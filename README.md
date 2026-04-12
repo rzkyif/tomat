@@ -31,11 +31,37 @@ A comprehensive settings system lets you adjust everything for your particular u
 
 ## Features
 
-- **Local AI** - Run LLMs (llama.cpp) and speech-to-text (whisper.cpp) entirely on your machine, with automatic model downloads from Hugging Face
-- **External Providers** - Connect to any OpenAI-compatible API as an alternative or fallback for more demanding tasks
-- **Voice Input** - Real-time voice activity detection with LLM-powered transcription autocorrect, plus sticky and push-to-talk activation modes via the global shortcut, with audible feedback on each transition
-- **Chat** - Streaming responses, markdown rendering, file attachments, multi-monitor screen capture, fullscreen image previews, vision support, and session management
-- **Configuration** - Zero-config model presets, system-prompt presets with optional context injection (user/agent name, language, location, date/time, OS), session-management toggles, declarative settings with conditional fields, and all data stored locally in `~/.tomat/`
+**Local AI**
+
+- LLMs via llama.cpp and speech-to-text via whisper.cpp, running entirely on your machine
+- Automatic model downloads from Hugging Face, with a confirmation prompt before anything touches disk
+- Optional fallback to any OpenAI-compatible external API for more demanding tasks
+
+**Chat**
+
+- Streaming responses with markdown rendering
+- File attachments, vision support, and fullscreen image previews
+- Multi-monitor screen capture
+- Session management and history
+
+**Voice Input**
+
+- Real-time voice activity detection
+- Sticky and push-to-talk activation modes via global shortcut, with audible feedback
+- LLM-powered transcription autocorrect
+- Can be disabled entirely from the preset picker
+
+**Configuration**
+
+- Zero-config model presets - works out of the box
+- System-prompt presets with optional context injection (user/agent name, language, location, date/time, OS)
+- Declarative settings schema with conditional fields
+- All data stored locally in `~/.tomat/`
+
+**Resources**
+
+- Live RAM and CPU usage for each local service
+- Disk-usage browser with per-category clear actions that protect models currently in use
 
 ## Roadmap
 
@@ -65,7 +91,7 @@ A comprehensive settings system lets you adjust everything for your particular u
 └────────┘    └────────────┘    └──────────────┘
 ```
 
-The Tauri backend manages sidecar processes (spawn, health check, restart, kill). Models are stored in `~/.tomat/models/` and downloaded from Hugging Face on demand. Settings and chat sessions are persisted as JSON in `~/.tomat/`.
+The Tauri backend manages sidecar processes (spawn, health check, restart, kill) and downloads queue one at a time. Models live in `~/.tomat/models/`, chat sessions in `~/.tomat/sessions/`, and settings in `~/.tomat/settings.json` - all viewable and clearable from the Resources settings view.
 
 ## Prerequisites
 
