@@ -123,12 +123,14 @@ pub async fn update_server_args_internal<R: Runtime>(
         let sidecar = sidecars.entry(server.clone()).or_insert(Sidecar {
             child: None,
             start_id: 0,
+            pid: None,
         });
 
         sidecar.start_id += 1;
         if let Some(child) = sidecar.child.take() {
             let _ = child.kill();
         }
+        sidecar.pid = None;
         sidecar.start_id
     };
 
@@ -316,6 +318,7 @@ pub async fn update_server_args_internal<R: Runtime>(
             };
             if let Some(s) = s_lock.get_mut(&server_clone) {
                 if s.start_id == current_start_id {
+                    s.pid = Some(child.pid());
                     s.child = Some(child);
                 } else {
                     let _ = child.kill();
@@ -473,6 +476,25 @@ pub async fn ensure_model_internal<R: Runtime>(
     emit_status(
         handle,
         server,
+        ServerStatus::Loading,
+        None,
+        Some("Waiting for download slot...".into()),
+    )
+    .await;
+
+    let _download_guard = state.0.download_mutex.lock().await;
+
+    if !is_current_start(state, server, start_id) {
+        return Err("Download cancelled".to_string());
+    }
+
+    if dest_path.exists() {
+        return Ok(dest_path.to_string_lossy().to_string());
+    }
+
+    emit_status(
+        handle,
+        server,
         ServerStatus::Downloading,
         Some(0.0),
         Some(format!("Downloading {}...", filename)),
@@ -532,4 +554,95 @@ pub async fn ensure_model_internal<R: Runtime>(
     std::fs::rename(tmp_path, &dest_path).map_err(|e| e.to_string())?;
 
     Ok(dest_path.to_string_lossy().to_string())
+}
+
+#[derive(serde::Serialize)]
+pub struct DownloadPlan {
+    pub path: String,
+    pub url: String,
+    pub filename: String,
+    pub size_bytes: Option<u64>,
+    pub already_downloaded: bool,
+}
+
+pub async fn probe_download<R: Runtime>(
+    handle: &AppHandle<R>,
+    path: &str,
+) -> Result<DownloadPlan, String> {
+    if !path.starts_with('@') {
+        let p = std::path::Path::new(path);
+        return Ok(DownloadPlan {
+            path: path.to_string(),
+            url: String::new(),
+            filename: p
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string()),
+            size_bytes: None,
+            already_downloaded: p.exists(),
+        });
+    }
+
+    let parts: Vec<&str> = path[1..].split('/').collect();
+    if parts.len() < 4 {
+        return Err("Invalid model path format".into());
+    }
+    let username = parts[0];
+    let reponame = parts[1];
+    let branchname = parts[2];
+    let filename = parts[3..].join("/");
+
+    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let dest_path = home
+        .join(".tomat")
+        .join("models")
+        .join(username)
+        .join(reponame)
+        .join(&filename);
+
+    if dest_path.exists() {
+        return Ok(DownloadPlan {
+            path: path.to_string(),
+            url: String::new(),
+            filename,
+            size_bytes: None,
+            already_downloaded: true,
+        });
+    }
+
+    let url = format!(
+        "https://huggingface.co/{}/{}/resolve/{}/{}?download=true",
+        username, reponame, branchname, filename
+    );
+
+    let client = reqwest::Client::new();
+    let size_bytes = match client.head(&url).send().await {
+        Ok(res) if res.status().is_success() => res.content_length(),
+        _ => None,
+    };
+
+    Ok(DownloadPlan {
+        path: path.to_string(),
+        url,
+        filename,
+        size_bytes,
+        already_downloaded: false,
+    })
+}
+
+#[tauri::command]
+pub async fn probe_downloads(
+    handle: AppHandle,
+    paths: Vec<String>,
+) -> Result<Vec<DownloadPlan>, String> {
+    let futures = paths.iter().map(|p| probe_download(&handle, p));
+    let results = futures_util::future::join_all(futures).await;
+    let mut out = Vec::with_capacity(results.len());
+    for r in results {
+        match r {
+            Ok(plan) => out.push(plan),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(out)
 }

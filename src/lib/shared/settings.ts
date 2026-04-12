@@ -10,7 +10,9 @@ export type SettingType =
   | "preset"
   | "command_preview"
   | "password"
-  | "multiline";
+  | "multiline"
+  | "services"
+  | "storage";
 
 const TOOL_ONLY_PROMPT = `You are a very limited on-device AI assistant. Your knowledge and reasoning capabilities are extremely small, so you MUST follow these rules strictly:
 
@@ -54,6 +56,8 @@ export interface FieldCondition {
   field: string;
   eq?: string | number | boolean;
   neq?: string | number | boolean;
+  in?: (string | number | boolean)[];
+  nin?: (string | number | boolean)[];
 }
 
 export interface PresetBadge {
@@ -250,7 +254,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "multiline",
             defaultValue: "",
             optional: true,
-            visibleWhen: { field: "general.systemPrompt.preset", neq: "disabled" },
+            visibleWhen: { field: "general.systemPrompt.preset", eq: "custom" },
           },
         ],
       },
@@ -491,7 +495,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
       },
       {
         label: "Llama Server Configuration",
-        visibleWhen: { field: "llm.preset", neq: "external" },
+        visibleWhen: { field: "llm.preset", eq: "custom" },
         fields: [
           {
             id: "llm.modelPath",
@@ -609,6 +613,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     sections: [
       {
         label: "Transcription",
+        visibleWhen: { field: "stt.preset", neq: "disabled" },
         fields: [
           {
             id: "stt.llmAutocorrect",
@@ -629,6 +634,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
       },
       {
         label: "Voice Input",
+        visibleWhen: { field: "stt.preset", neq: "disabled" },
         fields: [
           {
             id: "stt.smartStt",
@@ -745,6 +751,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                   description:
                     "Point to a remote transcription API. Skips the local whisper-server.",
                 },
+                {
+                  id: "disabled",
+                  label: "Disabled",
+                  title: "Disabled",
+                  badges: [{ icon: "i-material-symbols-mic-off-rounded", label: "Off" }],
+                  description:
+                    "Turn off speech-to-text entirely. The whisper server does not start and the microphone button is hidden.",
+                },
               ],
             },
           },
@@ -782,7 +796,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
       },
       {
         label: "Whisper Server Configuration",
-        visibleWhen: { field: "stt.preset", neq: "external" },
+        visibleWhen: { field: "stt.preset", eq: "custom" },
         fields: [
           {
             id: "stt.modelPath",
@@ -839,6 +853,37 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
       },
     ],
   },
+  {
+    id: "resources",
+    name: "Resources",
+    sections: [
+      {
+        label: "Activity",
+        fields: [
+          {
+            id: "resources.services",
+            name: "Services",
+            description: "Live memory and CPU usage for each local service.",
+            type: "services",
+            defaultValue: "",
+          },
+        ],
+      },
+      {
+        label: "Storage",
+        fields: [
+          {
+            id: "resources.storage",
+            name: "Disk Usage",
+            description:
+              "Downloaded models and saved sessions.\nSelect items and press Delete (or ⌘⌫) to remove them.",
+            type: "storage",
+            defaultValue: "",
+          },
+        ],
+      },
+    ],
+  },
 ];
 
 export function getDefaultSettings(): Record<string, any> {
@@ -846,7 +891,11 @@ export function getDefaultSettings(): Record<string, any> {
   for (const group of SETTINGS_SCHEMA) {
     for (const section of group.sections) {
       for (const field of section.fields) {
-        if (field.type !== "command_preview") {
+        if (
+          field.type !== "command_preview" &&
+          field.type !== "services" &&
+          field.type !== "storage"
+        ) {
           defaults[field.id] = field.defaultValue;
         }
       }
@@ -863,6 +912,8 @@ export function evalCondition(
   const val = currentSettings[cond.field];
   if (cond.eq !== undefined) return val === cond.eq;
   if (cond.neq !== undefined) return val !== cond.neq;
+  if (cond.in !== undefined) return cond.in.includes(val);
+  if (cond.nin !== undefined) return !cond.nin.includes(val);
   return true;
 }
 
@@ -998,7 +1049,12 @@ export function searchFields(
 
       const matched: SettingField[] = [];
       for (const field of section.fields) {
-        if (field.type === "command_preview") continue;
+        if (
+          field.type === "command_preview" ||
+          field.type === "services" ||
+          field.type === "storage"
+        )
+          continue;
         if (!evalCondition(field.visibleWhen, currentSettings)) continue;
         if (fieldMatchesQuery(field, q)) {
           matched.push(field);

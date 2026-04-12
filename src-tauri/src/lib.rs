@@ -5,7 +5,7 @@ mod types;
 mod utils;
 
 use crate::commands::*;
-use crate::sidecar::update_server_args_internal;
+use crate::sidecar::{probe_downloads, update_server_args_internal};
 use crate::state::{AppState, AppStateInner};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,6 +41,8 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState(Arc::new(AppStateInner {
             sidecars: Mutex::new(HashMap::new()),
+            download_mutex: tokio::sync::Mutex::new(()),
+            metrics: Mutex::new(sysinfo::System::new()),
         })))
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -177,7 +179,14 @@ pub fn run() {
             save_session_title,
             load_chat_session,
             delete_chat_session,
-            convert_file_to_markdown
+            convert_file_to_markdown,
+            probe_downloads,
+            get_process_metrics,
+            list_tomat_storage,
+            delete_tomat_paths,
+            clear_tomat_models,
+            clear_tomat_sessions,
+            clear_tomat_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

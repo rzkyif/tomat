@@ -6,7 +6,9 @@
   import CommandPreviewField from "./CommandPreviewField.svelte";
   import MultilineField from "./MultilineField.svelte";
   import PresetField from "./PresetField.svelte";
+  import ServicesField from "./ServicesField.svelte";
   import StandardField from "./StandardField.svelte";
+  import StorageField from "./StorageField.svelte";
 
   let { field, monitors, error, onChange, onReset, onPresetSelect } = $props<{
     field: SettingField;
@@ -27,6 +29,10 @@
     <CommandPreviewField {field} />
   {:else if field.type === "multiline"}
     <MultilineField {field} {error} {onChange} {onReset} />
+  {:else if field.type === "services"}
+    <ServicesField {field} />
+  {:else if field.type === "storage"}
+    <StorageField {field} />
   {:else}
     <StandardField {field} {monitors} {error} {onChange} {onReset} />
   {/if}

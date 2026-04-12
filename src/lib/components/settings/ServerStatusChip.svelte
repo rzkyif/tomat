@@ -42,7 +42,7 @@
   }
 </script>
 
-{#if update.status !== "Running"}
+{#if update.status !== "Running" && update.status !== "Disabled"}
   <button
     bind:this={buttonEl}
     class="flex items-center gap-1.5 px-3 py-1 rounded-2xl {color} {update.status ===

@@ -31,6 +31,17 @@ export async function restartServerIfNeed(type: "llm" | "stt") {
     return;
   }
 
+  if (preset === "disabled") {
+    await invoke("update_server_args", {
+      server: type,
+      args: [],
+      modelPath: null,
+      mmprojPath: null,
+      checkUrl: null,
+    });
+    return;
+  }
+
   const modelPath = currentSettings[`${type}.modelPath`];
   const args = computeArgs(type, currentSettings);
   const host = currentSettings[`${type}.host`] || "127.0.0.1";

@@ -212,7 +212,7 @@ pub fn resolve_path(handle: AppHandle, path: String) -> Result<String, String> {
 
 fn history_dir(handle: &AppHandle) -> Result<PathBuf, String> {
     let home = handle.path().home_dir().map_err(|e| e.to_string())?;
-    let dir = home.join(".tomat").join("messages");
+    let dir = home.join(".tomat").join("sessions");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -381,7 +381,7 @@ pub async fn load_chat_session(
 #[tauri::command]
 pub async fn load_latest_chat_history(handle: AppHandle) -> Result<serde_json::Value, String> {
     let home = handle.path().home_dir().map_err(|e| e.to_string())?;
-    let history_dir = home.join(".tomat").join("messages");
+    let history_dir = home.join(".tomat").join("sessions");
 
     if !history_dir.exists() {
         return Ok(serde_json::json!(null));
@@ -494,4 +494,358 @@ pub async fn convert_file_to_markdown(file_path: String) -> Result<String, Strin
     let options = anytomd::ConversionOptions::default();
     let result = anytomd::convert_file(&canonical, &options).map_err(|e| e.to_string())?;
     Ok(result.markdown)
+}
+
+// -------------------------------------------------------------------
+// Process metrics
+// -------------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+pub struct ProcessMetrics {
+    pub pid: u32,
+    pub rss_mb: f64,
+    pub cpu_pct: f32,
+    pub running: bool,
+}
+
+#[tauri::command]
+pub async fn get_process_metrics(
+    state: State<'_, AppState>,
+) -> Result<HashMap<String, ProcessMetrics>, String> {
+    let mut pids: Vec<(String, u32)> = {
+        let sidecars = state.0.sidecars.lock().map_err(|e| e.to_string())?;
+        sidecars
+            .iter()
+            .filter_map(|(name, s)| s.pid.map(|pid| (name.clone(), pid)))
+            .collect()
+    };
+
+    if let Ok(main_pid) = sysinfo::get_current_pid() {
+        pids.push(("main".to_string(), main_pid.as_u32()));
+    }
+
+    let mut out = HashMap::new();
+    let mut sys = state.0.metrics.lock().map_err(|e| e.to_string())?;
+    for (name, pid) in pids {
+        let sys_pid = sysinfo::Pid::from_u32(pid);
+        sys.refresh_process(sys_pid);
+        if let Some(proc) = sys.process(sys_pid) {
+            out.insert(
+                name,
+                ProcessMetrics {
+                    pid,
+                    rss_mb: proc.memory() as f64 / 1024.0 / 1024.0,
+                    cpu_pct: proc.cpu_usage(),
+                    running: true,
+                },
+            );
+        } else {
+            out.insert(
+                name,
+                ProcessMetrics {
+                    pid,
+                    rss_mb: 0.0,
+                    cpu_pct: 0.0,
+                    running: false,
+                },
+            );
+        }
+    }
+    Ok(out)
+}
+
+// -------------------------------------------------------------------
+// Storage: ~/.tomat/ tree listing + delete
+// -------------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum StorageNode {
+    File {
+        name: String,
+        path: String,
+        size: u64,
+    },
+    Folder {
+        name: String,
+        path: String,
+        size: u64,
+        children: Vec<StorageNode>,
+    },
+}
+
+#[derive(serde::Serialize)]
+pub struct StorageTree {
+    pub models: Vec<StorageNode>,
+    pub sessions: Vec<StorageNode>,
+    pub total_size: u64,
+    pub models_size: u64,
+    pub sessions_size: u64,
+    pub settings_size: u64,
+    pub root_path: String,
+}
+
+fn dir_size_recursive(path: &std::path::Path) -> u64 {
+    let mut total: u64 = 0;
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if let Ok(meta) = entry.metadata() {
+            if meta.is_file() {
+                total += meta.len();
+            } else if meta.is_dir() {
+                total += dir_size_recursive(&p);
+            }
+        }
+    }
+    total
+}
+
+fn collect_file_nodes(dir: &std::path::Path, ext_filter: Option<&str>) -> Vec<StorageNode> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        if let Some(ext) = ext_filter {
+            let matches = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case(ext))
+                .unwrap_or(false);
+            if !matches {
+                continue;
+            }
+        }
+        let name = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        out.push(StorageNode::File {
+            name,
+            path: p.to_string_lossy().to_string(),
+            size: meta.len(),
+        });
+    }
+    out.sort_by(|a, b| storage_name(a).cmp(storage_name(b)));
+    out
+}
+
+fn storage_name(node: &StorageNode) -> &str {
+    match node {
+        StorageNode::File { name, .. } => name.as_str(),
+        StorageNode::Folder { name, .. } => name.as_str(),
+    }
+}
+
+fn storage_size(node: &StorageNode) -> u64 {
+    match node {
+        StorageNode::File { size, .. } => *size,
+        StorageNode::Folder { size, .. } => *size,
+    }
+}
+
+fn build_models_tree(models_dir: &std::path::Path) -> Vec<StorageNode> {
+    let mut out = Vec::new();
+    let Ok(user_entries) = std::fs::read_dir(models_dir) else {
+        return out;
+    };
+
+    for user_entry in user_entries.flatten() {
+        let user_path = user_entry.path();
+        if !user_path.is_dir() {
+            continue;
+        }
+        let Ok(repo_entries) = std::fs::read_dir(&user_path) else {
+            continue;
+        };
+        for repo_entry in repo_entries.flatten() {
+            let repo_path = repo_entry.path();
+            if !repo_path.is_dir() {
+                continue;
+            }
+            let user_name = user_entry.file_name().to_string_lossy().to_string();
+            let repo_name = repo_entry.file_name().to_string_lossy().to_string();
+            let display_name = format!("{}/{}", user_name, repo_name);
+
+            let mut gguf_files = collect_file_nodes(&repo_path, Some("gguf"));
+            // Also include .bin files (whisper.cpp)
+            gguf_files.extend(collect_file_nodes(&repo_path, Some("bin")));
+            gguf_files.sort_by(|a, b| storage_name(a).cmp(storage_name(b)));
+
+            let has_mmproj = gguf_files.iter().any(|n| {
+                storage_name(n)
+                    .to_ascii_lowercase()
+                    .starts_with("mmproj")
+            });
+
+            if gguf_files.is_empty() {
+                continue;
+            }
+
+            if has_mmproj || gguf_files.len() > 1 {
+                let size: u64 = gguf_files.iter().map(storage_size).sum();
+                out.push(StorageNode::Folder {
+                    name: display_name,
+                    path: repo_path.to_string_lossy().to_string(),
+                    size,
+                    children: gguf_files,
+                });
+            } else {
+                // Single file: show as flat line "user/repo/filename"
+                let file = gguf_files.into_iter().next().unwrap();
+                if let StorageNode::File {
+                    name: fname,
+                    path,
+                    size,
+                } = file
+                {
+                    out.push(StorageNode::File {
+                        name: format!("{}/{}", display_name, fname),
+                        path,
+                        size,
+                    });
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| storage_name(a).cmp(storage_name(b)));
+    out
+}
+
+fn build_sessions_tree(sessions_dir: &std::path::Path) -> Vec<StorageNode> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(sessions_dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let is_json = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("json"))
+            .unwrap_or(false);
+        if !is_json {
+            continue;
+        }
+        let stem = p
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let title = read_session_file(&p)
+            .map(|s| s.title)
+            .unwrap_or_default();
+        let display = if title.trim().is_empty() {
+            stem
+        } else {
+            title
+        };
+        out.push(StorageNode::File {
+            name: display,
+            path: p.to_string_lossy().to_string(),
+            size: meta.len(),
+        });
+    }
+    out.sort_by(|a, b| storage_name(a).cmp(storage_name(b)));
+    out
+}
+
+#[tauri::command]
+pub async fn list_tomat_storage(handle: AppHandle) -> Result<StorageTree, String> {
+    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let root = home.join(".tomat");
+    let models_dir = root.join("models");
+    let sessions_dir = root.join("sessions");
+
+    let models = build_models_tree(&models_dir);
+    let sessions = build_sessions_tree(&sessions_dir);
+
+    let models_size: u64 = models.iter().map(storage_size).sum();
+    let sessions_size: u64 = sessions.iter().map(storage_size).sum();
+    let settings_size = std::fs::metadata(root.join("settings.json"))
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let total_size = dir_size_recursive(&root);
+
+    Ok(StorageTree {
+        models,
+        sessions,
+        total_size,
+        models_size,
+        sessions_size,
+        settings_size,
+        root_path: root.to_string_lossy().to_string(),
+    })
+}
+
+fn is_under(path: &std::path::Path, root: &std::path::Path) -> bool {
+    match (path.canonicalize(), root.canonicalize()) {
+        (Ok(p), Ok(r)) => p.starts_with(&r),
+        _ => false,
+    }
+}
+
+#[tauri::command]
+pub async fn delete_tomat_paths(handle: AppHandle, paths: Vec<String>) -> Result<(), String> {
+    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let root = home.join(".tomat");
+
+    for path_str in paths {
+        let p = PathBuf::from(&path_str);
+        if !is_under(&p, &root) {
+            return Err(format!("Path not under ~/.tomat: {}", path_str));
+        }
+        let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+        if meta.is_dir() {
+            std::fs::remove_dir_all(&p).map_err(|e| e.to_string())?;
+        } else {
+            std::fs::remove_file(&p).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_tomat_models(handle: AppHandle) -> Result<(), String> {
+    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let dir = home.join(".tomat").join("models");
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_tomat_sessions(handle: AppHandle) -> Result<(), String> {
+    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let dir = home.join(".tomat").join("sessions");
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_tomat_settings(handle: AppHandle) -> Result<(), String> {
+    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let path = home.join(".tomat").join("settings.json");
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }

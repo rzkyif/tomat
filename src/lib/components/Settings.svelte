@@ -18,6 +18,13 @@
   import SettingsSidebar from "./settings/SettingsSidebar.svelte";
   import SettingsSection from "./settings/SettingsSection.svelte";
   import SettingsField from "./settings/SettingsField.svelte";
+  import DownloadConfirmationModal from "./DownloadConfirmationModal.svelte";
+  import ConfirmModal from "./ConfirmModal.svelte";
+  import {
+    collectDownloadCandidates,
+    planDownloads,
+    type DownloadPlan,
+  } from "$lib/downloader/plan";
 
   let { toggleSettings } = $props<{
     toggleSettings: () => void;
@@ -33,6 +40,10 @@
   let scrollEl: HTMLDivElement | undefined = $state();
   let showTopFade = $state(false);
   let showBottomFade = $state(true);
+  let pendingDownload = $state<null | {
+    plans: DownloadPlan[];
+    apply: () => Promise<void>;
+  }>(null);
 
   function updateScrollFades() {
     if (!scrollEl) return;
@@ -82,7 +93,12 @@
     for (const group of SETTINGS_SCHEMA) {
       for (const section of group.sections) {
         for (const field of section.fields) {
-          if (field.type === "command_preview") continue;
+          if (
+            field.type === "command_preview" ||
+            field.type === "services" ||
+            field.type === "storage"
+          )
+            continue;
           const value = settingsState.currentSettings[field.id];
           validateField(field.id, value);
         }
@@ -94,6 +110,23 @@
     validateField(key, value);
     if (validationErrors[key]) return;
 
+    const prev = { ...$state.snapshot(settingsState.currentSettings) };
+    const next = { ...prev, [key]: value };
+    const candidates = collectDownloadCandidates(prev, next);
+    if (candidates.length > 0) {
+      const plans = await planDownloads(candidates);
+      if (plans.length > 0) {
+        const apply = async () => {
+          await applyFieldChange(key, value);
+        };
+        pendingDownload = { plans, apply };
+        return;
+      }
+    }
+    await applyFieldChange(key, value);
+  }
+
+  async function applyFieldChange(key: string, value: any) {
     if (
       key.startsWith("llm.") &&
       key !== "llm.preset" &&
@@ -184,11 +217,40 @@
   async function handlePresetSelect(fieldId: string, option: PresetOption) {
     const updates: Record<string, any> = { [fieldId]: option.id };
     if (option.defaults) Object.assign(updates, option.defaults);
-    await settingsState.updateSettings(updates);
 
-    // Validate all fields and re-evaluate conditions after preset is applied
+    const prev = { ...$state.snapshot(settingsState.currentSettings) };
+    const next = { ...prev, ...updates };
+    const candidates = collectDownloadCandidates(prev, next);
+    if (candidates.length > 0) {
+      const plans = await planDownloads(candidates);
+      if (plans.length > 0) {
+        const apply = async () => {
+          await applyPresetUpdates(updates);
+        };
+        pendingDownload = { plans, apply };
+        return;
+      }
+    }
+    await applyPresetUpdates(updates);
+  }
+
+  async function applyPresetUpdates(updates: Record<string, any>) {
+    await settingsState.updateSettings(updates);
     validateAllFields();
     reEvaluateDeps(...Object.keys(updates));
+  }
+
+  async function confirmPendingDownload() {
+    if (!pendingDownload) return;
+    const { apply } = pendingDownload;
+    pendingDownload = null;
+    await apply();
+  }
+
+  function cancelPendingDownload() {
+    pendingDownload = null;
+    // Force reactive re-read so any DOM inputs reflecting rejected values snap back
+    settingsState.currentSettings = { ...settingsState.currentSettings };
   }
 
   /** Re-evaluate all conditions that depend on the given setting keys. */
@@ -239,7 +301,7 @@
 
 <Bubble
   selectedAlignment={settingsState.getAlignment()}
-  extraClass="flex flex-col gap-3 min-w-0 overflow-hidden transition-all w-full h-150"
+  extraClass="flex flex-col gap-3 min-w-0 overflow-hidden transition-all w-full h-150 relative"
 >
   <!-- Settings Header and Back Button -->
   <div class="flex gap-2 items-center text-2xl relative">
@@ -374,6 +436,16 @@
       ></div>
     </div>
   </div>
+
+  {#if pendingDownload}
+    <DownloadConfirmationModal
+      plans={pendingDownload.plans}
+      onConfirm={confirmPendingDownload}
+      onCancel={cancelPendingDownload}
+    />
+  {/if}
+
+  <ConfirmModal />
 </Bubble>
 
 <style>

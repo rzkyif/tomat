@@ -882,37 +882,41 @@
     </div>
 
     <div class="flex gap-2">
-      <button
-        class="bg-default-100 p-2 rounded-2xl flex items-center transition-colors {vadLoading
-          ? 'text-default-300 cursor-wait'
-          : vadEnabled
+      {#if settingsState.currentSettings["stt.preset"] !== "disabled"}
+        <button
+          class="bg-default-100 p-2 rounded-2xl flex items-center transition-colors {vadLoading
+            ? 'text-default-300 cursor-wait'
+            : vadEnabled
+              ? isListening
+                ? 'text-green-500 animate-pulse'
+                : 'text-blue-400'
+              : sttStatus === 'Running' || sttStatus === 'Disabled'
+                ? 'hover:text-default-900 hover:cursor-pointer text-default-500'
+                : 'text-default-300 cursor-not-allowed'}"
+          title={vadEnabled
             ? isListening
-              ? 'text-green-500 animate-pulse'
-              : 'text-blue-400'
-            : sttStatus === 'Running' || sttStatus === 'Disabled'
-              ? 'hover:text-default-900 hover:cursor-pointer text-default-500'
-              : 'text-default-300 cursor-not-allowed'}"
-        title={vadEnabled
-          ? isListening
-            ? "Listening..."
-            : "VAD Active (click to disable)"
-          : sttStatus === "Running" || sttStatus === "Disabled"
-            ? "Enable Voice Input"
-            : "Voice Input (Unavailable)"}
-        onclick={toggleVad}
-        disabled={vadLoading ||
-          (sttStatus !== "Running" && sttStatus !== "Disabled" && !vadEnabled)}
-      >
-        <i
-          class="flex {vadEnabled
-            ? isListening
-              ? 'i-material-symbols-sync-rounded animate-spin'
-              : 'i-material-symbols-mic-rounded'
-            : sttStatus === 'Running' || sttStatus === 'Disabled'
-              ? 'i-material-symbols-mic-outline-rounded'
-              : 'i-material-symbols-mic-off-outline-rounded'}"
-        ></i>
-      </button>
+              ? "Listening..."
+              : "VAD Active (click to disable)"
+            : sttStatus === "Running" || sttStatus === "Disabled"
+              ? "Enable Voice Input"
+              : "Voice Input (Unavailable)"}
+          onclick={toggleVad}
+          disabled={vadLoading ||
+            (sttStatus !== "Running" &&
+              sttStatus !== "Disabled" &&
+              !vadEnabled)}
+        >
+          <i
+            class="flex {vadEnabled
+              ? isListening
+                ? 'i-material-symbols-progress-activity animate-spin'
+                : 'i-material-symbols-mic-rounded'
+              : sttStatus === 'Running' || sttStatus === 'Disabled'
+                ? 'i-material-symbols-mic-outline-rounded'
+                : 'i-material-symbols-mic-off-outline-rounded'}"
+          ></i>
+        </button>
+      {/if}
       <button
         class="hover:cursor-pointer bg-default-100 p-2 rounded-2xl flex items-center transition-colors {isStreaming &&
         !hasContent
