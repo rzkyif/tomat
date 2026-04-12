@@ -92,9 +92,14 @@
 
   let defaultTitle = $derived(messagesState.getDefaultTitle());
   let isNewSession = $derived(messagesState.messages.length === 0);
+  let storageEnabled = $derived(
+    settingsState.currentSettings["behaviour.storeSessions"] !== false,
+  );
 
-  let showTitle = $derived(!isNewSession);
-  let showButtonGroup = $derived(canPrev || canNext || !isNewSession);
+  let showTitle = $derived(!isNewSession && storageEnabled);
+  let showButtonGroup = $derived(
+    storageEnabled && (canPrev || canNext || !isNewSession),
+  );
   let showBar = $derived(
     !!messagesState.tokenUsage || showTitle || showButtonGroup,
   );

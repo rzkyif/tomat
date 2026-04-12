@@ -4,6 +4,7 @@
   import type { Monitor } from "$lib/shared/types";
   import { settingsState } from "../../state";
   import CommandPreviewField from "./CommandPreviewField.svelte";
+  import MultilineField from "./MultilineField.svelte";
   import PresetField from "./PresetField.svelte";
   import StandardField from "./StandardField.svelte";
 
@@ -24,6 +25,8 @@
     <PresetField {field} {onPresetSelect} />
   {:else if field.type === "command_preview"}
     <CommandPreviewField {field} />
+  {:else if field.type === "multiline"}
+    <MultilineField {field} {error} {onChange} {onReset} />
   {:else}
     <StandardField {field} {monitors} {error} {onChange} {onReset} />
   {/if}

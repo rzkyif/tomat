@@ -120,6 +120,15 @@
         await settingsState.updateSetting("stt.preset", "custom");
       }
     }
+    if (
+      key.startsWith("behaviour.") &&
+      key !== "behaviour.preset" &&
+      getPresetFieldIds("behaviour").has(key)
+    ) {
+      if (settingsState.currentSettings["behaviour.preset"] !== "custom") {
+        await settingsState.updateSetting("behaviour.preset", "custom");
+      }
+    }
     await settingsState.updateSetting(key, value);
     reEvaluateDeps(key);
   }

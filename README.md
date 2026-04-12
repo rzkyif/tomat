@@ -33,15 +33,14 @@ A comprehensive settings system lets you adjust everything for your particular u
 
 - **Local AI** - Run LLMs (llama.cpp) and speech-to-text (whisper.cpp) entirely on your machine, with automatic model downloads from Hugging Face
 - **External Providers** - Connect to any OpenAI-compatible API as an alternative or fallback for more demanding tasks
-- **Voice Input** - Real-time voice activity detection with LLM-powered transcription autocorrect
-- **Chat** - Streaming responses, markdown rendering, file attachments, vision support, and session management
-- **Configuration** - Zero-config model presets, declarative settings with conditional fields, and all data stored locally in `~/.tomat/`
+- **Voice Input** - Real-time voice activity detection with LLM-powered transcription autocorrect, plus persistent and push-to-hold smart activation modes via the global shortcut, with audible feedback on each transition
+- **Chat** - Streaming responses, markdown rendering, file attachments, multi-monitor screen capture, fullscreen image previews, vision support, and session management
+- **Configuration** - Zero-config model presets, system-prompt presets with optional context injection (preferred user/agent name, language, location, date/time, OS), session-management toggles, declarative settings with conditional fields, and all data stored locally in `~/.tomat/`
 
 ## Roadmap
 
 - **Tool server** - Bun-powered tool server that executes arbitrary `.ts` scripts as tools
 - **Text-to-Speech** - TTS functionality for spoken responses
-- **Personality presets** - Configurable system prompts for different assistant personas
 - **Dual-model system** - Route small tasks to a local model while upstreaming complex questions to a cloud provider
 
 ## Architecture

@@ -3,7 +3,7 @@ use crate::state::AppState;
 use crate::types::{ServerStatus, WindowAlignment};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Position, Size, State};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Size, State};
 
 fn validate_session_id(id: &str) -> Result<(), String> {
     if id.is_empty() || id.len() > 64 {
@@ -18,10 +18,7 @@ fn validate_session_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_monitor(
-    app: &AppHandle,
-    monitor_id: &str,
-) -> Result<tauri::Monitor, String> {
+fn resolve_monitor(app: &AppHandle, monitor_id: &str) -> Result<tauri::Monitor, String> {
     let all_monitors = app.available_monitors().map_err(|e| e.to_string())?;
     let primary_monitor = app.primary_monitor().map_err(|e| e.to_string())?;
 
@@ -77,20 +74,90 @@ pub fn position_window(
     }
 
     window
-        .set_size(Size::Logical(LogicalSize::new(width as f64, mon_height as f64)))
+        .set_size(Size::Logical(LogicalSize::new(
+            width as f64,
+            mon_height as f64,
+        )))
         .map_err(|e| e.to_string())?;
     window
-        .set_position(Position::Logical(LogicalPosition::new(x as f64, mon_y as f64)))
+        .set_position(Position::Logical(LogicalPosition::new(
+            x as f64,
+            mon_y as f64,
+        )))
         .map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
 #[tauri::command]
-pub fn show_main_window(window: tauri::WebviewWindow) -> Result<(), String> {
+pub fn show_main_window(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
+    let _ = app.emit("window-visibility", true);
     Ok(())
+}
+
+#[tauri::command]
+pub fn hide_main_window(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|e| e.to_string())?;
+    let _ = app.emit("window-visibility", false);
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+pub struct CaptureMonitorInfo {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "isPrimary")]
+    pub is_primary: bool,
+}
+
+#[tauri::command]
+pub async fn list_capture_monitors() -> Result<Vec<CaptureMonitorInfo>, String> {
+    let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for (idx, m) in monitors.iter().enumerate() {
+        let id = m
+            .id()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|_| idx.to_string());
+        let name = m.name().unwrap_or_else(|_| format!("Monitor {}", idx + 1));
+        let is_primary = m.is_primary().unwrap_or(false);
+        out.push(CaptureMonitorInfo {
+            id,
+            name,
+            is_primary,
+        });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn capture_monitor(monitor_id: String) -> Result<String, String> {
+    use base64::Engine;
+    let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
+    let monitor = monitors
+        .into_iter()
+        .enumerate()
+        .find(|(idx, m)| {
+            m.id()
+                .ok()
+                .map(|v| v.to_string() == monitor_id)
+                .unwrap_or(false)
+                || idx.to_string() == monitor_id
+        })
+        .map(|(_, m)| m)
+        .ok_or_else(|| "Monitor not found".to_string())?;
+
+    let image = monitor.capture_image().map_err(|e| e.to_string())?;
+
+    let mut buf: Vec<u8> = Vec::new();
+    let dyn_img = image::DynamicImage::ImageRgba8(image);
+    dyn_img
+        .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+        .map_err(|e| e.to_string())?;
+
+    Ok(base64::engine::general_purpose::STANDARD.encode(&buf))
 }
 
 #[tauri::command]

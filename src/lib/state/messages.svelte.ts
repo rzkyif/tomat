@@ -19,6 +19,10 @@ class MessagesState {
   isStreaming = $state(false);
   streamingFirstChunkReceived = $state(false);
 
+  private get storageEnabled(): boolean {
+    return settingsState.currentSettings["behaviour.storeSessions"] !== false;
+  }
+
   /** Get the default title (formatted timestamp from sessionId) */
   getDefaultTitle(): string {
     if (!this.sessionId) return "";
@@ -35,6 +39,10 @@ class MessagesState {
   }
 
   async loadSessionList() {
+    if (!this.storageEnabled) {
+      this.sessionList = [];
+      return;
+    }
     try {
       const sessions = (await invoke("list_chat_sessions")) as SessionInfo[];
       this.sessionList = sessions;
@@ -48,6 +56,7 @@ class MessagesState {
   }
 
   async loadLatest() {
+    if (!this.storageEnabled) return;
     try {
       const history = (await invoke("load_latest_chat_history")) as {
         sessionId: string;
@@ -152,7 +161,7 @@ class MessagesState {
 
   async updateTitle(title: string) {
     this.sessionTitle = title;
-    if (this.sessionId) {
+    if (this.sessionId && this.storageEnabled) {
       try {
         await invoke("save_session_title", {
           sessionId: this.sessionId,
@@ -176,6 +185,7 @@ class MessagesState {
   }
 
   async save() {
+    if (!this.storageEnabled) return;
     try {
       // Eagerly assign sessionId before the first await to prevent concurrent save()
       // calls (e.g. addMessage + startStreaming in the same tick) from each seeing

@@ -111,19 +111,19 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Global shortcut: Meta+Shift+Ctrl+Z to toggle window
-            let shortcut_visible = visible.clone();
-            let shortcut_toggle_item = toggle_item.clone();
+            // Global shortcut: Meta+Shift+Ctrl+Z.
+            // The frontend owns the semantics (hide/show/VAD toggle) based on the
+            // Smart STT setting, so Rust only emits press/release events here.
             let shortcut_handle = app.handle().clone();
             app.global_shortcut()
                 .on_shortcut("super+ctrl+shift+z", move |_app, _shortcut, event| {
-                    if event.state == ShortcutState::Pressed {
-                        let is_visible = toggle_window(&shortcut_handle, &shortcut_visible);
-                        let _ = shortcut_toggle_item.set_text(if is_visible {
-                            "Hide tomat"
-                        } else {
-                            "Show tomat"
-                        });
+                    match event.state {
+                        ShortcutState::Pressed => {
+                            let _ = shortcut_handle.emit("shortcut-pressed", ());
+                        }
+                        ShortcutState::Released => {
+                            let _ = shortcut_handle.emit("shortcut-released", ());
+                        }
                     }
                 })
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
@@ -165,6 +165,9 @@ pub fn run() {
             update_server_args,
             position_window,
             show_main_window,
+            hide_main_window,
+            list_capture_monitors,
+            capture_monitor,
             resolve_path,
             save_settings,
             load_settings,

@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { titleCase } from "title-case";
 import { settingsState, messagesState } from "../state";
 import { setInterruptController } from "$lib/shared/interrupt";
+import { buildSystemPrompt } from "$lib/shared/systemPrompt";
 import type { LLMErrorType, MessageContent } from "$lib/shared/types";
 
 // --- Error mapping ---
@@ -213,6 +214,12 @@ export async function sendMessages(): Promise<void> {
     apiMessages.pop();
 
     const isFirstUserMessage = apiMessages.length === 1 && apiMessages[0].role === "user";
+    const firstUserContent = isFirstUserMessage ? apiMessages[0].content : null;
+
+    const systemPrompt = buildSystemPrompt();
+    if (systemPrompt) {
+      apiMessages.unshift({ role: "system", content: systemPrompt });
+    }
 
     const useReasoning = preset !== "external" && settings["llm.reasoning"] === "on";
     const reasoningBudget = settings["llm.reasoningBudget"];
@@ -236,17 +243,20 @@ export async function sendMessages(): Promise<void> {
 
     // Fire-and-forget title generation on first message
     // Only if the session title is still empty/default (don't overwrite user edits)
+    // Skip entirely when sessions are not being stored.
     const currentTitle = messagesState.sessionTitle;
     const defaultTitle = messagesState.getDefaultTitle();
     const shouldGenerateTitle =
-      isFirstUserMessage && (!currentTitle || currentTitle === defaultTitle);
+      isFirstUserMessage &&
+      firstUserContent !== null &&
+      settings["behaviour.storeSessions"] !== false &&
+      (!currentTitle || currentTitle === defaultTitle);
 
     if (shouldGenerateTitle) {
-      const firstContent = apiMessages[0].content;
       const textForTitle =
-        typeof firstContent === "string"
-          ? firstContent
-          : firstContent
+        typeof firstUserContent === "string"
+          ? firstUserContent
+          : firstUserContent!
               .filter((p): p is { type: "text"; text: string } => p.type === "text")
               .map((p) => p.text)
               .join(" ");

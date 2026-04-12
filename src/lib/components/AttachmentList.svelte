@@ -5,10 +5,12 @@
     parts,
     editable = false,
     onRemove,
+    onImageClick,
   } = $props<{
     parts: MessagePart[];
     editable?: boolean;
     onRemove?: (index: number) => void;
+    onImageClick?: (url: string) => void;
   }>();
 </script>
 
@@ -16,25 +18,39 @@
   <div class="flex flex-wrap gap-2">
     {#each parts as part, i}
       {#if part.type === "image_url"}
-        <div class="relative group">
-          <img
-            src={part.image_url.url}
-            alt="Attached"
-            class="h-16 w-16 object-cover bg-default-100 p-2 rounded-lg"
-          />
+        <div class="relative group bg-default-100 p-2 rounded-lg pr-7">
+          {#if onImageClick}
+            <button
+              class="block p-0 border-0 bg-transparent hover:cursor-pointer"
+              onclick={() => onImageClick(part.image_url.url)}
+              title="View Full Image"
+            >
+              <img
+                src={part.image_url.url}
+                alt="Attached"
+                class="h-16 w-16 object-cover"
+              />
+            </button>
+          {:else}
+            <img
+              src={part.image_url.url}
+              alt="Attached"
+              class="h-16 w-16 object-cover"
+            />
+          {/if}
           {#if editable && onRemove}
             <button
-              class="absolute -top-1 -right-1 bg-red-400 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+              class="absolute top-1 right-1 text-default-400 hover:text-red-500 rounded-full w-5 h-5 flex items-center justify-center transition-opacity cursor-pointer"
               onclick={() => onRemove(i)}
               title="Remove Attachment"
             >
-              <i class="flex i-material-symbols-close-rounded text-xs"></i>
+              <i class="flex i-material-symbols-close-rounded text-sm"></i>
             </button>
           {/if}
         </div>
       {:else if part.type === "document"}
         <div
-          class="relative group flex items-center gap-1 bg-default-100 px-3 py-1.5 rounded-lg text-sm text-default-600"
+          class="relative group flex items-center gap-1 bg-default-100 px-3 py-1.5 rounded-lg text-sm text-default-600 h-fit"
         >
           <i
             class="flex i-material-symbols-description-outline-rounded text-base"

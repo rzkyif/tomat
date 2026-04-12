@@ -24,5 +24,7 @@ Tomat is a local-first modular AI client built as a desktop app. It runs LLMs an
 
 ## After a Task
 
-- Run `bun run check` (runs `oxlint`, `oxfmt`, `svelte-check`, and `cargo check`). Fix any errors before finishing.
+- Run `bun run check:js` (runs `oxlint`, `oxfmt`, `svelte-check`) IF you made changes in the JS codebase.
+- Run `bun run check:rs` (runst `cargo check`) IF you made changes in the Rust codebase.
+- Fix any errors before finishing.
 - Review whether `README.md` and this file should be updated to reflect the changes (new features, changed setup steps, new scripts, updated architecture, etc.).

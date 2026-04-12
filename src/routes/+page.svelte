@@ -72,7 +72,11 @@
           applyTheme("auto");
         }
       });
-      await messagesState.loadLatest();
+      if (settingsState.currentSettings["behaviour.alwaysStartNew"]) {
+        await messagesState.loadSessionList();
+      } else {
+        await messagesState.loadLatest();
+      }
       document.addEventListener("click", linkHandler);
 
       // Initial sidecar startup

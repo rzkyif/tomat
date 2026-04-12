@@ -9,7 +9,41 @@ export type SettingType =
   | "monitor"
   | "preset"
   | "command_preview"
-  | "password";
+  | "password"
+  | "multiline";
+
+const TOOL_ONLY_PROMPT = `You are a very limited on-device AI assistant. Your knowledge and reasoning capabilities are extremely small, so you MUST follow these rules strictly:
+
+1. You can ONLY answer very basic, short, factual questions (1-2 sentences max). Examples of questions you CAN answer: simple greetings, very basic arithmetic, the current date if provided in context, or restating something the user just said.
+
+2. For ANY question that requires reasoning, multi-step thinking, creativity, writing, coding, analysis, or specialized knowledge — you MUST NOT attempt to answer. Instead, politely explain that you are a small local model with very limited knowledge and cannot reliably answer complex questions, and suggest the user try a larger model or consult another source.
+
+3. When a tool call would help answer the user's request, you MUST make the tool call. Never try to guess what a tool would return. Never invent facts.
+
+4. Never make up information. Never guess. Never speculate. Never produce long responses. If in doubt, refuse politely.
+
+5. Keep your responses extremely short — ideally one sentence, never more than two. Do not add disclaimers, preambles, or filler.
+
+Remember: it is ALWAYS better to politely decline than to produce a wrong or made-up answer.`;
+
+const ASSISTANT_PROMPT = `You are a professional on-device AI assistant. You run locally on the user's machine and have access to a suite of tools that let you help the user accomplish their tasks.
+
+Your identity:
+- You are an on-device assistant — you run locally, you respect user privacy, and you do not rely on any cloud service for core reasoning.
+- You are professional, helpful, concise, and honest.
+
+Your capabilities:
+- You can answer questions, write and analyze code, help with tasks, and carry on natural conversation.
+- You have access to tools. When a tool would produce a better or more accurate answer than your own reasoning, make the tool call.
+- You can handle complex, multi-step requests. There are no arbitrary limits on the topics or tasks you are willing to help with, provided they are legal and safe.
+
+Your style:
+- Be direct and practical. Prefer short answers for simple questions and detailed answers only when needed.
+- Never pretend to be a different model or service.
+- If you are unsure about a fact, say so plainly rather than guessing.
+- Never fabricate tool output. If a tool is not available or fails, explain what happened.
+
+Remember: you are here to be genuinely useful to the user running you on their own device.`;
 
 export interface SettingOption {
   value: string | number;
@@ -140,6 +174,140 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Must be between 400 and 1200",
               },
             ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "behaviour",
+    name: "Behaviour",
+    sections: [
+      {
+        label: "System Prompt",
+        fields: [
+          {
+            id: "behaviour.preset",
+            name: "",
+            description: "",
+            type: "preset",
+            defaultValue: "disabled",
+            presetConfig: {
+              columns: 3,
+              options: [
+                {
+                  id: "disabled",
+                  label: "Disabled",
+                  defaults: { "behaviour.systemPrompt": "" },
+                },
+                {
+                  id: "tool-only",
+                  label: "Tool Only",
+                  defaults: { "behaviour.systemPrompt": TOOL_ONLY_PROMPT },
+                },
+                {
+                  id: "assistant",
+                  label: "Assistant",
+                  defaults: { "behaviour.systemPrompt": ASSISTANT_PROMPT },
+                },
+              ],
+              secondaryOptions: [
+                {
+                  id: "custom",
+                  label: "Custom",
+                  icon: "i-material-symbols-tune-rounded",
+                  color: "amber",
+                },
+              ],
+            },
+          },
+          {
+            id: "behaviour.systemPrompt",
+            name: "System Prompt",
+            description:
+              "The system prompt sent to the agent. Editing this manually switches the preset to Custom.",
+            type: "multiline",
+            defaultValue: "",
+            optional: true,
+            visibleWhen: { field: "behaviour.preset", neq: "disabled" },
+          },
+        ],
+      },
+      {
+        label: "Context",
+        fields: [
+          {
+            id: "behaviour.context.preferredUserName",
+            name: "Preferred User Name",
+            description: "Optional: how the agent should address you.",
+            type: "string",
+            defaultValue: "",
+            optional: true,
+            placeholder: "e.g. Alex",
+          },
+          {
+            id: "behaviour.context.preferredAgentName",
+            name: "Preferred Agent Name",
+            description:
+              "Optional: a name for the agent. Leave empty to let the agent pick or stay nameless.",
+            type: "string",
+            defaultValue: "",
+            optional: true,
+            placeholder: "e.g. Tomat",
+          },
+          {
+            id: "behaviour.context.preferredLanguage",
+            name: "Preferred Language",
+            description: "Optional: the language you prefer to communicate in.",
+            type: "string",
+            defaultValue: "",
+            optional: true,
+            placeholder: "e.g. English",
+          },
+          {
+            id: "behaviour.context.location",
+            name: "Location",
+            description:
+              "Optional: a location string the agent can reference. No network calls are made.",
+            type: "string",
+            defaultValue: "",
+            optional: true,
+            placeholder: "e.g. San Francisco, CA",
+          },
+          {
+            id: "behaviour.context.dateTime",
+            name: "Date and time",
+            description: "Attach the current date and time to the system prompt.",
+            type: "boolean",
+            defaultValue: true,
+          },
+          {
+            id: "behaviour.context.os",
+            name: "Operating System",
+            description: "Attach your operating system to the system prompt.",
+            type: "boolean",
+            defaultValue: true,
+          },
+        ],
+      },
+      {
+        label: "Session Management",
+        fields: [
+          {
+            id: "behaviour.alwaysStartNew",
+            name: "Always Start New Session",
+            description:
+              "When the app starts, always begin a new empty session instead of resuming the last one.",
+            type: "boolean",
+            defaultValue: false,
+          },
+          {
+            id: "behaviour.storeSessions",
+            name: "Store Sessions",
+            description:
+              "Persist messages and session titles to disk. When disabled, sessions live only in memory and are cleared when the app closes.",
+            type: "boolean",
+            defaultValue: true,
           },
         ],
       },
@@ -405,6 +573,42 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description: "Automatically send the message after speech transcription completes",
             type: "boolean",
             defaultValue: false,
+          },
+        ],
+      },
+      {
+        label: "Smart Activation",
+        fields: [
+          {
+            id: "stt.smartStt",
+            name: "Smart STT",
+            description:
+              "How voice input is activated. Persistent: VAD state survives app restarts. Hold: press the global shortcut to activate VAD while held.",
+            type: "select",
+            defaultValue: "disabled",
+            options: [
+              { value: "disabled", label: "Disabled" },
+              { value: "persistent", label: "Persistent" },
+              { value: "hold", label: "Hold" },
+            ],
+          },
+          {
+            id: "stt.holdDuration",
+            name: "Hold Duration",
+            description:
+              "Delay before VAD activates while holding the shortcut. A short tap under this threshold will hide the app instead.",
+            type: "number",
+            defaultValue: 250,
+            suffix: "ms",
+            visibleWhen: { field: "stt.smartStt", eq: "hold" },
+          },
+          {
+            id: "stt.vadPersistedState",
+            name: "VAD Persisted State",
+            description: "",
+            type: "boolean",
+            defaultValue: false,
+            visibleWhen: { field: "stt.smartStt", eq: "__never__" },
           },
         ],
       },

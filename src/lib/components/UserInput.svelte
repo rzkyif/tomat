@@ -18,8 +18,16 @@
     pauseClickThrough,
     resumeClickThrough,
   } from "$lib/shared/clickthrough";
+  import { playBeep } from "$lib/shared/beep";
+  import { invoke } from "@tauri-apps/api/core";
   import AttachmentList from "./AttachmentList.svelte";
   import Bubble from "./Bubble.svelte";
+
+  interface CaptureMonitorInfo {
+    id: string;
+    name: string;
+    isPrimary: boolean;
+  }
 
   let { toggleSettings, showSettings } = $props<{
     toggleSettings: () => void;
@@ -31,12 +39,18 @@
   let textareaElement: HTMLTextAreaElement | undefined = $state();
   let attachments = $state<Attachment[]>([]);
 
+  // Attachment + menu (expandable)
+  let attachMenuOpen = $state(false);
+  let captureMonitors = $state<CaptureMonitorInfo[]>([]);
+  let capturing = $state(false);
+
   // VAD state
   let vadEnabled = $state(false);
   let vadInstance: any = null;
   let vadDestroyed = false;
   let isListening = $state(false); // true when speech is currently detected
   let vadLoading = $state(false);
+  let vadPendingDisable = false;
 
   let vadPausedByHide = false; // true if VAD was paused due to window hide
   let unlistenVisibility: (() => void) | null = null;
@@ -76,6 +90,21 @@
       return { type: "document", filename: att.filename, markdown: att.data };
     }),
   );
+
+  // Fullscreen image preview
+  let previewImageUrl = $state<string | null>(null);
+
+  function openImagePreview(url: string) {
+    if (url) previewImageUrl = url;
+  }
+
+  function closeImagePreview() {
+    previewImageUrl = null;
+  }
+
+  function handlePreviewKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") closeImagePreview();
+  }
 
   function focusTextarea() {
     if (
@@ -127,6 +156,118 @@
     );
   });
 
+  // Click-outside to close the attachment menu
+  function handleDocClick(e: MouseEvent) {
+    if (!attachMenuOpen) return;
+    const target = e.target as HTMLElement;
+    if (!target.closest("[data-attach-root]")) {
+      closeAttachMenu();
+    }
+  }
+
+  onMount(() => {
+    document.addEventListener("click", handleDocClick, true);
+    return () => document.removeEventListener("click", handleDocClick, true);
+  });
+
+  // --- Smart STT: global shortcut handling ---
+
+  let shortcutPressStart = 0;
+  let shortcutWasVisibleOnPress = false;
+  let shortcutHoldTimer: ReturnType<typeof setTimeout> | null = null;
+  let unlistenShortcutPressed: (() => void) | null = null;
+  let unlistenShortcutReleased: (() => void) | null = null;
+
+  async function windowIsVisible(): Promise<boolean> {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      return await getCurrentWindow().isVisible();
+    } catch {
+      return true;
+    }
+  }
+
+  onMount(async () => {
+    unlistenShortcutPressed = await listen("shortcut-pressed", async () => {
+      const mode = settingsState.currentSettings["stt.smartStt"];
+      const duration =
+        Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
+      shortcutPressStart = Date.now();
+
+      if (mode === "hold") {
+        const visible = await windowIsVisible();
+        shortcutWasVisibleOnPress = visible;
+
+        // Show the app immediately if hidden, but in both cases defer VAD
+        // activation to the hold timer so quick taps don't trigger VAD.
+        if (!visible) {
+          try {
+            await invoke("show_main_window");
+          } catch (e) {
+            console.warn("[shortcut] show failed:", e);
+          }
+        }
+
+        if (shortcutHoldTimer) clearTimeout(shortcutHoldTimer);
+        shortcutHoldTimer = setTimeout(async () => {
+          shortcutHoldTimer = null;
+          if (shortcutPressStart && !vadEnabled && !vadLoading) {
+            await toggleVad();
+          }
+        }, duration);
+      } else {
+        // Disabled / Persistent: classic toggle visibility
+        const visible = await windowIsVisible();
+        try {
+          await invoke(visible ? "hide_main_window" : "show_main_window");
+        } catch (e) {
+          console.warn("[shortcut] toggle failed:", e);
+        }
+      }
+    });
+
+    unlistenShortcutReleased = await listen("shortcut-released", async () => {
+      const mode = settingsState.currentSettings["stt.smartStt"];
+      const duration =
+        Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
+      const held = shortcutPressStart ? Date.now() - shortcutPressStart : 0;
+      const wasVisibleOnPress = shortcutWasVisibleOnPress;
+      shortcutPressStart = 0;
+
+      if (mode !== "hold") return;
+
+      if (shortcutHoldTimer) {
+        clearTimeout(shortcutHoldTimer);
+        shortcutHoldTimer = null;
+      }
+
+      if (held < duration) {
+        // Short tap: if the app was already visible, hide it (tap-to-hide).
+        // If the app was hidden on press we showed it — leave it visible.
+        if (wasVisibleOnPress) {
+          try {
+            await invoke("hide_main_window");
+          } catch (e) {
+            console.warn("[shortcut] hide failed:", e);
+          }
+        }
+      } else if (vadEnabled) {
+        await toggleVad();
+      }
+    });
+  });
+
+  // Persistent mode: restore VAD state on mount
+  onMount(async () => {
+    if (
+      settingsState.currentSettings["stt.smartStt"] === "persistent" &&
+      settingsState.currentSettings["stt.vadPersistedState"] === true &&
+      !vadEnabled
+    ) {
+      await toggleVad();
+    }
+  });
+
   onDestroy(() => {
     vadDestroyed = true;
     if (vadInstance) {
@@ -134,6 +275,12 @@
       vadInstance = null;
     }
     unlistenVisibility?.();
+    unlistenShortcutPressed?.();
+    unlistenShortcutReleased?.();
+    if (shortcutHoldTimer) {
+      clearTimeout(shortcutHoldTimer);
+      shortcutHoldTimer = null;
+    }
   });
 
   function handleMonitorChange(event: Event) {
@@ -217,15 +364,30 @@
 
   // --- VAD ---
 
+  async function disableVadNow() {
+    if (vadInstance) {
+      vadInstance.destroy();
+      vadInstance = null;
+    }
+    vadEnabled = false;
+    isListening = false;
+    vadPendingDisable = false;
+    playBeep("off");
+    if (settingsState.currentSettings["stt.smartStt"] === "persistent") {
+      await settingsState.updateSetting("stt.vadPersistedState", false);
+    }
+  }
+
   async function toggleVad() {
     if (vadEnabled) {
-      // Disable
-      if (vadInstance) {
-        vadInstance.destroy();
-        vadInstance = null;
+      // If VAD is currently capturing speech, defer the disable until
+      // onSpeechEnd (or onVADMisfire) fires so the last clip reaches STT.
+      if (isListening && vadInstance && !vadPendingDisable) {
+        vadPendingDisable = true;
+        return;
       }
-      vadEnabled = false;
-      isListening = false;
+      if (vadPendingDisable) return; // already queued
+      await disableVadNow();
     } else {
       // Enable
       vadLoading = true;
@@ -242,9 +404,15 @@
           onSpeechEnd: async (audio: Float32Array) => {
             isListening = false;
             await handleVadAudio(audio);
+            if (vadPendingDisable) {
+              await disableVadNow();
+            }
           },
           onVADMisfire: () => {
             isListening = false;
+            if (vadPendingDisable) {
+              void disableVadNow();
+            }
           },
         });
 
@@ -256,6 +424,10 @@
         vadInstance = instance;
         vadInstance.start();
         vadEnabled = true;
+        playBeep("on");
+        if (settingsState.currentSettings["stt.smartStt"] === "persistent") {
+          await settingsState.updateSetting("stt.vadPersistedState", true);
+        }
       } catch (err) {
         console.error("[vad] Failed to initialize VAD:", err);
         vadEnabled = false;
@@ -446,6 +618,89 @@
     attachments = attachments.filter((_, i) => i !== index);
   }
 
+  // --- Attachment menu ---
+
+  async function toggleAttachMenu() {
+    if (attachMenuOpen) {
+      attachMenuOpen = false;
+    } else {
+      attachMenuOpen = true;
+      try {
+        captureMonitors = (await invoke(
+          "list_capture_monitors",
+        )) as CaptureMonitorInfo[];
+      } catch (e) {
+        console.warn("[capture] Failed to list monitors:", e);
+        captureMonitors = [];
+      }
+    }
+  }
+
+  function closeAttachMenu() {
+    attachMenuOpen = false;
+  }
+
+  async function handleAttachFileFromMenu() {
+    closeAttachMenu();
+    await handleAttachFile();
+  }
+
+  function handleCaptureSelect(e: Event) {
+    const target = e.target as HTMLSelectElement;
+    const id = target.value;
+    target.value = "";
+    if (id) captureMonitorById(id);
+  }
+
+  async function captureMonitorById(monitorId: string) {
+    if (capturing) return;
+    closeAttachMenu();
+    capturing = true;
+
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
+
+    let shouldHide = false;
+    try {
+      shouldHide = (await win.isVisible()) ?? false;
+    } catch (e) {
+      console.warn("[capture] Failed to check window visibility:", e);
+    }
+
+    try {
+      if (shouldHide) {
+        await invoke("hide_main_window");
+        // Give the compositor a moment to actually hide before capturing
+        await new Promise((r) => setTimeout(r, 180));
+      }
+
+      const base64 = (await invoke("capture_monitor", {
+        monitorId,
+      })) as string;
+
+      attachments = [
+        ...attachments,
+        {
+          type: "image",
+          filename: `screenshot-${Date.now()}.png`,
+          data: base64,
+          mime: "image/png",
+        },
+      ];
+    } catch (e) {
+      console.error("[capture] Failed to capture monitor:", e);
+    } finally {
+      if (shouldHide) {
+        try {
+          await invoke("show_main_window");
+        } catch (e) {
+          console.warn("[capture] Failed to restore window:", e);
+        }
+      }
+      capturing = false;
+    }
+  }
+
   function handleBubbleClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (target.closest("button, select, textarea, a, input")) return;
@@ -506,8 +761,7 @@
         ? 'opacity-50'
         : ''}"
       placeholder={placeholderText}
-      disabled={(llmStatus !== "Running" && llmStatus !== "Disabled") ||
-        vadEnabled}
+      disabled={llmStatus !== "Running" && llmStatus !== "Disabled"}
     ></textarea>
   </div>
 
@@ -516,18 +770,70 @@
     parts={attachmentParts}
     editable
     onRemove={removeAttachment}
+    onImageClick={openImagePreview}
   />
 
   <div
     class="flex items-end justify-between gap-2 text-2xl text-default-500 w-full"
   >
-    <button
-      class="hover:text-default-900 hover:cursor-pointer bg-default-100 p-2 rounded-2xl flex items-center transition-colors"
-      title="Attach File"
-      onclick={handleAttachFile}
+    <div
+      class="flex {settingsState.getAlignment() == 'right'
+        ? 'flex-row-reverse'
+        : 'flex-row'} items-center justify-center bg-default-100 p-1 rounded-2xl"
+      data-attach-root
     >
-      <i class="flex i-material-symbols-add-rounded"></i>
-    </button>
+      <button
+        class="hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center shrink-0 text-default-600"
+        title={attachMenuOpen ? "Close" : "Attach"}
+        onclick={toggleAttachMenu}
+      >
+        <i
+          class="flex i-material-symbols-add-rounded transition-transform duration-100 {attachMenuOpen
+            ? 'rotate-45'
+            : ''}"
+        ></i>
+      </button>
+
+      <button
+        class="hover:text-default-900 hover:cursor-pointer rounded flex items-center shrink-0 overflow-hidden transition-all duration-100 {attachMenuOpen
+          ? 'w-8 p-1 opacity-100'
+          : 'w-0 p-0 opacity-0 pointer-events-none'}"
+        title="Attach File"
+        onclick={handleAttachFileFromMenu}
+        tabindex={attachMenuOpen ? 0 : -1}
+      >
+        <i class="flex i-material-symbols-attach-file-rounded"></i>
+      </button>
+
+      <div
+        class="relative shrink-0 flex items-center overflow-hidden transition-all duration-100 rounded hover:text-default-900 {attachMenuOpen
+          ? 'w-8 p-1 opacity-100'
+          : 'w-0 p-0 opacity-0 pointer-events-none'}"
+      >
+        <i class="flex i-material-symbols-screenshot-monitor-outline-rounded"
+        ></i>
+        <select
+          class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          title="Screen Capture"
+          aria-label="Screen Capture Monitor"
+          onchange={handleCaptureSelect}
+          disabled={!attachMenuOpen || capturing}
+          tabindex={attachMenuOpen ? 0 : -1}
+          value=""
+        >
+          <option value="" disabled>Select Monitor</option>
+          {#each captureMonitors as mon}
+            <option value={mon.id}
+              >{mon.name}{mon.isPrimary ? " (Primary)" : ""}</option
+            >
+          {/each}
+        </select>
+      </div>
+
+      {#if attachMenuOpen}
+        <div class="flex h-full w-1"></div>
+      {/if}
+    </div>
 
     <div
       class="flex flex-row items-center justify-center bg-default-100 px-2 py-1 rounded-2xl"
@@ -630,3 +936,24 @@
     </div>
   </div>
 </Bubble>
+
+<svelte:window onkeydown={handlePreviewKeydown} onblur={closeImagePreview} />
+
+{#if previewImageUrl}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center p-6"
+    onclick={closeImagePreview}
+  >
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div onclick={(e) => e.stopPropagation()}>
+      <img
+        src={previewImageUrl}
+        alt="Preview"
+        class="max-h-[calc(100vh-6rem)] max-w-[calc(100vw-6rem)] object-contain rounded-lg shadow-2xl"
+      />
+    </div>
+  </div>
+{/if}
