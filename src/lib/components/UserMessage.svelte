@@ -1,0 +1,130 @@
+<script lang="ts">
+  import AttachmentList from "./AttachmentList.svelte";
+  import Bubble from "./Bubble.svelte";
+  import { settingsState } from "../state";
+  import {
+    getTextContent,
+    type MessageContent,
+    type MessagePart,
+  } from "$lib/shared/types";
+
+  let {
+    content,
+    isLast = false,
+    onEdit,
+  } = $props<{
+    content: MessageContent;
+    isLast?: boolean;
+    onEdit?: (newContent: MessageContent) => void;
+  }>();
+
+  let editText = $state("");
+  let editTimeout: any = null;
+
+  let displayText = $derived(getTextContent(content));
+
+  // Extract document and image parts for display
+  let attachments = $derived(
+    typeof content === "string"
+      ? []
+      : (content as MessagePart[]).filter(
+          (p) => p.type === "document" || p.type === "image_url",
+        ),
+  );
+
+  // Local copy of attachments for editing (so removals are tracked)
+  let editAttachments = $state<MessagePart[]>([]);
+
+  let editable = $derived(isLast && !!onEdit);
+
+  // Sync editText and editAttachments with content when this becomes the editable message
+  $effect(() => {
+    if (editable) {
+      editText = displayText;
+      editAttachments = [...attachments];
+    }
+  });
+
+  /** Build updated MessageContent from current edit state */
+  function buildEditContent(): MessageContent {
+    const trimmed = editText.trim();
+    if (editAttachments.length === 0) {
+      return trimmed;
+    }
+    const parts: MessagePart[] = [];
+    if (trimmed) {
+      parts.push({ type: "text", text: trimmed });
+    }
+    parts.push(...editAttachments);
+    return parts;
+  }
+
+  function emitEdit() {
+    if (!onEdit) return;
+    const newContent = buildEditContent();
+    // Check if content is effectively empty (delete case)
+    const isEmpty =
+      typeof newContent === "string" ? !newContent : newContent.length === 0;
+    if (isEmpty) {
+      onEdit(newContent);
+      return;
+    }
+    // Check if content actually changed
+    const oldText = displayText;
+    const newText = editText.trim();
+    const attachmentsChanged = editAttachments.length !== attachments.length;
+    if (newText !== oldText || attachmentsChanged) {
+      onEdit(newContent);
+    }
+  }
+
+  function handleEditInput() {
+    if (editTimeout) clearTimeout(editTimeout);
+    editTimeout = setTimeout(() => emitEdit(), 1000);
+  }
+
+  function handleEditKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      editText = displayText;
+      editAttachments = [...attachments];
+      if (editTimeout) clearTimeout(editTimeout);
+    }
+  }
+
+  function removeAttachment(index: number) {
+    editAttachments = editAttachments.filter((_, i) => i !== index);
+    if (editTimeout) clearTimeout(editTimeout);
+    // Trigger edit immediately on attachment removal
+    setTimeout(() => emitEdit(), 0);
+  }
+</script>
+
+<Bubble
+  selectedAlignment={settingsState.getAlignment()}
+  extraClass={"flex flex-col gap-4"}
+>
+  {#if editable}
+    <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
+      <span
+        class="invisible whitespace-pre-wrap break-words wrap-break-word col-start-1 row-start-1 pointer-events-none"
+        >{editText + "\u200b"}</span
+      >
+      <textarea
+        bind:value={editText}
+        oninput={handleEditInput}
+        onkeydown={handleEditKeydown}
+        class="col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words"
+        rows="1"
+        cols="1"
+      ></textarea>
+    </div>
+  {:else}
+    {displayText}
+  {/if}
+
+  <AttachmentList
+    parts={editable ? editAttachments : attachments}
+    {editable}
+    onRemove={removeAttachment}
+  />
+</Bubble>

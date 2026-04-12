@@ -1,0 +1,535 @@
+use crate::state::{AppState, Sidecar};
+use crate::types::{ServerStatus, ServerStatusUpdate};
+use crate::utils::current_target_triple;
+use futures_util::StreamExt;
+use std::path::PathBuf;
+use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::ShellExt;
+
+pub fn shared_library_dir<R: Runtime>(handle: &AppHandle<R>) -> Result<PathBuf, String> {
+    let triple = current_target_triple()?;
+    if cfg!(debug_assertions) {
+        Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("binaries")
+            .join(triple))
+    } else {
+        Ok(handle
+            .path()
+            .resource_dir()
+            .map_err(|e| e.to_string())?
+            .join("binaries")
+            .join(triple))
+    }
+}
+
+pub fn apply_runtime_library_path<R: Runtime>(
+    handle: &AppHandle<R>,
+    cmd: tauri_plugin_shell::process::Command,
+) -> Result<tauri_plugin_shell::process::Command, String> {
+    let lib_dir = shared_library_dir(handle)?;
+    if !lib_dir.exists() {
+        return Ok(cmd);
+    }
+
+    let lib_dir_str = lib_dir.to_string_lossy().to_string();
+
+    #[cfg(target_os = "macos")]
+    {
+        let existing = std::env::var("DYLD_LIBRARY_PATH").ok();
+        let value = match existing {
+            Some(path) if !path.is_empty() => format!("{lib_dir_str}:{path}"),
+            _ => lib_dir_str,
+        };
+        return Ok(cmd.env("DYLD_LIBRARY_PATH", value));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let existing = std::env::var("LD_LIBRARY_PATH").ok();
+        let value = match existing {
+            Some(path) if !path.is_empty() => format!("{lib_dir_str}:{path}"),
+            _ => lib_dir_str,
+        };
+        return Ok(cmd.env("LD_LIBRARY_PATH", value));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let separator = ";";
+        let existing = std::env::var("PATH").ok();
+        let value = match existing {
+            Some(path) if !path.is_empty() => format!("{lib_dir_str}{separator}{path}"),
+            _ => lib_dir_str,
+        };
+        return Ok(cmd.env("PATH", value));
+    }
+
+    #[allow(unreachable_code)]
+    Ok(cmd)
+}
+
+pub async fn emit_status<R: Runtime>(
+    handle: &AppHandle<R>,
+    server: &str,
+    status: ServerStatus,
+    progress: Option<f64>,
+    message: Option<String>,
+) {
+    let _ = handle.emit(
+        "sidecar-status",
+        ServerStatusUpdate {
+            server: server.to_string(),
+            status,
+            progress,
+            message,
+        },
+    );
+}
+
+pub fn is_current_start(state: &AppState, server: &str, start_id: u64) -> bool {
+    match state.0.sidecars.lock() {
+        Ok(sidecars) => sidecars
+            .get(server)
+            .map(|sidecar| sidecar.start_id == start_id)
+            .unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
+fn validate_health_check_url(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| format!("Invalid health check URL: {e}"))?;
+    if parsed.scheme() != "http" {
+        return Err("Health check URL must use http scheme".into());
+    }
+    let host = parsed.host_str().unwrap_or("");
+    if host != "127.0.0.1" && host != "localhost" {
+        return Err("Health check URL must point to localhost".into());
+    }
+    Ok(())
+}
+
+pub async fn update_server_args_internal<R: Runtime>(
+    handle: AppHandle<R>,
+    state: &AppState,
+    server: String,
+    args: Vec<String>,
+    model_path: Option<String>,
+    mmproj_path: Option<String>,
+    check_url: Option<String>,
+) -> Result<(), String> {
+    let current_start_id = {
+        let mut sidecars = state.0.sidecars.lock().map_err(|e| e.to_string())?;
+        let sidecar = sidecars.entry(server.clone()).or_insert(Sidecar {
+            child: None,
+            start_id: 0,
+        });
+
+        sidecar.start_id += 1;
+        if let Some(child) = sidecar.child.take() {
+            let _ = child.kill();
+        }
+        sidecar.start_id
+    };
+
+    if let Some(ref url) = check_url {
+        validate_health_check_url(url)?;
+    }
+
+    if args.is_empty() && server != "bun" {
+        emit_status(&handle, &server, ServerStatus::Disabled, None, None).await;
+        return Ok(());
+    }
+
+    let handle_clone = handle.clone();
+    let server_clone = server.clone();
+    let state_clone = state.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let actual_model_path = if let Some(mp) = model_path {
+            if mp.is_empty() {
+                None
+            } else {
+                match ensure_model_internal(
+                    &handle_clone,
+                    &state_clone,
+                    &server_clone,
+                    &mp,
+                    current_start_id,
+                )
+                .await
+                {
+                    Ok(path) => Some(path),
+                    Err(_) if !is_current_start(
+                        &state_clone,
+                        &server_clone,
+                        current_start_id,
+                    ) => {
+                        return;
+                    }
+                    Err(e) => {
+                        emit_status(
+                            &handle_clone,
+                            &server_clone,
+                            ServerStatus::Error,
+                            None,
+                            Some(e),
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            }
+        } else {
+            None
+        };
+
+        let actual_mmproj_path = if let Some(mp) = mmproj_path {
+            if mp.is_empty() {
+                None
+            } else {
+                match ensure_model_internal(
+                    &handle_clone,
+                    &state_clone,
+                    &server_clone,
+                    &mp,
+                    current_start_id,
+                )
+                .await
+                {
+                    Ok(path) => Some(path),
+                    Err(_) if !is_current_start(
+                        &state_clone,
+                        &server_clone,
+                        current_start_id,
+                    ) => {
+                        return;
+                    }
+                    Err(e) => {
+                        emit_status(
+                            &handle_clone,
+                            &server_clone,
+                            ServerStatus::Error,
+                            None,
+                            Some(e),
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            }
+        } else {
+            None
+        };
+
+        // Re-check start_id
+        if !is_current_start(&state_clone, &server_clone, current_start_id) {
+            return;
+        }
+
+        emit_status(
+            &handle_clone,
+            &server_clone,
+            ServerStatus::Loading,
+            None,
+            Some("Starting server...".into()),
+        )
+        .await;
+
+        let final_args: Vec<String> = args
+            .into_iter()
+            .filter_map(|a| {
+                if a == "__MODEL_PATH__" {
+                    Some(actual_model_path.clone().unwrap_or_default())
+                } else if a == "__MMPROJ_PATH__" {
+                    // If no mmproj path resolved, drop both the flag and placeholder
+                    actual_mmproj_path.clone()
+                } else if a == "--mmproj" && actual_mmproj_path.is_none() {
+                    None
+                } else {
+                    Some(a)
+                }
+            })
+            .collect();
+
+        let sidecar_name = if server_clone == "llm" {
+            "tomat-llama-server"
+        } else if server_clone == "stt" {
+            "tomat-whisper-server"
+        } else {
+            "tomat-tools-server"
+        };
+
+        let cmd = match handle_clone.shell().sidecar(sidecar_name) {
+            Ok(cmd) => cmd.args(final_args),
+            Err(e) => {
+                emit_status(
+                    &handle_clone,
+                    &server_clone,
+                    ServerStatus::Error,
+                    None,
+                    Some(format!("Failed to prepare sidecar: {e}")),
+                )
+                .await;
+                return;
+            }
+        };
+
+        let cmd = match apply_runtime_library_path(&handle_clone, cmd) {
+            Ok(cmd) => cmd,
+            Err(e) => {
+                emit_status(
+                    &handle_clone,
+                    &server_clone,
+                    ServerStatus::Error,
+                    None,
+                    Some(e),
+                )
+                .await;
+                return;
+            }
+        };
+
+        let (mut rx, child) = match cmd.spawn() {
+            Ok(result) => result,
+            Err(e) => {
+                emit_status(
+                    &handle_clone,
+                    &server_clone,
+                    ServerStatus::Error,
+                    None,
+                    Some(format!("Failed to spawn sidecar: {e}")),
+                )
+                .await;
+                return;
+            }
+        };
+
+        {
+            let mut s_lock = match state_clone.0.sidecars.lock() {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("[sidecar] mutex poisoned: {e}");
+                    let _ = child.kill();
+                    return;
+                }
+            };
+            if let Some(s) = s_lock.get_mut(&server_clone) {
+                if s.start_id == current_start_id {
+                    s.child = Some(child);
+                } else {
+                    let _ = child.kill();
+                    return;
+                }
+            }
+        }
+
+        // Monitor output
+        let handle_inner = handle_clone.clone();
+        let server_inner = server_clone.clone();
+        let state_for_output = state_clone.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut recent_logs: Vec<String> = Vec::new();
+            while let Some(event) = rx.recv().await {
+                match event {
+                    CommandEvent::Stdout(bytes) | CommandEvent::Stderr(bytes) => {
+                        let text = String::from_utf8_lossy(&bytes);
+                        for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+                            recent_logs.push(line.to_string());
+                            if recent_logs.len() > 10 {
+                                recent_logs.remove(0);
+                            }
+                        }
+                    }
+                    CommandEvent::Error(e) => {
+                        if is_current_start(&state_for_output, &server_inner, current_start_id) {
+                            emit_status(
+                                &handle_inner,
+                                &server_inner,
+                                ServerStatus::Error,
+                                None,
+                                Some(e),
+                            )
+                            .await;
+                        }
+                    }
+                    CommandEvent::Terminated(payload) => {
+                        if is_current_start(&state_for_output, &server_inner, current_start_id) {
+                            let message = if recent_logs.is_empty() {
+                                format!(
+                                    "Server exited before becoming ready (code {:?})",
+                                    payload.code
+                                )
+                            } else {
+                                recent_logs.join("\n")
+                            };
+                            emit_status(
+                                &handle_inner,
+                                &server_inner,
+                                ServerStatus::Error,
+                                None,
+                                Some(message),
+                            )
+                            .await;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        if let Some(url) = check_url {
+            let mut healthy = false;
+            for _ in 0..30 {
+                if let Ok(res) = reqwest::get(&url).await {
+                    if res.status().is_success() {
+                        healthy = true;
+                        break;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+                // Check if we were superseded
+                if !is_current_start(&state_clone, &server_clone, current_start_id) {
+                    return;
+                }
+            }
+            if healthy {
+                emit_status(
+                    &handle_clone,
+                    &server_clone,
+                    ServerStatus::Running,
+                    None,
+                    None,
+                )
+                .await;
+            } else {
+                emit_status(
+                    &handle_clone,
+                    &server_clone,
+                    ServerStatus::Error,
+                    None,
+                    Some("Health check timed out".into()),
+                )
+                .await;
+            }
+        } else {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            emit_status(
+                &handle_clone,
+                &server_clone,
+                ServerStatus::Running,
+                None,
+                None,
+            )
+            .await;
+        }
+    });
+
+    Ok(())
+}
+
+pub async fn ensure_model_internal<R: Runtime>(
+    handle: &AppHandle<R>,
+    state: &AppState,
+    server: &str,
+    model_path: &str,
+    start_id: u64,
+) -> Result<String, String> {
+    if !model_path.starts_with('@') {
+        let path = std::path::Path::new(model_path);
+        if path.exists() {
+            return Ok(model_path.to_string());
+        } else {
+            return Err(format!("Model path does not exist: {}", model_path));
+        }
+    }
+
+    // @username/reponame/branchname/filename
+    let parts: Vec<&str> = model_path[1..].split('/').collect();
+    if parts.len() < 4 {
+        return Err("Invalid model path format".into());
+    }
+
+    let username = parts[0];
+    let reponame = parts[1];
+    let branchname = parts[2];
+    let filename = parts[3..].join("/");
+
+    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let dest_dir = home
+        .join(".tomat")
+        .join("models")
+        .join(username)
+        .join(reponame);
+    let dest_path = dest_dir.join(&filename);
+
+    if dest_path.exists() {
+        return Ok(dest_path.to_string_lossy().to_string());
+    }
+
+    std::fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
+
+    emit_status(
+        handle,
+        server,
+        ServerStatus::Downloading,
+        Some(0.0),
+        Some(format!("Downloading {}...", filename)),
+    )
+    .await;
+
+    let url = format!(
+        "https://huggingface.co/{}/{}/resolve/{}/{}?download=true",
+        username, reponame, branchname, filename
+    );
+
+    let client = reqwest::Client::new();
+    let res = client.get(url).send().await.map_err(|e| e.to_string())?;
+
+    if !res.status().is_success() {
+        return Err(format!("Failed to download model: {}", res.status()));
+    }
+
+    let total_size = res.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut stream = res.bytes_stream();
+
+    let tmp_path = dest_path.with_extension("tmp");
+    let mut file = tokio::fs::File::create(&tmp_path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    while let Some(item) = stream.next().await {
+        if !is_current_start(state, server, start_id) {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err("Download cancelled".to_string());
+        }
+
+        let chunk = item.map_err(|e| e.to_string())?;
+        tokio::io::copy(&mut &chunk[..], &mut file)
+            .await
+            .map_err(|e| e.to_string())?;
+        downloaded += chunk.len() as u64;
+
+        if total_size > 0 {
+            let progress = (downloaded as f64 / total_size as f64) * 100.0;
+            emit_status(
+                handle,
+                server,
+                ServerStatus::Downloading,
+                Some(progress),
+                Some(format!(
+                    "Downloading {} ({:.2} MB)...",
+                    filename,
+                    downloaded as f64 / 1024.0 / 1024.0
+                )),
+            )
+            .await;
+        }
+    }
+
+    std::fs::rename(tmp_path, &dest_path).map_err(|e| e.to_string())?;
+
+    Ok(dest_path.to_string_lossy().to_string())
+}
