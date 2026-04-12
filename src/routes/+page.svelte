@@ -72,7 +72,7 @@
           applyTheme("auto");
         }
       });
-      if (settingsState.currentSettings["behaviour.alwaysStartNew"]) {
+      if (settingsState.currentSettings["general.session.alwaysStartNew"]) {
         await messagesState.loadSessionList();
       } else {
         await messagesState.loadLatest();

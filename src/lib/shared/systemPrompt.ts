@@ -25,33 +25,33 @@ function formatDateTime(): string {
 }
 
 /**
- * Build the system prompt string from the behaviour preset + context settings.
+ * Build the system prompt string from the system prompt preset + context settings.
  * The "disabled" preset suppresses the base prompt but still emits context
  * if any context field/toggle is set. Returns null only when nothing is set.
  */
 export function buildSystemPrompt(): string | null {
   const s = settingsState.currentSettings;
   const base =
-    s["behaviour.preset"] === "disabled" ? "" : (s["behaviour.systemPrompt"] || "").trim();
+    s["general.systemPrompt.preset"] === "disabled" ? "" : (s["general.systemPrompt"] || "").trim();
   const ctx: string[] = [];
 
-  const userName = (s["behaviour.context.preferredUserName"] || "").trim();
+  const userName = (s["general.context.userName"] || "").trim();
   if (userName) ctx.push(`The user prefers to be called ${userName}.`);
 
-  const agentName = (s["behaviour.context.preferredAgentName"] || "").trim();
+  const agentName = (s["general.context.agentName"] || "").trim();
   if (agentName) ctx.push(`Your name is ${agentName}.`);
 
-  const language = (s["behaviour.context.preferredLanguage"] || "").trim();
+  const language = (s["general.context.language"] || "").trim();
   if (language) ctx.push(`Communicate in ${language}.`);
 
-  const location = (s["behaviour.context.location"] || "").trim();
+  const location = (s["general.context.location"] || "").trim();
   if (location) ctx.push(`User location: ${location}.`);
 
-  if (s["behaviour.context.dateTime"]) {
+  if (s["general.context.dateTime"]) {
     ctx.push(`Current date and time: ${formatDateTime()}.`);
   }
 
-  if (s["behaviour.context.os"]) {
+  if (s["general.context.os"]) {
     ctx.push(`User operating system: ${getOsName()}.`);
   }
 

@@ -93,7 +93,7 @@
   let defaultTitle = $derived(messagesState.getDefaultTitle());
   let isNewSession = $derived(messagesState.messages.length === 0);
   let storageEnabled = $derived(
-    settingsState.currentSettings["behaviour.storeSessions"] !== false,
+    settingsState.currentSettings["general.session.storeSessions"] !== false,
   );
 
   let showTitle = $derived(!isNewSession && storageEnabled);

@@ -8,7 +8,7 @@
 
   let isOpen = $state(false);
   let buttonEl = $state<HTMLButtonElement>();
-  let popupStyle = $state('');
+  let popupStyle = $state("");
 
   function updatePopupPosition() {
     if (!buttonEl) return;
@@ -35,39 +35,45 @@
   const icon = $derived(iconMap[update.status as ServerStatus]);
 
   function toggle() {
-    if (update.status === 'Error') {
+    if (update.status === "Error") {
       isOpen = !isOpen;
       if (isOpen) updatePopupPosition();
     }
   }
 </script>
 
-{#if update.status !== 'Running'}
-<button
-  bind:this={buttonEl}
-  class="flex items-center gap-1.5 px-3 py-1 rounded-2xl {color} {update.status === 'Error' ? 'cursor-pointer hover:ring-2 ring-red-400/50' : 'cursor-default'}"
-  title={update.status !== 'Error' ? (update.message || update.status) : undefined}
-  onclick={(e) => {
-    toggle();
-    e.stopPropagation();
-  }}
->
-  <i class={icon}></i>
-  <span>
-    {type}
-    {update.status === "Downloading" && update.progress !== undefined
-      ? `${Math.round(update.progress)}%`
-      : update.status}
-  </span>
-</button>
-{#if update.status === 'Error' && isOpen}
-  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-  <div
-    class="fixed bg-neutral-900/95 backdrop-blur text-red-400 p-3 rounded-xl shadow-xl border border-neutral-700 w-96 max-h-64 overflow-y-auto font-mono text-xs text-left z-50 overflow-x-hidden whitespace-pre-wrap break-words cursor-text"
-    style={popupStyle}
-    onclick={(e) => e.stopPropagation()}
+{#if update.status !== "Running"}
+  <button
+    bind:this={buttonEl}
+    class="flex items-center gap-1.5 px-3 py-1 rounded-2xl {color} {update.status ===
+    'Error'
+      ? 'cursor-pointer hover:ring-2 ring-red-400/50'
+      : 'cursor-default'}"
+    title={update.status !== "Error"
+      ? update.message || update.status
+      : undefined}
+    onclick={(e) => {
+      toggle();
+      e.stopPropagation();
+    }}
   >
-    {update.message || "Unknown error"}
-  </div>
-{/if}
+    <i class={icon}></i>
+    <span>
+      {type}
+      {update.status === "Downloading" && update.progress !== undefined
+        ? `${Math.round(update.progress)}%`
+        : update.status}
+    </span>
+  </button>
+  {#if update.status === "Error" && isOpen}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div
+      class="fixed bg-neutral-900/95 backdrop-blur text-red-400 p-3 rounded-xl shadow-xl border border-neutral-700 w-96 max-h-64 overflow-y-auto font-mono text-xs text-left z-50 overflow-x-hidden whitespace-pre-wrap break-words cursor-text"
+      style={popupStyle}
+      onclick={(e) => e.stopPropagation()}
+    >
+      {update.message || "Unknown error"}
+    </div>
+  {/if}
 {/if}

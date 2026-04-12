@@ -249,7 +249,7 @@ export async function sendMessages(): Promise<void> {
     const shouldGenerateTitle =
       isFirstUserMessage &&
       firstUserContent !== null &&
-      settings["behaviour.storeSessions"] !== false &&
+      settings["general.session.storeSessions"] !== false &&
       (!currentTitle || currentTitle === defaultTitle);
 
     if (shouldGenerateTitle) {

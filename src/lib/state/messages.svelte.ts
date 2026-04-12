@@ -20,7 +20,7 @@ class MessagesState {
   streamingFirstChunkReceived = $state(false);
 
   private get storageEnabled(): boolean {
-    return settingsState.currentSettings["behaviour.storeSessions"] !== false;
+    return settingsState.currentSettings["general.session.storeSessions"] !== false;
   }
 
   /** Get the default title (formatted timestamp from sessionId) */
@@ -274,7 +274,7 @@ class MessagesState {
     const isEmpty =
       typeof content === "string"
         ? !content.trim()
-        : content.length === 0 || content.every((p) => p.type === "text" && !p.text.trim());
+        : content.every((p) => p.type === "text" && !p.text.trim());
     if (isEmpty) {
       // Remove everything from the user message and all newer messages (the response)
       this.messages.splice(0, userIdx + 1);

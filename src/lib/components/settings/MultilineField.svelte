@@ -28,7 +28,7 @@
     <div class="flex flex-col flex-1">
       <div class="text-default-800">{field.name}</div>
       {#if field.description}
-        <div class="text-default-500 text-sm leading-tight">
+        <div class="text-default-500 text-sm leading-tight whitespace-pre-line">
           {field.description}
         </div>
       {/if}

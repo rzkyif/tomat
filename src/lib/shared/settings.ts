@@ -56,16 +56,22 @@ export interface FieldCondition {
   neq?: string | number | boolean;
 }
 
+export interface PresetBadge {
+  icon: string;
+  label: string;
+}
+
 export interface PresetOption {
   id: string;
   label: string;
+  title?: string;
+  badges?: PresetBadge[];
+  description?: string;
   icon?: string;
-  color?: string;
   defaults?: Record<string, string | number | boolean>;
 }
 
 export interface PresetConfig {
-  columns: number;
   options: PresetOption[];
   secondaryOptions?: PresetOption[];
 }
@@ -115,6 +121,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     name: "Appearance",
     sections: [
       {
+        label: "Theme",
         fields: [
           {
             id: "appearance.theme",
@@ -131,7 +138,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "appearance.textSize",
             name: "Text Size",
-            description: "Base text size for the entire app (12–32).",
+            description: "Base text size for the entire app.\nAccepted range: 12–32 pixels.",
             type: "number",
             defaultValue: 18,
             suffix: "px",
@@ -142,6 +149,11 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               },
             ],
           },
+        ],
+      },
+      {
+        label: "Window",
+        fields: [
           {
             id: "layout.monitor",
             name: "Monitor",
@@ -151,8 +163,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           },
           {
             id: "layout.alignment",
-            name: "Screen Alignment",
-            description: "Align the window to the left, center, or right.",
+            name: "Window Alignment",
+            description: "Align the window to the left, center, or right of the monitor.",
             type: "select",
             defaultValue: "center",
             options: [
@@ -164,7 +176,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "layout.width",
             name: "Window Width",
-            description: "Width of the app window (400–1200).",
+            description: "Width of the app window.\nAccepted range: 400–1200 pixels.",
             type: "number",
             defaultValue: 700,
             suffix: "px",
@@ -180,56 +192,65 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     ],
   },
   {
-    id: "behaviour",
-    name: "Behaviour",
+    id: "general",
+    name: "General",
     sections: [
       {
         label: "System Prompt",
         fields: [
           {
-            id: "behaviour.preset",
+            id: "general.systemPrompt.preset",
             name: "",
             description: "",
             type: "preset",
             defaultValue: "disabled",
             presetConfig: {
-              columns: 3,
               options: [
                 {
                   id: "disabled",
-                  label: "Disabled",
-                  defaults: { "behaviour.systemPrompt": "" },
+                  label: "None",
+                  title: "None",
+                  description:
+                    "No system prompt is sent. The model runs with its default behavior.",
+                  defaults: { "general.systemPrompt": "" },
                 },
                 {
                   id: "tool-only",
                   label: "Tool Only",
-                  defaults: { "behaviour.systemPrompt": TOOL_ONLY_PROMPT },
+                  title: "Tool Only",
+                  description:
+                    "Forces short, cautious replies and a strong preference for tool use. Suited to small on-device models that cannot reason reliably on their own.",
+                  defaults: { "general.systemPrompt": TOOL_ONLY_PROMPT },
                 },
                 {
                   id: "assistant",
                   label: "Assistant",
-                  defaults: { "behaviour.systemPrompt": ASSISTANT_PROMPT },
+                  title: "Assistant",
+                  description:
+                    "A professional, capable general-purpose assistant that answers directly and uses tools when helpful.",
+                  defaults: { "general.systemPrompt": ASSISTANT_PROMPT },
                 },
               ],
               secondaryOptions: [
                 {
                   id: "custom",
                   label: "Custom",
-                  icon: "i-material-symbols-tune-rounded",
-                  color: "amber",
+                  title: "Custom",
+                  description:
+                    "Write your own system prompt. Editing the prompt manually switches to this option automatically.",
                 },
               ],
             },
           },
           {
-            id: "behaviour.systemPrompt",
+            id: "general.systemPrompt",
             name: "System Prompt",
             description:
-              "The system prompt sent to the agent. Editing this manually switches the preset to Custom.",
+              "The system prompt sent to the agent.\nEditing this manually switches the preset to Custom.",
             type: "multiline",
             defaultValue: "",
             optional: true,
-            visibleWhen: { field: "behaviour.preset", neq: "disabled" },
+            visibleWhen: { field: "general.systemPrompt.preset", neq: "disabled" },
           },
         ],
       },
@@ -237,53 +258,53 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         label: "Context",
         fields: [
           {
-            id: "behaviour.context.preferredUserName",
-            name: "Preferred User Name",
-            description: "Optional: how the agent should address you.",
+            id: "general.context.userName",
+            name: "Your Name",
+            description: "How the agent should address you. Optional.",
             type: "string",
             defaultValue: "",
             optional: true,
             placeholder: "e.g. Alex",
           },
           {
-            id: "behaviour.context.preferredAgentName",
-            name: "Preferred Agent Name",
+            id: "general.context.agentName",
+            name: "Agent Name",
             description:
-              "Optional: a name for the agent. Leave empty to let the agent pick or stay nameless.",
+              "A name for the agent. Optional — leave empty to let the agent pick or stay nameless.",
             type: "string",
             defaultValue: "",
             optional: true,
             placeholder: "e.g. Tomat",
           },
           {
-            id: "behaviour.context.preferredLanguage",
-            name: "Preferred Language",
-            description: "Optional: the language you prefer to communicate in.",
+            id: "general.context.language",
+            name: "Language",
+            description: "The language you prefer to communicate in. Optional.",
             type: "string",
             defaultValue: "",
             optional: true,
             placeholder: "e.g. English",
           },
           {
-            id: "behaviour.context.location",
+            id: "general.context.location",
             name: "Location",
             description:
-              "Optional: a location string the agent can reference. No network calls are made.",
+              "A location string the agent can reference. Optional.\nNo network calls are made — the value is attached as plain text.",
             type: "string",
             defaultValue: "",
             optional: true,
             placeholder: "e.g. San Francisco, CA",
           },
           {
-            id: "behaviour.context.dateTime",
-            name: "Date and time",
+            id: "general.context.dateTime",
+            name: "Include Date and Time",
             description: "Attach the current date and time to the system prompt.",
             type: "boolean",
             defaultValue: true,
           },
           {
-            id: "behaviour.context.os",
-            name: "Operating System",
+            id: "general.context.os",
+            name: "Include Operating System",
             description: "Attach your operating system to the system prompt.",
             type: "boolean",
             defaultValue: true,
@@ -291,10 +312,10 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         ],
       },
       {
-        label: "Session Management",
+        label: "Sessions",
         fields: [
           {
-            id: "behaviour.alwaysStartNew",
+            id: "general.session.alwaysStartNew",
             name: "Always Start New Session",
             description:
               "When the app starts, always begin a new empty session instead of resuming the last one.",
@@ -302,10 +323,10 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             defaultValue: false,
           },
           {
-            id: "behaviour.storeSessions",
+            id: "general.session.storeSessions",
             name: "Store Sessions",
             description:
-              "Persist messages and session titles to disk. When disabled, sessions live only in memory and are cleared when the app closes.",
+              "Persist messages and session titles to disk.\nWhen disabled, sessions live only in memory and are cleared when the app closes.",
             type: "boolean",
             defaultValue: true,
           },
@@ -318,31 +339,40 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     name: "Language Model",
     sections: [
       {
+        label: "Attachments",
         fields: [
           {
             id: "llm.supportImages",
             name: "Support Images",
             description:
-              "Allow attaching images to send to the LLM (requires vision-capable model)",
+              "Allow attaching images to messages.\nRequires a vision-capable model when using the local llama-server.",
             type: "boolean",
             defaultValue: true,
           },
         ],
       },
       {
+        label: "Model",
         fields: [
           {
             id: "llm.preset",
-            name: "Model Preset",
+            name: "",
             description: "",
             type: "preset",
             defaultValue: "0.8b",
             presetConfig: {
-              columns: 3,
               options: [
                 {
                   id: "0.8b",
                   label: "0.8B",
+                  title: "Qwen 0.8B",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~1 GB RAM" },
+                    { icon: "i-material-symbols-bolt-rounded", label: "Fastest" },
+                    { icon: "i-material-symbols-lightbulb-outline-rounded", label: "Basic" },
+                  ],
+                  description:
+                    "Lightweight and quick. Good for short questions, simple chat, and machines with limited memory.\n\nStruggles with multi-step reasoning or long contexts.",
                   defaults: {
                     "llm.modelPath": "@unsloth/Qwen3.5-0.8B-GGUF/main/Qwen3.5-0.8B-Q4_K_M.gguf",
                     "llm.mmprojPath": "@unsloth/Qwen3.5-0.8B-GGUF/main/mmproj-F16.gguf",
@@ -358,6 +388,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 {
                   id: "2b",
                   label: "2B",
+                  title: "Qwen 2B",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~2 GB RAM" },
+                    { icon: "i-material-symbols-speed-rounded", label: "Balanced" },
+                    { icon: "i-material-symbols-psychology-rounded", label: "Reasoning" },
+                  ],
+                  description:
+                    "A balanced default with reasoning enabled. Handles most everyday tasks comfortably on a modern laptop.",
                   defaults: {
                     "llm.modelPath": "@unsloth/Qwen3.5-2B-GGUF/main/Qwen3.5-2B-Q4_K_M.gguf",
                     "llm.mmprojPath": "@unsloth/Qwen3.5-2B-GGUF/main/mmproj-F16.gguf",
@@ -373,6 +411,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 {
                   id: "5b-e2b",
                   label: "5B E2B",
+                  title: "Gemma 5B E2B",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~5 GB RAM" },
+                    { icon: "i-material-symbols-hourglass-top-rounded", label: "Slower" },
+                    { icon: "i-material-symbols-psychology-alt-rounded", label: "Smartest" },
+                  ],
+                  description:
+                    "Best reasoning and answer quality. Recommended when you have the RAM to spare and want the strongest responses.\n\nSlower to first token.",
                   defaults: {
                     "llm.modelPath": "@unsloth/gemma-4-E2B-it-GGUF/main/gemma-4-E2B-it-Q4_K_M.gguf",
                     "llm.mmprojPath": "@unsloth/gemma-4-E2B-it-GGUF/main/mmproj-F16.gguf",
@@ -390,14 +436,16 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 {
                   id: "custom",
                   label: "Custom",
-                  icon: "i-material-symbols-tune-rounded",
-                  color: "amber",
+                  title: "Custom",
+                  badges: [{ icon: "i-material-symbols-build-rounded", label: "Manual setup" }],
+                  description: "Configure model path, context size, threads, and ports yourself.",
                 },
                 {
                   id: "external",
                   label: "External",
-                  icon: "i-material-symbols-cloud-done-outline-rounded",
-                  color: "purple",
+                  title: "External",
+                  badges: [{ icon: "i-material-symbols-cloud", label: "OpenAI-compatible" }],
+                  description: "Point to a remote API. Skips the local llama-server entirely.",
                 },
               ],
             },
@@ -411,7 +459,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "llm.external.baseUrl",
             name: "Base URL",
-            description: "API endpoint URL",
+            description: "API endpoint URL.",
             type: "string",
             defaultValue: "",
             placeholder: "https://api.example.com/v1",
@@ -419,7 +467,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "llm.external.apiKey",
             name: "API Key",
-            description: "Authentication key",
+            description: "Authentication key.",
             type: "password",
             defaultValue: "",
             placeholder: "sk-...",
@@ -427,7 +475,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "llm.external.model",
             name: "Model",
-            description: "Model identifier to use",
+            description: "Model identifier to use.",
             type: "string",
             defaultValue: "",
             placeholder: "gpt-4o-mini",
@@ -435,7 +483,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "llm.external.contextSize",
             name: "Context Size",
-            description: "Maximum context window length for usage tracking",
+            description: "Maximum context window length, used for usage tracking.",
             type: "number",
             defaultValue: 128000,
           },
@@ -448,14 +496,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "llm.modelPath",
             name: "Model Path",
-            description: "Path to the GGUF model file",
+            description: "Path to the GGUF model file.",
             type: "string",
             defaultValue: "@unsloth/Qwen3.5-0.8B-GGUF/main/Qwen3.5-0.8B-Q4_K_M.gguf",
           },
           {
             id: "llm.mmprojPath",
             name: "Vision Projector Path",
-            description: "Path to the mmproj GGUF file for vision support",
+            description: "Path to the mmproj GGUF file used for vision support.",
             type: "string",
             defaultValue: "@unsloth/Qwen3.5-0.8B-GGUF/main/mmproj-F16.gguf",
             placeholder: "@user/repo/branch/mmproj-f16.gguf",
@@ -465,28 +513,29 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "llm.contextSize",
             name: "Context Size",
-            description: "Maximum context window length",
+            description: "Maximum context window length.",
             type: "number",
             defaultValue: 4096,
           },
           {
             id: "llm.mmap",
-            name: "Memory Map (mmap)",
-            description: "Use memory-mapped I/O for model loading",
+            name: "Memory Mapping",
+            description:
+              "Use memory-mapped I/O when loading the model.\n\nFaster startup and lower RAM usage in most cases. Disable if you see stability issues on unusual filesystems.",
             type: "boolean",
             defaultValue: true,
           },
           {
             id: "llm.threads",
             name: "CPU Threads",
-            description: "Number of threads for inference",
+            description: "Number of threads used for inference.",
             type: "number",
             defaultValue: 4,
           },
           {
             id: "llm.reasoning",
-            name: "Reasoning State",
-            description: "Whether to enable reasoning (on, off, auto)",
+            name: "Reasoning",
+            description: "Whether the model should produce a reasoning trace before its answer.",
             type: "select",
             defaultValue: "off",
             options: [
@@ -499,7 +548,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "llm.reasoningBudget",
             name: "Reasoning Budget",
-            description: "Number of tokens reserved for reasoning",
+            description: "Number of tokens reserved for the reasoning trace.",
             type: "number",
             defaultValue: "",
             visibleWhen: { field: "llm.reasoning", neq: "off" },
@@ -509,7 +558,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "llm.host",
             name: "Host",
-            description: "Server bind address",
+            description: "Server bind address.",
             type: "string",
             defaultValue: "127.0.0.1",
             regex: [
@@ -523,7 +572,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "llm.port",
             name: "Port",
-            description: "Server listen port",
+            description: "Server listen port.",
             type: "string",
             defaultValue: "7701",
             regex: [
@@ -537,8 +586,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           },
           {
             id: "llm.webui",
-            name: "Enable Web UI",
-            description: "Enable the llama.cpp built-in Web UI",
+            name: "Llama.cpp Web UI",
+            description: "Enable the llama.cpp built-in web interface.",
             type: "boolean",
             defaultValue: false,
           },
@@ -559,44 +608,46 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     name: "Speech-to-Text",
     sections: [
       {
+        label: "Transcription",
         fields: [
           {
             id: "stt.llmAutocorrect",
             name: "LLM Autocorrect",
-            description: "Use the LLM to correct transcription mistakes after speech recognition",
+            description:
+              "Use the language model to clean up transcription mistakes after speech recognition.",
             type: "boolean",
             defaultValue: false,
           },
           {
             id: "stt.autoSend",
-            name: "Auto Send Speech",
-            description: "Automatically send the message after speech transcription completes",
+            name: "Auto-send Transcription",
+            description: "Automatically send the message as soon as transcription completes.",
             type: "boolean",
             defaultValue: false,
           },
         ],
       },
       {
-        label: "Smart Activation",
+        label: "Voice Input",
         fields: [
           {
             id: "stt.smartStt",
-            name: "Smart STT",
+            name: "Activation",
             description:
-              "How voice input is activated. Persistent: VAD state survives app restarts. Hold: press the global shortcut to activate VAD while held.",
+              "How the microphone is activated.\n\nManual: use the mic button. Voice input turns off whenever the app is hidden or closed.\nSticky: use the mic button. Voice input stays on through hides, closes, and restarts.\nPush to Talk: hold the global shortcut to dictate. Quick taps show or hide the window instead.",
             type: "select",
             defaultValue: "disabled",
             options: [
-              { value: "disabled", label: "Disabled" },
-              { value: "persistent", label: "Persistent" },
-              { value: "hold", label: "Hold" },
+              { value: "disabled", label: "Manual" },
+              { value: "persistent", label: "Sticky" },
+              { value: "hold", label: "Push to Talk" },
             ],
           },
           {
             id: "stt.holdDuration",
             name: "Hold Duration",
             description:
-              "Delay before VAD activates while holding the shortcut. A short tap under this threshold will hide the app instead.",
+              "Delay before push-to-talk activates while holding the shortcut.\nTaps shorter than this show or hide the app instead.",
             type: "number",
             defaultValue: 250,
             suffix: "ms",
@@ -613,20 +664,27 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         ],
       },
       {
+        label: "Model",
         fields: [
           {
             id: "stt.preset",
-
-            name: "Model Preset",
+            name: "",
             description: "",
             type: "preset",
             defaultValue: "base",
             presetConfig: {
-              columns: 3,
               options: [
                 {
                   id: "base",
                   label: "Base",
+                  title: "Whisper Base",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~400 MB RAM" },
+                    { icon: "i-material-symbols-bolt-rounded", label: "Fastest" },
+                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Basic accuracy" },
+                  ],
+                  description:
+                    "Quick transcription for clear speech in quiet environments. Runs on almost any hardware.",
                   defaults: {
                     "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-base.bin",
                     "stt.threads": 4,
@@ -637,6 +695,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 {
                   id: "medium",
                   label: "Medium",
+                  title: "Whisper Medium",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~2.5 GB RAM" },
+                    { icon: "i-material-symbols-speed-rounded", label: "Balanced" },
+                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Solid accuracy" },
+                  ],
+                  description:
+                    "Noticeably more accurate than Base with accents or background noise. A good default on modern machines.",
                   defaults: {
                     "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-medium.bin",
                     "stt.threads": 6,
@@ -647,6 +713,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 {
                   id: "large",
                   label: "Large",
+                  title: "Whisper Large v3",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~4 GB RAM" },
+                    { icon: "i-material-symbols-hourglass-top-rounded", label: "Slower" },
+                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Best accuracy" },
+                  ],
+                  description:
+                    "Highest accuracy, especially for non-English or noisy audio.\n\nSlow on low-end hardware.",
                   defaults: {
                     "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-large-v3.bin",
                     "stt.threads": 8,
@@ -659,14 +733,17 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 {
                   id: "custom",
                   label: "Custom",
-                  icon: "i-material-symbols-tune-rounded",
-                  color: "amber",
+                  title: "Custom",
+                  badges: [{ icon: "i-material-symbols-build-rounded", label: "Manual setup" }],
+                  description: "Configure model path, threads, and ports yourself.",
                 },
                 {
                   id: "external",
                   label: "External",
-                  icon: "i-material-symbols-cloud-done-outline-rounded",
-                  color: "purple",
+                  title: "External",
+                  badges: [{ icon: "i-material-symbols-cloud", label: "OpenAI-compatible" }],
+                  description:
+                    "Point to a remote transcription API. Skips the local whisper-server.",
                 },
               ],
             },
@@ -680,7 +757,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "stt.external.baseUrl",
             name: "Base URL",
-            description: "API endpoint URL",
+            description: "API endpoint URL.",
             type: "string",
             defaultValue: "",
             placeholder: "https://api.example.com/v1",
@@ -688,7 +765,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "stt.external.apiKey",
             name: "API Key",
-            description: "Authentication key",
+            description: "Authentication key.",
             type: "password",
             defaultValue: "",
             placeholder: "sk-...",
@@ -696,7 +773,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "stt.external.model",
             name: "Model",
-            description: "Model identifier to use",
+            description: "Model identifier to use.",
             type: "string",
             defaultValue: "",
             placeholder: "whisper-1",
@@ -710,21 +787,21 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "stt.modelPath",
             name: "Model Path",
-            description: "Path to the Whisper model file",
+            description: "Path to the Whisper model file.",
             type: "string",
             defaultValue: "@ggerganov/whisper.cpp/main/ggml-base.bin",
           },
           {
             id: "stt.threads",
             name: "CPU Threads",
-            description: "Number of threads for inference",
+            description: "Number of threads used for inference.",
             type: "number",
             defaultValue: 4,
           },
           {
             id: "stt.host",
             name: "Host",
-            description: "Server bind address",
+            description: "Server bind address.",
             type: "string",
             defaultValue: "127.0.0.1",
             regex: [
@@ -738,7 +815,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "stt.port",
             name: "Port",
-            description: "Server listen port",
+            description: "Server listen port.",
             type: "string",
             defaultValue: "7702",
             regex: [
@@ -896,19 +973,46 @@ export function getPresetFieldIds(groupId: string): Set<string> {
   return ids;
 }
 
-/** Search all settings fields by query string. Matches against name, description, options labels, and preset labels. */
-export function searchFields(query: string): SettingField[] {
+export interface SearchResultGroup {
+  groupId: string;
+  groupName: string;
+  sectionKey: string;
+  sectionLabel?: string;
+  fields: SettingField[];
+}
+
+/** Search all settings fields by query string, grouped by section. Skips sections/fields
+ * whose visibility conditions fail against the current settings. */
+export function searchFields(
+  query: string,
+  currentSettings: Record<string, any>,
+): SearchResultGroup[] {
   if (!query.trim()) return [];
   const q = query.toLowerCase();
-  const results: SettingField[] = [];
+  const results: SearchResultGroup[] = [];
 
   for (const group of SETTINGS_SCHEMA) {
-    for (const section of group.sections) {
+    for (let si = 0; si < group.sections.length; si++) {
+      const section = group.sections[si];
+      if (!evalCondition(section.visibleWhen, currentSettings)) continue;
+
+      const matched: SettingField[] = [];
       for (const field of section.fields) {
         if (field.type === "command_preview") continue;
+        if (!evalCondition(field.visibleWhen, currentSettings)) continue;
         if (fieldMatchesQuery(field, q)) {
-          results.push(field);
+          matched.push(field);
         }
+      }
+
+      if (matched.length > 0) {
+        results.push({
+          groupId: group.id,
+          groupName: group.name,
+          sectionKey: `${group.id}-${si}`,
+          sectionLabel: section.label,
+          fields: matched,
+        });
       }
     }
   }

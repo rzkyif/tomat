@@ -17,6 +17,11 @@ const inversionMap: Record<string, string> = {
 export default defineConfig({
   presets: [presetWind4({ dark: "class" }), presetIcons(), presetTypography()],
   extractors: [extractorSvelte()],
+  content: {
+    pipeline: {
+      include: [/\.(vue|svelte|[jt]sx?|mdx?|astro|elm|php|phtml|html)($|\?)/],
+    },
+  },
   shortcuts: [
     [/^bg-default-(\d+)$/, ([, s]) => `bg-neutral-${s} dark:bg-neutral-${inversionMap[s] ?? s}`],
     [

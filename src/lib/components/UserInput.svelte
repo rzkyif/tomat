@@ -143,11 +143,15 @@
   onMount(async () => {
     unlistenVisibility = await listen<boolean>(
       "window-visibility",
-      ({ payload: visible }) => {
+      async ({ payload: visible }) => {
         if (!visible && vadEnabled && vadInstance) {
-          vadInstance.pause();
-          isListening = false;
-          vadPausedByHide = true;
+          if (settingsState.currentSettings["stt.smartStt"] === "persistent") {
+            vadInstance.pause();
+            isListening = false;
+            vadPausedByHide = true;
+          } else {
+            await disableVadNow();
+          }
         } else if (visible && vadPausedByHide && vadInstance) {
           vadInstance.start();
           vadPausedByHide = false;

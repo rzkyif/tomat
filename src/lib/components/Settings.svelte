@@ -121,12 +121,12 @@
       }
     }
     if (
-      key.startsWith("behaviour.") &&
-      key !== "behaviour.preset" &&
-      getPresetFieldIds("behaviour").has(key)
+      key.startsWith("general.") &&
+      key !== "general.systemPrompt.preset" &&
+      getPresetFieldIds("general").has(key)
     ) {
-      if (settingsState.currentSettings["behaviour.preset"] !== "custom") {
-        await settingsState.updateSetting("behaviour.preset", "custom");
+      if (settingsState.currentSettings["general.systemPrompt.preset"] !== "custom") {
+        await settingsState.updateSetting("general.systemPrompt.preset", "custom");
       }
     }
     await settingsState.updateSetting(key, value);
@@ -320,15 +320,26 @@
         onscroll={updateScrollFades}
       >
         {#if searchMode && searchQuery.trim()}
-          {#each searchFields(searchQuery) as field}
-            <SettingsField
-              {field}
-              {monitors}
-              error={validationErrors[field.id] ?? null}
-              onChange={handleChange}
-              onReset={resetToDefault}
-              onPresetSelect={handlePresetSelect}
-            />
+          {#each searchFields(searchQuery, settingsState.currentSettings) as group (group.sectionKey)}
+            <div class="flex flex-col gap-2">
+              <div
+                class="text-sm text-default-500 font-medium uppercase tracking-wide"
+              >
+                {group.groupName}{group.sectionLabel
+                  ? ` › ${group.sectionLabel}`
+                  : ""}
+              </div>
+              {#each group.fields as field (field.id)}
+                <SettingsField
+                  {field}
+                  {monitors}
+                  error={validationErrors[field.id] ?? null}
+                  onChange={handleChange}
+                  onReset={resetToDefault}
+                  onPresetSelect={handlePresetSelect}
+                />
+              {/each}
+            </div>
           {:else}
             <div
               class="bg-default-100 rounded-2xl px-4 py-2 text-default-600 text-base"
