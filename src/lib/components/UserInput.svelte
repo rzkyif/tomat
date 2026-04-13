@@ -594,7 +594,7 @@
         <i class="flex i-material-symbols-screenshot-monitor-outline-rounded"
         ></i>
         <select
-          class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
           title="Screen Capture"
           aria-label="Screen Capture Monitor"
           onchange={handleCaptureSelect}
@@ -624,7 +624,7 @@
       >
         <i class="i-material-symbols-desktop-windows-outline-rounded"></i>
         <select
-          class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
           onchange={handleMonitorChange}
           value={settingsState.getMonitor()}
         >
