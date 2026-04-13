@@ -367,6 +367,7 @@
       }}
       llmStatus={serversState.serverStatuses.llm}
       sttStatus={serversState.serverStatuses.stt}
+      bunStatus={serversState.serverStatuses.bun}
     />
 
     <!-- Main Panel -->

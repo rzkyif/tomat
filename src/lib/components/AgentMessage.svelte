@@ -5,7 +5,7 @@
   import { markedHighlight } from "marked-highlight";
   import DOMPurify from "dompurify";
   import { onMount, tick } from "svelte";
-  import { settingsState } from "../state";
+  import { settingsState, ttsState } from "../state";
   import { getTextContent, type MessageContent } from "$lib/shared/types";
   import Bubble from "./Bubble.svelte";
 
@@ -26,11 +26,74 @@
     }
   });
 
-  let { content } = $props<{
+  let {
+    id,
+    content,
+    modelUsed = "default",
+  } = $props<{
+    id?: string;
     content: MessageContent;
+    modelUsed?: "default" | "secondary";
   }>();
 
   let displayText = $derived(getTextContent(content));
+  let bgClass = $derived(
+    modelUsed === "secondary" ? "bg-accent-purple" : "bg-accent-blue",
+  );
+  let pillBgClass = $derived(
+    modelUsed === "secondary"
+      ? "bg-accent-purple-inner"
+      : "bg-accent-blue-inner",
+  );
+  let pillTextClass = $derived(
+    modelUsed === "secondary"
+      ? "text-accent-purple-inner"
+      : "text-accent-blue-inner",
+  );
+
+  let ttsActive = $derived(
+    ttsState.enabled && ttsState.loaded && id !== undefined,
+  );
+  // "mine" = this message currently owns the TTS pipeline. While mine,
+  // three distinct states are possible:
+  //   playing : audio is actively coming out of the speakers
+  //   loading : synth is in flight (or about to be) with nothing queued yet
+  //   neither : transient gap, treated as idle for UI purposes
+  let isMine = $derived(
+    ttsState.currentMessageId !== null &&
+      id !== undefined &&
+      ttsState.currentMessageId === id,
+  );
+  let isPlaying = $derived(isMine && ttsState.liveSourceCount > 0);
+  let isLoading = $derived(isMine && !isPlaying && ttsState.synthInflight);
+  let buttonState = $derived<"idle" | "loading" | "playing">(
+    isPlaying ? "playing" : isLoading ? "loading" : "idle",
+  );
+  let buttonIcon = $derived(
+    buttonState === "playing"
+      ? "i-material-symbols-stop-rounded"
+      : buttonState === "loading"
+        ? "i-line-md:loading-twotone-loop"
+        : "i-material-symbols-text-to-speech-rounded",
+  );
+  let buttonTitle = $derived(
+    buttonState === "playing"
+      ? "Stop speaking"
+      : buttonState === "loading"
+        ? "Synthesizing..."
+        : "Read aloud",
+  );
+
+  function handleTTSClick(e: MouseEvent) {
+    e.stopPropagation();
+    if (!id) return;
+    // playing or loading: stop & clear. idle: start replay.
+    if (buttonState === "idle") {
+      ttsState.replayMessage(id, displayText);
+    } else {
+      ttsState.reset();
+    }
+  }
 
   // oxlint-disable-next-line no-unassigned-vars
   let container: HTMLDivElement;
@@ -80,8 +143,8 @@
 
 <Bubble
   selectedAlignment={settingsState.getAlignment()}
-  bgClass="bg-accent-blue"
-  extraClass="markdown overflow-clip"
+  {bgClass}
+  extraClass="markdown overflow-clip flex flex-col gap-3"
 >
   <div bind:this={container} class="markdown-content min-w-0 overflow-hidden">
     {@html DOMPurify.sanitize(marked.parse(displayText) as string, {
@@ -130,10 +193,27 @@
         "type",
         "checked",
         "disabled",
+        "start",
+        "value",
+        "reversed",
       ],
       ALLOW_DATA_ATTR: false,
     })}
   </div>
+
+  {#if ttsActive}
+    <div
+      class="flex flex-row items-center {pillBgClass} {pillTextClass} p-1 rounded-2xl text-2xl w-fit ml-auto"
+    >
+      <button
+        class="rounded p-1 flex items-center transition-colors hover:cursor-pointer hover:opacity-80"
+        title={buttonTitle}
+        onclick={handleTTSClick}
+      >
+        <i class="flex {buttonIcon}"></i>
+      </button>
+    </div>
+  {/if}
 </Bubble>
 
 <style lang="scss">

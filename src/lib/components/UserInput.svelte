@@ -4,7 +4,6 @@
     Alignment,
     Monitor,
     Attachment,
-    MessageContent,
     MessagePart,
   } from "$lib/shared/types";
   import { availableMonitors } from "@tauri-apps/api/window";
@@ -70,11 +69,15 @@
         return {
           type: "image_url",
           image_url: {
-            url: `data:${att.mime || "image/png"};base64,${att.data}`,
+            url: `data:${att.mime || "image/png"};base64,${att.pendingData}`,
           },
         };
       }
-      return { type: "document", filename: att.filename, markdown: att.data };
+      return {
+        type: "document",
+        filename: att.filename,
+        markdown: att.pendingData,
+      };
     }),
   );
 
@@ -194,36 +197,6 @@
     settingsState.updateSetting("layout.alignment", align);
   }
 
-  function buildMessageContent(): MessageContent {
-    const parts: MessagePart[] = [];
-
-    if (text.trim()) {
-      parts.push({ type: "text", text: text.trim() });
-    }
-
-    for (const att of attachments) {
-      if (att.type === "image") {
-        parts.push({
-          type: "image_url",
-          image_url: {
-            url: `data:${att.mime || "image/png"};base64,${att.data}`,
-          },
-        });
-      } else if (att.type === "document") {
-        parts.push({
-          type: "document",
-          filename: att.filename,
-          markdown: att.data,
-        });
-      }
-    }
-
-    if (parts.length === 1 && parts[0].type === "text") {
-      return parts[0].text;
-    }
-    return parts;
-  }
-
   async function handleStop(): Promise<void> {
     await messagesState.interruptStreaming();
   }
@@ -236,19 +209,26 @@
   async function handleSend() {
     if (isStreaming) return;
 
-    const content = buildMessageContent();
-    const hasContentToSend =
-      typeof content === "string"
-        ? content.trim().length > 0
-        : content.length > 0;
+    const trimmedText = text.trim();
+    if (!trimmedText && attachments.length === 0) return;
 
-    if (!hasContentToSend) return;
+    const snapshot: Attachment[] = attachments.map((a) => ({
+      type: a.type,
+      filename: a.filename,
+      pendingData: a.pendingData,
+      mime: a.mime,
+    }));
+    const timestamp = Date.now();
 
-    messagesState.addMessage({ role: "user", content });
     text = "";
     attachments = [];
 
     try {
+      await messagesState.addUserMessage({
+        text: trimmedText,
+        attachments: snapshot,
+        timestamp,
+      });
       await sendMessages();
     } catch (err) {
       console.error("[ui] sendMessages failed:", err);
@@ -300,6 +280,123 @@
     }
   }
 
+  const DOC_EXTENSIONS = [
+    "pdf",
+    "docx",
+    "pptx",
+    "xlsx",
+    "xls",
+    "csv",
+    "html",
+    "htm",
+    "txt",
+    "md",
+    "json",
+    "xml",
+    "rst",
+    "log",
+    "toml",
+    "yaml",
+    "ini",
+    "py",
+    "rs",
+    "js",
+    "ts",
+    "c",
+    "cpp",
+    "go",
+    "java",
+  ];
+
+  const IMAGE_EXTENSIONS = [
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "webp",
+    "bmp",
+    "svg",
+  ];
+
+  const MIME_BY_EXT: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    bmp: "image/bmp",
+    svg: "image/svg+xml",
+  };
+
+  async function ingestImageBlob(blob: Blob, filename: string, ext: string) {
+    const mime = blob.type || MIME_BY_EXT[ext] || "image/png";
+    const base64 = await blobToBase64(new Blob([blob], { type: mime }));
+    attachments = [
+      ...attachments,
+      { type: "image", filename, pendingData: base64, mime },
+    ];
+  }
+
+  async function ingestDocumentBlob(blob: Blob, filename: string) {
+    const { writeFile, remove } = await import("@tauri-apps/plugin-fs");
+    const { tempDir, join } = await import("@tauri-apps/api/path");
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    const tmpDir = await tempDir();
+    const tmpPath = await join(
+      tmpDir,
+      `tomat-paste-${Date.now()}-${filename}`,
+    );
+    try {
+      await writeFile(tmpPath, buf);
+      const markdown = (await invoke("convert_file_to_markdown", {
+        filePath: tmpPath,
+      })) as string;
+      attachments = [
+        ...attachments,
+        { type: "document", filename, pendingData: markdown },
+      ];
+    } finally {
+      try {
+        await remove(tmpPath);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  async function handlePaste(e: ClipboardEvent) {
+    const files = Array.from(e.clipboardData?.files || []);
+    if (files.length === 0) return;
+
+    const supportsImages = settingsState.currentSettings["llm.supportImages"];
+    let handledAny = false;
+
+    for (const file of files) {
+      const name = file.name || "pasted";
+      const ext = name.split(".").pop()?.toLowerCase() || "";
+      const isImage =
+        supportsImages &&
+        (IMAGE_EXTENSIONS.includes(ext) || file.type.startsWith("image/"));
+      const isDoc = DOC_EXTENSIONS.includes(ext);
+      if (!isImage && !isDoc) continue;
+
+      handledAny = true;
+      try {
+        if (isImage) {
+          const imgExt = IMAGE_EXTENSIONS.includes(ext) ? ext : "png";
+          const baseName = name.includes(".") ? name : `${name}.${imgExt}`;
+          await ingestImageBlob(file, baseName, imgExt);
+        } else {
+          await ingestDocumentBlob(file, name);
+        }
+      } catch (err) {
+        console.error("[attach] Paste ingestion failed:", err);
+      }
+    }
+
+    if (handledAny) e.preventDefault();
+  }
+
   async function handleAttachFile() {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -308,43 +405,8 @@
 
       const supportsImages = settingsState.currentSettings["llm.supportImages"];
 
-      const docExtensions = [
-        "pdf",
-        "docx",
-        "pptx",
-        "xlsx",
-        "xls",
-        "csv",
-        "html",
-        "htm",
-        "txt",
-        "md",
-        "json",
-        "xml",
-        "rst",
-        "log",
-        "toml",
-        "yaml",
-        "ini",
-        "py",
-        "rs",
-        "js",
-        "ts",
-        "c",
-        "cpp",
-        "go",
-        "java",
-      ];
-
-      const imageExtensions = [
-        "png",
-        "jpg",
-        "jpeg",
-        "gif",
-        "webp",
-        "bmp",
-        "svg",
-      ];
+      const docExtensions = DOC_EXTENSIONS;
+      const imageExtensions = IMAGE_EXTENSIONS;
 
       const filters = [
         {
@@ -401,21 +463,12 @@
 
       if (isImage) {
         const data = await readFile(filePath);
-        const mimeMap: Record<string, string> = {
-          png: "image/png",
-          jpg: "image/jpeg",
-          jpeg: "image/jpeg",
-          gif: "image/gif",
-          webp: "image/webp",
-          bmp: "image/bmp",
-          svg: "image/svg+xml",
-        };
-        const mime = mimeMap[ext] || "image/png";
+        const mime = MIME_BY_EXT[ext] || "image/png";
         const blob = new Blob([data], { type: mime });
         const base64 = await blobToBase64(blob);
         attachments = [
           ...attachments,
-          { type: "image", filename: fileName, data: base64, mime },
+          { type: "image", filename: fileName, pendingData: base64, mime },
         ];
       } else {
         const markdown = (await invoke("convert_file_to_markdown", {
@@ -423,7 +476,7 @@
         })) as string;
         attachments = [
           ...attachments,
-          { type: "document", filename: fileName, data: markdown },
+          { type: "document", filename: fileName, pendingData: markdown },
         ];
       }
     } catch (err) {
@@ -472,7 +525,7 @@
           {
             type: "image",
             filename: `screenshot-${Date.now()}.png`,
-            data: base64,
+            pendingData: base64,
             mime: "image/png",
           },
         ];
@@ -533,6 +586,7 @@
       bind:this={textareaElement}
       bind:value={text}
       onkeydown={handleKeydown}
+      onpaste={handlePaste}
       autocapitalize="on"
       autocomplete="off"
       rows="1"

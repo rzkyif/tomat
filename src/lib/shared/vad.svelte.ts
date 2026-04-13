@@ -88,6 +88,9 @@ class VadManager {
   private async enable(): Promise<void> {
     const token = ++this.enableToken;
     this.loading = true;
+    // Turning on voice input means the user wants to speak, not listen -
+    // cut any TTS that's currently playing or queued.
+    void import("$lib/state/tts.svelte").then(({ ttsState }) => ttsState.reset());
     try {
       const { MicVAD } = await import("@ricky0123/vad-web");
       const instance = await MicVAD.new({

@@ -608,6 +608,128 @@ pub async fn ensure_model_internal<R: Runtime>(
     Ok(dest_path.to_string_lossy().to_string())
 }
 
+/// Download a single Hugging Face path into the shared model cache, emitting
+/// progress as `<server>` sidecar-status events. Unlike `ensure_model_internal`
+/// this is not gated on a sidecar start_id - intended for one-shot fetches
+/// (e.g. TTS assets) that don't restart a process when they finish.
+pub async fn ensure_path_internal<R: Runtime>(
+    handle: &AppHandle<R>,
+    state: &AppState,
+    server: &str,
+    path: &str,
+) -> Result<String, String> {
+    if !path.starts_with('@') {
+        let p = std::path::Path::new(path);
+        if p.exists() {
+            return Ok(path.to_string());
+        }
+        return Err(format!("Path does not exist: {}", path));
+    }
+
+    let parts: Vec<&str> = path[1..].split('/').collect();
+    if parts.len() < 4 {
+        return Err("Invalid model path format".into());
+    }
+    let username = parts[0];
+    let reponame = parts[1];
+    let branchname = parts[2];
+    let filename = parts[3..].join("/");
+
+    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let dest_dir = home
+        .join(".tomat")
+        .join("models")
+        .join(username)
+        .join(reponame);
+    let dest_path = dest_dir.join(&filename);
+
+    if dest_path.exists() {
+        return Ok(dest_path.to_string_lossy().to_string());
+    }
+
+    if let Some(parent) = dest_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    emit_status(
+        handle,
+        server,
+        ServerStatus::Loading,
+        None,
+        Some("Waiting for download slot...".into()),
+    )
+    .await;
+
+    let _download_guard = state
+        .0
+        .download_sem
+        .acquire()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if dest_path.exists() {
+        return Ok(dest_path.to_string_lossy().to_string());
+    }
+
+    emit_status(
+        handle,
+        server,
+        ServerStatus::Downloading,
+        Some(0.0),
+        Some(format!("Downloading {}...", filename)),
+    )
+    .await;
+
+    let url = format!(
+        "https://huggingface.co/{}/{}/resolve/{}/{}?download=true",
+        username, reponame, branchname, filename
+    );
+
+    let client = reqwest::Client::new();
+    let res = client.get(url).send().await.map_err(|e| e.to_string())?;
+
+    if !res.status().is_success() {
+        return Err(format!("Failed to download asset: {}", res.status()));
+    }
+
+    let total_size = res.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut stream = res.bytes_stream();
+
+    let tmp_path = dest_path.with_extension("tmp");
+    let mut file = tokio::fs::File::create(&tmp_path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    while let Some(item) = stream.next().await {
+        let chunk = item.map_err(|e| e.to_string())?;
+        tokio::io::copy(&mut &chunk[..], &mut file)
+            .await
+            .map_err(|e| e.to_string())?;
+        downloaded += chunk.len() as u64;
+
+        if total_size > 0 {
+            let progress = (downloaded as f64 / total_size as f64) * 100.0;
+            emit_status(
+                handle,
+                server,
+                ServerStatus::Downloading,
+                Some(progress),
+                Some(format!(
+                    "Downloading {} ({:.2} MB)...",
+                    filename,
+                    downloaded as f64 / 1024.0 / 1024.0
+                )),
+            )
+            .await;
+        }
+    }
+
+    std::fs::rename(tmp_path, &dest_path).map_err(|e| e.to_string())?;
+
+    Ok(dest_path.to_string_lossy().to_string())
+}
+
 #[derive(serde::Serialize)]
 pub struct DownloadPlan {
     pub path: String,

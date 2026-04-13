@@ -184,6 +184,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_server_statuses,
             update_server_args,
+            ensure_models,
             position_window,
             show_main_window,
             hide_main_window,
@@ -198,6 +199,9 @@ pub fn run() {
             save_session_title,
             load_chat_session,
             delete_chat_session,
+            write_session_attachment,
+            read_session_attachment,
+            delete_session_attachments,
             convert_file_to_markdown,
             probe_downloads,
             get_process_metrics,

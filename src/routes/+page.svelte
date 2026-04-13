@@ -86,6 +86,12 @@
       restartServerIfNeed("llm");
       restartServerIfNeed("stt");
 
+      // If TTS was left enabled in persisted settings, load the model now.
+      if (settingsState.currentSettings["tts.enabled"]) {
+        const { ttsState } = await import("$lib/state/tts.svelte");
+        void ttsState.setEnabled(true);
+      }
+
       await positionWindow();
     } finally {
       // Always render content and show the window, even if setup partially
@@ -207,7 +213,11 @@
             {:else if msg.role === "error"}
               <ErrorMessage content={msg.content} />
             {:else if msg.role === "assistant"}
-              <AgentMessage content={msg.content} />
+              <AgentMessage
+                id={msg.id}
+                content={msg.content}
+                modelUsed={msg.modelUsed}
+              />
             {/if}
           </div>
         {/each}

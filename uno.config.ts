@@ -46,6 +46,11 @@ export default defineConfig({
     ],
     {
       "bg-accent-blue": "bg-blue-300 dark:bg-blue-800",
+      "bg-accent-blue-inner": "bg-blue-400 dark:bg-blue-700",
+      "text-accent-blue-inner": "text-blue-900 dark:text-blue-100",
+      "bg-accent-purple": "bg-purple-300 dark:bg-purple-800",
+      "bg-accent-purple-inner": "bg-purple-400 dark:bg-purple-700",
+      "text-accent-purple-inner": "text-purple-900 dark:text-purple-100",
       "bg-accent-red": "bg-red-300 dark:bg-red-800",
       "bg-chip-neutral": "bg-neutral-200 dark:bg-neutral-700",
       "text-chip-neutral": "text-neutral-600 dark:text-neutral-400",

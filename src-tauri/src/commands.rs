@@ -1,4 +1,4 @@
-use crate::sidecar::update_server_args_internal;
+use crate::sidecar::{emit_status, ensure_path_internal, update_server_args_internal};
 use crate::state::AppState;
 use crate::types::{ServerStatus, WindowAlignment};
 use std::collections::HashMap;
@@ -179,6 +179,36 @@ pub async fn get_server_statuses(
     Ok(statuses)
 }
 
+/// Download the named Hugging Face paths into the shared model cache, emitting
+/// progress events on the given sidecar's status channel. Restores the
+/// `Running` status when finished so the chip returns to its idle state.
+#[tauri::command]
+pub async fn ensure_models(
+    handle: AppHandle,
+    state: State<'_, AppState>,
+    server: String,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let result = (async {
+        for path in &paths {
+            ensure_path_internal(&handle, state.inner(), &server, path).await?;
+        }
+        Ok::<(), String>(())
+    })
+    .await;
+
+    match &result {
+        Ok(_) => {
+            emit_status(&handle, &server, ServerStatus::Running, None, None).await;
+        }
+        Err(e) => {
+            emit_status(&handle, &server, ServerStatus::Error, None, Some(e.clone())).await;
+        }
+    }
+
+    result
+}
+
 /// (Re)launch a sidecar with the given args. Supersedes any previous instance.
 #[tauri::command]
 pub async fn update_server_args(
@@ -225,19 +255,67 @@ fn history_dir(handle: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn session_file_path(handle: &AppHandle, session_id: &str) -> Result<PathBuf, String> {
+fn session_dir(handle: &AppHandle, session_id: &str) -> Result<PathBuf, String> {
     validate_session_id(session_id)?;
-    let dir = history_dir(handle)?;
-    let file_path = dir.join(format!("{}.json", session_id));
-    if !file_path.starts_with(&dir) {
-        return Err("Invalid session path".into());
-    }
-    Ok(file_path)
+    let dir = history_dir(handle)?.join(session_id);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+fn session_file_path(handle: &AppHandle, session_id: &str) -> Result<PathBuf, String> {
+    Ok(session_dir(handle, session_id)?.join("messages.json"))
 }
 
 fn read_session_file(path: &std::path::Path) -> Option<SessionFile> {
     let content = std::fs::read_to_string(path).ok()?;
     serde_json::from_str::<SessionFile>(&content).ok()
+}
+
+/// Sanitize a user-supplied attachment filename. Rejects empty names,
+/// strips any directory component, and blocks `..` and NUL.
+fn sanitize_attachment_name(name: &str) -> Result<String, String> {
+    if name.is_empty() || name.len() > 255 {
+        return Err("Invalid attachment filename".into());
+    }
+    if name.contains('\0') || name == "." || name == ".." {
+        return Err("Invalid attachment filename".into());
+    }
+    let stem = std::path::Path::new(name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "Invalid attachment filename".to_string())?;
+    if stem.contains('/') || stem.contains('\\') {
+        return Err("Invalid attachment filename".into());
+    }
+    Ok(stem.to_string())
+}
+
+/// Resolve `<session_dir>/<prefix>-<filename>`, appending `-1`, `-2`, …
+/// before the extension until an unused path is found.
+fn unique_attachment_path(dir: &std::path::Path, prefix: &str, name: &str) -> PathBuf {
+    let candidate = format!("{}-{}", prefix, name);
+    let path = dir.join(&candidate);
+    if !path.exists() {
+        return path;
+    }
+    let stem = std::path::Path::new(name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file")
+        .to_string();
+    let ext = std::path::Path::new(name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|e| format!(".{}", e))
+        .unwrap_or_default();
+    for i in 1..u32::MAX {
+        let alt = format!("{}-{}-{}{}", prefix, stem, i, ext);
+        let p = dir.join(&alt);
+        if !p.exists() {
+            return p;
+        }
+    }
+    path
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -353,11 +431,16 @@ pub async fn list_chat_sessions(handle: AppHandle) -> Result<Vec<SessionInfo>, S
         .filter_map(|e| {
             let entry = e.ok()?;
             let path = entry.path();
-            if path.extension()?.to_str()? != "json" {
+            let meta = entry.metadata().ok()?;
+            if !meta.is_dir() {
                 return None;
             }
-            let id = path.file_stem()?.to_str()?.to_string();
-            let title = read_session_file(&path)
+            let id = path.file_name()?.to_str()?.to_string();
+            if validate_session_id(&id).is_err() {
+                return None;
+            }
+            let messages_path = path.join("messages.json");
+            let title = read_session_file(&messages_path)
                 .map(|s| s.title)
                 .unwrap_or_default();
             Some(SessionInfo { id, title })
@@ -369,16 +452,16 @@ pub async fn list_chat_sessions(handle: AppHandle) -> Result<Vec<SessionInfo>, S
     Ok(sessions)
 }
 
-/// Remove a single session file from disk.
+/// Remove a single session directory (messages.json and any attachments) from disk.
 #[tauri::command]
 pub async fn delete_chat_session(handle: AppHandle, session_id: String) -> Result<(), String> {
-    let file_path = session_file_path(&handle, &session_id)?;
+    let dir = session_dir(&handle, &session_id)?;
 
-    if !file_path.exists() {
+    if !dir.exists() {
         return Err("Session not found".to_string());
     }
 
-    std::fs::remove_file(file_path).map_err(|e| e.to_string())?;
+    std::fs::remove_dir_all(dir).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -416,20 +499,21 @@ pub async fn load_latest_chat_history(handle: AppHandle) -> Result<serde_json::V
     }
 
     let entries = std::fs::read_dir(history_dir).map_err(|e| e.to_string())?;
-    let mut files: Vec<PathBuf> = entries
+    let mut dirs: Vec<PathBuf> = entries
         .filter_map(|e| e.ok().map(|entry| entry.path()))
-        .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
+        .filter(|p| p.is_dir() && p.join("messages.json").exists())
         .collect();
 
-    files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
 
-    if let Some(latest) = files.first() {
+    if let Some(latest) = dirs.first() {
         let session_id = latest
-            .file_stem()
+            .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-        let content = std::fs::read_to_string(latest).map_err(|e| e.to_string())?;
+        let messages_path = latest.join("messages.json");
+        let content = std::fs::read_to_string(&messages_path).map_err(|e| e.to_string())?;
         let session: SessionFile = serde_json::from_str(&content).map_err(|e| e.to_string())?;
         Ok(serde_json::json!(ChatHistoryResponse {
             session_id,
@@ -440,6 +524,116 @@ pub async fn load_latest_chat_history(handle: AppHandle) -> Result<serde_json::V
     } else {
         Ok(serde_json::json!(null))
     }
+}
+
+// -------------------------------------------------------------------
+// Session attachments
+// -------------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+pub struct WrittenAttachment {
+    pub path: String,
+    pub filename: String,
+}
+
+/// Write an attachment blob into the session's directory and return its absolute path.
+/// `data_base64` is the payload encoded as standard base64. Filename collisions
+/// are resolved by appending `-1`, `-2`, ... before the extension.
+#[tauri::command]
+pub async fn write_session_attachment(
+    handle: AppHandle,
+    session_id: String,
+    message_timestamp: String,
+    filename: String,
+    data_base64: String,
+) -> Result<WrittenAttachment, String> {
+    use base64::Engine;
+    let dir = session_dir(&handle, &session_id)?;
+    let clean_name = sanitize_attachment_name(&filename)?;
+    // message_timestamp is used as a filename prefix. Constrain to digits only
+    // (frontend uses Date.now()) to keep paths predictable and safe.
+    if message_timestamp.is_empty()
+        || !message_timestamp.chars().all(|c| c.is_ascii_digit())
+        || message_timestamp.len() > 32
+    {
+        return Err("Invalid message timestamp".into());
+    }
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.as_bytes())
+        .map_err(|e| format!("Invalid base64 payload: {e}"))?;
+
+    let final_path = unique_attachment_path(&dir, &message_timestamp, &clean_name);
+    if !final_path.starts_with(&dir) {
+        return Err("Invalid attachment path".into());
+    }
+
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = final_path.with_extension(format!("tmp.{}.{}", std::process::id(), suffix));
+    tokio::fs::write(&tmp_path, &bytes)
+        .await
+        .map_err(|e| e.to_string())?;
+    tokio::fs::rename(&tmp_path, &final_path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let out_name = final_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&clean_name)
+        .to_string();
+    Ok(WrittenAttachment {
+        path: final_path.to_string_lossy().to_string(),
+        filename: out_name,
+    })
+}
+
+/// Read an attachment file from disk and return it base64-encoded. Path must
+/// resolve under `~/.tomat/sessions/`.
+#[tauri::command]
+pub async fn read_session_attachment(handle: AppHandle, path: String) -> Result<String, String> {
+    use base64::Engine;
+    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let sessions_root = home
+        .join(".tomat")
+        .join("sessions")
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    let requested = PathBuf::from(&path);
+    let canonical = resolve_within(&requested, &sessions_root)
+        .ok_or_else(|| format!("Path not under ~/.tomat/sessions: {}", path))?;
+    let bytes = tokio::fs::read(&canonical)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
+/// Best-effort delete of attachment files under `~/.tomat/sessions/`. Missing
+/// paths are silently ignored so callers can use this as cleanup after edits.
+#[tauri::command]
+pub async fn delete_session_attachments(
+    handle: AppHandle,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let sessions_root = home.join(".tomat").join("sessions");
+    let sessions_root_canonical = match sessions_root.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return Ok(()),
+    };
+
+    for path_str in paths {
+        let p = PathBuf::from(&path_str);
+        if let Some(canonical) = resolve_within(&p, &sessions_root_canonical) {
+            if canonical.is_file() {
+                let _ = std::fs::remove_file(&canonical);
+            }
+        }
+    }
+    Ok(())
 }
 
 // -------------------------------------------------------------------
@@ -475,10 +669,69 @@ fn keychain_delete(key: &str) -> Result<(), String> {
     }
 }
 
+// Dev-only hidden fallback file for secrets. In unsigned Tauri dev builds
+// the OS keychain is unreliable across rebuilds (every rebuild changes the
+// code signature and loses access to entries it wrote on a previous run,
+// silently returning None on subsequent reads). For RELEASE builds this
+// code path is never taken - production secrets must only ever live in the
+// OS keychain. Gated on `debug_assertions` so it's physically impossible
+// for a release binary to read or write this file.
+#[cfg(debug_assertions)]
+const SECRETS_FALLBACK_ENABLED: bool = true;
+#[cfg(not(debug_assertions))]
+const SECRETS_FALLBACK_ENABLED: bool = false;
+
+fn secrets_fallback_path(_handle: &AppHandle) -> Result<PathBuf, String> {
+    // Co-locate with the running executable rather than putting it under
+    // `~/.tomat/` where a well-known path makes it a softer target. In dev
+    // this ends up under `src-tauri/target/debug/` (gitignored, also makes
+    // `cargo clean` / binary removal auto-wipe it).
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe_dir = exe
+        .parent()
+        .ok_or_else(|| "Could not determine executable directory".to_string())?;
+    Ok(exe_dir.join(".secrets.json"))
+}
+
+fn read_fallback_secrets(path: &std::path::Path) -> HashMap<String, String> {
+    if !SECRETS_FALLBACK_ENABLED {
+        return HashMap::new();
+    }
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    serde_json::from_str::<HashMap<String, String>>(&content).unwrap_or_default()
+}
+
+fn write_fallback_secrets(
+    path: &std::path::Path,
+    map: &HashMap<String, String>,
+) -> Result<(), String> {
+    if !SECRETS_FALLBACK_ENABLED {
+        // Never keep stale entries around in release builds, either.
+        if path.exists() {
+            std::fs::remove_file(path).map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+    if map.is_empty() {
+        if path.exists() {
+            std::fs::remove_file(path).map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+    let content = serde_json::to_string_pretty(map).map_err(|e| e.to_string())?;
+    std::fs::write(path, content).map_err(|e| e.to_string())
+}
+
 /// Persist user settings. `settings` is written verbatim to
-/// `~/.tomat/settings.json`; every entry in `secrets` is routed to the OS
-/// keychain (empty value → delete). Caller is responsible for ensuring no
-/// secret-typed key appears in `settings`.
+/// `~/.tomat/settings.json`. Secrets are handled strictly by build profile:
+/// - **Dev** (`debug_assertions`): written to `~/.tomat/.secrets.json` only.
+///   The keychain is bypassed entirely because unsigned dev builds can't
+///   reliably persist keychain entries across rebuilds (set usually appears
+///   to succeed but reads return nothing on the next launch).
+/// - **Release**: written to the OS keychain only. `.secrets.json` is never
+///   touched, so API keys never land on disk unencrypted.
 #[tauri::command]
 pub async fn save_settings(
     handle: AppHandle,
@@ -493,11 +746,26 @@ pub async fn save_settings(
         return Err("settings must be a JSON object".into());
     }
 
-    for (key, value) in &secrets {
-        if value.is_empty() {
-            keychain_delete(key)?;
-        } else {
-            keychain_set(key, value)?;
+    if SECRETS_FALLBACK_ENABLED {
+        let fallback_path = secrets_fallback_path(&handle)?;
+        let mut fallback = read_fallback_secrets(&fallback_path);
+        for (key, value) in &secrets {
+            if value.is_empty() {
+                fallback.remove(key);
+            } else {
+                fallback.insert(key.clone(), value.clone());
+            }
+        }
+        write_fallback_secrets(&fallback_path, &fallback)?;
+    } else {
+        for (key, value) in &secrets {
+            if value.is_empty() {
+                if let Err(e) = keychain_delete(key) {
+                    eprintln!("[settings] keychain delete failed for {key}: {e}");
+                }
+            } else if let Err(e) = keychain_set(key, value) {
+                eprintln!("[settings] keychain set failed for {key}: {e}");
+            }
         }
     }
 
@@ -507,7 +775,8 @@ pub async fn save_settings(
     Ok(())
 }
 
-/// Load user settings, merging in the named keychain entries.
+/// Load user settings. Secrets are resolved per build profile - dev reads
+/// from `~/.tomat/.secrets.json`, release reads from the OS keychain.
 #[tauri::command]
 pub async fn load_settings(
     handle: AppHandle,
@@ -526,9 +795,25 @@ pub async fn load_settings(
         serde_json::Map::new()
     };
 
-    for key in &secret_keys {
-        if let Some(v) = keychain_get(key)? {
-            obj.insert(key.clone(), serde_json::Value::String(v));
+    if SECRETS_FALLBACK_ENABLED {
+        let fallback_path = secrets_fallback_path(&handle)?;
+        let fallback = read_fallback_secrets(&fallback_path);
+        for key in &secret_keys {
+            if let Some(v) = fallback.get(key) {
+                obj.insert(key.clone(), serde_json::Value::String(v.clone()));
+            }
+        }
+    } else {
+        for key in &secret_keys {
+            match keychain_get(key) {
+                Ok(Some(v)) => {
+                    obj.insert(key.clone(), serde_json::Value::String(v));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("[settings] keychain get failed for {key}: {e}");
+                }
+            }
         }
     }
 
@@ -687,42 +972,6 @@ fn dir_size_recursive(path: &std::path::Path) -> u64 {
     total
 }
 
-fn collect_file_nodes(dir: &std::path::Path, ext_filter: Option<&str>) -> Vec<StorageNode> {
-    let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return out;
-    };
-    for entry in entries.flatten() {
-        let p = entry.path();
-        let Ok(meta) = entry.metadata() else { continue };
-        if !meta.is_file() {
-            continue;
-        }
-        if let Some(ext) = ext_filter {
-            let matches = p
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.eq_ignore_ascii_case(ext))
-                .unwrap_or(false);
-            if !matches {
-                continue;
-            }
-        }
-        let name = p
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .to_string();
-        out.push(StorageNode::File {
-            name,
-            path: p.to_string_lossy().to_string(),
-            size: meta.len(),
-        });
-    }
-    out.sort_by(|a, b| storage_name(a).cmp(storage_name(b)));
-    out
-}
-
 fn storage_name(node: &StorageNode) -> &str {
     match node {
         StorageNode::File { name, .. } => name.as_str(),
@@ -734,6 +983,45 @@ fn storage_size(node: &StorageNode) -> u64 {
     match node {
         StorageNode::File { size, .. } => *size,
         StorageNode::Folder { size, .. } => *size,
+    }
+}
+
+// File extensions that count as "model / support files" we want to surface
+// in the storage UI. Includes gguf (llama.cpp), bin (whisper.cpp + some ORT
+// voice tensors), onnx + json (Kokoro / transformers.js), and pt (PyTorch
+// weight tensors, used by Kokoro-style voice files).
+const MODEL_FILE_EXTS: &[&str] = &["gguf", "bin", "onnx", "json", "pt"];
+
+/// Recursively walk `dir` under `base`, emitting `StorageNode::File` entries
+/// for any file whose extension is in `MODEL_FILE_EXTS`. The emitted `name`
+/// is the file's path relative to `base` (e.g. `"onnx/model_quantized.onnx"`)
+/// so nested repo layouts like Kokoro's are readable at a glance.
+fn collect_model_files(base: &std::path::Path, dir: &std::path::Path, out: &mut Vec<StorageNode>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_dir() {
+            collect_model_files(base, &p, out);
+        } else if meta.is_file() {
+            let ext = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_ascii_lowercase)
+                .unwrap_or_default();
+            if !MODEL_FILE_EXTS.contains(&ext.as_str()) {
+                continue;
+            }
+            let rel = p.strip_prefix(base).unwrap_or(&p);
+            let name = rel.to_string_lossy().to_string();
+            out.push(StorageNode::File {
+                name,
+                path: p.to_string_lossy().to_string(),
+                size: meta.len(),
+            });
+        }
     }
 }
 
@@ -760,30 +1048,32 @@ fn build_models_tree(models_dir: &std::path::Path) -> Vec<StorageNode> {
             let repo_name = repo_entry.file_name().to_string_lossy().to_string();
             let display_name = format!("{}/{}", user_name, repo_name);
 
-            let mut gguf_files = collect_file_nodes(&repo_path, Some("gguf"));
-            // Also include .bin files (whisper.cpp)
-            gguf_files.extend(collect_file_nodes(&repo_path, Some("bin")));
-            gguf_files.sort_by(|a, b| storage_name(a).cmp(storage_name(b)));
+            let mut files = Vec::new();
+            collect_model_files(&repo_path, &repo_path, &mut files);
+            files.sort_by(|a, b| storage_name(a).cmp(storage_name(b)));
 
-            let has_mmproj = gguf_files
-                .iter()
-                .any(|n| storage_name(n).to_ascii_lowercase().starts_with("mmproj"));
+            let has_mmproj = files.iter().any(|n| {
+                let name = storage_name(n);
+                let basename = name.rsplit('/').next().unwrap_or(name);
+                basename.to_ascii_lowercase().starts_with("mmproj")
+            });
 
-            if gguf_files.is_empty() {
+            if files.is_empty() {
                 continue;
             }
 
-            if has_mmproj || gguf_files.len() > 1 {
-                let size: u64 = gguf_files.iter().map(storage_size).sum();
+            if has_mmproj || files.len() > 1 {
+                let size: u64 = files.iter().map(storage_size).sum();
                 out.push(StorageNode::Folder {
                     name: display_name,
                     path: repo_path.to_string_lossy().to_string(),
                     size,
-                    children: gguf_files,
+                    children: files,
                 });
             } else {
-                // Single file: show as flat line "user/repo/filename"
-                let file = gguf_files.into_iter().next().unwrap();
+                // Single-file repo: render inline "user/repo/filename" so the
+                // list stays dense when only one file matters (e.g. whisper).
+                let file = files.into_iter().next().unwrap();
                 if let StorageNode::File {
                     name: fname,
                     path,
@@ -811,28 +1101,26 @@ fn build_sessions_tree(sessions_dir: &std::path::Path) -> Vec<StorageNode> {
     for entry in entries.flatten() {
         let p = entry.path();
         let Ok(meta) = entry.metadata() else { continue };
-        if !meta.is_file() {
-            continue;
-        }
-        let is_json = p
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case("json"))
-            .unwrap_or(false);
-        if !is_json {
+        if !meta.is_dir() {
             continue;
         }
         let stem = p
-            .file_stem()
+            .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or_default()
             .to_string();
-        let title = read_session_file(&p).map(|s| s.title).unwrap_or_default();
+        let messages_path = p.join("messages.json");
+        if !messages_path.exists() {
+            continue;
+        }
+        let title = read_session_file(&messages_path)
+            .map(|s| s.title)
+            .unwrap_or_default();
         let display = if title.trim().is_empty() { stem } else { title };
         out.push(StorageNode::File {
             name: display,
             path: p.to_string_lossy().to_string(),
-            size: meta.len(),
+            size: dir_size_recursive(&p),
         });
     }
     out.sort_by(|a, b| storage_name(a).cmp(storage_name(b)));
@@ -926,7 +1214,8 @@ pub async fn clear_tomat_sessions(handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Wipe the settings file and every keychain entry the caller names.
+/// Wipe the settings file and every keychain entry (release) or the
+/// `.secrets.json` fallback (dev) for the caller-named secrets.
 #[tauri::command]
 pub async fn clear_tomat_settings(
     handle: AppHandle,
@@ -937,8 +1226,17 @@ pub async fn clear_tomat_settings(
     if path.exists() {
         std::fs::remove_file(&path).map_err(|e| e.to_string())?;
     }
-    for key in &secret_keys {
-        keychain_delete(key)?;
+    if SECRETS_FALLBACK_ENABLED {
+        let fallback_path = secrets_fallback_path(&handle)?;
+        if fallback_path.exists() {
+            std::fs::remove_file(&fallback_path).map_err(|e| e.to_string())?;
+        }
+    } else {
+        for key in &secret_keys {
+            if let Err(e) = keychain_delete(key) {
+                eprintln!("[settings] keychain delete failed for {key}: {e}");
+            }
+        }
     }
     Ok(())
 }

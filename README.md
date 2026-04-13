@@ -57,9 +57,19 @@ A comprehensive settings system lets you adjust everything for your particular u
 **Chat**
 
 - Streaming responses with markdown rendering
-- File attachments, vision support, and fullscreen image previews
+- File attachments (picker or Ctrl+V paste), vision support, and fullscreen image previews
+- Attachment files stored per-session on disk and read lazily
 - Multi-monitor screen capture
 - Session management and history
+- Dual-model routing: keep simple prompts on the default model, upstream complex ones to a configured external model
+
+**Speech**
+
+- Text-to-speech that streams assistant responses to a local Kokoro-82M voice model via the bun sidecar
+- Full multilingual voice catalog, adjustable synthesis speed, and pitch-preserving playback speed
+- Smart batching that keeps chunks close to Kokoro's optimal token count while chaining them gap-free on top of the currently-playing audio
+- Per-message play / stop controls on every assistant reply; TTS auto-stops when you switch sessions, send a new message, or turn on voice input
+- Markdown, code blocks, URLs, and tables are stripped before synthesis so the voice never reads punctuation aloud
 
 **Voice Input**
 
@@ -83,8 +93,6 @@ A comprehensive settings system lets you adjust everything for your particular u
 ## Roadmap
 
 - **Tool server** - Bun-powered tool server that executes arbitrary `.ts` scripts as tools
-- **Text-to-Speech** - TTS functionality for spoken responses
-- **Dual-model system** - Route small tasks to a local model while upstreaming complex questions to a cloud provider
 
 ## Architecture
 
@@ -108,7 +116,7 @@ A comprehensive settings system lets you adjust everything for your particular u
 └────────┘    └────────────┘    └──────────────┘
 ```
 
-The Tauri backend manages sidecar processes (spawn, health check, restart, kill) and downloads queue one at a time. Models live in `~/.tomat/models/`, chat sessions in `~/.tomat/sessions/`, and settings in `~/.tomat/settings.json` - all viewable and clearable from the Resources settings view.
+The Tauri backend manages sidecar processes (spawn, health check, restart, kill) and downloads queue one at a time. Models live in `~/.tomat/models/`, chat sessions in `~/.tomat/sessions/<session_id>/` (a `messages.json` plus any attachment files saved alongside it), and settings in `~/.tomat/settings.json` - all viewable and clearable from the Resources settings view. The bun sidecar also hosts the Kokoro-82M TTS runtime when Text-to-Speech is enabled.
 
 ## Prerequisites
 
@@ -134,7 +142,8 @@ cd tomat
 # Install dependencies
 bun install
 
-# Download required binaries (llama-server, whisper-server, bun runtime, VAD files)
+# Download required binaries (llama-server, whisper-server, bun runtime,
+# VAD files, ONNX runtime native binding for the bun TTS sidecar, Kokoro voices)
 bun run fetch
 
 # Start the development server
@@ -149,7 +158,7 @@ bun run dev
 | ---------------- | -------------------------------------------------------------- |
 | `bun run dev`    | Start the Tauri development server                             |
 | `bun run build`  | Build the production desktop app                               |
-| `bun run fetch`  | Download required sidecar binaries and VAD runtime files       |
+| `bun run fetch`  | Download sidecar binaries + stage VAD, ONNX runtime, and Kokoro voice assets |
 | `bun run check`  | Run linter, formatter, Svelte type checker, and `cargo check`  |
 | `bun run lint`   | Lint with [oxlint](https://oxc.rs/docs/guide/usage/linter)     |
 | `bun run format` | Format with [oxfmt](https://oxc.rs/docs/guide/usage/formatter) |

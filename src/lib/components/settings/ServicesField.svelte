@@ -20,7 +20,7 @@
     { key: "main", label: "App" },
     { key: "llm", label: "Language Model" },
     { key: "stt", label: "Speech-to-Text" },
-    { key: "bun", label: "Tools" },
+    { key: "bun", label: "Text-to-Speech + Tools" },
   ];
 
   function endpointFor(key: ServiceKey): string | null {

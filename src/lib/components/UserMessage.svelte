@@ -36,7 +36,11 @@
     typeof content === "string"
       ? []
       : (content as MessagePart[]).filter(
-          (p) => p.type === "document" || p.type === "image_url",
+          (p) =>
+            p.type === "document" ||
+            p.type === "image_url" ||
+            p.type === "document_file" ||
+            p.type === "image_file",
         ),
   );
 

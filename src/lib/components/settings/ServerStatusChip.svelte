@@ -2,7 +2,7 @@
   import type { ServerStatus, ServerStatusUpdate } from "$lib/shared/types";
 
   let { type, update } = $props<{
-    type: "LLM" | "STT";
+    type: "LLM" | "STT" | "Bun";
     update: ServerStatusUpdate;
   }>();
 

@@ -1,17 +1,30 @@
-import type {
-  LLMErrorType,
-  Message,
-  MessageContent,
-  SessionInfo,
-  TokenUsage,
+import {
+  makeMessageId,
+  type Attachment,
+  type LLMErrorType,
+  type Message,
+  type MessageContent,
+  type MessagePart,
+  type SessionInfo,
+  type TokenUsage,
 } from "$lib/shared/types";
 import { invoke } from "@tauri-apps/api/core";
 import { settingsState } from "./settings.svelte";
 import { interruptCurrentStream } from "$lib/shared/interrupt";
+import {
+  deleteSessionAttachments,
+  diffRemovedAttachmentPaths,
+  ensureMarkdownExtension,
+  imageExtFromMime,
+  utf8ToBase64,
+  writeSessionAttachment,
+} from "$lib/shared/attachments";
+import { stripMarkdownForTTS } from "$lib/shared/text";
 
 const DEFAULT_WINDOW_SIZE = 200;
 const WINDOW_GROWTH = 200;
 const SAVE_DEBOUNCE_MS = 1000;
+
 // Coalesce streaming tokens before pushing into reactive state. At ~30 ms we
 // stay under one frame at 30 fps and avoid re-parsing the full markdown blob
 // per token (which would dominate at high token rates).
@@ -38,6 +51,7 @@ class MessagesState {
   private unloadHooked = false;
   private streamBuffer = "";
   private streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private ttsCursor = 0;
 
   private get storageEnabled(): boolean {
     return settingsState.currentSettings["general.session.storeSessions"] !== false;
@@ -54,7 +68,73 @@ class MessagesState {
   }
 
   addMessage(message: Message) {
+    if (!message.id) message.id = makeMessageId();
     this.messages.unshift(message);
+    this.scheduleSave();
+  }
+
+  /**
+   * Flush any pending attachments to disk under the current session directory,
+   * then add the resulting user message. Session ID is assigned eagerly so
+   * attachments get a stable path even before the first save.
+   */
+  async addUserMessage(payload: {
+    text: string;
+    attachments: Attachment[];
+    timestamp: number;
+  }): Promise<void> {
+    // Sending a new message always preempts any previous assistant TTS that
+    // might still be playing or queued.
+    this.resetTTSPlayback();
+
+    const trimmedText = payload.text.trim();
+    if (!this.sessionId) {
+      this.sessionId = Date.now().toString();
+      this.sessionTitle = this.sessionTitle || this.getDefaultTitle();
+    }
+    const sessionId = this.sessionId;
+    const tsStr = payload.timestamp.toString();
+
+    const parts: MessagePart[] = [];
+    if (trimmedText) parts.push({ type: "text", text: trimmedText });
+
+    for (const att of payload.attachments) {
+      try {
+        if (att.type === "image") {
+          const mime = att.mime || "image/png";
+          const ext = imageExtFromMime(mime);
+          const filename = att.filename.includes(".")
+            ? att.filename
+            : `${att.filename || "image"}.${ext}`;
+          const written = await writeSessionAttachment(sessionId, tsStr, filename, att.pendingData);
+          parts.push({
+            type: "image_file",
+            filename: written.filename,
+            path: written.path,
+            mime,
+          });
+        } else {
+          const filename = ensureMarkdownExtension(att.filename || "document.md");
+          const written = await writeSessionAttachment(
+            sessionId,
+            tsStr,
+            filename,
+            utf8ToBase64(att.pendingData),
+          );
+          parts.push({
+            type: "document_file",
+            filename: written.filename,
+            path: written.path,
+          });
+        }
+      } catch (e) {
+        console.error("[messages] Failed to write attachment:", e);
+      }
+    }
+
+    const content: MessageContent =
+      parts.length === 1 && parts[0].type === "text" ? parts[0].text : parts;
+    this.messages.unshift({ id: tsStr, role: "user", content });
     this.scheduleSave();
   }
 
@@ -82,6 +162,14 @@ class MessagesState {
     }
   }
 
+  private backfillMessageIds(messages: Message[]): Message[] {
+    let counter = 0;
+    for (const m of messages) {
+      if (!m.id) m.id = `load-${Date.now()}-${counter++}`;
+    }
+    return messages;
+  }
+
   async loadLatest() {
     if (!this.storageEnabled) return;
     try {
@@ -92,7 +180,7 @@ class MessagesState {
         messages: Message[];
       } | null;
       if (history && Array.isArray(history.messages)) {
-        this.messages = history.messages;
+        this.messages = this.backfillMessageIds(history.messages);
         this.sessionId = history.sessionId;
         this.sessionTitle = history.title || this.getDefaultTitle();
         this.tokenUsage = history.contextUsage || null;
@@ -104,6 +192,10 @@ class MessagesState {
     await this.loadSessionList();
   }
 
+  private resetTTSPlayback() {
+    void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
+  }
+
   async loadSession(sessionId: string) {
     // Drain any debounced save first - otherwise a pending timer could fire
     // after sessionId/messages are replaced and write the new session's data
@@ -111,6 +203,8 @@ class MessagesState {
     if (this.sessionId && this.sessionId !== sessionId) {
       await this.flushSave();
     }
+    await this.interruptStreaming();
+    this.resetTTSPlayback();
     try {
       const history = (await invoke("load_chat_session", { sessionId })) as {
         sessionId: string;
@@ -119,7 +213,7 @@ class MessagesState {
         messages: Message[];
       };
       if (history && Array.isArray(history.messages)) {
-        this.messages = history.messages;
+        this.messages = this.backfillMessageIds(history.messages);
         this.sessionId = history.sessionId;
         this.sessionTitle = history.title || this.getDefaultTitle();
         this.tokenUsage = history.contextUsage || null;
@@ -145,6 +239,9 @@ class MessagesState {
 
   async deleteSession() {
     if (!this.sessionId) return;
+
+    await this.interruptStreaming();
+    this.resetTTSPlayback();
 
     // Cancel (don't flush) any pending save - we're about to remove the file,
     // so persisting it now would just be resurrected and then deleted, or
@@ -182,6 +279,8 @@ class MessagesState {
     if (this.sessionId && this.messages.length > 0) {
       await this.flushSave();
     }
+    await this.interruptStreaming();
+    this.resetTTSPlayback();
 
     this.messages = [];
     this.sessionId = null;
@@ -275,11 +374,17 @@ class MessagesState {
     this.saveInFlight = this.saveInFlight
       .then(async () => {
         try {
-          const isNew = !this.sessionId;
-          if (isNew) {
+          // `addUserMessage` now pre-assigns `sessionId` (so attachments can
+          // write into the session directory before the first save), so we
+          // can't detect a new session just by checking whether `sessionId`
+          // is null. Instead, compare against `sessionList` - if the current
+          // session hasn't been registered there yet, this is its first save
+          // and we need to refresh the list once the file exists.
+          if (!this.sessionId) {
             this.sessionId = Date.now().toString();
             this.sessionTitle = this.sessionTitle || this.getDefaultTitle();
           }
+          const isNew = !this.sessionList.some((s) => s.id === this.sessionId);
 
           await invoke("save_chat_history", {
             messages: $state.snapshot(this.messages),
@@ -301,15 +406,22 @@ class MessagesState {
     await this.saveInFlight;
   }
 
-  startStreaming() {
+  startStreaming(modelUsed: "default" | "secondary" = "default") {
     this.isStreaming = true;
     this.streamingFirstChunkReceived = false;
+    this.ttsCursor = 0;
+    const assistantId = makeMessageId();
+    void import("./tts.svelte").then(({ ttsState }) => ttsState.startStream(assistantId));
     const settings = settingsState.currentSettings;
     const useThinkingPlaceholder =
-      settings["llm.preset"] !== "external" && settings["llm.reasoning"] === "on";
+      modelUsed === "default" &&
+      settings["llm.preset"] !== "external" &&
+      settings["llm.reasoning"] === "on";
     this.addMessage({
+      id: assistantId,
       role: "assistant",
       content: useThinkingPlaceholder ? "Thinking..." : "...",
+      modelUsed,
     });
   }
 
@@ -329,11 +441,58 @@ class MessagesState {
     this.streamFlushTimer = null;
     if (!this.streamBuffer) return;
     const cur = (this.messages[0]?.content as string) || "";
+    const next = cur + this.streamBuffer;
     this.messages[0] = {
       ...this.messages[0],
-      content: cur + this.streamBuffer,
+      content: next,
     };
     this.streamBuffer = "";
+    void this.feedTTS(next, /* final */ false);
+  }
+
+  private async feedTTS(fullText: string, final: boolean): Promise<void> {
+    const settings = settingsState.currentSettings;
+    if (!settings["tts.enabled"]) return;
+    const { ttsState } = await import("./tts.svelte");
+    if (!ttsState.loaded) return;
+
+    // Don't interleave with a replay that's voicing a different message.
+    const streamingId = this.messages[0]?.id;
+    if (
+      ttsState.currentMessageId !== null &&
+      streamingId !== undefined &&
+      ttsState.currentMessageId !== streamingId
+    ) {
+      return;
+    }
+
+    // Strip markdown BEFORE segmenting - Intl.Segmenter isn't markdown-aware
+    // and otherwise gets confused by URLs, code fences, table pipes, etc.
+    // ttsCursor indexes into the stripped text, not the raw stream.
+    const stripped = stripMarkdownForTTS(fullText);
+    const remaining = stripped.slice(this.ttsCursor);
+    if (!remaining) {
+      if (final) ttsState.finalize();
+      return;
+    }
+
+    const sentenceSeg = new Intl.Segmenter(undefined, { granularity: "sentence" });
+    const sentences = Array.from(sentenceSeg.segment(remaining));
+    const lastIdx = sentences.length - 1;
+
+    for (let i = 0; i < sentences.length; i++) {
+      const seg = sentences[i];
+      // Mid-stream the trailing segment is usually unfinished - hold it back.
+      // On finalize every segment is considered complete.
+      const isTerminal = i < lastIdx || final;
+      if (!isTerminal) break;
+
+      const chunk = seg.segment.trim();
+      if (chunk) ttsState.feedSentence(chunk);
+      this.ttsCursor += seg.segment.length;
+    }
+
+    if (final) ttsState.finalize();
   }
 
   private cancelStreamBuffer() {
@@ -347,6 +506,8 @@ class MessagesState {
   async finishStreaming() {
     this.cancelStreamBuffer();
     this.isStreaming = false;
+    const finalText = (this.messages[0]?.content as string) || "";
+    void this.feedTTS(finalText, true);
     await this.flushSave();
   }
 
@@ -361,6 +522,7 @@ class MessagesState {
   async interruptStreaming(): Promise<void> {
     if (!this.isStreaming) return;
     this.cancelStreamBuffer();
+    void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
 
     if (this.streamingFirstChunkReceived) {
       const current = this.messages[0].content;
@@ -390,17 +552,26 @@ class MessagesState {
     const userIdx = this.messages.findIndex((m) => m.role === "user");
     if (userIdx < 0) return;
 
+    const prevContent = this.messages[userIdx].content;
+    const removedPaths = diffRemovedAttachmentPaths(prevContent, content);
+
     const isEmpty =
       typeof content === "string"
         ? !content.trim()
         : content.every((p) => p.type === "text" && !p.text.trim());
     if (isEmpty) {
       this.messages.splice(0, userIdx + 1);
+      if (removedPaths.length > 0) {
+        void deleteSessionAttachments(removedPaths);
+      }
       await this.flushSave();
       return;
     }
 
     this.messages[userIdx] = { role: "user", content };
+    if (removedPaths.length > 0) {
+      void deleteSessionAttachments(removedPaths);
+    }
 
     if (userIdx > 0) {
       this.messages.splice(0, userIdx);

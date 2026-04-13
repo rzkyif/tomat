@@ -16,6 +16,18 @@ export type SettingType =
 
 export type SmartSTTMode = "disabled" | "hold" | "persistent";
 
+// Kokoro TTS assets are fetched into ~/.tomat/models/<repo>/... by the existing
+// downloader. transformers.js's `dtype: "q8"` expects an ONNX file named
+// `model_quantized.onnx` (see DEFAULT_DTYPE_SUFFIX_MAPPING in dtypes.js); the
+// repo ships that variant, so we download it rather than `model_q8f16.onnx`.
+export const TTS_REPO = "@onnx-community/Kokoro-82M-v1.0-ONNX/main";
+export const TTS_BASE_FILES: readonly string[] = [
+  `${TTS_REPO}/config.json`,
+  `${TTS_REPO}/tokenizer.json`,
+  `${TTS_REPO}/tokenizer_config.json`,
+  `${TTS_REPO}/onnx/model_quantized.onnx`,
+];
+
 const TOOL_ONLY_PROMPT = `You are a very limited on-device AI assistant. Your knowledge and reasoning capabilities are extremely small, so you MUST follow these rules strictly:
 
 1. You can ONLY answer very basic, short, factual questions (1-2 sentences max). Examples of questions you CAN answer: simple greetings, very basic arithmetic, the current date if provided in context, or restating something the user just said.
@@ -690,22 +702,23 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             name: "",
             description: "",
             type: "preset",
-            defaultValue: "base",
+            defaultValue: "small",
             presetConfig: {
               options: [
                 {
-                  id: "base",
-                  label: "Base",
-                  title: "Whisper Base",
+                  id: "small",
+                  label: "Small",
+                  title: "Whisper Small",
                   badges: [
-                    { icon: "i-material-symbols-memory-rounded", label: "~400 MB RAM" },
-                    { icon: "i-material-symbols-bolt-rounded", label: "Fastest" },
-                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Basic accuracy" },
+                    { icon: "i-material-symbols-memory-rounded", label: "~1 GB RAM" },
+                    { icon: "i-material-symbols-bolt-rounded", label: "Fast" },
+                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Good accuracy" },
+                    { icon: "i-material-symbols-language-rounded", label: "Multilingual" },
                   ],
                   description:
-                    "Quick transcription for clear speech in quiet environments. Runs on almost any hardware.",
+                    "Solid all-round transcription for clear speech. Runs well on most hardware.",
                   defaults: {
-                    "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-base.bin",
+                    "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-small.bin",
                     "stt.threads": 4,
                     "stt.host": "127.0.0.1",
                     "stt.port": "7702",
@@ -719,9 +732,10 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                     { icon: "i-material-symbols-memory-rounded", label: "~2.5 GB RAM" },
                     { icon: "i-material-symbols-speed-rounded", label: "Balanced" },
                     { icon: "i-material-symbols-graphic-eq-rounded", label: "Solid accuracy" },
+                    { icon: "i-material-symbols-language-rounded", label: "Multilingual" },
                   ],
                   description:
-                    "Noticeably more accurate than Base with accents or background noise. A good default on modern machines.",
+                    "More accurate with accents or background noise. A good default on modern machines.",
                   defaults: {
                     "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-medium.bin",
                     "stt.threads": 6,
@@ -730,19 +744,80 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                   },
                 },
                 {
-                  id: "large",
-                  label: "Large",
-                  title: "Whisper Large v3",
+                  id: "large-v3-turbo-q8",
+                  label: "Large v3 Turbo",
+                  title: "Whisper Large v3 Turbo (Q8)",
                   badges: [
-                    { icon: "i-material-symbols-memory-rounded", label: "~4 GB RAM" },
-                    { icon: "i-material-symbols-hourglass-top-rounded", label: "Slower" },
+                    { icon: "i-material-symbols-memory-rounded", label: "~2 GB RAM" },
+                    { icon: "i-material-symbols-speed-rounded", label: "Balanced" },
                     { icon: "i-material-symbols-graphic-eq-rounded", label: "Best accuracy" },
+                    { icon: "i-material-symbols-language-rounded", label: "Multilingual" },
                   ],
                   description:
-                    "Highest accuracy, especially for non-English or noisy audio.\n\nSlow on low-end hardware.",
+                    "Quantized Turbo build of Large v3. Near-Large accuracy at a fraction of the size and latency.",
                   defaults: {
-                    "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-large-v3.bin",
+                    "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-large-v3-turbo-q8_0.bin",
                     "stt.threads": 8,
+                    "stt.host": "127.0.0.1",
+                    "stt.port": "7702",
+                  },
+                },
+                {
+                  id: "distil-small-en",
+                  label: "Distil Small",
+                  title: "Distil-Whisper Small (English)",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~350 MB RAM" },
+                    { icon: "i-material-symbols-bolt-rounded", label: "Fastest" },
+                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Good accuracy" },
+                    { icon: "i-material-symbols-translate-rounded", label: "English only" },
+                  ],
+                  description:
+                    "Distilled English-only model. Very fast with low memory use — great for live dictation.",
+                  defaults: {
+                    "stt.modelPath":
+                      "@distil-whisper/distil-small.en/main/ggml-distil-small.en.bin",
+                    "stt.threads": 4,
+                    "stt.host": "127.0.0.1",
+                    "stt.port": "7702",
+                  },
+                },
+                {
+                  id: "distil-medium-en",
+                  label: "Distil Medium",
+                  title: "Distil-Whisper Medium (English)",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~800 MB RAM" },
+                    { icon: "i-material-symbols-speed-rounded", label: "Fast" },
+                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Solid accuracy" },
+                    { icon: "i-material-symbols-translate-rounded", label: "English only" },
+                  ],
+                  description:
+                    "Distilled English-only Medium. Keeps Medium-class accuracy with noticeably lower latency.",
+                  defaults: {
+                    "stt.modelPath":
+                      "@distil-whisper/distil-medium.en/main/ggml-medium-32-2.en.bin",
+                    "stt.threads": 4,
+                    "stt.host": "127.0.0.1",
+                    "stt.port": "7702",
+                  },
+                },
+                {
+                  id: "distil-large-v3",
+                  label: "Distil Large v3",
+                  title: "Distil-Whisper Large v3 (English)",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~1.5 GB RAM" },
+                    { icon: "i-material-symbols-speed-rounded", label: "Fast" },
+                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Best accuracy" },
+                    { icon: "i-material-symbols-translate-rounded", label: "English only" },
+                  ],
+                  description:
+                    "Distilled English-only Large v3. Top-tier English accuracy at Medium-class cost.",
+                  defaults: {
+                    "stt.modelPath":
+                      "@distil-whisper/distil-large-v3-ggml/main/ggml-distil-large-v3.bin",
+                    "stt.threads": 6,
                     "stt.host": "127.0.0.1",
                     "stt.port": "7702",
                   },
@@ -818,7 +893,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             name: "Model Path",
             description: "Path to the Whisper model file.",
             type: "string",
-            defaultValue: "@ggerganov/whisper.cpp/main/ggml-base.bin",
+            defaultValue: "@ggerganov/whisper.cpp/main/ggml-small.bin",
           },
           {
             id: "stt.threads",
@@ -863,6 +938,208 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "command_preview",
             defaultValue: "",
             commandType: "stt",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "tts",
+    name: "Text-to-Speech",
+    sections: [
+      {
+        fields: [
+          {
+            id: "tts.enabled",
+            name: "Enable Text-to-Speech",
+            description:
+              "Read assistant responses aloud as they stream.\nKeeps the voice model loaded in memory while enabled and frees it on disable.",
+            type: "boolean",
+            defaultValue: false,
+          },
+        ],
+      },
+      {
+        label: "Voice",
+        visibleWhen: { field: "tts.enabled", eq: true },
+        fields: [
+          {
+            id: "tts.voice",
+            name: "Voice",
+            description:
+              "Voice model used for speech synthesis.\nSelecting a voice downloads its file the first time it is used.",
+            type: "select",
+            defaultValue: "af_bella",
+            options: [
+              { value: "af_alloy", label: "American • Female • Alloy" },
+              { value: "af_aoede", label: "American • Female • Aoede" },
+              { value: "af_bella", label: "American • Female • Bella" },
+              { value: "af_heart", label: "American • Female • Heart" },
+              { value: "af_jessica", label: "American • Female • Jessica" },
+              { value: "af_kore", label: "American • Female • Kore" },
+              { value: "af_nicole", label: "American • Female • Nicole" },
+              { value: "af_nova", label: "American • Female • Nova" },
+              { value: "af_river", label: "American • Female • River" },
+              { value: "af_sarah", label: "American • Female • Sarah" },
+              { value: "af_sky", label: "American • Female • Sky" },
+              { value: "am_adam", label: "American • Male • Adam" },
+              { value: "am_echo", label: "American • Male • Echo" },
+              { value: "am_eric", label: "American • Male • Eric" },
+              { value: "am_fenrir", label: "American • Male • Fenrir" },
+              { value: "am_liam", label: "American • Male • Liam" },
+              { value: "am_michael", label: "American • Male • Michael" },
+              { value: "am_onyx", label: "American • Male • Onyx" },
+              { value: "am_puck", label: "American • Male • Puck" },
+              { value: "am_santa", label: "American • Male • Santa" },
+              { value: "bf_alice", label: "British • Female • Alice" },
+              { value: "bf_emma", label: "British • Female • Emma" },
+              { value: "bf_isabella", label: "British • Female • Isabella" },
+              { value: "bf_lily", label: "British • Female • Lily" },
+              { value: "bm_daniel", label: "British • Male • Daniel" },
+              { value: "bm_fable", label: "British • Male • Fable" },
+              { value: "bm_george", label: "British • Male • George" },
+              { value: "bm_lewis", label: "British • Male • Lewis" },
+              { value: "jf_alpha", label: "Japanese • Female • Alpha" },
+              { value: "jf_gongitsune", label: "Japanese • Female • Gongitsune" },
+              { value: "jf_nezumi", label: "Japanese • Female • Nezumi" },
+              { value: "jf_tebukuro", label: "Japanese • Female • Tebukuro" },
+              { value: "jm_kumo", label: "Japanese • Male • Kumo" },
+              { value: "zf_xiaobei", label: "Mandarin • Female • Xiaobei" },
+              { value: "zf_xiaoni", label: "Mandarin • Female • Xiaoni" },
+              { value: "zf_xiaoxiao", label: "Mandarin • Female • Xiaoxiao" },
+              { value: "zf_xiaoyi", label: "Mandarin • Female • Xiaoyi" },
+              { value: "zm_yunjian", label: "Mandarin • Male • Yunjian" },
+              { value: "zm_yunxi", label: "Mandarin • Male • Yunxi" },
+              { value: "zm_yunxia", label: "Mandarin • Male • Yunxia" },
+              { value: "zm_yunyang", label: "Mandarin • Male • Yunyang" },
+              { value: "ef_dora", label: "Spanish • Female • Dora" },
+              { value: "em_alex", label: "Spanish • Male • Alex" },
+              { value: "em_santa", label: "Spanish • Male • Santa" },
+              { value: "ff_siwis", label: "French • Female • Siwis" },
+              { value: "hf_alpha", label: "Hindi • Female • Alpha" },
+              { value: "hf_beta", label: "Hindi • Female • Beta" },
+              { value: "hm_omega", label: "Hindi • Male • Omega" },
+              { value: "hm_psi", label: "Hindi • Male • Psi" },
+              { value: "if_sara", label: "Italian • Female • Sara" },
+              { value: "im_nicola", label: "Italian • Male • Nicola" },
+              { value: "pf_dora", label: "Brazilian Portuguese • Female • Dora" },
+              { value: "pm_alex", label: "Brazilian Portuguese • Male • Alex" },
+              { value: "pm_santa", label: "Brazilian Portuguese • Male • Santa" },
+            ],
+          },
+          {
+            id: "tts.minChunkWords",
+            name: "Minimum Chunk Words",
+            description:
+              "Smallest number of words to buffer before sending a chunk to the voice model.\nHigher values produce smoother prosody at the cost of latency.",
+            type: "number",
+            defaultValue: 8,
+            suffix: "words",
+            regex: [{ regex: "^[1-9][0-9]*$", errorMessage: "Must be a positive integer" }],
+          },
+          {
+            id: "tts.synthesisSpeed",
+            name: "Synthesis Speed",
+            description:
+              "Speed the voice model is asked to render speech at.\nAffects the prosody of the generated audio (lower = more relaxed pacing, higher = more clipped).\nAccepted range: 0.25–3.",
+            type: "float",
+            defaultValue: 1,
+            suffix: "x",
+            regex: [
+              {
+                regex: "^(0\\.(2[5-9]|[3-9]\\d?)|[12](\\.\\d+)?|3(\\.0+)?)$",
+                errorMessage: "Must be between 0.25 and 3",
+              },
+            ],
+          },
+          {
+            id: "tts.playbackSpeed",
+            name: "Playback Speed",
+            description:
+              "Speed the synthesized audio is replayed at.\nApplied after synthesis, so pitch scales with the multiplier (higher = higher-pitched voice).\nAccepted range: 0.25–3.",
+            type: "float",
+            defaultValue: 1,
+            suffix: "x",
+            regex: [
+              {
+                regex: "^(0\\.(2[5-9]|[3-9]\\d?)|[12](\\.\\d+)?|3(\\.0+)?)$",
+                errorMessage: "Must be between 0.25 and 3",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "dualModel",
+    name: "Dual Model",
+    sections: [
+      {
+        fields: [
+          {
+            id: "dualModel.enabled",
+            name: "Enable Dual Model",
+            description:
+              "Route complex prompts to a stronger external model while keeping simple prompts on the default model.",
+            type: "boolean",
+            defaultValue: false,
+          },
+        ],
+      },
+      {
+        label: "Detection",
+        visibleWhen: { field: "dualModel.enabled", eq: true },
+        fields: [
+          {
+            id: "dualModel.detectionPrompt",
+            name: "Detection Prompt",
+            description:
+              "System prompt used by the default model to classify each new user message before it is answered.\nThe reply is matched case-insensitively: if it contains the word `complex` without `simple` the request is routed to the secondary model, otherwise it stays on the default model. A reply that is ambiguous or empty falls back to the default model.",
+            type: "multiline",
+            defaultValue: `You are a router. Classify the user's request as either \`simple\` or \`complex\`.
+- \`simple\`: short factual questions, light chit-chat, trivial code edits, summarization of attached text, single-step tool invocations (e.g. set an alarm, start a timer, fetch the weather).
+- \`complex\`: multi-step reasoning, non-trivial coding, in-depth analysis, planning, long-form writing, anything that benefits from stronger reasoning or vision understanding.
+Reply with exactly one word: \`simple\` or \`complex\`. No punctuation.`,
+          },
+        ],
+      },
+      {
+        label: "Secondary Model",
+        visibleWhen: { field: "dualModel.enabled", eq: true },
+        fields: [
+          {
+            id: "dualModel.external.baseUrl",
+            name: "Base URL",
+            description:
+              "API endpoint URL. Must use HTTPS for remote hosts; HTTP is only allowed for localhost.",
+            type: "string",
+            defaultValue: "",
+            placeholder: "https://api.example.com/v1",
+            regex: SECURE_URL_VALIDATION,
+          },
+          {
+            id: "dualModel.external.apiKey",
+            name: "API Key",
+            description: "Authentication key.",
+            type: "password",
+            defaultValue: "",
+            placeholder: "sk-...",
+          },
+          {
+            id: "dualModel.external.model",
+            name: "Model",
+            description: "Model identifier to use.",
+            type: "string",
+            defaultValue: "",
+            placeholder: "gpt-4o",
+          },
+          {
+            id: "dualModel.external.contextSize",
+            name: "Context Size",
+            description: "Maximum context window length, used for usage tracking.",
+            type: "number",
+            defaultValue: 128000,
           },
         ],
       },

@@ -99,6 +99,54 @@ const VAD_FILES = [
 ];
 
 // ---------------------------------------------------------------------------
+// Bun sidecar runtime dependencies
+// ---------------------------------------------------------------------------
+// The bun-side server.js is bundled (see scripts/build-bun.mjs) but a few
+// packages are kept external because they carry per-platform native binaries
+// or are loaded relative to their own dist directory:
+//
+//   - onnxruntime-node: native NAPI binding used by transformers.js's CPU
+//     execution provider. Only the host platform's binary is staged to keep
+//     the shipped bundle small.
+//   - onnxruntime-common: shared types/util package required by onnxruntime-node.
+//   - kokoro-js voice tensors: kokoro-js loads `voices/<name>.bin` relative
+//     to its own dist dir. We stage them so that, at runtime, server.js can
+//     reach them via `../voices/...`.
+//
+// Tauri's bundle.resources ships these into the packaged app:
+//   src-tauri/resources/node_modules/onnxruntime-node|common
+//   src-tauri/voices
+const ORT_NODE_PKG = path.join(ROOT_DIR, "node_modules", "onnxruntime-node");
+const ORT_COMMON_PKG = path.join(ROOT_DIR, "node_modules", "onnxruntime-common");
+const KOKORO_PKG = path.join(ROOT_DIR, "node_modules", "kokoro-js");
+const SIDECAR_NODE_MODULES_DIR = path.join(ROOT_DIR, "src-tauri", "resources", "node_modules");
+const SIDECAR_VOICES_DIR = path.join(ROOT_DIR, "src-tauri", "voices");
+
+function hostOrtBinaryDir() {
+  // onnxruntime-node lays out binaries as bin/napi-v3/<platform>/<arch>/
+  // matching Node's process.platform / process.arch values exactly.
+  return path.join("bin", "napi-v3", process.platform, process.arch);
+}
+
+function copyDir(src, dest, filter) {
+  if (!fs.existsSync(src)) {
+    throw new Error(`Source directory does not exist: ${src}`);
+  }
+  ensureDir(dest);
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (filter && !filter(srcPath, entry)) continue;
+    if (entry.isDirectory()) {
+      copyDir(srcPath, destPath, filter);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -335,6 +383,23 @@ async function main() {
 
   const needVad = installed.vadWeb !== vadWebVersion || installed.onnxruntime !== onnxWebVersion;
 
+  // Bun sidecar deps: track by package version + host platform so a platform
+  // switch (e.g. cargo build --target across architectures) re-stages the
+  // correct native binary.
+  const ortNodeVersion = JSON.parse(
+    fs.readFileSync(path.join(ORT_NODE_PKG, "package.json"), "utf-8"),
+  ).version;
+  const ortCommonVersion = JSON.parse(
+    fs.readFileSync(path.join(ORT_COMMON_PKG, "package.json"), "utf-8"),
+  ).version;
+  const kokoroVersion = JSON.parse(
+    fs.readFileSync(path.join(KOKORO_PKG, "package.json"), "utf-8"),
+  ).version;
+  const ortHostKey = `${ortNodeVersion}-${process.platform}-${process.arch}`;
+  const needOrtNode = installed.onnxruntimeNode !== ortHostKey;
+  const needOrtCommon = installed.onnxruntimeCommon !== ortCommonVersion;
+  const needKokoroVoices = installed.kokoroVoices !== kokoroVersion;
+
   // In --update mode, always re-download every binary so hashes are recorded
   // for all of them - otherwise a binary that's already at the latest version
   // on disk would be skipped and its entry would never appear in checksums.json.
@@ -342,8 +407,16 @@ async function main() {
   const needLlama = UPDATE_MODE || installed.llama !== targetVersions.llama;
   const needBun = UPDATE_MODE || installed.bun !== targetVersions.bun;
 
-  if (!needWhisper && !needLlama && !needBun && !needVad) {
-    log("All binaries and VAD files are up to date.");
+  if (
+    !needWhisper &&
+    !needLlama &&
+    !needBun &&
+    !needVad &&
+    !needOrtNode &&
+    !needOrtCommon &&
+    !needKokoroVoices
+  ) {
+    log("All binaries, VAD files, and bun sidecar deps are up to date.");
     return;
   }
 
@@ -356,6 +429,48 @@ async function main() {
     }
     installed.vadWeb = vadWebVersion;
     installed.onnxruntime = onnxWebVersion;
+  }
+
+  if (needOrtNode) {
+    log(`Staging onnxruntime-node ${ortNodeVersion} for ${process.platform}/${process.arch}...`);
+    const dest = path.join(SIDECAR_NODE_MODULES_DIR, "onnxruntime-node");
+    rmDir(dest);
+    ensureDir(dest);
+    const hostBinDir = hostOrtBinaryDir();
+    // Skip every other platform's native binary to keep the bundle small.
+    copyDir(ORT_NODE_PKG, dest, (src) => {
+      const rel = path.relative(ORT_NODE_PKG, src);
+      if (rel === "node_modules" || rel.startsWith("node_modules" + path.sep)) {
+        return false;
+      }
+      if (rel === "bin" || rel.startsWith("bin" + path.sep)) {
+        return rel === "bin" || rel.startsWith(hostBinDir) || hostBinDir.startsWith(rel);
+      }
+      return true;
+    });
+    installed.onnxruntimeNode = ortHostKey;
+    log(`  Staged onnxruntime-node (host binary only)`);
+  }
+
+  if (needOrtCommon) {
+    log(`Staging onnxruntime-common ${ortCommonVersion}...`);
+    const dest = path.join(SIDECAR_NODE_MODULES_DIR, "onnxruntime-common");
+    rmDir(dest);
+    ensureDir(dest);
+    copyDir(ORT_COMMON_PKG, dest, (src) => {
+      const rel = path.relative(ORT_COMMON_PKG, src);
+      return rel !== "node_modules" && !rel.startsWith("node_modules" + path.sep);
+    });
+    installed.onnxruntimeCommon = ortCommonVersion;
+    log(`  Staged onnxruntime-common`);
+  }
+
+  if (needKokoroVoices) {
+    log(`Staging kokoro-js voices ${kokoroVersion}...`);
+    rmDir(SIDECAR_VOICES_DIR);
+    copyDir(path.join(KOKORO_PKG, "voices"), SIDECAR_VOICES_DIR);
+    installed.kokoroVoices = kokoroVersion;
+    log(`  Staged kokoro-js voices`);
   }
 
   // In default mode, we fetch release metadata per-tag to discover asset URLs

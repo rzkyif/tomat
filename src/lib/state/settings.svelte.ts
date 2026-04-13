@@ -60,6 +60,7 @@ class SettingsState {
   }
 
   async updateSetting(key: string, value: unknown) {
+    const prevEnabled = !!this.currentSettings["tts.enabled"];
     this.currentSettings[key] = value;
     await this.save();
 
@@ -67,22 +68,38 @@ class SettingsState {
       this.debounceRestart("llm");
     } else if (key.startsWith("stt.")) {
       this.debounceRestart("stt");
+    } else if (key === "tts.enabled") {
+      const nowEnabled = !!value;
+      if (prevEnabled !== nowEnabled) {
+        const { ttsState } = await import("./tts.svelte");
+        void ttsState.setEnabled(nowEnabled);
+      }
     }
   }
 
   async updateSettings(updates: Record<string, unknown>) {
+    const prevTtsEnabled = !!this.currentSettings["tts.enabled"];
     let llmChanged = false;
     let sttChanged = false;
+    let ttsEnabledChanged = false;
 
     for (const [key, value] of Object.entries(updates)) {
       this.currentSettings[key] = value;
       if (key.startsWith("llm.")) llmChanged = true;
       if (key.startsWith("stt.")) sttChanged = true;
+      if (key === "tts.enabled") ttsEnabledChanged = true;
     }
     await this.save();
 
     if (llmChanged) this.debounceRestart("llm");
     if (sttChanged) this.debounceRestart("stt");
+    if (ttsEnabledChanged) {
+      const nowEnabled = !!this.currentSettings["tts.enabled"];
+      if (prevTtsEnabled !== nowEnabled) {
+        const { ttsState } = await import("./tts.svelte");
+        void ttsState.setEnabled(nowEnabled);
+      }
+    }
   }
 
   async save() {

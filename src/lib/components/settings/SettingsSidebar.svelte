@@ -8,11 +8,13 @@
     onSelect,
     llmStatus,
     sttStatus,
+    bunStatus,
   } = $props<{
     selectedGroupId: string;
     onSelect?: (id: string) => void;
     llmStatus: ServerStatusUpdate;
     sttStatus: ServerStatusUpdate;
+    bunStatus: ServerStatusUpdate;
   }>();
 </script>
 
@@ -39,5 +41,6 @@
   <div class="flex flex-col gap-1 text-sm font-medium w-fit">
     <ServerStatusChip type="LLM" update={llmStatus} />
     <ServerStatusChip type="STT" update={sttStatus} />
+    <ServerStatusChip type="Bun" update={bunStatus} />
   </div>
 </div>

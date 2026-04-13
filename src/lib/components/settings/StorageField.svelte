@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { SECRET_KEYS, type SettingField } from "$lib/shared/settings";
+  import { SECRET_KEYS, TTS_BASE_FILES, type SettingField } from "$lib/shared/settings";
   import { confirmState, settingsState } from "../../state";
 
   let { field } = $props<{ field: SettingField }>();
@@ -150,6 +150,15 @@
     if (s["stt.preset"] !== "external" && s["stt.preset"] !== "disabled") {
       const p = resolveHfToDisk(s["stt.modelPath"], tree.root_path);
       if (p) protect.add(p);
+    }
+    // TTS has no "external" mode - whenever it's enabled, the Kokoro model
+    // + tokenizer files are required. Protect every path from TTS_BASE_FILES
+    // so "Clear models" leaves them alone.
+    if (s["tts.enabled"]) {
+      for (const hf of TTS_BASE_FILES) {
+        const p = resolveHfToDisk(hf, tree.root_path);
+        if (p) protect.add(p);
+      }
     }
     return protect;
   }

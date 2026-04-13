@@ -3,6 +3,7 @@ import { titleCase } from "title-case";
 import { settingsState, messagesState } from "../state";
 import { setInterruptController } from "$lib/shared/interrupt";
 import { buildSystemPrompt } from "$lib/shared/systemPrompt";
+import { readSessionAttachment, base64ToUtf8 } from "$lib/shared/attachments";
 import type { LLMErrorType, MessageContent } from "$lib/shared/types";
 
 // --- Error mapping ---
@@ -63,6 +64,15 @@ export function getLLMClient(): OpenAI {
   }
 }
 
+/** Create an OpenAI client for the configured Dual-Model secondary endpoint. */
+export function getSecondaryLLMClient(): OpenAI {
+  const settings = settingsState.currentSettings;
+  return createOpenAIClient(
+    settings["dualModel.external.baseUrl"],
+    settings["dualModel.external.apiKey"],
+  );
+}
+
 // --- Context size ---
 
 /** Get the configured context size for the current LLM */
@@ -74,22 +84,70 @@ export function getContextSize(): number {
   return settings["llm.contextSize"] || 4096;
 }
 
+/**
+ * When dual-model routing is enabled, ask the default model whether the last
+ * user message warrants the stronger external model.
+ */
+export async function routeSelection(): Promise<"default" | "secondary"> {
+  const settings = settingsState.currentSettings;
+  if (!settings["dualModel.enabled"]) return "default";
+
+  const hasSecondaryConfig =
+    typeof settings["dualModel.external.baseUrl"] === "string" &&
+    settings["dualModel.external.baseUrl"].length > 0 &&
+    typeof settings["dualModel.external.model"] === "string" &&
+    settings["dualModel.external.model"].length > 0;
+  if (!hasSecondaryConfig) return "default";
+
+  // `messagesState.messages` is stored newest-first (see addMessage's
+  // `unshift`), so `.find(...)` without reversing returns the MOST RECENT
+  // user message - which is what we want to classify. Reversing would match
+  // the first user message in the session, so follow-ups would be routed
+  // based on the very first question every time.
+  const lastUser = messagesState.messages.find((m) => m.role === "user");
+  if (!lastUser) return "default";
+
+  const detectionPrompt =
+    settings["dualModel.detectionPrompt"] ||
+    "Classify the user's request as `simple` or `complex`. Reply with exactly one word.";
+
+  try {
+    const verdict = await singleShotLLM(detectionPrompt, lastUser.content);
+    const norm = verdict.trim().toLowerCase();
+    // Lenient match: small local models rarely comply perfectly with
+    // "reply with one word". Accept any mention of "complex" that isn't
+    // dominated by "simple".
+    const hasComplex = /\bcomplex(?:ity|ness)?\b/.test(norm);
+    const hasSimple = /\bsimple(?:st)?\b/.test(norm);
+    const route: "default" | "secondary" = hasComplex && !hasSimple ? "secondary" : "default";
+    console.log(`[llm] dual-model detection verdict=${JSON.stringify(verdict)} -> ${route}`);
+    return route;
+  } catch (e) {
+    console.warn("[llm] dual-model routing failed; falling back to default:", e);
+    return "default";
+  }
+}
+
 // --- Utility LLM calls ---
 
-/** Single-shot non-streaming LLM call for utilities (title gen, autocorrect) */
-export async function singleShotLLM(systemPrompt: string, userMessage: string): Promise<string> {
+/** Single-shot non-streaming LLM call for utilities (title gen, autocorrect, routing) */
+export async function singleShotLLM(
+  systemPrompt: string,
+  userMessage: MessageContent,
+): Promise<string> {
   const client = getLLMClient();
   const settings = settingsState.currentSettings;
   const preset = settings["llm.preset"];
   const model = preset === "external" ? settings["llm.external.model"] : "default";
 
+  const apiContent = await contentToApi(userMessage);
   const request: OpenAI.ChatCompletionCreateParamsNonStreaming & {
     reasoning?: { effort: string; budget: number };
   } = {
     model,
     messages: [
       { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
+      { role: "user", content: apiContent as OpenAI.ChatCompletionUserMessageParam["content"] },
     ],
     stream: false as const,
   };
@@ -170,8 +228,9 @@ type ApiMessage = {
   content: string | ApiMessagePart[];
 };
 
-/** Convert our MessageContent to the OpenAI API format */
-function contentToApi(content: MessageContent): string | ApiMessagePart[] {
+/** Convert our MessageContent to the OpenAI API format. Materializes any
+ *  on-disk attachment parts by reading them from the session directory. */
+async function contentToApi(content: MessageContent): Promise<string | ApiMessagePart[]> {
   if (typeof content === "string") return content;
 
   const parts: ApiMessagePart[] = [];
@@ -185,30 +244,58 @@ function contentToApi(content: MessageContent): string | ApiMessagePart[] {
         type: "text",
         text: `[Attached document: ${part.filename}]\n\n${part.markdown}`,
       });
+    } else if (part.type === "image_file") {
+      try {
+        const b64 = await readSessionAttachment(part.path);
+        parts.push({
+          type: "image_url",
+          image_url: { url: `data:${part.mime};base64,${b64}` },
+        });
+      } catch (e) {
+        console.warn("[llm] failed to load image attachment:", part.path, e);
+      }
+    } else if (part.type === "document_file") {
+      try {
+        const b64 = await readSessionAttachment(part.path);
+        const markdown = base64ToUtf8(b64);
+        parts.push({
+          type: "text",
+          text: `[Attached document: ${part.filename}]\n\n${markdown}`,
+        });
+      } catch (e) {
+        console.warn("[llm] failed to load document attachment:", part.path, e);
+      }
     }
   }
   return parts.length === 1 && parts[0].type === "text" ? parts[0].text : parts;
 }
 
 export async function sendMessages(): Promise<void> {
-  messagesState.startStreaming();
-
   const controller = new AbortController();
   setInterruptController(controller);
 
+  const route = await routeSelection();
+  messagesState.startStreaming(route);
+
   try {
-    const client = getLLMClient();
     const settings = settingsState.currentSettings;
     const preset = settings["llm.preset"];
+    const usingSecondary = route === "secondary";
+    const client = usingSecondary ? getSecondaryLLMClient() : getLLMClient();
 
-    const apiMessages: ApiMessage[] = messagesState.messages
+    const chatMessages = messagesState.messages
       .slice()
       .reverse()
       .filter(
         (m): m is typeof m & { role: "user" | "assistant" } =>
           m.role === "user" || m.role === "assistant",
-      )
-      .map((m) => ({ role: m.role, content: contentToApi(m.content) }));
+      );
+    const apiMessages: ApiMessage[] = await Promise.all(
+      chatMessages.map(async (m) => ({
+        role: m.role,
+        content: await contentToApi(m.content),
+      })),
+    );
 
     // exclude the last incomplete assistant placeholder
     apiMessages.pop();
@@ -221,9 +308,14 @@ export async function sendMessages(): Promise<void> {
       apiMessages.unshift({ role: "system", content: systemPrompt });
     }
 
-    const useReasoning = preset !== "external" && settings["llm.reasoning"] === "on";
+    const useReasoning =
+      !usingSecondary && preset !== "external" && settings["llm.reasoning"] === "on";
     const reasoningBudget = settings["llm.reasoningBudget"];
-    const model = preset === "external" ? settings["llm.external.model"] : "default";
+    const model = usingSecondary
+      ? settings["dualModel.external.model"]
+      : preset === "external"
+        ? settings["llm.external.model"]
+        : "default";
 
     const request: OpenAI.ChatCompletionCreateParamsStreaming & {
       reasoning?: { effort: string; budget: number };

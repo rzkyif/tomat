@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { TTS_BASE_FILES } from "./settings";
 
 export type DownloadPlan = {
   path: string;
@@ -40,6 +41,16 @@ export function collectDownloadCandidates(
 
     out.push(newVal);
   }
+
+  // Text-to-speech assets. Voice tensors ship bundled with the runtime, so we
+  // only ever propose the shared model/tokenizer files - and only the first
+  // time TTS is enabled.
+  const ttsPrevActive = !!prev["tts.enabled"];
+  const ttsNextActive = !!next["tts.enabled"];
+  if (ttsNextActive && !ttsPrevActive) {
+    for (const f of TTS_BASE_FILES) out.push(f);
+  }
+
   return out;
 }
 
