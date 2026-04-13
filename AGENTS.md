@@ -8,10 +8,10 @@ Tomat is a local-first modular AI client built as a desktop app. It runs LLMs an
 
 **Key directories:**
 
-- `src/` — Svelte frontend (components, state via Svelte 5 runes, sidecar communication)
-- `src-tauri/src/` — Rust backend (sidecar lifecycle, file I/O, window management, Tauri commands)
-- `src-bun/` — Bun/Elysia HTTP sidecar server
-- `scripts/` — Build utilities (`fetch-required-files.mjs` downloads platform binaries)
+- `src/` - Svelte frontend (components, state via Svelte 5 runes, sidecar communication)
+- `src-tauri/src/` - Rust backend (sidecar lifecycle, file I/O, window management, Tauri commands)
+- `src-bun/` - Bun/Elysia HTTP sidecar server
+- `scripts/` - Build utilities (`fetch-required-files.mjs` downloads platform binaries)
 
 ## Binary provenance
 
@@ -19,8 +19,8 @@ Sidecar binaries (llama.cpp, whisper.cpp, bun) are not committed. They are
 downloaded by `bun run fetch` into `src-tauri/binaries/`. Two committed files
 pin and verify those downloads:
 
-- `src-tauri/binaries/versions.json` — pinned version tag per binary.
-- `src-tauri/binaries/checksums.json` — expected SHA-256 per archive per platform.
+- `src-tauri/binaries/versions.json` - pinned version tag per binary.
+- `src-tauri/binaries/checksums.json` - expected SHA-256 per archive per platform.
 
 `bun run fetch` reads these and refuses to proceed on any hash mismatch. When
 bumping an upstream version, run `bun run fetch --update` (maintainer mode):

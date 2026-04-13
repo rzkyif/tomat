@@ -101,7 +101,7 @@ pub fn is_current_start(state: &AppState, server: &str, start_id: u64) -> bool {
 }
 
 /// Validate a sidecar health-check URL. Only accepts `http://` pointing at
-/// `127.0.0.1` or `localhost` — external endpoints are intentionally rejected
+/// `127.0.0.1` or `localhost` - external endpoints are intentionally rejected
 /// to keep sidecar supervision local to the user's machine.
 fn validate_health_check_url(url: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("Invalid health check URL: {e}"))?;
@@ -119,7 +119,7 @@ fn validate_health_check_url(url: &str) -> Result<(), String> {
 
 // Graceful termination on Unix: send SIGTERM so the child can flush buffers
 // and close sockets, wait for the grace period, then SIGKILL via child.kill().
-// Windows has no SIGTERM equivalent, so we skip the grace period entirely —
+// Windows has no SIGTERM equivalent, so we skip the grace period entirely -
 // otherwise we'd idle for GRACEFUL_SHUTDOWN_SECS with no signal sent, just
 // slowing sidecar replacement.
 #[cfg(unix)]
@@ -143,7 +143,7 @@ fn terminate_child_detached(pid: u32, child: CommandChild) {
         if let Err(e) = child.kill() {
             eprintln!("[sidecar] child.kill() failed: {e}");
         }
-        // CommandChild dropped here — tauri-plugin-shell reaps the underlying
+        // CommandChild dropped here - tauri-plugin-shell reaps the underlying
         // tokio::process::Child internally.
     });
 }

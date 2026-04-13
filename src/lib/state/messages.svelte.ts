@@ -18,7 +18,7 @@ const SAVE_DEBOUNCE_MS = 1000;
 const STREAM_FLUSH_MS = 30;
 
 // Module-level singleton (see export at the bottom). Not torn down in
-// production — `beforeunload` listener is intentionally never removed.
+// production - `beforeunload` listener is intentionally never removed.
 class MessagesState {
   messages = $state<Message[]>([]);
   sessionId = $state<string | null>(null);
@@ -105,7 +105,7 @@ class MessagesState {
   }
 
   async loadSession(sessionId: string) {
-    // Drain any debounced save first — otherwise a pending timer could fire
+    // Drain any debounced save first - otherwise a pending timer could fire
     // after sessionId/messages are replaced and write the new session's data
     // under the new id, silently dropping unpersisted edits to the prior one.
     if (this.sessionId && this.sessionId !== sessionId) {
@@ -146,7 +146,7 @@ class MessagesState {
   async deleteSession() {
     if (!this.sessionId) return;
 
-    // Cancel (don't flush) any pending save — we're about to remove the file,
+    // Cancel (don't flush) any pending save - we're about to remove the file,
     // so persisting it now would just be resurrected and then deleted, or
     // worse, fire after the delete and recreate an orphan.
     this.cancelPendingSave();

@@ -273,7 +273,7 @@ function verifyOrRecordHash(checksums, binary, platform, version, actualHex) {
       `SHA-256 mismatch for ${binary} ${platform}:\n` +
         `  expected: ${expected}\n` +
         `  actual:   ${actualHex}\n` +
-        `Aborting — downloaded archive does not match committed manifest.`,
+        `Aborting - downloaded archive does not match committed manifest.`,
     );
   }
   log(`  [verify] ${binary} ${platform} OK`);
@@ -336,7 +336,7 @@ async function main() {
   const needVad = installed.vadWeb !== vadWebVersion || installed.onnxruntime !== onnxWebVersion;
 
   // In --update mode, always re-download every binary so hashes are recorded
-  // for all of them — otherwise a binary that's already at the latest version
+  // for all of them - otherwise a binary that's already at the latest version
   // on disk would be skipped and its entry would never appear in checksums.json.
   const needWhisper = UPDATE_MODE || installed.whisper !== targetVersions.whisper;
   const needLlama = UPDATE_MODE || installed.llama !== targetVersions.llama;
@@ -359,7 +359,7 @@ async function main() {
   }
 
   // In default mode, we fetch release metadata per-tag to discover asset URLs
-  // matching the pinned version — not "latest".
+  // matching the pinned version - not "latest".
   if (!UPDATE_MODE) {
     const [w, l, b] = await Promise.all([
       needWhisper ? fetchReleaseByTag(WHISPER_REPO, targetVersions.whisper) : null,
@@ -514,7 +514,7 @@ async function main() {
     if (UPDATE_MODE) {
       writeJSON(VERSIONS_FILE, targetVersions);
       writeJSON(CHECKSUMS_FILE, checksums);
-      log("Wrote versions.json and checksums.json — review and commit them.");
+      log("Wrote versions.json and checksums.json - review and commit them.");
     }
   } finally {
     rmDir(TEMP_DIR);

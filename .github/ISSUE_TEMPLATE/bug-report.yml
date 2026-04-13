@@ -9,9 +9,9 @@ body:
       value: |
         Thanks for helping test tomat! A few things to know before filing:
 
-        - Tomat is in a rapid-development phase. Bug issues may sit open for a while — they're being read, but not necessarily fixed on a schedule.
+        - Tomat is in a rapid-development phase. Bug issues may sit open for a while - they're being read, but not necessarily fixed on a schedule.
         - **Security vulnerabilities do not go here.** Report them privately via [SECURITY.md](https://github.com/rzkyif/tomat/blob/main/SECURITY.md).
-        - Search existing issues first — a comment on a duplicate helps more than a new thread.
+        - Search existing issues first - a comment on a duplicate helps more than a new thread.
   - type: textarea
     id: summary
     attributes:

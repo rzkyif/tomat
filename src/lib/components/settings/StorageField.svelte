@@ -211,7 +211,7 @@
         confirmState.request({
           title: "Delete items",
           message:
-            "No items to delete — the selection only contains files currently in use.",
+            "No items to delete - the selection only contains files currently in use.",
           confirmLabel: "OK",
           onConfirm: () => {},
         });
@@ -248,7 +248,7 @@
         confirmState.request({
           title: "Clear models",
           message:
-            "No models to clear — the remaining files are currently in use.",
+            "No models to clear - the remaining files are currently in use.",
           confirmLabel: "OK",
           onConfirm: () => {},
         });

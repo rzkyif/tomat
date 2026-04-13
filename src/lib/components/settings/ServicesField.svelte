@@ -92,7 +92,7 @@
       <div class="text-default-800 text-sm flex-1 min-w-0 truncate">Total</div>
       <div class="flex flex-col items-end shrink-0">
         <div class="text-default-800 text-sm tabular-nums">
-          {totals.any ? formatRam(totals.ram) : "—"}
+          {totals.any ? formatRam(totals.ram) : "-"}
         </div>
         <div class="text-default-500 text-xs tabular-nums">
           {totals.any ? `${totals.cpu.toFixed(1)}% CPU` : ""}
@@ -114,7 +114,7 @@
         </div>
         <div class="flex flex-col items-end shrink-0">
           <div class="text-default-800 text-sm tabular-nums">
-            {m && m.running ? formatRam(m.rss_mb) : "—"}
+            {m && m.running ? formatRam(m.rss_mb) : "-"}
           </div>
           <div class="text-default-500 text-xs tabular-nums">
             {m && m.running ? `${m.cpu_pct.toFixed(1)}% CPU` : ""}

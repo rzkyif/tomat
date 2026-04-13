@@ -20,20 +20,20 @@ const TOOL_ONLY_PROMPT = `You are a very limited on-device AI assistant. Your kn
 
 1. You can ONLY answer very basic, short, factual questions (1-2 sentences max). Examples of questions you CAN answer: simple greetings, very basic arithmetic, the current date if provided in context, or restating something the user just said.
 
-2. For ANY question that requires reasoning, multi-step thinking, creativity, writing, coding, analysis, or specialized knowledge — you MUST NOT attempt to answer. Instead, politely explain that you are a small local model with very limited knowledge and cannot reliably answer complex questions, and suggest the user try a larger model or consult another source.
+2. For ANY question that requires reasoning, multi-step thinking, creativity, writing, coding, analysis, or specialized knowledge - you MUST NOT attempt to answer. Instead, politely explain that you are a small local model with very limited knowledge and cannot reliably answer complex questions, and suggest the user try a larger model or consult another source.
 
 3. When a tool call would help answer the user's request, you MUST make the tool call. Never try to guess what a tool would return. Never invent facts.
 
 4. Never make up information. Never guess. Never speculate. Never produce long responses. If in doubt, refuse politely.
 
-5. Keep your responses extremely short — ideally one sentence, never more than two. Do not add disclaimers, preambles, or filler.
+5. Keep your responses extremely short - ideally one sentence, never more than two. Do not add disclaimers, preambles, or filler.
 
 Remember: it is ALWAYS better to politely decline than to produce a wrong or made-up answer.`;
 
 const ASSISTANT_PROMPT = `You are a professional on-device AI assistant. You run locally on the user's machine and have access to a suite of tools that let you help the user accomplish their tasks.
 
 Your identity:
-- You are an on-device assistant — you run locally, you respect user privacy, and you do not rely on any cloud service for core reasoning.
+- You are an on-device assistant - you run locally, you respect user privacy, and you do not rely on any cloud service for core reasoning.
 - You are professional, helpful, concise, and honest.
 
 Your capabilities:
@@ -285,7 +285,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "general.context.agentName",
             name: "Agent Name",
             description:
-              "A name for the agent. Optional — leave empty to let the agent pick or stay nameless.",
+              "A name for the agent. Optional - leave empty to let the agent pick or stay nameless.",
             type: "string",
             defaultValue: "",
             optional: true,
@@ -304,7 +304,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "general.context.location",
             name: "Location",
             description:
-              "A location string the agent can reference. Optional.\nNo network calls are made — the value is attached as plain text.",
+              "A location string the agent can reference. Optional.\nNo network calls are made - the value is attached as plain text.",
             type: "string",
             defaultValue: "",
             optional: true,
@@ -903,7 +903,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
 
 // Settings whose values are routed to the OS keychain rather than to
 // ~/.tomat/settings.json. Derived from the schema so adding a `type: "password"`
-// field automatically opts it in — no Rust or manifest update needed.
+// field automatically opts it in - no Rust or manifest update needed.
 export const SECRET_KEYS: readonly string[] = (() => {
   const out: string[] = [];
   for (const group of SETTINGS_SCHEMA) {

@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this for refinements to **existing** features — friction points, confusing copy, missing shortcuts, ergonomic issues, etc. For brand-new capabilities, use **Feature Requests** instead.
+        Use this for refinements to **existing** features - friction points, confusing copy, missing shortcuts, ergonomic issues, etc. For brand-new capabilities, use **Feature Requests** instead.
   - type: textarea
     id: feature
     attributes:
@@ -27,7 +27,7 @@ body:
     id: proposal
     attributes:
       label: Proposed improvement
-      description: What would make it better? A rough idea is fine — you don't need a complete design.
+      description: What would make it better? A rough idea is fine - you don't need a complete design.
     validations:
       required: true
   - type: textarea

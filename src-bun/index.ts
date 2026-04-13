@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 
-// Bind to loopback only — the sidecar is process-private and must never
+// Bind to loopback only - the sidecar is process-private and must never
 // accept connections from other hosts on the LAN.
 export const app = new Elysia()
   .get("/api/health", () => {

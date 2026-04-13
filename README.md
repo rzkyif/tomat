@@ -7,7 +7,7 @@ tomat
 
 <!--
   Badge maintenance: Rust/Bun versions mirror rust-toolchain.toml and
-  .bun-version respectively — bump them together when upgrading.
+  .bun-version respectively - bump them together when upgrading.
 -->
 <p align="center">
   <a href="https://github.com/rzkyif/tomat/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/rzkyif/tomat/ci.yml?branch=main&label=CI&logo=github"/></a>
@@ -174,9 +174,9 @@ scripts/              Build utilities (fetch-required-files)
 
 Tomat is in a **rapid-development phase**. All implementation is done by the maintainer ([@rzkyif](https://github.com/rzkyif)) and **external pull requests are not being reviewed or accepted** right now. The best ways to help:
 
-- 🐛 [Report a bug](https://github.com/rzkyif/tomat/issues/new?template=bug-report.yml) — filed as an Issue so it can be tracked to resolution.
-- 💡 [Suggest an improvement](https://github.com/rzkyif/tomat/discussions/new?category=improvement-suggestions) to an existing feature — filed as a Discussion.
-- ✨ [Request a new feature](https://github.com/rzkyif/tomat/discussions/new?category=feature-requests) — filed as a Discussion.
+- 🐛 [Report a bug](https://github.com/rzkyif/tomat/issues/new?template=bug-report.yml) - filed as an Issue so it can be tracked to resolution.
+- 💡 [Suggest an improvement](https://github.com/rzkyif/tomat/discussions/new?category=improvement-suggestions) to an existing feature - filed as a Discussion.
+- ✨ [Request a new feature](https://github.com/rzkyif/tomat/discussions/new?category=feature-requests) - filed as a Discussion.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full policy and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
 

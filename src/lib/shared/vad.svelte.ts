@@ -17,7 +17,7 @@ class VadManager {
   private onSpeech: ((audio: Float32Array) => Promise<void>) | null = null;
 
   /** Wire up the window-visibility listener and register the speech handler.
-   *  Safe to call multiple times — re-attaching replaces the previous hook. */
+   *  Safe to call multiple times - re-attaching replaces the previous hook. */
   async attach(onSpeech: (audio: Float32Array) => Promise<void>): Promise<void> {
     this.onSpeech = onSpeech;
     if (this.unlistenVisibility) return;

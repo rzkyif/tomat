@@ -215,7 +215,7 @@ pub fn resolve_path(handle: AppHandle, path: String) -> Result<String, String> {
 }
 
 // -------------------------------------------------------------------
-// Session / Chat History — format: { title, contextUsage, messages }
+// Session / Chat History - format: { title, contextUsage, messages }
 // -------------------------------------------------------------------
 
 fn history_dir(handle: &AppHandle) -> Result<PathBuf, String> {
@@ -448,7 +448,7 @@ pub async fn load_latest_chat_history(handle: AppHandle) -> Result<serde_json::V
 
 // Settings whose values are secrets and must live in the OS keychain rather
 // than ~/.tomat/settings.json. The frontend (which owns the settings schema)
-// decides which keys are secret and passes them in on every call — Rust does
+// decides which keys are secret and passes them in on every call - Rust does
 // not maintain its own list.
 const KEYCHAIN_SERVICE: &str = "tomat";
 

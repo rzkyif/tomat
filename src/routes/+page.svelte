@@ -153,7 +153,7 @@
   }
 
   // Find the index of the last user message (messages are newest-first).
-  // Use visibleMessages — the last user message always sits within the window
+  // Use visibleMessages - the last user message always sits within the window
   // after a send, and callers index against the rendered list.
   let lastUserMsgIndex = $derived(
     messagesState.visibleMessages.findIndex((m) => m.role === "user"),

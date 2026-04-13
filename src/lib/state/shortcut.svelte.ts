@@ -13,7 +13,7 @@ async function windowIsVisible(): Promise<boolean> {
 }
 
 class ShortcutHandler {
-  // Regular fields — no reactivity needed, just persistent across listener
+  // Regular fields - no reactivity needed, just persistent across listener
   // fires. Using `this` rather than module-scope variables ensures we never
   // read from a stale closure capture.
   private pressStart = 0;
@@ -93,7 +93,7 @@ class ShortcutHandler {
 
     if (held < duration) {
       // Short tap: if visible on press, hide. If hidden on press, we already
-      // showed it on press — leave it visible.
+      // showed it on press - leave it visible.
       if (wasVisibleOnPress) {
         try {
           await invoke("hide_main_window");

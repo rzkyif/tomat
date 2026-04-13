@@ -3,7 +3,7 @@
 
 Tomat is currently in a rapid-development phase and external pull requests
 are NOT being reviewed or accepted. This PR will most likely be closed
-unread — please don't invest time in it.
+unread - please don't invest time in it.
 
 If you'd like to help, the best paths right now are:
 

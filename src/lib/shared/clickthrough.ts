@@ -34,7 +34,7 @@ async function switchToCapture() {
   await win.setIgnoreCursorEvents(false);
   setIgnored(false);
   if (document.hasFocus()) {
-    // Window is focused — use mousemove for responsive exit detection
+    // Window is focused - use mousemove for responsive exit detection
     stopPolling();
     document.addEventListener("mousemove", onMouseMove);
     window.addEventListener("blur", onBlurWhileCapturing, { once: true });
@@ -82,7 +82,7 @@ async function onMouseMove(e: MouseEvent) {
 }
 
 function onBlurWhileCapturing() {
-  // Window lost focus while in capture mode — fall back to polling
+  // Window lost focus while in capture mode - fall back to polling
   // so we can still detect cursor leaving without mousemove events
   document.removeEventListener("mousemove", onMouseMove);
   startPolling();

@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this for **new capabilities** tomat doesn't have today. For tweaks to existing features, use **Improvement Suggestions** instead. The maintainer prioritizes based on concrete use-cases — a well-described workflow beats a vague "it would be cool if…".
+        Use this for **new capabilities** tomat doesn't have today. For tweaks to existing features, use **Improvement Suggestions** instead. The maintainer prioritizes based on concrete use-cases - a well-described workflow beats a vague "it would be cool if…".
   - type: textarea
     id: problem
     attributes:
@@ -20,7 +20,7 @@ body:
     id: use-case
     attributes:
       label: Concrete use-case
-      description: Walk through a realistic scenario — who, when, what, why.
+      description: Walk through a realistic scenario - who, when, what, why.
     validations:
       required: true
   - type: textarea
