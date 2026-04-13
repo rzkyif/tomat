@@ -101,10 +101,14 @@ class VadManager {
           this.listening = false;
           if (this.onSpeech) await this.onSpeech(audio);
           if (this.pendingDisable) await this.disableNow();
+          else if (settingsState.currentSettings["stt.smartStt"] === "disabled")
+            await this.disableNow();
         },
         onVADMisfire: () => {
           this.listening = false;
           if (this.pendingDisable) void this.disableNow();
+          else if (settingsState.currentSettings["stt.smartStt"] === "disabled")
+            void this.disableNow();
         },
       });
 

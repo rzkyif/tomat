@@ -37,6 +37,8 @@ fn toggle_window(app: &AppHandle, visible: &AtomicBool) -> bool {
 pub fn run() {
     let visible = Arc::new(AtomicBool::new(true));
     let close_visible = visible.clone();
+    let last_monitor: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let move_last_monitor = last_monitor.clone();
 
     tauri::Builder::default()
         .manage(AppState(Arc::new(AppStateInner {
@@ -50,12 +52,26 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
-        .on_window_event(move |window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(move |window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 let _ = window.hide();
                 close_visible.store(false, Ordering::Relaxed);
                 api.prevent_close();
             }
+            tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                let _ = window.app_handle().emit("monitor-changed", ());
+            }
+            tauri::WindowEvent::Moved(_) => {
+                if let Ok(Some(mon)) = window.current_monitor() {
+                    let name = mon.name().cloned();
+                    let mut last = move_last_monitor.lock().unwrap();
+                    if *last != name {
+                        *last = name;
+                        let _ = window.app_handle().emit("monitor-changed", ());
+                    }
+                }
+            }
+            _ => {}
         })
         .setup(move |app| {
             // Hide dock icon on macOS

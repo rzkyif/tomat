@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { DownloadPlan } from "$lib/downloader/plan";
+  import type { DownloadPlan } from "$lib/shared/download";
 
   let { plans, onConfirm, onCancel } = $props<{
     plans: DownloadPlan[];

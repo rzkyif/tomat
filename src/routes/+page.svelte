@@ -58,6 +58,7 @@
   }
 
   let unlistenVisibility: (() => void) | null = null;
+  let unlistenMonitor: (() => void) | null = null;
   let cleanupSystemTheme: (() => void) | null = null;
 
   onMount(async () => {
@@ -108,6 +109,10 @@
           }
         },
       );
+
+      unlistenMonitor = await listen("monitor-changed", () => {
+        if (loaded) positionWindow();
+      });
     }
   });
 
@@ -115,6 +120,7 @@
     document.removeEventListener("click", linkHandler);
     stopClickThrough();
     unlistenVisibility?.();
+    unlistenMonitor?.();
     cleanupSystemTheme?.();
   });
 

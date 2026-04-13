@@ -24,7 +24,7 @@
     collectDownloadCandidates,
     planDownloads,
     type DownloadPlan,
-  } from "$lib/downloader/plan";
+  } from "$lib/shared/download";
 
   let { toggleSettings } = $props<{
     toggleSettings: () => void;

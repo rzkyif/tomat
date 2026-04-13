@@ -667,10 +667,29 @@ pub async fn probe_download<R: Runtime>(
         username, reponame, branchname, filename
     );
 
-    let client = reqwest::Client::new();
-    let size_bytes = match client.head(&url).send().await {
-        Ok(res) if res.status().is_success() => res.content_length(),
+    // HF resolve URLs 302-redirect to a CDN that often omits Content-Length on
+    // HEAD. The 302 response itself carries the LFS file size in
+    // `x-linked-size`, so probe with redirects disabled first and fall back to
+    // following redirects if HF didn't set it.
+    let no_redirect = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?;
+    let size_bytes = match no_redirect.head(&url).send().await {
+        Ok(res) => res
+            .headers()
+            .get("x-linked-size")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .or_else(|| res.content_length()),
         _ => None,
+    };
+    let size_bytes = match size_bytes {
+        Some(n) => Some(n),
+        None => match reqwest::Client::new().head(&url).send().await {
+            Ok(res) if res.status().is_success() => res.content_length(),
+            _ => None,
+        },
     };
 
     Ok(DownloadPlan {
