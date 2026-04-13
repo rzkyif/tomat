@@ -21,7 +21,7 @@ tomat
   <img alt="Svelte 5" src="https://img.shields.io/badge/svelte-5-FF3E00?logo=svelte&logoColor=white"/>
 </p>
 
-tomat is a desktop AI assistant that runs LLMs and speech-to-text locally via [llama.cpp](https://github.com/ggml-org/llama.cpp) and [whisper.cpp](https://github.com/ggerganov/whisper.cpp), with optional support for external OpenAI-compatible APIs.
+tomat is a desktop AI client that provides easy access to state-of-the-art local speech-to-text, LLM inference, text-to-speech, and modular tool execution.
 
 It's designed to be useful out of the box for anyone - not just developers - while remaining deeply customizable for those who want more control.
 
