@@ -83,6 +83,14 @@ jobs:
         run: |
           mkdir -p src-tauri/resources
           touch src-tauri/resources/server.js
-      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+          # `bundle.resources` globs (*.dylib, *.so, *.dll) are each validated
+          # against the working tree regardless of host OS — an empty match is
+          # a hard error, so seed one file per extension on every runner.
+          touch src-tauri/binaries/placeholder.dylib \
+                src-tauri/binaries/placeholder.so \
+                src-tauri/binaries/placeholder.dll
+      # Formatting is syntactic and OS-independent; only run once.
+      - if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
