@@ -149,7 +149,9 @@
         await vadManager.attach(handleVadAudio);
         await shortcutHandler.attach();
 
-        const mode = settingsState.currentSettings["stt.smartStt"] as SmartSTTMode;
+        const mode = settingsState.currentSettings[
+          "stt.smartStt"
+        ] as SmartSTTMode;
         if (
           mode === "persistent" &&
           settingsState.currentSettings["stt.vadPersistedState"] === true &&
@@ -663,7 +665,7 @@
             ? 'text-default-300 cursor-wait'
             : vadManager.enabled
               ? vadManager.listening
-                ? 'text-green-500 animate-pulse'
+                ? 'text-green-500'
                 : 'text-blue-400'
               : sttStatus === 'Running' || sttStatus === 'Disabled'
                 ? 'hover:text-default-900 hover:cursor-pointer text-default-500'
@@ -684,7 +686,7 @@
           <i
             class="flex {vadManager.enabled
               ? vadManager.listening
-                ? 'i-material-symbols-progress-activity animate-spin'
+                ? 'i-line-md:loading-twotone-loop'
                 : 'i-material-symbols-mic-rounded'
               : sttStatus === 'Running' || sttStatus === 'Disabled'
                 ? 'i-material-symbols-mic-outline-rounded'
