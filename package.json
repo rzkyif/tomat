@@ -12,14 +12,16 @@
     "build:bun": "bun build src-bun/index.ts --outfile=src-tauri/resources/server.js --target=bun --minify",
     "preview": "vite preview",
     "check": "bun run check:js && bun run check:rs",
-    "check:js": "bun run lint && bun run format && bun run check:svelte",
-    "check:svelte": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "check:svelte:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "check:rs": "cargo check --manifest-path src-tauri/Cargo.toml",
+    "check:js": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && bun run lint:js && bun run format:js",
+    "check:rs": "cargo check --manifest-path src-tauri/Cargo.toml && bun run lint:rs && bun run format:rs",
     "tauri": "tauri",
     "fetch": "bun scripts/fetch-required-files.mjs",
-    "lint": "oxlint . --fix",
-    "format": "oxfmt . --write"
+    "lint": "bun run lint:js && bun run lint:rs",
+    "lint:js": "oxlint . --fix",
+    "lint:rs": "cargo clippy --manifest-path src-tauri/Cargo.toml",
+    "format": "bun run format:js && bun run format:rs",
+    "format:js": "oxfmt . --write",
+    "format:rs": "cargo fmt --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@elysiajs/eden": "^1.4.9",
