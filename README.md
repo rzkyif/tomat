@@ -184,10 +184,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full policy and [CODE_OF_CONDUCT.
 
 Please see [SECURITY.md](SECURITY.md) for how to report vulnerabilities and what's in scope. Do not file security issues as public GitHub issues.
 
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for notable changes.
-
 ## AI Disclosure
 
 Multiple AI tools were used during the development of this project to flesh out ideas, speed up implementation, identify bugs and security issues, and more.
