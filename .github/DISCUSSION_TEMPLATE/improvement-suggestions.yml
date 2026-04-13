@@ -1,0 +1,42 @@
+# Category slug: improvement-suggestions
+# A matching Discussion category named "Improvement Suggestions" must exist in the repo.
+title: "[Improvement] "
+labels:
+  - improvement-suggestions
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for refinements to **existing** features — friction points, confusing copy, missing shortcuts, ergonomic issues, etc. For brand-new capabilities, use **Feature Requests** instead.
+  - type: textarea
+    id: feature
+    attributes:
+      label: Which existing feature?
+      description: Name the feature or surface you'd like to see improved.
+      placeholder: e.g. "Push-to-talk shortcut", "Settings → Models panel", "Markdown rendering".
+    validations:
+      required: true
+  - type: textarea
+    id: friction
+    attributes:
+      label: What's the friction today?
+      description: What makes the current experience worse than it could be? Concrete examples help more than abstract complaints.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed improvement
+      description: What would make it better? A rough idea is fine — you don't need a complete design.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Other ways to solve the same friction. Why did you prefer your proposal?
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Screenshots, prior art from other apps, related discussions.

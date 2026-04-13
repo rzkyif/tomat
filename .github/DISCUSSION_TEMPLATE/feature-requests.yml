@@ -1,0 +1,40 @@
+# Category slug: feature-requests
+# A matching Discussion category named "Feature Requests" must exist in the repo.
+title: "[Feature] "
+labels:
+  - feature-request
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for **new capabilities** tomat doesn't have today. For tweaks to existing features, use **Improvement Suggestions** instead. The maintainer prioritizes based on concrete use-cases — a well-described workflow beats a vague "it would be cool if…".
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the need, not the implementation. What can't you do today?
+      placeholder: e.g. "I want to pipe the active transcription into a terminal command without switching windows."
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Concrete use-case
+      description: Walk through a realistic scenario — who, when, what, why.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution (optional)
+      description: If you have a specific idea for how it should work, describe it. Otherwise leave blank and trust the maintainer to design.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: Existing tools, manual workflows, or related tomat features you've tried.
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Links, prior art from other apps, relevant constraints.

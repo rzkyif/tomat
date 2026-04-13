@@ -1,72 +1,37 @@
 # Contributing
 
-Thanks for your interest in contributing to tomat! This guide will help you get set up and familiar with the project.
+Tomat is in a **rapid-development phase**. During this period:
 
-## Prerequisites
+- All implementation is done by the maintainer ([@rzkyif](https://github.com/rzkyif)).
+- **External pull requests will not be reviewed or accepted.** Please do not invest time in a PR — it will be closed unread.
+- The architecture, schemas, and public surface are churning weekly. Anything submitted today could be invalidated by a refactor tomorrow.
 
-- [Rust](https://www.rust-lang.org/tools/install) (stable)
-- [Bun](https://bun.sh/)
-- Platform-specific dependencies for Tauri — see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+This policy will relax once the project reaches a stable 1.0 release. Until then, the most valuable ways to help are:
 
-## Development Setup
+1. **Test the app** and [**report bugs**](https://github.com/rzkyif/tomat/issues/new?template=bug-report.yml) as Issues, so each one can be tracked to resolution. Bugs may sit open for a while during rapid-dev — they're being read, not necessarily fixed on a schedule.
+2. [**Suggest improvements**](https://github.com/rzkyif/tomat/discussions/new?category=improvement-suggestions) to existing features — UX friction, confusing copy, missing shortcuts, etc. These live in **Discussions** since they're wish-list items, not tracked work.
+3. [**Request new features**](https://github.com/rzkyif/tomat/discussions/new?category=feature-requests) with a clear use-case. Also **Discussions** — the maintainer promotes one to an Issue when committing to build it.
+
+Each template lives in [.github/](.github/).
+
+## Security issues
+
+Do **not** open a public discussion or issue for security-sensitive reports. See [SECURITY.md](SECURITY.md) for the private disclosure process.
+
+## Running from source (for testing)
+
+If you want to test pre-release builds or unreleased changes:
 
 ```bash
-# Clone the repository
 git clone https://github.com/rzkyif/tomat.git
 cd tomat
-
-# Install dependencies
 bun install
-
-# Download required binaries
 bun run fetch
-
-# Start the development server
 bun run dev
 ```
 
-## Code Quality
+See [README.md](README.md#getting-started) for prerequisites and platform notes.
 
-Before submitting a pull request, run the full check suite:
+## Code of Conduct
 
-```bash
-bun run check
-```
-
-This runs:
-
-1. **oxlint** — Linting with auto-fix
-2. **oxfmt** — Code formatting
-3. **svelte-check** — Svelte/TypeScript type checking
-
-You can also run these individually:
-
-```bash
-bun run lint      # Lint only
-bun run format    # Format only
-```
-
-## Project Structure
-
-| Directory    | Language           | Purpose                                              |
-| ------------ | ------------------ | ---------------------------------------------------- |
-| `src/`       | Svelte, TypeScript | Frontend UI, state management, sidecar communication |
-| `src-tauri/` | Rust               | Desktop backend, sidecar lifecycle, file I/O         |
-| `src-bun/`   | TypeScript         | Bun/Elysia HTTP sidecar server                       |
-| `scripts/`   | JavaScript         | Build utilities                                      |
-
-## Submitting Changes
-
-1. Fork the repository and create a branch from `main`
-2. Make your changes
-3. Run `bun run check` and ensure it passes
-4. Submit a pull request with a clear description of the change
-
-## Reporting Issues
-
-When reporting a bug, please include:
-
-- Your operating system and architecture
-- Steps to reproduce
-- Expected vs. actual behavior
-- Any relevant logs or error messages
+Discussions are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).

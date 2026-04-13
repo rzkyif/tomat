@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import AttachmentList from "./AttachmentList.svelte";
   import Bubble from "./Bubble.svelte";
   import { settingsState } from "../state";
@@ -19,7 +20,14 @@
   }>();
 
   let editText = $state("");
-  let editTimeout: any = null;
+  let editTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  onDestroy(() => {
+    if (editTimeout) {
+      clearTimeout(editTimeout);
+      editTimeout = null;
+    }
+  });
 
   let displayText = $derived(getTextContent(content));
 

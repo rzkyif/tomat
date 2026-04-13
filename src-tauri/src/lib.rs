@@ -41,8 +41,8 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState(Arc::new(AppStateInner {
             sidecars: Mutex::new(HashMap::new()),
-            download_mutex: tokio::sync::Mutex::new(()),
-            metrics: Mutex::new(sysinfo::System::new()),
+            download_sem: tokio::sync::Semaphore::new(2),
+            metrics: tokio::sync::RwLock::new(sysinfo::System::new()),
         })))
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -76,6 +76,8 @@ pub fn run() {
 
             tauri::tray::TrayIconBuilder::new()
                 .icon(
+                    // Intentional panic on startup: a missing tray icon means
+                    // the bundle is broken; the app cannot recover.
                     app.default_window_icon()
                         .expect("tray icon must be bundled")
                         .clone(),
@@ -118,16 +120,17 @@ pub fn run() {
             // Smart STT setting, so Rust only emits press/release events here.
             let shortcut_handle = app.handle().clone();
             app.global_shortcut()
-                .on_shortcut("super+ctrl+shift+z", move |_app, _shortcut, event| {
-                    match event.state {
+                .on_shortcut(
+                    "super+ctrl+shift+z",
+                    move |_app, _shortcut, event| match event.state {
                         ShortcutState::Pressed => {
                             let _ = shortcut_handle.emit("shortcut-pressed", ());
                         }
                         ShortcutState::Released => {
                             let _ = shortcut_handle.emit("shortcut-released", ());
                         }
-                    }
-                })
+                    },
+                )
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
             // Initial Sidecars
@@ -189,5 +192,6 @@ pub fn run() {
             clear_tomat_settings
         ])
         .run(tauri::generate_context!())
+        // Intentional panic on startup: Tauri runtime failure is unrecoverable.
         .expect("error while running tauri application");
 }

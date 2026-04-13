@@ -10,8 +10,13 @@ pub struct Sidecar {
 
 pub struct AppStateInner {
     pub sidecars: Mutex<HashMap<String, Sidecar>>,
-    pub download_mutex: tokio::sync::Mutex<()>,
-    pub metrics: Mutex<sysinfo::System>,
+    // Cap concurrent model downloads. A semaphore (vs. a mutex) lets multiple
+    // model fetches proceed in parallel without overwhelming the network or
+    // disk; 2 is conservative.
+    pub download_sem: tokio::sync::Semaphore,
+    // RwLock so concurrent metric reads don't serialize on each other; writes
+    // (refresh_process) still take the write lock briefly.
+    pub metrics: tokio::sync::RwLock<sysinfo::System>,
 }
 
 #[derive(Clone)]

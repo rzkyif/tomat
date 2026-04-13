@@ -14,6 +14,8 @@ export type SettingType =
   | "services"
   | "storage";
 
+export type SmartSTTMode = "disabled" | "hold" | "persistent";
+
 const TOOL_ONLY_PROMPT = `You are a very limited on-device AI assistant. Your knowledge and reasoning capabilities are extremely small, so you MUST follow these rules strictly:
 
 1. You can ONLY answer very basic, short, factual questions (1-2 sentences max). Examples of questions you CAN answer: simple greetings, very basic arithmetic, the current date if provided in context, or restating something the user just said.
@@ -86,6 +88,15 @@ export interface RegexValidationRule {
 }
 
 export type RegexValidation = string | RegexValidationRule[];
+
+// External-API URL validator: HTTPS for any host, or HTTP only for loopback.
+// Used by llm.external.baseUrl and stt.external.baseUrl.
+const SECURE_URL_VALIDATION: RegexValidationRule[] = [
+  {
+    regex: "^(https://|http://(localhost|127\\.0\\.0\\.1)(:|/|$))",
+    errorMessage: "URL must use HTTPS, or HTTP with localhost / 127.0.0.1 only.",
+  },
+];
 
 export interface SettingField {
   id: string;
@@ -463,10 +474,12 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "llm.external.baseUrl",
             name: "Base URL",
-            description: "API endpoint URL.",
+            description:
+              "API endpoint URL. Must use HTTPS for remote hosts; HTTP is only allowed for localhost.",
             type: "string",
             defaultValue: "",
             placeholder: "https://api.example.com/v1",
+            regex: SECURE_URL_VALIDATION,
           },
           {
             id: "llm.external.apiKey",
@@ -771,10 +784,12 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "stt.external.baseUrl",
             name: "Base URL",
-            description: "API endpoint URL.",
+            description:
+              "API endpoint URL. Must use HTTPS for remote hosts; HTTP is only allowed for localhost.",
             type: "string",
             defaultValue: "",
             placeholder: "https://api.example.com/v1",
+            regex: SECURE_URL_VALIDATION,
           },
           {
             id: "stt.external.apiKey",
@@ -885,6 +900,21 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     ],
   },
 ];
+
+// Settings whose values are routed to the OS keychain rather than to
+// ~/.tomat/settings.json. Derived from the schema so adding a `type: "password"`
+// field automatically opts it in — no Rust or manifest update needed.
+export const SECRET_KEYS: readonly string[] = (() => {
+  const out: string[] = [];
+  for (const group of SETTINGS_SCHEMA) {
+    for (const section of group.sections) {
+      for (const field of section.fields) {
+        if (field.type === "password") out.push(field.id);
+      }
+    }
+  }
+  return out;
+})();
 
 export function getDefaultSettings(): Record<string, any> {
   const defaults: Record<string, any> = {};

@@ -1,7 +1,24 @@
-# tomat
-
 <p align="center">
 <img src="./static/tomat.png" width="100"/>
+</p>
+<p align="center" style="font-size: 28px; margin-top: -20px;">
+tomat
+</p>
+
+<!--
+  Badge maintenance: Rust/Bun versions mirror rust-toolchain.toml and
+  .bun-version respectively — bump them together when upgrading.
+-->
+<p align="center">
+  <a href="https://github.com/rzkyif/tomat/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/rzkyif/tomat/ci.yml?branch=main&label=CI&logo=github"/></a>
+  <a href="https://github.com/rzkyif/tomat/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/rzkyif/tomat?include_prereleases&display_name=tag&sort=semver&label=release"/></a>
+  <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-orange"/>
+  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue"/></a>
+  <br/>
+  <a href="rust-toolchain.toml"><img alt="Rust 1.91.1" src="https://img.shields.io/badge/rust-1.91.1-B7410E?logo=rust&logoColor=white"/></a>
+  <a href=".bun-version"><img alt="Bun 1.3.12" src="https://img.shields.io/badge/bun-1.3.12-000000?logo=bun&logoColor=white"/></a>
+  <img alt="Tauri 2" src="https://img.shields.io/badge/tauri-2-24C8DB?logo=tauri&logoColor=white"/>
+  <img alt="Svelte 5" src="https://img.shields.io/badge/svelte-5-FF3E00?logo=svelte&logoColor=white"/>
 </p>
 
 tomat is a desktop AI assistant that runs LLMs and speech-to-text locally via [llama.cpp](https://github.com/ggml-org/llama.cpp) and [whisper.cpp](https://github.com/ggerganov/whisper.cpp), with optional support for external OpenAI-compatible APIs.
@@ -124,7 +141,7 @@ bun run fetch
 bun run dev
 ```
 
-> **Note:** `bun run fetch` downloads platform-specific binaries from GitHub releases for all supported targets. The first run may take a while depending on your network speed. Subsequent runs skip downloads if versions are already up to date.
+> **Note:** `bun run fetch` downloads platform-specific binaries from GitHub releases for the versions pinned in [src-tauri/binaries/versions.json](src-tauri/binaries/versions.json) and verifies each archive's SHA-256 against [src-tauri/binaries/checksums.json](src-tauri/binaries/checksums.json). Mismatches abort the install. Maintainers bump versions via `bun run fetch --update`.
 
 ## Available Scripts
 
@@ -155,7 +172,21 @@ scripts/              Build utilities (fetch-required-files)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+Tomat is in a **rapid-development phase**. All implementation is done by the maintainer ([@rzkyif](https://github.com/rzkyif)) and **external pull requests are not being reviewed or accepted** right now. The best ways to help:
+
+- 🐛 [Report a bug](https://github.com/rzkyif/tomat/issues/new?template=bug-report.yml) — filed as an Issue so it can be tracked to resolution.
+- 💡 [Suggest an improvement](https://github.com/rzkyif/tomat/discussions/new?category=improvement-suggestions) to an existing feature — filed as a Discussion.
+- ✨ [Request a new feature](https://github.com/rzkyif/tomat/discussions/new?category=feature-requests) — filed as a Discussion.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full policy and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
+
+## Security
+
+Please see [SECURITY.md](SECURITY.md) for how to report vulnerabilities and what's in scope. Do not file security issues as public GitHub issues.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for notable changes.
 
 ## AI Disclosure
 

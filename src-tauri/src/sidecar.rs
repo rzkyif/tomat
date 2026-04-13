@@ -4,8 +4,11 @@ use crate::utils::current_target_triple;
 use futures_util::StreamExt;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
-use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+
+// Grace period between SIGTERM and SIGKILL when superseding an old sidecar.
+const GRACEFUL_SHUTDOWN_SECS: u64 = 5;
 
 pub fn shared_library_dir<R: Runtime>(handle: &AppHandle<R>) -> Result<PathBuf, String> {
     let triple = current_target_triple()?;
@@ -97,16 +100,52 @@ pub fn is_current_start(state: &AppState, server: &str, start_id: u64) -> bool {
     }
 }
 
+/// Validate a sidecar health-check URL. Only accepts `http://` pointing at
+/// `127.0.0.1` or `localhost` — external endpoints are intentionally rejected
+/// to keep sidecar supervision local to the user's machine.
 fn validate_health_check_url(url: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("Invalid health check URL: {e}"))?;
     if parsed.scheme() != "http" {
         return Err("Health check URL must use http scheme".into());
     }
-    let host = parsed.host_str().unwrap_or("");
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Health check URL missing host".to_string())?;
     if host != "127.0.0.1" && host != "localhost" {
         return Err("Health check URL must point to localhost".into());
     }
     Ok(())
+}
+
+// Graceful termination on Unix: send SIGTERM so the child can flush buffers
+// and close sockets, wait for the grace period, then SIGKILL via child.kill().
+// Windows has no SIGTERM equivalent, so we skip the grace period entirely —
+// otherwise we'd idle for GRACEFUL_SHUTDOWN_SECS with no signal sent, just
+// slowing sidecar replacement.
+#[cfg(unix)]
+fn send_sigterm(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
+}
+
+fn terminate_child_detached(pid: u32, child: CommandChild) {
+    tauri::async_runtime::spawn(async move {
+        #[cfg(unix)]
+        {
+            send_sigterm(pid);
+            tokio::time::sleep(std::time::Duration::from_secs(GRACEFUL_SHUTDOWN_SECS)).await;
+        }
+        #[cfg(not(unix))]
+        let _ = pid;
+
+        if let Err(e) = child.kill() {
+            eprintln!("[sidecar] child.kill() failed: {e}");
+        }
+        // CommandChild dropped here — tauri-plugin-shell reaps the underlying
+        // tokio::process::Child internally.
+    });
 }
 
 pub async fn update_server_args_internal<R: Runtime>(
@@ -118,7 +157,7 @@ pub async fn update_server_args_internal<R: Runtime>(
     mmproj_path: Option<String>,
     check_url: Option<String>,
 ) -> Result<(), String> {
-    let current_start_id = {
+    let (current_start_id, old_child, old_pid) = {
         let mut sidecars = state.0.sidecars.lock().map_err(|e| e.to_string())?;
         let sidecar = sidecars.entry(server.clone()).or_insert(Sidecar {
             child: None,
@@ -127,12 +166,14 @@ pub async fn update_server_args_internal<R: Runtime>(
         });
 
         sidecar.start_id += 1;
-        if let Some(child) = sidecar.child.take() {
-            let _ = child.kill();
-        }
-        sidecar.pid = None;
-        sidecar.start_id
+        let old_child = sidecar.child.take();
+        let old_pid = sidecar.pid.take();
+        (sidecar.start_id, old_child, old_pid)
     };
+
+    if let (Some(child), Some(pid)) = (old_child, old_pid) {
+        terminate_child_detached(pid, child);
+    }
 
     if let Some(ref url) = check_url {
         validate_health_check_url(url)?;
@@ -162,11 +203,7 @@ pub async fn update_server_args_internal<R: Runtime>(
                 .await
                 {
                     Ok(path) => Some(path),
-                    Err(_) if !is_current_start(
-                        &state_clone,
-                        &server_clone,
-                        current_start_id,
-                    ) => {
+                    Err(_) if !is_current_start(&state_clone, &server_clone, current_start_id) => {
                         return;
                     }
                     Err(e) => {
@@ -200,11 +237,7 @@ pub async fn update_server_args_internal<R: Runtime>(
                 .await
                 {
                     Ok(path) => Some(path),
-                    Err(_) if !is_current_start(
-                        &state_clone,
-                        &server_clone,
-                        current_start_id,
-                    ) => {
+                    Err(_) if !is_current_start(&state_clone, &server_clone, current_start_id) => {
                         return;
                     }
                     Err(e) => {
@@ -238,21 +271,20 @@ pub async fn update_server_args_internal<R: Runtime>(
         )
         .await;
 
-        let final_args: Vec<String> = args
-            .into_iter()
-            .filter_map(|a| {
-                if a == "__MODEL_PATH__" {
-                    Some(actual_model_path.clone().unwrap_or_default())
-                } else if a == "__MMPROJ_PATH__" {
-                    // If no mmproj path resolved, drop both the flag and placeholder
-                    actual_mmproj_path.clone()
-                } else if a == "--mmproj" && actual_mmproj_path.is_none() {
-                    None
-                } else {
-                    Some(a)
+        let mut final_args: Vec<String> = Vec::with_capacity(args.len());
+        for a in args {
+            if a == "__MODEL_PATH__" {
+                final_args.push(actual_model_path.clone().unwrap_or_default());
+            } else if a == "__MMPROJ_PATH__" {
+                if let Some(p) = actual_mmproj_path.clone() {
+                    final_args.push(p);
                 }
-            })
-            .collect();
+            } else if a == "--mmproj" && actual_mmproj_path.is_none() {
+                continue;
+            } else {
+                final_args.push(a);
+            }
+        }
 
         let sidecar_name = if server_clone == "llm" {
             "tomat-llama-server"
@@ -307,24 +339,37 @@ pub async fn update_server_args_internal<R: Runtime>(
             }
         };
 
-        {
-            let mut s_lock = match state_clone.0.sidecars.lock() {
-                Ok(g) => g,
-                Err(e) => {
-                    eprintln!("[sidecar] mutex poisoned: {e}");
-                    let _ = child.kill();
-                    return;
+        // Poisoned-mutex handling is isolated in this block so the PoisonError
+        // (which holds a !Send MutexGuard) is fully dropped before any await.
+        let poison_msg: Option<String> = match state_clone.0.sidecars.lock() {
+            Ok(mut s_lock) => {
+                if let Some(s) = s_lock.get_mut(&server_clone) {
+                    if s.start_id == current_start_id {
+                        s.pid = Some(child.pid());
+                        s.child = Some(child);
+                    } else {
+                        let _ = child.kill();
+                        return;
+                    }
                 }
-            };
-            if let Some(s) = s_lock.get_mut(&server_clone) {
-                if s.start_id == current_start_id {
-                    s.pid = Some(child.pid());
-                    s.child = Some(child);
-                } else {
-                    let _ = child.kill();
-                    return;
-                }
+                None
             }
+            Err(e) => {
+                eprintln!("[sidecar] mutex poisoned: {e}");
+                let _ = child.kill();
+                Some("Internal state corrupted, restart required".into())
+            }
+        };
+        if let Some(msg) = poison_msg {
+            emit_status(
+                &handle_clone,
+                &server_clone,
+                ServerStatus::Error,
+                None,
+                Some(msg),
+            )
+            .await;
+            return;
         }
 
         // Monitor output
@@ -482,7 +527,12 @@ pub async fn ensure_model_internal<R: Runtime>(
     )
     .await;
 
-    let _download_guard = state.0.download_mutex.lock().await;
+    let _download_guard = state
+        .0
+        .download_sem
+        .acquire()
+        .await
+        .map_err(|e| e.to_string())?;
 
     if !is_current_start(state, server, start_id) {
         return Err("Download cancelled".to_string());

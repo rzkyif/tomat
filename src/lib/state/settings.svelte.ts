@@ -1,5 +1,5 @@
 import { browser } from "$app/environment";
-import { getDefaultSettings } from "$lib/shared/settings";
+import { getDefaultSettings, SECRET_KEYS } from "$lib/shared/settings";
 import type { Alignment } from "$lib/shared/types";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -13,7 +13,10 @@ class SettingsState {
     if (!browser) return;
     try {
       if ((window as any).__TAURI_INTERNALS__) {
-        const stored = (await invoke("load_settings")) as Record<string, any> | null;
+        const stored = (await invoke("load_settings", { secretKeys: SECRET_KEYS })) as Record<
+          string,
+          any
+        > | null;
         if (stored) {
           this.currentSettings = { ...getDefaultSettings(), ...stored };
         } else {
@@ -56,7 +59,7 @@ class SettingsState {
     );
   }
 
-  async updateSetting(key: string, value: any) {
+  async updateSetting(key: string, value: unknown) {
     this.currentSettings[key] = value;
     await this.save();
 
@@ -67,7 +70,7 @@ class SettingsState {
     }
   }
 
-  async updateSettings(updates: Record<string, any>) {
+  async updateSettings(updates: Record<string, unknown>) {
     let llmChanged = false;
     let sttChanged = false;
 
@@ -92,11 +95,20 @@ class SettingsState {
         nonDefault[key] = value;
       }
     }
+    // Partition out secret-typed fields so they never reach the JSON file.
+    // Always include each secret key (empty value tells Rust to clear the
+    // keychain entry).
+    const secrets: Record<string, string> = {};
+    for (const key of SECRET_KEYS) {
+      const v = nonDefault[key];
+      secrets[key] = typeof v === "string" ? v : "";
+      delete nonDefault[key];
+    }
     const snapshot = JSON.stringify(nonDefault, null, 2);
     this.saveChain = this.saveChain.then(async () => {
       try {
         if ((window as any).__TAURI_INTERNALS__) {
-          await invoke("save_settings", { settings: JSON.parse(snapshot) });
+          await invoke("save_settings", { settings: JSON.parse(snapshot), secrets });
         } else {
           localStorage.setItem("tomat-settings", snapshot);
         }

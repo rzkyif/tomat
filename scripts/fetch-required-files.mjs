@@ -3,22 +3,31 @@
 /**
  * fetch-required-files.mjs
  *
- * Downloads the latest llama-server, whisper-server, and bun binaries from GitHub,
- * extracts them into src-tauri/binaries, and tracks versions
- * in src-tauri/binaries/versions.json to avoid redundant downloads.
+ * Downloads llama-server, whisper-server, and bun binaries from GitHub releases
+ * and extracts them into src-tauri/binaries. Verifies every downloaded archive
+ * against a committed SHA-256 manifest (src-tauri/binaries/checksums.json) to
+ * protect against tampered releases or MITM. Also copies VAD runtime files
+ * (Silero + ONNX Runtime WASM) from node_modules into static/vad/.
  *
- * Also copies VAD runtime files (Silero model + ONNX Runtime WASM) from
- * node_modules into static/vad/, re-copying only when package versions change.
+ * Default mode: reads pinned versions from versions.json, downloads those
+ * exact versions, and refuses to proceed if a downloaded archive's hash does
+ * not match the committed manifest.
+ *
+ * Maintainer mode (--update): fetches the latest release tags from GitHub,
+ * downloads, and writes both versions.json and checksums.json. Use this when
+ * bumping upstream versions. The resulting files should be reviewed and
+ * committed.
  */
 
+import crypto from "crypto";
 import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { pipeline } from "stream/promises";
-import { Readable } from "stream";
+import { Readable, Transform } from "stream";
 
 // ---------------------------------------------------------------------------
-// Platform mapping: whisper-server platform -> llama.cpp asset search string
+// Platform mapping
 // ---------------------------------------------------------------------------
 
 const PLATFORM_MAP = {
@@ -73,13 +82,14 @@ const BUN_REPO = "oven-sh/bun";
 const ROOT_DIR = path.resolve(import.meta.dirname, "..");
 const BINARIES_DIR = path.join(ROOT_DIR, "src-tauri", "binaries");
 const VERSIONS_FILE = path.join(BINARIES_DIR, "versions.json");
+const CHECKSUMS_FILE = path.join(BINARIES_DIR, "checksums.json");
+const INSTALLED_FILE = path.join(BINARIES_DIR, ".installed.json");
 const TEMP_DIR = path.join(BINARIES_DIR, ".tmp_binaries");
 
 const VAD_WEB_PKG = path.join(ROOT_DIR, "node_modules", "@ricky0123", "vad-web");
 const ORT_WEB_PKG = path.join(ROOT_DIR, "node_modules", "onnxruntime-web");
 const VAD_DEST_DIR = path.join(ROOT_DIR, "static", "vad");
 
-// Files to copy: [srcDir, filename]
 const VAD_FILES = [
   [path.join(VAD_WEB_PKG, "dist"), "silero_vad_v5.onnx"],
   [path.join(VAD_WEB_PKG, "dist"), "vad.worklet.bundle.min.js"],
@@ -91,6 +101,8 @@ const VAD_FILES = [
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const UPDATE_MODE = process.argv.includes("--update");
 
 function log(msg) {
   console.log(`[fetch-required-files] ${msg}`);
@@ -113,7 +125,7 @@ async function fetchJSON(url) {
   return res.json();
 }
 
-async function downloadFile(url, destPath) {
+async function downloadFileWithHash(url, destPath) {
   const res = await fetch(url, {
     headers: { "User-Agent": "fetch-required-files-script" },
     redirect: "follow",
@@ -121,21 +133,29 @@ async function downloadFile(url, destPath) {
   if (!res.ok) {
     throw new Error(`Download failed: ${res.status} ${res.statusText} for ${url}`);
   }
+  const hash = crypto.createHash("sha256");
+  const hashTap = new Transform({
+    transform(chunk, _enc, cb) {
+      hash.update(chunk);
+      cb(null, chunk);
+    },
+  });
   const fileStream = fs.createWriteStream(destPath);
-  await pipeline(Readable.fromWeb(res.body), fileStream);
+  await pipeline(Readable.fromWeb(res.body), hashTap, fileStream);
+  return hash.digest("hex");
 }
 
-function readVersions() {
+function readJSON(file, fallback) {
   try {
-    return JSON.parse(fs.readFileSync(VERSIONS_FILE, "utf-8"));
+    return JSON.parse(fs.readFileSync(file, "utf-8"));
   } catch {
-    return { llama: null, whisper: null, bun: null, vadWeb: null, onnxruntime: null };
+    return fallback;
   }
 }
 
-function writeVersions(versions) {
-  fs.mkdirSync(path.dirname(VERSIONS_FILE), { recursive: true });
-  fs.writeFileSync(VERSIONS_FILE, JSON.stringify(versions, null, 2) + "\n");
+function writeJSON(file, data) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
 }
 
 function ensureDir(dir) {
@@ -205,36 +225,107 @@ function findBunAsset(assets, bunAsset) {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Release fetch: maintainer mode pulls latest; default mode uses a dummy
+// structure and looks up assets from the pinned tag directly.
 // ---------------------------------------------------------------------------
 
-async function main() {
-  log("Checking for latest versions...");
-
-  const [whisperRelease, llamaRelease, bunRelease] = await Promise.all([
+async function fetchLatestReleases() {
+  log("Fetching latest release tags from GitHub...");
+  const [whisper, llama, bun] = await Promise.all([
     fetchJSON(`https://api.github.com/repos/${WHISPER_REPO}/releases/latest`),
     fetchJSON(`https://api.github.com/repos/${LLAMA_REPO}/releases/latest`),
     fetchJSON(`https://api.github.com/repos/${BUN_REPO}/releases/latest`),
   ]);
+  return { whisper, llama, bun };
+}
 
-  const latestWhisperVersion = whisperRelease.tag_name;
-  const latestLlamaVersion = llamaRelease.tag_name;
-  const latestBunVersion = bunRelease.tag_name;
+async function fetchReleaseByTag(repo, tag) {
+  return fetchJSON(`https://api.github.com/repos/${repo}/releases/tags/${tag}`);
+}
 
-  log(`Latest whisper-server: ${latestWhisperVersion}`);
-  log(`Latest llama.cpp:      ${latestLlamaVersion}`);
-  log(`Latest bun:            ${latestBunVersion}`);
+// ---------------------------------------------------------------------------
+// Verification / hash manifest
+// ---------------------------------------------------------------------------
 
-  const currentVersions = readVersions();
-  log(`Current whisper-server: ${currentVersions.whisper || "(none)"}`);
-  log(`Current llama.cpp:      ${currentVersions.llama || "(none)"}`);
-  log(`Current bun:            ${currentVersions.bun || "(none)"}`);
+function verifyOrRecordHash(checksums, binary, platform, version, actualHex) {
+  const entry = checksums[binary] ?? { version: null, platforms: {} };
+  const expected = entry.version === version ? entry.platforms[platform] : undefined;
 
-  const needWhisper = currentVersions.whisper !== latestWhisperVersion;
-  const needLlama = currentVersions.llama !== latestLlamaVersion;
-  const needBun = currentVersions.bun !== latestBunVersion;
+  if (UPDATE_MODE) {
+    if (entry.version !== version) {
+      entry.version = version;
+      entry.platforms = {};
+    }
+    entry.platforms[platform] = actualHex;
+    checksums[binary] = entry;
+    log(`  [update] recorded ${binary} ${platform}: ${actualHex.slice(0, 12)}...`);
+    return;
+  }
 
-  // --- VAD files ---
+  if (!expected) {
+    throw new Error(
+      `No committed SHA-256 for ${binary} ${platform} at version ${version}. ` +
+        `Run 'bun run fetch --update' (maintainer mode) to regenerate checksums.json.`,
+    );
+  }
+  if (expected !== actualHex) {
+    throw new Error(
+      `SHA-256 mismatch for ${binary} ${platform}:\n` +
+        `  expected: ${expected}\n` +
+        `  actual:   ${actualHex}\n` +
+        `Aborting — downloaded archive does not match committed manifest.`,
+    );
+  }
+  log(`  [verify] ${binary} ${platform} OK`);
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main() {
+  ensureDir(BINARIES_DIR);
+
+  // Resolve target versions.
+  let targetVersions;
+  let releases = { whisper: null, llama: null, bun: null };
+
+  if (UPDATE_MODE) {
+    releases = await fetchLatestReleases();
+    targetVersions = {
+      whisper: releases.whisper.tag_name,
+      llama: releases.llama.tag_name,
+      bun: releases.bun.tag_name,
+    };
+    log(
+      `--update mode: targeting whisper=${targetVersions.whisper}, ` +
+        `llama=${targetVersions.llama}, bun=${targetVersions.bun}`,
+    );
+  } else {
+    targetVersions = readJSON(VERSIONS_FILE, null);
+    if (!targetVersions) {
+      throw new Error(
+        `${VERSIONS_FILE} missing. Run 'bun run fetch --update' first to pin versions.`,
+      );
+    }
+    log(
+      `Pinned: whisper=${targetVersions.whisper}, ` +
+        `llama=${targetVersions.llama}, bun=${targetVersions.bun}`,
+    );
+  }
+
+  // Load hash manifest.
+  const checksums = readJSON(CHECKSUMS_FILE, {});
+  if (!UPDATE_MODE && Object.keys(checksums).length === 0) {
+    throw new Error(
+      `${CHECKSUMS_FILE} missing or empty. Run 'bun run fetch --update' to populate it.`,
+    );
+  }
+
+  // Track what's currently extracted on disk, to skip redundant work.
+  const installed = readJSON(INSTALLED_FILE, {});
+
+  // VAD files: trust node_modules (lockfile integrity).
   const vadWebVersion = JSON.parse(
     fs.readFileSync(path.join(VAD_WEB_PKG, "package.json"), "utf-8"),
   ).version;
@@ -242,20 +333,20 @@ async function main() {
     fs.readFileSync(path.join(ORT_WEB_PKG, "package.json"), "utf-8"),
   ).version;
 
-  log(`Installed @ricky0123/vad-web: ${vadWebVersion}`);
-  log(`Installed onnxruntime-web:    ${onnxWebVersion}`);
-  log(`Current  @ricky0123/vad-web:  ${currentVersions.vadWeb || "(none)"}`);
-  log(`Current  onnxruntime-web:     ${currentVersions.onnxruntime || "(none)"}`);
+  const needVad = installed.vadWeb !== vadWebVersion || installed.onnxruntime !== onnxWebVersion;
 
-  const needVad =
-    currentVersions.vadWeb !== vadWebVersion || currentVersions.onnxruntime !== onnxWebVersion;
+  // In --update mode, always re-download every binary so hashes are recorded
+  // for all of them — otherwise a binary that's already at the latest version
+  // on disk would be skipped and its entry would never appear in checksums.json.
+  const needWhisper = UPDATE_MODE || installed.whisper !== targetVersions.whisper;
+  const needLlama = UPDATE_MODE || installed.llama !== targetVersions.llama;
+  const needBun = UPDATE_MODE || installed.bun !== targetVersions.bun;
 
   if (!needWhisper && !needLlama && !needBun && !needVad) {
-    log("All files are up to date. Nothing to do.");
+    log("All binaries and VAD files are up to date.");
     return;
   }
 
-  // --- Copy VAD files from node_modules ---
   if (needVad) {
     log("Copying VAD files from node_modules...");
     ensureDir(VAD_DEST_DIR);
@@ -263,6 +354,19 @@ async function main() {
       fs.copyFileSync(path.join(srcDir, file), path.join(VAD_DEST_DIR, file));
       log(`  Copied ${file}`);
     }
+    installed.vadWeb = vadWebVersion;
+    installed.onnxruntime = onnxWebVersion;
+  }
+
+  // In default mode, we fetch release metadata per-tag to discover asset URLs
+  // matching the pinned version — not "latest".
+  if (!UPDATE_MODE) {
+    const [w, l, b] = await Promise.all([
+      needWhisper ? fetchReleaseByTag(WHISPER_REPO, targetVersions.whisper) : null,
+      needLlama ? fetchReleaseByTag(LLAMA_REPO, targetVersions.llama) : null,
+      needBun ? fetchReleaseByTag(BUN_REPO, targetVersions.bun) : null,
+    ]);
+    releases = { whisper: w, llama: l, bun: b };
   }
 
   ensureDir(TEMP_DIR);
@@ -282,9 +386,8 @@ async function main() {
         ? `tomat-tools-server-${config.tauriTriple}.exe`
         : `tomat-tools-server-${config.tauriTriple}`;
 
-      // --- Bun ---
       if (needBun) {
-        const bunAsset = findBunAsset(bunRelease.assets, config.bunAsset);
+        const bunAsset = findBunAsset(releases.bun.assets, config.bunAsset);
         if (!bunAsset) {
           logError(
             `No bun asset found for platform: ${platform} (searching for: bun-${config.bunAsset}.zip)`,
@@ -292,7 +395,8 @@ async function main() {
         } else {
           log(`Downloading bun for ${platform}...`);
           const bunZipPath = path.join(TEMP_DIR, bunAsset.name);
-          await downloadFile(bunAsset.browser_download_url, bunZipPath);
+          const hex = await downloadFileWithHash(bunAsset.browser_download_url, bunZipPath);
+          verifyOrRecordHash(checksums, "bun", platform, targetVersions.bun, hex);
 
           log(`Extracting bun for ${platform}...`);
           const bunExtractDir = path.join(TEMP_DIR, `bun-${platform}`);
@@ -314,15 +418,15 @@ async function main() {
         }
       }
 
-      // --- Whisper-server ---
       if (needWhisper) {
-        const whisperAsset = findWhisperAsset(whisperRelease.assets, platform);
+        const whisperAsset = findWhisperAsset(releases.whisper.assets, platform);
         if (!whisperAsset) {
           logError(`No whisper-server asset found for platform: ${platform}`);
         } else {
           log(`Downloading whisper-server for ${platform}...`);
           const whisperZipPath = path.join(TEMP_DIR, whisperAsset.name);
-          await downloadFile(whisperAsset.browser_download_url, whisperZipPath);
+          const hex = await downloadFileWithHash(whisperAsset.browser_download_url, whisperZipPath);
+          verifyOrRecordHash(checksums, "whisper", platform, targetVersions.whisper, hex);
 
           log(`Extracting whisper-server for ${platform}...`);
           const whisperExtractDir = path.join(TEMP_DIR, `whisper-${platform}`);
@@ -344,10 +448,9 @@ async function main() {
         }
       }
 
-      // --- Llama-server ---
       if (needLlama) {
         const llamaAsset = findLlamaAsset(
-          llamaRelease.assets,
+          releases.llama.assets,
           config.llamaAsset,
           config.archiveExt,
         );
@@ -358,7 +461,8 @@ async function main() {
         } else {
           log(`Downloading llama.cpp for ${platform}...`);
           const llamaArchivePath = path.join(TEMP_DIR, llamaAsset.name);
-          await downloadFile(llamaAsset.browser_download_url, llamaArchivePath);
+          const hex = await downloadFileWithHash(llamaAsset.browser_download_url, llamaArchivePath);
+          verifyOrRecordHash(checksums, "llama", platform, targetVersions.llama, hex);
 
           log(`Extracting llama-server for ${platform}...`);
           const llamaExtractDir = path.join(TEMP_DIR, `llama-${platform}`);
@@ -376,11 +480,7 @@ async function main() {
           if (binaryPath) {
             const destBinaryPath = path.join(outputDir, llamaExeName);
             fs.copyFileSync(binaryPath, destBinaryPath);
-
-            if (!config.isWindows) {
-              fs.chmodSync(destBinaryPath, 0o755);
-            }
-
+            if (!config.isWindows) fs.chmodSync(destBinaryPath, 0o755);
             log(`  Copied ${llamaExeName}`);
           } else {
             logError(`  Could not find ${binaryName} in llama.cpp archive for ${platform}`);
@@ -404,17 +504,18 @@ async function main() {
       }
     }
 
-    const newVersions = {
-      whisper: needWhisper ? latestWhisperVersion : currentVersions.whisper,
-      llama: needLlama ? latestLlamaVersion : currentVersions.llama,
-      bun: needBun ? latestBunVersion : currentVersions.bun,
-      vadWeb: needVad ? vadWebVersion : currentVersions.vadWeb,
-      onnxruntime: needVad ? onnxWebVersion : currentVersions.onnxruntime,
-    };
-    writeVersions(newVersions);
-    log(
-      `Updated versions.json: whisper=${newVersions.whisper}, llama=${newVersions.llama}, bun=${newVersions.bun}, vadWeb=${newVersions.vadWeb}, onnxruntime=${newVersions.onnxruntime}`,
-    );
+    // Persist state: installed tracks what's on disk; versions.json and
+    // checksums.json are committed artifacts updated only in --update mode.
+    if (needWhisper) installed.whisper = targetVersions.whisper;
+    if (needLlama) installed.llama = targetVersions.llama;
+    if (needBun) installed.bun = targetVersions.bun;
+    writeJSON(INSTALLED_FILE, installed);
+
+    if (UPDATE_MODE) {
+      writeJSON(VERSIONS_FILE, targetVersions);
+      writeJSON(CHECKSUMS_FILE, checksums);
+      log("Wrote versions.json and checksums.json — review and commit them.");
+    }
   } finally {
     rmDir(TEMP_DIR);
   }

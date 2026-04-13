@@ -152,9 +152,11 @@
     }
   }
 
-  // Find the index of the last user message (messages are newest-first)
+  // Find the index of the last user message (messages are newest-first).
+  // Use visibleMessages — the last user message always sits within the window
+  // after a send, and callers index against the rendered list.
   let lastUserMsgIndex = $derived(
-    messagesState.messages.findIndex((m) => m.role === "user"),
+    messagesState.visibleMessages.findIndex((m) => m.role === "user"),
   );
 </script>
 
@@ -171,23 +173,23 @@
         <Settings {toggleSettings} />
       {:else}
         <div
-          style="position: relative; z-index: {messagesState.messages.length +
-            3};"
+          style="position: relative; z-index: {messagesState.visibleMessages
+            .length + 3};"
         >
           <SessionBar />
         </div>
 
         <div
-          style="position: relative; z-index: {messagesState.messages.length +
-            2};"
+          style="position: relative; z-index: {messagesState.visibleMessages
+            .length + 2};"
         >
           <UserInput {toggleSettings} {showSettings} />
         </div>
 
-        {#each messagesState.messages as msg, i}
+        {#each messagesState.visibleMessages as msg, i}
           <div
-            style="position: relative; z-index: {messagesState.messages.length -
-              i};"
+            style="position: relative; z-index: {messagesState.visibleMessages
+              .length - i};"
           >
             {#if msg.role === "user"}
               <UserMessage
@@ -203,6 +205,15 @@
             {/if}
           </div>
         {/each}
+        {#if messagesState.hasMoreMessages}
+          <button
+            type="button"
+            class="mx-auto my-2 px-3 py-1 text-sm text-default-600 hover:text-default-900 rounded bg-default-100 hover:bg-default-200"
+            onclick={() => messagesState.loadMoreMessages()}
+          >
+            Load older messages
+          </button>
+        {/if}
       {/if}
     </div>
   </main>

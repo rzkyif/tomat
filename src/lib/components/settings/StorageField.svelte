@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import type { SettingField } from "$lib/shared/settings";
+  import { SECRET_KEYS, type SettingField } from "$lib/shared/settings";
   import { confirmState, settingsState } from "../../state";
 
   let { field } = $props<{ field: SettingField }>();
@@ -290,7 +290,7 @@
           if (kind === "sessions") {
             await invoke("clear_tomat_sessions");
           } else {
-            await invoke("clear_tomat_settings");
+            await invoke("clear_tomat_settings", { secretKeys: SECRET_KEYS });
             await settingsState.loadSettings();
           }
         } catch (err) {

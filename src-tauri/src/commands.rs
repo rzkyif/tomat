@@ -45,6 +45,7 @@ fn resolve_monitor(app: &AppHandle, monitor_id: &str) -> Result<tauri::Monitor, 
     monitor.ok_or_else(|| "No monitor available".to_string())
 }
 
+/// Move and resize the main window to fill the chosen monitor with the given alignment.
 #[tauri::command]
 pub fn position_window(
     app: AppHandle,
@@ -89,6 +90,7 @@ pub fn position_window(
     Ok(())
 }
 
+/// Show the main window, focus it, and broadcast a `window-visibility: true` event.
 #[tauri::command]
 pub fn show_main_window(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
     window.show().map_err(|e| e.to_string())?;
@@ -97,6 +99,7 @@ pub fn show_main_window(app: AppHandle, window: tauri::WebviewWindow) -> Result<
     Ok(())
 }
 
+/// Hide the main window and broadcast a `window-visibility: false` event.
 #[tauri::command]
 pub fn hide_main_window(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
     window.hide().map_err(|e| e.to_string())?;
@@ -112,6 +115,7 @@ pub struct CaptureMonitorInfo {
     pub is_primary: bool,
 }
 
+/// List attached monitors for the screen-capture picker.
 #[tauri::command]
 pub async fn list_capture_monitors() -> Result<Vec<CaptureMonitorInfo>, String> {
     let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
@@ -132,6 +136,7 @@ pub async fn list_capture_monitors() -> Result<Vec<CaptureMonitorInfo>, String> 
     Ok(out)
 }
 
+/// Capture the named monitor and return a base64-encoded PNG.
 #[tauri::command]
 pub async fn capture_monitor(monitor_id: String) -> Result<String, String> {
     use base64::Engine;
@@ -160,6 +165,8 @@ pub async fn capture_monitor(monitor_id: String) -> Result<String, String> {
     Ok(base64::engine::general_purpose::STANDARD.encode(&buf))
 }
 
+/// Return a snapshot of each tracked sidecar's status. Used on startup
+/// when the frontend reconciles against any already-running processes.
 #[tauri::command]
 pub async fn get_server_statuses(
     state: State<'_, AppState>,
@@ -172,6 +179,7 @@ pub async fn get_server_statuses(
     Ok(statuses)
 }
 
+/// (Re)launch a sidecar with the given args. Supersedes any previous instance.
 #[tauri::command]
 pub async fn update_server_args(
     handle: AppHandle,
@@ -194,11 +202,11 @@ pub async fn update_server_args(
     .await
 }
 
+/// Expand a leading `~` in the given path to the user's home directory.
 #[tauri::command]
 pub fn resolve_path(handle: AppHandle, path: String) -> Result<String, String> {
-    if path.starts_with('~') {
+    if let Some(rest) = path.strip_prefix('~') {
         let home = handle.path().home_dir().map_err(|e| e.to_string())?;
-        let rest = &path[1..];
         let rest = rest.trim_start_matches('/');
         Ok(home.join(rest).to_string_lossy().to_string())
     } else {
@@ -256,6 +264,8 @@ pub struct SessionInfo {
     pub title: String,
 }
 
+/// Persist a chat session to `~/.tomat/sessions/<session_id>.json` atomically.
+/// Returns the session ID (generated from the current timestamp when absent).
 #[tauri::command]
 pub async fn save_chat_history(
     handle: AppHandle,
@@ -290,10 +300,24 @@ pub async fn save_chat_history(
     };
 
     let content = serde_json::to_string_pretty(&session_file).map_err(|e| e.to_string())?;
-    std::fs::write(file_path, content).map_err(|e| e.to_string())?;
+    // Atomic write: stage to a unique .tmp then rename. The pid+nanos suffix
+    // prevents two concurrent saves of the same session from racing on the
+    // same tmp path (which would otherwise clobber each other mid-write).
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = file_path.with_extension(format!("tmp.{}.{}", std::process::id(), suffix));
+    tokio::fs::write(&tmp_path, content)
+        .await
+        .map_err(|e| e.to_string())?;
+    tokio::fs::rename(&tmp_path, &file_path)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(session_id)
 }
 
+/// Update just the title on an existing session file (used by auto-titling).
 #[tauri::command]
 pub async fn save_session_title(
     handle: AppHandle,
@@ -315,6 +339,7 @@ pub async fn save_session_title(
     Ok(())
 }
 
+/// List all saved sessions, sorted by session ID (timestamp) ascending.
 #[tauri::command]
 pub async fn list_chat_sessions(handle: AppHandle) -> Result<Vec<SessionInfo>, String> {
     let dir = history_dir(&handle)?;
@@ -344,6 +369,7 @@ pub async fn list_chat_sessions(handle: AppHandle) -> Result<Vec<SessionInfo>, S
     Ok(sessions)
 }
 
+/// Remove a single session file from disk.
 #[tauri::command]
 pub async fn delete_chat_session(handle: AppHandle, session_id: String) -> Result<(), String> {
     let file_path = session_file_path(&handle, &session_id)?;
@@ -356,6 +382,7 @@ pub async fn delete_chat_session(handle: AppHandle, session_id: String) -> Resul
     Ok(())
 }
 
+/// Load the full contents of a specific session.
 #[tauri::command]
 pub async fn load_chat_session(
     handle: AppHandle,
@@ -378,6 +405,7 @@ pub async fn load_chat_session(
     }))
 }
 
+/// Load the most recent session, or `null` if none exist.
 #[tauri::command]
 pub async fn load_latest_chat_history(handle: AppHandle) -> Result<serde_json::Value, String> {
     let home = handle.path().home_dir().map_err(|e| e.to_string())?;
@@ -390,7 +418,7 @@ pub async fn load_latest_chat_history(handle: AppHandle) -> Result<serde_json::V
     let entries = std::fs::read_dir(history_dir).map_err(|e| e.to_string())?;
     let mut files: Vec<PathBuf> = entries
         .filter_map(|e| e.ok().map(|entry| entry.path()))
-        .filter(|p| p.extension().map_or(false, |ext| ext == "json"))
+        .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
         .collect();
 
     files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
@@ -402,26 +430,13 @@ pub async fn load_latest_chat_history(handle: AppHandle) -> Result<serde_json::V
             .unwrap_or("")
             .to_string();
         let content = std::fs::read_to_string(latest).map_err(|e| e.to_string())?;
-
-        // Try new format first, fall back to legacy (plain array)
-        if let Ok(session) = serde_json::from_str::<SessionFile>(&content) {
-            Ok(serde_json::json!(ChatHistoryResponse {
-                session_id,
-                title: session.title,
-                context_usage: session.context_usage,
-                messages: session.messages,
-            }))
-        } else {
-            // Legacy: file is just a JSON array of messages
-            let messages: serde_json::Value =
-                serde_json::from_str(&content).map_err(|e| e.to_string())?;
-            Ok(serde_json::json!(ChatHistoryResponse {
-                session_id,
-                title: String::new(),
-                context_usage: None,
-                messages,
-            }))
-        }
+        let session: SessionFile = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+        Ok(serde_json::json!(ChatHistoryResponse {
+            session_id,
+            title: session.title,
+            context_usage: session.context_usage,
+            messages: session.messages,
+        }))
     } else {
         Ok(serde_json::json!(null))
     }
@@ -431,11 +446,60 @@ pub async fn load_latest_chat_history(handle: AppHandle) -> Result<serde_json::V
 // Settings
 // -------------------------------------------------------------------
 
+// Settings whose values are secrets and must live in the OS keychain rather
+// than ~/.tomat/settings.json. The frontend (which owns the settings schema)
+// decides which keys are secret and passes them in on every call — Rust does
+// not maintain its own list.
+const KEYCHAIN_SERVICE: &str = "tomat";
+
+fn keychain_set(key: &str, value: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, key).map_err(|e| e.to_string())?;
+    entry.set_password(value).map_err(|e| e.to_string())
+}
+
+fn keychain_get(key: &str) -> Result<Option<String>, String> {
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, key).map_err(|e| e.to_string())?;
+    match entry.get_password() {
+        Ok(pw) => Ok(Some(pw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn keychain_delete(key: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, key).map_err(|e| e.to_string())?;
+    match entry.delete_credential() {
+        Ok(_) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Persist user settings. `settings` is written verbatim to
+/// `~/.tomat/settings.json`; every entry in `secrets` is routed to the OS
+/// keychain (empty value → delete). Caller is responsible for ensuring no
+/// secret-typed key appears in `settings`.
 #[tauri::command]
-pub async fn save_settings(handle: AppHandle, settings: serde_json::Value) -> Result<(), String> {
+pub async fn save_settings(
+    handle: AppHandle,
+    settings: serde_json::Value,
+    secrets: HashMap<String, String>,
+) -> Result<(), String> {
     let home = handle.path().home_dir().map_err(|e| e.to_string())?;
     let settings_dir = home.join(".tomat");
     std::fs::create_dir_all(&settings_dir).map_err(|e| e.to_string())?;
+
+    if !matches!(settings, serde_json::Value::Object(_)) {
+        return Err("settings must be a JSON object".into());
+    }
+
+    for (key, value) in &secrets {
+        if value.is_empty() {
+            keychain_delete(key)?;
+        } else {
+            keychain_set(key, value)?;
+        }
+    }
 
     let settings_path = settings_dir.join("settings.json");
     let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
@@ -443,24 +507,43 @@ pub async fn save_settings(handle: AppHandle, settings: serde_json::Value) -> Re
     Ok(())
 }
 
+/// Load user settings, merging in the named keychain entries.
 #[tauri::command]
-pub async fn load_settings(handle: AppHandle) -> Result<serde_json::Value, String> {
+pub async fn load_settings(
+    handle: AppHandle,
+    secret_keys: Vec<String>,
+) -> Result<serde_json::Value, String> {
     let home = handle.path().home_dir().map_err(|e| e.to_string())?;
     let settings_path = home.join(".tomat").join("settings.json");
 
-    if !settings_path.exists() {
-        return Ok(serde_json::json!(null));
+    let mut obj = if settings_path.exists() {
+        let content = std::fs::read_to_string(&settings_path).map_err(|e| e.to_string())?;
+        match serde_json::from_str::<serde_json::Value>(&content).map_err(|e| e.to_string())? {
+            serde_json::Value::Object(map) => map,
+            _ => serde_json::Map::new(),
+        }
+    } else {
+        serde_json::Map::new()
+    };
+
+    for key in &secret_keys {
+        if let Some(v) = keychain_get(key)? {
+            obj.insert(key.clone(), serde_json::Value::String(v));
+        }
     }
 
-    let content = std::fs::read_to_string(settings_path).map_err(|e| e.to_string())?;
-    let val: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-    Ok(val)
+    if obj.is_empty() && !settings_path.exists() {
+        return Ok(serde_json::json!(null));
+    }
+    Ok(serde_json::Value::Object(obj))
 }
 
 // -------------------------------------------------------------------
 // File conversion (anytomd)
 // -------------------------------------------------------------------
 
+/// Convert the file at `file_path` to Markdown for attachment as document context.
+/// Size-capped at 50 MiB; extension-whitelisted.
 #[tauri::command]
 pub async fn convert_file_to_markdown(file_path: String) -> Result<String, String> {
     let canonical =
@@ -508,6 +591,7 @@ pub struct ProcessMetrics {
     pub running: bool,
 }
 
+/// Return RSS and CPU% for each tracked sidecar plus the main process.
 #[tauri::command]
 pub async fn get_process_metrics(
     state: State<'_, AppState>,
@@ -525,7 +609,7 @@ pub async fn get_process_metrics(
     }
 
     let mut out = HashMap::new();
-    let mut sys = state.0.metrics.lock().map_err(|e| e.to_string())?;
+    let mut sys = state.0.metrics.write().await;
     for (name, pid) in pids {
         let sys_pid = sysinfo::Pid::from_u32(pid);
         sys.refresh_process(sys_pid);
@@ -681,11 +765,9 @@ fn build_models_tree(models_dir: &std::path::Path) -> Vec<StorageNode> {
             gguf_files.extend(collect_file_nodes(&repo_path, Some("bin")));
             gguf_files.sort_by(|a, b| storage_name(a).cmp(storage_name(b)));
 
-            let has_mmproj = gguf_files.iter().any(|n| {
-                storage_name(n)
-                    .to_ascii_lowercase()
-                    .starts_with("mmproj")
-            });
+            let has_mmproj = gguf_files
+                .iter()
+                .any(|n| storage_name(n).to_ascii_lowercase().starts_with("mmproj"));
 
             if gguf_files.is_empty() {
                 continue;
@@ -745,14 +827,8 @@ fn build_sessions_tree(sessions_dir: &std::path::Path) -> Vec<StorageNode> {
             .and_then(|s| s.to_str())
             .unwrap_or_default()
             .to_string();
-        let title = read_session_file(&p)
-            .map(|s| s.title)
-            .unwrap_or_default();
-        let display = if title.trim().is_empty() {
-            stem
-        } else {
-            title
-        };
+        let title = read_session_file(&p).map(|s| s.title).unwrap_or_default();
+        let display = if title.trim().is_empty() { stem } else { title };
         out.push(StorageNode::File {
             name: display,
             path: p.to_string_lossy().to_string(),
@@ -763,6 +839,7 @@ fn build_sessions_tree(sessions_dir: &std::path::Path) -> Vec<StorageNode> {
     out
 }
 
+/// Enumerate everything under `~/.tomat/` for the storage UI.
 #[tauri::command]
 pub async fn list_tomat_storage(handle: AppHandle) -> Result<StorageTree, String> {
     let home = handle.path().home_dir().map_err(|e| e.to_string())?;
@@ -791,33 +868,41 @@ pub async fn list_tomat_storage(handle: AppHandle) -> Result<StorageTree, String
     })
 }
 
-fn is_under(path: &std::path::Path, root: &std::path::Path) -> bool {
-    match (path.canonicalize(), root.canonicalize()) {
-        (Ok(p), Ok(r)) => p.starts_with(&r),
-        _ => false,
+/// Returns Some(canonical_path) if `path` resolves inside `root`, else None.
+/// Both arguments are canonicalized to defeat symlink-based path traversal.
+fn resolve_within(path: &std::path::Path, root_canonical: &std::path::Path) -> Option<PathBuf> {
+    let p = path.canonicalize().ok()?;
+    if p.starts_with(root_canonical) {
+        Some(p)
+    } else {
+        None
     }
 }
 
+/// Delete the given paths. Every path is canonicalized and must resolve under `~/.tomat/`.
 #[tauri::command]
 pub async fn delete_tomat_paths(handle: AppHandle, paths: Vec<String>) -> Result<(), String> {
     let home = handle.path().home_dir().map_err(|e| e.to_string())?;
-    let root = home.join(".tomat");
+    let root_canonical = home
+        .join(".tomat")
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
 
     for path_str in paths {
         let p = PathBuf::from(&path_str);
-        if !is_under(&p, &root) {
-            return Err(format!("Path not under ~/.tomat: {}", path_str));
-        }
-        let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+        let canonical = resolve_within(&p, &root_canonical)
+            .ok_or_else(|| format!("Path not under ~/.tomat: {}", path_str))?;
+        let meta = std::fs::metadata(&canonical).map_err(|e| e.to_string())?;
         if meta.is_dir() {
-            std::fs::remove_dir_all(&p).map_err(|e| e.to_string())?;
+            std::fs::remove_dir_all(&canonical).map_err(|e| e.to_string())?;
         } else {
-            std::fs::remove_file(&p).map_err(|e| e.to_string())?;
+            std::fs::remove_file(&canonical).map_err(|e| e.to_string())?;
         }
     }
     Ok(())
 }
 
+/// Remove all downloaded models from `~/.tomat/models/`.
 #[tauri::command]
 pub async fn clear_tomat_models(handle: AppHandle) -> Result<(), String> {
     let home = handle.path().home_dir().map_err(|e| e.to_string())?;
@@ -829,6 +914,7 @@ pub async fn clear_tomat_models(handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Remove every saved session from `~/.tomat/sessions/`.
 #[tauri::command]
 pub async fn clear_tomat_sessions(handle: AppHandle) -> Result<(), String> {
     let home = handle.path().home_dir().map_err(|e| e.to_string())?;
@@ -840,12 +926,19 @@ pub async fn clear_tomat_sessions(handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Wipe the settings file and every keychain entry the caller names.
 #[tauri::command]
-pub async fn clear_tomat_settings(handle: AppHandle) -> Result<(), String> {
+pub async fn clear_tomat_settings(
+    handle: AppHandle,
+    secret_keys: Vec<String>,
+) -> Result<(), String> {
     let home = handle.path().home_dir().map_err(|e| e.to_string())?;
     let path = home.join(".tomat").join("settings.json");
     if path.exists() {
         std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    for key in &secret_keys {
+        keychain_delete(key)?;
     }
     Ok(())
 }

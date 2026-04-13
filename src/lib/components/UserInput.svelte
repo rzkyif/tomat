@@ -8,8 +8,8 @@
     MessagePart,
   } from "$lib/shared/types";
   import { availableMonitors } from "@tauri-apps/api/window";
-  import { listen } from "@tauri-apps/api/event";
   import { messagesState, serversState, settingsState } from "../state";
+  import { shortcutHandler } from "$lib/state/shortcut.svelte";
   import { sendMessages } from "$lib/sidecar/llm";
   import { transcribeAudio } from "$lib/sidecar/stt";
   import { autocorrectTranscription } from "$lib/sidecar/llm";
@@ -18,16 +18,16 @@
     pauseClickThrough,
     resumeClickThrough,
   } from "$lib/shared/clickthrough";
-  import { playBeep } from "$lib/shared/beep";
   import { invoke } from "@tauri-apps/api/core";
+  import {
+    listCaptureMonitors,
+    captureMonitor,
+    type CaptureMonitorInfo,
+  } from "$lib/shared/capture";
+  import { vadManager } from "$lib/shared/vad.svelte";
+  import type { SmartSTTMode } from "$lib/shared/settings";
   import AttachmentList from "./AttachmentList.svelte";
   import Bubble from "./Bubble.svelte";
-
-  interface CaptureMonitorInfo {
-    id: string;
-    name: string;
-    isPrimary: boolean;
-  }
 
   let { toggleSettings, showSettings } = $props<{
     toggleSettings: () => void;
@@ -39,21 +39,9 @@
   let textareaElement: HTMLTextAreaElement | undefined = $state();
   let attachments = $state<Attachment[]>([]);
 
-  // Attachment + menu (expandable)
   let attachMenuOpen = $state(false);
   let captureMonitors = $state<CaptureMonitorInfo[]>([]);
   let capturing = $state(false);
-
-  // VAD state
-  let vadEnabled = $state(false);
-  let vadInstance: any = null;
-  let vadDestroyed = false;
-  let isListening = $state(false); // true when speech is currently detected
-  let vadLoading = $state(false);
-  let vadPendingDisable = false;
-
-  let vadPausedByHide = false; // true if VAD was paused due to window hide
-  let unlistenVisibility: (() => void) | null = null;
 
   let sttError = $state<string | null>(null);
   let sttErrorTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -62,9 +50,9 @@
   let isStreaming = $derived(messagesState.isStreaming);
   let hasContent = $derived(text.trim().length > 0 || attachments.length > 0);
   let placeholderText = $derived(
-    vadEnabled && isListening
+    vadManager.enabled && vadManager.listening
       ? "Listening..."
-      : vadEnabled
+      : vadManager.enabled
         ? "Waiting for speech..."
         : llmStatus === "Error"
           ? "LLM server failed to start!"
@@ -76,7 +64,6 @@
   );
   let sttStatus = $derived(serversState.serverStatuses.stt.status);
 
-  /** Convert Attachment[] to MessagePart[] for display in AttachmentList */
   let attachmentParts = $derived(
     attachments.map((att): MessagePart => {
       if (att.type === "image") {
@@ -91,7 +78,6 @@
     }),
   );
 
-  // Fullscreen image preview
   let previewImageUrl = $state<string | null>(null);
 
   function openImagePreview(url: string) {
@@ -122,45 +108,6 @@
     }
   });
 
-  onMount(() => {
-    window.addEventListener("focus", focusTextarea);
-    return () => window.removeEventListener("focus", focusTextarea);
-  });
-
-  onMount(async () => {
-    try {
-      const m = await availableMonitors();
-      monitors = m.map((mon, i) => ({
-        id: mon.name || i.toString(),
-        name: mon.name || `Monitor ${i + 1}`,
-        isPrimary: false,
-      }));
-    } catch (err) {
-      console.warn("Could not fetch monitors", err);
-    }
-  });
-
-  onMount(async () => {
-    unlistenVisibility = await listen<boolean>(
-      "window-visibility",
-      async ({ payload: visible }) => {
-        if (!visible && vadEnabled && vadInstance) {
-          if (settingsState.currentSettings["stt.smartStt"] === "persistent") {
-            vadInstance.pause();
-            isListening = false;
-            vadPausedByHide = true;
-          } else {
-            await disableVadNow();
-          }
-        } else if (visible && vadPausedByHide && vadInstance) {
-          vadInstance.start();
-          vadPausedByHide = false;
-        }
-      },
-    );
-  });
-
-  // Click-outside to close the attachment menu
   function handleDocClick(e: MouseEvent) {
     if (!attachMenuOpen) return;
     const target = e.target as HTMLElement;
@@ -170,120 +117,68 @@
   }
 
   onMount(() => {
+    const cleanups: Array<() => void> = [];
+
+    // Focus management
+    window.addEventListener("focus", focusTextarea);
+    cleanups.push(() => window.removeEventListener("focus", focusTextarea));
+
+    // Click-outside to close attachment menu
     document.addEventListener("click", handleDocClick, true);
-    return () => document.removeEventListener("click", handleDocClick, true);
-  });
+    cleanups.push(() =>
+      document.removeEventListener("click", handleDocClick, true),
+    );
 
-  // --- Smart STT: global shortcut handling ---
-
-  let shortcutPressStart = 0;
-  let shortcutWasVisibleOnPress = false;
-  let shortcutHoldTimer: ReturnType<typeof setTimeout> | null = null;
-  let unlistenShortcutPressed: (() => void) | null = null;
-  let unlistenShortcutReleased: (() => void) | null = null;
-
-  async function windowIsVisible(): Promise<boolean> {
-    try {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      return await getCurrentWindow().isVisible();
-    } catch {
-      return true;
-    }
-  }
-
-  onMount(async () => {
-    unlistenShortcutPressed = await listen("shortcut-pressed", async () => {
-      const mode = settingsState.currentSettings["stt.smartStt"];
-      const duration =
-        Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
-      shortcutPressStart = Date.now();
-
-      if (mode === "hold") {
-        const visible = await windowIsVisible();
-        shortcutWasVisibleOnPress = visible;
-
-        // Show the app immediately if hidden, but in both cases defer VAD
-        // activation to the hold timer so quick taps don't trigger VAD.
-        if (!visible) {
-          try {
-            await invoke("show_main_window");
-          } catch (e) {
-            console.warn("[shortcut] show failed:", e);
-          }
-        }
-
-        if (shortcutHoldTimer) clearTimeout(shortcutHoldTimer);
-        shortcutHoldTimer = setTimeout(async () => {
-          shortcutHoldTimer = null;
-          if (shortcutPressStart && !vadEnabled && !vadLoading) {
-            await toggleVad();
-          }
-        }, duration);
-      } else {
-        // Disabled / Persistent: classic toggle visibility
-        const visible = await windowIsVisible();
+    // Async setup: monitors, VAD, shortcut listeners, persistent-mode restore.
+    // Monitors are best-effort (benign on failure); VAD and shortcut setup
+    // failures surface via the sttError banner because DevTools aren't
+    // available in the packaged app.
+    void (async () => {
+      try {
         try {
-          await invoke(visible ? "hide_main_window" : "show_main_window");
-        } catch (e) {
-          console.warn("[shortcut] toggle failed:", e);
+          const m = await availableMonitors();
+          monitors = m.map((mon, i) => ({
+            id: mon.name || i.toString(),
+            name: mon.name || `Monitor ${i + 1}`,
+            isPrimary: false,
+          }));
+        } catch (err) {
+          console.warn("Could not fetch monitors", err);
         }
-      }
-    });
 
-    unlistenShortcutReleased = await listen("shortcut-released", async () => {
-      const mode = settingsState.currentSettings["stt.smartStt"];
-      const duration =
-        Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
-      const held = shortcutPressStart ? Date.now() - shortcutPressStart : 0;
-      const wasVisibleOnPress = shortcutWasVisibleOnPress;
-      shortcutPressStart = 0;
+        await vadManager.attach(handleVadAudio);
+        await shortcutHandler.attach();
 
-      if (mode !== "hold") return;
-
-      if (shortcutHoldTimer) {
-        clearTimeout(shortcutHoldTimer);
-        shortcutHoldTimer = null;
-      }
-
-      if (held < duration) {
-        // Short tap: if the app was already visible, hide it (tap-to-hide).
-        // If the app was hidden on press we showed it — leave it visible.
-        if (wasVisibleOnPress) {
-          try {
-            await invoke("hide_main_window");
-          } catch (e) {
-            console.warn("[shortcut] hide failed:", e);
-          }
+        const mode = settingsState.currentSettings["stt.smartStt"] as SmartSTTMode;
+        if (
+          mode === "persistent" &&
+          settingsState.currentSettings["stt.vadPersistedState"] === true &&
+          !vadManager.enabled
+        ) {
+          await vadManager.toggle();
         }
-      } else if (vadEnabled) {
-        await toggleVad();
+      } catch (err) {
+        console.error("[user-input] init failed:", err);
+        const detail = err instanceof Error ? err.message : String(err);
+        sttError = `Voice input setup failed: ${detail}`;
+        if (sttErrorTimeout) clearTimeout(sttErrorTimeout);
+        sttErrorTimeout = setTimeout(() => {
+          sttError = null;
+        }, 8000);
       }
-    });
-  });
+    })();
 
-  // Persistent mode: restore VAD state on mount
-  onMount(async () => {
-    if (
-      settingsState.currentSettings["stt.smartStt"] === "persistent" &&
-      settingsState.currentSettings["stt.vadPersistedState"] === true &&
-      !vadEnabled
-    ) {
-      await toggleVad();
-    }
+    return () => {
+      for (const c of cleanups) c();
+    };
   });
 
   onDestroy(() => {
-    vadDestroyed = true;
-    if (vadInstance) {
-      vadInstance.destroy();
-      vadInstance = null;
-    }
-    unlistenVisibility?.();
-    unlistenShortcutPressed?.();
-    unlistenShortcutReleased?.();
-    if (shortcutHoldTimer) {
-      clearTimeout(shortcutHoldTimer);
-      shortcutHoldTimer = null;
+    shortcutHandler.detach();
+    vadManager.detach();
+    if (sttErrorTimeout) {
+      clearTimeout(sttErrorTimeout);
+      sttErrorTimeout = null;
     }
   });
 
@@ -321,7 +216,6 @@
       }
     }
 
-    // If only text, return as string for simplicity
     if (parts.length === 1 && parts[0].type === "text") {
       return parts[0].text;
     }
@@ -366,81 +260,6 @@
     }
   }
 
-  // --- VAD ---
-
-  async function disableVadNow() {
-    if (vadInstance) {
-      vadInstance.destroy();
-      vadInstance = null;
-    }
-    vadEnabled = false;
-    isListening = false;
-    vadPendingDisable = false;
-    playBeep("off");
-    if (settingsState.currentSettings["stt.smartStt"] === "persistent") {
-      await settingsState.updateSetting("stt.vadPersistedState", false);
-    }
-  }
-
-  async function toggleVad() {
-    if (vadEnabled) {
-      // If VAD is currently capturing speech, defer the disable until
-      // onSpeechEnd (or onVADMisfire) fires so the last clip reaches STT.
-      if (isListening && vadInstance && !vadPendingDisable) {
-        vadPendingDisable = true;
-        return;
-      }
-      if (vadPendingDisable) return; // already queued
-      await disableVadNow();
-    } else {
-      // Enable
-      vadLoading = true;
-      try {
-        const { MicVAD } = await import("@ricky0123/vad-web");
-
-        const instance = await MicVAD.new({
-          baseAssetPath: "/vad/",
-          onnxWASMBasePath: "/vad/",
-          model: "v5",
-          onSpeechStart: () => {
-            isListening = true;
-          },
-          onSpeechEnd: async (audio: Float32Array) => {
-            isListening = false;
-            await handleVadAudio(audio);
-            if (vadPendingDisable) {
-              await disableVadNow();
-            }
-          },
-          onVADMisfire: () => {
-            isListening = false;
-            if (vadPendingDisable) {
-              void disableVadNow();
-            }
-          },
-        });
-
-        if (vadDestroyed) {
-          instance.destroy();
-          return;
-        }
-
-        vadInstance = instance;
-        vadInstance.start();
-        vadEnabled = true;
-        playBeep("on");
-        if (settingsState.currentSettings["stt.smartStt"] === "persistent") {
-          await settingsState.updateSetting("stt.vadPersistedState", true);
-        }
-      } catch (err) {
-        console.error("[vad] Failed to initialize VAD:", err);
-        vadEnabled = false;
-      } finally {
-        vadLoading = false;
-      }
-    }
-  }
-
   async function handleVadAudio(audio: Float32Array) {
     const wavBlob = float32ToWav(audio, 16000);
     const base64 = await blobToBase64(wavBlob);
@@ -459,7 +278,6 @@
     let transcription = result.text.trim();
     if (!transcription) return;
 
-    // LLM Autocorrect
     if (settingsState.currentSettings["stt.llmAutocorrect"]) {
       try {
         const corrected = await autocorrectTranscription(transcription);
@@ -472,7 +290,6 @@
     text = transcription;
     textareaElement?.focus();
 
-    // Auto Send
     if (settingsState.currentSettings["stt.autoSend"]) {
       if (messagesState.isStreaming) {
         await messagesState.interruptStreaming();
@@ -480,8 +297,6 @@
       await handleSend();
     }
   }
-
-  // --- File Picker ---
 
   async function handleAttachFile() {
     try {
@@ -583,7 +398,6 @@
       const isImage = imageExtensions.includes(ext);
 
       if (isImage) {
-        // Read image as binary, convert to base64 efficiently via Blob + FileReader
         const data = await readFile(filePath);
         const mimeMap: Record<string, string> = {
           png: "image/png",
@@ -597,14 +411,11 @@
         const mime = mimeMap[ext] || "image/png";
         const blob = new Blob([data], { type: mime });
         const base64 = await blobToBase64(blob);
-        // blobToBase64 returns raw base64 (no prefix), we store with mime for the data URL
         attachments = [
           ...attachments,
           { type: "image", filename: fileName, data: base64, mime },
         ];
       } else {
-        // Convert document to markdown via Rust
-        const { invoke } = await import("@tauri-apps/api/core");
         const markdown = (await invoke("convert_file_to_markdown", {
           filePath,
         })) as string;
@@ -622,21 +433,12 @@
     attachments = attachments.filter((_, i) => i !== index);
   }
 
-  // --- Attachment menu ---
-
   async function toggleAttachMenu() {
     if (attachMenuOpen) {
       attachMenuOpen = false;
     } else {
       attachMenuOpen = true;
-      try {
-        captureMonitors = (await invoke(
-          "list_capture_monitors",
-        )) as CaptureMonitorInfo[];
-      } catch (e) {
-        console.warn("[capture] Failed to list monitors:", e);
-        captureMonitors = [];
-      }
+      captureMonitors = await listCaptureMonitors();
     }
   }
 
@@ -653,54 +455,27 @@
     const target = e.target as HTMLSelectElement;
     const id = target.value;
     target.value = "";
-    if (id) captureMonitorById(id);
+    if (id) void captureMonitorById(id);
   }
 
   async function captureMonitorById(monitorId: string) {
     if (capturing) return;
     closeAttachMenu();
     capturing = true;
-
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    const win = getCurrentWindow();
-
-    let shouldHide = false;
     try {
-      shouldHide = (await win.isVisible()) ?? false;
-    } catch (e) {
-      console.warn("[capture] Failed to check window visibility:", e);
-    }
-
-    try {
-      if (shouldHide) {
-        await invoke("hide_main_window");
-        // Give the compositor a moment to actually hide before capturing
-        await new Promise((r) => setTimeout(r, 180));
+      const base64 = await captureMonitor(monitorId);
+      if (base64) {
+        attachments = [
+          ...attachments,
+          {
+            type: "image",
+            filename: `screenshot-${Date.now()}.png`,
+            data: base64,
+            mime: "image/png",
+          },
+        ];
       }
-
-      const base64 = (await invoke("capture_monitor", {
-        monitorId,
-      })) as string;
-
-      attachments = [
-        ...attachments,
-        {
-          type: "image",
-          filename: `screenshot-${Date.now()}.png`,
-          data: base64,
-          mime: "image/png",
-        },
-      ];
-    } catch (e) {
-      console.error("[capture] Failed to capture monitor:", e);
     } finally {
-      if (shouldHide) {
-        try {
-          await invoke("show_main_window");
-        } catch (e) {
-          console.warn("[capture] Failed to restore window:", e);
-        }
-      }
       capturing = false;
     }
   }
@@ -884,31 +659,31 @@
     <div class="flex gap-2">
       {#if settingsState.currentSettings["stt.preset"] !== "disabled"}
         <button
-          class="bg-default-100 p-2 rounded-2xl flex items-center transition-colors {vadLoading
+          class="bg-default-100 p-2 rounded-2xl flex items-center transition-colors {vadManager.loading
             ? 'text-default-300 cursor-wait'
-            : vadEnabled
-              ? isListening
+            : vadManager.enabled
+              ? vadManager.listening
                 ? 'text-green-500 animate-pulse'
                 : 'text-blue-400'
               : sttStatus === 'Running' || sttStatus === 'Disabled'
                 ? 'hover:text-default-900 hover:cursor-pointer text-default-500'
                 : 'text-default-300 cursor-not-allowed'}"
-          title={vadEnabled
-            ? isListening
+          title={vadManager.enabled
+            ? vadManager.listening
               ? "Listening..."
               : "VAD Active (click to disable)"
             : sttStatus === "Running" || sttStatus === "Disabled"
               ? "Enable Voice Input"
               : "Voice Input (Unavailable)"}
-          onclick={toggleVad}
-          disabled={vadLoading ||
+          onclick={() => vadManager.toggle()}
+          disabled={vadManager.loading ||
             (sttStatus !== "Running" &&
               sttStatus !== "Disabled" &&
-              !vadEnabled)}
+              !vadManager.enabled)}
         >
           <i
-            class="flex {vadEnabled
-              ? isListening
+            class="flex {vadManager.enabled
+              ? vadManager.listening
                 ? 'i-material-symbols-progress-activity animate-spin'
                 : 'i-material-symbols-mic-rounded'
               : sttStatus === 'Running' || sttStatus === 'Disabled'
