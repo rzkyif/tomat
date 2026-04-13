@@ -13,6 +13,7 @@ jobs:
   js:
     name: JS / Svelte
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,6 +41,7 @@ jobs:
             triple: x86_64-pc-windows-msvc
             exe_ext: ".exe"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -64,9 +66,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      # tauri-build validates externalBin paths exist for the current target.
-      # Real binaries come from `bun run fetch` but aren't needed for cargo check;
-      # create empty placeholders so the build script doesn't fail.
+      # tauri-build validates every literal path in `externalBin` and `bundle.resources`
+      # (see src-tauri/tauri.conf.json). Real artifacts come from `bun run fetch` and
+      # `bun run build:bun`, but aren't needed for cargo check — empty placeholders
+      # satisfy the build script. If a new literal path is added to tauri.conf.json,
+      # add a matching placeholder here or CI will fail with "doesn't exist".
       - name: Create placeholder sidecar binaries
         shell: bash
         run: |
@@ -74,6 +78,11 @@ jobs:
           for bin in tomat-tools-server tomat-llama-server tomat-whisper-server; do
             touch "src-tauri/binaries/${bin}-${{ matrix.triple }}${{ matrix.exe_ext }}"
           done
+      - name: Create placeholder bundled resources
+        shell: bash
+        run: |
+          mkdir -p src-tauri/resources
+          touch src-tauri/resources/server.js
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
