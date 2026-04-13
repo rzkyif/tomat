@@ -6,6 +6,3 @@ contact_links:
   - name: ✨ Request a new feature
     url: https://github.com/rzkyif/tomat/discussions/new?category=feature-requests
     about: Describe a new capability you'd like to see, with a concrete use-case.
-  - name: 🔒 Report a security vulnerability
-    url: https://github.com/rzkyif/tomat/security/advisories/new
-    about: Private disclosure channel. Do not file security issues publicly.

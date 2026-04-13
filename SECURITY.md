@@ -4,7 +4,7 @@ Thanks for taking the time to look at Tomat's security posture. This project is 
 
 ## Reporting a vulnerability
 
-Please **do not** open a public issue for security-sensitive reports. Instead, email the maintainer at the address listed on the GitHub profile for [@rzkyif](https://github.com/rzkyif). Include:
+Please **do not** open a public issue for security-sensitive reports. Instead, email the maintainer at [security@au.tomat.ing](mailto:security@au.tomat.ing). Include:
 
 - A description of the issue and the impact you believe it has.
 - Steps to reproduce (or a proof-of-concept).
