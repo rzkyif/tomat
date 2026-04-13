@@ -8,6 +8,8 @@ use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
 // Grace period between SIGTERM and SIGKILL when superseding an old sidecar.
+// Unix-only: Windows has no SIGTERM equivalent and skips the grace period.
+#[cfg(unix)]
 const GRACEFUL_SHUTDOWN_SECS: u64 = 5;
 
 pub fn shared_library_dir<R: Runtime>(handle: &AppHandle<R>) -> Result<PathBuf, String> {
