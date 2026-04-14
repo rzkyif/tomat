@@ -7,7 +7,12 @@
     MessagePart,
   } from "$lib/shared/types";
   import { availableMonitors } from "@tauri-apps/api/window";
-  import { messagesState, serversState, settingsState, snippetsState } from "../state";
+  import {
+    messagesState,
+    serversState,
+    settingsState,
+    snippetsState,
+  } from "../state";
   import { shortcutHandler } from "$lib/state/shortcut.svelte";
   import { sendMessages } from "$lib/sidecar/llm";
   import { transcribeAudio } from "$lib/sidecar/stt";
@@ -91,7 +96,10 @@
       if (!s.trigger.toLowerCase().startsWith(prefix)) return false;
       // insert-user snippets are explicitly designed to be dropped inline
       // multiple times, so don't filter them out even if already present.
-      if (s.placement !== "insert-user" && existing.has(s.trigger.toLowerCase())) {
+      if (
+        s.placement !== "insert-user" &&
+        existing.has(s.trigger.toLowerCase())
+      ) {
         return false;
       }
       return true;
@@ -168,7 +176,10 @@
 
   /** Measure the viewport-relative position of a specific text offset inside
    *  the textarea by cloning its layout-affecting styles into a hidden div. */
-  function measureCaretAt(ta: HTMLTextAreaElement, index: number): { top: number; left: number } {
+  function measureCaretAt(
+    ta: HTMLTextAreaElement,
+    index: number,
+  ): { top: number; left: number } {
     const mirror = document.createElement("div");
     const cs = window.getComputedStyle(ta);
     const copiedProps = [
@@ -220,12 +231,18 @@
     // Translate the mirror-relative marker position to viewport coords using
     // the textarea's top-left as the origin (mirror and textarea share the
     // same content-box layout).
-    const top = taRect.top + (markerRect.top - mirror.getBoundingClientRect().top) - ta.scrollTop;
+    const top =
+      taRect.top +
+      (markerRect.top - mirror.getBoundingClientRect().top) -
+      ta.scrollTop;
     const left =
-      taRect.left + (markerRect.left - mirror.getBoundingClientRect().left) - ta.scrollLeft;
+      taRect.left +
+      (markerRect.left - mirror.getBoundingClientRect().left) -
+      ta.scrollLeft;
     document.body.removeChild(mirror);
     // Anchor the dropdown just below the current line.
-    const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+    const lineHeight =
+      parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
     return { top: top + lineHeight + 4, left };
   }
 
@@ -429,7 +446,9 @@
       buildContextBlock(),
     );
     const systemPromptOverride =
-      systemOverride && effectiveSystemPrompt ? effectiveSystemPrompt : undefined;
+      systemOverride && effectiveSystemPrompt
+        ? effectiveSystemPrompt
+        : undefined;
 
     const snapshot: Attachment[] = attachments.map((a) => ({
       type: a.type,
@@ -461,13 +480,15 @@
     if (autocompleteOpen && autocompleteOptions.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        autocompleteIndex = (autocompleteIndex + 1) % autocompleteOptions.length;
+        autocompleteIndex =
+          (autocompleteIndex + 1) % autocompleteOptions.length;
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
         autocompleteIndex =
-          (autocompleteIndex - 1 + autocompleteOptions.length) % autocompleteOptions.length;
+          (autocompleteIndex - 1 + autocompleteOptions.length) %
+          autocompleteOptions.length;
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
@@ -555,15 +576,7 @@
     "java",
   ];
 
-  const IMAGE_EXTENSIONS = [
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "webp",
-    "bmp",
-    "svg",
-  ];
+  const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
 
   const MIME_BY_EXT: Record<string, string> = {
     png: "image/png",
@@ -589,10 +602,7 @@
     const { tempDir, join } = await import("@tauri-apps/api/path");
     const buf = new Uint8Array(await blob.arrayBuffer());
     const tmpDir = await tempDir();
-    const tmpPath = await join(
-      tmpDir,
-      `tomat-paste-${Date.now()}-${filename}`,
-    );
+    const tmpPath = await join(tmpDir, `tomat-paste-${Date.now()}-${filename}`);
     try {
       await writeFile(tmpPath, buf);
       const markdown = (await invoke("convert_file_to_markdown", {
@@ -844,10 +854,7 @@
       autocomplete="off"
       rows="1"
       cols="1"
-      class="col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-[calc(100vw-80px)] max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words {llmStatus !==
-        'Running' && llmStatus !== 'Disabled'
-        ? 'opacity-50'
-        : ''}"
+      class="col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-[calc(100vw-80px)] max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words"
       placeholder={placeholderText}
       disabled={llmStatus !== "Running" && llmStatus !== "Disabled"}
     ></textarea>
@@ -969,14 +976,14 @@
       {#if settingsState.currentSettings["stt.preset"] !== "disabled"}
         <button
           class="bg-default-100 p-2 rounded-2xl flex items-center transition-colors {vadManager.loading
-            ? 'text-default-300 cursor-wait'
+            ? 'cursor-wait'
             : vadManager.enabled
               ? vadManager.listening
                 ? 'text-green-500'
                 : 'text-blue-400'
               : sttStatus === 'Running' || sttStatus === 'Disabled'
                 ? 'hover:text-default-900 hover:cursor-pointer text-default-500'
-                : 'text-default-300 cursor-not-allowed'}"
+                : 'cursor-not-allowed'}"
           title={vadManager.enabled
             ? vadManager.listening
               ? "Listening..."
@@ -991,13 +998,15 @@
               !vadManager.enabled)}
         >
           <i
-            class="flex {vadManager.enabled
-              ? vadManager.listening
-                ? 'i-line-md:loading-twotone-loop'
-                : 'i-material-symbols-mic-rounded'
-              : sttStatus === 'Running' || sttStatus === 'Disabled'
-                ? 'i-material-symbols-mic-outline-rounded'
-                : 'i-material-symbols-mic-off-outline-rounded'}"
+            class="flex {vadManager.loading
+              ? 'i-line-md:loading-loop'
+              : vadManager.enabled
+                ? vadManager.listening
+                  ? 'i-line-md:loading-twotone-loop'
+                  : 'i-material-symbols-mic-rounded'
+                : sttStatus === 'Running' || sttStatus === 'Disabled'
+                  ? 'i-material-symbols-mic-outline-rounded'
+                  : 'i-material-symbols-mic-off-outline-rounded'}"
           ></i>
         </button>
       {/if}
