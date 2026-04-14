@@ -154,14 +154,14 @@ bun run dev
 
 ## Available Scripts
 
-| Script           | Description                                                    |
-| ---------------- | -------------------------------------------------------------- |
-| `bun run dev`    | Start the Tauri development server                             |
-| `bun run build`  | Build the production desktop app                               |
+| Script           | Description                                                                  |
+| ---------------- | ---------------------------------------------------------------------------- |
+| `bun run dev`    | Start the Tauri development server                                           |
+| `bun run build`  | Build the production desktop app                                             |
 | `bun run fetch`  | Download sidecar binaries + stage VAD, ONNX runtime, and Kokoro voice assets |
-| `bun run check`  | Run linter, formatter, Svelte type checker, and `cargo check`  |
-| `bun run lint`   | Lint with [oxlint](https://oxc.rs/docs/guide/usage/linter)     |
-| `bun run format` | Format with [oxfmt](https://oxc.rs/docs/guide/usage/formatter) |
+| `bun run check`  | Run linter, formatter, Svelte type checker, and `cargo check`                |
+| `bun run lint`   | Lint with [oxlint](https://oxc.rs/docs/guide/usage/linter)                   |
+| `bun run format` | Format with [oxfmt](https://oxc.rs/docs/guide/usage/formatter)               |
 
 ## Project Structure
 

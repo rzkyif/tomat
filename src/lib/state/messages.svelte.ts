@@ -1,4 +1,5 @@
 import {
+  getTextContent,
   makeMessageId,
   type Attachment,
   type LLMErrorType,
@@ -10,6 +11,7 @@ import {
 } from "$lib/shared/types";
 import { invoke } from "@tauri-apps/api/core";
 import { settingsState } from "./settings.svelte";
+import { snippetsState } from "./snippets.svelte";
 import { interruptCurrentStream } from "$lib/shared/interrupt";
 import {
   deleteSessionAttachments,
@@ -20,6 +22,13 @@ import {
   writeSessionAttachment,
 } from "$lib/shared/attachments";
 import { stripMarkdownForTTS } from "$lib/shared/text";
+import { applySnippets } from "$lib/shared/snippets";
+import {
+  applySystemPromptOverride,
+  buildContextBlock,
+  buildSystemPrompt,
+  buildSystemPromptBase,
+} from "$lib/shared/systemPrompt";
 
 const DEFAULT_WINDOW_SIZE = 200;
 const WINDOW_GROWTH = 200;
@@ -82,6 +91,8 @@ class MessagesState {
     text: string;
     attachments: Attachment[];
     timestamp: number;
+    systemPromptOverride?: string;
+    effectiveSystemPrompt?: string | null;
   }): Promise<void> {
     // Sending a new message always preempts any previous assistant TTS that
     // might still be playing or queued.
@@ -134,8 +145,43 @@ class MessagesState {
 
     const content: MessageContent =
       parts.length === 1 && parts[0].type === "text" ? parts[0].text : parts;
-    this.messages.unshift({ id: tsStr, role: "user", content });
+    const userMsg: Message = { id: tsStr, role: "user", content };
+    if (payload.systemPromptOverride) {
+      userMsg.systemPromptOverride = payload.systemPromptOverride;
+    }
+    this.messages.unshift(userMsg);
+    this.upsertSystemMessage(payload.effectiveSystemPrompt ?? buildSystemPrompt());
     this.scheduleSave();
+  }
+
+  /**
+   * Keep the visible system-role bubble in sync with what was actually sent
+   * to the LLM on the most recent turn. Creates, updates, or removes the
+   * system message depending on the `prompts.showSystemPrompt` toggle and
+   * whether `effective` is non-empty.
+   */
+  private upsertSystemMessage(effective: string | null | undefined): void {
+    const show = settingsState.currentSettings["prompts.showSystemPrompt"] === true;
+    const existingIdx = this.messages.findIndex((m) => m.role === "system");
+    const shouldShow = show && typeof effective === "string" && effective.trim().length > 0;
+
+    if (shouldShow) {
+      const content = (effective as string).trim();
+      if (existingIdx >= 0) {
+        this.messages[existingIdx] = {
+          ...this.messages[existingIdx],
+          content,
+        };
+      } else {
+        this.messages.push({
+          id: makeMessageId(),
+          role: "system",
+          content,
+        });
+      }
+    } else if (existingIdx >= 0) {
+      this.messages.splice(existingIdx, 1);
+    }
   }
 
   loadMoreMessages() {
@@ -548,17 +594,35 @@ class MessagesState {
   /** Update the last user message content and regenerate the agent response */
   async updateLastUserMessage(content: MessageContent) {
     await this.interruptStreaming();
+    // interruptStreaming only stops TTS if something was actively streaming.
+    // When editing a message with a settled assistant response, the response
+    // is about to be discarded (either spliced out on delete, or replaced by
+    // the resend), so any replay-mode TTS tied to it must stop too.
+    this.resetTTSPlayback();
 
     const userIdx = this.messages.findIndex((m) => m.role === "user");
     if (userIdx < 0) return;
 
     const prevContent = this.messages[userIdx].content;
-    const removedPaths = diffRemovedAttachmentPaths(prevContent, content);
 
     const isEmpty =
       typeof content === "string"
         ? !content.trim()
         : content.every((p) => p.type === "text" && !p.text.trim());
+
+    // Reject clearing the sole user message of a session: leaving the session
+    // with zero user messages orphans the session file and drops any system
+    // message + attachments that belonged to this turn.
+    if (isEmpty) {
+      const userCount = this.messages.filter((m) => m.role === "user").length;
+      if (userCount <= 1) {
+        console.warn("[messages] refusing to empty the only user message of this session");
+        return;
+      }
+    }
+
+    const removedPaths = diffRemovedAttachmentPaths(prevContent, content);
+
     if (isEmpty) {
       this.messages.splice(0, userIdx + 1);
       if (removedPaths.length > 0) {
@@ -568,7 +632,31 @@ class MessagesState {
       return;
     }
 
-    this.messages[userIdx] = { role: "user", content };
+    // Re-apply snippet expansion over the edited text so retyped `@triggers`
+    // take effect on resend. Attachments are preserved verbatim.
+    const rawText = getTextContent(content);
+    const { userText, systemOverride } = applySnippets(rawText, snippetsState.snippets);
+    const systemPromptOverride = systemOverride
+      ? (applySystemPromptOverride(buildSystemPromptBase(), systemOverride, buildContextBlock()) ??
+        undefined)
+      : undefined;
+    const effectiveSystemPrompt = systemPromptOverride ?? buildSystemPrompt();
+
+    const expandedContent: MessageContent = (() => {
+      if (typeof content === "string") return userText;
+      const nonText = (content as MessagePart[]).filter((p) => p.type !== "text");
+      const parts: MessagePart[] = [];
+      if (userText) parts.push({ type: "text", text: userText });
+      parts.push(...nonText);
+      if (parts.length === 1 && parts[0].type === "text") return parts[0].text;
+      return parts;
+    })();
+
+    const updatedMsg: Message = { role: "user", content: expandedContent };
+    if (this.messages[userIdx].id) updatedMsg.id = this.messages[userIdx].id;
+    if (systemPromptOverride) updatedMsg.systemPromptOverride = systemPromptOverride;
+    this.messages[userIdx] = updatedMsg;
+
     if (removedPaths.length > 0) {
       void deleteSessionAttachments(removedPaths);
     }
@@ -581,6 +669,8 @@ class MessagesState {
     if (isFirstMessage) {
       this.sessionTitle = this.getDefaultTitle();
     }
+
+    this.upsertSystemMessage(effectiveSystemPrompt);
 
     await this.flushSave();
 

@@ -7,6 +7,7 @@
   import MultilineField from "./MultilineField.svelte";
   import PresetField from "./PresetField.svelte";
   import ServicesField from "./ServicesField.svelte";
+  import SnippetsField from "./SnippetsField.svelte";
   import StandardField from "./StandardField.svelte";
   import StorageField from "./StorageField.svelte";
 
@@ -33,6 +34,8 @@
     <ServicesField {field} />
   {:else if field.type === "storage"}
     <StorageField {field} />
+  {:else if field.type === "snippets"}
+    <SnippetsField {field} />
   {:else}
     <StandardField {field} {monitors} {error} {onChange} {onReset} />
   {/if}

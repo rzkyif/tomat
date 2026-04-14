@@ -947,9 +947,11 @@ pub enum StorageNode {
 pub struct StorageTree {
     pub models: Vec<StorageNode>,
     pub sessions: Vec<StorageNode>,
+    pub snippets: Vec<StorageNode>,
     pub total_size: u64,
     pub models_size: u64,
     pub sessions_size: u64,
+    pub snippets_size: u64,
     pub settings_size: u64,
     pub root_path: String,
 }
@@ -1127,6 +1129,129 @@ fn build_sessions_tree(sessions_dir: &std::path::Path) -> Vec<StorageNode> {
     out
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Snippet {
+    pub id: String,
+    pub name: String,
+    pub trigger: String,
+    pub placement: String,
+    pub text: String,
+}
+
+fn validate_snippet_id(id: &str) -> Result<(), String> {
+    if id.is_empty() || id.len() > 64 {
+        return Err("Invalid snippet ID".into());
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("Snippet ID contains invalid characters".into());
+    }
+    Ok(())
+}
+
+fn snippets_dir(handle: &AppHandle) -> Result<PathBuf, String> {
+    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let dir = home.join(".tomat").join("snippets");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+fn snippet_file_path(handle: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    validate_snippet_id(id)?;
+    Ok(snippets_dir(handle)?.join(format!("{}.json", id)))
+}
+
+/// Persist a single snippet to `~/.tomat/snippets/<id>.json` atomically.
+#[tauri::command]
+pub async fn save_snippet(handle: AppHandle, snippet: Snippet) -> Result<String, String> {
+    let id = snippet.id.clone();
+    let file_path = snippet_file_path(&handle, &id)?;
+
+    let content = serde_json::to_string_pretty(&snippet).map_err(|e| e.to_string())?;
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = file_path.with_extension(format!("tmp.{}.{}", std::process::id(), suffix));
+    tokio::fs::write(&tmp_path, content)
+        .await
+        .map_err(|e| e.to_string())?;
+    tokio::fs::rename(&tmp_path, &file_path)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+/// Read all snippets from `~/.tomat/snippets/`, sorted by name.
+#[tauri::command]
+pub async fn list_snippets(handle: AppHandle) -> Result<Vec<Snippet>, String> {
+    let dir = snippets_dir(&handle)?;
+    let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
+    let mut snippets: Vec<Snippet> = entries
+        .filter_map(|e| {
+            let entry = e.ok()?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                return None;
+            }
+            let content = std::fs::read_to_string(&path).ok()?;
+            serde_json::from_str::<Snippet>(&content).ok()
+        })
+        .collect();
+    snippets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(snippets)
+}
+
+/// Remove a single snippet file.
+#[tauri::command]
+pub async fn delete_snippet(handle: AppHandle, id: String) -> Result<(), String> {
+    let file_path = snippet_file_path(&handle, &id)?;
+    if !file_path.exists() {
+        return Ok(());
+    }
+    std::fs::remove_file(&file_path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn build_snippets_tree(snippets_dir: &std::path::Path) -> Vec<StorageNode> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(snippets_dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        if p.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let stem = p
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        // Prefer the snippet's user-facing `name` field when readable; otherwise
+        // fall back to the filename stem.
+        let display = std::fs::read_to_string(&p)
+            .ok()
+            .and_then(|c| serde_json::from_str::<Snippet>(&c).ok())
+            .map(|s| s.name)
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or(stem);
+        out.push(StorageNode::File {
+            name: display,
+            path: p.to_string_lossy().to_string(),
+            size: meta.len(),
+        });
+    }
+    out.sort_by(|a, b| storage_name(a).cmp(storage_name(b)));
+    out
+}
+
 /// Enumerate everything under `~/.tomat/` for the storage UI.
 #[tauri::command]
 pub async fn list_tomat_storage(handle: AppHandle) -> Result<StorageTree, String> {
@@ -1134,12 +1259,15 @@ pub async fn list_tomat_storage(handle: AppHandle) -> Result<StorageTree, String
     let root = home.join(".tomat");
     let models_dir = root.join("models");
     let sessions_dir = root.join("sessions");
+    let snippets_dir = root.join("snippets");
 
     let models = build_models_tree(&models_dir);
     let sessions = build_sessions_tree(&sessions_dir);
+    let snippets = build_snippets_tree(&snippets_dir);
 
     let models_size: u64 = models.iter().map(storage_size).sum();
     let sessions_size: u64 = sessions.iter().map(storage_size).sum();
+    let snippets_size: u64 = snippets.iter().map(storage_size).sum();
     let settings_size = std::fs::metadata(root.join("settings.json"))
         .map(|m| m.len())
         .unwrap_or(0);
@@ -1148,9 +1276,11 @@ pub async fn list_tomat_storage(handle: AppHandle) -> Result<StorageTree, String
     Ok(StorageTree {
         models,
         sessions,
+        snippets,
         total_size,
         models_size,
         sessions_size,
+        snippets_size,
         settings_size,
         root_path: root.to_string_lossy().to_string(),
     })

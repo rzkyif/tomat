@@ -96,7 +96,8 @@
           if (
             field.type === "command_preview" ||
             field.type === "services" ||
-            field.type === "storage"
+            field.type === "storage" ||
+            field.type === "snippets"
           )
             continue;
           const value = settingsState.currentSettings[field.id];
@@ -154,12 +155,14 @@
       }
     }
     if (
-      key.startsWith("general.") &&
-      key !== "general.systemPrompt.preset" &&
-      getPresetFieldIds("general").has(key)
+      key.startsWith("prompts.") &&
+      key !== "prompts.defaultSystemPrompt.preset" &&
+      getPresetFieldIds("prompts").has(key)
     ) {
-      if (settingsState.currentSettings["general.systemPrompt.preset"] !== "custom") {
-        await settingsState.updateSetting("general.systemPrompt.preset", "custom");
+      if (
+        settingsState.currentSettings["prompts.defaultSystemPrompt.preset"] !== "custom"
+      ) {
+        await settingsState.updateSetting("prompts.defaultSystemPrompt.preset", "custom");
       }
     }
     await settingsState.updateSetting(key, value);

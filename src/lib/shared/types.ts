@@ -13,9 +13,13 @@ export type Message = {
   /** Stable client-generated id used for TTS replay controls. Backfilled on
    *  load for messages persisted before this field existed. */
   id?: string;
-  role: "user" | "assistant" | "error";
+  role: "user" | "assistant" | "error" | "system";
   content: MessageContent;
   modelUsed?: "default" | "secondary";
+  /** Only populated on user messages. Holds the resolved system prompt that
+   *  was sent to the LLM for that turn, including any snippet-triggered
+   *  transformations. Used by sendMessages() on edit-and-resend. */
+  systemPromptOverride?: string;
 };
 
 /** Generate a message id. Kept consistent with the attachment-folder

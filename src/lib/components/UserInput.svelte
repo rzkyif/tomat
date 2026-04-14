@@ -7,12 +7,23 @@
     MessagePart,
   } from "$lib/shared/types";
   import { availableMonitors } from "@tauri-apps/api/window";
-  import { messagesState, serversState, settingsState } from "../state";
+  import { messagesState, serversState, settingsState, snippetsState } from "../state";
   import { shortcutHandler } from "$lib/state/shortcut.svelte";
   import { sendMessages } from "$lib/sidecar/llm";
   import { transcribeAudio } from "$lib/sidecar/stt";
   import { autocorrectTranscription } from "$lib/sidecar/llm";
   import { float32ToWav, blobToBase64 } from "$lib/shared/audio";
+  import {
+    applySnippets,
+    TRIGGER_BEFORE_CARET,
+    type Snippet,
+  } from "$lib/shared/snippets";
+  import {
+    applySystemPromptOverride,
+    buildContextBlock,
+    buildSystemPromptBase,
+  } from "$lib/shared/systemPrompt";
+  import SnippetAutocomplete from "./SnippetAutocomplete.svelte";
   import {
     pauseClickThrough,
     resumeClickThrough,
@@ -37,6 +48,66 @@
   let monitors: Monitor[] = $state([]);
   let textareaElement: HTMLTextAreaElement | undefined = $state();
   let attachments = $state<Attachment[]>([]);
+
+  let autocompleteOpen = $state(false);
+  let autocompletePrefix = $state("");
+  let autocompleteIndex = $state(0);
+  let autocompleteAnchor = $state({ top: 0, left: 0 });
+  let autocompleteTriggerStart = $state(-1);
+  let autocompleteTriggerEnd = $state(-1);
+  let imeComposing = $state(false);
+
+  /** Collects every `@trigger` token already present in `text`, excluding the
+   *  token currently being typed (so the one you're filtering on doesn't
+   *  filter itself out). Used to hide already-applied single-shot snippets
+   *  from autocomplete suggestions. */
+  function collectExistingTriggers(
+    source: string,
+    excludeStart: number,
+    excludeEnd: number,
+  ): Set<string> {
+    const found = new Set<string>();
+    const re = /(^|[^\w@])(@[A-Za-z0-9_-]+)/g;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(source)) !== null) {
+      const tokenStart = match.index + match[1].length;
+      const tokenEnd = tokenStart + match[2].length;
+      if (tokenEnd <= excludeStart || tokenStart >= excludeEnd) {
+        found.add(match[2].toLowerCase());
+      }
+    }
+    return found;
+  }
+
+  let autocompleteOptions = $derived.by<Snippet[]>(() => {
+    if (!autocompleteOpen) return [];
+    const prefix = autocompletePrefix.toLowerCase();
+    const existing = collectExistingTriggers(
+      text,
+      autocompleteTriggerStart,
+      autocompleteTriggerEnd,
+    );
+    return snippetsState.snippets.filter((s) => {
+      if (!s.trigger.toLowerCase().startsWith(prefix)) return false;
+      // insert-user snippets are explicitly designed to be dropped inline
+      // multiple times, so don't filter them out even if already present.
+      if (s.placement !== "insert-user" && existing.has(s.trigger.toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+  });
+
+  $effect(() => {
+    if (!autocompleteOpen) return;
+    if (autocompleteOptions.length === 0) {
+      autocompleteOpen = false;
+      return;
+    }
+    if (autocompleteIndex >= autocompleteOptions.length) {
+      autocompleteIndex = 0;
+    }
+  });
 
   let attachMenuOpen = $state(false);
   let captureMonitors = $state<CaptureMonitorInfo[]>([]);
@@ -93,6 +164,137 @@
 
   function handlePreviewKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") closeImagePreview();
+  }
+
+  /** Measure the viewport-relative position of a specific text offset inside
+   *  the textarea by cloning its layout-affecting styles into a hidden div. */
+  function measureCaretAt(ta: HTMLTextAreaElement, index: number): { top: number; left: number } {
+    const mirror = document.createElement("div");
+    const cs = window.getComputedStyle(ta);
+    const copiedProps = [
+      "boxSizing",
+      "width",
+      "height",
+      "overflowX",
+      "overflowY",
+      "borderTopWidth",
+      "borderRightWidth",
+      "borderBottomWidth",
+      "borderLeftWidth",
+      "paddingTop",
+      "paddingRight",
+      "paddingBottom",
+      "paddingLeft",
+      "fontStyle",
+      "fontVariant",
+      "fontWeight",
+      "fontStretch",
+      "fontSize",
+      "fontSizeAdjust",
+      "lineHeight",
+      "fontFamily",
+      "textAlign",
+      "textTransform",
+      "textIndent",
+      "textDecoration",
+      "letterSpacing",
+      "wordSpacing",
+      "tabSize",
+    ] as const;
+    for (const p of copiedProps) {
+      (mirror.style as any)[p] = (cs as any)[p];
+    }
+    mirror.style.position = "absolute";
+    mirror.style.top = "-9999px";
+    mirror.style.left = "-9999px";
+    mirror.style.visibility = "hidden";
+    mirror.style.whiteSpace = "pre-wrap";
+    mirror.style.overflowWrap = "break-word";
+    mirror.textContent = ta.value.substring(0, index);
+    const marker = document.createElement("span");
+    marker.textContent = "\u200b";
+    mirror.appendChild(marker);
+    document.body.appendChild(mirror);
+    const markerRect = marker.getBoundingClientRect();
+    const taRect = ta.getBoundingClientRect();
+    // Translate the mirror-relative marker position to viewport coords using
+    // the textarea's top-left as the origin (mirror and textarea share the
+    // same content-box layout).
+    const top = taRect.top + (markerRect.top - mirror.getBoundingClientRect().top) - ta.scrollTop;
+    const left =
+      taRect.left + (markerRect.left - mirror.getBoundingClientRect().left) - ta.scrollLeft;
+    document.body.removeChild(mirror);
+    // Anchor the dropdown just below the current line.
+    const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+    return { top: top + lineHeight + 4, left };
+  }
+
+  function updateAutocompleteFromInput() {
+    if (imeComposing || !textareaElement) {
+      autocompleteOpen = false;
+      return;
+    }
+    const ta = textareaElement;
+    const caret = ta.selectionStart ?? text.length;
+    const before = text.slice(0, caret);
+    const match = before.match(TRIGGER_BEFORE_CARET);
+    if (!match) {
+      autocompleteOpen = false;
+      return;
+    }
+    const token = match[1];
+    // Only reset the selected index when the filter prefix actually changed
+    // (or we're freshly opening). Otherwise arrow-key presses — which fire
+    // onkeyup → here — would bounce the highlight back to the first option.
+    const prefixChanged = !autocompleteOpen || token !== autocompletePrefix;
+    autocompletePrefix = token;
+    autocompleteTriggerStart = caret - token.length;
+    autocompleteTriggerEnd = caret;
+    if (prefixChanged) {
+      autocompleteIndex = 0;
+    }
+    autocompleteAnchor = measureCaretAt(ta, autocompleteTriggerStart);
+    autocompleteOpen = true;
+  }
+
+  function applySnippetTrigger(snippet: Snippet) {
+    if (!textareaElement) return;
+    const ta = textareaElement;
+    const start = autocompleteTriggerStart;
+    const end = autocompleteTriggerEnd;
+    if (start < 0 || end < 0) {
+      autocompleteOpen = false;
+      return;
+    }
+    const before = text.slice(0, start);
+    const after = text.slice(end);
+    const replacement = `${snippet.trigger} `;
+    text = `${before}${replacement}${after}`;
+    autocompleteOpen = false;
+    const newCaret = start + replacement.length;
+    // Restore caret position after Svelte updates the DOM value.
+    queueMicrotask(() => {
+      ta.focus();
+      ta.setSelectionRange(newCaret, newCaret);
+    });
+  }
+
+  function handleCompositionStart() {
+    imeComposing = true;
+    autocompleteOpen = false;
+  }
+
+  function handleCompositionEnd() {
+    imeComposing = false;
+    updateAutocompleteFromInput();
+  }
+
+  function handleTextInput() {
+    updateAutocompleteFromInput();
+  }
+
+  function handleSelectionChange() {
+    if (autocompleteOpen) updateAutocompleteFromInput();
   }
 
   function focusTextarea() {
@@ -212,6 +414,23 @@
     const trimmedText = text.trim();
     if (!trimmedText && attachments.length === 0) return;
 
+    // Expand snippet triggers before the message leaves the input. The
+    // resolved user text is what gets persisted + sent to the LLM; the
+    // resolved effective system prompt (including any snippet-driven
+    // prepend/replace/append) is attached to the user message so sendMessages
+    // can pick it up verbatim.
+    const { userText, systemOverride } = applySnippets(
+      trimmedText,
+      snippetsState.snippets,
+    );
+    const effectiveSystemPrompt = applySystemPromptOverride(
+      buildSystemPromptBase(),
+      systemOverride,
+      buildContextBlock(),
+    );
+    const systemPromptOverride =
+      systemOverride && effectiveSystemPrompt ? effectiveSystemPrompt : undefined;
+
     const snapshot: Attachment[] = attachments.map((a) => ({
       type: a.type,
       filename: a.filename,
@@ -222,12 +441,15 @@
 
     text = "";
     attachments = [];
+    autocompleteOpen = false;
 
     try {
       await messagesState.addUserMessage({
-        text: trimmedText,
+        text: userText,
         attachments: snapshot,
         timestamp,
+        systemPromptOverride,
+        effectiveSystemPrompt,
       });
       await sendMessages();
     } catch (err) {
@@ -236,6 +458,31 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    if (autocompleteOpen && autocompleteOptions.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        autocompleteIndex = (autocompleteIndex + 1) % autocompleteOptions.length;
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        autocompleteIndex =
+          (autocompleteIndex - 1 + autocompleteOptions.length) % autocompleteOptions.length;
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const selected = autocompleteOptions[autocompleteIndex];
+        if (selected) applySnippetTrigger(selected);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        autocompleteOpen = false;
+        return;
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (!isStreaming) handleSend();
@@ -586,6 +833,12 @@
       bind:this={textareaElement}
       bind:value={text}
       onkeydown={handleKeydown}
+      oninput={handleTextInput}
+      onkeyup={handleSelectionChange}
+      onclick={handleSelectionChange}
+      oncompositionstart={handleCompositionStart}
+      oncompositionend={handleCompositionEnd}
+      onblur={() => (autocompleteOpen = false)}
       onpaste={handlePaste}
       autocapitalize="on"
       autocomplete="off"
@@ -777,6 +1030,15 @@
 </Bubble>
 
 <svelte:window onkeydown={handlePreviewKeydown} onblur={closeImagePreview} />
+
+{#if autocompleteOpen}
+  <SnippetAutocomplete
+    options={autocompleteOptions}
+    selectedIndex={autocompleteIndex}
+    anchor={autocompleteAnchor}
+    onSelect={applySnippetTrigger}
+  />
+{/if}
 
 {#if previewImageUrl}
   <!-- svelte-ignore a11y_click_events_have_key_events -->

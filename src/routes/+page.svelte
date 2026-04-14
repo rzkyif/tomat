@@ -3,11 +3,17 @@
   import { invoke } from "@tauri-apps/api/core";
   import AgentMessage from "$lib/components/AgentMessage.svelte";
   import ErrorMessage from "$lib/components/ErrorMessage.svelte";
+  import SystemMessage from "$lib/components/SystemMessage.svelte";
   import UserInput from "$lib/components/UserInput.svelte";
   import UserMessage from "$lib/components/UserMessage.svelte";
   import SessionBar from "$lib/components/SessionBar.svelte";
   import Settings from "$lib/components/Settings.svelte";
-  import { messagesState, serversState, settingsState } from "$lib/state";
+  import {
+    messagesState,
+    serversState,
+    settingsState,
+    snippetsState,
+  } from "$lib/state";
   import {
     applyTheme,
     applyTextSize,
@@ -78,6 +84,7 @@
       } else {
         await messagesState.loadLatest();
       }
+      await snippetsState.load();
       document.addEventListener("click", linkHandler);
 
       // Initial sidecar startup
@@ -218,6 +225,8 @@
                 content={msg.content}
                 modelUsed={msg.modelUsed}
               />
+            {:else if msg.role === "system"}
+              <SystemMessage content={msg.content as string} />
             {/if}
           </div>
         {/each}

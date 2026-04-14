@@ -1,4 +1,11 @@
 import type { CommandType } from "./command";
+import {
+  TOOL_ONLY_PROMPT,
+  ASSISTANT_PROMPT,
+  DEFAULT_TITLE_GENERATION_PROMPT,
+  DEFAULT_AUTOCORRECT_PROMPT,
+  DEFAULT_DUAL_MODEL_DETECTION_PROMPT,
+} from "./prompts";
 
 export type SettingType =
   | "boolean"
@@ -12,7 +19,8 @@ export type SettingType =
   | "password"
   | "multiline"
   | "services"
-  | "storage";
+  | "storage"
+  | "snippets";
 
 export type SmartSTTMode = "disabled" | "hold" | "persistent";
 
@@ -27,39 +35,6 @@ export const TTS_BASE_FILES: readonly string[] = [
   `${TTS_REPO}/tokenizer_config.json`,
   `${TTS_REPO}/onnx/model_quantized.onnx`,
 ];
-
-const TOOL_ONLY_PROMPT = `You are a very limited on-device AI assistant. Your knowledge and reasoning capabilities are extremely small, so you MUST follow these rules strictly:
-
-1. You can ONLY answer very basic, short, factual questions (1-2 sentences max). Examples of questions you CAN answer: simple greetings, very basic arithmetic, the current date if provided in context, or restating something the user just said.
-
-2. For ANY question that requires reasoning, multi-step thinking, creativity, writing, coding, analysis, or specialized knowledge - you MUST NOT attempt to answer. Instead, politely explain that you are a small local model with very limited knowledge and cannot reliably answer complex questions, and suggest the user try a larger model or consult another source.
-
-3. When a tool call would help answer the user's request, you MUST make the tool call. Never try to guess what a tool would return. Never invent facts.
-
-4. Never make up information. Never guess. Never speculate. Never produce long responses. If in doubt, refuse politely.
-
-5. Keep your responses extremely short - ideally one sentence, never more than two. Do not add disclaimers, preambles, or filler.
-
-Remember: it is ALWAYS better to politely decline than to produce a wrong or made-up answer.`;
-
-const ASSISTANT_PROMPT = `You are a professional on-device AI assistant. You run locally on the user's machine and have access to a suite of tools that let you help the user accomplish their tasks.
-
-Your identity:
-- You are an on-device assistant - you run locally, you respect user privacy, and you do not rely on any cloud service for core reasoning.
-- You are professional, helpful, concise, and honest.
-
-Your capabilities:
-- You can answer questions, write and analyze code, help with tasks, and carry on natural conversation.
-- You have access to tools. When a tool would produce a better or more accurate answer than your own reasoning, make the tool call.
-- You can handle complex, multi-step requests. There are no arbitrary limits on the topics or tasks you are willing to help with, provided they are legal and safe.
-
-Your style:
-- Be direct and practical. Prefer short answers for simple questions and detailed answers only when needed.
-- Never pretend to be a different model or service.
-- If you are unsure about a fact, say so plainly rather than guessing.
-- Never fabricate tool output. If a tool is not available or fails, explain what happened.
-
-Remember: you are here to be genuinely useful to the user running you on their own device.`;
 
 export interface SettingOption {
   value: string | number;
@@ -144,143 +119,9 @@ export interface SettingGroup {
 
 export const SETTINGS_SCHEMA: SettingGroup[] = [
   {
-    id: "appearance",
-    name: "Appearance",
-    sections: [
-      {
-        label: "Theme",
-        fields: [
-          {
-            id: "appearance.theme",
-            name: "Theme",
-            description: "Choose between light, dark, or system-matching theme.",
-            type: "select",
-            defaultValue: "auto",
-            options: [
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
-              { value: "auto", label: "Auto (System)" },
-            ],
-          },
-          {
-            id: "appearance.textSize",
-            name: "Text Size",
-            description: "Base text size for the entire app.\nAccepted range: 12–32 pixels.",
-            type: "number",
-            defaultValue: 18,
-            suffix: "px",
-            regex: [
-              {
-                regex: "^(?:1[2-9]|2[0-9]|3[0-2])$",
-                errorMessage: "Must be between 12 and 32",
-              },
-            ],
-          },
-        ],
-      },
-      {
-        label: "Window",
-        fields: [
-          {
-            id: "layout.monitor",
-            name: "Monitor",
-            description: "Choose which monitor to display the app on.",
-            type: "monitor",
-            defaultValue: "primary",
-          },
-          {
-            id: "layout.alignment",
-            name: "Window Alignment",
-            description: "Align the window to the left, center, or right of the monitor.",
-            type: "select",
-            defaultValue: "center",
-            options: [
-              { value: "left", label: "Left" },
-              { value: "center", label: "Center" },
-              { value: "right", label: "Right" },
-            ],
-          },
-          {
-            id: "layout.width",
-            name: "Window Width",
-            description: "Width of the app window.\nAccepted range: 400–1200 pixels.",
-            type: "number",
-            defaultValue: 700,
-            suffix: "px",
-            regex: [
-              {
-                regex: "^(?:4[0-9]{2}|[5-9][0-9]{2}|1[01][0-9]{2}|1200)$",
-                errorMessage: "Must be between 400 and 1200",
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-  {
     id: "general",
     name: "General",
     sections: [
-      {
-        label: "System Prompt",
-        fields: [
-          {
-            id: "general.systemPrompt.preset",
-            name: "",
-            description: "",
-            type: "preset",
-            defaultValue: "disabled",
-            presetConfig: {
-              options: [
-                {
-                  id: "disabled",
-                  label: "None",
-                  title: "None",
-                  description:
-                    "No system prompt is sent. The model runs with its default behavior.",
-                  defaults: { "general.systemPrompt": "" },
-                },
-                {
-                  id: "tool-only",
-                  label: "Tool Only",
-                  title: "Tool Only",
-                  description:
-                    "Forces short, cautious replies and a strong preference for tool use. Suited to small on-device models that cannot reason reliably on their own.",
-                  defaults: { "general.systemPrompt": TOOL_ONLY_PROMPT },
-                },
-                {
-                  id: "assistant",
-                  label: "Assistant",
-                  title: "Assistant",
-                  description:
-                    "A professional, capable general-purpose assistant that answers directly and uses tools when helpful.",
-                  defaults: { "general.systemPrompt": ASSISTANT_PROMPT },
-                },
-              ],
-              secondaryOptions: [
-                {
-                  id: "custom",
-                  label: "Custom",
-                  title: "Custom",
-                  description:
-                    "Write your own system prompt. Editing the prompt manually switches to this option automatically.",
-                },
-              ],
-            },
-          },
-          {
-            id: "general.systemPrompt",
-            name: "System Prompt",
-            description:
-              "The system prompt sent to the agent.\nEditing this manually switches the preset to Custom.",
-            type: "multiline",
-            defaultValue: "",
-            optional: true,
-            visibleWhen: { field: "general.systemPrompt.preset", eq: "custom" },
-          },
-        ],
-      },
       {
         label: "Context",
         fields: [
@@ -362,6 +203,213 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     ],
   },
   {
+    id: "prompts",
+    name: "Prompts",
+    sections: [
+      {
+        label: "Default System Prompt",
+        fields: [
+          {
+            id: "prompts.defaultSystemPrompt.preset",
+            name: "",
+            description: "",
+            type: "preset",
+            defaultValue: "disabled",
+            presetConfig: {
+              options: [
+                {
+                  id: "disabled",
+                  label: "None",
+                  title: "None",
+                  description:
+                    "No system prompt is sent. The model runs with its default behavior.",
+                  defaults: { "prompts.defaultSystemPrompt": "" },
+                },
+                {
+                  id: "tool-only",
+                  label: "Tool Only",
+                  title: "Tool Only",
+                  description:
+                    "Forces short, cautious replies and a strong preference for tool use. Suited to small on-device models that cannot reason reliably on their own.",
+                  defaults: { "prompts.defaultSystemPrompt": TOOL_ONLY_PROMPT },
+                },
+                {
+                  id: "assistant",
+                  label: "Assistant",
+                  title: "Assistant",
+                  description:
+                    "A professional, capable general-purpose assistant that answers directly and uses tools when helpful.",
+                  defaults: { "prompts.defaultSystemPrompt": ASSISTANT_PROMPT },
+                },
+              ],
+              secondaryOptions: [
+                {
+                  id: "custom",
+                  label: "Custom",
+                  title: "Custom",
+                  description:
+                    "Write your own system prompt. Editing the prompt manually switches to this option automatically.",
+                },
+              ],
+            },
+          },
+          {
+            id: "prompts.defaultSystemPrompt",
+            name: "Default System Prompt",
+            description:
+              "The system prompt sent to the agent.\nEditing this manually switches the preset to Custom.",
+            type: "multiline",
+            defaultValue: "",
+            optional: true,
+            visibleWhen: { field: "prompts.defaultSystemPrompt.preset", eq: "custom" },
+          },
+        ],
+      },
+      {
+        fields: [
+          {
+            id: "prompts.showSystemPrompt",
+            name: "Show System Prompt",
+            description:
+              "Show the active system prompt as a collapsible bubble at the top of each session.\nThe bubble updates to match whatever was last sent to the LLM, including any snippet-triggered changes.",
+            type: "boolean",
+            defaultValue: false,
+          },
+        ],
+      },
+      {
+        label: "Title Generation",
+        fields: [
+          {
+            id: "prompts.titleGenerationPrompt",
+            name: "Title Generation Prompt",
+            description:
+              "Prompt used to auto-generate a short session title from the first user message.",
+            type: "multiline",
+            defaultValue: DEFAULT_TITLE_GENERATION_PROMPT,
+            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
+          },
+        ],
+      },
+      {
+        label: "Autocorrect",
+        fields: [
+          {
+            id: "prompts.autocorrectPrompt",
+            name: "Autocorrect Prompt",
+            description:
+              "Prompt used to clean up speech-to-text transcriptions before they reach the chat input.",
+            type: "multiline",
+            defaultValue: DEFAULT_AUTOCORRECT_PROMPT,
+            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
+          },
+        ],
+      },
+      {
+        label: "Dual-Model Detection",
+        fields: [
+          {
+            id: "prompts.dualModelDetectionPrompt",
+            name: "Dual-Model Detection Prompt",
+            description:
+              "System prompt used by the default model to classify each new user message before it is answered.\nThe reply is matched case-insensitively: if it contains the word `complex` without `simple` the request is routed to the secondary model, otherwise it stays on the default model. A reply that is ambiguous or empty falls back to the default model.",
+            type: "multiline",
+            defaultValue: DEFAULT_DUAL_MODEL_DETECTION_PROMPT,
+            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
+          },
+        ],
+      },
+      {
+        label: "Snippets",
+        fields: [
+          {
+            id: "prompts.snippets",
+            name: "Snippets",
+            description:
+              "Reusable text fragments triggered via @trigger in the chat input. Snippets can prepend, append, replace, or insert text into either the user message or the system prompt.",
+            type: "snippets",
+            defaultValue: "",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "appearance",
+    name: "Appearance",
+    sections: [
+      {
+        label: "Theme",
+        fields: [
+          {
+            id: "appearance.theme",
+            name: "Theme",
+            description: "Choose between light, dark, or system-matching theme.",
+            type: "select",
+            defaultValue: "auto",
+            options: [
+              { value: "light", label: "Light" },
+              { value: "dark", label: "Dark" },
+              { value: "auto", label: "Auto (System)" },
+            ],
+          },
+          {
+            id: "appearance.textSize",
+            name: "Text Size",
+            description: "Base text size for the entire app.\nAccepted range: 12–32 pixels.",
+            type: "number",
+            defaultValue: 18,
+            suffix: "px",
+            regex: [
+              {
+                regex: "^(?:1[2-9]|2[0-9]|3[0-2])$",
+                errorMessage: "Must be between 12 and 32",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        label: "Window",
+        fields: [
+          {
+            id: "layout.monitor",
+            name: "Monitor",
+            description: "Choose which monitor to display the app on.",
+            type: "monitor",
+            defaultValue: "primary",
+          },
+          {
+            id: "layout.alignment",
+            name: "Window Alignment",
+            description: "Align the window to the left, center, or right of the monitor.",
+            type: "select",
+            defaultValue: "center",
+            options: [
+              { value: "left", label: "Left" },
+              { value: "center", label: "Center" },
+              { value: "right", label: "Right" },
+            ],
+          },
+          {
+            id: "layout.width",
+            name: "Window Width",
+            description: "Width of the app window.\nAccepted range: 400–1200 pixels.",
+            type: "number",
+            defaultValue: 700,
+            suffix: "px",
+            regex: [
+              {
+                regex: "^(?:4[0-9]{2}|[5-9][0-9]{2}|1[01][0-9]{2}|1200)$",
+                errorMessage: "Must be between 400 and 1200",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
     id: "llm",
     name: "Language Model",
     sections: [
@@ -392,7 +440,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 {
                   id: "0.8b",
                   label: "0.8B",
-                  title: "Qwen 0.8B",
+                  title: "Qwen 3.5 0.8B",
                   badges: [
                     { icon: "i-material-symbols-memory-rounded", label: "~1 GB RAM" },
                     { icon: "i-material-symbols-bolt-rounded", label: "Fastest" },
@@ -415,7 +463,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 {
                   id: "2b",
                   label: "2B",
-                  title: "Qwen 2B",
+                  title: "Qwen 3.5 2B",
                   badges: [
                     { icon: "i-material-symbols-memory-rounded", label: "~2 GB RAM" },
                     { icon: "i-material-symbols-speed-rounded", label: "Balanced" },
@@ -438,7 +486,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 {
                   id: "5b-e2b",
                   label: "5B E2B",
-                  title: "Gemma 5B E2B",
+                  title: "Gemma 4 5B E2B",
                   badges: [
                     { icon: "i-material-symbols-memory-rounded", label: "~5 GB RAM" },
                     { icon: "i-material-symbols-hourglass-top-rounded", label: "Slower" },
@@ -713,7 +761,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                     { icon: "i-material-symbols-memory-rounded", label: "~1 GB RAM" },
                     { icon: "i-material-symbols-bolt-rounded", label: "Fast" },
                     { icon: "i-material-symbols-graphic-eq-rounded", label: "Good accuracy" },
-                    { icon: "i-material-symbols-language-rounded", label: "Multilingual" },
+                    { icon: "i-material-symbols-language", label: "Multilingual" },
                   ],
                   description:
                     "Solid all-round transcription for clear speech. Runs well on most hardware.",
@@ -732,7 +780,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                     { icon: "i-material-symbols-memory-rounded", label: "~2.5 GB RAM" },
                     { icon: "i-material-symbols-speed-rounded", label: "Balanced" },
                     { icon: "i-material-symbols-graphic-eq-rounded", label: "Solid accuracy" },
-                    { icon: "i-material-symbols-language-rounded", label: "Multilingual" },
+                    { icon: "i-material-symbols-language", label: "Multilingual" },
                   ],
                   description:
                     "More accurate with accents or background noise. A good default on modern machines.",
@@ -751,7 +799,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                     { icon: "i-material-symbols-memory-rounded", label: "~2 GB RAM" },
                     { icon: "i-material-symbols-speed-rounded", label: "Balanced" },
                     { icon: "i-material-symbols-graphic-eq-rounded", label: "Best accuracy" },
-                    { icon: "i-material-symbols-language-rounded", label: "Multilingual" },
+                    { icon: "i-material-symbols-language", label: "Multilingual" },
                   ],
                   description:
                     "Quantized Turbo build of Large v3. Near-Large accuracy at a fraction of the size and latency.",
@@ -1081,26 +1129,9 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "dualModel.enabled",
             name: "Enable Dual Model",
             description:
-              "Route complex prompts to a stronger external model while keeping simple prompts on the default model.",
+              "Route complex prompts to a stronger external model while keeping simple prompts on the default model.\nThe detection prompt is configured in the Prompts group.",
             type: "boolean",
             defaultValue: false,
-          },
-        ],
-      },
-      {
-        label: "Detection",
-        visibleWhen: { field: "dualModel.enabled", eq: true },
-        fields: [
-          {
-            id: "dualModel.detectionPrompt",
-            name: "Detection Prompt",
-            description:
-              "System prompt used by the default model to classify each new user message before it is answered.\nThe reply is matched case-insensitively: if it contains the word `complex` without `simple` the request is routed to the secondary model, otherwise it stays on the default model. A reply that is ambiguous or empty falls back to the default model.",
-            type: "multiline",
-            defaultValue: `You are a router. Classify the user's request as either \`simple\` or \`complex\`.
-- \`simple\`: short factual questions, light chit-chat, trivial code edits, summarization of attached text, single-step tool invocations (e.g. set an alarm, start a timer, fetch the weather).
-- \`complex\`: multi-step reasoning, non-trivial coding, in-depth analysis, planning, long-form writing, anything that benefits from stronger reasoning or vision understanding.
-Reply with exactly one word: \`simple\` or \`complex\`. No punctuation.`,
           },
         ],
       },
@@ -1201,7 +1232,8 @@ export function getDefaultSettings(): Record<string, any> {
         if (
           field.type !== "command_preview" &&
           field.type !== "services" &&
-          field.type !== "storage"
+          field.type !== "storage" &&
+          field.type !== "snippets"
         ) {
           defaults[field.id] = field.defaultValue;
         }

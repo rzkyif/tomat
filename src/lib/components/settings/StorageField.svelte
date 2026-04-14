@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { SECRET_KEYS, TTS_BASE_FILES, type SettingField } from "$lib/shared/settings";
-  import { confirmState, settingsState } from "../../state";
+  import { confirmState, settingsState, snippetsState } from "../../state";
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -23,15 +23,19 @@
   type StorageTree = {
     models: StorageNode[];
     sessions: StorageNode[];
+    snippets: StorageNode[];
     total_size: number;
     models_size: number;
     sessions_size: number;
+    snippets_size: number;
     settings_size: number;
     root_path: string;
   };
 
   let tree = $state<StorageTree | null>(null);
-  let expanded = $state<Set<string>>(new Set(["__models__", "__sessions__"]));
+  let expanded = $state<Set<string>>(
+    new Set(["__models__", "__sessions__", "__snippets__"]),
+  );
   let selected = $state<Set<string>>(new Set());
   let lastSelectedPath = $state<string | null>(null);
   const inUsePaths = $derived(getInUseModelPaths());
@@ -42,7 +46,7 @@
       // Drop selections for paths that no longer exist
       const allPaths = new Set<string>();
       if (tree) {
-        for (const n of [...tree.models, ...tree.sessions]) {
+        for (const n of [...tree.models, ...tree.sessions, ...tree.snippets]) {
           collectPaths(n, allPaths);
         }
       }
@@ -94,6 +98,7 @@
     };
     addRoot("__models__", tree.models);
     addRoot("__sessions__", tree.sessions);
+    addRoot("__snippets__", tree.snippets);
     return rows;
   }
 
@@ -173,16 +178,17 @@
     return out;
   }
 
-  function hasClearable(kind: "models" | "sessions" | "settings"): boolean {
+  function hasClearable(kind: "models" | "sessions" | "snippets" | "settings"): boolean {
     if (!tree) return false;
     if (kind === "settings") return tree.settings_size > 0;
     if (kind === "sessions") return tree.sessions.length > 0;
+    if (kind === "snippets") return tree.snippets.length > 0;
     return collectModelFiles().some((p) => !inUsePaths.has(p));
   }
 
   function findNode(path: string): StorageNode | null {
     if (!tree) return null;
-    for (const root of [tree.models, tree.sessions]) {
+    for (const root of [tree.models, tree.sessions, tree.snippets]) {
       for (const n of root) {
         if (n.path === path) return n;
         if (n.kind === "folder") {
@@ -208,6 +214,10 @@
     return files;
   }
 
+  function isSnippetPath(path: string): boolean {
+    return !!tree && tree.snippets.some((n) => n.path === path);
+  }
+
   function handleKeyDown(e: KeyboardEvent) {
     const isDelete =
       e.key === "Delete" || (e.key === "Backspace" && (e.metaKey || e.ctrlKey));
@@ -230,6 +240,7 @@
         skipped > 0
           ? ` ${skipped} file${skipped === 1 ? "" : "s"} currently in use will be kept.`
           : "";
+      const touchesSnippets = toDelete.some(isSnippetPath);
       confirmState.request({
         title: "Delete items",
         message: `Delete ${toDelete.length} file${toDelete.length === 1 ? "" : "s"} from disk?${suffix} This cannot be undone.`,
@@ -242,12 +253,15 @@
             console.error("delete_tomat_paths failed", err);
           }
           await refresh();
+          if (touchesSnippets) {
+            void snippetsState.load();
+          }
         },
       });
     }
   }
 
-  function requestClear(kind: "models" | "sessions" | "settings") {
+  function requestClear(kind: "models" | "sessions" | "snippets" | "settings") {
     if (kind === "models") {
       const protect = getInUseModelPaths();
       const all = collectModelFiles();
@@ -279,6 +293,27 @@
             console.error("clear models failed", err);
           }
           await refresh();
+        },
+      });
+      return;
+    }
+
+    if (kind === "snippets") {
+      const paths = tree?.snippets.map((n) => n.path) || [];
+      if (paths.length === 0) return;
+      confirmState.request({
+        title: "Clear snippets",
+        message: `Delete all ${paths.length} snippet${paths.length === 1 ? "" : "s"} from disk? This cannot be undone.`,
+        destructive: true,
+        confirmLabel: "Clear",
+        onConfirm: async () => {
+          try {
+            await invoke("delete_tomat_paths", { paths });
+          } catch (err) {
+            console.error("clear snippets failed", err);
+          }
+          await refresh();
+          void snippetsState.load();
         },
       });
       return;
@@ -353,6 +388,15 @@
         size: tree.sessions_size,
         nodes: tree.sessions,
         clear: "sessions" as const,
+        expandable: true,
+      },
+      {
+        key: "__snippets__",
+        label: "Snippets",
+        empty: "No snippets.",
+        size: tree.snippets_size,
+        nodes: tree.snippets,
+        clear: "snippets" as const,
         expandable: true,
       },
       {

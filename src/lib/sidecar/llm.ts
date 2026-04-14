@@ -107,9 +107,7 @@ export async function routeSelection(): Promise<"default" | "secondary"> {
   const lastUser = messagesState.messages.find((m) => m.role === "user");
   if (!lastUser) return "default";
 
-  const detectionPrompt =
-    settings["dualModel.detectionPrompt"] ||
-    "Classify the user's request as `simple` or `complex`. Reply with exactly one word.";
+  const detectionPrompt = settings["prompts.dualModelDetectionPrompt"];
 
   try {
     const verdict = await singleShotLLM(detectionPrompt, lastUser.content);
@@ -164,57 +162,16 @@ export async function singleShotLLM(
 
 /** Generate a short session title from the first user message */
 export async function generateSessionTitle(firstMessage: string): Promise<string> {
-  const raw = await singleShotLLM(
-    `You are a title generator. Your ONLY job is to create a short title (3 to 5 words) that describes what the user's message is about.
-
-Rules:
-- Output ONLY the title, nothing else.
-- Do NOT answer the user's question.
-- Do NOT add quotes or punctuation at the end.
-- The title must be 3 to 5 words long.
-
-Examples:
-
-User: How do I center a div in CSS?
-Title: Centering A Div
-
-User: Can you help me write a Python script to rename files?
-Title: Python File Renaming Script
-
-User: I'm having trouble with my React app crashing on startup
-Title: React App Crash Issue
-
-User: What's the best way to learn guitar?
-Title: Learning Guitar Tips`,
-    firstMessage,
-  );
+  const settings = settingsState.currentSettings;
+  const raw = await singleShotLLM(settings["prompts.titleGenerationPrompt"], firstMessage);
   // Postprocess: ensure title case and strip trailing punctuation
   return titleCase(raw.replace(/[.!?]+$/, ""));
 }
 
 /** Correct transcription mistakes using the LLM */
 export async function autocorrectTranscription(text: string): Promise<string> {
-  return singleShotLLM(
-    `You are a transcription corrector. Your ONLY job is to fix small mistakes in speech-to-text output. Do NOT change the meaning. Do NOT add or remove sentences. Do NOT answer or respond to the text. Output ONLY the corrected text, nothing else.
-
-Common mistakes to fix:
-- Wrong homophones (e.g. "there" vs "their", "your" vs "you're")
-- Missing or extra small words (e.g. "a", "the", "is")
-- Misheard technical terms or names
-- Missing punctuation or capitalization
-
-Examples:
-
-Input: i want too create a new react component for the side bar
-Output: I want to create a new React component for the sidebar.
-
-Input: can you fix the bug were the button doesnt work when i click on it
-Output: Can you fix the bug where the button doesn't work when I click on it?
-
-Input: their is a error in the console that says type error
-Output: There is an error in the console that says TypeError.`,
-    text,
-  );
+  const settings = settingsState.currentSettings;
+  return singleShotLLM(settings["prompts.autocorrectPrompt"], text);
 }
 
 // --- Message sending ---
@@ -303,7 +260,11 @@ export async function sendMessages(): Promise<void> {
     const isFirstUserMessage = apiMessages.length === 1 && apiMessages[0].role === "user";
     const firstUserContent = isFirstUserMessage ? apiMessages[0].content : null;
 
-    const systemPrompt = buildSystemPrompt();
+    // Prefer the turn-specific system prompt stashed on the most recent user
+    // message by snippet expansion; fall back to the plain buildSystemPrompt
+    // result when no snippet fired.
+    const lastUserMsg = messagesState.messages.find((m) => m.role === "user");
+    const systemPrompt = lastUserMsg?.systemPromptOverride ?? buildSystemPrompt();
     if (systemPrompt) {
       apiMessages.unshift({ role: "system", content: systemPrompt });
     }
