@@ -21,7 +21,7 @@ tomat
   <img alt="Svelte 5" src="https://img.shields.io/badge/svelte-5-FF3E00?logo=svelte&logoColor=white"/>
 </p>
 
-tomat is a desktop AI client that provides easy access to state-of-the-art local speech-to-text, LLM inference, text-to-speech, and modular tool execution.
+tomat is a desktop AI client that provides easy and seamless access to state-of-the-art local speech-to-text, LLM inference, text-to-speech, and modular tool execution.
 
 It's designed to be useful out of the box for anyone - not just developers - while remaining deeply customizable for those who want more control.
 
@@ -184,7 +184,7 @@ scripts/              Build utilities (fetch-required-files)
 Tomat is in a **rapid-development phase**. All implementation is done by the maintainer ([@rzkyif](https://github.com/rzkyif)) and **external pull requests are not being reviewed or accepted** right now. The best ways to help:
 
 - 🐛 [Report a bug](https://github.com/rzkyif/tomat/issues/new?template=bug-report.yml) - filed as an Issue so it can be tracked to resolution.
-- 💡 [Suggest an improvement](https://github.com/rzkyif/tomat/discussions/new?category=improvement-suggestions) to an existing feature - filed as a Discussion.
+- 💡 [Suggest an improvement to an existing feature](https://github.com/rzkyif/tomat/discussions/new?category=improvement-suggestions) - filed as a Discussion.
 - ✨ [Request a new feature](https://github.com/rzkyif/tomat/discussions/new?category=feature-requests) - filed as a Discussion.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full policy and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
