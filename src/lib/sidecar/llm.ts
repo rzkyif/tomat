@@ -140,7 +140,8 @@ export async function singleShotLLM(
 
   const apiContent = await contentToApi(userMessage);
   const request: OpenAI.ChatCompletionCreateParamsNonStreaming & {
-    reasoning?: { effort: string; budget: number };
+    chat_template_kwargs?: Record<string, unknown>;
+    reasoning_effort?: string;
   } = {
     model,
     messages: [
@@ -150,9 +151,16 @@ export async function singleShotLLM(
     stream: false as const,
   };
 
-  // Disable reasoning for local models to get faster utility responses
-  if (preset !== "external") {
-    request.reasoning = { effort: "low", budget: 0 };
+  // Disable reasoning for single-shot utility calls. llama.cpp's documented
+  // per-request toggle is chat_template_kwargs.enable_thinking (see
+  // https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md).
+  // For OpenAI-compatible external servers, reasoning_effort="minimal" is the
+  // standard low-latency signal; servers that don't support it typically
+  // ignore unknown fields.
+  if (preset === "external") {
+    request.reasoning_effort = "minimal";
+  } else {
+    request.chat_template_kwargs = { enable_thinking: false };
   }
 
   const response = await client.chat.completions.create(request);
@@ -172,6 +180,13 @@ export async function generateSessionTitle(firstMessage: string): Promise<string
 export async function autocorrectTranscription(text: string): Promise<string> {
   const settings = settingsState.currentSettings;
   return singleShotLLM(settings["prompts.autocorrectPrompt"], text);
+}
+
+/** Merge a new transcription into existing textarea text via single-shot LLM. */
+export async function chainTranscription(existing: string, transcription: string): Promise<string> {
+  const settings = settingsState.currentSettings;
+  const userMessage = `<existing>\n${existing}\n</existing>\n<new>\n${transcription}\n</new>`;
+  return singleShotLLM(settings["prompts.chainTranscriptionPrompt"], userMessage);
 }
 
 // --- Message sending ---

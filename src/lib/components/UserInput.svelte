@@ -16,7 +16,10 @@
   import { shortcutHandler } from "$lib/state/shortcut.svelte";
   import { sendMessages } from "$lib/sidecar/llm";
   import { transcribeAudio } from "$lib/sidecar/stt";
-  import { autocorrectTranscription } from "$lib/sidecar/llm";
+  import {
+    autocorrectTranscription,
+    chainTranscription,
+  } from "$lib/sidecar/llm";
   import { float32ToWav, blobToBase64 } from "$lib/shared/audio";
   import {
     applySnippets,
@@ -53,6 +56,8 @@
   let monitors: Monitor[] = $state([]);
   let textareaElement: HTMLTextAreaElement | undefined = $state();
   let attachments = $state<Attachment[]>([]);
+  let originalTranscription = $state<string | null>(null);
+  let showAutocorrectDiff = $state(false);
 
   let autocompleteOpen = $state(false);
   let autocompletePrefix = $state("");
@@ -307,6 +312,10 @@
   }
 
   function handleTextInput() {
+    if (showAutocorrectDiff) {
+      showAutocorrectDiff = false;
+      originalTranscription = null;
+    }
     updateAutocompleteFromInput();
   }
 
@@ -431,6 +440,9 @@
     const trimmedText = text.trim();
     if (!trimmedText && attachments.length === 0) return;
 
+    showAutocorrectDiff = false;
+    originalTranscription = null;
+
     // Expand snippet triggers before the message leaves the input. The
     // resolved user text is what gets persisted + sent to the LLM; the
     // resolved effective system prompt (including any snippet-driven
@@ -511,6 +523,9 @@
   }
 
   async function handleVadAudio(audio: Float32Array) {
+    showAutocorrectDiff = false;
+    originalTranscription = null;
+
     const wavBlob = float32ToWav(audio, 16000);
     const base64 = await blobToBase64(wavBlob);
 
@@ -525,19 +540,52 @@
     }
     if (!result.text) return;
 
-    let transcription = result.text.trim();
+    const transcription = result.text.trim();
     if (!transcription) return;
+
+    const existing = text;
+    let raw = transcription;
+    let corrected: string | null = null;
 
     if (settingsState.currentSettings["stt.llmAutocorrect"]) {
       try {
-        const corrected = await autocorrectTranscription(transcription);
-        if (corrected) transcription = corrected;
+        const result = await autocorrectTranscription(raw);
+        if (result) corrected = result;
       } catch (e) {
         console.warn("[stt] Autocorrect failed:", e);
       }
     }
 
-    text = transcription;
+    const chainEnabled =
+      settingsState.currentSettings["stt.llmChainTranscription"] &&
+      existing.trim().length > 0;
+
+    if (chainEnabled) {
+      try {
+        const chainedRaw = await chainTranscription(existing, raw);
+        if (chainedRaw) raw = chainedRaw;
+        if (corrected) {
+          const chainedCorrected = await chainTranscription(
+            existing,
+            corrected,
+          );
+          if (chainedCorrected) corrected = chainedCorrected;
+        }
+      } catch (e) {
+        console.warn("[stt] Chain transcription failed:", e);
+      }
+    }
+
+    if (corrected) {
+      text = corrected;
+      const changed = corrected.trim() !== raw.trim();
+      originalTranscription = changed ? raw : null;
+      showAutocorrectDiff = changed;
+    } else {
+      text = raw;
+      originalTranscription = null;
+      showAutocorrectDiff = false;
+    }
     textareaElement?.focus();
 
     if (settingsState.currentSettings["stt.autoSend"]) {
@@ -829,6 +877,30 @@
     >
       <i class="flex i-material-symbols-mic-off-rounded text-base"></i>
       <span>{sttError}</span>
+    </div>
+  {/if}
+
+  <!-- LLM autocorrect before -->
+  {#if showAutocorrectDiff && originalTranscription !== null}
+    <div
+      class="flex items-start gap-2 text-sm text-default-500 bg-default-100 rounded-lg px-3 py-2"
+    >
+      <span class="shrink-0 font-medium">Before Autocorrect:</span>
+      <span class="whitespace-pre-wrap break-words flex-1"
+        >{originalTranscription}</span
+      >
+      <button
+        class="shrink-0 hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center text-base"
+        title="Reject autocorrect"
+        onclick={() => {
+          if (originalTranscription !== null) text = originalTranscription;
+          showAutocorrectDiff = false;
+          originalTranscription = null;
+          textareaElement?.focus();
+        }}
+      >
+        <i class="flex i-material-symbols-refresh-rounded"></i>
+      </button>
     </div>
   {/if}
 

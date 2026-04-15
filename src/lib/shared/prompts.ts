@@ -76,6 +76,29 @@ Output: Can you fix the bug where the button doesn't work when I click on it?
 Input: their is a error in the console that says type error
 Output: There is an error in the console that says TypeError.`;
 
+export const DEFAULT_CHAIN_TRANSCRIPTION_PROMPT = `You are a text combiner. You will receive EXISTING text already in the user's input box and a NEW transcription. Merge the NEW text into the EXISTING text naturally, continuing lists, sentences, or paragraphs where appropriate. Do NOT answer the content, do NOT add new ideas, do NOT remove existing content. Preserve formatting (newlines, lists, code fences) from the existing text. Output ONLY the combined text, nothing else.
+
+Input format:
+<existing>
+{existing text}
+</existing>
+<new>
+{new transcription}
+</new>
+
+Example:
+<existing>
+Explain the following things to me:
+1. cats
+</existing>
+<new>
+2 dogs
+</new>
+Output:
+Explain the following things to me:
+1. cats
+2. dogs`;
+
 export const DEFAULT_DUAL_MODEL_DETECTION_PROMPT = `You are a router. Classify the user's request as either \`simple\` or \`complex\`.
 - \`simple\`: short factual questions, light chit-chat, trivial code edits, summarization of attached text, single-step tool invocations (e.g. set an alarm, start a timer, fetch the weather).
 - \`complex\`: multi-step reasoning, non-trivial coding, in-depth analysis, planning, long-form writing, anything that benefits from stronger reasoning or vision understanding.

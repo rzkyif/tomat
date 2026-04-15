@@ -4,6 +4,7 @@ import {
   ASSISTANT_PROMPT,
   DEFAULT_TITLE_GENERATION_PROMPT,
   DEFAULT_AUTOCORRECT_PROMPT,
+  DEFAULT_CHAIN_TRANSCRIPTION_PROMPT,
   DEFAULT_DUAL_MODEL_DETECTION_PROMPT,
 } from "./prompts";
 
@@ -301,6 +302,20 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               "Prompt used to clean up speech-to-text transcriptions before they reach the chat input.",
             type: "multiline",
             defaultValue: DEFAULT_AUTOCORRECT_PROMPT,
+            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
+          },
+        ],
+      },
+      {
+        label: "Chain Transcription",
+        fields: [
+          {
+            id: "prompts.chainTranscriptionPrompt",
+            name: "Chain Transcription Prompt",
+            description:
+              "Prompt used to merge a fresh speech-to-text transcription into the existing text already in the chat input.",
+            type: "multiline",
+            defaultValue: DEFAULT_CHAIN_TRANSCRIPTION_PROMPT,
             regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
           },
         ],
@@ -702,7 +717,15 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description:
               "Use the language model to clean up transcription mistakes after speech recognition.",
             type: "boolean",
-            defaultValue: false,
+            defaultValue: true,
+          },
+          {
+            id: "stt.llmChainTranscription",
+            name: "LLM Chain Transcription",
+            description:
+              "When there is already text in the input, use the language model to merge a new transcription into it instead of replacing it.",
+            type: "boolean",
+            defaultValue: true,
           },
           {
             id: "stt.autoSend",
