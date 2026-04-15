@@ -17,6 +17,17 @@ export async function setupSidecarListeners() {
     console.log("[sidecar:event]", event.payload);
     serversState.updateStatus(event.payload);
   });
+  // The bun sidecar is started by Rust setup() before this listener attaches,
+  // so its initial Loading/Running events are lost. Seed from a snapshot so
+  // the UI doesn't fall back to the "Disabled" default.
+  try {
+    const snapshot = await invoke<Record<string, ServerStatus>>("get_server_statuses");
+    for (const [server, status] of Object.entries(snapshot)) {
+      serversState.updateStatus({ server: server as ServerStatusUpdate["server"], status });
+    }
+  } catch (e) {
+    console.warn("[sidecar] get_server_statuses failed:", e);
+  }
 }
 
 export function computeArgs(type: "llm" | "stt", currentSettings: Record<string, any>): string[] {
