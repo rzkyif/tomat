@@ -45,9 +45,7 @@
     ],
     "resources": [
       "resources/server.js",
-      "resources/node_modules/onnxruntime-node/**/*",
-      "resources/node_modules/onnxruntime-common/**/*",
-      "voices/**/*",
+      "resources/node_modules/**/*",
       "binaries/**/*.dylib",
       "binaries/**/*.so",
       "binaries/**/*.dll"

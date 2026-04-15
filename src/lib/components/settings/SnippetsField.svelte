@@ -89,7 +89,9 @@
   }
 
   function makeUniqueTrigger(): string {
-    const existing = new Set(snippetsState.snippets.map((s) => s.trigger.toLowerCase()));
+    const existing = new Set(
+      snippetsState.snippets.map((s) => s.trigger.toLowerCase()),
+    );
     let i = 1;
     while (existing.has(`@snippet${i}`)) i++;
     return `@snippet${i}`;
@@ -237,7 +239,9 @@
               class="bg-default-300 text-default-800 rounded-lg block w-full h-8 pl-6 pr-2 outline-none font-mono {triggerError
                 ? 'bg-err-input border-err border'
                 : ''}"
-              value={draftTrigger.startsWith("@") ? draftTrigger.slice(1) : draftTrigger}
+              value={draftTrigger.startsWith("@")
+                ? draftTrigger.slice(1)
+                : draftTrigger}
               oninput={handleTriggerInput}
               onblur={() => flushSave()}
               placeholder="scientist"
@@ -257,7 +261,8 @@
             class="appearance-none bg-default-300 text-default-800 rounded-lg block w-full h-8 px-2 pr-7 outline-none"
             value={draftPlacement}
             onchange={(e) => {
-              draftPlacement = (e.target as HTMLSelectElement).value as SnippetPlacement;
+              draftPlacement = (e.target as HTMLSelectElement)
+                .value as SnippetPlacement;
               scheduleSave();
             }}
           >
@@ -275,7 +280,7 @@
         <div class="text-default-600 text-sm">Text</div>
         <textarea
           aria-label="Snippet text"
-          class="bg-default-300 text-default-800 rounded-lg w-full px-2 py-1.5 outline-none resize-none max-h-64 min-h-24 overflow-y-auto whitespace-pre-wrap break-words text-sm font-mono"
+          class="bg-default-300 text-default-800 rounded-lg w-full px-2 py-1.5 outline-none resize-none max-h-64 min-h-24 overflow-y-auto whitespace-pre-wrap break-words text-sm"
           value={draftText}
           oninput={(e) => {
             draftText = (e.target as HTMLTextAreaElement).value;

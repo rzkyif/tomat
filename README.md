@@ -85,7 +85,7 @@ A comprehensive settings system lets you adjust everything for your particular u
 - Declarative settings schema with conditional fields
 - All data stored locally in `~/.tomat/`
 
-**Resources**
+**Usage**
 
 - Live RAM and CPU usage for each local service
 - Disk-usage browser with per-category clear actions that protect models currently in use
@@ -116,7 +116,7 @@ A comprehensive settings system lets you adjust everything for your particular u
 └────────┘    └────────────┘    └──────────────┘
 ```
 
-The Tauri backend manages sidecar processes (spawn, health check, restart, kill) and downloads queue one at a time. Models live in `~/.tomat/models/`, chat sessions in `~/.tomat/sessions/<session_id>/` (a `messages.json` plus any attachment files saved alongside it), and settings in `~/.tomat/settings.json` - all viewable and clearable from the Resources settings view. The bun sidecar also hosts the Kokoro-82M TTS runtime when Text-to-Speech is enabled.
+The Tauri backend manages sidecar processes (spawn, health check, restart, kill) and downloads queue one at a time. Models live in `~/.tomat/models/`, chat sessions in `~/.tomat/sessions/<session_id>/` (a `messages.json` plus any attachment files saved alongside it), and settings in `~/.tomat/settings.json` - all viewable and clearable from the Usage settings view. The bun sidecar also hosts the Kokoro-82M TTS runtime when Text-to-Speech is enabled.
 
 ## Prerequisites
 

@@ -227,6 +227,113 @@ async function contentToApi(content: MessageContent): Promise<string | ApiMessag
   return parts.length === 1 && parts[0].type === "text" ? parts[0].text : parts;
 }
 
+async function runStream(opts: {
+  route: "default" | "secondary";
+  /** Messages (chronological order) to include in the request body. */
+  contextMessages: Array<{ role: "user" | "assistant"; content: MessageContent }>;
+  /** User message whose systemPromptOverride should be consulted for this
+   *  turn, if any. */
+  lastUserMsg: { systemPromptOverride?: string } | undefined;
+  /** When set, fire-and-forget title generation from this first user message. */
+  firstUserContentForTitle: MessageContent | null;
+  signal: AbortSignal;
+}): Promise<void> {
+  const settings = settingsState.currentSettings;
+  const preset = settings["llm.preset"];
+  const usingSecondary = opts.route === "secondary";
+  const client = usingSecondary ? getSecondaryLLMClient() : getLLMClient();
+
+  const apiMessages: ApiMessage[] = await Promise.all(
+    opts.contextMessages.map(async (m) => ({
+      role: m.role,
+      content: await contentToApi(m.content),
+    })),
+  );
+
+  // Prefer the turn-specific system prompt stashed on the most recent user
+  // message by snippet expansion; fall back to the plain buildSystemPrompt
+  // result when no snippet fired.
+  const systemPrompt = opts.lastUserMsg?.systemPromptOverride ?? buildSystemPrompt();
+  if (systemPrompt) {
+    apiMessages.unshift({ role: "system", content: systemPrompt });
+  }
+
+  const useReasoning =
+    !usingSecondary && preset !== "external" && settings["llm.reasoning"] === "on";
+  const reasoningBudget = settings["llm.reasoningBudget"];
+  const model = usingSecondary
+    ? settings["dualModel.external.model"]
+    : preset === "external"
+      ? settings["llm.external.model"]
+      : "default";
+
+  const request: OpenAI.ChatCompletionCreateParamsStreaming & {
+    reasoning?: { effort: string; budget: number };
+  } = {
+    model,
+    messages: apiMessages as OpenAI.ChatCompletionMessageParam[],
+    stream: true,
+    stream_options: { include_usage: true },
+  };
+
+  if (useReasoning && reasoningBudget) {
+    request.reasoning = {
+      effort: "high",
+      budget: Number(reasoningBudget),
+    };
+  }
+
+  if (opts.firstUserContentForTitle !== null) {
+    const content = opts.firstUserContentForTitle;
+    const textForTitle =
+      typeof content === "string"
+        ? content
+        : content
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join(" ");
+
+    generateSessionTitle(textForTitle)
+      .then((title) => {
+        if (title) {
+          messagesState.updateTitle(title);
+        }
+      })
+      .catch((e) => console.warn("[llm] Title generation failed:", e));
+  }
+
+  const completionStream = await client.chat.completions.create(request, {
+    signal: opts.signal,
+  });
+
+  for await (const chunk of completionStream) {
+    const choiceDelta = chunk.choices?.[0]?.delta as
+      | (OpenAI.Chat.Completions.ChatCompletionChunk.Choice["delta"] & {
+          reasoning_content?: string | null;
+          reasoning?: string | null;
+        })
+      | undefined;
+
+    const reasoningDelta = choiceDelta?.reasoning_content || choiceDelta?.reasoning || "";
+    if (reasoningDelta) {
+      messagesState.appendReasoning(reasoningDelta);
+    }
+
+    const delta = choiceDelta?.content || "";
+    if (delta) {
+      messagesState.appendToStreaming(delta);
+    }
+
+    if (chunk.usage) {
+      messagesState.updateTokenUsage({
+        promptTokens: chunk.usage.prompt_tokens || 0,
+        completionTokens: chunk.usage.completion_tokens || 0,
+        totalTokens: chunk.usage.total_tokens || 0,
+      });
+    }
+  }
+}
+
 export async function sendMessages(): Promise<void> {
   const controller = new AbortController();
   setInterruptController(controller);
@@ -236,9 +343,6 @@ export async function sendMessages(): Promise<void> {
 
   try {
     const settings = settingsState.currentSettings;
-    const preset = settings["llm.preset"];
-    const usingSecondary = route === "secondary";
-    const client = usingSecondary ? getSecondaryLLMClient() : getLLMClient();
 
     const chatMessages = messagesState.messages
       .slice()
@@ -247,101 +351,78 @@ export async function sendMessages(): Promise<void> {
         (m): m is typeof m & { role: "user" | "assistant" } =>
           m.role === "user" || m.role === "assistant",
       );
-    const apiMessages: ApiMessage[] = await Promise.all(
-      chatMessages.map(async (m) => ({
-        role: m.role,
-        content: await contentToApi(m.content),
-      })),
-    );
+    const contextMessages = chatMessages.map((m) => ({ role: m.role, content: m.content }));
 
-    // exclude the last incomplete assistant placeholder
-    apiMessages.pop();
+    // exclude the last incomplete assistant placeholder (pushed by startStreaming)
+    contextMessages.pop();
 
-    const isFirstUserMessage = apiMessages.length === 1 && apiMessages[0].role === "user";
-    const firstUserContent = isFirstUserMessage ? apiMessages[0].content : null;
-
-    // Prefer the turn-specific system prompt stashed on the most recent user
-    // message by snippet expansion; fall back to the plain buildSystemPrompt
-    // result when no snippet fired.
+    const isFirstUserMessage = contextMessages.length === 1 && contextMessages[0].role === "user";
     const lastUserMsg = messagesState.messages.find((m) => m.role === "user");
-    const systemPrompt = lastUserMsg?.systemPromptOverride ?? buildSystemPrompt();
-    if (systemPrompt) {
-      apiMessages.unshift({ role: "system", content: systemPrompt });
-    }
 
-    const useReasoning =
-      !usingSecondary && preset !== "external" && settings["llm.reasoning"] === "on";
-    const reasoningBudget = settings["llm.reasoningBudget"];
-    const model = usingSecondary
-      ? settings["dualModel.external.model"]
-      : preset === "external"
-        ? settings["llm.external.model"]
-        : "default";
-
-    const request: OpenAI.ChatCompletionCreateParamsStreaming & {
-      reasoning?: { effort: string; budget: number };
-    } = {
-      model,
-      messages: apiMessages as OpenAI.ChatCompletionMessageParam[],
-      stream: true,
-      stream_options: { include_usage: true },
-    };
-
-    if (useReasoning && reasoningBudget) {
-      request.reasoning = {
-        effort: "high",
-        budget: Number(reasoningBudget),
-      };
-    }
-
-    // Fire-and-forget title generation on first message
-    // Only if the session title is still empty/default (don't overwrite user edits)
-    // Skip entirely when sessions are not being stored.
     const currentTitle = messagesState.sessionTitle;
     const defaultTitle = messagesState.getDefaultTitle();
     const shouldGenerateTitle =
       isFirstUserMessage &&
-      firstUserContent !== null &&
       settings["general.session.storeSessions"] !== false &&
       (!currentTitle || currentTitle === defaultTitle);
 
-    if (shouldGenerateTitle) {
-      const textForTitle =
-        typeof firstUserContent === "string"
-          ? firstUserContent
-          : firstUserContent!
-              .filter((p): p is { type: "text"; text: string } => p.type === "text")
-              .map((p) => p.text)
-              .join(" ");
-
-      generateSessionTitle(textForTitle)
-        .then((title) => {
-          if (title) {
-            messagesState.updateTitle(title);
-          }
-        })
-        .catch((e) => console.warn("[llm] Title generation failed:", e));
-    }
-
-    const completionStream = await client.chat.completions.create(request, {
+    await runStream({
+      route,
+      contextMessages,
+      lastUserMsg,
+      firstUserContentForTitle: shouldGenerateTitle ? contextMessages[0].content : null,
       signal: controller.signal,
     });
-
-    for await (const chunk of completionStream) {
-      const delta = chunk.choices?.[0]?.delta?.content || "";
-      if (delta) {
-        messagesState.appendToStreaming(delta);
-      }
-
-      // Capture usage from the final chunk
-      if (chunk.usage) {
-        messagesState.updateTokenUsage({
-          promptTokens: chunk.usage.prompt_tokens || 0,
-          completionTokens: chunk.usage.completion_tokens || 0,
-          totalTokens: chunk.usage.total_tokens || 0,
-        });
-      }
+    messagesState.finishStreaming();
+  } catch (err: any) {
+    if (controller.signal.aborted) {
+      return;
     }
+    console.error(`[llm] Stream error:`, err);
+    const mapped = mapError(err);
+    messagesState.receiveErrorMessage(mapped.type, mapped.detail);
+  } finally {
+    setInterruptController(null);
+  }
+}
+
+/** Regenerate a single assistant message in place. Only uses messages
+ *  chronologically before the target as context; newer turns stay untouched. */
+export async function reprocessMessage(messageId: string): Promise<void> {
+  const targetIdx = messagesState.messages.findIndex((m) => m.id === messageId);
+  if (targetIdx < 0) return;
+
+  const target = messagesState.messages[targetIdx];
+  // Preserve the route the user originally saw for this bubble; reprocess is a
+  // "regenerate the same answer" action, not a re-route decision.
+  const route: "default" | "secondary" = target.modelUsed === "secondary" ? "secondary" : "default";
+
+  if (!messagesState.beginReprocess(messageId)) return;
+
+  const controller = new AbortController();
+  setInterruptController(controller);
+
+  try {
+    // Messages newest-first: everything at index > targetIdx is chronologically
+    // older (and thus valid context for the target).
+    const chatMessages = messagesState.messages
+      .slice(targetIdx + 1)
+      .reverse()
+      .filter(
+        (m): m is typeof m & { role: "user" | "assistant" } =>
+          m.role === "user" || m.role === "assistant",
+      );
+    const contextMessages = chatMessages.map((m) => ({ role: m.role, content: m.content }));
+
+    const lastUserMsg = messagesState.messages.slice(targetIdx + 1).find((m) => m.role === "user");
+
+    await runStream({
+      route,
+      contextMessages,
+      lastUserMsg,
+      firstUserContentForTitle: null,
+      signal: controller.signal,
+    });
     messagesState.finishStreaming();
   } catch (err: any) {
     if (controller.signal.aborted) {

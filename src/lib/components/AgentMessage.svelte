@@ -30,26 +30,65 @@
     id,
     content,
     modelUsed = "default",
+    reasoning,
+    pending = false,
+    isStreaming = false,
+    onReprocess,
+    onDelete,
   } = $props<{
     id?: string;
     content: MessageContent;
     modelUsed?: "default" | "secondary";
+    reasoning?: string;
+    pending?: boolean;
+    isStreaming?: boolean;
+    onReprocess?: () => void;
+    onDelete?: () => void;
   }>();
 
   let displayText = $derived(getTextContent(content));
   let bgClass = $derived(
-    modelUsed === "secondary" ? "bg-accent-purple" : "bg-accent-blue",
+    modelUsed === "secondary" ? "bg-accent-purple-300" : "bg-accent-blue-300",
   );
   let pillBgClass = $derived(
-    modelUsed === "secondary"
-      ? "bg-accent-purple-inner"
-      : "bg-accent-blue-inner",
+    modelUsed === "secondary" ? "bg-accent-purple-400" : "bg-accent-blue-400",
   );
-  let pillTextClass = $derived(
+  let pillMutedTextClass = $derived(
     modelUsed === "secondary"
-      ? "text-accent-purple-inner"
-      : "text-accent-blue-inner",
+      ? "text-accent-purple-700"
+      : "text-accent-blue-700",
   );
+  let pillHoverTextClass = $derived(
+    modelUsed === "secondary"
+      ? "hover:text-accent-purple-900"
+      : "hover:text-accent-blue-900",
+  );
+
+  let showReasoningSetting = $derived(
+    !!settingsState.currentSettings["llm.showReasoning"],
+  );
+  let hasReasoning = $derived(
+    showReasoningSetting &&
+      typeof reasoning === "string" &&
+      reasoning.length > 0,
+  );
+  // True only while reasoning chunks are still arriving for THIS message:
+  // stream is active, reasoning has begun, and the final answer hasn't
+  // started yet. Snaps the expandable open on the leading edge and shut on
+  // the trailing edge; in between, user toggles win.
+  let receivingReasoning = $derived(
+    hasReasoning && isStreaming && !displayText,
+  );
+  let reasoningExpanded = $state(false);
+  let wasReceivingReasoning = $state(false);
+  $effect(() => {
+    if (receivingReasoning && !wasReceivingReasoning) {
+      reasoningExpanded = true;
+    } else if (!receivingReasoning && wasReceivingReasoning) {
+      reasoningExpanded = false;
+    }
+    wasReceivingReasoning = receivingReasoning;
+  });
 
   let ttsActive = $derived(
     ttsState.enabled && ttsState.loaded && id !== undefined,
@@ -95,6 +134,39 @@
     }
   }
 
+  let confirmingDelete = $state(false);
+
+  function handleWindowFocusIn(e: FocusEvent) {
+    if (!confirmingDelete) return;
+    const target = e.target as HTMLElement;
+    if (!target.closest("[data-agent-delete-btn]")) {
+      confirmingDelete = false;
+    }
+  }
+
+  $effect(() => {
+    if (confirmingDelete) {
+      window.addEventListener("focusin", handleWindowFocusIn, true);
+      return () => {
+        window.removeEventListener("focusin", handleWindowFocusIn, true);
+      };
+    }
+  });
+
+  function handleDeleteClick() {
+    if (confirmingDelete) {
+      confirmingDelete = false;
+      onDelete?.();
+    } else {
+      confirmingDelete = true;
+    }
+  }
+
+  let showReprocess = $derived(!!onReprocess && !isStreaming);
+  let pillVisible = $derived(ttsActive || showReprocess || !!onDelete);
+  let showSpinner = $derived(pending && !displayText && !hasReasoning);
+
+  // svelte-ignore non_reactive_update
   // oxlint-disable-next-line no-unassigned-vars
   let container: HTMLDivElement;
 
@@ -146,72 +218,123 @@
   {bgClass}
   extraClass="markdown overflow-clip flex flex-col gap-3"
 >
-  <div bind:this={container} class="markdown-content min-w-0 overflow-hidden">
-    {@html DOMPurify.sanitize(marked.parse(displayText) as string, {
-      ALLOWED_TAGS: [
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "p",
-        "strong",
-        "em",
-        "del",
-        "ul",
-        "ol",
-        "li",
-        "code",
-        "pre",
-        "a",
-        "img",
-        "blockquote",
-        "table",
-        "thead",
-        "tbody",
-        "tr",
-        "th",
-        "td",
-        "hr",
-        "br",
-        "div",
-        "span",
-        "input",
-        "mark",
-        "kbd",
-        "sub",
-        "sup",
-        "details",
-        "summary",
-      ],
-      ALLOWED_ATTR: [
-        "href",
-        "src",
-        "alt",
-        "class",
-        "type",
-        "checked",
-        "disabled",
-        "start",
-        "value",
-        "reversed",
-      ],
-      ALLOW_DATA_ATTR: false,
-    })}
-  </div>
-
-  {#if ttsActive}
-    <div
-      class="flex flex-row items-center {pillBgClass} {pillTextClass} p-1 rounded-2xl text-2xl w-fit ml-auto"
-    >
+  {#if hasReasoning}
+    <div class="flex flex-col gap-2">
       <button
-        class="rounded p-1 flex items-center transition-colors hover:cursor-pointer hover:opacity-80"
-        title={buttonTitle}
-        onclick={handleTTSClick}
+        class="flex items-center gap-1 text-sm text-default-700 hover:cursor-pointer uppercase tracking-wide font-medium w-full"
+        onclick={() => (reasoningExpanded = !reasoningExpanded)}
+        title={reasoningExpanded ? "Collapse reasoning" : "Expand reasoning"}
       >
-        <i class="flex {buttonIcon}"></i>
+        <i
+          class="flex transition-transform duration-200 {reasoningExpanded
+            ? 'i-material-symbols-keyboard-arrow-down-rounded'
+            : 'i-material-symbols-chevron-right-rounded'}"
+        ></i>
+        <span>Reasoning</span>
       </button>
+      {#if reasoningExpanded}
+        <div class="whitespace-pre-wrap {pillBgClass} px-4 py-2 rounded-2xl">
+          {reasoning}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  {#if showSpinner}
+    <i class="i-line-md:loading-alt-loop text-3xl"></i>
+  {:else}
+    <div bind:this={container} class="markdown-content min-w-0 overflow-hidden">
+      {@html DOMPurify.sanitize(marked.parse(displayText) as string, {
+        ALLOWED_TAGS: [
+          "h1",
+          "h2",
+          "h3",
+          "h4",
+          "h5",
+          "h6",
+          "p",
+          "strong",
+          "em",
+          "del",
+          "ul",
+          "ol",
+          "li",
+          "code",
+          "pre",
+          "a",
+          "img",
+          "blockquote",
+          "table",
+          "thead",
+          "tbody",
+          "tr",
+          "th",
+          "td",
+          "hr",
+          "br",
+          "div",
+          "span",
+          "input",
+          "mark",
+          "kbd",
+          "sub",
+          "sup",
+          "details",
+          "summary",
+        ],
+        ALLOWED_ATTR: [
+          "href",
+          "src",
+          "alt",
+          "class",
+          "type",
+          "checked",
+          "disabled",
+          "start",
+          "value",
+          "reversed",
+        ],
+        ALLOW_DATA_ATTR: false,
+      })}
+    </div>
+  {/if}
+
+  {#if pillVisible}
+    <div
+      class="flex flex-row items-center {pillBgClass} {pillMutedTextClass} p-1 rounded-2xl text-2xl w-fit ml-auto"
+    >
+      {#if ttsActive}
+        <button
+          class="rounded p-1 flex items-center transition-colors hover:cursor-pointer {pillHoverTextClass}"
+          title={buttonTitle}
+          onclick={handleTTSClick}
+        >
+          <i class="flex {buttonIcon}"></i>
+        </button>
+      {/if}
+      {#if showReprocess}
+        <button
+          class="rounded p-1 flex items-center transition-colors hover:cursor-pointer {pillHoverTextClass}"
+          title="Reprocess message"
+          onclick={() => onReprocess?.()}
+        >
+          <i class="flex i-material-symbols-refresh-rounded"></i>
+        </button>
+      {/if}
+      {#if onDelete}
+        <button
+          data-agent-delete-btn
+          class="rounded p-1 flex items-center transition-colors hover:cursor-pointer {pillHoverTextClass}"
+          title={confirmingDelete ? "Confirm Delete" : "Delete message"}
+          onclick={handleDeleteClick}
+        >
+          <i
+            class="flex {confirmingDelete
+              ? 'i-material-symbols-delete-forever-rounded'
+              : 'i-material-symbols-delete-outline-rounded'}"
+          ></i>
+        </button>
+      {/if}
     </div>
   {/if}
 </Bubble>

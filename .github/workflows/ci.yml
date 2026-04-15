@@ -81,20 +81,12 @@ jobs:
       - name: Create placeholder bundled resources
         shell: bash
         run: |
-          mkdir -p src-tauri/resources
+          mkdir -p src-tauri/resources/node_modules
           touch src-tauri/resources/server.js
-          # `bundle.resources` globs for the onnxruntime node_modules are each
-          # validated against the working tree regardless of host OS — an empty
-          # match is a hard error, so seed one file per glob on every runner.
-          mkdir -p src-tauri/resources/node_modules/onnxruntime-node \
-                   src-tauri/resources/node_modules/onnxruntime-common \
-                   src-tauri/voices
-          touch src-tauri/resources/node_modules/onnxruntime-node/placeholder \
-                src-tauri/resources/node_modules/onnxruntime-common/placeholder \
-                src-tauri/voices/placeholder
-          # `bundle.resources` globs (*.dylib, *.so, *.dll) are each validated
-          # against the working tree regardless of host OS — an empty match is
-          # a hard error, so seed one file per extension on every runner.
+          # `bundle.resources` globs in tauri.conf.json are each validated
+          # against the working tree regardless of host OS — an empty match
+          # is a hard error, so seed one file per glob on every runner.
+          touch src-tauri/resources/node_modules/placeholder
           touch src-tauri/binaries/placeholder.dylib \
                 src-tauri/binaries/placeholder.so \
                 src-tauri/binaries/placeholder.dll

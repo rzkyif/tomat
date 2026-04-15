@@ -1,9 +1,8 @@
 import { browser } from "$app/environment";
 import { invoke } from "@tauri-apps/api/core";
-import { loadTtsModel, synthesizeTts, unloadTtsModel } from "$lib/sidecar/tts";
+import { loadTtsModel, synthesizeTts } from "$lib/sidecar/tts";
 import { TTS_BASE_FILES } from "$lib/shared/settings";
 import { stripMarkdownForTTS } from "$lib/shared/text";
-import { serversState } from "./servers.svelte";
 import { settingsState } from "./settings.svelte";
 
 const WORD_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "word" });
@@ -138,22 +137,24 @@ class TTSState {
         });
         await loadTtsModel();
         this.loaded = true;
-        serversState.updateStatus({ server: "bun", status: "Running" });
       } catch (e) {
         console.error("[tts] load failed:", e);
         this.loaded = false;
-        serversState.updateStatus({
-          server: "bun",
-          status: "Error",
-          message: `TTS load failed: ${e instanceof Error ? e.message : String(e)}`,
-        });
       } finally {
         this.loading = false;
       }
     } else {
       this.reset();
       this.loaded = false;
-      await unloadTtsModel();
+      // Recycle the bun sidecar process to actually release the ORT session
+      // memory - in-process disposal works but the OS allocator keeps freed
+      // pages mapped, so RSS only visibly drops when the process is replaced.
+      // The sidecar comes right back up (it also hosts upcoming tools).
+      try {
+        await invoke("restart_bun_sidecar");
+      } catch (e) {
+        console.warn("[tts] restart_bun_sidecar failed:", e);
+      }
     }
   }
 

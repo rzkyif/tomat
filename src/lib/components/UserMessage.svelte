@@ -13,14 +13,17 @@
     content,
     isLast = false,
     onEdit,
+    onDelete,
   } = $props<{
     content: MessageContent;
     isLast?: boolean;
     onEdit?: (newContent: MessageContent) => void;
+    onDelete?: () => void;
   }>();
 
   let editText = $state("");
   let editTimeout: ReturnType<typeof setTimeout> | null = null;
+  let confirmingDelete = $state(false);
 
   onDestroy(() => {
     if (editTimeout) {
@@ -47,11 +50,17 @@
   // Local copy of attachments for editing (so removals are tracked)
   let editAttachments = $state<MessagePart[]>([]);
 
-  let editable = $derived(isLast && !!onEdit);
+  // Edit toggle: auto-enabled on the most recent user message, auto-reset when
+  // a new turn pushes this one out of the "last" slot. User can override via
+  // the edit button on any message.
+  let editing = $state(false);
+  $effect.pre(() => {
+    editing = isLast;
+  });
 
-  // Sync editText and editAttachments with content when this becomes the editable message
+  // Sync editText and editAttachments with content when entering edit mode
   $effect(() => {
-    if (editable) {
+    if (editing) {
       editText = displayText;
       editAttachments = [...attachments];
     }
@@ -74,14 +83,12 @@
   function emitEdit() {
     if (!onEdit) return;
     const newContent = buildEditContent();
-    // Check if content is effectively empty (delete case)
     const isEmpty =
       typeof newContent === "string" ? !newContent : newContent.length === 0;
     if (isEmpty) {
       onEdit(newContent);
       return;
     }
-    // Check if content actually changed
     const oldText = displayText;
     const newText = editText.trim();
     const attachmentsChanged = editAttachments.length !== attachments.length;
@@ -106,8 +113,43 @@
   function removeAttachment(index: number) {
     editAttachments = editAttachments.filter((_, i) => i !== index);
     if (editTimeout) clearTimeout(editTimeout);
-    // Trigger edit immediately on attachment removal
     setTimeout(() => emitEdit(), 0);
+  }
+
+  function toggleEdit() {
+    // Flush pending debounce before toggling off so typed changes aren't lost.
+    if (editing && editTimeout) {
+      clearTimeout(editTimeout);
+      editTimeout = null;
+      emitEdit();
+    }
+    editing = !editing;
+  }
+
+  function handleWindowFocusIn(e: FocusEvent) {
+    if (!confirmingDelete) return;
+    const target = e.target as HTMLElement;
+    if (!target.closest("[data-user-delete-btn]")) {
+      confirmingDelete = false;
+    }
+  }
+
+  $effect(() => {
+    if (confirmingDelete) {
+      window.addEventListener("focusin", handleWindowFocusIn, true);
+      return () => {
+        window.removeEventListener("focusin", handleWindowFocusIn, true);
+      };
+    }
+  });
+
+  function handleDeleteClick() {
+    if (confirmingDelete) {
+      confirmingDelete = false;
+      onDelete?.();
+    } else {
+      confirmingDelete = true;
+    }
   }
 </script>
 
@@ -115,7 +157,7 @@
   selectedAlignment={settingsState.getAlignment()}
   extraClass={"flex flex-col gap-4"}
 >
-  {#if editable}
+  {#if editing}
     <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
       <span
         class="invisible whitespace-pre-wrap break-words wrap-break-word col-start-1 row-start-1 pointer-events-none"
@@ -131,12 +173,46 @@
       ></textarea>
     </div>
   {:else}
-    {displayText}
+    <span class="whitespace-pre-wrap break-words">{displayText}</span>
   {/if}
 
   <AttachmentList
-    parts={editable ? editAttachments : attachments}
-    {editable}
+    parts={editing ? editAttachments : attachments}
+    editable={editing}
     onRemove={removeAttachment}
   />
+
+  {#if onEdit || onDelete}
+    <div
+      class="flex flex-row items-center bg-default-100 text-default-500 p-1 rounded-2xl text-2xl w-fit ml-auto"
+    >
+      {#if onEdit}
+        <button
+          class="rounded p-1 flex items-center transition-colors hover:cursor-pointer hover:text-default-900"
+          title={editing ? "Stop editing" : "Edit message"}
+          onclick={toggleEdit}
+        >
+          <i
+            class="flex {editing
+              ? 'i-material-symbols-edit-off-outline-rounded'
+              : 'i-material-symbols-edit-outline-rounded'}"
+          ></i>
+        </button>
+      {/if}
+      {#if onDelete}
+        <button
+          data-user-delete-btn
+          class="rounded p-1 flex items-center transition-colors hover:cursor-pointer hover:text-default-900"
+          title={confirmingDelete ? "Confirm Delete" : "Delete message"}
+          onclick={handleDeleteClick}
+        >
+          <i
+            class="flex {confirmingDelete
+              ? 'i-material-symbols-delete-forever-rounded'
+              : 'i-material-symbols-delete-outline-rounded'}"
+          ></i>
+        </button>
+      {/if}
+    </div>
+  {/if}
 </Bubble>

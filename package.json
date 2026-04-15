@@ -9,7 +9,7 @@
     "dev:vite": "vite dev",
     "build": "tauri build",
     "build:vite": "bun run build:bun && vite build",
-    "build:bun": "bun scripts/build-bun.mjs",
+    "build:bun": "bun build src-bun/index.ts --outfile=src-tauri/resources/server.js --target=bun --minify --external onnxruntime-node --external onnxruntime-common --external kokoro-js --external @huggingface/transformers --external phonemizer",
     "preview": "vite preview",
     "check": "bun run check:js && bun run check:rs",
     "check:js": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && bun run lint:js && bun run format:js",

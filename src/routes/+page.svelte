@@ -215,7 +215,10 @@
                 content={msg.content}
                 isLast={i === lastUserMsgIndex}
                 onEdit={(newContent) =>
-                  messagesState.updateLastUserMessage(newContent)}
+                  messagesState.updateUserMessage(msg.id, newContent)}
+                onDelete={msg.id
+                  ? () => messagesState.deleteUserMessage(msg.id!)
+                  : undefined}
               />
             {:else if msg.role === "error"}
               <ErrorMessage content={msg.content} />
@@ -224,6 +227,17 @@
                 id={msg.id}
                 content={msg.content}
                 modelUsed={msg.modelUsed}
+                reasoning={msg.reasoning}
+                pending={i === 0 &&
+                  messagesState.isStreaming &&
+                  !messagesState.streamingFirstChunkReceived}
+                isStreaming={i === 0 && messagesState.isStreaming}
+                onReprocess={msg.id
+                  ? () => messagesState.reprocessAgentMessage(msg.id!)
+                  : undefined}
+                onDelete={msg.id
+                  ? () => messagesState.deleteAgentMessage(msg.id!)
+                  : undefined}
               />
             {:else if msg.role === "system"}
               <SystemMessage content={msg.content as string} />

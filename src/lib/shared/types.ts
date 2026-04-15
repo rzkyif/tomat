@@ -20,6 +20,10 @@ export type Message = {
    *  was sent to the LLM for that turn, including any snippet-triggered
    *  transformations. Used by sendMessages() on edit-and-resend. */
   systemPromptOverride?: string;
+  /** Only populated on assistant messages when the model emits a reasoning
+   *  trace and `llm.showReasoning` is enabled. Persisted with the session but
+   *  never sent back to the LLM (contentToApi only reads `content`). */
+  reasoning?: string;
 };
 
 /** Generate a message id. Kept consistent with the attachment-folder

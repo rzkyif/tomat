@@ -1,14 +1,27 @@
 const BASE_URL = "http://127.0.0.1:7703";
 
+// The sidecar may be mid-restart (toggle-off recycles the bun process to
+// release ORT memory), in which case the first few connection attempts will
+// be refused. Retry briefly so a quick toggle-on right after toggle-off Just
+// Works.
 export async function loadTtsModel(): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/tts/load`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: "{}",
-  });
-  if (!res.ok) {
-    throw new Error(`TTS load failed: ${res.status} ${await res.text()}`);
+  const deadline = Date.now() + 10_000;
+  let lastErr: unknown = null;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${BASE_URL}/api/tts/load`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (res.ok) return;
+      throw new Error(`TTS load failed: ${res.status} ${await res.text()}`);
+    } catch (e) {
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, 300));
+    }
   }
+  throw lastErr instanceof Error ? lastErr : new Error("TTS load timed out");
 }
 
 export async function unloadTtsModel(): Promise<void> {

@@ -40,7 +40,7 @@
 
 <Bubble
   selectedAlignment={settingsState.getAlignment()}
-  bgClass="bg-accent-red"
+  bgClass="bg-accent-red-300"
   extraClass="text-default-800"
 >
   {errorMessage}

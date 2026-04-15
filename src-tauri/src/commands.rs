@@ -1,4 +1,6 @@
-use crate::sidecar::{emit_status, ensure_path_internal, update_server_args_internal};
+use crate::sidecar::{
+    emit_status, ensure_path_internal, start_bun_sidecar, update_server_args_internal,
+};
 use crate::state::AppState;
 use crate::types::{ServerStatus, WindowAlignment};
 use std::collections::HashMap;
@@ -207,6 +209,19 @@ pub async fn ensure_models(
     }
 
     result
+}
+
+/// Recycle the bun sidecar process. Used by the TTS toggle to free the ORT
+/// session memory: in-process disposal works but the OS allocator keeps freed
+/// pages mapped to the process, so RSS only visibly drops when the process
+/// itself is replaced. The bun sidecar always stays running (it also hosts
+/// upcoming tools), this just reincarnates it with a fresh heap.
+#[tauri::command]
+pub async fn restart_bun_sidecar(
+    handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    start_bun_sidecar(handle, state.inner()).await
 }
 
 /// (Re)launch a sidecar with the given args. Supersedes any previous instance.

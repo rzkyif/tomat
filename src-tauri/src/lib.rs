@@ -5,7 +5,7 @@ mod types;
 mod utils;
 
 use crate::commands::*;
-use crate::sidecar::{probe_downloads, update_server_args_internal};
+use crate::sidecar::{probe_downloads, start_bun_sidecar};
 use crate::state::{AppState, AppStateInner};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -155,28 +155,9 @@ pub fn run() {
             let app_state = state.inner().clone();
 
             tauri::async_runtime::spawn(async move {
-                let resources_path = match handle.path().resource_dir() {
-                    Ok(p) => p,
-                    Err(e) => {
-                        eprintln!("[startup] resource_dir: {e}");
-                        return;
-                    }
-                };
-                let server_js_path = resources_path.join("resources").join("server.js");
-
-                let _ = update_server_args_internal(
-                    handle.clone(),
-                    &app_state,
-                    "bun".to_string(),
-                    vec![
-                        "run".to_string(),
-                        server_js_path.to_string_lossy().to_string(),
-                    ],
-                    None,
-                    None,
-                    Some("http://localhost:7703/api/health".to_string()),
-                )
-                .await;
+                if let Err(e) = start_bun_sidecar(handle.clone(), &app_state).await {
+                    eprintln!("[startup] start_bun_sidecar: {e}");
+                }
             });
 
             Ok(())
@@ -184,6 +165,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_server_statuses,
             update_server_args,
+            restart_bun_sidecar,
             ensure_models,
             position_window,
             show_main_window,

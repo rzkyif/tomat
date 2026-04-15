@@ -160,9 +160,13 @@
       getPresetFieldIds("prompts").has(key)
     ) {
       if (
-        settingsState.currentSettings["prompts.defaultSystemPrompt.preset"] !== "custom"
+        settingsState.currentSettings["prompts.defaultSystemPrompt.preset"] !==
+        "custom"
       ) {
-        await settingsState.updateSetting("prompts.defaultSystemPrompt.preset", "custom");
+        await settingsState.updateSetting(
+          "prompts.defaultSystemPrompt.preset",
+          "custom",
+        );
       }
     }
     await settingsState.updateSetting(key, value);
@@ -304,7 +308,7 @@
 
 <Bubble
   selectedAlignment={settingsState.getAlignment()}
-  extraClass="flex flex-col gap-3 min-w-0 overflow-hidden transition-all w-full h-150 relative"
+  extraClass="flex flex-col gap-3 min-w-0 overflow-hidden transition-all w-full max-h-80vh relative"
 >
   <!-- Settings Header and Back Button -->
   <div class="flex gap-2 items-center text-2xl relative">

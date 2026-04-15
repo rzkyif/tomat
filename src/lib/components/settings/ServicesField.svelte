@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import type { SettingField } from "$lib/shared/settings";
-  import { serversState, settingsState } from "../../state";
+  import { serversState, settingsState, ttsState } from "../../state";
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -16,12 +16,25 @@
   let metrics = $state<Record<string, ProcessMetrics>>({});
 
   type ServiceKey = "main" | "llm" | "stt" | "bun";
-  const SERVICES: Array<{ key: ServiceKey; label: string }> = [
-    { key: "main", label: "App" },
-    { key: "llm", label: "Language Model" },
-    { key: "stt", label: "Speech-to-Text" },
-    { key: "bun", label: "Text-to-Speech + Tools" },
+  const SERVICES: Array<{ key: ServiceKey }> = [
+    { key: "main" },
+    { key: "llm" },
+    { key: "stt" },
+    { key: "bun" },
   ];
+
+  function labelFor(key: ServiceKey): string {
+    switch (key) {
+      case "main":
+        return "Main Application";
+      case "llm":
+        return "Language Model";
+      case "stt":
+        return "Speech-to-Text";
+      case "bun":
+        return ttsState.enabled ? "Text-to-Speech + Tools" : "Tools";
+    }
+  }
 
   function endpointFor(key: ServiceKey): string | null {
     if (key === "main") return null;
@@ -86,9 +99,7 @@
   </div>
 
   <div class="flex flex-col gap-2">
-    <div
-      class="flex items-center gap-3 bg-default-200 rounded-xl px-3 py-2"
-    >
+    <div class="flex items-center gap-3 bg-default-300 rounded-xl px-3 py-2">
       <div class="text-default-800 text-sm flex-1 min-w-0 truncate">Total</div>
       <div class="flex flex-col items-end shrink-0">
         <div class="text-default-800 text-sm tabular-nums">
@@ -103,11 +114,10 @@
       {@const status = statusFor(sc.key)}
       {@const endpoint = endpointFor(sc.key)}
       {@const m = metrics[sc.key]}
-      <div
-        class="flex items-center gap-3 bg-default-200 rounded-xl px-3 py-2"
-      >
+      {#if sc.key === "bun" || status !== "Disabled"}
+        <div class="flex items-center gap-3 bg-default-200 rounded-xl px-3 py-2">
         <div class="flex flex-col flex-1 min-w-0">
-          <div class="text-default-800 text-sm truncate">{sc.label}</div>
+          <div class="text-default-800 text-sm truncate">{labelFor(sc.key)}</div>
           <div class="text-default-500 text-xs truncate">
             {status}{endpoint ? ` · ${endpoint}` : ""}
           </div>
@@ -120,7 +130,8 @@
             {m && m.running ? `${m.cpu_pct.toFixed(1)}% CPU` : ""}
           </div>
         </div>
-      </div>
+        </div>
+      {/if}
     {/each}
   </div>
 </div>

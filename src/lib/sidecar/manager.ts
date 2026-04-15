@@ -27,11 +27,12 @@ export async function restartServerIfNeed(type: "llm" | "stt") {
   const currentSettings = settingsState.currentSettings;
   const preset = currentSettings[`${type}.preset`];
 
-  if (preset === "external") {
-    return;
-  }
-
-  if (preset === "disabled") {
+  // External and disabled both mean "no local sidecar" - empty args trigger
+  // the Disabled state in the backend, which terminates any running child
+  // and emits the Disabled status. (Returning early here would leak a
+  // running llama-server when the user switches from a local preset to
+  // external.)
+  if (preset === "external" || preset === "disabled") {
     await invoke("update_server_args", {
       server: type,
       args: [],

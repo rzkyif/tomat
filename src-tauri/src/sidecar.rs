@@ -150,6 +150,38 @@ fn terminate_child_detached(pid: u32, child: CommandChild) {
     });
 }
 
+/// (Re)launch the bun tools sidecar with its canonical args. Used at startup
+/// and on demand (e.g. when TTS is toggled off, to release the ORT session
+/// memory by recycling the process - allocator behavior means in-process
+/// disposal can't visibly reduce RSS).
+pub async fn start_bun_sidecar<R: Runtime>(
+    handle: AppHandle<R>,
+    state: &AppState,
+) -> Result<(), String> {
+    let resources_path = handle
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("resource_dir: {e}"))?;
+    let server_js_path = resources_path.join("resources").join("server.js");
+    update_server_args_internal(
+        handle.clone(),
+        state,
+        "bun".to_string(),
+        vec![
+            // --smol favors a smaller heap and more aggressive GC at ~10%
+            // throughput cost - the right trade for an idle-most-of-the-time
+            // sidecar that bursts on big audio buffers.
+            "--smol".to_string(),
+            "run".to_string(),
+            server_js_path.to_string_lossy().to_string(),
+        ],
+        None,
+        None,
+        Some("http://localhost:7703/api/health".to_string()),
+    )
+    .await
+}
+
 pub async fn update_server_args_internal<R: Runtime>(
     handle: AppHandle<R>,
     state: &AppState,

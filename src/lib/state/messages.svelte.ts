@@ -50,6 +50,11 @@ class MessagesState {
   tokenUsage = $state<TokenUsage | null>(null);
   isStreaming = $state(false);
   streamingFirstChunkReceived = $state(false);
+  /** Id of the assistant message currently receiving stream chunks. Normally
+   *  the newest message (freshly pushed by `startStreaming`), but for
+   *  `reprocessAgentMessage` it points at an existing message mid-array so the
+   *  regenerated content lands in place without disturbing newer turns. */
+  streamingMessageId = $state<string | null>(null);
 
   visibleWindow = $state(DEFAULT_WINDOW_SIZE);
   visibleMessages = $derived(this.messages.slice(0, this.visibleWindow));
@@ -452,29 +457,58 @@ class MessagesState {
     await this.saveInFlight;
   }
 
+  /** Resolve the array index of the message currently being streamed into.
+   *  Returns -1 when there is no active stream or the target has been spliced
+   *  away (e.g. user deleted the streaming message). */
+  private getStreamingIndex(): number {
+    if (this.streamingMessageId === null) return -1;
+    return this.messages.findIndex((m) => m.id === this.streamingMessageId);
+  }
+
   startStreaming(modelUsed: "default" | "secondary" = "default") {
     this.isStreaming = true;
     this.streamingFirstChunkReceived = false;
     this.ttsCursor = 0;
     const assistantId = makeMessageId();
+    this.streamingMessageId = assistantId;
     void import("./tts.svelte").then(({ ttsState }) => ttsState.startStream(assistantId));
-    const settings = settingsState.currentSettings;
-    const useThinkingPlaceholder =
-      modelUsed === "default" &&
-      settings["llm.preset"] !== "external" &&
-      settings["llm.reasoning"] === "on";
     this.addMessage({
       id: assistantId,
       role: "assistant",
-      content: useThinkingPlaceholder ? "Thinking..." : "...",
+      content: "",
       modelUsed,
     });
   }
 
+  /** Set up for reprocessing an existing assistant message in place. Unlike
+   *  `startStreaming`, does not push a new message - streaming will write back
+   *  into the existing slot so newer conversation turns stay untouched. */
+  beginReprocess(messageId: string): boolean {
+    const idx = this.messages.findIndex((m) => m.id === messageId);
+    if (idx < 0) return false;
+    this.isStreaming = true;
+    this.streamingFirstChunkReceived = false;
+    this.ttsCursor = 0;
+    this.streamingMessageId = messageId;
+    // Clear existing content + reasoning so the regenerated output replaces,
+    // not appends. Preserve role + id + modelUsed.
+    const existing = this.messages[idx];
+    this.messages[idx] = {
+      ...existing,
+      role: "assistant",
+      content: "",
+      reasoning: undefined,
+    };
+    void import("./tts.svelte").then(({ ttsState }) => ttsState.startStream(messageId));
+    return true;
+  }
+
   appendToStreaming(content: string) {
+    const idx = this.getStreamingIndex();
+    if (idx < 0) return;
     if (!this.streamingFirstChunkReceived) {
       this.streamingFirstChunkReceived = true;
-      this.messages[0] = { ...this.messages[0], content: "" };
+      this.messages[idx] = { ...this.messages[idx], content: "" };
       this.streamBuffer = "";
     }
     this.streamBuffer += content;
@@ -483,13 +517,32 @@ class MessagesState {
     }
   }
 
+  /** Accumulate a reasoning-trace delta onto the currently streaming assistant
+   *  message. Written directly (no coalesce) since reasoning token rates are
+   *  lower than content rates in practice. */
+  appendReasoning(delta: string) {
+    if (!delta) return;
+    const idx = this.getStreamingIndex();
+    if (idx < 0) return;
+    const cur = this.messages[idx]?.reasoning ?? "";
+    this.messages[idx] = {
+      ...this.messages[idx],
+      reasoning: cur + delta,
+    };
+  }
+
   private flushStreamBuffer() {
     this.streamFlushTimer = null;
     if (!this.streamBuffer) return;
-    const cur = (this.messages[0]?.content as string) || "";
+    const idx = this.getStreamingIndex();
+    if (idx < 0) {
+      this.streamBuffer = "";
+      return;
+    }
+    const cur = (this.messages[idx]?.content as string) || "";
     const next = cur + this.streamBuffer;
-    this.messages[0] = {
-      ...this.messages[0],
+    this.messages[idx] = {
+      ...this.messages[idx],
       content: next,
     };
     this.streamBuffer = "";
@@ -503,10 +556,10 @@ class MessagesState {
     if (!ttsState.loaded) return;
 
     // Don't interleave with a replay that's voicing a different message.
-    const streamingId = this.messages[0]?.id;
+    const streamingId = this.streamingMessageId;
     if (
       ttsState.currentMessageId !== null &&
-      streamingId !== undefined &&
+      streamingId !== null &&
       ttsState.currentMessageId !== streamingId
     ) {
       return;
@@ -551,17 +604,24 @@ class MessagesState {
 
   async finishStreaming() {
     this.cancelStreamBuffer();
+    const idx = this.getStreamingIndex();
     this.isStreaming = false;
-    const finalText = (this.messages[0]?.content as string) || "";
+    this.streamingMessageId = null;
+    const finalText = idx >= 0 ? (this.messages[idx]?.content as string) || "" : "";
     void this.feedTTS(finalText, true);
     await this.flushSave();
   }
 
   receiveErrorMessage(errorType: LLMErrorType, detail?: string) {
     this.cancelStreamBuffer();
+    const idx = this.getStreamingIndex();
     this.isStreaming = false;
+    this.streamingMessageId = null;
     const content = detail ? `${errorType}\n${detail}` : errorType;
-    this.messages[0] = { role: "error", content };
+    if (idx >= 0) {
+      const existing = this.messages[idx];
+      this.messages[idx] = { ...(existing.id ? { id: existing.id } : {}), role: "error", content };
+    }
     void this.flushSave();
   }
 
@@ -570,29 +630,48 @@ class MessagesState {
     this.cancelStreamBuffer();
     void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
 
-    if (this.streamingFirstChunkReceived) {
-      const current = this.messages[0].content;
-      if (typeof current === "string") {
-        this.messages[0] = {
-          ...this.messages[0],
-          content: current + "\n\n> _User interrupted._",
+    const idx = this.getStreamingIndex();
+    if (idx >= 0) {
+      if (this.streamingFirstChunkReceived) {
+        const current = this.messages[idx].content;
+        if (typeof current === "string") {
+          this.messages[idx] = {
+            ...this.messages[idx],
+            content: current + "\n\n> _User interrupted._",
+          };
+        }
+      } else {
+        this.messages[idx] = {
+          ...this.messages[idx],
+          content: "> _User interrupted._",
         };
       }
-    } else {
-      this.messages[0] = {
-        ...this.messages[0],
-        content: "> _User interrupted._",
-      };
     }
 
     this.isStreaming = false;
     this.streamingFirstChunkReceived = false;
+    this.streamingMessageId = null;
     interruptCurrentStream();
     await this.flushSave();
   }
 
-  /** Update the last user message content and regenerate the agent response */
-  async updateLastUserMessage(content: MessageContent) {
+  /** Abort the active stream without emitting an interrupt marker. Used when
+   *  the ongoing assistant message is about to be spliced away (deleteAgent /
+   *  reprocess) - leaving a "_User interrupted._" note on a message that's
+   *  already being removed would be nonsensical. */
+  private abortStreamSilently(): void {
+    if (!this.isStreaming) return;
+    this.cancelStreamBuffer();
+    void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
+    this.isStreaming = false;
+    this.streamingFirstChunkReceived = false;
+    this.streamingMessageId = null;
+    interruptCurrentStream();
+  }
+
+  /** Update any user message by id and regenerate the response. If no id is
+   *  provided, falls back to the most recent user message. */
+  async updateUserMessage(messageId: string | undefined, content: MessageContent) {
     await this.interruptStreaming();
     // interruptStreaming only stops TTS if something was actively streaming.
     // When editing a message with a settled assistant response, the response
@@ -600,7 +679,9 @@ class MessagesState {
     // the resend), so any replay-mode TTS tied to it must stop too.
     this.resetTTSPlayback();
 
-    const userIdx = this.messages.findIndex((m) => m.role === "user");
+    const userIdx = messageId
+      ? this.messages.findIndex((m) => m.role === "user" && m.id === messageId)
+      : this.messages.findIndex((m) => m.role === "user");
     if (userIdx < 0) return;
 
     const prevContent = this.messages[userIdx].content;
@@ -676,6 +757,82 @@ class MessagesState {
 
     const { sendMessages } = await import("$lib/sidecar/llm");
     await sendMessages();
+  }
+
+  /** Back-compat wrapper: update the most recent user message. */
+  async updateLastUserMessage(content: MessageContent) {
+    await this.updateUserMessage(undefined, content);
+  }
+
+  /** Delete a user message along with its paired assistant/error response. If
+   *  this empties the session of user messages, remove the session entirely. */
+  async deleteUserMessage(messageId: string) {
+    await this.interruptStreaming();
+    this.resetTTSPlayback();
+
+    const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === messageId);
+    if (userIdx < 0) return;
+
+    // newest-first: the paired response (generated AFTER this user msg) sits
+    // one slot lower. Only splice it if it's actually an assistant/error.
+    const pairedIdx =
+      userIdx > 0 &&
+      (this.messages[userIdx - 1].role === "assistant" ||
+        this.messages[userIdx - 1].role === "error")
+        ? userIdx - 1
+        : userIdx;
+
+    const removedPaths = diffRemovedAttachmentPaths(this.messages[userIdx].content, "");
+
+    const deleteCount = userIdx - pairedIdx + 1;
+    this.messages.splice(pairedIdx, deleteCount);
+
+    if (removedPaths.length > 0) {
+      void deleteSessionAttachments(removedPaths);
+    }
+
+    const remainingUsers = this.messages.filter((m) => m.role === "user").length;
+    if (remainingUsers === 0) {
+      await this.deleteSession();
+      return;
+    }
+
+    await this.flushSave();
+  }
+
+  /** Regenerate a specific assistant message in place. Only messages
+   *  chronologically before the target are used as context; newer turns stay
+   *  untouched. */
+  async reprocessAgentMessage(messageId: string) {
+    if (this.isStreaming) return;
+    this.resetTTSPlayback();
+
+    const agentIdx = this.messages.findIndex(
+      (m) => (m.role === "assistant" || m.role === "error") && m.id === messageId,
+    );
+    if (agentIdx < 0) return;
+
+    const { reprocessMessage } = await import("$lib/sidecar/llm");
+    await reprocessMessage(messageId);
+  }
+
+  /** Delete an assistant/error message. Safe to call on a currently-streaming
+   *  message - aborts generation silently first. */
+  async deleteAgentMessage(messageId: string) {
+    const idx = this.messages.findIndex(
+      (m) => (m.role === "assistant" || m.role === "error") && m.id === messageId,
+    );
+    if (idx < 0) return;
+
+    const isStreamingThis = this.isStreaming && idx === 0;
+    if (isStreamingThis) {
+      this.abortStreamSilently();
+    }
+    this.resetTTSPlayback();
+
+    this.messages.splice(idx, 1);
+
+    await this.flushSave();
   }
 }
 

@@ -40,7 +40,7 @@
 
   <textarea
     aria-label={field.name}
-    class="multiline-scroll text-default-800 rounded-lg w-full px-2 py-1.5 outline-none resize-none max-h-128 min-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm font-mono {!editable
+    class="multiline-scroll text-default-800 rounded-lg w-full px-2 py-1.5 outline-none min-h-40 overflow-y-hidden focus:overflow-y-auto whitespace-pre-wrap break-words text-sm {!editable
       ? 'opacity-60'
       : ''} {hasError
       ? 'bg-err-input border-err'

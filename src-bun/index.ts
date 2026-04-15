@@ -20,11 +20,13 @@ env.cacheDir = LOCAL_MODEL_ROOT;
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 
-// kokoro-js ships voice tensors for every language under the 82M-v1 ONNX repo
-// but gates them behind a hardcoded allow-list of English voices. We still
-// want the full catalog exposed, so we relax validation here - the bundled
-// `voices/` directory supplies the tensor bytes; the model itself handles
-// any voice the user selects.
+// kokoro-js's `_validate_voice` only accepts the 28 English voices in its
+// hardcoded VOICES allowlist (see node_modules/kokoro-js/dist/kokoro.cjs),
+// but the package ships 56 .bin tensors covering Japanese (jf_*/jm_*),
+// Mandarin (zf_*/zm_*) and others. The model itself handles any voice whose
+// tensor file resolves; only the validator stands in the way. Upstream has
+// no API to extend the list, so we relax the validator here. Revisit if a
+// future kokoro-js exposes the full catalog directly.
 (KokoroTTS as unknown as { prototype: Record<string, unknown> }).prototype._validate_voice =
   function (voice: string): string {
     if (typeof voice !== "string" || voice.length === 0) {
@@ -57,15 +59,40 @@ async function ensureLoaded(): Promise<void> {
   }
 }
 
-function unloadModel(): void {
+// Drops the model and releases the underlying ORT sessions. Without
+// model.dispose() the native onnxruntime-node allocations stay live even
+// after the JS reference is gone, so toggling TTS off would never visibly
+// shrink the sidecar's RSS. kokoro-js also keeps a module-internal voice
+// tensor cache (~500 KB per voice, capped at ~27 MB if every voice was
+// played) that we can't reach to clear; that residue is the price of not
+// vendoring the package.
+async function unloadModel(): Promise<void> {
+  const model = tts;
   tts = null;
-  const g = globalThis as unknown as { gc?: () => void };
-  if (typeof g.gc === "function") {
+  loadPromise = null;
+  // Wait for any in-flight generate() before disposing - tearing down
+  // sessions mid-run would crash ORT.
+  await inflight.catch(() => {});
+  if (model) {
     try {
-      g.gc();
-    } catch {
-      /* ignore */
+      // PreTrainedModel.dispose() walks model.sessions and calls
+      // session.handler.dispose() on each, releasing the native ORT
+      // sessions. Without this the C++ sessions stay alive forever and a
+      // re-load would stack a fresh session on top of the old one.
+      await (model.model as { dispose?: () => Promise<unknown> }).dispose?.();
+    } catch (err) {
+      console.error("[tts] dispose failed:", err);
     }
+  }
+  // Bun.gc(true) forces a synchronous GC; globalThis.gc only exists with
+  // Node's --expose-gc, which Bun doesn't honor. Note the OS won't
+  // necessarily reclaim the freed pages - libc typically keeps them in the
+  // process's heap pool. RSS therefore won't visibly drop, but per-cycle
+  // growth is bounded since the native sessions are actually torn down.
+  try {
+    Bun.gc(true);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -135,8 +162,8 @@ export const app = new Elysia()
     },
     { body: t.Optional(t.Object({})) },
   )
-  .post("/api/tts/unload", () => {
-    unloadModel();
+  .post("/api/tts/unload", async () => {
+    await unloadModel();
     return { status: "ok" };
   })
   .post(

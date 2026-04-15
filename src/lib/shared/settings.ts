@@ -414,7 +414,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     name: "Language Model",
     sections: [
       {
-        label: "Attachments",
+        label: "General",
         fields: [
           {
             id: "llm.supportImages",
@@ -423,6 +423,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               "Allow attaching images to messages.\nRequires a vision-capable model when using the local llama-server.",
             type: "boolean",
             defaultValue: true,
+          },
+          {
+            id: "llm.showReasoning",
+            name: "Show Reasoning",
+            description:
+              "Display the model's reasoning trace in a collapsible section above each response. Persisted with the session but never sent back to the model.",
+            type: "boolean",
+            defaultValue: false,
           },
         ],
       },
@@ -1106,7 +1114,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description:
               "Speed the synthesized audio is replayed at.\nApplied after synthesis, so pitch scales with the multiplier (higher = higher-pitched voice).\nAccepted range: 0.25–3.",
             type: "float",
-            defaultValue: 1,
+            defaultValue: 1.25,
             suffix: "x",
             regex: [
               {
@@ -1177,14 +1185,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     ],
   },
   {
-    id: "resources",
-    name: "Resources",
+    id: "usage",
+    name: "Usage",
     sections: [
       {
         label: "Activity",
         fields: [
           {
-            id: "resources.services",
+            id: "usage.services",
             name: "Services",
             description: "Live memory and CPU usage for each local service.",
             type: "services",
@@ -1196,7 +1204,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         label: "Storage",
         fields: [
           {
-            id: "resources.storage",
+            id: "usage.storage",
             name: "Disk Usage",
             description:
               "Downloaded models and saved sessions.\nSelect items and press Delete (or ⌘⌫) to remove them.",

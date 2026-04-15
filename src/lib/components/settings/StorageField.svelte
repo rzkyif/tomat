@@ -1,7 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { SECRET_KEYS, TTS_BASE_FILES, type SettingField } from "$lib/shared/settings";
+  import {
+    SECRET_KEYS,
+    TTS_BASE_FILES,
+    type SettingField,
+  } from "$lib/shared/settings";
   import { confirmState, settingsState, snippetsState } from "../../state";
 
   let { field } = $props<{ field: SettingField }>();
@@ -178,7 +182,9 @@
     return out;
   }
 
-  function hasClearable(kind: "models" | "sessions" | "snippets" | "settings"): boolean {
+  function hasClearable(
+    kind: "models" | "sessions" | "snippets" | "settings",
+  ): boolean {
     if (!tree) return false;
     if (kind === "settings") return tree.settings_size > 0;
     if (kind === "sessions") return tree.sessions.length > 0;
@@ -362,7 +368,7 @@
   </div>
 
   <!-- Header: total only -->
-  <div class="flex items-center bg-default-200 rounded-xl px-3 py-2 mb-1">
+  <div class="flex items-center bg-default-300 rounded-xl px-3 py-2 mb-1">
     <span class="text-default-800 text-sm flex-1">Total</span>
     <span class="text-default-800 text-sm tabular-nums">
       {tree ? formatBytes(tree.total_size) : "…"}

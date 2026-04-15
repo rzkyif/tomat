@@ -101,26 +101,29 @@ const VAD_FILES = [
 // ---------------------------------------------------------------------------
 // Bun sidecar runtime dependencies
 // ---------------------------------------------------------------------------
-// The bun-side server.js is bundled (see scripts/build-bun.mjs) but a few
-// packages are kept external because they carry per-platform native binaries
-// or are loaded relative to their own dist directory:
+// The bun-side server.js is built with `bun build --external` for the
+// packages below, so they are not inlined and must be present on disk next
+// to server.js for Node-style resolution to find them at runtime:
 //
 //   - onnxruntime-node: native NAPI binding used by transformers.js's CPU
 //     execution provider. Only the host platform's binary is staged to keep
 //     the shipped bundle small.
 //   - onnxruntime-common: shared types/util package required by onnxruntime-node.
-//   - kokoro-js voice tensors: kokoro-js loads `voices/<name>.bin` relative
-//     to its own dist dir. We stage them so that, at runtime, server.js can
-//     reach them via `../voices/...`.
+//   - kokoro-js: loads `voices/<name>.bin` relative to its own dist dir, so
+//     keeping it as a real on-disk package (rather than inlined) lets that
+//     resolution Just Work without any post-bundle path patching.
+//   - @huggingface/transformers, phonemizer: required at runtime by
+//     kokoro-js's CJS entry; externalising kokoro-js without these would
+//     fail at load time with module-not-found.
 //
-// Tauri's bundle.resources ships these into the packaged app:
-//   src-tauri/resources/node_modules/onnxruntime-node|common
-//   src-tauri/voices
+// Tauri's bundle.resources ships everything under
+// src-tauri/resources/node_modules/ into the packaged app.
 const ORT_NODE_PKG = path.join(ROOT_DIR, "node_modules", "onnxruntime-node");
 const ORT_COMMON_PKG = path.join(ROOT_DIR, "node_modules", "onnxruntime-common");
 const KOKORO_PKG = path.join(ROOT_DIR, "node_modules", "kokoro-js");
+const TRANSFORMERS_PKG = path.join(ROOT_DIR, "node_modules", "@huggingface", "transformers");
+const PHONEMIZER_PKG = path.join(ROOT_DIR, "node_modules", "phonemizer");
 const SIDECAR_NODE_MODULES_DIR = path.join(ROOT_DIR, "src-tauri", "resources", "node_modules");
-const SIDECAR_VOICES_DIR = path.join(ROOT_DIR, "src-tauri", "voices");
 
 function hostOrtBinaryDir() {
   // onnxruntime-node lays out binaries as bin/napi-v3/<platform>/<arch>/
@@ -395,10 +398,18 @@ async function main() {
   const kokoroVersion = JSON.parse(
     fs.readFileSync(path.join(KOKORO_PKG, "package.json"), "utf-8"),
   ).version;
+  const transformersVersion = JSON.parse(
+    fs.readFileSync(path.join(TRANSFORMERS_PKG, "package.json"), "utf-8"),
+  ).version;
+  const phonemizerVersion = JSON.parse(
+    fs.readFileSync(path.join(PHONEMIZER_PKG, "package.json"), "utf-8"),
+  ).version;
   const ortHostKey = `${ortNodeVersion}-${process.platform}-${process.arch}`;
   const needOrtNode = installed.onnxruntimeNode !== ortHostKey;
   const needOrtCommon = installed.onnxruntimeCommon !== ortCommonVersion;
-  const needKokoroVoices = installed.kokoroVoices !== kokoroVersion;
+  const needKokoro = installed.kokoro !== kokoroVersion;
+  const needTransformers = installed.transformers !== transformersVersion;
+  const needPhonemizer = installed.phonemizer !== phonemizerVersion;
 
   // In --update mode, always re-download every binary so hashes are recorded
   // for all of them - otherwise a binary that's already at the latest version
@@ -414,7 +425,9 @@ async function main() {
     !needVad &&
     !needOrtNode &&
     !needOrtCommon &&
-    !needKokoroVoices
+    !needKokoro &&
+    !needTransformers &&
+    !needPhonemizer
   ) {
     log("All binaries, VAD files, and bun sidecar deps are up to date.");
     return;
@@ -465,12 +478,50 @@ async function main() {
     log(`  Staged onnxruntime-common`);
   }
 
-  if (needKokoroVoices) {
-    log(`Staging kokoro-js voices ${kokoroVersion}...`);
-    rmDir(SIDECAR_VOICES_DIR);
-    copyDir(path.join(KOKORO_PKG, "voices"), SIDECAR_VOICES_DIR);
-    installed.kokoroVoices = kokoroVersion;
-    log(`  Staged kokoro-js voices`);
+  // Helper for staging an externalised package: copy the whole tree minus
+  // any nested node_modules (those resolve from the root node_modules via
+  // Node's walk-up), with an optional per-package skip for files we know
+  // we'll never load at runtime.
+  function stagePackage(label, src, destName, version, extraSkip) {
+    log(`Staging ${label} ${version}...`);
+    const dest = path.join(SIDECAR_NODE_MODULES_DIR, destName);
+    rmDir(dest);
+    ensureDir(dest);
+    copyDir(src, dest, (p) => {
+      const rel = path.relative(src, p);
+      if (rel === "node_modules" || rel.startsWith("node_modules" + path.sep)) return false;
+      if (extraSkip && extraSkip(rel)) return false;
+      return true;
+    });
+    log(`  Staged ${label}`);
+  }
+
+  if (needKokoro) {
+    // Skip the 2 MB browser bundle - Bun loads kokoro.cjs via the "node"
+    // conditional export.
+    stagePackage(
+      "kokoro-js",
+      KOKORO_PKG,
+      "kokoro-js",
+      kokoroVersion,
+      (rel) => rel === path.join("dist", "kokoro.web.js"),
+    );
+    installed.kokoro = kokoroVersion;
+  }
+
+  if (needTransformers) {
+    stagePackage(
+      "@huggingface/transformers",
+      TRANSFORMERS_PKG,
+      path.join("@huggingface", "transformers"),
+      transformersVersion,
+    );
+    installed.transformers = transformersVersion;
+  }
+
+  if (needPhonemizer) {
+    stagePackage("phonemizer", PHONEMIZER_PKG, "phonemizer", phonemizerVersion);
+    installed.phonemizer = phonemizerVersion;
   }
 
   // In default mode, we fetch release metadata per-tag to discover asset URLs
