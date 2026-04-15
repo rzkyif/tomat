@@ -7,6 +7,7 @@
     type SettingField,
   } from "$lib/shared/settings";
   import { confirmState, settingsState, snippetsState } from "../../state";
+  import FieldDescription from "./FieldDescription.svelte";
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -37,9 +38,7 @@
   };
 
   let tree = $state<StorageTree | null>(null);
-  let expanded = $state<Set<string>>(
-    new Set(["__models__", "__sessions__", "__snippets__"]),
-  );
+  let expanded = $state<Set<string>>(new Set());
   let selected = $state<Set<string>>(new Set());
   let lastSelectedPath = $state<string | null>(null);
   const inUsePaths = $derived(getInUseModelPaths());
@@ -361,9 +360,7 @@
   <div class="flex flex-col">
     <div class="text-default-800">{field.name}</div>
     {#if field.description}
-      <div class="text-default-500 text-sm leading-tight whitespace-pre-line">
-        {field.description}
-      </div>
+      <FieldDescription text={field.description} />
     {/if}
   </div>
 

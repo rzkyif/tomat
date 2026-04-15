@@ -44,7 +44,12 @@
   <div class="flex flex-wrap gap-2">
     {#each parts as part, i}
       {#if part.type === "image_url"}
-        <div class="relative group bg-default-100 p-2 rounded-lg pr-7">
+        <div
+          class="relative group bg-default-100 p-2 rounded-lg {editable &&
+          onRemove
+            ? 'pr-7'
+            : ''}"
+        >
           {#if onImageClick}
             <button
               class="block p-0 border-0 bg-transparent hover:cursor-pointer"
@@ -76,7 +81,12 @@
         </div>
       {:else if part.type === "image_file"}
         {@const url = imageUrlCache[part.path] || ""}
-        <div class="relative group bg-default-100 p-2 rounded-lg pr-7">
+        <div
+          class="relative group bg-default-100 p-2 rounded-lg {editable &&
+          onRemove
+            ? 'pr-7'
+            : ''}"
+        >
           {#if url}
             {#if onImageClick}
               <button

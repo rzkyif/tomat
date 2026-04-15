@@ -4,8 +4,8 @@ import {
   ASSISTANT_PROMPT,
   DEFAULT_TITLE_GENERATION_PROMPT,
   DEFAULT_AUTOCORRECT_PROMPT,
-  DEFAULT_CHAIN_TRANSCRIPTION_PROMPT,
-  DEFAULT_DUAL_MODEL_DETECTION_PROMPT,
+  DEFAULT_MERGE_TRANSCRIPTION_PROMPT,
+  DEFAULT_COMPLEXITY_DETECTION_PROMPT,
 } from "./prompts";
 
 export type SettingType =
@@ -23,7 +23,7 @@ export type SettingType =
   | "storage"
   | "snippets";
 
-export type SmartSTTMode = "disabled" | "hold" | "persistent";
+export type ActivationMode = "manual" | "sticky" | "push-to-talk";
 
 // Kokoro TTS assets are fetched into ~/.tomat/models/<repo>/... by the existing
 // downloader. transformers.js's `dtype: "q8"` expects an ONNX file named
@@ -307,29 +307,29 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         ],
       },
       {
-        label: "Chain Transcription",
+        label: "Merge Transcription",
         fields: [
           {
-            id: "prompts.chainTranscriptionPrompt",
-            name: "Chain Transcription Prompt",
+            id: "prompts.mergeTranscriptionPrompt",
+            name: "Merge Transcription Prompt",
             description:
               "Prompt used to merge a fresh speech-to-text transcription into the existing text already in the chat input.",
             type: "multiline",
-            defaultValue: DEFAULT_CHAIN_TRANSCRIPTION_PROMPT,
+            defaultValue: DEFAULT_MERGE_TRANSCRIPTION_PROMPT,
             regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
           },
         ],
       },
       {
-        label: "Dual-Model Detection",
+        label: "Complexity Detection",
         fields: [
           {
-            id: "prompts.dualModelDetectionPrompt",
-            name: "Dual-Model Detection Prompt",
+            id: "prompts.complexityDetectionPrompt",
+            name: "Complexity Detection Prompt",
             description:
               "System prompt used by the default model to classify each new user message before it is answered.\nThe reply is matched case-insensitively: if it contains the word `complex` without `simple` the request is routed to the secondary model, otherwise it stays on the default model. A reply that is ambiguous or empty falls back to the default model.",
             type: "multiline",
-            defaultValue: DEFAULT_DUAL_MODEL_DETECTION_PROMPT,
+            defaultValue: DEFAULT_COMPLEXITY_DETECTION_PROMPT,
             regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
           },
         ],
@@ -433,7 +433,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         fields: [
           {
             id: "llm.supportImages",
-            name: "Support Images",
+            name: "Image Attachments",
             description:
               "Allow attaching images to messages.\nRequires a vision-capable model when using the local llama-server.",
             type: "boolean",
@@ -445,7 +445,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description:
               "Display the model's reasoning trace in a collapsible section above each response. Persisted with the session but never sent back to the model.",
             type: "boolean",
-            defaultValue: false,
+            defaultValue: true,
           },
         ],
       },
@@ -582,8 +582,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           },
           {
             id: "llm.external.contextSize",
-            name: "Context Size",
-            description: "Maximum context window length, used for usage tracking.",
+            name: "Context Length",
+            description: "Maximum context window length in tokens. Used for usage tracking.",
             type: "number",
             defaultValue: 128000,
           },
@@ -602,7 +602,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           },
           {
             id: "llm.mmprojPath",
-            name: "Vision Projector Path",
+            name: "Vision Projector (mmproj) Path",
             description: "Path to the mmproj GGUF file used for vision support.",
             type: "string",
             defaultValue: "@unsloth/Qwen3.5-0.8B-GGUF/main/mmproj-F16.gguf",
@@ -612,14 +612,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           },
           {
             id: "llm.contextSize",
-            name: "Context Size",
-            description: "Maximum context window length.",
+            name: "Context Length",
+            description: "Maximum context window length in tokens.",
             type: "number",
             defaultValue: 4096,
           },
           {
             id: "llm.mmap",
-            name: "Memory Mapping",
+            name: "Memory-Mapped Loading",
             description:
               "Use memory-mapped I/O when loading the model.\n\nFaster startup and lower RAM usage in most cases. Disable if you see stability issues on unusual filesystems.",
             type: "boolean",
@@ -634,7 +634,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           },
           {
             id: "llm.reasoning",
-            name: "Reasoning",
+            name: "Reasoning Mode",
             description: "Whether the model should produce a reasoning trace before its answer.",
             type: "select",
             defaultValue: "off",
@@ -647,7 +647,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           },
           {
             id: "llm.reasoningBudget",
-            name: "Reasoning Budget",
+            name: "Reasoning Token Budget",
             description: "Number of tokens reserved for the reasoning trace.",
             type: "number",
             defaultValue: "",
@@ -686,7 +686,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           },
           {
             id: "llm.webui",
-            name: "Llama.cpp Web UI",
+            name: "Built-in Web UI",
             description: "Enable the llama.cpp built-in web interface.",
             type: "boolean",
             defaultValue: false,
@@ -713,23 +713,23 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         fields: [
           {
             id: "stt.llmAutocorrect",
-            name: "LLM Autocorrect",
+            name: "Autocorrect Transcription",
             description:
-              "Use the language model to clean up transcription mistakes after speech recognition.",
+              "Use the language model to clean up transcription mistakes after speech recognition.\n\nDisable if you prefer raw Whisper output or want to save a model call per dictation.",
             type: "boolean",
             defaultValue: true,
           },
           {
             id: "stt.llmChainTranscription",
-            name: "LLM Chain Transcription",
+            name: "Merge Into Existing Input",
             description:
-              "When there is already text in the input, use the language model to merge a new transcription into it instead of replacing it.",
+              "When text is already in the input, use the language model to merge a new transcription into it rather than replacing it.\n\nDisable to always append as a new line.",
             type: "boolean",
             defaultValue: true,
           },
           {
             id: "stt.autoSend",
-            name: "Auto-send Transcription",
+            name: "Auto Send After Transcription",
             description: "Automatically send the message as soon as transcription completes.",
             type: "boolean",
             defaultValue: false,
@@ -741,16 +741,16 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         visibleWhen: { field: "stt.preset", neq: "disabled" },
         fields: [
           {
-            id: "stt.smartStt",
+            id: "stt.activation",
             name: "Activation",
             description:
-              "How the microphone is activated.\n\nManual: use the mic button. Voice input turns off whenever the app is hidden or closed.\nSticky: use the mic button. Voice input stays on through hides, closes, and restarts.\nPush to Talk: hold the global shortcut to dictate. Quick taps show or hide the window instead.",
+              "How the microphone is activated.\n\nManual: use the mic button. Voice input turns off whenever the app is hidden or closed.\n\nSticky: use the mic button. Voice input stays on through hides, closes, and restarts.\n\nPush to Talk: hold the global shortcut to dictate. Quick taps show or hide the window instead.",
             type: "select",
-            defaultValue: "disabled",
+            defaultValue: "manual",
             options: [
-              { value: "disabled", label: "Manual" },
-              { value: "persistent", label: "Sticky" },
-              { value: "hold", label: "Push to Talk" },
+              { value: "manual", label: "Manual" },
+              { value: "sticky", label: "Sticky" },
+              { value: "push-to-talk", label: "Push to Talk" },
             ],
           },
           {
@@ -761,7 +761,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "number",
             defaultValue: 250,
             suffix: "ms",
-            visibleWhen: { field: "stt.smartStt", eq: "hold" },
+            visibleWhen: { field: "stt.activation", eq: "push-to-talk" },
           },
           {
             id: "stt.vadPersistedState",
@@ -769,7 +769,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description: "",
             type: "boolean",
             defaultValue: false,
-            visibleWhen: { field: "stt.smartStt", eq: "__never__" },
+            visibleWhen: { field: "stt.activation", eq: "__never__" },
           },
         ],
       },
@@ -785,63 +785,6 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             presetConfig: {
               options: [
                 {
-                  id: "small",
-                  label: "Small",
-                  title: "Whisper Small",
-                  badges: [
-                    { icon: "i-material-symbols-memory-rounded", label: "~1 GB RAM" },
-                    { icon: "i-material-symbols-bolt-rounded", label: "Fast" },
-                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Good accuracy" },
-                    { icon: "i-material-symbols-language", label: "Multilingual" },
-                  ],
-                  description:
-                    "Solid all-round transcription for clear speech. Runs well on most hardware.",
-                  defaults: {
-                    "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-small.bin",
-                    "stt.threads": 4,
-                    "stt.host": "127.0.0.1",
-                    "stt.port": "7702",
-                  },
-                },
-                {
-                  id: "medium",
-                  label: "Medium",
-                  title: "Whisper Medium",
-                  badges: [
-                    { icon: "i-material-symbols-memory-rounded", label: "~2.5 GB RAM" },
-                    { icon: "i-material-symbols-speed-rounded", label: "Balanced" },
-                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Solid accuracy" },
-                    { icon: "i-material-symbols-language", label: "Multilingual" },
-                  ],
-                  description:
-                    "More accurate with accents or background noise. A good default on modern machines.",
-                  defaults: {
-                    "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-medium.bin",
-                    "stt.threads": 6,
-                    "stt.host": "127.0.0.1",
-                    "stt.port": "7702",
-                  },
-                },
-                {
-                  id: "large-v3-turbo-q8",
-                  label: "Large v3 Turbo",
-                  title: "Whisper Large v3 Turbo (Q8)",
-                  badges: [
-                    { icon: "i-material-symbols-memory-rounded", label: "~2 GB RAM" },
-                    { icon: "i-material-symbols-speed-rounded", label: "Balanced" },
-                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Best accuracy" },
-                    { icon: "i-material-symbols-language", label: "Multilingual" },
-                  ],
-                  description:
-                    "Quantized Turbo build of Large v3. Near-Large accuracy at a fraction of the size and latency.",
-                  defaults: {
-                    "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-large-v3-turbo-q8_0.bin",
-                    "stt.threads": 8,
-                    "stt.host": "127.0.0.1",
-                    "stt.port": "7702",
-                  },
-                },
-                {
                   id: "distil-small-en",
                   label: "Distil Small",
                   title: "Distil-Whisper Small (English)",
@@ -852,7 +795,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                     { icon: "i-material-symbols-translate-rounded", label: "English only" },
                   ],
                   description:
-                    "Distilled English-only model. Very fast with low memory use — great for live dictation.",
+                    "Distilled English-only model. Very fast with low memory use, great for live dictation.",
                   defaults: {
                     "stt.modelPath":
                       "@distil-whisper/distil-small.en/main/ggml-distil-small.en.bin",
@@ -882,6 +825,25 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                   },
                 },
                 {
+                  id: "small",
+                  label: "Small",
+                  title: "Whisper Small",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~1 GB RAM" },
+                    { icon: "i-material-symbols-bolt-rounded", label: "Fast" },
+                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Good accuracy" },
+                    { icon: "i-material-symbols-language", label: "Multilingual" },
+                  ],
+                  description:
+                    "Solid all-round transcription for clear speech. Runs well on most hardware.",
+                  defaults: {
+                    "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-small.bin",
+                    "stt.threads": 4,
+                    "stt.host": "127.0.0.1",
+                    "stt.port": "7702",
+                  },
+                },
+                {
                   id: "distil-large-v3",
                   label: "Distil Large v3",
                   title: "Distil-Whisper Large v3 (English)",
@@ -896,6 +858,44 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                   defaults: {
                     "stt.modelPath":
                       "@distil-whisper/distil-large-v3-ggml/main/ggml-distil-large-v3.bin",
+                    "stt.threads": 6,
+                    "stt.host": "127.0.0.1",
+                    "stt.port": "7702",
+                  },
+                },
+                {
+                  id: "large-v3-turbo-q8",
+                  label: "Large v3 Turbo",
+                  title: "Whisper Large v3 Turbo (Q8)",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~2 GB RAM" },
+                    { icon: "i-material-symbols-speed-rounded", label: "Balanced" },
+                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Best accuracy" },
+                    { icon: "i-material-symbols-language", label: "Multilingual" },
+                  ],
+                  description:
+                    "Quantized Turbo build of Large v3. Near-Large accuracy at a fraction of the size and latency.",
+                  defaults: {
+                    "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-large-v3-turbo-q8_0.bin",
+                    "stt.threads": 8,
+                    "stt.host": "127.0.0.1",
+                    "stt.port": "7702",
+                  },
+                },
+                {
+                  id: "medium",
+                  label: "Medium",
+                  title: "Whisper Medium",
+                  badges: [
+                    { icon: "i-material-symbols-memory-rounded", label: "~2.5 GB RAM" },
+                    { icon: "i-material-symbols-speed-rounded", label: "Balanced" },
+                    { icon: "i-material-symbols-graphic-eq-rounded", label: "Solid accuracy" },
+                    { icon: "i-material-symbols-language", label: "Multilingual" },
+                  ],
+                  description:
+                    "More accurate with accents or background noise. A good default on modern machines.",
+                  defaults: {
+                    "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-medium.bin",
                     "stt.threads": 6,
                     "stt.host": "127.0.0.1",
                     "stt.port": "7702",
@@ -1108,7 +1108,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           },
           {
             id: "tts.minChunkWords",
-            name: "Minimum Chunk Words",
+            name: "Minimum Words Per Chunk",
             description:
               "Smallest number of words to buffer before sending a chunk to the voice model.\nHigher values produce smoother prosody at the cost of latency.",
             type: "number",
@@ -1120,7 +1120,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "tts.synthesisSpeed",
             name: "Synthesis Speed",
             description:
-              "Speed the voice model is asked to render speech at.\nAffects the prosody of the generated audio (lower = more relaxed pacing, higher = more clipped).\nAccepted range: 0.25–3.",
+              "Speed the voice model is asked to render speech at.\nAffects the prosody of the generated audio (lower = more relaxed pacing, higher = more clipped).\nAccepted range: 0.25 to 3.",
             type: "float",
             defaultValue: 1,
             suffix: "x",
@@ -1135,9 +1135,9 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "tts.playbackSpeed",
             name: "Playback Speed",
             description:
-              "Speed the synthesized audio is replayed at.\nApplied after synthesis, so pitch scales with the multiplier (higher = higher-pitched voice).\nAccepted range: 0.25–3.",
+              "Speed the synthesized audio is replayed at.\nApplied after synthesis, so pitch scales with the multiplier (higher = higher-pitched voice).\nAccepted range: 0.25 to 3.",
             type: "float",
-            defaultValue: 1.25,
+            defaultValue: 1,
             suffix: "x",
             regex: [
               {

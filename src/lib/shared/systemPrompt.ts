@@ -68,7 +68,7 @@ export function buildContextBlock(): string {
  * if any context field/toggle is set. Returns null only when nothing is set.
  *
  * Used as the fallback when no snippet-driven override exists on the user
- * message — snippet paths go through `applySystemPromptOverride` with the
+ * message. Snippet paths go through `applySystemPromptOverride` with the
  * base and context passed separately so snippet text lands between them.
  */
 export function buildSystemPrompt(): string | null {

@@ -18,7 +18,7 @@
   import { transcribeAudio } from "$lib/sidecar/stt";
   import {
     autocorrectTranscription,
-    chainTranscription,
+    mergeTranscription,
   } from "$lib/sidecar/llm";
   import { float32ToWav, blobToBase64 } from "$lib/shared/audio";
   import {
@@ -43,7 +43,7 @@
     type CaptureMonitorInfo,
   } from "$lib/shared/capture";
   import { vadManager } from "$lib/shared/vad.svelte";
-  import type { SmartSTTMode } from "$lib/shared/settings";
+  import type { ActivationMode } from "$lib/shared/settings";
   import AttachmentList from "./AttachmentList.svelte";
   import Bubble from "./Bubble.svelte";
 
@@ -266,8 +266,8 @@
     }
     const token = match[1];
     // Only reset the selected index when the filter prefix actually changed
-    // (or we're freshly opening). Otherwise arrow-key presses — which fire
-    // onkeyup → here — would bounce the highlight back to the first option.
+    // (or we're freshly opening). Otherwise arrow-key presses, which fire
+    // onkeyup -> here, would bounce the highlight back to the first option.
     const prefixChanged = !autocompleteOpen || token !== autocompletePrefix;
     autocompletePrefix = token;
     autocompleteTriggerStart = caret - token.length;
@@ -381,10 +381,10 @@
         await shortcutHandler.attach();
 
         const mode = settingsState.currentSettings[
-          "stt.smartStt"
-        ] as SmartSTTMode;
+          "stt.activation"
+        ] as ActivationMode;
         if (
-          mode === "persistent" &&
+          mode === "sticky" &&
           settingsState.currentSettings["stt.vadPersistedState"] === true &&
           !vadManager.enabled
         ) {
@@ -562,17 +562,17 @@
 
     if (chainEnabled) {
       try {
-        const chainedRaw = await chainTranscription(existing, raw);
-        if (chainedRaw) raw = chainedRaw;
+        const mergedRaw = await mergeTranscription(existing, raw);
+        if (mergedRaw) raw = mergedRaw;
         if (corrected) {
-          const chainedCorrected = await chainTranscription(
+          const mergedCorrected = await mergeTranscription(
             existing,
             corrected,
           );
-          if (chainedCorrected) corrected = chainedCorrected;
+          if (mergedCorrected) corrected = mergedCorrected;
         }
       } catch (e) {
-        console.warn("[stt] Chain transcription failed:", e);
+        console.warn("[stt] Merge transcription failed:", e);
       }
     }
 

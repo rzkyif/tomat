@@ -3,6 +3,7 @@
   import { evalCondition } from "$lib/shared/settings";
   import type { Monitor } from "$lib/shared/types";
   import { settingsState } from "../../state";
+  import FieldDescription from "./FieldDescription.svelte";
   import FieldResetButton from "./FieldResetButton.svelte";
 
   let { field, monitors, error, onChange, onReset } = $props<{
@@ -30,9 +31,7 @@
     <div class="flex flex-col flex-1">
       <div class="text-default-800">{field.name}</div>
       {#if field.description}
-        <div class="text-default-500 text-sm leading-tight whitespace-pre-line">
-          {field.description}
-        </div>
+        <FieldDescription text={field.description} />
       {/if}
     </div>
     {#if editable && isModified}

@@ -60,29 +60,36 @@ A comprehensive settings system lets you adjust everything for your particular u
 - File attachments (picker or Ctrl+V paste), vision support, and fullscreen image previews
 - Attachment files stored per-session on disk and read lazily
 - Multi-monitor screen capture
-- Session management and history
-- Dual-model routing: keep simple prompts on the default model, upstream complex ones to a configured external model
+- Session management and history, with auto-generated session titles driven by a configurable prompt
+- Optional "Show System Prompt" bubble that displays the active system prompt (including snippet overrides) at the top of the session
+- Snippets: reusable text fragments triggered by `@trigger` in the input, configurable to prepend, append, replace, or inject into either the user message or the system prompt
+- Dual-model routing: simple prompts stay on the default model, complex ones route to a configured external model via a tunable complexity-detection prompt
 
 **Speech**
 
-- Text-to-speech that streams assistant responses to a local Kokoro-82M voice model via the bun sidecar
-- Full multilingual voice catalog, adjustable synthesis speed, and pitch-preserving playback speed
+- Text-to-speech that streams assistant responses to a local Kokoro-82M voice model via the bun sidecar (opt-in)
+- Full multilingual voice catalog (48 voices across 14 language/region combinations)
+- Configurable minimum words per chunk, synthesis speed, and pitch-preserving playback speed
 - Smart batching that keeps chunks close to Kokoro's optimal token count while chaining them gap-free on top of the currently-playing audio
 - Per-message play / stop controls on every assistant reply; TTS auto-stops when you switch sessions, send a new message, or turn on voice input
 - Markdown, code blocks, URLs, and tables are stripped before synthesis so the voice never reads punctuation aloud
 
 **Voice Input**
 
-- Real-time voice activity detection
-- Sticky and push-to-talk activation modes via global shortcut, with audible feedback
-- LLM-powered transcription autocorrect
-- Can be disabled entirely from the preset picker
+- Real-time voice activity detection with audible feedback
+- Three activation modes: Manual (mic button, off on hide), Sticky (mic button, persists through hides/restarts), Push to Talk (hold the global shortcut)
+- LLM-powered "Autocorrect Transcription" that fixes common speech-to-text mistakes
+- LLM-powered "Merge Into Existing Input" that merges new dictation into text already present in the input
+- Optional "Auto Send After Transcription" to skip the review step
+- Can be disabled entirely from the model preset picker
 
 **Configuration**
 
-- Zero-config model presets - works out of the box
-- System-prompt presets with optional context injection (user/agent name, language, location, date/time, OS)
-- Declarative settings schema with conditional fields
+- Zero-config model presets for both LLM and STT, ordered by RAM footprint
+- System prompt presets (None, Tool Only, Assistant, Custom) with optional context injection: user name, agent name, language, location, date/time, operating system
+- Appearance controls: light/dark/auto theme, base text size, monitor selection, window width, window alignment
+- Session persistence toggle; optional "always start a new session" on launch
+- Declarative settings schema with conditional fields and per-field search
 - All data stored locally in `~/.tomat/`
 
 **Usage**

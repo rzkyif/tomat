@@ -3,6 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import type { SettingField } from "$lib/shared/settings";
   import { serversState, settingsState, ttsState } from "../../state";
+  import FieldDescription from "./FieldDescription.svelte";
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -92,9 +93,7 @@
   <div class="flex flex-col">
     <div class="text-default-800">{field.name}</div>
     {#if field.description}
-      <div class="text-default-500 text-sm leading-tight whitespace-pre-line">
-        {field.description}
-      </div>
+      <FieldDescription text={field.description} />
     {/if}
   </div>
 

@@ -107,7 +107,7 @@ export async function routeSelection(): Promise<"default" | "secondary"> {
   const lastUser = messagesState.messages.find((m) => m.role === "user");
   if (!lastUser) return "default";
 
-  const detectionPrompt = settings["prompts.dualModelDetectionPrompt"];
+  const detectionPrompt = settings["prompts.complexityDetectionPrompt"];
 
   try {
     const verdict = await singleShotLLM(detectionPrompt, lastUser.content);
@@ -183,10 +183,10 @@ export async function autocorrectTranscription(text: string): Promise<string> {
 }
 
 /** Merge a new transcription into existing textarea text via single-shot LLM. */
-export async function chainTranscription(existing: string, transcription: string): Promise<string> {
+export async function mergeTranscription(existing: string, transcription: string): Promise<string> {
   const settings = settingsState.currentSettings;
   const userMessage = `<existing>\n${existing}\n</existing>\n<new>\n${transcription}\n</new>`;
-  return singleShotLLM(settings["prompts.chainTranscriptionPrompt"], userMessage);
+  return singleShotLLM(settings["prompts.mergeTranscriptionPrompt"], userMessage);
 }
 
 // --- Message sending ---

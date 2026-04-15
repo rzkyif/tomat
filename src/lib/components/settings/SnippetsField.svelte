@@ -8,6 +8,7 @@
     type SnippetPlacement,
   } from "$lib/shared/snippets";
   import { snippetsState, confirmState } from "../../state";
+  import FieldDescription from "./FieldDescription.svelte";
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -159,9 +160,7 @@
   <div class="flex flex-col">
     <div class="text-default-800">{field.name}</div>
     {#if field.description}
-      <div class="text-default-500 text-sm leading-tight whitespace-pre-line">
-        {field.description}
-      </div>
+      <FieldDescription text={field.description} />
     {/if}
   </div>
 
@@ -174,7 +173,7 @@
           value={selectedId ?? ""}
           onchange={handleSelectChange}
         >
-          <option value="">— Select a snippet —</option>
+          <option value="">Select a snippet...</option>
           {#each snippetsState.snippets as snippet (snippet.id)}
             <option value={snippet.id}
               >{snippet.name || snippet.trigger} ({snippet.trigger})</option

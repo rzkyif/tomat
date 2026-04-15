@@ -1,6 +1,7 @@
 <script lang="ts">
   import { settingsState } from "../../state";
   import type { SettingField, PresetOption } from "$lib/shared/settings";
+  import FieldDescription from "./FieldDescription.svelte";
 
   let { field, onPresetSelect } = $props<{
     field: SettingField;
@@ -54,13 +55,11 @@
             </div>
           {/if}
           {#if opt.description}
-            <div
-              class="text-sm leading-snug whitespace-pre-line {selected
-                ? 'opacity-90'
-                : 'text-default-500'}"
-            >
-              {opt.description}
-            </div>
+            <FieldDescription
+              text={opt.description}
+              variant="preset"
+              class={selected ? "opacity-90" : "text-default-500"}
+            />
           {/if}
         </button>
       {/each}
@@ -99,13 +98,11 @@
               </div>
             {/if}
             {#if opt.description}
-              <div
-                class="text-sm leading-snug whitespace-pre-line {selected
-                  ? 'opacity-90'
-                  : 'text-default-500'}"
-              >
-                {opt.description}
-              </div>
+              <FieldDescription
+                text={opt.description}
+                variant="preset"
+                class={selected ? "opacity-90" : "text-default-500"}
+              />
             {/if}
           </button>
         {/each}

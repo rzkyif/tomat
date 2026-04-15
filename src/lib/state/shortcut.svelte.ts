@@ -43,11 +43,11 @@ class ShortcutHandler {
   }
 
   private async onPressed() {
-    const mode = settingsState.currentSettings["stt.smartStt"];
+    const mode = settingsState.currentSettings["stt.activation"];
     const duration = Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
     this.pressStart = Date.now();
 
-    if (mode === "hold") {
+    if (mode === "push-to-talk") {
       const visible = await windowIsVisible();
       this.wasVisibleOnPress = visible;
 
@@ -67,7 +67,7 @@ class ShortcutHandler {
         }
       }, duration);
     } else {
-      // Disabled / Persistent: classic toggle visibility
+      // Manual / Sticky: classic toggle visibility
       const visible = await windowIsVisible();
       try {
         await invoke(visible ? "hide_main_window" : "show_main_window");
@@ -78,13 +78,13 @@ class ShortcutHandler {
   }
 
   private async onReleased() {
-    const mode = settingsState.currentSettings["stt.smartStt"];
+    const mode = settingsState.currentSettings["stt.activation"];
     const duration = Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
     const held = this.pressStart ? Date.now() - this.pressStart : 0;
     const wasVisibleOnPress = this.wasVisibleOnPress;
     this.pressStart = 0;
 
-    if (mode !== "hold") return;
+    if (mode !== "push-to-talk") return;
 
     if (this.holdTimer) {
       clearTimeout(this.holdTimer);

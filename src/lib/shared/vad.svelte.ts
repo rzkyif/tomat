@@ -25,7 +25,7 @@ class VadManager {
       "window-visibility",
       async ({ payload: visible }) => {
         if (!visible && this.enabled && this.instance) {
-          if (settingsState.currentSettings["stt.smartStt"] === "persistent") {
+          if (settingsState.currentSettings["stt.activation"] === "sticky") {
             this.instance.pause();
             this.listening = false;
             this.pausedByHide = true;
@@ -80,7 +80,7 @@ class VadManager {
     this.listening = false;
     this.pendingDisable = false;
     playBeep("off");
-    if (settingsState.currentSettings["stt.smartStt"] === "persistent") {
+    if (settingsState.currentSettings["stt.activation"] === "sticky") {
       await settingsState.updateSetting("stt.vadPersistedState", false);
     }
   }
@@ -105,7 +105,7 @@ class VadManager {
           if (this.onSpeech) await this.onSpeech(audio);
           if (this.pendingDisable) await this.disableNow();
           else if (
-            settingsState.currentSettings["stt.smartStt"] === "disabled" &&
+            settingsState.currentSettings["stt.activation"] === "manual" &&
             !settingsState.currentSettings["stt.llmChainTranscription"]
           )
             await this.disableNow();
@@ -114,7 +114,7 @@ class VadManager {
           this.listening = false;
           if (this.pendingDisable) void this.disableNow();
           else if (
-            settingsState.currentSettings["stt.smartStt"] === "disabled" &&
+            settingsState.currentSettings["stt.activation"] === "manual" &&
             !settingsState.currentSettings["stt.llmChainTranscription"]
           )
             void this.disableNow();
@@ -130,7 +130,7 @@ class VadManager {
       this.instance.start();
       this.enabled = true;
       playBeep("on");
-      if (settingsState.currentSettings["stt.smartStt"] === "persistent") {
+      if (settingsState.currentSettings["stt.activation"] === "sticky") {
         await settingsState.updateSetting("stt.vadPersistedState", true);
       }
     } catch (err) {
