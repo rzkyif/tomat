@@ -5,7 +5,7 @@ mod types;
 mod utils;
 
 use crate::commands::*;
-use crate::sidecar::{probe_downloads, start_bun_sidecar};
+use crate::sidecar::{init_process_guards, kill_all_sidecars, probe_downloads, start_bun_sidecar};
 use crate::state::{AppState, AppStateInner};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -74,6 +74,11 @@ pub fn run() {
             _ => {}
         })
         .setup(move |app| {
+            // On Windows, create a kill-on-close Job Object so sidecars are
+            // terminated automatically if this process exits for any reason
+            // (Ctrl+C, crash). On other platforms this is a no-op.
+            init_process_guards();
+
             // Hide dock icon on macOS
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -196,7 +201,14 @@ pub fn run() {
             list_snippets,
             delete_snippet
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         // Intentional panic on startup: Tauri runtime failure is unrecoverable.
-        .expect("error while running tauri application");
+        .expect("error while running tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    kill_all_sidecars(&state);
+                }
+            }
+        });
 }

@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "windows"))]
 pub fn current_target_triple() -> Result<&'static str, String> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Ok("aarch64-apple-darwin"),

@@ -1,13 +1,9 @@
 {
   "llama": {
-    "version": "b8772",
+    "version": "b8831",
     "platforms": {
-      "linux-arm64": "eb4575e8d7a9288a6e23eee7e960d3c516ca52958666aa999d09427a8c67ecad",
-      "linux-x86_64": "1a05eac30fa2789640546ce637e86c55ebcc4b5c9a24bed648366fab367037ba",
-      "macos-arm64": "5bd8d6b9a64c11c3b240b7129297068aed7315275b24ffed04bb98e291dc8bef",
-      "macos-x86_64": "46edfc5a90c0e8665e81a5047e1c672fe60ae64959ec1010c2b11af99627f36e",
-      "windows-arm64": "733a146183d2dd0d34fa2e42f2c3e12a7fe11b29a100b1ced010f13557fca418",
-      "windows-x64": "1c18c414b86e8f84d61d003f8605159acf97492eeecf6891b2d879af4a0dbfd2"
+      "windows-arm64": "385df31cf364439ad2c17b5c098851b6b276a23945c26fafde85843967e59459",
+      "windows-x64": "abf4c809fcc83bb38b474054d7f74cc5ceee4f73785ddd958d0ce7623cec2801"
     }
   },
   "bun": {

@@ -25,6 +25,7 @@ import fs from "fs";
 import path from "path";
 import { pipeline } from "stream/promises";
 import { Readable, Transform } from "stream";
+import { unzipSync } from "fflate";
 
 // ---------------------------------------------------------------------------
 // Platform mapping
@@ -221,7 +222,14 @@ function rmDir(dir) {
 
 function extractZip(zipPath, destDir) {
   ensureDir(destDir);
-  execSync(`unzip -o "${zipPath}" -d "${destDir}"`, { stdio: "pipe" });
+  const data = fs.readFileSync(zipPath);
+  const files = unzipSync(new Uint8Array(data));
+  for (const [name, content] of Object.entries(files)) {
+    if (name.endsWith("/")) continue;
+    const destPath = path.join(destDir, name);
+    ensureDir(path.dirname(destPath));
+    fs.writeFileSync(destPath, Buffer.from(content));
+  }
 }
 
 function extractTarGz(tarPath, destDir) {
@@ -240,6 +248,32 @@ function findFileRecursive(dir, fileName) {
       return fullPath;
     }
   }
+  return null;
+}
+
+// Returns the PE machine type for a Windows binary, or null if unreadable.
+// 0x8664 = AMD64, 0xAA64 = ARM64
+function getPeMachineType(filePath) {
+  try {
+    const fd = fs.openSync(filePath, "r");
+    const buf = Buffer.allocUnsafe(256);
+    const bytesRead = fs.readSync(fd, buf, 0, 256, 0);
+    fs.closeSync(fd);
+    if (bytesRead < 64) return null;
+    if (buf[0] !== 0x4d || buf[1] !== 0x5a) return null; // Not MZ
+    const peOffset = buf.readUInt32LE(0x3c);
+    if (peOffset + 6 > bytesRead) return null;
+    if (buf.readUInt32LE(peOffset) !== 0x00004550) return null; // Not PE\0\0
+    return buf.readUInt16LE(peOffset + 4);
+  } catch {
+    return null;
+  }
+}
+
+// Returns the expected PE machine type for the current host, or null if unknown.
+function hostWindowsMachineType() {
+  if (process.arch === "x64") return 0x8664; // AMD64
+  if (process.arch === "arm64") return 0xaa64; // ARM64
   return null;
 }
 
@@ -273,6 +307,18 @@ function findLlamaAsset(assets, llamaAsset, archiveExt) {
 
 function findBunAsset(assets, bunAsset) {
   return assets.find((a) => a.name === `bun-${bunAsset}.zip`);
+}
+
+// Returns the two PLATFORM_MAP keys for the current OS (native + cross-compile
+// target). We never need to extract binaries for other OSes — e.g. Linux .so
+// symlinks cannot be created on Windows NTFS.
+function getTargetPlatforms() {
+  const osMap = { win32: "windows", darwin: "macos", linux: "linux" };
+  const os = osMap[process.platform];
+  if (!os) throw new Error(`Unsupported host platform: ${process.platform}`);
+  // Windows uses "x64"; Linux and macOS use "x86_64" in PLATFORM_MAP keys.
+  const x64Key = os === "windows" ? "x64" : "x86_64";
+  return new Set([`${os}-${x64Key}`, `${os}-arm64`]);
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +457,52 @@ async function main() {
   const needTransformers = installed.transformers !== transformersVersion;
   const needPhonemizer = installed.phonemizer !== phonemizerVersion;
 
+  // On Windows, each sidecar exe and its DLLs are placed in a per-sidecar
+  // subdirectory (binaries/llm/ for llama, binaries/stt/ for whisper).
+  // ggml_backend_load_all() scans the directory of the module that contains
+  // the function (ggml.dll or the exe), so keeping DLLs adjacent to the exe
+  // prevents the llama b8772 and whisper DLL sets from conflicting with each
+  // other (they use different ggml versions). A layout migration key forces
+  // re-extraction and cleanup when the destination layout changes.
+  const DLL_LAYOUT = "sidecar-specific-v2";
+  if (installed.dllLayout !== DLL_LAYOUT) {
+    installed.whisper = null;
+    installed.llama = null;
+    if (process.platform === "win32") {
+      log(`Migrating Windows DLL layout to ${DLL_LAYOUT}...`);
+      // Remove stale DLLs and Windows llama/whisper exes from the root
+      // binaries directory (placed by the old root-binaries-v1 layout).
+      const staleRootPrefixes = ["tomat-llama-server-", "tomat-whisper-server-"];
+      for (const entry of fs.readdirSync(BINARIES_DIR, { withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        const isStale =
+          entry.name.endsWith(".dll") ||
+          staleRootPrefixes.some((p) => entry.name.startsWith(p) && entry.name.endsWith(".exe"));
+        if (isStale) {
+          fs.unlinkSync(path.join(BINARIES_DIR, entry.name));
+          log(`  Removed stale root file: ${entry.name}`);
+        }
+      }
+      // Remove old Windows triple subdirectories that are no longer used.
+      for (const dir of ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]) {
+        const dp = path.join(BINARIES_DIR, dir);
+        if (fs.existsSync(dp)) {
+          rmDir(dp);
+          log(`  Removed stale DLL subdir: ${dir}`);
+        }
+      }
+      // Remove per-sidecar subdirs so they are re-extracted with arch filtering
+      // (v1 may have placed arch-mismatched DLLs into llm/ and stt/).
+      for (const dir of ["llm", "stt"]) {
+        const dp = path.join(BINARIES_DIR, dir);
+        if (fs.existsSync(dp)) {
+          rmDir(dp);
+          log(`  Removed sidecar subdir for re-extraction: ${dir}`);
+        }
+      }
+    }
+  }
+
   // In --update mode, always re-download every binary so hashes are recorded
   // for all of them - otherwise a binary that's already at the latest version
   // on disk would be skipped and its entry would never appear in checksums.json.
@@ -537,8 +629,12 @@ async function main() {
 
   ensureDir(TEMP_DIR);
 
+  const targetPlatforms = getTargetPlatforms();
+  log(`Target platforms: ${[...targetPlatforms].join(", ")}`);
+
   try {
     for (const [platform, config] of Object.entries(PLATFORM_MAP)) {
+      if (!targetPlatforms.has(platform)) continue;
       const outputDir = BINARIES_DIR;
       ensureDir(outputDir);
 
@@ -598,15 +694,45 @@ async function main() {
           const whisperExtractDir = path.join(TEMP_DIR, `whisper-${platform}`);
           extractZip(whisperZipPath, whisperExtractDir);
 
+          // Windows: exe and DLLs go in binaries/stt/ so they are isolated from
+          // llama's DLLs. ggml_backend_load_all() scans the module directory, and
+          // keeping each sidecar's DLLs adjacent prevents version conflicts.
+          // Linux/macOS: exe goes in binaries/ root; DLLs go in the triple subdir
+          // for LD_LIBRARY_PATH (no scan-by-directory conflict risk there).
+          const whisperBinDir = config.isWindows ? path.join(outputDir, "stt") : outputDir;
+          ensureDir(whisperBinDir);
+
           const binaryName = config.isWindows ? "whisper-server.exe" : "whisper-server";
           const binaryPath = findFileRecursive(whisperExtractDir, binaryName);
           if (binaryPath) {
-            const destBinaryPath = path.join(outputDir, whisperExeName);
+            const destBinaryPath = path.join(whisperBinDir, whisperExeName);
             fs.copyFileSync(binaryPath, destBinaryPath);
             if (!config.isWindows) fs.chmodSync(destBinaryPath, 0o755);
-            log(`  Copied ${whisperExeName}`);
+            log(`  Copied ${whisperExeName} to ${config.isWindows ? "stt/" : "root"}`);
           } else {
             logError(`  Could not find ${binaryName} in whisper archive for ${platform}`);
+          }
+
+          const whisperSharedLibs = findSharedLibraries(whisperExtractDir);
+          if (whisperSharedLibs.length > 0) {
+            const whisperLibDir = config.isWindows
+              ? whisperBinDir
+              : path.join(outputDir, config.tauriTriple);
+            ensureDir(whisperLibDir);
+            const hostMachineType = config.isWindows ? hostWindowsMachineType() : null;
+            for (const libPath of whisperSharedLibs) {
+              const libName = path.basename(libPath);
+              if (hostMachineType !== null) {
+                const machineType = getPeMachineType(libPath);
+                if (machineType !== null && machineType !== hostMachineType) {
+                  log(`  Skipped ${libName} (arch mismatch: 0x${machineType.toString(16).toUpperCase()})`);
+                  continue;
+                }
+              }
+              const destLibPath = path.join(whisperLibDir, libName);
+              fs.copyFileSync(libPath, destLibPath);
+              log(`  Copied ${libName} to ${config.isWindows ? "stt/" : config.tauriTriple + "/"}`);
+            }
           }
 
           fs.unlinkSync(whisperZipPath);
@@ -643,24 +769,40 @@ async function main() {
           const binaryName = config.isWindows ? "llama-server.exe" : "llama-server";
           const binaryPath = findFileRecursive(llamaExtractDir, binaryName);
 
+          // Windows: exe and DLLs go in binaries/llm/ so they are isolated from
+          // whisper's DLLs. See whisper block above for the rationale.
+          // Linux/macOS: exe goes in binaries/ root; DLLs go in the triple subdir.
+          const llamaBinDir = config.isWindows ? path.join(outputDir, "llm") : outputDir;
+          ensureDir(llamaBinDir);
+
           if (binaryPath) {
-            const destBinaryPath = path.join(outputDir, llamaExeName);
+            const destBinaryPath = path.join(llamaBinDir, llamaExeName);
             fs.copyFileSync(binaryPath, destBinaryPath);
             if (!config.isWindows) fs.chmodSync(destBinaryPath, 0o755);
-            log(`  Copied ${llamaExeName}`);
+            log(`  Copied ${llamaExeName} to ${config.isWindows ? "llm/" : "root"}`);
           } else {
             logError(`  Could not find ${binaryName} in llama.cpp archive for ${platform}`);
           }
 
           const sharedLibs = findSharedLibraries(llamaExtractDir);
           if (sharedLibs.length > 0) {
-            const libDir = path.join(outputDir, config.tauriTriple);
+            const libDir = config.isWindows
+              ? llamaBinDir
+              : path.join(outputDir, config.tauriTriple);
             ensureDir(libDir);
+            const hostMachineType = config.isWindows ? hostWindowsMachineType() : null;
             for (const libPath of sharedLibs) {
               const libName = path.basename(libPath);
+              if (hostMachineType !== null) {
+                const machineType = getPeMachineType(libPath);
+                if (machineType !== null && machineType !== hostMachineType) {
+                  log(`  Skipped ${libName} (arch mismatch: 0x${machineType.toString(16).toUpperCase()})`);
+                  continue;
+                }
+              }
               const destLibPath = path.join(libDir, libName);
               fs.copyFileSync(libPath, destLibPath);
-              log(`  Copied ${libName} to ${config.tauriTriple}/`);
+              log(`  Copied ${libName} to ${config.isWindows ? "llm/" : config.tauriTriple + "/"}`);
             }
           }
 
@@ -675,6 +817,7 @@ async function main() {
     if (needWhisper) installed.whisper = targetVersions.whisper;
     if (needLlama) installed.llama = targetVersions.llama;
     if (needBun) installed.bun = targetVersions.bun;
+    installed.dllLayout = DLL_LAYOUT;
     writeJSON(INSTALLED_FILE, installed);
 
     if (UPDATE_MODE) {

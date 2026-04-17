@@ -1,0 +1,17 @@
+# Normalize all text file endings to LF in repo and working tree.
+# eol=lf overrides core.autocrlf=true so the working-tree copies match
+# what oxfmt / cargo fmt write when they follow .editorconfig.
+* text=auto eol=lf
+
+# Explicit binary markers — git must never touch line endings in these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.icns binary
+*.wasm binary
+*.node binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary

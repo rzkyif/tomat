@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "externalBin": [
+      "binaries/tomat-tools-server",
+      "binaries/llm/tomat-llama-server",
+      "binaries/stt/tomat-whisper-server"
+    ],
+    "resources": ["resources/server.js", "resources/node_modules/**/*", "binaries/**/*.dll"]
+  }
+}

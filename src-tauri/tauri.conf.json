@@ -43,12 +43,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      "resources/server.js",
-      "resources/node_modules/**/*",
-      "binaries/**/*.dylib",
-      "binaries/**/*.so",
-      "binaries/**/*.dll"
-    ]
+    "resources": ["resources/server.js", "resources/node_modules/**/*"]
   }
 }

@@ -1,5 +1,6 @@
 use crate::state::{AppState, Sidecar};
 use crate::types::{ServerStatus, ServerStatusUpdate};
+#[cfg(not(target_os = "windows"))]
 use crate::utils::current_target_triple;
 use futures_util::StreamExt;
 use std::path::PathBuf;
@@ -12,27 +13,201 @@ use tauri_plugin_shell::ShellExt;
 #[cfg(unix)]
 const GRACEFUL_SHUTDOWN_SECS: u64 = 5;
 
-pub fn shared_library_dir<R: Runtime>(handle: &AppHandle<R>) -> Result<PathBuf, String> {
-    let triple = current_target_triple()?;
-    if cfg!(debug_assertions) {
-        Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("binaries")
-            .join(triple))
+// ---------------------------------------------------------------------------
+// Windows Job Object — kill-on-close
+//
+// Sidecar processes spawned via tauri-plugin-shell on Windows are not in the
+// parent's console group, so Ctrl+C does not propagate to them. A Job Object
+// with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE solves this at the OS level: when
+// the last handle to the job closes (i.e. when this process exits for any
+// reason), all member processes are automatically terminated.
+// ---------------------------------------------------------------------------
+#[cfg(target_os = "windows")]
+mod job {
+    use std::sync::OnceLock;
+
+    type Handle = *mut core::ffi::c_void;
+    type Dword = u32;
+    type Bool = i32;
+
+    // JOBOBJECT_BASIC_LIMIT_INFORMATION (64 bytes on 64-bit Windows).
+    // Explicit _pad fields match the C struct's implicit alignment padding
+    // after DWORD fields that precede SIZE_T / ULONG_PTR fields.
+    #[repr(C)]
+    #[derive(Default)]
+    struct BasicLimitInfo {
+        per_process_user_time_limit: i64,
+        per_job_user_time_limit: i64,
+        limit_flags: Dword,
+        _pad1: Dword,
+        minimum_working_set_size: usize,
+        maximum_working_set_size: usize,
+        active_process_limit: Dword,
+        _pad2: Dword,
+        affinity: usize,
+        priority_class: Dword,
+        scheduling_class: Dword,
+    }
+
+    // IO_COUNTERS (48 bytes).
+    #[repr(C)]
+    #[derive(Default)]
+    struct IoCounters {
+        read_op_count: u64,
+        write_op_count: u64,
+        other_op_count: u64,
+        read_transfer_count: u64,
+        write_transfer_count: u64,
+        other_transfer_count: u64,
+    }
+
+    // JOBOBJECT_EXTENDED_LIMIT_INFORMATION (144 bytes on 64-bit Windows).
+    #[repr(C)]
+    #[derive(Default)]
+    struct ExtendedLimitInfo {
+        basic: BasicLimitInfo,
+        io_info: IoCounters,
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory_used: usize,
+        peak_job_memory_used: usize,
+    }
+
+    extern "system" {
+        fn CreateJobObjectW(lp_job_attributes: *mut u8, lp_name: *const u16) -> Handle;
+        fn SetInformationJobObject(
+            h_job: Handle,
+            job_object_information_class: i32,
+            lp_job_object_information: *const core::ffi::c_void,
+            cb_job_object_information_length: Dword,
+        ) -> Bool;
+        fn OpenProcess(
+            dw_desired_access: Dword,
+            b_inherit_handle: Bool,
+            dw_process_id: Dword,
+        ) -> Handle;
+        fn AssignProcessToJobObject(h_job: Handle, h_process: Handle) -> Bool;
+        fn CloseHandle(h_object: Handle) -> Bool;
+    }
+
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: Dword = 0x2000;
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
+    const PROCESS_SET_QUOTA: Dword = 0x0100;
+    const PROCESS_TERMINATE: Dword = 0x0001;
+
+    struct JobHandle(Handle);
+    // SAFETY: Win32 HANDLEs are kernel objects referenced by value. We never
+    // alias this mutably; it is only used to assign new processes to the job.
+    unsafe impl Send for JobHandle {}
+    unsafe impl Sync for JobHandle {}
+
+    static JOB: OnceLock<JobHandle> = OnceLock::new();
+
+    pub fn init() {
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+            if job.is_null() {
+                eprintln!("[sidecar] CreateJobObjectW failed");
+                return;
+            }
+            let mut info = ExtendedLimitInfo::default();
+            info.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if SetInformationJobObject(
+                job,
+                JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                std::ptr::addr_of!(info).cast(),
+                std::mem::size_of::<ExtendedLimitInfo>() as Dword,
+            ) == 0
+            {
+                eprintln!("[sidecar] SetInformationJobObject failed");
+            }
+            let _ = JOB.set(JobHandle(job));
+        }
+    }
+
+    pub fn assign(pid: u32) {
+        let Some(job) = JOB.get() else { return };
+        unsafe {
+            let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+            if process.is_null() {
+                eprintln!("[sidecar] OpenProcess({pid}) failed");
+                return;
+            }
+            if AssignProcessToJobObject(job.0, process) == 0 {
+                eprintln!("[sidecar] AssignProcessToJobObject({pid}) failed");
+            }
+            CloseHandle(process);
+        }
+    }
+}
+
+/// Called once at app startup. On Windows, creates the kill-on-close Job
+/// Object so that all sidecars die automatically if the parent exits for any
+/// reason, including crashes and Ctrl+C.
+pub fn init_process_guards() {
+    #[cfg(target_os = "windows")]
+    job::init();
+}
+
+/// Synchronously kill every live sidecar. Called from the `RunEvent::Exit`
+/// handler so sidecars are cleaned up on graceful exit on all platforms.
+pub fn kill_all_sidecars(state: &AppState) {
+    if let Ok(mut sidecars) = state.0.sidecars.lock() {
+        for sidecar in sidecars.values_mut() {
+            if let Some(child) = sidecar.child.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+}
+
+pub fn shared_library_dir<R: Runtime>(
+    handle: &AppHandle<R>,
+    server: &str,
+) -> Result<PathBuf, String> {
+    let base = if cfg!(debug_assertions) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries")
     } else {
-        Ok(handle
+        handle
             .path()
             .resource_dir()
             .map_err(|e| e.to_string())?
             .join("binaries")
-            .join(triple))
+    };
+    // Windows: each sidecar lives in its own subdirectory (binaries/llm/ or
+    // binaries/stt/) with its own copy of ggml.dll and backend plugins.
+    // ggml_backend_load_all() scans GetModuleFileNameW(NULL) (the exe dir) and
+    // fs::current_path() for ggml-*.dll plugins. We set current_dir to this
+    // subdirectory (in apply_runtime_library_path) so backends are reliably
+    // found when spawned by a parent process. Keeping llama and whisper DLLs
+    // separate also prevents their incompatible ggml versions from overwriting
+    // each other.
+    // Linux/macOS: DLLs live in a triple-specific subdirectory pointed at by
+    // LD_LIBRARY_PATH / DYLD_LIBRARY_PATH; dlopen uses the explicit path so
+    // there is no scan-by-directory conflict risk.
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = server;
+        let triple = current_target_triple()?;
+        Ok(base.join(triple))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let subdir = match server {
+            "llm" => "llm",
+            "stt" => "stt",
+            _ => return Ok(base),
+        };
+        Ok(base.join(subdir))
     }
 }
 
 pub fn apply_runtime_library_path<R: Runtime>(
     handle: &AppHandle<R>,
     cmd: tauri_plugin_shell::process::Command,
+    server: &str,
 ) -> Result<tauri_plugin_shell::process::Command, String> {
-    let lib_dir = shared_library_dir(handle)?;
+    let lib_dir = shared_library_dir(handle, server)?;
     if !lib_dir.exists() {
         return Ok(cmd);
     }
@@ -67,7 +242,11 @@ pub fn apply_runtime_library_path<R: Runtime>(
             Some(path) if !path.is_empty() => format!("{lib_dir_str}{separator}{path}"),
             _ => lib_dir_str,
         };
-        return Ok(cmd.env("PATH", value));
+        // ggml_backend_load_all() scans both the exe directory and
+        // fs::current_path(). Setting cwd to lib_dir ensures the scan finds
+        // backends via current_path() even if exe-directory resolution differs
+        // when launched by a parent process (e.g. Tauri sidecar mechanism).
+        return Ok(cmd.env("PATH", value).current_dir(&lib_dir));
     }
 
     #[allow(unreachable_code)]
@@ -343,7 +522,7 @@ pub async fn update_server_args_internal<R: Runtime>(
             }
         };
 
-        let cmd = match apply_runtime_library_path(&handle_clone, cmd) {
+        let cmd = match apply_runtime_library_path(&handle_clone, cmd, &server_clone) {
             Ok(cmd) => cmd,
             Err(e) => {
                 emit_status(
@@ -379,8 +558,11 @@ pub async fn update_server_args_internal<R: Runtime>(
             Ok(mut s_lock) => {
                 if let Some(s) = s_lock.get_mut(&server_clone) {
                     if s.start_id == current_start_id {
-                        s.pid = Some(child.pid());
+                        let pid = child.pid();
+                        s.pid = Some(pid);
                         s.child = Some(child);
+                        #[cfg(target_os = "windows")]
+                        job::assign(pid);
                     } else {
                         let _ = child.kill();
                         return;
