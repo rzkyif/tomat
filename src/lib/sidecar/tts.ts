@@ -1,4 +1,13 @@
-const BASE_URL = "http://127.0.0.1:7703";
+/**
+ * HTTP client for the Bun sidecar's text-to-speech endpoints. Loads and
+ * unloads the on-device model and asks the sidecar to synthesize chunks
+ * of text into raw WAV bytes. Loading retries briefly so a fresh sidecar
+ * boot doesn't surface as a user-visible error.
+ */
+
+import { BUN_SIDECAR_HTTP_BASE_URL } from "$lib/shared/network";
+
+const BASE_URL = BUN_SIDECAR_HTTP_BASE_URL;
 
 // The sidecar may be mid-restart (toggle-off recycles the bun process to
 // release ORT memory), in which case the first few connection attempts will

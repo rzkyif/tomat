@@ -1,3 +1,11 @@
+/**
+ * Manages the in-browser voice activity detector — the thing that listens
+ * to the microphone and decides when the user is talking. Owns the VAD
+ * model's lifecycle (load, start, pause, destroy), exposes its state for
+ * the UI, and hands each detected speech segment to a caller-supplied
+ * callback.
+ */
+
 import { listen } from "@tauri-apps/api/event";
 import { playBeep } from "$lib/shared/beep";
 import { settingsState } from "$lib/state/settings.svelte";

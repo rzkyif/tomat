@@ -3,6 +3,13 @@ import { env } from "@huggingface/transformers";
 import { KokoroTTS } from "kokoro-js";
 import * as path from "node:path";
 import * as os from "node:os";
+import { errorMessage, errorStatus, httpError } from "./httpError";
+
+/** Single source of truth for the sidecar's bound address. The frontend's
+ *  `src/lib/shared/network.ts` duplicates these values — keep both in sync
+ *  if either changes. */
+const SIDECAR_HOST = "127.0.0.1";
+const SIDECAR_PORT = 7703;
 
 // ---------------------------------------------------------------------------
 // Kokoro TTS runtime
@@ -141,24 +148,34 @@ export const app = new Elysia()
   .onRequest(({ set }) => {
     Object.assign(set.headers, CORS_HEADERS);
   })
+  // Centralized error formatter: every route throws; this translates the
+  // thrown value into a uniform `{ error, status }` JSON response with the
+  // right HTTP status, preserving CORS headers. Avoids scattering
+  // per-route try/catch boilerplate and divergent error shapes.
+  .onError(({ error, set }) => {
+    const status = errorStatus(error);
+    set.status = status;
+    Object.assign(set.headers, CORS_HEADERS);
+    return { error: errorMessage(error), status };
+  })
   .options("/*", () => new Response(null, { status: 204, headers: CORS_HEADERS }))
   .get("/api/health", () => {
-    return { status: "ok" };
+    // Liveness + component readiness. Callers (the Rust backend's
+    // `start_bun_sidecar` poll, frontend status chips) gate on "status: ok"
+    // but the nested fields let tooling report finer state.
+    return {
+      status: "ok",
+      tts: tts ? "loaded" : loadPromise ? "loading" : "idle",
+    };
   })
   .get("/api/test", () => {
     return { status: "ok" };
   })
   .post(
     "/api/tts/load",
-    async ({ set }) => {
-      try {
-        await ensureLoaded();
-        return { status: "ok" };
-      } catch (err) {
-        console.error("[tts] load failed:", err);
-        set.status = 500;
-        return { status: "error", error: String(err) };
-      }
+    async () => {
+      await ensureLoaded();
+      return { status: "ok" };
     },
     { body: t.Optional(t.Object({})) },
   )
@@ -168,23 +185,11 @@ export const app = new Elysia()
   })
   .post(
     "/api/tts/synthesize",
-    async ({ body, set }) => {
+    async ({ body }) => {
       const model = tts;
-      if (!model) {
-        set.status = 409;
-        return new Response(JSON.stringify({ error: "TTS not loaded" }), {
-          status: 409,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
+      if (!model) throw httpError(409, "TTS not loaded");
       const text = body.text?.trim();
-      if (!text) {
-        set.status = 400;
-        return new Response(JSON.stringify({ error: "Empty text" }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
+      if (!text) throw httpError(400, "Empty text");
       const voice = body.voice || "af_bella";
       const speed = Math.max(0.25, Math.min(3, body.speed ?? 1));
 
@@ -201,23 +206,8 @@ export const app = new Elysia()
         };
       });
       inflight = task.catch(() => {});
-      try {
-        await task;
-      } catch (err) {
-        console.error("[tts] synth failed:", err);
-        set.status = 500;
-        return new Response(JSON.stringify({ error: String(err) }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      if (!result) {
-        set.status = 500;
-        return new Response(JSON.stringify({ error: "No audio produced" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
+      await task;
+      if (!result) throw httpError(500, "No audio produced");
       const wav = wavFromPcm(
         (result as { audio: Float32Array }).audio,
         (result as { sampling_rate: number }).sampling_rate,
@@ -235,7 +225,7 @@ export const app = new Elysia()
       }),
     },
   )
-  .listen({ port: 7703, hostname: "127.0.0.1" });
+  .listen({ port: SIDECAR_PORT, hostname: SIDECAR_HOST });
 
 console.log(`Bun sidecar is running at ${app.server?.hostname}:${app.server?.port}`);
 

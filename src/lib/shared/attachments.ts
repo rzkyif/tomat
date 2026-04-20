@@ -1,3 +1,9 @@
+/**
+ * Helpers for working with message attachments: base64 encode/decode,
+ * save / load / delete attachment files through the Rust backend, and
+ * figure out which files belong to a given message.
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import type { MessageContent, MessagePart } from "./types";
 

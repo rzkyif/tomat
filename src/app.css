@@ -2,9 +2,17 @@
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
   padding: 0;
+  /* The window-show/hide animation translates content off-viewport. Without
+     this clamp, the browser would surface horizontal/vertical scrollbars on
+     body to let the user scroll to the temporarily-off-screen UI. */
+  overflow: hidden;
+}
+
+body {
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
 }

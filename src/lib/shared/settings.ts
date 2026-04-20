@@ -1,3 +1,17 @@
+/**
+ * Declarative schema and defaults for every user-tunable option. The
+ * settings UI, the defaults loader, and the persistence layer all read
+ * from this single source of truth so a new option only needs to be added
+ * in one place.
+ */
+
+/**
+ * Defines every user-tunable setting the app has, grouped into the sections
+ * the settings UI renders. The schema, default values, and validation
+ * rules all live here so adding a new option only takes a change in one
+ * place.
+ */
+
 import type { CommandType } from "./command";
 import {
   TOOL_ONLY_PROMPT,
@@ -21,7 +35,8 @@ export type SettingType =
   | "multiline"
   | "services"
   | "storage"
-  | "snippets";
+  | "snippets"
+  | "shortcut";
 
 export type ActivationMode = "manual" | "sticky" | "push-to-talk";
 
@@ -198,6 +213,26 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               "Persist messages and session titles to disk.\nWhen disabled, sessions live only in memory and are cleared when the app closes.",
             type: "boolean",
             defaultValue: true,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "shortcuts",
+    name: "Shortcuts",
+    sections: [
+      {
+        label: "Global",
+        fields: [
+          {
+            id: "shortcuts.toggleWindow",
+            name: "Show / Hide Window",
+            description:
+              "Global keyboard shortcut to show or hide the app window.\nClick the field and press a key combination to set it. Clear to disable.",
+            type: "shortcut",
+            defaultValue: "super+ctrl+shift+z",
+            optional: true,
           },
         ],
       },
@@ -385,6 +420,35 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         ],
       },
       {
+        label: "Animations",
+        fields: [
+          {
+            id: "appearance.animationsEnabled",
+            name: "Enable Animations",
+            description:
+              "Smoothly animate message entry, settings transitions, and expandable sections.",
+            type: "boolean",
+            defaultValue: true,
+          },
+          {
+            id: "appearance.animationSpeedMultiplier",
+            name: "Animation Speed",
+            description:
+              "Speed multiplier for all UI animations.\nHigher values = faster. Accepted range: 25–400%.",
+            type: "number",
+            defaultValue: 100,
+            suffix: "%",
+            editableWhen: { field: "appearance.animationsEnabled", eq: true },
+            regex: [
+              {
+                regex: "^(?:2[5-9]|[3-9][0-9]|[1-3][0-9]{2}|400)$",
+                errorMessage: "Must be between 25 and 400",
+              },
+            ],
+          },
+        ],
+      },
+      {
         label: "Window",
         fields: [
           {
@@ -501,7 +565,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                     "llm.mmap": true,
                     "llm.threads": 4,
                     "llm.reasoning": "on",
-                    "llm.reasoningBudget": 1024,
+                    "llm.reasoningBudget": 512,
                     "llm.host": "127.0.0.1",
                     "llm.port": "7701",
                   },
@@ -524,7 +588,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                     "llm.mmap": true,
                     "llm.threads": 6,
                     "llm.reasoning": "on",
-                    "llm.reasoningBudget": 1024,
+                    "llm.reasoningBudget": 512,
                     "llm.host": "127.0.0.1",
                     "llm.port": "7701",
                   },
@@ -1255,6 +1319,31 @@ export const SECRET_KEYS: readonly string[] = (() => {
   return out;
 })();
 
+/**
+ * Every setting field id known to the schema. Derived at import time so a
+ * rename here doesn't require updating a hand-maintained list elsewhere.
+ * Useful for: runtime validation of `currentSettings` lookups in dev, and
+ * dependency-graph traversal.
+ */
+export const SETTING_IDS: readonly string[] = (() => {
+  const out: string[] = [];
+  for (const group of SETTINGS_SCHEMA) {
+    for (const section of group.sections) {
+      for (const field of section.fields) {
+        out.push(field.id);
+      }
+    }
+  }
+  return out;
+})();
+
+const SETTING_ID_SET: ReadonlySet<string> = new Set(SETTING_IDS);
+
+/** True if `key` matches a field id in `SETTINGS_SCHEMA`. */
+export function isValidSettingKey(key: string): boolean {
+  return SETTING_ID_SET.has(key);
+}
+
 export function getDefaultSettings(): Record<string, any> {
   const defaults: Record<string, any> = {};
   for (const group of SETTINGS_SCHEMA) {
@@ -1422,7 +1511,8 @@ export function searchFields(
         if (
           field.type === "command_preview" ||
           field.type === "services" ||
-          field.type === "storage"
+          field.type === "storage" ||
+          field.type === "snippets"
         )
           continue;
         if (!evalCondition(field.visibleWhen, currentSettings)) continue;

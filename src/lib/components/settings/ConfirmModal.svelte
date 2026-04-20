@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { confirmState } from "../state";
+  import { confirmState } from "../../state";
 </script>
 
 {#if confirmState.pending}

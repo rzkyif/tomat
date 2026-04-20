@@ -1,3 +1,10 @@
+/**
+ * Transcribes recorded audio. Sends the audio to either the local
+ * whisper-server sidecar or a configured external OpenAI-compatible
+ * transcription endpoint, depending on the user's settings, and returns
+ * the recognized text (or an error string).
+ */
+
 import { createOpenAIClient } from "./llm";
 import { settingsState } from "../state";
 

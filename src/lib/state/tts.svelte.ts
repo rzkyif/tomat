@@ -1,3 +1,11 @@
+/**
+ * The text-to-speech queue and player. Receives streaming assistant text,
+ * batches it into chunks the synth handles efficiently, sends them to the
+ * sidecar for synthesis, and chains the returned audio through an
+ * HTMLAudioElement-based playback queue so audio starts as soon as
+ * possible without gaps between chunks.
+ */
+
 import { browser } from "$app/environment";
 import { invoke } from "@tauri-apps/api/core";
 import { loadTtsModel, synthesizeTts } from "$lib/sidecar/tts";

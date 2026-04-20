@@ -725,7 +725,9 @@ async function main() {
               if (hostMachineType !== null) {
                 const machineType = getPeMachineType(libPath);
                 if (machineType !== null && machineType !== hostMachineType) {
-                  log(`  Skipped ${libName} (arch mismatch: 0x${machineType.toString(16).toUpperCase()})`);
+                  log(
+                    `  Skipped ${libName} (arch mismatch: 0x${machineType.toString(16).toUpperCase()})`,
+                  );
                   continue;
                 }
               }
@@ -796,7 +798,9 @@ async function main() {
               if (hostMachineType !== null) {
                 const machineType = getPeMachineType(libPath);
                 if (machineType !== null && machineType !== hostMachineType) {
-                  log(`  Skipped ${libName} (arch mismatch: 0x${machineType.toString(16).toUpperCase()})`);
+                  log(
+                    `  Skipped ${libName} (arch mismatch: 0x${machineType.toString(16).toUpperCase()})`,
+                  );
                   continue;
                 }
               }

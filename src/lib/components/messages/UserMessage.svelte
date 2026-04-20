@@ -1,13 +1,14 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import AttachmentList from "./AttachmentList.svelte";
-  import Bubble from "./Bubble.svelte";
-  import { settingsState } from "../state";
+  import AttachmentList from "../AttachmentList.svelte";
+  import Bubble from "../Bubble.svelte";
+  import { settingsState } from "../../state";
   import {
     getTextContent,
     type MessageContent,
     type MessagePart,
   } from "$lib/shared/types";
+  import { showUserMessageMenu } from "$lib/shared/messageMenu";
 
   let {
     content,
@@ -23,7 +24,6 @@
 
   let editText = $state("");
   let editTimeout: ReturnType<typeof setTimeout> | null = null;
-  let confirmingDelete = $state(false);
 
   onDestroy(() => {
     if (editTimeout) {
@@ -125,37 +125,22 @@
     }
     editing = !editing;
   }
-
-  function handleWindowFocusIn(e: FocusEvent) {
-    if (!confirmingDelete) return;
-    const target = e.target as HTMLElement;
-    if (!target.closest("[data-user-delete-btn]")) {
-      confirmingDelete = false;
-    }
-  }
-
-  $effect(() => {
-    if (confirmingDelete) {
-      window.addEventListener("focusin", handleWindowFocusIn, true);
-      return () => {
-        window.removeEventListener("focusin", handleWindowFocusIn, true);
-      };
-    }
-  });
-
-  function handleDeleteClick() {
-    if (confirmingDelete) {
-      confirmingDelete = false;
-      onDelete?.();
-    } else {
-      confirmingDelete = true;
-    }
-  }
 </script>
 
 <Bubble
   selectedAlignment={settingsState.getAlignment()}
   extraClass={"flex flex-col gap-4"}
+  active={editing}
+  borderColorClass="border-default-400"
+  onclick={onEdit && !editing ? () => toggleEdit() : undefined}
+  oncontextmenu={(e) => {
+    e.preventDefault();
+    void showUserMessageMenu({
+      editing,
+      onToggleEdit: onEdit ? toggleEdit : undefined,
+      onDelete,
+    });
+  }}
 >
   {#if editing}
     <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
@@ -181,38 +166,4 @@
     editable={editing}
     onRemove={removeAttachment}
   />
-
-  {#if onEdit || onDelete}
-    <div
-      class="flex flex-row items-center bg-default-100 text-default-500 p-1 rounded-2xl text-2xl w-fit ml-auto"
-    >
-      {#if onEdit}
-        <button
-          class="rounded p-1 flex items-center transition-colors hover:cursor-pointer hover:text-default-900"
-          title={editing ? "Stop editing" : "Edit message"}
-          onclick={toggleEdit}
-        >
-          <i
-            class="flex {editing
-              ? 'i-material-symbols-edit-off-outline-rounded'
-              : 'i-material-symbols-edit-outline-rounded'}"
-          ></i>
-        </button>
-      {/if}
-      {#if onDelete}
-        <button
-          data-user-delete-btn
-          class="rounded p-1 flex items-center transition-colors hover:cursor-pointer hover:text-default-900"
-          title={confirmingDelete ? "Confirm Delete" : "Delete message"}
-          onclick={handleDeleteClick}
-        >
-          <i
-            class="flex {confirmingDelete
-              ? 'i-material-symbols-delete-forever-rounded'
-              : 'i-material-symbols-delete-outline-rounded'}"
-          ></i>
-        </button>
-      {/if}
-    </div>
-  {/if}
 </Bubble>

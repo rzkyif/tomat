@@ -1,3 +1,10 @@
+/**
+ * Talks to whatever LLM the user has configured — either the local
+ * llama-server sidecar or an external OpenAI-compatible endpoint. Handles
+ * client setup, error classification, dual-model routing, and the
+ * higher-level chat-completion calls used by the rest of the app.
+ */
+
 import OpenAI from "openai";
 import { titleCase } from "title-case";
 import { settingsState, messagesState } from "../state";

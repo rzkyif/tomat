@@ -32,9 +32,11 @@ the diff and commit.
 - Read the relevant source files before making changes. Understand existing patterns and styling.
 - Check `src/lib/shared/settings.ts` for the declarative settings schema if the task involves configuration or features.
 - Check `src/lib/shared/command.ts` for the command argument builder if the task involves sidecar CLI args.
-- Check `src-tauri/src/commands.rs` for existing Tauri commands before adding new ones.
+- Check `src-tauri/src/commands/` (split by domain: `session`, `snippets`, `settings`, `storage`, `paths`, plus window/sidecar commands in `mod.rs`) for existing Tauri commands before adding new ones.
+- Check `src-tauri/src/error.rs` for the unified `AppError` type - new Tauri commands should return `AppResult<T>` and use `?` rather than `map_err(|e| e.to_string())`.
 - Check `src-tauri/src/sidecar.rs` for sidecar process management patterns.
 - Check `src/lib/state/` for existing reactive state classes before introducing new state.
+- Check `src/lib/shared/env.ts` (`isTauri()`) and `src/lib/shared/network.ts` (sidecar host/port constants) before adding platform detection or URL literals.
 
 ## After a Task
 

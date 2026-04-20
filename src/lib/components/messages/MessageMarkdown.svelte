@@ -1,17 +1,22 @@
-<script lang="ts">
-  import "highlight.js/styles/atom-one-dark.css";
-  import hljs from "highlight.js";
-  import { marked } from "marked";
-  import { markedHighlight } from "marked-highlight";
-  import DOMPurify from "dompurify";
-  import { onMount, tick } from "svelte";
-  import { settingsState, ttsState } from "../state";
-  import { getTextContent, type MessageContent } from "$lib/shared/types";
-  import Bubble from "./Bubble.svelte";
+<script lang="ts" module>
+  // marked, highlight.js, marked-highlight, and the hljs CSS are deferred to
+  // first use so they do not land in the initial bundle. ~600KB of JS stays
+  // off the critical-path for empty-session launches.
+  type MarkedModule = typeof import("marked");
+  let rendererReady: Promise<MarkedModule["marked"]> | null = null;
 
-  onMount(() => {
-    // Configure marked with syntax highlighting once
-    if (!marked.hasOwnProperty("_markedHighlight")) {
+  function ensureRenderer(): Promise<MarkedModule["marked"]> {
+    if (rendererReady) return rendererReady;
+    rendererReady = (async () => {
+      const [hljsMod, markedMod, markedHighlightMod] = await Promise.all([
+        import("highlight.js"),
+        import("marked"),
+        import("marked-highlight"),
+        import("highlight.js/styles/atom-one-dark.css"),
+      ]);
+      const hljs = hljsMod.default;
+      const { marked } = markedMod;
+      const { markedHighlight } = markedHighlightMod;
       marked.use(
         markedHighlight({
           langPrefix: "hljs language-",
@@ -21,154 +26,74 @@
           },
         }),
       );
-      // Mark as configured
-      (marked as any)._markedHighlight = true;
-    }
-  });
-
-  let {
-    id,
-    content,
-    modelUsed = "default",
-    reasoning,
-    pending = false,
-    isStreaming = false,
-    onReprocess,
-    onDelete,
-  } = $props<{
-    id?: string;
-    content: MessageContent;
-    modelUsed?: "default" | "secondary";
-    reasoning?: string;
-    pending?: boolean;
-    isStreaming?: boolean;
-    onReprocess?: () => void;
-    onDelete?: () => void;
-  }>();
-
-  let displayText = $derived(getTextContent(content));
-  let bgClass = $derived(
-    modelUsed === "secondary" ? "bg-accent-purple-300" : "bg-accent-blue-300",
-  );
-  let pillBgClass = $derived(
-    modelUsed === "secondary" ? "bg-accent-purple-400" : "bg-accent-blue-400",
-  );
-  let pillMutedTextClass = $derived(
-    modelUsed === "secondary"
-      ? "text-accent-purple-700"
-      : "text-accent-blue-700",
-  );
-  let pillHoverTextClass = $derived(
-    modelUsed === "secondary"
-      ? "hover:text-accent-purple-900"
-      : "hover:text-accent-blue-900",
-  );
-
-  let showReasoningSetting = $derived(
-    !!settingsState.currentSettings["llm.showReasoning"],
-  );
-  let hasReasoning = $derived(
-    showReasoningSetting &&
-      typeof reasoning === "string" &&
-      reasoning.length > 0,
-  );
-  // True only while reasoning chunks are still arriving for THIS message:
-  // stream is active, reasoning has begun, and the final answer hasn't
-  // started yet. Snaps the expandable open on the leading edge and shut on
-  // the trailing edge; in between, user toggles win.
-  let receivingReasoning = $derived(
-    hasReasoning && isStreaming && !displayText,
-  );
-  let reasoningExpanded = $state(false);
-  let wasReceivingReasoning = $state(false);
-  $effect(() => {
-    if (receivingReasoning && !wasReceivingReasoning) {
-      reasoningExpanded = true;
-    } else if (!receivingReasoning && wasReceivingReasoning) {
-      reasoningExpanded = false;
-    }
-    wasReceivingReasoning = receivingReasoning;
-  });
-
-  let ttsActive = $derived(
-    ttsState.enabled && ttsState.loaded && id !== undefined,
-  );
-  // "mine" = this message currently owns the TTS pipeline. While mine,
-  // three distinct states are possible:
-  //   playing : audio is actively coming out of the speakers
-  //   loading : synth is in flight (or about to be) with nothing queued yet
-  //   neither : transient gap, treated as idle for UI purposes
-  let isMine = $derived(
-    ttsState.currentMessageId !== null &&
-      id !== undefined &&
-      ttsState.currentMessageId === id,
-  );
-  let isPlaying = $derived(isMine && ttsState.liveSourceCount > 0);
-  let isLoading = $derived(isMine && !isPlaying && ttsState.synthInflight);
-  let buttonState = $derived<"idle" | "loading" | "playing">(
-    isPlaying ? "playing" : isLoading ? "loading" : "idle",
-  );
-  let buttonIcon = $derived(
-    buttonState === "playing"
-      ? "i-material-symbols-stop-rounded"
-      : buttonState === "loading"
-        ? "i-line-md:loading-twotone-loop"
-        : "i-material-symbols-text-to-speech-rounded",
-  );
-  let buttonTitle = $derived(
-    buttonState === "playing"
-      ? "Stop speaking"
-      : buttonState === "loading"
-        ? "Synthesizing..."
-        : "Read aloud",
-  );
-
-  function handleTTSClick(e: MouseEvent) {
-    e.stopPropagation();
-    if (!id) return;
-    // playing or loading: stop & clear. idle: start replay.
-    if (buttonState === "idle") {
-      ttsState.replayMessage(id, displayText);
-    } else {
-      ttsState.reset();
-    }
+      return marked;
+    })();
+    return rendererReady;
   }
 
-  let confirmingDelete = $state(false);
+  const ALLOWED_TAGS = [
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "p",
+    "strong",
+    "em",
+    "del",
+    "ul",
+    "ol",
+    "li",
+    "code",
+    "pre",
+    "a",
+    "img",
+    "blockquote",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "hr",
+    "br",
+    "div",
+    "span",
+    "input",
+    "mark",
+    "kbd",
+    "sub",
+    "sup",
+    "details",
+    "summary",
+  ];
 
-  function handleWindowFocusIn(e: FocusEvent) {
-    if (!confirmingDelete) return;
-    const target = e.target as HTMLElement;
-    if (!target.closest("[data-agent-delete-btn]")) {
-      confirmingDelete = false;
-    }
-  }
+  const ALLOWED_ATTR = [
+    "href",
+    "src",
+    "alt",
+    "class",
+    "type",
+    "checked",
+    "disabled",
+    "start",
+    "value",
+    "reversed",
+  ];
+</script>
 
-  $effect(() => {
-    if (confirmingDelete) {
-      window.addEventListener("focusin", handleWindowFocusIn, true);
-      return () => {
-        window.removeEventListener("focusin", handleWindowFocusIn, true);
-      };
-    }
-  });
+<script lang="ts">
+  import DOMPurify from "dompurify";
+  import { tick } from "svelte";
 
-  function handleDeleteClick() {
-    if (confirmingDelete) {
-      confirmingDelete = false;
-      onDelete?.();
-    } else {
-      confirmingDelete = true;
-    }
-  }
-
-  let showReprocess = $derived(!!onReprocess && !isStreaming);
-  let pillVisible = $derived(ttsActive || showReprocess || !!onDelete);
-  let showSpinner = $derived(pending && !displayText && !hasReasoning);
+  let { content }: { content: string } = $props();
 
   // svelte-ignore non_reactive_update
   // oxlint-disable-next-line no-unassigned-vars
   let container: HTMLDivElement;
+
+  let renderedHtml = $state<string | null>(null);
 
   function wrapTables(node: HTMLDivElement) {
     const tables = node.querySelectorAll("table");
@@ -201,143 +126,41 @@
   }
 
   $effect(() => {
-    // Re-run when content changes
-    // oxlint-disable-next-line no-unused-expressions
-    content;
-    tick().then(() => {
-      if (container) {
-        wrapTables(container);
-        wrapCodeBlocks(container);
-      }
+    const text = content;
+    if (!text) {
+      renderedHtml = null;
+      return;
+    }
+    let cancelled = false;
+    ensureRenderer().then((marked) => {
+      if (cancelled) return;
+      renderedHtml = DOMPurify.sanitize(marked.parse(text) as string, {
+        ALLOWED_TAGS,
+        ALLOWED_ATTR,
+        ALLOW_DATA_ATTR: false,
+      });
+      tick().then(() => {
+        if (container) {
+          wrapTables(container);
+          wrapCodeBlocks(container);
+        }
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   });
 </script>
 
-<Bubble
-  selectedAlignment={settingsState.getAlignment()}
-  {bgClass}
-  extraClass="markdown overflow-clip flex flex-col gap-3"
->
-  {#if hasReasoning}
-    <div class="flex flex-col gap-2">
-      <button
-        class="flex items-center gap-1 text-sm text-default-700 hover:cursor-pointer uppercase tracking-wide font-medium w-full"
-        onclick={() => (reasoningExpanded = !reasoningExpanded)}
-        title={reasoningExpanded ? "Collapse reasoning" : "Expand reasoning"}
-      >
-        <i
-          class="flex transition-transform duration-200 {reasoningExpanded
-            ? 'i-material-symbols-keyboard-arrow-down-rounded'
-            : 'i-material-symbols-chevron-right-rounded'}"
-        ></i>
-        <span>Reasoning</span>
-      </button>
-      {#if reasoningExpanded}
-        <div class="whitespace-pre-wrap {pillBgClass} px-4 py-2 rounded-2xl">
-          {reasoning}
-        </div>
-      {/if}
-    </div>
-  {/if}
-
-  {#if showSpinner}
+{#if content}
+  {#if renderedHtml === null}
     <i class="i-line-md:loading-alt-loop text-3xl"></i>
   {:else}
     <div bind:this={container} class="markdown-content min-w-0 overflow-hidden">
-      {@html DOMPurify.sanitize(marked.parse(displayText) as string, {
-        ALLOWED_TAGS: [
-          "h1",
-          "h2",
-          "h3",
-          "h4",
-          "h5",
-          "h6",
-          "p",
-          "strong",
-          "em",
-          "del",
-          "ul",
-          "ol",
-          "li",
-          "code",
-          "pre",
-          "a",
-          "img",
-          "blockquote",
-          "table",
-          "thead",
-          "tbody",
-          "tr",
-          "th",
-          "td",
-          "hr",
-          "br",
-          "div",
-          "span",
-          "input",
-          "mark",
-          "kbd",
-          "sub",
-          "sup",
-          "details",
-          "summary",
-        ],
-        ALLOWED_ATTR: [
-          "href",
-          "src",
-          "alt",
-          "class",
-          "type",
-          "checked",
-          "disabled",
-          "start",
-          "value",
-          "reversed",
-        ],
-        ALLOW_DATA_ATTR: false,
-      })}
+      {@html renderedHtml}
     </div>
   {/if}
-
-  {#if pillVisible}
-    <div
-      class="flex flex-row items-center {pillBgClass} {pillMutedTextClass} p-1 rounded-2xl text-2xl w-fit ml-auto"
-    >
-      {#if ttsActive}
-        <button
-          class="rounded p-1 flex items-center transition-colors hover:cursor-pointer {pillHoverTextClass}"
-          title={buttonTitle}
-          onclick={handleTTSClick}
-        >
-          <i class="flex {buttonIcon}"></i>
-        </button>
-      {/if}
-      {#if showReprocess}
-        <button
-          class="rounded p-1 flex items-center transition-colors hover:cursor-pointer {pillHoverTextClass}"
-          title="Reprocess message"
-          onclick={() => onReprocess?.()}
-        >
-          <i class="flex i-material-symbols-refresh-rounded"></i>
-        </button>
-      {/if}
-      {#if onDelete}
-        <button
-          data-agent-delete-btn
-          class="rounded p-1 flex items-center transition-colors hover:cursor-pointer {pillHoverTextClass}"
-          title={confirmingDelete ? "Confirm Delete" : "Delete message"}
-          onclick={handleDeleteClick}
-        >
-          <i
-            class="flex {confirmingDelete
-              ? 'i-material-symbols-delete-forever-rounded'
-              : 'i-material-symbols-delete-outline-rounded'}"
-          ></i>
-        </button>
-      {/if}
-    </div>
-  {/if}
-</Bubble>
+{/if}
 
 <style lang="scss">
   :global(.markdown) {

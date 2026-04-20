@@ -1,3 +1,10 @@
+/**
+ * Shared TypeScript types used across the app: messages, attachments,
+ * tool calls, server status, and session info. The shapes here are the
+ * common vocabulary between the UI, the state stores, and the sidecar
+ * layer.
+ */
+
 export type MessagePart =
   | { type: "text"; text: string }
   // In-memory forms used only between user picking an attachment and the message being flushed to disk.
@@ -24,13 +31,20 @@ export type Message = {
    *  trace and `llm.showReasoning` is enabled. Persisted with the session but
    *  never sent back to the LLM (contentToApi only reads `content`). */
   reasoning?: string;
+  /** Elapsed time (ms) from the first reasoning chunk to the first content
+   *  chunk (or stream finish if no content). Captured once per assistant turn
+   *  so historic messages can still render "Thought for Xs". */
+  reasoningDurationMs?: number;
 };
 
-/** Generate a message id. Kept consistent with the attachment-folder
- *  `<message_timestamp>-<filename>` scheme: a user message's id matches the
- *  timestamp prefix used for any attachments it owns. */
+/** Generate a message id. User message ids are set separately from their
+ *  attachment timestamp (see `addUserMessage`) so this only needs to be
+ *  unique, not a bare timestamp. A process-local counter guards against
+ *  same-millisecond collisions between assistant / system / tool messages
+ *  minted back-to-back in a single event loop turn. */
+let messageIdCounter = 0;
 export function makeMessageId(): string {
-  return Date.now().toString();
+  return `${Date.now()}-${(++messageIdCounter).toString(36)}`;
 }
 export type Monitor = { id: string | number; name: string; isPrimary: boolean };
 export type Alignment = "left" | "center" | "right";

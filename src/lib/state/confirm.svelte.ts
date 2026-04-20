@@ -1,3 +1,10 @@
+/**
+ * Reactive store backing the global confirm dialog. Anywhere in the app
+ * can push a request onto this state and the dialog component will
+ * render it and run the callback when the user confirms — so prompts
+ * don't have to be wired through the component tree.
+ */
+
 type ConfirmRequest = {
   title: string;
   message: string;

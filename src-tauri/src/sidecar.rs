@@ -1,17 +1,55 @@
+//! Sidecar lifecycle: spawning, supersession, health checks, and model
+//! download orchestration for the `llm`, `stt`, and `bun` processes.
+//!
+//! ## Secrets storage and `debug_assertions`
+//!
+//! Elsewhere in the crate (see `commands.rs`), the secrets flow branches on
+//! `cfg(debug_assertions)` between the OS keychain and a plaintext fallback
+//! file. That divergence is load-bearing: unsigned dev builds can't persist
+//! keychain entries reliably across rebuilds (every rebuild changes the code
+//! signature and the OS silently refuses reads of previously-written keys).
+//! It has no effect on sidecar supervision here, but is called out so the two
+//! code paths don't look mysterious on a cold read.
+
+use crate::error::{AppError, AppResult};
+use crate::sidecar_kind::SidecarKind;
 use crate::state::{AppState, Sidecar};
 use crate::types::{ServerStatus, ServerStatusUpdate};
 #[cfg(not(target_os = "windows"))]
 use crate::utils::current_target_triple;
 use futures_util::StreamExt;
 use std::path::PathBuf;
+use std::str::FromStr;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
-// Grace period between SIGTERM and SIGKILL when superseding an old sidecar.
-// Unix-only: Windows has no SIGTERM equivalent and skips the grace period.
+// ---------------------------------------------------------------------------
+// Tunable constants
+// ---------------------------------------------------------------------------
+
+/// Grace period between SIGTERM and SIGKILL when superseding an old sidecar.
+/// Unix-only: Windows has no SIGTERM equivalent and skips the grace period.
 #[cfg(unix)]
 const GRACEFUL_SHUTDOWN_SECS: u64 = 5;
+
+/// Maximum number of health-check probes before giving up on a starting
+/// sidecar. Combined with `HEALTH_CHECK_INTERVAL_SECS` this caps a slow
+/// startup at 30s before the chip reports an error.
+const HEALTH_CHECK_ATTEMPTS: u32 = 30;
+
+/// Delay between consecutive health-check probes.
+const HEALTH_CHECK_INTERVAL_SECS: u64 = 1;
+
+/// When no health-check URL is provided, how long to wait after spawning
+/// before declaring the sidecar Running. Tuned to exceed observed cold-start
+/// times for llama-server / whisper-server.
+const STARTUP_WARMUP_SECS: u64 = 2;
+
+/// Maximum number of `-N` suffix attempts when finding a non-colliding
+/// unique attachment path. Capped instead of `u32::MAX` so a pathological
+/// directory can never lock a caller indefinitely.
+pub const MAX_UNIQUE_SUFFIX_ATTEMPTS: u32 = 1_000;
 
 // ---------------------------------------------------------------------------
 // Windows Job Object — kill-on-close
@@ -161,18 +199,11 @@ pub fn kill_all_sidecars(state: &AppState) {
     }
 }
 
-pub fn shared_library_dir<R: Runtime>(
-    handle: &AppHandle<R>,
-    server: &str,
-) -> Result<PathBuf, String> {
+pub fn shared_library_dir<R: Runtime>(handle: &AppHandle<R>, server: &str) -> AppResult<PathBuf> {
     let base = if cfg!(debug_assertions) {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries")
     } else {
-        handle
-            .path()
-            .resource_dir()
-            .map_err(|e| e.to_string())?
-            .join("binaries")
+        handle.path().resource_dir()?.join("binaries")
     };
     // Windows: each sidecar lives in its own subdirectory (binaries/llm/ or
     // binaries/stt/) with its own copy of ggml.dll and backend plugins.
@@ -188,17 +219,18 @@ pub fn shared_library_dir<R: Runtime>(
     #[cfg(not(target_os = "windows"))]
     {
         let _ = server;
-        let triple = current_target_triple()?;
+        let triple = current_target_triple().map_err(AppError::external)?;
         Ok(base.join(triple))
     }
     #[cfg(target_os = "windows")]
     {
-        let subdir = match server {
-            "llm" => "llm",
-            "stt" => "stt",
-            _ => return Ok(base),
-        };
-        Ok(base.join(subdir))
+        // Only llm/stt use platform library subdirs; bun and any other kind
+        // resolve to the base binaries directory.
+        match SidecarKind::from_str(server) {
+            Ok(SidecarKind::Llm) => Ok(base.join(SidecarKind::Llm.as_str())),
+            Ok(SidecarKind::Stt) => Ok(base.join(SidecarKind::Stt.as_str())),
+            _ => Ok(base),
+        }
     }
 }
 
@@ -206,7 +238,7 @@ pub fn apply_runtime_library_path<R: Runtime>(
     handle: &AppHandle<R>,
     cmd: tauri_plugin_shell::process::Command,
     server: &str,
-) -> Result<tauri_plugin_shell::process::Command, String> {
+) -> AppResult<tauri_plugin_shell::process::Command> {
     let lib_dir = shared_library_dir(handle, server)?;
     if !lib_dir.exists() {
         return Ok(cmd);
@@ -284,16 +316,20 @@ pub fn is_current_start(state: &AppState, server: &str, start_id: u64) -> bool {
 /// Validate a sidecar health-check URL. Only accepts `http://` pointing at
 /// `127.0.0.1` or `localhost` - external endpoints are intentionally rejected
 /// to keep sidecar supervision local to the user's machine.
-fn validate_health_check_url(url: &str) -> Result<(), String> {
-    let parsed = url::Url::parse(url).map_err(|e| format!("Invalid health check URL: {e}"))?;
+fn validate_health_check_url(url: &str) -> AppResult<()> {
+    let parsed = url::Url::parse(url)?;
     if parsed.scheme() != "http" {
-        return Err("Health check URL must use http scheme".into());
+        return Err(AppError::validation(
+            "Health check URL must use http scheme",
+        ));
     }
     let host = parsed
         .host_str()
-        .ok_or_else(|| "Health check URL missing host".to_string())?;
+        .ok_or_else(|| AppError::validation("Health check URL missing host"))?;
     if host != "127.0.0.1" && host != "localhost" {
-        return Err("Health check URL must point to localhost".into());
+        return Err(AppError::validation(
+            "Health check URL must point to localhost",
+        ));
     }
     Ok(())
 }
@@ -336,16 +372,13 @@ fn terminate_child_detached(pid: u32, child: CommandChild) {
 pub async fn start_bun_sidecar<R: Runtime>(
     handle: AppHandle<R>,
     state: &AppState,
-) -> Result<(), String> {
-    let resources_path = handle
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("resource_dir: {e}"))?;
+) -> AppResult<()> {
+    let resources_path = handle.path().resource_dir()?;
     let server_js_path = resources_path.join("resources").join("server.js");
     update_server_args_internal(
         handle.clone(),
         state,
-        "bun".to_string(),
+        SidecarKind::Bun.as_str().to_string(),
         vec![
             // --smol favors a smaller heap and more aggressive GC at ~10%
             // throughput cost - the right trade for an idle-most-of-the-time
@@ -369,9 +402,13 @@ pub async fn update_server_args_internal<R: Runtime>(
     model_path: Option<String>,
     mmproj_path: Option<String>,
     check_url: Option<String>,
-) -> Result<(), String> {
+) -> AppResult<()> {
     let (current_start_id, old_child, old_pid) = {
-        let mut sidecars = state.0.sidecars.lock().map_err(|e| e.to_string())?;
+        let mut sidecars = state
+            .0
+            .sidecars
+            .lock()
+            .map_err(|e| AppError::sidecar(format!("sidecar mutex poisoned: {e}")))?;
         let sidecar = sidecars.entry(server.clone()).or_insert(Sidecar {
             child: None,
             start_id: 0,
@@ -392,7 +429,7 @@ pub async fn update_server_args_internal<R: Runtime>(
         validate_health_check_url(url)?;
     }
 
-    if args.is_empty() && server != "bun" {
+    if args.is_empty() && server != SidecarKind::Bun.as_str() {
         emit_status(&handle, &server, ServerStatus::Disabled, None, None).await;
         return Ok(());
     }
@@ -425,7 +462,7 @@ pub async fn update_server_args_internal<R: Runtime>(
                             &server_clone,
                             ServerStatus::Error,
                             None,
-                            Some(e),
+                            Some(e.to_string()),
                         )
                         .await;
                         return;
@@ -459,7 +496,7 @@ pub async fn update_server_args_internal<R: Runtime>(
                             &server_clone,
                             ServerStatus::Error,
                             None,
-                            Some(e),
+                            Some(e.to_string()),
                         )
                         .await;
                         return;
@@ -499,12 +536,19 @@ pub async fn update_server_args_internal<R: Runtime>(
             }
         }
 
-        let sidecar_name = if server_clone == "llm" {
-            "tomat-llama-server"
-        } else if server_clone == "stt" {
-            "tomat-whisper-server"
-        } else {
-            "tomat-tools-server"
+        let sidecar_name = match SidecarKind::from_str(&server_clone) {
+            Ok(kind) => kind.binary_name(),
+            Err(_) => {
+                emit_status(
+                    &handle_clone,
+                    &server_clone,
+                    ServerStatus::Error,
+                    None,
+                    Some(format!("unknown sidecar kind: {server_clone}")),
+                )
+                .await;
+                return;
+            }
         };
 
         let cmd = match handle_clone.shell().sidecar(sidecar_name) {
@@ -530,7 +574,7 @@ pub async fn update_server_args_internal<R: Runtime>(
                     &server_clone,
                     ServerStatus::Error,
                     None,
-                    Some(e),
+                    Some(e.to_string()),
                 )
                 .await;
                 return;
@@ -643,15 +687,33 @@ pub async fn update_server_args_internal<R: Runtime>(
         });
 
         if let Some(url) = check_url {
+            // Reuse a single client across the polling loop so we don't pay
+            // connection-pool setup cost on every probe.
+            let client = match reqwest::Client::builder().build() {
+                Ok(c) => c,
+                Err(e) => {
+                    emit_status(
+                        &handle_clone,
+                        &server_clone,
+                        ServerStatus::Error,
+                        None,
+                        Some(format!("Failed to build health check client: {e}")),
+                    )
+                    .await;
+                    return;
+                }
+            };
+
             let mut healthy = false;
-            for _ in 0..30 {
-                if let Ok(res) = reqwest::get(&url).await {
+            for _ in 0..HEALTH_CHECK_ATTEMPTS {
+                if let Ok(res) = client.get(&url).send().await {
                     if res.status().is_success() {
                         healthy = true;
                         break;
                     }
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(HEALTH_CHECK_INTERVAL_SECS))
+                    .await;
 
                 // Check if we were superseded
                 if !is_current_start(&state_clone, &server_clone, current_start_id) {
@@ -678,7 +740,7 @@ pub async fn update_server_args_internal<R: Runtime>(
                 .await;
             }
         } else {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(STARTUP_WARMUP_SECS)).await;
             emit_status(
                 &handle_clone,
                 &server_clone,
@@ -699,20 +761,22 @@ pub async fn ensure_model_internal<R: Runtime>(
     server: &str,
     model_path: &str,
     start_id: u64,
-) -> Result<String, String> {
+) -> AppResult<String> {
     if !model_path.starts_with('@') {
         let path = std::path::Path::new(model_path);
         if path.exists() {
             return Ok(model_path.to_string());
         } else {
-            return Err(format!("Model path does not exist: {}", model_path));
+            return Err(AppError::not_found(format!(
+                "Model path does not exist: {model_path}"
+            )));
         }
     }
 
     // @username/reponame/branchname/filename
     let parts: Vec<&str> = model_path[1..].split('/').collect();
     if parts.len() < 4 {
-        return Err("Invalid model path format".into());
+        return Err(AppError::validation("Invalid model path format"));
     }
 
     let username = parts[0];
@@ -720,7 +784,7 @@ pub async fn ensure_model_internal<R: Runtime>(
     let branchname = parts[2];
     let filename = parts[3..].join("/");
 
-    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let home = handle.path().home_dir()?;
     let dest_dir = home
         .join(".tomat")
         .join("models")
@@ -732,7 +796,7 @@ pub async fn ensure_model_internal<R: Runtime>(
         return Ok(dest_path.to_string_lossy().to_string());
     }
 
-    std::fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(&dest_dir).await?;
 
     emit_status(
         handle,
@@ -743,15 +807,10 @@ pub async fn ensure_model_internal<R: Runtime>(
     )
     .await;
 
-    let _download_guard = state
-        .0
-        .download_sem
-        .acquire()
-        .await
-        .map_err(|e| e.to_string())?;
+    let _download_guard = state.0.download_sem.acquire().await?;
 
     if !is_current_start(state, server, start_id) {
-        return Err("Download cancelled".to_string());
+        return Err(AppError::external("Download cancelled"));
     }
 
     if dest_path.exists() {
@@ -763,20 +822,22 @@ pub async fn ensure_model_internal<R: Runtime>(
         server,
         ServerStatus::Downloading,
         Some(0.0),
-        Some(format!("Downloading {}...", filename)),
+        Some(format!("Downloading {filename}...")),
     )
     .await;
 
     let url = format!(
-        "https://huggingface.co/{}/{}/resolve/{}/{}?download=true",
-        username, reponame, branchname, filename
+        "https://huggingface.co/{username}/{reponame}/resolve/{branchname}/{filename}?download=true"
     );
 
     let client = reqwest::Client::new();
-    let res = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let res = client.get(url).send().await?;
 
     if !res.status().is_success() {
-        return Err(format!("Failed to download model: {}", res.status()));
+        return Err(AppError::external(format!(
+            "Failed to download model: {}",
+            res.status()
+        )));
     }
 
     let total_size = res.content_length().unwrap_or(0);
@@ -784,20 +845,16 @@ pub async fn ensure_model_internal<R: Runtime>(
     let mut stream = res.bytes_stream();
 
     let tmp_path = dest_path.with_extension("tmp");
-    let mut file = tokio::fs::File::create(&tmp_path)
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::create(&tmp_path).await?;
 
     while let Some(item) = stream.next().await {
         if !is_current_start(state, server, start_id) {
             let _ = tokio::fs::remove_file(&tmp_path).await;
-            return Err("Download cancelled".to_string());
+            return Err(AppError::external("Download cancelled"));
         }
 
-        let chunk = item.map_err(|e| e.to_string())?;
-        tokio::io::copy(&mut &chunk[..], &mut file)
-            .await
-            .map_err(|e| e.to_string())?;
+        let chunk = item?;
+        tokio::io::copy(&mut &chunk[..], &mut file).await?;
         downloaded += chunk.len() as u64;
 
         if total_size > 0 {
@@ -808,8 +865,7 @@ pub async fn ensure_model_internal<R: Runtime>(
                 ServerStatus::Downloading,
                 Some(progress),
                 Some(format!(
-                    "Downloading {} ({:.2} MB)...",
-                    filename,
+                    "Downloading {filename} ({:.2} MB)...",
                     downloaded as f64 / 1024.0 / 1024.0
                 )),
             )
@@ -817,7 +873,7 @@ pub async fn ensure_model_internal<R: Runtime>(
         }
     }
 
-    std::fs::rename(tmp_path, &dest_path).map_err(|e| e.to_string())?;
+    tokio::fs::rename(tmp_path, &dest_path).await?;
 
     Ok(dest_path.to_string_lossy().to_string())
 }
@@ -831,25 +887,25 @@ pub async fn ensure_path_internal<R: Runtime>(
     state: &AppState,
     server: &str,
     path: &str,
-) -> Result<String, String> {
+) -> AppResult<String> {
     if !path.starts_with('@') {
         let p = std::path::Path::new(path);
         if p.exists() {
             return Ok(path.to_string());
         }
-        return Err(format!("Path does not exist: {}", path));
+        return Err(AppError::not_found(format!("Path does not exist: {path}")));
     }
 
     let parts: Vec<&str> = path[1..].split('/').collect();
     if parts.len() < 4 {
-        return Err("Invalid model path format".into());
+        return Err(AppError::validation("Invalid model path format"));
     }
     let username = parts[0];
     let reponame = parts[1];
     let branchname = parts[2];
     let filename = parts[3..].join("/");
 
-    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let home = handle.path().home_dir()?;
     let dest_dir = home
         .join(".tomat")
         .join("models")
@@ -862,7 +918,7 @@ pub async fn ensure_path_internal<R: Runtime>(
     }
 
     if let Some(parent) = dest_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        tokio::fs::create_dir_all(parent).await?;
     }
 
     emit_status(
@@ -874,12 +930,7 @@ pub async fn ensure_path_internal<R: Runtime>(
     )
     .await;
 
-    let _download_guard = state
-        .0
-        .download_sem
-        .acquire()
-        .await
-        .map_err(|e| e.to_string())?;
+    let _download_guard = state.0.download_sem.acquire().await?;
 
     if dest_path.exists() {
         return Ok(dest_path.to_string_lossy().to_string());
@@ -890,20 +941,22 @@ pub async fn ensure_path_internal<R: Runtime>(
         server,
         ServerStatus::Downloading,
         Some(0.0),
-        Some(format!("Downloading {}...", filename)),
+        Some(format!("Downloading {filename}...")),
     )
     .await;
 
     let url = format!(
-        "https://huggingface.co/{}/{}/resolve/{}/{}?download=true",
-        username, reponame, branchname, filename
+        "https://huggingface.co/{username}/{reponame}/resolve/{branchname}/{filename}?download=true"
     );
 
     let client = reqwest::Client::new();
-    let res = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let res = client.get(url).send().await?;
 
     if !res.status().is_success() {
-        return Err(format!("Failed to download asset: {}", res.status()));
+        return Err(AppError::external(format!(
+            "Failed to download asset: {}",
+            res.status()
+        )));
     }
 
     let total_size = res.content_length().unwrap_or(0);
@@ -911,15 +964,11 @@ pub async fn ensure_path_internal<R: Runtime>(
     let mut stream = res.bytes_stream();
 
     let tmp_path = dest_path.with_extension("tmp");
-    let mut file = tokio::fs::File::create(&tmp_path)
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::create(&tmp_path).await?;
 
     while let Some(item) = stream.next().await {
-        let chunk = item.map_err(|e| e.to_string())?;
-        tokio::io::copy(&mut &chunk[..], &mut file)
-            .await
-            .map_err(|e| e.to_string())?;
+        let chunk = item?;
+        tokio::io::copy(&mut &chunk[..], &mut file).await?;
         downloaded += chunk.len() as u64;
 
         if total_size > 0 {
@@ -930,8 +979,7 @@ pub async fn ensure_path_internal<R: Runtime>(
                 ServerStatus::Downloading,
                 Some(progress),
                 Some(format!(
-                    "Downloading {} ({:.2} MB)...",
-                    filename,
+                    "Downloading {filename} ({:.2} MB)...",
                     downloaded as f64 / 1024.0 / 1024.0
                 )),
             )
@@ -939,7 +987,7 @@ pub async fn ensure_path_internal<R: Runtime>(
         }
     }
 
-    std::fs::rename(tmp_path, &dest_path).map_err(|e| e.to_string())?;
+    tokio::fs::rename(tmp_path, &dest_path).await?;
 
     Ok(dest_path.to_string_lossy().to_string())
 }
@@ -956,7 +1004,7 @@ pub struct DownloadPlan {
 pub async fn probe_download<R: Runtime>(
     handle: &AppHandle<R>,
     path: &str,
-) -> Result<DownloadPlan, String> {
+) -> AppResult<DownloadPlan> {
     if !path.starts_with('@') {
         let p = std::path::Path::new(path);
         return Ok(DownloadPlan {
@@ -973,14 +1021,14 @@ pub async fn probe_download<R: Runtime>(
 
     let parts: Vec<&str> = path[1..].split('/').collect();
     if parts.len() < 4 {
-        return Err("Invalid model path format".into());
+        return Err(AppError::validation("Invalid model path format"));
     }
     let username = parts[0];
     let reponame = parts[1];
     let branchname = parts[2];
     let filename = parts[3..].join("/");
 
-    let home = handle.path().home_dir().map_err(|e| e.to_string())?;
+    let home = handle.path().home_dir()?;
     let dest_path = home
         .join(".tomat")
         .join("models")
@@ -999,8 +1047,7 @@ pub async fn probe_download<R: Runtime>(
     }
 
     let url = format!(
-        "https://huggingface.co/{}/{}/resolve/{}/{}?download=true",
-        username, reponame, branchname, filename
+        "https://huggingface.co/{username}/{reponame}/resolve/{branchname}/{filename}?download=true"
     );
 
     // HF resolve URLs 302-redirect to a CDN that often omits Content-Length on
@@ -1009,8 +1056,7 @@ pub async fn probe_download<R: Runtime>(
     // following redirects if HF didn't set it.
     let no_redirect = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| e.to_string())?;
+        .build()?;
     let size_bytes = match no_redirect.head(&url).send().await {
         Ok(res) => res
             .headers()
@@ -1041,15 +1087,12 @@ pub async fn probe_download<R: Runtime>(
 pub async fn probe_downloads(
     handle: AppHandle,
     paths: Vec<String>,
-) -> Result<Vec<DownloadPlan>, String> {
+) -> AppResult<Vec<DownloadPlan>> {
     let futures = paths.iter().map(|p| probe_download(&handle, p));
     let results = futures_util::future::join_all(futures).await;
     let mut out = Vec::with_capacity(results.len());
     for r in results {
-        match r {
-            Ok(plan) => out.push(plan),
-            Err(e) => return Err(e),
-        }
+        out.push(r?);
     }
     Ok(out)
 }

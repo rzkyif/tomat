@@ -1,3 +1,9 @@
+/**
+ * Applies the user's visual preferences (theme, base font size) to the
+ * document, and watches the OS color-scheme preference so the app can
+ * react when the user has chosen "auto".
+ */
+
 import { browser } from "$app/environment";
 
 const mql = browser ? window.matchMedia("(prefers-color-scheme: dark)") : null;

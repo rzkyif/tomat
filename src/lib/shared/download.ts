@@ -1,3 +1,10 @@
+/**
+ * Figures out which model files need downloading when settings change.
+ * Compares old and new settings, picks out HuggingFace paths that are
+ * actually being used (skipping ones for features the user hasn't turned
+ * on), and asks the Rust downloader to plan the fetch.
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import { TTS_BASE_FILES } from "./settings";
 

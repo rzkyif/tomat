@@ -12,8 +12,7 @@
     serversState,
     settingsState,
     snippetsState,
-  } from "../state";
-  import { shortcutHandler } from "$lib/state/shortcut.svelte";
+  } from "../../state";
   import { sendMessages } from "$lib/sidecar/llm";
   import { transcribeAudio } from "$lib/sidecar/stt";
   import {
@@ -44,8 +43,9 @@
   } from "$lib/shared/capture";
   import { vadManager } from "$lib/shared/vad.svelte";
   import type { ActivationMode } from "$lib/shared/settings";
-  import AttachmentList from "./AttachmentList.svelte";
-  import Bubble from "./Bubble.svelte";
+  import { measureCaretAt } from "$lib/shared/textareaMirror";
+  import AttachmentList from "../AttachmentList.svelte";
+  import Bubble from "../Bubble.svelte";
 
   let { toggleSettings, showSettings } = $props<{
     toggleSettings: () => void;
@@ -179,78 +179,6 @@
     if (e.key === "Escape") closeImagePreview();
   }
 
-  /** Measure the viewport-relative position of a specific text offset inside
-   *  the textarea by cloning its layout-affecting styles into a hidden div. */
-  function measureCaretAt(
-    ta: HTMLTextAreaElement,
-    index: number,
-  ): { top: number; left: number } {
-    const mirror = document.createElement("div");
-    const cs = window.getComputedStyle(ta);
-    const copiedProps = [
-      "boxSizing",
-      "width",
-      "height",
-      "overflowX",
-      "overflowY",
-      "borderTopWidth",
-      "borderRightWidth",
-      "borderBottomWidth",
-      "borderLeftWidth",
-      "paddingTop",
-      "paddingRight",
-      "paddingBottom",
-      "paddingLeft",
-      "fontStyle",
-      "fontVariant",
-      "fontWeight",
-      "fontStretch",
-      "fontSize",
-      "fontSizeAdjust",
-      "lineHeight",
-      "fontFamily",
-      "textAlign",
-      "textTransform",
-      "textIndent",
-      "textDecoration",
-      "letterSpacing",
-      "wordSpacing",
-      "tabSize",
-    ] as const;
-    for (const p of copiedProps) {
-      (mirror.style as any)[p] = (cs as any)[p];
-    }
-    mirror.style.position = "absolute";
-    mirror.style.top = "-9999px";
-    mirror.style.left = "-9999px";
-    mirror.style.visibility = "hidden";
-    mirror.style.whiteSpace = "pre-wrap";
-    mirror.style.overflowWrap = "break-word";
-    mirror.textContent = ta.value.substring(0, index);
-    const marker = document.createElement("span");
-    marker.textContent = "\u200b";
-    mirror.appendChild(marker);
-    document.body.appendChild(mirror);
-    const markerRect = marker.getBoundingClientRect();
-    const taRect = ta.getBoundingClientRect();
-    // Translate the mirror-relative marker position to viewport coords using
-    // the textarea's top-left as the origin (mirror and textarea share the
-    // same content-box layout).
-    const top =
-      taRect.top +
-      (markerRect.top - mirror.getBoundingClientRect().top) -
-      ta.scrollTop;
-    const left =
-      taRect.left +
-      (markerRect.left - mirror.getBoundingClientRect().left) -
-      ta.scrollLeft;
-    document.body.removeChild(mirror);
-    // Anchor the dropdown just below the current line.
-    const lineHeight =
-      parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
-    return { top: top + lineHeight + 4, left };
-  }
-
   function updateAutocompleteFromInput() {
     if (imeComposing || !textareaElement) {
       autocompleteOpen = false;
@@ -378,7 +306,6 @@
         }
 
         await vadManager.attach(handleVadAudio);
-        await shortcutHandler.attach();
 
         const mode = settingsState.currentSettings[
           "stt.activation"
@@ -407,7 +334,6 @@
   });
 
   onDestroy(() => {
-    shortcutHandler.detach();
     vadManager.detach();
     if (sttErrorTimeout) {
       clearTimeout(sttErrorTimeout);
@@ -565,10 +491,7 @@
         const mergedRaw = await mergeTranscription(existing, raw);
         if (mergedRaw) raw = mergedRaw;
         if (corrected) {
-          const mergedCorrected = await mergeTranscription(
-            existing,
-            corrected,
-          );
+          const mergedCorrected = await mergeTranscription(existing, corrected);
           if (mergedCorrected) corrected = mergedCorrected;
         }
       } catch (e) {
@@ -873,7 +796,7 @@
   <!-- STT error banner -->
   {#if sttError}
     <div
-      class="flex items-center gap-2 text-sm text-default-500 bg-default-100 rounded-lg px-3 py-2"
+      class="flex items-center gap-2 text-sm text-default-700 bg-default-200 rounded-lg px-3 py-2"
     >
       <i class="flex i-material-symbols-mic-off-rounded text-base"></i>
       <span>{sttError}</span>
@@ -883,7 +806,7 @@
   <!-- LLM autocorrect before -->
   {#if showAutocorrectDiff && originalTranscription !== null}
     <div
-      class="flex items-start gap-2 text-sm text-default-500 bg-default-100 rounded-lg px-3 py-2"
+      class="flex items-start gap-2 text-sm text-default-700 bg-default-200 rounded-lg px-3 py-2"
     >
       <span class="shrink-0 font-medium">Before Autocorrect:</span>
       <span class="whitespace-pre-wrap break-words flex-1"
@@ -941,16 +864,14 @@
   />
 
   <div
-    class="flex items-end justify-between gap-2 text-2xl text-default-500 w-full"
+    class="flex items-end justify-between gap-2 text-2xl text-default-700 w-full"
   >
     <div
-      class="flex {settingsState.getAlignment() == 'right'
-        ? 'flex-row-reverse'
-        : 'flex-row'} items-center justify-center bg-default-100 p-1 rounded-2xl"
+      class="flex flex-row items-center justify-center bg-default-200 p-1 rounded-2xl"
       data-attach-root
     >
       <button
-        class="hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center shrink-0 text-default-600"
+        class="hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center shrink-0 text-default-700"
         title={attachMenuOpen ? "Close" : "Attach"}
         onclick={toggleAttachMenu}
       >
@@ -1003,10 +924,10 @@
     </div>
 
     <div
-      class="flex flex-row items-center justify-center bg-default-100 px-2 py-1 rounded-2xl"
+      class="flex flex-row items-center justify-center bg-default-200 px-2 py-1 rounded-2xl"
     >
       <div
-        class="relative flex items-center p-1 text-default-500 hover:text-default-900 transition-colors"
+        class="relative flex items-center p-1 text-default-700 hover:text-default-900 transition-colors"
       >
         <i class="i-material-symbols-desktop-windows-outline-rounded"></i>
         <select
@@ -1024,7 +945,7 @@
       <div class="flex items-center">
         {#each ALIGNMENTS as align}
           <button
-            class="hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center text-default-500"
+            class="hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center text-default-700"
             onclick={() => handleAlignment(align.value)}
             title={align.title}
           >
@@ -1036,7 +957,7 @@
       <button
         class=" hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center {showSettings
           ? 'text-blue-400'
-          : 'text-default-500'}"
+          : 'text-default-700'}"
         onclick={toggleSettings}
         title="Settings"
       >
@@ -1047,14 +968,14 @@
     <div class="flex gap-2">
       {#if settingsState.currentSettings["stt.preset"] !== "disabled"}
         <button
-          class="bg-default-100 p-2 rounded-2xl flex items-center transition-colors {vadManager.loading
+          class="bg-default-200 p-2 rounded-2xl flex items-center transition-colors {vadManager.loading
             ? 'cursor-wait'
             : vadManager.enabled
               ? vadManager.listening
                 ? 'text-green-500'
                 : 'text-blue-400'
               : sttStatus === 'Running' || sttStatus === 'Disabled'
-                ? 'hover:text-default-900 hover:cursor-pointer text-default-500'
+                ? 'hover:text-default-900 hover:cursor-pointer text-default-700'
                 : 'cursor-not-allowed'}"
           title={vadManager.enabled
             ? vadManager.listening
@@ -1083,10 +1004,10 @@
         </button>
       {/if}
       <button
-        class="hover:cursor-pointer bg-default-100 p-2 rounded-2xl flex items-center transition-colors {isStreaming &&
+        class="hover:cursor-pointer bg-default-200 p-2 rounded-2xl flex items-center transition-colors {isStreaming &&
         !hasContent
           ? 'text-red-500 hover:text-red-400'
-          : 'hover:text-default-900 text-default-500'}"
+          : 'hover:text-default-900 text-default-700'}"
         title={isStreaming && !hasContent
           ? "Stop"
           : isStreaming && hasContent

@@ -6,7 +6,7 @@
   import ServerStatusChip from "./ServerStatusChip.svelte";
 
   let {
-    selectedGroupId = $bindable(),
+    selectedGroupId,
     onSelect,
     llmStatus,
     sttStatus,
@@ -39,10 +39,7 @@
           : ''} {selectedGroupId === group.id
           ? 'text-default-900 border-default-700'
           : 'text-default-500 border-transparent hover:text-default-700 hover:border-default-500'}"
-        onclick={() => {
-          selectedGroupId = group.id;
-          onSelect?.(group.id);
-        }}
+        onclick={() => onSelect?.(group.id)}
       >
         {group.name}
       </button>
@@ -55,10 +52,12 @@
       <ServerStatusChip type="STT" update={sttStatus} />
       <ServerStatusChip type="Bun" update={bunStatus} />
     </div>
-    <div
-      class="flex items-center gap-1.5 text-default-600 text-sm pb-2 select-none"
-    >
-      <img src="/tomat.png" alt="tomat" class="w-6 h-6" />
+    <div class="flex items-center gap-1.5 text-default-900 text-sm select-none">
+      <span
+        class="w-6 h-6 bg-current"
+        style="mask:url(/tomat.svg) center/contain no-repeat;-webkit-mask:url(/tomat.svg) center/contain no-repeat;"
+        aria-label="tomat"
+      ></span>
       <span>{version ? `v${version}` : ""}</span>
     </div>
   </div>

@@ -1,3 +1,10 @@
+/**
+ * Builds the system prompt sent to the LLM for a given turn. Combines the
+ * user's chosen base prompt, optional context fields (date, OS, user name,
+ * etc.), any per-turn overrides from snippets, and one-off hints like
+ * "tools are available this turn" into a single string.
+ */
+
 import { settingsState } from "../state";
 import type { SnippetOverride } from "./snippets";
 

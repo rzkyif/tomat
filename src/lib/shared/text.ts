@@ -1,12 +1,8 @@
 /**
- * Remove markdown syntax from LLM output so Kokoro (or any other TTS engine)
- * doesn't end up reading asterisks, backticks, URLs, or the contents of code
- * blocks aloud. Runs on the full streamed text every flush, not per sentence,
- * because `Intl.Segmenter` is not markdown-aware: if we segmented first, URLs
- * and table pipes would poison the sentence boundaries.
- *
- * Rules are a chain of `String.replace` calls - ~sub-millisecond for the
- * multi-KB buffers we see in practice. See plan doc for the full list.
+ * Strips markdown formatting out of LLM output before it goes to the
+ * text-to-speech engine, so the voice doesn't end up reading asterisks,
+ * backticks, URLs, or code-block contents aloud. Safe to run on partial,
+ * mid-stream text.
  */
 export function stripMarkdownForTTS(input: string): string {
   let text = input;

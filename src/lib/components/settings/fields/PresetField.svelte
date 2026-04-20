@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { settingsState } from "../../state";
+  import { settingsState } from "../../../state";
   import type { SettingField, PresetOption } from "$lib/shared/settings";
   import FieldDescription from "./FieldDescription.svelte";
 
@@ -11,7 +11,7 @@
   function presetBtnClass(selected: boolean): string {
     return selected
       ? "bg-blue-500 text-white shadow-md shadow-blue-500/25"
-      : "bg-default-100 text-default-700 hover:bg-default-200";
+      : "bg-default-200 text-default-700 hover:bg-default-100";
   }
 </script>
 
@@ -27,7 +27,7 @@
         {@const selected = settingsState.currentSettings[field.id] === opt.id}
         <button
           type="button"
-          class="p-3 rounded-xl cursor-pointer border-0.35em border-default-100 text-left flex flex-col gap-1.5 {presetBtnClass(
+          class="p-3 rounded-xl cursor-pointer border-0.35em border-default-200 text-left flex flex-col gap-1.5 {presetBtnClass(
             selected,
           )}"
           onclick={() => onPresetSelect(field.id, opt)}
@@ -70,7 +70,7 @@
           {@const selected = settingsState.currentSettings[field.id] === opt.id}
           <button
             type="button"
-            class="p-3 rounded-xl cursor-pointer border-0.35em border-default-100 text-left flex flex-col gap-1.5 {presetBtnClass(
+            class="p-3 rounded-xl cursor-pointer border-0.35em border-default-200 text-left flex flex-col gap-1.5 {presetBtnClass(
               selected,
             )}"
             onclick={() => onPresetSelect(field.id, opt)}

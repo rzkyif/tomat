@@ -1,8 +1,5 @@
 <p align="center">
-<img src="./static/tomat.png" width="100"/>
-</p>
-<p align="center" style="font-size: 28px; margin-top: -20px;">
-tomat
+<img src="./static/tomat.svg" width="100"/>
 </p>
 
 <!--
@@ -181,7 +178,11 @@ src/                  Svelte 5 frontend
     ├── sidecar/      Sidecar process communication
     └── shared/       Utilities, types, settings schema
 src-tauri/            Tauri 2 backend (Rust)
-└── src/              Commands, sidecar management, state, types
+└── src/
+    ├── commands/     Tauri commands (paths, session, snippets, settings, storage)
+    ├── error.rs      Unified AppError type + From impls
+    ├── sidecar.rs    Sidecar lifecycle (supervision, health, downloads)
+    └── state/types   App state and serde types
 src-bun/              Bun/Elysia HTTP server (sidecar)
 scripts/              Build utilities (fetch-required-files)
 ```

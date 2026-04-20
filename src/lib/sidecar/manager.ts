@@ -1,3 +1,10 @@
+/**
+ * Glue between the frontend and the Rust process supervisor that runs the
+ * sidecars. Listens for status updates from Rust and mirrors them into
+ * reactive state, and asks Rust to restart a sidecar with new args
+ * whenever the relevant settings change.
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { buildArgs } from "$lib/shared/command";

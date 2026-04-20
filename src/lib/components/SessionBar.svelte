@@ -115,7 +115,7 @@
     {#if messagesState.tokenUsage}
       <!-- Context progress bar with text inside -->
       <div
-        class="relative w-16 h-10 bg-default-100 rounded-2xl overflow-hidden shrink-0 border-0.35em border-default-100"
+        class="relative w-16 h-10 bg-default-200 rounded-2xl overflow-hidden shrink-0 border-0.35em border-default-200"
         title="Context: {formatTokens(contextUsed)} / {formatTokens(
           contextMax,
         )}"
@@ -125,7 +125,7 @@
           style="height: {Math.min(contextRatio * 100, 100)}%"
         ></div>
         <span
-          class="absolute inset-0 flex items-center justify-center text-sm font-medium text-default-500 leading-none"
+          class="absolute inset-0 flex items-center justify-center text-sm font-medium text-default-700 leading-none"
         >
           {Math.round(contextRatio * 100)}%
         </span>
@@ -135,7 +135,7 @@
     <!-- Title (grid overlap technique for auto-sizing) -->
     {#if showTitle}
       <div
-        class="grid items-center min-w-0 overflow-hidden bg-default-100 rounded-2xl"
+        class="grid items-center min-w-0 overflow-hidden bg-default-200 rounded-2xl"
       >
         <span
           class="invisible row-start-1 col-start-1 whitespace-pre px-4 py-2"
@@ -150,7 +150,7 @@
           onblur={handleTitleBlur}
           onkeydown={handleTitleKeydown}
           placeholder={defaultTitle}
-          class="row-start-1 col-start-1 w-full min-h-full px-4 py-2 text-default-500 flex items-center"
+          class="row-start-1 col-start-1 w-full min-h-full px-4 py-2 text-default-700 flex items-center"
         />
       </div>
     {/if}
@@ -158,11 +158,11 @@
     <!-- Session navigation -->
     {#if showButtonGroup}
       <div
-        class="flex flex-row items-center justify-center bg-default-100 px-2 py-1 rounded-2xl shrink-0"
+        class="flex flex-row items-center justify-center bg-default-200 px-2 py-1 rounded-2xl shrink-0"
       >
         {#if canPrev}
           <button
-            class="text-2xl rounded p-1 flex items-center hover:text-default-900 hover:cursor-pointer text-default-500 transition-colors"
+            class="text-2xl rounded p-1 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
             onclick={() => {
               confirmingDelete = false;
               messagesState.navigatePrev();
@@ -174,7 +174,7 @@
         {/if}
         {#if canNext}
           <button
-            class="text-2xl rounded p-1 flex items-center hover:text-default-900 hover:cursor-pointer text-default-500 transition-colors"
+            class="text-2xl rounded p-1 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
             onclick={() => {
               confirmingDelete = false;
               messagesState.navigateNext();
@@ -188,8 +188,8 @@
           <button
             data-delete-btn
             class="text-2xl rounded p-1 flex items-center hover:cursor-pointer transition-colors {confirmingDelete
-              ? 'text-default-500 hover:text-default-900'
-              : 'text-default-500 hover:text-default-900'}"
+              ? 'text-default-700 hover:text-default-900'
+              : 'text-default-700 hover:text-default-900'}"
             onclick={handleDeleteClick}
             title={confirmingDelete ? "Confirm Delete" : "Delete Session"}
           >
@@ -200,7 +200,7 @@
             ></i>
           </button>
           <button
-            class="text-2xl rounded p-1 flex items-center hover:text-default-900 hover:cursor-pointer text-default-500 transition-colors"
+            class="text-2xl rounded p-1 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
             onclick={() => {
               confirmingDelete = false;
               messagesState.newSession();

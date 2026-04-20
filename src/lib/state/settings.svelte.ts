@@ -1,7 +1,22 @@
-import { browser } from "$app/environment";
-import { getDefaultSettings, SECRET_KEYS } from "$lib/shared/settings";
+/**
+ * Reactive store for user settings. Loads them from the right place on
+ * startup (Rust backend on desktop, localStorage in the browser), saves
+ * them back when the user changes anything, and triggers the right side
+ * effect — like restarting a sidecar or toggling TTS — when the relevant
+ * keys change.
+ */
+
+import { browser, dev } from "$app/environment";
+import { isTauri } from "$lib/shared/env";
+import { getDefaultSettings, isValidSettingKey, SECRET_KEYS } from "$lib/shared/settings";
 import type { Alignment } from "$lib/shared/types";
 import { invoke } from "@tauri-apps/api/core";
+
+function warnIfUnknownKey(key: string): void {
+  if (dev && !isValidSettingKey(key)) {
+    console.warn(`[settings] writing unknown setting key: "${key}"`);
+  }
+}
 
 class SettingsState {
   currentSettings = $state<Record<string, any>>(getDefaultSettings());
@@ -12,7 +27,7 @@ class SettingsState {
   async loadSettings() {
     if (!browser) return;
     try {
-      if ((window as any).__TAURI_INTERNALS__) {
+      if (isTauri()) {
         const stored = (await invoke("load_settings", { secretKeys: SECRET_KEYS })) as Record<
           string,
           any
@@ -40,6 +55,21 @@ class SettingsState {
       console.warn("Failed to load settings, using defaults:", e);
       this.currentSettings = getDefaultSettings();
     }
+
+    // Push the persisted shortcut to Rust so it overrides the startup default.
+    // Boot must not abort if the shortcut is now taken by another app — log
+    // and let the user fix it from Settings.
+    if (isTauri()) {
+      this.applyToggleWindowShortcut(this.currentSettings["shortcuts.toggleWindow"]).catch((e) =>
+        console.warn("Failed to register persisted shortcut:", e),
+      );
+    }
+  }
+
+  private async applyToggleWindowShortcut(value: unknown): Promise<void> {
+    if (!isTauri()) return;
+    const accelerator = typeof value === "string" && value.length > 0 ? value : null;
+    await invoke("set_global_shortcut", { accelerator });
   }
 
   debounceRestart(type: "llm" | "stt") {
@@ -60,8 +90,20 @@ class SettingsState {
   }
 
   async updateSetting(key: string, value: unknown) {
+    warnIfUnknownKey(key);
     const prevEnabled = !!this.currentSettings["tts.enabled"];
+    const prevValue = this.currentSettings[key];
     this.currentSettings[key] = value;
+
+    if (key === "shortcuts.toggleWindow") {
+      try {
+        await this.applyToggleWindowShortcut(value);
+      } catch (e) {
+        this.currentSettings[key] = prevValue;
+        throw e;
+      }
+    }
+
     await this.save();
 
     if (key.startsWith("llm.")) {
@@ -79,16 +121,30 @@ class SettingsState {
 
   async updateSettings(updates: Record<string, unknown>) {
     const prevTtsEnabled = !!this.currentSettings["tts.enabled"];
+    const prevShortcut = this.currentSettings["shortcuts.toggleWindow"];
     let llmChanged = false;
     let sttChanged = false;
     let ttsEnabledChanged = false;
+    let toggleShortcutChanged = false;
 
     for (const [key, value] of Object.entries(updates)) {
+      warnIfUnknownKey(key);
       this.currentSettings[key] = value;
       if (key.startsWith("llm.")) llmChanged = true;
       if (key.startsWith("stt.")) sttChanged = true;
       if (key === "tts.enabled") ttsEnabledChanged = true;
+      if (key === "shortcuts.toggleWindow") toggleShortcutChanged = true;
     }
+
+    if (toggleShortcutChanged) {
+      try {
+        await this.applyToggleWindowShortcut(this.currentSettings["shortcuts.toggleWindow"]);
+      } catch (e) {
+        this.currentSettings["shortcuts.toggleWindow"] = prevShortcut;
+        throw e;
+      }
+    }
+
     await this.save();
 
     if (llmChanged) this.debounceRestart("llm");
@@ -124,7 +180,7 @@ class SettingsState {
     const snapshot = JSON.stringify(nonDefault, null, 2);
     this.saveChain = this.saveChain.then(async () => {
       try {
-        if ((window as any).__TAURI_INTERNALS__) {
+        if (isTauri()) {
           await invoke("save_settings", { settings: JSON.parse(snapshot), secrets });
         } else {
           localStorage.setItem("tomat-settings", snapshot);

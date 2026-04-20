@@ -1,3 +1,8 @@
+/**
+ * Plays short beep sounds to give the user audio feedback for things like
+ * the microphone turning on or off.
+ */
+
 let audioCtx: AudioContext | null = null;
 
 function ctx(): AudioContext {

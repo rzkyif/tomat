@@ -1,3 +1,11 @@
+/**
+ * The big chat-state store. Holds the active conversation's messages,
+ * handles streaming chunks coming back from the LLM, manages session
+ * persistence (load, save, switch, delete), feeds assistant output into
+ * the TTS queue, and exposes derived slices the UI uses for windowed
+ * rendering.
+ */
+
 import {
   getTextContent,
   makeMessageId,
@@ -30,13 +38,21 @@ import {
   buildSystemPromptBase,
 } from "$lib/shared/systemPrompt";
 
+/** Initial number of messages rendered for a session. Large enough to cover
+ *  a typical working conversation without paying to mount thousands of
+ *  history turns on session load. Extra turns are revealed in
+ *  `WINDOW_GROWTH`-sized chunks when the user scrolls to the top. */
 const DEFAULT_WINDOW_SIZE = 200;
+/** How many additional older messages to mount per "load more" step. */
 const WINDOW_GROWTH = 200;
+/** Trailing-edge debounce for `saveSessionToDisk`. At 1s, rapid edits (user
+ *  typing + tool streaming) coalesce into one write instead of fanning out
+ *  dozens of tmp-file renames per second. */
 const SAVE_DEBOUNCE_MS = 1000;
 
-// Coalesce streaming tokens before pushing into reactive state. At ~30 ms we
-// stay under one frame at 30 fps and avoid re-parsing the full markdown blob
-// per token (which would dominate at high token rates).
+/** Coalesce streaming tokens before pushing into reactive state. At ~30 ms we
+ *  stay under one frame at 30 fps and avoid re-parsing the full markdown blob
+ *  per token (which would dominate at high token rates). */
 const STREAM_FLUSH_MS = 30;
 
 // Module-level singleton (see export at the bottom). Not torn down in
@@ -66,6 +82,10 @@ class MessagesState {
   private streamBuffer = "";
   private streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private ttsCursor = 0;
+  /** Wall-clock start of the current assistant turn's reasoning trace.
+   *  Set on the first reasoning delta, cleared when the duration is written
+   *  onto the message (on first content chunk or on finish). */
+  private reasoningStartTime: number | null = null;
 
   private get storageEnabled(): boolean {
     return settingsState.currentSettings["general.session.storeSessions"] !== false;
@@ -294,36 +314,49 @@ class MessagesState {
     await this.interruptStreaming();
     this.resetTTSPlayback();
 
-    // Cancel (don't flush) any pending save - we're about to remove the file,
-    // so persisting it now would just be resurrected and then deleted, or
-    // worse, fire after the delete and recreate an orphan.
+    // Cancel any pending save and drain the in-flight chain before the delete.
+    // If a save completes *after* the directory is removed, it resurrects the
+    // session file and leaves the UI pointing at a now-orphaned id.
     this.cancelPendingSave();
+    await this.saveInFlight;
 
-    const deletedIndex = this.currentSessionIndex;
+    const sessionToDelete = this.sessionId;
+    const deletedIndex = this.sessionList.findIndex((s) => s.id === sessionToDelete);
+    const remaining = this.sessionList.filter((s) => s.id !== sessionToDelete);
+
+    // Clear in-memory session state *before* invoking the backend delete and
+    // any follow-up loadSession(). Otherwise loadSession's preemptive
+    // flushSave() sees the stale id + empty messages array and rewrites the
+    // deleted session back to disk; subsequent sends also wire up against the
+    // phantom id and silently drop the user's next message.
+    this.messages = [];
+    this.sessionId = null;
+    this.sessionTitle = "";
+    this.tokenUsage = null;
+    this.isStreaming = false;
+    this.streamingFirstChunkReceived = false;
+    this.streamingMessageId = null;
+    this.resetWindow();
 
     try {
-      await invoke("delete_chat_session", { sessionId: this.sessionId });
+      await invoke("delete_chat_session", { sessionId: sessionToDelete });
     } catch (e) {
       console.error("Failed to delete session:", e);
+    }
+
+    this.sessionList = remaining;
+
+    if (remaining.length === 0) {
+      this.currentSessionIndex = 0;
       return;
     }
 
-    this.sessionList = this.sessionList.filter((_, i) => i !== deletedIndex);
-
-    if (this.sessionList.length === 0) {
-      this.messages = [];
-      this.sessionId = null;
-      this.sessionTitle = "";
-      this.tokenUsage = null;
-      this.isStreaming = false;
-      this.streamingFirstChunkReceived = false;
-      this.currentSessionIndex = 0;
-      this.resetWindow();
-    } else if (deletedIndex < this.sessionList.length) {
-      await this.loadSession(this.sessionList[deletedIndex].id);
-    } else {
-      await this.loadSession(this.sessionList[deletedIndex - 1].id);
-    }
+    // Pick the session that slid into the deleted slot, or the previous one
+    // if we deleted the tail. Fall back to the first when the deleted id
+    // wasn't in the list (deletedIndex === -1).
+    const nextIdx =
+      deletedIndex < 0 ? 0 : deletedIndex < remaining.length ? deletedIndex : remaining.length - 1;
+    await this.loadSession(remaining[nextIdx].id);
   }
 
   async newSession() {
@@ -468,6 +501,7 @@ class MessagesState {
   startStreaming(modelUsed: "default" | "secondary" = "default") {
     this.isStreaming = true;
     this.streamingFirstChunkReceived = false;
+    this.reasoningStartTime = null;
     this.ttsCursor = 0;
     const assistantId = makeMessageId();
     this.streamingMessageId = assistantId;
@@ -488,6 +522,7 @@ class MessagesState {
     if (idx < 0) return false;
     this.isStreaming = true;
     this.streamingFirstChunkReceived = false;
+    this.reasoningStartTime = null;
     this.ttsCursor = 0;
     this.streamingMessageId = messageId;
     // Clear existing content + reasoning so the regenerated output replaces,
@@ -498,6 +533,7 @@ class MessagesState {
       role: "assistant",
       content: "",
       reasoning: undefined,
+      reasoningDurationMs: undefined,
     };
     void import("./tts.svelte").then(({ ttsState }) => ttsState.startStream(messageId));
     return true;
@@ -508,6 +544,7 @@ class MessagesState {
     if (idx < 0) return;
     if (!this.streamingFirstChunkReceived) {
       this.streamingFirstChunkReceived = true;
+      this.finalizeReasoningDuration(idx);
       this.messages[idx] = { ...this.messages[idx], content: "" };
       this.streamBuffer = "";
     }
@@ -524,10 +561,26 @@ class MessagesState {
     if (!delta) return;
     const idx = this.getStreamingIndex();
     if (idx < 0) return;
+    if (this.reasoningStartTime === null && !this.streamingFirstChunkReceived) {
+      this.reasoningStartTime = Date.now();
+    }
     const cur = this.messages[idx]?.reasoning ?? "";
     this.messages[idx] = {
       ...this.messages[idx],
       reasoning: cur + delta,
+    };
+  }
+
+  /** Freeze the elapsed reasoning time onto the message so historic loads can
+   *  render "Thought for Xs" without live tracking. No-op if reasoning was
+   *  never active on this turn. */
+  private finalizeReasoningDuration(idx: number) {
+    if (this.reasoningStartTime === null) return;
+    const duration = Date.now() - this.reasoningStartTime;
+    this.reasoningStartTime = null;
+    this.messages[idx] = {
+      ...this.messages[idx],
+      reasoningDurationMs: duration,
     };
   }
 
@@ -605,6 +658,7 @@ class MessagesState {
   async finishStreaming() {
     this.cancelStreamBuffer();
     const idx = this.getStreamingIndex();
+    if (idx >= 0) this.finalizeReasoningDuration(idx);
     this.isStreaming = false;
     this.streamingMessageId = null;
     const finalText = idx >= 0 ? (this.messages[idx]?.content as string) || "" : "";
@@ -632,6 +686,7 @@ class MessagesState {
 
     const idx = this.getStreamingIndex();
     if (idx >= 0) {
+      this.finalizeReasoningDuration(idx);
       if (this.streamingFirstChunkReceived) {
         const current = this.messages[idx].content;
         if (typeof current === "string") {
@@ -665,6 +720,7 @@ class MessagesState {
     void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
     this.isStreaming = false;
     this.streamingFirstChunkReceived = false;
+    this.reasoningStartTime = null;
     this.streamingMessageId = null;
     interruptCurrentStream();
   }
@@ -742,10 +798,6 @@ class MessagesState {
       void deleteSessionAttachments(removedPaths);
     }
 
-    if (userIdx > 0) {
-      this.messages.splice(0, userIdx);
-    }
-
     const isFirstMessage = this.messages.filter((m) => m.role === "user").length === 1;
     if (isFirstMessage) {
       this.sessionTitle = this.getDefaultTitle();
@@ -755,8 +807,19 @@ class MessagesState {
 
     await this.flushSave();
 
-    const { sendMessages } = await import("$lib/sidecar/llm");
-    await sendMessages();
+    // Regenerate the paired response in place so turns newer than this user
+    // message survive the edit. In newest-first order the paired assistant/
+    // error sits one slot lower (userIdx - 1). Fall back to a fresh send only
+    // when no paired response exists (edit on a brand-new user message).
+    const pairedIdx = userIdx - 1;
+    const paired = pairedIdx >= 0 ? this.messages[pairedIdx] : null;
+    if (paired && (paired.role === "assistant" || paired.role === "error") && paired.id) {
+      const { reprocessMessage } = await import("$lib/sidecar/llm");
+      await reprocessMessage(paired.id);
+    } else {
+      const { sendMessages } = await import("$lib/sidecar/llm");
+      await sendMessages();
+    }
   }
 
   /** Back-compat wrapper: update the most recent user message. */
@@ -817,7 +880,9 @@ class MessagesState {
   }
 
   /** Delete an assistant/error message. Safe to call on a currently-streaming
-   *  message - aborts generation silently first. */
+   *  message - aborts generation silently first. If this empties the session
+   *  of user messages, remove the session entirely (symmetric with
+   *  deleteUserMessage). */
   async deleteAgentMessage(messageId: string) {
     const idx = this.messages.findIndex(
       (m) => (m.role === "assistant" || m.role === "error") && m.id === messageId,
@@ -831,6 +896,12 @@ class MessagesState {
     this.resetTTSPlayback();
 
     this.messages.splice(idx, 1);
+
+    const remainingUsers = this.messages.filter((m) => m.role === "user").length;
+    if (remainingUsers === 0) {
+      await this.deleteSession();
+      return;
+    }
 
     await this.flushSave();
   }

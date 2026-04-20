@@ -1,3 +1,8 @@
+/**
+ * Audio format conversions: turn raw PCM samples into a WAV blob, and turn
+ * a blob into a base64 string for sending elsewhere.
+ */
+
 /** Convert Float32Array PCM samples to a WAV Blob (mono, specified sample rate) */
 export function float32ToWav(samples: Float32Array, sampleRate: number): Blob {
   const numChannels = 1;

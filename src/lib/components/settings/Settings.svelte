@@ -3,8 +3,8 @@
   import { SETTINGS_SCHEMA } from "$lib/shared/settings";
   import type { PresetOption } from "$lib/shared/settings";
   import type { Monitor } from "$lib/shared/types";
-  import Bubble from "./Bubble.svelte";
-  import { settingsState, serversState } from "../state";
+  import Bubble from "../Bubble.svelte";
+  import { settingsState, serversState } from "../../state";
   import {
     evalCondition,
     findField,
@@ -13,11 +13,12 @@
     getConditionDeps,
     searchFields,
   } from "$lib/shared/settings";
+  import { groupSlide, getDuration } from "$lib/shared/animations";
 
   // Sub-components
-  import SettingsSidebar from "./settings/SettingsSidebar.svelte";
-  import SettingsSection from "./settings/SettingsSection.svelte";
-  import SettingsField from "./settings/SettingsField.svelte";
+  import SettingsSidebar from "./SettingsSidebar.svelte";
+  import SettingsSection from "./SettingsSection.svelte";
+  import SettingsField from "./SettingsField.svelte";
   import DownloadConfirmationModal from "./DownloadConfirmationModal.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
   import {
@@ -25,6 +26,8 @@
     planDownloads,
     type DownloadPlan,
   } from "$lib/shared/download";
+
+  const SEARCH_KEY = "__search__";
 
   let { toggleSettings } = $props<{
     toggleSettings: () => void;
@@ -44,6 +47,55 @@
     plans: DownloadPlan[];
     apply: () => Promise<void>;
   }>(null);
+
+  // Group-swap animation state
+  let direction = $state<"up" | "down">("down");
+  let measureEl: HTMLDivElement | undefined = $state();
+  let animatedHeight = $state<number | null>(null);
+  let heightReady = $state(false);
+
+  let groupKey = $derived(searchMode ? SEARCH_KEY : selectedSettingGroupId);
+
+  function currentKey() {
+    return searchMode ? SEARCH_KEY : selectedSettingGroupId;
+  }
+
+  function indexOfKey(key: string): number {
+    // Search-results "group" lives above every real group.
+    if (key === SEARCH_KEY) return -1;
+    return SETTINGS_SCHEMA.findIndex((g) => g.id === key);
+  }
+
+  function changeGroup(newKey: string) {
+    const prevKey = currentKey();
+    if (prevKey === newKey) return;
+
+    direction = indexOfKey(newKey) < indexOfKey(prevKey) ? "up" : "down";
+
+    // Pin the outgoing group with position:absolute inside measureEl (which
+    // is position:relative) so it's clipped by the overflow-hidden wrapper
+    // and doesn't fight the incoming one for layout space.
+    const currentGroup = measureEl?.firstElementChild as HTMLElement | null;
+    if (currentGroup) {
+      const top = currentGroup.offsetTop;
+      const left = currentGroup.offsetLeft;
+      const width = currentGroup.offsetWidth;
+      const height = currentGroup.offsetHeight;
+      currentGroup.style.position = "absolute";
+      currentGroup.style.top = `${top}px`;
+      currentGroup.style.left = `${left}px`;
+      currentGroup.style.width = `${width}px`;
+      currentGroup.style.height = `${height}px`;
+    }
+
+    if (newKey === SEARCH_KEY) {
+      searchMode = true;
+      selectedSettingGroupId = "";
+    } else {
+      searchMode = false;
+      selectedSettingGroupId = newKey;
+    }
+  }
 
   function updateScrollFades() {
     if (!scrollEl) return;
@@ -87,6 +139,27 @@
     validateAllFields();
     searchInput?.focus();
     updateScrollFades();
+
+    // Track the natural height of the group content so the Bubble can resize
+    // smoothly between groups (and when sections expand/collapse). ResizeObserver
+    // reports `measureEl`'s border-box — since the outgoing panel is pinned
+    // position:fixed during a group swap, only the incoming panel is in-flow,
+    // giving us the correct target height.
+    if (measureEl) {
+      const ro = new ResizeObserver(() => {
+        if (!measureEl) return;
+        const h = measureEl.offsetHeight;
+        if (h === 0) return; // transient empty state during swap
+        animatedHeight = h;
+        if (!heightReady) {
+          // First measurement sets height without animating from 0.
+          requestAnimationFrame(() => {
+            heightReady = true;
+          });
+        }
+      });
+      ro.observe(measureEl);
+    }
   });
 
   function validateAllFields() {
@@ -118,13 +191,24 @@
       const plans = await planDownloads(candidates);
       if (plans.length > 0) {
         const apply = async () => {
-          await applyFieldChange(key, value);
+          await tryApply(key, value);
         };
         pendingDownload = { plans, apply };
         return;
       }
     }
-    await applyFieldChange(key, value);
+    await tryApply(key, value);
+  }
+
+  async function tryApply(key: string, value: any) {
+    try {
+      await applyFieldChange(key, value);
+    } catch (e) {
+      validationErrors = {
+        ...validationErrors,
+        [key]: e instanceof Error ? e.message : String(e),
+      };
+    }
   }
 
   async function applyFieldChange(key: string, value: any) {
@@ -308,12 +392,12 @@
 
 <Bubble
   selectedAlignment={settingsState.getAlignment()}
-  extraClass="flex flex-col gap-3 min-w-0 overflow-hidden transition-all w-full max-h-80vh relative"
+  extraClass="flex flex-col gap-3 overflow-hidden transition-all w-full max-h-80vh relative"
 >
   <!-- Settings Header and Back Button -->
   <div class="flex gap-2 items-center text-2xl relative">
     <div
-      class="relative h-10 bg-default-100 rounded-2xl overflow-hidden w-full flex items-center px-4 pr-8"
+      class="relative h-10 bg-default-200 rounded-2xl overflow-hidden w-full flex items-center px-4 pr-8"
     >
       <input
         type="text"
@@ -323,17 +407,14 @@
         bind:value={searchQuery}
         oninput={() => {
           if (searchQuery.trim()) {
-            searchMode = true;
-            selectedSettingGroupId = "";
-          } else {
-            searchMode = false;
-            selectedSettingGroupId = SETTINGS_SCHEMA[0].id;
+            changeGroup(SEARCH_KEY);
+          } else if (searchMode) {
+            changeGroup(SETTINGS_SCHEMA[0].id);
           }
         }}
         onfocus={() => {
-          if (searchQuery.trim()) {
-            searchMode = true;
-            selectedSettingGroupId = "";
+          if (searchQuery.trim() && !searchMode) {
+            changeGroup(SEARCH_KEY);
           }
         }}
       />
@@ -342,8 +423,7 @@
           class="flex absolute right-3 top-1/2 -translate-y-1/2 text-default-400 hover:text-default-600 text-lg cursor-pointer transition-colors"
           onclick={() => {
             searchQuery = "";
-            searchMode = false;
-            selectedSettingGroupId = SETTINGS_SCHEMA[0].id;
+            changeGroup(SETTINGS_SCHEMA[0].id);
             searchInput?.focus();
           }}
           title="Clear search"
@@ -357,7 +437,7 @@
       {/if}
     </div>
     <button
-      class="hover:text-default-700 text-default-400 transition-colors p-2 rounded-full bg-default-100 hover:cursor-pointer"
+      class="hover:text-default-700 text-default-400 transition-colors p-2 rounded-full bg-default-200 hover:cursor-pointer"
       onclick={toggleSettings}
       title="Back to Chat"
     >
@@ -368,10 +448,8 @@
   <div class="flex flex-1 gap-8 overflow-hidden min-h-0 -mr-2">
     <!-- Sidebar -->
     <SettingsSidebar
-      bind:selectedGroupId={selectedSettingGroupId}
-      onSelect={() => {
-        searchMode = false;
-      }}
+      selectedGroupId={selectedSettingGroupId}
+      onSelect={(id) => changeGroup(id)}
       llmStatus={serversState.serverStatuses.llm}
       sttStatus={serversState.serverStatuses.stt}
       bunStatus={serversState.serverStatuses.bun}
@@ -385,57 +463,75 @@
           : 'opacity-0'}"
       ></div>
       <div
-        class="settings-scroll flex flex-col gap-2 overflow-y-auto pr-2 h-full"
+        class="settings-scroll overflow-y-auto pr-2 h-full"
         bind:this={scrollEl}
         onscroll={updateScrollFades}
       >
-        {#if searchMode && searchQuery.trim()}
-          {#each searchFields(searchQuery, settingsState.currentSettings) as group (group.sectionKey)}
-            <div class="flex flex-col gap-2">
+        <div
+          style:height={heightReady && animatedHeight !== null
+            ? `${animatedHeight}px`
+            : undefined}
+          style:transition={heightReady
+            ? `height ${getDuration()}ms cubic-bezier(0.4, 0, 0.2, 1)`
+            : undefined}
+          class="overflow-hidden"
+        >
+          <div bind:this={measureEl} class="relative">
+            {#key groupKey}
               <div
-                class="text-sm text-default-500 font-medium uppercase tracking-wide"
+                class="flex flex-col gap-2"
+                in:groupSlide={{ direction, phase: "in" }}
+                out:groupSlide={{ direction, phase: "out" }}
               >
-                {group.groupName}{group.sectionLabel
-                  ? ` › ${group.sectionLabel}`
-                  : ""}
+                {#if searchMode && searchQuery.trim()}
+                  {#each searchFields(searchQuery, settingsState.currentSettings) as group (group.sectionKey)}
+                    <div class="flex flex-col gap-2">
+                      <div
+                        class="text-sm text-default-500 font-medium uppercase tracking-wide"
+                      >
+                        {group.groupName}{group.sectionLabel
+                          ? ` › ${group.sectionLabel}`
+                          : ""}
+                      </div>
+                      {#each group.fields as field (field.id)}
+                        <SettingsField
+                          {field}
+                          {monitors}
+                          error={validationErrors[field.id] ?? null}
+                          onChange={handleChange}
+                          onReset={resetToDefault}
+                          onPresetSelect={handlePresetSelect}
+                        />
+                      {/each}
+                    </div>
+                  {:else}
+                    <div
+                      class="bg-default-200 rounded-2xl px-4 py-2 text-default-600 text-base"
+                    >
+                      No matching settings found.
+                    </div>
+                  {/each}
+                {:else}
+                  {#each SETTINGS_SCHEMA.find((g) => g.id === selectedSettingGroupId)?.sections || [] as section, si}
+                    <SettingsSection
+                      {section}
+                      sectionKey={`${selectedSettingGroupId}-${si}`}
+                      isExpanded={expandedSections.has(
+                        `${selectedSettingGroupId}-${si}`,
+                      )}
+                      {monitors}
+                      {validationErrors}
+                      onToggle={toggleSection}
+                      onChange={handleChange}
+                      onReset={resetToDefault}
+                      onPresetSelect={handlePresetSelect}
+                    />
+                  {/each}
+                {/if}
               </div>
-              {#each group.fields as field (field.id)}
-                <SettingsField
-                  {field}
-                  {monitors}
-                  error={validationErrors[field.id] ?? null}
-                  onChange={handleChange}
-                  onReset={resetToDefault}
-                  onPresetSelect={handlePresetSelect}
-                />
-              {/each}
-            </div>
-          {:else}
-            <div
-              class="bg-default-100 rounded-2xl px-4 py-2 text-default-600 text-base"
-            >
-              No matching settings found.
-            </div>
-          {/each}
-        {:else}
-          {#key selectedSettingGroupId}
-            {#each SETTINGS_SCHEMA.find((g) => g.id === selectedSettingGroupId)?.sections || [] as section, si}
-              <SettingsSection
-                {section}
-                sectionKey={`${selectedSettingGroupId}-${si}`}
-                isExpanded={expandedSections.has(
-                  `${selectedSettingGroupId}-${si}`,
-                )}
-                {monitors}
-                {validationErrors}
-                onToggle={toggleSection}
-                onChange={handleChange}
-                onReset={resetToDefault}
-                onPresetSelect={handlePresetSelect}
-              />
-            {/each}
-          {/key}
-        {/if}
+            {/key}
+          </div>
+        </div>
       </div>
       <div
         class="absolute left-0 right-0 bottom-0 h-6 pointer-events-none z-1 bg-gradient-to-t from-neutral-300 dark:from-neutral-600 to-transparent transition-opacity duration-100 {showBottomFade
@@ -472,7 +568,7 @@
     background: rgba(0, 0, 0, 0.25);
   }
   :global(html.dark) .settings-scroll::-webkit-scrollbar-thumb {
-    background: oklch(30% 0 0);
+    background: oklch(37% 0 0);
   }
   :global(html.dark) .settings-scroll::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.25);

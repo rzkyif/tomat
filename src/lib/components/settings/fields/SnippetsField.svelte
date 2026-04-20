@@ -7,7 +7,7 @@
     type Snippet,
     type SnippetPlacement,
   } from "$lib/shared/snippets";
-  import { snippetsState, confirmState } from "../../state";
+  import { snippetsState, confirmState } from "../../../state";
   import FieldDescription from "./FieldDescription.svelte";
 
   let { field } = $props<{ field: SettingField }>();
@@ -155,7 +155,7 @@
 </script>
 
 <div
-  class="flex flex-col gap-2 px-4 pt-2 pb-3 bg-default-100 rounded-2xl border-2 border-transparent"
+  class="flex flex-col gap-2 px-4 pt-2 pb-3 bg-default-200 rounded-2xl border-2 border-transparent"
 >
   <div class="flex flex-col">
     <div class="text-default-800">{field.name}</div>

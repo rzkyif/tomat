@@ -1,3 +1,9 @@
+/**
+ * Reactive snapshot of the latest status reported by each sidecar process.
+ * The sidecar manager writes to this as backend events arrive, and
+ * components read from it to render running / loading / error indicators.
+ */
+
 import type { ServerStatusUpdate } from "$lib/shared/types";
 
 class ServersState {

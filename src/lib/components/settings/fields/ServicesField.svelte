@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { BUN_SIDECAR_HOST, BUN_SIDECAR_PORT } from "$lib/shared/network";
   import type { SettingField } from "$lib/shared/settings";
-  import { serversState, settingsState, ttsState } from "../../state";
+  import { serversState, settingsState } from "../../../state";
+  import { ttsState } from "$lib/state/tts.svelte";
   import FieldDescription from "./FieldDescription.svelte";
 
   let { field } = $props<{ field: SettingField }>();
@@ -40,7 +42,7 @@
   function endpointFor(key: ServiceKey): string | null {
     if (key === "main") return null;
     const s = settingsState.currentSettings;
-    if (key === "bun") return "127.0.0.1:7703";
+    if (key === "bun") return `${BUN_SIDECAR_HOST}:${BUN_SIDECAR_PORT}`;
     const host = s[`${key}.host`] || "127.0.0.1";
     const port = s[`${key}.port`] || (key === "llm" ? "7701" : "7702");
     return `${host}:${port}`;
@@ -88,7 +90,7 @@
 </script>
 
 <div
-  class="flex flex-col gap-2 px-4 pt-2 pb-3 bg-default-100 rounded-2xl border-2 border-transparent"
+  class="flex flex-col gap-2 px-4 pt-2 pb-3 bg-default-200 rounded-2xl border-2 border-transparent"
 >
   <div class="flex flex-col">
     <div class="text-default-800">{field.name}</div>

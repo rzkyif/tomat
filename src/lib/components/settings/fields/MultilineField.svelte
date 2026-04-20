@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { SettingField } from "$lib/shared/settings";
   import { evalCondition } from "$lib/shared/settings";
-  import { settingsState } from "../../state";
+  import { settingsState } from "../../../state";
   import FieldDescription from "./FieldDescription.svelte";
   import FieldResetButton from "./FieldResetButton.svelte";
 
@@ -23,7 +23,7 @@
 <div
   class="flex flex-col gap-2 max-w-full overflow-clip px-4 pt-2 pb-3 text-base rounded-2xl border-2 {hasError
     ? 'bg-err-light border-err'
-    : 'bg-default-100 border-transparent'}"
+    : 'bg-default-200 border-transparent'}"
 >
   <div class="flex flex-row justify-between items-start gap-2">
     <div class="flex flex-col flex-1">

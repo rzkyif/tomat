@@ -1,3 +1,10 @@
+/**
+ * Builds the command-line arguments used to launch the LLM and STT
+ * sidecars from the user's current settings. The same definition is used
+ * to generate the actual args passed to the process and the preview
+ * shown in the settings screen.
+ */
+
 export type CommandType = "llm" | "stt";
 
 export interface CommandArg {

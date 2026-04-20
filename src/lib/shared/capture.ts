@@ -1,3 +1,9 @@
+/**
+ * Take screenshots of the user's monitors. Lists available monitors and
+ * captures one as a base64 PNG, briefly hiding the app window first so it
+ * doesn't show up in the screenshot.
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 
 export interface CaptureMonitorInfo {

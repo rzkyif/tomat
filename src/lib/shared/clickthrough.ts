@@ -1,3 +1,9 @@
+/**
+ * Makes the overlay window click-through except where there's actual app
+ * content. The window passes mouse clicks through to whatever is behind it
+ * unless the cursor is hovering over a real UI element.
+ */
+
 import { getCurrentWindow, cursorPosition } from "@tauri-apps/api/window";
 
 const win = getCurrentWindow();

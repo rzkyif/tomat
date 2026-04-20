@@ -1,3 +1,10 @@
+/**
+ * Defines the snippet shape and the logic that expands `@trigger` tokens
+ * inside the user's input. Validates triggers, walks the raw text to
+ * substitute matching snippets, and returns the final text along with any
+ * system-prompt overrides the snippets ask for.
+ */
+
 export type SnippetPlacement =
   | "prepend-system"
   | "replace-system"

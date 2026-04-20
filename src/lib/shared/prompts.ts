@@ -1,6 +1,8 @@
-// Single source of truth for default prompt text. Settings schema references
-// these as `defaultValue`, so the user can edit them in the UI but resetting
-// always restores the canonical versions here.
+/**
+ * Default text for the system prompts the app sends to the LLM. The user
+ * can edit any of these from the settings UI, and resetting a prompt
+ * restores the version defined here.
+ */
 
 export const TOOL_ONLY_PROMPT = `You are a very limited on-device AI assistant. Your knowledge and reasoning capabilities are extremely small, so you MUST follow these rules strictly:
 

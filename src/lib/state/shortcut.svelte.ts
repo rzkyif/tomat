@@ -1,3 +1,10 @@
+/**
+ * Listens for global-shortcut press / release events coming from the
+ * Rust backend and turns them into the right app-level behavior — show
+ * or hide the window, push-to-talk, sticky listen, etc., based on what
+ * the user has configured.
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { vadManager } from "$lib/shared/vad.svelte";
@@ -67,10 +74,12 @@ class ShortcutHandler {
         }
       }, duration);
     } else {
-      // Manual / Sticky: classic toggle visibility
-      const visible = await windowIsVisible();
+      // Manual / Sticky: defer to Rust so the shortcut and the tray icon
+      // share one source of truth for visibility (avoids drift between
+      // window.isVisible() on the JS side and the AtomicBool on the Rust
+      // side that the tray uses).
       try {
-        await invoke(visible ? "hide_main_window" : "show_main_window");
+        await invoke("toggle_main_window");
       } catch (e) {
         console.warn("[shortcut] toggle failed:", e);
       }
@@ -96,7 +105,9 @@ class ShortcutHandler {
       // showed it on press - leave it visible.
       if (wasVisibleOnPress) {
         try {
-          await invoke("hide_main_window");
+          // Route through the request path so the UI animates out before
+          // the native window actually hides.
+          await invoke("request_hide_main_window");
         } catch (e) {
           console.warn("[shortcut] hide failed:", e);
         }

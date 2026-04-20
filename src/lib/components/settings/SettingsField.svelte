@@ -3,13 +3,14 @@
   import { evalCondition } from "$lib/shared/settings";
   import type { Monitor } from "$lib/shared/types";
   import { settingsState } from "../../state";
-  import CommandPreviewField from "./CommandPreviewField.svelte";
-  import MultilineField from "./MultilineField.svelte";
-  import PresetField from "./PresetField.svelte";
-  import ServicesField from "./ServicesField.svelte";
-  import SnippetsField from "./SnippetsField.svelte";
-  import StandardField from "./StandardField.svelte";
-  import StorageField from "./StorageField.svelte";
+  import CommandPreviewField from "./fields/CommandPreviewField.svelte";
+  import MultilineField from "./fields/MultilineField.svelte";
+  import PresetField from "./fields/PresetField.svelte";
+  import ServicesField from "./fields/ServicesField.svelte";
+  import ShortcutField from "./fields/ShortcutField.svelte";
+  import SnippetsField from "./fields/SnippetsField.svelte";
+  import StandardField from "./fields/StandardField.svelte";
+  import StorageField from "./fields/StorageField.svelte";
 
   let { field, monitors, error, onChange, onReset, onPresetSelect } = $props<{
     field: SettingField;
@@ -36,6 +37,8 @@
     <StorageField {field} />
   {:else if field.type === "snippets"}
     <SnippetsField {field} />
+  {:else if field.type === "shortcut"}
+    <ShortcutField {field} {error} {onChange} {onReset} />
   {:else}
     <StandardField {field} {monitors} {error} {onChange} {onReset} />
   {/if}

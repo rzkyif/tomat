@@ -6,7 +6,7 @@
     TTS_BASE_FILES,
     type SettingField,
   } from "$lib/shared/settings";
-  import { confirmState, settingsState, snippetsState } from "../../state";
+  import { confirmState, settingsState, snippetsState } from "../../../state";
   import FieldDescription from "./FieldDescription.svelte";
 
   let { field } = $props<{ field: SettingField }>();
@@ -352,7 +352,7 @@
 </script>
 
 <div
-  class="flex flex-col gap-2 px-4 pt-2 pb-3 bg-default-100 rounded-2xl border-2 border-transparent outline-none"
+  class="flex flex-col gap-2 px-4 pt-2 pb-3 bg-default-200 rounded-2xl border-2 border-transparent outline-none"
   tabindex="0"
   role="tree"
   onkeydown={handleKeyDown}
