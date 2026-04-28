@@ -24,7 +24,7 @@
 
 <div
   class="flex flex-col gap-2 max-w-full overflow-clip px-4 pt-2 pb-3 text-base rounded-2xl border-2 {hasError
-    ? 'bg-err-light border-err'
+    ? 'bg-accent-red-100 border-accent-red-400'
     : 'bg-default-200 border-transparent'}"
 >
   <div class="flex flex-row justify-between items-start gap-2">
@@ -110,7 +110,7 @@
           class="text-default-800 rounded-lg block w-full min-h-8 px-2 outline-none {!editable
             ? 'opacity-60'
             : ''} {hasError
-            ? 'bg-err-input border-err'
+            ? 'bg-accent-red-300 border-accent-red-400'
             : 'bg-default-300 focus:ring-blue-500'}"
           disabled={!editable}
           placeholder={field.placeholder || ""}

@@ -11,6 +11,9 @@ type ConfirmRequest = {
   confirmLabel?: string;
   destructive?: boolean;
   onConfirm: () => void | Promise<void>;
+  /** When true, render as a one-button notice (no Cancel). The `onConfirm`
+   *  callback is optional in this mode. */
+  alert?: boolean;
 };
 
 class ConfirmState {
@@ -18,6 +21,17 @@ class ConfirmState {
 
   request(req: ConfirmRequest) {
     this.pending = req;
+  }
+
+  /** Shortcut for a single-button error notice. */
+  alert(opts: { title: string; message: string; confirmLabel?: string }) {
+    this.pending = {
+      title: opts.title,
+      message: opts.message,
+      confirmLabel: opts.confirmLabel ?? "OK",
+      alert: true,
+      onConfirm: () => {},
+    };
   }
 
   cancel() {

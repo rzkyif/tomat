@@ -41,32 +41,57 @@ export function buildSystemPromptBase(): string {
 }
 
 /** The context block alone (everything driven by general.context.*).
- *  Returns "" when no context fields are set. */
+ *  Returns "" when no context fields are set.
+ *
+ *  Fields are split into two buckets:
+ *  - Behavior settings (agent name, response language) are emitted as plain
+ *    instructions because they change how the model responds on every turn.
+ *  - Reference data (user name, location, date/time, OS) is wrapped in an
+ *    XML-tagged block. The tag boundary signals "structured metadata, not
+ *    narrative content" so weaker models are less prone to weaving these
+ *    fields into every reply. Imperative directives here ("do not mention…")
+ *    backfire on small models — they acknowledge the rule in their output —
+ *    so the framing is descriptive instead.
+ */
 export function buildContextBlock(): string {
   const s = settingsState.currentSettings;
-  const ctx: string[] = [];
-
-  const userName = (s["general.context.userName"] || "").trim();
-  if (userName) ctx.push(`The user prefers to be called ${userName}.`);
+  const behavior: string[] = [];
+  const reference: string[] = [];
 
   const agentName = (s["general.context.agentName"] || "").trim();
-  if (agentName) ctx.push(`Your name is ${agentName}.`);
+  if (agentName) behavior.push(`Your name is ${agentName}.`);
 
   const language = (s["general.context.language"] || "").trim();
-  if (language) ctx.push(`Communicate in ${language}.`);
+  if (language) behavior.push(`Always respond in ${language}.`);
+
+  const userName = (s["general.context.userName"] || "").trim();
+  if (userName) reference.push(`Preferred name: ${userName}`);
 
   const location = (s["general.context.location"] || "").trim();
-  if (location) ctx.push(`User location: ${location}.`);
+  if (location) reference.push(`Location: ${location}`);
 
   if (s["general.context.dateTime"]) {
-    ctx.push(`Current date and time: ${formatDateTime()}.`);
+    reference.push(`Date and time: ${formatDateTime()}`);
   }
 
   if (s["general.context.os"]) {
-    ctx.push(`User operating system: ${getOsName()}.`);
+    reference.push(`Operating system: ${getOsName()}`);
   }
 
-  return ctx.length ? `Context:\n- ${ctx.join("\n- ")}` : "";
+  const parts: string[] = [];
+  if (behavior.length) parts.push(behavior.join("\n"));
+  if (reference.length) {
+    parts.push(
+      [
+        "<user_metadata>",
+        "Hidden instruction: only refer to these when they are related to the user's message.",
+        "",
+        ...reference.map((r) => `- ${r}`),
+        "</user_metadata>",
+      ].join("\n"),
+    );
+  }
+  return parts.join("\n\n");
 }
 
 /**
@@ -83,6 +108,26 @@ export function buildSystemPrompt(): string | null {
   const context = buildContextBlock();
   if (!base && !context) return null;
   return [base, context].filter((s) => s).join("\n\n");
+}
+
+/** Short line appended to the system prompt on turns where at least one
+ *  toolkit tool survives the relevance filter. Keeps the default prompt
+ *  untouched on tool-less turns. */
+const TOOLS_HINT =
+  "Tools are available for this turn. Prefer calling a tool over speculating when a tool's description clearly fits the request.";
+
+/** Compose the final system prompt for a specific turn. When `toolsHint` is
+ *  true, appends a one-line nudge about tool use to whatever prompt/override
+ *  we'd normally send. Returns null when there is nothing at all to send. */
+export function buildSystemPromptForTurn(opts: {
+  base: string | null;
+  toolsHint: boolean;
+}): string | null {
+  const parts: string[] = [];
+  if (opts.base) parts.push(opts.base);
+  if (opts.toolsHint) parts.push(TOOLS_HINT);
+  if (parts.length === 0) return null;
+  return parts.join("\n\n");
 }
 
 /**

@@ -36,14 +36,15 @@
     resumeClickThrough,
   } from "$lib/shared/clickthrough";
   import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
   import {
     listCaptureMonitors,
     captureMonitor,
     type CaptureMonitorInfo,
   } from "$lib/shared/capture";
   import { vadManager } from "$lib/shared/vad.svelte";
+  import { shortcutHandler } from "$lib/state/shortcut.svelte";
   import type { ActivationMode } from "$lib/shared/settings";
-  import { measureCaretAt } from "$lib/shared/textareaMirror";
   import AttachmentList from "../AttachmentList.svelte";
   import Bubble from "../Bubble.svelte";
 
@@ -55,6 +56,7 @@
   let text = $state("");
   let monitors: Monitor[] = $state([]);
   let textareaElement: HTMLTextAreaElement | undefined = $state();
+  let mirrorSpan: HTMLSpanElement | undefined = $state();
   let attachments = $state<Attachment[]>([]);
   let originalTranscription = $state<string | null>(null);
   let showAutocorrectDiff = $state(false);
@@ -130,7 +132,10 @@
   let sttErrorTimeout: ReturnType<typeof setTimeout> | null = null;
 
   let llmStatus = $derived(serversState.serverStatuses.llm.status);
-  let isStreaming = $derived(messagesState.isStreaming);
+  // True whenever the user has something to interrupt — either an LLM stream
+  // or an active tool call (running or awaiting input). Drives the stop button
+  // so tool calls can be aborted the same way streams are.
+  let hasActiveWork = $derived(messagesState.hasActiveWork);
   let hasContent = $derived(text.trim().length > 0 || attachments.length > 0);
   let placeholderText = $derived(
     vadManager.enabled && vadManager.listening
@@ -179,6 +184,24 @@
     if (e.key === "Escape") closeImagePreview();
   }
 
+  // Anchors the autocomplete dropdown under the caret by measuring a Range on
+  // the sibling sizing span — it shares the textarea's grid cell and wraps
+  // identically, so we can read the caret position directly without cloning
+  // styles into a hidden mirror.
+  function measureCaretAt(index: number): { top: number; left: number } {
+    if (!mirrorSpan || !textareaElement) return { top: 0, left: 0 };
+    const textNode = mirrorSpan.firstChild;
+    if (!textNode) return { top: 0, left: 0 };
+    const range = document.createRange();
+    const safeIndex = Math.min(index, textNode.textContent?.length ?? 0);
+    range.setStart(textNode, safeIndex);
+    range.setEnd(textNode, safeIndex);
+    const rect = range.getBoundingClientRect();
+    const cs = window.getComputedStyle(textareaElement);
+    const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+    return { top: rect.top + lineHeight + 4, left: rect.left };
+  }
+
   function updateAutocompleteFromInput() {
     if (imeComposing || !textareaElement) {
       autocompleteOpen = false;
@@ -203,7 +226,7 @@
     if (prefixChanged) {
       autocompleteIndex = 0;
     }
-    autocompleteAnchor = measureCaretAt(ta, autocompleteTriggerStart);
+    autocompleteAnchor = measureCaretAt(autocompleteTriggerStart);
     autocompleteOpen = true;
   }
 
@@ -278,9 +301,14 @@
   onMount(() => {
     const cleanups: Array<() => void> = [];
 
-    // Focus management
-    window.addEventListener("focus", focusTextarea);
-    cleanups.push(() => window.removeEventListener("focus", focusTextarea));
+    // Focus the textarea only when the window is shown from hidden (via
+    // global shortcut or tray click), not on every native focus event.
+    // Rust emits `window-visibility` with `true` on show and `false` on hide.
+    void listen<boolean>("window-visibility", ({ payload: visible }) => {
+      if (visible) focusTextarea();
+    }).then((unlisten) => {
+      cleanups.push(unlisten);
+    });
 
     // Click-outside to close attachment menu
     document.addEventListener("click", handleDocClick, true);
@@ -361,7 +389,10 @@
   }
 
   async function handleSend() {
-    if (isStreaming) return;
+    // Block send while any work is in flight — stream OR active tool call.
+    // Otherwise the user could queue a new LLM request while tools from a
+    // prior turn are still executing / awaiting input.
+    if (hasActiveWork) return;
 
     const trimmedText = text.trim();
     if (!trimmedText && attachments.length === 0) return;
@@ -444,7 +475,7 @@
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (!isStreaming) handleSend();
+      if (!hasActiveWork) handleSend();
     }
   }
 
@@ -512,7 +543,7 @@
     textareaElement?.focus();
 
     if (settingsState.currentSettings["stt.autoSend"]) {
-      if (messagesState.isStreaming) {
+      if (messagesState.hasActiveWork) {
         await messagesState.interruptStreaming();
       }
       await handleSend();
@@ -828,8 +859,10 @@
   {/if}
 
   <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
-    <!-- Hidden span for the typed text to dynamically expand width and height. Safely renders newlines. -->
+    <!-- Hidden span for the typed text to dynamically expand width and height. Safely renders newlines.
+         Doubles as a layout mirror for caret measurement (see measureCaretAt). -->
     <span
+      bind:this={mirrorSpan}
       class="invisible whitespace-pre-wrap break-words wrap-break-word col-start-1 row-start-1 pointer-events-none"
       >{text ? text + "\u200b" : placeholderText}</span
     >
@@ -968,15 +1001,13 @@
     <div class="flex gap-2">
       {#if settingsState.currentSettings["stt.preset"] !== "disabled"}
         <button
-          class="bg-default-200 p-2 rounded-2xl flex items-center transition-colors {vadManager.loading
-            ? 'cursor-wait'
-            : vadManager.enabled
-              ? vadManager.listening
-                ? 'text-green-500'
-                : 'text-blue-400'
-              : sttStatus === 'Running' || sttStatus === 'Disabled'
-                ? 'hover:text-default-900 hover:cursor-pointer text-default-700'
-                : 'cursor-not-allowed'}"
+          class="bg-default-200 p-2 rounded-2xl flex items-center transition-colors {vadManager.enabled
+            ? vadManager.listening
+              ? 'text-green-500'
+              : 'text-blue-400'
+            : sttStatus === 'Running' || sttStatus === 'Disabled'
+              ? 'hover:text-default-900 hover:cursor-pointer text-default-700'
+              : 'cursor-not-allowed'}"
           title={vadManager.enabled
             ? vadManager.listening
               ? "Listening..."
@@ -990,39 +1021,60 @@
               sttStatus !== "Disabled" &&
               !vadManager.enabled)}
         >
-          <i
-            class="flex {vadManager.loading
-              ? 'i-line-md:loading-loop'
-              : vadManager.enabled
+          {#if shortcutHandler.pttHolding}
+            <svg
+              class="ptt-ring flex w-[1em] h-[1em] text-default-700"
+              style="--ptt-duration: {shortcutHandler.pttHoldDuration}ms"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <circle
+                cx="12"
+                cy="12"
+                r="9"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                pathLength="100"
+                stroke-dasharray="100"
+                stroke-dashoffset="100"
+                transform="rotate(-90 12 12)"
+              />
+            </svg>
+          {:else}
+            <i
+              class="flex {vadManager.enabled
                 ? vadManager.listening
                   ? 'i-line-md:loading-twotone-loop'
                   : 'i-material-symbols-mic-rounded'
                 : sttStatus === 'Running' || sttStatus === 'Disabled'
                   ? 'i-material-symbols-mic-outline-rounded'
                   : 'i-material-symbols-mic-off-outline-rounded'}"
-          ></i>
+            ></i>
+          {/if}
         </button>
       {/if}
       <button
-        class="hover:cursor-pointer bg-default-200 p-2 rounded-2xl flex items-center transition-colors {isStreaming &&
+        class="hover:cursor-pointer bg-default-200 p-2 rounded-2xl flex items-center transition-colors {hasActiveWork &&
         !hasContent
           ? 'text-red-500 hover:text-red-400'
           : 'hover:text-default-900 text-default-700'}"
-        title={isStreaming && !hasContent
+        title={hasActiveWork && !hasContent
           ? "Stop"
-          : isStreaming && hasContent
+          : hasActiveWork && hasContent
             ? "Interrupt and Send"
             : "Send"}
-        onclick={isStreaming && !hasContent
+        onclick={hasActiveWork && !hasContent
           ? handleStop
-          : isStreaming && hasContent
+          : hasActiveWork && hasContent
             ? handleInterruptAndSend
             : handleSend}
       >
         <i
-          class="flex {isStreaming && !hasContent
+          class="flex {hasActiveWork && !hasContent
             ? 'i-material-symbols-stop-rounded'
-            : isStreaming && hasContent
+            : hasActiveWork && hasContent
               ? 'i-material-symbols-arrow-upward-rounded'
               : 'i-material-symbols-send-outline-rounded'}"
         ></i>
@@ -1046,7 +1098,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center p-6"
+    class="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-auto"
     onclick={closeImagePreview}
   >
     <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -1060,3 +1112,19 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* Push-to-talk hold ring: starts at 0% on press and fills to 100% over the
+     configured hold duration. The SVG is mounted only while the shortcut is
+     held, so the keyframes always run from the start — release-before-fill
+     simply unmounts the element. `pathLength="100"` lets the dasharray math
+     stay in percent regardless of the circle's actual circumference. */
+  .ptt-ring circle {
+    animation: ptt-ring-fill var(--ptt-duration) linear forwards;
+  }
+  @keyframes ptt-ring-fill {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+</style>

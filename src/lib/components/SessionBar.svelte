@@ -109,13 +109,13 @@
 {#if showBar}
   <Bubble
     selectedAlignment={alignment}
-    paddingClass="px-3 py-2"
-    extraClass={`flex items-center gap-2 max-w-full`}
+    size="small"
+    extraClass={`flex items-center gap-2`}
   >
     {#if messagesState.tokenUsage}
       <!-- Context progress bar with text inside -->
       <div
-        class="relative w-16 h-10 bg-default-200 rounded-2xl overflow-hidden shrink-0 border-0.35em border-default-200"
+        class="relative w-12 h-8 bg-default-200 rounded-xl overflow-hidden shrink-0 border-0.25em border-default-200"
         title="Context: {formatTokens(contextUsed)} / {formatTokens(
           contextMax,
         )}"
@@ -125,20 +125,25 @@
           style="height: {Math.min(contextRatio * 100, 100)}%"
         ></div>
         <span
-          class="absolute inset-0 flex items-center justify-center text-sm font-medium text-default-700 leading-none"
+          class="absolute inset-0 flex items-center justify-center text-xs font-medium text-default-700 leading-none"
         >
           {Math.round(contextRatio * 100)}%
         </span>
       </div>
     {/if}
 
-    <!-- Title (grid overlap technique for auto-sizing) -->
+    <!-- Title (grid overlap technique for auto-sizing). The container is the
+         only `min-w-0` flex item in the bubble — the context bar and button
+         group are `shrink-0` — so it absorbs the squeeze when the bubble hits
+         its own max-width cap. The invisible sizing span gets clipped by
+         `overflow-hidden`, and the input shows an ellipsis when blurred so
+         the user can still tell the title is truncated. -->
     {#if showTitle}
       <div
-        class="grid items-center min-w-0 overflow-hidden bg-default-200 rounded-2xl"
+        class="grid items-center min-w-0 h-8 overflow-hidden bg-default-200 rounded-xl text-sm"
       >
         <span
-          class="invisible row-start-1 col-start-1 whitespace-pre px-4 py-2"
+          class="invisible row-start-1 col-start-1 whitespace-pre px-3 py-1"
           aria-hidden="true">{titleText || defaultTitle}</span
         >
         <input
@@ -150,7 +155,7 @@
           onblur={handleTitleBlur}
           onkeydown={handleTitleKeydown}
           placeholder={defaultTitle}
-          class="row-start-1 col-start-1 w-full min-h-full px-4 py-2 text-default-700 flex items-center"
+          class="row-start-1 col-start-1 w-full min-h-full px-3 py-1 text-default-700 flex items-center text-ellipsis"
         />
       </div>
     {/if}
@@ -158,11 +163,11 @@
     <!-- Session navigation -->
     {#if showButtonGroup}
       <div
-        class="flex flex-row items-center justify-center bg-default-200 px-2 py-1 rounded-2xl shrink-0"
+        class="flex flex-row items-center justify-center bg-default-200 h-8 px-1 rounded-xl shrink-0"
       >
         {#if canPrev}
           <button
-            class="text-2xl rounded p-1 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
+            class="text-lg rounded p-0.5 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
             onclick={() => {
               confirmingDelete = false;
               messagesState.navigatePrev();
@@ -174,7 +179,7 @@
         {/if}
         {#if canNext}
           <button
-            class="text-2xl rounded p-1 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
+            class="text-lg rounded p-0.5 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
             onclick={() => {
               confirmingDelete = false;
               messagesState.navigateNext();
@@ -187,7 +192,7 @@
         {#if !isNewSession}
           <button
             data-delete-btn
-            class="text-2xl rounded p-1 flex items-center hover:cursor-pointer transition-colors {confirmingDelete
+            class="text-lg rounded p-0.5 flex items-center hover:cursor-pointer transition-colors {confirmingDelete
               ? 'text-default-700 hover:text-default-900'
               : 'text-default-700 hover:text-default-900'}"
             onclick={handleDeleteClick}
@@ -200,7 +205,7 @@
             ></i>
           </button>
           <button
-            class="text-2xl rounded p-1 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
+            class="text-lg rounded p-0.5 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
             onclick={() => {
               confirmingDelete = false;
               messagesState.newSession();

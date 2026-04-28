@@ -139,7 +139,7 @@
 
 <div
   class="flex flex-col gap-2 max-w-full overflow-clip px-4 pt-2 pb-3 text-base rounded-2xl border-2 {hasError
-    ? 'bg-err-light border-err'
+    ? 'bg-accent-red-100 border-accent-red-400'
     : 'bg-default-200 border-transparent'}"
 >
   <div class="flex flex-row justify-between items-start gap-2">
@@ -163,7 +163,7 @@
         : ''} {capturing
         ? 'bg-blue-500/20 ring-2 ring-blue-500'
         : hasError
-          ? 'bg-err-input border-err'
+          ? 'bg-accent-red-300 border-accent-red-400'
           : 'bg-default-300 hover:bg-default-400'}"
       onclick={startCapture}
     >

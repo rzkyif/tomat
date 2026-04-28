@@ -21,12 +21,14 @@
         {p.message}
       </div>
       <div class="flex justify-end gap-2">
-        <button
-          class="px-3 py-1.5 text-sm rounded-lg bg-default-200 hover:bg-default-300 text-default-800 hover:cursor-pointer transition-colors"
-          onclick={() => confirmState.cancel()}
-        >
-          Cancel
-        </button>
+        {#if !p.alert}
+          <button
+            class="px-3 py-1.5 text-sm rounded-lg bg-default-200 hover:bg-default-300 text-default-800 hover:cursor-pointer transition-colors"
+            onclick={() => confirmState.cancel()}
+          >
+            Cancel
+          </button>
+        {/if}
         <button
           class="px-3 py-1.5 text-sm rounded-lg {p.destructive
             ? 'bg-red-600 hover:bg-red-700 text-white'

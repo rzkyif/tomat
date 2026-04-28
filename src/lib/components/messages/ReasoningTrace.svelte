@@ -1,48 +1,56 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import MessageMarkdown from "./MessageMarkdown.svelte";
-  import { expand } from "$lib/shared/animations";
+  import Expandable from "../Expandable.svelte";
+  import { settingsState } from "$lib/state";
 
   let {
     reasoning,
     isStreaming,
-    hasText,
     pillBgClass,
     reasoningDurationMs,
+    expanded = $bindable(false),
   }: {
     reasoning: string;
+    /** True while reasoning chunks are still arriving for this bubble.
+     *  Cleared by messagesState as soon as the first content chunk lands or
+     *  the stream finishes — at which point the elapsed timer freezes. */
     isStreaming: boolean;
-    /** True once the final answer has begun arriving. Used to detect the
-     *  trailing edge of the reasoning stream so the elapsed timer can freeze. */
-    hasText: boolean;
     pillBgClass: string;
     /** Persisted duration from storage, used as the fallback elapsed time
      *  for historic messages where we can't live-track the stream. */
     reasoningDurationMs?: number;
+    /** Bindable so the parent (AgentMessage) can wire this into the shared
+     *  expansion map for chain-break detection. */
+    expanded?: boolean;
   } = $props();
 
-  let receivingReasoning = $derived(isStreaming && !hasText);
-  let reasoningExpanded = $state(false);
+  let receivingReasoning = $derived(isStreaming);
 
   let startTime = $state<number | null>(null);
   let nowTime = $state(Date.now());
   let finalMs = $state<number | null>(null);
-  let tickInterval: ReturnType<typeof setInterval> | null = null;
+  let tickTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function scheduleNextTick() {
+    const elapsed = startTime !== null ? Date.now() - startTime : 0;
+    const intervalMs = elapsed < 1000 ? 100 : 1000;
+    tickTimer = setTimeout(() => {
+      nowTime = Date.now();
+      scheduleNextTick();
+    }, intervalMs);
+  }
 
   $effect(() => {
     if (receivingReasoning) {
       if (startTime === null) startTime = Date.now();
       finalMs = null;
       nowTime = Date.now();
-      if (!tickInterval) {
-        tickInterval = setInterval(() => {
-          nowTime = Date.now();
-        }, 1000);
-      }
+      if (!tickTimer) scheduleNextTick();
     } else {
-      if (tickInterval) {
-        clearInterval(tickInterval);
-        tickInterval = null;
+      if (tickTimer) {
+        clearTimeout(tickTimer);
+        tickTimer = null;
       }
       if (startTime !== null && finalMs === null) {
         finalMs = Date.now() - startTime;
@@ -51,11 +59,15 @@
   });
 
   onDestroy(() => {
-    if (tickInterval) clearInterval(tickInterval);
+    if (tickTimer) clearTimeout(tickTimer);
   });
 
   function formatElapsed(ms: number): string {
-    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    const safeMs = Math.max(0, ms);
+    if (safeMs < 1000) {
+      return `0.${Math.floor(safeMs / 100)}s`;
+    }
+    const totalSec = Math.floor(safeMs / 1000);
     const minutes = Math.floor(totalSec / 60);
     const seconds = totalSec % 60;
     if (minutes > 0) return `${minutes}m ${seconds}s`;
@@ -74,24 +86,13 @@
   });
 </script>
 
-<div class="flex flex-col gap-2">
-  <button
-    class="flex items-center gap-1 text-default-900 text-sm font-bold hover:cursor-pointer w-full"
-    onclick={() => (reasoningExpanded = !reasoningExpanded)}
-    title={reasoningExpanded ? "Collapse reasoning" : "Expand reasoning"}
-  >
-    <i
-      class="flex transition-transform duration-200 {reasoningExpanded
-        ? 'i-material-symbols-keyboard-arrow-down-rounded'
-        : 'i-material-symbols-chevron-right-rounded'}"
-    ></i>
+<Expandable bind:expanded alignment={settingsState.getAlignment()}>
+  {#snippet title()}
     <span>{headerText}</span>
-  </button>
-  {#if reasoningExpanded}
-    <div transition:expand>
-      <div class="{pillBgClass} px-4 py-2 rounded-2xl text-default-700">
-        <MessageMarkdown content={reasoning} />
-      </div>
+  {/snippet}
+  {#snippet children()}
+    <div class="{pillBgClass} px-4 py-2 rounded-2xl text-default-700 text-xs">
+      <MessageMarkdown content={reasoning} />
     </div>
-  {/if}
-</div>
+  {/snippet}
+</Expandable>

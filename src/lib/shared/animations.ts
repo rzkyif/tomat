@@ -27,11 +27,23 @@ export function getDuration(ms: number = BASE_MS): number {
 // initial session-restore burst. Without this, loading a 50-message session
 // would kick off 50 simultaneous entry animations.
 let messageAnimationsReady = false;
+// Stable msgIds we've already mounted. Prevents the slide-in from replaying
+// on remount (e.g. load-more-history reshuffles wrappers, or stack regrouping
+// moves a bubble under a new parent). Recorded even while gated so the
+// post-gate state already knows about every mounted message.
+const messagesSeen = new Set<string>();
 export function enableMessageAnimations() {
   messageAnimationsReady = true;
 }
 
-export function messageEnter(node: Element, { alignment }: { alignment: Alignment }) {
+export function messageEnter(
+  node: Element,
+  { alignment, msgId }: { alignment: Alignment; msgId?: string },
+) {
+  if (msgId) {
+    if (messagesSeen.has(msgId)) return { duration: 0 };
+    messagesSeen.add(msgId);
+  }
   if (!messageAnimationsReady) return { duration: 0 };
 
   const height = (node as HTMLElement).offsetHeight;

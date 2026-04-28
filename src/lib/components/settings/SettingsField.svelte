@@ -11,6 +11,7 @@
   import SnippetsField from "./fields/SnippetsField.svelte";
   import StandardField from "./fields/StandardField.svelte";
   import StorageField from "./fields/StorageField.svelte";
+  import ToolkitsField from "./fields/ToolkitsField.svelte";
 
   let { field, monitors, error, onChange, onReset, onPresetSelect } = $props<{
     field: SettingField;
@@ -39,6 +40,8 @@
     <SnippetsField {field} />
   {:else if field.type === "shortcut"}
     <ShortcutField {field} {error} {onChange} {onReset} />
+  {:else if field.type === "toolkits"}
+    <ToolkitsField {field} />
   {:else}
     <StandardField {field} {monitors} {error} {onChange} {onReset} />
   {/if}

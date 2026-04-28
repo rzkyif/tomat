@@ -418,7 +418,7 @@
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-          class="group flex items-center gap-1 text-left text-sm px-2 py-1 rounded-lg hover:bg-default-200 transition-colors {group.expandable
+          class="group flex items-center gap-1 text-left text-sm px-2 py-1 rounded-lg {group.expandable
             ? 'cursor-pointer'
             : ''}"
           onclick={() => group.expandable && toggleExpand(group.key)}
@@ -471,9 +471,7 @@
               <div
                 class="flex items-center gap-1 text-sm pl-4 pr-2 py-1 rounded-lg {isProtected
                   ? 'cursor-default opacity-60'
-                  : 'hover:bg-default-200 cursor-pointer'} {selected.has(
-                  node.path,
-                )
+                  : 'cursor-pointer'} {selected.has(node.path)
                   ? 'bg-blue-500/20'
                   : ''}"
                 onclick={(e) => handleRowClick(e, node)}
@@ -519,9 +517,7 @@
                   <div
                     class="flex items-center gap-1 text-sm pl-10 pr-2 py-1 rounded-lg {childProtected
                       ? 'cursor-default opacity-60'
-                      : 'hover:bg-default-200 cursor-pointer'} {selected.has(
-                      child.path,
-                    )
+                      : 'cursor-pointer'} {selected.has(child.path)
                       ? 'bg-blue-500/20'
                       : ''}"
                     onclick={(e) => handleRowClick(e, child)}

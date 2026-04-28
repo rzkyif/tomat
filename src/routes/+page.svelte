@@ -4,16 +4,21 @@
   import AgentMessage from "$lib/components/messages/AgentMessage.svelte";
   import ErrorMessage from "$lib/components/messages/ErrorMessage.svelte";
   import SystemMessage from "$lib/components/messages/SystemMessage.svelte";
+  import ToolCall from "$lib/components/messages/ToolCall.svelte";
+  import RelevantTools from "$lib/components/messages/RelevantTools.svelte";
   import UserInput from "$lib/components/input/UserInput.svelte";
   import UserMessage from "$lib/components/messages/UserMessage.svelte";
   import SessionBar from "$lib/components/SessionBar.svelte";
   import Settings from "$lib/components/settings/Settings.svelte";
   import Bubble from "$lib/components/Bubble.svelte";
+  import MessageStackGroup from "$lib/components/MessageStackGroup.svelte";
+  import { getTextContent, type Message } from "$lib/shared/types";
   import {
     messagesState,
     serversState,
     settingsState,
     snippetsState,
+    toolkitsState,
   } from "$lib/state";
   import { shortcutHandler } from "$lib/state/shortcut.svelte";
   import {
@@ -118,6 +123,16 @@
     // first paint is not blocked on it.
     try {
       await settingsState.loadSettings();
+      // Seed bundled sample toolkits into ~/.tomat/toolkits/ on first run.
+      // Subsequent runs no-op because seed_sample_toolkits skips existing
+      // entries.
+      invoke("seed_sample_toolkits").catch((e) =>
+        console.warn("seed_sample_toolkits:", e),
+      );
+      // Connect to the sidecar's WS channel for tool-call events in the
+      // background; the toolkits state auto-reconnects if the sidecar
+      // restarts.
+      void toolkitsState.ensureConnected();
 
       applyTheme(settingsState.currentSettings["appearance.theme"] ?? "auto");
       applyTextSize(settingsState.currentSettings["appearance.textSize"] ?? 20);
@@ -276,12 +291,125 @@
     }
   }
 
-  // Find the index of the last user message (messages are newest-first).
-  // Use visibleMessages - the last user message always sits within the window
-  // after a send, and callers index against the rendered list.
-  let lastUserMsgIndex = $derived(
-    messagesState.visibleMessages.findIndex((m) => m.role === "user"),
+  // Find the most recent user message (visibleMessages is newest-first).
+  // Used by UserMessage to decide whether it's the last sent message and
+  // should default to its inline-edit state.
+  let lastUserMsg = $derived(
+    messagesState.visibleMessages.find((m) => m.role === "user"),
   );
+
+  // Visible while the assistant turn is in flight but we haven't received
+  // anything yet — neither reasoning nor content. Drives a transient
+  // small-bubble spinner so the user has a visual cue between sending and
+  // first-token arrival. As soon as either reasoning or content fires, this
+  // turns false and the corresponding real bubble takes over.
+  let showStreamingLoadingBubble = $derived(
+    messagesState.isStreaming &&
+      messagesState.streamingMessageId !== null &&
+      messagesState.streamingReasoningId === null &&
+      !messagesState.streamingFirstChunkReceived,
+  );
+
+  // A "small bubble" message is one rendered as a `size="small"` Bubble
+  // (system prompt, reasoning, tool_filter, tool, plus the synthetic loading
+  // sentinel). Consecutive small bubbles are stacked horizontally (with wrap)
+  // into a single flex row. When one of them expands, MessageStackGroup
+  // promotes that bubble's wrapper to `flex-basis: 100%` so it claims its
+  // own row inside the same stack — keeping the bubble's component identity
+  // stable across expand/collapse (no remount → no replayed slide-in and the
+  // Expandable's open/close transition fires as expected).
+  function isSmallBubbleMsg(msg: Message): boolean {
+    if (msg.role === "system") return true;
+    if (msg.role === "reasoning") return true;
+    if (msg.role === "loading") return true;
+    if (msg.role === "tool" && msg.toolCall) return true;
+    if (msg.role === "tool_filter" && msg.relevantTools) return true;
+    return false;
+  }
+
+  type RenderGroup =
+    | { kind: "stack"; key: string; messages: Message[] }
+    | { kind: "single"; key: string; message: Message };
+
+  // Stable id for the synthetic loading sentinel — consistent across the
+  // bubble's mounted lifetime so keyed each blocks don't churn while it's
+  // visible. The dedup-by-msgId guard inside `messageEnter` is bypassed
+  // separately for this id so each appearance still animates in/out.
+  const LOADING_MSG_ID = "__streaming_loading__";
+
+  // Filter out hidden messages (empty assistant placeholders mid-stream and
+  // reasoning when the setting is off) before grouping so the chain logic
+  // sees only what'll actually render. Then inject a synthetic small-bubble
+  // loading sentinel at the newest position when we're awaiting the first
+  // response chunk — that lets it stack with adjacent small bubbles
+  // (tool_filter, reasoning, system) via the existing grouping pipeline
+  // instead of being a standalone element outside it.
+  let displayedMessages = $derived.by<Message[]>(() => {
+    const real = messagesState.visibleMessages.filter((msg) => {
+      const isEmptyAssistant =
+        msg.role === "assistant" && getTextContent(msg.content) === "";
+      const isHiddenReasoning =
+        msg.role === "reasoning" &&
+        !settingsState.currentSettings["llm.showReasoning"];
+      const isHiddenSystem =
+        msg.role === "system" &&
+        !settingsState.currentSettings["prompts.showSystemPrompt"];
+      return !isEmptyAssistant && !isHiddenReasoning && !isHiddenSystem;
+    });
+    if (showStreamingLoadingBubble) {
+      const loadingMsg: Message = {
+        id: LOADING_MSG_ID,
+        role: "loading",
+        content: "",
+      };
+      return [loadingMsg, ...real];
+    }
+    return real;
+  });
+
+  function msgKey(msg: Message, fallback: string): string {
+    return msg.id ?? msg.toolCall?.callId ?? fallback;
+  }
+
+  let messageGroups = $derived.by<RenderGroup[]>(() => {
+    const groups: RenderGroup[] = [];
+    let stack: Message[] = [];
+    // visibleMessages is newest-first, but the user wants stacked small
+    // bubbles in old→new visual order (oldest at the screen-facing edge,
+    // wrapping rightward and downward). We collect into `stack` in the
+    // newest-first iteration order, then reverse on flush so DOM[0] of the
+    // stack is the OLDEST message — placing it leftmost (left/center
+    // alignment with flex-row) or rightmost (right alignment with
+    // flex-row-reverse).
+    const flushStack = () => {
+      if (stack.length === 0) return;
+      stack.reverse();
+      const head = stack[0];
+      groups.push({
+        kind: "stack",
+        key: `stack:${msgKey(head, `s-${groups.length}`)}`,
+        messages: stack,
+      });
+      stack = [];
+    };
+    for (let i = 0; i < displayedMessages.length; i++) {
+      const msg = displayedMessages[i];
+      if (isSmallBubbleMsg(msg)) {
+        stack.push(msg);
+      } else {
+        flushStack();
+        groups.push({
+          kind: "single",
+          key: `single:${msgKey(msg, `i-${i}`)}`,
+          message: msg,
+        });
+      }
+    }
+    flushStack();
+    return groups;
+  });
+
+
 </script>
 
 {#if loaded}
@@ -300,7 +428,7 @@
     <div bind:this={contentEl} class="flex flex-col-reverse gap-2 my-auto">
       {#if showSettings}
         <div
-          class="w-fit"
+          class="w-fit pointer-events-none"
           class:ml-auto={settingsState.getAlignment() === "right"}
           class:mr-auto={settingsState.getAlignment() === "left"}
           class:mx-auto={settingsState.getAlignment() === "center"}
@@ -317,7 +445,7 @@
         </div>
       {:else}
         <div
-          class="w-fit flex flex-col-reverse gap-2"
+          class="w-fit flex flex-col-reverse gap-2 pointer-events-none"
           class:ml-auto={settingsState.getAlignment() === "right"}
           class:mr-auto={settingsState.getAlignment() === "left"}
           class:mx-auto={settingsState.getAlignment() === "center"}
@@ -330,25 +458,16 @@
             direction: "out",
           }}
         >
-          <div
-            class="relative"
-            style="z-index: {messagesState.visibleMessages.length + 3};"
-          >
+          <div class="relative pointer-events-none z-30">
             <SessionBar />
           </div>
 
-          <div
-            class="relative"
-            style="z-index: {messagesState.visibleMessages.length + 2};"
-          >
+          <div class="relative pointer-events-none z-20">
             <UserInput {toggleSettings} {showSettings} />
           </div>
 
           {#if sessionLoading}
-            <div
-              class="relative"
-              style="z-index: {messagesState.visibleMessages.length + 1};"
-            >
+            <div class="relative pointer-events-none z-10">
               <Bubble
                 selectedAlignment={settingsState.getAlignment()}
                 borderColorClass="border-default-400"
@@ -360,57 +479,127 @@
             </div>
           {/if}
 
-          {#each messagesState.visibleMessages as msg, i (msg.id ?? i)}
-            <div
-              class="relative"
-              style="z-index: {messagesState.visibleMessages.length - i};"
-              in:messageEnter|local={{
-                alignment: settingsState.getAlignment(),
-              }}
-              out:messageEnter|local={{
-                alignment: settingsState.getAlignment(),
-              }}
-            >
-              {#if msg.role === "user"}
-                <UserMessage
-                  content={msg.content}
-                  isLast={i === lastUserMsgIndex}
-                  onEdit={(newContent) =>
-                    messagesState.updateUserMessage(msg.id, newContent)}
-                  onDelete={msg.id
-                    ? () => messagesState.deleteUserMessage(msg.id!)
-                    : undefined}
-                />
-              {:else if msg.role === "error"}
-                <ErrorMessage content={msg.content} />
-              {:else if msg.role === "assistant"}
-                <AgentMessage
-                  id={msg.id}
-                  content={msg.content}
-                  modelUsed={msg.modelUsed}
-                  reasoning={msg.reasoning}
-                  reasoningDurationMs={msg.reasoningDurationMs}
-                  pending={messagesState.isStreaming &&
-                    messagesState.streamingMessageId === msg.id &&
-                    !messagesState.streamingFirstChunkReceived}
-                  isStreaming={messagesState.isStreaming &&
-                    messagesState.streamingMessageId === msg.id}
-                  onReprocess={msg.id
-                    ? () => messagesState.reprocessAgentMessage(msg.id!)
-                    : undefined}
-                  onDelete={msg.id
-                    ? () => messagesState.deleteAgentMessage(msg.id!)
-                    : undefined}
-                />
-              {:else if msg.role === "system"}
-                <SystemMessage content={msg.content as string} />
-              {/if}
-            </div>
+          {#each messageGroups as group (group.key)}
+            {#if group.kind === "stack"}
+              <MessageStackGroup messages={group.messages}>
+                {#snippet item({ msg, idx, neighborLeft, neighborRight })}
+                  <div
+                    class="pointer-events-none"
+                    in:messageEnter|local={{
+                      alignment: settingsState.getAlignment(),
+                      msgId:
+                        msg.role === "loading"
+                          ? undefined
+                          : msgKey(msg, `g-${idx}`),
+                    }}
+                    out:messageEnter|local={{
+                      alignment: settingsState.getAlignment(),
+                      msgId:
+                        msg.role === "loading"
+                          ? undefined
+                          : msgKey(msg, `g-${idx}`),
+                    }}
+                  >
+                    {#if msg.role === "loading"}
+                      <Bubble
+                        selectedAlignment={settingsState.getAlignment()}
+                        size="small"
+                        extraClass="flex items-center"
+                        {neighborLeft}
+                        {neighborRight}
+                      >
+                        <i class="i-line-md:loading-alt-loop text-base"></i>
+                      </Bubble>
+                    {:else if msg.role === "reasoning"}
+                      <AgentMessage
+                        kind="reasoning"
+                        id={msg.id}
+                        content={msg.content}
+                        modelUsed={msg.modelUsed}
+                        reasoningDurationMs={msg.reasoningDurationMs}
+                        isStreaming={messagesState.isStreaming &&
+                          messagesState.streamingReasoningId === msg.id}
+                        onDelete={msg.id
+                          ? () => messagesState.deleteReasoningMessage(msg.id!)
+                          : undefined}
+                        {neighborLeft}
+                        {neighborRight}
+                      />
+                    {:else if msg.role === "system"}
+                      <SystemMessage
+                        id={msg.id}
+                        content={msg.content as string}
+                        {neighborLeft}
+                        {neighborRight}
+                      />
+                    {:else if msg.role === "tool" && msg.toolCall}
+                      <ToolCall
+                        id={msg.id}
+                        toolCall={msg.toolCall}
+                        onAnswer={(requestId, answers) =>
+                          toolkitsState.answerAskUser(
+                            msg.toolCall!.callId,
+                            requestId,
+                            answers,
+                          )}
+                        {neighborLeft}
+                        {neighborRight}
+                      />
+                    {:else if msg.role === "tool_filter" && msg.relevantTools}
+                      <RelevantTools
+                        id={msg.id}
+                        relevantTools={msg.relevantTools}
+                        {neighborLeft}
+                        {neighborRight}
+                      />
+                    {/if}
+                  </div>
+                {/snippet}
+              </MessageStackGroup>
+            {:else}
+              {@const msg = group.message}
+              <div
+                class="relative pointer-events-none"
+                in:messageEnter|local={{
+                  alignment: settingsState.getAlignment(),
+                  msgId: msgKey(msg, group.key),
+                }}
+              >
+                {#if msg.role === "user"}
+                  <UserMessage
+                    content={msg.content}
+                    isLast={msg === lastUserMsg}
+                    onEdit={(newContent) =>
+                      messagesState.updateUserMessage(msg.id, newContent)}
+                    onDelete={msg.id
+                      ? () => messagesState.deleteUserMessage(msg.id!)
+                      : undefined}
+                  />
+                {:else if msg.role === "error"}
+                  <ErrorMessage content={msg.content} />
+                {:else if msg.role === "assistant"}
+                  <AgentMessage
+                    kind="content"
+                    id={msg.id}
+                    content={msg.content}
+                    modelUsed={msg.modelUsed}
+                    isStreaming={messagesState.isStreaming &&
+                      messagesState.streamingMessageId === msg.id}
+                    onReprocess={msg.id
+                      ? () => messagesState.reprocessAgentMessage(msg.id!)
+                      : undefined}
+                    onDelete={msg.id
+                      ? () => messagesState.deleteAgentMessage(msg.id!)
+                      : undefined}
+                  />
+                {/if}
+              </div>
+            {/if}
           {/each}
           {#if messagesState.hasMoreMessages}
             <button
               type="button"
-              class="mx-auto my-2 px-3 py-1 text-sm text-default-600 hover:text-default-900 rounded bg-default-100 hover:bg-default-200"
+              class="mx-auto my-2 px-3 py-1 text-sm text-default-600 hover:text-default-900 rounded bg-default-100 hover:bg-default-200 pointer-events-auto"
               onclick={() => messagesState.loadMoreMessages()}
             >
               Load older messages

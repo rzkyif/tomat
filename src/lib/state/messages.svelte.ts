@@ -9,13 +9,20 @@
 import {
   getTextContent,
   makeMessageId,
+  type AskUserAnswer,
+  type AskUserQuestion,
   type Attachment,
   type LLMErrorType,
   type Message,
   type MessageContent,
   type MessagePart,
+  type PendingToolCall,
+  type RelevantToolsState,
   type SessionInfo,
   type TokenUsage,
+  type ToolCallLogLine,
+  type ToolCallState,
+  type ToolCallStatus,
 } from "$lib/shared/types";
 import { invoke } from "@tauri-apps/api/core";
 import { settingsState } from "./settings.svelte";
@@ -29,7 +36,7 @@ import {
   utf8ToBase64,
   writeSessionAttachment,
 } from "$lib/shared/attachments";
-import { stripMarkdownForTTS } from "$lib/shared/text";
+import { stripEmojisForTTS, stripMarkdownForTTS } from "$lib/shared/text";
 import { applySnippets } from "$lib/shared/snippets";
 import {
   applySystemPromptOverride,
@@ -71,10 +78,39 @@ class MessagesState {
    *  `reprocessAgentMessage` it points at an existing message mid-array so the
    *  regenerated content lands in place without disturbing newer turns. */
   streamingMessageId = $state<string | null>(null);
+  /** Id of the `role: "reasoning"` message currently receiving reasoning
+   *  chunks. Lazily created on the first reasoning delta and cleared when the
+   *  first content chunk arrives (or the stream finishes / errors). Lives in
+   *  its own bubble — separate from the paired assistant content message. */
+  streamingReasoningId = $state<string | null>(null);
 
   visibleWindow = $state(DEFAULT_WINDOW_SIZE);
   visibleMessages = $derived(this.messages.slice(0, this.visibleWindow));
   hasMoreMessages = $derived(this.messages.length > this.visibleWindow);
+
+  /** Any tool call bubble currently in a non-terminal state. Drives the
+   *  unified "interrupt" affordance in UserInput so tool calls can be stopped
+   *  the same way an LLM stream can. */
+  hasActiveToolCall = $derived(
+    this.messages.some(
+      (m) =>
+        !!m.toolCall &&
+        (m.toolCall.status === "pending" ||
+          m.toolCall.status === "running" ||
+          m.toolCall.status === "awaiting_user"),
+    ),
+  );
+  /** True whenever there is something the user could interrupt: either an
+   *  in-flight LLM stream or any active tool call. */
+  hasActiveWork = $derived(this.isStreaming || this.hasActiveToolCall);
+
+  /** Callback registered by toolkitsState so interruptStreaming() can cancel
+   *  every active tool call without messagesState importing toolkitsState
+   *  (which would create a circular dependency). */
+  private toolCancelHandler: (() => void) | null = null;
+  setToolCancelHandler(fn: () => void): void {
+    this.toolCancelHandler = fn;
+  }
 
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private saveInFlight: Promise<void> = Promise.resolve();
@@ -176,21 +212,92 @@ class MessagesState {
     }
     this.messages.unshift(userMsg);
     this.upsertSystemMessage(payload.effectiveSystemPrompt ?? buildSystemPrompt());
+    if (settingsState.currentSettings["tools.enabled"]) {
+      this.upsertToolFilterMessage(userMsg.id!, {
+        status: "filtering",
+        phase1: [],
+        phase2: null,
+      });
+    }
     this.scheduleSave();
   }
 
   /**
-   * Keep the visible system-role bubble in sync with what was actually sent
-   * to the LLM on the most recent turn. Creates, updates, or removes the
-   * system message depending on the `prompts.showSystemPrompt` toggle and
-   * whether `effective` is non-empty.
+   * Public wrapper for `upsertSystemMessage`. Lets the LLM dispatch refresh
+   * the visible system-prompt bubble with the turn-final prompt (including
+   * the tools hint) right before sending.
+   */
+  setDisplaySystemPrompt(effective: string | null | undefined): void {
+    this.upsertSystemMessage(effective);
+  }
+
+  /** Stable id convention: every tool_filter message is paired 1:1 with a
+   *  user message via this suffix. Lets the lifecycle hooks (reprocess, edit,
+   *  delete) find the right bubble without walking neighbouring indices. */
+  private toolFilterIdFor(userMessageId: string): string {
+    return `${userMessageId}-filter`;
+  }
+
+  /**
+   * Create or update the tool_filter bubble paired with a user message. The
+   * bubble is inserted at index 0 (newest-first order) so it visually sits
+   * between the user message and the assistant response.
+   */
+  upsertToolFilterMessage(userMessageId: string, state: RelevantToolsState): void {
+    const id = this.toolFilterIdFor(userMessageId);
+    const existingIdx = this.messages.findIndex((m) => m.role === "tool_filter" && m.id === id);
+    if (existingIdx >= 0) {
+      this.messages[existingIdx] = {
+        ...this.messages[existingIdx],
+        relevantTools: state,
+      };
+    } else {
+      this.messages.unshift({
+        id,
+        role: "tool_filter",
+        content: "",
+        relevantTools: state,
+      });
+    }
+    this.scheduleSave();
+  }
+
+  /** Patch the tool_filter bubble paired with `userMessageId`. No-op if the
+   *  bubble doesn't exist (e.g. tool use was disabled when the user message
+   *  was added). */
+  updateRelevantTools(userMessageId: string, patch: Partial<RelevantToolsState>): void {
+    const id = this.toolFilterIdFor(userMessageId);
+    const idx = this.messages.findIndex((m) => m.role === "tool_filter" && m.id === id);
+    if (idx < 0) return;
+    const existing = this.messages[idx].relevantTools;
+    if (!existing) return;
+    this.messages[idx] = {
+      ...this.messages[idx],
+      relevantTools: { ...existing, ...patch },
+    };
+    this.scheduleSave();
+  }
+
+  /** Remove the tool_filter bubble paired with `userMessageId`. Used when the
+   *  paired user message is deleted. */
+  removeToolFilterMessage(userMessageId: string): void {
+    const id = this.toolFilterIdFor(userMessageId);
+    const idx = this.messages.findIndex((m) => m.role === "tool_filter" && m.id === id);
+    if (idx < 0) return;
+    this.messages.splice(idx, 1);
+  }
+
+  /**
+   * Keep the system-role message in sync with what was actually sent to the
+   * LLM on the most recent turn. Always reflected in the array (and therefore
+   * persisted with the session) so toggling `prompts.showSystemPrompt` later
+   * can reveal it without a round-trip; the toggle is enforced at render time.
    */
   private upsertSystemMessage(effective: string | null | undefined): void {
-    const show = settingsState.currentSettings["prompts.showSystemPrompt"] === true;
     const existingIdx = this.messages.findIndex((m) => m.role === "system");
-    const shouldShow = show && typeof effective === "string" && effective.trim().length > 0;
+    const hasContent = typeof effective === "string" && effective.trim().length > 0;
 
-    if (shouldShow) {
+    if (hasContent) {
       const content = (effective as string).trim();
       if (existingIdx >= 0) {
         this.messages[existingIdx] = {
@@ -237,6 +344,34 @@ class MessagesState {
     let counter = 0;
     for (const m of messages) {
       if (!m.id) m.id = `load-${Date.now()}-${counter++}`;
+      // Freeze any tool-call bubbles that were mid-flight when the app was
+      // closed. The worker they were running in is long gone; leaving them
+      // as "running" would produce a UI spinner that never stops and would
+      // also leak into materializeContext (which filters by status). Set
+      // them to "cancelled" so the user sees a clear terminal state.
+      if (
+        m.role === "tool" &&
+        m.toolCall &&
+        m.toolCall.status !== "complete" &&
+        m.toolCall.status !== "failed" &&
+        m.toolCall.status !== "cancelled"
+      ) {
+        m.toolCall = {
+          ...m.toolCall,
+          status: "cancelled",
+          error: m.toolCall.error ?? "interrupted: session was reloaded",
+        };
+      }
+      // Same idea for tool_filter bubbles: any "filtering" status that
+      // survived to disk represents a session reload mid-filter. Freeze it as
+      // an error so the spinner doesn't run forever.
+      if (m.role === "tool_filter" && m.relevantTools && m.relevantTools.status === "filtering") {
+        m.relevantTools = {
+          ...m.relevantTools,
+          status: "error",
+          errorMessage: m.relevantTools.errorMessage ?? "interrupted: session was reloaded",
+        };
+      }
     }
     return messages;
   }
@@ -449,6 +584,57 @@ class MessagesState {
     });
   }
 
+  /** Build a persistence-safe snapshot of `messages`. Live runtime state is
+   *  untouched; this only filters/transforms the SNAPSHOT we send to disk so
+   *  in-progress states don't survive an app close/restart cycle. The
+   *  matching defense-in-depth lives in `backfillMessageIds`. */
+  private sanitizeSnapshotForSave(): Message[] {
+    const snapshot = $state.snapshot(this.messages) as Message[];
+    const streamingId = this.streamingMessageId;
+    const out: Message[] = [];
+    for (const m of snapshot) {
+      // Drop the assistant message currently mid-stream — it'll be persisted
+      // on the next flushSave after finishStreaming. Keeping it here would
+      // save half-written content that we can never resume.
+      if (this.isStreaming && streamingId !== null && m.id === streamingId) {
+        continue;
+      }
+      // Tool calls in non-terminal status: rewrite to a cancelled snapshot
+      // so reload doesn't show a stuck spinner.
+      if (
+        m.role === "tool" &&
+        m.toolCall &&
+        m.toolCall.status !== "complete" &&
+        m.toolCall.status !== "failed" &&
+        m.toolCall.status !== "cancelled"
+      ) {
+        out.push({
+          ...m,
+          toolCall: {
+            ...m.toolCall,
+            status: "cancelled",
+            error: m.toolCall.error ?? "interrupted: app was closed",
+          },
+        });
+        continue;
+      }
+      // Tool filter still in "filtering" status: rewrite to error.
+      if (m.role === "tool_filter" && m.relevantTools && m.relevantTools.status === "filtering") {
+        out.push({
+          ...m,
+          relevantTools: {
+            ...m.relevantTools,
+            status: "error",
+            errorMessage: m.relevantTools.errorMessage ?? "interrupted: app was closed",
+          },
+        });
+        continue;
+      }
+      out.push(m);
+    }
+    return out;
+  }
+
   async save() {
     if (!this.storageEnabled) return;
     // Chain saves so rapid successive calls still serialize in order. The
@@ -471,7 +657,7 @@ class MessagesState {
           const isNew = !this.sessionList.some((s) => s.id === this.sessionId);
 
           await invoke("save_chat_history", {
-            messages: $state.snapshot(this.messages),
+            messages: this.sanitizeSnapshotForSave(),
             sessionId: this.sessionId,
             title: this.sessionTitle || null,
             contextUsage: this.tokenUsage ? $state.snapshot(this.tokenUsage) : null,
@@ -502,6 +688,7 @@ class MessagesState {
     this.isStreaming = true;
     this.streamingFirstChunkReceived = false;
     this.reasoningStartTime = null;
+    this.streamingReasoningId = null;
     this.ttsCursor = 0;
     const assistantId = makeMessageId();
     this.streamingMessageId = assistantId;
@@ -523,18 +710,39 @@ class MessagesState {
     this.isStreaming = true;
     this.streamingFirstChunkReceived = false;
     this.reasoningStartTime = null;
+    this.streamingReasoningId = null;
     this.ttsCursor = 0;
     this.streamingMessageId = messageId;
-    // Clear existing content + reasoning so the regenerated output replaces,
-    // not appends. Preserve role + id + modelUsed.
-    const existing = this.messages[idx];
-    this.messages[idx] = {
+    // Drop any prior reasoning bubble paired to this assistant turn. A new
+    // one will be lazily created if reasoning fires again on the regenerated
+    // run.
+    const reasoningIdx = this.messages.findIndex(
+      (m) => m.role === "reasoning" && m.pairedAssistantId === messageId,
+    );
+    if (reasoningIdx >= 0) {
+      this.messages.splice(reasoningIdx, 1);
+    }
+    // Clear existing content so the regenerated output replaces, not appends.
+    // Preserve role + id + modelUsed. (Re-find the index in case the prior
+    // reasoning splice shifted it.)
+    const refreshedIdx = this.messages.findIndex((m) => m.id === messageId);
+    if (refreshedIdx < 0) return false;
+    const existing = this.messages[refreshedIdx];
+    this.messages[refreshedIdx] = {
       ...existing,
       role: "assistant",
       content: "",
-      reasoning: undefined,
-      reasoningDurationMs: undefined,
     };
+    // Reset the paired tool_filter bubble so the spinner shows during the
+    // re-run instead of stale phase-1/phase-2 results.
+    const pairedUser = this.messages.slice(refreshedIdx + 1).find((m) => m.role === "user");
+    if (pairedUser?.id && settingsState.currentSettings["tools.enabled"]) {
+      this.upsertToolFilterMessage(pairedUser.id, {
+        status: "filtering",
+        phase1: [],
+        phase2: null,
+      });
+    }
     void import("./tts.svelte").then(({ ttsState }) => ttsState.startStream(messageId));
     return true;
   }
@@ -544,7 +752,7 @@ class MessagesState {
     if (idx < 0) return;
     if (!this.streamingFirstChunkReceived) {
       this.streamingFirstChunkReceived = true;
-      this.finalizeReasoningDuration(idx);
+      this.finalizeReasoningDuration();
       this.messages[idx] = { ...this.messages[idx], content: "" };
       this.streamBuffer = "";
     }
@@ -554,34 +762,64 @@ class MessagesState {
     }
   }
 
-  /** Accumulate a reasoning-trace delta onto the currently streaming assistant
-   *  message. Written directly (no coalesce) since reasoning token rates are
-   *  lower than content rates in practice. */
+  /** Accumulate a reasoning-trace delta. Lazily creates a `role: "reasoning"`
+   *  bubble on the first delta of a turn, paired to the currently-streaming
+   *  assistant message. Written directly (no coalesce) since reasoning token
+   *  rates are lower than content rates in practice. */
   appendReasoning(delta: string) {
     if (!delta) return;
-    const idx = this.getStreamingIndex();
-    if (idx < 0) return;
-    if (this.reasoningStartTime === null && !this.streamingFirstChunkReceived) {
+    if (this.streamingMessageId === null) return;
+    if (this.streamingFirstChunkReceived) return;
+
+    if (this.streamingReasoningId === null) {
+      const contentIdx = this.messages.findIndex((m) => m.id === this.streamingMessageId);
+      if (contentIdx < 0) return;
+      const contentMsg = this.messages[contentIdx];
+      const reasoningId = makeMessageId();
+      this.streamingReasoningId = reasoningId;
       this.reasoningStartTime = Date.now();
+      // Insert immediately after the assistant content message in the
+      // newest-first array — that places the reasoning bubble older (higher
+      // index) than its paired content, matching the chronological order in
+      // which the model emits them.
+      this.messages.splice(contentIdx + 1, 0, {
+        id: reasoningId,
+        role: "reasoning",
+        content: delta,
+        modelUsed: contentMsg.modelUsed,
+        pairedAssistantId: contentMsg.id,
+      });
+      this.scheduleSave();
+      return;
     }
-    const cur = this.messages[idx]?.reasoning ?? "";
-    this.messages[idx] = {
-      ...this.messages[idx],
-      reasoning: cur + delta,
-    };
+
+    const idx = this.messages.findIndex((m) => m.id === this.streamingReasoningId);
+    if (idx < 0) return;
+    const cur = (this.messages[idx].content as string) || "";
+    this.messages[idx] = { ...this.messages[idx], content: cur + delta };
   }
 
-  /** Freeze the elapsed reasoning time onto the message so historic loads can
-   *  render "Thought for Xs" without live tracking. No-op if reasoning was
-   *  never active on this turn. */
-  private finalizeReasoningDuration(idx: number) {
-    if (this.reasoningStartTime === null) return;
-    const duration = Date.now() - this.reasoningStartTime;
+  /** Freeze the elapsed reasoning time onto the streaming reasoning bubble so
+   *  historic loads can render "Thought for Xs" without live tracking, then
+   *  clear the streaming-reasoning slot so subsequent state transitions stop
+   *  treating it as live. No-op if no reasoning bubble is currently open. */
+  private finalizeReasoningDuration() {
+    if (this.streamingReasoningId === null) {
+      this.reasoningStartTime = null;
+      return;
+    }
+    const idx = this.messages.findIndex((m) => m.id === this.streamingReasoningId);
+    if (idx < 0) {
+      this.streamingReasoningId = null;
+      this.reasoningStartTime = null;
+      return;
+    }
+    if (this.reasoningStartTime !== null) {
+      const duration = Date.now() - this.reasoningStartTime;
+      this.messages[idx] = { ...this.messages[idx], reasoningDurationMs: duration };
+    }
+    this.streamingReasoningId = null;
     this.reasoningStartTime = null;
-    this.messages[idx] = {
-      ...this.messages[idx],
-      reasoningDurationMs: duration,
-    };
   }
 
   private flushStreamBuffer() {
@@ -621,7 +859,10 @@ class MessagesState {
     // Strip markdown BEFORE segmenting - Intl.Segmenter isn't markdown-aware
     // and otherwise gets confused by URLs, code fences, table pipes, etc.
     // ttsCursor indexes into the stripped text, not the raw stream.
-    const stripped = stripMarkdownForTTS(fullText);
+    let stripped = stripMarkdownForTTS(fullText);
+    if (!settingsState.currentSettings["tts.spellOutEmojis"]) {
+      stripped = stripEmojisForTTS(stripped);
+    }
     const remaining = stripped.slice(this.ttsCursor);
     if (!remaining) {
       if (final) ttsState.finalize();
@@ -658,7 +899,7 @@ class MessagesState {
   async finishStreaming() {
     this.cancelStreamBuffer();
     const idx = this.getStreamingIndex();
-    if (idx >= 0) this.finalizeReasoningDuration(idx);
+    this.finalizeReasoningDuration();
     this.isStreaming = false;
     this.streamingMessageId = null;
     const finalText = idx >= 0 ? (this.messages[idx]?.content as string) || "" : "";
@@ -666,9 +907,134 @@ class MessagesState {
     await this.flushSave();
   }
 
+  /** Attach the OpenAI tool_calls emitted in the final chunk of the current
+   *  streaming assistant message so edit-and-resend can re-materialize the
+   *  tool-role messages deterministically. Does NOT clear the streaming slot.
+   *  The tool-call loop in llm.ts handles the handoff explicitly. */
+  setPendingToolCalls(calls: PendingToolCall[]): void {
+    const idx = this.getStreamingIndex();
+    if (idx < 0) return;
+    this.messages[idx] = {
+      ...this.messages[idx],
+      pendingToolCalls: calls,
+    };
+  }
+
+  /** Close out the current streaming assistant slot when the model is about
+   *  to hand off to tool calls. Unlike finishStreaming(), does not trigger a
+   *  TTS finalize (no prose was produced) and does not persist the empty
+   *  bubble - the assistant message will be rewritten on the next hop. */
+  finishStreamingForToolCalls(): void {
+    this.cancelStreamBuffer();
+    this.finalizeReasoningDuration();
+    this.isStreaming = false;
+    this.streamingMessageId = null;
+    void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
+  }
+
+  /** Push a new role:"tool" message representing an active tool invocation.
+   *  Returns the message id so callers can update the same slot later. */
+  appendToolCall(tc: ToolCallState): string {
+    const id = makeMessageId();
+    this.addMessage({
+      id,
+      role: "tool",
+      content: "",
+      toolCall: tc,
+    });
+    return id;
+  }
+
+  /** Immutably merge `patch` into the ToolCallState of the message whose
+   *  toolCall.callId matches. No-op when the call is missing (e.g. the user
+   *  deleted the bubble). */
+  updateToolCall(callId: string, patch: Partial<ToolCallState>): void {
+    const idx = this.messages.findIndex((m) => m.toolCall?.callId === callId);
+    if (idx < 0) return;
+    const existing = this.messages[idx].toolCall;
+    if (!existing) return;
+    this.messages[idx] = {
+      ...this.messages[idx],
+      toolCall: { ...existing, ...patch },
+    };
+    this.scheduleSave();
+  }
+
+  /** Mark a tool call terminated with either a result or an error. Sets the
+   *  status too so callers don't have to duplicate that. */
+  resolveToolCall(
+    callId: string,
+    payload: { result?: unknown; error?: string; cancelled?: boolean },
+  ): void {
+    const idx = this.messages.findIndex((m) => m.toolCall?.callId === callId);
+    if (idx < 0) return;
+    const existing = this.messages[idx].toolCall;
+    if (!existing) return;
+    let status: ToolCallStatus;
+    if (payload.cancelled) {
+      status = "cancelled";
+    } else if (payload.error !== undefined) {
+      status = "failed";
+    } else {
+      status = "complete";
+    }
+    this.messages[idx] = {
+      ...this.messages[idx],
+      toolCall: {
+        ...existing,
+        status,
+        result: payload.result,
+        error: payload.error,
+      },
+    };
+    this.scheduleSave();
+  }
+
+  /** Record an askUser request on the bubble so the form renders. */
+  setToolCallAskUser(callId: string, requestId: string, questions: AskUserQuestion[]): void {
+    this.updateToolCall(callId, {
+      status: "awaiting_user",
+      askUser: { requestId, questions, answers: null },
+    });
+  }
+
+  /** Stash the user's answers on the bubble after submit. The WS layer
+   *  forwards them back to the worker; this keeps the UI in the right state
+   *  while we wait for the next progress / result event. */
+  recordToolCallAskUserAnswers(callId: string, answers: AskUserAnswer[]): void {
+    const idx = this.messages.findIndex((m) => m.toolCall?.callId === callId);
+    if (idx < 0) return;
+    const existing = this.messages[idx].toolCall;
+    if (!existing?.askUser) return;
+    this.messages[idx] = {
+      ...this.messages[idx],
+      toolCall: {
+        ...existing,
+        status: "running",
+        askUser: { ...existing.askUser, answers },
+      },
+    };
+    this.scheduleSave();
+  }
+
+  /** Append a log line visible in the bubble's details disclosure. */
+  appendToolCallLog(callId: string, line: ToolCallLogLine): void {
+    const idx = this.messages.findIndex((m) => m.toolCall?.callId === callId);
+    if (idx < 0) return;
+    const existing = this.messages[idx].toolCall;
+    if (!existing) return;
+    const logs = existing.logs.length >= 200 ? existing.logs.slice(-199) : existing.logs.slice();
+    logs.push(line);
+    this.messages[idx] = {
+      ...this.messages[idx],
+      toolCall: { ...existing, logs },
+    };
+  }
+
   receiveErrorMessage(errorType: LLMErrorType, detail?: string) {
     this.cancelStreamBuffer();
     const idx = this.getStreamingIndex();
+    this.finalizeReasoningDuration();
     this.isStreaming = false;
     this.streamingMessageId = null;
     const content = detail ? `${errorType}\n${detail}` : errorType;
@@ -680,32 +1046,43 @@ class MessagesState {
   }
 
   async interruptStreaming(): Promise<void> {
-    if (!this.isStreaming) return;
-    this.cancelStreamBuffer();
-    void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
+    if (!this.isStreaming && !this.hasActiveToolCall) return;
 
-    const idx = this.getStreamingIndex();
-    if (idx >= 0) {
-      this.finalizeReasoningDuration(idx);
-      if (this.streamingFirstChunkReceived) {
-        const current = this.messages[idx].content;
-        if (typeof current === "string") {
+    if (this.isStreaming) {
+      this.cancelStreamBuffer();
+      void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
+      this.finalizeReasoningDuration();
+
+      const idx = this.getStreamingIndex();
+      if (idx >= 0) {
+        if (this.streamingFirstChunkReceived) {
+          const current = this.messages[idx].content;
+          if (typeof current === "string") {
+            this.messages[idx] = {
+              ...this.messages[idx],
+              content: current + "\n\n> _User interrupted._",
+            };
+          }
+        } else {
           this.messages[idx] = {
             ...this.messages[idx],
-            content: current + "\n\n> _User interrupted._",
+            content: "> _User interrupted._",
           };
         }
-      } else {
-        this.messages[idx] = {
-          ...this.messages[idx],
-          content: "> _User interrupted._",
-        };
       }
+
+      this.isStreaming = false;
+      this.streamingFirstChunkReceived = false;
+      this.streamingMessageId = null;
     }
 
-    this.isStreaming = false;
-    this.streamingFirstChunkReceived = false;
-    this.streamingMessageId = null;
+    // Cancel every in-flight tool call. The sidecar responds with
+    // `tool_cancelled` which drives each bubble to its terminal state.
+    this.toolCancelHandler?.();
+    // Abort the outer LLM HTTP stream (no-op when already settled). Kept
+    // outside the `isStreaming` branch so tool-only turns still stop the
+    // parent `sendMessages` loop — its controller is live until the
+    // tool-call chain finishes.
     interruptCurrentStream();
     await this.flushSave();
   }
@@ -722,6 +1099,7 @@ class MessagesState {
     this.streamingFirstChunkReceived = false;
     this.reasoningStartTime = null;
     this.streamingMessageId = null;
+    this.streamingReasoningId = null;
     interruptCurrentStream();
   }
 
@@ -808,11 +1186,21 @@ class MessagesState {
     await this.flushSave();
 
     // Regenerate the paired response in place so turns newer than this user
-    // message survive the edit. In newest-first order the paired assistant/
-    // error sits one slot lower (userIdx - 1). Fall back to a fresh send only
-    // when no paired response exists (edit on a brand-new user message).
-    const pairedIdx = userIdx - 1;
-    const paired = pairedIdx >= 0 ? this.messages[pairedIdx] : null;
+    // message survive the edit. In newest-first order the paired response sits
+    // one or more slots above the user message: a tool_filter bubble (when
+    // tools are enabled) and/or a reasoning bubble may sit between. Skip past
+    // those to land on the content slot that drives reprocessing. Fall back to
+    // a fresh send when no paired response exists (edit on a brand-new user
+    // message). Skipping tool_filter matters because otherwise we'd fall into
+    // sendMessages() with the stale assistant still in context, which llama.cpp
+    // rejects as an "assistant prefill" incompatible with enable_thinking.
+    let scan = userIdx - 1;
+    while (
+      scan >= 0 &&
+      (this.messages[scan].role === "reasoning" || this.messages[scan].role === "tool_filter")
+    )
+      scan -= 1;
+    const paired = scan >= 0 ? this.messages[scan] : null;
     if (paired && (paired.role === "assistant" || paired.role === "error") && paired.id) {
       const { reprocessMessage } = await import("$lib/sidecar/llm");
       await reprocessMessage(paired.id);
@@ -836,18 +1224,29 @@ class MessagesState {
     const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === messageId);
     if (userIdx < 0) return;
 
+    // Drop the paired tool_filter bubble first so its index doesn't drift
+    // under the assistant-pair splice below.
+    this.removeToolFilterMessage(messageId);
+    const refreshedUserIdx = this.messages.findIndex(
+      (m) => m.role === "user" && m.id === messageId,
+    );
+
     // newest-first: the paired response (generated AFTER this user msg) sits
-    // one slot lower. Only splice it if it's actually an assistant/error.
-    const pairedIdx =
-      userIdx > 0 &&
-      (this.messages[userIdx - 1].role === "assistant" ||
-        this.messages[userIdx - 1].role === "error")
-        ? userIdx - 1
-        : userIdx;
+    // one or two slots above. Walk backwards across reasoning bubbles and the
+    // assistant/error content bubble so the splice catches the whole turn.
+    let pairedIdx = refreshedUserIdx;
+    while (pairedIdx > 0) {
+      const above = this.messages[pairedIdx - 1];
+      if (above.role === "assistant" || above.role === "error" || above.role === "reasoning") {
+        pairedIdx -= 1;
+      } else {
+        break;
+      }
+    }
 
-    const removedPaths = diffRemovedAttachmentPaths(this.messages[userIdx].content, "");
+    const removedPaths = diffRemovedAttachmentPaths(this.messages[refreshedUserIdx].content, "");
 
-    const deleteCount = userIdx - pairedIdx + 1;
+    const deleteCount = refreshedUserIdx - pairedIdx + 1;
     this.messages.splice(pairedIdx, deleteCount);
 
     if (removedPaths.length > 0) {
@@ -883,6 +1282,23 @@ class MessagesState {
    *  message - aborts generation silently first. If this empties the session
    *  of user messages, remove the session entirely (symmetric with
    *  deleteUserMessage). */
+  /** Delete a reasoning bubble. When the bubble is paired to an assistant
+   *  content message (the normal case), delegate to `deleteAgentMessage` so
+   *  the whole turn (reasoning + content) goes together — leaving reasoning
+   *  without its produced answer makes no sense. Standalone reasoning
+   *  (orphaned, shouldn't happen in practice) is removed in place. */
+  async deleteReasoningMessage(messageId: string) {
+    const idx = this.messages.findIndex((m) => m.role === "reasoning" && m.id === messageId);
+    if (idx < 0) return;
+    const paired = this.messages[idx].pairedAssistantId;
+    if (paired) {
+      await this.deleteAgentMessage(paired);
+      return;
+    }
+    this.messages.splice(idx, 1);
+    await this.flushSave();
+  }
+
   async deleteAgentMessage(messageId: string) {
     const idx = this.messages.findIndex(
       (m) => (m.role === "assistant" || m.role === "error") && m.id === messageId,
@@ -896,6 +1312,15 @@ class MessagesState {
     this.resetTTSPlayback();
 
     this.messages.splice(idx, 1);
+    // Drop any reasoning bubble paired to this assistant turn — they live
+    // and die together, since the reasoning trace has no meaning without
+    // its produced answer (or vice-versa).
+    const reasoningIdx = this.messages.findIndex(
+      (m) => m.role === "reasoning" && m.pairedAssistantId === messageId,
+    );
+    if (reasoningIdx >= 0) {
+      this.messages.splice(reasoningIdx, 1);
+    }
 
     const remainingUsers = this.messages.filter((m) => m.role === "user").length;
     if (remainingUsers === 0) {

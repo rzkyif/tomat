@@ -3,7 +3,12 @@ import { env } from "@huggingface/transformers";
 import { KokoroTTS } from "kokoro-js";
 import * as path from "node:path";
 import * as os from "node:os";
+import * as fs from "node:fs";
 import { errorMessage, errorStatus, httpError } from "./httpError";
+import { ToolkitsRegistry } from "./toolkits/registry";
+import { ToolkitsService, TOOLKITS_DIR } from "./toolkits/service";
+import { embedTexts, isEmbeddingModelReady } from "./toolkits/embed";
+import type { ClientToHostFrame, HostToClientFrame } from "./toolkits/types";
 
 /** Single source of truth for the sidecar's bound address. The frontend's
  *  `src/lib/shared/network.ts` duplicates these values — keep both in sync
@@ -131,6 +136,73 @@ function wavFromPcm(pcm: Float32Array, sampleRate: number): Buffer {
 }
 
 // ---------------------------------------------------------------------------
+// Toolkits runtime
+// ---------------------------------------------------------------------------
+// Registry file lives in ~/.tomat/toolkits/ alongside the user's toolkits.
+const TOOLKITS_DB = path.join(TOOLKITS_DIR, "registry.sqlite");
+fs.mkdirSync(TOOLKITS_DIR, { recursive: true });
+const toolkitsRegistry = new ToolkitsRegistry(TOOLKITS_DB);
+
+// Read a minimal slice of the persisted app settings so pool limits and the
+// ignore-scripts flag respect the user's choices. Settings persisted by the
+// Rust side live at ~/.tomat/settings.json.
+const SETTINGS_PATH = path.join(homeDir, ".tomat", "settings.json");
+function readAppSettings(): Record<string, unknown> {
+  try {
+    const raw = fs.readFileSync(SETTINGS_PATH, "utf-8");
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+// Locate the prebuilt worker runtime. `import.meta.dir` varies by launch mode:
+//  - packaged app: sits next to the bundled server.js, alongside runtime.js
+//  - `tauri dev`: Tauri copies server.js into src-tauri/target/<profile>/
+//    resources/ , three levels above src-tauri/resources/runtime.js
+//  - `bun src-bun/index.ts` (sidecar standalone): import.meta.dir is src-bun/
+//    so we fall back to the .ts entry point; Bun loads TS workers directly.
+const workerScriptUrl: string = (() => {
+  const candidates = [
+    path.join(import.meta.dir, "runtime.js"),
+    path.join(import.meta.dir, "../../../resources/runtime.js"),
+    path.join(import.meta.dir, "toolkits", "worker", "runtime.ts"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error(`[toolkits] worker runtime not found. Looked in:\n  ${candidates.join("\n  ")}`);
+})();
+
+const toolkitsService = new ToolkitsService({
+  registry: toolkitsRegistry,
+  workerScriptUrl,
+  readSettings() {
+    const s = readAppSettings();
+    return {
+      maxWarmWorkers:
+        typeof s["toolkits.maxWarmWorkers"] === "number"
+          ? (s["toolkits.maxWarmWorkers"] as number)
+          : 8,
+      workerIdleMs:
+        typeof s["toolkits.workerIdleMs"] === "number"
+          ? (s["toolkits.workerIdleMs"] as number)
+          : 300000,
+      ignorePostinstallScripts: s["toolkits.ignorePostinstallScripts"] !== false,
+    };
+  },
+});
+
+// Verify hashes of every currently-enabled toolkit at boot so tampered files
+// surface before the first tool call rather than mid-turn.
+try {
+  toolkitsService.verifyAllOnBoot();
+} catch (err) {
+  console.warn("[toolkits] verifyAllOnBoot error:", err);
+}
+
+// ---------------------------------------------------------------------------
 // HTTP server (loopback only)
 // ---------------------------------------------------------------------------
 // The webview's origin (tauri.localhost / http://localhost:1420 in dev) is not
@@ -225,7 +297,163 @@ export const app = new Elysia()
       }),
     },
   )
+  // --- Toolkits -----------------------------------------------------------
+  .post(
+    "/api/embed",
+    async ({ body }) => {
+      if (!isEmbeddingModelReady()) {
+        throw httpError(503, "embedding model not downloaded yet");
+      }
+      const vectors = await embedTexts(body.texts);
+      return { vectors: vectors.map((v) => Array.from(v)) };
+    },
+    { body: t.Object({ texts: t.Array(t.String()) }) },
+  )
+  .get("/api/toolkits/scan", () => toolkitsService.scan())
+  .post("/api/toolkits/refresh-metadata", async () => {
+    await toolkitsService.refreshMissingMetadata();
+    return { ok: true };
+  })
+  .post("/api/toolkits/reindex", async () => {
+    return await toolkitsService.reindexEnabled();
+  })
+  .post("/api/toolkits/trust", async ({ body }) => await toolkitsService.trust(body.id), {
+    body: t.Object({ id: t.String() }),
+  })
+  .post(
+    "/api/toolkits/untrust",
+    async ({ body }) => {
+      await toolkitsService.untrust(body.id);
+      return { ok: true };
+    },
+    { body: t.Object({ id: t.String() }) },
+  )
+  .post(
+    "/api/toolkits/remove",
+    async ({ body }) => {
+      await toolkitsService.remove(body.id);
+      return { ok: true };
+    },
+    { body: t.Object({ id: t.String() }) },
+  )
+  .post("/api/toolkits/install", ({ body }) => toolkitsService.startInstall(body.id), {
+    body: t.Object({ id: t.String() }),
+  })
+  .post(
+    "/api/toolkits/uninstall-deps",
+    async ({ body }) => {
+      await toolkitsService.uninstallToolkitDeps(body.id);
+      return { ok: true };
+    },
+    { body: t.Object({ id: t.String() }) },
+  )
+  .post("/api/toolkits/enable", async ({ body }) => await toolkitsService.enable(body.id), {
+    body: t.Object({ id: t.String() }),
+  })
+  .post(
+    "/api/toolkits/disable",
+    async ({ body }) => {
+      await toolkitsService.disable(body.id);
+      return { ok: true };
+    },
+    { body: t.Object({ id: t.String() }) },
+  )
+  .post(
+    "/api/toolkits/filter",
+    ({ body }) => {
+      const vec = new Float32Array(body.vector);
+      const topK = body.topK ?? 10;
+      const candidates = toolkitsService.phase1Filter(vec, topK);
+      return { candidates };
+    },
+    {
+      body: t.Object({
+        vector: t.Array(t.Number()),
+        topK: t.Optional(t.Number()),
+      }),
+    },
+  )
+  .post(
+    "/api/toolkits/tool-schemas",
+    ({ body }) => {
+      const tools = toolkitsService.toolSchemasFor(body.ids);
+      return { tools };
+    },
+    { body: t.Object({ ids: t.Array(t.String()) }) },
+  )
+  .ws("/ws/toolcall", {
+    open(ws) {
+      const emit = (frame: HostToClientFrame) => ws.send(frame);
+      const unsub = toolkitsService.subscribeWs(emit);
+      (ws.data as { unsub?: () => void }).unsub = unsub;
+    },
+    message(ws, raw) {
+      const frame = coerceClientFrame(raw);
+      if (!frame) {
+        console.warn("[toolcall] rejected malformed client frame:", raw);
+        return;
+      }
+      toolkitsService.handleClientFrame(frame, (f) => ws.send(f));
+    },
+    close(ws) {
+      const unsub = (ws.data as { unsub?: () => void }).unsub;
+      if (unsub) unsub();
+    },
+  })
   .listen({ port: SIDECAR_PORT, hostname: SIDECAR_HOST });
+
+function coerceClientFrame(raw: unknown): ClientToHostFrame | null {
+  let v: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      v = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!v || typeof v !== "object") return null;
+  const obj = v as Record<string, unknown>;
+  const kind = obj.kind;
+  if (typeof kind !== "string") return null;
+  if (kind === "start") {
+    if (
+      typeof obj.callId === "string" &&
+      typeof obj.toolkitId === "string" &&
+      typeof obj.toolName === "string" &&
+      typeof obj.arguments === "string"
+    ) {
+      return {
+        kind: "start",
+        callId: obj.callId,
+        toolkitId: obj.toolkitId,
+        toolName: obj.toolName,
+        arguments: obj.arguments,
+        chatContext:
+          (obj.chatContext as
+            | { userMessage: string; sessionId: string | null; locale?: string }
+            | undefined) ?? undefined,
+      };
+    }
+  } else if (kind === "ask_user_response") {
+    if (
+      typeof obj.callId === "string" &&
+      typeof obj.requestId === "string" &&
+      Array.isArray(obj.answers)
+    ) {
+      return {
+        kind: "ask_user_response",
+        callId: obj.callId,
+        requestId: obj.requestId,
+        answers: obj.answers as (string | string[])[],
+      };
+    }
+  } else if (kind === "cancel") {
+    if (typeof obj.callId === "string") {
+      return { kind: "cancel", callId: obj.callId };
+    }
+  }
+  return null;
+}
 
 console.log(`Bun sidecar is running at ${app.server?.hostname}:${app.server?.port}`);
 

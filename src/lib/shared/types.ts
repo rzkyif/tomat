@@ -16,25 +16,131 @@ export type MessagePart =
 
 export type MessageContent = string | MessagePart[];
 
+/** Lifecycle of a single tool invocation as seen by the UI. */
+export type ToolCallStatus =
+  | "pending"
+  | "running"
+  | "awaiting_user"
+  | "complete"
+  | "failed"
+  | "cancelled";
+
+export type AskUserQuestion = {
+  question: string;
+  options?: { label: string; description?: string; value: string }[];
+  multiselect?: boolean;
+  allowFreeformInput?: boolean;
+};
+
+/** Answer shape: string for text/freeform, chosen option `value` for
+ *  single-select, string[] for multiselect. */
+export type AskUserAnswer = string | string[];
+
+export type ToolCallAskUserState = {
+  requestId: string;
+  questions: AskUserQuestion[];
+  answers: AskUserAnswer[] | null;
+};
+
+export type ToolCallLogLine = {
+  level: "debug" | "info" | "warn" | "error";
+  message: string;
+  ts: number;
+};
+
+export type ToolCallState = {
+  /** Server-generated unique id for this invocation. Routes WS events. */
+  callId: string;
+  /** OpenAI tool_call_id echoed back when the tool result is sent to the LLM. */
+  toolCallId: string;
+  toolkitId: string;
+  toolName: string;
+  /** Parsed arguments object (may be {} if the model produced invalid JSON). */
+  arguments: Record<string, unknown>;
+  status: ToolCallStatus;
+  progress?: number;
+  label?: string;
+  description?: string;
+  askUser?: ToolCallAskUserState;
+  result?: unknown;
+  error?: string;
+  logs: ToolCallLogLine[];
+};
+
+export type PendingToolCall = {
+  /** The OpenAI tool_call_id. */
+  id: string;
+  /** Tool name the model chose, e.g. "open". */
+  name: string;
+  /** Raw JSON arguments string from the stream. */
+  arguments: string;
+};
+
+/** A single phase-1 (embedding similarity) candidate, snapshot for the bubble. */
+export type RelevantToolPhase1Entry = {
+  id: string;
+  name: string;
+  description: string;
+  score: number;
+};
+
+/** A single phase-2 (LLM filter) survivor. No score — phase 2 is binary keep/drop. */
+export type RelevantToolPhase2Entry = {
+  name: string;
+  description: string;
+};
+
+export type RelevantToolsState = {
+  status: "filtering" | "complete" | "error";
+  phase1: RelevantToolPhase1Entry[];
+  /** null = second pass disabled (phase 1 is the final list). */
+  phase2: RelevantToolPhase2Entry[] | null;
+  /** Populated when the filter LLM call failed; phase2 falls back to phase1 in
+   *  that case so tools still reach the main model. */
+  errorMessage?: string;
+};
+
 export type Message = {
   /** Stable client-generated id used for TTS replay controls. Backfilled on
    *  load for messages persisted before this field existed. */
   id?: string;
-  role: "user" | "assistant" | "error" | "system";
+  role:
+    | "user"
+    | "assistant"
+    | "reasoning"
+    | "error"
+    | "system"
+    | "tool"
+    | "tool_filter"
+    /** Synthetic, render-only role. The +page rendering pipeline injects a
+     *  single `role: "loading"` Message into its derived display list while
+     *  awaiting the first response chunk so a transient spinner bubble flows
+     *  through the same small-bubble stacking layout as adjacent reasoning /
+     *  tool_filter / system bubbles. Never persisted, never added to
+     *  messagesState.messages, never sent to the LLM. */
+    | "loading";
   content: MessageContent;
   modelUsed?: "default" | "secondary";
   /** Only populated on user messages. Holds the resolved system prompt that
    *  was sent to the LLM for that turn, including any snippet-triggered
    *  transformations. Used by sendMessages() on edit-and-resend. */
   systemPromptOverride?: string;
-  /** Only populated on assistant messages when the model emits a reasoning
-   *  trace and `llm.showReasoning` is enabled. Persisted with the session but
-   *  never sent back to the LLM (contentToApi only reads `content`). */
-  reasoning?: string;
-  /** Elapsed time (ms) from the first reasoning chunk to the first content
-   *  chunk (or stream finish if no content). Captured once per assistant turn
-   *  so historic messages can still render "Thought for Xs". */
+  /** Only populated on `role: "reasoning"` messages. Elapsed time (ms) from
+   *  the first reasoning chunk to the first content chunk (or stream finish
+   *  if no content). Captured once per turn so historic messages can still
+   *  render "Thought for Xs". */
   reasoningDurationMs?: number;
+  /** Only populated on `role: "reasoning"` messages — points back at the
+   *  assistant content message produced in the same turn. Used to delete /
+   *  reprocess the pair atomically. */
+  pairedAssistantId?: string;
+  /** Set on a `role: "tool"` message. Drives the ToolCall bubble. */
+  toolCall?: ToolCallState;
+  /** Set on a `role: "tool_filter"` message. Drives the RelevantTools bubble. */
+  relevantTools?: RelevantToolsState;
+  /** Set on an assistant message that produced tool_calls in its final chunk.
+   *  Used to re-materialize `role: "tool"` messages on edit-and-resend. */
+  pendingToolCalls?: PendingToolCall[];
 };
 
 /** Generate a message id. User message ids are set separately from their

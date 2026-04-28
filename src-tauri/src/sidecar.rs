@@ -365,6 +365,30 @@ fn terminate_child_detached(pid: u32, child: CommandChild) {
     });
 }
 
+/// Hugging Face paths for the MiniLM embedding model used by the toolkits
+/// relevance filter. Kept in sync with EMBED_BASE_FILES in
+/// src/lib/shared/settings.ts.
+const EMBED_FILES: &[&str] = &[
+    "@Xenova/all-MiniLM-L6-v2/main/config.json",
+    "@Xenova/all-MiniLM-L6-v2/main/tokenizer.json",
+    "@Xenova/all-MiniLM-L6-v2/main/tokenizer_config.json",
+    "@Xenova/all-MiniLM-L6-v2/main/onnx/model_quantized.onnx",
+];
+
+/// Download the embedding model into `~/.tomat/models/` via the same
+/// downloader used for llama / whisper / kokoro weights. Errors are surfaced
+/// as a log line rather than blocking sidecar startup - the Bun sidecar
+/// gates `/api/embed` on the files existing, so an incomplete download just
+/// means phase-1 tool filtering is disabled until the download completes on
+/// a later run.
+async fn ensure_embedding_model<R: Runtime>(handle: &AppHandle<R>, state: &AppState) {
+    for path in EMBED_FILES {
+        if let Err(e) = ensure_path_internal(handle, state, "bun", path).await {
+            eprintln!("[embedding] download {path} failed: {e}");
+        }
+    }
+}
+
 /// (Re)launch the bun tools sidecar with its canonical args. Used at startup
 /// and on demand (e.g. when TTS is toggled off, to release the ORT session
 /// memory by recycling the process - allocator behavior means in-process
@@ -375,7 +399,7 @@ pub async fn start_bun_sidecar<R: Runtime>(
 ) -> AppResult<()> {
     let resources_path = handle.path().resource_dir()?;
     let server_js_path = resources_path.join("resources").join("server.js");
-    update_server_args_internal(
+    let result = update_server_args_internal(
         handle.clone(),
         state,
         SidecarKind::Bun.as_str().to_string(),
@@ -391,7 +415,20 @@ pub async fn start_bun_sidecar<R: Runtime>(
         None,
         Some("http://localhost:7703/api/health".to_string()),
     )
-    .await
+    .await;
+
+    // Kick off the embedding-model fetch in the background so the first
+    // toolkit-relevance pass doesn't pay the full download cost. The
+    // download emits `sidecar-status` events on the "bun" channel, so the
+    // existing UI surfaces progress without any new wiring.
+    let handle_for_embed = handle.clone();
+    let state_for_embed = state.clone();
+    tauri::async_runtime::spawn(async move {
+        ensure_embedding_model(&handle_for_embed, &state_for_embed).await;
+        emit_status(&handle_for_embed, "bun", ServerStatus::Running, None, None).await;
+    });
+
+    result
 }
 
 pub async fn update_server_args_internal<R: Runtime>(

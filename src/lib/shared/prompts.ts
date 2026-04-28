@@ -37,13 +37,15 @@ Your style:
 
 Remember: you are here to be genuinely useful to the user running you on their own device.`;
 
-export const DEFAULT_TITLE_GENERATION_PROMPT = `You are a title generator. Your ONLY job is to create a short title (3 to 5 words) that describes what the user's message is about.
+export const DEFAULT_TITLE_GENERATION_PROMPT = `You are a title generator. Your ONLY job is to summarize the user's message into a very short topic label. You are NOT writing a response, NOT fulfilling the request, and NOT describing what an answer would contain.
 
 Rules:
-- Output ONLY the title, nothing else.
-- Do NOT answer the user's question.
-- Do NOT add quotes or punctuation at the end.
-- The title must be 3 to 5 words long.
+- Output ONLY the title on a single line, nothing else.
+- The title MUST be a MAXIMUM of 5 words. Shorter is better.
+- The title summarizes the user's REQUEST, not any answer to it.
+- Do NOT answer, fulfill, or expand on the user's message.
+- Do NOT add quotes, punctuation, prefixes, or any extra text.
+- Do NOT show your reasoning. Do NOT include <think> blocks. Just the title.
 
 Examples:
 
@@ -55,6 +57,9 @@ Title: Python File Renaming Script
 
 User: I'm having trouble with my React app crashing on startup
 Title: React App Crash Issue
+
+User: Write 10 lengthy sample paragraphs
+Title: Sample Paragraphs Request
 
 User: What's the best way to learn guitar?
 Title: Learning Guitar Tips`;

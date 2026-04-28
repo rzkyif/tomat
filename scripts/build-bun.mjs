@@ -9,7 +9,7 @@
  *
  * Why: tauri-build emits `cargo:rerun-if-changed` for every file listed in
  * tauri.conf.json's bundle.resources array (which includes server.js and
- * worker-runtime.js). `bun build --outfile=X` always updates X's mtime, so
+ * runtime.js). `bun build --outfile=X` always updates X's mtime, so
  * the plain invocation forced Cargo to invalidate its build-script cache on
  * every `bun dev` run — even when the bundled output was byte-identical.
  * This script builds to a temp file, compares, and only renames over the
@@ -18,11 +18,13 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
 const RESOURCES = resolve(ROOT, "src-tauri/resources");
+const USER_TOOLKITS_DIR = resolve(homedir(), ".tomat/toolkits");
 
 mkdirSync(RESOURCES, { recursive: true });
 
@@ -37,6 +39,11 @@ const BUILDS = [
       "@huggingface/transformers",
       "phonemizer",
     ],
+  },
+  {
+    entry: "src-bun/toolkits/worker/runtime.ts",
+    outfile: "runtime.js",
+    external: [],
   },
 ];
 
@@ -90,5 +97,18 @@ for (const build of BUILDS) {
     console.log(
       `[build-bun] ${build.outfile} unchanged (${newBytes.length} bytes, mtime preserved)`,
     );
+  }
+}
+
+// Sync the toolkit author SDK into ~/.tomat/toolkits/ so dev toolkits get
+// autocomplete on ToolContext / ToolkitMetadata without waiting for the Rust
+// seed command to fire on first app launch.
+{
+  const sdkSrc = resolve(ROOT, "src-bun/sdk/toolkits.d.ts");
+  if (existsSync(sdkSrc)) {
+    mkdirSync(USER_TOOLKITS_DIR, { recursive: true });
+    const sdkDst = resolve(USER_TOOLKITS_DIR, "toolkits.d.ts");
+    copyFileSync(sdkSrc, sdkDst);
+    console.log(`[build-bun] synced SDK to ${sdkDst}`);
   }
 }

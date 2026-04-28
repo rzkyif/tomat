@@ -10,7 +10,7 @@ import { browser } from "$app/environment";
 import { invoke } from "@tauri-apps/api/core";
 import { loadTtsModel, synthesizeTts } from "$lib/sidecar/tts";
 import { TTS_BASE_FILES } from "$lib/shared/settings";
-import { stripMarkdownForTTS } from "$lib/shared/text";
+import { stripEmojisForTTS, stripMarkdownForTTS } from "$lib/shared/text";
 import { settingsState } from "./settings.svelte";
 
 const WORD_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "word" });
@@ -75,8 +75,11 @@ function splitAtMaxWords(
 // playback segments.
 const MAX_WORDS = 50;
 // Safety margin so we don't dispatch right when audio ends and risk a tiny
-// gap from network/decode jitter.
-const SAFETY_MS = 250;
+// gap from network/decode jitter. Sized to cover loadedmetadata wait,
+// browser play() latency, and the audio-output device's prefill on chunk
+// handoff - 250 ms was tight enough that the chain-1->2 transition could
+// audibly stall if synth came in just under estimate.
+const SAFETY_MS = 400;
 // Floor for the re-check timer so we don't spin.
 const MIN_RECHECK_MS = 75;
 
@@ -144,6 +147,24 @@ class TTSState {
           paths: [...TTS_BASE_FILES],
         });
         await loadTtsModel();
+        // Pre-warm: kokoro-js lazy-loads the per-voice tensor on the first
+        // generate() call (and ORT does its JIT pass then too). Without this
+        // the user's first synth chunk pays the cold-start cost, which
+        // shows up as a noticeable gap before chunk 2 lands. Warming with
+        // the currently selected voice loads the right tensor into the
+        // module's voice cache. Failure is non-fatal - we still mark
+        // loaded so the user can use TTS.
+        try {
+          const settings = settingsState.currentSettings;
+          const voice = (settings["tts.voice"] as string) || "af_bella";
+          const synthSpeed = Math.max(
+            0.25,
+            Math.min(3, Number(settings["tts.synthesisSpeed"]) || 1),
+          );
+          await synthesizeTts("Hi.", voice, synthSpeed);
+        } catch (e) {
+          console.warn("[tts] pre-warm failed (non-fatal):", e);
+        }
         this.loaded = true;
       } catch (e) {
         console.error("[tts] load failed:", e);
@@ -179,7 +200,10 @@ class TTSState {
     if (!this.enabled || !this.loaded) return;
     this.reset();
     this.currentMessageId = messageId;
-    const stripped = stripMarkdownForTTS(content);
+    let stripped = stripMarkdownForTTS(content);
+    if (!settingsState.currentSettings["tts.spellOutEmojis"]) {
+      stripped = stripEmojisForTTS(stripped);
+    }
     if (!stripped) {
       this.currentMessageId = null;
       return;
@@ -404,6 +428,9 @@ class TTSState {
     const a = entry.audio as HTMLAudioElement & { preservesPitch?: boolean };
     a.preservesPitch = true;
     a.playbackRate = entry.playbackRate;
+    const volRaw = Number(settingsState.currentSettings["tts.volume"]);
+    const volPct = Number.isFinite(volRaw) ? volRaw : 100;
+    a.volume = Math.max(0, Math.min(100, volPct)) / 100;
     entry.audio.play().catch((e) => {
       console.warn("[tts] play failed:", e);
       this.onEntryEnded(entry);

@@ -197,7 +197,7 @@
     {#if selectedId}
       <button
         type="button"
-        class="flex items-center shrink-0 bg-default-300 hover:bg-err text-default-800 hover:text-white rounded-lg w-8 h-8 justify-center hover:cursor-pointer transition-colors"
+        class="flex items-center shrink-0 bg-default-300 hover:bg-accent-red-500 text-default-800 hover:text-white rounded-lg w-8 h-8 justify-center hover:cursor-pointer transition-colors"
         onclick={handleDelete}
         title="Delete snippet"
         aria-label="Delete snippet"
@@ -236,7 +236,7 @@
               type="text"
               aria-label="Snippet trigger"
               class="bg-default-300 text-default-800 rounded-lg block w-full h-8 pl-6 pr-2 outline-none font-mono {triggerError
-                ? 'bg-err-input border-err border'
+                ? 'bg-accent-red-300 border-accent-red-400 border'
                 : ''}"
               value={draftTrigger.startsWith("@")
                 ? draftTrigger.slice(1)

@@ -45,16 +45,27 @@ export default defineConfig({
       ([, s]) => `border-neutral-${inversionMap[s] ?? s} dark:border-neutral-${s}`,
     ],
     [
-      /^bg-accent-(blue|purple|red)-(\d+)$/,
+      /^bg-accent-(blue|purple|red|green)-(\d+)$/,
       ([, c, s]) => `bg-${c}-${s} dark:bg-${c}-${inversionMap[s] ?? s}`,
     ],
     [
-      /^text-accent-(blue|purple|red)-(\d+)$/,
+      /^text-accent-(blue|purple|red|green)-(\d+)$/,
       ([, c, s]) => `text-${c}-${s} dark:text-${c}-${inversionMap[s] ?? s}`,
     ],
     [
-      /^border-accent-(blue|purple|red)-(\d+)$/,
+      /^border-accent-(blue|purple|red|green)-(\d+)$/,
       ([, c, s]) => `border-${c}-${s} dark:border-${c}-${inversionMap[s] ?? s}`,
+    ],
+    // Inner-card background — one level of lightness darker than its parent
+    // bubble (`bg-default-300` / `bg-accent-X-300`), in BOTH themes. This
+    // intentionally side-steps the inversion map: light goes to -400 and dark
+    // goes to -700, so the card always reads as recessed against the bubble.
+    [
+      /^bg-card-(default|blue|purple|red|green)$/,
+      ([, c]) => {
+        const color = c === "default" ? "neutral" : c;
+        return `bg-${color}-400 dark:bg-${color}-700`;
+      },
     ],
     {
       "bg-chip-neutral": "bg-neutral-200 dark:bg-neutral-700",
@@ -71,9 +82,6 @@ export default defineConfig({
       "bg-ctx-yellow": "bg-yellow-200 dark:bg-yellow-800",
       "bg-ctx-orange": "bg-orange-200 dark:bg-orange-800",
       "bg-ctx-red": "bg-red-200 dark:bg-red-800",
-      "bg-err-light": "bg-red-100 dark:bg-red-900",
-      "border-err": "border-red-400 dark:border-red-600",
-      "bg-err-input": "bg-red-300 dark:bg-red-700",
     },
   ],
 });

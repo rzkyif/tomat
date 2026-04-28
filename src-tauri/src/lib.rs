@@ -246,7 +246,11 @@ pub fn run() {
             clear_tomat_settings,
             save_snippet,
             list_snippets,
-            delete_snippet
+            delete_snippet,
+            open_toolkits_folder,
+            open_toolkit_entry,
+            seed_sample_toolkits,
+            downloads_dir
         ])
         .build(tauri::generate_context!())
         // Intentional panic on startup: Tauri runtime failure is unrecoverable.

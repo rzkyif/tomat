@@ -78,10 +78,13 @@ pub fn position_window(
 ) -> AppResult<()> {
     let monitor = resolve_monitor(&app, &monitor_id)?;
     let scale_factor = monitor.scale_factor();
-    let mon_width = (monitor.size().width as f64 / scale_factor) as u32;
-    let mon_height = (monitor.size().height as f64 / scale_factor) as u32;
-    let mon_x = (monitor.position().x as f64 / scale_factor) as i32;
-    let mon_y = (monitor.position().y as f64 / scale_factor) as i32;
+    // work_area excludes OS chrome (macOS menu bar, Windows/Linux taskbars/panels);
+    // size()/position() include them, which clips the bottom of full-height windows.
+    let work_area = monitor.work_area();
+    let mon_width = (work_area.size.width as f64 / scale_factor) as u32;
+    let mon_height = (work_area.size.height as f64 / scale_factor) as u32;
+    let mon_x = (work_area.position.x as f64 / scale_factor) as i32;
+    let mon_y = (work_area.position.y as f64 / scale_factor) as i32;
 
     let width: u32 = width.unwrap_or(700).clamp(400, 1200);
 
@@ -490,3 +493,143 @@ pub async fn get_process_metrics(
     Ok(out)
 }
 
+// -------------------------------------------------------------------
+// Toolkits
+// -------------------------------------------------------------------
+
+async fn toolkits_dir(handle: &AppHandle) -> AppResult<std::path::PathBuf> {
+    let home = handle.path().home_dir()?;
+    let dir = home.join(".tomat").join("toolkits");
+    tokio::fs::create_dir_all(&dir).await?;
+    Ok(dir)
+}
+
+/// Open the `~/.tomat/toolkits/` folder in the user's file manager. Creates
+/// the folder first if it doesn't exist so the Settings UI can wire this to
+/// a button that's always usable.
+#[tauri::command]
+pub async fn open_toolkits_folder(handle: AppHandle) -> AppResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = toolkits_dir(&handle).await?;
+    handle
+        .opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| AppError::external(e.to_string()))
+}
+
+/// Open a specific toolkit file or folder in the user's file manager. Id
+/// matches the filesystem entry name; path is canonicalized and must resolve
+/// under `~/.tomat/toolkits/`.
+#[tauri::command]
+pub async fn open_toolkit_entry(handle: AppHandle, id: String) -> AppResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let root = toolkits_dir(&handle).await?;
+    let root_canon = root.canonicalize()?;
+    let candidate_file = root.join(format!("{id}.ts"));
+    let candidate_dir = root.join(&id);
+    let target = if candidate_dir.exists() {
+        candidate_dir
+    } else if candidate_file.exists() {
+        candidate_file
+    } else {
+        return Err(AppError::not_found(format!(
+            "toolkit entry not found: {id}"
+        )));
+    };
+    let canonical = paths::resolve_within(&target, &root_canon)
+        .ok_or_else(|| AppError::validation("invalid toolkit path"))?;
+    handle
+        .opener()
+        .open_path(canonical.to_string_lossy(), None::<&str>)
+        .map_err(|e| AppError::external(e.to_string()))
+}
+
+/// Seed `~/.tomat/toolkits/` with bundled sample toolkits and the
+/// `toolkits.d.ts` SDK file on first run. Existing entries with the same
+/// name are left untouched. Returns the ids actually seeded.
+#[tauri::command]
+pub async fn seed_sample_toolkits(handle: AppHandle) -> AppResult<Vec<String>> {
+    let dest_root = toolkits_dir(&handle).await?;
+
+    let resources_root = handle
+        .path()
+        .resource_dir()?
+        .join("resources")
+        .join("toolkits");
+
+    if !resources_root.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut seeded: Vec<String> = Vec::new();
+
+    let sdk_src = resources_root.join("toolkits.d.ts");
+    if sdk_src.exists() {
+        let sdk_dst = dest_root.join("toolkits.d.ts");
+        let _ = tokio::fs::copy(&sdk_src, sdk_dst).await;
+    }
+
+    let mut reader = match tokio::fs::read_dir(&resources_root).await {
+        Ok(r) => r,
+        Err(_) => return Ok(vec![]),
+    };
+
+    while let Some(entry) = reader.next_entry().await? {
+        let p = entry.path();
+        let name = match p.file_name().and_then(|s| s.to_str()) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        if name == "toolkits.d.ts" {
+            continue;
+        }
+        let dst = dest_root.join(&name);
+        if dst.exists() {
+            continue;
+        }
+        let meta = entry.metadata().await?;
+        if meta.is_dir() {
+            if let Err(e) = copy_dir_recursive(&p, &dst).await {
+                eprintln!("[toolkits] failed to seed {name}: {e}");
+                continue;
+            }
+            seeded.push(name);
+        } else if meta.is_file() && name.ends_with(".ts") {
+            if let Err(e) = tokio::fs::copy(&p, &dst).await {
+                eprintln!("[toolkits] failed to seed {name}: {e}");
+                continue;
+            }
+            let id = name.trim_end_matches(".ts").to_string();
+            seeded.push(id);
+        }
+    }
+
+    Ok(seeded)
+}
+
+async fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    tokio::fs::create_dir_all(dst).await?;
+    let mut reader = tokio::fs::read_dir(src).await?;
+    while let Some(entry) = reader.next_entry().await? {
+        let file_type = entry.file_type().await?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            Box::pin(copy_dir_recursive(&from, &to)).await?;
+        } else if file_type.is_file() {
+            tokio::fs::copy(&from, &to).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Resolve the platform's default Downloads directory. Used by the
+/// `download_url` sample toolkit.
+#[tauri::command]
+pub async fn downloads_dir(handle: AppHandle) -> AppResult<String> {
+    if let Some(p) = dirs::download_dir() {
+        return Ok(p.to_string_lossy().to_string());
+    }
+    let home = handle.path().home_dir()?;
+    Ok(home.join("Downloads").to_string_lossy().to_string())
+}

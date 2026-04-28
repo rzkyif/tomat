@@ -29,7 +29,7 @@
     Disabled: "i-material-symbols-nearby-off-rounded",
     Error: "i-material-symbols-warning-rounded",
     Downloading: "i-material-symbols-cloud-download-rounded",
-    Loading: "i-line-md:loading-twotone-loop",
+    Loading: "i-line-md:loading-loop",
     Running: "i-material-symbols-check-rounded",
   };
   const icon = $derived(iconMap[update.status as ServerStatus]);

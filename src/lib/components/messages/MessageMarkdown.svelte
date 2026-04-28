@@ -154,7 +154,7 @@
 
 {#if content}
   {#if renderedHtml === null}
-    <i class="i-line-md:loading-alt-loop text-3xl"></i>
+    <i class="i-line-md:loading-loop text-3xl"></i>
   {:else}
     <div bind:this={container} class="markdown-content min-w-0 overflow-hidden">
       {@html renderedHtml}
@@ -386,12 +386,9 @@
     }
 
     :global(a) {
-      color: rgb(59, 130, 246);
+      color: #171717;
       text-decoration: underline;
       text-underline-offset: 0.2em;
-      &:hover {
-        color: rgb(37, 99, 235);
-      }
     }
 
     :global(img) {
@@ -516,6 +513,9 @@
     }
     :global(hr) {
       border-top-color: #6b7280;
+    }
+    :global(a) {
+      color: #f5f5f5;
     }
     :global(li:has(input[type="checkbox"]))::before {
       background: #2d2d2d;

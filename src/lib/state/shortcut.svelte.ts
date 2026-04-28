@@ -20,6 +20,15 @@ async function windowIsVisible(): Promise<boolean> {
 }
 
 class ShortcutHandler {
+  // Reactive: true while the push-to-talk shortcut is currently being held
+  // (between press and either timer-fire or release). Drives the mic button's
+  // hold-progress ring so the UI animates from 0 → 100% in lockstep with the
+  // hold timer.
+  pttHolding = $state(false);
+  // The hold duration captured at press time (ms). Pinned for the duration
+  // of the press so a settings change mid-hold can't desync the animation.
+  pttHoldDuration = $state(0);
+
   // Regular fields - no reactivity needed, just persistent across listener
   // fires. Using `this` rather than module-scope variables ensures we never
   // read from a stale closure capture.
@@ -47,6 +56,8 @@ class ShortcutHandler {
     }
     this.pressStart = 0;
     this.wasVisibleOnPress = false;
+    this.pttHolding = false;
+    this.pttHoldDuration = 0;
   }
 
   private async onPressed() {
@@ -67,8 +78,13 @@ class ShortcutHandler {
       }
 
       if (this.holdTimer) clearTimeout(this.holdTimer);
+      // Flip the reactive flag synchronously on press so the UI ring starts
+      // animating immediately, not after the timer fires.
+      this.pttHoldDuration = duration;
+      this.pttHolding = true;
       this.holdTimer = setTimeout(async () => {
         this.holdTimer = null;
+        this.pttHolding = false;
         if (this.pressStart && !vadManager.enabled && !vadManager.loading) {
           await vadManager.toggle();
         }
@@ -99,6 +115,7 @@ class ShortcutHandler {
       clearTimeout(this.holdTimer);
       this.holdTimer = null;
     }
+    this.pttHolding = false;
 
     if (held < duration) {
       // Short tap: if visible on press, hide. If hidden on press, we already

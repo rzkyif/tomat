@@ -8,6 +8,8 @@ export * from "./settings.svelte";
 export * from "./messages.svelte";
 export * from "./confirm.svelte";
 export * from "./snippets.svelte";
+export * from "./toolkits.svelte";
+export * from "./expansion.svelte";
 // tts.svelte is intentionally not re-exported here: it is heavy (audio + TTS
 // model plumbing) and every +page.svelte consumer of `$lib/state` would
 // otherwise drag it into the eager first-paint graph. Import it directly

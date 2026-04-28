@@ -36,6 +36,7 @@ export type SettingType =
   | "services"
   | "storage"
   | "snippets"
+  | "toolkits"
   | "shortcut";
 
 export type ActivationMode = "manual" | "sticky" | "push-to-talk";
@@ -50,6 +51,19 @@ export const TTS_BASE_FILES: readonly string[] = [
   `${TTS_REPO}/tokenizer.json`,
   `${TTS_REPO}/tokenizer_config.json`,
   `${TTS_REPO}/onnx/model_quantized.onnx`,
+];
+
+// Embedding model for toolkit tool-relevance RAG. Fetched into
+// ~/.tomat/models/Xenova/all-MiniLM-L6-v2/... by the shared Rust downloader so
+// transformers.js can resolve it via env.localModelPath without ever hitting
+// the network at runtime. dtype "q8" is used at load time to pick the
+// `model_quantized.onnx` variant (same convention as Kokoro).
+export const EMBED_REPO = "@Xenova/all-MiniLM-L6-v2/main";
+export const EMBED_BASE_FILES: readonly string[] = [
+  `${EMBED_REPO}/config.json`,
+  `${EMBED_REPO}/tokenizer.json`,
+  `${EMBED_REPO}/tokenizer_config.json`,
+  `${EMBED_REPO}/onnx/model_quantized.onnx`,
 ];
 
 export interface SettingOption {
@@ -158,7 +172,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "string",
             defaultValue: "",
             optional: true,
-            placeholder: "e.g. Tomat",
+            placeholder: "e.g. Sebastian",
           },
           {
             id: "general.context.language",
@@ -768,6 +782,63 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     ],
   },
   {
+    id: "dualModel",
+    name: "Dual Model",
+    sections: [
+      {
+        fields: [
+          {
+            id: "dualModel.enabled",
+            name: "Enable Dual Model",
+            description:
+              "Route complex prompts to a stronger external model while keeping simple prompts on the default model.\nThe detection prompt is configured in the Prompts group.",
+            type: "boolean",
+            defaultValue: false,
+          },
+        ],
+      },
+      {
+        label: "Secondary Model",
+        visibleWhen: { field: "dualModel.enabled", eq: true },
+        fields: [
+          {
+            id: "dualModel.external.baseUrl",
+            name: "Base URL",
+            description:
+              "API endpoint URL. Must use HTTPS for remote hosts; HTTP is only allowed for localhost.",
+            type: "string",
+            defaultValue: "",
+            placeholder: "https://api.example.com/v1",
+            regex: SECURE_URL_VALIDATION,
+          },
+          {
+            id: "dualModel.external.apiKey",
+            name: "API Key",
+            description: "Authentication key.",
+            type: "password",
+            defaultValue: "",
+            placeholder: "sk-...",
+          },
+          {
+            id: "dualModel.external.model",
+            name: "Model",
+            description: "Model identifier to use.",
+            type: "string",
+            defaultValue: "",
+            placeholder: "gpt-4o",
+          },
+          {
+            id: "dualModel.external.contextSize",
+            name: "Context Size",
+            description: "Maximum context window length, used for usage tracking.",
+            type: "number",
+            defaultValue: 128000,
+          },
+        ],
+      },
+    ],
+  },
+  {
     id: "stt",
     name: "Speech-to-Text",
     sections: [
@@ -796,7 +867,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             name: "Auto Send After Transcription",
             description: "Automatically send the message as soon as transcription completes.",
             type: "boolean",
-            defaultValue: false,
+            defaultValue: true,
           },
         ],
       },
@@ -810,7 +881,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description:
               "How the microphone is activated.\n\nManual: use the mic button. Voice input turns off whenever the app is hidden or closed.\n\nSticky: use the mic button. Voice input stays on through hides, closes, and restarts.\n\nPush to Talk: hold the global shortcut to dictate. Quick taps show or hide the window instead.",
             type: "select",
-            defaultValue: "manual",
+            defaultValue: "push-to-talk",
             options: [
               { value: "manual", label: "Manual" },
               { value: "sticky", label: "Sticky" },
@@ -1100,6 +1171,15 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "boolean",
             defaultValue: false,
           },
+          {
+            id: "tts.spellOutEmojis",
+            name: "Spell Out Emojis",
+            description:
+              "Pass emojis through to the voice model so it pronounces them.\nWhen disabled (default), emojis are stripped from the text before synthesis.",
+            type: "boolean",
+            defaultValue: false,
+            visibleWhen: { field: "tts.enabled", eq: true },
+          },
         ],
       },
       {
@@ -1210,62 +1290,135 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               },
             ],
           },
+          {
+            id: "tts.volume",
+            name: "Volume",
+            description: "Playback volume for synthesized speech.\nAccepted range: 0 to 100.",
+            type: "number",
+            defaultValue: 70,
+            suffix: "%",
+            regex: [
+              {
+                regex: "^(?:[0-9]|[1-9][0-9]|100)$",
+                errorMessage: "Must be between 0 and 100",
+              },
+            ],
+          },
         ],
       },
     ],
   },
   {
-    id: "dualModel",
-    name: "Dual Model",
+    id: "toolkits",
+    name: "Tools",
     sections: [
       {
         fields: [
           {
-            id: "dualModel.enabled",
-            name: "Enable Dual Model",
+            id: "tools.enabled",
+            name: "Enable Tool Use",
             description:
-              "Route complex prompts to a stronger external model while keeping simple prompts on the default model.\nThe detection prompt is configured in the Prompts group.",
+              "Allow trusted toolkits to inject tools into each chat turn.\nWhen on, relevant tools are added to the LLM request via the native `tools` API, letting the model call them mid-turn.",
             type: "boolean",
             defaultValue: false,
+          },
+          {
+            id: "toolkits.list",
+            name: "Installed Toolkits",
+            description:
+              "Drop a .ts file or folder into ~/.tomat/toolkits/, press Refresh, then Trust/Install/Enable.\nOnly trusted + enabled toolkits contribute tools to the agent.",
+            type: "toolkits",
+            defaultValue: "",
+            visibleWhen: { field: "tools.enabled", eq: true },
           },
         ],
       },
       {
-        label: "Secondary Model",
-        visibleWhen: { field: "dualModel.enabled", eq: true },
+        label: "Tool Selection",
+        visibleWhen: { field: "tools.enabled", eq: true },
         fields: [
           {
-            id: "dualModel.external.baseUrl",
-            name: "Base URL",
+            id: "tools.maxTools",
+            name: "Max Tools Per Turn",
             description:
-              "API endpoint URL. Must use HTTPS for remote hosts; HTTP is only allowed for localhost.",
-            type: "string",
-            defaultValue: "",
-            placeholder: "https://api.example.com/v1",
-            regex: SECURE_URL_VALIDATION,
-          },
-          {
-            id: "dualModel.external.apiKey",
-            name: "API Key",
-            description: "Authentication key.",
-            type: "password",
-            defaultValue: "",
-            placeholder: "sk-...",
-          },
-          {
-            id: "dualModel.external.model",
-            name: "Model",
-            description: "Model identifier to use.",
-            type: "string",
-            defaultValue: "",
-            placeholder: "gpt-4o",
-          },
-          {
-            id: "dualModel.external.contextSize",
-            name: "Context Size",
-            description: "Maximum context window length, used for usage tracking.",
+              "Cap on tools passed to the main model. When the LLM filter is enabled, applied after filtering as a final cap; when disabled, applied directly to the embedding-similarity ranking.",
             type: "number",
-            defaultValue: 128000,
+            defaultValue: 30,
+            regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
+          },
+          {
+            id: "tools.secondPassEnabled",
+            name: "Enable LLM Filter (2nd Pass)",
+            description:
+              "Run a second-pass LLM filter to drop clearly unrelated tools after the embedding-similarity pass.\nDisable to use only embedding similarity ranking truncated to Max Tools.",
+            type: "boolean",
+            defaultValue: true,
+          },
+          {
+            id: "tools.filterReasoning",
+            name: "Filter Reasoning Mode",
+            description:
+              "Whether the second-pass filter LLM should produce a reasoning trace before its answer.\nMay improve filtering accuracy on borderline cases but slows down responses.",
+            type: "select",
+            defaultValue: "off",
+            options: [
+              { value: "off", label: "Off" },
+              { value: "on", label: "On" },
+              { value: "auto", label: "Auto" },
+            ],
+            visibleWhen: { field: "tools.secondPassEnabled", eq: true },
+          },
+          {
+            id: "tools.filterReasoningBudget",
+            name: "Filter Reasoning Token Budget",
+            description: "Number of tokens reserved for the filter reasoning trace.",
+            type: "number",
+            defaultValue: "",
+            visibleWhen: { field: "tools.filterReasoning", neq: "off" },
+            optional: true,
+            placeholder: "optional",
+          },
+          {
+            id: "tools.maxHops",
+            name: "Max Tool-Call Hops Per Turn",
+            description:
+              "Hard cap on consecutive tool_call rounds within a single user turn.\nProtects against runaway loops when a tool's output keeps the model requesting more calls.",
+            type: "number",
+            defaultValue: 5,
+            regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
+          },
+        ],
+      },
+      {
+        label: "Worker Pool",
+        visibleWhen: { field: "tools.enabled", eq: true },
+        fields: [
+          {
+            id: "toolkits.maxWarmWorkers",
+            name: "Max Warm Workers",
+            description:
+              "Maximum number of toolkit workers kept alive at once.\nHigher values reduce cold-start latency; lower values cap resident memory when hundreds of toolkits are enabled.",
+            type: "number",
+            defaultValue: 8,
+            regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
+          },
+          {
+            id: "toolkits.workerIdleMs",
+            name: "Worker Idle Timeout",
+            description:
+              "Terminate a warm worker after this long with no tool calls.\nShorter values free memory faster; longer values keep frequently-used toolkits warm.",
+            type: "number",
+            defaultValue: 300000,
+            suffix: "ms",
+            regex: [{ regex: "^[0-9]+$", errorMessage: "Must be a non-negative integer" }],
+          },
+          {
+            id: "toolkits.ignorePostinstallScripts",
+            name: "Ignore Postinstall Scripts",
+            description:
+              "Pass `--ignore-scripts` to `bun install` so dependency postinstall hooks don't run.\nRecommended on: postinstall scripts from transitive dependencies are a common vector for surprise code execution. Disable only if a toolkit's dependencies require native builds.",
+            type: "boolean",
+            defaultValue: true,
           },
         ],
       },
@@ -1353,7 +1506,8 @@ export function getDefaultSettings(): Record<string, any> {
           field.type !== "command_preview" &&
           field.type !== "services" &&
           field.type !== "storage" &&
-          field.type !== "snippets"
+          field.type !== "snippets" &&
+          field.type !== "toolkits"
         ) {
           defaults[field.id] = field.defaultValue;
         }
@@ -1512,7 +1666,8 @@ export function searchFields(
           field.type === "command_preview" ||
           field.type === "services" ||
           field.type === "storage" ||
-          field.type === "snippets"
+          field.type === "snippets" ||
+          field.type === "toolkits"
         )
           continue;
         if (!evalCondition(field.visibleWhen, currentSettings)) continue;

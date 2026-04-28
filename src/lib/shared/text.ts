@@ -69,11 +69,32 @@ export function stripMarkdownForTTS(input: string): string {
   // 14. Inline code.
   text = text.replace(/`([^`\n]+?)`/g, "$1");
 
-  // 15. Clean up pipe-substitution artifacts: collapse runs of ", ..." and
+  // 15. Promote line breaks into sentence boundaries when the line above
+  //     doesn't already end with terminal punctuation. Without this, the
+  //     next step's `\s+` collapse merges list items, headings, and short
+  //     paragraphs into one run-on "sentence" that Intl.Segmenter cannot
+  //     split because it has no .!? to break on. `:` and `;` stay in the
+  //     negated class so we don't double-punctuate soft-pause endings.
+  text = text.replace(/([^.!?:;\s])(\n+)/g, "$1.$2");
+
+  // 16. Clean up pipe-substitution artifacts: collapse runs of ", ..." and
   //     strip leading/trailing commas, plus collapse any whitespace.
   text = text.replace(/(?:,\s*){2,}/g, ", ");
   text = text.replace(/^[\s,]+|[\s,]+$/g, "");
   text = text.replace(/\s+/g, " ");
 
   return text.trim();
+}
+
+// Matches a base pictographic glyph plus any trailing variation selectors
+// (U+FE0F) and ZWJ-joined pictographs, so combined emoji like 👨‍👩‍👧 and ❤️
+// disappear cleanly instead of leaving dangling joiners or selectors behind.
+const EMOJI_PATTERN = /\p{Extended_Pictographic}(?:\u{FE0F}|\u{200D}\p{Extended_Pictographic})*/gu;
+
+/**
+ * Strip emoji glyphs from text destined for TTS so the voice model doesn't
+ * try to pronounce them. Safe to run on partial, mid-stream text.
+ */
+export function stripEmojisForTTS(input: string): string {
+  return input.replace(EMOJI_PATTERN, "").replace(/\s+/g, " ").trim();
 }

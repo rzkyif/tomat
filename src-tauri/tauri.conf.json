@@ -45,7 +45,9 @@
     ],
     "resources": [
       "resources/server.js",
+      "resources/runtime.js",
       "resources/node_modules/**/*",
+      "resources/toolkits/**/*",
       "binaries/**/*.dylib",
       "binaries/**/*.so",
       "binaries/**/*.dll"

@@ -19,13 +19,16 @@ export type UserMenuCtx = {
 export type AgentMenuCtx = {
   messageId: string;
   isStreaming: boolean;
-  hasReasoning: boolean;
   result: string;
-  reasoning?: string;
   ttsActive: boolean;
   isSpeakingThis: boolean;
   isSynthesizing: boolean;
   onReprocess?: () => void;
+  onDelete?: () => void;
+};
+
+export type ReasoningMenuCtx = {
+  reasoning: string;
   onDelete?: () => void;
 };
 
@@ -79,36 +82,14 @@ export async function showAgentMessageMenu(ctx: AgentMenuCtx): Promise<void> {
     }
   }
 
-  const copyItems: MenuItemSpec[] = [];
-  const reasoning = ctx.reasoning;
-  if (ctx.hasReasoning && reasoning) {
-    copyItems.push({
-      text: "Copy Thoughts",
-      action: () => {
-        void navigator.clipboard.writeText(reasoning);
-      },
-    });
-  }
   if (ctx.result) {
-    copyItems.push({
+    if (items.length > 0) items.push({ item: "Separator" });
+    items.push({
       text: "Copy Result",
       action: () => {
         void navigator.clipboard.writeText(ctx.result);
       },
     });
-  }
-  if (ctx.hasReasoning && reasoning) {
-    copyItems.push({
-      text: "Copy All",
-      action: () => {
-        const combined = `Reasoning:\n${reasoning}\n\nResult:\n${ctx.result}`;
-        void navigator.clipboard.writeText(combined);
-      },
-    });
-  }
-  if (copyItems.length > 0) {
-    if (items.length > 0) items.push({ item: "Separator" });
-    items.push(...copyItems);
   }
 
   const tailItems: MenuItemSpec[] = [];
@@ -127,6 +108,30 @@ export async function showAgentMessageMenu(ctx: AgentMenuCtx): Promise<void> {
   if (tailItems.length > 0) {
     if (items.length > 0) items.push({ item: "Separator" });
     items.push(...tailItems);
+  }
+
+  if (items.length === 0) return;
+  await popup(items);
+}
+
+export async function showReasoningMessageMenu(ctx: ReasoningMenuCtx): Promise<void> {
+  const items: MenuItemSpec[] = [];
+
+  if (ctx.reasoning) {
+    items.push({
+      text: "Copy Thoughts",
+      action: () => {
+        void navigator.clipboard.writeText(ctx.reasoning);
+      },
+    });
+  }
+
+  if (ctx.onDelete) {
+    if (items.length > 0) items.push({ item: "Separator" });
+    items.push({
+      text: "Delete Message",
+      action: () => ctx.onDelete?.(),
+    });
   }
 
   if (items.length === 0) return;
