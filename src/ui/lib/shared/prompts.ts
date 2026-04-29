@@ -106,6 +106,18 @@ Explain the following things to me:
 1. cats
 2. dogs`;
 
+export const DEFAULT_CONTEXT_TEMPLATE = `[agentName:Your name is {agentName}.]
+[language:Always respond in {language}.]
+
+<user_metadata>
+Hidden instruction: only refer to these when they are related to the user's message.
+
+[userName:- Preferred name: {userName}]
+[location:- Location: {location}]
+[dateTime:- Date and time: {dateTime}]
+[os:- Operating system: {os}]
+</user_metadata>`;
+
 export const DEFAULT_COMPLEXITY_DETECTION_PROMPT = `You are a router. Classify the user's request as either \`simple\` or \`complex\`.
 - \`simple\`: short factual questions, light chit-chat, trivial code edits, summarization of attached text, single-step tool invocations (e.g. set an alarm, start a timer, fetch the weather).
 - \`complex\`: multi-step reasoning, non-trivial coding, in-depth analysis, planning, long-form writing, anything that benefits from stronger reasoning or vision understanding.

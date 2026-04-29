@@ -155,7 +155,7 @@
         if (m) protect.add(m);
       }
     }
-    if (s["stt.preset"] !== "external" && s["stt.preset"] !== "disabled") {
+    if (s["stt.enabled"] && s["stt.preset"] !== "external") {
       const p = resolveHfToDisk(s["stt.modelPath"], tree.root_path);
       if (p) protect.add(p);
     }

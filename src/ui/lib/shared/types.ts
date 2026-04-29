@@ -92,9 +92,20 @@ export type RelevantToolPhase2Entry = {
 
 export type RelevantToolsState = {
   status: "filtering" | "complete" | "error";
-  phase1: RelevantToolPhase1Entry[];
-  /** null = second pass disabled (phase 1 is the final list). */
+  /** null = phase 1 (embedding similarity) didn't run for this turn. Happens
+   *  when the user's filtering toggle is off or the threshold-bypass kicks
+   *  in. Empty array means "ran but produced nothing". */
+  phase1: RelevantToolPhase1Entry[] | null;
+  /** null = phase 2 (LLM filter) didn't run. Empty array means "ran but
+   *  produced nothing". */
   phase2: RelevantToolPhase2Entry[] | null;
+  /** null = always-available bypass didn't run (toggle off OR no qualifying
+   *  tools exist). Empty array means "ran but no tools were appended"
+   *  (rare — every alwaysAvailable tool was already in phase2). When phase1
+   *  + phase2 are both null and this is a non-empty list, the bubble shows
+   *  only this section (filter pipeline was bypassed; all enabled tools are
+   *  surfaced here). */
+  alwaysAvailable: RelevantToolPhase2Entry[] | null;
   /** Populated when the filter LLM call failed; phase2 falls back to phase1 in
    *  that case so tools still reach the main model. */
   errorMessage?: string;

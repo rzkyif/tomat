@@ -20,6 +20,7 @@ import {
   DEFAULT_AUTOCORRECT_PROMPT,
   DEFAULT_MERGE_TRANSCRIPTION_PROMPT,
   DEFAULT_COMPLEXITY_DETECTION_PROMPT,
+  DEFAULT_CONTEXT_TEMPLATE,
 } from "./prompts";
 
 export type SettingType =
@@ -72,11 +73,16 @@ export interface SettingOption {
 }
 
 export interface FieldCondition {
-  field: string;
+  /** Field id to compare against. Optional only when `allOf` is set —
+   *  in that case the parent acts as a pure AND wrapper around its children. */
+  field?: string;
   eq?: string | number | boolean;
   neq?: string | number | boolean;
   in?: (string | number | boolean)[];
   nin?: (string | number | boolean)[];
+  /** When set, all listed conditions must pass. Combines with the field-level
+   *  comparison if both are present. */
+  allOf?: FieldCondition[];
 }
 
 export interface PresetBadge {
@@ -184,6 +190,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             placeholder: "e.g. English",
           },
           {
+            id: "general.context.locationAuto",
+            name: "Auto-Detect Location",
+            description:
+              "Derive your location from the OS timezone (city + country) instead of typing it manually.\nFully offline: uses `Intl.DateTimeFormat().resolvedOptions().timeZone` plus an IANA → country lookup. No network calls, no permissions.",
+            type: "boolean",
+            defaultValue: false,
+          },
+          {
             id: "general.context.location",
             name: "Location",
             description:
@@ -192,6 +206,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             defaultValue: "",
             optional: true,
             placeholder: "e.g. San Francisco, CA",
+            visibleWhen: { field: "general.context.locationAuto", eq: false },
           },
           {
             id: "general.context.dateTime",
@@ -246,6 +261,38 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               "Global keyboard shortcut to show or hide the app window.\nClick the field and press a key combination to set it. Clear to disable.",
             type: "shortcut",
             defaultValue: "super+ctrl+shift+z",
+            optional: true,
+          },
+        ],
+      },
+      {
+        label: "Input",
+        fields: [
+          {
+            id: "shortcuts.attachFile",
+            name: "Attach File",
+            description:
+              "Open the file picker to attach a file to the next message.\nOnly active while the user input is focused (i.e. not while the Settings panel is open).",
+            type: "shortcut",
+            defaultValue: "super+ctrl+shift+a",
+            optional: true,
+          },
+          {
+            id: "shortcuts.captureScreen",
+            name: "Capture Full Screen",
+            description:
+              "Capture the primary monitor as an image attachment.\nOnly active while the user input is focused.",
+            type: "shortcut",
+            defaultValue: "super+ctrl+shift+s",
+            optional: true,
+          },
+          {
+            id: "shortcuts.captureRegion",
+            name: "Capture Screen Region",
+            description:
+              "Open the region-capture overlay so you can drag-select a rectangle to attach.\nOnly active while the user input is focused.",
+            type: "shortcut",
+            defaultValue: "super+ctrl+shift+x",
             optional: true,
           },
         ],
@@ -324,6 +371,20 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               "Show the active system prompt as a collapsible bubble at the top of each session.\nThe bubble updates to match whatever was last sent to the LLM, including any snippet-triggered changes.",
             type: "boolean",
             defaultValue: false,
+          },
+        ],
+      },
+      {
+        label: "Context Template",
+        fields: [
+          {
+            id: "prompts.contextTemplate",
+            name: "Context Template",
+            description:
+              "Template appended to the system prompt when any context setting (agent name, language, location, date/time, OS, etc.) is enabled.\nUse `{name}` for placeholders and `[name:body]` for conditional segments that disappear when the named setting is unset. Available names: agentName, language, userName, location, dateTime, os.",
+            type: "multiline",
+            defaultValue: DEFAULT_CONTEXT_TEMPLATE,
+            regex: [{ regex: "\\S", errorMessage: "Template cannot be empty" }],
           },
         ],
       },
@@ -843,73 +904,20 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     name: "Speech-to-Text",
     sections: [
       {
-        label: "Transcription",
-        visibleWhen: { field: "stt.preset", neq: "disabled" },
         fields: [
           {
-            id: "stt.llmAutocorrect",
-            name: "Autocorrect Transcription",
+            id: "stt.enabled",
+            name: "Enable Speech-to-Text",
             description:
-              "Use the language model to clean up transcription mistakes after speech recognition.\n\nDisable if you prefer raw Whisper output or want to save a model call per dictation.",
+              "Allow voice dictation via the microphone button or push-to-talk shortcut.\nWhen disabled, the whisper server does not start, the mic button is hidden, and all STT sub-settings are inactive.",
             type: "boolean",
             defaultValue: true,
-          },
-          {
-            id: "stt.llmChainTranscription",
-            name: "Merge Into Existing Input",
-            description:
-              "When text is already in the input, use the language model to merge a new transcription into it rather than replacing it.\n\nDisable to always append as a new line.",
-            type: "boolean",
-            defaultValue: true,
-          },
-          {
-            id: "stt.autoSend",
-            name: "Auto Send After Transcription",
-            description: "Automatically send the message as soon as transcription completes.",
-            type: "boolean",
-            defaultValue: true,
-          },
-        ],
-      },
-      {
-        label: "Voice Input",
-        visibleWhen: { field: "stt.preset", neq: "disabled" },
-        fields: [
-          {
-            id: "stt.activation",
-            name: "Activation",
-            description:
-              "How the microphone is activated.\n\nManual: use the mic button. Voice input turns off whenever the app is hidden or closed.\n\nSticky: use the mic button. Voice input stays on through hides, closes, and restarts.\n\nPush to Talk: hold the global shortcut to dictate. Quick taps show or hide the window instead.",
-            type: "select",
-            defaultValue: "push-to-talk",
-            options: [
-              { value: "manual", label: "Manual" },
-              { value: "sticky", label: "Sticky" },
-              { value: "push-to-talk", label: "Push to Talk" },
-            ],
-          },
-          {
-            id: "stt.holdDuration",
-            name: "Hold Duration",
-            description:
-              "Delay before push-to-talk activates while holding the shortcut.\nTaps shorter than this show or hide the app instead.",
-            type: "number",
-            defaultValue: 250,
-            suffix: "ms",
-            visibleWhen: { field: "stt.activation", eq: "push-to-talk" },
-          },
-          {
-            id: "stt.vadPersistedState",
-            name: "VAD Persisted State",
-            description: "",
-            type: "boolean",
-            defaultValue: false,
-            visibleWhen: { field: "stt.activation", eq: "__never__" },
           },
         ],
       },
       {
         label: "Model",
+        visibleWhen: { field: "stt.enabled", eq: true },
         fields: [
           {
             id: "stt.preset",
@@ -1053,22 +1061,106 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                   description:
                     "Point to a remote transcription API. Skips the local whisper-server.",
                 },
-                {
-                  id: "disabled",
-                  label: "Disabled",
-                  title: "Disabled",
-                  badges: [{ icon: "i-material-symbols-mic-off-rounded", label: "Off" }],
-                  description:
-                    "Turn off speech-to-text entirely. The whisper server does not start and the microphone button is hidden.",
-                },
               ],
             },
           },
         ],
       },
       {
+        label: "Transcription",
+        visibleWhen: { field: "stt.enabled", eq: true },
+        fields: [
+          {
+            id: "stt.llmAutocorrect",
+            name: "Autocorrect Transcription",
+            description:
+              "Use the language model to clean up transcription mistakes after speech recognition.\n\nDisable if you prefer raw Whisper output or want to save a model call per dictation.",
+            type: "boolean",
+            defaultValue: true,
+          },
+          {
+            id: "stt.llmChainTranscription",
+            name: "Merge Into Existing Input",
+            description:
+              "When text is already in the input, use the language model to merge a new transcription into it rather than replacing it.\n\nDisable to always append as a new line.",
+            type: "boolean",
+            defaultValue: true,
+          },
+          {
+            id: "stt.autoSend",
+            name: "Auto Send After Transcription",
+            description: "Automatically send the message as soon as transcription completes.",
+            type: "boolean",
+            defaultValue: true,
+          },
+        ],
+      },
+      {
+        label: "Voice Input",
+        visibleWhen: { field: "stt.enabled", eq: true },
+        fields: [
+          {
+            id: "stt.activation",
+            name: "Activation",
+            description:
+              "How the microphone is activated.\n\nManual: use the mic button. Voice input turns off whenever the app is hidden or closed.\n\nSticky: use the mic button. Voice input stays on through hides, closes, and restarts.\n\nPush to Talk: hold the global shortcut to dictate. Quick taps show or hide the window instead.",
+            type: "select",
+            defaultValue: "push-to-talk",
+            options: [
+              { value: "manual", label: "Manual" },
+              { value: "sticky", label: "Sticky" },
+              { value: "push-to-talk", label: "Push to Talk" },
+            ],
+          },
+          {
+            id: "stt.holdDuration",
+            name: "Hold Duration",
+            description:
+              "Delay before push-to-talk activates while holding the shortcut.\nTaps shorter than this show or hide the app instead.",
+            type: "number",
+            defaultValue: 250,
+            suffix: "ms",
+            visibleWhen: { field: "stt.activation", eq: "push-to-talk" },
+          },
+          {
+            id: "stt.autoVolumeEnabled",
+            name: "Lower System Volume While Listening",
+            description:
+              "Drop the system output volume to a configurable level while voice input is active, then restore it when listening stops.\nUseful for letting your own voice be heard over media playback.",
+            type: "boolean",
+            defaultValue: false,
+          },
+          {
+            id: "stt.autoVolumeTarget",
+            name: "Lowered Volume Target",
+            description:
+              "System volume to apply while voice input is listening.\nAccepted range: 0 to 100.",
+            type: "number",
+            defaultValue: 20,
+            suffix: "%",
+            visibleWhen: { field: "stt.autoVolumeEnabled", eq: true },
+            regex: [
+              { regex: "^(?:[0-9]|[1-9][0-9]|100)$", errorMessage: "Must be between 0 and 100" },
+            ],
+          },
+          {
+            id: "stt.vadPersistedState",
+            name: "VAD Persisted State",
+            description: "",
+            type: "boolean",
+            defaultValue: false,
+            visibleWhen: { field: "stt.activation", eq: "__never__" },
+          },
+        ],
+      },
+      {
         label: "External Provider",
-        visibleWhen: { field: "stt.preset", eq: "external" },
+        visibleWhen: {
+          allOf: [
+            { field: "stt.enabled", eq: true },
+            { field: "stt.preset", eq: "external" },
+          ],
+        },
         fields: [
           {
             id: "stt.external.baseUrl",
@@ -1100,7 +1192,12 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
       },
       {
         label: "Whisper Server Configuration",
-        visibleWhen: { field: "stt.preset", eq: "custom" },
+        visibleWhen: {
+          allOf: [
+            { field: "stt.enabled", eq: true },
+            { field: "stt.preset", eq: "custom" },
+          ],
+        },
         fields: [
           {
             id: "stt.modelPath",
@@ -1338,6 +1435,33 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         visibleWhen: { field: "tools.enabled", eq: true },
         fields: [
           {
+            id: "tools.filteringEnabled",
+            name: "Enable Relevance Filtering",
+            description:
+              "Filter the available toolset down to a relevance-ranked shortlist before each turn (embedding similarity + optional LLM second pass).\nDisable to send every enabled tool to the model on every turn — simpler, but eats more context and slows down small models when many toolkits are installed.",
+            type: "boolean",
+            defaultValue: true,
+          },
+          {
+            id: "tools.filteringMinTools",
+            name: "Filtering Threshold",
+            description:
+              "Skip filtering and send all enabled tools to the model when the total tool count is below this number.\nUseful when you only have a handful of tools and would rather not pay the embedding+LLM cost. Set to 0 to always filter.",
+            type: "number",
+            defaultValue: 0,
+            regex: [{ regex: "^([0-9]|[1-9][0-9]{1,2}|1000)$", errorMessage: "Must be 0-1000" }],
+            visibleWhen: { field: "tools.filteringEnabled", eq: true },
+          },
+          {
+            id: "tools.alwaysAvailableEnabled",
+            name: "Always-Available Tools Bypass",
+            description:
+              "When on, tools whose toolkit declares `alwaysAvailable: true` skip the relevance filter and are always sent to the model.\nOnly takes effect when filtering is enabled — disabling filtering already sends every tool, so the bypass is redundant.",
+            type: "boolean",
+            defaultValue: true,
+            visibleWhen: { field: "tools.filteringEnabled", eq: true },
+          },
+          {
             id: "tools.maxTools",
             name: "Max Tools Per Turn",
             description:
@@ -1345,6 +1469,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "number",
             defaultValue: 30,
             regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
+            visibleWhen: { field: "tools.filteringEnabled", eq: true },
           },
           {
             id: "tools.secondPassEnabled",
@@ -1353,6 +1478,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               "Run a second-pass LLM filter to drop clearly unrelated tools after the embedding-similarity pass.\nDisable to use only embedding similarity ranking truncated to Max Tools.",
             type: "boolean",
             defaultValue: true,
+            visibleWhen: { field: "tools.filteringEnabled", eq: true },
           },
           {
             id: "tools.filterReasoning",
@@ -1366,7 +1492,12 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               { value: "on", label: "On" },
               { value: "auto", label: "Auto" },
             ],
-            visibleWhen: { field: "tools.secondPassEnabled", eq: true },
+            visibleWhen: {
+              allOf: [
+                { field: "tools.filteringEnabled", eq: true },
+                { field: "tools.secondPassEnabled", eq: true },
+              ],
+            },
           },
           {
             id: "tools.filterReasoningBudget",
@@ -1374,7 +1505,12 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description: "Number of tokens reserved for the filter reasoning trace.",
             type: "number",
             defaultValue: "",
-            visibleWhen: { field: "tools.filterReasoning", neq: "off" },
+            visibleWhen: {
+              allOf: [
+                { field: "tools.filteringEnabled", eq: true },
+                { field: "tools.filterReasoning", neq: "off" },
+              ],
+            },
             optional: true,
             placeholder: "optional",
           },
@@ -1522,11 +1658,18 @@ export function evalCondition(
   currentSettings: Record<string, any>,
 ): boolean {
   if (!cond) return true;
-  const val = currentSettings[cond.field];
-  if (cond.eq !== undefined) return val === cond.eq;
-  if (cond.neq !== undefined) return val !== cond.neq;
-  if (cond.in !== undefined) return cond.in.includes(val);
-  if (cond.nin !== undefined) return !cond.nin.includes(val);
+  if (cond.field !== undefined) {
+    const val = currentSettings[cond.field];
+    if (cond.eq !== undefined && val !== cond.eq) return false;
+    if (cond.neq !== undefined && val === cond.neq) return false;
+    if (cond.in !== undefined && !cond.in.includes(val)) return false;
+    if (cond.nin !== undefined && cond.nin.includes(val)) return false;
+  }
+  if (cond.allOf) {
+    for (const sub of cond.allOf) {
+      if (!evalCondition(sub, currentSettings)) return false;
+    }
+  }
   return true;
 }
 
@@ -1571,37 +1714,50 @@ export function getConditionDeps(): Map<string, ConditionDep[]> {
     list.push(dep);
   }
 
+  // Walk a condition (including any nested `allOf` children) and yield each
+  // field id it depends on. Used so a single setting change can re-evaluate
+  // every dependent field/section regardless of how deeply nested.
+  function fieldsOf(cond: FieldCondition | undefined): string[] {
+    if (!cond) return [];
+    const out: string[] = [];
+    if (cond.field !== undefined) out.push(cond.field);
+    if (cond.allOf) {
+      for (const sub of cond.allOf) out.push(...fieldsOf(sub));
+    }
+    return out;
+  }
+
   for (const group of SETTINGS_SCHEMA) {
     for (let si = 0; si < group.sections.length; si++) {
       const section = group.sections[si];
-      if (section.visibleWhen) {
-        add(section.visibleWhen.field, {
+      for (const field of fieldsOf(section.visibleWhen)) {
+        add(field, {
           kind: "section",
           groupId: group.id,
           sectionIndex: si,
           condition: "visibleWhen",
         });
       }
-      if (section.expandWhen) {
-        add(section.expandWhen.field, {
+      for (const field of fieldsOf(section.expandWhen)) {
+        add(field, {
           kind: "section",
           groupId: group.id,
           sectionIndex: si,
           condition: "expandWhen",
         });
       }
-      for (const field of section.fields) {
-        if (field.editableWhen) {
-          add(field.editableWhen.field, {
+      for (const f of section.fields) {
+        for (const field of fieldsOf(f.editableWhen)) {
+          add(field, {
             kind: "field",
-            fieldId: field.id,
+            fieldId: f.id,
             condition: "editableWhen",
           });
         }
-        if (field.optionalWhen) {
-          add(field.optionalWhen.field, {
+        for (const field of fieldsOf(f.optionalWhen)) {
+          add(field, {
             kind: "field",
-            fieldId: field.id,
+            fieldId: f.id,
             condition: "optionalWhen",
           });
         }

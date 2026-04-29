@@ -92,12 +92,31 @@ class SettingsState {
   async updateSetting(key: string, value: unknown) {
     warnIfUnknownKey(key);
     const prevEnabled = !!this.currentSettings["tts.enabled"];
+    const prevSttEnabled = this.currentSettings["stt.enabled"] !== false;
     const prevValue = this.currentSettings[key];
     this.currentSettings[key] = value;
 
     if (key === "shortcuts.toggleWindow") {
       try {
         await this.applyToggleWindowShortcut(value);
+      } catch (e) {
+        this.currentSettings[key] = prevValue;
+        throw e;
+      }
+    } else if (
+      isTauri() &&
+      (key === "shortcuts.attachFile" ||
+        key === "shortcuts.captureScreen" ||
+        key === "shortcuts.captureRegion") &&
+      typeof value === "string" &&
+      value.trim().length > 0
+    ) {
+      // Probe-validate the new combo before persisting. The actual
+      // (re-)registration happens later when UserInput remounts; this just
+      // surfaces "already taken" errors at the moment the user picks the
+      // combo so the bad value doesn't get saved.
+      try {
+        await invoke("validate_shortcut", { accelerator: value });
       } catch (e) {
         this.currentSettings[key] = prevValue;
         throw e;
@@ -110,6 +129,15 @@ class SettingsState {
       this.debounceRestart("llm");
     } else if (key.startsWith("stt.")) {
       this.debounceRestart("stt");
+      // If the STT enable toggle just flipped off, also stop VAD — otherwise
+      // the in-browser VAD instance keeps listening and tries to transcribe
+      // against a whisper-server we just shut down. Use forceDisable rather
+      // than detach so the visibility listener and speech handler stay wired
+      // up for a later re-enable.
+      if (key === "stt.enabled" && prevSttEnabled && !value) {
+        const { vadManager } = await import("$lib/shared/vad.svelte");
+        void vadManager.forceDisable();
+      }
     } else if (key === "tts.enabled") {
       const nowEnabled = !!value;
       if (prevEnabled !== nowEnabled) {

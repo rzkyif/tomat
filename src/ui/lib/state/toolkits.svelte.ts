@@ -40,6 +40,9 @@ export type ToolRow = {
   triggers: string[];
   parameters: Record<string, unknown>;
   fnExport: string;
+  /** When true, this tool bypasses the relevance filter (provided the user
+   *  has the "Always-Available Tools Bypass" toggle enabled). */
+  alwaysAvailable: boolean;
 };
 
 export type UntrustedRow = {
@@ -398,6 +401,19 @@ class ToolkitsState {
     // search only finds tools whose embeddings exist in tool_embeddings,
     // so a toolkit that's enabled but indexed=0 contributes nothing.
     return this.trusted.some((t) => t.enabled && t.embeddedToolCount > 0);
+  }
+
+  /** Flat list of every tool from every enabled, trusted toolkit. Used when
+   *  the relevance filter is bypassed (filtering disabled, or the total tool
+   *  count is below the user's threshold). Excludes tools whose toolkit is
+   *  disabled or untrusted. */
+  allEnabledTools(): ToolRow[] {
+    const out: ToolRow[] = [];
+    for (const tk of this.trusted) {
+      if (!tk.enabled) continue;
+      for (const t of tk.tools) out.push(t);
+    }
+    return out;
   }
 
   /** Embed a user prompt (phase-1 relevance vector). Returns null when the

@@ -6,8 +6,10 @@
  * callback.
  */
 
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { playBeep } from "$lib/shared/beep";
+import { isTauri } from "$lib/shared/env";
 import { settingsState } from "$lib/state/settings.svelte";
 
 class VadManager {
@@ -23,6 +25,10 @@ class VadManager {
   // doesn't match the current value is treated as superseded and cleaned up.
   private enableToken = 0;
   private onSpeech: ((audio: Float32Array) => Promise<void>) | null = null;
+  // True iff this enable() call lowered the system volume and owes a restore.
+  // The Rust side is the single source of truth (via saved_volume) — this
+  // flag just lets us avoid the IPC round-trip when no change was made.
+  private volumeRestorePending = false;
 
   /** Wire up the window-visibility listener and register the speech handler.
    *  Safe to call multiple times - re-attaching replaces the previous hook. */
@@ -62,6 +68,14 @@ class VadManager {
     this.loading = false;
     this.pendingDisable = false;
     this.pausedByHide = false;
+    if (this.volumeRestorePending && isTauri()) {
+      this.volumeRestorePending = false;
+      // Best-effort: detach is sync-shaped here, but invoke returns a Promise.
+      // Fire and forget — the Rust-side Exit handler is the safety net.
+      void invoke("restore_system_volume").catch((e) =>
+        console.warn("[vad] restore_system_volume on detach failed:", e),
+      );
+    }
   }
 
   /** User-facing toggle: if enabled, disables (deferring until current
@@ -79,6 +93,17 @@ class VadManager {
     }
   }
 
+  /** Force-disable immediately (no-op if not enabled). Unlike `toggle()`,
+   *  doesn't defer for an in-progress speech segment. Used when STT is
+   *  globally disabled — the whisper-server is going away, so any segment
+   *  still in the pipeline would just hit a dead endpoint. The visibility
+   *  listener and speech handler stay attached so a later re-enable doesn't
+   *  need a full UserInput remount. */
+  async forceDisable(): Promise<void> {
+    if (!this.enabled && !this.instance) return;
+    await this.disableNow();
+  }
+
   private async disableNow(): Promise<void> {
     if (this.instance) {
       this.instance.destroy();
@@ -90,6 +115,14 @@ class VadManager {
     playBeep("off");
     if (settingsState.currentSettings["stt.activation"] === "sticky") {
       await settingsState.updateSetting("stt.vadPersistedState", false);
+    }
+    if (this.volumeRestorePending && isTauri()) {
+      this.volumeRestorePending = false;
+      try {
+        await invoke("restore_system_volume");
+      } catch (e) {
+        console.warn("[vad] restore_system_volume failed:", e);
+      }
     }
   }
 
@@ -140,6 +173,18 @@ class VadManager {
       playBeep("on");
       if (settingsState.currentSettings["stt.activation"] === "sticky") {
         await settingsState.updateSetting("stt.vadPersistedState", true);
+      }
+      if (settingsState.currentSettings["stt.autoVolumeEnabled"] && isTauri()) {
+        const target = Math.max(
+          0,
+          Math.min(100, Number(settingsState.currentSettings["stt.autoVolumeTarget"]) || 0),
+        );
+        try {
+          await invoke("set_system_volume", { percent: target });
+          this.volumeRestorePending = true;
+        } catch (e) {
+          console.warn("[vad] set_system_volume failed:", e);
+        }
       }
     } catch (err) {
       console.error("[vad] Failed to initialize:", err);

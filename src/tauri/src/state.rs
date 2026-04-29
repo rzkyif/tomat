@@ -28,6 +28,20 @@ pub struct AppStateInner {
     // tray icon, the global shortcut, the close-to-tray handler, and the
     // show/hide commands so they can't drift out of sync.
     pub visible: AtomicBool,
+    // System output volume captured the first time we lower it for STT auto-
+    // volume during a listening session. `Some(v)` means a restore is owed;
+    // `None` means we haven't lowered (or have already restored). Shared so
+    // the JS-side commands and the graceful-shutdown handler agree on whether
+    // a restore is needed.
+    pub saved_volume: Mutex<Option<u8>>,
+    // Currently registered input shortcuts (event name + accelerator). Cleared
+    // on UserInput unmount. Tracked so we can unregister cleanly before
+    // re-registering with new bindings.
+    pub input_shortcuts: Mutex<Vec<(String, String)>>,
+    // The xcap monitor id the next region-capture invocation should crop
+    // against. Set by the JS helper before showing the overlay window;
+    // read by the overlay page on mount. Defaults to "primary".
+    pub region_capture_target: Mutex<String>,
 }
 
 #[derive(Clone)]

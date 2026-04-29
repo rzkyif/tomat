@@ -391,32 +391,70 @@ async function llmFilterTools(
       errorMessage: err instanceof Error ? err.message : String(err),
     };
   }
-  const picks = extractJsonArray(raw);
-  if (!picks) {
-    // Couldn't parse a JSON array — surface the raw output so the user can
-    // see exactly what the filter LLM said. Fall back to keeping all
-    // candidates so the main model still has tools to work with.
+  const allowedSet = new Set(allowed);
+  const picks = extractToolNames(raw, allowedSet);
+  if (picks === null) {
+    // Couldn't extract any candidates from the response — surface the raw
+    // output so the user can see exactly what the filter LLM said. Fall
+    // back to keeping all candidates so the main model still has tools.
     return {
       kept: allowed,
-      errorMessage: `Filter LLM did not return a valid JSON array. Raw response:\n${raw || "<empty>"}`,
+      errorMessage: `Filter LLM did not return a recognizable list. Raw response:\n${raw || "<empty>"}`,
     };
   }
-  const allowedSet = new Set(allowed);
-  return {
-    kept: picks.filter((n) => typeof n === "string" && allowedSet.has(n)) as string[],
-  };
+  // Dedupe while preserving first-seen order. Small filter LLMs sometimes
+  // emit the same tool name multiple times (and we drop hallucinated names
+  // here too, since allowedSet is the source of truth).
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const name of picks) {
+    if (!allowedSet.has(name) || seen.has(name)) continue;
+    seen.add(name);
+    kept.push(name);
+  }
+  return { kept };
 }
 
-function extractJsonArray(raw: string): unknown[] | null {
+/** Extract a tool-name list from a filter-LLM response. Tries strict JSON
+ *  first, then falls back to a lenient pass that handles bare-identifier
+ *  arrays like `[open_website, send_email]` and free-form prose containing
+ *  identifier-shaped names. Caller dedupes and intersects with the allowed
+ *  set, so this can be aggressive. Returns null only when nothing usable
+ *  was found at all. */
+function extractToolNames(raw: string, allowed: Set<string>): string[] | null {
   const start = raw.indexOf("[");
   const end = raw.lastIndexOf("]");
-  if (start < 0 || end <= start) return null;
-  try {
-    const parsed = JSON.parse(raw.slice(start, end + 1));
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
+  // Scope: bracketed substring if present, otherwise the whole response —
+  // small models sometimes drop the brackets.
+  const scope = start >= 0 && end > start ? raw.slice(start, end + 1) : raw;
+
+  // Strict JSON first. Caller passes through whatever array we return; if a
+  // string-only array round-trips cleanly we're done.
+  if (start >= 0 && end > start) {
+    try {
+      const parsed = JSON.parse(scope);
+      if (Array.isArray(parsed)) {
+        const strs = parsed.filter((v): v is string => typeof v === "string");
+        if (strs.length > 0) return strs;
+      }
+    } catch {
+      // fall through to lenient parsing
+    }
   }
+
+  // Lenient: pluck every identifier-shaped token. Tool names are typically
+  // snake_case ASCII, but we accept anything matching `[A-Za-z_][\w]*` so we
+  // can also recognize camelCase-named tools. Quotes (single or double),
+  // backticks, and surrounding punctuation are stripped naturally because
+  // we just match the identifier.
+  const matches = scope.match(/[A-Za-z_][A-Za-z0-9_]*/g);
+  if (!matches) return null;
+  // Filter to only tokens that are actual tool names. This keeps obvious
+  // hallucinations (and stray English words) out of the result. If the
+  // intersection is empty, return [] (an explicit "filter kept nothing")
+  // rather than null so we don't fall back to "keep every candidate".
+  const inAllowed = matches.filter((m) => allowed.has(m));
+  return inAllowed;
 }
 
 /** Trim a sorted-by-score candidate list to the largest prefix that fits
@@ -472,44 +510,63 @@ async function selectToolsForTurn(
   const removeBubble = () => {
     if (userMessageId) messagesState.removeToolFilterMessage(userMessageId);
   };
-  const showSkipReason = (reason: string) => {
-    if (!userMessageId) return;
-    messagesState.upsertToolFilterMessage(userMessageId, {
-      status: "error",
-      phase1: [],
-      phase2: null,
-      errorMessage: reason,
-    });
-  };
 
-  // Tool use globally off → no bubble at all (matches the user's intent of
-  // not running the filter pipeline).
+  // No-bubble cases — every guard below means "we send 0 tools and don't
+  // want to clutter the chat with a bubble". The bubble only exists to show
+  // *what filtering did*; if no filtering happened (or there was nothing to
+  // filter), there's nothing to show.
   if (!settings["tools.enabled"]) {
     removeBubble();
     return undefined;
   }
-  // Tool use IS enabled but nothing to filter against. Surface this as a
-  // visible skip reason so the user can diagnose (e.g. they enabled the
-  // setting but haven't trusted/enabled any toolkit yet, or indexing hasn't
-  // populated tools.length yet).
+  // No enabled toolkits with indexed tools — there's literally nothing to
+  // send, so don't show a bubble. (Previously this surfaced an error bubble;
+  // the user explicitly preferred silence here so a fresh session with no
+  // toolkits stays clean.)
   if (!toolkitsState.hasEnabledTools()) {
-    console.warn(
-      "[llm] tool filter skipped: no enabled toolkits with indexed tools. trusted toolkits =",
-      toolkitsState.trusted.map((t) => ({
-        id: t.id,
-        enabled: t.enabled,
-        toolCount: t.tools.length,
-      })),
-    );
-    showSkipReason(
-      "No enabled toolkits with indexed tools. Open Settings → Tools and make sure at least one toolkit is trusted, enabled, and finished indexing.",
-    );
+    removeBubble();
     return undefined;
   }
   // Empty user text (e.g. attachments-only turn). No filter to run.
   if (!userText.trim()) {
     removeBubble();
     return undefined;
+  }
+
+  // Filtering can be globally disabled, or auto-skipped when the user's total
+  // tool count is below their configured threshold. In either case we ship
+  // every enabled tool to the model (clipped to PHASE1_HARD_CAP as a safety
+  // net so we don't accidentally blow past the model's context window) and
+  // surface them in the bubble's "Always Available" section — from the
+  // model's perspective every tool sent this turn was unconditional.
+  const filteringEnabled = settings["tools.filteringEnabled"] !== false;
+  const allEnabled = toolkitsState.allEnabledTools();
+  const minTools = clampInt(settings["tools.filteringMinTools"], 0, 0, 1000);
+  if (!filteringEnabled || allEnabled.length < minTools) {
+    if (allEnabled.length === 0) {
+      removeBubble();
+      return undefined;
+    }
+    const sliced = allEnabled.slice(0, PHASE1_HARD_CAP);
+    const bypassEntries: RelevantToolPhase2Entry[] = sliced.map((t) => ({
+      name: t.name,
+      description: t.description,
+    }));
+    if (userMessageId) {
+      messagesState.upsertToolFilterMessage(userMessageId, {
+        status: "complete",
+        phase1: null,
+        phase2: null,
+        alwaysAvailable: bypassEntries,
+      });
+    }
+    try {
+      const tools = await toolkitsState.toolSchemas(sliced.map((t) => t.id));
+      return tools.length > 0 ? (tools as OpenAI.ChatCompletionTool[]) : undefined;
+    } catch (err) {
+      console.warn("[llm] toolSchemas (unfiltered) call threw:", err);
+      return undefined;
+    }
   }
 
   const secondPassEnabled = settings["tools.secondPassEnabled"] !== false;
@@ -528,9 +585,54 @@ async function selectToolsForTurn(
   if (userMessageId) {
     messagesState.upsertToolFilterMessage(userMessageId, {
       status: "filtering",
-      phase1: [],
+      phase1: null,
       phase2: null,
+      alwaysAvailable: null,
     });
+  }
+
+  // Hoist always-available bypass setup so the early-out paths (vector
+  // unavailable, no phase-1 candidates, filter LLM kept nothing) can still
+  // ship those tools — the bypass exists precisely so high-value tools
+  // aren't gated on the filter pipeline succeeding.
+  const alwaysAvailableEnabled = settings["tools.alwaysAvailableEnabled"] !== false;
+  const alwaysTools = alwaysAvailableEnabled
+    ? toolkitsState.allEnabledTools().filter((t) => t.alwaysAvailable)
+    : [];
+
+  // Compute the always-available union and the bubble entries describing
+  // which tools were appended (skipping any already covered by the filter
+  // result). Returns the final ordered id list + the snapshot for the
+  // bubble's "Always Available" section.
+  function applyAlwaysBypass(filteredIds: string[]): {
+    finalIds: string[];
+    bypassEntries: RelevantToolPhase2Entry[];
+  } {
+    if (alwaysTools.length === 0) {
+      return { finalIds: filteredIds, bypassEntries: [] };
+    }
+    const seen = new Set(filteredIds);
+    const finalIds = [...filteredIds];
+    const bypassEntries: RelevantToolPhase2Entry[] = [];
+    for (const t of alwaysTools) {
+      if (seen.has(t.id)) continue;
+      finalIds.push(t.id);
+      seen.add(t.id);
+      bypassEntries.push({ name: t.name, description: t.description });
+    }
+    return { finalIds, bypassEntries };
+  }
+
+  // Wrap bypass entries for the bubble: returns null when the bypass section
+  // shouldn't appear at all (toggle off, no tagged tools, or nothing to add
+  // because every tagged tool was already in the filter result). The bubble
+  // hides any null bucket entirely so the user sees only sections that
+  // actually contributed tools this turn.
+  function bypassBucket(entries: RelevantToolPhase2Entry[]): RelevantToolPhase2Entry[] | null {
+    if (!alwaysAvailableEnabled || alwaysTools.length === 0 || entries.length === 0) {
+      return null;
+    }
+    return entries;
   }
 
   const vector = await toolkitsState.embed(userText);
@@ -555,16 +657,23 @@ async function selectToolsForTurn(
     return undefined;
   }
   if (rawCandidates.length === 0) {
-    // No candidates came back. Could mean the embedding index is empty (no
-    // tools embedded yet) or the sidecar /api/toolkits/filter call returned
-    // nothing. Mark complete (not error) — this is a legitimate "no tools
-    // matched" outcome.
+    // Embedding ran, found nothing. Skip phase 2 (no tools to filter) but
+    // still let the always-available bypass inject tools.
+    const { finalIds, bypassEntries } = applyAlwaysBypass([]);
     updateBubble({
       status: "complete",
       phase1: [],
       phase2: secondPassEnabled ? [] : null,
+      alwaysAvailable: bypassBucket(bypassEntries),
     });
-    return undefined;
+    if (finalIds.length === 0) return undefined;
+    try {
+      const tools = await toolkitsState.toolSchemas(finalIds);
+      return tools.length > 0 ? (tools as OpenAI.ChatCompletionTool[]) : undefined;
+    } catch (err) {
+      console.warn("[llm] toolSchemas (phase1-empty) call threw:", err);
+      return undefined;
+    }
   }
 
   // Fit the candidates against the appropriate budget. For phase 2, we tokenize
@@ -606,14 +715,16 @@ async function selectToolsForTurn(
     // Skip the LLM filter entirely. Cap at maxTools and ship.
     const truncated = fitted.slice(0, maxTools);
     const truncatedPhase1 = phase1Snapshot.slice(0, maxTools);
+    const { finalIds, bypassEntries } = applyAlwaysBypass(truncated.map((c) => c.id));
     updateBubble({
       status: "complete",
       phase1: truncatedPhase1,
       phase2: null,
+      alwaysAvailable: bypassBucket(bypassEntries),
     });
-    if (truncated.length === 0) return undefined;
+    if (finalIds.length === 0) return undefined;
     try {
-      const tools = await toolkitsState.toolSchemas(truncated.map((c) => c.id));
+      const tools = await toolkitsState.toolSchemas(finalIds);
       return tools.length > 0 ? (tools as OpenAI.ChatCompletionTool[]) : undefined;
     } catch (err) {
       console.warn("[llm] toolSchemas call threw:", err);
@@ -627,10 +738,21 @@ async function selectToolsForTurn(
   const filterResult = await llmFilterTools(userText, fitted);
   let keptNames = filterResult.kept;
   if (keptNames.length === 0 && !filterResult.errorMessage) {
-    // The filter said "keep nothing". Bubble it as complete with an empty
-    // phase 2; main LLM gets no tools this turn (legitimate outcome).
-    updateBubble({ status: "complete", phase2: [] });
-    return undefined;
+    // The filter said "keep nothing". Always-available bypass still runs.
+    const { finalIds, bypassEntries } = applyAlwaysBypass([]);
+    updateBubble({
+      status: "complete",
+      phase2: [],
+      alwaysAvailable: bypassBucket(bypassEntries),
+    });
+    if (finalIds.length === 0) return undefined;
+    try {
+      const tools = await toolkitsState.toolSchemas(finalIds);
+      return tools.length > 0 ? (tools as OpenAI.ChatCompletionTool[]) : undefined;
+    } catch (err) {
+      console.warn("[llm] toolSchemas (bypass-only) call threw:", err);
+      return undefined;
+    }
   }
   // Cap at maxTools as a final safety net.
   if (keptNames.length > maxTools) keptNames = keptNames.slice(0, maxTools);
@@ -643,19 +765,26 @@ async function selectToolsForTurn(
     .filter((c): c is ToolDescriptor => c !== undefined)
     .map((c) => ({ name: c.name, description: c.description }));
 
+  const { finalIds, bypassEntries } = applyAlwaysBypass(keptIds);
+
   if (filterResult.errorMessage) {
     updateBubble({
       status: "error",
       phase2: phase2Snapshot,
+      alwaysAvailable: bypassBucket(bypassEntries),
       errorMessage: filterResult.errorMessage,
     });
   } else {
-    updateBubble({ status: "complete", phase2: phase2Snapshot });
+    updateBubble({
+      status: "complete",
+      phase2: phase2Snapshot,
+      alwaysAvailable: bypassBucket(bypassEntries),
+    });
   }
 
-  if (keptIds.length === 0) return undefined;
+  if (finalIds.length === 0) return undefined;
   try {
-    const tools = await toolkitsState.toolSchemas(keptIds);
+    const tools = await toolkitsState.toolSchemas(finalIds);
     return tools.length > 0 ? (tools as OpenAI.ChatCompletionTool[]) : undefined;
   } catch (err) {
     console.warn("[llm] toolSchemas call threw:", err);
@@ -1072,10 +1201,10 @@ export async function sendMessages(): Promise<void> {
 /** Regenerate a single assistant message in place. Only uses messages
  *  chronologically before the target as context; newer turns stay untouched. */
 export async function reprocessMessage(messageId: string): Promise<void> {
-  const targetIdx = messagesState.messages.findIndex((m) => m.id === messageId);
-  if (targetIdx < 0) return;
+  const initialIdx = messagesState.messages.findIndex((m) => m.id === messageId);
+  if (initialIdx < 0) return;
 
-  const target = messagesState.messages[targetIdx];
+  const target = messagesState.messages[initialIdx];
   // Preserve the route the user originally saw for this bubble; reprocess is a
   // "regenerate the same answer" action, not a re-route decision.
   const route: "default" | "secondary" = target.modelUsed === "secondary" ? "secondary" : "default";
@@ -1086,6 +1215,15 @@ export async function reprocessMessage(messageId: string): Promise<void> {
   setInterruptController(controller);
 
   try {
+    // beginReprocess can mutate the messages array (e.g. splice a paired
+    // reasoning bubble, or unshift a fresh tool_filter bubble). Re-find the
+    // target by id afterwards so `slice` still excludes the empty assistant
+    // slot we just cleared — otherwise it'd land at the tail of the
+    // contextMessages and llama.cpp would reject it as an "assistant
+    // response prefill is incompatible with enable_thinking".
+    const targetIdx = messagesState.messages.findIndex((m) => m.id === messageId);
+    if (targetIdx < 0) return;
+
     // Messages newest-first: everything at index > targetIdx is chronologically
     // older (and thus valid context for the target). Include tool rounds so
     // the regenerated response sees the same transcript the original did.

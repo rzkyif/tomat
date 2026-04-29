@@ -40,6 +40,7 @@
   import {
     listCaptureMonitors,
     captureMonitor,
+    captureRegion,
     type CaptureMonitorInfo,
   } from "$lib/shared/capture";
   import { vadManager } from "$lib/shared/vad.svelte";
@@ -301,11 +302,46 @@
   onMount(() => {
     const cleanups: Array<() => void> = [];
 
-    // Focus the textarea only when the window is shown from hidden (via
-    // global shortcut or tray click), not on every native focus event.
-    // Rust emits `window-visibility` with `true` on show and `false` on hide.
+    // Input-mode shortcuts are registered on the OS level via
+    // tauri-plugin-global-shortcut, but only while:
+    //   (1) UserInput is mounted (i.e. Settings panel is closed) AND
+    //   (2) The window is currently visible.
+    // (1) is satisfied for the lifetime of this component. (2) we track via
+    // the `window-visibility` event: register on visible=true, clear on
+    // visible=false. Initial state is computed inside the async setup below.
+    function readInputBindings(): [string, string][] {
+      const s = settingsState.currentSettings;
+      return [
+        ["attach-file", (s["shortcuts.attachFile"] as string) || ""],
+        ["capture-screen", (s["shortcuts.captureScreen"] as string) || ""],
+        ["capture-region", (s["shortcuts.captureRegion"] as string) || ""],
+      ];
+    }
+    async function registerInputShortcuts() {
+      try {
+        await invoke("set_input_shortcuts", { bindings: readInputBindings() });
+      } catch (e) {
+        console.warn("[user-input] set_input_shortcuts failed:", e);
+      }
+    }
+    async function clearInputShortcuts() {
+      try {
+        await invoke("set_input_shortcuts", { bindings: [] });
+      } catch (e) {
+        console.warn("[user-input] clear input_shortcuts failed:", e);
+      }
+    }
+
+    // Focus the textarea on show, and (de)register input shortcuts in lockstep
+    // with window visibility. Rust emits `window-visibility` with `true` on
+    // show and `false` on hide.
     void listen<boolean>("window-visibility", ({ payload: visible }) => {
-      if (visible) focusTextarea();
+      if (visible) {
+        focusTextarea();
+        void registerInputShortcuts();
+      } else {
+        void clearInputShortcuts();
+      }
     }).then((unlisten) => {
       cleanups.push(unlisten);
     });
@@ -315,6 +351,45 @@
     cleanups.push(() =>
       document.removeEventListener("click", handleDocClick, true),
     );
+
+    void listen("input-shortcut-attach-file", () => {
+      void handleAttachFileFromMenu();
+    }).then((u) => cleanups.push(u));
+    void listen("input-shortcut-capture-screen", () => {
+      // Pick the primary monitor from the captureMonitors snapshot, falling
+      // back to the first id we see. captureMonitors is populated lazily via
+      // the attach-menu open path; if it's empty we still try to fetch.
+      void (async () => {
+        let monitors = captureMonitors;
+        if (monitors.length === 0) {
+          monitors = await listCaptureMonitors();
+          captureMonitors = monitors;
+        }
+        const target =
+          monitors.find((m) => m.isPrimary)?.id || monitors[0]?.id;
+        if (target) await captureMonitorById(target);
+      })();
+    }).then((u) => cleanups.push(u));
+    void listen("input-shortcut-capture-region", () => {
+      void handleCaptureRegionFromMenu();
+    }).then((u) => cleanups.push(u));
+    cleanups.push(() => {
+      void clearInputShortcuts();
+    });
+
+    // Initial registration: only if the window is already visible at mount
+    // time. Most of the time it is (closing Settings doesn't hide the window),
+    // but on app startup with a hidden tray-only launch we'd otherwise
+    // register shortcuts that should be inactive.
+    void (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const visible = (await getCurrentWindow().isVisible()) ?? true;
+        if (visible) await registerInputShortcuts();
+      } catch (e) {
+        console.warn("[user-input] initial visibility check failed:", e);
+      }
+    })();
 
     // Async setup: monitors, VAD, shortcut listeners, persistent-mode restore.
     // Monitors are best-effort (benign on failure); VAD and shortcut setup
@@ -794,6 +869,28 @@
     }
   }
 
+  async function handleCaptureRegionFromMenu() {
+    if (capturing) return;
+    closeAttachMenu();
+    capturing = true;
+    try {
+      const base64 = await captureRegion();
+      if (base64) {
+        attachments = [
+          ...attachments,
+          {
+            type: "image",
+            filename: `region-${Date.now()}.png`,
+            pendingData: base64,
+            mime: "image/png",
+          },
+        ];
+      }
+    } finally {
+      capturing = false;
+    }
+  }
+
   function handleBubbleClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (target.closest("button, select, textarea, a, input")) return;
@@ -951,6 +1048,19 @@
         </select>
       </div>
 
+      <button
+        class="hover:text-default-900 hover:cursor-pointer rounded flex items-center shrink-0 overflow-hidden transition-all duration-100 {attachMenuOpen
+          ? 'w-8 p-1 opacity-100'
+          : 'w-0 p-0 opacity-0 pointer-events-none'}"
+        title="Capture Region"
+        aria-label="Capture Screen Region"
+        onclick={handleCaptureRegionFromMenu}
+        disabled={!attachMenuOpen || capturing}
+        tabindex={attachMenuOpen ? 0 : -1}
+      >
+        <i class="flex i-material-symbols-crop-free-rounded"></i>
+      </button>
+
       {#if attachMenuOpen}
         <div class="flex h-full w-1"></div>
       {/if}
@@ -999,7 +1109,7 @@
     </div>
 
     <div class="flex gap-2">
-      {#if settingsState.currentSettings["stt.preset"] !== "disabled"}
+      {#if settingsState.currentSettings["stt.enabled"]}
         <button
           class="bg-default-200 p-2 rounded-2xl flex items-center transition-colors {vadManager.enabled
             ? vadManager.listening

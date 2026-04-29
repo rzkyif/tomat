@@ -1,5 +1,9 @@
 <script lang="ts">
-  import type { RelevantToolsState } from "$lib/shared/types";
+  import type {
+    RelevantToolPhase1Entry,
+    RelevantToolPhase2Entry,
+    RelevantToolsState,
+  } from "$lib/shared/types";
   import Bubble from "../Bubble.svelte";
   import Expandable from "../Expandable.svelte";
   import { settingsState } from "../../state";
@@ -18,13 +22,58 @@
     neighborRight?: boolean;
   } = $props();
 
-  // The headline count tracks whichever phase actually fed the main model:
-  // phase 2 when the LLM filter ran, phase 1 otherwise.
-  let count = $derived(
+  // Active sections, in the order they ran. The "Phase N" label in the UI
+  // is derived from this array's index — it represents execution order, not
+  // a fixed mapping to method. Skipped methods (filter off, secondPass off,
+  // no always-available tools) drop out of the array entirely so the
+  // remaining sections renumber 1..N seamlessly.
+  type ScoredPhase = { kind: "embedding"; entries: RelevantToolPhase1Entry[] };
+  type PlainPhase = {
+    kind: "llm" | "always";
+    entries: RelevantToolPhase2Entry[];
+  };
+  type Phase = ScoredPhase | PlainPhase;
+
+  let phases = $derived.by<Phase[]>(() => {
+    const out: Phase[] = [];
+    if (relevantTools.phase1 !== null) {
+      out.push({ kind: "embedding", entries: relevantTools.phase1 });
+    }
+    if (relevantTools.phase2 !== null) {
+      out.push({ kind: "llm", entries: relevantTools.phase2 });
+    }
+    if (
+      relevantTools.alwaysAvailable !== null &&
+      relevantTools.alwaysAvailable !== undefined &&
+      relevantTools.alwaysAvailable.length > 0
+    ) {
+      out.push({ kind: "always", entries: relevantTools.alwaysAvailable });
+    }
+    return out;
+  });
+
+  function phaseLabel(kind: Phase["kind"]): string {
+    if (kind === "embedding") return "Embedding";
+    if (kind === "llm") return "LLM Filter";
+    return "Always Available Tools";
+  }
+
+  function phaseEmptyText(kind: Phase["kind"]): string {
+    if (kind === "embedding") return "No candidates matched.";
+    if (kind === "llm") return "No tools survived the filter.";
+    return "No tools.";
+  }
+
+  // Headline count = tools actually sent to the model. The filter pipeline's
+  // contribution is whichever filter phase ran last (phase 2 if present, else
+  // phase 1, else 0); always-available tools are appended on top.
+  let bypassCount = $derived(relevantTools.alwaysAvailable?.length ?? 0);
+  let baseCount = $derived(
     relevantTools.phase2 !== null
       ? relevantTools.phase2.length
-      : relevantTools.phase1.length,
+      : (relevantTools.phase1?.length ?? 0),
   );
+  let count = $derived(baseCount + bypassCount);
 
   let titleText = $derived.by(() => {
     if (relevantTools.status === "filtering")
@@ -93,45 +142,34 @@
           </div>
         {/if}
 
-        <div class="flex flex-col gap-1">
-          <div class="text-default-600 font-bold">
-            Phase 1: Embedding Similarity ({relevantTools.phase1.length})
-          </div>
-          {#if relevantTools.phase1.length === 0}
-            <div class="text-default-500 italic px-3 py-2">No candidates.</div>
-          {:else}
-            <div
-              class="bg-card-default rounded-2xl px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
-            >
-              {#each relevantTools.phase1 as tool, i (tool.id ?? i)}{#if i > 0},
-                {/if}{tool.name}<span class="text-default-500 tabular-nums"
-                  >&nbsp;({formatScore(tool.score)})</span
-                >{/each}
-            </div>
-          {/if}
-        </div>
-
-        {#if relevantTools.phase2 !== null}
+        {#each phases as phase, i (phase.kind)}
           <div class="flex flex-col gap-1">
             <div class="text-default-600 font-bold">
-              Phase 2: LLM Filter ({relevantTools.phase2.length})
+              Phase {i + 1}: {phaseLabel(phase.kind)} ({phase.entries.length})
             </div>
-            {#if relevantTools.phase2.length === 0}
+            {#if phase.entries.length === 0}
+              <div class="text-default-500 italic px-3 py-2">
+                {phaseEmptyText(phase.kind)}
+              </div>
+            {:else if phase.kind === "embedding"}
               <div
-                class="bg-card-default rounded-2xl px-4 py-2 text-default-500"
+                class="bg-card-default rounded-2xl px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
               >
-                No tools survived the filter.
+                {#each phase.entries as tool, ti (tool.id ?? ti)}{#if ti > 0},
+                  {/if}{tool.name}<span class="text-default-500 tabular-nums"
+                    >&nbsp;({formatScore(tool.score)})</span
+                  >{/each}
               </div>
             {:else}
               <div
                 class="bg-card-default rounded-2xl px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
               >
-                {#each relevantTools.phase2 as tool, i (tool.name + i)}{#if i > 0},
+                {#each phase.entries as tool, ti (tool.name + ti)}{#if ti > 0},
                   {/if}{tool.name}{/each}
               </div>
             {/if}
           </div>
-        {/if}
+        {/each}
       </div>
     {/snippet}
   </Expandable>

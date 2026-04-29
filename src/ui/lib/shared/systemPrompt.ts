@@ -5,7 +5,9 @@
  * "tools are available this turn" into a single string.
  */
 
+import { getCountryForTimezone } from "countries-and-timezones";
 import { settingsState } from "../state";
+import { DEFAULT_CONTEXT_TEMPLATE } from "./prompts";
 import type { SnippetOverride } from "./snippets";
 
 function getOsName(): string {
@@ -32,6 +34,52 @@ function formatDateTime(): string {
   return `${formatted} (${tz})`;
 }
 
+/** Derive a "City, Country" string from the OS-reported IANA timezone, using
+ *  the `countries-and-timezones` package (IANA-derived data, no network).
+ *  Falls back to just the city when the country lookup fails, or "" when the
+ *  timezone is something abstract like "UTC" / "GMT" / "Etc/UTC". */
+function deriveAutoLocation(): string {
+  let tz = "";
+  try {
+    tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
+  if (!tz || tz === "UTC" || tz === "GMT" || tz.startsWith("Etc/")) return "";
+
+  const country = getCountryForTimezone(tz)?.name || "";
+
+  // City is the last path segment, with underscores → spaces (e.g. "New York")
+  // and dashes preserved (e.g. "Port-au-Prince").
+  const lastSlash = tz.lastIndexOf("/");
+  const cityRaw = lastSlash === -1 ? tz : tz.slice(lastSlash + 1);
+  const city = cityRaw.replace(/_/g, " ");
+
+  if (!city) return country;
+  return country ? `${city}, ${country}` : city;
+}
+
+/** Render the user's context-prompt template:
+ *  - `[name:body]` is a conditional segment, kept iff `vars[name]` is a
+ *    non-empty string. Body may itself contain `{name}` placeholders.
+ *  - `{name}` is a placeholder, replaced by `vars[name]` (empty string when
+ *    the var is missing).
+ *  Conditional matching is non-greedy and does not nest.
+ *  After substitution, runs of 2+ consecutive blank lines collapse to a
+ *  single blank line so empty conditionals don't leave large gaps.
+ */
+export function renderContextTemplate(template: string, vars: Record<string, string>): string {
+  const condRe = /\[(\w+):([\s\S]*?)\]/g;
+  const phaseOne = template.replace(condRe, (_, name: string, body: string) => {
+    const v = vars[name];
+    return v && v.length > 0 ? body : "";
+  });
+  const placeholderRe = /\{(\w+)\}/g;
+  const phaseTwo = phaseOne.replace(placeholderRe, (_, name: string) => vars[name] ?? "");
+  // Collapse 2+ blank lines into a single blank line, then trim outer whitespace.
+  return phaseTwo.replace(/\n[ \t]*(\n[ \t]*)+/g, "\n\n").trim();
+}
+
 /** The default system prompt base alone, without the context block.
  *  Returns "" when the preset is "disabled" or the custom text is empty. */
 export function buildSystemPromptBase(): string {
@@ -41,57 +89,30 @@ export function buildSystemPromptBase(): string {
 }
 
 /** The context block alone (everything driven by general.context.*).
- *  Returns "" when no context fields are set.
+ *  Returns "" when no context fields resolve to anything.
  *
- *  Fields are split into two buckets:
- *  - Behavior settings (agent name, response language) are emitted as plain
- *    instructions because they change how the model responds on every turn.
- *  - Reference data (user name, location, date/time, OS) is wrapped in an
- *    XML-tagged block. The tag boundary signals "structured metadata, not
- *    narrative content" so weaker models are less prone to weaving these
- *    fields into every reply. Imperative directives here ("do not mention…")
- *    backfire on small models — they acknowledge the rule in their output —
- *    so the framing is descriptive instead.
+ *  Driven by `prompts.contextTemplate`: the user can edit the template freely
+ *  using `{name}` placeholders and `[name:body]` conditional segments. See
+ *  `renderContextTemplate` and `DEFAULT_CONTEXT_TEMPLATE` for the syntax.
  */
 export function buildContextBlock(): string {
   const s = settingsState.currentSettings;
-  const behavior: string[] = [];
-  const reference: string[] = [];
 
-  const agentName = (s["general.context.agentName"] || "").trim();
-  if (agentName) behavior.push(`Your name is ${agentName}.`);
+  const location = s["general.context.locationAuto"]
+    ? deriveAutoLocation()
+    : (s["general.context.location"] || "").trim();
 
-  const language = (s["general.context.language"] || "").trim();
-  if (language) behavior.push(`Always respond in ${language}.`);
+  const vars: Record<string, string> = {
+    agentName: (s["general.context.agentName"] || "").trim(),
+    language: (s["general.context.language"] || "").trim(),
+    userName: (s["general.context.userName"] || "").trim(),
+    location,
+    dateTime: s["general.context.dateTime"] ? formatDateTime() : "",
+    os: s["general.context.os"] ? getOsName() : "",
+  };
 
-  const userName = (s["general.context.userName"] || "").trim();
-  if (userName) reference.push(`Preferred name: ${userName}`);
-
-  const location = (s["general.context.location"] || "").trim();
-  if (location) reference.push(`Location: ${location}`);
-
-  if (s["general.context.dateTime"]) {
-    reference.push(`Date and time: ${formatDateTime()}`);
-  }
-
-  if (s["general.context.os"]) {
-    reference.push(`Operating system: ${getOsName()}`);
-  }
-
-  const parts: string[] = [];
-  if (behavior.length) parts.push(behavior.join("\n"));
-  if (reference.length) {
-    parts.push(
-      [
-        "<user_metadata>",
-        "Hidden instruction: only refer to these when they are related to the user's message.",
-        "",
-        ...reference.map((r) => `- ${r}`),
-        "</user_metadata>",
-      ].join("\n"),
-    );
-  }
-  return parts.join("\n\n");
+  const template = (s["prompts.contextTemplate"] as string) || DEFAULT_CONTEXT_TEMPLATE;
+  return renderContextTemplate(template, vars);
 }
 
 /**

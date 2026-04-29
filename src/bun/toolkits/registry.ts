@@ -23,13 +23,14 @@ CREATE TABLE IF NOT EXISTS toolkits (
 );
 
 CREATE TABLE IF NOT EXISTS tools (
-  id              TEXT PRIMARY KEY,
-  toolkit_id      TEXT NOT NULL REFERENCES toolkits(id) ON DELETE CASCADE,
-  name            TEXT NOT NULL,
-  description     TEXT NOT NULL,
-  parameters_json TEXT NOT NULL,
-  triggers_json   TEXT NOT NULL,
-  fn_export       TEXT NOT NULL,
+  id               TEXT PRIMARY KEY,
+  toolkit_id       TEXT NOT NULL REFERENCES toolkits(id) ON DELETE CASCADE,
+  name             TEXT NOT NULL,
+  description      TEXT NOT NULL,
+  parameters_json  TEXT NOT NULL,
+  triggers_json    TEXT NOT NULL,
+  fn_export        TEXT NOT NULL,
+  always_available INTEGER NOT NULL DEFAULT 0,
   UNIQUE(toolkit_id, name)
 );
 
@@ -64,6 +65,7 @@ export interface ToolRecord {
   parameters_json: string;
   triggers_json: string;
   fn_export: string;
+  always_available: number;
 }
 
 export interface ToolEmbedding {
@@ -241,13 +243,14 @@ export class ToolkitsRegistry {
       parametersJson: string;
       triggersJson: string;
       fnExport: string;
+      alwaysAvailable: boolean;
     }[],
   ): ToolRecord[] {
     this.db.transaction(() => {
       this.db.query(`DELETE FROM tools WHERE toolkit_id = ?`).run(toolkitId);
       const insert = this.db.query(
-        `INSERT INTO tools (id, toolkit_id, name, description, parameters_json, triggers_json, fn_export)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tools (id, toolkit_id, name, description, parameters_json, triggers_json, fn_export, always_available)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const t of tools) {
         const toolId = `${toolkitId}:${t.name}`;
@@ -259,6 +262,7 @@ export class ToolkitsRegistry {
           t.parametersJson,
           t.triggersJson,
           t.fnExport,
+          t.alwaysAvailable ? 1 : 0,
         );
       }
     })();
@@ -368,6 +372,7 @@ export function toolRecordToPublic(rec: ToolRecord): ToolRow {
     triggers: safeJsonArray(rec.triggers_json),
     parameters: safeJsonObject(rec.parameters_json),
     fnExport: rec.fn_export,
+    alwaysAvailable: !!rec.always_available,
   };
 }
 

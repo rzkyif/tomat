@@ -25,6 +25,7 @@ export const METADATA: ToolkitMetadata = {
         "go to the docs website",
       ],
       function: "open",
+      alwaysAvailable: true,
     },
   ],
 };

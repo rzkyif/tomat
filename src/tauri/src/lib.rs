@@ -83,6 +83,9 @@ pub fn run() {
             metrics: tokio::sync::RwLock::new(sysinfo::System::new()),
             current_shortcut: Mutex::new(None),
             visible: AtomicBool::new(true),
+            saved_volume: Mutex::new(None),
+            input_shortcuts: Mutex::new(Vec::new()),
+            region_capture_target: Mutex::new("primary".to_string()),
         })))
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -224,6 +227,16 @@ pub fn run() {
             set_global_shortcut,
             list_capture_monitors,
             capture_monitor,
+            capture_monitor_region,
+            set_region_capture_target,
+            get_region_capture_target,
+            show_region_capture_overlay,
+            hide_region_capture_overlay,
+            get_system_volume,
+            set_system_volume,
+            restore_system_volume,
+            set_input_shortcuts,
+            validate_shortcut,
             resolve_path,
             save_settings,
             load_settings,
@@ -258,6 +271,14 @@ pub fn run() {
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app_handle.try_state::<AppState>() {
+                    // Restore the system volume before tearing down sidecars
+                    // so a hard quit (Cmd+Q, tray exit) still hands the user
+                    // back their original level if STT lowered it.
+                    if let Ok(mut saved) = state.0.saved_volume.lock() {
+                        if let Some(v) = saved.take() {
+                            let _ = cpvc::set_system_volume(v);
+                        }
+                    }
                     kill_all_sidecars(&state);
                 }
             }

@@ -215,8 +215,9 @@ class MessagesState {
     if (settingsState.currentSettings["tools.enabled"]) {
       this.upsertToolFilterMessage(userMsg.id!, {
         status: "filtering",
-        phase1: [],
+        phase1: null,
         phase2: null,
+        alwaysAvailable: null,
       });
     }
     this.scheduleSave();
@@ -739,8 +740,9 @@ class MessagesState {
     if (pairedUser?.id && settingsState.currentSettings["tools.enabled"]) {
       this.upsertToolFilterMessage(pairedUser.id, {
         status: "filtering",
-        phase1: [],
+        phase1: null,
         phase2: null,
+        alwaysAvailable: null,
       });
     }
     void import("./tts.svelte").then(({ ttsState }) => ttsState.startStream(messageId));

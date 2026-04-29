@@ -19,6 +19,9 @@ export interface ToolDefinition {
   parameters: Record<string, unknown>;
   triggers: string[];
   function: string;
+  /** When true, this tool bypasses the relevance filter (provided the user's
+   *  "Always-Available Tools Bypass" toggle is on). See `toolkits.d.ts`. */
+  alwaysAvailable?: boolean;
 }
 
 export interface ToolkitMetadata {
@@ -56,6 +59,7 @@ export interface ToolRow {
   triggers: string[];
   parameters: Record<string, unknown>;
   fnExport: string;
+  alwaysAvailable: boolean;
 }
 
 export interface UntrustedRow {

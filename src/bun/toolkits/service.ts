@@ -430,6 +430,7 @@ export class ToolkitsService {
       parametersJson: JSON.stringify(t.parameters ?? {}),
       triggersJson: JSON.stringify(t.triggers ?? []),
       fnExport: t.function,
+      alwaysAvailable: !!t.alwaysAvailable,
     }));
     // Drop any cached validators for the OLD tool set before we swap rows.
     // A tool that kept its name but whose parameters schema was edited

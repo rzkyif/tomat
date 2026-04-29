@@ -34,7 +34,7 @@ export function collectDownloadCandidates(
 ): string[] {
   const out: string[] = [];
   const llmActive = next["llm.preset"] !== "external";
-  const sttActive = next["stt.preset"] !== "external" && next["stt.preset"] !== "disabled";
+  const sttActive = !!next["stt.enabled"] && next["stt.preset"] !== "external";
   const imagesOn = !!next["llm.supportImages"];
 
   for (const key of DOWNLOAD_FIELDS) {

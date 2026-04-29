@@ -31,6 +31,12 @@ export interface ToolDefinition {
   /** Name of the async export on the toolkit module that runs this tool.
    *  Called as `fn(args, ctx)`. */
   function: string;
+  /** When true, this tool bypasses the relevance filter and is always sent
+   *  to the LLM (provided the user has the "Always-Available Tools Bypass"
+   *  toggle enabled). Use sparingly: every always-available tool eats
+   *  context budget on every turn. Best reserved for high-value, low-cost
+   *  tools the model should always have to hand. */
+  alwaysAvailable?: boolean;
 }
 
 export interface ToolkitMetadata {
