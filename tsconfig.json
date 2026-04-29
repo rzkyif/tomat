@@ -10,7 +10,14 @@
     "sourceMap": true,
     "strict": true,
     "moduleResolution": "bundler"
-  }
+  },
+  // The SvelteKit-generated tsconfig sweeps in everything under src/ via
+  // "src/**/*.{js,ts,svelte}". Exclude:
+  //   - src/tauri/   the Rust crate (its only JS is bundled bun output)
+  //   - src/toolkits/  ships as runtime user scripts; runs in the bun toolkit
+  //     worker pool with its own module resolution, so imports like
+  //     "mime-types" wouldn't resolve against the project's node_modules.
+  "exclude": ["src/tauri/**", "src/toolkits/**", "node_modules/**"]
   // Path aliases are handled by https://svelte.dev/docs/kit/configuration#alias
   // except $lib which is handled by https://svelte.dev/docs/kit/configuration#files
   //

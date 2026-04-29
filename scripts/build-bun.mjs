@@ -5,7 +5,7 @@
  *
  * Runs the same `bun build` invocations that used to live inline in
  * package.json's `build:bun` script, but writes the outputs into
- * src-tauri/resources/ only when the content actually changed.
+ * src/tauri/resources/ only when the content actually changed.
  *
  * Why: tauri-build emits `cargo:rerun-if-changed` for every file listed in
  * tauri.conf.json's bundle.resources array (which includes server.js and
@@ -23,14 +23,14 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
-const RESOURCES = resolve(ROOT, "src-tauri/resources");
+const RESOURCES = resolve(ROOT, "src/tauri/resources");
 const USER_TOOLKITS_DIR = resolve(homedir(), ".tomat/toolkits");
 
 mkdirSync(RESOURCES, { recursive: true });
 
 const BUILDS = [
   {
-    entry: "src-bun/index.ts",
+    entry: "src/bun/index.ts",
     outfile: "server.js",
     external: [
       "onnxruntime-node",
@@ -41,7 +41,7 @@ const BUILDS = [
     ],
   },
   {
-    entry: "src-bun/toolkits/worker/runtime.ts",
+    entry: "src/bun/toolkits/worker/runtime.ts",
     outfile: "runtime.js",
     external: [],
   },
@@ -104,7 +104,7 @@ for (const build of BUILDS) {
 // autocomplete on ToolContext / ToolkitMetadata without waiting for the Rust
 // seed command to fire on first app launch.
 {
-  const sdkSrc = resolve(ROOT, "src-bun/sdk/toolkits.d.ts");
+  const sdkSrc = resolve(ROOT, "src/toolkits/toolkits.d.ts");
   if (existsSync(sdkSrc)) {
     mkdirSync(USER_TOOLKITS_DIR, { recursive: true });
     const sdkDst = resolve(USER_TOOLKITS_DIR, "toolkits.d.ts");

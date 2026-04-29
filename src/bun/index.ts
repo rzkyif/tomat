@@ -159,9 +159,9 @@ function readAppSettings(): Record<string, unknown> {
 
 // Locate the prebuilt worker runtime. `import.meta.dir` varies by launch mode:
 //  - packaged app: sits next to the bundled server.js, alongside runtime.js
-//  - `tauri dev`: Tauri copies server.js into src-tauri/target/<profile>/
-//    resources/ , three levels above src-tauri/resources/runtime.js
-//  - `bun src-bun/index.ts` (sidecar standalone): import.meta.dir is src-bun/
+//  - `tauri dev`: Tauri copies server.js into src/tauri/target/<profile>/
+//    resources/ , three levels above src/tauri/resources/runtime.js
+//  - `bun src/bun/index.ts` (sidecar standalone): import.meta.dir is src/bun/
 //    so we fall back to the .ts entry point; Bun loads TS workers directly.
 const workerScriptUrl: string = (() => {
   const candidates = [

@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
-// transformers.js's env is already configured at the top of src-bun/index.ts
+// transformers.js's env is already configured at the top of src/bun/index.ts
 // to point at ~/.tomat/models/ with remote models disallowed. We just import
 // the pipeline lazily so the sidecar doesn't pay the ONNX startup cost until
 // the first embed request.

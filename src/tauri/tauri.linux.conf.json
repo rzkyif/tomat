@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "binaries/aarch64-unknown-linux-gnu": "binaries/aarch64-unknown-linux-gnu",
+      "binaries/x86_64-unknown-linux-gnu": "binaries/x86_64-unknown-linux-gnu"
+    }
+  }
+}

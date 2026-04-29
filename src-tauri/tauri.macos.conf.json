@@ -1,5 +1,0 @@
-{
-  "bundle": {
-    "resources": ["resources/server.js", "resources/node_modules/**/*", "binaries/**/*.dylib"]
-  }
-}

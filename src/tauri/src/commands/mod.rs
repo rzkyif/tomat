@@ -554,7 +554,6 @@ pub async fn seed_sample_toolkits(handle: AppHandle) -> AppResult<Vec<String>> {
     let resources_root = handle
         .path()
         .resource_dir()?
-        .join("resources")
         .join("toolkits");
 
     if !resources_root.exists() {

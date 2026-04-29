@@ -154,7 +154,7 @@ bun run fetch
 bun run dev
 ```
 
-> **Note:** `bun run fetch` downloads platform-specific binaries from GitHub releases for the versions pinned in [src-tauri/binaries/versions.json](src-tauri/binaries/versions.json) and verifies each archive's SHA-256 against [src-tauri/binaries/checksums.json](src-tauri/binaries/checksums.json). Mismatches abort the install. Maintainers bump versions via `bun run fetch --update`.
+> **Note:** `bun run fetch` downloads platform-specific binaries from GitHub releases for the versions pinned in [src/tauri/binaries/versions.json](src/tauri/binaries/versions.json) and verifies each archive's SHA-256 against [src/tauri/binaries/checksums.json](src/tauri/binaries/checksums.json). Mismatches abort the install. Maintainers bump versions via `bun run fetch --update`.
 
 ## Available Scripts
 
@@ -170,21 +170,23 @@ bun run dev
 ## Project Structure
 
 ```
-src/                  Svelte 5 frontend
-├── routes/           SvelteKit pages
-└── lib/
-    ├── components/   UI components (chat, settings, input)
-    ├── state/        Reactive state (Svelte 5 runes)
-    ├── sidecar/      Sidecar process communication
-    └── shared/       Utilities, types, settings schema
-src-tauri/            Tauri 2 backend (Rust)
-└── src/
-    ├── commands/     Tauri commands (paths, session, snippets, settings, storage)
-    ├── error.rs      Unified AppError type + From impls
-    ├── sidecar.rs    Sidecar lifecycle (supervision, health, downloads)
-    └── state/types   App state and serde types
-src-bun/              Bun/Elysia HTTP server (sidecar)
-scripts/              Build utilities (fetch-required-files)
+src/
+├── ui/               Svelte 5 frontend
+│   ├── routes/       SvelteKit pages
+│   └── lib/
+│       ├── components/   UI components (chat, settings, input)
+│       ├── state/        Reactive state (Svelte 5 runes)
+│       ├── sidecar/      Sidecar process communication
+│       └── shared/       Utilities, types, settings schema
+├── tauri/            Tauri 2 backend (Rust)
+│   └── src/
+│       ├── commands/     Tauri commands (paths, session, snippets, settings, storage)
+│       ├── error.rs      Unified AppError type + From impls
+│       ├── sidecar.rs    Sidecar lifecycle (supervision, health, downloads)
+│       └── state/types   App state and serde types
+├── bun/              Bun/Elysia HTTP server (sidecar)
+└── toolkits/         Built-in sample toolkits + author SDK (toolkits.d.ts)
+scripts/              Build utilities (fetch-required-files, build-bun)
 ```
 
 ## Contributing

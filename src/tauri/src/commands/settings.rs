@@ -52,7 +52,7 @@ pub(crate) const SECRETS_FALLBACK_ENABLED: bool = false;
 pub(crate) fn secrets_fallback_path(_handle: &AppHandle) -> AppResult<PathBuf> {
     // Co-locate with the running executable rather than putting it under
     // `~/.tomat/` where a well-known path makes it a softer target. In dev
-    // this ends up under `src-tauri/target/debug/` (gitignored, also makes
+    // this ends up under `src/tauri/target/debug/` (gitignored, also makes
     // `cargo clean` / binary removal auto-wipe it).
     let exe = std::env::current_exe()?;
     let exe_dir = exe

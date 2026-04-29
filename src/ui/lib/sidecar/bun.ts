@@ -6,6 +6,6 @@
 
 import { edenTreaty } from "@elysiajs/eden";
 import { BUN_SIDECAR_HTTP_BASE_URL } from "$lib/shared/network";
-import type { App } from "../../../src-bun/index";
+import type { App } from "../../../bun/index";
 
 export const eden = edenTreaty<App>(BUN_SIDECAR_HTTP_BASE_URL);

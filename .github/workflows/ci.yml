@@ -65,33 +65,51 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: src/tauri
       # tauri-build validates every literal path in `externalBin` and `bundle.resources`
-      # (see src-tauri/tauri.conf.json). Real artifacts come from `bun run fetch` and
+      # (see src/tauri/tauri.conf.json). Real artifacts come from `bun run fetch` and
       # `bun run build:bun`, but aren't needed for cargo check — empty placeholders
       # satisfy the build script. If a new literal path is added to tauri.conf.json,
       # add a matching placeholder here or CI will fail with "doesn't exist".
       - name: Create placeholder sidecar binaries
         shell: bash
         run: |
-          mkdir -p src-tauri/binaries
+          mkdir -p src/tauri/binaries
           for bin in tomat-tools-server tomat-llama-server tomat-whisper-server; do
-            touch "src-tauri/binaries/${bin}-${{ matrix.triple }}${{ matrix.exe_ext }}"
+            touch "src/tauri/binaries/${bin}-${{ matrix.triple }}${{ matrix.exe_ext }}"
           done
       - name: Create placeholder bundled resources
         shell: bash
         run: |
-          mkdir -p src-tauri/resources/node_modules
-          touch src-tauri/resources/server.js
-          # `bundle.resources` globs in tauri.conf.json are each validated
-          # against the working tree regardless of host OS — an empty match
-          # is a hard error, so seed one file per glob on every runner.
-          touch src-tauri/resources/node_modules/placeholder
-          touch src-tauri/binaries/placeholder.dylib \
-                src-tauri/binaries/placeholder.so \
-                src-tauri/binaries/placeholder.dll
+          mkdir -p src/tauri/resources/node_modules
+          touch src/tauri/resources/server.js
+          touch src/tauri/resources/runtime.js
+          # `bundle.resources` directory entries in tauri.conf.json must point
+          # at paths that exist on disk — an empty match is a hard error. Seed
+          # the cross-platform staging dir plus the per-OS shared-lib subdirs
+          # that the platform-specific tauri.<os>.conf.json overrides reference.
+          touch src/tauri/resources/node_modules/placeholder
+          case "${{ matrix.os }}" in
+            ubuntu-latest)
+              mkdir -p src/tauri/binaries/aarch64-unknown-linux-gnu \
+                       src/tauri/binaries/x86_64-unknown-linux-gnu
+              touch src/tauri/binaries/aarch64-unknown-linux-gnu/placeholder.so \
+                    src/tauri/binaries/x86_64-unknown-linux-gnu/placeholder.so
+              ;;
+            macos-latest)
+              mkdir -p src/tauri/binaries/aarch64-apple-darwin \
+                       src/tauri/binaries/x86_64-apple-darwin
+              touch src/tauri/binaries/aarch64-apple-darwin/placeholder.dylib \
+                    src/tauri/binaries/x86_64-apple-darwin/placeholder.dylib
+              ;;
+            windows-latest)
+              mkdir -p src/tauri/binaries/llm src/tauri/binaries/stt
+              touch src/tauri/binaries/llm/placeholder.dll \
+                    src/tauri/binaries/stt/placeholder.dll
+              ;;
+          esac
       # Formatting is syntactic and OS-independent; only run once.
       - if: matrix.os == 'ubuntu-latest'
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+        run: cargo fmt --manifest-path src/tauri/Cargo.toml --check
+      - run: cargo clippy --manifest-path src/tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo check --manifest-path src/tauri/Cargo.toml --all-targets

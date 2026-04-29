@@ -7,7 +7,7 @@
     "beforeDevCommand": "bun run dev:vite",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build:vite",
-    "frontendDist": "../build"
+    "frontendDist": "../../build"
   },
   "app": {
     "macOSPrivateApi": true,
@@ -43,14 +43,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      "resources/server.js",
-      "resources/runtime.js",
-      "resources/node_modules/**/*",
-      "resources/toolkits/**/*",
-      "binaries/**/*.dylib",
-      "binaries/**/*.so",
-      "binaries/**/*.dll"
-    ]
+    "resources": {
+      "resources/server.js": "resources/server.js",
+      "resources/runtime.js": "resources/runtime.js",
+      "resources/node_modules": "resources/node_modules",
+      "../toolkits": "toolkits"
+    }
   }
 }

@@ -4,8 +4,8 @@
  * fetch-required-files.mjs
  *
  * Downloads llama-server, whisper-server, and bun binaries from GitHub releases
- * and extracts them into src-tauri/binaries. Verifies every downloaded archive
- * against a committed SHA-256 manifest (src-tauri/binaries/checksums.json) to
+ * and extracts them into src/tauri/binaries. Verifies every downloaded archive
+ * against a committed SHA-256 manifest (src/tauri/binaries/checksums.json) to
  * protect against tampered releases or MITM. Also copies VAD runtime files
  * (Silero + ONNX Runtime WASM) from node_modules into static/vad/.
  *
@@ -81,7 +81,7 @@ const LLAMA_REPO = "ggml-org/llama.cpp";
 const BUN_REPO = "oven-sh/bun";
 
 const ROOT_DIR = path.resolve(import.meta.dirname, "..");
-const BINARIES_DIR = path.join(ROOT_DIR, "src-tauri", "binaries");
+const BINARIES_DIR = path.join(ROOT_DIR, "src", "tauri", "binaries");
 const VERSIONS_FILE = path.join(BINARIES_DIR, "versions.json");
 const CHECKSUMS_FILE = path.join(BINARIES_DIR, "checksums.json");
 const INSTALLED_FILE = path.join(BINARIES_DIR, ".installed.json");
@@ -118,13 +118,13 @@ const VAD_FILES = [
 //     fail at load time with module-not-found.
 //
 // Tauri's bundle.resources ships everything under
-// src-tauri/resources/node_modules/ into the packaged app.
+// src/tauri/resources/node_modules/ into the packaged app.
 const ORT_NODE_PKG = path.join(ROOT_DIR, "node_modules", "onnxruntime-node");
 const ORT_COMMON_PKG = path.join(ROOT_DIR, "node_modules", "onnxruntime-common");
 const KOKORO_PKG = path.join(ROOT_DIR, "node_modules", "kokoro-js");
 const TRANSFORMERS_PKG = path.join(ROOT_DIR, "node_modules", "@huggingface", "transformers");
 const PHONEMIZER_PKG = path.join(ROOT_DIR, "node_modules", "phonemizer");
-const SIDECAR_NODE_MODULES_DIR = path.join(ROOT_DIR, "src-tauri", "resources", "node_modules");
+const SIDECAR_NODE_MODULES_DIR = path.join(ROOT_DIR, "src", "tauri", "resources", "node_modules");
 
 function hostOrtBinaryDir() {
   // onnxruntime-node lays out binaries as bin/napi-v3/<platform>/<arch>/

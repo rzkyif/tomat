@@ -8,5 +8,5 @@
   "env": {
     "builtin": true
   },
-  "ignorePatterns": ["src-tauri/resources/server.js", "src-tauri/resources/runtime.js", "static/"]
+  "ignorePatterns": ["src/tauri/resources/server.js", "src/tauri/resources/runtime.js", "static/"]
 }

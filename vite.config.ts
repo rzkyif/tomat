@@ -28,8 +28,8 @@ const restartOnRustChange = (): Plugin => ({
       }, 100);
     };
     const watchers = [
-      watch("src-tauri/src", { recursive: true }, onChange),
-      watch("src-tauri/Cargo.toml", onChange),
+      watch("src/tauri/src", { recursive: true }, onChange),
+      watch("src/tauri/Cargo.toml", onChange),
     ];
     server.httpServer?.once("close", () => {
       clearTimeout(timer);
@@ -54,13 +54,13 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // Ignore src-tauri (no reason to HMR on Rust/Cargo output) and
+      // Ignore src/tauri (no reason to HMR on Rust/Cargo output) and
       // .svelte-kit/generated (svelte-kit sync regenerates these en masse,
       // which fires a burst of HMR updates that trips the WebKit ESM TDZ
       // race in client.js — see sveltejs/kit#15287). Route HMR continues
-      // to work via src/routes/ being watched directly; only route add /
+      // to work via src/ui/routes/ being watched directly; only route add /
       // delete now needs a manual refresh to pick up the new manifest.
-      ignored: ["**/src-tauri/**", "**/.svelte-kit/generated/**"],
+      ignored: ["**/src/tauri/**", "**/.svelte-kit/generated/**"],
     },
   },
 
