@@ -144,11 +144,11 @@
       : vadManager.enabled
         ? "Waiting for speech..."
         : llmStatus === "Error"
-          ? "LLM server failed to start!"
+          ? "Failed to start LLM server!!"
           : llmStatus === "Downloading"
-            ? "Downloading LLM model, please wait..."
+            ? "Downloading LLM model..."
             : llmStatus === "Loading"
-              ? "Starting LLM server, please wait..."
+              ? "Waiting for LLM server..."
               : "Enter your instructions...",
   );
   let sttStatus = $derived(serversState.serverStatuses.stt.status);
@@ -199,7 +199,8 @@
     range.setEnd(textNode, safeIndex);
     const rect = range.getBoundingClientRect();
     const cs = window.getComputedStyle(textareaElement);
-    const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+    const lineHeight =
+      parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
     return { top: rect.top + lineHeight + 4, left: rect.left };
   }
 
@@ -285,6 +286,10 @@
     }
   }
 
+  function focusInput() {
+    if (textareaElement) setTimeout(() => textareaElement?.focus(), 0);
+  }
+
   $effect(() => {
     if (!showSettings) {
       focusTextarea();
@@ -365,8 +370,7 @@
           monitors = await listCaptureMonitors();
           captureMonitors = monitors;
         }
-        const target =
-          monitors.find((m) => m.isPrimary)?.id || monitors[0]?.id;
+        const target = monitors.find((m) => m.isPrimary)?.id || monitors[0]?.id;
         if (target) await captureMonitorById(target);
       })();
     }).then((u) => cleanups.push(u));
@@ -813,6 +817,7 @@
           { type: "document", filename: fileName, pendingData: markdown },
         ];
       }
+      focusInput();
     } catch (err) {
       console.error("[attach] File attach failed:", err);
     }
@@ -863,6 +868,7 @@
             mime: "image/png",
           },
         ];
+        focusInput();
       }
     } finally {
       capturing = false;
@@ -885,6 +891,7 @@
             mime: "image/png",
           },
         ];
+        focusInput();
       }
     } finally {
       capturing = false;

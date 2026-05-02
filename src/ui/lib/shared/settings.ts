@@ -589,7 +589,25 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         ],
       },
       {
+        label: "Provider",
+        fields: [
+          {
+            id: "llm.provider",
+            name: "Provider",
+            description:
+              "Where the language model runs.\n\nLocal: a bundled llama.cpp server runs on this machine.\n\nExternal: requests are sent to an OpenAI-compatible API and no local server is started.",
+            type: "select",
+            defaultValue: "local",
+            options: [
+              { value: "local", label: "Local" },
+              { value: "external", label: "External" },
+            ],
+          },
+        ],
+      },
+      {
         label: "Model",
+        visibleWhen: { field: "llm.provider", eq: "local" },
         fields: [
           {
             id: "llm.preset",
@@ -677,60 +695,19 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                   badges: [{ icon: "i-material-symbols-build-rounded", label: "Manual setup" }],
                   description: "Configure model path, context size, threads, and ports yourself.",
                 },
-                {
-                  id: "external",
-                  label: "External",
-                  title: "External",
-                  badges: [{ icon: "i-material-symbols-cloud", label: "OpenAI-compatible" }],
-                  description: "Point to a remote API. Skips the local llama-server entirely.",
-                },
               ],
             },
           },
         ],
       },
       {
-        label: "External Provider",
-        visibleWhen: { field: "llm.preset", eq: "external" },
-        fields: [
-          {
-            id: "llm.external.baseUrl",
-            name: "Base URL",
-            description:
-              "API endpoint URL. Must use HTTPS for remote hosts; HTTP is only allowed for localhost.",
-            type: "string",
-            defaultValue: "",
-            placeholder: "https://api.example.com/v1",
-            regex: SECURE_URL_VALIDATION,
-          },
-          {
-            id: "llm.external.apiKey",
-            name: "API Key",
-            description: "Authentication key.",
-            type: "password",
-            defaultValue: "",
-            placeholder: "sk-...",
-          },
-          {
-            id: "llm.external.model",
-            name: "Model",
-            description: "Model identifier to use.",
-            type: "string",
-            defaultValue: "",
-            placeholder: "gpt-4o-mini",
-          },
-          {
-            id: "llm.external.contextSize",
-            name: "Context Length",
-            description: "Maximum context window length in tokens. Used for usage tracking.",
-            type: "number",
-            defaultValue: 128000,
-          },
-        ],
-      },
-      {
         label: "Llama Server Configuration",
-        visibleWhen: { field: "llm.preset", eq: "custom" },
+        visibleWhen: {
+          allOf: [
+            { field: "llm.provider", eq: "local" },
+            { field: "llm.preset", eq: "custom" },
+          ],
+        },
         fields: [
           {
             id: "llm.modelPath",
@@ -840,6 +817,45 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           },
         ],
       },
+      {
+        label: "External Provider",
+        visibleWhen: { field: "llm.provider", eq: "external" },
+        fields: [
+          {
+            id: "llm.external.baseUrl",
+            name: "Base URL",
+            description:
+              "API endpoint URL. Must use HTTPS for remote hosts; HTTP is only allowed for localhost.",
+            type: "string",
+            defaultValue: "",
+            placeholder: "https://api.example.com/v1",
+            regex: SECURE_URL_VALIDATION,
+          },
+          {
+            id: "llm.external.apiKey",
+            name: "API Key",
+            description: "Authentication key.",
+            type: "password",
+            defaultValue: "",
+            placeholder: "sk-...",
+          },
+          {
+            id: "llm.external.model",
+            name: "Model",
+            description: "Model identifier to use.",
+            type: "string",
+            defaultValue: "",
+            placeholder: "gpt-4o-mini",
+          },
+          {
+            id: "llm.external.contextSize",
+            name: "Context Length",
+            description: "Maximum context window length in tokens. Used for usage tracking.",
+            type: "number",
+            defaultValue: 128000,
+          },
+        ],
+      },
     ],
   },
   {
@@ -916,8 +932,118 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         ],
       },
       {
-        label: "Model",
+        label: "Transcription",
         visibleWhen: { field: "stt.enabled", eq: true },
+        fields: [
+          {
+            id: "stt.llmAutocorrect",
+            name: "Autocorrect Transcription",
+            description:
+              "Use the language model to clean up transcription mistakes after speech recognition.\n\nDisable if you prefer raw Whisper output or want to save a model call per dictation.",
+            type: "boolean",
+            defaultValue: true,
+          },
+          {
+            id: "stt.llmChainTranscription",
+            name: "Merge Into Existing Input",
+            description:
+              "When text is already in the input, use the language model to merge a new transcription into it rather than replacing it.\n\nDisable to always append as a new line.",
+            type: "boolean",
+            defaultValue: true,
+          },
+          {
+            id: "stt.autoSend",
+            name: "Auto Send After Transcription",
+            description: "Automatically send the message as soon as transcription completes.",
+            type: "boolean",
+            defaultValue: true,
+          },
+        ],
+      },
+      {
+        label: "Voice Input",
+        visibleWhen: { field: "stt.enabled", eq: true },
+        fields: [
+          {
+            id: "stt.activation",
+            name: "Activation",
+            description:
+              "How the microphone is activated.\n\nManual: use the mic button. Voice input turns off whenever the app is hidden or closed.\n\nSticky: use the mic button. Voice input stays on through hides, closes, and restarts.\n\nPush to Talk: hold the global shortcut to dictate. Quick taps show or hide the window instead.",
+            type: "select",
+            defaultValue: "push-to-talk",
+            options: [
+              { value: "manual", label: "Manual" },
+              { value: "sticky", label: "Sticky" },
+              { value: "push-to-talk", label: "Push to Talk" },
+            ],
+          },
+          {
+            id: "stt.holdDuration",
+            name: "Hold Duration",
+            description:
+              "Delay before push-to-talk activates while holding the shortcut.\nTaps shorter than this show or hide the app instead.",
+            type: "number",
+            defaultValue: 250,
+            suffix: "ms",
+            visibleWhen: { field: "stt.activation", eq: "push-to-talk" },
+          },
+          {
+            id: "stt.autoVolumeEnabled",
+            name: "Lower System Volume While Listening",
+            description:
+              "Drop the system output volume to a configurable level while voice input is active, then restore it when listening stops.\nUseful for letting your own voice be heard over media playback.",
+            type: "boolean",
+            defaultValue: false,
+          },
+          {
+            id: "stt.autoVolumeTarget",
+            name: "Lowered Volume Target",
+            description:
+              "System volume to apply while voice input is listening.\nAccepted range: 0 to 100.",
+            type: "number",
+            defaultValue: 20,
+            suffix: "%",
+            visibleWhen: { field: "stt.autoVolumeEnabled", eq: true },
+            regex: [
+              { regex: "^(?:[0-9]|[1-9][0-9]|100)$", errorMessage: "Must be between 0 and 100" },
+            ],
+          },
+          {
+            id: "stt.vadPersistedState",
+            name: "VAD Persisted State",
+            description: "",
+            type: "boolean",
+            defaultValue: false,
+            visibleWhen: { field: "stt.activation", eq: "__never__" },
+          },
+        ],
+      },
+      {
+        label: "Provider",
+        visibleWhen: { field: "stt.enabled", eq: true },
+        fields: [
+          {
+            id: "stt.provider",
+            name: "Provider",
+            description:
+              "Where speech-to-text runs.\n\nLocal: a bundled whisper.cpp server runs on this machine.\n\nExternal: audio is sent to an OpenAI-compatible transcription API and no local server is started.",
+            type: "select",
+            defaultValue: "local",
+            options: [
+              { value: "local", label: "Local" },
+              { value: "external", label: "External" },
+            ],
+          },
+        ],
+      },
+      {
+        label: "Model",
+        visibleWhen: {
+          allOf: [
+            { field: "stt.enabled", eq: true },
+            { field: "stt.provider", eq: "local" },
+          ],
+        },
         fields: [
           {
             id: "stt.preset",
@@ -1053,140 +1179,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                   badges: [{ icon: "i-material-symbols-build-rounded", label: "Manual setup" }],
                   description: "Configure model path, threads, and ports yourself.",
                 },
-                {
-                  id: "external",
-                  label: "External",
-                  title: "External",
-                  badges: [{ icon: "i-material-symbols-cloud", label: "OpenAI-compatible" }],
-                  description:
-                    "Point to a remote transcription API. Skips the local whisper-server.",
-                },
               ],
             },
-          },
-        ],
-      },
-      {
-        label: "Transcription",
-        visibleWhen: { field: "stt.enabled", eq: true },
-        fields: [
-          {
-            id: "stt.llmAutocorrect",
-            name: "Autocorrect Transcription",
-            description:
-              "Use the language model to clean up transcription mistakes after speech recognition.\n\nDisable if you prefer raw Whisper output or want to save a model call per dictation.",
-            type: "boolean",
-            defaultValue: true,
-          },
-          {
-            id: "stt.llmChainTranscription",
-            name: "Merge Into Existing Input",
-            description:
-              "When text is already in the input, use the language model to merge a new transcription into it rather than replacing it.\n\nDisable to always append as a new line.",
-            type: "boolean",
-            defaultValue: true,
-          },
-          {
-            id: "stt.autoSend",
-            name: "Auto Send After Transcription",
-            description: "Automatically send the message as soon as transcription completes.",
-            type: "boolean",
-            defaultValue: true,
-          },
-        ],
-      },
-      {
-        label: "Voice Input",
-        visibleWhen: { field: "stt.enabled", eq: true },
-        fields: [
-          {
-            id: "stt.activation",
-            name: "Activation",
-            description:
-              "How the microphone is activated.\n\nManual: use the mic button. Voice input turns off whenever the app is hidden or closed.\n\nSticky: use the mic button. Voice input stays on through hides, closes, and restarts.\n\nPush to Talk: hold the global shortcut to dictate. Quick taps show or hide the window instead.",
-            type: "select",
-            defaultValue: "push-to-talk",
-            options: [
-              { value: "manual", label: "Manual" },
-              { value: "sticky", label: "Sticky" },
-              { value: "push-to-talk", label: "Push to Talk" },
-            ],
-          },
-          {
-            id: "stt.holdDuration",
-            name: "Hold Duration",
-            description:
-              "Delay before push-to-talk activates while holding the shortcut.\nTaps shorter than this show or hide the app instead.",
-            type: "number",
-            defaultValue: 250,
-            suffix: "ms",
-            visibleWhen: { field: "stt.activation", eq: "push-to-talk" },
-          },
-          {
-            id: "stt.autoVolumeEnabled",
-            name: "Lower System Volume While Listening",
-            description:
-              "Drop the system output volume to a configurable level while voice input is active, then restore it when listening stops.\nUseful for letting your own voice be heard over media playback.",
-            type: "boolean",
-            defaultValue: false,
-          },
-          {
-            id: "stt.autoVolumeTarget",
-            name: "Lowered Volume Target",
-            description:
-              "System volume to apply while voice input is listening.\nAccepted range: 0 to 100.",
-            type: "number",
-            defaultValue: 20,
-            suffix: "%",
-            visibleWhen: { field: "stt.autoVolumeEnabled", eq: true },
-            regex: [
-              { regex: "^(?:[0-9]|[1-9][0-9]|100)$", errorMessage: "Must be between 0 and 100" },
-            ],
-          },
-          {
-            id: "stt.vadPersistedState",
-            name: "VAD Persisted State",
-            description: "",
-            type: "boolean",
-            defaultValue: false,
-            visibleWhen: { field: "stt.activation", eq: "__never__" },
-          },
-        ],
-      },
-      {
-        label: "External Provider",
-        visibleWhen: {
-          allOf: [
-            { field: "stt.enabled", eq: true },
-            { field: "stt.preset", eq: "external" },
-          ],
-        },
-        fields: [
-          {
-            id: "stt.external.baseUrl",
-            name: "Base URL",
-            description:
-              "API endpoint URL. Must use HTTPS for remote hosts; HTTP is only allowed for localhost.",
-            type: "string",
-            defaultValue: "",
-            placeholder: "https://api.example.com/v1",
-            regex: SECURE_URL_VALIDATION,
-          },
-          {
-            id: "stt.external.apiKey",
-            name: "API Key",
-            description: "Authentication key.",
-            type: "password",
-            defaultValue: "",
-            placeholder: "sk-...",
-          },
-          {
-            id: "stt.external.model",
-            name: "Model",
-            description: "Model identifier to use.",
-            type: "string",
-            defaultValue: "",
-            placeholder: "whisper-1",
           },
         ],
       },
@@ -1195,6 +1189,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         visibleWhen: {
           allOf: [
             { field: "stt.enabled", eq: true },
+            { field: "stt.provider", eq: "local" },
             { field: "stt.preset", eq: "custom" },
           ],
         },
@@ -1249,6 +1244,43 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "command_preview",
             defaultValue: "",
             commandType: "stt",
+          },
+        ],
+      },
+      {
+        label: "External Provider",
+        visibleWhen: {
+          allOf: [
+            { field: "stt.enabled", eq: true },
+            { field: "stt.provider", eq: "external" },
+          ],
+        },
+        fields: [
+          {
+            id: "stt.external.baseUrl",
+            name: "Base URL",
+            description:
+              "API endpoint URL. Must use HTTPS for remote hosts; HTTP is only allowed for localhost.",
+            type: "string",
+            defaultValue: "",
+            placeholder: "https://api.example.com/v1",
+            regex: SECURE_URL_VALIDATION,
+          },
+          {
+            id: "stt.external.apiKey",
+            name: "API Key",
+            description: "Authentication key.",
+            type: "password",
+            defaultValue: "",
+            placeholder: "sk-...",
+          },
+          {
+            id: "stt.external.model",
+            name: "Model",
+            description: "Model identifier to use.",
+            type: "string",
+            defaultValue: "",
+            placeholder: "whisper-1",
           },
         ],
       },

@@ -61,8 +61,8 @@ export function resetTokenizeFallback(): void {
  *  Returns a conservative estimate when accuracy isn't available. */
 export async function tokenize(text: string): Promise<number> {
   if (!text) return 0;
-  const preset = settingsState.currentSettings["llm.preset"];
-  if (preset === "external") return charBasedEstimate(text);
+  const provider = settingsState.currentSettings["llm.provider"];
+  if (provider === "external") return charBasedEstimate(text);
   return tokenizeLocal(text);
 }
 
@@ -70,7 +70,7 @@ export async function tokenize(text: string): Promise<number> {
  *  parallel `/tokenize` calls; for external is vectorized char/4 (no I/O). */
 export async function tokenizeMany(texts: string[]): Promise<number[]> {
   if (texts.length === 0) return [];
-  const preset = settingsState.currentSettings["llm.preset"];
-  if (preset === "external") return texts.map(charBasedEstimate);
+  const provider = settingsState.currentSettings["llm.provider"];
+  if (provider === "external") return texts.map(charBasedEstimate);
   return Promise.all(texts.map(tokenizeLocal));
 }

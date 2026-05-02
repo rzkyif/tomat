@@ -13,7 +13,7 @@ export async function transcribeAudio(
 ): Promise<{ text: string; error?: string }> {
   try {
     const settings = settingsState.currentSettings;
-    const preset = settings["stt.preset"];
+    const provider = settings["stt.provider"];
     const binaryString = atob(audioData);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
@@ -21,7 +21,7 @@ export async function transcribeAudio(
     }
     const blob = new Blob([bytes], { type: "audio/wav" });
 
-    if (preset === "external") {
+    if (provider === "external") {
       const client = createOpenAIClient(
         settings["stt.external.baseUrl"],
         settings["stt.external.apiKey"],

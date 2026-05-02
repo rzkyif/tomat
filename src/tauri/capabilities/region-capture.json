@@ -3,7 +3,5 @@
   "identifier": "region-capture",
   "description": "Capability for the transparent region-capture overlay window. Needs to invoke the region-capture Rust commands and emit the result/cancel events back to the main window.",
   "windows": ["region-capture"],
-  "permissions": [
-    "core:event:default"
-  ]
+  "permissions": ["core:event:default"]
 }

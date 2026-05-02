@@ -43,6 +43,7 @@ export function computeArgs(type: "llm" | "stt", currentSettings: Record<string,
 
 export async function restartServerIfNeed(type: "llm" | "stt") {
   const currentSettings = settingsState.currentSettings;
+  const provider = currentSettings[`${type}.provider`];
   const preset = currentSettings[`${type}.preset`];
   const sttDisabled = type === "stt" && currentSettings["stt.enabled"] === false;
 
@@ -51,7 +52,7 @@ export async function restartServerIfNeed(type: "llm" | "stt") {
   // backend, which terminates any running child and emits the Disabled
   // status. (Returning early here would leak a running llama-server when the
   // user switches from a local preset to external.)
-  if (preset === "external" || preset === "disabled" || sttDisabled) {
+  if (provider === "external" || preset === "disabled" || sttDisabled) {
     await invoke("update_server_args", {
       server: type,
       args: [],

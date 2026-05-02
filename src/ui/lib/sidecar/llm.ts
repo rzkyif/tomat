@@ -70,9 +70,9 @@ export function createOpenAIClient(baseURL: string, apiKey: string): OpenAI {
 /** Create an OpenAI client pointing at the configured LLM server */
 export function getLLMClient(): OpenAI {
   const settings = settingsState.currentSettings;
-  const preset = settings["llm.preset"];
+  const provider = settings["llm.provider"];
 
-  if (preset === "external") {
+  if (provider === "external") {
     return createOpenAIClient(settings["llm.external.baseUrl"], settings["llm.external.apiKey"]);
   } else {
     const host = settings["llm.host"] || "127.0.0.1";
@@ -95,7 +95,7 @@ export function getSecondaryLLMClient(): OpenAI {
 /** Get the configured context size for the current LLM */
 export function getContextSize(): number {
   const settings = settingsState.currentSettings;
-  if (settings["llm.preset"] === "external") {
+  if (settings["llm.provider"] === "external") {
     return settings["llm.external.contextSize"] || 128000;
   }
   return settings["llm.contextSize"] || 4096;
@@ -161,8 +161,8 @@ export async function singleShotLLM(
 ): Promise<string> {
   const client = getLLMClient();
   const settings = settingsState.currentSettings;
-  const preset = settings["llm.preset"];
-  const model = preset === "external" ? settings["llm.external.model"] : "default";
+  const provider = settings["llm.provider"];
+  const model = provider === "external" ? settings["llm.external.model"] : "default";
 
   const apiContent = await contentToApi(userMessage);
   const request: OpenAI.ChatCompletionCreateParamsNonStreaming & {
@@ -185,14 +185,14 @@ export async function singleShotLLM(
   // For OpenAI-compatible external servers, reasoning_effort is the standard
   // signal; servers that don't support it ignore unknown fields.
   if (mode === "off") {
-    if (preset === "external") {
+    if (provider === "external") {
       request.reasoning_effort = "minimal";
     } else {
       request.chat_template_kwargs = { enable_thinking: false };
     }
   } else {
     const effort = mode === "on" ? "high" : "low";
-    if (preset === "external") {
+    if (provider === "external") {
       request.reasoning_effort = effort;
     } else {
       request.chat_template_kwargs = { enable_thinking: true };
@@ -906,7 +906,7 @@ async function materializeContext(messages: Message[]): Promise<ApiMessage[]> {
 
 async function runStream(opts: RunStreamOpts): Promise<void> {
   const settings = settingsState.currentSettings;
-  const preset = settings["llm.preset"];
+  const provider = settings["llm.provider"];
   const usingSecondary = opts.route === "secondary";
   const client = usingSecondary ? getSecondaryLLMClient() : getLLMClient();
 
@@ -939,11 +939,11 @@ async function runStream(opts: RunStreamOpts): Promise<void> {
   messagesState.setDisplaySystemPrompt(systemPrompt);
 
   const useReasoning =
-    !usingSecondary && preset !== "external" && settings["llm.reasoning"] === "on";
+    !usingSecondary && provider !== "external" && settings["llm.reasoning"] === "on";
   const reasoningBudget = settings["llm.reasoningBudget"];
   const model = usingSecondary
     ? settings["dualModel.external.model"]
-    : preset === "external"
+    : provider === "external"
       ? settings["llm.external.model"]
       : "default";
   const maxHops = clampInt(settings["tools.maxHops"], 5, 1, 99);

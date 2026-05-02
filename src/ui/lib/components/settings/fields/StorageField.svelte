@@ -147,7 +147,7 @@
     const protect = new Set<string>();
     if (!tree) return protect;
     const s = settingsState.currentSettings;
-    if (s["llm.preset"] !== "external") {
+    if (s["llm.provider"] !== "external") {
       const p = resolveHfToDisk(s["llm.modelPath"], tree.root_path);
       if (p) protect.add(p);
       if (s["llm.supportImages"]) {
@@ -155,7 +155,7 @@
         if (m) protect.add(m);
       }
     }
-    if (s["stt.enabled"] && s["stt.preset"] !== "external") {
+    if (s["stt.enabled"] && s["stt.provider"] !== "external") {
       const p = resolveHfToDisk(s["stt.modelPath"], tree.root_path);
       if (p) protect.add(p);
     }

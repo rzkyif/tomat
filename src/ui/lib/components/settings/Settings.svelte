@@ -13,7 +13,7 @@
     getConditionDeps,
     searchFields,
   } from "$lib/shared/settings";
-  import { groupSlide, getDuration } from "$lib/shared/animations";
+  import { groupSlide } from "$lib/shared/animations";
 
   // Sub-components
   import SettingsSidebar from "./SettingsSidebar.svelte";
@@ -51,8 +51,6 @@
   // Group-swap animation state
   let direction = $state<"up" | "down">("down");
   let measureEl: HTMLDivElement | undefined = $state();
-  let animatedHeight = $state<number | null>(null);
-  let heightReady = $state(false);
 
   let groupKey = $derived(searchMode ? SEARCH_KEY : selectedSettingGroupId);
 
@@ -105,10 +103,14 @@
   }
 
   $effect(() => {
-    // Re-check fades when group/search changes reset scroll content
+    // Reset scroll to top and re-check fades when the group or search mode
+    // changes; otherwise a long previous group leaves the new one scrolled
+    // partway down.
     void [selectedSettingGroupId, searchMode];
-    // Wait a tick for DOM to update
-    requestAnimationFrame(updateScrollFades);
+    requestAnimationFrame(() => {
+      if (scrollEl) scrollEl.scrollTop = 0;
+      updateScrollFades();
+    });
   });
 
   onMount(async () => {
@@ -139,27 +141,6 @@
     validateAllFields();
     searchInput?.focus();
     updateScrollFades();
-
-    // Track the natural height of the group content so the Bubble can resize
-    // smoothly between groups (and when sections expand/collapse). ResizeObserver
-    // reports `measureEl`'s border-box — since the outgoing panel is pinned
-    // position:fixed during a group swap, only the incoming panel is in-flow,
-    // giving us the correct target height.
-    if (measureEl) {
-      const ro = new ResizeObserver(() => {
-        if (!measureEl) return;
-        const h = measureEl.offsetHeight;
-        if (h === 0) return; // transient empty state during swap
-        animatedHeight = h;
-        if (!heightReady) {
-          // First measurement sets height without animating from 0.
-          requestAnimationFrame(() => {
-            heightReady = true;
-          });
-        }
-      });
-      ro.observe(measureEl);
-    }
   });
 
   function validateAllFields() {
@@ -218,10 +199,7 @@
       !key.startsWith("llm.external.") &&
       getPresetFieldIds("llm").has(key)
     ) {
-      if (
-        settingsState.currentSettings["llm.preset"] !== "external" &&
-        settingsState.currentSettings["llm.preset"] !== "custom"
-      ) {
+      if (settingsState.currentSettings["llm.preset"] !== "custom") {
         await settingsState.updateSetting("llm.preset", "custom");
       }
     }
@@ -231,10 +209,7 @@
       !key.startsWith("stt.external.") &&
       getPresetFieldIds("stt").has(key)
     ) {
-      if (
-        settingsState.currentSettings["stt.preset"] !== "external" &&
-        settingsState.currentSettings["stt.preset"] !== "custom"
-      ) {
+      if (settingsState.currentSettings["stt.preset"] !== "custom") {
         await settingsState.updateSetting("stt.preset", "custom");
       }
     }
@@ -392,7 +367,7 @@
 
 <Bubble
   selectedAlignment={settingsState.getAlignment()}
-  extraClass="flex flex-col gap-3 overflow-hidden transition-all w-full max-h-80vh relative"
+  extraClass="flex flex-col gap-3 overflow-hidden transition-all w-full h-80vh relative"
 >
   <!-- Settings Header and Back Button -->
   <div class="flex gap-2 items-center text-2xl relative">
@@ -467,16 +442,7 @@
         bind:this={scrollEl}
         onscroll={updateScrollFades}
       >
-        <div
-          style:height={heightReady && animatedHeight !== null
-            ? `${animatedHeight}px`
-            : undefined}
-          style:transition={heightReady
-            ? `height ${getDuration()}ms cubic-bezier(0.4, 0, 0.2, 1)`
-            : undefined}
-          class="overflow-hidden"
-        >
-          <div bind:this={measureEl} class="relative">
+        <div bind:this={measureEl} class="relative">
             {#key groupKey}
               <div
                 class="flex flex-col gap-2"
@@ -530,7 +496,6 @@
                 {/if}
               </div>
             {/key}
-          </div>
         </div>
       </div>
       <div
