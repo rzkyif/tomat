@@ -2,12 +2,18 @@
   import type { SettingField } from "$lib/shared/settings";
   import { evalCondition } from "$lib/shared/settings";
   import { settingsState } from "../../../state";
-  import FieldDescription from "./FieldDescription.svelte";
-  import FieldResetButton from "./FieldResetButton.svelte";
+  import FieldCard from "./FieldCard.svelte";
 
-  let { field, error, onChange, onReset } = $props<{
+  let {
+    field,
+    error,
+    horizontal = false,
+    onChange,
+    onReset,
+  } = $props<{
     field: SettingField;
     error: string | null;
+    horizontal?: boolean;
     onChange: (key: string, value: any) => void;
     onReset: (fieldId: string) => void;
   }>();
@@ -18,7 +24,6 @@
   const currentValue = $derived(
     (settingsState.currentSettings[field.id] ?? "") as string,
   );
-  const isModified = $derived(currentValue !== field.defaultValue);
   const hasError = $derived(!!error);
 
   let capturing = $state(false);
@@ -137,28 +142,12 @@
   const segments = $derived(currentValue ? currentValue.split("+") : []);
 </script>
 
-<div
-  class="flex flex-col gap-2 max-w-full overflow-clip px-4 pt-2 pb-3 text-base rounded-2xl border-2 {hasError
-    ? 'bg-accent-red-100 border-accent-red-400'
-    : 'bg-default-200 border-transparent'}"
->
-  <div class="flex flex-row justify-between items-start gap-2">
-    <div class="flex flex-col flex-1">
-      <div class="text-default-800">{field.name}</div>
-      {#if field.description}
-        <FieldDescription text={field.description} />
-      {/if}
-    </div>
-    {#if editable && isModified}
-      <FieldResetButton onclick={() => onReset(field.id)} />
-    {/if}
-  </div>
-
-  <div class="flex flex-row items-center gap-2">
+<FieldCard {field} {error} {horizontal} {onReset}>
+  <div class="flex flex-row items-center gap-2 w-full">
     <button
       type="button"
       aria-label={field.name}
-      class="flex-1 min-h-8 px-2 rounded-lg text-left flex flex-row items-center gap-1 flex-wrap outline-none {!editable
+      class="flex-1 min-h-8 px-2 py-1 rounded-lg text-left flex flex-row items-center gap-1 flex-wrap outline-none {!editable
         ? 'opacity-60 pointer-events-none'
         : ''} {capturing
         ? 'bg-blue-500/20 ring-2 ring-blue-500'
@@ -168,9 +157,9 @@
       onclick={startCapture}
     >
       {#if capturing}
-        <span class="text-default-600 text-sm italic"
-          >Press a key combination… (Esc to cancel)</span
-        >
+        <span class="text-default-600 text-sm italic">
+          Press a key combination… (Esc to cancel)
+        </span>
       {:else if segments.length === 0}
         <span class="text-default-500 text-sm italic">Disabled</span>
       {:else}
@@ -180,8 +169,9 @@
           {/if}
           <kbd
             class="bg-default-100 text-default-800 px-1.5 py-0.5 rounded border border-default-400 text-xs font-mono uppercase"
-            >{seg}</kbd
           >
+            {seg}
+          </kbd>
         {/each}
       {/if}
     </button>
@@ -189,7 +179,7 @@
     {#if editable && currentValue}
       <button
         type="button"
-        class="text-default-500 hover:text-red-500 transition-colors p-1 shrink-0"
+        class="text-default-500 hover:text-red-500 transition-colors shrink-0"
         title="Disable shortcut"
         onclick={clearShortcut}
       >
@@ -197,8 +187,4 @@
       </button>
     {/if}
   </div>
-
-  {#if hasError}
-    <div class="text-red-500 text-sm">{error}</div>
-  {/if}
-</div>
+</FieldCard>

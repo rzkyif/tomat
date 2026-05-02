@@ -2,8 +2,7 @@
   import type { SettingField } from "$lib/shared/settings";
   import { evalCondition } from "$lib/shared/settings";
   import { settingsState } from "../../../state";
-  import FieldDescription from "./FieldDescription.svelte";
-  import FieldResetButton from "./FieldResetButton.svelte";
+  import FieldCard from "./FieldCard.svelte";
 
   let { field, error, onChange, onReset } = $props<{
     field: SettingField;
@@ -16,30 +15,45 @@
     evalCondition(field.editableWhen, settingsState.currentSettings),
   );
   const currentValue = $derived(settingsState.currentSettings[field.id]);
-  const isModified = $derived(currentValue !== field.defaultValue);
   const hasError = $derived(!!error);
+
+  // While focused, grow the textarea to its full scrollHeight so the user
+  // can see all of their text. On blur, return to the limited min-h-40 box.
+  let focused = $state(false);
+  let textareaEl = $state<HTMLTextAreaElement>();
+
+  function fitToContent() {
+    if (!textareaEl) return;
+    // Reset first so shrinking on delete works.
+    textareaEl.style.height = "auto";
+    textareaEl.style.height = `${textareaEl.scrollHeight}px`;
+  }
+
+  function onFocus() {
+    focused = true;
+    fitToContent();
+  }
+
+  function onBlur() {
+    focused = false;
+    if (textareaEl) {
+      // Clear the inline height so the CSS min-h-40 rule takes over again,
+      // returning the textarea to its limited resting height.
+      textareaEl.style.height = "";
+    }
+  }
+
+  function onInput(e: Event) {
+    onChange(field.id, (e.target as HTMLTextAreaElement).value);
+    if (focused) fitToContent();
+  }
 </script>
 
-<div
-  class="flex flex-col gap-2 max-w-full overflow-clip px-4 pt-2 pb-3 text-base rounded-2xl border-2 {hasError
-    ? 'bg-accent-red-100 border-accent-red-400'
-    : 'bg-default-200 border-transparent'}"
->
-  <div class="flex flex-row justify-between items-start gap-2">
-    <div class="flex flex-col flex-1">
-      <div class="text-default-800">{field.name}</div>
-      {#if field.description}
-        <FieldDescription text={field.description} />
-      {/if}
-    </div>
-    {#if editable && isModified}
-      <FieldResetButton onclick={() => onReset(field.id)} />
-    {/if}
-  </div>
-
+<FieldCard {field} {error} {onReset}>
   <textarea
+    bind:this={textareaEl}
     aria-label={field.name}
-    class="multiline-scroll text-default-800 rounded-lg w-full px-2 py-1.5 outline-none min-h-40 overflow-y-hidden focus:overflow-y-auto whitespace-pre-wrap break-words text-sm {!editable
+    class="multiline-scroll text-default-800 rounded-lg w-full px-2 py-1.5 outline-none min-h-40 resize-y overflow-y-hidden focus:overflow-y-auto whitespace-pre-wrap break-words text-sm {!editable
       ? 'opacity-60'
       : ''} {hasError
       ? 'bg-accent-red-300 border-accent-red-400'
@@ -47,13 +61,11 @@
     disabled={!editable}
     placeholder={field.placeholder || ""}
     value={currentValue}
-    oninput={(e) => onChange(field.id, (e.target as HTMLTextAreaElement).value)}
+    oninput={onInput}
+    onfocus={onFocus}
+    onblur={onBlur}
   ></textarea>
-
-  {#if hasError}
-    <div class="text-red-500 text-sm">{error}</div>
-  {/if}
-</div>
+</FieldCard>
 
 <style>
   .multiline-scroll::-webkit-scrollbar {

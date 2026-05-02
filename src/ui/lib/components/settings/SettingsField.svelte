@@ -13,10 +13,11 @@
   import StorageField from "./fields/StorageField.svelte";
   import ToolkitsField from "./fields/ToolkitsField.svelte";
 
-  let { field, monitors, error, onChange, onReset, onPresetSelect } = $props<{
+  let { field, monitors, error, horizontal = false, onChange, onReset, onPresetSelect } = $props<{
     field: SettingField;
     monitors: Monitor[];
     error: string | null;
+    horizontal?: boolean;
     onChange: (key: string, value: any) => void;
     onReset: (fieldId: string) => void;
     onPresetSelect: (fieldId: string, option: PresetOption) => void;
@@ -39,10 +40,10 @@
   {:else if field.type === "snippets"}
     <SnippetsField {field} />
   {:else if field.type === "shortcut"}
-    <ShortcutField {field} {error} {onChange} {onReset} />
+    <ShortcutField {field} {error} {horizontal} {onChange} {onReset} />
   {:else if field.type === "toolkits"}
     <ToolkitsField {field} />
   {:else}
-    <StandardField {field} {monitors} {error} {onChange} {onReset} />
+    <StandardField {field} {monitors} {error} {horizontal} {onChange} {onReset} />
   {/if}
 {/if}

@@ -3,13 +3,20 @@
   import { evalCondition } from "$lib/shared/settings";
   import type { Monitor } from "$lib/shared/types";
   import { settingsState } from "../../../state";
-  import FieldDescription from "./FieldDescription.svelte";
-  import FieldResetButton from "./FieldResetButton.svelte";
+  import FieldCard from "./FieldCard.svelte";
 
-  let { field, monitors, error, onChange, onReset } = $props<{
+  let {
+    field,
+    monitors,
+    error,
+    horizontal = false,
+    onChange,
+    onReset,
+  } = $props<{
     field: SettingField;
     monitors: Monitor[];
     error: string | null;
+    horizontal?: boolean;
     onChange: (key: string, value: any) => void;
     onReset: (fieldId: string) => void;
   }>();
@@ -17,31 +24,24 @@
   const editable = $derived(
     evalCondition(field.editableWhen, settingsState.currentSettings),
   );
-  const currentValue = $derived(settingsState.currentSettings[field.id]);
-  const isModified = $derived(currentValue !== field.defaultValue);
   const hasError = $derived(!!error);
+
+  const inputType = $derived(
+    field.type === "password"
+      ? "password"
+      : field.type === "number" || field.type === "float"
+        ? "number"
+        : "text",
+  );
+  const isNumeric = $derived(
+    field.type === "number" || field.type === "float",
+  );
 </script>
 
-<div
-  class="flex flex-col gap-2 max-w-full overflow-clip px-4 pt-2 pb-3 text-base rounded-2xl border-2 {hasError
-    ? 'bg-accent-red-100 border-accent-red-400'
-    : 'bg-default-200 border-transparent'}"
->
-  <div class="flex flex-row justify-between items-start gap-2">
-    <div class="flex flex-col flex-1">
-      <div class="text-default-800">{field.name}</div>
-      {#if field.description}
-        <FieldDescription text={field.description} />
-      {/if}
-    </div>
-    {#if editable && isModified}
-      <FieldResetButton onclick={() => onReset(field.id)} />
-    {/if}
-  </div>
-
+<FieldCard {field} {error} {horizontal} {onReset}>
   {#if field.type === "boolean"}
     <label
-      class="relative inline-flex items-center cursor-pointer w-full {!editable
+      class="relative flex items-center cursor-pointer w-full {!editable
         ? 'opacity-60 pointer-events-none'
         : ''}"
     >
@@ -63,7 +63,7 @@
       field.type === "monitor"
         ? settingsState.getMonitor()
         : settingsState.currentSettings[field.id]}
-    <div class="relative flex-1">
+    <div class="relative w-full">
       <select
         aria-label={field.name}
         class="appearance-none bg-default-300 text-default-800 rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full h-8 px-2 pr-7 outline-none {!editable
@@ -90,50 +90,38 @@
       ></i>
     </div>
   {:else}
-    {@const inputType =
-      field.type === "password"
-        ? "password"
-        : field.type === "number" || field.type === "float"
-          ? "number"
-          : "text"}
-    {@const isNumeric = field.type === "number" || field.type === "float"}
-    <div class="flex flex-col flex-1">
-      <div class="flex flex-row items-center gap-2">
-        <input
-          aria-label={field.name}
-          type={inputType}
-          step={field.type === "float"
-            ? "0.1"
-            : field.type === "number"
-              ? "1"
-              : undefined}
-          class="text-default-800 rounded-lg block w-full min-h-8 px-2 outline-none {!editable
-            ? 'opacity-60'
-            : ''} {hasError
-            ? 'bg-accent-red-300 border-accent-red-400'
-            : 'bg-default-300 focus:ring-blue-500'}"
-          disabled={!editable}
-          placeholder={field.placeholder || ""}
-          value={settingsState.currentSettings[field.id]}
-          onchange={(e) => {
-            const val = (e.target as HTMLInputElement).value;
-            if (isNumeric) {
-              onChange(
-                field.id,
-                field.type === "float" ? parseFloat(val) : parseInt(val, 10),
-              );
-            } else {
-              onChange(field.id, val);
-            }
-          }}
-        />
-        {#if field.suffix}
-          <span class="text-default-500 text-sm shrink-0">{field.suffix}</span>
-        {/if}
-      </div>
-      {#if hasError}
-        <div class="text-red-500 text-sm mt-1">{error}</div>
+    <div class="flex flex-row items-center gap-2 w-full">
+      <input
+        aria-label={field.name}
+        type={inputType}
+        step={field.type === "float"
+          ? "0.1"
+          : field.type === "number"
+            ? "1"
+            : undefined}
+        class="text-default-800 rounded-lg block w-full min-h-8 px-2 outline-none {!editable
+          ? 'opacity-60'
+          : ''} {hasError
+          ? 'bg-accent-red-300 border-accent-red-400'
+          : 'bg-default-300 focus:ring-blue-500'}"
+        disabled={!editable}
+        placeholder={field.placeholder || ""}
+        value={settingsState.currentSettings[field.id]}
+        onchange={(e) => {
+          const val = (e.target as HTMLInputElement).value;
+          if (isNumeric) {
+            onChange(
+              field.id,
+              field.type === "float" ? parseFloat(val) : parseInt(val, 10),
+            );
+          } else {
+            onChange(field.id, val);
+          }
+        }}
+      />
+      {#if field.suffix}
+        <span class="text-default-500 text-sm shrink-0">{field.suffix}</span>
       {/if}
     </div>
   {/if}
-</div>
+</FieldCard>

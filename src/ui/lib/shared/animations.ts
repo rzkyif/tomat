@@ -97,42 +97,6 @@ export function slidePanel(
 }
 
 /**
- * Slide + fade transition used by the Settings UI when switching between
- * setting groups (or to/from search-results mode).
- *
- * `direction` reflects the spatial relationship between old and new: "up"
- * when the new group sits above the previous one in the sidebar, "down" when
- * below. `phase` is "in" for the entering element, "out" for the leaving one.
- *
- * Convention: moving "up" means the new panel slides in from above and the
- * old panel falls down out of view. Moving "down" mirrors that.
- */
-export function groupSlide(
-  _node: Element,
-  { direction, phase }: { direction: "up" | "down"; phase: "in" | "out" },
-) {
-  const duration = getDuration(BASE_MS);
-  if (!duration) return { duration: 0 };
-
-  // Offscreen Y-sign: negative = above, positive = below.
-  //   up+in    → new from above       → -
-  //   up+out   → old falls down       → +
-  //   down+in  → new from below       → +
-  //   down+out → old rises up         → -
-  const sign =
-    (direction === "up" && phase === "in") || (direction === "down" && phase === "out") ? -1 : 1;
-
-  return {
-    duration,
-    css: (t: number) => {
-      const p = easeInOut(t);
-      const travel = 100 * (1 - p) * sign;
-      return `opacity: ${p}; transform: translateY(${travel}%);`;
-    },
-  };
-}
-
-/**
  * Pins the given panel element to its current viewport rect with
  * `position: fixed`. Call this BEFORE flipping the reactive state that
  * triggers the panel swap — otherwise the incoming panel has already mounted
@@ -154,6 +118,35 @@ export function pinPanelForOutro(el: HTMLElement | null | undefined) {
   el.style.left = `${rect.left}px`;
   el.style.width = `${rect.width}px`;
   el.style.height = `${rect.height}px`;
+}
+
+/**
+ * Slide + fade transition used when toggling between the normal scroll-spy
+ * group view and search results. Convention from the previous group-switch
+ * animation:
+ *   "up"   — incoming panel slides in from above, outgoing falls down
+ *   "down" — incoming panel slides in from below, outgoing rises up
+ * Search mode lives "above" the group list (its index is -1), so entering
+ * search uses direction "up" and exiting uses direction "down".
+ */
+export function searchSlide(
+  _node: Element,
+  { direction, phase }: { direction: "up" | "down"; phase: "in" | "out" },
+) {
+  const duration = getDuration(BASE_MS);
+  if (!duration) return { duration: 0 };
+
+  const sign =
+    (direction === "up" && phase === "in") || (direction === "down" && phase === "out") ? -1 : 1;
+
+  return {
+    duration,
+    css: (t: number) => {
+      const p = easeInOut(t);
+      const travel = 100 * (1 - p) * sign;
+      return `opacity: ${p}; transform: translateY(${travel}%);`;
+    },
+  };
 }
 
 export function expand(node: Element) {

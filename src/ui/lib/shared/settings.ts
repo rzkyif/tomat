@@ -137,6 +137,15 @@ export interface SettingField {
   regex?: RegexValidation;
   optional?: boolean;
   suffix?: string;
+  /** When true, hidden unless `appearance.settings.showAdvanced` is on.
+   *  Search results always include advanced fields regardless. */
+  advanced?: boolean;
+  /** Controls how the description is presented:
+   *  - `none`: never shown (no info button).
+   *  - `ondemand`: hidden behind an info-button toggle (default for non-empty descriptions).
+   *  - `always`: rendered inline, always visible.
+   *  When unset, falls back to `ondemand` if description is non-empty, else `none`. */
+  descriptionTier?: "none" | "ondemand" | "always";
 }
 
 export interface SettingSection {
@@ -145,11 +154,18 @@ export interface SettingSection {
   visibleWhen?: FieldCondition;
   expandWhen?: FieldCondition;
   fields: SettingField[];
+  /** When true, the entire section is hidden unless advanced settings are shown. */
+  advanced?: boolean;
 }
 
 export interface SettingGroup {
   id: string;
   name: string;
+  /** Filled-variant icon class. Used when the group is the active sidebar entry. */
+  icon: string;
+  /** Outline-variant icon class. Falls back to `icon` when the icon set has no
+   *  outline equivalent (e.g. tune, call-split). */
+  iconInactive?: string;
   sections: SettingSection[];
 }
 
@@ -157,6 +173,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   {
     id: "general",
     name: "General",
+    icon: "i-material-symbols-tune-rounded",
+    iconInactive: "i-material-symbols-tune-rounded",
     sections: [
       {
         label: "Context",
@@ -164,63 +182,70 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "general.context.userName",
             name: "Your Name",
-            description: "How the agent should address you. Optional.",
+            description: "How the agent should address you.",
             type: "string",
             defaultValue: "",
             optional: true,
             placeholder: "e.g. Alex",
+            descriptionTier: "none",
           },
           {
             id: "general.context.agentName",
             name: "Agent Name",
             description:
-              "A name for the agent. Optional - leave empty to let the agent pick or stay nameless.",
+              "A name for the agent. Leave empty to let the agent pick or stay nameless.",
             type: "string",
             defaultValue: "",
             optional: true,
             placeholder: "e.g. Sebastian",
+            descriptionTier: "ondemand",
           },
           {
             id: "general.context.language",
             name: "Language",
-            description: "The language you prefer to communicate in. Optional.",
+            description: "The language you prefer to communicate in.",
             type: "string",
             defaultValue: "",
             optional: true,
             placeholder: "e.g. English",
+            descriptionTier: "none",
           },
           {
             id: "general.context.locationAuto",
             name: "Auto-Detect Location",
             description:
-              "Derive your location from the OS timezone (city + country) instead of typing it manually.\nFully offline: uses `Intl.DateTimeFormat().resolvedOptions().timeZone` plus an IANA → country lookup. No network calls, no permissions.",
+              "Derive your location from the system timezone instead of typing it manually.\nFully offline — no network calls, no permissions.",
             type: "boolean",
             defaultValue: false,
+            descriptionTier: "ondemand",
           },
           {
             id: "general.context.location",
             name: "Location",
             description:
-              "A location string the agent can reference. Optional.\nNo network calls are made - the value is attached as plain text.",
+              "A location the agent can reference. Sent as plain text — no network calls.",
             type: "string",
             defaultValue: "",
             optional: true,
             placeholder: "e.g. San Francisco, CA",
             visibleWhen: { field: "general.context.locationAuto", eq: false },
+            descriptionTier: "none",
           },
           {
             id: "general.context.dateTime",
-            name: "Include Date and Time",
+            name: "Share Current Date and Time",
             description: "Attach the current date and time to the system prompt.",
             type: "boolean",
             defaultValue: true,
+            descriptionTier: "none",
           },
           {
             id: "general.context.os",
-            name: "Include Operating System",
+            name: "Share Operating System",
             description: "Attach your operating system to the system prompt.",
             type: "boolean",
             defaultValue: true,
+            descriptionTier: "none",
           },
         ],
       },
@@ -229,19 +254,21 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         fields: [
           {
             id: "general.session.alwaysStartNew",
-            name: "Always Start New Session",
+            name: "Start Fresh Each Time",
             description:
               "When the app starts, always begin a new empty session instead of resuming the last one.",
             type: "boolean",
             defaultValue: false,
+            descriptionTier: "ondemand",
           },
           {
             id: "general.session.storeSessions",
-            name: "Store Sessions",
+            name: "Save Chat History",
             description:
               "Persist messages and session titles to disk.\nWhen disabled, sessions live only in memory and are cleared when the app closes.",
             type: "boolean",
             defaultValue: true,
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -250,6 +277,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   {
     id: "shortcuts",
     name: "Shortcuts",
+    icon: "i-material-symbols-keyboard-rounded",
+    iconInactive: "i-material-symbols-keyboard-outline-rounded",
     sections: [
       {
         label: "Global",
@@ -257,11 +286,11 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           {
             id: "shortcuts.toggleWindow",
             name: "Show / Hide Window",
-            description:
-              "Global keyboard shortcut to show or hide the app window.\nClick the field and press a key combination to set it. Clear to disable.",
+            description: "Click the field and press a key combination to set it. Clear to disable.",
             type: "shortcut",
             defaultValue: "super+ctrl+shift+z",
             optional: true,
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -272,188 +301,31 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "shortcuts.attachFile",
             name: "Attach File",
             description:
-              "Open the file picker to attach a file to the next message.\nOnly active while the user input is focused (i.e. not while the Settings panel is open).",
+              "Open the file picker to attach a file to the next message.\nOnly active while the chat input is focused.",
             type: "shortcut",
             defaultValue: "super+ctrl+shift+a",
             optional: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "shortcuts.captureScreen",
             name: "Capture Full Screen",
             description:
-              "Capture the primary monitor as an image attachment.\nOnly active while the user input is focused.",
+              "Capture the primary monitor as an image attachment.\nOnly active while the chat input is focused.",
             type: "shortcut",
             defaultValue: "super+ctrl+shift+s",
             optional: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "shortcuts.captureRegion",
-            name: "Capture Screen Region",
+            name: "Capture Screen Area",
             description:
-              "Open the region-capture overlay so you can drag-select a rectangle to attach.\nOnly active while the user input is focused.",
+              "Open the region-capture overlay so you can drag-select a rectangle to attach.\nOnly active while the chat input is focused.",
             type: "shortcut",
             defaultValue: "super+ctrl+shift+x",
             optional: true,
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: "prompts",
-    name: "Prompts",
-    sections: [
-      {
-        label: "Default System Prompt",
-        fields: [
-          {
-            id: "prompts.defaultSystemPrompt.preset",
-            name: "",
-            description: "",
-            type: "preset",
-            defaultValue: "disabled",
-            presetConfig: {
-              options: [
-                {
-                  id: "disabled",
-                  label: "None",
-                  title: "None",
-                  description:
-                    "No system prompt is sent. The model runs with its default behavior.",
-                  defaults: { "prompts.defaultSystemPrompt": "" },
-                },
-                {
-                  id: "tool-only",
-                  label: "Tool Only",
-                  title: "Tool Only",
-                  description:
-                    "Forces short, cautious replies and a strong preference for tool use. Suited to small on-device models that cannot reason reliably on their own.",
-                  defaults: { "prompts.defaultSystemPrompt": TOOL_ONLY_PROMPT },
-                },
-                {
-                  id: "assistant",
-                  label: "Assistant",
-                  title: "Assistant",
-                  description:
-                    "A professional, capable general-purpose assistant that answers directly and uses tools when helpful.",
-                  defaults: { "prompts.defaultSystemPrompt": ASSISTANT_PROMPT },
-                },
-              ],
-              secondaryOptions: [
-                {
-                  id: "custom",
-                  label: "Custom",
-                  title: "Custom",
-                  description:
-                    "Write your own system prompt. Editing the prompt manually switches to this option automatically.",
-                },
-              ],
-            },
-          },
-          {
-            id: "prompts.defaultSystemPrompt",
-            name: "Default System Prompt",
-            description:
-              "The system prompt sent to the agent.\nEditing this manually switches the preset to Custom.",
-            type: "multiline",
-            defaultValue: "",
-            optional: true,
-            visibleWhen: { field: "prompts.defaultSystemPrompt.preset", eq: "custom" },
-          },
-        ],
-      },
-      {
-        fields: [
-          {
-            id: "prompts.showSystemPrompt",
-            name: "Show System Prompt",
-            description:
-              "Show the active system prompt as a collapsible bubble at the top of each session.\nThe bubble updates to match whatever was last sent to the LLM, including any snippet-triggered changes.",
-            type: "boolean",
-            defaultValue: false,
-          },
-        ],
-      },
-      {
-        label: "Context Template",
-        fields: [
-          {
-            id: "prompts.contextTemplate",
-            name: "Context Template",
-            description:
-              "Template appended to the system prompt when any context setting (agent name, language, location, date/time, OS, etc.) is enabled.\nUse `{name}` for placeholders and `[name:body]` for conditional segments that disappear when the named setting is unset. Available names: agentName, language, userName, location, dateTime, os.",
-            type: "multiline",
-            defaultValue: DEFAULT_CONTEXT_TEMPLATE,
-            regex: [{ regex: "\\S", errorMessage: "Template cannot be empty" }],
-          },
-        ],
-      },
-      {
-        label: "Title Generation",
-        fields: [
-          {
-            id: "prompts.titleGenerationPrompt",
-            name: "Title Generation Prompt",
-            description:
-              "Prompt used to auto-generate a short session title from the first user message.",
-            type: "multiline",
-            defaultValue: DEFAULT_TITLE_GENERATION_PROMPT,
-            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
-          },
-        ],
-      },
-      {
-        label: "Autocorrect",
-        fields: [
-          {
-            id: "prompts.autocorrectPrompt",
-            name: "Autocorrect Prompt",
-            description:
-              "Prompt used to clean up speech-to-text transcriptions before they reach the chat input.",
-            type: "multiline",
-            defaultValue: DEFAULT_AUTOCORRECT_PROMPT,
-            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
-          },
-        ],
-      },
-      {
-        label: "Merge Transcription",
-        fields: [
-          {
-            id: "prompts.mergeTranscriptionPrompt",
-            name: "Merge Transcription Prompt",
-            description:
-              "Prompt used to merge a fresh speech-to-text transcription into the existing text already in the chat input.",
-            type: "multiline",
-            defaultValue: DEFAULT_MERGE_TRANSCRIPTION_PROMPT,
-            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
-          },
-        ],
-      },
-      {
-        label: "Complexity Detection",
-        fields: [
-          {
-            id: "prompts.complexityDetectionPrompt",
-            name: "Complexity Detection Prompt",
-            description:
-              "System prompt used by the default model to classify each new user message before it is answered.\nThe reply is matched case-insensitively: if it contains the word `complex` without `simple` the request is routed to the secondary model, otherwise it stays on the default model. A reply that is ambiguous or empty falls back to the default model.",
-            type: "multiline",
-            defaultValue: DEFAULT_COMPLEXITY_DETECTION_PROMPT,
-            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
-          },
-        ],
-      },
-      {
-        label: "Snippets",
-        fields: [
-          {
-            id: "prompts.snippets",
-            name: "Snippets",
-            description:
-              "Reusable text fragments triggered via @trigger in the chat input. Snippets can prepend, append, replace, or insert text into either the user message or the system prompt.",
-            type: "snippets",
-            defaultValue: "",
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -462,6 +334,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   {
     id: "appearance",
     name: "Appearance",
+    icon: "i-material-symbols-palette",
+    iconInactive: "i-material-symbols-palette-outline",
     sections: [
       {
         label: "Theme",
@@ -477,6 +351,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               { value: "dark", label: "Dark" },
               { value: "auto", label: "Auto (System)" },
             ],
+            descriptionTier: "none",
           },
           {
             id: "appearance.textSize",
@@ -491,6 +366,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Must be between 12 and 32",
               },
             ],
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -504,6 +380,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               "Smoothly animate message entry, settings transitions, and expandable sections.",
             type: "boolean",
             defaultValue: true,
+            descriptionTier: "none",
           },
           {
             id: "appearance.animationSpeedMultiplier",
@@ -520,6 +397,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Must be between 25 and 400",
               },
             ],
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -532,6 +410,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description: "Choose which monitor to display the app on.",
             type: "monitor",
             defaultValue: "primary",
+            descriptionTier: "none",
           },
           {
             id: "layout.alignment",
@@ -544,6 +423,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               { value: "center", label: "Center" },
               { value: "right", label: "Right" },
             ],
+            descriptionTier: "none",
           },
           {
             id: "layout.width",
@@ -558,6 +438,46 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Must be between 400 and 1200",
               },
             ],
+            descriptionTier: "ondemand",
+          },
+        ],
+      },
+      {
+        label: "Settings UI",
+        fields: [
+          {
+            id: "appearance.settings.showAdvanced",
+            name: "Show Advanced Settings",
+            description: "Reveal advanced and technical settings throughout this panel.",
+            type: "boolean",
+            defaultValue: false,
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.settings.sidebarCollapsed",
+            name: "Collapse Settings Sidebar",
+            description: "Shrink the settings sidebar to a thin icon strip.",
+            type: "boolean",
+            defaultValue: false,
+            advanced: true,
+            descriptionTier: "none",
+          },
+          {
+            id: "appearance.settings.horizontalThreshold",
+            name: "Horizontal Layout Threshold",
+            description:
+              "Container width at which fields switch to a horizontal layout (label left, input right).\nAccepted range: 400–2999 pixels.",
+            type: "number",
+            defaultValue: 450,
+            suffix: "px",
+            advanced: true,
+            descriptionTier: "ondemand",
+            regex: [
+              {
+                regex: "^([4-9][0-9]{2}|[12][0-9]{3})$",
+                errorMessage: "Must be between 400 and 2999",
+              },
+            ],
           },
         ],
       },
@@ -566,6 +486,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   {
     id: "llm",
     name: "Language Model",
+    icon: "i-material-symbols-psychology-rounded",
+    iconInactive: "i-material-symbols-psychology-outline-rounded",
     sections: [
       {
         label: "General",
@@ -574,17 +496,19 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "llm.supportImages",
             name: "Image Attachments",
             description:
-              "Allow attaching images to messages.\nRequires a vision-capable model when using the local llama-server.",
+              "Allow attaching images to messages.\nRequires a vision-capable model when running locally.",
             type: "boolean",
             defaultValue: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "llm.showReasoning",
-            name: "Show Reasoning",
+            name: "Show Thinking Process",
             description:
-              "Display the model's reasoning trace in a collapsible section above each response. Persisted with the session but never sent back to the model.",
+              "Display the model's reasoning in a collapsible section above each response.\nSaved with the session but never sent back to the model.",
             type: "boolean",
             defaultValue: true,
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -595,13 +519,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "llm.provider",
             name: "Provider",
             description:
-              "Where the language model runs.\n\nLocal: a bundled llama.cpp server runs on this machine.\n\nExternal: requests are sent to an OpenAI-compatible API and no local server is started.",
+              "Where the language model runs.\n\nLocal: runs on this machine.\n\nExternal: sent to an OpenAI-compatible API.",
             type: "select",
             defaultValue: "local",
             options: [
               { value: "local", label: "Local" },
               { value: "external", label: "External" },
             ],
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -715,38 +640,34 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description: "Path to the GGUF model file.",
             type: "string",
             defaultValue: "@unsloth/Qwen3.5-0.8B-GGUF/main/Qwen3.5-0.8B-Q4_K_M.gguf",
+            descriptionTier: "ondemand",
           },
           {
             id: "llm.mmprojPath",
-            name: "Vision Projector (mmproj) Path",
+            name: "Vision Module Path",
             description: "Path to the mmproj GGUF file used for vision support.",
             type: "string",
             defaultValue: "@unsloth/Qwen3.5-0.8B-GGUF/main/mmproj-F16.gguf",
             placeholder: "@user/repo/branch/mmproj-f16.gguf",
             visibleWhen: { field: "llm.supportImages", eq: true },
             optionalWhen: { field: "llm.supportImages", eq: false },
+            descriptionTier: "ondemand",
           },
           {
             id: "llm.contextSize",
-            name: "Context Length",
+            name: "Context Window Size",
             description: "Maximum context window length in tokens.",
             type: "number",
             defaultValue: 4096,
-          },
-          {
-            id: "llm.mmap",
-            name: "Memory-Mapped Loading",
-            description:
-              "Use memory-mapped I/O when loading the model.\n\nFaster startup and lower RAM usage in most cases. Disable if you see stability issues on unusual filesystems.",
-            type: "boolean",
-            defaultValue: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "llm.threads",
-            name: "CPU Threads",
-            description: "Number of threads used for inference.",
+            name: "Processor Cores",
+            description: "Number of CPU threads used for inference.",
             type: "number",
             defaultValue: 4,
+            descriptionTier: "ondemand",
           },
           {
             id: "llm.reasoning",
@@ -760,16 +681,28 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               { value: "auto", label: "Auto" },
             ],
             optional: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "llm.reasoningBudget",
-            name: "Reasoning Token Budget",
+            name: "Max Thinking Tokens",
             description: "Number of tokens reserved for the reasoning trace.",
             type: "number",
             defaultValue: "",
             visibleWhen: { field: "llm.reasoning", neq: "off" },
             optional: true,
             placeholder: "optional",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "llm.mmap",
+            name: "Memory-Mapped Loading",
+            description:
+              "Use memory-mapped I/O when loading the model.\n\nFaster startup and lower RAM usage in most cases. Disable if you see stability issues on unusual filesystems.",
+            type: "boolean",
+            defaultValue: true,
+            advanced: true,
+            descriptionTier: "always",
           },
           {
             id: "llm.host",
@@ -784,6 +717,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Must be a valid IPv4 address",
               },
             ],
+            advanced: true,
+            descriptionTier: "always",
           },
           {
             id: "llm.port",
@@ -799,6 +734,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Port must be 1–65535",
               },
             ],
+            advanced: true,
+            descriptionTier: "always",
           },
           {
             id: "llm.webui",
@@ -806,6 +743,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description: "Enable the llama.cpp built-in web interface.",
             type: "boolean",
             defaultValue: false,
+            advanced: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "llm.commandPreview",
@@ -814,6 +753,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "command_preview",
             defaultValue: "",
             commandType: "llm",
+            advanced: true,
           },
         ],
       },
@@ -830,6 +770,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             defaultValue: "",
             placeholder: "https://api.example.com/v1",
             regex: SECURE_URL_VALIDATION,
+            descriptionTier: "ondemand",
           },
           {
             id: "llm.external.apiKey",
@@ -838,6 +779,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "password",
             defaultValue: "",
             placeholder: "sk-...",
+            descriptionTier: "none",
           },
           {
             id: "llm.external.model",
@@ -846,13 +788,387 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "string",
             defaultValue: "",
             placeholder: "gpt-4o-mini",
+            descriptionTier: "none",
           },
           {
             id: "llm.external.contextSize",
-            name: "Context Length",
+            name: "Context Window Size",
             description: "Maximum context window length in tokens. Used for usage tracking.",
             type: "number",
             defaultValue: 128000,
+            advanced: true,
+            descriptionTier: "ondemand",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "prompts",
+    name: "Prompts",
+    icon: "i-material-symbols-chat-bubble-rounded",
+    iconInactive: "i-material-symbols-chat-bubble-outline-rounded",
+    sections: [
+      {
+        label: "Default System Prompt",
+        fields: [
+          {
+            id: "prompts.defaultSystemPrompt.preset",
+            name: "",
+            description: "",
+            type: "preset",
+            defaultValue: "disabled",
+            presetConfig: {
+              options: [
+                {
+                  id: "disabled",
+                  label: "None",
+                  title: "None",
+                  description:
+                    "No system prompt is sent. The model runs with its default behavior.",
+                  defaults: { "prompts.defaultSystemPrompt": "" },
+                },
+                {
+                  id: "tool-only",
+                  label: "Tool Only",
+                  title: "Tool Only",
+                  description:
+                    "Forces short, cautious replies and a strong preference for tool use. Suited to small on-device models that cannot reason reliably on their own.",
+                  defaults: { "prompts.defaultSystemPrompt": TOOL_ONLY_PROMPT },
+                },
+                {
+                  id: "assistant",
+                  label: "Assistant",
+                  title: "Assistant",
+                  description:
+                    "A professional, capable general-purpose assistant that answers directly and uses tools when helpful.",
+                  defaults: { "prompts.defaultSystemPrompt": ASSISTANT_PROMPT },
+                },
+              ],
+              secondaryOptions: [
+                {
+                  id: "custom",
+                  label: "Custom",
+                  title: "Custom",
+                  description:
+                    "Write your own system prompt. Editing the prompt manually switches to this option automatically.",
+                },
+              ],
+            },
+          },
+          {
+            id: "prompts.defaultSystemPrompt",
+            name: "Default System Prompt",
+            description:
+              "The system prompt sent to the agent.\nEditing this manually switches the preset to Custom.",
+            type: "multiline",
+            defaultValue: "",
+            optional: true,
+            visibleWhen: { field: "prompts.defaultSystemPrompt.preset", eq: "custom" },
+            advanced: true,
+            descriptionTier: "always",
+          },
+        ],
+      },
+      {
+        fields: [
+          {
+            id: "prompts.showSystemPrompt",
+            name: "Show System Prompt Bubble",
+            description:
+              "Display the active system prompt as a collapsible bubble at the top of each session.\nThe bubble updates to reflect any snippet-triggered changes.",
+            type: "boolean",
+            defaultValue: false,
+            descriptionTier: "ondemand",
+          },
+        ],
+      },
+      {
+        label: "Context Template",
+        advanced: true,
+        fields: [
+          {
+            id: "prompts.contextTemplate",
+            name: "Context Template",
+            description:
+              "Template appended to the system prompt when any context setting (agent name, language, location, date/time, OS, etc.) is enabled.\nUse `{name}` for placeholders and `[name:body]` for conditional segments that disappear when the named setting is unset. Available names: agentName, language, userName, location, dateTime, os.",
+            type: "multiline",
+            defaultValue: DEFAULT_CONTEXT_TEMPLATE,
+            regex: [{ regex: "\\S", errorMessage: "Template cannot be empty" }],
+            advanced: true,
+            descriptionTier: "always",
+          },
+        ],
+      },
+      {
+        label: "Title Generation",
+        advanced: true,
+        fields: [
+          {
+            id: "prompts.titleGenerationPrompt",
+            name: "Title Generation Prompt",
+            description:
+              "Prompt used to auto-generate a short session title from the first user message.",
+            type: "multiline",
+            defaultValue: DEFAULT_TITLE_GENERATION_PROMPT,
+            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
+            advanced: true,
+            descriptionTier: "always",
+          },
+        ],
+      },
+      {
+        label: "Autocorrect",
+        advanced: true,
+        fields: [
+          {
+            id: "prompts.autocorrectPrompt",
+            name: "Autocorrect Prompt",
+            description:
+              "Prompt used to clean up speech-to-text transcriptions before they reach the chat input.",
+            type: "multiline",
+            defaultValue: DEFAULT_AUTOCORRECT_PROMPT,
+            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
+            advanced: true,
+            descriptionTier: "always",
+          },
+        ],
+      },
+      {
+        label: "Merge Transcription",
+        advanced: true,
+        fields: [
+          {
+            id: "prompts.mergeTranscriptionPrompt",
+            name: "Merge Transcription Prompt",
+            description:
+              "Prompt used to merge a fresh speech-to-text transcription into the existing text already in the chat input.",
+            type: "multiline",
+            defaultValue: DEFAULT_MERGE_TRANSCRIPTION_PROMPT,
+            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
+            advanced: true,
+            descriptionTier: "always",
+          },
+        ],
+      },
+      {
+        label: "Complexity Detection",
+        advanced: true,
+        fields: [
+          {
+            id: "prompts.complexityDetectionPrompt",
+            name: "Complexity Detection Prompt",
+            description:
+              "System prompt used by the default model to classify each new user message before it is answered.\nThe reply is matched case-insensitively: if it contains the word `complex` without `simple` the request is routed to the secondary model, otherwise it stays on the default model. A reply that is ambiguous or empty falls back to the default model.",
+            type: "multiline",
+            defaultValue: DEFAULT_COMPLEXITY_DETECTION_PROMPT,
+            regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
+            advanced: true,
+            descriptionTier: "always",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "snippets",
+    name: "Snippets",
+    icon: "i-material-symbols-text-snippet-rounded",
+    iconInactive: "i-material-symbols-text-snippet-outline-rounded",
+    sections: [
+      {
+        fields: [
+          {
+            id: "prompts.snippets",
+            name: "Snippets",
+            description:
+              "Reusable text fragments triggered via @trigger in the chat input. Snippets can prepend, append, replace, or insert text into either the user message or the system prompt.",
+            type: "snippets",
+            defaultValue: "",
+            descriptionTier: "always",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "toolkits",
+    name: "Tools",
+    icon: "i-material-symbols-build-rounded",
+    iconInactive: "i-material-symbols-build-outline-rounded",
+    sections: [
+      {
+        fields: [
+          {
+            id: "tools.enabled",
+            name: "Enable Tool Use",
+            description:
+              "Allow trusted toolkits to inject tools into each chat turn.\nWhen on, relevant tools are added to the model request, letting it call them mid-turn.",
+            type: "boolean",
+            defaultValue: false,
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "toolkits.list",
+            name: "Installed Toolkits",
+            description:
+              "Drop a .ts file or folder into ~/.tomat/toolkits/, press Refresh, then Trust/Install/Enable.\nOnly trusted + enabled toolkits contribute tools to the agent.",
+            type: "toolkits",
+            defaultValue: "",
+            visibleWhen: { field: "tools.enabled", eq: true },
+            descriptionTier: "ondemand",
+          },
+        ],
+      },
+      {
+        label: "Tool Selection",
+        advanced: true,
+        visibleWhen: { field: "tools.enabled", eq: true },
+        fields: [
+          {
+            id: "tools.filteringEnabled",
+            name: "Enable Relevance Filtering",
+            description:
+              "Filter the available toolset down to a relevance-ranked shortlist before each turn (embedding similarity + optional AI second pass).\nDisable to send every enabled tool to the model on every turn — simpler, but eats more context and slows down small models when many toolkits are installed.",
+            type: "boolean",
+            defaultValue: true,
+            advanced: true,
+            descriptionTier: "always",
+          },
+          {
+            id: "tools.filteringMinTools",
+            name: "Skip Filtering If Fewer Tools",
+            description:
+              "Skip filtering and send all enabled tools to the model when the total tool count is below this number.\nUseful when you only have a handful of tools and would rather not pay the embedding+AI cost. Set to 0 to always filter.",
+            type: "number",
+            defaultValue: 0,
+            regex: [{ regex: "^([0-9]|[1-9][0-9]{1,2}|1000)$", errorMessage: "Must be 0-1000" }],
+            visibleWhen: { field: "tools.filteringEnabled", eq: true },
+            advanced: true,
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "tools.alwaysAvailableEnabled",
+            name: "Bypass Filter for Essential Tools",
+            description:
+              "When on, tools whose toolkit declares `alwaysAvailable: true` skip the relevance filter and are always sent to the model.\nOnly takes effect when filtering is enabled — disabling filtering already sends every tool, so the bypass is redundant.",
+            type: "boolean",
+            defaultValue: true,
+            visibleWhen: { field: "tools.filteringEnabled", eq: true },
+            advanced: true,
+            descriptionTier: "always",
+          },
+          {
+            id: "tools.maxTools",
+            name: "Max Tools Per Turn",
+            description:
+              "Cap on tools passed to the main model. When the AI filter is enabled, applied after filtering as a final cap; when disabled, applied directly to the embedding-similarity ranking.",
+            type: "number",
+            defaultValue: 30,
+            regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
+            visibleWhen: { field: "tools.filteringEnabled", eq: true },
+            advanced: true,
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "tools.secondPassEnabled",
+            name: "Use AI to Refine Tool Selection",
+            description:
+              "Run a second-pass AI filter to drop clearly unrelated tools after the embedding-similarity pass.\nDisable to use only embedding similarity ranking truncated to Max Tools.",
+            type: "boolean",
+            defaultValue: true,
+            visibleWhen: { field: "tools.filteringEnabled", eq: true },
+            advanced: true,
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "tools.filterReasoning",
+            name: "Filter Reasoning Mode",
+            description:
+              "Whether the second-pass filter should produce a reasoning trace before its answer.\nMay improve filtering accuracy on borderline cases but slows down responses.",
+            type: "select",
+            defaultValue: "off",
+            options: [
+              { value: "off", label: "Off" },
+              { value: "on", label: "On" },
+              { value: "auto", label: "Auto" },
+            ],
+            visibleWhen: {
+              allOf: [
+                { field: "tools.filteringEnabled", eq: true },
+                { field: "tools.secondPassEnabled", eq: true },
+              ],
+            },
+            advanced: true,
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "tools.filterReasoningBudget",
+            name: "Max Tokens for Filter Thinking",
+            description: "Number of tokens reserved for the filter reasoning trace.",
+            type: "number",
+            defaultValue: "",
+            visibleWhen: {
+              allOf: [
+                { field: "tools.filteringEnabled", eq: true },
+                { field: "tools.filterReasoning", neq: "off" },
+              ],
+            },
+            optional: true,
+            placeholder: "optional",
+            advanced: true,
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "tools.maxHops",
+            name: "Max Tool Calls Per Message",
+            description:
+              "Hard cap on consecutive tool-call rounds within a single user turn.\nProtects against runaway loops when a tool's output keeps the model requesting more calls.",
+            type: "number",
+            defaultValue: 5,
+            regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
+            advanced: true,
+            descriptionTier: "ondemand",
+          },
+        ],
+      },
+      {
+        label: "Worker Pool",
+        advanced: true,
+        visibleWhen: { field: "tools.enabled", eq: true },
+        fields: [
+          {
+            id: "toolkits.maxWarmWorkers",
+            name: "Max Active Tool Processes",
+            description:
+              "Maximum number of toolkit workers kept alive at once.\nHigher values reduce cold-start latency; lower values cap resident memory when hundreds of toolkits are enabled.",
+            type: "number",
+            defaultValue: 8,
+            regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
+            advanced: true,
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "toolkits.workerIdleMs",
+            name: "Unload Inactive Tools After",
+            description:
+              "Terminate a warm worker after this long with no tool calls.\nShorter values free memory faster; longer values keep frequently-used toolkits warm.",
+            type: "number",
+            defaultValue: 300000,
+            suffix: "ms",
+            regex: [{ regex: "^[0-9]+$", errorMessage: "Must be a non-negative integer" }],
+            advanced: true,
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "toolkits.ignorePostinstallScripts",
+            name: "Ignore Postinstall Scripts",
+            description:
+              "Pass `--ignore-scripts` to `bun install` so dependency postinstall hooks don't run.\nRecommended on: postinstall scripts from transitive dependencies are a common vector for surprise code execution. Disable only if a toolkit's dependencies require native builds.",
+            type: "boolean",
+            defaultValue: true,
+            advanced: true,
+            descriptionTier: "always",
           },
         ],
       },
@@ -861,6 +1177,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   {
     id: "dualModel",
     name: "Dual Model",
+    icon: "i-material-symbols-call-split-rounded",
+    iconInactive: "i-material-symbols-call-split-rounded",
     sections: [
       {
         fields: [
@@ -871,6 +1189,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               "Route complex prompts to a stronger external model while keeping simple prompts on the default model.\nThe detection prompt is configured in the Prompts group.",
             type: "boolean",
             defaultValue: false,
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -887,6 +1206,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             defaultValue: "",
             placeholder: "https://api.example.com/v1",
             regex: SECURE_URL_VALIDATION,
+            descriptionTier: "ondemand",
           },
           {
             id: "dualModel.external.apiKey",
@@ -895,6 +1215,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "password",
             defaultValue: "",
             placeholder: "sk-...",
+            descriptionTier: "none",
           },
           {
             id: "dualModel.external.model",
@@ -903,13 +1224,16 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "string",
             defaultValue: "",
             placeholder: "gpt-4o",
+            descriptionTier: "none",
           },
           {
             id: "dualModel.external.contextSize",
-            name: "Context Size",
+            name: "Context Window Size",
             description: "Maximum context window length, used for usage tracking.",
             type: "number",
             defaultValue: 128000,
+            advanced: true,
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -918,6 +1242,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   {
     id: "stt",
     name: "Speech-to-Text",
+    icon: "i-material-symbols-mic-rounded",
+    iconInactive: "i-material-symbols-mic-outline-rounded",
     sections: [
       {
         fields: [
@@ -925,9 +1251,10 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "stt.enabled",
             name: "Enable Speech-to-Text",
             description:
-              "Allow voice dictation via the microphone button or push-to-talk shortcut.\nWhen disabled, the whisper server does not start, the mic button is hidden, and all STT sub-settings are inactive.",
+              "Allow voice dictation via the microphone button or push-to-talk shortcut.\nWhen disabled, the whisper server does not start, the mic button is hidden, and all sub-settings are inactive.",
             type: "boolean",
             defaultValue: true,
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -937,19 +1264,21 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         fields: [
           {
             id: "stt.llmAutocorrect",
-            name: "Autocorrect Transcription",
+            name: "Clean Up Transcription",
             description:
-              "Use the language model to clean up transcription mistakes after speech recognition.\n\nDisable if you prefer raw Whisper output or want to save a model call per dictation.",
+              "Use the language model to clean up transcription mistakes after speech recognition.\n\nDisable if you prefer raw output or want to save a model call per dictation.",
             type: "boolean",
             defaultValue: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "stt.llmChainTranscription",
-            name: "Merge Into Existing Input",
+            name: "Merge Voice Into Existing Text",
             description:
               "When text is already in the input, use the language model to merge a new transcription into it rather than replacing it.\n\nDisable to always append as a new line.",
             type: "boolean",
             defaultValue: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "stt.autoSend",
@@ -957,6 +1286,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description: "Automatically send the message as soon as transcription completes.",
             type: "boolean",
             defaultValue: true,
+            descriptionTier: "none",
           },
         ],
       },
@@ -966,7 +1296,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         fields: [
           {
             id: "stt.activation",
-            name: "Activation",
+            name: "Microphone Mode",
             description:
               "How the microphone is activated.\n\nManual: use the mic button. Voice input turns off whenever the app is hidden or closed.\n\nSticky: use the mic button. Voice input stays on through hides, closes, and restarts.\n\nPush to Talk: hold the global shortcut to dictate. Quick taps show or hide the window instead.",
             type: "select",
@@ -976,28 +1306,32 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               { value: "sticky", label: "Sticky" },
               { value: "push-to-talk", label: "Push to Talk" },
             ],
+            descriptionTier: "ondemand",
           },
           {
             id: "stt.holdDuration",
-            name: "Hold Duration",
+            name: "Push-to-Talk Hold Time",
             description:
               "Delay before push-to-talk activates while holding the shortcut.\nTaps shorter than this show or hide the app instead.",
             type: "number",
             defaultValue: 250,
             suffix: "ms",
             visibleWhen: { field: "stt.activation", eq: "push-to-talk" },
+            descriptionTier: "ondemand",
           },
           {
             id: "stt.autoVolumeEnabled",
-            name: "Lower System Volume While Listening",
+            name: "Lower Volume While Listening",
             description:
               "Drop the system output volume to a configurable level while voice input is active, then restore it when listening stops.\nUseful for letting your own voice be heard over media playback.",
             type: "boolean",
             defaultValue: false,
+            advanced: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "stt.autoVolumeTarget",
-            name: "Lowered Volume Target",
+            name: "Lowered Volume Level",
             description:
               "System volume to apply while voice input is listening.\nAccepted range: 0 to 100.",
             type: "number",
@@ -1007,6 +1341,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             regex: [
               { regex: "^(?:[0-9]|[1-9][0-9]|100)$", errorMessage: "Must be between 0 and 100" },
             ],
+            advanced: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "stt.vadPersistedState",
@@ -1015,6 +1351,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "boolean",
             defaultValue: false,
             visibleWhen: { field: "stt.activation", eq: "__never__" },
+            descriptionTier: "none",
           },
         ],
       },
@@ -1026,13 +1363,14 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "stt.provider",
             name: "Provider",
             description:
-              "Where speech-to-text runs.\n\nLocal: a bundled whisper.cpp server runs on this machine.\n\nExternal: audio is sent to an OpenAI-compatible transcription API and no local server is started.",
+              "Where speech-to-text runs.\n\nLocal: runs on this machine.\n\nExternal: audio is sent to an OpenAI-compatible transcription API.",
             type: "select",
             defaultValue: "local",
             options: [
               { value: "local", label: "Local" },
               { value: "external", label: "External" },
             ],
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -1200,13 +1538,15 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description: "Path to the Whisper model file.",
             type: "string",
             defaultValue: "@ggerganov/whisper.cpp/main/ggml-small.bin",
+            descriptionTier: "ondemand",
           },
           {
             id: "stt.threads",
-            name: "CPU Threads",
-            description: "Number of threads used for inference.",
+            name: "Processor Cores",
+            description: "Number of CPU threads used for inference.",
             type: "number",
             defaultValue: 4,
+            descriptionTier: "ondemand",
           },
           {
             id: "stt.host",
@@ -1221,6 +1561,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Must be a valid IPv4 address",
               },
             ],
+            advanced: true,
+            descriptionTier: "always",
           },
           {
             id: "stt.port",
@@ -1236,6 +1578,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Port must be 1–65535",
               },
             ],
+            advanced: true,
+            descriptionTier: "always",
           },
           {
             id: "stt.commandPreview",
@@ -1244,6 +1588,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "command_preview",
             defaultValue: "",
             commandType: "stt",
+            advanced: true,
           },
         ],
       },
@@ -1265,6 +1610,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             defaultValue: "",
             placeholder: "https://api.example.com/v1",
             regex: SECURE_URL_VALIDATION,
+            descriptionTier: "ondemand",
           },
           {
             id: "stt.external.apiKey",
@@ -1273,6 +1619,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "password",
             defaultValue: "",
             placeholder: "sk-...",
+            descriptionTier: "none",
           },
           {
             id: "stt.external.model",
@@ -1281,6 +1628,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "string",
             defaultValue: "",
             placeholder: "whisper-1",
+            descriptionTier: "none",
           },
         ],
       },
@@ -1289,6 +1637,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   {
     id: "tts",
     name: "Text-to-Speech",
+    icon: "i-material-symbols-volume-up-rounded",
+    iconInactive: "i-material-symbols-volume-up-outline-rounded",
     sections: [
       {
         fields: [
@@ -1299,15 +1649,17 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               "Read assistant responses aloud as they stream.\nKeeps the voice model loaded in memory while enabled and frees it on disable.",
             type: "boolean",
             defaultValue: false,
+            descriptionTier: "ondemand",
           },
           {
             id: "tts.spellOutEmojis",
             name: "Spell Out Emojis",
             description:
-              "Pass emojis through to the voice model so it pronounces them.\nWhen disabled (default), emojis are stripped from the text before synthesis.",
+              "Pass emojis through to the voice model so it pronounces them.\nWhen disabled (default), emojis are stripped before synthesis.",
             type: "boolean",
             defaultValue: false,
             visibleWhen: { field: "tts.enabled", eq: true },
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -1322,6 +1674,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               "Voice model used for speech synthesis.\nSelecting a voice downloads its file the first time it is used.",
             type: "select",
             defaultValue: "af_bella",
+            descriptionTier: "ondemand",
             options: [
               { value: "af_alloy", label: "American • Female • Alloy" },
               { value: "af_aoede", label: "American • Female • Aoede" },
@@ -1381,17 +1734,19 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
           },
           {
             id: "tts.minChunkWords",
-            name: "Minimum Words Per Chunk",
+            name: "Min Words Per Chunk",
             description:
               "Smallest number of words to buffer before sending a chunk to the voice model.\nHigher values produce smoother prosody at the cost of latency.",
             type: "number",
             defaultValue: 8,
             suffix: "words",
             regex: [{ regex: "^[1-9][0-9]*$", errorMessage: "Must be a positive integer" }],
+            advanced: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "tts.synthesisSpeed",
-            name: "Synthesis Speed",
+            name: "Speech Synthesis Speed",
             description:
               "Speed the voice model is asked to render speech at.\nAffects the prosody of the generated audio (lower = more relaxed pacing, higher = more clipped).\nAccepted range: 0.25 to 3.",
             type: "float",
@@ -1403,6 +1758,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Must be between 0.25 and 3",
               },
             ],
+            advanced: true,
+            descriptionTier: "ondemand",
           },
           {
             id: "tts.playbackSpeed",
@@ -1418,6 +1775,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Must be between 0.25 and 3",
               },
             ],
+            descriptionTier: "ondemand",
           },
           {
             id: "tts.volume",
@@ -1432,161 +1790,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Must be between 0 and 100",
               },
             ],
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: "toolkits",
-    name: "Tools",
-    sections: [
-      {
-        fields: [
-          {
-            id: "tools.enabled",
-            name: "Enable Tool Use",
-            description:
-              "Allow trusted toolkits to inject tools into each chat turn.\nWhen on, relevant tools are added to the LLM request via the native `tools` API, letting the model call them mid-turn.",
-            type: "boolean",
-            defaultValue: false,
-          },
-          {
-            id: "toolkits.list",
-            name: "Installed Toolkits",
-            description:
-              "Drop a .ts file or folder into ~/.tomat/toolkits/, press Refresh, then Trust/Install/Enable.\nOnly trusted + enabled toolkits contribute tools to the agent.",
-            type: "toolkits",
-            defaultValue: "",
-            visibleWhen: { field: "tools.enabled", eq: true },
-          },
-        ],
-      },
-      {
-        label: "Tool Selection",
-        visibleWhen: { field: "tools.enabled", eq: true },
-        fields: [
-          {
-            id: "tools.filteringEnabled",
-            name: "Enable Relevance Filtering",
-            description:
-              "Filter the available toolset down to a relevance-ranked shortlist before each turn (embedding similarity + optional LLM second pass).\nDisable to send every enabled tool to the model on every turn — simpler, but eats more context and slows down small models when many toolkits are installed.",
-            type: "boolean",
-            defaultValue: true,
-          },
-          {
-            id: "tools.filteringMinTools",
-            name: "Filtering Threshold",
-            description:
-              "Skip filtering and send all enabled tools to the model when the total tool count is below this number.\nUseful when you only have a handful of tools and would rather not pay the embedding+LLM cost. Set to 0 to always filter.",
-            type: "number",
-            defaultValue: 0,
-            regex: [{ regex: "^([0-9]|[1-9][0-9]{1,2}|1000)$", errorMessage: "Must be 0-1000" }],
-            visibleWhen: { field: "tools.filteringEnabled", eq: true },
-          },
-          {
-            id: "tools.alwaysAvailableEnabled",
-            name: "Always-Available Tools Bypass",
-            description:
-              "When on, tools whose toolkit declares `alwaysAvailable: true` skip the relevance filter and are always sent to the model.\nOnly takes effect when filtering is enabled — disabling filtering already sends every tool, so the bypass is redundant.",
-            type: "boolean",
-            defaultValue: true,
-            visibleWhen: { field: "tools.filteringEnabled", eq: true },
-          },
-          {
-            id: "tools.maxTools",
-            name: "Max Tools Per Turn",
-            description:
-              "Cap on tools passed to the main model. When the LLM filter is enabled, applied after filtering as a final cap; when disabled, applied directly to the embedding-similarity ranking.",
-            type: "number",
-            defaultValue: 30,
-            regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
-            visibleWhen: { field: "tools.filteringEnabled", eq: true },
-          },
-          {
-            id: "tools.secondPassEnabled",
-            name: "Enable LLM Filter (2nd Pass)",
-            description:
-              "Run a second-pass LLM filter to drop clearly unrelated tools after the embedding-similarity pass.\nDisable to use only embedding similarity ranking truncated to Max Tools.",
-            type: "boolean",
-            defaultValue: true,
-            visibleWhen: { field: "tools.filteringEnabled", eq: true },
-          },
-          {
-            id: "tools.filterReasoning",
-            name: "Filter Reasoning Mode",
-            description:
-              "Whether the second-pass filter LLM should produce a reasoning trace before its answer.\nMay improve filtering accuracy on borderline cases but slows down responses.",
-            type: "select",
-            defaultValue: "off",
-            options: [
-              { value: "off", label: "Off" },
-              { value: "on", label: "On" },
-              { value: "auto", label: "Auto" },
-            ],
-            visibleWhen: {
-              allOf: [
-                { field: "tools.filteringEnabled", eq: true },
-                { field: "tools.secondPassEnabled", eq: true },
-              ],
-            },
-          },
-          {
-            id: "tools.filterReasoningBudget",
-            name: "Filter Reasoning Token Budget",
-            description: "Number of tokens reserved for the filter reasoning trace.",
-            type: "number",
-            defaultValue: "",
-            visibleWhen: {
-              allOf: [
-                { field: "tools.filteringEnabled", eq: true },
-                { field: "tools.filterReasoning", neq: "off" },
-              ],
-            },
-            optional: true,
-            placeholder: "optional",
-          },
-          {
-            id: "tools.maxHops",
-            name: "Max Tool-Call Hops Per Turn",
-            description:
-              "Hard cap on consecutive tool_call rounds within a single user turn.\nProtects against runaway loops when a tool's output keeps the model requesting more calls.",
-            type: "number",
-            defaultValue: 5,
-            regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
-          },
-        ],
-      },
-      {
-        label: "Worker Pool",
-        visibleWhen: { field: "tools.enabled", eq: true },
-        fields: [
-          {
-            id: "toolkits.maxWarmWorkers",
-            name: "Max Warm Workers",
-            description:
-              "Maximum number of toolkit workers kept alive at once.\nHigher values reduce cold-start latency; lower values cap resident memory when hundreds of toolkits are enabled.",
-            type: "number",
-            defaultValue: 8,
-            regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
-          },
-          {
-            id: "toolkits.workerIdleMs",
-            name: "Worker Idle Timeout",
-            description:
-              "Terminate a warm worker after this long with no tool calls.\nShorter values free memory faster; longer values keep frequently-used toolkits warm.",
-            type: "number",
-            defaultValue: 300000,
-            suffix: "ms",
-            regex: [{ regex: "^[0-9]+$", errorMessage: "Must be a non-negative integer" }],
-          },
-          {
-            id: "toolkits.ignorePostinstallScripts",
-            name: "Ignore Postinstall Scripts",
-            description:
-              "Pass `--ignore-scripts` to `bun install` so dependency postinstall hooks don't run.\nRecommended on: postinstall scripts from transitive dependencies are a common vector for surprise code execution. Disable only if a toolkit's dependencies require native builds.",
-            type: "boolean",
-            defaultValue: true,
+            descriptionTier: "none",
           },
         ],
       },
@@ -1595,6 +1799,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   {
     id: "usage",
     name: "Usage",
+    icon: "i-material-symbols-analytics-rounded",
+    iconInactive: "i-material-symbols-analytics-outline-rounded",
     sections: [
       {
         label: "Activity",
@@ -1605,6 +1811,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description: "Live memory and CPU usage for each local service.",
             type: "services",
             defaultValue: "",
+            descriptionTier: "none",
           },
         ],
       },
@@ -1618,6 +1825,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
               "Downloaded models and saved sessions.\nSelect items and press Delete (or ⌘⌫) to remove them.",
             type: "storage",
             defaultValue: "",
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -1683,6 +1891,34 @@ export function getDefaultSettings(): Record<string, any> {
     }
   }
   return defaults;
+}
+
+/** True when a field/section pair should be visible given the user's
+ *  advanced-settings preference. Advanced sections hide every child; an
+ *  advanced field hides itself even within a non-advanced section. */
+export function isFieldVisible(
+  field: SettingField,
+  section: SettingSection,
+  showAdvanced: boolean,
+): boolean {
+  if (showAdvanced) return true;
+  if (section.advanced) return false;
+  return !field.advanced;
+}
+
+/** True when a section should be rendered in non-search mode. Advanced
+ *  sections hide entirely when `showAdvanced` is false; otherwise the
+ *  section is hidden only if all of its fields are advanced. */
+export function isSectionVisible(section: SettingSection, showAdvanced: boolean): boolean {
+  if (showAdvanced) return true;
+  if (section.advanced) return false;
+  return section.fields.some((f) => !f.advanced);
+}
+
+/** True when a group should appear in the sidebar in non-search mode. */
+export function isGroupVisible(group: SettingGroup, showAdvanced: boolean): boolean {
+  if (showAdvanced) return true;
+  return group.sections.some((s) => isSectionVisible(s, showAdvanced));
 }
 
 export function evalCondition(

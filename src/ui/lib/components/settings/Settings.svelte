@@ -11,9 +11,11 @@
     getValidationError,
     getPresetFieldIds,
     getConditionDeps,
+    isGroupVisible,
+    isSectionVisible,
     searchFields,
   } from "$lib/shared/settings";
-  import { groupSlide } from "$lib/shared/animations";
+  import { BASE_MS, getDuration, searchSlide } from "$lib/shared/animations";
 
   // Sub-components
   import SettingsSidebar from "./SettingsSidebar.svelte";
@@ -27,8 +29,6 @@
     type DownloadPlan,
   } from "$lib/shared/download";
 
-  const SEARCH_KEY = "__search__";
-
   let { toggleSettings } = $props<{
     toggleSettings: () => void;
   }>();
@@ -39,78 +39,132 @@
   let validationErrors = $state<Record<string, string>>({});
   let searchQuery = $state("");
   let searchMode = $state(false);
+  // Direction the slide animation runs: "up" when entering search (search
+  // results live conceptually above the group list), "down" when exiting.
+  let searchDirection = $state<"up" | "down">("up");
+
+  function setSearchMode(active: boolean) {
+    if (searchMode === active) return;
+    // Pin the outgoing wrapper with position:absolute so the incoming wrapper
+    // gets its natural place in flow — otherwise both occupy flex space and
+    // the slide animation has the panel double in height mid-transition.
+    const outgoing = fieldsContainerEl
+      ?.firstElementChild as HTMLElement | null;
+    if (outgoing) {
+      outgoing.style.top = `${outgoing.offsetTop}px`;
+      outgoing.style.left = `${outgoing.offsetLeft}px`;
+      outgoing.style.width = `${outgoing.offsetWidth}px`;
+      outgoing.style.position = "absolute";
+    }
+    searchDirection = active ? "up" : "down";
+    searchMode = active;
+  }
   let searchInput: HTMLInputElement | undefined = $state();
   let scrollEl: HTMLDivElement | undefined = $state();
-  let showTopFade = $state(false);
+  let scrollViewportHeight = $state(0);
+  let fieldsContainerEl: HTMLDivElement | undefined = $state();
   let showBottomFade = $state(true);
   let pendingDownload = $state<null | {
     plans: DownloadPlan[];
     apply: () => Promise<void>;
   }>(null);
 
-  // Group-swap animation state
-  let direction = $state<"up" | "down">("down");
-  let measureEl: HTMLDivElement | undefined = $state();
+  // Refs to each rendered group section, used by the scroll spy and the
+  // sidebar bookmark scrollTo. Keyed by group id.
+  const groupRefs: Record<string, HTMLElement | undefined> = $state({});
+  // Set briefly during programmatic scrollTo so the IntersectionObserver
+  // doesn't flicker selectedSettingGroupId through every group on the way down.
+  let isProgrammaticScroll = $state(false);
+  let containerWidth = $state(0);
 
-  let groupKey = $derived(searchMode ? SEARCH_KEY : selectedSettingGroupId);
+  const showAdvanced = $derived(
+    !!settingsState.currentSettings["appearance.settings.showAdvanced"],
+  );
+  const horizontalThreshold = $derived(
+    (settingsState.currentSettings[
+      "appearance.settings.horizontalThreshold"
+    ] as number) ?? 680,
+  );
+  const horizontal = $derived(containerWidth >= horizontalThreshold);
 
-  function currentKey() {
-    return searchMode ? SEARCH_KEY : selectedSettingGroupId;
-  }
+  const visibleGroups = $derived(
+    SETTINGS_SCHEMA.filter((g) => isGroupVisible(g, showAdvanced)),
+  );
 
-  function indexOfKey(key: string): number {
-    // Search-results "group" lives above every real group.
-    if (key === SEARCH_KEY) return -1;
-    return SETTINGS_SCHEMA.findIndex((g) => g.id === key);
-  }
-
-  function changeGroup(newKey: string) {
-    const prevKey = currentKey();
-    if (prevKey === newKey) return;
-
-    direction = indexOfKey(newKey) < indexOfKey(prevKey) ? "up" : "down";
-
-    // Pin the outgoing group with position:absolute inside measureEl (which
-    // is position:relative) so it's clipped by the overflow-hidden wrapper
-    // and doesn't fight the incoming one for layout space.
-    const currentGroup = measureEl?.firstElementChild as HTMLElement | null;
-    if (currentGroup) {
-      const top = currentGroup.offsetTop;
-      const left = currentGroup.offsetLeft;
-      const width = currentGroup.offsetWidth;
-      const height = currentGroup.offsetHeight;
-      currentGroup.style.position = "absolute";
-      currentGroup.style.top = `${top}px`;
-      currentGroup.style.left = `${left}px`;
-      currentGroup.style.width = `${width}px`;
-      currentGroup.style.height = `${height}px`;
-    }
-
-    if (newKey === SEARCH_KEY) {
-      searchMode = true;
-      selectedSettingGroupId = "";
+  function handleSidebarSelect(groupId: string) {
+    if (searchMode) {
+      searchQuery = "";
+      setSearchMode(false);
+      // Defer scroll until after the search-slide swap remounts the group
+      // list so groupRefs are populated again.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => scrollTo(groupId)),
+      );
     } else {
-      searchMode = false;
-      selectedSettingGroupId = newKey;
+      scrollTo(groupId);
     }
+  }
+
+  function scrollTo(groupId: string) {
+    const el = groupRefs[groupId];
+    if (!el || !scrollEl) return;
+    const animEnabled =
+      !!settingsState.currentSettings["appearance.animationsEnabled"];
+    isProgrammaticScroll = true;
+    scrollEl.scrollTo({
+      top: el.offsetTop,
+      behavior: animEnabled ? "smooth" : "instant",
+    });
+    selectedSettingGroupId = groupId;
+    // 'scrollend' would be more precise but Safari/WebKit support is uneven;
+    // fall back to a fixed timeout that comfortably covers a smooth scroll.
+    setTimeout(() => {
+      isProgrammaticScroll = false;
+    }, 600);
   }
 
   function updateScrollFades() {
     if (!scrollEl) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollEl;
-    showTopFade = scrollTop > 0;
     showBottomFade = scrollTop + clientHeight < scrollHeight - 1;
   }
 
+  // Scroll spy: the active group is the last one whose header has reached
+  // (or passed) the top of the scroll viewport. A scroll listener gives
+  // pixel-precise activation — IntersectionObserver's rootMargin tricks
+  // produced visible lag at section boundaries.
+  function updateActiveGroup() {
+    if (isProgrammaticScroll || searchMode || !scrollEl) return;
+    const scrollTop = scrollEl.scrollTop;
+    let active = visibleGroups[0]?.id;
+    for (const group of visibleGroups) {
+      const el = groupRefs[group.id];
+      if (!el) continue;
+      // 1px buffer absorbs sub-pixel rounding when scrolling smoothly.
+      if (el.offsetTop <= scrollTop + 1) {
+        active = group.id;
+      } else {
+        break;
+      }
+    }
+    if (active && active !== selectedSettingGroupId) {
+      selectedSettingGroupId = active;
+    }
+  }
+
+  function onScroll() {
+    updateScrollFades();
+    updateActiveGroup();
+  }
+
+  // Container width watcher driving horizontal-mode flip.
   $effect(() => {
-    // Reset scroll to top and re-check fades when the group or search mode
-    // changes; otherwise a long previous group leaves the new one scrolled
-    // partway down.
-    void [selectedSettingGroupId, searchMode];
-    requestAnimationFrame(() => {
-      if (scrollEl) scrollEl.scrollTop = 0;
-      updateScrollFades();
+    if (!fieldsContainerEl) return;
+    const ro = new ResizeObserver((entries) => {
+      containerWidth = entries[0].contentRect.width;
     });
+    ro.observe(fieldsContainerEl);
+    return () => ro.disconnect();
   });
 
   onMount(async () => {
@@ -129,7 +183,6 @@
         isPrimary: pm ? mon.name === pm.name : false,
       }));
 
-      // Sort: primary first
       mapped.sort((a, b) =>
         a.isPrimary === b.isPrimary ? 0 : a.isPrimary ? -1 : 1,
       );
@@ -137,7 +190,6 @@
     } catch (e) {
       console.error("Failed to load monitors:", e);
     }
-    // Validate all fields on mount
     validateAllFields();
     searchInput?.focus();
     updateScrollFades();
@@ -236,12 +288,10 @@
     const field = findField(fieldId);
     if (!field) return;
 
-    // Determine if this field is currently required
     const isOptional = field.optionalWhen
       ? evalCondition(field.optionalWhen, settingsState.currentSettings)
       : !!field.optional;
 
-    // Check required field validation (empty value when not optional)
     if (
       !isOptional &&
       (value === undefined || value === null || value === "")
@@ -253,7 +303,6 @@
       return;
     }
 
-    // Clear required error if value is present or field became optional
     if (
       validationErrors[field.id] === "This field is required" &&
       (isOptional || (value !== "" && value !== undefined && value !== null))
@@ -315,11 +364,9 @@
 
   function cancelPendingDownload() {
     pendingDownload = null;
-    // Force reactive re-read so any DOM inputs reflecting rejected values snap back
     settingsState.currentSettings = { ...settingsState.currentSettings };
   }
 
-  /** Re-evaluate all conditions that depend on the given setting keys. */
   function reEvaluateDeps(...keys: string[]) {
     const deps = getConditionDeps();
     const next = new Set(expandedSections);
@@ -363,6 +410,121 @@
     else next.add(key);
     expandedSections = next;
   }
+
+  // Captures the topmost field/group anchor before a layout-shifting change
+  // (sidebar collapse, advanced-fields toggle), runs the change, then re-pins
+  // the same anchor to its previous viewport offset every frame for the full
+  // animation window.
+  //
+  // A single tick-and-scroll isn't enough: the sidebar's slide transition
+  // animates over ~200ms and the ResizeObserver-driven horizontal-mode flip
+  // fires partway through, both of which keep shifting the anchor's
+  // offsetTop after our first measurement. Re-pinning per frame tracks the
+  // anchor through the whole settle process.
+  //
+  // Each frame we walk a fallback chain (field → enclosing group) so that if
+  // the field gets unmounted (e.g. it was advanced and the toggle just hid
+  // it), we still pin to its containing group's top instead of letting the
+  // browser clamp scrollTop to the now-shorter content's bottom.
+  type AnchorEntry = { selector: string; offset: number };
+
+  function withScrollAnchor(fn: () => void) {
+    if (!scrollEl) {
+      fn();
+      return;
+    }
+
+    const scrollTop = scrollEl.scrollTop;
+    const candidates = scrollEl.querySelectorAll<HTMLElement>(
+      "[data-field-id], [data-group-id]",
+    );
+    let topAnchor: HTMLElement | null = null;
+    for (const el of candidates) {
+      if (el.offsetTop >= scrollTop) {
+        topAnchor = el;
+        break;
+      }
+    }
+
+    const chain: AnchorEntry[] = [];
+    if (topAnchor) {
+      const offset = topAnchor.offsetTop - scrollTop;
+      const fid = topAnchor.dataset.fieldId;
+      const gid = topAnchor.dataset.groupId;
+      if (fid) {
+        chain.push({
+          selector: `[data-field-id="${CSS.escape(fid)}"]`,
+          offset,
+        });
+        // Fallback 1: the enclosing section. Pinned at offset 0 so its top
+        // edge (with the sticky section header) lands at the viewport top —
+        // keeps the user "in the same section" when only their specific
+        // field has been hidden.
+        const sectionAncestor = topAnchor.closest<HTMLElement>(
+          "[data-section-key]",
+        );
+        if (sectionAncestor?.dataset.sectionKey) {
+          chain.push({
+            selector: `[data-section-key="${CSS.escape(sectionAncestor.dataset.sectionKey)}"]`,
+            offset: 0,
+          });
+        }
+        // Fallback 2: the enclosing group. Used when the entire section is
+        // also gone (whole section marked advanced, or all of its fields
+        // are advanced).
+        const groupAncestor =
+          topAnchor.closest<HTMLElement>("[data-group-id]");
+        if (groupAncestor?.dataset.groupId) {
+          chain.push({
+            selector: `[data-group-id="${CSS.escape(groupAncestor.dataset.groupId)}"]`,
+            offset: 0,
+          });
+        }
+      } else if (gid) {
+        chain.push({
+          selector: `[data-group-id="${CSS.escape(gid)}"]`,
+          offset,
+        });
+      }
+    }
+
+    fn();
+
+    if (chain.length === 0) return;
+
+    // Run a buffered window: full animation duration + 100ms grace so the
+    // post-transition ResizeObserver tick (and any horizontal-mode flip it
+    // triggers) have time to land.
+    const deadline = performance.now() + getDuration(BASE_MS) + 100;
+
+    function step() {
+      if (!scrollEl) return;
+      for (const entry of chain) {
+        const el = scrollEl.querySelector<HTMLElement>(entry.selector);
+        if (!el) continue;
+        const target = Math.max(0, el.offsetTop - entry.offset);
+        // Skip the assignment when we're already there to avoid spurious
+        // scroll events stealing focus from a user-initiated scroll.
+        if (Math.abs(scrollEl.scrollTop - target) > 0.5) {
+          scrollEl.scrollTop = target;
+        }
+        break;
+      }
+      if (performance.now() < deadline) {
+        requestAnimationFrame(step);
+      }
+    }
+
+    requestAnimationFrame(step);
+  }
+
+  function onSearchInput() {
+    if (searchQuery.trim()) {
+      setSearchMode(true);
+    } else if (searchMode) {
+      setSearchMode(false);
+    }
+  }
 </script>
 
 <Bubble
@@ -380,16 +542,10 @@
         class="bg-transparent outline-none text-base text-default-600 w-full"
         bind:this={searchInput}
         bind:value={searchQuery}
-        oninput={() => {
-          if (searchQuery.trim()) {
-            changeGroup(SEARCH_KEY);
-          } else if (searchMode) {
-            changeGroup(SETTINGS_SCHEMA[0].id);
-          }
-        }}
+        oninput={onSearchInput}
         onfocus={() => {
           if (searchQuery.trim() && !searchMode) {
-            changeGroup(SEARCH_KEY);
+            setSearchMode(true);
           }
         }}
       />
@@ -398,7 +554,7 @@
           class="flex absolute right-3 top-1/2 -translate-y-1/2 text-default-400 hover:text-default-600 text-lg cursor-pointer transition-colors"
           onclick={() => {
             searchQuery = "";
-            changeGroup(SETTINGS_SCHEMA[0].id);
+            setSearchMode(false);
             searchInput?.focus();
           }}
           title="Clear search"
@@ -420,36 +576,33 @@
     </button>
   </div>
 
-  <div class="flex flex-1 gap-8 overflow-hidden min-h-0 -mr-2">
+  <div class="flex flex-1 overflow-hidden min-h-0 -mr-2 gap-3">
     <!-- Sidebar -->
     <SettingsSidebar
       selectedGroupId={selectedSettingGroupId}
-      onSelect={(id) => changeGroup(id)}
+      onSelect={handleSidebarSelect}
       llmStatus={serversState.serverStatuses.llm}
       sttStatus={serversState.serverStatuses.stt}
       bunStatus={serversState.serverStatuses.bun}
+      {withScrollAnchor}
     />
 
     <!-- Main Panel -->
     <div class="relative flex-1 min-h-0 min-w-0">
       <div
-        class="absolute left-0 right-0 top-0 h-6 pointer-events-none z-1 bg-gradient-to-b from-neutral-300 dark:from-neutral-600 to-transparent transition-opacity duration-100 {showTopFade
-          ? 'opacity-100'
-          : 'opacity-0'}"
-      ></div>
-      <div
         class="settings-scroll overflow-y-auto pr-2 h-full"
         bind:this={scrollEl}
-        onscroll={updateScrollFades}
+        bind:clientHeight={scrollViewportHeight}
+        onscroll={onScroll}
       >
-        <div bind:this={measureEl} class="relative">
-            {#key groupKey}
-              <div
-                class="flex flex-col gap-2"
-                in:groupSlide={{ direction, phase: "in" }}
-                out:groupSlide={{ direction, phase: "out" }}
-              >
-                {#if searchMode && searchQuery.trim()}
+        <div bind:this={fieldsContainerEl} class="relative">
+          {#key searchMode}
+            <div
+              in:searchSlide={{ direction: searchDirection, phase: "in" }}
+              out:searchSlide={{ direction: searchDirection, phase: "out" }}
+            >
+              {#if searchMode && searchQuery.trim()}
+                <div class="flex flex-col gap-4">
                   {#each searchFields(searchQuery, settingsState.currentSettings) as group (group.sectionKey)}
                     <div class="flex flex-col gap-2">
                       <div
@@ -464,6 +617,7 @@
                           {field}
                           {monitors}
                           error={validationErrors[field.id] ?? null}
+                          {horizontal}
                           onChange={handleChange}
                           onReset={resetToDefault}
                           onPresetSelect={handlePresetSelect}
@@ -477,25 +631,67 @@
                       No matching settings found.
                     </div>
                   {/each}
-                {:else}
-                  {#each SETTINGS_SCHEMA.find((g) => g.id === selectedSettingGroupId)?.sections || [] as section, si}
-                    <SettingsSection
-                      {section}
-                      sectionKey={`${selectedSettingGroupId}-${si}`}
-                      isExpanded={expandedSections.has(
-                        `${selectedSettingGroupId}-${si}`,
-                      )}
-                      {monitors}
-                      {validationErrors}
-                      onToggle={toggleSection}
-                      onChange={handleChange}
-                      onReset={resetToDefault}
-                      onPresetSelect={handlePresetSelect}
-                    />
+                </div>
+              {:else}
+                <div class="flex flex-col gap-4">
+                  {#each visibleGroups as group, gi (group.id)}
+                    {@const isLast = gi === visibleGroups.length - 1}
+                    {@const firstRenderedSection = group.sections.find(
+                      (s) =>
+                        isSectionVisible(s, showAdvanced) &&
+                        evalCondition(
+                          s.visibleWhen,
+                          settingsState.currentSettings,
+                        ),
+                    )}
+                    {@const needsTopGap =
+                      firstRenderedSection && !firstRenderedSection.label}
+                    <section
+                      data-group-id={group.id}
+                      bind:this={groupRefs[group.id]}
+                      class="flex flex-col"
+                      style={isLast && scrollViewportHeight
+                        ? `min-height: ${scrollViewportHeight}px`
+                        : undefined}
+                    >
+                      <div class="sticky top-0 z-20">
+                        <h2
+                          class="flex items-center h-7 bg-default-300 text-sm text-default-800 font-medium uppercase tracking-wide"
+                        >
+                          {group.name}
+                        </h2>
+                        <div
+                          class="absolute left-0 right-0 top-full h-3 bg-gradient-to-b from-neutral-300 dark:from-neutral-600 to-neutral-300/0 dark:to-neutral-600/0 pointer-events-none"
+                        ></div>
+                      </div>
+                      <div
+                        class="flex flex-col gap-2 {needsTopGap ? 'pt-2' : ''}"
+                      >
+                        {#each group.sections as section, si}
+                          {#if isSectionVisible(section, showAdvanced)}
+                            <SettingsSection
+                              {section}
+                              sectionKey={`${group.id}-${si}`}
+                              isExpanded={expandedSections.has(
+                                `${group.id}-${si}`,
+                              )}
+                              {monitors}
+                              {validationErrors}
+                              {horizontal}
+                              onToggle={toggleSection}
+                              onChange={handleChange}
+                              onReset={resetToDefault}
+                              onPresetSelect={handlePresetSelect}
+                            />
+                          {/if}
+                        {/each}
+                      </div>
+                    </section>
                   {/each}
-                {/if}
-              </div>
-            {/key}
+                </div>
+              {/if}
+            </div>
+          {/key}
         </div>
       </div>
       <div

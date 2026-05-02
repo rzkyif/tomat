@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { getVersion } from "@tauri-apps/api/app";
-  import { SETTINGS_SCHEMA } from "$lib/shared/settings";
-  import type { ServerStatusUpdate } from "$lib/shared/types";
+  import { slide } from "svelte/transition";
+  import { SETTINGS_SCHEMA, isGroupVisible } from "$lib/shared/settings";
+  import type { ServerStatus, ServerStatusUpdate } from "$lib/shared/types";
+  import { settingsState } from "../../state";
+  import { getDuration } from "$lib/shared/animations";
   import ServerStatusChip from "./ServerStatusChip.svelte";
 
   let {
@@ -11,54 +12,178 @@
     llmStatus,
     sttStatus,
     bunStatus,
+    withScrollAnchor,
   } = $props<{
     selectedGroupId: string;
     onSelect?: (id: string) => void;
     llmStatus: ServerStatusUpdate;
     sttStatus: ServerStatusUpdate;
     bunStatus: ServerStatusUpdate;
+    /** Wrap a layout-shifting state change so the scroll panel preserves
+     *  the anchor field's viewport position across the toggle. */
+    withScrollAnchor: (fn: () => void) => void;
   }>();
 
-  let version = $state("");
-  onMount(async () => {
-    try {
-      version = await getVersion();
-    } catch {
-      version = "";
-    }
-  });
+  const showAdvanced = $derived(
+    !!settingsState.currentSettings["appearance.settings.showAdvanced"],
+  );
+  const collapsed = $derived(
+    !!settingsState.currentSettings["appearance.settings.sidebarCollapsed"],
+  );
+
+  const visibleGroups = $derived(
+    SETTINGS_SCHEMA.filter((g) => isGroupVisible(g, showAdvanced)),
+  );
+
+  function toggleAdvanced() {
+    withScrollAnchor(() => {
+      settingsState.updateSetting(
+        "appearance.settings.showAdvanced",
+        !showAdvanced,
+      );
+    });
+  }
+
+  function toggleCollapse() {
+    withScrollAnchor(() => {
+      settingsState.updateSetting(
+        "appearance.settings.sidebarCollapsed",
+        !collapsed,
+      );
+    });
+  }
+
+  // ServerStatusChip only renders when status is not Running and not Disabled.
+  // In collapsed mode we mirror that condition for the dot indicator.
+  function chipVisible(status: ServerStatus): boolean {
+    return status !== "Running" && status !== "Disabled";
+  }
+
+  // Left padding stays constant so icons line up at the same X position in
+  // both modes. Right padding is only widened when the row actually has a
+  // text label next to its icon — icon-only rows stay compact rectangles.
+  function rowClass(hasText: boolean): string {
+    const showText = hasText && !collapsed;
+    return `flex items-center gap-2 h-8 pl-1.5 ${showText ? "pr-2.5" : "pr-1.5"} rounded-lg transition-[padding,colors,background-color] duration-200`;
+  }
+
+  // Text spans use Svelte's slide transition with axis "x" so the sidebar
+  // resizes smoothly as labels appear/disappear. Duration honours the
+  // appearance.animations* settings via getDuration().
+  const slideX = $derived({ axis: "x" as const, duration: getDuration() });
 </script>
 
 <div class="flex flex-col gap-2 overflow-y-auto justify-between">
   <div class="flex flex-col gap-1">
-    {#each SETTINGS_SCHEMA as group}
+    <!-- h-7 (matches the sticky group header) so the icon's vertical center
+         lines up with the h2 text when the panel is scrolled to the top. -->
+    <button
+      class="hover:cursor-pointer text-default-500 hover:text-default-700 hover:bg-default-200 w-fit flex items-center gap-2 h-6.5 pl-1.5 pr-1.5 rounded-lg transition-colors"
+      onclick={toggleCollapse}
+      title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+    >
+      <i
+        class="flex text-xl shrink-0 {collapsed
+          ? 'i-material-symbols-keyboard-double-arrow-right-rounded'
+          : 'i-material-symbols-keyboard-double-arrow-left-rounded'}"
+      ></i>
+    </button>
+
+    {#each visibleGroups as group (group.id)}
+      {@const isActive = selectedGroupId === group.id}
       <button
-        class="text-left text-base hover:cursor-pointer pl-3 border-l-4 transition-colors {selectedGroupId ===
-        group.id
-          ? ''
-          : ''} {selectedGroupId === group.id
-          ? 'text-default-900 border-default-700'
-          : 'text-default-500 border-transparent hover:text-default-700 hover:border-default-500'}"
+        class="hover:cursor-pointer {rowClass(true)} {isActive
+          ? 'bg-default-300 text-default-900'
+          : 'text-default-500 hover:text-default-700 hover:bg-default-200'}"
         onclick={() => onSelect?.(group.id)}
+        title={collapsed ? group.name : undefined}
+        aria-label={group.name}
       >
-        {group.name}
+        <i
+          class="flex text-xl shrink-0 {isActive
+            ? group.icon
+            : (group.iconInactive ?? group.icon)}"
+        ></i>
+        {#if !collapsed}
+          <span
+            transition:slide={slideX}
+            class="text-base text-left whitespace-nowrap"
+          >
+            {group.name}
+          </span>
+        {/if}
       </button>
     {/each}
   </div>
 
-  <div class="flex flex-col gap-2 w-fit">
-    <div class="flex flex-col gap-1 text-sm font-medium w-fit">
-      <ServerStatusChip type="LLM" update={llmStatus} />
-      <ServerStatusChip type="STT" update={sttStatus} />
-      <ServerStatusChip type="Bun" update={bunStatus} />
-    </div>
-    <div class="flex items-center gap-1.5 text-default-900 text-sm select-none">
+  <div class="flex flex-col gap-1">
+    {#if collapsed}
+      {#if chipVisible(llmStatus.status as ServerStatus) || chipVisible(sttStatus.status as ServerStatus) || chipVisible(bunStatus.status as ServerStatus)}
+        <div class="flex flex-col gap-1.5 items-center px-1.5 py-1">
+          {#if chipVisible(llmStatus.status as ServerStatus)}
+            <span
+              class="w-2 h-2 rounded-full bg-default-500"
+              title={"LLM: " + llmStatus.status}
+            ></span>
+          {/if}
+          {#if chipVisible(sttStatus.status as ServerStatus)}
+            <span
+              class="w-2 h-2 rounded-full bg-default-500"
+              title={"STT: " + sttStatus.status}
+            ></span>
+          {/if}
+          {#if chipVisible(bunStatus.status as ServerStatus)}
+            <span
+              class="w-2 h-2 rounded-full bg-default-500"
+              title={"Bun: " + bunStatus.status}
+            ></span>
+          {/if}
+        </div>
+      {/if}
+    {:else}
+      <div class="flex flex-col gap-1 text-sm font-medium w-fit px-2.5">
+        <ServerStatusChip type="LLM" update={llmStatus} />
+        <ServerStatusChip type="STT" update={sttStatus} />
+        <ServerStatusChip type="Bun" update={bunStatus} />
+      </div>
+    {/if}
+
+    <button
+      class="hover:cursor-pointer {rowClass(true)} {showAdvanced
+        ? 'bg-default-300 text-default-900'
+        : 'text-default-500 hover:text-default-700 hover:bg-default-200'}"
+      onclick={toggleAdvanced}
+      title={collapsed
+        ? showAdvanced
+          ? "Hide advanced fields"
+          : "Show advanced fields"
+        : undefined}
+      aria-pressed={showAdvanced}
+    >
+      <i
+        class="flex text-xl shrink-0 {showAdvanced
+          ? 'i-material-symbols-toggle-on'
+          : 'i-material-symbols-toggle-off-outline'}"
+      ></i>
+      {#if !collapsed}
+        <span
+          transition:slide={slideX}
+          class="text-base text-left whitespace-nowrap"
+        >
+          Advanced Fields
+        </span>
+      {/if}
+    </button>
+
+    <div
+      class="flex items-center {rowClass(false)} text-default-900 select-none"
+    >
       <span
-        class="w-6 h-6 bg-current"
+        class="w-5 h-5 bg-current shrink-0"
         style="mask:url(/tomat.svg) center/contain no-repeat;-webkit-mask:url(/tomat.svg) center/contain no-repeat;"
         aria-label="tomat"
       ></span>
-      <span>{version ? `v${version}` : ""}</span>
     </div>
   </div>
 </div>
