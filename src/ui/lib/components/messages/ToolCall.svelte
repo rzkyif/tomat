@@ -54,7 +54,7 @@
   });
   // Auto-open when the tool enters `awaiting_user` so the user can answer,
   // and auto-close once the tool reaches a terminal state (complete /
-  // failed / cancelled) — but ONLY if it actually went through awaiting_user
+  // failed / cancelled), but ONLY if it actually went through awaiting_user
   // earlier. `wasAwaiting` flips on entry and is cleared on the terminal
   // transition; this prevents non-interactive tool calls (e.g. a tool that
   // ran straight to "complete" without ever asking the user) from being
@@ -277,7 +277,7 @@
 
   // Side border, same mechanism as AgentMessage/UserMessage: Bubble renders
   // a chunky side border when `active` is true. Only light it up for states
-  // that carry a color cue — failed (red) and awaiting input (amber). We
+  // that carry a color cue: failed (red) and awaiting input (amber). We
   // still pass a neutral `border-default-400` for the other states so the
   // browser has a stable border-color to interpolate from when the width
   // animates between 0 and 8px on status transitions; otherwise the color

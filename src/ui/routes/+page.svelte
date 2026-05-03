@@ -62,7 +62,7 @@
   // transform; on first show we fade it in (no slide on startup, since
   // the slide's percent-translate resolves against a width that isn't
   // fully settled on the very first paint after Rust unhides the window).
-  // Subsequent show/hide uses the full slide — `main`'s layout is stable
+  // Subsequent show/hide uses the full slide. `main`'s layout is stable
   // by then so percent-translate works correctly.
   let initialShown = $state(false);
 
@@ -150,7 +150,7 @@
       await invoke("show_main_window");
       // The `window-visibility: true` event emitted by `show_main_window`
       // fires before the listener below is registered, so flip the gate
-      // here directly — this triggers the fade-in on first show.
+      // here directly. This triggers the fade-in on first show.
       initialShown = true;
     }
 
@@ -191,7 +191,7 @@
     });
 
     // Global-shortcut listener lives here (not in UserInput) so it stays
-    // attached when the user is in the Settings view — otherwise the
+    // attached when the user is in the Settings view; otherwise the
     // shortcut silently stops working whenever UserInput is unmounted.
     void shortcutHandler.attach();
 
@@ -221,7 +221,7 @@
       } finally {
         sessionLoading = false;
         // Enable per-message entry animations only AFTER the bulk restore
-        // completes — otherwise 50 messages all animate in at once.
+        // completes; otherwise 50 messages all animate in at once.
         await tick();
         enableMessageAnimations();
       }
@@ -299,7 +299,7 @@
   );
 
   // Visible while the assistant turn is in flight but we haven't received
-  // anything yet — neither reasoning nor content. Drives a transient
+  // anything yet, neither reasoning nor content. Drives a transient
   // small-bubble spinner so the user has a visual cue between sending and
   // first-token arrival. As soon as either reasoning or content fires, this
   // turns false and the corresponding real bubble takes over.
@@ -315,7 +315,7 @@
   // sentinel). Consecutive small bubbles are stacked horizontally (with wrap)
   // into a single flex row. When one of them expands, MessageStackGroup
   // promotes that bubble's wrapper to `flex-basis: 100%` so it claims its
-  // own row inside the same stack — keeping the bubble's component identity
+  // own row inside the same stack, keeping the bubble's component identity
   // stable across expand/collapse (no remount → no replayed slide-in and the
   // Expandable's open/close transition fires as expected).
   function isSmallBubbleMsg(msg: Message): boolean {
@@ -331,7 +331,7 @@
     | { kind: "stack"; key: string; messages: Message[] }
     | { kind: "single"; key: string; message: Message };
 
-  // Stable id for the synthetic loading sentinel — consistent across the
+  // Stable id for the synthetic loading sentinel, consistent across the
   // bubble's mounted lifetime so keyed each blocks don't churn while it's
   // visible. The dedup-by-msgId guard inside `messageEnter` is bypassed
   // separately for this id so each appearance still animates in/out.
@@ -341,7 +341,7 @@
   // reasoning when the setting is off) before grouping so the chain logic
   // sees only what'll actually render. Then inject a synthetic small-bubble
   // loading sentinel at the newest position when we're awaiting the first
-  // response chunk — that lets it stack with adjacent small bubbles
+  // response chunk. That lets it stack with adjacent small bubbles
   // (tool_filter, reasoning, system) via the existing grouping pipeline
   // instead of being a standalone element outside it.
   let displayedMessages = $derived.by<Message[]>(() => {
@@ -378,7 +378,7 @@
     // bubbles in old→new visual order (oldest at the screen-facing edge,
     // wrapping rightward and downward). We collect into `stack` in the
     // newest-first iteration order, then reverse on flush so DOM[0] of the
-    // stack is the OLDEST message — placing it leftmost (left/center
+    // stack is the OLDEST message, placing it leftmost (left/center
     // alignment with flex-row) or rightmost (right alignment with
     // flex-row-reverse).
     const flushStack = () => {

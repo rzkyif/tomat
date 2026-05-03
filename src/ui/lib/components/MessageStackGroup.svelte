@@ -39,11 +39,11 @@
   //     alignment-leading edge; clicking it collapses every Expandable in
   //     the stack and reverts to "horizontal".
   //
-  // The user can toggle between them via stack click / X click — that's
+  // The user can toggle between them via stack click / X click; that's
   // tracked in `userMode`. The actual `mode` is forced to "expanded" when
   // either of these is true:
   //   - `awaitingInput`: a tool call needs the user (status `awaiting_user`).
-  //     The X close-bubble is hidden in this case — dismissing makes no
+  //     The X close-bubble is hidden in this case; dismissing makes no
   //     sense while the tool blocks on input.
   //   - `anyExpanded`: any message in the stack has its body open. Keeping
   //     the row in horizontal mode while a bubble is expanded would make the
@@ -72,7 +72,7 @@
       const real = expansionState.get(id) ?? false;
       const layout = layoutExpanded.get(id) ?? false;
       if (real === layout) {
-        // States agree — cancel any pending close-delay (e.g. user toggled
+        // States agree: cancel any pending close-delay (e.g. user toggled
         // back open during the delay window).
         const t = transitionTimers.get(id);
         if (t) {
@@ -119,7 +119,7 @@
   // immediately and stays open through the close transition.
   let anyLayoutExpanded = $derived(messages.some(isMsgLayoutExpanded));
   // True when the bubbles' natural total width exceeds the available
-  // container width — i.e. when a horizontal layout would actually need to
+  // container width, i.e. when a horizontal layout would actually need to
   // scroll. Updated by the ResizeObserver below. When false, the stack has
   // no use for the horizontal/expanded toggle: there's nothing hidden past
   // an edge to reveal, so we stay in expanded layout (no clipping, no X
@@ -132,7 +132,7 @@
   let wrapper: HTMLDivElement | undefined = $state();
   // True when the flex-wrap row spans more than one line. When this happens
   // we bypass the per-bubble neighbor calc and force every bubble in the
-  // group to render with the less-rounded corners on both sides — wrapping
+  // group to render with the less-rounded corners on both sides; wrapping
   // visually breaks the chain along directions that don't map cleanly to
   // "left neighbor" / "right neighbor", so a uniform treatment looks better.
   let wrapped = $state(false);
@@ -157,7 +157,7 @@
   // expanded (immediate or delayed) because `basis-full` in that case
   // inflates a child's offsetWidth to the full row, which would falsely
   // report overflow. While forced-expanded the flag's value is irrelevant
-  // anyway — mode is already pinned to "expanded".
+  // anyway; mode is already pinned to "expanded".
   function checkOverflow() {
     if (!wrapper) return;
     if (anyLayoutExpanded || awaitingInput) return;
@@ -197,7 +197,7 @@
   // position-based (lastElementChild's leading edge inside the wrapper),
   // not event-source based, so programmatic `scrollIntoView` calls land at
   // the end and immediately clear `userScrolled` on the resulting scroll
-  // event — avoiding the in-flight ambiguity of `behavior: "smooth"`.
+  // event, avoiding the in-flight ambiguity of `behavior: "smooth"`.
   let userScrolled = $state(false);
 
   function isAtEnd(): boolean {
@@ -205,7 +205,7 @@
     const wrapperRect = wrapper.getBoundingClientRect();
     const lastRect = wrapper.lastElementChild.getBoundingClientRect();
     // flex-row-reverse (right alignment): lastElementChild visually sits at
-    // the wrapper's left — "end" means its left edge fits inside.
+    // the wrapper's left. "end" means its left edge fits inside.
     if (alignment === "right") {
       return lastRect.left >= wrapperRect.left - 4;
     }
@@ -225,7 +225,7 @@
   }
 
   $effect(() => {
-    // Re-attach observers whenever the message list or mode changes — this
+    // Re-attach observers whenever the message list or mode changes. This
     // also doubles as the trigger that pins the stack to the end after any
     // structural change (new bubble, bubble auto-collapsed, mode flipped),
     // since pinToEnd is gated on `userScrolled` it's safe to over-call.
@@ -260,7 +260,7 @@
 
   // Immediate expansion: reads `expansionState` directly. Used for `mode`
   // forcing on open (so the wrapper unclamps the moment the body starts to
-  // animate in) and for the body's own visibility — `expansionState` is the
+  // animate in) and for the body's own visibility. `expansionState` is the
   // ground truth.
   function isMsgExpanded(msg: Message): boolean {
     if (msg.id === undefined) return false;
@@ -277,7 +277,7 @@
   }
 
   // Collapse every Expandable in the stack. Used when the user dismisses the
-  // expanded mode via the X bubble — the spec is that the stack returns to
+  // expanded mode via the X bubble. The spec is that the stack returns to
   // a clean horizontal row with no per-bubble bodies open.
   function collapseAll() {
     for (const msg of messages) {
@@ -287,7 +287,7 @@
 
   // Whether the X bubble has a non-expanded message touching it in the row.
   // Reads the delayed view so the X's own corner-radius adjustment doesn't
-  // pop the moment a neighbour starts to expand/collapse — it follows the
+  // pop the moment a neighbour starts to expand/collapse. It follows the
   // chain break/unbreak.
   let xHasTrailingNeighbor = $derived(
     mode === "expanded" &&
@@ -318,7 +318,7 @@
       isMsgLayoutExpanded(messages[idx + 1]);
     // The X bubble at DOM[0] in expanded mode is the DOM-prev of messages[0].
     // It's hidden whenever a tool is blocking on user input OR the natural
-    // width fits the row (no scroll to dismiss into) — see `mode` and the X
+    // width fits the row (no scroll to dismiss into); see `mode` and the X
     // render guard below.
     const xPresent = mode === "expanded" && !awaitingInput && overflows;
     const hasDomPrev = (idx > 0 && !prevExpanded) || (idx === 0 && xPresent);
@@ -376,7 +376,7 @@
          elsewhere for the inverted-progress overlay, so the inversion looks
          and feels consistent across the app. Hidden while a bubble in the
          stack is auto-forcing expanded mode (e.g., a tool awaiting user
-         input) — the user shouldn't be able to dismiss the request. -->
+         input). The user shouldn't be able to dismiss the request. -->
     <div class="bubble-x-wrapper">
       <Bubble
         selectedAlignment={alignment}

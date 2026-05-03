@@ -254,6 +254,7 @@ pub fn run() {
             get_process_metrics,
             list_tomat_storage,
             delete_tomat_paths,
+            reveal_tomat_path,
             clear_tomat_models,
             clear_tomat_sessions,
             clear_tomat_settings,

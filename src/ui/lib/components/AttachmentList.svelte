@@ -71,7 +71,7 @@
           {/if}
           {#if editable && onRemove}
             <button
-              class="absolute top-1 right-1 text-default-400 hover:text-red-500 rounded-full w-5 h-5 flex items-center justify-center transition-opacity cursor-pointer"
+              class="absolute top-1 right-1 text-default-400 hover:text-default-900 rounded-full w-5 h-5 flex items-center justify-center transition-opacity cursor-pointer"
               onclick={() => onRemove(i)}
               title="Remove Attachment"
             >
@@ -103,14 +103,13 @@
             <div
               class="h-16 w-16 flex items-center justify-center text-default-400"
             >
-              <i
-                class="flex i-material-symbols-image-outline-rounded text-2xl"
+              <i class="flex i-material-symbols-image-outline-rounded text-2xl"
               ></i>
             </div>
           {/if}
           {#if editable && onRemove}
             <button
-              class="absolute top-1 right-1 text-default-400 hover:text-red-500 rounded-full w-5 h-5 flex items-center justify-center transition-opacity cursor-pointer"
+              class="absolute top-1 right-1 text-default-400 hover:text-default-900 rounded-full w-5 h-5 flex items-center justify-center transition-opacity cursor-pointer"
               onclick={() => onRemove(i)}
               title="Remove Attachment"
             >
@@ -128,7 +127,7 @@
           <span class="max-w-32 truncate">{part.filename}</span>
           {#if editable && onRemove}
             <button
-              class="ml-1 text-default-400 hover:text-red-500 cursor-pointer transition-colors"
+              class="ml-1 text-default-400 hover:text-default-900 cursor-pointer transition-colors"
               onclick={() => onRemove(i)}
               title="Remove Attachment"
             >

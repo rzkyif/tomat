@@ -98,7 +98,7 @@ export class ToolkitsService {
     return () => this.wsSubs.delete(emit);
   }
 
-  /** Worker pool health snapshot — exposed to `/api/health`. */
+  /** Worker pool health snapshot, exposed to `/api/health`. */
   poolStats(): { warmWorkers: number; maxWarmWorkers: number; inFlightCalls: number } {
     return this.pool.stats();
   }
@@ -204,7 +204,7 @@ export class ToolkitsService {
 
     const { hasDeps, depsInstalled } = deriveStatus(rec.entry_path, rec.kind);
 
-    // Folder-with-deps-but-not-installed toolkits can't boot yet — they get
+    // Folder-with-deps-but-not-installed toolkits can't boot yet; they get
     // their metadata populated after install-deps completes instead.
     if (!hasDeps || depsInstalled) {
       await this.extractMetadata(id);
@@ -221,7 +221,7 @@ export class ToolkitsService {
    *  Never throws: failures are logged to `lastError` and the row is left
    *  with null display_name/description. */
   /** For every trusted toolkit whose METADATA hasn't been cached yet (and
-   *  which is runnable — deps installed if it has any), boot the worker to
+   *  which is runnable, deps installed if it has any), boot the worker to
    *  read it. Folder-with-deps-but-not-installed toolkits are skipped. Runs
    *  serially to keep worker memory bounded. */
   async refreshMissingMetadata(): Promise<void> {
@@ -504,7 +504,7 @@ export class ToolkitsService {
 
   /** Re-run embedding for every enabled toolkit. Used to backfill the
    *  embeddings of toolkits that were enabled before the embedding model
-   *  finished downloading — `refreshEmbeddingsFor` silently bails when the
+   *  finished downloading. `refreshEmbeddingsFor` silently bails when the
    *  model isn't ready, so those toolkits sit in "enabled, zero embeddings"
    *  until the user manually triggers re-indexing. */
   async reindexEnabled(): Promise<{ embedded: number; skipped: boolean }> {

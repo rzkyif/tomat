@@ -23,7 +23,7 @@
   } = $props();
 
   // Active sections, in the order they ran. The "Phase N" label in the UI
-  // is derived from this array's index — it represents execution order, not
+  // is derived from this array's index. It represents execution order, not
   // a fixed mapping to method. Skipped methods (filter off, secondPass off,
   // no always-available tools) drop out of the array entirely so the
   // remaining sections renumber 1..N seamlessly.
@@ -92,7 +92,7 @@
       id !== undefined ? (expansionState.get(id) ?? false) : false,
     ),
   );
-  // Bidirectional sync with expansionState — see SystemMessage.svelte for
+  // Bidirectional sync with expansionState. See SystemMessage.svelte for
   // the rationale. Cross-side reads are wrapped in `untrack` so each effect
   // only fires on its own side's changes; otherwise a local toggle and an
   // external mutation race and the wrong value wins.

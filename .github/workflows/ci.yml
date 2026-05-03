@@ -68,7 +68,7 @@ jobs:
           workspaces: src/tauri
       # tauri-build validates every literal path in `externalBin` and `bundle.resources`
       # (see src/tauri/tauri.conf.json). Real artifacts come from `bun run fetch` and
-      # `bun run build:bun`, but aren't needed for cargo check — empty placeholders
+      # `bun run build:bun`, but aren't needed for cargo check. Empty placeholders
       # satisfy the build script. If a new literal path is added to tauri.conf.json,
       # add a matching placeholder here or CI will fail with "doesn't exist".
       - name: Create placeholder sidecar binaries
@@ -85,7 +85,7 @@ jobs:
           touch src/tauri/resources/server.js
           touch src/tauri/resources/runtime.js
           # `bundle.resources` directory entries in tauri.conf.json must point
-          # at paths that exist on disk — an empty match is a hard error. Seed
+          # at paths that exist on disk; an empty match is a hard error. Seed
           # the cross-platform staging dir plus the per-OS shared-lib subdirs
           # that the platform-specific tauri.<os>.conf.json overrides reference.
           touch src/tauri/resources/node_modules/placeholder

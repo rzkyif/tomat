@@ -54,7 +54,7 @@
   // Bidirectional sync with expansionState (only meaningful for reasoning
   // kind; the content branch never reads `reasoningExpanded`). Cross-side
   // reads are wrapped in `untrack` so each effect fires on its own side's
-  // changes only — otherwise a user toggle gets reverted by the
+  // changes only; otherwise a user toggle gets reverted by the
   // external→local effect before local→external can write through.
   $effect(() => {
     if (kind !== "reasoning" || id === undefined) return;
@@ -82,7 +82,7 @@
       : "border-accent-blue-400",
   );
 
-  // TTS only attaches to content bubbles — reasoning is never read aloud.
+  // TTS only attaches to content bubbles; reasoning is never read aloud.
   let isMine = $derived(
     kind === "content" &&
       id !== undefined &&

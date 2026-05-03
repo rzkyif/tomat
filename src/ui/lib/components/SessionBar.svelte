@@ -133,8 +133,8 @@
     {/if}
 
     <!-- Title (grid overlap technique for auto-sizing). The container is the
-         only `min-w-0` flex item in the bubble — the context bar and button
-         group are `shrink-0` — so it absorbs the squeeze when the bubble hits
+         only `min-w-0` flex item in the bubble; the context bar and button
+         group are `shrink-0`, so it absorbs the squeeze when the bubble hits
          its own max-width cap. The invisible sizing span gets clipped by
          `overflow-hidden`, and the input shows an ellipsis when blurred so
          the user can still tell the title is truncated. -->

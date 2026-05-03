@@ -52,7 +52,7 @@ const STARTUP_WARMUP_SECS: u64 = 2;
 pub const MAX_UNIQUE_SUFFIX_ATTEMPTS: u32 = 1_000;
 
 // ---------------------------------------------------------------------------
-// Windows Job Object — kill-on-close
+// Windows Job Object: kill-on-close
 //
 // Sidecar processes spawned via tauri-plugin-shell on Windows are not in the
 // parent's console group, so Ctrl+C does not propagate to them. A Job Object

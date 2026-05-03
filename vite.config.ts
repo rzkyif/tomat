@@ -23,7 +23,7 @@ const restartOnRustChange = (): Plugin => ({
       if (!f.endsWith(".rs") && !f.endsWith("Cargo.toml")) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
-        server.config.logger.info("[tomat] rust change — restarting vite");
+        server.config.logger.info("[tomat] rust change, restarting vite");
         server.restart();
       }, 100);
     };
@@ -57,7 +57,7 @@ export default defineConfig(async () => ({
       // Ignore src/tauri (no reason to HMR on Rust/Cargo output) and
       // .svelte-kit/generated (svelte-kit sync regenerates these en masse,
       // which fires a burst of HMR updates that trips the WebKit ESM TDZ
-      // race in client.js — see sveltejs/kit#15287). Route HMR continues
+      // race in client.js, see sveltejs/kit#15287). Route HMR continues
       // to work via src/ui/routes/ being watched directly; only route add /
       // delete now needs a manual refresh to pick up the new manifest.
       ignored: ["**/src/tauri/**", "**/.svelte-kit/generated/**"],
@@ -66,7 +66,7 @@ export default defineConfig(async () => ({
 
   // Pre-bundle deps that are unconditionally on the first-render path so
   // Vite does not stall on them during initial request discovery. marked,
-  // highlight.js, and marked-highlight are intentionally excluded — they
+  // highlight.js, and marked-highlight are intentionally excluded; they
   // are lazy-loaded via dynamic import in MessageMarkdown.svelte.
   optimizeDeps: {
     include: [

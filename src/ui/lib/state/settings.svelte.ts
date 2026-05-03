@@ -2,7 +2,7 @@
  * Reactive store for user settings. Loads them from the right place on
  * startup (Rust backend on desktop, localStorage in the browser), saves
  * them back when the user changes anything, and triggers the right side
- * effect — like restarting a sidecar or toggling TTS — when the relevant
+ * effect (like restarting a sidecar or toggling TTS) when the relevant
  * keys change.
  */
 
@@ -57,7 +57,7 @@ class SettingsState {
     }
 
     // Push the persisted shortcut to Rust so it overrides the startup default.
-    // Boot must not abort if the shortcut is now taken by another app — log
+    // Boot must not abort if the shortcut is now taken by another app: log
     // and let the user fix it from Settings.
     if (isTauri()) {
       this.applyToggleWindowShortcut(this.currentSettings["shortcuts.toggleWindow"]).catch((e) =>
@@ -129,7 +129,7 @@ class SettingsState {
       this.debounceRestart("llm");
     } else if (key.startsWith("stt.")) {
       this.debounceRestart("stt");
-      // If the STT enable toggle just flipped off, also stop VAD — otherwise
+      // If the STT enable toggle just flipped off, also stop VAD; otherwise
       // the in-browser VAD instance keeps listening and tries to transcribe
       // against a whisper-server we just shut down. Use forceDisable rather
       // than detach so the visibility listener and speech handler stay wired

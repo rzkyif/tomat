@@ -11,7 +11,7 @@
  * tauri.conf.json's bundle.resources array (which includes server.js and
  * runtime.js). `bun build --outfile=X` always updates X's mtime, so
  * the plain invocation forced Cargo to invalidate its build-script cache on
- * every `bun dev` run — even when the bundled output was byte-identical.
+ * every `bun dev` run, even when the bundled output was byte-identical.
  * This script builds to a temp file, compares, and only renames over the
  * target if the new bytes differ; otherwise the existing file's mtime is
  * preserved and Cargo's incremental cache stays valid.

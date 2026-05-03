@@ -10,7 +10,7 @@ import type { Alignment } from "$lib/shared/types";
 
 export const BASE_MS = 200;
 
-// cubic-bezier(0.4, 0, 0.2, 1) — material "standard" easing.
+// cubic-bezier(0.4, 0, 0.2, 1): material "standard" easing.
 function easeInOut(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
@@ -99,7 +99,7 @@ export function slidePanel(
 /**
  * Pins the given panel element to its current viewport rect with
  * `position: fixed`. Call this BEFORE flipping the reactive state that
- * triggers the panel swap — otherwise the incoming panel has already mounted
+ * triggers the panel swap; otherwise the incoming panel has already mounted
  * by the time the outgoing's transition function fires, and the outgoing's
  * measured position reflects post-mount layout shifts, not the original spot
  * the user was looking at.
@@ -124,8 +124,8 @@ export function pinPanelForOutro(el: HTMLElement | null | undefined) {
  * Slide + fade transition used when toggling between the normal scroll-spy
  * group view and search results. Convention from the previous group-switch
  * animation:
- *   "up"   — incoming panel slides in from above, outgoing falls down
- *   "down" — incoming panel slides in from below, outgoing rises up
+ *   "up":   incoming panel slides in from above, outgoing falls down
+ *   "down": incoming panel slides in from below, outgoing rises up
  * Search mode lives "above" the group list (its index is -1), so entering
  * search uses direction "up" and exiting uses direction "down".
  */
@@ -157,7 +157,7 @@ export function expand(node: Element) {
 
   // Uses `tick` (per-frame JS) instead of `css` (pre-baked keyframes) so the
   // target height tracks scrollHeight as it grows. Necessary for content that
-  // renders asynchronously — e.g., MessageMarkdown in ReasoningTrace shows a
+  // renders asynchronously, e.g. MessageMarkdown in ReasoningTrace shows a
   // spinner first and only fills in the real HTML after `marked` + DOMPurify
   // complete. A pre-baked keyframe would animate to the spinner's height and
   // then the element would snap to full size when CSS clears at t=1.

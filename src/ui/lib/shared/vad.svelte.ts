@@ -1,5 +1,5 @@
 /**
- * Manages the in-browser voice activity detector — the thing that listens
+ * Manages the in-browser voice activity detector, the thing that listens
  * to the microphone and decides when the user is talking. Owns the VAD
  * model's lifecycle (load, start, pause, destroy), exposes its state for
  * the UI, and hands each detected speech segment to a caller-supplied
@@ -26,7 +26,7 @@ class VadManager {
   private enableToken = 0;
   private onSpeech: ((audio: Float32Array) => Promise<void>) | null = null;
   // True iff this enable() call lowered the system volume and owes a restore.
-  // The Rust side is the single source of truth (via saved_volume) — this
+  // The Rust side is the single source of truth (via saved_volume); this
   // flag just lets us avoid the IPC round-trip when no change was made.
   private volumeRestorePending = false;
 
@@ -71,7 +71,7 @@ class VadManager {
     if (this.volumeRestorePending && isTauri()) {
       this.volumeRestorePending = false;
       // Best-effort: detach is sync-shaped here, but invoke returns a Promise.
-      // Fire and forget — the Rust-side Exit handler is the safety net.
+      // Fire and forget; the Rust-side Exit handler is the safety net.
       void invoke("restore_system_volume").catch((e) =>
         console.warn("[vad] restore_system_volume on detach failed:", e),
       );
@@ -95,7 +95,7 @@ class VadManager {
 
   /** Force-disable immediately (no-op if not enabled). Unlike `toggle()`,
    *  doesn't defer for an in-progress speech segment. Used when STT is
-   *  globally disabled — the whisper-server is going away, so any segment
+   *  globally disabled. The whisper-server is going away, so any segment
    *  still in the pipeline would just hit a dead endpoint. The visibility
    *  listener and speech handler stay attached so a later re-enable doesn't
    *  need a full UserInput remount. */

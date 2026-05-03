@@ -310,7 +310,7 @@ function findBunAsset(assets, bunAsset) {
 }
 
 // Returns the two PLATFORM_MAP keys for the current OS (native + cross-compile
-// target). We never need to extract binaries for other OSes — e.g. Linux .so
+// target). We never need to extract binaries for other OSes (e.g. Linux .so
 // symlinks cannot be created on Windows NTFS.
 function getTargetPlatforms() {
   const osMap = { win32: "windows", darwin: "macos", linux: "linux" };

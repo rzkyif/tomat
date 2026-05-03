@@ -81,7 +81,7 @@ class MessagesState {
   /** Id of the `role: "reasoning"` message currently receiving reasoning
    *  chunks. Lazily created on the first reasoning delta and cleared when the
    *  first content chunk arrives (or the stream finishes / errors). Lives in
-   *  its own bubble — separate from the paired assistant content message. */
+   *  its own bubble, separate from the paired assistant content message. */
   streamingReasoningId = $state<string | null>(null);
 
   visibleWindow = $state(DEFAULT_WINDOW_SIZE);
@@ -594,7 +594,7 @@ class MessagesState {
     const streamingId = this.streamingMessageId;
     const out: Message[] = [];
     for (const m of snapshot) {
-      // Drop the assistant message currently mid-stream — it'll be persisted
+      // Drop the assistant message currently mid-stream; it'll be persisted
       // on the next flushSave after finishStreaming. Keeping it here would
       // save half-written content that we can never resume.
       if (this.isStreaming && streamingId !== null && m.id === streamingId) {
@@ -781,7 +781,7 @@ class MessagesState {
       this.streamingReasoningId = reasoningId;
       this.reasoningStartTime = Date.now();
       // Insert immediately after the assistant content message in the
-      // newest-first array — that places the reasoning bubble older (higher
+      // newest-first array, which places the reasoning bubble older (higher
       // index) than its paired content, matching the chronological order in
       // which the model emits them.
       this.messages.splice(contentIdx + 1, 0, {
@@ -1083,7 +1083,7 @@ class MessagesState {
     this.toolCancelHandler?.();
     // Abort the outer LLM HTTP stream (no-op when already settled). Kept
     // outside the `isStreaming` branch so tool-only turns still stop the
-    // parent `sendMessages` loop — its controller is live until the
+    // parent `sendMessages` loop. Its controller is live until the
     // tool-call chain finishes.
     interruptCurrentStream();
     await this.flushSave();
@@ -1286,7 +1286,7 @@ class MessagesState {
    *  deleteUserMessage). */
   /** Delete a reasoning bubble. When the bubble is paired to an assistant
    *  content message (the normal case), delegate to `deleteAgentMessage` so
-   *  the whole turn (reasoning + content) goes together — leaving reasoning
+   *  the whole turn (reasoning + content) goes together; leaving reasoning
    *  without its produced answer makes no sense. Standalone reasoning
    *  (orphaned, shouldn't happen in practice) is removed in place. */
   async deleteReasoningMessage(messageId: string) {
@@ -1314,7 +1314,7 @@ class MessagesState {
     this.resetTTSPlayback();
 
     this.messages.splice(idx, 1);
-    // Drop any reasoning bubble paired to this assistant turn — they live
+    // Drop any reasoning bubble paired to this assistant turn; they live
     // and die together, since the reasoning trace has no meaning without
     // its produced answer (or vice-versa).
     const reasoningIdx = this.messages.findIndex(

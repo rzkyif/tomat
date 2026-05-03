@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import {
+    EMBED_BASE_FILES,
     SECRET_KEYS,
     TTS_BASE_FILES,
     type SettingField,
@@ -41,7 +42,14 @@
   let expanded = $state<Set<string>>(new Set());
   let selected = $state<Set<string>>(new Set());
   let lastSelectedPath = $state<string | null>(null);
-  const inUsePaths = $derived(getInUseModelPaths());
+  let menuOpen = $state(false);
+  let menuX = $state(0);
+  let menuY = $state(0);
+  let menuTarget = $state<StorageNode | null>(null);
+  // Maps every locked path (file paths from settings + folder paths whose
+  // entire subtree is locked) to a human-readable reason. `.has(p)` answers
+  // "is this row locked?", `.get(p)` gives the tooltip text.
+  const lockReasons = $derived(computeLockReasons());
 
   async function refresh() {
     try {
@@ -106,13 +114,20 @@
   }
 
   function handleRowClick(e: MouseEvent, node: StorageNode) {
-    if (inUsePaths.has(node.path)) return;
+    if (lockReasons.has(node.path)) {
+      // Locked rows aren't selectable, but locked folders are still
+      // expandable so users can inspect the protected files inside.
+      if (node.kind === "folder" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+        toggleExpand(node.path);
+      }
+      return;
+    }
     const path = node.path;
     const next = new Set(selected);
     if (e.shiftKey && lastSelectedPath) {
       const rows = visibleRows()
         .map((r) => r.path)
-        .filter((p) => !inUsePaths.has(p));
+        .filter((p) => !lockReasons.has(p));
       const a = rows.indexOf(lastSelectedPath);
       const b = rows.indexOf(path);
       if (a !== -1 && b !== -1) {
@@ -127,6 +142,9 @@
     } else {
       next.clear();
       next.add(path);
+      // Plain click on a folder toggles its expansion as well, so the user
+      // can drill into a model repo without aiming for the chevron.
+      if (node.kind === "folder") toggleExpand(path);
     }
     selected = next;
     lastSelectedPath = path;
@@ -143,32 +161,56 @@
     return `${rootPath}/models/${user}/${repo}/${rest}`;
   }
 
-  function getInUseModelPaths(): Set<string> {
-    const protect = new Set<string>();
-    if (!tree) return protect;
+  function computeLockReasons(): Map<string, string> {
+    const reasons = new Map<string, string>();
+    if (!tree) return reasons;
     const s = settingsState.currentSettings;
+    const protect = (hf: unknown, reason: string) => {
+      const p = resolveHfToDisk(hf, tree!.root_path);
+      if (p) reasons.set(p, reason);
+    };
+
     if (s["llm.provider"] !== "external") {
-      const p = resolveHfToDisk(s["llm.modelPath"], tree.root_path);
-      if (p) protect.add(p);
+      protect(s["llm.modelPath"], "Used by LLM");
       if (s["llm.supportImages"]) {
-        const m = resolveHfToDisk(s["llm.mmprojPath"], tree.root_path);
-        if (m) protect.add(m);
+        protect(s["llm.mmprojPath"], "Used by LLM vision");
       }
     }
     if (s["stt.enabled"] && s["stt.provider"] !== "external") {
-      const p = resolveHfToDisk(s["stt.modelPath"], tree.root_path);
-      if (p) protect.add(p);
+      protect(s["stt.modelPath"], "Used by Speech-to-Text");
     }
     // TTS has no "external" mode - whenever it's enabled, the Kokoro model
-    // + tokenizer files are required. Protect every path from TTS_BASE_FILES
-    // so "Clear models" leaves them alone.
+    // + tokenizer files are required.
     if (s["tts.enabled"]) {
-      for (const hf of TTS_BASE_FILES) {
-        const p = resolveHfToDisk(hf, tree.root_path);
-        if (p) protect.add(p);
-      }
+      for (const hf of TTS_BASE_FILES) protect(hf, "Used by Text-to-Speech");
     }
-    return protect;
+    // Toolkit tool-relevance filtering loads the embedding model at request
+    // time, so deleting it would break the next tool-using turn.
+    if (s["tools.enabled"] && s["tools.filteringEnabled"] !== false) {
+      for (const hf of EMBED_BASE_FILES) protect(hf, "Used by tool filtering");
+    }
+
+    // Promote a folder to "locked" iff every leaf under it is locked. The
+    // reason is the union of child reasons so the tooltip stays informative
+    // even when a repo mixes (say) LLM + vision files.
+    const visit = (node: StorageNode): string | null => {
+      if (node.kind === "file") return reasons.get(node.path) ?? null;
+      if (node.children.length === 0) return null;
+      const childReasons = new Set<string>();
+      for (const c of node.children) {
+        const r = visit(c);
+        if (r === null) return null;
+        for (const part of r.split(", ")) childReasons.add(part);
+      }
+      if (childReasons.size === 0) return null;
+      const merged = [...childReasons].join(", ");
+      reasons.set(node.path, merged);
+      return merged;
+    };
+    for (const root of [tree.models, tree.sessions, tree.snippets]) {
+      for (const n of root) visit(n);
+    }
+    return reasons;
   }
 
   function collectModelFiles(): string[] {
@@ -188,7 +230,7 @@
     if (kind === "settings") return tree.settings_size > 0;
     if (kind === "sessions") return tree.sessions.length > 0;
     if (kind === "snippets") return tree.snippets.length > 0;
-    return collectModelFiles().some((p) => !inUsePaths.has(p));
+    return collectModelFiles().some((p) => !lockReasons.has(p));
   }
 
   function findNode(path: string): StorageNode | null {
@@ -223,54 +265,141 @@
     return !!tree && tree.snippets.some((n) => n.path === path);
   }
 
+  async function revealPath(path: string) {
+    try {
+      await invoke("reveal_tomat_path", { path });
+    } catch (err) {
+      console.warn("reveal_tomat_path failed", err);
+    }
+  }
+
+  function rootPathFor(
+    kind: "models" | "sessions" | "snippets" | "settings",
+  ): string | null {
+    if (!tree) return null;
+    if (kind === "settings") return `${tree.root_path}/settings.json`;
+    return `${tree.root_path}/${kind}`;
+  }
+
+  function deleteSelectionCounts(): { files: number; folders: number } {
+    let files = 0;
+    let folders = 0;
+    for (const p of selected) {
+      if (lockReasons.has(p)) continue;
+      const n = findNode(p);
+      if (!n) continue;
+      if (n.kind === "file") files += 1;
+      else folders += 1;
+    }
+    return { files, folders };
+  }
+
+  function deleteLabel(): string | null {
+    const { files, folders } = deleteSelectionCounts();
+    if (files === 0 && folders === 0) return null;
+    const parts: string[] = [];
+    if (files > 0) parts.push(`${files} file${files === 1 ? "" : "s"}`);
+    if (folders > 0) parts.push(`${folders} folder${folders === 1 ? "" : "s"}`);
+    return `Delete ${parts.join(" and ")}`;
+  }
+
+  function fileManagerName(): string {
+    if (typeof navigator === "undefined") return "file manager";
+    if (/Mac|iPhone|iPad|iPod/i.test(navigator.userAgent)) return "Finder";
+    if (/Win/i.test(navigator.userAgent)) return "Explorer";
+    return "file manager";
+  }
+
+  function showInLabel(): string {
+    return `Show in ${fileManagerName()}`;
+  }
+
+  function deleteSelected() {
+    if (selected.size === 0) return;
+    const all = expandToFiles([...selected]);
+    const toDelete = all.filter((p) => !lockReasons.has(p));
+    const skipped = all.length - toDelete.length;
+    if (toDelete.length === 0) {
+      confirmState.request({
+        title: "Delete items",
+        message:
+          "No items to delete - the selection only contains files currently in use.",
+        confirmLabel: "OK",
+        onConfirm: () => {},
+      });
+      return;
+    }
+    const suffix =
+      skipped > 0
+        ? ` ${skipped} file${skipped === 1 ? "" : "s"} currently in use will be kept.`
+        : "";
+    const touchesSnippets = toDelete.some(isSnippetPath);
+    confirmState.request({
+      title: "Delete items",
+      message: `Delete ${toDelete.length} file${toDelete.length === 1 ? "" : "s"} from disk?${suffix} This cannot be undone.`,
+      destructive: true,
+      confirmLabel: "Delete",
+      onConfirm: async () => {
+        try {
+          await invoke("delete_tomat_paths", { paths: toDelete });
+        } catch (err) {
+          console.error("delete_tomat_paths failed", err);
+        }
+        await refresh();
+        if (touchesSnippets) {
+          void snippetsState.load();
+        }
+      },
+    });
+  }
+
   function handleKeyDown(e: KeyboardEvent) {
     const isDelete =
       e.key === "Delete" || (e.key === "Backspace" && (e.metaKey || e.ctrlKey));
     if (isDelete && selected.size > 0) {
       e.preventDefault();
-      const all = expandToFiles([...selected]);
-      const toDelete = all.filter((p) => !inUsePaths.has(p));
-      const skipped = all.length - toDelete.length;
-      if (toDelete.length === 0) {
-        confirmState.request({
-          title: "Delete items",
-          message:
-            "No items to delete - the selection only contains files currently in use.",
-          confirmLabel: "OK",
-          onConfirm: () => {},
-        });
-        return;
-      }
-      const suffix =
-        skipped > 0
-          ? ` ${skipped} file${skipped === 1 ? "" : "s"} currently in use will be kept.`
-          : "";
-      const touchesSnippets = toDelete.some(isSnippetPath);
-      confirmState.request({
-        title: "Delete items",
-        message: `Delete ${toDelete.length} file${toDelete.length === 1 ? "" : "s"} from disk?${suffix} This cannot be undone.`,
-        destructive: true,
-        confirmLabel: "Delete",
-        onConfirm: async () => {
-          try {
-            await invoke("delete_tomat_paths", { paths: toDelete });
-          } catch (err) {
-            console.error("delete_tomat_paths failed", err);
-          }
-          await refresh();
-          if (touchesSnippets) {
-            void snippetsState.load();
-          }
-        },
-      });
+      deleteSelected();
     }
+  }
+
+  function openContextMenu(e: MouseEvent, node: StorageNode) {
+    e.preventDefault();
+    // Match standard file-manager behavior: right-clicking outside the
+    // current selection moves the cursor onto the clicked row. Locked rows
+    // can't be selected, so we just clear instead.
+    if (lockReasons.has(node.path)) {
+      selected = new Set();
+      lastSelectedPath = null;
+    } else if (!selected.has(node.path)) {
+      selected = new Set([node.path]);
+      lastSelectedPath = node.path;
+    }
+    menuTarget = node;
+    menuX = e.clientX;
+    menuY = e.clientY;
+    menuOpen = true;
+  }
+
+  function closeContextMenu() {
+    menuOpen = false;
+    menuTarget = null;
+  }
+
+  function menuDelete() {
+    closeContextMenu();
+    deleteSelected();
+  }
+
+  function menuReveal() {
+    const target = menuTarget;
+    closeContextMenu();
+    if (target) revealPath(target.path);
   }
 
   function requestClear(kind: "models" | "sessions" | "snippets" | "settings") {
     if (kind === "models") {
-      const protect = getInUseModelPaths();
       const all = collectModelFiles();
-      const toDelete = all.filter((p) => !protect.has(p));
+      const toDelete = all.filter((p) => !lockReasons.has(p));
       const skipped = all.length - toDelete.length;
       if (toDelete.length === 0) {
         confirmState.request({
@@ -364,13 +493,15 @@
     {/if}
   </div>
 
-  <!-- Header: total only -->
-  <div class="flex items-center bg-default-300 rounded-xl px-3 py-2 mb-1">
-    <span class="text-default-800 text-sm flex-1">Total</span>
-    <span class="text-default-800 text-sm tabular-nums">
-      {tree ? formatBytes(tree.total_size) : "…"}
-    </span>
-  </div>
+  <button
+    type="button"
+    class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-xl px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
+    onclick={() => tree && revealPath(tree.root_path)}
+    title={`Open Storage in ${fileManagerName()}`}
+  >
+    <i class="flex i-material-symbols-folder-open-rounded"></i>
+    <span>{`Open Storage in ${fileManagerName()}`}</span>
+  </button>
 
   <!-- Tree -->
   {#if tree}
@@ -418,7 +549,7 @@
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-          class="group flex items-center gap-1 text-left text-sm px-2 py-1 rounded-lg {group.expandable
+          class="group flex items-center gap-1 text-left text-sm px-2 py-1 select-none {group.expandable
             ? 'cursor-pointer'
             : ''}"
           onclick={() => group.expandable && toggleExpand(group.key)}
@@ -437,10 +568,21 @@
           <span class="text-default-800 font-medium truncate"
             >{group.label}</span
           >
-          <span class="flex-1"></span>
+          <button
+            class="flex shrink-0 w-5 h-5 justify-center items-center text-default-500 hover:text-default-900 hover:cursor-pointer transition-colors"
+            aria-label={`Open ${group.label} in ${fileManagerName()}`}
+            title={`Open ${group.label} in ${fileManagerName()}`}
+            onclick={(e) => {
+              e.stopPropagation();
+              const p = rootPathFor(group.clear);
+              if (p) revealPath(p);
+            }}
+          >
+            <i class="flex i-material-symbols-folder-open-rounded"></i>
+          </button>
           {#if hasClearable(group.clear)}
             <button
-              class="flex shrink-0 w-5 h-5 justify-center items-center text-default-500 hover:text-default-900 hover:cursor-pointer transition-colors opacity-0 group-hover:opacity-100"
+              class="flex shrink-0 w-5 h-5 -ml-1 justify-center items-center text-default-500 hover:text-default-900 hover:cursor-pointer transition-colors"
               aria-label={group.clear === "settings"
                 ? `Reset ${group.label}`
                 : `Clear ${group.label}`}
@@ -455,6 +597,7 @@
               <i class="flex i-material-symbols-delete-outline-rounded"></i>
             </button>
           {/if}
+          <span class="flex-1"></span>
           <span class="text-default-500 text-xs tabular-nums shrink-0"
             >{formatBytes(group.size)}</span
           >
@@ -462,19 +605,26 @@
 
         {#if group.expandable && expanded.has(group.key)}
           {#if group.nodes.length === 0}
-            <div class="pl-7 text-default-400 text-xs py-1">{group.empty}</div>
+            <div class="pl-7 text-default-400 text-xs py-1 select-none">
+              {group.empty}
+            </div>
           {:else}
             {#each group.nodes as node (node.path)}
-              {@const isProtected = inUsePaths.has(node.path)}
+              {@const lockReason = lockReasons.get(node.path) ?? null}
+              {@const isLocked = lockReason !== null}
               <!-- svelte-ignore a11y_click_events_have_key_events -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
-                class="flex items-center gap-1 text-sm pl-4 pr-2 py-1 rounded-lg {isProtected
-                  ? 'cursor-default opacity-60'
+                class="flex items-center gap-1 text-sm pl-4 pr-2 py-1 select-none {isLocked
+                  ? node.kind === 'folder'
+                    ? 'cursor-pointer opacity-60'
+                    : 'cursor-default opacity-60'
                   : 'cursor-pointer'} {selected.has(node.path)
-                  ? 'bg-blue-500/20'
+                  ? 'bg-default-400'
                   : ''}"
+                title={lockReason ?? undefined}
                 onclick={(e) => handleRowClick(e, node)}
+                oncontextmenu={(e) => openContextMenu(e, node)}
               >
                 {#if node.kind === "folder"}
                   <button
@@ -495,7 +645,7 @@
                   <span class="flex shrink-0 w-4"></span>
                 {/if}
                 <i
-                  class="flex shrink-0 w-4 justify-center {isProtected
+                  class="flex shrink-0 w-4 justify-center {isLocked
                     ? 'i-material-symbols-lock-outline'
                     : node.kind === 'folder'
                       ? 'i-material-symbols-folder-outline-rounded'
@@ -511,20 +661,23 @@
               </div>
               {#if node.kind === "folder" && expanded.has(node.path)}
                 {#each node.children as child (child.path)}
-                  {@const childProtected = inUsePaths.has(child.path)}
+                  {@const childLockReason = lockReasons.get(child.path) ?? null}
+                  {@const childLocked = childLockReason !== null}
                   <!-- svelte-ignore a11y_click_events_have_key_events -->
                   <!-- svelte-ignore a11y_no_static_element_interactions -->
                   <div
-                    class="flex items-center gap-1 text-sm pl-10 pr-2 py-1 rounded-lg {childProtected
+                    class="flex items-center gap-1 text-sm pl-10 pr-2 py-1 select-none {childLocked
                       ? 'cursor-default opacity-60'
                       : 'cursor-pointer'} {selected.has(child.path)
-                      ? 'bg-blue-500/20'
+                      ? 'bg-default-400'
                       : ''}"
+                    title={childLockReason ?? undefined}
                     onclick={(e) => handleRowClick(e, child)}
+                    oncontextmenu={(e) => openContextMenu(e, child)}
                   >
                     <span class="flex shrink-0 w-4"></span>
                     <i
-                      class="flex shrink-0 w-4 justify-center {childProtected
+                      class="flex shrink-0 w-4 justify-center {childLocked
                         ? 'i-material-symbols-lock-outline'
                         : 'i-material-symbols-description-outline-rounded'} text-default-500"
                     ></i>
@@ -542,7 +695,56 @@
         {/if}
       </div>
     {/each}
+
+    <!-- Total row mirrors a root-group header (same paddings, font weight,
+         and size-text color) so it reads as the bottom summary of the list. -->
+    <div class="flex items-center gap-1 text-sm px-2 py-1 select-none">
+      <span class="flex shrink-0 w-4"></span>
+      <span class="text-default-800 font-medium truncate">Total</span>
+      <span class="flex-1"></span>
+      <span class="text-default-500 text-xs tabular-nums shrink-0">
+        {formatBytes(tree.total_size)}
+      </span>
+    </div>
   {:else}
     <div class="text-default-500 text-sm">Loading…</div>
   {/if}
 </div>
+
+{#if menuOpen}
+  {@const dLabel = deleteLabel()}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="fixed inset-0 z-50"
+    onclick={closeContextMenu}
+    oncontextmenu={(e) => {
+      e.preventDefault();
+      closeContextMenu();
+    }}
+  >
+    <div
+      class="absolute bg-default-300 rounded-md shadow-lg py-1 min-w-[200px] text-sm select-none"
+      style="left: {menuX}px; top: {menuY}px;"
+    >
+      {#if dLabel}
+        <button
+          type="button"
+          class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-accent-red-600 hover:bg-default-400 hover:cursor-pointer transition-colors"
+          onclick={menuDelete}
+        >
+          <i class="flex i-material-symbols-delete-outline-rounded"></i>
+          <span>{dLabel}</span>
+        </button>
+      {/if}
+      <button
+        type="button"
+        class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-default-800 hover:bg-default-400 hover:cursor-pointer transition-colors"
+        onclick={menuReveal}
+      >
+        <i class="flex i-material-symbols-folder-open-rounded"></i>
+        <span>{showInLabel()}</span>
+      </button>
+    </div>
+  </div>
+{/if}

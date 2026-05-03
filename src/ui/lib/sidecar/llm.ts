@@ -1,5 +1,5 @@
 /**
- * Talks to whatever LLM the user has configured — either the local
+ * Talks to whatever LLM the user has configured: either the local
  * llama-server sidecar or an external OpenAI-compatible endpoint. Handles
  * client setup, error classification, dual-model routing, and the
  * higher-level chat-completion calls used by the rest of the app.
@@ -152,7 +152,7 @@ export interface SingleShotOptions {
 }
 
 /** Single-shot non-streaming LLM call for utilities (title gen, autocorrect,
- *  routing, tool filtering). By default reasoning is forced off — pass
+ *  routing, tool filtering). By default reasoning is forced off; pass
  *  `options.reasoning` to opt-in for callers that benefit from reasoning. */
 export async function singleShotLLM(
   systemPrompt: string,
@@ -220,7 +220,7 @@ export async function generateSessionTitle(firstMessage: string): Promise<string
     .replace(/^[\s\S]*?<\/think>/i, "")
     .replace(/<think>[\s\S]*$/i, "")
     .trim();
-  // Take only the first non-empty line — models sometimes append explanations
+  // Take only the first non-empty line. Models sometimes append explanations
   // after the title.
   const firstLine = withoutThink.split(/\r?\n/).find((l) => l.trim().length > 0) ?? "";
   // Strip surrounding quotes, "Title:" prefix, and trailing punctuation.
@@ -328,7 +328,7 @@ const OUTPUT_RESERVE_TOKENS = 1024;
 const SAFETY_MARGIN = 0.8;
 
 const PHASE2_PROMPT_HEADER = [
-  "You are a fast tool-shortlist reducer. The user has a request, and we have a candidate list of tools that *might* be useful. Your job is to drop only the tools that are CLEARLY UNRELATED to the user's request. When in doubt, KEEP the tool — the downstream model will make the final call.",
+  "You are a fast tool-shortlist reducer. The user has a request, and we have a candidate list of tools that *might* be useful. Your job is to drop only the tools that are CLEARLY UNRELATED to the user's request. When in doubt, KEEP the tool. The downstream model will make the final call.",
   "",
   "Reply with a JSON array of tool names to KEEP. Reply with ONLY the JSON array, no prose.",
   "",
@@ -360,7 +360,7 @@ interface FilterResult {
 }
 
 /** Phase 2: ask the LLM to drop only the clearly-unrelated phase-1 candidates.
- *  Tolerates arbitrary JSON arrays surrounded by prose — small models rarely
+ *  Tolerates arbitrary JSON arrays surrounded by prose; small models rarely
  *  reply cleanly. On any failure, falls back to "keep every candidate" so the
  *  main model still sees the tools. */
 async function llmFilterTools(
@@ -394,7 +394,7 @@ async function llmFilterTools(
   const allowedSet = new Set(allowed);
   const picks = extractToolNames(raw, allowedSet);
   if (picks === null) {
-    // Couldn't extract any candidates from the response — surface the raw
+    // Couldn't extract any candidates from the response. Surface the raw
     // output so the user can see exactly what the filter LLM said. Fall
     // back to keeping all candidates so the main model still has tools.
     return {
@@ -424,7 +424,7 @@ async function llmFilterTools(
 function extractToolNames(raw: string, allowed: Set<string>): string[] | null {
   const start = raw.indexOf("[");
   const end = raw.lastIndexOf("]");
-  // Scope: bracketed substring if present, otherwise the whole response —
+  // Scope: bracketed substring if present, otherwise the whole response.
   // small models sometimes drop the brackets.
   const scope = start >= 0 && end > start ? raw.slice(start, end + 1) : raw;
 
@@ -511,7 +511,7 @@ async function selectToolsForTurn(
     if (userMessageId) messagesState.removeToolFilterMessage(userMessageId);
   };
 
-  // No-bubble cases — every guard below means "we send 0 tools and don't
+  // No-bubble cases. Every guard below means "we send 0 tools and don't
   // want to clutter the chat with a bubble". The bubble only exists to show
   // *what filtering did*; if no filtering happened (or there was nothing to
   // filter), there's nothing to show.
@@ -519,7 +519,7 @@ async function selectToolsForTurn(
     removeBubble();
     return undefined;
   }
-  // No enabled toolkits with indexed tools — there's literally nothing to
+  // No enabled toolkits with indexed tools, so there's literally nothing to
   // send, so don't show a bubble. (Previously this surfaced an error bubble;
   // the user explicitly preferred silence here so a fresh session with no
   // toolkits stays clean.)
@@ -537,7 +537,7 @@ async function selectToolsForTurn(
   // tool count is below their configured threshold. In either case we ship
   // every enabled tool to the model (clipped to PHASE1_HARD_CAP as a safety
   // net so we don't accidentally blow past the model's context window) and
-  // surface them in the bubble's "Always Available" section — from the
+  // surface them in the bubble's "Always Available" section. From the
   // model's perspective every tool sent this turn was unconditional.
   const filteringEnabled = settings["tools.filteringEnabled"] !== false;
   const allEnabled = toolkitsState.allEnabledTools();
@@ -593,7 +593,7 @@ async function selectToolsForTurn(
 
   // Hoist always-available bypass setup so the early-out paths (vector
   // unavailable, no phase-1 candidates, filter LLM kept nothing) can still
-  // ship those tools — the bypass exists precisely so high-value tools
+  // ship those tools. The bypass exists precisely so high-value tools
   // aren't gated on the filter pipeline succeeding.
   const alwaysAvailableEnabled = settings["tools.alwaysAvailableEnabled"] !== false;
   const alwaysTools = alwaysAvailableEnabled
@@ -639,7 +639,7 @@ async function selectToolsForTurn(
   if (!vector) {
     console.info("[llm] embedding model not ready; skipping tool injection");
     errorBubble(
-      "Embedding model not ready. The Bun sidecar's embedding model is still loading or unreachable — try again in a moment.",
+      "Embedding model not ready. The Bun sidecar's embedding model is still loading or unreachable. Try again in a moment.",
     );
     return undefined;
   }
@@ -1136,7 +1136,7 @@ export async function sendMessages(): Promise<void> {
     // assistant (including ones that emitted tool_calls), and completed
     // `role: "tool"` rounds so the LLM has the full transcript on follow-up
     // turns. System, error, reasoning, and tool_filter roles are filtered
-    // out here — system is re-prepended from settings, error/reasoning/
+    // out here. System is re-prepended from settings, error/reasoning/
     // tool_filter bubbles are UI-only and never part of the wire transcript.
     const contextMessages: Message[] = messagesState.messages
       .slice()
@@ -1218,7 +1218,7 @@ export async function reprocessMessage(messageId: string): Promise<void> {
     // beginReprocess can mutate the messages array (e.g. splice a paired
     // reasoning bubble, or unshift a fresh tool_filter bubble). Re-find the
     // target by id afterwards so `slice` still excludes the empty assistant
-    // slot we just cleared — otherwise it'd land at the tail of the
+    // slot we just cleared; otherwise it'd land at the tail of the
     // contextMessages and llama.cpp would reject it as an "assistant
     // response prefill is incompatible with enable_thinking".
     const targetIdx = messagesState.messages.findIndex((m) => m.id === messageId);

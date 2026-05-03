@@ -129,7 +129,7 @@
       }
 
       const accel = buildAccelerator(e);
-      if (!accel) return; // lone modifier — wait for a real key
+      if (!accel) return; // lone modifier, wait for a real key
 
       onChange(field.id, accel);
       capturing = false;

@@ -61,7 +61,7 @@
 
   // Left padding stays constant so icons line up at the same X position in
   // both modes. Right padding is only widened when the row actually has a
-  // text label next to its icon — icon-only rows stay compact rectangles.
+  // text label next to its icon. Icon-only rows stay compact rectangles.
   function rowClass(hasText: boolean): string {
     const showText = hasText && !collapsed;
     return `flex items-center gap-2 h-8 pl-1.5 ${showText ? "pr-2.5" : "pr-1.5"} rounded-lg transition-[padding,colors,background-color] duration-200`;

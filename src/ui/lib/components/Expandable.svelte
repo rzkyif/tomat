@@ -41,7 +41,7 @@
       : chevronCollapsed,
   );
   // Pull the chevron a hair toward the bubble edge so the icon's optical
-  // center sits flush — left pad on the left chevron, right pad on the right.
+  // center sits flush: left pad on the left chevron, right pad on the right.
   let chevronMargin = $derived(isRight ? "-mr-0.5" : "-ml-0.5");
 </script>
 

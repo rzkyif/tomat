@@ -133,7 +133,7 @@
   let sttErrorTimeout: ReturnType<typeof setTimeout> | null = null;
 
   let llmStatus = $derived(serversState.serverStatuses.llm.status);
-  // True whenever the user has something to interrupt — either an LLM stream
+  // True whenever the user has something to interrupt: either an LLM stream
   // or an active tool call (running or awaiting input). Drives the stop button
   // so tool calls can be aborted the same way streams are.
   let hasActiveWork = $derived(messagesState.hasActiveWork);
@@ -186,7 +186,7 @@
   }
 
   // Anchors the autocomplete dropdown under the caret by measuring a Range on
-  // the sibling sizing span — it shares the textarea's grid cell and wraps
+  // the sibling sizing span. It shares the textarea's grid cell and wraps
   // identically, so we can read the caret position directly without cloning
   // styles into a hidden mirror.
   function measureCaretAt(index: number): { top: number; left: number } {
@@ -468,7 +468,7 @@
   }
 
   async function handleSend() {
-    // Block send while any work is in flight — stream OR active tool call.
+    // Block send while any work is in flight: stream OR active tool call.
     // Otherwise the user could queue a new LLM request while tools from a
     // prior turn are still executing / awaiting input.
     if (hasActiveWork) return;
@@ -1233,7 +1233,7 @@
 <style>
   /* Push-to-talk hold ring: starts at 0% on press and fills to 100% over the
      configured hold duration. The SVG is mounted only while the shortcut is
-     held, so the keyframes always run from the start — release-before-fill
+     held, so the keyframes always run from the start; release-before-fill
      simply unmounts the element. `pathLength="100"` lets the dasharray math
      stay in percent regardless of the circle's actual circumference. */
   .ptt-ring circle {

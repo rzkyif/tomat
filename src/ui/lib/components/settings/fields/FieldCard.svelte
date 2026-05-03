@@ -39,27 +39,36 @@
   const hasButtons = $derived(showInfoButton || showResetButton);
 </script>
 
+{#snippet resetButton()}
+  <button
+    class="text-default-500 hover:text-default-700 transition-colors flex items-center justify-center rounded-md"
+    title="Reset to default"
+    onclick={() => onReset(field.id)}
+  >
+    <i class="i-material-symbols-refresh-rounded text-lg flex"></i>
+  </button>
+{/snippet}
+
+{#snippet infoButton()}
+  <button
+    class="transition-colors flex items-center justify-center rounded-md {descriptionExpanded
+      ? 'text-default-900'
+      : 'text-default-500 hover:text-default-700'}"
+    title="Show description"
+    onclick={() => (descriptionExpanded = !descriptionExpanded)}
+    aria-pressed={descriptionExpanded}
+  >
+    <i class="i-material-symbols-info-outline-rounded text-lg flex"></i>
+  </button>
+{/snippet}
+
 {#snippet buttonRow()}
-  {#if showResetButton}
-    <button
-      class="text-default-500 hover:text-default-700 transition-colors flex items-center justify-center rounded-md"
-      title="Reset to default"
-      onclick={() => onReset(field.id)}
-    >
-      <i class="i-material-symbols-refresh-rounded text-lg flex"></i>
-    </button>
-  {/if}
-  {#if showInfoButton}
-    <button
-      class="transition-colors flex items-center justify-center rounded-md {descriptionExpanded
-        ? 'text-default-900'
-        : 'text-default-500 hover:text-default-700'}"
-      title="Show description"
-      onclick={() => (descriptionExpanded = !descriptionExpanded)}
-      aria-pressed={descriptionExpanded}
-    >
-      <i class="i-material-symbols-info-outline-rounded text-lg flex"></i>
-    </button>
+  {#if horizontal}
+    {#if showInfoButton}{@render infoButton()}{/if}
+    {#if showResetButton}{@render resetButton()}{/if}
+  {:else}
+    {#if showResetButton}{@render resetButton()}{/if}
+    {#if showInfoButton}{@render infoButton()}{/if}
   {/if}
 {/snippet}
 
@@ -73,12 +82,31 @@
     class="flex {horizontal ? 'flex-row items-start gap-3' : 'flex-col gap-2'}"
   >
     <div class="flex flex-col flex-1 min-w-0 gap-1">
-      <div class="flex flex-row items-center gap-2">
-        <div class="flex-1 text-default-800 min-w-0">{field.name}</div>
-        {#if !horizontal && hasButtons}
-          {@render buttonRow()}
-        {/if}
-      </div>
+      {#if horizontal}
+        {@const lastSpace = field.name.lastIndexOf(" ")}
+        {@const head = lastSpace >= 0 ? field.name.slice(0, lastSpace + 1) : ""}
+        {@const tail =
+          lastSpace >= 0 ? field.name.slice(lastSpace + 1) : field.name}
+        <div class="text-default-800 min-h-8 flex items-center">
+          <div class="min-w-0">
+            {head}<span class="whitespace-nowrap"
+              >{tail}{#if hasButtons}<span
+                  class="ml-1.5 inline-flex items-center gap-0.5 align-middle relative -top-px"
+                  >{@render buttonRow()}</span
+                >{/if}</span
+            >
+          </div>
+        </div>
+      {:else}
+        <div class="flex flex-row items-center gap-2 min-h-8">
+          <div class="flex-1 text-default-800 min-w-0">{field.name}</div>
+          {#if hasButtons}
+            <div class="flex items-center gap-1">
+              {@render buttonRow()}
+            </div>
+          {/if}
+        </div>
+      {/if}
       {#if effectiveTier === "always" && field.description}
         <FieldDescription text={field.description} />
       {/if}
@@ -96,11 +124,5 @@
 
   {#if hasError}
     <div class="text-red-500 text-sm">{error}</div>
-  {/if}
-
-  {#if horizontal && hasButtons}
-    <div class="flex flex-row justify-end items-center gap-1 -mt-1">
-      {@render buttonRow()}
-    </div>
   {/if}
 </div>

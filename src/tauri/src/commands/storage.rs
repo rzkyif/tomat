@@ -328,6 +328,44 @@ pub async fn clear_tomat_sessions(handle: AppHandle) -> AppResult<()> {
     Ok(())
 }
 
+/// Reveal a path in the OS file manager. Folders open in-place; files are
+/// revealed (selected) inside their parent folder. The path is canonicalized
+/// and must resolve under `~/.tomat/`. If the path doesn't exist, falls back
+/// to opening the closest existing ancestor so the button still works for
+/// roots like `~/.tomat/sessions/` before any session has been saved.
+#[tauri::command]
+pub async fn reveal_tomat_path(handle: AppHandle, path: String) -> AppResult<()> {
+    use tauri_plugin_opener::{reveal_item_in_dir, OpenerExt};
+    let home = handle.path().home_dir()?;
+    let root = home.join(".tomat");
+    tokio::fs::create_dir_all(&root).await?;
+    let root_canonical = root.canonicalize()?;
+
+    let requested = PathBuf::from(&path);
+    // Walk up to the closest existing ancestor so revealing a not-yet-created
+    // root folder (e.g. ~/.tomat/snippets) still does something useful.
+    let mut existing = requested.clone();
+    while !existing.exists() {
+        let Some(parent) = existing.parent() else {
+            return Err(AppError::not_found(format!("Path not found: {path}")));
+        };
+        existing = parent.to_path_buf();
+    }
+
+    let canonical = resolve_within(&existing, &root_canonical)
+        .ok_or_else(|| AppError::validation(format!("Path not under ~/.tomat: {path}")))?;
+
+    let meta = tokio::fs::metadata(&canonical).await?;
+    if meta.is_dir() {
+        handle
+            .opener()
+            .open_path(canonical.to_string_lossy(), None::<&str>)
+            .map_err(|e| AppError::external(e.to_string()))
+    } else {
+        reveal_item_in_dir(&canonical).map_err(|e| AppError::external(e.to_string()))
+    }
+}
+
 /// Wipe the settings file and every keychain entry (release) or the
 /// `.secrets.json` fallback (dev) for the caller-named secrets.
 #[tauri::command]

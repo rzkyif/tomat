@@ -1,5 +1,5 @@
 /**
- * State and transport for the user's installed toolkits — the user-defined
+ * State and transport for the user's installed toolkits, the user-defined
  * tools the LLM can call. Tracks the trusted and untrusted toolkit lists,
  * keeps a WebSocket open to the sidecar for running tools and streaming
  * progress back into the chat, and exposes install-job state for the
@@ -146,7 +146,7 @@ class ToolkitsState {
         this.reconnectDelay = 500;
         // Hydrate the toolkit list as soon as the sidecar is reachable.
         // Without this, `trusted` stays empty until the user opens the Tools
-        // settings tab — so the filter pipeline thinks the user has no
+        // settings tab, so the filter pipeline thinks the user has no
         // enabled toolkits even when they do (and the embeddings already
         // exist in SQLite from a previous session). Fires on every reconnect
         // too, so a sidecar restart re-syncs state automatically.
@@ -314,7 +314,7 @@ class ToolkitsState {
 
   /** After a state-mutating POST, re-fetch the scan and assert the expected
    *  row predicate held. Throws a loud error if the backend's reply didn't
-   *  actually land — covers "POST succeeded but state didn't change" gaps so
+   *  actually land. Covers "POST succeeded but state didn't change" gaps so
    *  the user always sees an alert instead of a no-op button. */
   private async assertAfter(
     id: string,

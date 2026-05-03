@@ -6,12 +6,12 @@
 // internal entry point is set up at webview boot regardless of
 // `withGlobalTauri`, so it's always there. The higher-level
 // `window.__TAURI__.event.emit` global has been observed to be flaky in
-// dev — falling back to a direct plugin invoke avoids depending on it.
+// dev. Falling back to a direct plugin invoke avoids depending on it.
 
 const internals = window.__TAURI_INTERNALS__;
 if (!internals || typeof internals.invoke !== "function") {
   console.error(
-    "[region-capture] window.__TAURI_INTERNALS__.invoke missing — overlay can't talk to the host. Check that withGlobalTauri is true and that the page loaded inside a Tauri webview.",
+    "[region-capture] window.__TAURI_INTERNALS__.invoke missing; overlay can't talk to the host. Check that withGlobalTauri is true and that the page loaded inside a Tauri webview.",
   );
 }
 
@@ -147,7 +147,7 @@ document.addEventListener(
       paintSelection();
     } else if (state === STATE_TRACKING) {
       // Click-drag-click: the second mousedown ends the selection. Finish
-      // here rather than on the trailing mouseup — feels snappier and
+      // here rather than on the trailing mouseup; feels snappier and
       // sidesteps any focus/event-order quirks. `finished` guards against
       // the trailing mouseup re-entering finish().
       currX = e.clientX;
@@ -194,7 +194,7 @@ document.addEventListener(
 );
 
 // Listen on both window and document to maximize the chance the key event
-// is delivered (overlay is a transparent decorationless window — focus is
+// is delivered (overlay is a transparent decorationless window; focus is
 // fragile across platforms). Capture phase so we beat any default handling.
 function onKeyDown(e) {
   if (e.key === "Escape") {
@@ -212,6 +212,6 @@ document.addEventListener("DOMContentLoaded", () => {
   try {
     document.body.focus();
   } catch {
-    // ignore — focus failures are harmless here
+    // ignore: focus failures are harmless here
   }
 });

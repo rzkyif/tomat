@@ -74,7 +74,7 @@ export async function captureMonitor(monitorId: string): Promise<string | null> 
  *  null on cancellation (ESC, click outside, or capture failure).
  *
  *  Hides the main window for the duration so the overlay sits alone. The
- *  overlay window is positioned and shown by a Rust command — keeps the
+ *  overlay window is positioned and shown by a Rust command. Keeps the
  *  logical/physical pixel math out of the JS side, where it'd have to wrestle
  *  with macOS retina + multi-monitor edge cases.
  */

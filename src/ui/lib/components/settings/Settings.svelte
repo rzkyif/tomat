@@ -46,7 +46,7 @@
   function setSearchMode(active: boolean) {
     if (searchMode === active) return;
     // Pin the outgoing wrapper with position:absolute so the incoming wrapper
-    // gets its natural place in flow — otherwise both occupy flex space and
+    // gets its natural place in flow; otherwise both occupy flex space and
     // the slide animation has the panel double in height mid-transition.
     const outgoing = fieldsContainerEl
       ?.firstElementChild as HTMLElement | null;
@@ -131,7 +131,7 @@
 
   // Scroll spy: the active group is the last one whose header has reached
   // (or passed) the top of the scroll viewport. A scroll listener gives
-  // pixel-precise activation — IntersectionObserver's rootMargin tricks
+  // pixel-precise activation; IntersectionObserver's rootMargin tricks
   // produced visible lag at section boundaries.
   function updateActiveGroup() {
     if (isProgrammaticScroll || searchMode || !scrollEl) return;
@@ -457,7 +457,7 @@
           offset,
         });
         // Fallback 1: the enclosing section. Pinned at offset 0 so its top
-        // edge (with the sticky section header) lands at the viewport top —
+        // edge (with the sticky section header) lands at the viewport top,
         // keeps the user "in the same section" when only their specific
         // field has been hidden.
         const sectionAncestor = topAnchor.closest<HTMLElement>(

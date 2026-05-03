@@ -73,7 +73,7 @@ export interface SettingOption {
 }
 
 export interface FieldCondition {
-  /** Field id to compare against. Optional only when `allOf` is set —
+  /** Field id to compare against. Optional only when `allOf` is set;
    *  in that case the parent acts as a pure AND wrapper around its children. */
   field?: string;
   eq?: string | number | boolean;
@@ -214,7 +214,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "general.context.locationAuto",
             name: "Auto-Detect Location",
             description:
-              "Derive your location from the system timezone instead of typing it manually.\nFully offline — no network calls, no permissions.",
+              "Derive your location from the system timezone instead of typing it manually.\nFully offline, no network calls, no permissions.",
             type: "boolean",
             defaultValue: false,
             descriptionTier: "ondemand",
@@ -223,7 +223,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "general.context.location",
             name: "Location",
             description:
-              "A location the agent can reference. Sent as plain text — no network calls.",
+              "A location the agent can reference. Sent as plain text. No network calls.",
             type: "string",
             defaultValue: "",
             optional: true,
@@ -1029,7 +1029,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "tools.filteringEnabled",
             name: "Enable Relevance Filtering",
             description:
-              "Filter the available toolset down to a relevance-ranked shortlist before each turn (embedding similarity + optional AI second pass).\nDisable to send every enabled tool to the model on every turn — simpler, but eats more context and slows down small models when many toolkits are installed.",
+              "Filter the available toolset down to a relevance-ranked shortlist before each turn (embedding similarity + optional AI second pass).\nDisable to send every enabled tool to the model on every turn. Simpler, but eats more context and slows down small models when many toolkits are installed.",
             type: "boolean",
             defaultValue: true,
             advanced: true,
@@ -1051,7 +1051,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             id: "tools.alwaysAvailableEnabled",
             name: "Bypass Filter for Essential Tools",
             description:
-              "When on, tools whose toolkit declares `alwaysAvailable: true` skip the relevance filter and are always sent to the model.\nOnly takes effect when filtering is enabled — disabling filtering already sends every tool, so the bypass is redundant.",
+              "When on, tools whose toolkit declares `alwaysAvailable: true` skip the relevance filter and are always sent to the model.\nOnly takes effect when filtering is enabled; disabling filtering already sends every tool, so the bypass is redundant.",
             type: "boolean",
             defaultValue: true,
             visibleWhen: { field: "tools.filteringEnabled", eq: true },
@@ -1803,7 +1803,6 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
     iconInactive: "i-material-symbols-analytics-outline-rounded",
     sections: [
       {
-        label: "Activity",
         fields: [
           {
             id: "usage.services",
@@ -1813,14 +1812,9 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             defaultValue: "",
             descriptionTier: "none",
           },
-        ],
-      },
-      {
-        label: "Storage",
-        fields: [
           {
             id: "usage.storage",
-            name: "Disk Usage",
+            name: "Storage",
             description:
               "Downloaded models and saved sessions.\nSelect items and press Delete (or ⌘⌫) to remove them.",
             type: "storage",

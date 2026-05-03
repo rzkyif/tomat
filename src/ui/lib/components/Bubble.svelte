@@ -31,7 +31,7 @@
     active?: boolean;
     pulse?: boolean;
     borderColorClass?: string;
-    /** Visual-left side has another bubble in the same stack row — collapse
+    /** Visual-left side has another bubble in the same stack row; collapse
      *  the left-side rounding to `md` to signal adjacency. Composes with the
      *  alignment override (left-aligned bubbles already get `rounded-l-md`). */
     neighborLeft?: boolean;
@@ -41,7 +41,7 @@
      *  occupies only the top header zone (h-8) so an expanded body underneath
      *  stays unaffected. `undefined` = no progress; `null` = indeterminate
      *  sweeping bar; number = percent (0..100). When set, content is rendered
-     *  twice — the top copy is `filter: invert()`-ed and clipped to the fill
+     *  twice: the top copy is `filter: invert()`-ed and clipped to the fill
      *  rect so text and other UI elements over the bar read inverted. */
     progress?: number | null;
     /** Override for the determinate/indeterminate fill colour. Defaults to
@@ -98,7 +98,7 @@
     <!-- Inverted layer: same content rendered atop the fill, clipped to the
          filled rect. `filter: invert(1) hue-rotate(180deg)` flips all colours
          (text, icons, inline-pill bg/fg) to a perceptually-inverted version
-         in one shot — no need to thread invert-color props through every
+         in one shot, no need to thread invert-color props through every
          descendant. The clip-path bottom inset keeps the inversion confined
          to the top h-8 header zone so an expanded body below renders
          normally. Children are rendered twice; Svelte's bind:expanded on the
@@ -121,7 +121,7 @@
 <style>
   /* Pulses the border color between its current value and transparent. With
      the default `background-clip: border-box`, the bubble's own bg paints
-     under the border area, so the transparent half reveals the bg color —
+     under the border area, so the transparent half reveals the bg color,
      producing a pulse between `border-<hue>-400` and `bg-<hue>-300` with no
      extra color plumbing required. */
   .bubble-border-pulse {
@@ -140,7 +140,7 @@
 
   /* Indeterminate fill: bar sweeps left → right, widening at the midpoint
      and collapsing at each end. Continuous motion via complementary
-     per-keyframe easing — `ease-in` 0%→50% accelerates into the midpoint,
+     per-keyframe easing. `ease-in` 0%→50% accelerates into the midpoint,
      `ease-out` 50%→100% decelerates out of it. */
   .bubble-progress-indet {
     animation: bubble-progress-indet 1.6s linear infinite;
@@ -163,8 +163,8 @@
       width: 0%;
     }
   }
-  /* Inversion clip tracks the indeterminate fill exactly — same duration,
-     timing, and per-keyframe easing — so the inverted content always
+  /* Inversion clip tracks the indeterminate fill exactly: same duration,
+     timing, and per-keyframe easing, so the inverted content always
      coincides with the moving bar. */
   .bubble-progress-invert-indet {
     animation: bubble-progress-invert-indet 1.6s linear infinite;

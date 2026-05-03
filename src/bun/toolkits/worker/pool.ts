@@ -99,7 +99,7 @@ export class WorkerPool {
     this.enforceMaxWorkers();
   }
 
-  /** Accessor for the current in-flight count across all warm workers —
+  /** Accessor for the current in-flight count across all warm workers,
    *  used by `/api/health` to expose liveness. */
   stats(): { warmWorkers: number; maxWarmWorkers: number; inFlightCalls: number } {
     let inFlight = 0;
@@ -253,7 +253,7 @@ export class WorkerPool {
   }
 
   /** Wait up to `timeoutMs` for `entry.inFlight` to naturally drain. Polls
-   *  at a coarse interval — tool calls that respect `cancel` frames usually
+   *  at a coarse interval. Tool calls that respect `cancel` frames usually
    *  finish in single-digit ms, so this rarely hits its ceiling. */
   private async drain(entry: WorkerEntry, timeoutMs: number): Promise<void> {
     // Proactively signal cancel so cooperative tools can abort quickly

@@ -162,7 +162,7 @@
     try {
       const r = await toolkitsState.reindex();
       reindexResult = r.skipped
-        ? "Embedding model not ready yet — try again in a moment."
+        ? "Embedding model not ready yet. Try again in a moment."
         : `Re-indexed ${r.embedded} tool${r.embedded === 1 ? "" : "s"}.`;
     } catch (err) {
       reportError("Re-index", err);
@@ -264,7 +264,7 @@
                     >{tool.name}</span
                   >
                   <span class="text-default-600 break-words"
-                    >— {tool.description}</span
+                    >- {tool.description}</span
                   >
                 </div>
               {/each}

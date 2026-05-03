@@ -84,7 +84,7 @@ export interface DerivedStatus {
 
 /** Inspect the toolkit folder on disk to answer "does it have dependencies?"
  *  and "are they installed right now?". File-kind toolkits always return
- *  false/false. Results are NOT cached — cheap to recompute.
+ *  false/false. Results are NOT cached; cheap to recompute.
  *  - hasDeps: `package.json` exists and its `dependencies` object is a
  *    non-empty record.
  *  - depsInstalled: `node_modules/` exists as a directory. */
@@ -206,7 +206,7 @@ export class ToolkitsRegistry {
     }
   }
 
-  /** Walk back to 'disabled' — keeps trust + cached metadata. */
+  /** Walk back to 'disabled'; keeps trust + cached metadata. */
   disable(id: string): void {
     this.db.query(`UPDATE toolkits SET state = 'disabled' WHERE id = ?`).run(id);
   }

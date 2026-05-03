@@ -56,7 +56,7 @@ export default defineConfig({
       /^border-accent-(blue|purple|red|green)-(\d+)$/,
       ([, c, s]) => `border-${c}-${s} dark:border-${c}-${inversionMap[s] ?? s}`,
     ],
-    // Inner-card background — one level of lightness darker than its parent
+    // Inner-card background, one level of lightness darker than its parent
     // bubble (`bg-default-300` / `bg-accent-X-300`), in BOTH themes. This
     // intentionally side-steps the inversion map: light goes to -400 and dark
     // goes to -700, so the card always reads as recessed against the bubble.

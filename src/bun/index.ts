@@ -11,7 +11,7 @@ import { embedTexts, isEmbeddingModelReady } from "./toolkits/embed";
 import type { ClientToHostFrame, HostToClientFrame } from "./toolkits/types";
 
 /** Single source of truth for the sidecar's bound address. The frontend's
- *  `src/lib/shared/network.ts` duplicates these values — keep both in sync
+ *  `src/lib/shared/network.ts` duplicates these values; keep both in sync
  *  if either changes. */
 const SIDECAR_HOST = "127.0.0.1";
 const SIDECAR_PORT = 7703;

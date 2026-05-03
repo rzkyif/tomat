@@ -25,7 +25,7 @@
   // External → local sync: mirror SvelteMap mutations (e.g. from
   // MessageStackGroup's collapseAll) into local state so the body actually
   // unmounts. The cross-side read is wrapped in `untrack` so the effect
-  // only re-runs when expansionState changes — without that, a local toggle
+  // only re-runs when expansionState changes. Without that, a local toggle
   // would also fire this effect and revert the user's click before the
   // local→external effect could write the new value back.
   $effect(() => {

@@ -1,11 +1,11 @@
 //! Tauri commands, organized by domain.
 //!
 //! Submodules:
-//! - [`paths`] — shared ID validation, filename sanitization, canonical-path helpers.
-//! - [`session`] — chat session CRUD, attachments.
-//! - [`snippets`] — snippet CRUD.
-//! - [`settings`] — user settings + OS keychain / dev fallback for secrets.
-//! - [`storage`] — `~/.tomat/` tree enumeration and bulk delete.
+//! - [`paths`]: shared ID validation, filename sanitization, canonical-path helpers.
+//! - [`session`]: chat session CRUD, attachments.
+//! - [`snippets`]: snippet CRUD.
+//! - [`settings`]: user settings + OS keychain / dev fallback for secrets.
+//! - [`storage`]: `~/.tomat/` tree enumeration and bulk delete.
 //!
 //! Everything else (window management, monitor capture, sidecar control,
 //! process metrics, file conversion) lives directly in this file.
@@ -27,7 +27,7 @@ pub use settings::{load_settings, save_settings};
 pub use snippets::{delete_snippet, list_snippets, save_snippet};
 pub use storage::{
     clear_tomat_models, clear_tomat_sessions, clear_tomat_settings, delete_tomat_paths,
-    list_tomat_storage,
+    list_tomat_storage, reveal_tomat_path,
 };
 
 use crate::error::{AppError, AppResult};
@@ -282,7 +282,7 @@ pub async fn get_system_volume() -> AppResult<u8> {
 ///
 /// `percent` is interpreted relatively (e.g. `25` = 25 % of whatever the
 /// system was already at). The original (pre-listening) level is captured
-/// only on the first call of a session — subsequent calls compute the new
+/// only on the first call of a session; subsequent calls compute the new
 /// target against that captured baseline, so changing the target mid-session
 /// remains anchored to the original level rather than compounding against
 /// the lowered one.
@@ -353,7 +353,7 @@ pub fn validate_shortcut(app: AppHandle, accelerator: String) -> AppResult<()> {
         return Ok(());
     }
     let gs = app.global_shortcut();
-    // Probe handler is a no-op — we only care whether registration succeeds.
+    // Probe handler is a no-op; we only care whether registration succeeds.
     match gs.on_shortcut(trimmed, |_, _, _| {}) {
         Ok(()) => {
             let _ = gs.unregister(trimmed);
@@ -367,7 +367,7 @@ pub fn validate_shortcut(app: AppHandle, accelerator: String) -> AppResult<()> {
 
 /// Replace the registered "input mode" shortcuts (file attach, full screen
 /// capture, region capture). Pass an empty `bindings` to unregister all of
-/// them — typically called when `UserInput` unmounts (e.g. settings opened).
+/// them; typically called when `UserInput` unmounts (e.g. settings opened).
 ///
 /// Empty accelerator strings inside `bindings` are skipped, allowing the user
 /// to clear an individual binding without unregistering the others.
@@ -392,7 +392,7 @@ pub fn set_input_shortcuts(
     current.clear();
 
     // Register each new binding. Failures on individual accelerators are
-    // logged but don't abort the others — a conflict on one shortcut
+    // logged but don't abort the others; a conflict on one shortcut
     // shouldn't take the whole input layer down.
     for (event_name, accel) in bindings.into_iter() {
         if accel.trim().is_empty() {
@@ -454,7 +454,7 @@ pub async fn capture_monitor(monitor_id: String) -> AppResult<String> {
 /// `capture_monitor_region` to use).
 ///
 /// All the geometry math lives here rather than in JS because Tauri exposes
-/// monitor bounds in physical pixels with a separate scale factor — getting
+/// monitor bounds in physical pixels with a separate scale factor; getting
 /// the logical-coordinate conversion right across macOS retina + multi-
 /// monitor setups in JS is error-prone.
 #[tauri::command]

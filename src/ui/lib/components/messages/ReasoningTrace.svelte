@@ -14,7 +14,7 @@
     reasoning: string;
     /** True while reasoning chunks are still arriving for this bubble.
      *  Cleared by messagesState as soon as the first content chunk lands or
-     *  the stream finishes — at which point the elapsed timer freezes. */
+     *  the stream finishes; at which point the elapsed timer freezes. */
     isStreaming: boolean;
     pillBgClass: string;
     /** Persisted duration from storage, used as the fallback elapsed time

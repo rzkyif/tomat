@@ -3,7 +3,7 @@
 # what oxfmt / cargo fmt write when they follow .editorconfig.
 * text=auto eol=lf
 
-# Explicit binary markers — git must never touch line endings in these.
+# Explicit binary markers; git must never touch line endings in these.
 *.png binary
 *.jpg binary
 *.jpeg binary

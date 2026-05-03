@@ -1,6 +1,6 @@
 /**
  * Listens for global-shortcut press / release events coming from the
- * Rust backend and turns them into the right app-level behavior — show
+ * Rust backend and turns them into the right app-level behavior: show
  * or hide the window, push-to-talk, sticky listen, etc., based on what
  * the user has configured.
  */

@@ -84,7 +84,7 @@ export type RelevantToolPhase1Entry = {
   score: number;
 };
 
-/** A single phase-2 (LLM filter) survivor. No score — phase 2 is binary keep/drop. */
+/** A single phase-2 (LLM filter) survivor. No score: phase 2 is binary keep/drop. */
 export type RelevantToolPhase2Entry = {
   name: string;
   description: string;
@@ -101,7 +101,7 @@ export type RelevantToolsState = {
   phase2: RelevantToolPhase2Entry[] | null;
   /** null = always-available bypass didn't run (toggle off OR no qualifying
    *  tools exist). Empty array means "ran but no tools were appended"
-   *  (rare — every alwaysAvailable tool was already in phase2). When phase1
+   *  (rare: every alwaysAvailable tool was already in phase2). When phase1
    *  + phase2 are both null and this is a non-empty list, the bubble shows
    *  only this section (filter pipeline was bypassed; all enabled tools are
    *  surfaced here). */
@@ -141,7 +141,7 @@ export type Message = {
    *  if no content). Captured once per turn so historic messages can still
    *  render "Thought for Xs". */
   reasoningDurationMs?: number;
-  /** Only populated on `role: "reasoning"` messages — points back at the
+  /** Only populated on `role: "reasoning"` messages. Points back at the
    *  assistant content message produced in the same turn. Used to delete /
    *  reprocess the pair atomically. */
   pairedAssistantId?: string;
