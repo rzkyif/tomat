@@ -47,7 +47,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
-      # Linux system deps for Tauri/webkit and xcap (PipeWire screen capture)
+      # Linux system deps for Tauri/webkit, xcap (PipeWire screen capture),
+      # and cpal/alsa-sys (audio capture for STT).
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -58,6 +59,7 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libpipewire-0.3-dev \
+            libasound2-dev \
             patchelf
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -67,17 +69,26 @@ jobs:
         with:
           workspaces: src/tauri
       # tauri-build validates every literal path in `externalBin` and `bundle.resources`
-      # (see src/tauri/tauri.conf.json). Real artifacts come from `bun run fetch` and
-      # `bun run build:bun`, but aren't needed for cargo check. Empty placeholders
-      # satisfy the build script. If a new literal path is added to tauri.conf.json,
-      # add a matching placeholder here or CI will fail with "doesn't exist".
+      # (see src/tauri/tauri.conf.json and the per-OS tauri.<os>.conf.json overrides).
+      # Real artifacts come from `bun run fetch` and `bun run build:bun`, but aren't
+      # needed for cargo check. Empty placeholders satisfy the build script. If a new
+      # literal path is added to any tauri.conf.json, add a matching placeholder here
+      # or CI will fail with "doesn't exist". Note: Windows splits llama/whisper into
+      # binaries/llm and binaries/stt subdirs (see tauri.windows.conf.json); Linux/macOS
+      # keep all three sidecars at binaries/ top-level.
       - name: Create placeholder sidecar binaries
         shell: bash
         run: |
           mkdir -p src/tauri/binaries
-          for bin in tomat-tools-server tomat-llama-server tomat-whisper-server; do
-            touch "src/tauri/binaries/${bin}-${{ matrix.triple }}${{ matrix.exe_ext }}"
-          done
+          touch "src/tauri/binaries/tomat-tools-server-${{ matrix.triple }}${{ matrix.exe_ext }}"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            mkdir -p src/tauri/binaries/llm src/tauri/binaries/stt
+            touch "src/tauri/binaries/llm/tomat-llama-server-${{ matrix.triple }}${{ matrix.exe_ext }}"
+            touch "src/tauri/binaries/stt/tomat-whisper-server-${{ matrix.triple }}${{ matrix.exe_ext }}"
+          else
+            touch "src/tauri/binaries/tomat-llama-server-${{ matrix.triple }}${{ matrix.exe_ext }}"
+            touch "src/tauri/binaries/tomat-whisper-server-${{ matrix.triple }}${{ matrix.exe_ext }}"
+          fi
       - name: Create placeholder bundled resources
         shell: bash
         run: |
