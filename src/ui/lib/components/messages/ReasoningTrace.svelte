@@ -91,7 +91,12 @@
     <span>{headerText}</span>
   {/snippet}
   {#snippet children()}
-    <div class="{pillBgClass} px-4 py-2 rounded-2xl text-default-700 text-xs">
+    <!-- `text-left` keeps the reasoning markdown alignment-independent;
+         the Expandable wrapper would otherwise right-align it when the
+         bubble is right-aligned. -->
+    <div
+      class="{pillBgClass} px-4 py-2 rounded-2xl text-default-700 text-xs text-left"
+    >
       <MessageMarkdown content={reasoning} />
     </div>
   {/snippet}

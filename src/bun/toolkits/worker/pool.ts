@@ -31,6 +31,15 @@ export interface StartCallOptions {
   onEvent: (ev: ToolCallEvent) => void;
 }
 
+/** Per-call timeout control. The timer is paused while a tool is awaiting
+ *  user input so a slow human response doesn't trigger a spurious timeout,
+ *  and resumed once the response is forwarded back to the worker. */
+interface CallTimer {
+  pause(): void;
+  resume(): void;
+  cancel(): void;
+}
+
 interface WorkerEntry {
   toolkitId: string;
   entryPath: string;
@@ -69,6 +78,10 @@ export const DEFAULT_DRAIN_TIMEOUT_MS = 2_000;
 /** Host-side lifecycle + routing for per-toolkit Workers. */
 export class WorkerPool {
   private workers = new Map<string, WorkerEntry>();
+  /** Per-call timers, keyed globally by callId. Lives outside `inFlight` so
+   *  `sendAskUserResponse` can resume the timer without knowing which entry
+   *  owns the call. */
+  private callTimers = new Map<string, CallTimer>();
   private clock = 0;
   opts: WorkerPoolOptions;
 
@@ -90,7 +103,7 @@ export class WorkerPool {
     if (typeof opts.workerIdleMs === "number" && opts.workerIdleMs >= 0) {
       this.opts.workerIdleMs = opts.workerIdleMs;
     }
-    if (typeof opts.callTimeoutMs === "number" && opts.callTimeoutMs > 0) {
+    if (typeof opts.callTimeoutMs === "number" && opts.callTimeoutMs >= 0) {
       this.opts.callTimeoutMs = opts.callTimeoutMs;
     }
     if (typeof opts.drainTimeoutMs === "number" && opts.drainTimeoutMs >= 0) {
@@ -144,13 +157,9 @@ export class WorkerPool {
     entry.inFlight.set(opts.callId, opts.onEvent);
 
     return new Promise((resolve) => {
-      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-
       const settle = (outcome: { ok: boolean; result?: unknown; error?: string }) => {
-        if (timeoutHandle) {
-          clearTimeout(timeoutHandle);
-          timeoutHandle = null;
-        }
+        this.callTimers.get(opts.callId)?.cancel();
+        this.callTimers.delete(opts.callId);
         entry.inFlight.delete(opts.callId);
         this.scheduleIdleTimer(entry);
         resolve(outcome);
@@ -158,7 +167,12 @@ export class WorkerPool {
 
       const forward = (ev: ToolCallEvent) => {
         opts.onEvent(ev);
-        if (ev.kind === "tool_result") {
+        if (ev.kind === "ask_user_request") {
+          // Pause the timeout for the duration the tool is blocked on a
+          // user response. The user might take arbitrarily long, and a
+          // stalled timer here would punish a perfectly cooperative tool.
+          this.callTimers.get(opts.callId)?.pause();
+        } else if (ev.kind === "tool_result") {
           settle({ ok: true, result: ev.result });
         } else if (ev.kind === "tool_error") {
           settle({ ok: false, error: ev.error });
@@ -167,15 +181,16 @@ export class WorkerPool {
       entry.inFlight.set(opts.callId, forward);
 
       if (this.opts.callTimeoutMs > 0) {
-        timeoutHandle = setTimeout(() => {
-          // Surface the timeout as a tool_error so the frontend's pending
-          // state resolves, then ask the worker to cancel. If the worker is
-          // cleanly abortable the cancel frame lands; if not, the next
-          // runCall will observe a busy worker and terminate/respawn.
+        const totalMs = this.opts.callTimeoutMs;
+        // Surface the timeout as a tool_error so the frontend's pending
+        // state resolves, then ask the worker to cancel. If the worker is
+        // cleanly abortable the cancel frame lands; if not, the next
+        // runCall will observe a busy worker and terminate/respawn.
+        const fire = () => {
           const timeoutEvent: ToolCallEvent = {
             kind: "tool_error",
             callId: opts.callId,
-            error: `tool call timed out after ${this.opts.callTimeoutMs}ms`,
+            error: `tool call timed out after ${totalMs}ms`,
           };
           try {
             opts.onEvent(timeoutEvent);
@@ -184,7 +199,8 @@ export class WorkerPool {
           }
           this.cancelCall(entry.toolkitId, opts.callId);
           settle({ ok: false, error: timeoutEvent.error });
-        }, this.opts.callTimeoutMs);
+        };
+        this.callTimers.set(opts.callId, makePausableTimer(totalMs, fire));
       }
 
       const frame: PoolToWorkerFrame = {
@@ -214,6 +230,9 @@ export class WorkerPool {
       answers,
     };
     entry.worker.postMessage(frame);
+    // The tool resumes execution as soon as the worker receives this frame,
+    // so resume the timeout in lockstep with sending it.
+    this.callTimers.get(callId)?.resume();
   }
 
   cancelCall(toolkitId: string, callId: string): void {
@@ -444,4 +463,31 @@ export class WorkerPool {
       entry.idleTimer = null;
     }
   }
+}
+
+/** Build a timer that supports pause/resume while keeping accurate remaining
+ *  time across multiple cycles. Idempotent: pause/resume/cancel can be called
+ *  in any order without throwing. */
+function makePausableTimer(totalMs: number, fire: () => void): CallTimer {
+  let remaining = totalMs;
+  let resumedAt = Date.now();
+  let handle: ReturnType<typeof setTimeout> | null = setTimeout(fire, remaining);
+  return {
+    pause() {
+      if (handle === null) return;
+      clearTimeout(handle);
+      handle = null;
+      remaining = Math.max(0, remaining - (Date.now() - resumedAt));
+    },
+    resume() {
+      if (handle !== null) return;
+      resumedAt = Date.now();
+      handle = setTimeout(fire, remaining);
+    },
+    cancel() {
+      if (handle === null) return;
+      clearTimeout(handle);
+      handle = null;
+    },
+  };
 }

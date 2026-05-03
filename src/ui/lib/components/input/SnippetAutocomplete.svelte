@@ -20,8 +20,8 @@
         type="button"
         class="w-full text-left flex items-center justify-between gap-3 px-4 py-2 text-sm hover:cursor-pointer transition-colors {i ===
         selectedIndex
-          ? 'bg-card-default text-default-900'
-          : 'text-default-800 hover:bg-card-default'}"
+          ? 'bg-default-200 text-default-900'
+          : 'text-default-800 hover:bg-default-200'}"
         onmousedown={(e) => {
           e.preventDefault();
           onSelect(option);

@@ -23,11 +23,11 @@
     ),
   );
   // External → local sync: mirror SvelteMap mutations (e.g. from
-  // MessageStackGroup's collapseAll) into local state so the body actually
-  // unmounts. The cross-side read is wrapped in `untrack` so the effect
-  // only re-runs when expansionState changes. Without that, a local toggle
-  // would also fire this effect and revert the user's click before the
-  // local→external effect could write the new value back.
+  // MessageStack's click-to-expand) into local state so the body actually
+  // mounts/unmounts. The cross-side read is wrapped in `untrack` so the
+  // effect only re-runs when expansionState changes. Without that, a local
+  // toggle would also fire this effect and revert the user's click before
+  // the local→external effect could write the new value back.
   $effect(() => {
     if (id === undefined) return;
     const stored = expansionState.get(id) ?? false;
@@ -58,8 +58,11 @@
       <span>System Prompt</span>
     {/snippet}
     {#snippet children()}
+      <!-- `text-left` keeps the prompt body alignment-independent — the
+           Expandable wrapper would otherwise apply `text-right` when the
+           bubble is right-aligned. -->
       <div
-        class="whitespace-pre-wrap bg-card-default text-default-700 text-xs px-4 py-2 rounded-2xl"
+        class="whitespace-pre-wrap bg-default-200 text-default-700 text-xs text-left px-4 py-2 rounded-2xl"
       >
         {content}
       </div>

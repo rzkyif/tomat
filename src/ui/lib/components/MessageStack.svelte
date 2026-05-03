@@ -1,0 +1,219 @@
+<script lang="ts">
+  import type { Snippet } from "svelte";
+  import { tick } from "svelte";
+  import type { Alignment, Message } from "$lib/shared/types";
+  import { expansionState } from "$lib/state/expansion.svelte";
+
+  let {
+    messages,
+    baseIdx,
+    alignment,
+    item,
+  }: {
+    messages: Message[];
+    /** Index of `messages[0]` within the parent group's full message list.
+     *  Forwarded into the snippet so per-bubble fallback keys (used in
+     *  +page.svelte's `msgKey`) stay stable across substack splits. */
+    baseIdx: number;
+    alignment: Alignment;
+    item: Snippet<
+      [
+        {
+          msg: Message;
+          idx: number;
+          neighborLeft: boolean;
+          neighborRight: boolean;
+        },
+      ]
+    >;
+  } = $props();
+
+  let wrapper: HTMLDivElement | undefined = $state();
+
+  // Sticky-scroll-to-end: the substack pins itself to the latest bubble
+  // by default, and only stops once the user explicitly scrolls away.
+  // Re-pins as soon as they scroll back to the end. Position-based detection
+  // (lastElementChild's leading edge inside the wrapper) so programmatic
+  // scrollIntoView calls land at the end and immediately clear `userScrolled`
+  // on the resulting scroll event.
+  let userScrolled = $state(false);
+
+  function isAtEnd(): boolean {
+    if (!wrapper || !wrapper.lastElementChild) return true;
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const lastRect = wrapper.lastElementChild.getBoundingClientRect();
+    // flex-row-reverse (right alignment): lastElementChild visually sits at
+    // the wrapper's left. "end" means its left edge fits inside.
+    if (alignment === "right") {
+      return lastRect.left >= wrapperRect.left - 4;
+    }
+    // LTR (left/center alignment): lastElementChild is at the right edge.
+    return lastRect.right <= wrapperRect.right + 4;
+  }
+
+  function pinToEnd() {
+    if (!wrapper) return;
+    if (userScrolled) return;
+    if (!wrapper.lastElementChild) return;
+    wrapper.lastElementChild.scrollIntoView({
+      inline: "nearest",
+      block: "nearest",
+      behavior: "instant",
+    });
+  }
+
+  // Edge-fade widths driving the colored overlays at the scrollable edges.
+  // Non-zero on a side means there's hidden content past that edge, so the
+  // overlay on that side is shown (default-100 fading to transparent into
+  // the row). 0 collapses the overlay so the edge stays solid.
+  let fadeLeft = $state("0px");
+  let fadeRight = $state("0px");
+  function updateFade() {
+    if (!wrapper) return;
+    fadeLeft = wrapper.scrollLeft > 4 ? "1rem" : "0px";
+    const remainingRight =
+      wrapper.scrollWidth - wrapper.scrollLeft - wrapper.clientWidth;
+    fadeRight = remainingRight > 4 ? "1rem" : "0px";
+  }
+
+  // Translate vertical wheel events into horizontal scroll on this row, so
+  // a plain mouse wheel scrolls along the stack without requiring shift.
+  // Shift-wheel and trackpad horizontal gestures already produce non-zero
+  // `deltaX` in the browser, so we prefer that when present and fall back
+  // to `deltaY` otherwise. At the boundaries we let the event pass through
+  // so the page can still scroll vertically once the stack hits its edge.
+  function onWheel(e: WheelEvent) {
+    if (!wrapper) return;
+    if (wrapper.scrollWidth <= wrapper.clientWidth) return;
+    const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+    if (delta === 0) return;
+    const max = wrapper.scrollWidth - wrapper.clientWidth;
+    const atStart = wrapper.scrollLeft <= 0;
+    const atEnd = wrapper.scrollLeft >= max;
+    if ((delta < 0 && atStart) || (delta > 0 && atEnd)) return;
+    e.preventDefault();
+    wrapper.scrollLeft += delta;
+  }
+
+  $effect(() => {
+    void messages;
+    if (!wrapper) return;
+    const ro = new ResizeObserver(() => {
+      updateFade();
+      pinToEnd();
+    });
+    ro.observe(wrapper);
+    for (const child of Array.from(wrapper.children)) ro.observe(child);
+    const onScroll = () => {
+      updateFade();
+      userScrolled = !isAtEnd();
+    };
+    wrapper.addEventListener("scroll", onScroll, { passive: true });
+    // `passive: false` so we can call preventDefault to stop the parent
+    // scroll container from also consuming the wheel event.
+    wrapper.addEventListener("wheel", onWheel, { passive: false });
+    updateFade();
+    // Wait one tick so the layout reflows from any messages change before
+    // measuring lastElementChild for scrollIntoView.
+    void tick().then(pinToEnd);
+    return () => {
+      ro.disconnect();
+      wrapper?.removeEventListener("scroll", onScroll);
+      wrapper?.removeEventListener("wheel", onWheel);
+    };
+  });
+
+  // A substack is a single horizontal row of collapsed bubbles, isolated
+  // from neighbouring rows in the parent column. Chain neighbours therefore
+  // come purely from DOM adjacency within this row.
+  function neighbors(i: number): {
+    neighborLeft: boolean;
+    neighborRight: boolean;
+  } {
+    const hasDomPrev = i > 0;
+    const hasDomNext = i < messages.length - 1;
+    if (alignment === "right") {
+      // flex-row-reverse: DOM[i+1] is visually to the LEFT of DOM[i].
+      return { neighborLeft: hasDomNext, neighborRight: hasDomPrev };
+    }
+    return { neighborLeft: hasDomPrev, neighborRight: hasDomNext };
+  }
+
+  // Capture-phase click handler: clicking anywhere on a collapsed bubble
+  // expands it (sets `expansionState[id] = true`). The parent group's
+  // segment grouping then promotes the bubble to its own row, splitting
+  // this substack. `stopPropagation` prevents the bubble's own
+  // chevron-toggle (or any descendant click handler) from also firing.
+  function handleClickCapture(e: MouseEvent) {
+    if (!wrapper) return;
+    let node: Element | null = e.target as Element | null;
+    while (node && node !== wrapper && node.parentElement !== wrapper) {
+      node = node.parentElement;
+    }
+    if (!node || node === wrapper) return;
+    const i = Array.from(wrapper.children).indexOf(node);
+    if (i < 0) return;
+    const msg = messages[i];
+    // Loading sentinel has no Expandable body; clicking shouldn't promote
+    // it to a standalone row.
+    if (msg.role === "loading") return;
+    if (msg.id === undefined) return;
+    e.stopPropagation();
+    expansionState.set(msg.id, true);
+  }
+</script>
+
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+<!-- Outer host: relative positioning anchors the edge-fade overlays to the
+     wrapper's viewport, so they stay pinned to the visible edges regardless
+     of scroll position. `isolate` gives the host its own stacking context
+     so the overlays' `z-30` is scoped to the substack and ranks above the
+     Bubble's internal `z-10` content / `z-20` progress overlay layers,
+     letting the fade cover the bubble text and not just the background. -->
+<div class="relative isolate w-fit max-w-[calc(100vw-5rem)]">
+  <div
+    bind:this={wrapper}
+    role="presentation"
+    class="flex gap-1 overflow-x-auto no-scrollbar pointer-events-auto cursor-pointer"
+    class:flex-row-reverse={alignment === "right"}
+    onclickcapture={handleClickCapture}
+  >
+    {#each messages as msg, i (msg.id ?? i)}
+      {@const n = neighbors(i)}
+      <!-- `max-h-8 overflow-hidden` clips any in-flight expanded body to the
+           small-bubble height; `flex-shrink-0` keeps the bubble at its
+           natural width so the row overflows into the scroll container. -->
+      <div class="max-h-8 overflow-hidden flex-shrink-0">
+        {@render item({
+          msg,
+          idx: baseIdx + i,
+          neighborLeft: n.neighborLeft,
+          neighborRight: n.neighborRight,
+        })}
+      </div>
+    {/each}
+  </div>
+  <!-- Edge fades: solid `bg-default-100` at the scrollable edge fading to
+       transparent towards the row, hinting that more bubbles exist past
+       the viewport without using a hard cutoff. Width collapses to 0 when
+       there's nothing hidden on that side. -->
+  <div
+    class="absolute inset-y-0 left-0 z-30 bg-default-100 pointer-events-none stack-fade-left"
+    style:width={fadeLeft}
+  ></div>
+  <div
+    class="absolute inset-y-0 right-0 z-30 bg-default-100 pointer-events-none stack-fade-right"
+    style:width={fadeRight}
+  ></div>
+</div>
+
+<style>
+  .stack-fade-left {
+    mask-image: linear-gradient(to right, black, transparent);
+    -webkit-mask-image: linear-gradient(to right, black, transparent);
+  }
+  .stack-fade-right {
+    mask-image: linear-gradient(to left, black, transparent);
+    -webkit-mask-image: linear-gradient(to left, black, transparent);
+  }
+</style>

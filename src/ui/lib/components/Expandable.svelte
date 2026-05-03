@@ -65,7 +65,13 @@
     {/if}
   </button>
   {#if expanded}
-    <div transition:expand class={isRight ? "text-right" : ""}>
+    <!-- `|global` so the open animation also fires when the body's `{#if}`
+         block is created as a side effect of an ancestor mounting (e.g.,
+         MessageStackGroup re-mounting the bubble into a standalone row
+         when the user expands it). Without it the body would snap into
+         view; the close animation already works because it runs on a
+         live instance before the layoutExpanded delay tears it down. -->
+    <div transition:expand|global class={isRight ? "text-right" : ""}>
       {@render children()}
     </div>
   {/if}

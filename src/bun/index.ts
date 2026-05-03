@@ -189,6 +189,10 @@ const toolkitsService = new ToolkitsService({
         typeof s["toolkits.workerIdleMs"] === "number"
           ? (s["toolkits.workerIdleMs"] as number)
           : 300000,
+      callTimeoutMs:
+        typeof s["toolkits.callTimeoutMs"] === "number"
+          ? (s["toolkits.callTimeoutMs"] as number)
+          : 60000,
       ignorePostinstallScripts: s["toolkits.ignorePostinstallScripts"] !== false,
     };
   },

@@ -17,11 +17,11 @@
   }
 
   const colorMap: Record<ServerStatus, string> = {
-    Disabled: "bg-chip-neutral text-chip-neutral",
-    Error: "bg-chip-red text-chip-red",
-    Downloading: "bg-chip-blue text-chip-blue",
-    Loading: "bg-chip-amber text-chip-amber",
-    Running: "bg-chip-emerald text-chip-emerald",
+    Disabled: "bg-default-200 text-default-600",
+    Error: "bg-accent-red-200 text-accent-red-700",
+    Downloading: "bg-accent-blue-200 text-accent-blue-700",
+    Loading: "bg-accent-orange-200 text-accent-orange-700",
+    Running: "bg-accent-green-200 text-accent-green-700",
   };
   const color = $derived(colorMap[update.status as ServerStatus]);
 
@@ -47,7 +47,7 @@
     bind:this={buttonEl}
     class="flex items-center gap-1.5 px-3 py-1 rounded-2xl {color} {update.status ===
     'Error'
-      ? 'cursor-pointer hover:ring-2 ring-red-400/50'
+      ? 'cursor-pointer'
       : 'cursor-default'}"
     title={update.status !== "Error"
       ? update.message || update.status

@@ -45,13 +45,6 @@ import {
   buildSystemPromptBase,
 } from "$lib/shared/systemPrompt";
 
-/** Initial number of messages rendered for a session. Large enough to cover
- *  a typical working conversation without paying to mount thousands of
- *  history turns on session load. Extra turns are revealed in
- *  `WINDOW_GROWTH`-sized chunks when the user scrolls to the top. */
-const DEFAULT_WINDOW_SIZE = 200;
-/** How many additional older messages to mount per "load more" step. */
-const WINDOW_GROWTH = 200;
 /** Trailing-edge debounce for `saveSessionToDisk`. At 1s, rapid edits (user
  *  typing + tool streaming) coalesce into one write instead of fanning out
  *  dozens of tmp-file renames per second. */
@@ -83,10 +76,6 @@ class MessagesState {
    *  first content chunk arrives (or the stream finishes / errors). Lives in
    *  its own bubble, separate from the paired assistant content message. */
   streamingReasoningId = $state<string | null>(null);
-
-  visibleWindow = $state(DEFAULT_WINDOW_SIZE);
-  visibleMessages = $derived(this.messages.slice(0, this.visibleWindow));
-  hasMoreMessages = $derived(this.messages.length > this.visibleWindow);
 
   /** Any tool call bubble currently in a non-terminal state. Drives the
    *  unified "interrupt" affordance in UserInput so tool calls can be stopped
@@ -317,14 +306,6 @@ class MessagesState {
     }
   }
 
-  loadMoreMessages() {
-    this.visibleWindow += WINDOW_GROWTH;
-  }
-
-  private resetWindow() {
-    this.visibleWindow = DEFAULT_WINDOW_SIZE;
-  }
-
   async loadSessionList() {
     if (!this.storageEnabled) {
       this.sessionList = [];
@@ -348,8 +329,9 @@ class MessagesState {
       // Freeze any tool-call bubbles that were mid-flight when the app was
       // closed. The worker they were running in is long gone; leaving them
       // as "running" would produce a UI spinner that never stops and would
-      // also leak into materializeContext (which filters by status). Set
-      // them to "cancelled" so the user sees a clear terminal state.
+      // also leak into materializeContext (which filters by status). Mark
+      // them "failed" so the user sees a clear error state explaining that
+      // the tool server stopped before the call could finish.
       if (
         m.role === "tool" &&
         m.toolCall &&
@@ -359,8 +341,10 @@ class MessagesState {
       ) {
         m.toolCall = {
           ...m.toolCall,
-          status: "cancelled",
-          error: m.toolCall.error ?? "interrupted: session was reloaded",
+          status: "failed",
+          error:
+            m.toolCall.error ??
+            "Tool server was stopped before this tool call completed (the app was closed).",
         };
       }
       // Same idea for tool_filter bubbles: any "filtering" status that
@@ -391,7 +375,6 @@ class MessagesState {
         this.sessionId = history.sessionId;
         this.sessionTitle = history.title || this.getDefaultTitle();
         this.tokenUsage = history.contextUsage || null;
-        this.resetWindow();
       }
     } catch (e) {
       console.error("Failed to load chat history:", e);
@@ -425,7 +408,6 @@ class MessagesState {
         this.sessionTitle = history.title || this.getDefaultTitle();
         this.tokenUsage = history.contextUsage || null;
         this.currentSessionIndex = this.sessionList.findIndex((s) => s.id === sessionId);
-        this.resetWindow();
       }
     } catch (e) {
       console.error("Failed to load session:", e);
@@ -472,7 +454,6 @@ class MessagesState {
     this.isStreaming = false;
     this.streamingFirstChunkReceived = false;
     this.streamingMessageId = null;
-    this.resetWindow();
 
     try {
       await invoke("delete_chat_session", { sessionId: sessionToDelete });
@@ -508,7 +489,6 @@ class MessagesState {
     this.tokenUsage = null;
     this.isStreaming = false;
     this.streamingFirstChunkReceived = false;
-    this.resetWindow();
 
     await this.loadSessionList();
     this.currentSessionIndex = this.sessionList.length;
@@ -600,8 +580,9 @@ class MessagesState {
       if (this.isStreaming && streamingId !== null && m.id === streamingId) {
         continue;
       }
-      // Tool calls in non-terminal status: rewrite to a cancelled snapshot
-      // so reload doesn't show a stuck spinner.
+      // Tool calls in non-terminal status: rewrite to a failed snapshot so
+      // reload doesn't show a stuck spinner, and the user sees a clear
+      // error explaining the tool server is gone.
       if (
         m.role === "tool" &&
         m.toolCall &&
@@ -613,8 +594,10 @@ class MessagesState {
           ...m,
           toolCall: {
             ...m.toolCall,
-            status: "cancelled",
-            error: m.toolCall.error ?? "interrupted: app was closed",
+            status: "failed",
+            error:
+              m.toolCall.error ??
+              "Tool server was stopped before this tool call completed (the app was closed).",
           },
         });
         continue;

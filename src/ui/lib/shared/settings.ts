@@ -1161,6 +1161,18 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             descriptionTier: "ondemand",
           },
           {
+            id: "toolkits.callTimeoutMs",
+            name: "Tool Call Timeout",
+            description:
+              "Hard upper bound for a single tool call before it is aborted with an error.\nThe timer is paused while a tool is waiting for user input, so a slow human response never causes a timeout. Set to 0 to disable.",
+            type: "number",
+            defaultValue: 60000,
+            suffix: "ms",
+            regex: [{ regex: "^[0-9]+$", errorMessage: "Must be a non-negative integer" }],
+            advanced: true,
+            descriptionTier: "ondemand",
+          },
+          {
             id: "toolkits.ignorePostinstallScripts",
             name: "Ignore Postinstall Scripts",
             description:

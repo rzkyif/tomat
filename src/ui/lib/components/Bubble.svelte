@@ -58,6 +58,11 @@
   let percent = $derived(
     typeof progress === "number" ? Math.max(0, Math.min(100, progress)) : null,
   );
+  // Right-aligned bubbles fill the progress bar from right to left so the
+  // motion mirrors the bubble's anchor edge. The determinate fill anchors on
+  // `right-0` instead of `left-0`; the indeterminate sweep and the
+  // inverted-layer clip-path use mirrored keyframes / inset values.
+  let isRight = $derived(selectedAlignment === "right");
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -82,11 +87,17 @@
   {#if hasProgress}
     {#if percent === null}
       <div
-        class="absolute top-0 left-0 h-8 {progressFillBgClass} bubble-progress-indet"
+        class="absolute top-0 h-8 {progressFillBgClass}"
+        class:left-0={!isRight}
+        class:right-0={isRight}
+        class:bubble-progress-indet={!isRight}
+        class:bubble-progress-indet-rtl={isRight}
       ></div>
     {:else}
       <div
-        class="absolute top-0 left-0 h-8 {progressFillBgClass} transition-all"
+        class="absolute top-0 h-8 {progressFillBgClass} transition-all"
+        class:left-0={!isRight}
+        class:right-0={isRight}
         style="width: {percent}%"
       ></div>
     {/if}
@@ -107,10 +118,13 @@
          (un-filtered) copy. -->
     <div
       class="bubble-progress-invert absolute inset-0 z-20 {paddingClass} {extraClass}"
-      class:bubble-progress-invert-indet={percent === null}
+      class:bubble-progress-invert-indet={percent === null && !isRight}
+      class:bubble-progress-invert-indet-rtl={percent === null && isRight}
       style:clip-path={percent === null
         ? undefined
-        : `inset(0 calc(100% - ${percent}%) calc(100% - 2rem) 0)`}
+        : isRight
+          ? `inset(0 0 calc(100% - 2rem) calc(100% - ${percent}%))`
+          : `inset(0 calc(100% - ${percent}%) calc(100% - 2rem) 0)`}
       aria-hidden="true"
     >
       {@render children()}
@@ -180,6 +194,48 @@
     }
     100% {
       clip-path: inset(0 0 calc(100% - 2rem) 100%);
+    }
+  }
+
+  /* Right-to-left mirror of the indeterminate sweep: bar enters from the
+     right edge, widens through the midpoint, and collapses at the left.
+     Anchors on `right` instead of `left` so the right-aligned bubble's
+     progress motion mirrors its anchor edge. */
+  .bubble-progress-indet-rtl {
+    animation: bubble-progress-indet-rtl 1.6s linear infinite;
+    width: 0%;
+    will-change: right, width;
+  }
+  @keyframes bubble-progress-indet-rtl {
+    0% {
+      right: 0%;
+      width: 0%;
+      animation-timing-function: ease-in;
+    }
+    50% {
+      right: 25%;
+      width: 50%;
+      animation-timing-function: ease-out;
+    }
+    100% {
+      right: 100%;
+      width: 0%;
+    }
+  }
+  .bubble-progress-invert-indet-rtl {
+    animation: bubble-progress-invert-indet-rtl 1.6s linear infinite;
+  }
+  @keyframes bubble-progress-invert-indet-rtl {
+    0% {
+      clip-path: inset(0 0 calc(100% - 2rem) 100%);
+      animation-timing-function: ease-in;
+    }
+    50% {
+      clip-path: inset(0 25% calc(100% - 2rem) 25%);
+      animation-timing-function: ease-out;
+    }
+    100% {
+      clip-path: inset(0 100% calc(100% - 2rem) 0);
     }
   }
 </style>

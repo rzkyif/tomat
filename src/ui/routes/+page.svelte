@@ -291,11 +291,11 @@
     }
   }
 
-  // Find the most recent user message (visibleMessages is newest-first).
+  // Find the most recent user message (messages is newest-first).
   // Used by UserMessage to decide whether it's the last sent message and
   // should default to its inline-edit state.
   let lastUserMsg = $derived(
-    messagesState.visibleMessages.find((m) => m.role === "user"),
+    messagesState.messages.find((m) => m.role === "user"),
   );
 
   // Visible while the assistant turn is in flight but we haven't received
@@ -312,12 +312,13 @@
 
   // A "small bubble" message is one rendered as a `size="small"` Bubble
   // (system prompt, reasoning, tool_filter, tool, plus the synthetic loading
-  // sentinel). Consecutive small bubbles are stacked horizontally (with wrap)
-  // into a single flex row. When one of them expands, MessageStackGroup
-  // promotes that bubble's wrapper to `flex-basis: 100%` so it claims its
-  // own row inside the same stack, keeping the bubble's component identity
-  // stable across expand/collapse (no remount → no replayed slide-in and the
-  // Expandable's open/close transition fires as expected).
+  // sentinel). Consecutive small bubbles are grouped into a MessageStackGroup,
+  // which renders one or more horizontally-scrollable substacks of collapsed
+  // bubbles separated by standalone rows for any bubbles whose Expandable is
+  // open. Expanding a bubble in a substack splits that substack around the
+  // bubble; collapsing merges the surrounding substacks back together.
+  // `messagesSeen` in animations.ts dedupes the slide-in transition so
+  // re-mounts caused by segment regrouping don't replay it.
   function isSmallBubbleMsg(msg: Message): boolean {
     if (msg.role === "system") return true;
     if (msg.role === "reasoning") return true;
@@ -345,7 +346,7 @@
   // (tool_filter, reasoning, system) via the existing grouping pipeline
   // instead of being a standalone element outside it.
   let displayedMessages = $derived.by<Message[]>(() => {
-    const real = messagesState.visibleMessages.filter((msg) => {
+    const real = messagesState.messages.filter((msg) => {
       const isEmptyAssistant =
         msg.role === "assistant" && getTextContent(msg.content) === "";
       const isHiddenReasoning =
@@ -374,7 +375,7 @@
   let messageGroups = $derived.by<RenderGroup[]>(() => {
     const groups: RenderGroup[] = [];
     let stack: Message[] = [];
-    // visibleMessages is newest-first, but the user wants stacked small
+    // messages is newest-first, but the user wants stacked small
     // bubbles in old→new visual order (oldest at the screen-facing edge,
     // wrapping rightward and downward). We collect into `stack` in the
     // newest-first iteration order, then reverse on flush so DOM[0] of the
@@ -596,15 +597,6 @@
               </div>
             {/if}
           {/each}
-          {#if messagesState.hasMoreMessages}
-            <button
-              type="button"
-              class="mx-auto my-2 px-3 py-1 text-sm text-default-600 hover:text-default-900 rounded bg-default-100 hover:bg-default-200 pointer-events-auto"
-              onclick={() => messagesState.loadMoreMessages()}
-            >
-              Load older messages
-            </button>
-          {/if}
         </div>
       {/if}
     </div>

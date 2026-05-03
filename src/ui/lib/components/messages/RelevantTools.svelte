@@ -129,7 +129,10 @@
       <span>{titleText}</span>
     {/snippet}
     {#snippet children()}
-      <div class="flex flex-col gap-2 text-xs">
+      <!-- `text-left` cancels the Expandable wrapper's right-alignment so the
+           body (phase summary blocks, error message) stays alignment-
+           independent while the header label keeps following alignment. -->
+      <div class="flex flex-col gap-2 text-xs text-left">
         {#if relevantTools.errorMessage}
           <div class="flex flex-col gap-1">
             <div class="text-accent-red-700 font-bold">Filter Error</div>
@@ -153,7 +156,7 @@
               </div>
             {:else if phase.kind === "embedding"}
               <div
-                class="bg-card-default rounded-2xl px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
+                class="bg-default-200 rounded-2xl px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
               >
                 {#each phase.entries as tool, ti (tool.id ?? ti)}{#if ti > 0},
                   {/if}{tool.name}<span class="text-default-500 tabular-nums"
@@ -162,7 +165,7 @@
               </div>
             {:else}
               <div
-                class="bg-card-default rounded-2xl px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
+                class="bg-default-200 rounded-2xl px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
               >
                 {#each phase.entries as tool, ti (tool.name + ti)}{#if ti > 0},
                   {/if}{tool.name}{/each}

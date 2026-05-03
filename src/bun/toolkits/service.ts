@@ -36,6 +36,7 @@ export interface ServiceOptions {
   readSettings: () => {
     maxWarmWorkers: number;
     workerIdleMs: number;
+    callTimeoutMs: number;
     ignorePostinstallScripts: boolean;
   };
 }
@@ -82,7 +83,7 @@ export class ToolkitsService {
       workerScriptUrl: opts.workerScriptUrl,
       maxWarmWorkers,
       workerIdleMs: clampNonNegative(s.workerIdleMs, 300000),
-      callTimeoutMs: DEFAULT_CALL_TIMEOUT_MS,
+      callTimeoutMs: clampNonNegative(s.callTimeoutMs, DEFAULT_CALL_TIMEOUT_MS),
       drainTimeoutMs: DEFAULT_DRAIN_TIMEOUT_MS,
     });
     this.hashVerifiedCache = new LRUCache({ max: Math.max(8, maxWarmWorkers * 2) });
@@ -133,6 +134,7 @@ export class ToolkitsService {
     this.pool.updateLimits({
       maxWarmWorkers,
       workerIdleMs: clampNonNegative(s.workerIdleMs, 300000),
+      callTimeoutMs: clampNonNegative(s.callTimeoutMs, DEFAULT_CALL_TIMEOUT_MS),
     });
     // Grow the hash + validator caches alongside the pool so a user who
     // bumps maxWarmWorkers doesn't thrash either cache. lru-cache v11 has

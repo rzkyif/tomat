@@ -121,7 +121,7 @@
     <ReasoningTrace
       reasoning={displayText}
       {isStreaming}
-      pillBgClass="bg-card-default"
+      pillBgClass="bg-default-200"
       {reasoningDurationMs}
       bind:expanded={reasoningExpanded}
     />

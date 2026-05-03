@@ -71,12 +71,12 @@
   let contextRatio = $derived(contextMax > 0 ? contextUsed / contextMax : 0);
   let contextColor = $derived(
     contextRatio < 0.5
-      ? "bg-ctx-green"
+      ? "bg-accent-green-200"
       : contextRatio < 0.75
-        ? "bg-ctx-yellow"
+        ? "bg-accent-yellow-200"
         : contextRatio < 0.9
-          ? "bg-ctx-orange"
-          : "bg-ctx-red",
+          ? "bg-accent-orange-200"
+          : "bg-accent-red-200",
   );
 
   function formatTokens(n: number): string {

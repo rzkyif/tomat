@@ -59,6 +59,16 @@
     return status !== "Running" && status !== "Disabled";
   }
 
+  // Mirrors the bg half of ServerStatusChip's colorMap so collapsed dots
+  // share their expanded-chip colour.
+  const chipBgMap: Record<ServerStatus, string> = {
+    Disabled: "bg-default-200",
+    Error: "bg-accent-red-200",
+    Downloading: "bg-accent-blue-200",
+    Loading: "bg-accent-orange-200",
+    Running: "bg-accent-green-200",
+  };
+
   // Left padding stays constant so icons line up at the same X position in
   // both modes. Right padding is only widened when the row actually has a
   // text label next to its icon. Icon-only rows stay compact rectangles.
@@ -117,32 +127,38 @@
     {/each}
   </div>
 
-  <div class="flex flex-col gap-1">
+  <div class="flex flex-col gap-1.5">
     {#if collapsed}
       {#if chipVisible(llmStatus.status as ServerStatus) || chipVisible(sttStatus.status as ServerStatus) || chipVisible(bunStatus.status as ServerStatus)}
         <div class="flex flex-col gap-1.5 items-center px-1.5 py-1">
           {#if chipVisible(llmStatus.status as ServerStatus)}
             <span
-              class="w-2 h-2 rounded-full bg-default-500"
+              class="w-3 h-3 rounded-full {chipBgMap[
+                llmStatus.status as ServerStatus
+              ]}"
               title={"LLM: " + llmStatus.status}
             ></span>
           {/if}
           {#if chipVisible(sttStatus.status as ServerStatus)}
             <span
-              class="w-2 h-2 rounded-full bg-default-500"
+              class="w-3 h-3 rounded-full {chipBgMap[
+                sttStatus.status as ServerStatus
+              ]}"
               title={"STT: " + sttStatus.status}
             ></span>
           {/if}
           {#if chipVisible(bunStatus.status as ServerStatus)}
             <span
-              class="w-2 h-2 rounded-full bg-default-500"
+              class="w-3 h-3 rounded-full {chipBgMap[
+                bunStatus.status as ServerStatus
+              ]}"
               title={"Bun: " + bunStatus.status}
             ></span>
           {/if}
         </div>
       {/if}
     {:else}
-      <div class="flex flex-col gap-1 text-sm font-medium w-fit px-2.5">
+      <div class="flex flex-col gap-1.5 text-sm font-medium w-full">
         <ServerStatusChip type="LLM" update={llmStatus} />
         <ServerStatusChip type="STT" update={sttStatus} />
         <ServerStatusChip type="Bun" update={bunStatus} />
