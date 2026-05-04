@@ -3,7 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import type { SettingField } from "$lib/shared/settings";
   import { confirmState, toolkitsState, type ToolkitRow } from "../../../state";
-  import FieldDescription from "./FieldDescription.svelte";
+  import FieldCard from "./FieldCard.svelte";
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -148,53 +148,14 @@
     return { label: "Trusted", color: "text-default-600" };
   }
 
-  let reindexBusy = $state(false);
-  let reindexResult = $state<string | null>(null);
-  let needsReindex = $derived(
-    toolkitsState.trusted.some(
-      (t) => t.enabled && t.embeddedToolCount < t.tools.length,
-    ),
-  );
-
-  async function handleReindex() {
-    reindexBusy = true;
-    reindexResult = null;
-    try {
-      const r = await toolkitsState.reindex();
-      reindexResult = r.skipped
-        ? "Embedding model not ready yet. Try again in a moment."
-        : `Re-indexed ${r.embedded} tool${r.embedded === 1 ? "" : "s"}.`;
-    } catch (err) {
-      reportError("Re-index", err);
-    } finally {
-      reindexBusy = false;
-    }
-  }
 </script>
 
-<div
-  class="flex flex-col gap-3 px-4 pt-2 pb-3 bg-default-200 rounded-2xl border-2 border-transparent"
->
-  <div class="flex flex-col">
-    <div class="text-default-800">{field.name}</div>
-    {#if field.description}
-      <FieldDescription text={field.description} />
-    {/if}
-  </div>
-
+<FieldCard {field}>
+  <div class="flex flex-col gap-3">
   <div class="flex flex-wrap items-center gap-2">
     <button
       type="button"
-      class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-lg px-3 h-8 text-sm hover:cursor-pointer transition-colors"
-      onclick={handleRefresh}
-      title="Rescan ~/.tomat/toolkits/"
-    >
-      <i class="flex i-material-symbols-refresh-rounded"></i>
-      <span>Refresh</span>
-    </button>
-    <button
-      type="button"
-      class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-lg px-3 h-8 text-sm hover:cursor-pointer transition-colors"
+      class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-xl px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
       onclick={handleOpenFolder}
       title="Open the toolkits folder in your file manager"
     >
@@ -203,46 +164,20 @@
     </button>
     <button
       type="button"
-      class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-lg px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-      onclick={handleReindex}
-      disabled={reindexBusy}
-      title="Re-embed enabled toolkits' tools so phase-1 vector search can find them. Useful when a toolkit was enabled before the embedding model finished downloading."
+      class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-xl px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
+      onclick={handleRefresh}
+      title="Rescan ~/.tomat/toolkits/"
     >
-      {#if reindexBusy}
-        <i class="flex i-line-md:loading-loop"></i>
-        <span>Re-indexing…</span>
-      {:else}
-        <i class="flex i-material-symbols-database-search-rounded"></i>
-        <span>Re-index{needsReindex ? " (pending)" : ""}</span>
-      {/if}
+      <i class="flex i-material-symbols-refresh-rounded"></i>
+      <span>Refresh</span>
     </button>
-    <div class="text-xs text-default-600">
-      {#if toolkitsState.wsConnected}
-        <span class="text-green-500">Connected</span>
-      {:else}
-        <span class="text-amber-500">Connecting...</span>
-      {/if}
-    </div>
   </div>
-  {#if reindexResult}
-    <div class="text-xs text-default-700 bg-default-300 rounded-md px-2 py-1">
-      {reindexResult}
-    </div>
-  {/if}
-  {#if needsReindex && !reindexBusy}
-    <div
-      class="text-xs text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-md px-2 py-1"
-    >
-      Some enabled toolkits have tools that aren't indexed yet. Phase-1 tool
-      selection won't find them until indexing completes.
-    </div>
-  {/if}
 
   {#if enabledToolkits.length > 0}
     <div class="flex flex-col gap-2">
       <div class="text-default-600 text-sm">Enabled</div>
       {#each enabledToolkits as tk (tk.id)}
-        <div class="flex flex-col gap-2 p-3 bg-default-200 rounded-xl">
+        <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-xl">
           <div class="flex flex-col gap-0.5">
             <div class="font-medium text-default-800 break-words">
               {tk.displayName || tk.id}
@@ -278,7 +213,7 @@
           <div class="flex flex-col gap-1.5">
             <button
               type="button"
-              class="w-full text-sm px-3 py-1.5 rounded bg-default-300 text-default-800 hover:bg-red-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-300 disabled:hover:text-default-800"
+              class="w-full text-sm px-3 py-1.5 rounded bg-default-400 text-default-800 hover:bg-red-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-400 disabled:hover:text-default-800"
               disabled={busyId === tk.id}
               onclick={() => handleDisable(tk.id)}
             >
@@ -296,7 +231,7 @@
       {#each disabledTrustedToolkits as tk (tk.id)}
         {@const needsInstall = tk.hasPackage && !tk.depsInstalled}
         {@const canUninstallDeps = tk.hasPackage && tk.depsInstalled}
-        <div class="flex flex-col gap-2 p-3 bg-default-200 rounded-xl">
+        <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-xl">
           <div class="flex flex-col gap-0.5">
             <div class="font-medium text-default-800 break-words">
               {tk.displayName || tk.id}
@@ -322,7 +257,7 @@
                 >Install output ({job.status})</summary
               >
               <pre
-                class="text-default-700 bg-default-300 rounded-md px-2 py-1 mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words">{job.lines
+                class="text-default-700 bg-default-400 rounded-md px-2 py-1 mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words">{job.lines
                   .map((l) => l.line)
                   .join("\n")}</pre>
             </details>
@@ -331,7 +266,7 @@
             {#if needsInstall}
               <button
                 type="button"
-                class="w-full text-sm px-3 py-1.5 rounded bg-default-300 text-default-800 hover:bg-red-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-300 disabled:hover:text-default-800"
+                class="w-full text-sm px-3 py-1.5 rounded bg-default-400 text-default-800 hover:bg-red-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-400 disabled:hover:text-default-800"
                 disabled={busyId === tk.id}
                 onclick={() => confirmUntrust(tk.id)}
               >
@@ -339,7 +274,7 @@
               </button>
               <button
                 type="button"
-                class="w-full text-sm px-3 py-1.5 rounded bg-default-300 text-default-800 hover:bg-green-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-300 disabled:hover:text-default-800"
+                class="w-full text-sm px-3 py-1.5 rounded bg-default-400 text-default-800 hover:bg-green-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-400 disabled:hover:text-default-800"
                 disabled={busyId === tk.id ||
                   toolkitsState.installJobs[tk.id]?.status === "running"}
                 onclick={() => handleInstall(tk.id)}
@@ -354,7 +289,7 @@
               {#if canUninstallDeps}
                 <button
                   type="button"
-                  class="w-full text-sm px-3 py-1.5 rounded bg-default-300 text-default-800 hover:bg-red-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-300 disabled:hover:text-default-800"
+                  class="w-full text-sm px-3 py-1.5 rounded bg-default-400 text-default-800 hover:bg-red-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-400 disabled:hover:text-default-800"
                   disabled={busyId === tk.id}
                   onclick={() => confirmUninstallDeps(tk.id)}
                 >
@@ -363,7 +298,7 @@
               {/if}
               <button
                 type="button"
-                class="w-full text-sm px-3 py-1.5 rounded bg-default-300 text-default-800 hover:bg-red-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-300 disabled:hover:text-default-800"
+                class="w-full text-sm px-3 py-1.5 rounded bg-default-400 text-default-800 hover:bg-red-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-400 disabled:hover:text-default-800"
                 disabled={busyId === tk.id}
                 onclick={() => confirmUntrust(tk.id)}
               >
@@ -371,7 +306,7 @@
               </button>
               <button
                 type="button"
-                class="w-full text-sm px-3 py-1.5 rounded bg-default-300 text-default-800 hover:bg-green-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-300 disabled:hover:text-default-800"
+                class="w-full text-sm px-3 py-1.5 rounded bg-default-400 text-default-800 hover:bg-green-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-400 disabled:hover:text-default-800"
                 disabled={busyId === tk.id}
                 onclick={() => handleEnable(tk.id)}
               >
@@ -388,7 +323,7 @@
     <div class="flex flex-col gap-2">
       <div class="text-default-600 text-sm">Untrusted</div>
       {#each toolkitsState.untrusted as tk (tk.id)}
-        <div class="flex flex-col gap-2 p-3 bg-default-200 rounded-xl">
+        <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-xl">
           <div class="flex flex-col gap-0.5">
             <div class="font-mono text-default-800 break-all">{tk.id}</div>
             <div class="text-xs text-default-600">
@@ -400,7 +335,7 @@
           <div class="flex flex-col gap-1.5">
             <button
               type="button"
-              class="w-full text-sm px-3 py-1.5 rounded bg-default-300 text-default-800 hover:bg-green-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-300 disabled:hover:text-default-800"
+              class="w-full text-sm px-3 py-1.5 rounded bg-default-400 text-default-800 hover:bg-green-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-400 disabled:hover:text-default-800"
               disabled={busyId === tk.id}
               onclick={() => confirmTrust(tk.id, tk.hasPackage)}
             >
@@ -418,4 +353,5 @@
       press Refresh.
     </div>
   {/if}
-</div>
+  </div>
+</FieldCard>

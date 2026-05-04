@@ -8,7 +8,7 @@
     type SettingField,
   } from "$lib/shared/settings";
   import { confirmState, settingsState, snippetsState } from "../../../state";
-  import FieldDescription from "./FieldDescription.svelte";
+  import FieldCard from "./FieldCard.svelte";
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -480,236 +480,243 @@
   }
 </script>
 
-<div
-  class="flex flex-col gap-2 px-4 pt-2 pb-3 bg-default-200 rounded-2xl border-2 border-transparent outline-none"
-  tabindex="0"
-  role="tree"
-  onkeydown={handleKeyDown}
->
-  <div class="flex flex-col">
-    <div class="text-default-800">{field.name}</div>
-    {#if field.description}
-      <FieldDescription text={field.description} />
-    {/if}
-  </div>
-
-  <button
-    type="button"
-    class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-xl px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
-    onclick={() => tree && revealPath(tree.root_path)}
-    title={`Open Storage in ${fileManagerName()}`}
+<FieldCard {field}>
+  <div
+    class="flex flex-col gap-2 outline-none"
+    tabindex="0"
+    role="tree"
+    onkeydown={handleKeyDown}
   >
-    <i class="flex i-material-symbols-folder-open-rounded"></i>
-    <span>{`Open Storage in ${fileManagerName()}`}</span>
-  </button>
-
-  <!-- Tree -->
-  {#if tree}
-    {@const rootGroups = [
-      {
-        key: "__models__",
-        label: "Models",
-        empty: "No models.",
-        size: tree.models_size,
-        nodes: tree.models,
-        clear: "models" as const,
-        expandable: true,
-      },
-      {
-        key: "__sessions__",
-        label: "Sessions",
-        empty: "No sessions.",
-        size: tree.sessions_size,
-        nodes: tree.sessions,
-        clear: "sessions" as const,
-        expandable: true,
-      },
-      {
-        key: "__snippets__",
-        label: "Snippets",
-        empty: "No snippets.",
-        size: tree.snippets_size,
-        nodes: tree.snippets,
-        clear: "snippets" as const,
-        expandable: true,
-      },
-      {
-        key: "__settings__",
-        label: "Settings",
-        empty: "",
-        size: tree.settings_size,
-        nodes: [] as StorageNode[],
-        clear: "settings" as const,
-        expandable: false,
-      },
-    ]}
-    {#each rootGroups as group (group.key)}
-      <div class="flex flex-col">
-        <!-- Group header row -->
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="group flex items-center gap-1 text-left text-sm px-2 py-1 select-none {group.expandable
-            ? 'cursor-pointer'
-            : ''}"
-          onclick={() => group.expandable && toggleExpand(group.key)}
-        >
-          {#if group.expandable}
-            <i
-              class="flex shrink-0 w-4 justify-center text-default-500 {expanded.has(
-                group.key,
-              )
-                ? 'i-material-symbols-expand-more-rounded'
-                : 'i-material-symbols-chevron-right-rounded'}"
-            ></i>
-          {:else}
-            <span class="flex shrink-0 w-4"></span>
-          {/if}
-          <span class="text-default-800 font-medium truncate"
-            >{group.label}</span
+    <!-- Tree -->
+    {#if tree}
+      {@const rootGroups = [
+        {
+          key: "__models__",
+          label: "Models",
+          empty: "No models.",
+          size: tree.models_size,
+          nodes: tree.models,
+          clear: "models" as const,
+          expandable: true,
+        },
+        {
+          key: "__sessions__",
+          label: "Sessions",
+          empty: "No sessions.",
+          size: tree.sessions_size,
+          nodes: tree.sessions,
+          clear: "sessions" as const,
+          expandable: true,
+        },
+        {
+          key: "__snippets__",
+          label: "Snippets",
+          empty: "No snippets.",
+          size: tree.snippets_size,
+          nodes: tree.snippets,
+          clear: "snippets" as const,
+          expandable: true,
+        },
+        {
+          key: "__settings__",
+          label: "Settings",
+          empty: "",
+          size: tree.settings_size,
+          nodes: [] as StorageNode[],
+          clear: "settings" as const,
+          expandable: false,
+        },
+      ]}
+      {#each rootGroups as group (group.key)}
+        <div class="flex flex-col">
+          <!-- Group header row -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="group flex items-center gap-1 text-left text-sm py-1 select-none {group.expandable
+              ? 'cursor-pointer'
+              : ''}"
+            onclick={() => group.expandable && toggleExpand(group.key)}
           >
-          <button
-            class="flex shrink-0 w-5 h-5 justify-center items-center text-default-500 hover:text-default-900 hover:cursor-pointer transition-colors"
-            aria-label={`Open ${group.label} in ${fileManagerName()}`}
-            title={`Open ${group.label} in ${fileManagerName()}`}
-            onclick={(e) => {
-              e.stopPropagation();
-              const p = rootPathFor(group.clear);
-              if (p) revealPath(p);
-            }}
-          >
-            <i class="flex i-material-symbols-folder-open-rounded"></i>
-          </button>
-          {#if hasClearable(group.clear)}
+            {#if group.expandable}
+              <i
+                class="flex shrink-0 w-4 justify-center text-default-500 {expanded.has(
+                  group.key,
+                )
+                  ? 'i-material-symbols-expand-more-rounded'
+                  : 'i-material-symbols-chevron-right-rounded'}"
+              ></i>
+            {:else}
+              <span class="flex shrink-0 w-4"></span>
+            {/if}
+            <span class="text-default-800 font-medium truncate"
+              >{group.label}</span
+            >
             <button
-              class="flex shrink-0 w-5 h-5 -ml-1 justify-center items-center text-default-500 hover:text-default-900 hover:cursor-pointer transition-colors"
-              aria-label={group.clear === "settings"
-                ? `Reset ${group.label}`
-                : `Clear ${group.label}`}
-              title={group.clear === "settings"
-                ? `Reset ${group.label}`
-                : `Clear ${group.label}`}
+              class="flex shrink-0 w-5 h-5 justify-center items-center text-default-500 hover:text-default-900 hover:cursor-pointer transition-colors"
+              aria-label={`Open ${group.label} in ${fileManagerName()}`}
+              title={`Open ${group.label} in ${fileManagerName()}`}
               onclick={(e) => {
                 e.stopPropagation();
-                requestClear(group.clear);
+                const p = rootPathFor(group.clear);
+                if (p) revealPath(p);
               }}
             >
-              <i class="flex i-material-symbols-delete-outline-rounded"></i>
+              <i class="flex i-material-symbols-folder-open-rounded"></i>
             </button>
-          {/if}
-          <span class="flex-1"></span>
-          <span class="text-default-500 text-xs tabular-nums shrink-0"
-            >{formatBytes(group.size)}</span
-          >
-        </div>
-
-        {#if group.expandable && expanded.has(group.key)}
-          {#if group.nodes.length === 0}
-            <div class="pl-7 text-default-400 text-xs py-1 select-none">
-              {group.empty}
-            </div>
-          {:else}
-            {#each group.nodes as node (node.path)}
-              {@const lockReason = lockReasons.get(node.path) ?? null}
-              {@const isLocked = lockReason !== null}
-              <!-- svelte-ignore a11y_click_events_have_key_events -->
-              <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div
-                class="flex items-center gap-1 text-sm pl-4 pr-2 py-1 select-none {isLocked
-                  ? node.kind === 'folder'
-                    ? 'cursor-pointer opacity-60'
-                    : 'cursor-default opacity-60'
-                  : 'cursor-pointer'} {selected.has(node.path)
-                  ? 'bg-default-400'
-                  : ''}"
-                title={lockReason ?? undefined}
-                onclick={(e) => handleRowClick(e, node)}
-                oncontextmenu={(e) => openContextMenu(e, node)}
+            {#if hasClearable(group.clear)}
+              <button
+                class="flex shrink-0 w-5 h-5 -ml-1 justify-center items-center text-default-500 hover:text-default-900 hover:cursor-pointer transition-colors"
+                aria-label={group.clear === "settings"
+                  ? `Reset ${group.label}`
+                  : `Clear ${group.label}`}
+                title={group.clear === "settings"
+                  ? `Reset ${group.label}`
+                  : `Clear ${group.label}`}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  requestClear(group.clear);
+                }}
               >
-                {#if node.kind === "folder"}
-                  <button
-                    class="flex shrink-0 w-4 justify-center text-default-500 hover:cursor-pointer"
-                    aria-label="Toggle folder"
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      toggleExpand(node.path);
-                    }}
-                  >
-                    <i
-                      class="flex {expanded.has(node.path)
-                        ? 'i-material-symbols-expand-more-rounded'
-                        : 'i-material-symbols-chevron-right-rounded'}"
-                    ></i>
-                  </button>
-                {:else}
-                  <span class="flex shrink-0 w-4"></span>
-                {/if}
-                <i
-                  class="flex shrink-0 w-4 justify-center {isLocked
-                    ? 'i-material-symbols-lock-outline'
-                    : node.kind === 'folder'
-                      ? 'i-material-symbols-folder-outline-rounded'
-                      : 'i-material-symbols-description-outline-rounded'} text-default-500"
-                ></i>
-                <span class="flex-1 truncate text-default-800">{node.name}</span
+                <i class="flex i-material-symbols-delete-outline-rounded"></i>
+              </button>
+            {/if}
+            <span class="flex-1"></span>
+            <span class="text-default-500 text-xs tabular-nums shrink-0"
+              >{formatBytes(group.size)}</span
+            >
+          </div>
+
+          {#if group.expandable && expanded.has(group.key)}
+            {#if group.nodes.length === 0}
+              <div class="pl-5 text-default-400 text-xs py-1 select-none">
+                {group.empty}
+              </div>
+            {:else}
+              {#each group.nodes as node (node.path)}
+                {@const lockReason = lockReasons.get(node.path) ?? null}
+                {@const isLocked = lockReason !== null}
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="flex items-center gap-1 text-sm pl-2 py-1 select-none {isLocked
+                    ? node.kind === 'folder'
+                      ? 'cursor-pointer opacity-60'
+                      : 'cursor-default opacity-60'
+                    : 'cursor-pointer'} {selected.has(node.path)
+                    ? 'bg-default-400'
+                    : ''}"
+                  title={lockReason ?? undefined}
+                  onclick={(e) => handleRowClick(e, node)}
+                  oncontextmenu={(e) => openContextMenu(e, node)}
                 >
-                {#if node.kind !== "folder" || !expanded.has(node.path)}
+                  {#if node.kind === "folder"}
+                    <button
+                      class="flex shrink-0 w-4 justify-center text-default-500 hover:cursor-pointer"
+                      aria-label="Toggle folder"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        toggleExpand(node.path);
+                      }}
+                    >
+                      <i
+                        class="flex {expanded.has(node.path)
+                          ? 'i-material-symbols-expand-more-rounded'
+                          : 'i-material-symbols-chevron-right-rounded'}"
+                      ></i>
+                    </button>
+                  {:else}
+                    <span class="flex shrink-0 w-4"></span>
+                  {/if}
+                  <i
+                    class="flex shrink-0 w-4 justify-center {isLocked
+                      ? 'i-material-symbols-lock-outline'
+                      : node.kind === 'folder'
+                        ? 'i-material-symbols-folder-outline-rounded'
+                        : 'i-material-symbols-description-outline-rounded'} text-default-500"
+                  ></i>
+                  <span class="flex-1 truncate text-default-800"
+                    >{node.name}</span
+                  >
                   <span class="text-default-500 text-xs tabular-nums shrink-0"
                     >{formatBytes(node.size)}</span
                   >
+                </div>
+                {#if node.kind === "folder" && expanded.has(node.path)}
+                  {#each node.children as child (child.path)}
+                    {@const childLockReason =
+                      lockReasons.get(child.path) ?? null}
+                    {@const childLocked = childLockReason !== null}
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div
+                      class="flex items-center gap-1 text-sm pl-8 py-1 select-none {childLocked
+                        ? 'cursor-default opacity-60'
+                        : 'cursor-pointer'} {selected.has(child.path)
+                        ? 'bg-default-400'
+                        : ''}"
+                      title={childLockReason ?? undefined}
+                      onclick={(e) => handleRowClick(e, child)}
+                      oncontextmenu={(e) => openContextMenu(e, child)}
+                    >
+                      <span class="flex shrink-0 w-4"></span>
+                      <i
+                        class="flex shrink-0 w-4 justify-center {childLocked
+                          ? 'i-material-symbols-lock-outline'
+                          : 'i-material-symbols-description-outline-rounded'} text-default-500"
+                      ></i>
+                      <span class="flex-1 truncate text-default-800"
+                        >{child.name}</span
+                      >
+                      <span
+                        class="text-default-500 text-xs tabular-nums shrink-0"
+                        >{formatBytes(child.size)}</span
+                      >
+                    </div>
+                  {/each}
                 {/if}
-              </div>
-              {#if node.kind === "folder" && expanded.has(node.path)}
-                {#each node.children as child (child.path)}
-                  {@const childLockReason = lockReasons.get(child.path) ?? null}
-                  {@const childLocked = childLockReason !== null}
-                  <!-- svelte-ignore a11y_click_events_have_key_events -->
-                  <!-- svelte-ignore a11y_no_static_element_interactions -->
-                  <div
-                    class="flex items-center gap-1 text-sm pl-10 pr-2 py-1 select-none {childLocked
-                      ? 'cursor-default opacity-60'
-                      : 'cursor-pointer'} {selected.has(child.path)
-                      ? 'bg-default-400'
-                      : ''}"
-                    title={childLockReason ?? undefined}
-                    onclick={(e) => handleRowClick(e, child)}
-                    oncontextmenu={(e) => openContextMenu(e, child)}
-                  >
-                    <span class="flex shrink-0 w-4"></span>
-                    <i
-                      class="flex shrink-0 w-4 justify-center {childLocked
-                        ? 'i-material-symbols-lock-outline'
-                        : 'i-material-symbols-description-outline-rounded'} text-default-500"
-                    ></i>
-                    <span class="flex-1 truncate text-default-800"
-                      >{child.name}</span
-                    >
-                    <span class="text-default-500 text-xs tabular-nums shrink-0"
-                      >{formatBytes(child.size)}</span
-                    >
-                  </div>
-                {/each}
-              {/if}
-            {/each}
+              {/each}
+            {/if}
           {/if}
-        {/if}
-      </div>
-    {/each}
+        </div>
+      {/each}
 
-    <!-- Total row mirrors a root-group header (same paddings, font weight,
+      <!-- Total row mirrors a root-group header (same paddings, font weight,
          and size-text color) so it reads as the bottom summary of the list. -->
-    <div class="flex items-center gap-1 text-sm px-2 py-1 select-none">
-      <span class="flex shrink-0 w-4"></span>
-      <span class="text-default-800 font-medium truncate">Total</span>
-      <span class="flex-1"></span>
-      <span class="text-default-500 text-xs tabular-nums shrink-0">
-        {formatBytes(tree.total_size)}
-      </span>
+      <div class="flex items-center gap-1 text-sm py-1 select-none">
+        <span class="flex shrink-0 w-4"></span>
+        <span class="text-default-800 font-medium truncate">Total</span>
+        <span class="flex-1"></span>
+        <span class="text-default-500 text-xs font-bold tabular-nums shrink-0">
+          {formatBytes(tree.total_size)}
+        </span>
+      </div>
+    {:else}
+      <div class="text-default-500 text-sm">Loading…</div>
+    {/if}
+    <div class="flex items-center justify-end gap-2 mb-1">
+      <button
+        type="button"
+        class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-xl px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
+        onclick={() => requestClear("models")}
+        disabled={!hasClearable("models")}
+        title="Delete model files that aren't currently in use"
+      >
+        <i class="flex i-material-symbols-delete-outline-rounded"></i>
+        <span>Clear Unused</span>
+      </button>
+      <button
+        type="button"
+        class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-xl px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
+        onclick={() => tree && revealPath(tree.root_path)}
+        title={`Open Storage in ${fileManagerName()}`}
+      >
+        <i class="flex i-material-symbols-folder-open-rounded"></i>
+        <span>Open Folder</span>
+      </button>
     </div>
-  {:else}
-    <div class="text-default-500 text-sm">Loading…</div>
-  {/if}
-</div>
+  </div>
+</FieldCard>
 
 {#if menuOpen}
   {@const dLabel = deleteLabel()}

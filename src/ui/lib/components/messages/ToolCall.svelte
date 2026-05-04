@@ -8,6 +8,7 @@
   import Expandable from "../Expandable.svelte";
   import { settingsState } from "../../state";
   import { expansionState } from "$lib/state/expansion.svelte";
+  import { expand } from "$lib/shared/animations";
   import { untrack } from "svelte";
 
   let {
@@ -67,9 +68,7 @@
       wasAwaiting = true;
     } else if (
       wasAwaiting &&
-      (status === "complete" ||
-        status === "failed" ||
-        status === "cancelled")
+      (status === "complete" || status === "failed" || status === "cancelled")
     ) {
       expanded = false;
       wasAwaiting = false;
@@ -227,8 +226,7 @@
       if (q.multiselect) return true;
       if (q.allowFreeformInput) {
         const engaged =
-          freeformFocused[i] === true ||
-          (drafts[i]?.freestyleActive ?? false);
+          freeformFocused[i] === true || (drafts[i]?.freestyleActive ?? false);
         if (engaged) return true;
       }
     }
@@ -256,9 +254,9 @@
   // activates buttons and submits when ready. We rely on
   // `e.currentTarget.querySelectorAll` rather than caching the list so it
   // always reflects the current DOM (questions/Submit can appear/disappear).
-  // While `keyboardNav` is true, hover effects on nav elements are
-  // suppressed so the focus border (driven by keyboard) is the only edge
-  // highlight visible. Pointer movement re-enables hover.
+  // While `keyboardNav` is true, hover preview styling is suppressed so the
+  // focused element's inversion preview is the only highlight visible.
+  // Pointer movement re-enables hover.
   let keyboardNav = $state(false);
   function onContainerKeydown(e: KeyboardEvent) {
     if (!toolCall.askUser) return;
@@ -274,8 +272,14 @@
       );
       if (items.length === 0) return;
       const idx = items.indexOf(target);
+      // No prior focus (e.g. mouse hovered then left): forward keys land on
+      // the first item, backward keys on the last.
       const nextIdx =
-        idx === -1 ? 0 : (idx + offset + items.length) % items.length;
+        idx === -1
+          ? offset > 0
+            ? 0
+            : items.length - 1
+          : (idx + offset + items.length) % items.length;
       items[nextIdx].focus();
     };
 
@@ -304,8 +308,21 @@
         return;
     }
   }
+  // Mouse "focus" (hover) and keyboard focus are kept mutually exclusive:
+  // the keyboard side already suppresses hover styling via `keyboardNav`,
+  // and the mouse side blurs any prior keyboard-focused button so arrow
+  // keys after a hover-and-leave start fresh from "no focus". Inputs are
+  // intentionally exempt; blurring them mid-typing would lose the caret.
   function onContainerPointerMove() {
     if (keyboardNav) keyboardNav = false;
+    const active = document.activeElement as HTMLElement | null;
+    if (
+      active &&
+      active.tagName === "BUTTON" &&
+      askUserContainer?.contains(active)
+    ) {
+      active.blur();
+    }
   }
 
   // Wrapper text around the tool name, keyed by status. The name renders as
@@ -413,23 +430,19 @@
     expanded ? "text-default-800 min-w-60" : "text-default-800",
   );
 
-  // Mirrors the bubble's "active edge" treatment onto each input: a thick
-  // border grows on the left side. Color is set globally (only the side
-  // with non-zero width is visible) and width animates via the element's
-  // own `transition-all duration-100`. Two intensities:
-  //   - hover/focus (`edgeBorderClasses`): a dimmer hint, default-700.
-  //     Hover effects are suppressed while `keyboardNav` is active so the
-  //     focused element is the only one with an edge highlight when the
-  //     user is arrow/tab-navigating.
-  //   - selected   (`selectedBorderClasses`): a brighter persistent mark,
-  //     default-900 — used for picked options and an active freestyle
-  //     entry, replacing the old `bg-neutral-*` darkening.
-  let edgeBorderClasses = $derived(
+  // Selected vs. unselected styling for option buttons and the freeform
+  // input: selection fully inverts bg/text. Hover (or focus while
+  // `keyboardNav` is active) just bumps the bg one shade lighter as a
+  // subtle highlight; text stays put. Switching hover→focus during keyboard
+  // nav prevents a stale mouse-hover from competing with the focused
+  // element.
+  let unselectedClasses = $derived(
     keyboardNav
-      ? "focus:border-l-8 focus:border-default-700"
-      : "hover:border-l-8 focus:border-l-8 hover:border-default-700 focus:border-default-700",
+      ? "bg-default-200 text-default-800 focus:bg-default-100"
+      : "bg-default-200 text-default-800 hover:bg-default-100",
   );
-  let selectedBorderClasses = "border-l-8 border-default-900";
+  const selectedClasses =
+    "bg-default-inverted-200 text-default-inverted-800";
 
   // Auto-focus the first nav element when input mode begins so the user can
   // start typing (text input) or arrow-navigate (option button) without
@@ -442,8 +455,7 @@
     const requestId = toolCall.askUser.requestId;
     if (autoFocusedRequestId === requestId) return;
     if (!askUserContainer) return;
-    const first =
-      askUserContainer.querySelector<HTMLElement>("[data-tc-nav]");
+    const first = askUserContainer.querySelector<HTMLElement>("[data-tc-nav]");
     if (!first) return;
     first.focus();
     autoFocusedRequestId = requestId;
@@ -482,7 +494,13 @@
            above still follows screen alignment. -->
       <div class="flex flex-col gap-2 text-left">
         {#if toolCall.description}
-          <div class="text-xs text-default-600">{toolCall.description}</div>
+          <div
+            class="text-xs text-default-600 {alignment === 'right'
+              ? 'text-right'
+              : ''}"
+          >
+            {toolCall.description}
+          </div>
         {/if}
 
         {#if hasAskUser && toolCall.askUser}
@@ -494,7 +512,7 @@
             onpointermove={onContainerPointerMove}
           >
             {#each toolCall.askUser.questions as q, qi (qi)}
-              <div class="flex flex-col gap-1">
+              <div class="flex flex-col gap-2">
                 <div class="text-sm">{q.question}</div>
                 {#if q.options}
                   <div class="flex flex-col gap-1">
@@ -502,13 +520,14 @@
                       <button
                         type="button"
                         data-tc-nav
-                        class="text-xs px-2 py-1 h-8 rounded cursor-pointer text-left outline-none bg-default-200 transition-all duration-100 {drafts[
+                        class="text-xs px-2 py-1 h-8 rounded cursor-pointer text-left outline-none transition-colors duration-100 {drafts[
                           qi
                         ]?.picks.includes(opt.value)
-                          ? selectedBorderClasses
-                          : edgeBorderClasses}"
+                          ? selectedClasses
+                          : unselectedClasses}"
                         title={opt.description}
-                        onclick={() => togglePick(qi, opt.value, !!q.multiselect)}
+                        onclick={() =>
+                          togglePick(qi, opt.value, !!q.multiselect)}
                       >
                         {opt.label}
                       </button>
@@ -518,11 +537,11 @@
                     <input
                       type="text"
                       data-tc-nav
-                      class="rounded block w-full h-8 px-2 outline-none text-xs bg-default-200 text-default-800 transition-all duration-100 {drafts[
+                      class="rounded block w-full h-8 px-2 outline-none -mt-1 text-xs transition-colors duration-100 {drafts[
                         qi
                       ]?.freestyleActive
-                        ? selectedBorderClasses
-                        : edgeBorderClasses}"
+                        ? selectedClasses
+                        : unselectedClasses}"
                       placeholder="Or type your own..."
                       value={drafts[qi]?.text ?? ""}
                       oninput={(e) =>
@@ -535,7 +554,7 @@
                   <input
                     type="text"
                     data-tc-nav
-                    class="bg-default-200 text-default-800 rounded block w-full h-8 px-2 outline-none text-xs transition-all duration-100 {edgeBorderClasses}"
+                    class="bg-default-200 text-default-800 rounded block w-full h-8 px-2 outline-none text-xs transition-colors duration-100"
                     value={drafts[qi]?.text ?? ""}
                     oninput={(e) =>
                       setText(qi, (e.target as HTMLInputElement).value)}
@@ -543,16 +562,21 @@
                 {/if}
               </div>
             {/each}
-            {#if requiresSubmit}
-              <button
-                type="button"
-                data-tc-nav
-                class="self-end text-xs px-3 py-1 rounded bg-default-200 text-default-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer outline-none transition-all duration-100 {edgeBorderClasses}"
-                disabled={!readyToSubmit(toolCall.askUser.questions)}
-                onclick={submit}
-              >
-                Submit
-              </button>
+            {#if requiresSubmit && readyToSubmit(toolCall.askUser.questions)}
+              <!-- Wrapper carries the height transition so the button itself
+                   keeps its natural padding; expand animates max-height +
+                   opacity from 0 and is gated by the global animation
+                   settings. -->
+              <div transition:expand class="self-end">
+                <button
+                  type="button"
+                  data-tc-nav
+                  class="text-xs px-3 py-1 rounded bg-default-200 text-default-800 cursor-pointer outline-none transition-colors duration-100"
+                  onclick={submit}
+                >
+                  Submit
+                </button>
+              </div>
             {/if}
           </div>
         {/if}

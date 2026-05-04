@@ -33,9 +33,7 @@
         ? "number"
         : "text",
   );
-  const isNumeric = $derived(
-    field.type === "number" || field.type === "float",
-  );
+  const isNumeric = $derived(field.type === "number" || field.type === "float");
 </script>
 
 <FieldCard {field} {error} {horizontal} {onReset}>
@@ -55,7 +53,7 @@
           onChange(field.id, (e.target as HTMLInputElement).checked)}
       />
       <div
-        class="w-full h-8 relative bg-default-300 peer-focus:outline-none rounded-lg peer peer-checked:after:translate-x-full peer-checked:after:border-white peer-checked:after:content-['on'] after:content-['off'] after:text-center after:text-xs after:content-center after:uppercase after:absolute after:top-0.35em after:left-0.35em after:bg-default-200 after:text-default-900 after:rounded-lg after:h-1.85em after:w-[calc(50%-0.35em)] after:transition-all peer-checked:bg-blue-500"
+        class="w-full h-8 relative bg-default-300 peer-focus:outline-none rounded-lg peer peer-checked:after:translate-x-full peer-checked:after:border-white peer-checked:after:content-['on'] after:content-['off'] after:text-center after:text-xs after:content-center after:uppercase after:absolute after:top-0.35em after:left-0.35em after:bg-default-200 after:text-default-900 after:rounded-lg after:h-1.85em after:w-[calc(50%-0.35em)] after:transition-all peer-checked:bg-neutral-200"
       ></div>
     </label>
   {:else if field.type === "select" || field.type === "monitor"}

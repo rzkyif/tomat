@@ -536,8 +536,9 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         fields: [
           {
             id: "llm.preset",
-            name: "",
-            description: "",
+            name: "Preset",
+            description:
+              "Pick a starter model. Selecting a preset replaces the model paths and tuning below. Editing any of those settings switches this to Custom.",
             type: "preset",
             defaultValue: "0.8b",
             presetConfig: {
@@ -814,8 +815,9 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         fields: [
           {
             id: "prompts.defaultSystemPrompt.preset",
-            name: "",
-            description: "",
+            name: "Preset",
+            description:
+              "Pick a starter system prompt sent at the start of every chat. Selecting a preset replaces the prompt text below. Editing the prompt switches this to Custom.",
             type: "preset",
             defaultValue: "disabled",
             presetConfig: {
@@ -1180,7 +1182,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             type: "boolean",
             defaultValue: true,
             advanced: true,
-            descriptionTier: "always",
+            descriptionTier: "ondemand",
           },
         ],
       },
@@ -1397,8 +1399,9 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
         fields: [
           {
             id: "stt.preset",
-            name: "",
-            description: "",
+            name: "Preset",
+            description:
+              "Pick a starter model. Selecting a preset replaces the model path and decoding settings below. Editing any of those settings switches this to Custom.",
             type: "preset",
             defaultValue: "small",
             presetConfig: {
@@ -1822,7 +1825,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
             description: "Live memory and CPU usage for each local service.",
             type: "services",
             defaultValue: "",
-            descriptionTier: "none",
+            descriptionTier: "ondemand",
           },
           {
             id: "usage.storage",

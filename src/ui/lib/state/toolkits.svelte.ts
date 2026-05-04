@@ -177,7 +177,7 @@ class ToolkitsState {
             emit({
               kind: "tool_error",
               callId,
-              error: "lost connection to sidecar",
+              error: "Lost connection to sidecar",
             });
           } catch (err) {
             console.error("[toolkits] stranded call cleanup failed:", err);

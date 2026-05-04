@@ -5,15 +5,21 @@
  * don't have to be wired through the component tree.
  */
 
+import type { DownloadPlan } from "$lib/shared/download";
+
 type ConfirmRequest = {
   title: string;
   message: string;
   confirmLabel?: string;
   destructive?: boolean;
   onConfirm: () => void | Promise<void>;
+  onCancel?: () => void;
   /** When true, render as a one-button notice (no Cancel). The `onConfirm`
    *  callback is optional in this mode. */
   alert?: boolean;
+  /** When set, render the list of files to download with a size total
+   *  alongside the message. */
+  downloads?: DownloadPlan[];
 };
 
 class ConfirmState {
@@ -35,7 +41,9 @@ class ConfirmState {
   }
 
   cancel() {
+    const p = this.pending;
     this.pending = null;
+    p?.onCancel?.();
   }
 
   async confirm() {

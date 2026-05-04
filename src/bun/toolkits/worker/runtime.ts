@@ -95,7 +95,7 @@ async function handleBoot(id: string, entryPath: string): Promise<void> {
     const mod = (await import(entryPath)) as Record<string, unknown>;
     const metadata = mod.METADATA as ToolkitMetadata | undefined;
     if (!metadata || typeof metadata !== "object") {
-      throw new Error("toolkit does not export METADATA");
+      throw new Error("Toolkit does not export METADATA");
     }
     if (!Array.isArray(metadata.tools)) {
       throw new Error("METADATA.tools must be an array");
@@ -122,7 +122,7 @@ async function handleCall(msg: {
     post({
       kind: "tool_error",
       callId: msg.callId,
-      error: "toolkit module is not loaded",
+      error: "Toolkit module is not loaded",
     });
     return;
   }
@@ -132,7 +132,7 @@ async function handleCall(msg: {
     post({
       kind: "tool_error",
       callId: msg.callId,
-      error: `toolkit does not export function "${msg.fnExport}"`,
+      error: `Toolkit does not export function "${msg.fnExport}"`,
     });
     return;
   }
@@ -168,7 +168,7 @@ async function handleCall(msg: {
     askUser(questions) {
       return new Promise<AskUserAnswer[]>((resolve, reject) => {
         if (ctrl.signal.aborted) {
-          reject(new Error("tool call cancelled"));
+          reject(new Error("User interrupted"));
           return;
         }
         const requestId = randomId();
@@ -206,7 +206,7 @@ async function handleCall(msg: {
     // stay suspended if it raced with cancellation.
     for (const p of entry.pendingAskUser.values()) {
       try {
-        p.reject(new Error("tool call ended"));
+        p.reject(new Error("Tool call ended"));
       } catch {
         /* ignore */
       }
@@ -219,7 +219,7 @@ function handleCancel(callId: string): void {
   if (!entry) return;
   entry.ctrl.abort();
   for (const p of entry.pendingAskUser.values()) {
-    p.reject(new Error("tool call cancelled"));
+    p.reject(new Error("User interrupted"));
   }
   entry.pendingAskUser.clear();
 }

@@ -8,7 +8,7 @@
     type SnippetPlacement,
   } from "$lib/shared/snippets";
   import { snippetsState, confirmState } from "../../../state";
-  import FieldDescription from "./FieldDescription.svelte";
+  import FieldCard from "./FieldCard.svelte";
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -154,16 +154,7 @@
   }
 </script>
 
-<div
-  class="flex flex-col gap-2 px-4 pt-2 pb-3 bg-default-200 rounded-2xl border-2 border-transparent"
->
-  <div class="flex flex-col">
-    <div class="text-default-800">{field.name}</div>
-    {#if field.description}
-      <FieldDescription text={field.description} />
-    {/if}
-  </div>
-
+<FieldCard {field}>
   <div class="flex items-center gap-2">
     {#if snippetsState.snippets.length > 0}
       <div class="relative flex-1">
@@ -290,4 +281,4 @@
       </div>
     </div>
   {/if}
-</div>
+</FieldCard>

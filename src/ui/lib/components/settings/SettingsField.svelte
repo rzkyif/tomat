@@ -34,7 +34,7 @@
   {:else if field.type === "multiline"}
     <MultilineField {field} {error} {onChange} {onReset} />
   {:else if field.type === "services"}
-    <ServicesField {field} />
+    <ServicesField {field} {horizontal} />
   {:else if field.type === "storage"}
     <StorageField {field} />
   {:else if field.type === "snippets"}

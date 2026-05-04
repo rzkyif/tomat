@@ -4,7 +4,7 @@
   import type { PresetOption } from "$lib/shared/settings";
   import type { Monitor } from "$lib/shared/types";
   import Bubble from "../Bubble.svelte";
-  import { settingsState, serversState } from "../../state";
+  import { settingsState, serversState, confirmState } from "../../state";
   import {
     evalCondition,
     findField,
@@ -21,7 +21,6 @@
   import SettingsSidebar from "./SettingsSidebar.svelte";
   import SettingsSection from "./SettingsSection.svelte";
   import SettingsField from "./SettingsField.svelte";
-  import DownloadConfirmationModal from "./DownloadConfirmationModal.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
   import {
     collectDownloadCandidates,
@@ -64,10 +63,6 @@
   let scrollViewportHeight = $state(0);
   let fieldsContainerEl: HTMLDivElement | undefined = $state();
   let showBottomFade = $state(true);
-  let pendingDownload = $state<null | {
-    plans: DownloadPlan[];
-    apply: () => Promise<void>;
-  }>(null);
 
   // Refs to each rendered group section, used by the scroll spy and the
   // sidebar bookmark scrollTo. Keyed by group id.
@@ -223,10 +218,7 @@
     if (candidates.length > 0) {
       const plans = await planDownloads(candidates);
       if (plans.length > 0) {
-        const apply = async () => {
-          await tryApply(key, value);
-        };
-        pendingDownload = { plans, apply };
+        requestDownloadConfirm(plans, () => tryApply(key, value));
         return;
       }
     }
@@ -339,10 +331,7 @@
     if (candidates.length > 0) {
       const plans = await planDownloads(candidates);
       if (plans.length > 0) {
-        const apply = async () => {
-          await applyPresetUpdates(updates);
-        };
-        pendingDownload = { plans, apply };
+        requestDownloadConfirm(plans, () => applyPresetUpdates(updates));
         return;
       }
     }
@@ -355,16 +344,20 @@
     reEvaluateDeps(...Object.keys(updates));
   }
 
-  async function confirmPendingDownload() {
-    if (!pendingDownload) return;
-    const { apply } = pendingDownload;
-    pendingDownload = null;
-    await apply();
-  }
-
-  function cancelPendingDownload() {
-    pendingDownload = null;
-    settingsState.currentSettings = { ...settingsState.currentSettings };
+  function requestDownloadConfirm(
+    plans: DownloadPlan[],
+    apply: () => Promise<void>,
+  ) {
+    confirmState.request({
+      title: "Download required",
+      message: `The following file${plans.length === 1 ? "" : "s"} will be downloaded to ~/.tomat/models/:`,
+      confirmLabel: "Download",
+      downloads: plans,
+      onConfirm: apply,
+      onCancel: () => {
+        settingsState.currentSettings = { ...settingsState.currentSettings };
+      },
+    });
   }
 
   function reEvaluateDeps(...keys: string[]) {
@@ -701,14 +694,6 @@
       ></div>
     </div>
   </div>
-
-  {#if pendingDownload}
-    <DownloadConfirmationModal
-      plans={pendingDownload.plans}
-      onConfirm={confirmPendingDownload}
-      onCancel={cancelPendingDownload}
-    />
-  {/if}
 
   <ConfirmModal />
 </Bubble>

@@ -3,6 +3,7 @@
   import { buildPreview, getCommandSettingIds } from "$lib/shared/command";
   import type { CommandType } from "$lib/shared/command";
   import type { SettingField } from "$lib/shared/settings";
+  import FieldCard from "./FieldCard.svelte";
 
   let { field } = $props<{
     field: SettingField;
@@ -22,10 +23,7 @@
 </script>
 
 {#if field.commandType}
-  <div
-    class="flex flex-col gap-2 max-w-full overflow-clip px-4 pt-2 pb-3 text-base rounded-2xl bg-default-200"
-  >
-    <div class="text-default-700">Command Preview</div>
+  <FieldCard {field}>
     <div class="overflow-hidden rounded-lg bg-default-300">
       <div class="overflow-x-auto overflow-y-clip">
         <pre class="flex leading-relaxed m-0"><code
@@ -34,5 +32,5 @@
           ></pre>
       </div>
     </div>
-  </div>
+  </FieldCard>
 {/if}

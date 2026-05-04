@@ -615,7 +615,7 @@ export class ToolkitsService {
       this.broadcast({
         kind: "tool_error",
         callId: frame.callId,
-        error: "toolkit is not enabled",
+        error: "Toolkit is not enabled",
       });
       return;
     }
@@ -624,7 +624,7 @@ export class ToolkitsService {
       this.broadcast({
         kind: "tool_error",
         callId: frame.callId,
-        error: `unknown tool "${frame.toolName}"`,
+        error: `Unknown tool "${frame.toolName}"`,
       });
       return;
     }
@@ -645,7 +645,7 @@ export class ToolkitsService {
         this.broadcast({
           kind: "tool_error",
           callId: frame.callId,
-          error: `arguments must be valid JSON (got ${frame.arguments.slice(0, 80)})`,
+          error: `Arguments must be valid JSON (got ${frame.arguments.slice(0, 80)})`,
         });
         return;
       }
@@ -661,7 +661,7 @@ export class ToolkitsService {
         this.broadcast({
           kind: "tool_error",
           callId: frame.callId,
-          error: `tool arguments failed validation: ${msg}`,
+          error: `Tool arguments failed validation: ${msg}`,
         });
         return;
       }
@@ -740,7 +740,7 @@ export class ToolkitsService {
         this.broadcast({
           kind: "tool_error",
           callId: ev.callId,
-          error: ev.error ?? "tool failed",
+          error: ev.error ?? "Tool failed",
         });
         break;
     }

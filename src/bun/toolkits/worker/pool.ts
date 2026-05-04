@@ -138,7 +138,7 @@ export class WorkerPool {
     }
     await entry.ready;
     if (!entry.metadata) {
-      throw new Error("toolkit did not produce METADATA");
+      throw new Error("Toolkit did not produce METADATA");
     }
     return entry.metadata;
   }
@@ -187,10 +187,11 @@ export class WorkerPool {
         // cleanly abortable the cancel frame lands; if not, the next
         // runCall will observe a busy worker and terminate/respawn.
         const fire = () => {
+          const seconds = (totalMs / 1000).toFixed(1).replace(/\.0$/, "");
           const timeoutEvent: ToolCallEvent = {
             kind: "tool_error",
             callId: opts.callId,
-            error: `tool call timed out after ${totalMs}ms`,
+            error: `Tool call timed out after ${seconds}s`,
           };
           try {
             opts.onEvent(timeoutEvent);
@@ -258,7 +259,7 @@ export class WorkerPool {
 
     for (const [callId, emit] of entry.inFlight) {
       try {
-        emit({ kind: "tool_error", callId, error: "worker terminated" });
+        emit({ kind: "tool_error", callId, error: "Toolkit worker terminated" });
       } catch (err) {
         console.error("[toolkits/worker/pool] forwarding terminate error failed:", err);
       }
@@ -350,7 +351,7 @@ export class WorkerPool {
       entry.inFlight.clear();
       for (const [callId, emit] of inflight) {
         try {
-          emit({ kind: "tool_error", callId, error: `worker terminated: ${reason}` });
+          emit({ kind: "tool_error", callId, error: `Toolkit worker terminated: ${reason}` });
         } catch (err) {
           console.error("[toolkits/worker/pool] forwarding terminal error failed:", err);
         }
