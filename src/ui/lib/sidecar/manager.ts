@@ -8,9 +8,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { buildArgs } from "$lib/shared/command";
-import { serversState, settingsState } from "../state";
+import type { DownloadItem } from "$lib/shared/types";
+import { downloadsState, serversState, settingsState } from "../state";
 
-export type ServerStatus = "Disabled" | "Error" | "Downloading" | "Loading" | "Running";
+export type ServerStatus = "Disabled" | "Error" | "Loading" | "Running";
 
 export interface ServerStatusUpdate {
   server: "llm" | "stt" | "bun";
@@ -24,6 +25,9 @@ export async function setupSidecarListeners() {
     console.log("[sidecar:event]", event.payload);
     serversState.updateStatus(event.payload);
   });
+  await listen<DownloadItem[]>("download-queue", (event) => {
+    downloadsState.items = event.payload;
+  });
   // The bun sidecar is started by Rust setup() before this listener attaches,
   // so its initial Loading/Running events are lost. Seed from a snapshot so
   // the UI doesn't fall back to the "Disabled" default.
@@ -34,6 +38,11 @@ export async function setupSidecarListeners() {
     }
   } catch (e) {
     console.warn("[sidecar] get_server_statuses failed:", e);
+  }
+  try {
+    downloadsState.items = await invoke<DownloadItem[]>("download_state");
+  } catch (e) {
+    console.warn("[downloads] download_state failed:", e);
   }
 }
 
@@ -81,4 +90,18 @@ export async function restartServerIfNeed(type: "llm" | "stt") {
     mmprojPath,
     checkUrl,
   });
+}
+
+/// Bring up every locally-managed service the persisted settings call
+/// for: llm + stt sidecars and the TTS engine. Used by the startup path
+/// when the disk has every required file already, and by the Settings
+/// ConfirmModal once the user has approved a missing-files download
+/// batch. Centralised so both paths drive identical bring-up.
+export async function startConfiguredServices() {
+  await restartServerIfNeed("llm");
+  await restartServerIfNeed("stt");
+  if (settingsState.currentSettings["tts.enabled"]) {
+    const { ttsState } = await import("$lib/state/tts.svelte");
+    void ttsState.setEnabled(true);
+  }
 }

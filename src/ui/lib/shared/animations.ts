@@ -8,7 +8,9 @@
 import { settingsState } from "$lib/state";
 import type { Alignment } from "$lib/shared/types";
 
-export const BASE_MS = 200;
+export const BASE_MS = 267;
+
+export const CSS_EASING = "cubic-bezier(0.4, 0, 0.2, 1)";
 
 // cubic-bezier(0.4, 0, 0.2, 1): material "standard" easing.
 function easeInOut(t: number): number {
@@ -36,145 +38,195 @@ export function enableMessageAnimations() {
   messageAnimationsReady = true;
 }
 
-export function messageEnter(
-  node: Element,
-  { alignment, msgId }: { alignment: Alignment; msgId?: string },
-) {
+/**
+ * Imperatively run the per-message entry animation: a two-phase rAF where
+ * phase A grows max-height (so neighbours don't jump) and phase B slides +
+ * fades the bubble in from the alignment-appropriate edge.
+ *   - `msgId` is used to dedupe replays: a bubble that's already been
+ *     animated stays animated even if its parent reshuffles (e.g. when
+ *     MessageStackGroup regroups).
+ * No outro: there is no symmetric exit animation, removals are instant.
+ */
+export function runMessageEnter(node: HTMLElement, alignment: Alignment, msgId?: string): void {
   if (msgId) {
-    if (messagesSeen.has(msgId)) return { duration: 0 };
+    if (messagesSeen.has(msgId)) return;
     messagesSeen.add(msgId);
   }
-  if (!messageAnimationsReady) return { duration: 0 };
+  if (!messageAnimationsReady) return;
 
-  const height = (node as HTMLElement).offsetHeight;
-  const duration = getDuration(BASE_MS);
-  if (!duration) return { duration: 0 };
+  const dur = getDuration(BASE_MS);
+  if (dur <= 0) return;
 
-  return {
-    duration,
-    css: (t: number) => {
-      const phaseA = Math.min(1, t * 2);
-      const phaseB = Math.max(0, (t - 0.5) * 2);
-      const heightProgress = easeInOut(phaseA);
-      const slideProgress = easeInOut(phaseB);
-      const h = height * heightProgress;
-      const travel = 100 * (1 - slideProgress);
-      let transform: string;
-      if (alignment === "left") transform = `translateX(${-travel}%)`;
-      else if (alignment === "right") transform = `translateX(${travel}%)`;
-      else transform = `translateY(${travel}%)`;
-      return `max-height: ${h}px; overflow: hidden; opacity: ${slideProgress}; transform: ${transform};`;
-    },
+  const height = node.offsetHeight;
+  const startTime = performance.now();
+
+  const setOffscreen = () => {
+    node.style.maxHeight = "0";
+    node.style.overflow = "hidden";
+    node.style.opacity = "0";
+    if (alignment === "left") node.style.transform = "translateX(-100%)";
+    else if (alignment === "right") node.style.transform = "translateX(100%)";
+    else node.style.transform = "translateY(100%)";
   };
-}
 
-type SlideDirection = "in" | "out";
+  setOffscreen();
+  void node.offsetHeight;
 
-export function slidePanel(
-  _node: Element,
-  { alignment, direction }: { alignment: Alignment; direction: SlideDirection },
-) {
-  const duration = getDuration(BASE_MS);
-  if (!duration) return { duration: 0 };
-
-  // Sequence: outgoing panel slides first, then incoming slides in.
-  const delay = direction === "in" ? duration : 0;
-
-  return {
-    duration,
-    delay,
-    css: (t: number) => {
-      const p = easeInOut(t);
-      const travel = 100 * (1 - p);
-      let transform: string;
-      if (alignment === "left") transform = `translateX(${-travel}%)`;
-      else if (alignment === "right") transform = `translateX(${travel}%)`;
-      else if (direction === "in") transform = `translateY(${travel}%)`;
-      else transform = `translateY(${-travel}%)`;
-      return `opacity: ${p}; transform: ${transform};`;
-    },
+  const frame = (now: number) => {
+    const t = Math.min(1, (now - startTime) / dur);
+    if (t >= 1) {
+      node.style.maxHeight = "";
+      node.style.overflow = "";
+      node.style.opacity = "";
+      node.style.transform = "";
+      return;
+    }
+    const phaseA = Math.min(1, t * 2);
+    const phaseB = Math.max(0, (t - 0.5) * 2);
+    const heightProgress = easeInOut(phaseA);
+    const slideProgress = easeInOut(phaseB);
+    const h = height * heightProgress;
+    const travel = 100 * (1 - slideProgress);
+    let transform: string;
+    if (alignment === "left") transform = `translateX(${-travel}%)`;
+    else if (alignment === "right") transform = `translateX(${travel}%)`;
+    else transform = `translateY(${travel}%)`;
+    node.style.maxHeight = `${h}px`;
+    node.style.overflow = "hidden";
+    node.style.opacity = `${slideProgress}`;
+    node.style.transform = transform;
+    requestAnimationFrame(frame);
   };
+
+  requestAnimationFrame(frame);
 }
 
 /**
- * Pins the given panel element to its current viewport rect with
- * `position: fixed`. Call this BEFORE flipping the reactive state that
- * triggers the panel swap; otherwise the incoming panel has already mounted
- * by the time the outgoing's transition function fires, and the outgoing's
- * measured position reflects post-mount layout shifts, not the original spot
- * the user was looking at.
- *
- * NOTE: Requires no transformed / perspective / filtered ancestor (those
- * trap `position: fixed` inside that ancestor's coordinate space, which
- * causes the pinned element to move when the ancestor resizes/repositions).
- * In this app we keep the window-slide transform off of `main` while it's
- * in the visible "in" state so this precondition holds.
+ * Imperatively animate a label's horizontal slide between visible (natural
+ * width, opacity 1) and collapsed (width 0, opacity 0). Same shape as the
+ * panel slide in +page.svelte: set transition, then assign the target style.
+ *   - `instant`: skip the animation (first mount, or animations disabled).
+ * Width is measured via `scrollWidth` while temporarily releasing the
+ * explicit width; this lets the same span handle dynamic content (e.g.
+ * "Downloads" → "Downloading…") without caching a stale natural width.
  */
-export function pinPanelForOutro(el: HTMLElement | null | undefined) {
-  if (!el) return;
-  const rect = el.getBoundingClientRect();
-  el.style.position = "fixed";
-  el.style.top = `${rect.top}px`;
-  el.style.left = `${rect.left}px`;
-  el.style.width = `${rect.width}px`;
-  el.style.height = `${rect.height}px`;
-}
+export function applyLabelCollapse(el: HTMLElement, collapsed: boolean, instant: boolean): void {
+  const dur = instant ? 0 : getDuration();
+  const trans = `width ${dur}ms ${CSS_EASING}, opacity ${dur}ms ${CSS_EASING}`;
 
-/**
- * Slide + fade transition used when toggling between the normal scroll-spy
- * group view and search results. Convention from the previous group-switch
- * animation:
- *   "up":   incoming panel slides in from above, outgoing falls down
- *   "down": incoming panel slides in from below, outgoing rises up
- * Search mode lives "above" the group list (its index is -1), so entering
- * search uses direction "up" and exiting uses direction "down".
- */
-export function searchSlide(
-  _node: Element,
-  { direction, phase }: { direction: "up" | "down"; phase: "in" | "out" },
-) {
-  const duration = getDuration(BASE_MS);
-  if (!duration) return { duration: 0 };
-
-  const sign =
-    (direction === "up" && phase === "in") || (direction === "down" && phase === "out") ? -1 : 1;
-
-  return {
-    duration,
-    css: (t: number) => {
-      const p = easeInOut(t);
-      const travel = 100 * (1 - p) * sign;
-      return `opacity: ${p}; transform: translateY(${travel}%);`;
-    },
-  };
-}
-
-export function expand(node: Element) {
-  const duration = getDuration(BASE_MS);
-  if (!duration) return { duration: 0 };
-
-  const htmlNode = node as HTMLElement;
-
-  // Uses `tick` (per-frame JS) instead of `css` (pre-baked keyframes) so the
-  // target height tracks scrollHeight as it grows. Necessary for content that
-  // renders asynchronously, e.g. MessageMarkdown in ReasoningTrace shows a
-  // spinner first and only fills in the real HTML after `marked` + DOMPurify
-  // complete. A pre-baked keyframe would animate to the spinner's height and
-  // then the element would snap to full size when CSS clears at t=1.
-  return {
-    duration,
-    tick: (t: number) => {
-      if (t >= 1) {
-        htmlNode.style.maxHeight = "";
-        htmlNode.style.overflow = "";
-        htmlNode.style.opacity = "";
-      } else {
-        const p = easeInOut(t);
-        const height = htmlNode.scrollHeight;
-        htmlNode.style.maxHeight = `${height * p}px`;
-        htmlNode.style.overflow = "hidden";
-        htmlNode.style.opacity = `${p}`;
+  if (collapsed) {
+    if (dur === 0) {
+      el.style.transition = "";
+      el.style.width = "0px";
+      el.style.opacity = "0";
+      return;
+    }
+    const w = el.scrollWidth || el.getBoundingClientRect().width;
+    el.style.transition = "none";
+    el.style.width = `${w}px`;
+    el.style.opacity = "1";
+    void el.offsetHeight;
+    el.style.transition = trans;
+    el.style.width = "0px";
+    el.style.opacity = "0";
+  } else {
+    el.style.transition = "none";
+    el.style.width = "auto";
+    el.style.opacity = "1";
+    const w = el.scrollWidth;
+    if (dur === 0) {
+      el.style.width = "";
+      return;
+    }
+    el.style.width = "0px";
+    el.style.opacity = "0";
+    void el.offsetHeight;
+    el.style.transition = trans;
+    el.style.width = `${w}px`;
+    el.style.opacity = "1";
+    // Drop the explicit width once the transition finishes so the span can
+    // resize naturally if its content later changes.
+    setTimeout(() => {
+      if (el.style.width === `${w}px`) {
+        el.style.transition = "";
+        el.style.width = "";
       }
+    }, dur);
+  }
+}
+
+export interface ExpandHandle {
+  cancel(): void;
+}
+
+/**
+ * Drive a per-frame max-height + opacity animation on `el`. Used by
+ * <Expand>. Per-frame (rather than CSS transition to a baked-in scrollHeight)
+ * so the target height tracks scrollHeight as it grows. Necessary for
+ * content that renders asynchronously, e.g. MessageMarkdown in ReasoningTrace
+ * shows a spinner first and only fills in the real HTML after `marked` +
+ * DOMPurify complete.
+ *   - direction "open":  t goes 0→1, ends with styles cleared (natural)
+ *   - direction "close": t goes 1→0, ends fully hidden
+ * `onComplete` fires after the target state is reached. The returned handle
+ * lets callers cancel an in-flight animation.
+ */
+export function runExpand(
+  el: HTMLElement,
+  direction: "open" | "close",
+  onComplete?: () => void,
+): ExpandHandle {
+  const dur = getDuration();
+  if (dur <= 0) {
+    if (direction === "open") {
+      el.style.maxHeight = "";
+      el.style.overflow = "";
+      el.style.opacity = "";
+    } else {
+      el.style.maxHeight = "0";
+      el.style.overflow = "hidden";
+      el.style.opacity = "0";
+    }
+    onComplete?.();
+    return { cancel: () => {} };
+  }
+
+  let cancelled = false;
+  let rafId = 0;
+  const startTime = performance.now();
+
+  const frame = (now: number) => {
+    if (cancelled) return;
+    const elapsed = (now - startTime) / dur;
+    const t = direction === "open" ? Math.min(1, elapsed) : Math.max(0, 1 - elapsed);
+    const done = (direction === "open" && t >= 1) || (direction === "close" && t <= 0);
+    if (done) {
+      if (direction === "open") {
+        el.style.maxHeight = "";
+        el.style.overflow = "";
+        el.style.opacity = "";
+      } else {
+        el.style.maxHeight = "0";
+        el.style.overflow = "hidden";
+        el.style.opacity = "0";
+      }
+      onComplete?.();
+      return;
+    }
+    const p = easeInOut(t);
+    const height = el.scrollHeight;
+    el.style.maxHeight = `${height * p}px`;
+    el.style.overflow = "hidden";
+    el.style.opacity = `${p}`;
+    rafId = requestAnimationFrame(frame);
+  };
+
+  rafId = requestAnimationFrame(frame);
+
+  return {
+    cancel() {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
     },
   };
 }

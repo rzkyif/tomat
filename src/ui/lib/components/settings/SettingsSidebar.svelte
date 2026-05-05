@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { slide } from "svelte/transition";
   import { SETTINGS_SCHEMA, isGroupVisible } from "$lib/shared/settings";
   import type { ServerStatus, ServerStatusUpdate } from "$lib/shared/types";
   import { settingsState } from "../../state";
-  import { getDuration } from "$lib/shared/animations";
   import ServerStatusChip from "./ServerStatusChip.svelte";
+  import DownloadsButton from "./DownloadsButton.svelte";
+  import CollapsibleLabel from "../CollapsibleLabel.svelte";
 
   let {
     selectedGroupId,
@@ -64,23 +64,21 @@
   const chipBgMap: Record<ServerStatus, string> = {
     Disabled: "bg-default-200",
     Error: "bg-accent-red-200",
-    Downloading: "bg-accent-blue-200",
     Loading: "bg-accent-orange-200",
     Running: "bg-accent-green-200",
   };
 
-  // Left padding stays constant so icons line up at the same X position in
-  // both modes. Right padding is only widened when the row actually has a
-  // text label next to its icon. Icon-only rows stay compact rectangles.
+  // Gap matches pl-1.5 so the space between icon and label mirrors the icon's
+  // left inset and stays constant across the collapse. The label width and
+  // the trailing pr-2.5 collapse together so the row reduces to a centred
+  // icon (pl-1.5 + icon + gap-1.5 with empty label + pr-0). Icon-only rows
+  // skip the trailing-pad collapse to stay symmetric rectangles.
   function rowClass(hasText: boolean): string {
     const showText = hasText && !collapsed;
-    return `flex items-center gap-2 h-8 pl-1.5 ${showText ? "pr-2.5" : "pr-1.5"} rounded-lg transition-[padding,colors,background-color] duration-200`;
+    const padRight = hasText ? (showText ? "pr-2.5" : "pr-0") : "pr-1.5";
+    return `flex items-center h-8 pl-1.5 ${padRight} gap-1.5 rounded-lg transition-[padding,colors,background-color] duration-200`;
   }
 
-  // Text spans use Svelte's slide transition with axis "x" so the sidebar
-  // resizes smoothly as labels appear/disappear. Duration honours the
-  // appearance.animations* settings via getDuration().
-  const slideX = $derived({ axis: "x" as const, duration: getDuration() });
 </script>
 
 <div class="flex flex-col gap-2 overflow-y-auto justify-between">
@@ -115,14 +113,9 @@
             ? group.icon
             : (group.iconInactive ?? group.icon)}"
         ></i>
-        {#if !collapsed}
-          <span
-            transition:slide={slideX}
-            class="text-base text-left whitespace-nowrap"
-          >
-            {group.name}
-          </span>
-        {/if}
+        <CollapsibleLabel {collapsed} class="text-base text-left">
+          {group.name}
+        </CollapsibleLabel>
       </button>
     {/each}
   </div>
@@ -165,6 +158,8 @@
       </div>
     {/if}
 
+    <DownloadsButton {collapsed} />
+
     <button
       class="hover:cursor-pointer {rowClass(true)} {showAdvanced
         ? 'bg-default-300 text-default-900'
@@ -182,14 +177,9 @@
           ? 'i-material-symbols-toggle-on'
           : 'i-material-symbols-toggle-off-outline'}"
       ></i>
-      {#if !collapsed}
-        <span
-          transition:slide={slideX}
-          class="text-base text-left whitespace-nowrap"
-        >
-          Advanced Fields
-        </span>
-      {/if}
+      <CollapsibleLabel {collapsed} class="text-base text-left">
+        Advanced Fields
+      </CollapsibleLabel>
     </button>
 
     <div

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { expand } from "$lib/shared/animations";
+  import Expand from "./Expand.svelte";
   import type { Alignment } from "$lib/shared/types";
 
   let {
@@ -64,15 +64,12 @@
       ></i>
     {/if}
   </button>
-  {#if expanded}
-    <!-- `|global` so the open animation also fires when the body's `{#if}`
-         block is created as a side effect of an ancestor mounting (e.g.,
-         MessageStackGroup re-mounting the bubble into a standalone row
-         when the user expands it). Without it the body would snap into
-         view; the close animation already works because it runs on a
-         live instance before the layoutExpanded delay tears it down. -->
-    <div transition:expand|global class={isRight ? "text-right" : ""}>
-      {@render children()}
-    </div>
-  {/if}
+  <!-- `animateOnMount` mirrors the previous `in:expand|global`: the open
+       animation runs even when the body mounts as a side effect of an
+       ancestor mount (e.g. MessageStackGroup re-mounting the bubble into a
+       standalone row). On ancestor unmount the wrapper unmounts the body
+       with no animation, matching the previous local out-transition. -->
+  <Expand open={expanded} animateOnMount class={isRight ? "text-right" : ""}>
+    {@render children()}
+  </Expand>
 </div>

@@ -7,17 +7,44 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { vadManager } from "$lib/shared/vad.svelte";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { vadManager } from "./vad.svelte";
 import { settingsState } from "./settings.svelte";
 
 async function windowIsVisible(): Promise<boolean> {
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
     return await getCurrentWindow().isVisible();
   } catch {
     return true;
   }
 }
+
+/**
+ * Tracks whether the main window is currently mid show / hide animation.
+ *
+ * Why: Rust flips its `visible` AtomicBool only after JS finishes the
+ * animation, so a shortcut press during a slide would emit the
+ * opposite-direction event and reverse the slide mid-flight (visible
+ * flicker on spam). +page.svelte calls begin() / end() at the boundaries
+ * of its animations; ShortcutHandler reads it to drop spammed presses.
+ */
+class WindowTransition {
+  private inFlight = false;
+
+  isTransitioning(): boolean {
+    return this.inFlight;
+  }
+
+  begin() {
+    this.inFlight = true;
+  }
+
+  end() {
+    this.inFlight = false;
+  }
+}
+
+export const windowTransition = new WindowTransition();
 
 class ShortcutHandler {
   // Reactive: true while the push-to-talk shortcut is currently being held
@@ -35,6 +62,10 @@ class ShortcutHandler {
   private pressStart = 0;
   private wasVisibleOnPress = false;
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
+  // Set when onPressed bails because a window transition is in flight, so
+  // the matching onReleased is also dropped (otherwise PTT release would
+  // still fire `request_hide_main_window` or toggle VAD off the half-press).
+  private skipNextRelease = false;
 
   private unlistenPressed: (() => void) | null = null;
   private unlistenReleased: (() => void) | null = null;
@@ -58,9 +89,19 @@ class ShortcutHandler {
     this.wasVisibleOnPress = false;
     this.pttHolding = false;
     this.pttHoldDuration = 0;
+    this.skipNextRelease = false;
   }
 
   private async onPressed() {
+    // Drop presses landing while the window is mid show / hide animation.
+    // Rust flips its visibility AtomicBool only after JS finishes the
+    // animation, so a pass-through press would emit the opposite-direction
+    // event and reverse the slide mid-flight (visible flicker on spam).
+    if (windowTransition.isTransitioning()) {
+      this.skipNextRelease = true;
+      return;
+    }
+
     const mode = settingsState.currentSettings["stt.activation"];
     const duration = Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
     this.pressStart = Date.now();
@@ -103,6 +144,11 @@ class ShortcutHandler {
   }
 
   private async onReleased() {
+    if (this.skipNextRelease) {
+      this.skipNextRelease = false;
+      return;
+    }
+
     const mode = settingsState.currentSettings["stt.activation"];
     const duration = Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
     const held = this.pressStart ? Date.now() - this.pressStart : 0;

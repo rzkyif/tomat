@@ -168,7 +168,7 @@
             <span class="text-default-500 text-xs">+</span>
           {/if}
           <kbd
-            class="bg-default-100 text-default-800 px-1.5 py-0.5 rounded border border-default-400 text-xs font-mono uppercase"
+            class="bg-default-200 text-default-800 px-1.5 py-0.5 rounded text-xs font-mono uppercase"
           >
             {seg}
           </kbd>

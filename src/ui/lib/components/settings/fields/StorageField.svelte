@@ -1,42 +1,23 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { SECRET_KEYS, type SettingField } from "$lib/shared/settings";
+  import { formatBytes } from "$lib/shared/format";
   import {
-    EMBED_BASE_FILES,
-    SECRET_KEYS,
-    TTS_BASE_FILES,
-    type SettingField,
-  } from "$lib/shared/settings";
+    collectModelFiles,
+    collectPaths,
+    computeLockReasons,
+    expandToFiles,
+    findNode,
+    isSnippetPath,
+    visibleRows,
+    type StorageNode,
+    type StorageTree,
+  } from "$lib/shared/storageTree";
   import { confirmState, settingsState, snippetsState } from "../../../state";
   import FieldCard from "./FieldCard.svelte";
 
   let { field } = $props<{ field: SettingField }>();
-
-  type StorageFile = {
-    kind: "file";
-    name: string;
-    path: string;
-    size: number;
-  };
-  type StorageFolder = {
-    kind: "folder";
-    name: string;
-    path: string;
-    size: number;
-    children: StorageNode[];
-  };
-  type StorageNode = StorageFile | StorageFolder;
-  type StorageTree = {
-    models: StorageNode[];
-    sessions: StorageNode[];
-    snippets: StorageNode[];
-    total_size: number;
-    models_size: number;
-    sessions_size: number;
-    snippets_size: number;
-    settings_size: number;
-    root_path: string;
-  };
 
   let tree = $state<StorageTree | null>(null);
   let expanded = $state<Set<string>>(new Set());
@@ -49,7 +30,9 @@
   // Maps every locked path (file paths from settings + folder paths whose
   // entire subtree is locked) to a human-readable reason. `.has(p)` answers
   // "is this row locked?", `.get(p)` gives the tooltip text.
-  const lockReasons = $derived(computeLockReasons());
+  const lockReasons = $derived(
+    tree ? computeLockReasons(tree, settingsState.currentSettings) : new Map<string, string>(),
+  );
 
   async function refresh() {
     try {
@@ -69,48 +52,15 @@
     }
   }
 
-  function collectPaths(node: StorageNode, into: Set<string>) {
-    into.add(node.path);
-    if (node.kind === "folder") {
-      for (const c of node.children) collectPaths(c, into);
-    }
-  }
-
   onMount(() => {
     refresh();
   });
-
-  function formatBytes(b: number): string {
-    if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(2)} GB`;
-    if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(1)} MB`;
-    if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`;
-    return `${b} B`;
-  }
 
   function toggleExpand(key: string) {
     const next = new Set(expanded);
     if (next.has(key)) next.delete(key);
     else next.add(key);
     expanded = next;
-  }
-
-  // Flat list of visible rows (respecting expansion) for range selection
-  function visibleRows(): StorageNode[] {
-    if (!tree) return [];
-    const rows: StorageNode[] = [];
-    const addRoot = (rootKey: string, nodes: StorageNode[]) => {
-      if (!expanded.has(rootKey)) return;
-      for (const n of nodes) {
-        rows.push(n);
-        if (n.kind === "folder" && expanded.has(n.path)) {
-          for (const c of n.children) rows.push(c);
-        }
-      }
-    };
-    addRoot("__models__", tree.models);
-    addRoot("__sessions__", tree.sessions);
-    addRoot("__snippets__", tree.snippets);
-    return rows;
   }
 
   function handleRowClick(e: MouseEvent, node: StorageNode) {
@@ -124,8 +74,8 @@
     }
     const path = node.path;
     const next = new Set(selected);
-    if (e.shiftKey && lastSelectedPath) {
-      const rows = visibleRows()
+    if (e.shiftKey && lastSelectedPath && tree) {
+      const rows = visibleRows(tree, expanded)
         .map((r) => r.path)
         .filter((p) => !lockReasons.has(p));
       const a = rows.indexOf(lastSelectedPath);
@@ -150,79 +100,6 @@
     lastSelectedPath = path;
   }
 
-  /** Convert a HuggingFace-style path (@user/repo/branch/file) to the on-disk path. */
-  function resolveHfToDisk(hfPath: unknown, rootPath: string): string | null {
-    if (typeof hfPath !== "string" || !hfPath.startsWith("@")) return null;
-    const parts = hfPath.slice(1).split("/");
-    if (parts.length < 4) return null;
-    const user = parts[0];
-    const repo = parts[1];
-    const rest = parts.slice(3).join("/");
-    return `${rootPath}/models/${user}/${repo}/${rest}`;
-  }
-
-  function computeLockReasons(): Map<string, string> {
-    const reasons = new Map<string, string>();
-    if (!tree) return reasons;
-    const s = settingsState.currentSettings;
-    const protect = (hf: unknown, reason: string) => {
-      const p = resolveHfToDisk(hf, tree!.root_path);
-      if (p) reasons.set(p, reason);
-    };
-
-    if (s["llm.provider"] !== "external") {
-      protect(s["llm.modelPath"], "Used by LLM");
-      if (s["llm.supportImages"]) {
-        protect(s["llm.mmprojPath"], "Used by LLM vision");
-      }
-    }
-    if (s["stt.enabled"] && s["stt.provider"] !== "external") {
-      protect(s["stt.modelPath"], "Used by Speech-to-Text");
-    }
-    // TTS has no "external" mode - whenever it's enabled, the Kokoro model
-    // + tokenizer files are required.
-    if (s["tts.enabled"]) {
-      for (const hf of TTS_BASE_FILES) protect(hf, "Used by Text-to-Speech");
-    }
-    // Toolkit tool-relevance filtering loads the embedding model at request
-    // time, so deleting it would break the next tool-using turn.
-    if (s["tools.enabled"] && s["tools.filteringEnabled"] !== false) {
-      for (const hf of EMBED_BASE_FILES) protect(hf, "Used by tool filtering");
-    }
-
-    // Promote a folder to "locked" iff every leaf under it is locked. The
-    // reason is the union of child reasons so the tooltip stays informative
-    // even when a repo mixes (say) LLM + vision files.
-    const visit = (node: StorageNode): string | null => {
-      if (node.kind === "file") return reasons.get(node.path) ?? null;
-      if (node.children.length === 0) return null;
-      const childReasons = new Set<string>();
-      for (const c of node.children) {
-        const r = visit(c);
-        if (r === null) return null;
-        for (const part of r.split(", ")) childReasons.add(part);
-      }
-      if (childReasons.size === 0) return null;
-      const merged = [...childReasons].join(", ");
-      reasons.set(node.path, merged);
-      return merged;
-    };
-    for (const root of [tree.models, tree.sessions, tree.snippets]) {
-      for (const n of root) visit(n);
-    }
-    return reasons;
-  }
-
-  function collectModelFiles(): string[] {
-    if (!tree) return [];
-    const out: string[] = [];
-    for (const n of tree.models) {
-      if (n.kind === "file") out.push(n.path);
-      else for (const c of n.children) if (c.kind === "file") out.push(c.path);
-    }
-    return out;
-  }
-
   function hasClearable(
     kind: "models" | "sessions" | "snippets" | "settings",
   ): boolean {
@@ -230,39 +107,7 @@
     if (kind === "settings") return tree.settings_size > 0;
     if (kind === "sessions") return tree.sessions.length > 0;
     if (kind === "snippets") return tree.snippets.length > 0;
-    return collectModelFiles().some((p) => !lockReasons.has(p));
-  }
-
-  function findNode(path: string): StorageNode | null {
-    if (!tree) return null;
-    for (const root of [tree.models, tree.sessions, tree.snippets]) {
-      for (const n of root) {
-        if (n.path === path) return n;
-        if (n.kind === "folder") {
-          for (const c of n.children) if (c.path === path) return c;
-        }
-      }
-    }
-    return null;
-  }
-
-  function expandToFiles(paths: string[]): string[] {
-    const files: string[] = [];
-    for (const p of paths) {
-      const n = findNode(p);
-      if (!n) continue;
-      if (n.kind === "file") files.push(n.path);
-      else {
-        for (const c of n.children) {
-          if (c.kind === "file") files.push(c.path);
-        }
-      }
-    }
-    return files;
-  }
-
-  function isSnippetPath(path: string): boolean {
-    return !!tree && tree.snippets.some((n) => n.path === path);
+    return collectModelFiles(tree).some((p) => !lockReasons.has(p));
   }
 
   async function revealPath(path: string) {
@@ -284,9 +129,10 @@
   function deleteSelectionCounts(): { files: number; folders: number } {
     let files = 0;
     let folders = 0;
+    if (!tree) return { files, folders };
     for (const p of selected) {
       if (lockReasons.has(p)) continue;
-      const n = findNode(p);
+      const n = findNode(tree, p);
       if (!n) continue;
       if (n.kind === "file") files += 1;
       else folders += 1;
@@ -298,8 +144,8 @@
     const { files, folders } = deleteSelectionCounts();
     if (files === 0 && folders === 0) return null;
     const parts: string[] = [];
-    if (files > 0) parts.push(`${files} file${files === 1 ? "" : "s"}`);
     if (folders > 0) parts.push(`${folders} folder${folders === 1 ? "" : "s"}`);
+    if (files > 0) parts.push(`${files} file${files === 1 ? "" : "s"}`);
     return `Delete ${parts.join(" and ")}`;
   }
 
@@ -315,8 +161,8 @@
   }
 
   function deleteSelected() {
-    if (selected.size === 0) return;
-    const all = expandToFiles([...selected]);
+    if (selected.size === 0 || !tree) return;
+    const all = expandToFiles(tree, [...selected]);
     const toDelete = all.filter((p) => !lockReasons.has(p));
     const skipped = all.length - toDelete.length;
     if (toDelete.length === 0) {
@@ -333,10 +179,20 @@
       skipped > 0
         ? ` ${skipped} file${skipped === 1 ? "" : "s"} currently in use will be kept.`
         : "";
-    const touchesSnippets = toDelete.some(isSnippetPath);
+    const { files, folders } = deleteSelectionCounts();
+    const totalSize = toDelete.reduce(
+      (sum, p) => sum + (findNode(tree!, p)?.size ?? 0),
+      0,
+    );
+    const parts: string[] = [];
+    if (folders > 0)
+      parts.push(`${folders} folder${folders === 1 ? "" : "s"}`);
+    if (files > 0) parts.push(`${files} file${files === 1 ? "" : "s"}`);
+    const summary = parts.join(" and ");
+    const touchesSnippets = toDelete.some((p) => isSnippetPath(tree!, p));
     confirmState.request({
       title: "Delete items",
-      message: `Delete ${toDelete.length} file${toDelete.length === 1 ? "" : "s"} from disk?${suffix} This cannot be undone.`,
+      message: `Delete ${summary} (${formatBytes(totalSize)}) from disk?${suffix} This cannot be undone.`,
       destructive: true,
       confirmLabel: "Delete",
       onConfirm: async () => {
@@ -398,7 +254,8 @@
 
   function requestClear(kind: "models" | "sessions" | "snippets" | "settings") {
     if (kind === "models") {
-      const all = collectModelFiles();
+      if (!tree) return;
+      const all = collectModelFiles(tree);
       const toDelete = all.filter((p) => !lockReasons.has(p));
       const skipped = all.length - toDelete.length;
       if (toDelete.length === 0) {

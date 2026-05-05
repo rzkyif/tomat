@@ -10,6 +10,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export interface CaptureMonitorInfo {
   id: string;
@@ -36,7 +37,6 @@ export async function listCaptureMonitors(): Promise<CaptureMonitorInfo[]> {
 /** Capture a monitor as a base64 PNG. Hides the app window during the capture
  *  if it was visible, and restores it afterwards. Returns null on failure. */
 export async function captureMonitor(monitorId: string): Promise<string | null> {
-  const { getCurrentWindow } = await import("@tauri-apps/api/window");
   const win = getCurrentWindow();
 
   let shouldHide = false;
@@ -79,7 +79,6 @@ export async function captureMonitor(monitorId: string): Promise<string | null> 
  *  with macOS retina + multi-monitor edge cases.
  */
 export async function captureRegion(): Promise<string | null> {
-  const { getCurrentWindow } = await import("@tauri-apps/api/window");
   const main = getCurrentWindow();
 
   let mainWasVisible = false;

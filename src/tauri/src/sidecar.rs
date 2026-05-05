@@ -11,13 +11,13 @@
 //! It has no effect on sidecar supervision here, but is called out so the two
 //! code paths don't look mysterious on a cold read.
 
+use crate::download::{DownloadDestination, EnqueueSpec};
 use crate::error::{AppError, AppResult};
 use crate::sidecar_kind::SidecarKind;
 use crate::state::{AppState, Sidecar};
 use crate::types::{ServerStatus, ServerStatusUpdate};
 #[cfg(not(target_os = "windows"))]
 use crate::utils::current_target_triple;
-use futures_util::StreamExt;
 use std::path::PathBuf;
 use std::str::FromStr;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -365,30 +365,6 @@ fn terminate_child_detached(pid: u32, child: CommandChild) {
     });
 }
 
-/// Hugging Face paths for the MiniLM embedding model used by the toolkits
-/// relevance filter. Kept in sync with EMBED_BASE_FILES in
-/// src/lib/shared/settings.ts.
-const EMBED_FILES: &[&str] = &[
-    "@Xenova/all-MiniLM-L6-v2/main/config.json",
-    "@Xenova/all-MiniLM-L6-v2/main/tokenizer.json",
-    "@Xenova/all-MiniLM-L6-v2/main/tokenizer_config.json",
-    "@Xenova/all-MiniLM-L6-v2/main/onnx/model_quantized.onnx",
-];
-
-/// Download the embedding model into `~/.tomat/models/` via the same
-/// downloader used for llama / whisper / kokoro weights. Errors are surfaced
-/// as a log line rather than blocking sidecar startup - the Bun sidecar
-/// gates `/api/embed` on the files existing, so an incomplete download just
-/// means phase-1 tool filtering is disabled until the download completes on
-/// a later run.
-async fn ensure_embedding_model<R: Runtime>(handle: &AppHandle<R>, state: &AppState) {
-    for path in EMBED_FILES {
-        if let Err(e) = ensure_path_internal(handle, state, "bun", path).await {
-            eprintln!("[embedding] download {path} failed: {e}");
-        }
-    }
-}
-
 /// (Re)launch the bun tools sidecar with its canonical args. Used at startup
 /// and on demand (e.g. when TTS is toggled off, to release the ORT session
 /// memory by recycling the process - allocator behavior means in-process
@@ -417,18 +393,72 @@ pub async fn start_bun_sidecar<R: Runtime>(
     )
     .await;
 
-    // Kick off the embedding-model fetch in the background so the first
-    // toolkit-relevance pass doesn't pay the full download cost. The
-    // download emits `sidecar-status` events on the "bun" channel, so the
-    // existing UI surfaces progress without any new wiring.
-    let handle_for_embed = handle.clone();
-    let state_for_embed = state.clone();
-    tauri::async_runtime::spawn(async move {
-        ensure_embedding_model(&handle_for_embed, &state_for_embed).await;
-        emit_status(&handle_for_embed, "bun", ServerStatus::Running, None, None).await;
-    });
-
+    // No auto-fetch happens here. Every download (sidecar models, TTS
+    // assets, toolkit embedding model, etc.) is gated on explicit user
+    // confirmation via the Settings ConfirmModal flow. The bun sidecar
+    // just runs; if the embedding files happen to be missing, the
+    // /api/embed endpoint reports the gap and toolkit relevance is
+    // disabled until the user confirms a download.
     result
+}
+
+/// Resolve a single optional model spec. `None` / empty maps to `Ok(None)`;
+/// non-empty specs are routed through the download manager.
+///
+/// On error: emits an `Error` status and returns `Err(())` if this start is
+/// still current; if it's been superseded, returns `Err(())` without emitting
+/// (so the new start owns the status). Either way the caller bails.
+async fn resolve_optional_path<R: Runtime>(
+    handle: &AppHandle<R>,
+    state: &AppState,
+    server: &str,
+    start_id: u64,
+    spec: Option<String>,
+) -> Result<Option<String>, ()> {
+    let Some(s) = spec else { return Ok(None) };
+    if s.is_empty() {
+        return Ok(None);
+    }
+    match resolve_path_via_downloader(handle, state, server, &s).await {
+        Ok(path) => Ok(Some(path)),
+        Err(_) if !is_current_start(state, server, start_id) => Err(()),
+        Err(e) => {
+            emit_status(
+                handle,
+                server,
+                ServerStatus::Error,
+                None,
+                Some(e.to_string()),
+            )
+            .await;
+            Err(())
+        }
+    }
+}
+
+/// Replace `__MODEL_PATH__` / `__MMPROJ_PATH__` tokens in the argument vector
+/// with the resolved on-disk paths. `--mmproj` is dropped when no mmproj path
+/// was provided so the sidecar doesn't see a flag with no value.
+fn substitute_path_tokens(
+    args: Vec<String>,
+    model_path: Option<&str>,
+    mmproj_path: Option<&str>,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(args.len());
+    for a in args {
+        if a == "__MODEL_PATH__" {
+            out.push(model_path.unwrap_or("").to_string());
+        } else if a == "__MMPROJ_PATH__" {
+            if let Some(p) = mmproj_path {
+                out.push(p.to_string());
+            }
+        } else if a == "--mmproj" && mmproj_path.is_none() {
+            continue;
+        } else {
+            out.push(a);
+        }
+    }
+    out
 }
 
 pub async fn update_server_args_internal<R: Runtime>(
@@ -476,72 +506,28 @@ pub async fn update_server_args_internal<R: Runtime>(
     let state_clone = state.clone();
 
     tauri::async_runtime::spawn(async move {
-        let actual_model_path = if let Some(mp) = model_path {
-            if mp.is_empty() {
-                None
-            } else {
-                match ensure_model_internal(
-                    &handle_clone,
-                    &state_clone,
-                    &server_clone,
-                    &mp,
-                    current_start_id,
-                )
-                .await
-                {
-                    Ok(path) => Some(path),
-                    Err(_) if !is_current_start(&state_clone, &server_clone, current_start_id) => {
-                        return;
-                    }
-                    Err(e) => {
-                        emit_status(
-                            &handle_clone,
-                            &server_clone,
-                            ServerStatus::Error,
-                            None,
-                            Some(e.to_string()),
-                        )
-                        .await;
-                        return;
-                    }
-                }
-            }
-        } else {
-            None
+        let Ok(actual_model_path) = resolve_optional_path(
+            &handle_clone,
+            &state_clone,
+            &server_clone,
+            current_start_id,
+            model_path,
+        )
+        .await
+        else {
+            return;
         };
 
-        let actual_mmproj_path = if let Some(mp) = mmproj_path {
-            if mp.is_empty() {
-                None
-            } else {
-                match ensure_model_internal(
-                    &handle_clone,
-                    &state_clone,
-                    &server_clone,
-                    &mp,
-                    current_start_id,
-                )
-                .await
-                {
-                    Ok(path) => Some(path),
-                    Err(_) if !is_current_start(&state_clone, &server_clone, current_start_id) => {
-                        return;
-                    }
-                    Err(e) => {
-                        emit_status(
-                            &handle_clone,
-                            &server_clone,
-                            ServerStatus::Error,
-                            None,
-                            Some(e.to_string()),
-                        )
-                        .await;
-                        return;
-                    }
-                }
-            }
-        } else {
-            None
+        let Ok(actual_mmproj_path) = resolve_optional_path(
+            &handle_clone,
+            &state_clone,
+            &server_clone,
+            current_start_id,
+            mmproj_path,
+        )
+        .await
+        else {
+            return;
         };
 
         // Re-check start_id
@@ -558,20 +544,11 @@ pub async fn update_server_args_internal<R: Runtime>(
         )
         .await;
 
-        let mut final_args: Vec<String> = Vec::with_capacity(args.len());
-        for a in args {
-            if a == "__MODEL_PATH__" {
-                final_args.push(actual_model_path.clone().unwrap_or_default());
-            } else if a == "__MMPROJ_PATH__" {
-                if let Some(p) = actual_mmproj_path.clone() {
-                    final_args.push(p);
-                }
-            } else if a == "--mmproj" && actual_mmproj_path.is_none() {
-                continue;
-            } else {
-                final_args.push(a);
-            }
-        }
+        let final_args = substitute_path_tokens(
+            args,
+            actual_model_path.as_deref(),
+            actual_mmproj_path.as_deref(),
+        );
 
         let sidecar_name = match SidecarKind::from_str(&server_clone) {
             Ok(kind) => kind.binary_name(),
@@ -792,170 +769,24 @@ pub async fn update_server_args_internal<R: Runtime>(
     Ok(())
 }
 
-pub async fn ensure_model_internal<R: Runtime>(
+/// Resolve the on-disk path for a model spec, downloading if necessary via
+/// the centralized `DownloadManager`. Bare local paths are validated; HF
+/// `@user/repo/branch/file` specs are routed through the manager so progress
+/// surfaces in the global Downloads modal rather than the per-server chip.
+async fn resolve_path_via_downloader<R: Runtime>(
     handle: &AppHandle<R>,
     state: &AppState,
     server: &str,
-    model_path: &str,
-    start_id: u64,
+    spec: &str,
 ) -> AppResult<String> {
-    if !model_path.starts_with('@') {
-        let path = std::path::Path::new(model_path);
+    if !spec.starts_with('@') {
+        let path = std::path::Path::new(spec);
         if path.exists() {
-            return Ok(model_path.to_string());
-        } else {
-            return Err(AppError::not_found(format!(
-                "Model path does not exist: {model_path}"
-            )));
+            return Ok(spec.to_string());
         }
-    }
-
-    // @username/reponame/branchname/filename
-    let parts: Vec<&str> = model_path[1..].split('/').collect();
-    if parts.len() < 4 {
-        return Err(AppError::validation("Invalid model path format"));
-    }
-
-    let username = parts[0];
-    let reponame = parts[1];
-    let branchname = parts[2];
-    let filename = parts[3..].join("/");
-
-    let home = handle.path().home_dir()?;
-    let dest_dir = home
-        .join(".tomat")
-        .join("models")
-        .join(username)
-        .join(reponame);
-    let dest_path = dest_dir.join(&filename);
-
-    if dest_path.exists() {
-        return Ok(dest_path.to_string_lossy().to_string());
-    }
-
-    tokio::fs::create_dir_all(&dest_dir).await?;
-
-    emit_status(
-        handle,
-        server,
-        ServerStatus::Loading,
-        None,
-        Some("Waiting for download slot...".into()),
-    )
-    .await;
-
-    let _download_guard = state.0.download_sem.acquire().await?;
-
-    if !is_current_start(state, server, start_id) {
-        return Err(AppError::external("Download cancelled"));
-    }
-
-    if dest_path.exists() {
-        return Ok(dest_path.to_string_lossy().to_string());
-    }
-
-    emit_status(
-        handle,
-        server,
-        ServerStatus::Downloading,
-        Some(0.0),
-        Some(format!("Downloading {filename}...")),
-    )
-    .await;
-
-    let url = format!(
-        "https://huggingface.co/{username}/{reponame}/resolve/{branchname}/{filename}?download=true"
-    );
-
-    let client = reqwest::Client::new();
-    let res = client.get(url).send().await?;
-
-    if !res.status().is_success() {
-        return Err(AppError::external(format!(
-            "Failed to download model: {}",
-            res.status()
+        return Err(AppError::not_found(format!(
+            "Model path does not exist: {spec}"
         )));
-    }
-
-    let total_size = res.content_length().unwrap_or(0);
-    let mut downloaded: u64 = 0;
-    let mut stream = res.bytes_stream();
-
-    let tmp_path = dest_path.with_extension("tmp");
-    let mut file = tokio::fs::File::create(&tmp_path).await?;
-
-    while let Some(item) = stream.next().await {
-        if !is_current_start(state, server, start_id) {
-            let _ = tokio::fs::remove_file(&tmp_path).await;
-            return Err(AppError::external("Download cancelled"));
-        }
-
-        let chunk = item?;
-        tokio::io::copy(&mut &chunk[..], &mut file).await?;
-        downloaded += chunk.len() as u64;
-
-        if total_size > 0 {
-            let progress = (downloaded as f64 / total_size as f64) * 100.0;
-            emit_status(
-                handle,
-                server,
-                ServerStatus::Downloading,
-                Some(progress),
-                Some(format!(
-                    "Downloading {filename} ({:.2} MB)...",
-                    downloaded as f64 / 1024.0 / 1024.0
-                )),
-            )
-            .await;
-        }
-    }
-
-    tokio::fs::rename(tmp_path, &dest_path).await?;
-
-    Ok(dest_path.to_string_lossy().to_string())
-}
-
-/// Download a single Hugging Face path into the shared model cache, emitting
-/// progress as `<server>` sidecar-status events. Unlike `ensure_model_internal`
-/// this is not gated on a sidecar start_id - intended for one-shot fetches
-/// (e.g. TTS assets) that don't restart a process when they finish.
-pub async fn ensure_path_internal<R: Runtime>(
-    handle: &AppHandle<R>,
-    state: &AppState,
-    server: &str,
-    path: &str,
-) -> AppResult<String> {
-    if !path.starts_with('@') {
-        let p = std::path::Path::new(path);
-        if p.exists() {
-            return Ok(path.to_string());
-        }
-        return Err(AppError::not_found(format!("Path does not exist: {path}")));
-    }
-
-    let parts: Vec<&str> = path[1..].split('/').collect();
-    if parts.len() < 4 {
-        return Err(AppError::validation("Invalid model path format"));
-    }
-    let username = parts[0];
-    let reponame = parts[1];
-    let branchname = parts[2];
-    let filename = parts[3..].join("/");
-
-    let home = handle.path().home_dir()?;
-    let dest_dir = home
-        .join(".tomat")
-        .join("models")
-        .join(username)
-        .join(reponame);
-    let dest_path = dest_dir.join(&filename);
-
-    if dest_path.exists() {
-        return Ok(dest_path.to_string_lossy().to_string());
-    }
-
-    if let Some(parent) = dest_path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
     }
 
     emit_status(
@@ -963,173 +794,26 @@ pub async fn ensure_path_internal<R: Runtime>(
         server,
         ServerStatus::Loading,
         None,
-        Some("Waiting for download slot...".into()),
+        Some("Waiting for downloads...".into()),
     )
     .await;
 
-    let _download_guard = state.0.download_sem.acquire().await?;
-
-    if dest_path.exists() {
-        return Ok(dest_path.to_string_lossy().to_string());
-    }
-
-    emit_status(
-        handle,
-        server,
-        ServerStatus::Downloading,
-        Some(0.0),
-        Some(format!("Downloading {filename}...")),
-    )
-    .await;
-
-    let url = format!(
-        "https://huggingface.co/{username}/{reponame}/resolve/{branchname}/{filename}?download=true"
-    );
-
-    let client = reqwest::Client::new();
-    let res = client.get(url).send().await?;
-
-    if !res.status().is_success() {
-        return Err(AppError::external(format!(
-            "Failed to download asset: {}",
-            res.status()
-        )));
-    }
-
-    let total_size = res.content_length().unwrap_or(0);
-    let mut downloaded: u64 = 0;
-    let mut stream = res.bytes_stream();
-
-    let tmp_path = dest_path.with_extension("tmp");
-    let mut file = tokio::fs::File::create(&tmp_path).await?;
-
-    while let Some(item) = stream.next().await {
-        let chunk = item?;
-        tokio::io::copy(&mut &chunk[..], &mut file).await?;
-        downloaded += chunk.len() as u64;
-
-        if total_size > 0 {
-            let progress = (downloaded as f64 / total_size as f64) * 100.0;
-            emit_status(
-                handle,
-                server,
-                ServerStatus::Downloading,
-                Some(progress),
-                Some(format!(
-                    "Downloading {filename} ({:.2} MB)...",
-                    downloaded as f64 / 1024.0 / 1024.0
-                )),
-            )
-            .await;
-        }
-    }
-
-    tokio::fs::rename(tmp_path, &dest_path).await?;
-
-    Ok(dest_path.to_string_lossy().to_string())
-}
-
-#[derive(serde::Serialize)]
-pub struct DownloadPlan {
-    pub path: String,
-    pub url: String,
-    pub filename: String,
-    pub size_bytes: Option<u64>,
-    pub already_downloaded: bool,
-}
-
-pub async fn probe_download<R: Runtime>(
-    handle: &AppHandle<R>,
-    path: &str,
-) -> AppResult<DownloadPlan> {
-    if !path.starts_with('@') {
-        let p = std::path::Path::new(path);
-        return Ok(DownloadPlan {
-            path: path.to_string(),
-            url: String::new(),
-            filename: p
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.to_string()),
-            size_bytes: None,
-            already_downloaded: p.exists(),
-        });
-    }
-
-    let parts: Vec<&str> = path[1..].split('/').collect();
-    if parts.len() < 4 {
-        return Err(AppError::validation("Invalid model path format"));
-    }
-    let username = parts[0];
-    let reponame = parts[1];
-    let branchname = parts[2];
-    let filename = parts[3..].join("/");
-
-    let home = handle.path().home_dir()?;
-    let dest_path = home
-        .join(".tomat")
-        .join("models")
-        .join(username)
-        .join(reponame)
-        .join(&filename);
-
-    if dest_path.exists() {
-        return Ok(DownloadPlan {
-            path: path.to_string(),
-            url: String::new(),
-            filename,
-            size_bytes: None,
-            already_downloaded: true,
-        });
-    }
-
-    let url = format!(
-        "https://huggingface.co/{username}/{reponame}/resolve/{branchname}/{filename}?download=true"
-    );
-
-    // HF resolve URLs 302-redirect to a CDN that often omits Content-Length on
-    // HEAD. The 302 response itself carries the LFS file size in
-    // `x-linked-size`, so probe with redirects disabled first and fall back to
-    // following redirects if HF didn't set it.
-    let no_redirect = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?;
-    let size_bytes = match no_redirect.head(&url).send().await {
-        Ok(res) => res
-            .headers()
-            .get("x-linked-size")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<u64>().ok())
-            .or_else(|| res.content_length()),
-        _ => None,
-    };
-    let size_bytes = match size_bytes {
-        Some(n) => Some(n),
-        None => match reqwest::Client::new().head(&url).send().await {
-            Ok(res) if res.status().is_success() => res.content_length(),
-            _ => None,
-        },
+    let group_id = match SidecarKind::from_str(server) {
+        Ok(SidecarKind::Llm) => "llm",
+        Ok(SidecarKind::Stt) => "stt",
+        // The bun sidecar handles toolkit assets (embedding model, TTS),
+        // grouped under "toolkits" / "tts" respectively. We default to
+        // "toolkits" here; TTS callers go through `ensure` directly with
+        // their own group_id.
+        _ => "toolkits",
     };
 
-    Ok(DownloadPlan {
-        path: path.to_string(),
-        url,
-        filename,
-        size_bytes,
-        already_downloaded: false,
-    })
-}
-
-#[tauri::command]
-pub async fn probe_downloads(
-    handle: AppHandle,
-    paths: Vec<String>,
-) -> AppResult<Vec<DownloadPlan>> {
-    let futures = paths.iter().map(|p| probe_download(&handle, p));
-    let results = futures_util::future::join_all(futures).await;
-    let mut out = Vec::with_capacity(results.len());
-    for r in results {
-        out.push(r?);
-    }
-    Ok(out)
+    let enqueue = EnqueueSpec {
+        source: spec.to_string(),
+        destination: DownloadDestination::Models,
+        group_id: group_id.to_string(),
+        size_hint: None,
+    };
+    let path = state.0.downloads.ensure(handle, enqueue).await?;
+    Ok(path.to_string_lossy().to_string())
 }

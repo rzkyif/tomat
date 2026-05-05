@@ -6,12 +6,22 @@
     Attachment,
     MessagePart,
   } from "$lib/shared/types";
-  import { availableMonitors } from "@tauri-apps/api/window";
   import {
+    availableMonitors,
+    currentMonitor,
+    getCurrentWindow,
+  } from "@tauri-apps/api/window";
+  import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
+  import { tempDir, join } from "@tauri-apps/api/path";
+  import { readFile, remove, writeFile } from "@tauri-apps/plugin-fs";
+  import { open } from "@tauri-apps/plugin-dialog";
+  import {
+    downloadsState,
     messagesState,
     serversState,
     settingsState,
     snippetsState,
+    streamingState,
   } from "../../state";
   import { sendMessages } from "$lib/sidecar/llm";
   import { transcribeAudio } from "$lib/sidecar/stt";
@@ -43,7 +53,7 @@
     captureRegion,
     type CaptureMonitorInfo,
   } from "$lib/shared/capture";
-  import { vadManager } from "$lib/shared/vad.svelte";
+  import { vadManager } from "$lib/state/vad.svelte";
   import { shortcutHandler } from "$lib/state/shortcut.svelte";
   import type { ActivationMode } from "$lib/shared/settings";
   import AttachmentList from "../AttachmentList.svelte";
@@ -133,20 +143,37 @@
   let sttErrorTimeout: ReturnType<typeof setTimeout> | null = null;
 
   let llmStatus = $derived(serversState.serverStatuses.llm.status);
+
+  // Drives the gear-icon flash while there are pending startup downloads
+  // and Settings is closed. We toggle the bool on a 500ms interval so the
+  // button can swap between its default and hover color tokens with a
+  // smooth transition-colors tween (CSS keyframes against design tokens
+  // would have to hardcode oklch values and re-state dark-mode variants).
+  let pendingBlinkOn = $state(false);
+  $effect(() => {
+    if (!downloadsState.hasPendingStartup || showSettings) {
+      pendingBlinkOn = false;
+      return;
+    }
+    const id = setInterval(() => {
+      pendingBlinkOn = !pendingBlinkOn;
+    }, 500);
+    return () => clearInterval(id);
+  });
   // True whenever the user has something to interrupt: either an LLM stream
   // or an active tool call (running or awaiting input). Drives the stop button
   // so tool calls can be aborted the same way streams are.
-  let hasActiveWork = $derived(messagesState.hasActiveWork);
+  let hasActiveWork = $derived(streamingState.hasActiveWork);
   let hasContent = $derived(text.trim().length > 0 || attachments.length > 0);
   let placeholderText = $derived(
-    vadManager.enabled && vadManager.listening
-      ? "Listening..."
-      : vadManager.enabled
-        ? "Waiting for speech..."
-        : llmStatus === "Error"
-          ? "Failed to start LLM server!!"
-          : llmStatus === "Downloading"
-            ? "Downloading LLM model..."
+    downloadsState.hasPendingStartup
+      ? "Pending download, open settings!"
+      : vadManager.enabled && vadManager.listening
+        ? "Listening..."
+        : vadManager.enabled
+          ? "Waiting for speech..."
+          : llmStatus === "Error"
+            ? "Failed to start LLM server!!"
             : llmStatus === "Loading"
               ? "Waiting for LLM server..."
               : "Enter your instructions...",
@@ -387,7 +414,6 @@
     // register shortcuts that should be inactive.
     void (async () => {
       try {
-        const { getCurrentWindow } = await import("@tauri-apps/api/window");
         const visible = (await getCurrentWindow().isVisible()) ?? true;
         if (visible) await registerInputShortcuts();
       } catch (e) {
@@ -459,11 +485,11 @@
   }
 
   async function handleStop(): Promise<void> {
-    await messagesState.interruptStreaming();
+    await streamingState.interruptStreaming();
   }
 
   async function handleInterruptAndSend(): Promise<void> {
-    await messagesState.interruptStreaming();
+    await streamingState.interruptStreaming();
     await handleSend();
   }
 
@@ -622,8 +648,8 @@
     textareaElement?.focus();
 
     if (settingsState.currentSettings["stt.autoSend"]) {
-      if (messagesState.hasActiveWork) {
-        await messagesState.interruptStreaming();
+      if (streamingState.hasActiveWork) {
+        await streamingState.interruptStreaming();
       }
       await handleSend();
     }
@@ -679,8 +705,6 @@
   }
 
   async function ingestDocumentBlob(blob: Blob, filename: string) {
-    const { writeFile, remove } = await import("@tauri-apps/plugin-fs");
-    const { tempDir, join } = await import("@tauri-apps/api/path");
     const buf = new Uint8Array(await blob.arrayBuffer());
     const tmpDir = await tempDir();
     const tmpPath = await join(tmpDir, `tomat-paste-${Date.now()}-${filename}`);
@@ -737,10 +761,6 @@
 
   async function handleAttachFile() {
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const { readFile } = await import("@tauri-apps/plugin-fs");
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-
       const supportsImages = settingsState.currentSettings["llm.supportImages"];
 
       const docExtensions = DOC_EXTENSIONS;
@@ -762,12 +782,8 @@
 
       // Shrink window and center Y to prevent macOS dimming overlay on transparent window
       const win = getCurrentWindow();
-      const { PhysicalSize, PhysicalPosition } = await import(
-        "@tauri-apps/api/dpi"
-      );
       const savedSize = await win.outerSize();
       const savedPos = await win.outerPosition();
-      const { currentMonitor } = await import("@tauri-apps/api/window");
       const monitor = await currentMonitor();
       const centerX = Math.round(savedPos.x + savedSize.width / 2);
       const centerY = monitor
@@ -988,7 +1004,8 @@
       cols="1"
       class="col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-[calc(100vw-80px)] max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words"
       placeholder={placeholderText}
-      disabled={llmStatus !== "Running" && llmStatus !== "Disabled"}
+      disabled={downloadsState.hasPendingStartup ||
+        (llmStatus !== "Running" && llmStatus !== "Disabled")}
     ></textarea>
   </div>
 
@@ -1105,11 +1122,15 @@
       </div>
 
       <button
-        class=" hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center {showSettings
+        class=" hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center transition-colors duration-300 {showSettings
           ? 'text-blue-400'
-          : 'text-default-700'}"
+          : pendingBlinkOn
+            ? 'text-default-900'
+            : 'text-default-700'}"
         onclick={toggleSettings}
-        title="Settings"
+        title={downloadsState.hasPendingStartup
+          ? "Pending downloads - open settings"
+          : "Settings"}
       >
         <i class="flex i-material-symbols-settings-outline-rounded"></i>
       </button>
@@ -1244,4 +1265,5 @@
       stroke-dashoffset: 0;
     }
   }
+
 </style>

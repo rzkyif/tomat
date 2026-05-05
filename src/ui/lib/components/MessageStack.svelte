@@ -70,10 +70,25 @@
   let fadeRight = $state("0px");
   function updateFade() {
     if (!wrapper) return;
-    fadeLeft = wrapper.scrollLeft > 4 ? "1rem" : "0px";
-    const remainingRight =
-      wrapper.scrollWidth - wrapper.scrollLeft - wrapper.clientWidth;
-    fadeRight = remainingRight > 4 ? "1rem" : "0px";
+    const first = wrapper.firstElementChild;
+    const last = wrapper.lastElementChild;
+    if (!first || !last) {
+      fadeLeft = "0px";
+      fadeRight = "0px";
+      return;
+    }
+    // Drive fades from element rects, not scrollLeft. Under flex-row-reverse
+    // (right alignment) Chromium/WebKit report scrollLeft in a [-max, 0]
+    // range, so any scrollLeft-derived math leaves one of the fades stuck.
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const leftChild = alignment === "right" ? last : first;
+    const rightChild = alignment === "right" ? first : last;
+    const hiddenLeft =
+      wrapperRect.left - leftChild.getBoundingClientRect().left;
+    const hiddenRight =
+      rightChild.getBoundingClientRect().right - wrapperRect.right;
+    fadeLeft = hiddenLeft > 4 ? "1rem" : "0px";
+    fadeRight = hiddenRight > 4 ? "1rem" : "0px";
   }
 
   // Translate vertical wheel events into horizontal scroll on this row, so
@@ -85,18 +100,36 @@
   function onWheel(e: WheelEvent) {
     if (!wrapper) return;
     if (wrapper.scrollWidth <= wrapper.clientWidth) return;
-    const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+    const first = wrapper.firstElementChild;
+    const last = wrapper.lastElementChild;
+    if (!first || !last) return;
+    // Trackpad gestures often emit a small non-zero deltaX alongside a much
+    // larger deltaY; picking by magnitude avoids letting that jitter swallow
+    // a vertical wheel translation.
+    const delta =
+      Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
     if (delta === 0) return;
-    const max = wrapper.scrollWidth - wrapper.clientWidth;
-    const atStart = wrapper.scrollLeft <= 0;
-    const atEnd = wrapper.scrollLeft >= max;
-    if ((delta < 0 && atStart) || (delta > 0 && atEnd)) return;
+    // Detect visual edges via element rects (not scrollLeft), since under
+    // flex-row-reverse the scrollLeft range flips negative and the usual
+    // `>= max` check would never fire — leaving the wheel handler eating
+    // events past the actual edge instead of letting the page scroll.
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const leftChild = alignment === "right" ? last : first;
+    const rightChild = alignment === "right" ? first : last;
+    const atLeft =
+      leftChild.getBoundingClientRect().left >= wrapperRect.left - 4;
+    const atRight =
+      rightChild.getBoundingClientRect().right <= wrapperRect.right + 4;
+    if ((delta < 0 && atLeft) || (delta > 0 && atRight)) return;
     e.preventDefault();
     wrapper.scrollLeft += delta;
   }
 
   $effect(() => {
     void messages;
+    // Toggling alignment swaps which DOM child is visually leftmost vs
+    // rightmost, so fade widths and edge detection have to recompute.
+    void alignment;
     if (!wrapper) return;
     const ro = new ResizeObserver(() => {
       updateFade();

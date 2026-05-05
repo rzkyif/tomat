@@ -14,28 +14,28 @@
   import MessageStackGroup from "$lib/components/MessageStackGroup.svelte";
   import { getTextContent, type Message } from "$lib/shared/types";
   import {
+    downloadsState,
     messagesState,
     serversState,
+    sessionsState,
     settingsState,
     snippetsState,
+    streamingState,
     toolkitsState,
   } from "$lib/state";
-  import { shortcutHandler } from "$lib/state/shortcut.svelte";
+  import { detectPendingStartup } from "$lib/shared/download";
   import {
-    applyTheme,
-    applyTextSize,
-    listenSystemTheme,
-  } from "$lib/state/appearance.svelte";
+    shortcutHandler,
+    windowTransition,
+  } from "$lib/state/shortcut.svelte";
   import {
-    messageEnter,
-    slidePanel,
     enableMessageAnimations,
     getDuration,
-    pinPanelForOutro,
   } from "$lib/shared/animations";
+  import MessageEnter from "$lib/components/MessageEnter.svelte";
   import {
     setupSidecarListeners,
-    restartServerIfNeed,
+    startConfiguredServices,
   } from "$lib/sidecar/manager";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import {
@@ -46,43 +46,95 @@
   } from "$lib/shared/clickthrough";
   import { listen } from "@tauri-apps/api/event";
 
+  // Visual preferences applied directly to documentElement: theme class for
+  // dark mode, root font size for the rem-based scale. SSR is off (see
+  // +layout.ts) so it's safe to touch `window` and `document` at module
+  // evaluation time.
+  const themeMql = window.matchMedia("(prefers-color-scheme: dark)");
+
+  function applyTheme(theme: string) {
+    const isDark = theme === "dark" || (theme === "auto" && themeMql.matches);
+    document.documentElement.classList.toggle("dark", isDark);
+  }
+
+  function applyTextSize(size: number) {
+    document.documentElement.style.fontSize = `${size}px`;
+  }
+
+  function listenSystemTheme(callback: () => void): () => void {
+    themeMql.addEventListener("change", callback);
+    return () => themeMql.removeEventListener("change", callback);
+  }
+
   let showSettings = $state(false);
   let loaded = $state(false);
   let sessionLoading = $state(true);
   let container: HTMLElement | undefined = $state();
   let contentEl: HTMLElement | undefined = $state();
 
-  // Window show/hide slide state. Drives the transform + opacity of `main`
-  // between visible ("in") and off-screen ("out").
-  let windowSlide = $state<"in" | "out">("in");
-  let hidingInFlight = false;
+  // Panel slide animates a viewport-sized wrapper around `main` rather than
+  // the inner panel itself. The wrapper is `w-screen h-screen`, so a 100%
+  // translate moves it by a full viewport (clearing main's p-10 padding
+  // that previously left the bubble's first 40px visible at the edge).
+  // The wrapper persists across the chat/settings swap, so the imperative
+  // sequence is just: slide out, swap content inside, slide back in.
+  let panelLayer: HTMLElement | undefined = $state();
+  let panelToggling = false;
 
-  // Gates the whole visual treatment. Stays false until the app's first
-  // show completes. While false, `main` is kept at opacity 0 with no
-  // transform; on first show we fade it in (no slide on startup, since
-  // the slide's percent-translate resolves against a width that isn't
-  // fully settled on the very first paint after Rust unhides the window).
-  // Subsequent show/hide uses the full slide. `main`'s layout is stable
-  // by then so percent-translate works correctly.
-  let initialShown = $state(false);
+  const animationsEnabled = $derived(
+    !!settingsState.currentSettings["appearance.animationsEnabled"],
+  );
 
-  function hideOffsetTransform(alignment: "left" | "center" | "right") {
+  function offscreenTransform(alignment: "left" | "center" | "right"): string {
     if (alignment === "left") return "translateX(-100%)";
     if (alignment === "right") return "translateX(100%)";
     return "translateY(100%)";
   }
 
+  const TRANSITION_EASING = "cubic-bezier(0.4, 0, 0.2, 1)";
+
+  // Imperatively drive the window-level slide+fade on `container`. Mirrors
+  // the same JS+CSS pattern used for panel swap (`toggleSettings`): set
+  // transition then target style; the WKWebView transition fires reliably
+  // because the source value is already on the element.
+  //   - "visible":   on screen, fully opaque
+  //   - "offscreen": slid out per alignment, fully transparent
+  // First paint inlines opacity:0 directly on the element so the window
+  // doesn't flash visible before the first applyWindowState() runs.
+  function applyWindowState(state: "visible" | "offscreen", animate: boolean) {
+    if (!container) return;
+    const dur = animate ? getDuration() : 0;
+    container.style.transition =
+      dur > 0
+        ? `transform ${dur}ms ${TRANSITION_EASING}, opacity ${dur}ms ${TRANSITION_EASING}`
+        : "";
+    if (state === "visible") {
+      container.style.transform = "";
+      container.style.opacity = "1";
+    } else {
+      container.style.transform = offscreenTransform(
+        settingsState.getAlignment(),
+      );
+      container.style.opacity = "0";
+    }
+  }
+
+  let hidingInFlight = false;
+
   async function animateHideThenHide() {
     if (hidingInFlight) return;
     hidingInFlight = true;
-    windowSlide = "out";
-    await new Promise((r) => setTimeout(r, getDuration()));
+    windowTransition.begin();
+    applyWindowState("offscreen", true);
     try {
+      await new Promise((r) => setTimeout(r, getDuration()));
       await invoke("hide_main_window");
     } catch (e) {
       console.warn("[window] hide failed:", e);
+    } finally {
+      hidingInFlight = false;
+      windowTransition.end();
     }
-    hidingInFlight = false;
   }
 
   const linkHandler = (e: MouseEvent) => {
@@ -149,9 +201,9 @@
       await tick();
       await invoke("show_main_window");
       // The `window-visibility: true` event emitted by `show_main_window`
-      // fires before the listener below is registered, so flip the gate
-      // here directly. This triggers the fade-in on first show.
-      initialShown = true;
+      // fires before the listener below is registered, so kick off the
+      // fade-in here directly.
+      applyWindowState("visible", true);
     }
 
     // Post-paint work. Fire-and-forget; the window is already visible.
@@ -169,8 +221,12 @@
 
     listen<boolean>("window-visibility", ({ payload: visible }) => {
       if (visible) {
-        windowSlide = "in";
+        applyWindowState("visible", true);
         resumeClickThrough();
+        // Mirror the slide-in animation duration so spammed shortcut presses
+        // can't reverse the in-progress show into a hide and flicker.
+        windowTransition.begin();
+        setTimeout(() => windowTransition.end(), getDuration());
       } else {
         pauseClickThrough();
       }
@@ -195,15 +251,33 @@
     // shortcut silently stops working whenever UserInput is unmounted.
     void shortcutHandler.attach();
 
-    // Sidecar listeners + kick off llm/stt. The bun sidecar starts from Rust
-    // setup(); setupSidecarListeners() seeds a snapshot so events missed
-    // during this delay are not lost.
+    // Probe disk for every HF file the current configuration references,
+    // then decide whether to start sidecars / TTS or wait. Nothing
+    // downloads until the user explicitly confirms via the Settings
+    // ConfirmModal: if anything is missing we stash the pending list
+    // and leave sidecar startup to the modal's onConfirm handler. If
+    // everything is already on disk we kick sidecars off immediately
+    // (their `ensure()` calls hit the file-exists fast path with no
+    // network I/O).
     setupSidecarListeners()
-      .then(() => {
-        restartServerIfNeed("llm");
-        restartServerIfNeed("stt");
-      })
-      .catch((e) => console.warn("setupSidecarListeners:", e));
+      .catch((e) => console.warn("setupSidecarListeners:", e))
+      .finally(async () => {
+        try {
+          const { plans, groupBySource } = await detectPendingStartup(
+            settingsState.currentSettings,
+          );
+          if (plans.length > 0) {
+            downloadsState.pendingStartup = plans;
+            downloadsState.pendingStartupGroupBySource = groupBySource;
+            // Don't start sidecars or TTS yet - the Settings modal will
+            // do that in its onConfirm once the user approves the batch.
+            return;
+          }
+          startConfiguredServices();
+        } catch (e) {
+          console.warn("detectPendingStartup:", e);
+        }
+      });
 
     void snippetsState.load();
 
@@ -212,9 +286,9 @@
     (async () => {
       try {
         if (settingsState.currentSettings["general.session.alwaysStartNew"]) {
-          await messagesState.loadSessionList();
+          await sessionsState.loadList();
         } else {
-          await messagesState.loadLatest();
+          await sessionsState.loadLatest();
         }
       } catch (e) {
         console.warn("session load:", e);
@@ -226,13 +300,6 @@
         enableMessageAnimations();
       }
     })();
-
-    // If TTS was left enabled in persisted settings, load the model now.
-    if (settingsState.currentSettings["tts.enabled"]) {
-      void import("$lib/state/tts.svelte").then(({ ttsState }) => {
-        void ttsState.setEnabled(true);
-      });
-    }
   });
 
   onDestroy(() => {
@@ -245,23 +312,38 @@
     cleanupSystemTheme?.();
   });
 
-  function toggleSettings() {
-    // Pin the currently-visible panel to its exact viewport position BEFORE
-    // flipping showSettings. Otherwise the incoming panel mounts first, its
-    // size re-centers `my-auto` on contentEl, and the outgoing panel has
-    // already drifted by the time its outro transition runs.
-    const current = contentEl?.firstElementChild as
-      | HTMLElement
-      | null
-      | undefined;
-    pinPanelForOutro(current);
+  async function toggleSettings() {
+    if (panelToggling) return;
+    panelToggling = true;
 
-    showSettings = !showSettings;
-    if (!showSettings) {
-      // Wait for the panel slide-out + slide-in sequence (2x base duration)
-      // before scrolling; otherwise the chat is still off-screen.
-      setTimeout(() => scrollToBottom(), getDuration() * 2);
+    const dur = getDuration();
+    const layer = panelLayer;
+
+    if (layer && dur > 0) {
+      const offscreen = offscreenTransform(settingsState.getAlignment());
+      const transitionStyle = `transform ${dur}ms cubic-bezier(0.4, 0, 0.2, 1)`;
+
+      // Phase 1: slide the wrapper (and everything inside, including the
+      // mounted panel) offscreen.
+      layer.style.transition = transitionStyle;
+      layer.style.transform = offscreen;
+      await new Promise((r) => setTimeout(r, dur));
+
+      // Phase 2: swap content. The wrapper stays at the offscreen transform,
+      // so the new panel mounts already offscreen with no extra positioning.
+      showSettings = !showSettings;
+      await tick();
+
+      // Phase 3: slide the wrapper back to its natural position.
+      layer.style.transform = "";
+      await new Promise((r) => setTimeout(r, dur));
+      layer.style.transition = "";
+    } else {
+      showSettings = !showSettings;
     }
+
+    panelToggling = false;
+    if (!showSettings) scrollToBottom();
   }
 
   $effect(() => {
@@ -304,10 +386,10 @@
   // first-token arrival. As soon as either reasoning or content fires, this
   // turns false and the corresponding real bubble takes over.
   let showStreamingLoadingBubble = $derived(
-    messagesState.isStreaming &&
-      messagesState.streamingMessageId !== null &&
-      messagesState.streamingReasoningId === null &&
-      !messagesState.streamingFirstChunkReceived,
+    streamingState.isActive &&
+      streamingState.messageId !== null &&
+      streamingState.reasoningId === null &&
+      !streamingState.firstChunkReceived,
   );
 
   // A "small bubble" message is one rendered as a `size="small"` Bubble
@@ -409,23 +491,23 @@
     flushStack();
     return groups;
   });
-
-
 </script>
 
 {#if loaded}
-  <main
-    bind:this={container}
-    class="no-scrollbar flex flex-col-reverse justify-start p-10 text-default-800 w-fit max-w-screen min-h-screen max-h-screen overflow-x-clip overflow-y-auto"
-    class:mx-auto={settingsState.getAlignment() === "center"}
-    class:ml-auto={settingsState.getAlignment() === "right"}
-    class:mr-auto={settingsState.getAlignment() === "left"}
-    style:transform={initialShown && windowSlide === "out"
-      ? hideOffsetTransform(settingsState.getAlignment())
-      : undefined}
-    style:opacity={initialShown && windowSlide === "in" ? "1" : "0"}
-    style:transition={`transform ${getDuration()}ms cubic-bezier(0.4, 0, 0.2, 1), opacity ${getDuration()}ms cubic-bezier(0.4, 0, 0.2, 1)`}
+  <div
+    bind:this={panelLayer}
+    class="w-screen h-screen overflow-hidden"
+    class:will-change-transform={animationsEnabled}
   >
+    <main
+      bind:this={container}
+      class="no-scrollbar flex flex-col-reverse justify-start p-10 text-default-800 w-fit max-w-screen min-h-screen max-h-screen overflow-x-clip overflow-y-auto"
+      class:mx-auto={settingsState.getAlignment() === "center"}
+      class:ml-auto={settingsState.getAlignment() === "right"}
+      class:mr-auto={settingsState.getAlignment() === "left"}
+      class:will-change-transform={animationsEnabled}
+      style="opacity: 0"
+    >
     <div bind:this={contentEl} class="flex flex-col-reverse gap-2 my-auto">
       {#if showSettings}
         <div
@@ -433,14 +515,6 @@
           class:ml-auto={settingsState.getAlignment() === "right"}
           class:mr-auto={settingsState.getAlignment() === "left"}
           class:mx-auto={settingsState.getAlignment() === "center"}
-          in:slidePanel={{
-            alignment: settingsState.getAlignment(),
-            direction: "in",
-          }}
-          out:slidePanel={{
-            alignment: settingsState.getAlignment(),
-            direction: "out",
-          }}
         >
           <Settings {toggleSettings} />
         </div>
@@ -450,14 +524,6 @@
           class:ml-auto={settingsState.getAlignment() === "right"}
           class:mr-auto={settingsState.getAlignment() === "left"}
           class:mx-auto={settingsState.getAlignment() === "center"}
-          in:slidePanel={{
-            alignment: settingsState.getAlignment(),
-            direction: "in",
-          }}
-          out:slidePanel={{
-            alignment: settingsState.getAlignment(),
-            direction: "out",
-          }}
         >
           <div class="relative pointer-events-none z-30">
             <SessionBar />
@@ -480,127 +546,127 @@
             </div>
           {/if}
 
-          {#each messageGroups as group (group.key)}
-            {#if group.kind === "stack"}
-              <MessageStackGroup messages={group.messages}>
-                {#snippet item({ msg, idx, neighborLeft, neighborRight })}
-                  <div
-                    class="pointer-events-none"
-                    in:messageEnter|local={{
-                      alignment: settingsState.getAlignment(),
-                      msgId:
-                        msg.role === "loading"
-                          ? undefined
-                          : msgKey(msg, `g-${idx}`),
-                    }}
-                    out:messageEnter|local={{
-                      alignment: settingsState.getAlignment(),
-                      msgId:
-                        msg.role === "loading"
-                          ? undefined
-                          : msgKey(msg, `g-${idx}`),
-                    }}
-                  >
-                    {#if msg.role === "loading"}
-                      <Bubble
-                        selectedAlignment={settingsState.getAlignment()}
-                        size="small"
-                        extraClass="flex items-center"
-                        {neighborLeft}
-                        {neighborRight}
-                      >
-                        <i class="i-line-md:loading-alt-loop text-base"></i>
-                      </Bubble>
-                    {:else if msg.role === "reasoning"}
-                      <AgentMessage
-                        kind="reasoning"
-                        id={msg.id}
-                        content={msg.content}
-                        modelUsed={msg.modelUsed}
-                        reasoningDurationMs={msg.reasoningDurationMs}
-                        isStreaming={messagesState.isStreaming &&
-                          messagesState.streamingReasoningId === msg.id}
-                        onDelete={msg.id
-                          ? () => messagesState.deleteReasoningMessage(msg.id!)
-                          : undefined}
-                        {neighborLeft}
-                        {neighborRight}
-                      />
-                    {:else if msg.role === "system"}
-                      <SystemMessage
-                        id={msg.id}
-                        content={msg.content as string}
-                        {neighborLeft}
-                        {neighborRight}
-                      />
-                    {:else if msg.role === "tool" && msg.toolCall}
-                      <ToolCall
-                        id={msg.id}
-                        toolCall={msg.toolCall}
-                        onAnswer={(requestId, answers) =>
-                          toolkitsState.answerAskUser(
-                            msg.toolCall!.callId,
-                            requestId,
-                            answers,
-                          )}
-                        {neighborLeft}
-                        {neighborRight}
-                      />
-                    {:else if msg.role === "tool_filter" && msg.relevantTools}
-                      <RelevantTools
-                        id={msg.id}
-                        relevantTools={msg.relevantTools}
-                        {neighborLeft}
-                        {neighborRight}
-                      />
-                    {/if}
-                  </div>
-                {/snippet}
-              </MessageStackGroup>
-            {:else}
-              {@const msg = group.message}
-              <div
-                class="relative pointer-events-none"
-                in:messageEnter|local={{
-                  alignment: settingsState.getAlignment(),
-                  msgId: msgKey(msg, group.key),
-                }}
-              >
-                {#if msg.role === "user"}
-                  <UserMessage
-                    content={msg.content}
-                    isLast={msg === lastUserMsg}
-                    onEdit={(newContent) =>
-                      messagesState.updateUserMessage(msg.id, newContent)}
-                    onDelete={msg.id
-                      ? () => messagesState.deleteUserMessage(msg.id!)
-                      : undefined}
-                  />
-                {:else if msg.role === "error"}
-                  <ErrorMessage content={msg.content} />
-                {:else if msg.role === "assistant"}
-                  <AgentMessage
-                    kind="content"
-                    id={msg.id}
-                    content={msg.content}
-                    modelUsed={msg.modelUsed}
-                    isStreaming={messagesState.isStreaming &&
-                      messagesState.streamingMessageId === msg.id}
-                    onReprocess={msg.id
-                      ? () => messagesState.reprocessAgentMessage(msg.id!)
-                      : undefined}
-                    onDelete={msg.id
-                      ? () => messagesState.deleteAgentMessage(msg.id!)
-                      : undefined}
-                  />
-                {/if}
-              </div>
-            {/if}
-          {/each}
+          <!-- Force a clean teardown of the entire message subtree on every
+               session boundary. Without the key, the cancelled tool's
+               Expandable body (transition:expand|global) and the various
+               per-component effects (auto-close, expansion-state writers,
+               MessageStackGroup's effect.pre + transitionTimers) can race
+               with `messages = []` and leave stale DOM behind after a
+               delete-with-active-tool-call. The key bumps inside
+               `sessionsState.resetAllSessionState`. -->
+          {#key sessionsState.epoch}
+            {#each messageGroups as group (group.key)}
+              {#if group.kind === "stack"}
+                <MessageStackGroup messages={group.messages}>
+                  {#snippet item({ msg, idx, neighborLeft, neighborRight })}
+                    <MessageEnter
+                      alignment={settingsState.getAlignment()}
+                      msgId={msg.role === "loading"
+                        ? undefined
+                        : msgKey(msg, `g-${idx}`)}
+                      class="pointer-events-none"
+                    >
+                      {#if msg.role === "loading"}
+                        <Bubble
+                          selectedAlignment={settingsState.getAlignment()}
+                          size="small"
+                          extraClass="flex items-center"
+                          {neighborLeft}
+                          {neighborRight}
+                        >
+                          <i class="i-line-md:loading-alt-loop text-base"></i>
+                        </Bubble>
+                      {:else if msg.role === "reasoning"}
+                        <AgentMessage
+                          kind="reasoning"
+                          id={msg.id}
+                          content={msg.content}
+                          modelUsed={msg.modelUsed}
+                          reasoningDurationMs={msg.reasoningDurationMs}
+                          isStreaming={streamingState.isActive &&
+                            streamingState.reasoningId === msg.id}
+                          onDelete={msg.id
+                            ? () =>
+                                messagesState.deleteReasoningMessage(msg.id!)
+                            : undefined}
+                          {neighborLeft}
+                          {neighborRight}
+                        />
+                      {:else if msg.role === "system"}
+                        <SystemMessage
+                          id={msg.id}
+                          content={msg.content as string}
+                          {neighborLeft}
+                          {neighborRight}
+                        />
+                      {:else if msg.role === "tool" && msg.toolCall}
+                        <ToolCall
+                          id={msg.id}
+                          toolCall={msg.toolCall}
+                          onAnswer={(requestId, answers) =>
+                            toolkitsState.answerAskUser(
+                              msg.toolCall!.callId,
+                              requestId,
+                              answers,
+                            )}
+                          {neighborLeft}
+                          {neighborRight}
+                        />
+                      {:else if msg.role === "tool_filter" && msg.relevantTools}
+                        <RelevantTools
+                          id={msg.id}
+                          relevantTools={msg.relevantTools}
+                          {neighborLeft}
+                          {neighborRight}
+                        />
+                      {/if}
+                    </MessageEnter>
+                  {/snippet}
+                </MessageStackGroup>
+              {:else}
+                {@const msg = group.message}
+                <MessageEnter
+                  alignment={settingsState.getAlignment()}
+                  msgId={msgKey(msg, group.key)}
+                  class="relative pointer-events-none"
+                >
+                  {#if msg.role === "user"}
+                    <UserMessage
+                      content={msg.content}
+                      isLast={msg === lastUserMsg}
+                      onEdit={(newContent) =>
+                        messagesState.updateUserMessage(msg.id, newContent)}
+                      onDelete={msg.id
+                        ? () => messagesState.deleteUserMessage(msg.id!)
+                        : undefined}
+                    />
+                  {:else if msg.role === "error"}
+                    <ErrorMessage content={msg.content} />
+                  {:else if msg.role === "assistant"}
+                    <AgentMessage
+                      kind="content"
+                      id={msg.id}
+                      content={msg.content}
+                      modelUsed={msg.modelUsed}
+                      isStreaming={streamingState.isActive &&
+                        streamingState.messageId === msg.id}
+                      onReprocess={msg.id
+                        ? () => messagesState.reprocessAgentMessage(msg.id!)
+                        : undefined}
+                      onDelete={msg.id
+                        ? () => messagesState.deleteAgentMessage(msg.id!)
+                        : undefined}
+                    />
+                  {/if}
+                </MessageEnter>
+              {/if}
+            {/each}
+          {/key}
         </div>
       {/if}
     </div>
   </main>
+  </div>
 {/if}
 
 <style lang="scss">

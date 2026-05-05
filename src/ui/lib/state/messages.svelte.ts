@@ -1,9 +1,15 @@
 /**
- * The big chat-state store. Holds the active conversation's messages,
- * handles streaming chunks coming back from the LLM, manages session
- * persistence (load, save, switch, delete), feeds assistant output into
- * the TTS queue, and exposes derived slices the UI uses for windowed
- * rendering.
+ * The active conversation's messages array and the structural mutations on
+ * it (add, edit, delete, regenerate, plus tool / tool_filter / system bubble
+ * helpers). Sister slices own the rest:
+ *
+ *   - sessionsState: session list + active id + title + load/new/delete
+ *   - persistenceState: debounced save + beforeunload flush + attachment GC
+ *   - streamingState: live LLM stream flags + buffered chunks + TTS feed +
+ *     interruptStreaming orchestration
+ *
+ * Consumers should reach for the slice that owns what they need; this file
+ * doesn't re-export anything by way of forwarders.
  */
 
 import {
@@ -12,31 +18,26 @@ import {
   type AskUserAnswer,
   type AskUserQuestion,
   type Attachment,
-  type LLMErrorType,
   type Message,
   type MessageContent,
   type MessagePart,
-  type PendingToolCall,
   type RelevantToolsState,
-  type SessionInfo,
   type TokenUsage,
   type ToolCallLogLine,
   type ToolCallState,
   type ToolCallStatus,
 } from "$lib/shared/types";
-import { invoke } from "@tauri-apps/api/core";
+import { persistenceState } from "./persistence.svelte";
+import { sessionsState } from "./sessions.svelte";
 import { settingsState } from "./settings.svelte";
 import { snippetsState } from "./snippets.svelte";
-import { interruptCurrentStream } from "$lib/shared/interrupt";
+import { streamingState } from "./streaming.svelte";
 import {
-  deleteSessionAttachments,
-  diffRemovedAttachmentPaths,
   ensureMarkdownExtension,
   imageExtFromMime,
   utf8ToBase64,
   writeSessionAttachment,
 } from "$lib/shared/attachments";
-import { stripEmojisForTTS, stripMarkdownForTTS } from "$lib/shared/text";
 import { applySnippets } from "$lib/shared/snippets";
 import {
   applySystemPromptOverride,
@@ -45,37 +46,12 @@ import {
   buildSystemPromptBase,
 } from "$lib/shared/systemPrompt";
 
-/** Trailing-edge debounce for `saveSessionToDisk`. At 1s, rapid edits (user
- *  typing + tool streaming) coalesce into one write instead of fanning out
- *  dozens of tmp-file renames per second. */
-const SAVE_DEBOUNCE_MS = 1000;
+type SendMessagesHandler = () => Promise<void>;
+type ReprocessMessageHandler = (messageId: string) => Promise<void>;
 
-/** Coalesce streaming tokens before pushing into reactive state. At ~30 ms we
- *  stay under one frame at 30 fps and avoid re-parsing the full markdown blob
- *  per token (which would dominate at high token rates). */
-const STREAM_FLUSH_MS = 30;
-
-// Module-level singleton (see export at the bottom). Not torn down in
-// production - `beforeunload` listener is intentionally never removed.
 class MessagesState {
   messages = $state<Message[]>([]);
-  sessionId = $state<string | null>(null);
-  sessionTitle = $state<string>("");
-  sessionList = $state<SessionInfo[]>([]);
-  currentSessionIndex = $state<number>(-1);
   tokenUsage = $state<TokenUsage | null>(null);
-  isStreaming = $state(false);
-  streamingFirstChunkReceived = $state(false);
-  /** Id of the assistant message currently receiving stream chunks. Normally
-   *  the newest message (freshly pushed by `startStreaming`), but for
-   *  `reprocessAgentMessage` it points at an existing message mid-array so the
-   *  regenerated content lands in place without disturbing newer turns. */
-  streamingMessageId = $state<string | null>(null);
-  /** Id of the `role: "reasoning"` message currently receiving reasoning
-   *  chunks. Lazily created on the first reasoning delta and cleared when the
-   *  first content chunk arrives (or the stream finishes / errors). Lives in
-   *  its own bubble, separate from the paired assistant content message. */
-  streamingReasoningId = $state<string | null>(null);
 
   /** Any tool call bubble currently in a non-terminal state. Drives the
    *  unified "interrupt" affordance in UserInput so tool calls can be stopped
@@ -89,47 +65,40 @@ class MessagesState {
           m.toolCall.status === "awaiting_user"),
     ),
   );
-  /** True whenever there is something the user could interrupt: either an
-   *  in-flight LLM stream or any active tool call. */
-  hasActiveWork = $derived(this.isStreaming || this.hasActiveToolCall);
 
-  /** Callback registered by toolkitsState so interruptStreaming() can cancel
-   *  every active tool call without messagesState importing toolkitsState
-   *  (which would create a circular dependency). */
-  private toolCancelHandler: (() => void) | null = null;
-  setToolCancelHandler(fn: () => void): void {
-    this.toolCancelHandler = fn;
+  // The LLM dispatch needs to be invoked from this slice but lives in a
+  // module that imports messagesState itself, so registering callbacks here
+  // keeps the static import graph one-way (llm -> messages, never back).
+  private sendMessagesHandler: SendMessagesHandler | null = null;
+  private reprocessMessageHandler: ReprocessMessageHandler | null = null;
+
+  setLLMHandlers(send: SendMessagesHandler, reprocess: ReprocessMessageHandler): void {
+    this.sendMessagesHandler = send;
+    this.reprocessMessageHandler = reprocess;
   }
 
-  private saveTimer: ReturnType<typeof setTimeout> | null = null;
-  private saveInFlight: Promise<void> = Promise.resolve();
-  private unloadHooked = false;
-  private streamBuffer = "";
-  private streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  private ttsCursor = 0;
-  /** Wall-clock start of the current assistant turn's reasoning trace.
-   *  Set on the first reasoning delta, cleared when the duration is written
-   *  onto the message (on first content chunk or on finish). */
-  private reasoningStartTime: number | null = null;
-
-  private get storageEnabled(): boolean {
-    return settingsState.currentSettings["general.session.storeSessions"] !== false;
+  /** Drop the active session's transcript from memory. Called by
+   *  sessionsState on every session-boundary transition; sister slices
+   *  (streamingState, sessionsState itself) reset their own per-session
+   *  fields. */
+  clear(): void {
+    this.messages = [];
+    this.tokenUsage = null;
   }
 
-  /** Get the default title (formatted timestamp from sessionId) */
-  getDefaultTitle(): string {
-    if (!this.sessionId) return "";
-    const ts = parseInt(this.sessionId, 10);
-    if (isNaN(ts)) return this.sessionId;
-    const d = new Date(ts);
-    const pad = (n: number) => n.toString().padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  /** Replace the in-memory transcript with a session loaded from disk.
+   *  Sessions slice owns id/title and is responsible for any defensive
+   *  snapshot fixups (e.g. backfilling ids, freezing stuck spinners) before
+   *  passing the array in. */
+  hydrate(messages: Message[], tokenUsage: TokenUsage | null): void {
+    this.messages = messages;
+    this.tokenUsage = tokenUsage;
   }
 
   addMessage(message: Message) {
     if (!message.id) message.id = makeMessageId();
     this.messages.unshift(message);
-    this.scheduleSave();
+    persistenceState.scheduleSave();
   }
 
   /**
@@ -146,14 +115,14 @@ class MessagesState {
   }): Promise<void> {
     // Sending a new message always preempts any previous assistant TTS that
     // might still be playing or queued.
-    this.resetTTSPlayback();
+    streamingState.resetTTSPlayback();
 
     const trimmedText = payload.text.trim();
-    if (!this.sessionId) {
-      this.sessionId = Date.now().toString();
-      this.sessionTitle = this.sessionTitle || this.getDefaultTitle();
+    if (!sessionsState.id) {
+      sessionsState.id = Date.now().toString();
+      sessionsState.title = sessionsState.title || sessionsState.defaultTitle;
     }
-    const sessionId = this.sessionId;
+    const sessionId = sessionsState.id;
     const tsStr = payload.timestamp.toString();
 
     const parts: MessagePart[] = [];
@@ -209,16 +178,7 @@ class MessagesState {
         alwaysAvailable: null,
       });
     }
-    this.scheduleSave();
-  }
-
-  /**
-   * Public wrapper for `upsertSystemMessage`. Lets the LLM dispatch refresh
-   * the visible system-prompt bubble with the turn-final prompt (including
-   * the tools hint) right before sending.
-   */
-  setDisplaySystemPrompt(effective: string | null | undefined): void {
-    this.upsertSystemMessage(effective);
+    persistenceState.scheduleSave();
   }
 
   /** Stable id convention: every tool_filter message is paired 1:1 with a
@@ -249,7 +209,7 @@ class MessagesState {
         relevantTools: state,
       });
     }
-    this.scheduleSave();
+    persistenceState.scheduleSave();
   }
 
   /** Patch the tool_filter bubble paired with `userMessageId`. No-op if the
@@ -265,7 +225,7 @@ class MessagesState {
       ...this.messages[idx],
       relevantTools: { ...existing, ...patch },
     };
-    this.scheduleSave();
+    persistenceState.scheduleSave();
   }
 
   /** Remove the tool_filter bubble paired with `userMessageId`. Used when the
@@ -282,8 +242,10 @@ class MessagesState {
    * LLM on the most recent turn. Always reflected in the array (and therefore
    * persisted with the session) so toggling `prompts.showSystemPrompt` later
    * can reveal it without a round-trip; the toggle is enforced at render time.
+   * Public so the LLM dispatch can refresh the bubble with the turn-final
+   * prompt (including the tools hint) right before sending.
    */
-  private upsertSystemMessage(effective: string | null | undefined): void {
+  upsertSystemMessage(effective: string | null | undefined): void {
     const existingIdx = this.messages.findIndex((m) => m.role === "system");
     const hasContent = typeof effective === "string" && effective.trim().length > 0;
 
@@ -304,617 +266,6 @@ class MessagesState {
     } else if (existingIdx >= 0) {
       this.messages.splice(existingIdx, 1);
     }
-  }
-
-  async loadSessionList() {
-    if (!this.storageEnabled) {
-      this.sessionList = [];
-      return;
-    }
-    try {
-      const sessions = (await invoke("list_chat_sessions")) as SessionInfo[];
-      this.sessionList = sessions;
-      if (this.sessionId) {
-        this.currentSessionIndex = sessions.findIndex((s) => s.id === this.sessionId);
-      }
-    } catch (e) {
-      console.error("Failed to load session list:", e);
-    }
-  }
-
-  private backfillMessageIds(messages: Message[]): Message[] {
-    let counter = 0;
-    for (const m of messages) {
-      if (!m.id) m.id = `load-${Date.now()}-${counter++}`;
-      // Freeze any tool-call bubbles that were mid-flight when the app was
-      // closed. The worker they were running in is long gone; leaving them
-      // as "running" would produce a UI spinner that never stops and would
-      // also leak into materializeContext (which filters by status). Mark
-      // them "failed" so the user sees a clear error state explaining that
-      // the tool server stopped before the call could finish.
-      if (
-        m.role === "tool" &&
-        m.toolCall &&
-        m.toolCall.status !== "complete" &&
-        m.toolCall.status !== "failed" &&
-        m.toolCall.status !== "cancelled"
-      ) {
-        m.toolCall = {
-          ...m.toolCall,
-          status: "failed",
-          error:
-            m.toolCall.error ??
-            "Tool server was stopped before this tool call completed (the app was closed).",
-        };
-      }
-      // Same idea for tool_filter bubbles: any "filtering" status that
-      // survived to disk represents a session reload mid-filter. Freeze it as
-      // an error so the spinner doesn't run forever.
-      if (m.role === "tool_filter" && m.relevantTools && m.relevantTools.status === "filtering") {
-        m.relevantTools = {
-          ...m.relevantTools,
-          status: "error",
-          errorMessage: m.relevantTools.errorMessage ?? "interrupted: session was reloaded",
-        };
-      }
-    }
-    return messages;
-  }
-
-  async loadLatest() {
-    if (!this.storageEnabled) return;
-    try {
-      const history = (await invoke("load_latest_chat_history")) as {
-        sessionId: string;
-        title: string;
-        contextUsage: TokenUsage | null;
-        messages: Message[];
-      } | null;
-      if (history && Array.isArray(history.messages)) {
-        this.messages = this.backfillMessageIds(history.messages);
-        this.sessionId = history.sessionId;
-        this.sessionTitle = history.title || this.getDefaultTitle();
-        this.tokenUsage = history.contextUsage || null;
-      }
-    } catch (e) {
-      console.error("Failed to load chat history:", e);
-    }
-    await this.loadSessionList();
-  }
-
-  private resetTTSPlayback() {
-    void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
-  }
-
-  async loadSession(sessionId: string) {
-    // Drain any debounced save first - otherwise a pending timer could fire
-    // after sessionId/messages are replaced and write the new session's data
-    // under the new id, silently dropping unpersisted edits to the prior one.
-    if (this.sessionId && this.sessionId !== sessionId) {
-      await this.flushSave();
-    }
-    await this.interruptStreaming();
-    this.resetTTSPlayback();
-    try {
-      const history = (await invoke("load_chat_session", { sessionId })) as {
-        sessionId: string;
-        title: string;
-        contextUsage: TokenUsage | null;
-        messages: Message[];
-      };
-      if (history && Array.isArray(history.messages)) {
-        this.messages = this.backfillMessageIds(history.messages);
-        this.sessionId = history.sessionId;
-        this.sessionTitle = history.title || this.getDefaultTitle();
-        this.tokenUsage = history.contextUsage || null;
-        this.currentSessionIndex = this.sessionList.findIndex((s) => s.id === sessionId);
-      }
-    } catch (e) {
-      console.error("Failed to load session:", e);
-    }
-  }
-
-  async navigatePrev() {
-    if (this.currentSessionIndex <= 0) return;
-    const prevId = this.sessionList[this.currentSessionIndex - 1].id;
-    await this.loadSession(prevId);
-  }
-
-  async navigateNext() {
-    if (this.currentSessionIndex >= this.sessionList.length - 1) return;
-    const nextId = this.sessionList[this.currentSessionIndex + 1].id;
-    await this.loadSession(nextId);
-  }
-
-  async deleteSession() {
-    if (!this.sessionId) return;
-
-    await this.interruptStreaming();
-    this.resetTTSPlayback();
-
-    // Cancel any pending save and drain the in-flight chain before the delete.
-    // If a save completes *after* the directory is removed, it resurrects the
-    // session file and leaves the UI pointing at a now-orphaned id.
-    this.cancelPendingSave();
-    await this.saveInFlight;
-
-    const sessionToDelete = this.sessionId;
-    const deletedIndex = this.sessionList.findIndex((s) => s.id === sessionToDelete);
-    const remaining = this.sessionList.filter((s) => s.id !== sessionToDelete);
-
-    // Clear in-memory session state *before* invoking the backend delete and
-    // any follow-up loadSession(). Otherwise loadSession's preemptive
-    // flushSave() sees the stale id + empty messages array and rewrites the
-    // deleted session back to disk; subsequent sends also wire up against the
-    // phantom id and silently drop the user's next message.
-    this.messages = [];
-    this.sessionId = null;
-    this.sessionTitle = "";
-    this.tokenUsage = null;
-    this.isStreaming = false;
-    this.streamingFirstChunkReceived = false;
-    this.streamingMessageId = null;
-
-    try {
-      await invoke("delete_chat_session", { sessionId: sessionToDelete });
-    } catch (e) {
-      console.error("Failed to delete session:", e);
-    }
-
-    this.sessionList = remaining;
-
-    if (remaining.length === 0) {
-      this.currentSessionIndex = 0;
-      return;
-    }
-
-    // Pick the session that slid into the deleted slot, or the previous one
-    // if we deleted the tail. Fall back to the first when the deleted id
-    // wasn't in the list (deletedIndex === -1).
-    const nextIdx =
-      deletedIndex < 0 ? 0 : deletedIndex < remaining.length ? deletedIndex : remaining.length - 1;
-    await this.loadSession(remaining[nextIdx].id);
-  }
-
-  async newSession() {
-    if (this.sessionId && this.messages.length > 0) {
-      await this.flushSave();
-    }
-    await this.interruptStreaming();
-    this.resetTTSPlayback();
-
-    this.messages = [];
-    this.sessionId = null;
-    this.sessionTitle = "";
-    this.tokenUsage = null;
-    this.isStreaming = false;
-    this.streamingFirstChunkReceived = false;
-
-    await this.loadSessionList();
-    this.currentSessionIndex = this.sessionList.length;
-  }
-
-  async updateTitle(title: string) {
-    this.sessionTitle = title;
-    if (this.sessionId && this.storageEnabled) {
-      try {
-        await invoke("save_session_title", {
-          sessionId: this.sessionId,
-          title,
-        });
-        const idx = this.sessionList.findIndex((s) => s.id === this.sessionId);
-        if (idx >= 0) {
-          this.sessionList[idx] = { ...this.sessionList[idx], title };
-        }
-      } catch (e) {
-        console.error("Failed to save session title:", e);
-      }
-    }
-  }
-
-  updateTokenUsage(usage: TokenUsage) {
-    this.tokenUsage = usage;
-    this.scheduleSave();
-  }
-
-  /** Debounced trailing-edge save. Prevents write amplification on hot paths
-   *  (per-message adds, per-token usage updates). */
-  scheduleSave() {
-    if (!this.storageEnabled) return;
-    this.hookUnloadFlush();
-    if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => {
-      this.saveTimer = null;
-      void this.save();
-    }, SAVE_DEBOUNCE_MS);
-  }
-
-  /** Force any pending scheduled save to run now, and wait for it. */
-  async flushSave(): Promise<void> {
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-      await this.save();
-    } else {
-      await this.saveInFlight;
-    }
-  }
-
-  /** Drop any pending scheduled save without persisting. Use before operations
-   *  that invalidate the current session (e.g. deletion) to prevent the timer
-   *  from resurrecting a file that was just removed. */
-  private cancelPendingSave() {
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-    }
-  }
-
-  private hookUnloadFlush() {
-    if (this.unloadHooked || typeof window === "undefined") return;
-    this.unloadHooked = true;
-    window.addEventListener("beforeunload", () => {
-      if (this.saveTimer) {
-        clearTimeout(this.saveTimer);
-        this.saveTimer = null;
-        // Best-effort synchronous flush: send an invoke and let it race with
-        // process exit. Tauri's invoke isn't truly sync but the command may
-        // still commit before teardown.
-        void this.save();
-      }
-    });
-  }
-
-  /** Build a persistence-safe snapshot of `messages`. Live runtime state is
-   *  untouched; this only filters/transforms the SNAPSHOT we send to disk so
-   *  in-progress states don't survive an app close/restart cycle. The
-   *  matching defense-in-depth lives in `backfillMessageIds`. */
-  private sanitizeSnapshotForSave(): Message[] {
-    const snapshot = $state.snapshot(this.messages) as Message[];
-    const streamingId = this.streamingMessageId;
-    const out: Message[] = [];
-    for (const m of snapshot) {
-      // Drop the assistant message currently mid-stream; it'll be persisted
-      // on the next flushSave after finishStreaming. Keeping it here would
-      // save half-written content that we can never resume.
-      if (this.isStreaming && streamingId !== null && m.id === streamingId) {
-        continue;
-      }
-      // Tool calls in non-terminal status: rewrite to a failed snapshot so
-      // reload doesn't show a stuck spinner, and the user sees a clear
-      // error explaining the tool server is gone.
-      if (
-        m.role === "tool" &&
-        m.toolCall &&
-        m.toolCall.status !== "complete" &&
-        m.toolCall.status !== "failed" &&
-        m.toolCall.status !== "cancelled"
-      ) {
-        out.push({
-          ...m,
-          toolCall: {
-            ...m.toolCall,
-            status: "failed",
-            error:
-              m.toolCall.error ??
-              "Tool server was stopped before this tool call completed (the app was closed).",
-          },
-        });
-        continue;
-      }
-      // Tool filter still in "filtering" status: rewrite to error.
-      if (m.role === "tool_filter" && m.relevantTools && m.relevantTools.status === "filtering") {
-        out.push({
-          ...m,
-          relevantTools: {
-            ...m.relevantTools,
-            status: "error",
-            errorMessage: m.relevantTools.errorMessage ?? "interrupted: app was closed",
-          },
-        });
-        continue;
-      }
-      out.push(m);
-    }
-    return out;
-  }
-
-  async save() {
-    if (!this.storageEnabled) return;
-    // Chain saves so rapid successive calls still serialize in order. The
-    // trailing .catch() ensures a single unexpected rejection (e.g. a throw
-    // outside the inner try/catch) doesn't wedge every subsequent save
-    // behind a permanently rejected promise.
-    this.saveInFlight = this.saveInFlight
-      .then(async () => {
-        try {
-          // `addUserMessage` now pre-assigns `sessionId` (so attachments can
-          // write into the session directory before the first save), so we
-          // can't detect a new session just by checking whether `sessionId`
-          // is null. Instead, compare against `sessionList` - if the current
-          // session hasn't been registered there yet, this is its first save
-          // and we need to refresh the list once the file exists.
-          if (!this.sessionId) {
-            this.sessionId = Date.now().toString();
-            this.sessionTitle = this.sessionTitle || this.getDefaultTitle();
-          }
-          const isNew = !this.sessionList.some((s) => s.id === this.sessionId);
-
-          await invoke("save_chat_history", {
-            messages: this.sanitizeSnapshotForSave(),
-            sessionId: this.sessionId,
-            title: this.sessionTitle || null,
-            contextUsage: this.tokenUsage ? $state.snapshot(this.tokenUsage) : null,
-          });
-
-          if (isNew) {
-            await this.loadSessionList();
-          }
-        } catch (e) {
-          console.error("Failed to save chat history:", e);
-        }
-      })
-      .catch((e) => {
-        console.error("[messages] save chain error:", e);
-      });
-    await this.saveInFlight;
-  }
-
-  /** Resolve the array index of the message currently being streamed into.
-   *  Returns -1 when there is no active stream or the target has been spliced
-   *  away (e.g. user deleted the streaming message). */
-  private getStreamingIndex(): number {
-    if (this.streamingMessageId === null) return -1;
-    return this.messages.findIndex((m) => m.id === this.streamingMessageId);
-  }
-
-  startStreaming(modelUsed: "default" | "secondary" = "default") {
-    this.isStreaming = true;
-    this.streamingFirstChunkReceived = false;
-    this.reasoningStartTime = null;
-    this.streamingReasoningId = null;
-    this.ttsCursor = 0;
-    const assistantId = makeMessageId();
-    this.streamingMessageId = assistantId;
-    void import("./tts.svelte").then(({ ttsState }) => ttsState.startStream(assistantId));
-    this.addMessage({
-      id: assistantId,
-      role: "assistant",
-      content: "",
-      modelUsed,
-    });
-  }
-
-  /** Set up for reprocessing an existing assistant message in place. Unlike
-   *  `startStreaming`, does not push a new message - streaming will write back
-   *  into the existing slot so newer conversation turns stay untouched. */
-  beginReprocess(messageId: string): boolean {
-    const idx = this.messages.findIndex((m) => m.id === messageId);
-    if (idx < 0) return false;
-    this.isStreaming = true;
-    this.streamingFirstChunkReceived = false;
-    this.reasoningStartTime = null;
-    this.streamingReasoningId = null;
-    this.ttsCursor = 0;
-    this.streamingMessageId = messageId;
-    // Drop any prior reasoning bubble paired to this assistant turn. A new
-    // one will be lazily created if reasoning fires again on the regenerated
-    // run.
-    const reasoningIdx = this.messages.findIndex(
-      (m) => m.role === "reasoning" && m.pairedAssistantId === messageId,
-    );
-    if (reasoningIdx >= 0) {
-      this.messages.splice(reasoningIdx, 1);
-    }
-    // Clear existing content so the regenerated output replaces, not appends.
-    // Preserve role + id + modelUsed. (Re-find the index in case the prior
-    // reasoning splice shifted it.)
-    const refreshedIdx = this.messages.findIndex((m) => m.id === messageId);
-    if (refreshedIdx < 0) return false;
-    const existing = this.messages[refreshedIdx];
-    this.messages[refreshedIdx] = {
-      ...existing,
-      role: "assistant",
-      content: "",
-    };
-    // Reset the paired tool_filter bubble so the spinner shows during the
-    // re-run instead of stale phase-1/phase-2 results.
-    const pairedUser = this.messages.slice(refreshedIdx + 1).find((m) => m.role === "user");
-    if (pairedUser?.id && settingsState.currentSettings["tools.enabled"]) {
-      this.upsertToolFilterMessage(pairedUser.id, {
-        status: "filtering",
-        phase1: null,
-        phase2: null,
-        alwaysAvailable: null,
-      });
-    }
-    void import("./tts.svelte").then(({ ttsState }) => ttsState.startStream(messageId));
-    return true;
-  }
-
-  appendToStreaming(content: string) {
-    const idx = this.getStreamingIndex();
-    if (idx < 0) return;
-    if (!this.streamingFirstChunkReceived) {
-      this.streamingFirstChunkReceived = true;
-      this.finalizeReasoningDuration();
-      this.messages[idx] = { ...this.messages[idx], content: "" };
-      this.streamBuffer = "";
-    }
-    this.streamBuffer += content;
-    if (!this.streamFlushTimer) {
-      this.streamFlushTimer = setTimeout(() => this.flushStreamBuffer(), STREAM_FLUSH_MS);
-    }
-  }
-
-  /** Accumulate a reasoning-trace delta. Lazily creates a `role: "reasoning"`
-   *  bubble on the first delta of a turn, paired to the currently-streaming
-   *  assistant message. Written directly (no coalesce) since reasoning token
-   *  rates are lower than content rates in practice. */
-  appendReasoning(delta: string) {
-    if (!delta) return;
-    if (this.streamingMessageId === null) return;
-    if (this.streamingFirstChunkReceived) return;
-
-    if (this.streamingReasoningId === null) {
-      const contentIdx = this.messages.findIndex((m) => m.id === this.streamingMessageId);
-      if (contentIdx < 0) return;
-      const contentMsg = this.messages[contentIdx];
-      const reasoningId = makeMessageId();
-      this.streamingReasoningId = reasoningId;
-      this.reasoningStartTime = Date.now();
-      // Insert immediately after the assistant content message in the
-      // newest-first array, which places the reasoning bubble older (higher
-      // index) than its paired content, matching the chronological order in
-      // which the model emits them.
-      this.messages.splice(contentIdx + 1, 0, {
-        id: reasoningId,
-        role: "reasoning",
-        content: delta,
-        modelUsed: contentMsg.modelUsed,
-        pairedAssistantId: contentMsg.id,
-      });
-      this.scheduleSave();
-      return;
-    }
-
-    const idx = this.messages.findIndex((m) => m.id === this.streamingReasoningId);
-    if (idx < 0) return;
-    const cur = (this.messages[idx].content as string) || "";
-    this.messages[idx] = { ...this.messages[idx], content: cur + delta };
-  }
-
-  /** Freeze the elapsed reasoning time onto the streaming reasoning bubble so
-   *  historic loads can render "Thought for Xs" without live tracking, then
-   *  clear the streaming-reasoning slot so subsequent state transitions stop
-   *  treating it as live. No-op if no reasoning bubble is currently open. */
-  private finalizeReasoningDuration() {
-    if (this.streamingReasoningId === null) {
-      this.reasoningStartTime = null;
-      return;
-    }
-    const idx = this.messages.findIndex((m) => m.id === this.streamingReasoningId);
-    if (idx < 0) {
-      this.streamingReasoningId = null;
-      this.reasoningStartTime = null;
-      return;
-    }
-    if (this.reasoningStartTime !== null) {
-      const duration = Date.now() - this.reasoningStartTime;
-      this.messages[idx] = { ...this.messages[idx], reasoningDurationMs: duration };
-    }
-    this.streamingReasoningId = null;
-    this.reasoningStartTime = null;
-  }
-
-  private flushStreamBuffer() {
-    this.streamFlushTimer = null;
-    if (!this.streamBuffer) return;
-    const idx = this.getStreamingIndex();
-    if (idx < 0) {
-      this.streamBuffer = "";
-      return;
-    }
-    const cur = (this.messages[idx]?.content as string) || "";
-    const next = cur + this.streamBuffer;
-    this.messages[idx] = {
-      ...this.messages[idx],
-      content: next,
-    };
-    this.streamBuffer = "";
-    void this.feedTTS(next, /* final */ false);
-  }
-
-  private async feedTTS(fullText: string, final: boolean): Promise<void> {
-    const settings = settingsState.currentSettings;
-    if (!settings["tts.enabled"]) return;
-    const { ttsState } = await import("./tts.svelte");
-    if (!ttsState.loaded) return;
-
-    // Don't interleave with a replay that's voicing a different message.
-    const streamingId = this.streamingMessageId;
-    if (
-      ttsState.currentMessageId !== null &&
-      streamingId !== null &&
-      ttsState.currentMessageId !== streamingId
-    ) {
-      return;
-    }
-
-    // Strip markdown BEFORE segmenting - Intl.Segmenter isn't markdown-aware
-    // and otherwise gets confused by URLs, code fences, table pipes, etc.
-    // ttsCursor indexes into the stripped text, not the raw stream.
-    let stripped = stripMarkdownForTTS(fullText);
-    if (!settingsState.currentSettings["tts.spellOutEmojis"]) {
-      stripped = stripEmojisForTTS(stripped);
-    }
-    const remaining = stripped.slice(this.ttsCursor);
-    if (!remaining) {
-      if (final) ttsState.finalize();
-      return;
-    }
-
-    const sentenceSeg = new Intl.Segmenter(undefined, { granularity: "sentence" });
-    const sentences = Array.from(sentenceSeg.segment(remaining));
-    const lastIdx = sentences.length - 1;
-
-    for (let i = 0; i < sentences.length; i++) {
-      const seg = sentences[i];
-      // Mid-stream the trailing segment is usually unfinished - hold it back.
-      // On finalize every segment is considered complete.
-      const isTerminal = i < lastIdx || final;
-      if (!isTerminal) break;
-
-      const chunk = seg.segment.trim();
-      if (chunk) ttsState.feedSentence(chunk);
-      this.ttsCursor += seg.segment.length;
-    }
-
-    if (final) ttsState.finalize();
-  }
-
-  private cancelStreamBuffer() {
-    if (this.streamFlushTimer) {
-      clearTimeout(this.streamFlushTimer);
-      this.streamFlushTimer = null;
-    }
-    this.flushStreamBuffer();
-  }
-
-  async finishStreaming() {
-    this.cancelStreamBuffer();
-    const idx = this.getStreamingIndex();
-    this.finalizeReasoningDuration();
-    this.isStreaming = false;
-    this.streamingMessageId = null;
-    const finalText = idx >= 0 ? (this.messages[idx]?.content as string) || "" : "";
-    void this.feedTTS(finalText, true);
-    await this.flushSave();
-  }
-
-  /** Attach the OpenAI tool_calls emitted in the final chunk of the current
-   *  streaming assistant message so edit-and-resend can re-materialize the
-   *  tool-role messages deterministically. Does NOT clear the streaming slot.
-   *  The tool-call loop in llm.ts handles the handoff explicitly. */
-  setPendingToolCalls(calls: PendingToolCall[]): void {
-    const idx = this.getStreamingIndex();
-    if (idx < 0) return;
-    this.messages[idx] = {
-      ...this.messages[idx],
-      pendingToolCalls: calls,
-    };
-  }
-
-  /** Close out the current streaming assistant slot when the model is about
-   *  to hand off to tool calls. Unlike finishStreaming(), does not trigger a
-   *  TTS finalize (no prose was produced) and does not persist the empty
-   *  bubble - the assistant message will be rewritten on the next hop. */
-  finishStreamingForToolCalls(): void {
-    this.cancelStreamBuffer();
-    this.finalizeReasoningDuration();
-    this.isStreaming = false;
-    this.streamingMessageId = null;
-    void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
   }
 
   /** Push a new role:"tool" message representing an active tool invocation.
@@ -942,7 +293,7 @@ class MessagesState {
       ...this.messages[idx],
       toolCall: { ...existing, ...patch },
     };
-    this.scheduleSave();
+    persistenceState.scheduleSave();
   }
 
   /** Mark a tool call terminated with either a result or an error. Sets the
@@ -972,7 +323,7 @@ class MessagesState {
         error: payload.error,
       },
     };
-    this.scheduleSave();
+    persistenceState.scheduleSave();
   }
 
   /** Record an askUser request on the bubble so the form renders. */
@@ -999,7 +350,7 @@ class MessagesState {
         askUser: { ...existing.askUser, answers },
       },
     };
-    this.scheduleSave();
+    persistenceState.scheduleSave();
   }
 
   /** Append a log line visible in the bubble's details disclosure. */
@@ -1016,87 +367,15 @@ class MessagesState {
     };
   }
 
-  receiveErrorMessage(errorType: LLMErrorType, detail?: string) {
-    this.cancelStreamBuffer();
-    const idx = this.getStreamingIndex();
-    this.finalizeReasoningDuration();
-    this.isStreaming = false;
-    this.streamingMessageId = null;
-    const content = detail ? `${errorType}\n${detail}` : errorType;
-    if (idx >= 0) {
-      const existing = this.messages[idx];
-      this.messages[idx] = { ...(existing.id ? { id: existing.id } : {}), role: "error", content };
-    }
-    void this.flushSave();
-  }
-
-  async interruptStreaming(): Promise<void> {
-    if (!this.isStreaming && !this.hasActiveToolCall) return;
-
-    if (this.isStreaming) {
-      this.cancelStreamBuffer();
-      void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
-      this.finalizeReasoningDuration();
-
-      const idx = this.getStreamingIndex();
-      if (idx >= 0) {
-        if (this.streamingFirstChunkReceived) {
-          const current = this.messages[idx].content;
-          if (typeof current === "string") {
-            this.messages[idx] = {
-              ...this.messages[idx],
-              content: current + "\n\n> _User interrupted._",
-            };
-          }
-        } else {
-          this.messages[idx] = {
-            ...this.messages[idx],
-            content: "> _User interrupted._",
-          };
-        }
-      }
-
-      this.isStreaming = false;
-      this.streamingFirstChunkReceived = false;
-      this.streamingMessageId = null;
-    }
-
-    // Cancel every in-flight tool call. The sidecar responds with
-    // `tool_cancelled` which drives each bubble to its terminal state.
-    this.toolCancelHandler?.();
-    // Abort the outer LLM HTTP stream (no-op when already settled). Kept
-    // outside the `isStreaming` branch so tool-only turns still stop the
-    // parent `sendMessages` loop. Its controller is live until the
-    // tool-call chain finishes.
-    interruptCurrentStream();
-    await this.flushSave();
-  }
-
-  /** Abort the active stream without emitting an interrupt marker. Used when
-   *  the ongoing assistant message is about to be spliced away (deleteAgent /
-   *  reprocess) - leaving a "_User interrupted._" note on a message that's
-   *  already being removed would be nonsensical. */
-  private abortStreamSilently(): void {
-    if (!this.isStreaming) return;
-    this.cancelStreamBuffer();
-    void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
-    this.isStreaming = false;
-    this.streamingFirstChunkReceived = false;
-    this.reasoningStartTime = null;
-    this.streamingMessageId = null;
-    this.streamingReasoningId = null;
-    interruptCurrentStream();
-  }
-
   /** Update any user message by id and regenerate the response. If no id is
    *  provided, falls back to the most recent user message. */
   async updateUserMessage(messageId: string | undefined, content: MessageContent) {
-    await this.interruptStreaming();
+    await streamingState.interruptStreaming();
     // interruptStreaming only stops TTS if something was actively streaming.
     // When editing a message with a settled assistant response, the response
     // is about to be discarded (either spliced out on delete, or replaced by
     // the resend), so any replay-mode TTS tied to it must stop too.
-    this.resetTTSPlayback();
+    streamingState.resetTTSPlayback();
 
     const userIdx = messageId
       ? this.messages.findIndex((m) => m.role === "user" && m.id === messageId)
@@ -1121,14 +400,10 @@ class MessagesState {
       }
     }
 
-    const removedPaths = diffRemovedAttachmentPaths(prevContent, content);
-
     if (isEmpty) {
       this.messages.splice(0, userIdx + 1);
-      if (removedPaths.length > 0) {
-        void deleteSessionAttachments(removedPaths);
-      }
-      await this.flushSave();
+      persistenceState.cleanupRemovedAttachments(prevContent, content);
+      await persistenceState.flushSave();
       return;
     }
 
@@ -1157,18 +432,16 @@ class MessagesState {
     if (systemPromptOverride) updatedMsg.systemPromptOverride = systemPromptOverride;
     this.messages[userIdx] = updatedMsg;
 
-    if (removedPaths.length > 0) {
-      void deleteSessionAttachments(removedPaths);
-    }
+    persistenceState.cleanupRemovedAttachments(prevContent, content);
 
     const isFirstMessage = this.messages.filter((m) => m.role === "user").length === 1;
     if (isFirstMessage) {
-      this.sessionTitle = this.getDefaultTitle();
+      sessionsState.title = sessionsState.defaultTitle;
     }
 
     this.upsertSystemMessage(effectiveSystemPrompt);
 
-    await this.flushSave();
+    await persistenceState.flushSave();
 
     // Regenerate the paired response in place so turns newer than this user
     // message survive the edit. In newest-first order the paired response sits
@@ -1187,11 +460,9 @@ class MessagesState {
       scan -= 1;
     const paired = scan >= 0 ? this.messages[scan] : null;
     if (paired && (paired.role === "assistant" || paired.role === "error") && paired.id) {
-      const { reprocessMessage } = await import("$lib/sidecar/llm");
-      await reprocessMessage(paired.id);
+      await this.reprocessMessageHandler?.(paired.id);
     } else {
-      const { sendMessages } = await import("$lib/sidecar/llm");
-      await sendMessages();
+      await this.sendMessagesHandler?.();
     }
   }
 
@@ -1203,8 +474,8 @@ class MessagesState {
   /** Delete a user message along with its paired assistant/error response. If
    *  this empties the session of user messages, remove the session entirely. */
   async deleteUserMessage(messageId: string) {
-    await this.interruptStreaming();
-    this.resetTTSPlayback();
+    await streamingState.interruptStreaming();
+    streamingState.resetTTSPlayback();
 
     const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === messageId);
     if (userIdx < 0) return;
@@ -1229,38 +500,35 @@ class MessagesState {
       }
     }
 
-    const removedPaths = diffRemovedAttachmentPaths(this.messages[refreshedUserIdx].content, "");
+    const prevContent = this.messages[refreshedUserIdx].content;
 
     const deleteCount = refreshedUserIdx - pairedIdx + 1;
     this.messages.splice(pairedIdx, deleteCount);
 
-    if (removedPaths.length > 0) {
-      void deleteSessionAttachments(removedPaths);
-    }
+    persistenceState.cleanupRemovedAttachments(prevContent, "");
 
     const remainingUsers = this.messages.filter((m) => m.role === "user").length;
     if (remainingUsers === 0) {
-      await this.deleteSession();
+      await sessionsState.delete();
       return;
     }
 
-    await this.flushSave();
+    await persistenceState.flushSave();
   }
 
   /** Regenerate a specific assistant message in place. Only messages
    *  chronologically before the target are used as context; newer turns stay
    *  untouched. */
   async reprocessAgentMessage(messageId: string) {
-    if (this.isStreaming) return;
-    this.resetTTSPlayback();
+    if (streamingState.isActive) return;
+    streamingState.resetTTSPlayback();
 
     const agentIdx = this.messages.findIndex(
       (m) => (m.role === "assistant" || m.role === "error") && m.id === messageId,
     );
     if (agentIdx < 0) return;
 
-    const { reprocessMessage } = await import("$lib/sidecar/llm");
-    await reprocessMessage(messageId);
+    await this.reprocessMessageHandler?.(messageId);
   }
 
   /** Delete an assistant/error message. Safe to call on a currently-streaming
@@ -1281,7 +549,7 @@ class MessagesState {
       return;
     }
     this.messages.splice(idx, 1);
-    await this.flushSave();
+    await persistenceState.flushSave();
   }
 
   async deleteAgentMessage(messageId: string) {
@@ -1290,11 +558,11 @@ class MessagesState {
     );
     if (idx < 0) return;
 
-    const isStreamingThis = this.isStreaming && idx === 0;
+    const isStreamingThis = streamingState.isActive && idx === 0;
     if (isStreamingThis) {
-      this.abortStreamSilently();
+      streamingState.abortSilently();
     }
-    this.resetTTSPlayback();
+    streamingState.resetTTSPlayback();
 
     this.messages.splice(idx, 1);
     // Drop any reasoning bubble paired to this assistant turn; they live
@@ -1309,11 +577,11 @@ class MessagesState {
 
     const remainingUsers = this.messages.filter((m) => m.role === "user").length;
     if (remainingUsers === 0) {
-      await this.deleteSession();
+      await sessionsState.delete();
       return;
     }
 
-    await this.flushSave();
+    await persistenceState.flushSave();
   }
 }
 

@@ -1,4 +1,5 @@
 mod commands;
+mod download;
 mod error;
 mod sidecar;
 mod sidecar_kind;
@@ -7,8 +8,12 @@ mod types;
 mod utils;
 
 use crate::commands::*;
-use crate::sidecar::{init_process_guards, kill_all_sidecars, probe_downloads, start_bun_sidecar};
-use crate::state::{AppState, AppStateInner, MAX_CONCURRENT_DOWNLOADS};
+use crate::download::{
+    cancel_download, clear_completed_downloads, download_state, enqueue_downloads,
+    mark_downloads_seen, probe_downloads, remove_download, retry_download, DownloadManager,
+};
+use crate::sidecar::{init_process_guards, kill_all_sidecars, start_bun_sidecar};
+use crate::state::{AppState, AppStateInner};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -76,10 +81,13 @@ pub fn run() {
     let last_monitor: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let move_last_monitor = last_monitor.clone();
 
+    let downloads =
+        DownloadManager::new(dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from(".")));
+
     tauri::Builder::default()
         .manage(AppState(Arc::new(AppStateInner {
             sidecars: Mutex::new(HashMap::new()),
-            download_sem: tokio::sync::Semaphore::new(MAX_CONCURRENT_DOWNLOADS),
+            downloads,
             metrics: tokio::sync::RwLock::new(sysinfo::System::new()),
             current_shortcut: Mutex::new(None),
             visible: AtomicBool::new(true),
@@ -206,6 +214,9 @@ pub fn run() {
             let state: State<AppState> = app.state();
             let app_state = state.inner().clone();
 
+            // Resume any persisted Pending / previously-active downloads.
+            app_state.0.downloads.start_resume(&handle);
+
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = start_bun_sidecar(handle.clone(), &app_state).await {
                     eprintln!("[startup] start_bun_sidecar: {e}");
@@ -251,6 +262,13 @@ pub fn run() {
             delete_session_attachments,
             convert_file_to_markdown,
             probe_downloads,
+            enqueue_downloads,
+            download_state,
+            cancel_download,
+            retry_download,
+            remove_download,
+            clear_completed_downloads,
+            mark_downloads_seen,
             get_process_metrics,
             list_tomat_storage,
             delete_tomat_paths,

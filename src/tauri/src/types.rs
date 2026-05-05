@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 pub enum ServerStatus {
     Disabled,
     Error,
-    Downloading,
     Loading,
     Running,
 }

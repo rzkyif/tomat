@@ -6,9 +6,9 @@
   } from "$lib/shared/types";
   import Bubble from "../Bubble.svelte";
   import Expandable from "../Expandable.svelte";
+  import Expand from "../Expand.svelte";
   import { settingsState } from "../../state";
   import { expansionState } from "$lib/state/expansion.svelte";
-  import { expand } from "$lib/shared/animations";
   import { untrack } from "svelte";
 
   let {
@@ -562,22 +562,22 @@
                 {/if}
               </div>
             {/each}
-            {#if requiresSubmit && readyToSubmit(toolCall.askUser.questions)}
-              <!-- Wrapper carries the height transition so the button itself
-                   keeps its natural padding; expand animates max-height +
-                   opacity from 0 and is gated by the global animation
-                   settings. -->
-              <div transition:expand class="self-end">
-                <button
-                  type="button"
-                  data-tc-nav
-                  class="text-xs px-3 py-1 rounded bg-default-200 text-default-800 cursor-pointer outline-none transition-colors duration-100"
-                  onclick={submit}
-                >
-                  Submit
-                </button>
-              </div>
-            {/if}
+            <!-- Expand wrapper carries the height transition so the button
+                 itself keeps its natural padding; max-height + opacity
+                 animate from 0 and the rate honours animation settings. -->
+            <Expand
+              open={requiresSubmit && readyToSubmit(toolCall.askUser.questions)}
+              class="self-end"
+            >
+              <button
+                type="button"
+                data-tc-nav
+                class="text-xs px-3 py-1 rounded bg-default-200 text-default-800 cursor-pointer outline-none transition-colors duration-100"
+                onclick={submit}
+              >
+                Submit
+              </button>
+            </Expand>
           </div>
         {/if}
 

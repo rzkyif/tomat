@@ -1,13 +1,22 @@
 <script lang="ts">
   import { confirmState } from "../../state";
+  import { formatBytes } from "$lib/shared/format";
 
-  function formatBytes(b: number | null): string {
-    if (b == null) return "size unknown";
-    if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(2)} GB`;
-    if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(1)} MB`;
-    if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`;
-    return `${b} B`;
-  }
+  // Esc dismisses the dialog. Even in alert mode (no Cancel button) this
+  // routes through `cancel()`, which clears the pending request without
+  // running `onConfirm` - matches every other modal-style component in the
+  // app, where Esc means "back out, do nothing."
+  $effect(() => {
+    if (!confirmState.pending) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        confirmState.cancel();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  });
 </script>
 
 {#if confirmState.pending}

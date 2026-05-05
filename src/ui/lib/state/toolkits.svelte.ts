@@ -9,6 +9,7 @@
 import { BUN_SIDECAR_HTTP_BASE_URL, BUN_SIDECAR_WS_BASE_URL } from "$lib/shared/network";
 import type { AskUserAnswer, AskUserQuestion, ToolCallState } from "$lib/shared/types";
 import { messagesState } from "./messages.svelte";
+import { streamingState } from "./streaming.svelte";
 
 const BASE_URL = BUN_SIDECAR_HTTP_BASE_URL;
 const WS_URL = `${BUN_SIDECAR_WS_BASE_URL}/ws/toolcall`;
@@ -116,14 +117,10 @@ class ToolkitsState {
    *  from the UI back into the right toolkit worker). */
   private callToolkit = new Map<string, string>();
 
-  constructor() {
-    // Auto-connect on first consumer, not here - `new WebSocket(...)` in a
-    // module-level constructor would fire during SSR.
-
-    // Register with messagesState so `interruptStreaming()` can stop every
-    // active tool call without messagesState needing to import this module.
-    messagesState.setToolCancelHandler(() => this.cancelAllActiveCalls());
-  }
+  // Auto-connect on first consumer, not in a constructor - `new WebSocket(...)`
+  // in a module-level constructor would fire during SSR. streamingState
+  // invokes `cancelAllActiveCalls()` from `interruptStreaming()` via the
+  // listener registered at the bottom of this module.
 
   async ensureConnected(): Promise<void> {
     if (typeof window === "undefined") return;
@@ -553,7 +550,7 @@ class ToolkitsState {
   }
 
   /** Send cancel frames for every tool call bubble still in a non-terminal
-   *  status. Wired into `messagesState.interruptStreaming()` so the global
+   *  status. Wired into `streamingState.interruptStreaming()` so the global
    *  stop affordance in UserInput tears down running AND awaiting-user tool
    *  calls in one shot. */
   cancelAllActiveCalls(): void {
@@ -676,3 +673,8 @@ class ToolkitsState {
 }
 
 export const toolkitsState = new ToolkitsState();
+
+// Cancel every active tool call when the user interrupts streaming. Registered
+// here so streaming.svelte doesn't have to import this module (toolkits already
+// imports streamingState; one-way is the cycle-free shape).
+streamingState.onInterrupt(() => toolkitsState.cancelAllActiveCalls());

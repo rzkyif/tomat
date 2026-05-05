@@ -1,13 +1,14 @@
+use crate::download::DownloadManager;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri_plugin_shell::process::CommandChild;
 
-/// Cap on concurrent model downloads. A semaphore (vs. a mutex) lets multiple
-/// model fetches proceed in parallel without overwhelming the network or
-/// disk; `2` is conservative and matches typical residential-link throughput
-/// for the ~1–4 GB Hugging Face files we pull.
-pub const MAX_CONCURRENT_DOWNLOADS: usize = 2;
+/// Cap on concurrent model downloads. Held at `1` so we don't trip
+/// HuggingFace's per-IP burst limits when several files are queued back to
+/// back; the manager additionally inserts a `INTER_DOWNLOAD_DELAY` pause
+/// between consecutive transfers for the same reason.
+pub const MAX_CONCURRENT_DOWNLOADS: usize = 1;
 
 pub struct Sidecar {
     pub child: Option<CommandChild>,
@@ -17,7 +18,10 @@ pub struct Sidecar {
 
 pub struct AppStateInner {
     pub sidecars: Mutex<HashMap<String, Sidecar>>,
-    pub download_sem: tokio::sync::Semaphore,
+    /// Centralized download queue. Constructed at app startup with the
+    /// persisted state from `~/.tomat/downloads.json`; resumed Pending items
+    /// are spawned in setup() once the `AppHandle` is available.
+    pub downloads: Arc<DownloadManager>,
     // RwLock so concurrent metric reads don't serialize on each other; writes
     // (refresh_process) still take the write lock briefly.
     pub metrics: tokio::sync::RwLock<sysinfo::System>,

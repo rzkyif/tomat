@@ -19,7 +19,6 @@
   const colorMap: Record<ServerStatus, string> = {
     Disabled: "bg-default-200 text-default-600",
     Error: "bg-accent-red-200 text-accent-red-700",
-    Downloading: "bg-accent-blue-200 text-accent-blue-700",
     Loading: "bg-accent-orange-200 text-accent-orange-700",
     Running: "bg-accent-green-200 text-accent-green-700",
   };
@@ -28,7 +27,6 @@
   const iconMap: Record<ServerStatus, string> = {
     Disabled: "i-material-symbols-nearby-off-rounded",
     Error: "i-material-symbols-warning-rounded",
-    Downloading: "i-material-symbols-cloud-download-rounded",
     Loading: "i-line-md:loading-loop",
     Running: "i-material-symbols-check-rounded",
   };
@@ -60,9 +58,7 @@
     <i class={icon}></i>
     <span>
       {type}
-      {update.status === "Downloading" && update.progress !== undefined
-        ? `${Math.round(update.progress)}%`
-        : update.status}
+      {update.status}
     </span>
   </button>
   {#if update.status === "Error" && isOpen}

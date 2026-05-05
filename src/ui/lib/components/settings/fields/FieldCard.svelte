@@ -3,7 +3,7 @@
   import type { SettingField } from "$lib/shared/settings";
   import { evalCondition } from "$lib/shared/settings";
   import { settingsState } from "../../../state";
-  import { expand } from "$lib/shared/animations";
+  import Expand from "../../Expand.svelte";
   import FieldDescription from "./FieldDescription.svelte";
 
   let {
@@ -74,7 +74,9 @@
 
 <div
   data-field-id={field.id}
-  class="flex flex-col gap-2 max-w-full overflow-clip px-3 pt-1 pb-2 text-base rounded-2xl border-2 {hasError
+  class="flex flex-col gap-2 max-w-full overflow-clip px-3 pt-1 {horizontal
+    ? 'pb-1'
+    : 'pb-2'} text-base rounded-2xl border-2 {hasError
     ? 'bg-accent-red-100 border-accent-red-400'
     : 'bg-default-200 border-transparent'}"
 >
@@ -110,10 +112,10 @@
       {#if effectiveTier === "always" && field.description}
         <FieldDescription text={field.description} />
       {/if}
-      {#if effectiveTier === "ondemand" && field.description && descriptionExpanded}
-        <div transition:expand>
+      {#if effectiveTier === "ondemand" && field.description}
+        <Expand open={descriptionExpanded}>
           <FieldDescription text={field.description} />
-        </div>
+        </Expand>
       {/if}
     </div>
 

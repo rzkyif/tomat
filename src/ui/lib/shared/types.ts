@@ -166,13 +166,32 @@ export function makeMessageId(): string {
 export type Monitor = { id: string | number; name: string; isPrimary: boolean };
 export type Alignment = "left" | "center" | "right";
 
-export type ServerStatus = "Disabled" | "Error" | "Downloading" | "Loading" | "Running";
+export type ServerStatus = "Disabled" | "Error" | "Loading" | "Running";
 
 export interface ServerStatusUpdate {
   server: "llm" | "stt" | "bun";
   status: ServerStatus;
   progress?: number;
   message?: string;
+}
+
+export type DownloadStatus = "Pending" | "Downloading" | "Completed" | "Error" | "Cancelled";
+export type DownloadDestination = "Models";
+
+export interface DownloadItem {
+  id: string;
+  source: string;
+  destination: DownloadDestination;
+  rel_path: string;
+  abs_path: string;
+  filename: string;
+  group_id: string;
+  size_bytes: number | null;
+  downloaded_bytes: number;
+  status: DownloadStatus;
+  error: string | null;
+  seen: boolean;
+  added_at_ms: number;
 }
 
 export type LLMErrorType =
@@ -193,6 +212,15 @@ export type SessionInfo = {
   id: string;
   title: string;
 };
+
+/** Wire shape returned by `load_chat_session` and `load_latest_chat_history`
+ *  Tauri commands. */
+export interface ChatHistoryPayload {
+  sessionId: string;
+  title: string;
+  contextUsage: TokenUsage | null;
+  messages: Message[];
+}
 
 export type Attachment = {
   type: "image" | "document";

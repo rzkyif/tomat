@@ -5,6 +5,8 @@
  * shown in the settings screen.
  */
 
+import { invoke } from "@tauri-apps/api/core";
+
 export type CommandType = "llm" | "stt";
 
 export interface CommandArg {
@@ -112,7 +114,6 @@ export async function buildPreview(
   type: CommandType,
   currentSettings: Record<string, any>,
 ): Promise<string> {
-  const { invoke } = await import("@tauri-apps/api/core");
   const cmd = COMMANDS[type];
   const parts = [cmd.binary];
   for (const arg of cmd.args) {

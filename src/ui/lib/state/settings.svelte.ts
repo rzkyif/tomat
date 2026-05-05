@@ -1,9 +1,10 @@
 /**
  * Reactive store for user settings. Loads them from the right place on
  * startup (Rust backend on desktop, localStorage in the browser), saves
- * them back when the user changes anything, and triggers the right side
- * effect (like restarting a sidecar or toggling TTS) when the relevant
- * keys change.
+ * them back when the user changes anything, and emits an `onChange` event
+ * per key so external orchestrators (`settingsEffects`) can drive sidecar
+ * restarts, TTS toggles, etc. without dragging this module into a cycle
+ * with the consumers.
  */
 
 import { browser, dev } from "$app/environment";
@@ -18,11 +19,30 @@ function warnIfUnknownKey(key: string): void {
   }
 }
 
+type SettingChangeListener = (key: string, prev: unknown, next: unknown) => void | Promise<void>;
+
 class SettingsState {
   currentSettings = $state<Record<string, any>>(getDefaultSettings());
 
-  private restartTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private saveChain: Promise<void> = Promise.resolve();
+  private listeners = new Set<SettingChangeListener>();
+
+  onChange(fn: SettingChangeListener): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private notifyListeners(key: string, prev: unknown, next: unknown): void {
+    for (const fn of this.listeners) {
+      try {
+        void Promise.resolve(fn(key, prev, next)).catch((e) =>
+          console.warn(`[settings] onChange listener for "${key}" failed:`, e),
+        );
+      } catch (e) {
+        console.warn(`[settings] onChange listener for "${key}" failed:`, e);
+      }
+    }
+  }
 
   async loadSettings() {
     if (!browser) return;
@@ -72,27 +92,8 @@ class SettingsState {
     await invoke("set_global_shortcut", { accelerator });
   }
 
-  debounceRestart(type: "llm" | "stt") {
-    const existing = this.restartTimeouts.get(type);
-    if (existing) clearTimeout(existing);
-    this.restartTimeouts.set(
-      type,
-      setTimeout(async () => {
-        if (type === "llm") {
-          const { messagesState } = await import("./messages.svelte");
-          await messagesState.interruptStreaming();
-        }
-        const { restartServerIfNeed } = await import("../sidecar/manager");
-        restartServerIfNeed(type);
-        this.restartTimeouts.delete(type);
-      }, 500),
-    );
-  }
-
   async updateSetting(key: string, value: unknown) {
     warnIfUnknownKey(key);
-    const prevEnabled = !!this.currentSettings["tts.enabled"];
-    const prevSttEnabled = this.currentSettings["stt.enabled"] !== false;
     const prevValue = this.currentSettings[key];
     this.currentSettings[key] = value;
 
@@ -124,43 +125,18 @@ class SettingsState {
     }
 
     await this.save();
-
-    if (key.startsWith("llm.")) {
-      this.debounceRestart("llm");
-    } else if (key.startsWith("stt.")) {
-      this.debounceRestart("stt");
-      // If the STT enable toggle just flipped off, also stop VAD; otherwise
-      // the in-browser VAD instance keeps listening and tries to transcribe
-      // against a whisper-server we just shut down. Use forceDisable rather
-      // than detach so the visibility listener and speech handler stay wired
-      // up for a later re-enable.
-      if (key === "stt.enabled" && prevSttEnabled && !value) {
-        const { vadManager } = await import("$lib/shared/vad.svelte");
-        void vadManager.forceDisable();
-      }
-    } else if (key === "tts.enabled") {
-      const nowEnabled = !!value;
-      if (prevEnabled !== nowEnabled) {
-        const { ttsState } = await import("./tts.svelte");
-        void ttsState.setEnabled(nowEnabled);
-      }
-    }
+    this.notifyListeners(key, prevValue, value);
   }
 
   async updateSettings(updates: Record<string, unknown>) {
-    const prevTtsEnabled = !!this.currentSettings["tts.enabled"];
+    const prevValues: Record<string, unknown> = {};
     const prevShortcut = this.currentSettings["shortcuts.toggleWindow"];
-    let llmChanged = false;
-    let sttChanged = false;
-    let ttsEnabledChanged = false;
     let toggleShortcutChanged = false;
 
     for (const [key, value] of Object.entries(updates)) {
       warnIfUnknownKey(key);
+      prevValues[key] = this.currentSettings[key];
       this.currentSettings[key] = value;
-      if (key.startsWith("llm.")) llmChanged = true;
-      if (key.startsWith("stt.")) sttChanged = true;
-      if (key === "tts.enabled") ttsEnabledChanged = true;
       if (key === "shortcuts.toggleWindow") toggleShortcutChanged = true;
     }
 
@@ -175,14 +151,8 @@ class SettingsState {
 
     await this.save();
 
-    if (llmChanged) this.debounceRestart("llm");
-    if (sttChanged) this.debounceRestart("stt");
-    if (ttsEnabledChanged) {
-      const nowEnabled = !!this.currentSettings["tts.enabled"];
-      if (prevTtsEnabled !== nowEnabled) {
-        const { ttsState } = await import("./tts.svelte");
-        void ttsState.setEnabled(nowEnabled);
-      }
+    for (const [key, value] of Object.entries(updates)) {
+      this.notifyListeners(key, prevValues[key], value);
     }
   }
 

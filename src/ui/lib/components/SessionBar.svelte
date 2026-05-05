@@ -1,17 +1,17 @@
 <script lang="ts">
   import Bubble from "./Bubble.svelte";
-  import { messagesState, settingsState } from "../state";
+  import { messagesState, sessionsState, settingsState } from "../state";
   import { getContextSize } from "$lib/sidecar/llm";
 
   let titleInput: HTMLInputElement | undefined = $state();
-  let titleText = $state(messagesState.sessionTitle);
+  let titleText = $state(sessionsState.title);
   let editingTitle = $state(false);
   let confirmingDelete = $state(false);
 
   // Sync title from state
   $effect(() => {
     if (!editingTitle) {
-      titleText = messagesState.sessionTitle;
+      titleText = sessionsState.title;
     }
   });
 
@@ -24,10 +24,10 @@
     editingTitle = false;
     const trimmed = titleText.trim();
     if (!trimmed) {
-      titleText = messagesState.getDefaultTitle();
-      messagesState.updateTitle(titleText);
-    } else if (trimmed !== messagesState.sessionTitle) {
-      messagesState.updateTitle(trimmed);
+      titleText = sessionsState.defaultTitle;
+      sessionsState.updateTitle(titleText);
+    } else if (trimmed !== sessionsState.title) {
+      sessionsState.updateTitle(trimmed);
     }
   }
 
@@ -59,7 +59,7 @@
   function handleDeleteClick() {
     if (confirmingDelete) {
       confirmingDelete = false;
-      messagesState.deleteSession();
+      sessionsState.delete();
     } else {
       confirmingDelete = true;
     }
@@ -85,12 +85,12 @@
   }
 
   // Navigation
-  let canPrev = $derived(messagesState.currentSessionIndex > 0);
+  let canPrev = $derived(sessionsState.currentIndex > 0);
   let canNext = $derived(
-    messagesState.currentSessionIndex < messagesState.sessionList.length - 1,
+    sessionsState.currentIndex < sessionsState.list.length - 1,
   );
 
-  let defaultTitle = $derived(messagesState.getDefaultTitle());
+  let defaultTitle = $derived(sessionsState.defaultTitle);
   let isNewSession = $derived(messagesState.messages.length === 0);
   let storageEnabled = $derived(
     settingsState.currentSettings["general.session.storeSessions"] !== false,
@@ -170,7 +170,7 @@
             class="text-lg rounded p-0.5 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
             onclick={() => {
               confirmingDelete = false;
-              messagesState.navigatePrev();
+              sessionsState.navigatePrev();
             }}
             title="Previous Session"
           >
@@ -182,7 +182,7 @@
             class="text-lg rounded p-0.5 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
             onclick={() => {
               confirmingDelete = false;
-              messagesState.navigateNext();
+              sessionsState.navigateNext();
             }}
             title="Next Session"
           >
@@ -208,7 +208,7 @@
             class="text-lg rounded p-0.5 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
             onclick={() => {
               confirmingDelete = false;
-              messagesState.newSession();
+              sessionsState.create();
             }}
             title="New Session"
           >

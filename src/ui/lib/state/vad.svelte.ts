@@ -10,7 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { playBeep } from "$lib/shared/beep";
 import { isTauri } from "$lib/shared/env";
-import { settingsState } from "$lib/state/settings.svelte";
+import { settingsState } from "./settings.svelte";
 
 class VadManager {
   enabled = $state(false);
@@ -131,7 +131,7 @@ class VadManager {
     this.loading = true;
     // Turning on voice input means the user wants to speak, not listen -
     // cut any TTS that's currently playing or queued.
-    void import("$lib/state/tts.svelte").then(({ ttsState }) => ttsState.reset());
+    void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
     try {
       const { MicVAD } = await import("@ricky0123/vad-web");
       const instance = await MicVAD.new({
