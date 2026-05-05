@@ -3,6 +3,14 @@
   import MessageMarkdown from "./MessageMarkdown.svelte";
   import Expandable from "../Expandable.svelte";
   import { settingsState } from "$lib/state";
+  import { hasAlpha } from "$lib/shared/color";
+
+  const override = $derived(
+    settingsState.currentSettings[
+      "appearance.systemMessageDefaultColor"
+    ] as string,
+  );
+  const overrideHex = $derived(hasAlpha(override) ? override : null);
 
   let {
     reasoning,
@@ -86,18 +94,20 @@
   });
 </script>
 
-<Expandable bind:expanded alignment={settingsState.getAlignment()}>
-  {#snippet title()}
-    <span>{headerText}</span>
-  {/snippet}
-  {#snippet children()}
-    <!-- `text-left` keeps the reasoning markdown alignment-independent;
-         the Expandable wrapper would otherwise right-align it when the
-         bubble is right-aligned. -->
-    <div
-      class="{pillBgClass} px-4 py-2 rounded-2xl text-default-700 text-xs text-left"
-    >
-      <MessageMarkdown content={reasoning} />
-    </div>
-  {/snippet}
-</Expandable>
+<div style:display="contents" style:--default-base={overrideHex}>
+  <Expandable bind:expanded alignment={settingsState.getAlignment()}>
+    {#snippet title()}
+      <span>{headerText}</span>
+    {/snippet}
+    {#snippet children()}
+      <!-- `text-left` keeps the reasoning markdown alignment-independent;
+           the Expandable wrapper would otherwise right-align it when the
+           bubble is right-aligned. -->
+      <div
+        class="{pillBgClass} px-4 py-2 rounded-large text-default-700 text-xs text-left"
+      >
+        <MessageMarkdown content={reasoning} />
+      </div>
+    {/snippet}
+  </Expandable>
+</div>

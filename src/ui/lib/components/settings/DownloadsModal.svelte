@@ -42,13 +42,13 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="absolute inset-0 bg-black/20 backdrop-blur flex items-center justify-center z-50 rounded-2xl"
+    class="absolute inset-0 bg-black/20 backdrop-blur flex items-center justify-center z-50 rounded-large"
     onclick={() => downloadsState.closeModal()}
   >
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="bg-default-300 rounded-2xl p-5 w-[calc(100%-2rem)] max-w-md flex flex-col gap-3 max-h-[80vh]"
+      class="bg-default-300 rounded-large p-5 w-[calc(100%-2rem)] max-w-md flex flex-col gap-3 max-h-[80vh]"
       onclick={(e) => e.stopPropagation()}
     >
       <div class="flex items-center justify-between">
@@ -65,7 +65,7 @@
 
       {#if downloadsState.items.length === 0}
         <div
-          class="bg-default-200 rounded-lg px-4 py-6 text-default-500 text-sm text-center"
+          class="bg-default-200 rounded-medium px-4 py-6 text-default-500 text-sm text-center"
         >
           No downloads
         </div>
@@ -80,7 +80,7 @@
       {#if hasCompleted}
         <div class="flex items-center justify-end">
           <button
-            class="bg-default-200 hover:bg-default-400 text-default-700 px-3 py-1.5 text-sm rounded-lg hover:cursor-pointer transition-colors"
+            class="bg-default-200 hover:bg-default-400 text-default-700 px-3 py-1.5 text-sm rounded-medium hover:cursor-pointer transition-colors"
             onclick={() => downloadsState.clearCompleted()}
           >
             Clear completed

@@ -43,7 +43,7 @@
 {#if update.status !== "Running" && update.status !== "Disabled"}
   <button
     bind:this={buttonEl}
-    class="flex items-center gap-1.5 px-3 py-1 rounded-2xl {color} {update.status ===
+    class="flex items-center gap-1.5 px-3 py-1 rounded-large {color} {update.status ===
     'Error'
       ? 'cursor-pointer'
       : 'cursor-default'}"
@@ -65,7 +65,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
-      class="fixed bg-neutral-900/95 backdrop-blur text-red-400 p-3 rounded-xl shadow-xl border border-neutral-700 w-96 max-h-64 overflow-y-auto font-mono text-xs text-left z-50 overflow-x-hidden whitespace-pre-wrap break-words cursor-text"
+      class="fixed bg-default-900 backdrop-blur text-accent-red-400 p-3 rounded-large shadow-xl border border-default-700 w-96 max-h-64 overflow-y-auto font-mono text-xs text-left z-50 overflow-x-hidden whitespace-pre-wrap break-words cursor-text"
       style={popupStyle}
       onclick={(e) => e.stopPropagation()}
     >

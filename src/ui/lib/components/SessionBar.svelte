@@ -2,6 +2,16 @@
   import Bubble from "./Bubble.svelte";
   import { messagesState, sessionsState, settingsState } from "../state";
   import { getContextSize } from "$lib/sidecar/llm";
+  import { hasAlpha } from "$lib/shared/color";
+
+  const themeOverride = $derived(
+    settingsState.currentSettings[
+      "appearance.sessionBarDefaultColor"
+    ] as string,
+  );
+  const themeOverrideHex = $derived(
+    hasAlpha(themeOverride) ? themeOverride : null,
+  );
 
   let titleInput: HTMLInputElement | undefined = $state();
   let titleText = $state(sessionsState.title);
@@ -107,6 +117,7 @@
 </script>
 
 {#if showBar}
+  <div style:display="contents" style:--default-base={themeOverrideHex}>
   <Bubble
     selectedAlignment={alignment}
     size="small"
@@ -115,7 +126,7 @@
     {#if messagesState.tokenUsage}
       <!-- Context progress bar with text inside -->
       <div
-        class="relative w-12 h-8 bg-default-200 rounded-xl overflow-hidden shrink-0 border-0.25em border-default-200"
+        class="relative w-12 h-8 bg-default-200 rounded-large overflow-hidden shrink-0 border-0.25em border-default-200"
         title="Context: {formatTokens(contextUsed)} / {formatTokens(
           contextMax,
         )}"
@@ -140,7 +151,7 @@
          the user can still tell the title is truncated. -->
     {#if showTitle}
       <div
-        class="grid items-center min-w-0 h-8 overflow-hidden bg-default-200 rounded-xl text-sm"
+        class="grid items-center min-w-0 h-8 overflow-hidden bg-default-200 rounded-large text-sm"
       >
         <span
           class="invisible row-start-1 col-start-1 whitespace-pre px-3 py-1"
@@ -163,7 +174,7 @@
     <!-- Session navigation -->
     {#if showButtonGroup}
       <div
-        class="flex flex-row items-center justify-center bg-default-200 h-8 px-1 rounded-xl shrink-0"
+        class="flex flex-row items-center justify-center bg-default-200 h-8 px-1 rounded-large shrink-0"
       >
         {#if canPrev}
           <button
@@ -218,4 +229,5 @@
       </div>
     {/if}
   </Bubble>
+  </div>
 {/if}

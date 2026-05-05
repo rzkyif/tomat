@@ -41,7 +41,7 @@
 
 {#snippet resetButton()}
   <button
-    class="text-default-500 hover:text-default-700 transition-colors flex items-center justify-center rounded-md"
+    class="text-default-500 hover:text-default-700 transition-colors flex items-center justify-center rounded-small"
     title="Reset to default"
     onclick={() => onReset?.(field.id)}
   >
@@ -51,7 +51,7 @@
 
 {#snippet infoButton()}
   <button
-    class="transition-colors flex items-center justify-center rounded-md {descriptionExpanded
+    class="transition-colors flex items-center justify-center rounded-small {descriptionExpanded
       ? 'text-default-900'
       : 'text-default-500 hover:text-default-700'}"
     title="Show description"
@@ -60,6 +60,15 @@
   >
     <i class="i-material-symbols-info-outline-rounded text-lg flex"></i>
   </button>
+{/snippet}
+
+{#snippet errorMessage()}
+  <div class="flex flex-row items-center gap-1.5 text-default-700 text-sm">
+    <i
+      class="i-material-symbols-error-outline-rounded text-base text-accent-red-400 flex shrink-0"
+    ></i>
+    <span class="min-w-0">{error}</span>
+  </div>
 {/snippet}
 
 {#snippet buttonRow()}
@@ -76,9 +85,7 @@
   data-field-id={field.id}
   class="flex flex-col gap-2 max-w-full overflow-clip px-3 pt-1 {horizontal
     ? 'pb-1'
-    : 'pb-2'} text-base rounded-2xl border-2 {hasError
-    ? 'bg-accent-red-100 border-accent-red-400'
-    : 'bg-default-200 border-transparent'}"
+    : 'pb-2'} text-base rounded-large bg-default-200"
 >
   <div
     class="flex {horizontal ? 'flex-row items-start gap-3' : 'flex-col gap-2'}"
@@ -119,12 +126,15 @@
       {/if}
     </div>
 
-    <div class={horizontal ? "w-48 shrink-0" : ""}>
+    <div class={horizontal ? "w-48 shrink-0 flex flex-col gap-1" : ""}>
       {@render children()}
+      {#if horizontal && hasError}
+        {@render errorMessage()}
+      {/if}
     </div>
   </div>
 
-  {#if hasError}
-    <div class="text-red-500 text-sm">{error}</div>
+  {#if !horizontal && hasError}
+    {@render errorMessage()}
   {/if}
 </div>

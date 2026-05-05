@@ -33,7 +33,7 @@
     borderColorClass?: string;
     /** Visual-left side has another bubble in the same stack row; collapse
      *  the left-side rounding to `md` to signal adjacency. Composes with the
-     *  alignment override (left-aligned bubbles already get `rounded-l-md`). */
+     *  alignment override (left-aligned bubbles already get `rounded-l-small`). */
     neighborLeft?: boolean;
     /** Visual-right side has another bubble in the same stack row. */
     neighborRight?: boolean;
@@ -70,13 +70,13 @@
   {onclick}
   {oncontextmenu}
   role={onclick ? "presentation" : undefined}
-  class="{bgClass} {minHClass} relative overflow-hidden rounded-2xl w-fit max-w-[calc(100vw-5rem)] break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
+  class="{bgClass} {minHClass} relative overflow-hidden rounded-large w-fit max-w-[calc(100vw-5rem)] break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
   class:mr-auto={selectedAlignment === "left"}
-  class:rounded-l-md={selectedAlignment === "left" || neighborLeft}
+  class:rounded-l-small={selectedAlignment === "left" || neighborLeft}
   class:border-l-8={selectedAlignment === "left" && active}
   class:border-l-0={selectedAlignment === "left" && !active}
   class:ml-auto={selectedAlignment === "right"}
-  class:rounded-r-md={selectedAlignment === "right" || neighborRight}
+  class:rounded-r-small={selectedAlignment === "right" || neighborRight}
   class:border-r-8={selectedAlignment === "right" && active}
   class:border-r-0={selectedAlignment === "right" && !active}
   class:mx-auto={selectedAlignment === "center"}

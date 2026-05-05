@@ -20,3 +20,330 @@ body {
 #app {
   min-height: 100vh;
 }
+
+/* User-customizable bubble colors. Only the three `*-bg-light` variables
+   are written from JS (driven by appearance.{user,agent,secondaryAgent}BubbleColor
+   settings); the border-light, bg-dark, and border-dark slots are derived
+   from them via `oklch(from ...)` so the four shades stay in sync with
+   whatever color the user picks. Lightness deltas approximate the Tailwind
+   300/400/500/600 ladder used previously. The trailing `/ alpha` keeps
+   transparency from the source through every derivation. */
+:root {
+  --user-bubble-bg-light: #86efacff;
+  --agent-bubble-bg-light: #93c5fdff;
+  --agent2-bubble-bg-light: #d8b4feff;
+
+  --user-bubble-border-light: oklch(from var(--user-bubble-bg-light) calc(l - 0.08) c h / alpha);
+  --user-bubble-bg-dark: oklch(from var(--user-bubble-bg-light) calc(l - 0.24) c h / alpha);
+  --user-bubble-border-dark: oklch(from var(--user-bubble-bg-light) calc(l - 0.15) c h / alpha);
+
+  --agent-bubble-border-light: oklch(from var(--agent-bubble-bg-light) calc(l - 0.08) c h / alpha);
+  --agent-bubble-bg-dark: oklch(from var(--agent-bubble-bg-light) calc(l - 0.24) c h / alpha);
+  --agent-bubble-border-dark: oklch(from var(--agent-bubble-bg-light) calc(l - 0.15) c h / alpha);
+
+  --agent2-bubble-border-light: oklch(
+    from var(--agent2-bubble-bg-light) calc(l - 0.08) c h / alpha
+  );
+  --agent2-bubble-bg-dark: oklch(from var(--agent2-bubble-bg-light) calc(l - 0.24) c h / alpha);
+  --agent2-bubble-border-dark: oklch(from var(--agent2-bubble-bg-light) calc(l - 0.15) c h / alpha);
+}
+
+.bubble-user {
+  background-color: var(--user-bubble-bg-light);
+  border-color: var(--user-bubble-border-light);
+}
+.dark .bubble-user {
+  background-color: var(--user-bubble-bg-dark);
+  border-color: var(--user-bubble-border-dark);
+}
+
+.bubble-agent {
+  background-color: var(--agent-bubble-bg-light);
+  border-color: var(--agent-bubble-border-light);
+}
+.dark .bubble-agent {
+  background-color: var(--agent-bubble-bg-dark);
+  border-color: var(--agent-bubble-border-dark);
+}
+
+.bubble-agent-secondary {
+  background-color: var(--agent2-bubble-bg-light);
+  border-color: var(--agent2-bubble-border-light);
+}
+.dark .bubble-agent-secondary {
+  background-color: var(--agent2-bubble-bg-dark);
+  border-color: var(--agent2-bubble-border-dark);
+}
+
+/* App-wide theme: the `*-default-*` and `*-accent-*-*` UnoCSS shortcuts
+   compile to `var(--default-N)` / `var(--default-d-N)` / `var(--accent-{c}-N)`
+   etc. Each scope has a single base hex (settable from JS via the appearance
+   color pickers); the 9 light + 9 dark shades are derived from that base via
+   OKLCH. The L table matches Tailwind v4's neutral OKLCH ladder; the dark
+   column applies the existing inversion map (50↔900, 100↔800, 200↔700,
+   300↔600, 400↔500, 500↔400, 600↔400, 700↔300, 800↔200, 900↔100) so
+   visuals stay consistent with the pre-themable behavior at default values.
+   The trailing `/ alpha` carries the base hex's alpha through every shade
+   so a fully-transparent base disables the layer cleanly. */
+
+/* `--default-base` defaults to neutral-500 sRGB (`#737373`) so the derived
+   ladder lands on the original Tailwind neutral palette at chroma=0. The
+   `--default-N` and `--default-d-N` shades are declared on `*` (not `:root`)
+   so per-component `--default-base` overrides re-resolve correctly through
+   the subtree. CSS custom properties on `*` are cheap; they're only
+   computed on demand at use sites. */
+:root {
+  --default-base: #737373ff;
+}
+
+* {
+  --default-50: oklch(from var(--default-base) 0.985 c h / alpha);
+  --default-100: oklch(from var(--default-base) 0.97 c h / alpha);
+  --default-200: oklch(from var(--default-base) 0.922 c h / alpha);
+  --default-300: oklch(from var(--default-base) 0.871 c h / alpha);
+  --default-400: oklch(from var(--default-base) 0.708 c h / alpha);
+  --default-500: oklch(from var(--default-base) 0.556 c h / alpha);
+  --default-600: oklch(from var(--default-base) 0.439 c h / alpha);
+  --default-700: oklch(from var(--default-base) 0.371 c h / alpha);
+  --default-800: oklch(from var(--default-base) 0.269 c h / alpha);
+  --default-900: oklch(from var(--default-base) 0.205 c h / alpha);
+
+  --default-d-50: oklch(from var(--default-base) 0.205 c h / alpha);
+  --default-d-100: oklch(from var(--default-base) 0.269 c h / alpha);
+  --default-d-200: oklch(from var(--default-base) 0.371 c h / alpha);
+  --default-d-300: oklch(from var(--default-base) 0.439 c h / alpha);
+  --default-d-400: oklch(from var(--default-base) 0.556 c h / alpha);
+  --default-d-500: oklch(from var(--default-base) 0.708 c h / alpha);
+  --default-d-600: oklch(from var(--default-base) 0.708 c h / alpha);
+  --default-d-700: oklch(from var(--default-base) 0.871 c h / alpha);
+  --default-d-800: oklch(from var(--default-base) 0.922 c h / alpha);
+  --default-d-900: oklch(from var(--default-base) 0.97 c h / alpha);
+}
+
+/* Accent colors. Each base defaults to its Tailwind v4 500 sRGB so visuals
+   stay identical until the user picks a different hue. Declared on `:root`
+   (not `*`) since accent pickers are global; there's no per-component
+   accent override. */
+:root {
+  --accent-red-base: #ef4444ff;
+  --accent-blue-base: #3b82f6ff;
+  --accent-purple-base: #a855f7ff;
+  --accent-green-base: #22c55eff;
+  --accent-orange-base: #f97316ff;
+  --accent-yellow-base: #eab308ff;
+
+  --accent-red-50: oklch(from var(--accent-red-base) 0.985 c h / alpha);
+  --accent-red-100: oklch(from var(--accent-red-base) 0.97 c h / alpha);
+  --accent-red-200: oklch(from var(--accent-red-base) 0.922 c h / alpha);
+  --accent-red-300: oklch(from var(--accent-red-base) 0.871 c h / alpha);
+  --accent-red-400: oklch(from var(--accent-red-base) 0.708 c h / alpha);
+  --accent-red-500: oklch(from var(--accent-red-base) 0.556 c h / alpha);
+  --accent-red-600: oklch(from var(--accent-red-base) 0.439 c h / alpha);
+  --accent-red-700: oklch(from var(--accent-red-base) 0.371 c h / alpha);
+  --accent-red-800: oklch(from var(--accent-red-base) 0.269 c h / alpha);
+  --accent-red-900: oklch(from var(--accent-red-base) 0.205 c h / alpha);
+  --accent-red-d-50: oklch(from var(--accent-red-base) 0.205 c h / alpha);
+  --accent-red-d-100: oklch(from var(--accent-red-base) 0.269 c h / alpha);
+  --accent-red-d-200: oklch(from var(--accent-red-base) 0.371 c h / alpha);
+  --accent-red-d-300: oklch(from var(--accent-red-base) 0.439 c h / alpha);
+  --accent-red-d-400: oklch(from var(--accent-red-base) 0.556 c h / alpha);
+  --accent-red-d-500: oklch(from var(--accent-red-base) 0.708 c h / alpha);
+  --accent-red-d-600: oklch(from var(--accent-red-base) 0.708 c h / alpha);
+  --accent-red-d-700: oklch(from var(--accent-red-base) 0.871 c h / alpha);
+  --accent-red-d-800: oklch(from var(--accent-red-base) 0.922 c h / alpha);
+  --accent-red-d-900: oklch(from var(--accent-red-base) 0.97 c h / alpha);
+
+  --accent-blue-50: oklch(from var(--accent-blue-base) 0.985 c h / alpha);
+  --accent-blue-100: oklch(from var(--accent-blue-base) 0.97 c h / alpha);
+  --accent-blue-200: oklch(from var(--accent-blue-base) 0.922 c h / alpha);
+  --accent-blue-300: oklch(from var(--accent-blue-base) 0.871 c h / alpha);
+  --accent-blue-400: oklch(from var(--accent-blue-base) 0.708 c h / alpha);
+  --accent-blue-500: oklch(from var(--accent-blue-base) 0.556 c h / alpha);
+  --accent-blue-600: oklch(from var(--accent-blue-base) 0.439 c h / alpha);
+  --accent-blue-700: oklch(from var(--accent-blue-base) 0.371 c h / alpha);
+  --accent-blue-800: oklch(from var(--accent-blue-base) 0.269 c h / alpha);
+  --accent-blue-900: oklch(from var(--accent-blue-base) 0.205 c h / alpha);
+  --accent-blue-d-50: oklch(from var(--accent-blue-base) 0.205 c h / alpha);
+  --accent-blue-d-100: oklch(from var(--accent-blue-base) 0.269 c h / alpha);
+  --accent-blue-d-200: oklch(from var(--accent-blue-base) 0.371 c h / alpha);
+  --accent-blue-d-300: oklch(from var(--accent-blue-base) 0.439 c h / alpha);
+  --accent-blue-d-400: oklch(from var(--accent-blue-base) 0.556 c h / alpha);
+  --accent-blue-d-500: oklch(from var(--accent-blue-base) 0.708 c h / alpha);
+  --accent-blue-d-600: oklch(from var(--accent-blue-base) 0.708 c h / alpha);
+  --accent-blue-d-700: oklch(from var(--accent-blue-base) 0.871 c h / alpha);
+  --accent-blue-d-800: oklch(from var(--accent-blue-base) 0.922 c h / alpha);
+  --accent-blue-d-900: oklch(from var(--accent-blue-base) 0.97 c h / alpha);
+
+  --accent-purple-50: oklch(from var(--accent-purple-base) 0.985 c h / alpha);
+  --accent-purple-100: oklch(from var(--accent-purple-base) 0.97 c h / alpha);
+  --accent-purple-200: oklch(from var(--accent-purple-base) 0.922 c h / alpha);
+  --accent-purple-300: oklch(from var(--accent-purple-base) 0.871 c h / alpha);
+  --accent-purple-400: oklch(from var(--accent-purple-base) 0.708 c h / alpha);
+  --accent-purple-500: oklch(from var(--accent-purple-base) 0.556 c h / alpha);
+  --accent-purple-600: oklch(from var(--accent-purple-base) 0.439 c h / alpha);
+  --accent-purple-700: oklch(from var(--accent-purple-base) 0.371 c h / alpha);
+  --accent-purple-800: oklch(from var(--accent-purple-base) 0.269 c h / alpha);
+  --accent-purple-900: oklch(from var(--accent-purple-base) 0.205 c h / alpha);
+  --accent-purple-d-50: oklch(from var(--accent-purple-base) 0.205 c h / alpha);
+  --accent-purple-d-100: oklch(from var(--accent-purple-base) 0.269 c h / alpha);
+  --accent-purple-d-200: oklch(from var(--accent-purple-base) 0.371 c h / alpha);
+  --accent-purple-d-300: oklch(from var(--accent-purple-base) 0.439 c h / alpha);
+  --accent-purple-d-400: oklch(from var(--accent-purple-base) 0.556 c h / alpha);
+  --accent-purple-d-500: oklch(from var(--accent-purple-base) 0.708 c h / alpha);
+  --accent-purple-d-600: oklch(from var(--accent-purple-base) 0.708 c h / alpha);
+  --accent-purple-d-700: oklch(from var(--accent-purple-base) 0.871 c h / alpha);
+  --accent-purple-d-800: oklch(from var(--accent-purple-base) 0.922 c h / alpha);
+  --accent-purple-d-900: oklch(from var(--accent-purple-base) 0.97 c h / alpha);
+
+  --accent-green-50: oklch(from var(--accent-green-base) 0.985 c h / alpha);
+  --accent-green-100: oklch(from var(--accent-green-base) 0.97 c h / alpha);
+  --accent-green-200: oklch(from var(--accent-green-base) 0.922 c h / alpha);
+  --accent-green-300: oklch(from var(--accent-green-base) 0.871 c h / alpha);
+  --accent-green-400: oklch(from var(--accent-green-base) 0.708 c h / alpha);
+  --accent-green-500: oklch(from var(--accent-green-base) 0.556 c h / alpha);
+  --accent-green-600: oklch(from var(--accent-green-base) 0.439 c h / alpha);
+  --accent-green-700: oklch(from var(--accent-green-base) 0.371 c h / alpha);
+  --accent-green-800: oklch(from var(--accent-green-base) 0.269 c h / alpha);
+  --accent-green-900: oklch(from var(--accent-green-base) 0.205 c h / alpha);
+  --accent-green-d-50: oklch(from var(--accent-green-base) 0.205 c h / alpha);
+  --accent-green-d-100: oklch(from var(--accent-green-base) 0.269 c h / alpha);
+  --accent-green-d-200: oklch(from var(--accent-green-base) 0.371 c h / alpha);
+  --accent-green-d-300: oklch(from var(--accent-green-base) 0.439 c h / alpha);
+  --accent-green-d-400: oklch(from var(--accent-green-base) 0.556 c h / alpha);
+  --accent-green-d-500: oklch(from var(--accent-green-base) 0.708 c h / alpha);
+  --accent-green-d-600: oklch(from var(--accent-green-base) 0.708 c h / alpha);
+  --accent-green-d-700: oklch(from var(--accent-green-base) 0.871 c h / alpha);
+  --accent-green-d-800: oklch(from var(--accent-green-base) 0.922 c h / alpha);
+  --accent-green-d-900: oklch(from var(--accent-green-base) 0.97 c h / alpha);
+
+  --accent-orange-50: oklch(from var(--accent-orange-base) 0.985 c h / alpha);
+  --accent-orange-100: oklch(from var(--accent-orange-base) 0.97 c h / alpha);
+  --accent-orange-200: oklch(from var(--accent-orange-base) 0.922 c h / alpha);
+  --accent-orange-300: oklch(from var(--accent-orange-base) 0.871 c h / alpha);
+  --accent-orange-400: oklch(from var(--accent-orange-base) 0.708 c h / alpha);
+  --accent-orange-500: oklch(from var(--accent-orange-base) 0.556 c h / alpha);
+  --accent-orange-600: oklch(from var(--accent-orange-base) 0.439 c h / alpha);
+  --accent-orange-700: oklch(from var(--accent-orange-base) 0.371 c h / alpha);
+  --accent-orange-800: oklch(from var(--accent-orange-base) 0.269 c h / alpha);
+  --accent-orange-900: oklch(from var(--accent-orange-base) 0.205 c h / alpha);
+  --accent-orange-d-50: oklch(from var(--accent-orange-base) 0.205 c h / alpha);
+  --accent-orange-d-100: oklch(from var(--accent-orange-base) 0.269 c h / alpha);
+  --accent-orange-d-200: oklch(from var(--accent-orange-base) 0.371 c h / alpha);
+  --accent-orange-d-300: oklch(from var(--accent-orange-base) 0.439 c h / alpha);
+  --accent-orange-d-400: oklch(from var(--accent-orange-base) 0.556 c h / alpha);
+  --accent-orange-d-500: oklch(from var(--accent-orange-base) 0.708 c h / alpha);
+  --accent-orange-d-600: oklch(from var(--accent-orange-base) 0.708 c h / alpha);
+  --accent-orange-d-700: oklch(from var(--accent-orange-base) 0.871 c h / alpha);
+  --accent-orange-d-800: oklch(from var(--accent-orange-base) 0.922 c h / alpha);
+  --accent-orange-d-900: oklch(from var(--accent-orange-base) 0.97 c h / alpha);
+
+  --accent-yellow-50: oklch(from var(--accent-yellow-base) 0.985 c h / alpha);
+  --accent-yellow-100: oklch(from var(--accent-yellow-base) 0.97 c h / alpha);
+  --accent-yellow-200: oklch(from var(--accent-yellow-base) 0.922 c h / alpha);
+  --accent-yellow-300: oklch(from var(--accent-yellow-base) 0.871 c h / alpha);
+  --accent-yellow-400: oklch(from var(--accent-yellow-base) 0.708 c h / alpha);
+  --accent-yellow-500: oklch(from var(--accent-yellow-base) 0.556 c h / alpha);
+  --accent-yellow-600: oklch(from var(--accent-yellow-base) 0.439 c h / alpha);
+  --accent-yellow-700: oklch(from var(--accent-yellow-base) 0.371 c h / alpha);
+  --accent-yellow-800: oklch(from var(--accent-yellow-base) 0.269 c h / alpha);
+  --accent-yellow-900: oklch(from var(--accent-yellow-base) 0.205 c h / alpha);
+  --accent-yellow-d-50: oklch(from var(--accent-yellow-base) 0.205 c h / alpha);
+  --accent-yellow-d-100: oklch(from var(--accent-yellow-base) 0.269 c h / alpha);
+  --accent-yellow-d-200: oklch(from var(--accent-yellow-base) 0.371 c h / alpha);
+  --accent-yellow-d-300: oklch(from var(--accent-yellow-base) 0.439 c h / alpha);
+  --accent-yellow-d-400: oklch(from var(--accent-yellow-base) 0.556 c h / alpha);
+  --accent-yellow-d-500: oklch(from var(--accent-yellow-base) 0.708 c h / alpha);
+  --accent-yellow-d-600: oklch(from var(--accent-yellow-base) 0.708 c h / alpha);
+  --accent-yellow-d-700: oklch(from var(--accent-yellow-base) 0.871 c h / alpha);
+  --accent-yellow-d-800: oklch(from var(--accent-yellow-base) 0.922 c h / alpha);
+  --accent-yellow-d-900: oklch(from var(--accent-yellow-base) 0.97 c h / alpha);
+}
+
+/* Customizable corner roundedness. Three buckets (small/medium/large)
+   drive the `rounded-small`, `rounded-medium`, `rounded-large` utilities
+   via the rules block in uno.config.ts. Defaults match the previous
+   Tailwind values so visuals stay identical until the user tweaks them. */
+:root {
+  --rounded-small: 6px;
+  --rounded-medium: 8px;
+  --rounded-large: 16px;
+}
+
+/* Themed range-input styling. Removes native chrome and paints track + thumb
+   from the `--default-*` ladder so sliders inherit the global Default Color
+   (and any per-component override). One declaration covers both the bubble
+   color picker's OKLCH sliders and the settings number_slider field. The
+   same rules apply across WebKit (macOS, Linux GTK) and Chromium (Windows
+   WebView2); Firefox-prefixed rules are present for the browser dev
+   environment. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 1.25rem;
+  width: 100%;
+  cursor: pointer;
+}
+input[type="range"]:focus {
+  outline: none;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 0.375rem;
+  border-radius: 9999px;
+  background: var(--default-200);
+}
+.dark input[type="range"]::-webkit-slider-runnable-track {
+  background: var(--default-d-200);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background: var(--default-500);
+  margin-top: -0.3125rem;
+  transition: transform 100ms ease;
+}
+.dark input[type="range"]::-webkit-slider-thumb {
+  background: var(--default-d-500);
+}
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+input[type="range"]::-moz-range-track {
+  height: 0.375rem;
+  border-radius: 9999px;
+  background: var(--default-200);
+}
+.dark input[type="range"]::-moz-range-track {
+  background: var(--default-d-200);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 1rem;
+  height: 1rem;
+  border: none;
+  border-radius: 9999px;
+  background: var(--default-500);
+}
+.dark input[type="range"]::-moz-range-thumb {
+  background: var(--default-d-500);
+}
+
+/* Checkerboard backdrop used behind partially-transparent color swatches
+   (e.g. the new/previous comparison rect in the bubble color picker) so
+   the alpha channel is visually distinguishable. */
+.alpha-checkerboard {
+  background-image:
+    linear-gradient(45deg, #cbd5e1 25%, transparent 25%),
+    linear-gradient(-45deg, #cbd5e1 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #cbd5e1 75%),
+    linear-gradient(-45deg, transparent 75%, #cbd5e1 75%);
+  background-size: 12px 12px;
+  background-position:
+    0 0,
+    0 6px,
+    6px -6px,
+    -6px 0;
+}

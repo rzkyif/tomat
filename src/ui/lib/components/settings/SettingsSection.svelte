@@ -68,7 +68,7 @@
           </div>
         {/if}
         <div
-          class="absolute left-0 right-0 top-full h-3 bg-gradient-to-b from-neutral-300 dark:from-neutral-600 to-neutral-300/0 dark:to-neutral-600/0 pointer-events-none"
+          class="absolute left-0 right-0 top-full h-3 bg-gradient-to-b from-default-300 to-transparent pointer-events-none"
         ></div>
       </div>
     {/if}

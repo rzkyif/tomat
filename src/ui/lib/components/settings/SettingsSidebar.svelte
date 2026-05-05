@@ -76,7 +76,7 @@
   function rowClass(hasText: boolean): string {
     const showText = hasText && !collapsed;
     const padRight = hasText ? (showText ? "pr-2.5" : "pr-0") : "pr-1.5";
-    return `flex items-center h-8 pl-1.5 ${padRight} gap-1.5 rounded-lg transition-[padding,colors,background-color] duration-200`;
+    return `flex items-center h-8 pl-1.5 ${padRight} gap-1.5 rounded-medium transition-[padding,colors,background-color] duration-200`;
   }
 
 </script>
@@ -86,7 +86,7 @@
     <!-- h-7 (matches the sticky group header) so the icon's vertical center
          lines up with the h2 text when the panel is scrolled to the top. -->
     <button
-      class="hover:cursor-pointer text-default-500 hover:text-default-700 hover:bg-default-200 w-fit flex items-center gap-2 h-6.5 pl-1.5 pr-1.5 rounded-lg transition-colors"
+      class="hover:cursor-pointer text-default-500 hover:text-default-700 hover:bg-default-200 w-fit flex items-center gap-2 h-6.5 pl-1.5 pr-1.5 rounded-medium transition-colors"
       onclick={toggleCollapse}
       title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}

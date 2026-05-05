@@ -10,6 +10,7 @@ export * from "./persistence.svelte";
 export * from "./streaming.svelte";
 export * from "./messages.svelte";
 export * from "./confirm.svelte";
+export * from "./colorPicker.svelte";
 export * from "./snippets.svelte";
 export * from "./toolkits.svelte";
 export * from "./expansion.svelte";

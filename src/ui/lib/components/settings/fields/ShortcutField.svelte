@@ -147,7 +147,7 @@
     <button
       type="button"
       aria-label={field.name}
-      class="flex-1 min-h-8 px-2 py-1 rounded-lg text-left flex flex-row items-center gap-1 flex-wrap outline-none {!editable
+      class="flex-1 min-h-8 px-2 py-1 rounded-medium text-left flex flex-row items-center gap-1 flex-wrap outline-none {!editable
         ? 'opacity-60 pointer-events-none'
         : ''} {capturing
         ? 'bg-blue-500/20 ring-2 ring-blue-500'

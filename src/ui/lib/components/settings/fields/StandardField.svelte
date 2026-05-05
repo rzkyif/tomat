@@ -53,7 +53,7 @@
           onChange(field.id, (e.target as HTMLInputElement).checked)}
       />
       <div
-        class="w-full h-8 relative bg-default-300 peer-focus:outline-none rounded-lg peer peer-checked:after:translate-x-full peer-checked:after:border-white peer-checked:after:content-['on'] after:content-['off'] after:text-center after:text-xs after:content-center after:uppercase after:absolute after:top-0.44em after:left-0.35em after:bg-default-200 after:text-default-500 peer-checked:after:text-default-200 after:rounded-lg after:h-1.85em after:w-[calc(50%-0.35em)] after:transition-all peer-checked:bg-neutral-300"
+        class="w-full h-8 relative bg-default-300 peer-focus:outline-none rounded-medium peer peer-checked:after:translate-x-full peer-checked:after:border-white peer-checked:after:content-['on'] after:content-['off'] after:text-center after:text-xs after:content-center after:uppercase after:absolute after:top-0.44em after:left-0.35em after:bg-default-200 after:text-default-500 peer-checked:after:text-default-200 after:rounded-medium after:h-1.85em after:w-[calc(50%-0.35em)] after:transition-all peer-checked:bg-default-500"
       ></div>
     </label>
   {:else if field.type === "select" || field.type === "monitor"}
@@ -64,7 +64,7 @@
     <div class="relative w-full">
       <select
         aria-label={field.name}
-        class="appearance-none bg-default-300 text-default-800 rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full h-8 px-2 pr-7 outline-none {!editable
+        class="appearance-none bg-default-300 text-default-800 rounded-medium focus:ring-blue-500 focus:border-blue-500 block w-full h-8 px-2 pr-7 outline-none {!editable
           ? 'opacity-60'
           : ''}"
         disabled={!editable}
@@ -97,7 +97,7 @@
           : field.type === "number"
             ? "1"
             : undefined}
-        class="text-default-800 rounded-lg block w-full min-h-8 px-2 outline-none {!editable
+        class="text-default-800 rounded-medium block w-full min-h-8 px-2 outline-none {!editable
           ? 'opacity-60'
           : ''} {hasError
           ? 'bg-accent-red-300 border-accent-red-400'

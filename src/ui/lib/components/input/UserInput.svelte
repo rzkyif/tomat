@@ -58,6 +58,16 @@
   import type { ActivationMode } from "$lib/shared/settings";
   import AttachmentList from "../AttachmentList.svelte";
   import Bubble from "../Bubble.svelte";
+  import { hasAlpha } from "$lib/shared/color";
+
+  const themeOverride = $derived(
+    settingsState.currentSettings[
+      "appearance.userInputDefaultColor"
+    ] as string,
+  );
+  const themeOverrideHex = $derived(
+    hasAlpha(themeOverride) ? themeOverride : null,
+  );
 
   let { toggleSettings, showSettings } = $props<{
     toggleSettings: () => void;
@@ -939,6 +949,7 @@
   ] as const;
 </script>
 
+<div style:display="contents" style:--default-base={themeOverrideHex}>
 <Bubble
   selectedAlignment={settingsState.getAlignment()}
   extraClass="flex flex-col gap-4 min-w-0 overflow-hidden transition-all"
@@ -947,7 +958,7 @@
   <!-- STT error banner -->
   {#if sttError}
     <div
-      class="flex items-center gap-2 text-sm text-default-700 bg-default-200 rounded-lg px-3 py-2"
+      class="flex items-center gap-2 text-sm text-default-700 bg-default-200 rounded-medium px-3 py-2"
     >
       <i class="flex i-material-symbols-mic-off-rounded text-base"></i>
       <span>{sttError}</span>
@@ -957,7 +968,7 @@
   <!-- LLM autocorrect before -->
   {#if showAutocorrectDiff && originalTranscription !== null}
     <div
-      class="flex items-start gap-2 text-sm text-default-700 bg-default-200 rounded-lg px-3 py-2"
+      class="flex items-start gap-2 text-sm text-default-700 bg-default-200 rounded-medium px-3 py-2"
     >
       <span class="shrink-0 font-medium">Before Autocorrect:</span>
       <span class="whitespace-pre-wrap break-words flex-1"
@@ -1021,7 +1032,7 @@
     class="flex items-end justify-between gap-2 text-2xl text-default-700 w-full"
   >
     <div
-      class="flex flex-row items-center justify-center bg-default-200 p-1 rounded-2xl"
+      class="flex flex-row items-center justify-center bg-default-200 p-1 rounded-large"
       data-attach-root
     >
       <button
@@ -1091,7 +1102,7 @@
     </div>
 
     <div
-      class="flex flex-row items-center justify-center bg-default-200 px-2 py-1 rounded-2xl"
+      class="flex flex-row items-center justify-center bg-default-200 px-2 py-1 rounded-large"
     >
       <div
         class="relative flex items-center p-1 text-default-700 hover:text-default-900 transition-colors"
@@ -1139,7 +1150,7 @@
     <div class="flex gap-2">
       {#if settingsState.currentSettings["stt.enabled"]}
         <button
-          class="bg-default-200 p-2 rounded-2xl flex items-center transition-colors {vadManager.enabled
+          class="bg-default-200 p-2 rounded-large flex items-center transition-colors {vadManager.enabled
             ? vadManager.listening
               ? 'text-green-500'
               : 'text-blue-400'
@@ -1194,7 +1205,7 @@
         </button>
       {/if}
       <button
-        class="hover:cursor-pointer bg-default-200 p-2 rounded-2xl flex items-center transition-colors {hasActiveWork &&
+        class="hover:cursor-pointer bg-default-200 p-2 rounded-large flex items-center transition-colors {hasActiveWork &&
         !hasContent
           ? 'text-red-500 hover:text-red-400'
           : 'hover:text-default-900 text-default-700'}"
@@ -1220,16 +1231,19 @@
     </div>
   </div>
 </Bubble>
+</div>
 
 <svelte:window onkeydown={handlePreviewKeydown} onblur={closeImagePreview} />
 
 {#if autocompleteOpen}
-  <SnippetAutocomplete
-    options={autocompleteOptions}
-    selectedIndex={autocompleteIndex}
-    anchor={autocompleteAnchor}
-    onSelect={applySnippetTrigger}
-  />
+  <div style:display="contents" style:--default-base={themeOverrideHex}>
+    <SnippetAutocomplete
+      options={autocompleteOptions}
+      selectedIndex={autocompleteIndex}
+      anchor={autocompleteAnchor}
+      onSelect={applySnippetTrigger}
+    />
+  </div>
 {/if}
 
 {#if previewImageUrl}
@@ -1245,7 +1259,7 @@
       <img
         src={previewImageUrl}
         alt="Preview"
-        class="max-h-[calc(100vh-6rem)] max-w-[calc(100vw-6rem)] object-contain rounded-lg shadow-2xl"
+        class="max-h-[calc(100vh-6rem)] max-w-[calc(100vw-6rem)] object-contain rounded-medium shadow-2xl"
       />
     </div>
   </div>

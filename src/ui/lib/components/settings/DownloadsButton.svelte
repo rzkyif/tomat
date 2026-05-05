@@ -14,8 +14,8 @@
 
 <button
   class="hover:cursor-pointer flex items-center h-8 pl-1.5 {collapsed
-    ? 'pr-1.5 gap-0'
-    : 'pr-2.5 gap-2'} rounded-lg transition-[padding,colors,background-color,gap] duration-200 text-default-500 hover:text-default-700 hover:bg-default-200"
+    ? 'pr-0'
+    : 'pr-2.5'} gap-1.5 rounded-medium transition-[padding,colors,background-color] duration-200 text-default-500 hover:text-default-700 hover:bg-default-200"
   onclick={() => downloadsState.openModal()}
   title={collapsed ? label : undefined}
   aria-label={label}

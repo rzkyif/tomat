@@ -45,7 +45,7 @@
     {#each parts as part, i}
       {#if part.type === "image_url"}
         <div
-          class="relative group bg-default-100 p-2 rounded-lg {editable &&
+          class="relative group bg-default-100 p-2 rounded-medium {editable &&
           onRemove
             ? 'pr-7'
             : ''}"
@@ -82,7 +82,7 @@
       {:else if part.type === "image_file"}
         {@const url = imageUrlCache[part.path] || ""}
         <div
-          class="relative group bg-default-100 p-2 rounded-lg {editable &&
+          class="relative group bg-default-100 p-2 rounded-medium {editable &&
           onRemove
             ? 'pr-7'
             : ''}"
@@ -119,7 +119,7 @@
         </div>
       {:else if part.type === "document" || part.type === "document_file"}
         <div
-          class="relative group flex items-center gap-1 bg-default-100 px-3 py-1.5 rounded-lg text-sm text-default-600 h-fit"
+          class="relative group flex items-center gap-1 bg-default-100 px-3 py-1.5 rounded-medium text-sm text-default-600 h-fit"
         >
           <i
             class="flex i-material-symbols-description-outline-rounded text-base"

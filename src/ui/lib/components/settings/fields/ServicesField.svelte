@@ -123,7 +123,7 @@
       {@const endpoint = endpointFor(sc.key)}
       {@const m = metrics[sc.key]}
       {#if sc.key === "bun" || status !== "Disabled"}
-        <div class="flex items-baseline gap-3 rounded-xl">
+        <div class="flex items-baseline gap-3 rounded-large">
           <div class="flex flex-col flex-1 min-w-0">
             <div class="text-default-800 text-sm truncate">
               {labelFor(sc.key)}
@@ -153,7 +153,7 @@
         </div>
       {/if}
     {/each}
-    <div class="flex items-center gap-3 rounded-xl">
+    <div class="flex items-center gap-3 rounded-large">
       <div class="text-default-800 text-sm flex-1 min-w-0 truncate">Total</div>
       <div class="flex items-center gap-2 shrink-0">
         <div

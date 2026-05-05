@@ -60,7 +60,7 @@
 </script>
 
 <div
-  class="group relative flex items-center gap-2 h-8 px-2 rounded-md overflow-hidden transition-colors duration-1000 {rowBg()}"
+  class="group relative flex items-center gap-2 h-8 px-2 rounded-small overflow-hidden transition-colors duration-1000 {rowBg()}"
   title={item.error ?? `${item.filename} (${item.rel_path})`}
 >
   {#if item.status === "Downloading"}

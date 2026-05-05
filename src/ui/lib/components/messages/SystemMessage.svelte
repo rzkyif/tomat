@@ -4,6 +4,14 @@
   import Expandable from "../Expandable.svelte";
   import { settingsState } from "../../state";
   import { expansionState } from "$lib/state/expansion.svelte";
+  import { hasAlpha } from "$lib/shared/color";
+
+  const override = $derived(
+    settingsState.currentSettings[
+      "appearance.systemMessageDefaultColor"
+    ] as string,
+  );
+  const overrideHex = $derived(hasAlpha(override) ? override : null);
 
   let {
     id,
@@ -47,25 +55,27 @@
   });
 </script>
 
-<Bubble
-  selectedAlignment={settingsState.getAlignment()}
-  size="small"
-  {neighborLeft}
-  {neighborRight}
->
-  <Expandable bind:expanded alignment={settingsState.getAlignment()}>
-    {#snippet title()}
-      <span>System Prompt</span>
-    {/snippet}
-    {#snippet children()}
-      <!-- `text-left` keeps the prompt body alignment-independent — the
-           Expandable wrapper would otherwise apply `text-right` when the
-           bubble is right-aligned. -->
-      <div
-        class="whitespace-pre-wrap bg-default-200 text-default-700 text-xs text-left px-4 py-2 rounded-2xl"
-      >
-        {content}
-      </div>
-    {/snippet}
-  </Expandable>
-</Bubble>
+<div style:display="contents" style:--default-base={overrideHex}>
+  <Bubble
+    selectedAlignment={settingsState.getAlignment()}
+    size="small"
+    {neighborLeft}
+    {neighborRight}
+  >
+    <Expandable bind:expanded alignment={settingsState.getAlignment()}>
+      {#snippet title()}
+        <span>System Prompt</span>
+      {/snippet}
+      {#snippet children()}
+        <!-- `text-left` keeps the prompt body alignment-independent — the
+             Expandable wrapper would otherwise apply `text-right` when the
+             bubble is right-aligned. -->
+        <div
+          class="whitespace-pre-wrap bg-default-200 text-default-700 text-xs text-left px-4 py-2 rounded-large"
+        >
+          {content}
+        </div>
+      {/snippet}
+    </Expandable>
+  </Bubble>
+</div>

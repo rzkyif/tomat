@@ -155,7 +155,7 @@
   <div class="flex flex-wrap items-center gap-2">
     <button
       type="button"
-      class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-xl px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
+      class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-large px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
       onclick={handleOpenFolder}
       title="Open the toolkits folder in your file manager"
     >
@@ -164,7 +164,7 @@
     </button>
     <button
       type="button"
-      class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-xl px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
+      class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-large px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
       onclick={handleRefresh}
       title="Rescan ~/.tomat/toolkits/"
     >
@@ -177,7 +177,7 @@
     <div class="flex flex-col gap-2">
       <div class="text-default-600 text-sm">Enabled</div>
       {#each enabledToolkits as tk (tk.id)}
-        <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-xl">
+        <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-large">
           <div class="flex flex-col gap-0.5">
             <div class="font-medium text-default-800 break-words">
               {tk.displayName || tk.id}
@@ -231,7 +231,7 @@
       {#each disabledTrustedToolkits as tk (tk.id)}
         {@const needsInstall = tk.hasPackage && !tk.depsInstalled}
         {@const canUninstallDeps = tk.hasPackage && tk.depsInstalled}
-        <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-xl">
+        <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-large">
           <div class="flex flex-col gap-0.5">
             <div class="font-medium text-default-800 break-words">
               {tk.displayName || tk.id}
@@ -257,7 +257,7 @@
                 >Install output ({job.status})</summary
               >
               <pre
-                class="text-default-700 bg-default-400 rounded-md px-2 py-1 mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words">{job.lines
+                class="text-default-700 bg-default-400 rounded-small px-2 py-1 mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words">{job.lines
                   .map((l) => l.line)
                   .join("\n")}</pre>
             </details>
@@ -323,7 +323,7 @@
     <div class="flex flex-col gap-2">
       <div class="text-default-600 text-sm">Untrusted</div>
       {#each toolkitsState.untrusted as tk (tk.id)}
-        <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-xl">
+        <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-large">
           <div class="flex flex-col gap-0.5">
             <div class="font-mono text-default-800 break-all">{tk.id}</div>
             <div class="text-xs text-default-600">

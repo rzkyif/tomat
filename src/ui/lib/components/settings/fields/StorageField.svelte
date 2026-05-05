@@ -554,7 +554,7 @@
     <div class="flex items-center justify-end gap-2 mb-1">
       <button
         type="button"
-        class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-xl px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
+        class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-large px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
         onclick={() => requestClear("models")}
         disabled={!hasClearable("models")}
         title="Delete model files that aren't currently in use"
@@ -564,7 +564,7 @@
       </button>
       <button
         type="button"
-        class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-xl px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
+        class="flex items-center gap-1 bg-default-300 hover:bg-default-400 text-default-800 rounded-large px-3 h-8 text-sm hover:cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed select-none"
         onclick={() => tree && revealPath(tree.root_path)}
         title={`Open Storage in ${fileManagerName()}`}
       >
@@ -588,7 +588,7 @@
     }}
   >
     <div
-      class="absolute bg-default-300 rounded-md shadow-lg py-1 min-w-[200px] text-sm select-none"
+      class="absolute bg-default-300 rounded-small shadow-lg py-1 min-w-[200px] text-sm select-none"
       style="left: {menuX}px; top: {menuY}px;"
     >
       {#if dLabel}

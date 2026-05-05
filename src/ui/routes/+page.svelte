@@ -61,6 +61,16 @@
     document.documentElement.style.fontSize = `${size}px`;
   }
 
+  function applyBubbleColor(cssVar: string, hex: string | undefined) {
+    if (typeof hex !== "string" || hex.length === 0) return;
+    document.documentElement.style.setProperty(cssVar, hex);
+  }
+
+  function applyCssVarPx(cssVar: string, value: number | undefined) {
+    if (typeof value !== "number" || !Number.isFinite(value)) return;
+    document.documentElement.style.setProperty(cssVar, `${value}px`);
+  }
+
   function listenSystemTheme(callback: () => void): () => void {
     themeMql.addEventListener("change", callback);
     return () => themeMql.removeEventListener("change", callback);
@@ -188,6 +198,58 @@
 
       applyTheme(settingsState.currentSettings["appearance.theme"] ?? "auto");
       applyTextSize(settingsState.currentSettings["appearance.textSize"] ?? 20);
+      applyBubbleColor(
+        "--user-bubble-bg-light",
+        settingsState.currentSettings["appearance.userBubbleColor"],
+      );
+      applyBubbleColor(
+        "--agent-bubble-bg-light",
+        settingsState.currentSettings["appearance.agentBubbleColor"],
+      );
+      applyBubbleColor(
+        "--agent2-bubble-bg-light",
+        settingsState.currentSettings["appearance.secondaryAgentBubbleColor"],
+      );
+      applyBubbleColor(
+        "--default-base",
+        settingsState.currentSettings["appearance.defaultColor"],
+      );
+      applyBubbleColor(
+        "--accent-red-base",
+        settingsState.currentSettings["appearance.accentRed"],
+      );
+      applyBubbleColor(
+        "--accent-blue-base",
+        settingsState.currentSettings["appearance.accentBlue"],
+      );
+      applyBubbleColor(
+        "--accent-purple-base",
+        settingsState.currentSettings["appearance.accentPurple"],
+      );
+      applyBubbleColor(
+        "--accent-green-base",
+        settingsState.currentSettings["appearance.accentGreen"],
+      );
+      applyBubbleColor(
+        "--accent-orange-base",
+        settingsState.currentSettings["appearance.accentOrange"],
+      );
+      applyBubbleColor(
+        "--accent-yellow-base",
+        settingsState.currentSettings["appearance.accentYellow"],
+      );
+      applyCssVarPx(
+        "--rounded-small",
+        settingsState.currentSettings["appearance.roundedSmall"] as number,
+      );
+      applyCssVarPx(
+        "--rounded-medium",
+        settingsState.currentSettings["appearance.roundedMedium"] as number,
+      );
+      applyCssVarPx(
+        "--rounded-large",
+        settingsState.currentSettings["appearance.roundedLarge"] as number,
+      );
 
       // Only show the "Loading latest session…" placeholder when we're
       // actually about to load one; "always start new" mode has nothing to
@@ -364,6 +426,63 @@
   $effect(() => {
     const size = settingsState.currentSettings["appearance.textSize"];
     if (loaded && size) applyTextSize(size as number);
+  });
+
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.userBubbleColor"];
+    if (loaded) applyBubbleColor("--user-bubble-bg-light", v);
+  });
+
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.agentBubbleColor"];
+    if (loaded) applyBubbleColor("--agent-bubble-bg-light", v);
+  });
+
+  $effect(() => {
+    const v =
+      settingsState.currentSettings["appearance.secondaryAgentBubbleColor"];
+    if (loaded) applyBubbleColor("--agent2-bubble-bg-light", v);
+  });
+
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.defaultColor"];
+    if (loaded) applyBubbleColor("--default-base", v);
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.accentRed"];
+    if (loaded) applyBubbleColor("--accent-red-base", v);
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.accentBlue"];
+    if (loaded) applyBubbleColor("--accent-blue-base", v);
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.accentPurple"];
+    if (loaded) applyBubbleColor("--accent-purple-base", v);
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.accentGreen"];
+    if (loaded) applyBubbleColor("--accent-green-base", v);
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.accentOrange"];
+    if (loaded) applyBubbleColor("--accent-orange-base", v);
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.accentYellow"];
+    if (loaded) applyBubbleColor("--accent-yellow-base", v);
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.roundedSmall"];
+    if (loaded) applyCssVarPx("--rounded-small", v as number);
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.roundedMedium"];
+    if (loaded) applyCssVarPx("--rounded-medium", v as number);
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.roundedLarge"];
+    if (loaded) applyCssVarPx("--rounded-large", v as number);
   });
 
   async function scrollToBottom() {

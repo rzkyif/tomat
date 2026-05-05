@@ -53,7 +53,7 @@
   <textarea
     bind:this={textareaEl}
     aria-label={field.name}
-    class="multiline-scroll text-default-800 rounded-lg w-full px-2 py-1.5 outline-none min-h-40 resize-y overflow-y-hidden focus:overflow-y-auto whitespace-pre-wrap break-words text-sm {!editable
+    class="multiline-scroll text-default-800 rounded-medium w-full px-2 py-1.5 outline-none min-h-40 resize-y overflow-y-hidden focus:overflow-y-auto whitespace-pre-wrap break-words text-sm {!editable
       ? 'opacity-60'
       : ''} {hasError
       ? 'bg-accent-red-300 border-accent-red-400'
@@ -76,16 +76,16 @@
     border-radius: 4px;
   }
   .multiline-scroll::-webkit-scrollbar-thumb {
-    background: oklch(92.2% 0 0);
+    background: var(--default-200);
     border-radius: 4px;
   }
   .multiline-scroll::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--default-400);
   }
   :global(html.dark) .multiline-scroll::-webkit-scrollbar-thumb {
-    background: oklch(30% 0 0);
+    background: var(--default-d-200);
   }
   :global(html.dark) .multiline-scroll::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.25);
+    background: var(--default-d-400);
   }
 </style>

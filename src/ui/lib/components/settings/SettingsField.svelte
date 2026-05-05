@@ -3,8 +3,10 @@
   import { evalCondition } from "$lib/shared/settings";
   import type { Monitor } from "$lib/shared/types";
   import { settingsState } from "../../state";
+  import ColorField from "./fields/ColorField.svelte";
   import CommandPreviewField from "./fields/CommandPreviewField.svelte";
   import MultilineField from "./fields/MultilineField.svelte";
+  import NumberSliderField from "./fields/NumberSliderField.svelte";
   import PresetField from "./fields/PresetField.svelte";
   import ServicesField from "./fields/ServicesField.svelte";
   import ShortcutField from "./fields/ShortcutField.svelte";
@@ -43,6 +45,10 @@
     <ShortcutField {field} {error} {horizontal} {onChange} {onReset} />
   {:else if field.type === "toolkits"}
     <ToolkitsField {field} />
+  {:else if field.type === "color"}
+    <ColorField {field} {error} {horizontal} {onChange} {onReset} />
+  {:else if field.type === "number_slider"}
+    <NumberSliderField {field} {error} {horizontal} {onChange} {onReset} />
   {:else}
     <StandardField {field} {monitors} {error} {horizontal} {onChange} {onReset} />
   {/if}

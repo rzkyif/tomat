@@ -27,6 +27,8 @@ export class ScrollSpy {
   /** Set briefly during programmatic scrollTo so the scroll listener
    *  doesn't flicker `selectedGroupId` through every group on the way. */
   private isProgrammaticScroll = false;
+  private programmaticTargetTop: number | null = null;
+  private programmaticScrollTimeout: ReturnType<typeof setTimeout> | null = null;
   private getVisibleGroups: () => { id: string }[] = () => [];
 
   constructor(initialGroupId: string) {
@@ -38,20 +40,36 @@ export class ScrollSpy {
     this.getVisibleGroups = accessor;
   }
 
+  private releaseProgrammaticLock(): void {
+    this.isProgrammaticScroll = false;
+    this.programmaticTargetTop = null;
+    if (this.programmaticScrollTimeout !== null) {
+      clearTimeout(this.programmaticScrollTimeout);
+      this.programmaticScrollTimeout = null;
+    }
+  }
+
   scrollTo(groupId: string, animEnabled: boolean): void {
     const el = this.groupRefs[groupId];
     if (!el || !this.scrollEl) return;
+    if (this.programmaticScrollTimeout !== null) {
+      clearTimeout(this.programmaticScrollTimeout);
+    }
     this.isProgrammaticScroll = true;
+    this.programmaticTargetTop = el.offsetTop;
     this.scrollEl.scrollTo({
       top: el.offsetTop,
       behavior: animEnabled ? "smooth" : "instant",
     });
     this.selectedGroupId = groupId;
-    // 'scrollend' would be more precise but Safari/WebKit support is uneven;
-    // fall back to a fixed timeout that comfortably covers a smooth scroll.
-    setTimeout(() => {
-      this.isProgrammaticScroll = false;
-    }, 600);
+    // 'scrollend' would be more precise but Safari/WebKit support is uneven.
+    // Instead, `onScroll` releases the lock as soon as scrollTop reaches the
+    // target; this timeout is just a safety net for cases where the scroll
+    // is interrupted (e.g. user grabs the scrollbar mid-flight) and never
+    // lands exactly on the target.
+    this.programmaticScrollTimeout = setTimeout(() => {
+      this.releaseProgrammaticLock();
+    }, 1500);
   }
 
   updateFades(): void {
@@ -84,6 +102,14 @@ export class ScrollSpy {
 
   onScroll(searchMode: boolean): void {
     this.updateFades();
+    if (
+      this.isProgrammaticScroll &&
+      this.programmaticTargetTop !== null &&
+      this.scrollEl &&
+      Math.abs(this.scrollEl.scrollTop - this.programmaticTargetTop) < 1
+    ) {
+      this.releaseProgrammaticLock();
+    }
     this.updateActiveGroup(searchMode);
   }
 

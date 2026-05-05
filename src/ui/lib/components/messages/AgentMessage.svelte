@@ -74,12 +74,7 @@
 
   let displayText = $derived(getTextContent(content));
   let bgClass = $derived(
-    modelUsed === "secondary" ? "bg-accent-purple-300" : "bg-accent-blue-300",
-  );
-  let borderColorClass = $derived(
-    modelUsed === "secondary"
-      ? "border-accent-purple-400"
-      : "border-accent-blue-400",
+    modelUsed === "secondary" ? "bubble-agent-secondary" : "bubble-agent",
   );
 
   // TTS only attaches to content bubbles; reasoning is never read aloud.
@@ -133,7 +128,6 @@
     extraClass="markdown overflow-clip flex flex-col gap-3"
     active={ttsBusyThis}
     pulse={ttsBusyThis && !isSpeakingThis}
-    {borderColorClass}
     oncontextmenu={(e) => {
       if (!id) return;
       e.preventDefault();

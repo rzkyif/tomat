@@ -20,7 +20,7 @@
   {@const selected = settingsState.currentSettings[field.id] === opt.id}
   <button
     type="button"
-    class="p-3 rounded-xl cursor-pointer text-left flex flex-col gap-1.5 outline-none transition-colors duration-100 {selected
+    class="p-3 rounded-large cursor-pointer text-left flex flex-col gap-1.5 outline-none transition-colors duration-100 {selected
       ? selectedClasses
       : unselectedClasses}"
     onclick={() => onPresetSelect(field.id, opt)}

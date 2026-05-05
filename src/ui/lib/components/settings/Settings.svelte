@@ -5,6 +5,7 @@
   import type { PresetOption } from "$lib/shared/settings";
   import type { Monitor } from "$lib/shared/types";
   import { startConfiguredServices } from "$lib/sidecar/manager";
+  import { hasAlpha } from "$lib/shared/color";
   import Bubble from "../Bubble.svelte";
   import {
     settingsState,
@@ -30,6 +31,7 @@
   import SettingsSidebar from "./SettingsSidebar.svelte";
   import SettingsSection from "./SettingsSection.svelte";
   import SettingsField from "./SettingsField.svelte";
+  import ColorPickerModal from "./ColorPickerModal.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
   import DownloadsModal from "./DownloadsModal.svelte";
   import {
@@ -374,8 +376,18 @@
   }
 
   const withScrollAnchor = (fn: () => void) => scroll.withAnchor(fn);
+
+  const themeOverride = $derived(
+    settingsState.currentSettings[
+      "appearance.settingsDefaultColor"
+    ] as string,
+  );
+  const themeOverrideHex = $derived(
+    hasAlpha(themeOverride) ? themeOverride : null,
+  );
 </script>
 
+<div style:display="contents" style:--default-base={themeOverrideHex}>
 <Bubble
   selectedAlignment={settingsState.getAlignment()}
   extraClass="flex flex-col gap-3 overflow-hidden transition-all w-full h-80vh relative"
@@ -383,7 +395,7 @@
   <!-- Settings Header and Back Button -->
   <div class="flex gap-2 items-center text-2xl relative">
     <div
-      class="relative h-10 bg-default-200 rounded-2xl overflow-hidden w-full flex items-center px-4 pr-8"
+      class="relative h-10 bg-default-200 rounded-large overflow-hidden w-full flex items-center px-4 pr-8"
     >
       <input
         type="text"
@@ -470,7 +482,7 @@
                     </div>
                   {:else}
                     <div
-                      class="bg-default-200 rounded-2xl px-4 py-2 text-default-600 text-base"
+                      class="bg-default-200 rounded-large px-4 py-2 text-default-600 text-base"
                     >
                       No matching settings found.
                     </div>
@@ -505,7 +517,7 @@
                           {group.name}
                         </h2>
                         <div
-                          class="absolute left-0 right-0 top-full h-3 bg-gradient-to-b from-neutral-300 dark:from-neutral-600 to-neutral-300/0 dark:to-neutral-600/0 pointer-events-none"
+                          class="absolute left-0 right-0 top-full h-3 bg-gradient-to-b from-default-300 to-transparent pointer-events-none"
                         ></div>
                       </div>
                       <div
@@ -538,7 +550,7 @@
         </div>
       </div>
       <div
-        class="absolute left-0 right-0 bottom-0 h-6 pointer-events-none z-1 bg-gradient-to-t from-neutral-300 dark:from-neutral-600 to-transparent transition-opacity duration-100 {scroll.showBottomFade
+        class="absolute left-0 right-0 bottom-0 h-6 pointer-events-none z-1 bg-gradient-to-t from-default-300 to-transparent transition-opacity duration-100 {scroll.showBottomFade
           ? 'opacity-100'
           : 'opacity-0'}"
       ></div>
@@ -547,9 +559,15 @@
 
   <ConfirmModal />
   <DownloadsModal />
+  <ColorPickerModal />
 </Bubble>
+</div>
 
 <style>
+  /* Scrollbar colors track the themable default scale so a tinted Default
+     Color flows through. Light and dark variants pull from `--default-200`
+     and `--default-d-200`; hover steps to `--default-400` / `--default-d-400`
+     for a consistent darkening (and lightening in dark mode). */
   .settings-scroll::-webkit-scrollbar {
     width: 8px;
   }
@@ -558,16 +576,16 @@
     border-radius: 4px;
   }
   .settings-scroll::-webkit-scrollbar-thumb {
-    background: oklch(92.2% 0 0);
+    background: var(--default-200);
     border-radius: 4px;
   }
   .settings-scroll::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--default-400);
   }
   :global(html.dark) .settings-scroll::-webkit-scrollbar-thumb {
-    background: oklch(37% 0 0);
+    background: var(--default-d-200);
   }
   :global(html.dark) .settings-scroll::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.25);
+    background: var(--default-d-400);
   }
 </style>

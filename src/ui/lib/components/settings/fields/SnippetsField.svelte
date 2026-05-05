@@ -160,7 +160,7 @@
       <div class="relative flex-1">
         <select
           aria-label="Select snippet"
-          class="appearance-none bg-default-300 text-default-800 rounded-lg block w-full h-8 px-2 pr-7 outline-none"
+          class="appearance-none bg-default-300 text-default-800 rounded-medium block w-full h-8 px-2 pr-7 outline-none"
           value={selectedId ?? ""}
           onchange={handleSelectChange}
         >
@@ -178,7 +178,7 @@
     {/if}
     <button
       type="button"
-      class="flex items-center gap-1 shrink-0 bg-default-300 hover:bg-default-400 text-default-800 rounded-lg px-3 h-8 text-sm hover:cursor-pointer transition-colors"
+      class="flex items-center gap-1 shrink-0 bg-default-300 hover:bg-default-400 text-default-800 rounded-medium px-3 h-8 text-sm hover:cursor-pointer transition-colors"
       onclick={handleAdd}
       title="Add snippet"
     >
@@ -188,7 +188,7 @@
     {#if selectedId}
       <button
         type="button"
-        class="flex items-center shrink-0 bg-default-300 hover:bg-accent-red-500 text-default-800 hover:text-white rounded-lg w-8 h-8 justify-center hover:cursor-pointer transition-colors"
+        class="flex items-center shrink-0 bg-default-300 hover:bg-accent-red-500 text-default-800 hover:text-white rounded-medium w-8 h-8 justify-center hover:cursor-pointer transition-colors"
         onclick={handleDelete}
         title="Delete snippet"
         aria-label="Delete snippet"
@@ -205,7 +205,7 @@
         <input
           type="text"
           aria-label="Snippet name"
-          class="bg-default-300 text-default-800 rounded-lg block w-full h-8 px-2 outline-none"
+          class="bg-default-300 text-default-800 rounded-medium block w-full h-8 px-2 outline-none"
           value={draftName}
           oninput={(e) => {
             draftName = (e.target as HTMLInputElement).value;
@@ -226,7 +226,7 @@
             <input
               type="text"
               aria-label="Snippet trigger"
-              class="bg-default-300 text-default-800 rounded-lg block w-full h-8 pl-6 pr-2 outline-none font-mono {triggerError
+              class="bg-default-300 text-default-800 rounded-medium block w-full h-8 pl-6 pr-2 outline-none font-mono {triggerError
                 ? 'bg-accent-red-300 border-accent-red-400 border'
                 : ''}"
               value={draftTrigger.startsWith("@")
@@ -248,7 +248,7 @@
         <div class="relative">
           <select
             aria-label="Snippet placement"
-            class="appearance-none bg-default-300 text-default-800 rounded-lg block w-full h-8 px-2 pr-7 outline-none"
+            class="appearance-none bg-default-300 text-default-800 rounded-medium block w-full h-8 px-2 pr-7 outline-none"
             value={draftPlacement}
             onchange={(e) => {
               draftPlacement = (e.target as HTMLSelectElement)
@@ -270,7 +270,7 @@
         <div class="text-default-600 text-sm">Text</div>
         <textarea
           aria-label="Snippet text"
-          class="bg-default-300 text-default-800 rounded-lg w-full px-2 py-1.5 outline-none resize-none max-h-64 min-h-24 overflow-y-auto whitespace-pre-wrap break-words text-sm"
+          class="bg-default-300 text-default-800 rounded-medium w-full px-2 py-1.5 outline-none resize-none max-h-64 min-h-24 overflow-y-auto whitespace-pre-wrap break-words text-sm"
           value={draftText}
           oninput={(e) => {
             draftText = (e.target as HTMLTextAreaElement).value;

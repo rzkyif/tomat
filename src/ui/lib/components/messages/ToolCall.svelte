@@ -10,6 +10,16 @@
   import { settingsState } from "../../state";
   import { expansionState } from "$lib/state/expansion.svelte";
   import { untrack } from "svelte";
+  import { hasAlpha } from "$lib/shared/color";
+
+  const themeOverride = $derived(
+    settingsState.currentSettings[
+      "appearance.systemMessageDefaultColor"
+    ] as string,
+  );
+  const themeOverrideHex = $derived(
+    hasAlpha(themeOverride) ? themeOverride : null,
+  );
 
   let {
     id,
@@ -462,6 +472,7 @@
   });
 </script>
 
+<div style:display="contents" style:--default-base={themeOverrideHex}>
 <Bubble
   selectedAlignment={alignment}
   size="small"
@@ -583,29 +594,29 @@
 
         {#if hasCancelledError}
           <pre
-            class="text-xs font-mono text-default-700 bg-default-200 rounded-md px-2 py-1 max-h-48 overflow-auto whitespace-pre">{toolCall.error}</pre>
+            class="text-xs font-mono text-default-700 bg-default-200 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{toolCall.error}</pre>
         {/if}
 
         <div class="flex flex-col gap-1 text-xs">
           {#if hasArgs}
             <div class="text-default-600">Arguments</div>
             <pre
-              class="text-default-800 bg-default-200 rounded-md px-2 py-1 max-h-32 overflow-auto whitespace-pre">{argsText}</pre>
+              class="text-default-800 bg-default-200 rounded-small px-2 py-1 max-h-32 overflow-auto whitespace-pre">{argsText}</pre>
           {/if}
           {#if hasResult}
             <div class="text-default-600">Result</div>
             <pre
-              class="text-default-800 bg-default-200 rounded-md px-2 py-1 max-h-48 overflow-auto whitespace-pre">{resultText}</pre>
+              class="text-default-800 bg-default-200 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{resultText}</pre>
           {/if}
           {#if hasError}
             <div class="text-default-600">Error</div>
             <pre
-              class="font-mono text-default-800 bg-default-200 rounded-md px-2 py-1 max-h-48 overflow-auto whitespace-pre">{toolCall.error}</pre>
+              class="font-mono text-default-800 bg-default-200 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{toolCall.error}</pre>
           {/if}
           {#if hasLogs}
             <div class="text-default-600">Logs</div>
             <div
-              class="bg-default-200 rounded-md px-2 py-1 max-h-32 overflow-auto flex flex-col gap-0.5 whitespace-pre"
+              class="bg-default-200 rounded-small px-2 py-1 max-h-32 overflow-auto flex flex-col gap-0.5 whitespace-pre"
             >
               {#each toolCall.logs as log, i (i)}
                 <div class="text-default-700">
@@ -620,6 +631,7 @@
     {/snippet}
   </Expandable>
 </Bubble>
+</div>
 
 <style>
   /* Inline code pill matching MessageMarkdown's :global(code) treatment so

@@ -129,10 +129,9 @@
 
 <Bubble
   selectedAlignment={settingsState.getAlignment()}
-  bgClass="bg-accent-green-300"
+  bgClass="bubble-user"
   extraClass={"flex flex-col gap-4"}
   active={editing}
-  borderColorClass="border-accent-green-400"
   oncontextmenu={(e) => {
     e.preventDefault();
     void showUserMessageMenu({

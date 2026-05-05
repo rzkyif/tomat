@@ -37,16 +37,16 @@
     border-radius: 4px;
   }
   .description-scroll::-webkit-scrollbar-thumb {
-    background: oklch(92.2% 0 0);
+    background: var(--default-200);
     border-radius: 4px;
   }
   .description-scroll::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--default-400);
   }
   :global(html.dark) .description-scroll::-webkit-scrollbar-thumb {
-    background: oklch(37% 0 0);
+    background: var(--default-d-200);
   }
   :global(html.dark) .description-scroll::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.25);
+    background: var(--default-d-400);
   }
 </style>

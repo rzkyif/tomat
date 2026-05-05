@@ -38,7 +38,9 @@ export type SettingType =
   | "storage"
   | "snippets"
   | "toolkits"
-  | "shortcut";
+  | "shortcut"
+  | "color"
+  | "number_slider";
 
 export type ActivationMode = "manual" | "sticky" | "push-to-talk";
 
@@ -137,6 +139,11 @@ export interface SettingField {
   regex?: RegexValidation;
   optional?: boolean;
   suffix?: string;
+  /** For `number_slider`: min/max/step bounds for the range slider and the
+   *  numeric input. Ignored by other field types. */
+  min?: number;
+  max?: number;
+  step?: number;
   /** When true, hidden unless `appearance.settings.showAdvanced` is on.
    *  Search results always include advanced fields regardless. */
   advanced?: boolean;
@@ -366,6 +373,189 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
                 errorMessage: "Must be between 12 and 32",
               },
             ],
+            descriptionTier: "ondemand",
+          },
+        ],
+      },
+      {
+        label: "Bubbles",
+        fields: [
+          {
+            id: "appearance.userBubbleColor",
+            name: "User Bubble Color",
+            description:
+              "Color of your message bubbles. Light/dark variants are derived automatically; the picker reflects the current theme but only the light value is saved. Supports transparency via the alpha slider.",
+            type: "color",
+            defaultValue: "#86efacff",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.agentBubbleColor",
+            name: "Agent Bubble Color",
+            description: "Color of agent message bubbles when the primary model is used.",
+            type: "color",
+            defaultValue: "#93c5fdff",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.secondaryAgentBubbleColor",
+            name: "Secondary Agent Bubble Color",
+            description:
+              "Color of agent message bubbles when the secondary model is used (if dual model is enabled).",
+            type: "color",
+            defaultValue: "#d8b4feff",
+            descriptionTier: "ondemand",
+          },
+        ],
+      },
+      {
+        label: "Theme Colors",
+        fields: [
+          {
+            id: "appearance.defaultColor",
+            name: "Default Color",
+            description:
+              "Source color for the entire neutral scale used across the app (backgrounds, borders, text, etc.). All nine light shades and their dark variants are derived from this single hex via OKLCH lightness adjustments. Pick a desaturated near-gray for a classic neutral, or a tinted hex for a themed app.",
+            type: "color",
+            defaultValue: "#737373ff",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.systemMessageDefaultColor",
+            name: "System Message Override",
+            description:
+              "Override the default color for system-message bubbles (reasoning, tool call, relevant tools). Set alpha to 0 (fully transparent) to inherit the global Default Color.",
+            type: "color",
+            defaultValue: "#00000000",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.userInputDefaultColor",
+            name: "User Input Override",
+            description:
+              "Override the default color for the user input area at the bottom. Set alpha to 0 (fully transparent) to inherit the global Default Color.",
+            type: "color",
+            defaultValue: "#00000000",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.sessionBarDefaultColor",
+            name: "Session Bar Override",
+            description:
+              "Override the default color for the session bar. Set alpha to 0 (fully transparent) to inherit the global Default Color.",
+            type: "color",
+            defaultValue: "#00000000",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.settingsDefaultColor",
+            name: "Settings Override",
+            description:
+              "Override the default color for the settings panel. Set alpha to 0 (fully transparent) to inherit the global Default Color.",
+            type: "color",
+            defaultValue: "#00000000",
+            descriptionTier: "ondemand",
+          },
+        ],
+      },
+      {
+        label: "Accent Colors",
+        fields: [
+          {
+            id: "appearance.accentRed",
+            name: "Red Accent",
+            description:
+              "Source color for the red accent scale (used for errors and destructive actions). All shades are derived from this hex.",
+            type: "color",
+            defaultValue: "#ef4444ff",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.accentBlue",
+            name: "Blue Accent",
+            description:
+              "Source color for the blue accent scale. All shades are derived from this hex.",
+            type: "color",
+            defaultValue: "#3b82f6ff",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.accentPurple",
+            name: "Purple Accent",
+            description:
+              "Source color for the purple accent scale. All shades are derived from this hex.",
+            type: "color",
+            defaultValue: "#a855f7ff",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.accentGreen",
+            name: "Green Accent",
+            description:
+              "Source color for the green accent scale (used for success states). All shades are derived from this hex.",
+            type: "color",
+            defaultValue: "#22c55eff",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.accentOrange",
+            name: "Orange Accent",
+            description:
+              "Source color for the orange accent scale (used for warnings/loading). All shades are derived from this hex.",
+            type: "color",
+            defaultValue: "#f97316ff",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.accentYellow",
+            name: "Yellow Accent",
+            description:
+              "Source color for the yellow accent scale. All shades are derived from this hex.",
+            type: "color",
+            defaultValue: "#eab308ff",
+            descriptionTier: "ondemand",
+          },
+        ],
+      },
+      {
+        label: "Roundedness",
+        fields: [
+          {
+            id: "appearance.roundedSmall",
+            name: "Small Roundedness",
+            description: "Corner radius used by smaller chrome (code blocks, ToolCall internals).",
+            type: "number_slider",
+            defaultValue: 6,
+            min: 0,
+            max: 16,
+            step: 1,
+            suffix: "px",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.roundedMedium",
+            name: "Medium Roundedness",
+            description:
+              "Corner radius used by inputs, form controls, and small cards (FieldCard, MultilineField, etc.).",
+            type: "number_slider",
+            defaultValue: 8,
+            min: 0,
+            max: 20,
+            step: 1,
+            suffix: "px",
+            descriptionTier: "ondemand",
+          },
+          {
+            id: "appearance.roundedLarge",
+            name: "Large Roundedness",
+            description:
+              "Corner radius used by message bubbles, modals, and prominent surfaces (SessionBar, system messages).",
+            type: "number_slider",
+            defaultValue: 16,
+            min: 0,
+            max: 32,
+            step: 1,
+            suffix: "px",
             descriptionTier: "ondemand",
           },
         ],

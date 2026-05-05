@@ -27,13 +27,13 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="absolute inset-0 bg-black/20 backdrop-blur flex items-center justify-center z-50 rounded-2xl"
+    class="absolute inset-0 bg-black/20 backdrop-blur flex items-center justify-center z-50 rounded-large"
     onclick={() => confirmState.cancel()}
   >
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="bg-default-300 rounded-2xl p-5 w-[calc(100%-2rem)] max-w-md flex flex-col gap-3"
+      class="bg-default-300 rounded-large p-5 w-[calc(100%-2rem)] max-w-md flex flex-col gap-3"
       onclick={(e) => e.stopPropagation()}
     >
       <div class="text-default-800 font-medium">{p.title}</div>
@@ -44,7 +44,7 @@
         <div class="flex flex-col gap-1 max-h-64 overflow-y-auto">
           {#each downloads as d (d.path)}
             <div
-              class="flex items-center gap-2 bg-default-200 rounded-lg px-3 py-2"
+              class="flex items-center gap-2 bg-default-200 rounded-medium px-3 py-2"
             >
               <i
                 class="flex i-material-symbols-cloud-download-outline-rounded text-default-500"
@@ -70,14 +70,14 @@
         {/if}
         {#if !p.alert}
           <button
-            class="px-3 py-1.5 text-sm rounded-lg bg-default-200 text-default-800 hover:cursor-pointer transition-colors"
+            class="px-3 py-1.5 text-sm rounded-medium bg-default-200 text-default-800 hover:cursor-pointer transition-colors"
             onclick={() => confirmState.cancel()}
           >
             Cancel
           </button>
         {/if}
         <button
-          class="px-3 py-1.5 text-sm rounded-lg {p.destructive
+          class="px-3 py-1.5 text-sm rounded-medium {p.destructive
             ? 'bg-accent-red-200 text-white'
             : 'bg-accent-blue-200 text-white'} hover:cursor-pointer transition-colors"
           onclick={() => confirmState.confirm()}
