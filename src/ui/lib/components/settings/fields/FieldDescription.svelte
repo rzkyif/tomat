@@ -15,7 +15,7 @@
   );
 </script>
 
-<div class="description-scroll flex flex-col gap-1">
+<div class="description-scroll flex flex-col gap-1 mb-2">
   {#each paragraphs as paragraph}
     <p class={paragraphClass}>
       {paragraph}

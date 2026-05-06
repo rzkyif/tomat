@@ -492,7 +492,7 @@
                     {@const isLast = gi === visibleGroups.length - 1}
                     {#if gi > 0}
                       <div
-                        class="h-0.5 mt-2 bg-default-800"
+                        class="h-0.5 mt-2 bg-default-400"
                         aria-hidden="true"
                       ></div>
                     {/if}

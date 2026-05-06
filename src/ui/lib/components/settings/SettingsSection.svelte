@@ -73,7 +73,7 @@
       </div>
     {/if}
     {#if !section.collapsible || isExpanded}
-      <div class="flex flex-col gap-2">
+      <div class="flex flex-col gap-1">
         {#each visibleFields as field}
           <SettingsField
             {field}

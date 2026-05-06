@@ -85,10 +85,10 @@
   data-field-id={field.id}
   class="flex flex-col gap-2 max-w-full overflow-clip px-3 pt-1 {horizontal
     ? 'pb-1'
-    : 'pb-2'} text-base rounded-large bg-default-200"
+    : 'pb-2'} text-base rounded-medium bg-default-200"
 >
   <div
-    class="flex {horizontal ? 'flex-row items-start gap-3' : 'flex-col gap-2'}"
+    class="flex {horizontal ? 'flex-row items-center gap-3' : 'flex-col gap-1'}"
   >
     <div class="flex flex-col flex-1 min-w-0 gap-1">
       {#if horizontal}
