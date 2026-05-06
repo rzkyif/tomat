@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SettingField } from "$lib/shared/settings";
+  import type { SettingField, SettingOption } from "$lib/shared/settings";
   import { evalCondition } from "$lib/shared/settings";
   import type { Monitor } from "$lib/shared/types";
   import { settingsState } from "../../../state";
@@ -8,6 +8,7 @@
   let {
     field,
     monitors,
+    fonts,
     error,
     horizontal = false,
     onChange,
@@ -15,11 +16,33 @@
   } = $props<{
     field: SettingField;
     monitors: Monitor[];
+    fonts: string[];
     error: string | null;
     horizontal?: boolean;
     onChange: (key: string, value: any) => void;
     onReset: (fieldId: string) => void;
   }>();
+
+  function resolveSelectOptions(): SettingOption[] {
+    if (field.type !== "select") return [];
+    if (field.optionsSource === "monitors") {
+      return [
+        { value: "primary", label: "Primary Monitor" },
+        ...monitors.map((m: Monitor) => ({
+          value: m.id.toString(),
+          label: m.name,
+        })),
+      ];
+    }
+    if (field.optionsSource === "fonts") {
+      return [
+        { value: "default", label: "Default" },
+        ...fonts.map((f: string) => ({ value: f, label: f })),
+      ];
+    }
+    return field.options ?? [];
+  }
+  const selectOptions = $derived(resolveSelectOptions());
 
   const editable = $derived(
     evalCondition(field.editableWhen, settingsState.currentSettings),
@@ -68,11 +91,7 @@
         class="w-full h-2em relative bg-default-300 peer-focus:outline-none rounded-medium peer peer-checked:after:translate-x-full peer-checked:after:border-white peer-checked:after:content-['on'] after:content-['off'] after:text-center after:text-xs after:content-center after:uppercase after:absolute after:top-0.25em after:left-0.25em after:bg-default-200 after:text-default-500 after:rounded-medium after:h-2.16em after:w-[calc(50%-0.25em)] after:transition-all peer-checked:bg-default-400"
       ></div>
     </label>
-  {:else if field.type === "select" || field.type === "monitor"}
-    {@const selectValue =
-      field.type === "monitor"
-        ? settingsState.getMonitor()
-        : settingsState.currentSettings[field.id]}
+  {:else if field.type === "select"}
     <div class="relative w-full">
       <select
         aria-label={field.name}
@@ -80,20 +99,13 @@
           ? 'opacity-60'
           : ''}"
         disabled={!editable}
-        value={selectValue}
+        value={settingsState.currentSettings[field.id]}
         onchange={(e) =>
           onChange(field.id, (e.target as HTMLSelectElement).value)}
       >
-        {#if field.type === "monitor"}
-          <option value="primary">Primary Monitor</option>
-          {#each monitors as monitor}
-            <option value={monitor.id.toString()}>{monitor.name}</option>
-          {/each}
-        {:else}
-          {#each field.options || [] as option}
-            <option value={option.value}>{option.label}</option>
-          {/each}
-        {/if}
+        {#each selectOptions as option}
+          <option value={option.value}>{option.label}</option>
+        {/each}
       </select>
       <i
         class="i-material-symbols-expand-more-rounded absolute right-1.5 top-1/2 -translate-y-1/2 text-default-600 pointer-events-none"

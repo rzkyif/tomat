@@ -237,6 +237,7 @@ pub fn run() {
             toggle_main_window,
             set_global_shortcut,
             list_capture_monitors,
+            list_system_fonts,
             capture_monitor,
             capture_monitor_region,
             set_region_capture_target,

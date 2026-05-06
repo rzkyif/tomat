@@ -9,12 +9,14 @@
 //! - [`window`]: main-window visibility, positioning, global / input shortcuts.
 //! - [`capture`]: monitor enumeration, full-monitor capture, region-capture overlay.
 //! - [`servers`]: sidecar status, model fetch, restart, arg replacement.
+//! - [`fonts`]: installed system font enumeration.
 //!
 //! Misc top-level commands that haven't grown enough to warrant their own
 //! module (system volume, file conversion, process metrics, toolkit folder
 //! ops, path resolution, downloads-dir lookup) live directly in this file.
 
 pub mod capture;
+pub mod fonts;
 pub mod paths;
 pub mod servers;
 pub mod session;
@@ -30,6 +32,7 @@ pub use capture::{
     hide_region_capture_overlay, list_capture_monitors, set_region_capture_target,
     show_region_capture_overlay,
 };
+pub use fonts::list_system_fonts;
 pub use servers::{ensure_models, get_server_statuses, restart_bun_sidecar, update_server_args};
 pub use session::{
     delete_chat_session, delete_session_attachments, list_chat_sessions, load_chat_session,

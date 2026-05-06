@@ -53,9 +53,9 @@
   <textarea
     bind:this={textareaEl}
     aria-label={field.name}
-    class="multiline-scroll text-default-800 rounded-medium w-full px-2 py-1.5 outline-none min-h-40 resize-y overflow-y-hidden focus:overflow-y-auto whitespace-pre-wrap break-words text-sm {!editable
-      ? 'opacity-60'
-      : ''} {hasError
+    class="multiline-scroll text-default-800 rounded-medium w-full px-2 py-1.5 outline-none min-h-40 resize-y overflow-y-hidden focus:overflow-y-auto whitespace-pre-wrap break-words text-sm {field.mono
+      ? 'font-mono'
+      : ''} {!editable ? 'opacity-60' : ''} {hasError
       ? 'bg-accent-red-300 border-accent-red-400'
       : 'bg-default-300 focus:ring-blue-500'}"
     disabled={!editable}

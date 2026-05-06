@@ -645,6 +645,6 @@
     margin-left: 0.25em;
     margin-right: 0.25em;
     font-size: 0.8em;
-    font-family: "SF Mono", Monaco, Consolas, "Liberation Mono", monospace;
+    font-family: var(--font-mono);
   }
 </style>

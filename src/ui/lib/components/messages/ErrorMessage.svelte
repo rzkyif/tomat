@@ -86,7 +86,7 @@
     code {
       overflow: clip;
       font-size: 0.9em;
-      font-family: "SF Mono", Monaco, Consolas, "Liberation Mono", monospace;
+      font-family: var(--font-mono);
       background: transparent;
       padding: 0;
       color: white;

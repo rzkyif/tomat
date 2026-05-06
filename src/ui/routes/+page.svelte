@@ -71,6 +71,29 @@
     document.documentElement.style.setProperty(cssVar, `${value}px`);
   }
 
+  // Fallback stacks appended after the user's chosen family so a missing
+  // glyph (or a typo'd / uninstalled face) gracefully degrades to the
+  // platform-native stack rather than the browser default.
+  const FONT_DEFAULT_FALLBACK =
+    `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif`;
+  const FONT_MONO_FALLBACK =
+    `ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`;
+
+  function applyFont(cssVar: "--font-default" | "--font-mono", value: unknown) {
+    const family = typeof value === "string" ? value : "";
+    if (!family || family === "default") {
+      document.documentElement.style.removeProperty(cssVar);
+      return;
+    }
+    const fallback =
+      cssVar === "--font-mono" ? FONT_MONO_FALLBACK : FONT_DEFAULT_FALLBACK;
+    const escaped = family.replace(/"/g, '\\"');
+    document.documentElement.style.setProperty(
+      cssVar,
+      `"${escaped}", ${fallback}`,
+    );
+  }
+
   function listenSystemTheme(callback: () => void): () => void {
     themeMql.addEventListener("change", callback);
     return () => themeMql.removeEventListener("change", callback);
@@ -249,6 +272,14 @@
       applyCssVarPx(
         "--rounded-large",
         settingsState.currentSettings["appearance.roundedLarge"] as number,
+      );
+      applyFont(
+        "--font-default",
+        settingsState.currentSettings["appearance.defaultFont"],
+      );
+      applyFont(
+        "--font-mono",
+        settingsState.currentSettings["appearance.monoFont"],
       );
 
       // Only show the "Loading latest session…" placeholder when we're
@@ -483,6 +514,14 @@
   $effect(() => {
     const v = settingsState.currentSettings["appearance.roundedLarge"];
     if (loaded) applyCssVarPx("--rounded-large", v as number);
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.defaultFont"];
+    if (loaded) applyFont("--font-default", v);
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.monoFont"];
+    if (loaded) applyFont("--font-mono", v);
   });
 
   async function scrollToBottom() {

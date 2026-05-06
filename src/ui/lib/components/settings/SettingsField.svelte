@@ -15,9 +15,10 @@
   import StorageField from "./fields/StorageField.svelte";
   import ToolkitsField from "./fields/ToolkitsField.svelte";
 
-  let { field, monitors, error, horizontal = false, onChange, onReset, onPresetSelect } = $props<{
+  let { field, monitors, fonts, error, horizontal = false, onChange, onReset, onPresetSelect } = $props<{
     field: SettingField;
     monitors: Monitor[];
+    fonts: string[];
     error: string | null;
     horizontal?: boolean;
     onChange: (key: string, value: any) => void;
@@ -50,6 +51,6 @@
   {:else if field.type === "number_slider"}
     <NumberSliderField {field} {error} {horizontal} {onChange} {onReset} />
   {:else}
-    <StandardField {field} {monitors} {error} {horizontal} {onChange} {onReset} />
+    <StandardField {field} {monitors} {fonts} {error} {horizontal} {onChange} {onReset} />
   {/if}
 {/if}

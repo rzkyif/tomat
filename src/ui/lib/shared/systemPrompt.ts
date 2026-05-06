@@ -88,21 +88,17 @@ export function buildSystemPromptBase(): string {
   return (s["prompts.defaultSystemPrompt"] || "").trim();
 }
 
-/** The context block alone (everything driven by general.context.*).
- *  Returns "" when no context fields resolve to anything.
- *
- *  Driven by `prompts.contextTemplate`: the user can edit the template freely
- *  using `{name}` placeholders and `[name:body]` conditional segments. See
- *  `renderContextTemplate` and `DEFAULT_CONTEXT_TEMPLATE` for the syntax.
- */
-export function buildContextBlock(): string {
+/** Collect the variable map used to render the context template.
+ *  Shared by `buildContextBlock` and the tools-hint extractor so both see the
+ *  same set of resolvable placeholders. */
+function collectContextVars(): Record<string, string> {
   const s = settingsState.currentSettings;
 
   const location = s["general.context.locationAuto"]
     ? deriveAutoLocation()
     : (s["general.context.location"] || "").trim();
 
-  const vars: Record<string, string> = {
+  return {
     agentName: (s["general.context.agentName"] || "").trim(),
     language: (s["general.context.language"] || "").trim(),
     userName: (s["general.context.userName"] || "").trim(),
@@ -110,9 +106,34 @@ export function buildContextBlock(): string {
     dateTime: s["general.context.dateTime"] ? formatDateTime() : "",
     os: s["general.context.os"] ? getOsName() : "",
   };
+}
 
+/** The context block alone (everything driven by general.context.*).
+ *  Returns "" when no context fields resolve to anything.
+ *
+ *  Driven by `prompts.contextTemplate`: the user can edit the template freely
+ *  using `{name}` placeholders and `[name:body]` conditional segments. See
+ *  `renderContextTemplate` and `DEFAULT_CONTEXT_TEMPLATE` for the syntax.
+ *  The `[toolsAvailable:...]` segment is intentionally NOT rendered here — it
+ *  is appended separately at turn time via `buildToolsHint` so the hint only
+ *  shows up on turns where tools actually survive the relevance filter.
+ */
+export function buildContextBlock(): string {
+  const s = settingsState.currentSettings;
   const template = (s["prompts.contextTemplate"] as string) || DEFAULT_CONTEXT_TEMPLATE;
-  return renderContextTemplate(template, vars);
+  return renderContextTemplate(template, collectContextVars());
+}
+
+/** Extract the `[toolsAvailable:body]` segment from the context template and
+ *  render its body using the current context vars. The conditional itself is
+ *  evaluated empty by `buildContextBlock` (because no `toolsAvailable` var is
+ *  passed there), keeping the hint out of the steady-state context. */
+function buildToolsHint(): string {
+  const s = settingsState.currentSettings;
+  const template = (s["prompts.contextTemplate"] as string) || DEFAULT_CONTEXT_TEMPLATE;
+  const match = template.match(/\[toolsAvailable:([\s\S]*?)\]/);
+  if (!match) return "";
+  return renderContextTemplate(match[1], collectContextVars());
 }
 
 /**
@@ -131,22 +152,21 @@ export function buildSystemPrompt(): string | null {
   return [base, context].filter((s) => s).join("\n\n");
 }
 
-/** Short line appended to the system prompt on turns where at least one
- *  toolkit tool survives the relevance filter. Keeps the default prompt
- *  untouched on tool-less turns. */
-const TOOLS_HINT =
-  "Tools are available for this turn. Prefer calling a tool over speculating when a tool's description clearly fits the request.";
-
 /** Compose the final system prompt for a specific turn. When `toolsHint` is
- *  true, appends a one-line nudge about tool use to whatever prompt/override
- *  we'd normally send. Returns null when there is nothing at all to send. */
+ *  true, appends the tool-use nudge to whatever prompt/override we'd normally
+ *  send. The nudge text comes from the `[toolsAvailable:...]` segment of the
+ *  context template so users can customize or remove it. Returns null when
+ *  there is nothing at all to send. */
 export function buildSystemPromptForTurn(opts: {
   base: string | null;
   toolsHint: boolean;
 }): string | null {
   const parts: string[] = [];
   if (opts.base) parts.push(opts.base);
-  if (opts.toolsHint) parts.push(TOOLS_HINT);
+  if (opts.toolsHint) {
+    const hint = buildToolsHint();
+    if (hint) parts.push(hint);
+  }
   if (parts.length === 0) return null;
   return parts.join("\n\n");
 }

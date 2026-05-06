@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { primaryMonitor, availableMonitors } from "@tauri-apps/api/window";
+  import { invoke } from "@tauri-apps/api/core";
+  import { isTauri } from "$lib/shared/env";
   import { SETTINGS_SCHEMA } from "$lib/shared/settings";
   import type { PresetOption } from "$lib/shared/settings";
   import type { Monitor } from "$lib/shared/types";
@@ -48,6 +50,7 @@
   }>();
 
   let monitors: Monitor[] = $state([]);
+  let fonts: string[] = $state([]);
   let expandedSections = $state<Set<string>>(new Set());
   let validationErrors = $state<Record<string, string>>({});
 
@@ -106,6 +109,13 @@
       monitors = mapped;
     } catch (e) {
       console.error("Failed to load monitors:", e);
+    }
+    if (isTauri()) {
+      try {
+        fonts = (await invoke("list_system_fonts")) as string[];
+      } catch (e) {
+        console.error("Failed to load fonts:", e);
+      }
     }
     validateAllFields();
     search.inputEl?.focus();
@@ -265,9 +275,10 @@
       validationErrors = rest;
     }
 
-    if (!field.regex) return;
+    const regex = "regex" in field ? field.regex : undefined;
+    if (!regex) return;
 
-    const error = getValidationError(field.regex, value);
+    const error = getValidationError(regex, value);
     if (error) {
       validationErrors = { ...validationErrors, [fieldId]: error };
     } else {
@@ -470,6 +481,7 @@
                         <SettingsField
                           {field}
                           {monitors}
+                          {fonts}
                           error={validationErrors[field.id] ?? null}
                           horizontal={layout.horizontal}
                           onChange={handleChange}
@@ -536,6 +548,7 @@
                                 `${group.id}-${si}`,
                               )}
                               {monitors}
+                              {fonts}
                               {validationErrors}
                               horizontal={layout.horizontal}
                               onToggle={toggleSection}

@@ -3,6 +3,15 @@ import extractorSvelte from "@unocss/extractor-svelte";
 
 export default defineConfig({
   presets: [presetWind4({ dark: "class" }), presetIcons(), presetTypography()],
+  // Route font-sans/font-mono through the runtime-overridable CSS variables
+  // declared in app.css and written by the appearance.{default,mono}Font
+  // settings (see +page.svelte).
+  theme: {
+    font: {
+      sans: "var(--font-default)",
+      mono: "var(--font-mono)",
+    },
+  },
   extractors: [extractorSvelte()],
   content: {
     pipeline: {

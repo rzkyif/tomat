@@ -12,9 +12,17 @@ body {
   overflow: hidden;
 }
 
-body {
-  font-family:
+/* Both font stacks default to the platform-native system stack and can be
+   overridden at runtime by the appearance.defaultFont / appearance.monoFont
+   settings, which set these variables on `documentElement`. */
+:root {
+  --font-default:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+body {
+  font-family: var(--font-default);
 }
 
 #app {

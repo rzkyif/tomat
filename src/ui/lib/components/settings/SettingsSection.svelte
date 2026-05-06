@@ -10,6 +10,7 @@
     sectionKey,
     isExpanded,
     monitors,
+    fonts,
     validationErrors,
     horizontal = false,
     onToggle,
@@ -21,6 +22,7 @@
     sectionKey: string;
     isExpanded: boolean;
     monitors: Monitor[];
+    fonts: string[];
     validationErrors: Record<string, string>;
     horizontal?: boolean;
     onToggle: (key: string) => void;
@@ -78,6 +80,7 @@
           <SettingsField
             {field}
             {monitors}
+            {fonts}
             error={validationErrors[field.id]}
             {horizontal}
             {onChange}

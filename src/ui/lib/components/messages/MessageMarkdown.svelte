@@ -350,7 +350,7 @@
       :global(code) {
         overflow: clip;
         font-size: 0.9em;
-        font-family: "SF Mono", Monaco, Consolas, "Liberation Mono", monospace;
+        font-family: var(--font-mono);
         background: transparent;
         padding: 0;
         color: white;
@@ -364,7 +364,7 @@
       margin-left: 0.25em;
       margin-right: 0.25em;
       font-size: 0.8em;
-      font-family: "SF Mono", Monaco, Consolas, "Liberation Mono", monospace;
+      font-family: var(--font-mono);
     }
     :global(kbd) {
       display: inline-block;
