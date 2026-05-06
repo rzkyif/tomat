@@ -59,7 +59,7 @@
     <input
       type="number"
       aria-label={field.name}
-      class="text-default-800 rounded-medium block w-16 shrink-0 min-h-8 px-2 outline-none {hasError
+      class="no-spinner text-default-800 rounded-medium block w-16 shrink-0 min-h-8 px-2 outline-none {hasError
         ? 'bg-accent-red-300 border-accent-red-400'
         : 'bg-default-300 focus:ring-blue-500'}"
       {min}
@@ -93,5 +93,14 @@
   }
   :global(.dark) input[type="range"]::-moz-range-track {
     background: var(--default-d-100);
+  }
+  .no-spinner::-webkit-inner-spin-button,
+  .no-spinner::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .no-spinner {
+    -moz-appearance: textfield;
+    appearance: textfield;
   }
 </style>

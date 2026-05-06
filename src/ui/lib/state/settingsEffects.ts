@@ -41,6 +41,18 @@ settingsState.onChange((key, prev, next) => {
     if (key === "stt.enabled" && prev !== false && !next) {
       void vadManager.forceDisable();
     }
+    // Auto-send and merge-into-existing are mutually exclusive: merging
+    // requires multiple transcriptions before sending, which auto-send
+    // would short-circuit. Whichever the user just enabled wins.
+    if (key === "stt.autoSend" && next === true) {
+      if (settingsState.currentSettings["stt.llmChainTranscription"]) {
+        void settingsState.updateSetting("stt.llmChainTranscription", false);
+      }
+    } else if (key === "stt.llmChainTranscription" && next === true) {
+      if (settingsState.currentSettings["stt.autoSend"]) {
+        void settingsState.updateSetting("stt.autoSend", false);
+      }
+    }
   } else if (key === "tts.enabled" && !!prev !== !!next) {
     // tts.svelte is intentionally lazy (see state/index.ts) - keep this
     // import dynamic so the tts bundle doesn't get pulled into the eager

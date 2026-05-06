@@ -32,10 +32,15 @@
 
   // Sticky-scroll-to-end: the substack pins itself to the latest bubble
   // by default, and only stops once the user explicitly scrolls away.
-  // Re-pins as soon as they scroll back to the end. Position-based detection
-  // (lastElementChild's leading edge inside the wrapper) so programmatic
-  // scrollIntoView calls land at the end and immediately clear `userScrolled`
-  // on the resulting scroll event.
+  // Re-pins as soon as they scroll back to the end.
+  //
+  // Why we hand-roll this instead of `lastElementChild.scrollIntoView`:
+  // scrollIntoView walks every scrollable ancestor, so during streaming
+  // (when this is fired from the ResizeObserver below) it would also pull
+  // the outer chat `<main>` back down whenever the user scrolled up,
+  // overriding their vertical scroll position. Adjusting `wrapper.scrollLeft`
+  // from rect math keeps the side-effect scoped to this row and works
+  // under flex-row-reverse where WebKit reports scrollLeft in [-max, 0].
   let userScrolled = $state(false);
 
   function isAtEnd(): boolean {
@@ -55,11 +60,13 @@
     if (!wrapper) return;
     if (userScrolled) return;
     if (!wrapper.lastElementChild) return;
-    wrapper.lastElementChild.scrollIntoView({
-      inline: "nearest",
-      block: "nearest",
-      behavior: "instant",
-    });
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const lastRect = wrapper.lastElementChild.getBoundingClientRect();
+    const delta =
+      alignment === "right"
+        ? lastRect.left - wrapperRect.left
+        : lastRect.right - wrapperRect.right;
+    if (delta !== 0) wrapper.scrollLeft += delta;
   }
 
   // Edge-fade widths driving the colored overlays at the scrollable edges.

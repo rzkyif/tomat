@@ -207,7 +207,7 @@
       font-weight: 600;
       margin-top: 0.75em;
       margin-bottom: 0.25em;
-      color: #59636e;
+      color: var(--default-500);
     }
 
     :global(p) {
@@ -225,7 +225,7 @@
       opacity: 0.7;
     }
     :global(mark) {
-      background-color: #fff8c5;
+      background-color: var(--accent-yellow-200);
       color: inherit;
     }
     :global(sub) {
@@ -297,8 +297,8 @@
       top: 0.15em;
       width: 1.1em;
       height: 1.1em;
-      background: white;
-      border: 2px solid black;
+      background: var(--default-50);
+      border: 2px solid var(--default-700);
       border-radius: 0.25em;
     }
     :global(input[type="checkbox"]:checked + *) {
@@ -379,14 +379,14 @@
         monospace;
       line-height: 10px;
       vertical-align: middle;
-      background-color: #f6f8fa;
-      border: solid 1px rgba(0, 0, 0, 0.2);
+      background-color: var(--default-100);
+      border: solid 1px var(--default-300);
       border-radius: 6px;
-      box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+      box-shadow: inset 0 -1px 0 var(--default-300);
     }
 
     :global(a) {
-      color: #171717;
+      color: inherit;
       text-decoration: underline;
       text-underline-offset: 0.2em;
     }
@@ -423,7 +423,8 @@
       overflow: clip;
       border-radius: 0.5em;
       margin-bottom: 1em;
-      background: white;
+      background: var(--default-50);
+      color: var(--default-800);
     }
     :global(.table-scroller) {
       max-height: 600px;
@@ -434,16 +435,16 @@
       height: 8px;
     }
     :global(.table-scroller::-webkit-scrollbar-track) {
-      background: white;
+      background: var(--default-50);
     }
     :global(.table-scroller::-webkit-scrollbar-thumb) {
-      background: rgba(0, 0, 0, 0.2);
+      background: var(--default-300);
     }
     :global(.table-scroller::-webkit-scrollbar-thumb:hover) {
-      background: rgba(0, 0, 0, 0.3);
+      background: var(--default-500);
     }
     :global(.table-scroller::-webkit-scrollbar-corner) {
-      background: white;
+      background: var(--default-50);
     }
     :global(table) {
       width: max-content;
@@ -454,7 +455,7 @@
       font-variant: tabular-nums;
     }
     :global(th) {
-      background-color: #eee;
+      background-color: var(--default-100);
       font-weight: 600;
       text-align: left;
       padding: 6px 13px;
@@ -463,7 +464,7 @@
     }
     :global(td) {
       padding: 6px 13px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+      border-bottom: 1px solid var(--default-200);
     }
     :global(tr:last-child td) {
       border-bottom: none;
@@ -471,55 +472,53 @@
 
     :global(hr) {
       border: none;
-      border-top: 2px solid black;
+      border-top: 2px solid var(--default-700);
       margin: 1.5em 0;
     }
   }
 
   :global(html.dark .markdown) {
     :global(h6) {
-      color: #9ca3af;
+      color: var(--default-d-500);
     }
     :global(mark) {
-      background-color: #854d0e;
-      color: #fef9c3;
+      background-color: var(--accent-yellow-d-200);
+      color: var(--accent-yellow-d-900);
     }
     :global(kbd) {
-      background-color: #2d2d2d;
-      border-color: rgba(255, 255, 255, 0.2);
-      color: #e5e7eb;
-      box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.1);
+      background-color: var(--default-d-100);
+      border-color: var(--default-d-300);
+      color: var(--default-d-800);
+      box-shadow: inset 0 -1px 0 var(--default-d-300);
     }
     :global(.table-wrapper) {
-      background: #1e1e1e;
+      background: var(--default-d-50);
+      color: var(--default-d-800);
     }
     :global(.table-scroller::-webkit-scrollbar-track) {
-      background: #1e1e1e;
+      background: var(--default-d-50);
     }
     :global(.table-scroller::-webkit-scrollbar-thumb) {
-      background: rgba(255, 255, 255, 0.2);
+      background: var(--default-d-300);
     }
     :global(.table-scroller::-webkit-scrollbar-thumb:hover) {
-      background: rgba(255, 255, 255, 0.3);
+      background: var(--default-d-500);
     }
     :global(.table-scroller::-webkit-scrollbar-corner) {
-      background: #1e1e1e;
+      background: var(--default-d-50);
     }
     :global(th) {
-      background-color: #2d2d2d;
+      background-color: var(--default-d-100);
     }
     :global(td) {
-      border-bottom-color: rgba(255, 255, 255, 0.1);
+      border-bottom-color: var(--default-d-200);
     }
     :global(hr) {
-      border-top-color: #6b7280;
-    }
-    :global(a) {
-      color: #f5f5f5;
+      border-top-color: var(--default-d-700);
     }
     :global(li:has(input[type="checkbox"]))::before {
-      background: #2d2d2d;
-      border-color: #9ca3af;
+      background: var(--default-d-50);
+      border-color: var(--default-d-700);
     }
   }
 </style>

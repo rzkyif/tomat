@@ -53,7 +53,7 @@
           onChange(field.id, (e.target as HTMLInputElement).checked)}
       />
       <div
-        class="w-full h-8 relative bg-default-300 peer-focus:outline-none rounded-medium peer peer-checked:after:translate-x-full peer-checked:after:border-white peer-checked:after:content-['on'] after:content-['off'] after:text-center after:text-xs after:content-center after:uppercase after:absolute after:top-0.44em after:left-0.35em after:bg-default-200 after:text-default-500 peer-checked:after:text-default-200 after:rounded-medium after:h-1.85em after:w-[calc(50%-0.35em)] after:transition-all peer-checked:bg-default-500"
+        class="w-full h-2em relative bg-default-300 peer-focus:outline-none rounded-medium peer peer-checked:after:translate-x-full peer-checked:after:border-white peer-checked:after:content-['on'] after:content-['off'] after:text-center after:text-xs after:content-center after:uppercase after:absolute after:top-0.2em after:left-0.15em after:bg-default-200 after:text-default-500 after:rounded-medium after:h-2.25em after:w-[calc(50%-0.15em)] after:transition-all"
       ></div>
     </label>
   {:else if field.type === "select" || field.type === "monitor"}

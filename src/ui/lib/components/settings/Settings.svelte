@@ -378,9 +378,7 @@
   const withScrollAnchor = (fn: () => void) => scroll.withAnchor(fn);
 
   const themeOverride = $derived(
-    settingsState.currentSettings[
-      "appearance.settingsDefaultColor"
-    ] as string,
+    settingsState.currentSettings["appearance.settingsDefaultColor"] as string,
   );
   const themeOverrideHex = $derived(
     hasAlpha(themeOverride) ? themeOverride : null,
@@ -388,76 +386,76 @@
 </script>
 
 <div style:display="contents" style:--default-base={themeOverrideHex}>
-<Bubble
-  selectedAlignment={settingsState.getAlignment()}
-  extraClass="flex flex-col gap-3 overflow-hidden transition-all w-full h-80vh relative"
->
-  <!-- Settings Header and Back Button -->
-  <div class="flex gap-2 items-center text-2xl relative">
-    <div
-      class="relative h-10 bg-default-200 rounded-large overflow-hidden w-full flex items-center px-4 pr-8"
-    >
-      <input
-        type="text"
-        placeholder="Search settings..."
-        class="bg-transparent outline-none text-base text-default-600 w-full"
-        bind:this={search.inputEl}
-        bind:value={search.query}
-        oninput={() => search.onInput()}
-        onfocus={() => {
-          if (search.query.trim() && !search.mode) {
-            void search.setMode(true);
-          }
-        }}
-      />
-      {#if search.query}
-        <button
-          class="flex absolute right-3 top-1/2 -translate-y-1/2 text-default-400 hover:text-default-600 text-lg cursor-pointer transition-colors"
-          onclick={() => search.clear()}
-          title="Clear search"
-        >
-          <i class="flex i-material-symbols-close-rounded"></i>
-        </button>
-      {:else}
-        <i
-          class="flex i-material-symbols-search-rounded absolute right-3 top-1/2 -translate-y-1/2 text-default-400 text-lg pointer-events-none"
-        ></i>
-      {/if}
-    </div>
-    <button
-      class="hover:text-default-700 text-default-400 transition-colors p-2 rounded-full bg-default-200 hover:cursor-pointer"
-      onclick={toggleSettings}
-      title="Back to Chat"
-    >
-      <i class="flex i-material-symbols-close-rounded"></i>
-    </button>
-  </div>
-
-  <div class="flex flex-1 overflow-hidden min-h-0 -mr-2 gap-3">
-    <!-- Sidebar -->
-    <SettingsSidebar
-      selectedGroupId={scroll.selectedGroupId}
-      onSelect={handleSidebarSelect}
-      llmStatus={serversState.serverStatuses.llm}
-      sttStatus={serversState.serverStatuses.stt}
-      bunStatus={serversState.serverStatuses.bun}
-      {withScrollAnchor}
-    />
-
-    <!-- Main Panel -->
-    <div class="relative flex-1 min-h-0 min-w-0">
+  <Bubble
+    selectedAlignment={settingsState.getAlignment()}
+    extraClass="flex flex-col gap-3 overflow-hidden transition-all w-full h-80vh relative"
+  >
+    <!-- Settings Header and Back Button -->
+    <div class="flex gap-2 items-center text-2xl relative">
       <div
-        class="settings-scroll overflow-y-auto pr-2 h-full"
-        bind:this={scroll.scrollEl}
-        bind:clientHeight={scroll.viewportHeight}
-        onscroll={() => scroll.onScroll(search.mode)}
+        class="relative h-10 bg-default-200 rounded-large overflow-hidden w-full flex items-center px-4 pr-8"
       >
-        <div bind:this={layout.containerEl} class="relative">
-          <div
-            bind:this={search.layerEl}
-            class:will-change-transform={animationsEnabled}
+        <input
+          type="text"
+          placeholder="Search settings..."
+          class="bg-transparent outline-none text-base text-default-600 w-full"
+          bind:this={search.inputEl}
+          bind:value={search.query}
+          oninput={() => search.onInput()}
+          onfocus={() => {
+            if (search.query.trim() && !search.mode) {
+              void search.setMode(true);
+            }
+          }}
+        />
+        {#if search.query}
+          <button
+            class="flex absolute right-3 top-1/2 -translate-y-1/2 text-default-400 hover:text-default-600 text-lg cursor-pointer transition-colors"
+            onclick={() => search.clear()}
+            title="Clear search"
           >
-            {#if search.mode && search.query.trim()}
+            <i class="flex i-material-symbols-close-rounded"></i>
+          </button>
+        {:else}
+          <i
+            class="flex i-material-symbols-search-rounded absolute right-3 top-1/2 -translate-y-1/2 text-default-400 text-lg pointer-events-none"
+          ></i>
+        {/if}
+      </div>
+      <button
+        class="hover:text-default-700 text-default-400 transition-colors p-2 rounded-full bg-default-200 hover:cursor-pointer"
+        onclick={toggleSettings}
+        title="Back to Chat"
+      >
+        <i class="flex i-material-symbols-close-rounded"></i>
+      </button>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden min-h-0 -mr-2 gap-3">
+      <!-- Sidebar -->
+      <SettingsSidebar
+        selectedGroupId={scroll.selectedGroupId}
+        onSelect={handleSidebarSelect}
+        llmStatus={serversState.serverStatuses.llm}
+        sttStatus={serversState.serverStatuses.stt}
+        bunStatus={serversState.serverStatuses.bun}
+        {withScrollAnchor}
+      />
+
+      <!-- Main Panel -->
+      <div class="relative flex-1 min-h-0 min-w-0">
+        <div
+          class="settings-scroll overflow-y-auto pr-2 h-full"
+          bind:this={scroll.scrollEl}
+          bind:clientHeight={scroll.viewportHeight}
+          onscroll={() => scroll.onScroll(search.mode)}
+        >
+          <div bind:this={layout.containerEl} class="relative">
+            <div
+              bind:this={search.layerEl}
+              class:will-change-transform={animationsEnabled}
+            >
+              {#if search.mode && search.query.trim()}
                 <div class="flex flex-col gap-4">
                   {#each searchFields(search.query, settingsState.currentSettings) as group (group.sectionKey)}
                     <div class="flex flex-col gap-2">
@@ -492,6 +490,12 @@
                 <div class="flex flex-col gap-4">
                   {#each visibleGroups as group, gi (group.id)}
                     {@const isLast = gi === visibleGroups.length - 1}
+                    {#if gi > 0}
+                      <div
+                        class="h-0.5 mt-2 bg-default-800"
+                        aria-hidden="true"
+                      ></div>
+                    {/if}
                     {@const firstRenderedSection = group.sections.find(
                       (s) =>
                         isSectionVisible(s, showAdvanced) &&
@@ -546,21 +550,21 @@
                   {/each}
                 </div>
               {/if}
+            </div>
           </div>
         </div>
+        <div
+          class="absolute left-0 right-0 bottom-0 h-6 pointer-events-none z-1 bg-gradient-to-t from-default-300 to-transparent transition-opacity duration-100 {scroll.showBottomFade
+            ? 'opacity-100'
+            : 'opacity-0'}"
+        ></div>
       </div>
-      <div
-        class="absolute left-0 right-0 bottom-0 h-6 pointer-events-none z-1 bg-gradient-to-t from-default-300 to-transparent transition-opacity duration-100 {scroll.showBottomFade
-          ? 'opacity-100'
-          : 'opacity-0'}"
-      ></div>
     </div>
-  </div>
 
-  <ConfirmModal />
-  <DownloadsModal />
-  <ColorPickerModal />
-</Bubble>
+    <ConfirmModal />
+    <DownloadsModal />
+    <ColorPickerModal />
+  </Bubble>
 </div>
 
 <style>

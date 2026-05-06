@@ -493,11 +493,21 @@
   }
 
   // Find the most recent user message (messages is newest-first).
-  // Used by UserMessage to decide whether it's the last sent message and
-  // should default to its inline-edit state.
+  // Used to default the editing target to the latest sent message.
   let lastUserMsg = $derived(
     messagesState.messages.find((m) => m.role === "user"),
   );
+  let lastUserMsgId = $derived(lastUserMsg?.id ?? null);
+
+  // Single shared "which user message is in edit mode" — only one bubble can
+  // edit at a time. Defaults to (and resets to) the latest user message
+  // whenever a new turn arrives or the latest is deleted; double-clicking a
+  // different user bubble switches the target without losing pending debounced
+  // edits (UserMessage flushes on its own when editing flips off).
+  let editingUserMsgId = $state<string | null>(null);
+  $effect(() => {
+    editingUserMsgId = lastUserMsgId;
+  });
 
   // Visible while the assistant turn is in flight but we haven't received
   // anything yet, neither reasoning nor content. Drives a transient
@@ -542,10 +552,10 @@
   // Filter out hidden messages (empty assistant placeholders mid-stream and
   // reasoning when the setting is off) before grouping so the chain logic
   // sees only what'll actually render. Then inject a synthetic small-bubble
-  // loading sentinel at the newest position when we're awaiting the first
-  // response chunk. That lets it stack with adjacent small bubbles
-  // (tool_filter, reasoning, system) via the existing grouping pipeline
-  // instead of being a standalone element outside it.
+  // loading sentinel at the newest position OF THE RUNNING TURN when we're
+  // awaiting the first response chunk. That lets it stack with adjacent
+  // small bubbles (tool_filter, reasoning, system) via the existing
+  // grouping pipeline instead of being a standalone element outside it.
   let displayedMessages = $derived.by<Message[]>(() => {
     const real = messagesState.messages.filter((msg) => {
       const isEmptyAssistant =
@@ -558,15 +568,29 @@
         !settingsState.currentSettings["prompts.showSystemPrompt"];
       return !isEmptyAssistant && !isHiddenReasoning && !isHiddenSystem;
     });
-    if (showStreamingLoadingBubble) {
-      const loadingMsg: Message = {
-        id: LOADING_MSG_ID,
-        role: "loading",
-        content: "",
-      };
-      return [loadingMsg, ...real];
+    if (!showStreamingLoadingBubble) return real;
+    const loadingMsg: Message = {
+      id: LOADING_MSG_ID,
+      role: "loading",
+      content: "",
+    };
+    // Mid-history regenerate: the streaming layer is inserting bubbles
+    // between the anchor user message and the next-newer user message, so
+    // the sentinel must land in that same slot - just newer than the
+    // next-newer user message (or at index 0 if none) - to appear at the
+    // top of the running turn instead of at the very top of the array.
+    const anchorId = streamingState.turnAnchorId;
+    if (anchorId === null) return [loadingMsg, ...real];
+    const anchorIdx = real.findIndex((m) => m.role === "user" && m.id === anchorId);
+    if (anchorIdx < 0) return [loadingMsg, ...real];
+    let insertIdx = 0;
+    for (let i = anchorIdx - 1; i >= 0; i--) {
+      if (real[i].role === "user") {
+        insertIdx = i + 1;
+        break;
+      }
     }
-    return real;
+    return [...real.slice(0, insertIdx), loadingMsg, ...real.slice(insertIdx)];
   });
 
   function msgKey(msg: Message, fallback: string): string {
@@ -704,10 +728,6 @@
                           reasoningDurationMs={msg.reasoningDurationMs}
                           isStreaming={streamingState.isActive &&
                             streamingState.reasoningId === msg.id}
-                          onDelete={msg.id
-                            ? () =>
-                                messagesState.deleteReasoningMessage(msg.id!)
-                            : undefined}
                           {neighborLeft}
                           {neighborRight}
                         />
@@ -752,9 +772,15 @@
                   {#if msg.role === "user"}
                     <UserMessage
                       content={msg.content}
-                      isLast={msg === lastUserMsg}
+                      editing={msg.id != null && msg.id === editingUserMsgId}
+                      onStartEdit={() =>
+                        (editingUserMsgId = msg.id ?? null)}
+                      onStopEdit={() => (editingUserMsgId = null)}
                       onEdit={(newContent) =>
                         messagesState.updateUserMessage(msg.id, newContent)}
+                      onReprocess={msg.id
+                        ? () => messagesState.reprocessUserMessage(msg.id!)
+                        : undefined}
                       onDelete={msg.id
                         ? () => messagesState.deleteUserMessage(msg.id!)
                         : undefined}

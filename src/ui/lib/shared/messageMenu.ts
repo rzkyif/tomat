@@ -12,7 +12,9 @@ type MenuItemSpec = MenuItemOptions | { item: "Separator" };
 
 export type UserMenuCtx = {
   editing: boolean;
+  isStreaming: boolean;
   onToggleEdit?: () => void;
+  onReprocess?: () => void;
   onDelete?: () => void;
 };
 
@@ -29,7 +31,6 @@ export type AgentMenuCtx = {
 
 export type ReasoningMenuCtx = {
   reasoning: string;
-  onDelete?: () => void;
 };
 
 async function popup(items: MenuItemSpec[]): Promise<void> {
@@ -45,6 +46,13 @@ export async function showUserMessageMenu(ctx: UserMenuCtx): Promise<void> {
     items.push({
       text: ctx.editing ? "Stop Editing" : "Edit Message",
       action: () => ctx.onToggleEdit?.(),
+    });
+  }
+
+  if (ctx.onReprocess && !ctx.isStreaming) {
+    items.push({
+      text: "Reprocess Response",
+      action: () => ctx.onReprocess?.(),
     });
   }
 
@@ -123,14 +131,6 @@ export async function showReasoningMessageMenu(ctx: ReasoningMenuCtx): Promise<v
       action: () => {
         void navigator.clipboard.writeText(ctx.reasoning);
       },
-    });
-  }
-
-  if (ctx.onDelete) {
-    if (items.length > 0) items.push({ item: "Separator" });
-    items.push({
-      text: "Delete Message",
-      action: () => ctx.onDelete?.(),
     });
   }
 

@@ -150,10 +150,10 @@
       class="flex-1 min-h-8 px-2 py-1 rounded-medium text-left flex flex-row items-center gap-1 flex-wrap outline-none {!editable
         ? 'opacity-60 pointer-events-none'
         : ''} {capturing
-        ? 'bg-blue-500/20 ring-2 ring-blue-500'
+        ? 'bg-default-300'
         : hasError
           ? 'bg-accent-red-300 border-accent-red-400'
-          : 'bg-default-300 hover:bg-default-400'}"
+          : 'bg-default-300 cursor-pointer'}"
       onclick={startCapture}
     >
       {#if capturing}

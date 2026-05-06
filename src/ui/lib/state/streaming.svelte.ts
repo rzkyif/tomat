@@ -23,11 +23,20 @@ type InterruptListener = () => void | Promise<void>;
 class StreamingState {
   isActive = $state(false);
   firstChunkReceived = $state(false);
-  /** Id of the assistant message currently receiving stream chunks. Normally
-   *  the newest message (freshly pushed by `start`), but for `beginReprocess`
-   *  it points at an existing message mid-array so the regenerated content
-   *  lands in place without disturbing newer turns. */
+  /** Id of the assistant message currently receiving stream chunks. Set by
+   *  `start` to the freshly created bubble's id; cleared between hops by
+   *  `quiesceStream`. */
   messageId = $state<string | null>(null);
+  /** Id of the user message that anchors the current turn. Bubbles created
+   *  while a turn is active (assistant placeholder, tool calls, tool_filter)
+   *  are inserted just newer than this anchor instead of unconditionally
+   *  unshifted to index 0, so editing or reprocessing a mid-history user
+   *  message regenerates its bubbles in place without disturbing newer turns.
+   *  null = "no anchor" (fresh tail-of-history submission, equivalent to
+   *  unshift). Set by `beginTurn` and cleared on turn end (finish, error,
+   *  cancel, abort, session reset). NOT cleared by `quiesceStream` so the
+   *  anchor survives across hop boundaries. */
+  turnAnchorId = $state<string | null>(null);
   /** Id of the `role: "reasoning"` message currently receiving reasoning
    *  chunks. Lazily created on the first reasoning delta and cleared when the
    *  first content chunk arrives (or the stream finishes / errors). Lives in
@@ -76,6 +85,14 @@ class StreamingState {
     return messagesState.messages.findIndex((m) => m.id === this.messageId);
   }
 
+  /** Set the user message that anchors the upcoming turn. `null` keeps the
+   *  classic tail-of-history behavior (new bubbles unshift to index 0); a
+   *  string id pins insertions to just-newer-than that user message so a
+   *  mid-history regenerate lands in place. Must be called before `start`. */
+  beginTurn(anchorUserId: string | null): void {
+    this.turnAnchorId = anchorUserId;
+  }
+
   start(modelUsed: "default" | "secondary" = "default") {
     this.isActive = true;
     this.firstChunkReceived = false;
@@ -85,61 +102,12 @@ class StreamingState {
     const assistantId = makeMessageId();
     this.messageId = assistantId;
     void import("./tts.svelte").then(({ ttsState }) => ttsState.startStream(assistantId));
-    messagesState.addMessage({
+    messagesState.insertAtTurnAnchor({
       id: assistantId,
       role: "assistant",
       content: "",
       modelUsed,
     });
-  }
-
-  /** Set up for reprocessing an existing assistant message in place. Unlike
-   *  `start`, does not push a new message - streaming will write back into
-   *  the existing slot so newer conversation turns stay untouched. */
-  beginReprocess(targetId: string): boolean {
-    const idx = messagesState.messages.findIndex((m) => m.id === targetId);
-    if (idx < 0) return false;
-    this.isActive = true;
-    this.firstChunkReceived = false;
-    this.reasoningStartTime = null;
-    this.reasoningId = null;
-    this.ttsCursor = 0;
-    this.messageId = targetId;
-    // Drop any prior reasoning bubble paired to this assistant turn. A new
-    // one will be lazily created if reasoning fires again on the regenerated
-    // run.
-    const reasoningIdx = messagesState.messages.findIndex(
-      (m) => m.role === "reasoning" && m.pairedAssistantId === targetId,
-    );
-    if (reasoningIdx >= 0) {
-      messagesState.messages.splice(reasoningIdx, 1);
-    }
-    // Clear existing content so the regenerated output replaces, not appends.
-    // Preserve role + id + modelUsed. (Re-find the index in case the prior
-    // reasoning splice shifted it.)
-    const refreshedIdx = messagesState.messages.findIndex((m) => m.id === targetId);
-    if (refreshedIdx < 0) return false;
-    const existing = messagesState.messages[refreshedIdx];
-    messagesState.messages[refreshedIdx] = {
-      ...existing,
-      role: "assistant",
-      content: "",
-    };
-    // Reset the paired tool_filter bubble so the spinner shows during the
-    // re-run instead of stale phase-1/phase-2 results.
-    const pairedUser = messagesState.messages
-      .slice(refreshedIdx + 1)
-      .find((m) => m.role === "user");
-    if (pairedUser?.id && settingsState.currentSettings["tools.enabled"]) {
-      messagesState.upsertToolFilterMessage(pairedUser.id, {
-        status: "filtering",
-        phase1: null,
-        phase2: null,
-        alwaysAvailable: null,
-      });
-    }
-    void import("./tts.svelte").then(({ ttsState }) => ttsState.startStream(targetId));
-    return true;
   }
 
   appendContent(content: string) {
@@ -308,6 +276,7 @@ class StreamingState {
   async finish() {
     const idx = this.getActiveIndex();
     this.quiesceStream();
+    this.turnAnchorId = null;
     const finalText = idx >= 0 ? (messagesState.messages[idx]?.content as string) || "" : "";
     void this.feedTTS(finalText, true);
     await persistenceState.flushSave();
@@ -338,6 +307,7 @@ class StreamingState {
   recordError(errorType: LLMErrorType, detail?: string) {
     const idx = this.getActiveIndex();
     this.quiesceStream();
+    this.turnAnchorId = null;
     const content = detail ? `${errorType}\n${detail}` : errorType;
     if (idx >= 0) {
       const existing = messagesState.messages[idx];
@@ -382,6 +352,7 @@ class StreamingState {
     this.isActive = false;
     this.firstChunkReceived = false;
     this.messageId = null;
+    this.turnAnchorId = null;
   }
 
   /** Abort the active stream without emitting an interrupt marker. Used when
@@ -397,6 +368,7 @@ class StreamingState {
     this.reasoningStartTime = null;
     this.messageId = null;
     this.reasoningId = null;
+    this.turnAnchorId = null;
     interruptCurrentStream();
   }
 
@@ -429,6 +401,7 @@ class StreamingState {
     this.firstChunkReceived = false;
     this.messageId = null;
     this.reasoningId = null;
+    this.turnAnchorId = null;
     this.streamBuffer = "";
     this.ttsCursor = 0;
     this.reasoningStartTime = null;

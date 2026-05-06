@@ -2,7 +2,7 @@
   import { onDestroy } from "svelte";
   import AttachmentList from "../AttachmentList.svelte";
   import Bubble from "../Bubble.svelte";
-  import { settingsState } from "../../state";
+  import { settingsState, streamingState } from "../../state";
   import {
     getTextContent,
     type MessageContent,
@@ -12,13 +12,19 @@
 
   let {
     content,
-    isLast = false,
+    editing = false,
+    onStartEdit,
+    onStopEdit,
     onEdit,
+    onReprocess,
     onDelete,
   } = $props<{
     content: MessageContent;
-    isLast?: boolean;
+    editing?: boolean;
+    onStartEdit?: () => void;
+    onStopEdit?: () => void;
     onEdit?: (newContent: MessageContent) => void;
+    onReprocess?: () => void;
     onDelete?: () => void;
   }>();
 
@@ -50,19 +56,23 @@
   // Local copy of attachments for editing (so removals are tracked)
   let editAttachments = $state<MessagePart[]>([]);
 
-  // Edit toggle: auto-enabled on the most recent user message, auto-reset when
-  // a new turn pushes this one out of the "last" slot. User can override via
-  // the edit button on any message.
-  let editing = $state(false);
-  $effect.pre(() => {
-    editing = isLast;
-  });
-
   // Sync editText and editAttachments with content when entering edit mode
   $effect(() => {
     if (editing) {
       editText = displayText;
       editAttachments = [...attachments];
+    }
+  });
+
+  // Editing is owned by the parent (only one user message edits at a time).
+  // When the parent flips us off (sibling double-click, new turn arrives, or
+  // explicit Stop), flush any debounced edit so typed changes aren't lost
+  // before the textarea unmounts.
+  $effect(() => {
+    if (!editing && editTimeout) {
+      clearTimeout(editTimeout);
+      editTimeout = null;
+      emitEdit();
     }
   });
 
@@ -117,13 +127,11 @@
   }
 
   function toggleEdit() {
-    // Flush pending debounce before toggling off so typed changes aren't lost.
-    if (editing && editTimeout) {
-      clearTimeout(editTimeout);
-      editTimeout = null;
-      emitEdit();
+    if (editing) {
+      onStopEdit?.();
+    } else {
+      onStartEdit?.();
     }
-    editing = !editing;
   }
 </script>
 
@@ -132,11 +140,16 @@
   bgClass="bubble-user"
   extraClass={"flex flex-col gap-4"}
   active={editing}
+  ondblclick={() => {
+    if (!editing && onEdit) onStartEdit?.();
+  }}
   oncontextmenu={(e) => {
     e.preventDefault();
     void showUserMessageMenu({
       editing,
+      isStreaming: streamingState.isActive,
       onToggleEdit: onEdit ? toggleEdit : undefined,
+      onReprocess,
       onDelete,
     });
   }}

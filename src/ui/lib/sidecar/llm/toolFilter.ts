@@ -131,13 +131,14 @@ function extractToolNames(raw: string, allowed: Set<string>): string[] | null {
   const scope = start >= 0 && end > start ? raw.slice(start, end + 1) : raw;
 
   // Strict JSON first. Caller passes through whatever array we return; if a
-  // string-only array round-trips cleanly we're done.
+  // string-only array round-trips cleanly we're done. An empty array is a
+  // valid "filter kept nothing" result and must not fall through to lenient
+  // parsing (which would return null and trip the error path).
   if (start >= 0 && end > start) {
     try {
       const parsed = JSON.parse(scope);
       if (Array.isArray(parsed)) {
-        const strs = parsed.filter((v): v is string => typeof v === "string");
-        if (strs.length > 0) return strs;
+        return parsed.filter((v): v is string => typeof v === "string");
       }
     } catch {
       // fall through to lenient parsing

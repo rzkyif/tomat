@@ -46,33 +46,50 @@ body {
   );
   --agent2-bubble-bg-dark: oklch(from var(--agent2-bubble-bg-light) calc(l - 0.24) c h / alpha);
   --agent2-bubble-border-dark: oklch(from var(--agent2-bubble-bg-light) calc(l - 0.15) c h / alpha);
+
+  /* Bubble text colors derived from the same bubble base. We override the
+     L to a dark/light extreme and force alpha=1 so a transparent bubble
+     still shows readable text. Chroma and hue carry through, so the text
+     gently tints toward the bubble's color family. */
+  --user-bubble-text-light: oklch(from var(--user-bubble-bg-light) 0.2 c h / 1);
+  --user-bubble-text-dark: oklch(from var(--user-bubble-bg-light) 0.95 c h / 1);
+  --agent-bubble-text-light: oklch(from var(--agent-bubble-bg-light) 0.2 c h / 1);
+  --agent-bubble-text-dark: oklch(from var(--agent-bubble-bg-light) 0.95 c h / 1);
+  --agent2-bubble-text-light: oklch(from var(--agent2-bubble-bg-light) 0.2 c h / 1);
+  --agent2-bubble-text-dark: oklch(from var(--agent2-bubble-bg-light) 0.95 c h / 1);
 }
 
 .bubble-user {
   background-color: var(--user-bubble-bg-light);
   border-color: var(--user-bubble-border-light);
+  color: var(--user-bubble-text-light);
 }
 .dark .bubble-user {
   background-color: var(--user-bubble-bg-dark);
   border-color: var(--user-bubble-border-dark);
+  color: var(--user-bubble-text-dark);
 }
 
 .bubble-agent {
   background-color: var(--agent-bubble-bg-light);
   border-color: var(--agent-bubble-border-light);
+  color: var(--agent-bubble-text-light);
 }
 .dark .bubble-agent {
   background-color: var(--agent-bubble-bg-dark);
   border-color: var(--agent-bubble-border-dark);
+  color: var(--agent-bubble-text-dark);
 }
 
 .bubble-agent-secondary {
   background-color: var(--agent2-bubble-bg-light);
   border-color: var(--agent2-bubble-border-light);
+  color: var(--agent2-bubble-text-light);
 }
 .dark .bubble-agent-secondary {
   background-color: var(--agent2-bubble-bg-dark);
   border-color: var(--agent2-bubble-border-dark);
+  color: var(--agent2-bubble-text-dark);
 }
 
 /* App-wide theme: the `*-default-*` and `*-accent-*-*` UnoCSS shortcuts

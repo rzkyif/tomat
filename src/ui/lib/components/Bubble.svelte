@@ -16,6 +16,7 @@
     progressFillBgClass = "bg-default-800",
     onclick,
     oncontextmenu,
+    ondblclick,
     children,
   } = $props<{
     selectedAlignment: Alignment;
@@ -49,6 +50,7 @@
     progressFillBgClass?: string;
     onclick?: (e: MouseEvent) => void;
     oncontextmenu?: (e: MouseEvent) => void;
+    ondblclick?: (e: MouseEvent) => void;
     children: Snippet;
   }>();
 
@@ -69,6 +71,7 @@
 <div
   {onclick}
   {oncontextmenu}
+  {ondblclick}
   role={onclick ? "presentation" : undefined}
   class="{bgClass} {minHClass} relative overflow-hidden rounded-large w-fit max-w-[calc(100vw-5rem)] break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
   class:mr-auto={selectedAlignment === "left"}

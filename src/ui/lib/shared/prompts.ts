@@ -111,11 +111,10 @@ export const DEFAULT_CONTEXT_TEMPLATE = `[agentName:Your name is {agentName}.]
 
 <user_metadata>
 Hidden instruction: only refer to these when they are related to the user's message.
-
-[userName:- Preferred name: {userName}]
-[location:- Location: {location}]
-[dateTime:- Date and time: {dateTime}]
-[os:- Operating system: {os}]
+[userName:- The user's preferred name is {userName}]
+[location:- The user's location is {location}]
+[dateTime:- The user's date and time is {dateTime}]
+[os:- The user's operating system is {os}]
 </user_metadata>`;
 
 export const DEFAULT_COMPLEXITY_DETECTION_PROMPT = `You are a router. Classify the user's request as either \`simple\` or \`complex\`.

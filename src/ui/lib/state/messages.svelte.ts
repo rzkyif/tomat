@@ -46,8 +46,7 @@ import {
   buildSystemPromptBase,
 } from "$lib/shared/systemPrompt";
 
-type SendMessagesHandler = () => Promise<void>;
-type ReprocessMessageHandler = (messageId: string) => Promise<void>;
+type SendMessagesHandler = (anchorUserId?: string) => Promise<void>;
 
 class MessagesState {
   messages = $state<Message[]>([]);
@@ -67,14 +66,16 @@ class MessagesState {
   );
 
   // The LLM dispatch needs to be invoked from this slice but lives in a
-  // module that imports messagesState itself, so registering callbacks here
-  // keeps the static import graph one-way (llm -> messages, never back).
+  // module that imports messagesState itself, so registering the callback
+  // here keeps the static import graph one-way (llm -> messages, never back).
+  // The handler accepts an optional `anchorUserId` so edit / reprocess can
+  // regenerate the turn for an arbitrary user message in the middle of
+  // history; called with no argument it sends the most recent user message
+  // as a fresh turn at the tail.
   private sendMessagesHandler: SendMessagesHandler | null = null;
-  private reprocessMessageHandler: ReprocessMessageHandler | null = null;
 
-  setLLMHandlers(send: SendMessagesHandler, reprocess: ReprocessMessageHandler): void {
+  setLLMHandlers(send: SendMessagesHandler): void {
     this.sendMessagesHandler = send;
-    this.reprocessMessageHandler = reprocess;
   }
 
   /** Drop the active session's transcript from memory. Called by
@@ -99,6 +100,68 @@ class MessagesState {
     if (!message.id) message.id = makeMessageId();
     this.messages.unshift(message);
     persistenceState.scheduleSave();
+  }
+
+  /** Insert a message at the newest position WITHIN the current turn.
+   *
+   *  No anchor (fresh tail-of-history submission): unshift to index 0,
+   *  matching the historic behavior.
+   *
+   *  Anchor set (mid-history regenerate): place the new bubble immediately
+   *  after the next-newer user message (lower index = newer), which keeps
+   *  it inside the anchor's turn and below every bubble belonging to a
+   *  newer turn. If no next-newer user exists, this still degenerates to
+   *  index 0 (unshift). The bubble lands at the top of the anchor's turn,
+   *  pushing any prior in-turn bubbles to higher (older) indices. */
+  insertAtTurnAnchor(message: Message): void {
+    if (!message.id) message.id = makeMessageId();
+    const anchorId = streamingState.turnAnchorId;
+    if (anchorId === null) {
+      this.messages.unshift(message);
+      persistenceState.scheduleSave();
+      return;
+    }
+    const anchorIdx = this.messages.findIndex((m) => m.id === anchorId);
+    if (anchorIdx < 0) {
+      this.messages.unshift(message);
+      persistenceState.scheduleSave();
+      return;
+    }
+    let nextNewerUserIdx = -1;
+    for (let i = anchorIdx - 1; i >= 0; i--) {
+      if (this.messages[i].role === "user") {
+        nextNewerUserIdx = i;
+        break;
+      }
+    }
+    this.messages.splice(nextNewerUserIdx + 1, 0, message);
+    persistenceState.scheduleSave();
+  }
+
+  /** Splice every non-user bubble between `anchorUserId` and the next-newer
+   *  user message. Returns the number of bubbles removed. Used by
+   *  `regenerateTurn` (edit / reprocess) and `deleteUserMessage` to clear a
+   *  whole multi-bubble turn atomically; both edges are preserved (the
+   *  anchor user and the next user message stay put). */
+  private spliceTurnAfter(anchorUserId: string): number {
+    const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === anchorUserId);
+    if (userIdx < 0) return 0;
+    // newest-first: walk from userIdx-1 down toward 0, stop at the first
+    // other user message (or the array head). Everything in between is part
+    // of this turn.
+    let stopIdx = -1;
+    for (let i = userIdx - 1; i >= 0; i--) {
+      if (this.messages[i].role === "user") {
+        stopIdx = i;
+        break;
+      }
+    }
+    const startIdx = stopIdx + 1;
+    const count = userIdx - startIdx;
+    if (count > 0) {
+      this.messages.splice(startIdx, count);
+    }
+    return count;
   }
 
   /**
@@ -189,9 +252,11 @@ class MessagesState {
   }
 
   /**
-   * Create or update the tool_filter bubble paired with a user message. The
-   * bubble is inserted at index 0 (newest-first order) so it visually sits
-   * between the user message and the assistant response.
+   * Create or update the tool_filter bubble paired with a user message.
+   * Inserted just newer than the paired user message (one slot below in the
+   * newest-first array) so it visually sits between the user message and the
+   * assistant response, even when the paired user message is mid-history
+   * (during an edit / reprocess regenerate).
    */
   upsertToolFilterMessage(userMessageId: string, state: RelevantToolsState): void {
     const id = this.toolFilterIdFor(userMessageId);
@@ -202,12 +267,18 @@ class MessagesState {
         relevantTools: state,
       };
     } else {
-      this.messages.unshift({
+      const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === userMessageId);
+      const bubble: Message = {
         id,
         role: "tool_filter",
         content: "",
         relevantTools: state,
-      });
+      };
+      if (userIdx < 0) {
+        this.messages.unshift(bubble);
+      } else {
+        this.messages.splice(userIdx, 0, bubble);
+      }
     }
     persistenceState.scheduleSave();
   }
@@ -272,7 +343,7 @@ class MessagesState {
    *  Returns the message id so callers can update the same slot later. */
   appendToolCall(tc: ToolCallState): string {
     const id = makeMessageId();
-    this.addMessage({
+    this.insertAtTurnAnchor({
       id,
       role: "tool",
       content: "",
@@ -367,7 +438,31 @@ class MessagesState {
     };
   }
 
-  /** Update any user message by id and regenerate the response. If no id is
+  /** Clear every non-user bubble between `anchorUserId` and the next-newer
+   *  user message, then re-stream the turn from that user message. Used as
+   *  the single regeneration entry point for both edit (user message
+   *  modified, then regenerate) and reprocess (no text change, just regen
+   *  the turn that the targeted agent bubble belongs to). Bubbles older
+   *  than the anchor and bubbles at or newer than the next user message
+   *  stay untouched. */
+  private async regenerateTurn(anchorUserId: string): Promise<void> {
+    this.spliceTurnAfter(anchorUserId);
+    // Re-seed the tool_filter bubble in "filtering" state so the spinner
+    // shows during regen instead of leaving a gap until the model emits
+    // its first chunk.
+    if (settingsState.currentSettings["tools.enabled"]) {
+      this.upsertToolFilterMessage(anchorUserId, {
+        status: "filtering",
+        phase1: null,
+        phase2: null,
+        alwaysAvailable: null,
+      });
+    }
+    await persistenceState.flushSave();
+    await this.sendMessagesHandler?.(anchorUserId);
+  }
+
+  /** Update any user message by id and regenerate the turn. If no id is
    *  provided, falls back to the most recent user message. */
   async updateUserMessage(messageId: string | undefined, content: MessageContent) {
     await streamingState.interruptStreaming();
@@ -383,6 +478,7 @@ class MessagesState {
     if (userIdx < 0) return;
 
     const prevContent = this.messages[userIdx].content;
+    const userMsgId = this.messages[userIdx].id;
 
     const isEmpty =
       typeof content === "string"
@@ -398,12 +494,10 @@ class MessagesState {
         console.warn("[messages] refusing to empty the only user message of this session");
         return;
       }
-    }
-
-    if (isEmpty) {
-      this.messages.splice(0, userIdx + 1);
+      if (userMsgId) {
+        await this.deleteUserMessage(userMsgId);
+      }
       persistenceState.cleanupRemovedAttachments(prevContent, content);
-      await persistenceState.flushSave();
       return;
     }
 
@@ -428,7 +522,7 @@ class MessagesState {
     })();
 
     const updatedMsg: Message = { role: "user", content: expandedContent };
-    if (this.messages[userIdx].id) updatedMsg.id = this.messages[userIdx].id;
+    if (userMsgId) updatedMsg.id = userMsgId;
     if (systemPromptOverride) updatedMsg.systemPromptOverride = systemPromptOverride;
     this.messages[userIdx] = updatedMsg;
 
@@ -441,29 +535,16 @@ class MessagesState {
 
     this.upsertSystemMessage(effectiveSystemPrompt);
 
-    await persistenceState.flushSave();
-
-    // Regenerate the paired response in place so turns newer than this user
-    // message survive the edit. In newest-first order the paired response sits
-    // one or more slots above the user message: a tool_filter bubble (when
-    // tools are enabled) and/or a reasoning bubble may sit between. Skip past
-    // those to land on the content slot that drives reprocessing. Fall back to
-    // a fresh send when no paired response exists (edit on a brand-new user
-    // message). Skipping tool_filter matters because otherwise we'd fall into
-    // sendMessages() with the stale assistant still in context, which llama.cpp
-    // rejects as an "assistant prefill" incompatible with enable_thinking.
-    let scan = userIdx - 1;
-    while (
-      scan >= 0 &&
-      (this.messages[scan].role === "reasoning" || this.messages[scan].role === "tool_filter")
-    )
-      scan -= 1;
-    const paired = scan >= 0 ? this.messages[scan] : null;
-    if (paired && (paired.role === "assistant" || paired.role === "error") && paired.id) {
-      await this.reprocessMessageHandler?.(paired.id);
-    } else {
+    if (!userMsgId) {
+      // Defensive: every user message gets an id at addUserMessage time, but
+      // older session files may have been hydrated without one. Without an
+      // anchor we can't safely splice the turn, so fall back to a tail send.
+      await persistenceState.flushSave();
       await this.sendMessagesHandler?.();
+      return;
     }
+
+    await this.regenerateTurn(userMsgId);
   }
 
   /** Back-compat wrapper: update the most recent user message. */
@@ -471,8 +552,9 @@ class MessagesState {
     await this.updateUserMessage(undefined, content);
   }
 
-  /** Delete a user message along with its paired assistant/error response. If
-   *  this empties the session of user messages, remove the session entirely. */
+  /** Delete a user message along with every bubble in its turn (everything
+   *  between this user message and the next-newer user message). If this
+   *  empties the session of user messages, remove the session entirely. */
   async deleteUserMessage(messageId: string) {
     await streamingState.interruptStreaming();
     streamingState.resetTTSPlayback();
@@ -480,30 +562,18 @@ class MessagesState {
     const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === messageId);
     if (userIdx < 0) return;
 
-    // Drop the paired tool_filter bubble first so its index doesn't drift
-    // under the assistant-pair splice below.
-    this.removeToolFilterMessage(messageId);
+    const prevContent = this.messages[userIdx].content;
+
+    // Splice the turn first (everything newer than the user message, up to
+    // the next user message). Then refind the user message's index (it may
+    // have shifted) and splice it too.
+    this.spliceTurnAfter(messageId);
     const refreshedUserIdx = this.messages.findIndex(
       (m) => m.role === "user" && m.id === messageId,
     );
-
-    // newest-first: the paired response (generated AFTER this user msg) sits
-    // one or two slots above. Walk backwards across reasoning bubbles and the
-    // assistant/error content bubble so the splice catches the whole turn.
-    let pairedIdx = refreshedUserIdx;
-    while (pairedIdx > 0) {
-      const above = this.messages[pairedIdx - 1];
-      if (above.role === "assistant" || above.role === "error" || above.role === "reasoning") {
-        pairedIdx -= 1;
-      } else {
-        break;
-      }
+    if (refreshedUserIdx >= 0) {
+      this.messages.splice(refreshedUserIdx, 1);
     }
-
-    const prevContent = this.messages[refreshedUserIdx].content;
-
-    const deleteCount = refreshedUserIdx - pairedIdx + 1;
-    this.messages.splice(pairedIdx, deleteCount);
 
     persistenceState.cleanupRemovedAttachments(prevContent, "");
 
@@ -516,9 +586,10 @@ class MessagesState {
     await persistenceState.flushSave();
   }
 
-  /** Regenerate a specific assistant message in place. Only messages
-   *  chronologically before the target are used as context; newer turns stay
-   *  untouched. */
+  /** Regenerate the entire turn that produced the given assistant/error
+   *  bubble. Walks older from the bubble until it hits the user message
+   *  that caused the turn, then delegates to `regenerateTurn`. Equivalent
+   *  to "edit that user message with no text change." */
   async reprocessAgentMessage(messageId: string) {
     if (streamingState.isActive) return;
     streamingState.resetTTSPlayback();
@@ -528,30 +599,41 @@ class MessagesState {
     );
     if (agentIdx < 0) return;
 
-    await this.reprocessMessageHandler?.(messageId);
-  }
-
-  /** Delete an assistant/error message. Safe to call on a currently-streaming
-   *  message - aborts generation silently first. If this empties the session
-   *  of user messages, remove the session entirely (symmetric with
-   *  deleteUserMessage). */
-  /** Delete a reasoning bubble. When the bubble is paired to an assistant
-   *  content message (the normal case), delegate to `deleteAgentMessage` so
-   *  the whole turn (reasoning + content) goes together; leaving reasoning
-   *  without its produced answer makes no sense. Standalone reasoning
-   *  (orphaned, shouldn't happen in practice) is removed in place. */
-  async deleteReasoningMessage(messageId: string) {
-    const idx = this.messages.findIndex((m) => m.role === "reasoning" && m.id === messageId);
-    if (idx < 0) return;
-    const paired = this.messages[idx].pairedAssistantId;
-    if (paired) {
-      await this.deleteAgentMessage(paired);
-      return;
+    // newest-first: walk older (higher index) until we find the user message
+    // that anchors this turn.
+    let userMsgId: string | null = null;
+    for (let i = agentIdx + 1; i < this.messages.length; i++) {
+      if (this.messages[i].role === "user") {
+        userMsgId = this.messages[i].id ?? null;
+        break;
+      }
     }
-    this.messages.splice(idx, 1);
-    await persistenceState.flushSave();
+    if (!userMsgId) return;
+
+    await this.regenerateTurn(userMsgId);
   }
 
+  /** Regenerate the turn anchored on a user message, with no text change.
+   *  Symmetric counterpart to `reprocessAgentMessage` for the user message
+   *  context menu: equivalent to editing the message and resending it
+   *  unchanged. */
+  async reprocessUserMessage(messageId: string) {
+    if (streamingState.isActive) return;
+    streamingState.resetTTSPlayback();
+
+    const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === messageId);
+    if (userIdx < 0) return;
+
+    await this.regenerateTurn(messageId);
+  }
+
+  /** Delete an assistant/error message together with the entire turn it
+   *  belongs to (every bubble between the user message that caused the turn
+   *  and the next-newer user message). The user message itself stays so the
+   *  conversation thread is preserved. Safe to call on a currently-streaming
+   *  bubble - aborts generation silently first. If we can't locate the
+   *  causing user message (orphaned bubble, shouldn't happen), falls back
+   *  to in-place delete of the bubble + any paired reasoning. */
   async deleteAgentMessage(messageId: string) {
     const idx = this.messages.findIndex(
       (m) => (m.role === "assistant" || m.role === "error") && m.id === messageId,
@@ -564,15 +646,27 @@ class MessagesState {
     }
     streamingState.resetTTSPlayback();
 
-    this.messages.splice(idx, 1);
-    // Drop any reasoning bubble paired to this assistant turn; they live
-    // and die together, since the reasoning trace has no meaning without
-    // its produced answer (or vice-versa).
-    const reasoningIdx = this.messages.findIndex(
-      (m) => m.role === "reasoning" && m.pairedAssistantId === messageId,
-    );
-    if (reasoningIdx >= 0) {
-      this.messages.splice(reasoningIdx, 1);
+    // Find the user message that caused this turn (walk older = higher idx).
+    let userMsgId: string | null = null;
+    for (let i = idx + 1; i < this.messages.length; i++) {
+      if (this.messages[i].role === "user") {
+        userMsgId = this.messages[i].id ?? null;
+        break;
+      }
+    }
+
+    if (userMsgId) {
+      this.spliceTurnAfter(userMsgId);
+    } else {
+      // Orphaned bubble: nothing to anchor a turn-splice on, so just remove
+      // the bubble and any paired reasoning in place.
+      this.messages.splice(idx, 1);
+      const reasoningIdx = this.messages.findIndex(
+        (m) => m.role === "reasoning" && m.pairedAssistantId === messageId,
+      );
+      if (reasoningIdx >= 0) {
+        this.messages.splice(reasoningIdx, 1);
+      }
     }
 
     const remainingUsers = this.messages.filter((m) => m.role === "user").length;

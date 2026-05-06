@@ -109,7 +109,6 @@
       e.preventDefault();
       void showReasoningMessageMenu({
         reasoning: displayText,
-        onDelete,
       });
     }}
   >

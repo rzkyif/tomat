@@ -6,7 +6,7 @@
  */
 
 import { messagesState } from "$lib/state";
-import { sendMessages, reprocessMessage } from "./stream";
+import { sendMessages } from "./stream";
 
 export { mapError, type LLMError } from "./errors";
 export {
@@ -20,10 +20,10 @@ export {
 } from "./client";
 export { generateSessionTitle } from "./title";
 export { autocorrectTranscription, mergeTranscription } from "./transcribe";
-export { sendMessages, reprocessMessage };
+export { sendMessages };
 
 // Wire the LLM dispatch into messagesState. Messages can't import this module
-// (stream.ts already imports messagesState), so we register the handlers from
+// (stream.ts already imports messagesState), so we register the handler from
 // here at module load. UserInput.svelte imports from "$lib/sidecar/llm" so
 // this index loads as part of the eager bundle.
-messagesState.setLLMHandlers(sendMessages, reprocessMessage);
+messagesState.setLLMHandlers(sendMessages);

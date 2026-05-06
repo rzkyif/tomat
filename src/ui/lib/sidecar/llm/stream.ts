@@ -1,8 +1,8 @@
 /**
- * Chat-completion streaming driver. `sendMessages` is the public entry for a
- * fresh user turn; `reprocessMessage` regenerates an existing assistant
- * message in place. Both feed into `runStream`, which drives a small
- * pipeline of stages:
+ * Chat-completion streaming driver. `sendMessages` is the public entry for
+ * both fresh user turns and mid-history regenerates (the optional
+ * `anchorUserId` arg discriminates). It feeds into `runStream`, which drives
+ * a small pipeline of stages:
  *
  *   buildStreamRequest → provider.createClient → consumeStream
  *   consumeStream = parseChunk → ToolCallAssembler + emitChunk
@@ -67,9 +67,11 @@ function clampInt(raw: unknown, fallback: number, min: number, max: number): num
 // Routing
 // ---------------------------------------------------------------------------
 
-/** When dual-model routing is enabled, ask the default model whether the last
- *  user message warrants the stronger external model. */
-async function routeSelection(): Promise<"default" | "secondary"> {
+/** When dual-model routing is enabled, ask the default model whether the
+ *  driving user message warrants the stronger external model. The driving
+ *  message is the most recent user message for fresh tail submissions, or
+ *  the anchor user message for mid-history regenerates. */
+async function routeSelection(anchorUserId?: string): Promise<"default" | "secondary"> {
   const settings = settingsState.currentSettings;
   if (!settings["dualModel.enabled"]) return "default";
 
@@ -82,16 +84,19 @@ async function routeSelection(): Promise<"default" | "secondary"> {
 
   // `messagesState.messages` is stored newest-first (see addMessage's
   // `unshift`), so `.find(...)` without reversing returns the MOST RECENT
-  // user message - which is what we want to classify. Reversing would match
-  // the first user message in the session, so follow-ups would be routed
-  // based on the very first question every time.
-  const lastUser = messagesState.messages.find((m) => m.role === "user");
-  if (!lastUser) return "default";
+  // user message - which is what we want to classify for fresh submissions.
+  // For mid-history regenerates, route off the anchor instead so the user
+  // sees consistent routing whether they're editing a turn in place or
+  // sending a fresh one.
+  const drivingUser = anchorUserId
+    ? messagesState.messages.find((m) => m.role === "user" && m.id === anchorUserId)
+    : messagesState.messages.find((m) => m.role === "user");
+  if (!drivingUser) return "default";
 
   const detectionPrompt = settings["prompts.complexityDetectionPrompt"];
 
   try {
-    const verdict = await singleShotLLM(detectionPrompt, lastUser.content);
+    const verdict = await singleShotLLM(detectionPrompt, drivingUser.content);
     const norm = verdict.trim().toLowerCase();
     // Lenient match: small local models rarely comply perfectly with
     // "reply with one word". Accept any mention of "complex" that isn't
@@ -537,15 +542,26 @@ function shouldGenerateTitleFor(contextMessages: Message[]): boolean {
   return !currentTitle || currentTitle === defaultTitle;
 }
 
-function buildContextMessages(): Message[] {
-  // Build chronological context from all non-system messages. Keeps user,
-  // assistant (including ones that emitted tool_calls), and completed
-  // `role: "tool"` rounds so the LLM has the full transcript on follow-up
-  // turns. System, error, reasoning, and tool_filter roles are filtered
-  // out here. System is re-prepended from settings, error/reasoning/
-  // tool_filter bubbles are UI-only and never part of the wire transcript.
-  const out: Message[] = messagesState.messages
-    .slice()
+/** Build the chronological wire context for a turn.
+ *
+ *  No anchor (fresh tail submission): every non-UI bubble in the array,
+ *  oldest-first.
+ *
+ *  Anchor set (mid-history regenerate): only bubbles older than OR equal
+ *  to the anchor (i.e. messages at indices >= anchorIdx in the newest-first
+ *  array). Bubbles newer than the anchor belong to turns that came after
+ *  it in time, and including them would condition the regenerated turn on
+ *  facts from its own future. */
+function buildContextMessages(anchorUserId?: string): Message[] {
+  const arr = messagesState.messages;
+  const sliceFrom = anchorUserId
+    ? Math.max(
+        0,
+        arr.findIndex((m) => m.role === "user" && m.id === anchorUserId),
+      )
+    : 0;
+  const out: Message[] = arr
+    .slice(sliceFrom)
     .reverse()
     .filter(
       (m) =>
@@ -556,7 +572,7 @@ function buildContextMessages(): Message[] {
     );
 
   // Exclude the last incomplete assistant placeholder (pushed by
-  // startStreaming). It's always the last element if present.
+  // streamingState.start). It's always the last element if present.
   if (out.length > 0 && out[out.length - 1].role === "assistant") {
     const tail = out[out.length - 1];
     // Streaming placeholder has empty content and no tool calls.
@@ -570,84 +586,31 @@ function buildContextMessages(): Message[] {
   return out;
 }
 
-export async function sendMessages(): Promise<void> {
+/** Drive a single turn end-to-end. With no `anchorUserId` argument this is a
+ *  fresh tail-of-history submission: the just-added user message at index 0
+ *  triggers a new assistant bubble that unshifts to the top. With an anchor,
+ *  the turn regenerates in place: bubbles stream into the slot just newer
+ *  than the anchor user message, and turns at or newer than the next-newer
+ *  user message stay untouched. The `regenerateTurn` orchestration on
+ *  messagesState splices the prior turn's bubbles before invoking this. */
+export async function sendMessages(anchorUserId?: string): Promise<void> {
   const controller = new AbortController();
   setInterruptController(controller);
 
-  const route = await routeSelection();
+  const route = await routeSelection(anchorUserId);
+  streamingState.beginTurn(anchorUserId ?? null);
   streamingState.start(route);
 
   try {
-    const contextMessages = buildContextMessages();
+    const contextMessages = buildContextMessages(anchorUserId);
     const firstUser = contextMessages.find((m) => m.role === "user");
-    const lastUserMsg = messagesState.messages.find((m) => m.role === "user");
-    const generateTitle = shouldGenerateTitleFor(contextMessages);
-
-    await runStream({
-      route,
-      contextMessages,
-      lastUserMsg,
-      firstUserContentForTitle: generateTitle && firstUser ? firstUser.content : null,
-      signal: controller.signal,
-    });
-    streamingState.finish();
-  } catch (err: unknown) {
-    if (controller.signal.aborted) {
-      return;
-    }
-    console.error(`[llm] Stream error:`, err);
-    const mapped = mapError(err);
-    streamingState.recordError(mapped.type, mapped.detail);
-  } finally {
-    setInterruptController(null);
-  }
-}
-
-/** Regenerate a single assistant message in place. Only uses messages
- *  chronologically before the target as context; newer turns stay untouched. */
-export async function reprocessMessage(messageId: string): Promise<void> {
-  const initialIdx = messagesState.messages.findIndex((m) => m.id === messageId);
-  if (initialIdx < 0) return;
-
-  const target = messagesState.messages[initialIdx];
-  // Preserve the route the user originally saw for this bubble; reprocess is a
-  // "regenerate the same answer" action, not a re-route decision.
-  const route: "default" | "secondary" = target.modelUsed === "secondary" ? "secondary" : "default";
-
-  if (!streamingState.beginReprocess(messageId)) return;
-
-  const controller = new AbortController();
-  setInterruptController(controller);
-
-  try {
-    // beginReprocess can mutate the messages array (e.g. splice a paired
-    // reasoning bubble, or unshift a fresh tool_filter bubble). Re-find the
-    // target by id afterwards so `slice` still excludes the empty assistant
-    // slot we just cleared; otherwise it'd land at the tail of the
-    // contextMessages and llama.cpp would reject it as an "assistant
-    // response prefill is incompatible with enable_thinking".
-    const targetIdx = messagesState.messages.findIndex((m) => m.id === messageId);
-    if (targetIdx < 0) return;
-
-    // Messages newest-first: everything at index > targetIdx is chronologically
-    // older (and thus valid context for the target). Include tool rounds so
-    // the regenerated response sees the same transcript the original did.
-    const contextMessages: Message[] = messagesState.messages
-      .slice(targetIdx + 1)
-      .reverse()
-      .filter(
-        (m) =>
-          m.role !== "system" &&
-          m.role !== "error" &&
-          m.role !== "reasoning" &&
-          m.role !== "tool_filter",
-      );
-
-    const lastUserMsg = messagesState.messages.slice(targetIdx + 1).find((m) => m.role === "user");
-    const firstUser = contextMessages.find((m) => m.role === "user");
-    // When the user edits the first turn's user message, the session title
-    // should regenerate alongside the response. updateUserMessage resets the
-    // title to the default in that case so this check fires.
+    // For mid-history regenerate the "last user" driving this turn is the
+    // anchor itself (any user newer than the anchor belongs to a later
+    // turn we're explicitly leaving untouched). For fresh submissions it's
+    // the most recent user message overall, which is the one just added.
+    const lastUserMsg = anchorUserId
+      ? messagesState.messages.find((m) => m.role === "user" && m.id === anchorUserId)
+      : messagesState.messages.find((m) => m.role === "user");
     const generateTitle = shouldGenerateTitleFor(contextMessages);
 
     await runStream({
