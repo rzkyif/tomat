@@ -3,11 +3,17 @@
   import { primaryMonitor, availableMonitors } from "@tauri-apps/api/window";
   import { invoke } from "@tauri-apps/api/core";
   import { isTauri } from "$lib/shared/env";
-  import { SETTINGS_SCHEMA } from "$lib/shared/settings";
-  import type { PresetOption } from "$lib/shared/settings";
+  import { SETTINGS_SCHEMA } from "@tomat/shared";
+  import type { PresetOption } from "@tomat/shared";
   import type { Monitor } from "$lib/shared/types";
-  import { startConfiguredServices } from "$lib/sidecar/manager";
   import { hasAlpha } from "$lib/shared/color";
+
+  // Sidecar (re)starts are server-side now: PATCH /api/v1/settings triggers
+  // core to spawn / restart its sidecars based on the new config. The UI
+  // doesn't need to call anything explicit anymore.
+  async function startConfiguredServices(): Promise<void> {
+    /* no-op: handled server-side */
+  }
   import Bubble from "../Bubble.svelte";
   import {
     settingsState,
@@ -24,7 +30,7 @@
     isGroupVisible,
     isSectionVisible,
     searchFields,
-  } from "$lib/shared/settings";
+  } from "@tomat/shared";
   import { useSettingsSearch } from "$lib/composables/useSettingsSearch.svelte";
   import { useScrollSpy } from "$lib/composables/useScrollSpy.svelte";
   import { useResponsiveLayout } from "$lib/composables/useResponsiveLayout.svelte";
@@ -41,9 +47,18 @@
     enqueueDownloads,
     inferGroupIdFromKey,
     planDownloads,
-    planToEnqueueSpec,
     type DownloadPlan,
   } from "$lib/shared/download";
+
+  // The legacy planToEnqueueSpec converted a probed plan into a Tauri-side
+  // EnqueueSpec. After the rework, models.download takes the same shape
+  // directly — pass-through helper for compat.
+  function planToEnqueueSpec(plan: DownloadPlan, groupId: string) {
+    return {
+      source: plan.source,
+      group: (groupId as "llm" | "stt" | "tts" | "embed"),
+    };
+  }
 
   let { toggleSettings } = $props<{
     toggleSettings: () => void;
@@ -52,6 +67,32 @@
   let monitors: Monitor[] = $state([]);
   let fonts: string[] = $state([]);
   let expandedSections = $state<Set<string>>(new Set());
+
+  // Multi-core "editing settings for" picker: lists every paired core; when
+  // changed, re-selects that core so cores().api() / core-side settings load
+  // from / save to the right place.
+  import { cores } from "$lib/core";
+  import type { PairedCoreEntry } from "$lib/core";
+  let pairedCores: PairedCoreEntry[] = $state([]);
+  let selectedCoreId: string = $state("");
+
+  async function loadPairedCores() {
+    try {
+      pairedCores = await cores().list();
+      selectedCoreId = cores().currentEntry()?.id ?? "";
+    } catch {
+      /* not paired yet */
+    }
+  }
+
+  async function onSelectedCoreChanged(): Promise<void> {
+    if (!selectedCoreId) return;
+    try {
+      await cores().select(selectedCoreId);
+    } catch (e) {
+      console.warn("[settings] select core failed:", e);
+    }
+  }
   let validationErrors = $state<Record<string, string>>({});
 
   const search = useSettingsSearch();
@@ -91,6 +132,7 @@
   $effect(() => layout.observe());
 
   onMount(async () => {
+    void loadPairedCores();
     try {
       const [pm, all] = await Promise.all([
         primaryMonitor(),
@@ -149,7 +191,7 @@
       onConfirm: async () => {
         downloadsState.startupModalShown = true;
         const items = plans.map((p) =>
-          planToEnqueueSpec(p, groups[p.path] ?? "general"),
+          planToEnqueueSpec(p, groups[p.source] ?? "general"),
         );
         await enqueueDownloads(items);
         // Bring up every locally-managed service. Sidecar `ensure()`
@@ -168,7 +210,8 @@
             field.type === "command_preview" ||
             field.type === "services" ||
             field.type === "storage" ||
-            field.type === "snippets"
+            field.type === "snippets" ||
+            field.type === "cores"
           )
             continue;
           const value = settingsState.currentSettings[field.id];
@@ -442,14 +485,32 @@
       </button>
     </div>
 
+    {#if pairedCores.length > 1}
+      <!-- Multi-core "editing settings for: <core>" picker. Switches the
+           core-side settings store so Settings groups marked destination:"core"
+           read/write against the selected core's /api/v1/settings. -->
+      <div class="flex items-center gap-2 px-1 py-1 text-sm">
+        <span class="text-default-600">Editing settings for:</span>
+        <select
+          class="bg-default-200 text-default-800 rounded-medium px-2 py-1 hover:cursor-pointer"
+          bind:value={selectedCoreId}
+          onchange={() => onSelectedCoreChanged()}
+        >
+          {#each pairedCores as c (c.id)}
+            <option value={c.id}>{c.name}</option>
+          {/each}
+        </select>
+      </div>
+    {/if}
+
     <div class="flex flex-1 overflow-hidden min-h-0 -mr-2 gap-3">
       <!-- Sidebar -->
       <SettingsSidebar
         selectedGroupId={scroll.selectedGroupId}
         onSelect={handleSidebarSelect}
-        llmStatus={serversState.serverStatuses.llm}
-        sttStatus={serversState.serverStatuses.stt}
-        bunStatus={serversState.serverStatuses.bun}
+        llmStatus={serversState.serverStatuses.llama}
+        sttStatus={serversState.serverStatuses.whisper}
+        ttsStatus={serversState.serverStatuses.tts}
         {withScrollAnchor}
       />
 
@@ -528,9 +589,27 @@
                     >
                       <div class="sticky top-0 z-20">
                         <h2
-                          class="flex items-center h-7 bg-default-300 text-sm text-default-800 font-medium uppercase tracking-wide"
+                          class="flex items-center gap-2 h-7 bg-default-300 text-sm text-default-800 font-medium uppercase tracking-wide"
                         >
-                          {group.name}
+                          <span>{group.name}</span>
+                          {#if pairedCores.length > 1}
+                            <!-- Destination chip is only meaningful when the
+                                 user has multiple cores paired (one Settings
+                                 screen, split storage). With a single core,
+                                 the old UX had no concept of destination —
+                                 hide it. -->
+                            <span
+                              class="text-[10px] font-medium tracking-normal normal-case px-1.5 py-0.5 rounded-medium {group.destination ===
+                              'core'
+                                ? 'bg-accent-blue-100 text-accent-blue-300'
+                                : 'bg-default-200 text-default-600'}"
+                              title={group.destination === "core"
+                                ? "Stored on the paired core (~/.tomat/core/settings.json)"
+                                : "Stored on this device (~/.tomat/client/settings.json)"}
+                            >
+                              {group.destination === "core" ? "Core" : "Client"}
+                            </span>
+                          {/if}
                         </h2>
                         <div
                           class="absolute left-0 right-0 top-full h-3 bg-gradient-to-b from-default-300 to-transparent pointer-events-none"

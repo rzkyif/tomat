@@ -1,17 +1,31 @@
 /**
- * Reactive store for user settings. Loads them from the right place on
- * startup (Rust backend on desktop, localStorage in the browser), saves
- * them back when the user changes anything, and emits an `onChange` event
- * per key so external orchestrators (`settingsEffects`) can drive sidecar
- * restarts, TTS toggles, etc. without dragging this module into a cycle
- * with the consumers.
+ * Reactive store for user settings. Routes reads/writes by group destination:
+ *
+ *   - "client" groups → ~/.tomat/client/settings.json via the platform's
+ *     clientSettings.read/write (Tauri file write on desktop, localStorage
+ *     in the browser stub).
+ *   - "core" groups → currently-selected paired core via
+ *     `cores().api().settings.{load,patch}`. Secret-typed fields go to
+ *     the secrets vault via `setSecret`/`deleteSecret`.
+ *
+ * Loaded settings are merged onto the schema defaults; saves are sparse
+ * (only non-default values are persisted). External code subscribes via
+ * `onChange` to react to specific keys (settingsEffects.ts).
  */
 
 import { browser, dev } from "$app/environment";
-import { isTauri } from "$lib/shared/env";
-import { getDefaultSettings, isValidSettingKey, SECRET_KEYS } from "$lib/shared/settings";
+import {
+  getDefaultSettings,
+  isClientGroup,
+  isCoreGroup,
+  isValidSettingKey,
+  SECRET_KEYS,
+  SETTINGS_SCHEMA,
+  type SettingGroupId,
+} from "@tomat/shared";
+import { platform } from "$lib/platform";
+import { cores } from "$lib/core";
 import type { Alignment } from "$lib/shared/types";
-import { invoke } from "@tauri-apps/api/core";
 
 function warnIfUnknownKey(key: string): void {
   if (dev && !isValidSettingKey(key)) {
@@ -21,7 +35,30 @@ function warnIfUnknownKey(key: string): void {
 
 type SettingChangeListener = (key: string, prev: unknown, next: unknown) => void | Promise<void>;
 
+// Per-key destination lookup: settings.ts loads the schema once and
+// pre-computes which destination each known key belongs to so the per-key
+// save path doesn't have to walk the schema every time.
+const KEY_DESTINATION = (() => {
+  const map = new Map<string, "client" | "core">();
+  for (const group of SETTINGS_SCHEMA) {
+    for (const section of group.sections) {
+      for (const field of section.fields) {
+        map.set(field.id, group.destination);
+      }
+    }
+  }
+  return map;
+})();
+
+const SECRET_KEY_SET = new Set<string>(SECRET_KEYS);
+
+function destinationFor(key: string): "client" | "core" {
+  return KEY_DESTINATION.get(key) ?? "client";
+}
+
 class SettingsState {
+  // deno-lint-ignore no-explicit-any -- consumers treat values as untyped
+  // and the schema-defaults loader builds a heterogeneous record.
   currentSettings = $state<Record<string, any>>(getDefaultSettings());
 
   private saveChain: Promise<void> = Promise.resolve();
@@ -44,100 +81,63 @@ class SettingsState {
     }
   }
 
-  async loadSettings() {
+  async loadSettings(): Promise<void> {
     if (!browser) return;
+    const defaults = getDefaultSettings();
+    // deno-lint-ignore no-explicit-any
+    let merged: Record<string, any> = { ...defaults };
     try {
-      if (isTauri()) {
-        const stored = (await invoke("load_settings", { secretKeys: SECRET_KEYS })) as Record<
-          string,
-          any
-        > | null;
-        if (stored) {
-          this.currentSettings = { ...getDefaultSettings(), ...stored };
-        } else {
-          this.currentSettings = getDefaultSettings();
-          await this.save();
-        }
-      } else {
-        const stored = localStorage.getItem("tomat-settings");
-        if (stored) {
-          try {
-            const parsed = JSON.parse(stored);
-            this.currentSettings = { ...getDefaultSettings(), ...parsed };
-          } catch (e) {
-            console.error("Failed to parse settings, resetting to defaults:", e);
-            this.currentSettings = getDefaultSettings();
-            await this.save();
-          }
-        }
+      const clientStored = await platform().clientSettings.read();
+      merged = { ...merged, ...clientStored };
+    } catch (e) {
+      console.warn("Failed to load client settings, using defaults:", e);
+    }
+    try {
+      if (cores().currentEntry()) {
+        const coreStored = await cores().api().settings.load();
+        merged = { ...merged, ...coreStored };
       }
     } catch (e) {
-      console.warn("Failed to load settings, using defaults:", e);
-      this.currentSettings = getDefaultSettings();
+      console.warn("Failed to load core settings, falling back:", e);
     }
+    this.currentSettings = merged;
 
-    // Push the persisted shortcut to Rust so it overrides the startup default.
-    // Boot must not abort if the shortcut is now taken by another app: log
-    // and let the user fix it from Settings.
-    if (isTauri()) {
-      this.applyToggleWindowShortcut(this.currentSettings["shortcuts.toggleWindow"]).catch((e) =>
-        console.warn("Failed to register persisted shortcut:", e),
-      );
-    }
+    // Push the persisted shortcut so Rust overrides the startup default.
+    // Boot must not abort if the shortcut is taken; log and let Settings fix.
+    this.applyToggleWindowShortcut(this.currentSettings["shortcuts.toggleWindow"]).catch((e) =>
+      console.warn("Failed to register persisted shortcut:", e),
+    );
   }
 
   private async applyToggleWindowShortcut(value: unknown): Promise<void> {
-    if (!isTauri()) return;
     const accelerator = typeof value === "string" && value.length > 0 ? value : null;
-    await invoke("set_global_shortcut", { accelerator });
+    await platform().shortcuts.setBinding(accelerator);
   }
 
-  async updateSetting(key: string, value: unknown) {
-    warnIfUnknownKey(key);
-    const prevValue = this.currentSettings[key];
-    this.currentSettings[key] = value;
-
-    if (key === "shortcuts.toggleWindow") {
-      try {
-        await this.applyToggleWindowShortcut(value);
-      } catch (e) {
-        this.currentSettings[key] = prevValue;
-        throw e;
-      }
-    } else if (
-      isTauri() &&
-      (key === "shortcuts.attachFile" ||
-        key === "shortcuts.captureScreen" ||
-        key === "shortcuts.captureRegion") &&
-      typeof value === "string" &&
-      value.trim().length > 0
-    ) {
-      // Probe-validate the new combo before persisting. The actual
-      // (re-)registration happens later when UserInput remounts; this just
-      // surfaces "already taken" errors at the moment the user picks the
-      // combo so the bad value doesn't get saved.
-      try {
-        await invoke("validate_shortcut", { accelerator: value });
-      } catch (e) {
-        this.currentSettings[key] = prevValue;
-        throw e;
-      }
-    }
-
-    await this.save();
-    this.notifyListeners(key, prevValue, value);
+  async updateSetting(key: string, value: unknown): Promise<void> {
+    return await this.updateSettings({ [key]: value });
   }
 
-  async updateSettings(updates: Record<string, unknown>) {
+  async updateSettings(updates: Record<string, unknown>): Promise<void> {
     const prevValues: Record<string, unknown> = {};
     const prevShortcut = this.currentSettings["shortcuts.toggleWindow"];
     let toggleShortcutChanged = false;
+    let nonToggleShortcutToValidate: { key: string; value: string } | undefined;
 
     for (const [key, value] of Object.entries(updates)) {
       warnIfUnknownKey(key);
       prevValues[key] = this.currentSettings[key];
       this.currentSettings[key] = value;
       if (key === "shortcuts.toggleWindow") toggleShortcutChanged = true;
+      if (
+        (key === "shortcuts.attachFile" ||
+          key === "shortcuts.captureScreen" ||
+          key === "shortcuts.captureRegion") &&
+        typeof value === "string" &&
+        value.trim().length > 0
+      ) {
+        nonToggleShortcutToValidate = { key, value };
+      }
     }
 
     if (toggleShortcutChanged) {
@@ -145,6 +145,18 @@ class SettingsState {
         await this.applyToggleWindowShortcut(this.currentSettings["shortcuts.toggleWindow"]);
       } catch (e) {
         this.currentSettings["shortcuts.toggleWindow"] = prevShortcut;
+        throw e;
+      }
+    }
+    if (nonToggleShortcutToValidate) {
+      // Probe-validate the combo before persisting. Re-registration happens
+      // when UserInput remounts; this just surfaces "already taken" so the
+      // bad value doesn't get saved.
+      try {
+        await platform().shortcuts.validate(nonToggleShortcutToValidate.value);
+      } catch (e) {
+        const k = nonToggleShortcutToValidate.key;
+        this.currentSettings[k] = prevValues[k];
         throw e;
       }
     }
@@ -156,47 +168,66 @@ class SettingsState {
     }
   }
 
-  async save() {
+  async save(): Promise<void> {
     if (!browser) return;
     const defaults = getDefaultSettings();
-    const current = $state.snapshot(this.currentSettings);
-    const nonDefault: Record<string, any> = {};
-    for (const [key, value] of Object.entries(current)) {
-      if (value !== defaults[key]) {
-        nonDefault[key] = value;
-      }
-    }
-    // Partition out secret-typed fields so they never reach the JSON file.
-    // Always include each secret key (empty value tells Rust to clear the
-    // keychain entry).
+    // deno-lint-ignore no-explicit-any
+    const current = $state.snapshot(this.currentSettings) as Record<string, any>;
+    // Split sparse non-default values by destination + secret-vault.
+    const clientDelta: Record<string, unknown> = {};
+    const coreDelta: Record<string, unknown> = {};
     const secrets: Record<string, string> = {};
-    for (const key of SECRET_KEYS) {
-      const v = nonDefault[key];
-      secrets[key] = typeof v === "string" ? v : "";
-      delete nonDefault[key];
+    for (const [key, value] of Object.entries(current)) {
+      const isSecret = SECRET_KEY_SET.has(key);
+      if (isSecret) {
+        // Always include — empty string means "clear the vault entry".
+        secrets[key] = typeof value === "string" ? value : "";
+        continue;
+      }
+      if (Object.is(value, defaults[key])) continue;
+      const dest = destinationFor(key);
+      if (dest === "core") coreDelta[key] = value;
+      else clientDelta[key] = value;
     }
-    const snapshot = JSON.stringify(nonDefault, null, 2);
+
     this.saveChain = this.saveChain.then(async () => {
       try {
-        if (isTauri()) {
-          await invoke("save_settings", { settings: JSON.parse(snapshot), secrets });
-        } else {
-          localStorage.setItem("tomat-settings", snapshot);
-        }
+        await platform().clientSettings.write(clientDelta);
       } catch (e) {
-        console.warn("Failed to save settings:", e);
+        console.warn("Failed to save client settings:", e);
+      }
+      if (cores().currentEntry()) {
+        const api = cores().api().settings;
+        try {
+          await api.patch(coreDelta);
+        } catch (e) {
+          console.warn("Failed to save core settings:", e);
+        }
+        // Push every secret (empty = delete) so the vault matches what
+        // the user typed in the password fields.
+        for (const [name, value] of Object.entries(secrets)) {
+          try {
+            if (value === "") await api.deleteSecret(name);
+            else await api.setSecret(name, value);
+          } catch (e) {
+            console.warn(`Failed to update secret "${name}":`, e);
+          }
+        }
       }
     });
     await this.saveChain;
   }
 
   getAlignment(): Alignment {
-    return this.currentSettings["layout.alignment"] || "center";
+    return (this.currentSettings["layout.alignment"] as Alignment) ?? "center";
   }
 
   getMonitor(): string {
     return this.currentSettings["layout.monitor"]?.toString() || "primary";
   }
 }
+
+// Re-exported for downstream consumers that want to introspect destinations.
+export { isClientGroup, isCoreGroup, type SettingGroupId };
 
 export const settingsState = new SettingsState();

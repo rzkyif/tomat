@@ -1,6 +1,6 @@
 <script lang="ts">
   import { settingsState } from "../../../state";
-  import type { SettingField, PresetOption } from "$lib/shared/settings";
+  import type { SettingField, PresetOption } from "@tomat/shared";
   import FieldCard from "./FieldCard.svelte";
   import FieldDescription from "./FieldDescription.svelte";
 

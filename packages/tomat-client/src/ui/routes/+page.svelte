@@ -33,11 +33,16 @@
     getDuration,
   } from "$lib/shared/animations";
   import MessageEnter from "$lib/components/MessageEnter.svelte";
-  import {
-    setupSidecarListeners,
-    startConfiguredServices,
-  } from "$lib/sidecar/manager";
   import { openUrl } from "@tauri-apps/plugin-opener";
+
+  // Sidecar lifecycle is server-side; the client only attaches WS-driven
+  // state subscribers so status frames reach the UI.
+  function setupSidecarListeners(): void {
+    /* no-op: handled by serversState.attach() in onMount */
+  }
+  async function startConfiguredServices(): Promise<void> {
+    /* no-op: handled server-side */
+  }
   import {
     startClickThrough,
     stopClickThrough,
@@ -208,12 +213,9 @@
     // first paint is not blocked on it.
     try {
       await settingsState.loadSettings();
-      // Seed bundled sample toolkits into ~/.tomat/toolkits/ on first run.
-      // Subsequent runs no-op because seed_sample_toolkits skips existing
-      // entries.
-      invoke("seed_sample_toolkits").catch((e) =>
-        console.warn("seed_sample_toolkits:", e),
-      );
+      // Toolkits are installed by the user (per the rework) — no first-run
+      // seed step. The state below subscribes to the core's toolkit + tool
+      // call WS frames.
       // Connect to the sidecar's WS channel for tool-call events in the
       // background; the toolkits state auto-reconnects if the sidecar
       // restarts.
@@ -352,25 +354,22 @@
     // everything is already on disk we kick sidecars off immediately
     // (their `ensure()` calls hit the file-exists fast path with no
     // network I/O).
-    setupSidecarListeners()
-      .catch((e) => console.warn("setupSidecarListeners:", e))
-      .finally(async () => {
-        try {
-          const { plans, groupBySource } = await detectPendingStartup(
-            settingsState.currentSettings,
-          );
-          if (plans.length > 0) {
-            downloadsState.pendingStartup = plans;
-            downloadsState.pendingStartupGroupBySource = groupBySource;
-            // Don't start sidecars or TTS yet - the Settings modal will
-            // do that in its onConfirm once the user approves the batch.
-            return;
-          }
-          startConfiguredServices();
-        } catch (e) {
-          console.warn("detectPendingStartup:", e);
+    setupSidecarListeners();
+    void (async () => {
+      try {
+        const { plans, groupBySource } = await detectPendingStartup(
+          settingsState.currentSettings,
+        );
+        if (plans.length > 0) {
+          downloadsState.pendingStartup = plans;
+          downloadsState.pendingStartupGroupBySource = groupBySource;
+          return;
         }
-      });
+        void startConfiguredServices();
+      } catch (e) {
+        console.warn("detectPendingStartup:", e);
+      }
+    })();
 
     void snippetsState.load();
 

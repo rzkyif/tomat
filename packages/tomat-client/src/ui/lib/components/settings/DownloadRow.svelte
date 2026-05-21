@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { DownloadItem } from "$lib/shared/types";
-  import { SETTINGS_SCHEMA } from "$lib/shared/settings";
+  import { SETTINGS_SCHEMA } from "@tomat/shared";
   import { downloadsState } from "../../state";
   import { formatBytes } from "$lib/shared/format";
 

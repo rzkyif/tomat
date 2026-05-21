@@ -2,7 +2,7 @@
   import { settingsState } from "../../../state";
   import { buildPreview, getCommandSettingIds } from "$lib/shared/command";
   import type { CommandType } from "$lib/shared/command";
-  import type { SettingField } from "$lib/shared/settings";
+  import type { SettingField } from "@tomat/shared";
   import FieldCard from "./FieldCard.svelte";
 
   let { field } = $props<{

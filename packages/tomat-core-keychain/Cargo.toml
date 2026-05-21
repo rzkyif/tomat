@@ -1,0 +1,23 @@
+[package]
+name = "tomat-core-keychain"
+version = "0.1.0"
+edition = "2021"
+description = "Native OS-keychain helper for tomat-core. Reads/writes/deletes secret entries via the platform keychain (macOS Keychain, Linux libsecret, Windows Credential Manager). Stdio protocol so the Deno core can shell out to it for sealing the master key without bringing in native FFI."
+publish = false
+
+[dependencies]
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+dbg_macro = "warn"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

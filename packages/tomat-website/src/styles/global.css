@@ -1,0 +1,112 @@
+/* tomat website — minimal in-construction landing.
+ *
+ * Colors mirror the desktop client's neutral default palette
+ * (`--default-base: #737373` from app.css), with the user-bubble green as
+ * the single accent so the brand stays recognizable.
+ */
+
+:root {
+  --bg: #fafafa;
+  --fg: #171717;
+  --muted: #525252;
+  --accent: #86efac;
+  --border: #e5e5e5;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0a0a0a;
+    --fg: #fafafa;
+    --muted: #a3a3a3;
+    --accent: #4ade80;
+    --border: #262626;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+main {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+  gap: 1.5rem;
+}
+
+.logo {
+  width: 96px;
+  height: 96px;
+  display: block;
+}
+
+.logo path {
+  fill: var(--fg);
+}
+
+.wordmark {
+  font-size: 2.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.tagline {
+  font-size: 1rem;
+  color: var(--muted);
+  margin: 0;
+  max-width: 28rem;
+}
+
+.dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--accent);
+  vertical-align: 1px;
+  margin-right: 0.5rem;
+}
+
+footer {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+footer a {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+}
+
+footer a:hover {
+  color: var(--fg);
+  border-bottom-color: var(--fg);
+}

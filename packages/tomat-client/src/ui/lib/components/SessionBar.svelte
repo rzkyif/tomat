@@ -1,8 +1,15 @@
 <script lang="ts">
   import Bubble from "./Bubble.svelte";
   import { messagesState, sessionsState, settingsState } from "../state";
-  import { getContextSize } from "$lib/sidecar/llm";
   import { hasAlpha } from "$lib/shared/color";
+
+  // getContextSize lived in $lib/sidecar/llm and read from the LLM HTTP
+  // /props endpoint. Context size is now reported by core; until the
+  // /api/v1/llm/status endpoint exists this falls back to a static default
+  // (8192 is the llama.cpp default for most models).
+  function getContextSize(): number {
+    return Number(settingsState.currentSettings["llm.contextSize"]) || 8192;
+  }
 
   const themeOverride = $derived(
     settingsState.currentSettings[
@@ -77,7 +84,7 @@
 
   // Context progress
   let contextMax = $derived(getContextSize());
-  let contextUsed = $derived(messagesState.tokenUsage?.totalTokens || 0);
+  let contextUsed = $derived(messagesState.tokenUsage?.total || 0);
   let contextRatio = $derived(contextMax > 0 ? contextUsed / contextMax : 0);
   let contextColor = $derived(
     contextRatio < 0.5

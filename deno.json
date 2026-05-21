@@ -1,0 +1,68 @@
+{
+  "workspace": [
+    "./packages/tomat-shared",
+    "./packages/tomat-core",
+    "./packages/tomat-core-updater",
+    "./packages/tomat-client",
+    "./packages/tomat-website",
+    "./packages/tomat-builtin-toolkit"
+  ],
+  "nodeModulesDir": "auto",
+  "unstable": ["raw-imports"],
+  "tasks": {
+    "dev": "deno run -A scripts/dev.ts",
+    "build:core": "deno run -A scripts/build-core.ts",
+    "build:client": "deno run -A scripts/build-client.ts",
+    "check": "deno task check:js && deno task check:rs",
+    "check:js": "deno run -A scripts/check.ts",
+    "check:rs": "cargo check --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets && cargo check --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets",
+    "fmt": "deno task fmt:js && deno task fmt:rs",
+    "fmt:js": "deno fmt && deno run -A npm:oxfmt@0.51.0 packages/tomat-client/src/ui packages/tomat-client/vite.config.ts packages/tomat-client/svelte.config.js packages/tomat-client/uno.config.ts packages/tomat-website/src packages/tomat-website/astro.config.mjs",
+    "fmt:rs": "cargo fmt --manifest-path packages/tomat-client/src/tauri/Cargo.toml && cargo fmt --manifest-path packages/tomat-core-keychain/Cargo.toml",
+    "lint": "deno task lint:js && deno task lint:rs",
+    "lint:js": "deno lint && deno lint --config scripts/lint-plugins/client-deno.json packages/tomat-client/src/ui && deno run -A npm:oxlint@1.66.0 -c .oxlintrc.json packages/tomat-client/src/ui packages/tomat-client/vite.config.ts packages/tomat-client/svelte.config.js packages/tomat-client/uno.config.ts packages/tomat-website/src packages/tomat-website/astro.config.mjs",
+    "lint:rs": "cargo clippy --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings",
+    "website:dev": "deno run -A scripts/website/dev.ts",
+    "website:build": "deno run -A scripts/website/deploy.ts --dry-run",
+    "website:deploy": "deno run -A scripts/website/deploy.ts"
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    },
+    "exclude": [
+      "packages/tomat-client/src/ui",
+      "packages/tomat-client/src/tauri",
+      "packages/tomat-client/static",
+      "packages/tomat-client/vite.config.ts",
+      "packages/tomat-client/svelte.config.js",
+      "packages/tomat-client/uno.config.ts",
+      "packages/tomat-website/src",
+      "packages/tomat-website/public",
+      "packages/tomat-website/astro.config.mjs"
+    ]
+  },
+  "fmt": {
+    "exclude": [
+      "packages/tomat-client/src/ui",
+      "packages/tomat-client/src/tauri",
+      "packages/tomat-client/static",
+      "packages/tomat-client/vite.config.ts",
+      "packages/tomat-client/svelte.config.js",
+      "packages/tomat-client/uno.config.ts",
+      "packages/tomat-website/src",
+      "packages/tomat-website/public",
+      "packages/tomat-website/astro.config.mjs"
+    ]
+  },
+  "exclude": [
+    "**/node_modules",
+    "**/target",
+    "**/build",
+    "**/dist",
+    "**/.svelte-kit",
+    "**/.astro",
+    "**/.wrangler",
+    "**/.deno-cache"
+  ]
+}

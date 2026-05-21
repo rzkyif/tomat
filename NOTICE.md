@@ -1,6 +1,8 @@
 # Notice
 
-Tomat is licensed under [AGPL-3.0-only](LICENSE). It incorporates and/or distributes at runtime the following third-party components. Each is licensed separately; please consult the upstream project for its full license text.
+Tomat is licensed under [AGPL-3.0-only](LICENSE). It incorporates and/or
+distributes at runtime the following third-party components. Each is licensed
+separately; please consult the upstream project for its full license text.
 
 ## Downloaded at runtime (GitHub releases)
 
@@ -20,10 +22,14 @@ Tomat is licensed under [AGPL-3.0-only](LICENSE). It incorporates and/or distrib
 
 ## Rust dependencies
 
-See `cargo about generate` output (to be added in CI) for a machine-readable license report of every Rust dependency.
+See `cargo about generate` output (to be added in CI) for a machine-readable
+license report of every Rust dependency.
 
 ## TypeScript dependencies
 
-See `bun pm ls` / npm license tooling for a machine-readable license report of every JavaScript dependency.
+See `bun pm ls` / npm license tooling for a machine-readable license report of
+every JavaScript dependency.
 
-When distributing built artifacts, ensure the upstream license texts (MIT / Apache-2.0 / etc.) are included alongside the binary, either in-bundle or in the release assets.
+When distributing built artifacts, ensure the upstream license texts (MIT /
+Apache-2.0 / etc.) are included alongside the binary, either in-bundle or in the
+release assets.

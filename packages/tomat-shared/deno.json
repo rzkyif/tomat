@@ -1,0 +1,20 @@
+{
+  "name": "@tomat/shared",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./api/http": "./src/api/http.ts",
+    "./api/ws": "./src/api/ws.ts",
+    "./api/errors": "./src/api/errors.ts",
+    "./domain/session": "./src/domain/session.ts",
+    "./domain/toolkit": "./src/domain/toolkit.ts",
+    "./domain/model": "./src/domain/model.ts",
+    "./domain/settings": "./src/domain/settings.ts",
+    "./validation/toolsJson": "./src/validation/toolsJson.ts",
+    "./validation/pairing": "./src/validation/pairing.ts",
+    "./validation/chat": "./src/validation/chat.ts"
+  },
+  "imports": {
+    "zod": "npm:zod@^3.23.0"
+  }
+}

@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "au.tomat.ing",
   "build": {
-    "beforeDevCommand": "bun run dev:vite",
+    "beforeDevCommand": "deno task dev:vite",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build:vite",
+    "beforeBuildCommand": "deno task build:vite",
     "frontendDist": "../../build"
   },
   "app": {
@@ -40,29 +40,18 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' http://127.0.0.1:* http://localhost:*; worker-src 'self' blob:; font-src 'self' data:"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' http://127.0.0.1:* http://localhost:* https:; worker-src 'self' blob:; font-src 'self' data:"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": [
-      "binaries/tomat-tools-server",
-      "binaries/tomat-llama-server",
-      "binaries/tomat-whisper-server"
-    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "resources": {
-      "resources/server.js": "resources/server.js",
-      "resources/runtime.js": "resources/runtime.js",
-      "resources/node_modules": "resources/node_modules",
-      "../toolkits": "toolkits"
-    }
+    ]
   }
 }

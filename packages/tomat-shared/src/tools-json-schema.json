@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://au.tomat.ing/schemas/tools-v1.json",
+  "title": "tools.json",
+  "description": "Open standard for declaring AI tools that an LLM host can execute on behalf of a user. Place at the root of a folder (or as the root of an npm package).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "description", "tools"],
+  "properties": {
+    "$schema": { "type": "string", "format": "uri" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "license": { "type": "string" },
+    "homepage": { "type": "string", "format": "uri" },
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/tool" }
+    }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description", "parameters", "function"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+          "description": "Machine name; must match ^[a-zA-Z0-9_-]{1,64}$ and be unique within the toolkit."
+        },
+        "description": { "type": "string", "minLength": 1 },
+        "parameters": {
+          "type": "object",
+          "description": "JSON Schema (draft 2020-12) for the LLM-supplied arguments."
+        },
+        "triggers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Example user prompts; used by the host for RAG-style relevance filtering."
+        },
+        "function": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the exported async function on the entry module that runs this tool."
+        },
+        "alwaysAvailable": { "type": "boolean", "default": false },
+        "permissions": {
+          "type": "object",
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "net": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/netPermission" },
+              "default": []
+            },
+            "read": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/pathPermission" },
+              "default": []
+            },
+            "write": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/pathPermission" },
+              "default": []
+            },
+            "run": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/runPermission" },
+              "default": []
+            },
+            "env": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/envPermission" },
+              "default": []
+            },
+            "ffi": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/ffiPermission" },
+              "default": []
+            },
+            "sys": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/sysPermission" },
+              "default": []
+            }
+          }
+        }
+      }
+    },
+    "permissionReason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "description": "Human-readable rationale shown to the user when they're asked to grant this permission."
+    },
+    "netPermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "ports", "reason"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Hostname or '*' for any host."
+        },
+        "ports": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              { "type": "integer", "minimum": 1, "maximum": 65535 },
+              { "const": "*" }
+            ]
+          }
+        },
+        "reason": { "$ref": "#/$defs/permissionReason" },
+        "optional": { "type": "boolean", "default": false }
+      }
+    },
+    "pathPermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "reason"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Absolute path or template using $home, $downloads, $models, $sessions, $toolkit, $env.VAR."
+        },
+        "reason": { "$ref": "#/$defs/permissionReason" },
+        "optional": { "type": "boolean", "default": false }
+      }
+    },
+    "runPermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binary", "reason"],
+      "properties": {
+        "binary": { "type": "string", "minLength": 1 },
+        "reason": { "$ref": "#/$defs/permissionReason" },
+        "optional": { "type": "boolean", "default": false }
+      }
+    },
+    "envPermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "reason"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
+        "reason": { "$ref": "#/$defs/permissionReason" },
+        "optional": { "type": "boolean", "default": false }
+      }
+    },
+    "ffiPermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "properties": {
+        "reason": { "$ref": "#/$defs/permissionReason" },
+        "optional": { "type": "boolean", "default": false }
+      }
+    },
+    "sysPermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flag", "reason"],
+      "properties": {
+        "flag": { "type": "string", "minLength": 1 },
+        "reason": { "$ref": "#/$defs/permissionReason" },
+        "optional": { "type": "boolean", "default": false }
+      }
+    }
+  }
+}

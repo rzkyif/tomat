@@ -1,3 +1,8 @@
+// deno-lint-ignore-file tomat/no-tauri-import -- TODO: add a
+//   `platform.menu.createContextMenu(items)` abstraction so this file can
+//   stop importing @tauri-apps directly. The native-menu shape isn't a
+//   one-liner to abstract, so this is the only call site that bypasses the
+//   Platform boundary today.
 /**
  * Builds the native right-click menu shown on chat message bubbles.
  * Different items appear depending on whether the message is from the

@@ -6,8 +6,7 @@
  * callback.
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { platform } from "$lib/platform";
 import { playBeep } from "$lib/shared/beep";
 import { isTauri } from "$lib/shared/env";
 import { settingsState } from "./settings.svelte";
@@ -35,23 +34,20 @@ class VadManager {
   async attach(onSpeech: (audio: Float32Array) => Promise<void>): Promise<void> {
     this.onSpeech = onSpeech;
     if (this.unlistenVisibility) return;
-    this.unlistenVisibility = await listen<boolean>(
-      "window-visibility",
-      async ({ payload: visible }) => {
-        if (!visible && this.enabled && this.instance) {
-          if (settingsState.currentSettings["stt.activation"] === "sticky") {
-            this.instance.pause();
-            this.listening = false;
-            this.pausedByHide = true;
-          } else {
-            await this.disableNow();
-          }
-        } else if (visible && this.pausedByHide && this.instance) {
-          this.instance.start();
-          this.pausedByHide = false;
+    this.unlistenVisibility = await platform().windowing.subscribeVisibility(async (visible) => {
+      if (!visible && this.enabled && this.instance) {
+        if (settingsState.currentSettings["stt.activation"] === "sticky") {
+          this.instance.pause();
+          this.listening = false;
+          this.pausedByHide = true;
+        } else {
+          await this.disableNow();
         }
-      },
-    );
+      } else if (visible && this.pausedByHide && this.instance) {
+        this.instance.start();
+        this.pausedByHide = false;
+      }
+    });
   }
 
   detach() {
@@ -70,11 +66,12 @@ class VadManager {
     this.pausedByHide = false;
     if (this.volumeRestorePending && isTauri()) {
       this.volumeRestorePending = false;
-      // Best-effort: detach is sync-shaped here, but invoke returns a Promise.
-      // Fire and forget; the Rust-side Exit handler is the safety net.
-      void invoke("restore_system_volume").catch((e) =>
-        console.warn("[vad] restore_system_volume on detach failed:", e),
-      );
+      // Best-effort: detach is sync-shaped here, but the platform call
+      // returns a Promise. Fire and forget; the Rust-side Exit handler is
+      // the safety net.
+      void platform()
+        .audio.restoreSystemVolume()
+        .catch((e) => console.warn("[vad] restoreSystemVolume on detach failed:", e));
     }
   }
 
@@ -119,9 +116,9 @@ class VadManager {
     if (this.volumeRestorePending && isTauri()) {
       this.volumeRestorePending = false;
       try {
-        await invoke("restore_system_volume");
+        await platform().audio.restoreSystemVolume();
       } catch (e) {
-        console.warn("[vad] restore_system_volume failed:", e);
+        console.warn("[vad] restoreSystemVolume failed:", e);
       }
     }
   }
@@ -148,8 +145,9 @@ class VadManager {
           else if (
             settingsState.currentSettings["stt.activation"] === "manual" &&
             !settingsState.currentSettings["stt.llmChainTranscription"]
-          )
+          ) {
             await this.disableNow();
+          }
         },
         onVADMisfire: () => {
           this.listening = false;
@@ -157,8 +155,9 @@ class VadManager {
           else if (
             settingsState.currentSettings["stt.activation"] === "manual" &&
             !settingsState.currentSettings["stt.llmChainTranscription"]
-          )
+          ) {
             void this.disableNow();
+          }
         },
       });
 
@@ -180,10 +179,10 @@ class VadManager {
           Math.min(100, Number(settingsState.currentSettings["stt.autoVolumeTarget"]) || 0),
         );
         try {
-          await invoke("set_system_volume", { percent: target });
+          await platform().audio.setSystemVolume(target);
           this.volumeRestorePending = true;
         } catch (e) {
-          console.warn("[vad] set_system_volume failed:", e);
+          console.warn("[vad] setSystemVolume failed:", e);
         }
       }
     } catch (err) {

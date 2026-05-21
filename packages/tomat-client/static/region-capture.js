@@ -21,7 +21,10 @@ const invoke = (cmd, args) => internals.invoke(cmd, args);
 // hood (see node_modules/@tauri-apps/api/event.js). We inline that shape so
 // the page never has to read the higher-level global.
 const emit = (event, payload) =>
-  invoke("plugin:event|emit", { event, payload: payload === undefined ? null : payload });
+  invoke("plugin:event|emit", {
+    event,
+    payload: payload === undefined ? null : payload,
+  });
 
 const watermark = document.getElementById("watermark");
 const selection = document.getElementById("selection");

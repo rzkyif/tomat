@@ -5,16 +5,15 @@
  * layer.
  */
 
-export type MessagePart =
-  | { type: "text"; text: string }
-  // In-memory forms used only between user picking an attachment and the message being flushed to disk.
-  | { type: "image_url"; image_url: { url: string } }
-  | { type: "document"; filename: string; markdown: string }
-  // Persisted forms written into session JSON: point at a file under ~/.tomat/sessions/<id>/.
-  | { type: "image_file"; filename: string; path: string; mime: string }
-  | { type: "document_file"; filename: string; path: string };
-
-export type MessageContent = string | MessagePart[];
+// Re-export canonical definitions from the shared package so client and core
+// agree on the wire shape. `path` on `*_file` parts is the core REST URL
+// (/api/v1/sessions/:sid/attachments/:aid) returned by the upload endpoint;
+// the server parses the trailing :aid to load bytes when building the LLM
+// request. The import + re-export form is needed because plain
+// `export type {} from "..."` doesn't bring the name into the local scope
+// for use in interfaces below.
+import type { MessageContent, MessagePart } from "@tomat/shared";
+export type { MessageContent, MessagePart };
 
 /** Lifecycle of a single tool invocation as seen by the UI. */
 export type ToolCallStatus =
@@ -169,7 +168,11 @@ export type Alignment = "left" | "center" | "right";
 export type ServerStatus = "Disabled" | "Error" | "Loading" | "Running";
 
 export interface ServerStatusUpdate {
-  server: "llm" | "stt" | "bun";
+  // After the rework the sidecar kinds are "llama"/"whisper"/"tts"/"tool"
+  // (per @tomat/shared) but legacy components still read "llm"/"stt"/"bun".
+  // Keep this string-typed for compatibility; convert at the read site if
+  // strict matching is ever required.
+  server: string;
   status: ServerStatus;
   progress?: number;
   message?: string;
@@ -178,20 +181,23 @@ export interface ServerStatusUpdate {
 export type DownloadStatus = "Pending" | "Downloading" | "Completed" | "Error" | "Cancelled";
 export type DownloadDestination = "Models";
 
+// Wire-format DownloadEntry (camelCase per the new shared API). Keeping
+// the old `DownloadItem` name + snake_case aliases as getters would be
+// a migration crust we explicitly avoid; UI sites that read these fields
+// switch to camelCase as part of the rework.
 export interface DownloadItem {
   id: string;
   source: string;
-  destination: DownloadDestination;
-  rel_path: string;
-  abs_path: string;
+  destination: "models" | "binaries" | "toolkits";
+  relPath: string;
+  absPath: string;
   filename: string;
-  group_id: string;
-  size_bytes: number | null;
-  downloaded_bytes: number;
+  groupId: string;
+  sizeBytes?: number;
+  downloadedBytes: number;
   status: DownloadStatus;
-  error: string | null;
-  seen: boolean;
-  added_at_ms: number;
+  error?: string;
+  addedAtMs: number;
 }
 
 export type LLMErrorType =
@@ -202,19 +208,18 @@ export type LLMErrorType =
   | "server_error"
   | "unknown_error";
 
-export type TokenUsage = {
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-};
+// Local re-export of the server-defined wire shape so the rest of the
+// client can keep importing `TokenUsage` from `$lib/shared/types`. The
+// canonical definition lives in @tomat/shared/domain/session.ts.
+import type { TokenUsage as SharedTokenUsage } from "@tomat/shared";
+export type TokenUsage = SharedTokenUsage;
 
 export type SessionInfo = {
   id: string;
   title: string;
 };
 
-/** Wire shape returned by `load_chat_session` and `load_latest_chat_history`
- *  Tauri commands. */
+/** Wire shape returned by the server when re-hydrating a session. */
 export interface ChatHistoryPayload {
   sessionId: string;
   title: string;

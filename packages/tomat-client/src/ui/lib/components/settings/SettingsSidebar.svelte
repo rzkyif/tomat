@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SETTINGS_SCHEMA, isGroupVisible } from "$lib/shared/settings";
+  import { SETTINGS_SCHEMA, isGroupVisible } from "@tomat/shared";
   import type { ServerStatus, ServerStatusUpdate } from "$lib/shared/types";
   import { settingsState } from "../../state";
   import ServerStatusChip from "./ServerStatusChip.svelte";
@@ -11,14 +11,14 @@
     onSelect,
     llmStatus,
     sttStatus,
-    bunStatus,
+    ttsStatus,
     withScrollAnchor,
   } = $props<{
     selectedGroupId: string;
     onSelect?: (id: string) => void;
     llmStatus: ServerStatusUpdate;
     sttStatus: ServerStatusUpdate;
-    bunStatus: ServerStatusUpdate;
+    ttsStatus: ServerStatusUpdate;
     /** Wrap a layout-shifting state change so the scroll panel preserves
      *  the anchor field's viewport position across the toggle. */
     withScrollAnchor: (fn: () => void) => void;
@@ -122,7 +122,7 @@
 
   <div class="flex flex-col gap-1.5">
     {#if collapsed}
-      {#if chipVisible(llmStatus.status as ServerStatus) || chipVisible(sttStatus.status as ServerStatus) || chipVisible(bunStatus.status as ServerStatus)}
+      {#if chipVisible(llmStatus.status as ServerStatus) || chipVisible(sttStatus.status as ServerStatus) || chipVisible(ttsStatus.status as ServerStatus)}
         <div class="flex flex-col gap-1.5 items-center px-1.5 py-1">
           {#if chipVisible(llmStatus.status as ServerStatus)}
             <span
@@ -140,12 +140,12 @@
               title={"STT: " + sttStatus.status}
             ></span>
           {/if}
-          {#if chipVisible(bunStatus.status as ServerStatus)}
+          {#if chipVisible(ttsStatus.status as ServerStatus)}
             <span
               class="w-3 h-3 rounded-full {chipBgMap[
-                bunStatus.status as ServerStatus
+                ttsStatus.status as ServerStatus
               ]}"
-              title={"Bun: " + bunStatus.status}
+              title={"TTS: " + ttsStatus.status}
             ></span>
           {/if}
         </div>
@@ -154,7 +154,7 @@
       <div class="flex flex-col gap-1.5 text-sm font-medium w-full">
         <ServerStatusChip type="LLM" update={llmStatus} />
         <ServerStatusChip type="STT" update={sttStatus} />
-        <ServerStatusChip type="Bun" update={bunStatus} />
+        <ServerStatusChip type="TTS" update={ttsStatus} />
       </div>
     {/if}
 

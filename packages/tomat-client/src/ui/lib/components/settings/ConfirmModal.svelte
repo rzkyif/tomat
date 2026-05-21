@@ -22,8 +22,8 @@
 {#if confirmState.pending}
   {@const p = confirmState.pending}
   {@const downloads = p.downloads ?? []}
-  {@const total = downloads.reduce((s, d) => s + (d.size_bytes ?? 0), 0)}
-  {@const anyUnknown = downloads.some((d) => d.size_bytes == null)}
+  {@const total = downloads.reduce((s, d) => s + (d.sizeHint ?? 0), 0)}
+  {@const anyUnknown = downloads.some((d) => d.sizeHint == null)}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
@@ -42,7 +42,7 @@
       </div>
       {#if downloads.length > 0}
         <div class="flex flex-col gap-1 max-h-64 overflow-y-auto">
-          {#each downloads as d (d.path)}
+          {#each downloads as d (d.source)}
             <div
               class="flex items-center gap-2 bg-default-200 rounded-medium px-3 py-2"
             >
@@ -51,12 +51,12 @@
               ></i>
               <div class="flex flex-col flex-1 min-w-0">
                 <div class="text-default-800 text-sm truncate">
-                  {d.filename}
+                  {d.source.split("/").pop() ?? d.source}
                 </div>
-                <div class="text-default-500 text-xs truncate">{d.path}</div>
+                <div class="text-default-500 text-xs truncate">{d.source}</div>
               </div>
               <div class="text-default-500 text-xs tabular-nums shrink-0">
-                {formatBytes(d.size_bytes)}
+                {formatBytes(d.sizeHint ?? 0)}
               </div>
             </div>
           {/each}

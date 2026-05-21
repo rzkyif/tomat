@@ -1,0 +1,27 @@
+{
+  "name": "@tomat/core",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "tasks": {
+    "dev": "deno run --watch --allow-all src/main.ts"
+  },
+  "imports": {
+    "@tomat/shared": "../tomat-shared/src/index.ts",
+    "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
+    "@std/path": "jsr:@std/path@^1.0.0",
+    "@std/tar": "jsr:@std/tar@^0.1.0",
+    "@std/ulid": "jsr:@std/ulid@^1.0.0",
+    "@std/log": "jsr:@std/log@^0.224.0",
+    "@std/cli": "jsr:@std/cli@^1.0.0",
+    "@noble/ed25519": "jsr:@noble/ed25519@^2.1.0",
+    "hono": "npm:hono@^4.6.0",
+    "zod": "npm:zod@^3.23.0",
+    "ndjson": "npm:ndjson@^2.0.0",
+    "ignore": "npm:ignore@^7.0.0",
+    "openai": "npm:openai@^6.33.0",
+    "kokoro-js": "npm:kokoro-js@^1.2.1",
+    "@huggingface/transformers": "npm:@huggingface/transformers@^4.1.0"
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "$schema": "https://au.tomat.ing/schemas/tools-v1.json",
+  "name": "Tomat Built-in Toolkit",
+  "description": "Reference toolkit bundling three sample tools — download a URL to the user's Downloads folder, open a URL in the default browser, and a UI-walkthrough for the askUser flow. Useful as both a fresh-install starter and a worked example for third-party toolkit authors.",
+  "license": "MIT",
+  "homepage": "https://au.tomat.ing",
+  "tools": [
+    {
+      "name": "download_url",
+      "description": "Download the file at a URL into the user's Downloads folder, reporting progress.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Absolute http(s) URL of the file to download."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Optional filename for the saved file. Defaults to the last segment of the URL."
+          }
+        },
+        "required": ["url"]
+      },
+      "triggers": [
+        "download https://example.com/file.zip",
+        "save that file to my downloads",
+        "grab the pdf from this link",
+        "fetch this archive for me"
+      ],
+      "function": "download",
+      "permissions": {
+        "net": [
+          {
+            "host": "*",
+            "ports": [80, 443],
+            "reason": "Download from arbitrary http(s) URL"
+          }
+        ],
+        "write": [
+          {
+            "path": "$downloads",
+            "reason": "Write the downloaded file"
+          }
+        ],
+        "env": [
+          {
+            "key": "XDG_DOWNLOAD_DIR",
+            "reason": "Honor the user's preferred Downloads folder (Linux/XDG)",
+            "optional": true
+          },
+          {
+            "key": "HOME",
+            "reason": "Resolve ~/Downloads fallback"
+          },
+          {
+            "key": "USERPROFILE",
+            "reason": "Resolve %USERPROFILE%\\Downloads on Windows",
+            "optional": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "open_website",
+      "description": "Open a web URL in the user's default browser. Use when the user asks to visit, open, or go to a website.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Absolute http:// or https:// URL to open."
+          }
+        },
+        "required": ["url"]
+      },
+      "triggers": [
+        "open https://news.ycombinator.com",
+        "take me to the github page",
+        "visit example.com",
+        "go to the docs website"
+      ],
+      "function": "open",
+      "alwaysAvailable": true,
+      "permissions": {
+        "run": [
+          {
+            "binary": "open",
+            "reason": "Hand the URL off to macOS's `open` command"
+          },
+          {
+            "binary": "xdg-open",
+            "reason": "Hand the URL off to Linux's `xdg-open`"
+          },
+          {
+            "binary": "cmd",
+            "reason": "Hand the URL off to Windows's `cmd /c start`"
+          }
+        ]
+      }
+    },
+    {
+      "name": "askuser_demo",
+      "description": "Demonstrate the askUser flow: text input, single-select, multiselect with freeform input.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "triggers": [
+        "demo the ask user flow",
+        "show me how askUser works",
+        "run the form demo"
+      ],
+      "function": "demo",
+      "permissions": {}
+    }
+  ]
+}

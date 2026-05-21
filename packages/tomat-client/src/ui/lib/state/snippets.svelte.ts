@@ -1,47 +1,48 @@
 /**
- * Reactive store for the user's saved snippets. Mirrors the on-disk
- * snippet list managed by the Rust backend, and offers a small helper
- * for finding a snippet by its trigger.
+ * Reactive store for the user's saved snippets. Snippets are pure client-side
+ * preferences (small, intrinsically per-device) and live in
+ * ~/.tomat/client/settings.json under the "snippets" key.
  */
 
 import { browser } from "$app/environment";
-import { invoke } from "@tauri-apps/api/core";
-import { isTauri } from "$lib/shared/env";
+import { platform } from "$lib/platform";
 import type { Snippet } from "$lib/shared/snippets";
+
+const KEY = "snippets";
 
 class SnippetsState {
   snippets = $state<Snippet[]>([]);
 
   async load(): Promise<void> {
-    if (!browser || !isTauri()) return;
+    if (!browser) return;
     try {
-      const list = (await invoke("list_snippets")) as Snippet[];
-      this.snippets = list;
+      const settings = await platform().clientSettings.read();
+      const raw = settings[KEY];
+      this.snippets = Array.isArray(raw) ? (raw as Snippet[]) : [];
     } catch (e) {
       console.warn("Failed to load snippets:", e);
     }
   }
 
   async save(snippet: Snippet): Promise<void> {
-    if (!browser || !isTauri()) return;
-    try {
-      await invoke("save_snippet", { snippet });
-      await this.load();
-    } catch (e) {
-      console.error("Failed to save snippet:", e);
-      throw e;
-    }
+    if (!browser) return;
+    const settings = await platform().clientSettings.read();
+    const current = Array.isArray(settings[KEY]) ? (settings[KEY] as Snippet[]) : [];
+    const filtered = current.filter((s) => s.id !== snippet.id);
+    const next = filtered.concat(snippet);
+    settings[KEY] = next;
+    await platform().clientSettings.write(settings);
+    this.snippets = next;
   }
 
   async delete(id: string): Promise<void> {
-    if (!browser || !isTauri()) return;
-    try {
-      await invoke("delete_snippet", { id });
-      await this.load();
-    } catch (e) {
-      console.error("Failed to delete snippet:", e);
-      throw e;
-    }
+    if (!browser) return;
+    const settings = await platform().clientSettings.read();
+    const current = Array.isArray(settings[KEY]) ? (settings[KEY] as Snippet[]) : [];
+    const next = current.filter((s) => s.id !== id);
+    settings[KEY] = next;
+    await platform().clientSettings.write(settings);
+    this.snippets = next;
   }
 
   findByTrigger(trigger: string): Snippet | undefined {

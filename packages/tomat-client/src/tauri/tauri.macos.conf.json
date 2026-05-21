@@ -1,8 +1,0 @@
-{
-  "bundle": {
-    "resources": {
-      "binaries/aarch64-apple-darwin": "binaries/aarch64-apple-darwin",
-      "binaries/x86_64-apple-darwin": "binaries/x86_64-apple-darwin"
-    }
-  }
-}

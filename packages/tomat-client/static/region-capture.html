@@ -1,52 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="utf-8" />
-<title>Region Capture</title>
-<!--
+  <head>
+    <meta charset="utf-8" />
+    <title>Region Capture</title>
+    <!--
   Colors are intentionally hard-coded (no `prefers-color-scheme` query). The
   overlay sits on top of arbitrary screen content while the main app is
   hidden, so its theming is independent of the app's light/dark choice. A
   consistent dim-dark veil with light watermark text reads cleanly against
   any wallpaper or app behind it.
 -->
-<style>
-  html, body { margin: 0; height: 100%; }
-  body {
-    background: rgba(15, 15, 15, 0.35);
-    cursor: crosshair;
-    user-select: none;
-    -webkit-user-select: none;
-    overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  }
-  #watermark {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    pointer-events: none;
-    color: rgba(245, 245, 245, 0.55);
-    font-size: 2.5rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    padding: 0 3rem;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-  }
-  #selection {
-    position: absolute;
-    border: 2px solid rgb(96, 165, 250);
-    background: rgba(96, 165, 250, 0.12);
-    pointer-events: none;
-    display: none;
-  }
-</style>
-</head>
-<body tabindex="0">
-  <div id="watermark">Click and drag to select region · ESC to cancel</div>
-  <div id="selection"></div>
-  <script type="module" src="/region-capture.js"></script>
-</body>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        background: rgba(15, 15, 15, 0.35);
+        cursor: crosshair;
+        user-select: none;
+        -webkit-user-select: none;
+        overflow: hidden;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      }
+      #watermark {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        pointer-events: none;
+        color: rgba(245, 245, 245, 0.55);
+        font-size: 2.5rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        padding: 0 3rem;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+      }
+      #selection {
+        position: absolute;
+        border: 2px solid rgb(96, 165, 250);
+        background: rgba(96, 165, 250, 0.12);
+        pointer-events: none;
+        display: none;
+      }
+    </style>
+  </head>
+  <body tabindex="0">
+    <div id="watermark">Click and drag to select region · ESC to cancel</div>
+    <div id="selection"></div>
+    <script type="module" src="/region-capture.js"></script>
+  </body>
 </html>

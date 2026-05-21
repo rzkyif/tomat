@@ -1,8 +1,8 @@
 <script lang="ts">
   import { settingsState } from "../../state";
-  import type { SettingSection, PresetOption } from "$lib/shared/settings";
+  import type { SettingSection, PresetOption } from "@tomat/shared";
   import type { Monitor } from "$lib/shared/types";
-  import { evalCondition } from "$lib/shared/settings";
+  import { evalCondition } from "@tomat/shared";
   import SettingsField from "./SettingsField.svelte";
 
   let {

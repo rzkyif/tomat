@@ -1,0 +1,14 @@
+# Astro
+dist/
+.astro/
+
+# Wrangler / Cloudflare local state
+.wrangler/
+.dev.vars
+
+# Generated mirror of release artifacts (populated by `deno task website:build`).
+# These files are produced fresh on every build; the originals live in
+# scripts/install/, packages/tomat-shared/, etc.
+public/install/
+public/manifests/
+public/schemas/

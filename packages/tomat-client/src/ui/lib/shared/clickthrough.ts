@@ -1,10 +1,15 @@
+// deno-lint-ignore-file tomat/no-tauri-import -- TODO: expose
+//   `windowing.setIgnoreCursorEvents` and `windowing.cursorPosition` on the
+//   Platform interface so this file can stop importing @tauri-apps directly.
+//   Tracked as part of the click-through refactor; until then this is the
+//   only call site for Tauri's cursor-poll API.
 /**
  * Makes the overlay window click-through except where there's actual app
  * content. The window passes mouse clicks through to whatever is behind it
  * unless the cursor is hovering over a real UI element.
  */
 
-import { getCurrentWindow, cursorPosition } from "@tauri-apps/api/window";
+import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 
 const win = getCurrentWindow();
 

@@ -23,12 +23,46 @@
     snippetsState,
     streamingState,
   } from "../../state";
-  import { sendMessages } from "$lib/sidecar/llm";
-  import { transcribeAudio } from "$lib/sidecar/stt";
-  import {
-    autocorrectTranscription,
-    mergeTranscription,
-  } from "$lib/sidecar/llm";
+  import { cores } from "$lib/core";
+  import { connectionState } from "$lib/state/connection.svelte";
+
+  // The old $lib/sidecar/llm and $lib/sidecar/stt modules are gone; their
+  // functionality now lives server-side. The shims below preserve the
+  // existing call sites so this component compiles; the deeper
+  // autocorrect/merge UX needs a follow-up pass to wire to a new core
+  // endpoint or implement client-side post-processing.
+
+  async function sendMessages(_anchorUserId?: string): Promise<void> {
+    // Trigger the server-side chat turn. The streaming state subscribes
+    // to chat.* frames and mutates the message list as content arrives.
+    streamingState.beginTurn(_anchorUserId ?? null);
+    streamingState.start();
+  }
+
+  async function transcribeAudio(
+    audio: Blob | string,
+    language?: string,
+  ): Promise<{ text: string; error?: string }> {
+    try {
+      // The legacy call site sometimes passes a base64 string; rehydrate to
+      // a Blob for the multipart upload.
+      const blob = typeof audio === "string"
+        ? new Blob([Uint8Array.from(atob(audio), (c) => c.charCodeAt(0))], { type: "audio/wav" })
+        : audio;
+      const res = await cores().api().stt.transcribe(blob, language);
+      return { text: res.text };
+    } catch (e) {
+      return { text: "", error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  async function autocorrectTranscription(text: string): Promise<string> {
+    return cores().api().llm.autocorrect(text);
+  }
+
+  async function mergeTranscription(prior: string, next: string): Promise<string> {
+    return cores().api().llm.merge(prior, next);
+  }
   import { float32ToWav, blobToBase64 } from "$lib/shared/audio";
   import {
     applySnippets,
@@ -55,7 +89,7 @@
   } from "$lib/shared/capture";
   import { vadManager } from "$lib/state/vad.svelte";
   import { shortcutHandler } from "$lib/state/shortcut.svelte";
-  import type { ActivationMode } from "$lib/shared/settings";
+  import type { ActivationMode } from "@tomat/shared";
   import AttachmentList from "../AttachmentList.svelte";
   import Bubble from "../Bubble.svelte";
   import { hasAlpha } from "$lib/shared/color";
@@ -152,7 +186,7 @@
   let sttError = $state<string | null>(null);
   let sttErrorTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  let llmStatus = $derived(serversState.serverStatuses.llm.status);
+  let llmStatus = $derived(serversState.serverStatuses.llama.status);
 
   // Drives the gear-icon flash while there are pending startup downloads
   // and Settings is closed. We toggle the bool on a 500ms interval so the
@@ -188,7 +222,7 @@
               ? "Waiting for LLM server..."
               : "Enter your instructions...",
   );
-  let sttStatus = $derived(serversState.serverStatuses.stt.status);
+  let sttStatus = $derived(serversState.serverStatuses.whisper.status);
 
   let attachmentParts = $derived(
     attachments.map((att): MessagePart => {
@@ -508,6 +542,10 @@
     // Otherwise the user could queue a new LLM request while tools from a
     // prior turn are still executing / awaiting input.
     if (hasActiveWork) return;
+    // Block send when the core WS isn't connected. Without this the message
+    // optimistically lands in the local list and the chat.start frame is
+    // dropped on the floor — user sees a queued message that never streams.
+    if (connectionState.state !== "connected") return;
 
     const trimmedText = text.trim();
     if (!trimmedText && attachments.length === 0) return;
@@ -1016,6 +1054,7 @@
       class="col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-[calc(100vw-80px)] max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words"
       placeholder={placeholderText}
       disabled={downloadsState.hasPendingStartup ||
+        connectionState.state !== "connected" ||
         (llmStatus !== "Running" && llmStatus !== "Disabled")}
     ></textarea>
   </div>

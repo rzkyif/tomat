@@ -5,7 +5,7 @@
  * easy to follow and unit-testable.
  */
 
-import { EMBED_BASE_FILES, TTS_BASE_FILES } from "$lib/shared/settings";
+import { EMBED_BASE_FILES, TTS_BASE_FILES } from "@tomat/shared";
 
 export type StorageFile = {
   kind: "file";

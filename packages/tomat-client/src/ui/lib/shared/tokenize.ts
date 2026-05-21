@@ -40,7 +40,9 @@ async function tokenizeLocal(text: string): Promise<number> {
     });
     if (!res.ok) throw new Error(`tokenize HTTP ${res.status}`);
     const data = (await res.json()) as { tokens?: unknown };
-    if (!Array.isArray(data.tokens)) throw new Error("tokenize: missing tokens array");
+    if (!Array.isArray(data.tokens)) {
+      throw new Error("tokenize: missing tokens array");
+    }
     return data.tokens.length;
   } catch (e) {
     if (!localTokenizeFailed) {

@@ -5,7 +5,7 @@
  * shown in the settings screen.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { platform } from "$lib/platform";
 
 export type CommandType = "llm" | "stt";
 
@@ -40,7 +40,12 @@ export const COMMANDS: Record<CommandType, CommandDefinition> = {
       { flag: "-c", settingId: "llm.contextSize", argType: "value" },
       { flag: "--mmap", settingId: "llm.mmap", argType: "boolean" },
       { flag: "-t", settingId: "llm.threads", argType: "value" },
-      { flag: "--reasoning", settingId: "llm.reasoning", argType: "value", omitEmpty: true },
+      {
+        flag: "--reasoning",
+        settingId: "llm.reasoning",
+        argType: "value",
+        omitEmpty: true,
+      },
       {
         flag: "--reasoning-budget",
         settingId: "llm.reasoningBudget",
@@ -49,7 +54,12 @@ export const COMMANDS: Record<CommandType, CommandDefinition> = {
       },
       { flag: "--host", settingId: "llm.host", argType: "value" },
       { flag: "--port", settingId: "llm.port", argType: "value" },
-      { flag: "--webui", settingId: "llm.webui", argType: "boolean", falseFlag: "--no-webui" },
+      {
+        flag: "--webui",
+        settingId: "llm.webui",
+        argType: "boolean",
+        falseFlag: "--no-webui",
+      },
       {
         flag: "--mmproj",
         settingId: "llm.mmprojPath",
@@ -129,17 +139,23 @@ export async function buildPreview(
         }
       }
       try {
-        v = await invoke("resolve_path", { path: v });
-      } catch {}
+        v = await platform().resolvePath(v);
+      } catch {
+        /* leave v as-is on resolution failure */
+      }
     }
 
     if (arg.argType === "boolean") {
       if (v) parts.push(arg.flag);
       else if (arg.falseFlag) parts.push(arg.falseFlag);
     } else if (arg.argType === "quoted") {
-      if (!arg.omitEmpty || !isEmpty(v)) parts.push(`${arg.flag} "${String(v).trim()}"`);
+      if (!arg.omitEmpty || !isEmpty(v)) {
+        parts.push(`${arg.flag} "${String(v).trim()}"`);
+      }
     } else {
-      if (!arg.omitEmpty || !isEmpty(v)) parts.push(`${arg.flag} ${String(v).trim()}`);
+      if (!arg.omitEmpty || !isEmpty(v)) {
+        parts.push(`${arg.flag} ${String(v).trim()}`);
+      }
     }
   }
   return parts.join(" \\\n  ");

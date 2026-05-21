@@ -31,7 +31,7 @@
       const oa = order[a.status] ?? 99;
       const ob = order[b.status] ?? 99;
       if (oa !== ob) return oa - ob;
-      return a.added_at_ms - b.added_at_ms;
+      return a.addedAtMs - b.addedAtMs;
     });
   });
 

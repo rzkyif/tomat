@@ -1,0 +1,427 @@
+// Sidecar supervisor (port of packages/tomat-client/src/tauri/src/sidecar.rs).
+//
+// Responsibilities:
+//   - Spawn / re-spawn sidecar subprocesses.
+//   - Supersede in-flight starts via a monotonic startId.
+//   - Health-check (HTTP poll or stdout marker or warmup sleep) and transition
+//     from Loading -> Running -> Error.
+//   - Capture last 10 output lines for error messaging on unexpected exit.
+//   - Graceful kill: SIGTERM, GRACEFUL_SHUTDOWN_MS grace, SIGKILL on Unix;
+//     SIGKILL on Windows.
+//   - Restart-on-crash with exponential backoff up to maxAttempts.
+//   - Broadcast SidecarSnapshot to subscribers (the ws hub forwards over WS).
+//
+// Out of scope here (handled by sibling modules per the rework plan):
+//   - Per-kind arg construction (sidecars/{llama,whisper,tts}.ts).
+//   - Windows Job Object sidecar tracking (sidecars/jobctl.ts).
+//   - Binary path resolution (binaries/manager.ts).
+
+import { getLogger } from "../shared/log.ts";
+import { trackSidecarPid } from "./jobctl.ts";
+import { libraryEnvFor } from "./libraryPath.ts";
+import {
+  pollHttpHealth,
+  sleep,
+  STARTUP_WARMUP_MS,
+  validateHealthCheckUrl,
+} from "./readiness.ts";
+import {
+  DEFAULT_RESTART_POLICY,
+  type RestartPolicy,
+  type SidecarKind,
+  type SidecarSnapshot,
+  type StartOptions,
+  type StatusListener,
+} from "./types.ts";
+
+const log = getLogger("sidecars");
+
+const GRACEFUL_SHUTDOWN_MS = 5_000;
+const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
+const RECENT_LOG_LINES = 10;
+
+interface Active {
+  startId: number;
+  proc: Deno.ChildProcess;
+  pid: number;
+  abort: AbortController; // aborted on supersede/stop
+  recentLogs: string[];
+}
+
+class Sidecar {
+  readonly kind: SidecarKind;
+  private startId = 0;
+  private active: Active | null = null;
+  private current: SidecarSnapshot;
+  private pendingStop = false;
+
+  constructor(
+    kind: SidecarKind,
+    private readonly notify: (snap: SidecarSnapshot) => void,
+  ) {
+    this.kind = kind;
+    this.current = { kind, status: "Disabled" };
+  }
+
+  snapshot(): SidecarSnapshot {
+    return this.current;
+  }
+
+  private emit(next: SidecarSnapshot): void {
+    this.current = next;
+    this.notify(next);
+  }
+
+  async start(options: StartOptions): Promise<void> {
+    // 1. Supersede any in-flight start. Null out this.active BEFORE awaiting
+    //    terminate so the old watchExit's isCurrent check returns false the
+    //    moment the old proc dies (otherwise we briefly emit a spurious Error
+    //    while terminateActive is still in its post-race cleanup).
+    this.startId += 1;
+    const myStartId = this.startId;
+    if (this.active) {
+      const old = this.active;
+      this.active = null;
+      await this.terminateActive(old);
+    }
+
+    // 2. Validate readiness URL before doing anything else.
+    if (options.readiness?.kind === "http") {
+      validateHealthCheckUrl(options.readiness.url);
+    }
+
+    this.emit({ kind: this.kind, status: "Loading", message: "Starting…" });
+
+    // 3. Build env. Workspace env + caller env + library-path env.
+    const libEnv = options.libraryDir
+      ? libraryEnvFor(options.libraryDir)
+      : { env: {} };
+    const env: Record<string, string> = {
+      ...Deno.env.toObject(),
+      ...libEnv.env,
+      ...(options.env ?? {}),
+    };
+    const cwd = options.cwd ?? libEnv.cwd;
+
+    // 4. Spawn.
+    let proc: Deno.ChildProcess;
+    try {
+      proc = new Deno.Command(options.binary, {
+        args: options.args,
+        env,
+        cwd,
+        stdout: "piped",
+        stderr: "piped",
+        stdin: "null",
+      }).spawn();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error(`${this.kind}: spawn failed: ${msg}`);
+      this.emit({
+        kind: this.kind,
+        status: "Error",
+        message: `spawn failed: ${msg}`,
+      });
+      return;
+    }
+
+    const abort = new AbortController();
+    const active: Active = {
+      startId: myStartId,
+      proc,
+      pid: proc.pid,
+      abort,
+      recentLogs: [],
+    };
+    this.active = active;
+
+    // Windows-only: register the PID with the kill-on-close job object so
+    // a hard core crash doesn't leave the sidecar running. No-op elsewhere.
+    trackSidecarPid(proc.pid);
+
+    // 5. Wire output capture + monitor unexpected exit.
+    void this.captureOutput(
+      active,
+      options.readiness?.kind === "stdout"
+        ? options.readiness.marker ?? "READY\n"
+        : null,
+    );
+    void this.watchExit(active, options);
+
+    // 6. Readiness probe.
+    const readinessOk = await this.runReadiness(active, options);
+    if (!this.isCurrent(myStartId)) return; // superseded mid-probe
+    if (!readinessOk) {
+      log.warn(`${this.kind}: readiness timed out; killing`);
+      await this.terminateActive(active);
+      if (this.isCurrent(myStartId)) {
+        this.active = null;
+        this.emit({
+          kind: this.kind,
+          status: "Error",
+          message: "readiness timeout",
+        });
+      }
+      return;
+    }
+
+    if (!this.isCurrent(myStartId)) return;
+    this.emit({ kind: this.kind, status: "Running", pid: active.pid });
+  }
+
+  async stop(): Promise<void> {
+    this.pendingStop = true;
+    if (!this.active) {
+      this.emit({ kind: this.kind, status: "Disabled" });
+      return;
+    }
+    const active = this.active;
+    this.active = null;
+    this.startId += 1;
+    await this.terminateActive(active);
+    this.emit({ kind: this.kind, status: "Disabled" });
+  }
+
+  async restart(options: StartOptions): Promise<void> {
+    await this.start(options);
+  }
+
+  private isCurrent(startId: number): boolean {
+    return this.active?.startId === startId;
+  }
+
+  // Pipe stdout+stderr through a tee so we can both (a) detect a stdout
+  // readiness marker on one branch and (b) keep a ring buffer of the last
+  // 10 lines on the other for error context if the process dies.
+  private async captureOutput(
+    active: Active,
+    marker: string | null,
+  ): Promise<void> {
+    const decoder = new TextDecoder();
+    const pump = async (
+      stream: ReadableStream<Uint8Array>,
+      tag: "stdout" | "stderr",
+    ): Promise<void> => {
+      let buf = "";
+      try {
+        for await (const chunk of stream) {
+          buf += decoder.decode(chunk, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.length === 0) continue;
+            active.recentLogs.push(trimmed);
+            if (active.recentLogs.length > RECENT_LOG_LINES) {
+              active.recentLogs.shift();
+            }
+            log.debug(`[${this.kind}/${tag}] ${trimmed}`);
+            if (marker && trimmed.includes(marker)) {
+              (active as Active & { _markerSeen?: boolean })._markerSeen = true;
+            }
+          }
+        }
+      } catch {
+        // Stream closed; expected on process exit.
+      }
+    };
+    await Promise.all([
+      pump(active.proc.stdout, "stdout"),
+      pump(active.proc.stderr, "stderr"),
+    ]);
+  }
+
+  private async runReadiness(
+    active: Active,
+    options: StartOptions,
+  ): Promise<boolean> {
+    const readiness = options.readiness ??
+      { kind: "warmup", ms: STARTUP_WARMUP_MS };
+    const startupTimeoutMs = options.startupTimeoutMs ??
+      DEFAULT_STARTUP_TIMEOUT_MS;
+
+    if (readiness.kind === "warmup") {
+      try {
+        await sleep(readiness.ms, active.abort.signal);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    if (readiness.kind === "http") {
+      return await pollHttpHealth(readiness.url, {
+        signal: active.abort.signal,
+        attempts: Math.ceil(startupTimeoutMs / 1_000),
+        intervalMs: 1_000,
+      });
+    }
+    if (readiness.kind === "stdout") {
+      // captureOutput already watches for readiness.marker (defaulted in
+      // start()) and flips _markerSeen on the active entry; we just poll it.
+      const deadline = Date.now() + startupTimeoutMs;
+      while (Date.now() < deadline) {
+        if (active.abort.signal.aborted) return false;
+        if ((active as Active & { _markerSeen?: boolean })._markerSeen) {
+          return true;
+        }
+        try {
+          await sleep(100, active.abort.signal);
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    }
+    return false;
+  }
+
+  private async watchExit(
+    active: Active,
+    options: StartOptions,
+  ): Promise<void> {
+    const status = await active.proc.status;
+    // If this active was superseded or stopped intentionally, ignore.
+    if (!this.isCurrent(active.startId)) return;
+    if (this.pendingStop) {
+      this.pendingStop = false;
+      return;
+    }
+    // Unexpected exit.
+    const msg = active.recentLogs.length > 0
+      ? active.recentLogs.join("\n")
+      : `exited with code ${status.code}${
+        status.signal ? ` (signal ${status.signal})` : ""
+      }`;
+    log.warn(`${this.kind}: unexpected exit: ${msg}`);
+    this.active = null;
+    this.emit({ kind: this.kind, status: "Error", message: msg });
+
+    // Restart with backoff if policy allows.
+    const policy = options.restartPolicy === "none" ? null : (
+      options.restartPolicy ?? DEFAULT_RESTART_POLICY
+    );
+    if (!policy) return;
+    await this.restartWithBackoff(options, policy);
+  }
+
+  private async restartWithBackoff(
+    options: StartOptions,
+    policy: RestartPolicy,
+  ): Promise<void> {
+    let delay = policy.initialDelayMs;
+    for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
+      log.info(
+        `${this.kind}: restart attempt ${attempt}/${policy.maxAttempts} in ${delay}ms`,
+      );
+      await sleep(delay);
+      if (this.pendingStop) return;
+      await this.start(options);
+      if (this.current.status === "Running") return;
+      delay = Math.min(delay * 2, policy.maxDelayMs);
+    }
+    log.error(
+      `${this.kind}: gave up restarting after ${policy.maxAttempts} attempts`,
+    );
+  }
+
+  private async terminateActive(active: Active): Promise<void> {
+    active.abort.abort();
+    try {
+      if (Deno.build.os === "windows") {
+        // No SIGTERM on Windows; SIGKILL is the only option via Deno.
+        active.proc.kill("SIGKILL");
+      } else {
+        active.proc.kill("SIGTERM");
+        // Race the grace period against the natural exit.
+        const result = await Promise.race([
+          active.proc.status.then(() => "exited" as const),
+          sleep(GRACEFUL_SHUTDOWN_MS).then(() => "timeout" as const),
+        ]);
+        if (result === "timeout") {
+          try {
+            active.proc.kill("SIGKILL");
+          } catch {
+            // Already dead.
+          }
+        }
+      }
+    } catch (err) {
+      log.warn(
+        `${this.kind}: terminate failed: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+    }
+    // Drain status to release resources.
+    try {
+      await active.proc.status;
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export class SidecarManager {
+  private readonly sidecars = new Map<SidecarKind, Sidecar>();
+  private readonly listeners = new Set<StatusListener>();
+
+  private getOrCreate(kind: SidecarKind): Sidecar {
+    let s = this.sidecars.get(kind);
+    if (!s) {
+      s = new Sidecar(kind, (snap) => this.broadcast(snap));
+      this.sidecars.set(kind, s);
+    }
+    return s;
+  }
+
+  async start(kind: SidecarKind, options: StartOptions): Promise<void> {
+    await this.getOrCreate(kind).start(options);
+  }
+
+  async stop(kind: SidecarKind): Promise<void> {
+    const s = this.sidecars.get(kind);
+    if (s) await s.stop();
+  }
+
+  async restart(kind: SidecarKind, options: StartOptions): Promise<void> {
+    await this.getOrCreate(kind).restart(options);
+  }
+
+  status(kind: SidecarKind): SidecarSnapshot {
+    return this.sidecars.get(kind)?.snapshot() ??
+      { kind, status: "Disabled" };
+  }
+
+  getStatuses(): SidecarSnapshot[] {
+    return Array.from(this.sidecars.values(), (s) => s.snapshot());
+  }
+
+  subscribe(listener: StatusListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  // Called once on process exit. Stops every live sidecar concurrently.
+  async shutdown(): Promise<void> {
+    await Promise.all(Array.from(this.sidecars.values(), (s) => s.stop()));
+  }
+
+  private broadcast(snap: SidecarSnapshot): void {
+    for (const l of this.listeners) {
+      try {
+        l(snap);
+      } catch (err) {
+        log.warn(
+          `sidecar listener threw: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    }
+  }
+}
+
+// Singleton accessor — the rest of core wires routes/WS into this one.
+let _instance: SidecarManager | null = null;
+export function sidecarManager(): SidecarManager {
+  if (!_instance) _instance = new SidecarManager();
+  return _instance;
+}

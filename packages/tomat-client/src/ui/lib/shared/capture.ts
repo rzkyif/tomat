@@ -5,29 +5,27 @@
  *
  * Also exposes a region-capture flow that opens a transparent fullscreen
  * overlay window on the active monitor and returns the user-selected
- * rectangle as a base64 PNG.
+ * rectangle as a base64 PNG. Region capture is event-driven: the Rust
+ * overlay window draws the selection and emits `region-capture-result` /
+ * `region-capture-cancelled` events — there's no direct "capture this
+ * rectangle" call from the JS side.
+ *
+ * All platform-specific Tauri calls go through `$lib/platform/`, so the
+ * same code paths can run under the web/mobile stub when those builds
+ * land. Web builds rely on the platform's no-op fallbacks (capture itself
+ * isn't available without the host process).
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { platform, type MonitorInfo } from "$lib/platform";
 
-export interface CaptureMonitorInfo {
-  id: string;
-  name: string;
-  isPrimary: boolean;
-  /** Physical-pixel bounds in the virtual desktop. Mirrors xcap's monitor
-   *  geometry so the region-capture flow can match against Tauri's
-   *  `currentMonitor()` position without relying on names matching. */
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+// Alias kept so consumers don't have to import from `$lib/platform`. The
+// shape is the canonical `MonitorInfo` returned by the platform's capture
+// layer.
+export type CaptureMonitorInfo = MonitorInfo;
 
 export async function listCaptureMonitors(): Promise<CaptureMonitorInfo[]> {
   try {
-    return (await invoke("list_capture_monitors")) as CaptureMonitorInfo[];
+    return await platform().capture.monitors();
   } catch (e) {
     console.warn("[capture] Failed to list monitors:", e);
     return [];
@@ -37,31 +35,24 @@ export async function listCaptureMonitors(): Promise<CaptureMonitorInfo[]> {
 /** Capture a monitor as a base64 PNG. Hides the app window during the capture
  *  if it was visible, and restores it afterwards. Returns null on failure. */
 export async function captureMonitor(monitorId: string): Promise<string | null> {
-  const win = getCurrentWindow();
-
-  let shouldHide = false;
-  try {
-    shouldHide = (await win.isVisible()) ?? false;
-  } catch (e) {
-    console.warn("[capture] Failed to check window visibility:", e);
-  }
+  const shouldHide = await platform().windowing.isVisible();
 
   try {
     if (shouldHide) {
-      await invoke("hide_main_window");
+      await platform().windowing.hide();
       // Compositor lag: after hide() resolves, the window may still be on
       // screen on slow compositors (notably tiling WMs on X11). 180 ms
       // empirically covers observed cases without noticeable capture delay.
       await new Promise((r) => setTimeout(r, 180));
     }
-    return (await invoke("capture_monitor", { monitorId })) as string;
+    return await platform().capture.captureMonitor(monitorId);
   } catch (e) {
     console.error("[capture] Failed to capture monitor:", e);
     return null;
   } finally {
     if (shouldHide) {
       try {
-        await invoke("show_main_window");
+        await platform().windowing.show();
       } catch (e) {
         console.warn("[capture] Failed to restore window:", e);
       }
@@ -79,26 +70,19 @@ export async function captureMonitor(monitorId: string): Promise<string | null> 
  *  with macOS retina + multi-monitor edge cases.
  */
 export async function captureRegion(): Promise<string | null> {
-  const main = getCurrentWindow();
+  const mainWasVisible = await platform().windowing.isVisible();
 
-  let mainWasVisible = false;
-  try {
-    mainWasVisible = (await main.isVisible()) ?? false;
-  } catch (e) {
-    console.warn("[capture] visibility check failed:", e);
-  }
-
-  const unlisteners: UnlistenFn[] = [];
+  let unsubscribe: (() => void) | null = null;
 
   try {
     if (mainWasVisible) {
-      await invoke("hide_main_window");
+      await platform().windowing.hide();
       // Compositor lag, see captureMonitor()'s comment.
       await new Promise((r) => setTimeout(r, 180));
     }
 
-    // Set up the result-listener BEFORE the overlay shows: a fast
-    // drag-release or ESC press on the page could otherwise fire before the
+    // Wire the result listener BEFORE showing the overlay: a fast drag-
+    // release or ESC press on the page could otherwise fire before the
     // listener attaches and the event would be lost.
     let resolveResult!: (v: string | null) => void;
     const resultPromise = new Promise<string | null>((r) => {
@@ -110,19 +94,16 @@ export async function captureRegion(): Promise<string | null> {
       settled = true;
       resolveResult(v);
     };
-    unlisteners.push(
-      await listen<string>("region-capture-result", (e) => settle(e.payload || null)),
-    );
-    unlisteners.push(await listen("region-capture-cancelled", () => settle(null)));
+    unsubscribe = await platform().capture.subscribeRegionResult(settle);
 
-    // Position + size + show the overlay in one Rust call. Returns the
-    // xcap monitor id that matches the active monitor; we stash it so the
-    // page can pass it back to `capture_monitor_region`.
-    const xcapMonitorId = await invoke<string>("show_region_capture_overlay");
+    // Position + size + show the overlay in one Rust call. Returns the xcap
+    // monitor id that matches the active monitor; we stash it so the
+    // overlay's screen capture targets the right display.
+    const xcapMonitorId = await platform().capture.showRegionOverlay();
     try {
-      await invoke("set_region_capture_target", { monitorId: xcapMonitorId });
+      await platform().capture.setRegionTarget(xcapMonitorId);
     } catch (e) {
-      console.warn("[capture] set_region_capture_target failed:", e);
+      console.warn("[capture] setRegionTarget failed:", e);
     }
 
     return await resultPromise;
@@ -130,15 +111,15 @@ export async function captureRegion(): Promise<string | null> {
     console.error("[capture] region capture failed:", e);
     return null;
   } finally {
-    for (const u of unlisteners) u();
+    if (unsubscribe) unsubscribe();
     try {
-      await invoke("hide_region_capture_overlay");
+      await platform().capture.hideRegionOverlay();
     } catch {
       // ignore
     }
     if (mainWasVisible) {
       try {
-        await invoke("show_main_window");
+        await platform().windowing.show();
       } catch (e) {
         console.warn("[capture] restore main window failed:", e);
       }

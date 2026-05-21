@@ -7,11 +7,19 @@
  */
 
 import { browser } from "$app/environment";
-import { invoke } from "@tauri-apps/api/core";
-import { loadTtsModel, synthesizeTts } from "$lib/sidecar/tts";
-import { TTS_BASE_FILES } from "$lib/shared/settings";
+import { cores } from "$lib/core";
+import { TTS_BASE_FILES } from "@tomat/shared";
 import { stripEmojisForTTS, stripMarkdownForTTS } from "$lib/shared/text";
 import { settingsState } from "./settings.svelte";
+
+// Local shims that replace the deleted $lib/sidecar/tts module.
+async function loadTtsModel(): Promise<void> {
+  await cores().api().tts.load();
+}
+
+async function synthesizeTts(text: string, voice?: string, speed?: number): Promise<Blob> {
+  return await cores().api().tts.synthesize({ text, voice, speed });
+}
 
 const WORD_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "word" });
 function countWords(text: string): number {
@@ -22,7 +30,9 @@ function countWords(text: string): number {
   return n;
 }
 
-const SENTENCE_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "sentence" });
+const SENTENCE_SEGMENTER = new Intl.Segmenter(undefined, {
+  granularity: "sentence",
+});
 
 // One audio chunk in the playback queue. Holds the element, its owning blob
 // URL (so we can revoke it after playback/reset), and the pre-measured
@@ -142,10 +152,13 @@ class TTSState {
       if (this.loaded || this.loading) return;
       this.loading = true;
       try {
-        await invoke("ensure_models", {
-          server: "bun",
-          paths: [...TTS_BASE_FILES],
-        });
+        // Ensure model files are present in core's model store; downloads
+        // surface in the standard download queue.
+        await cores()
+          .api()
+          .models.download({
+            items: TTS_BASE_FILES.map((source) => ({ source, group: "tts" as const })),
+          });
         await loadTtsModel();
         // Pre-warm: kokoro-js lazy-loads the per-voice tensor on the first
         // generate() call (and ORT does its JIT pass then too). Without this
@@ -175,14 +188,12 @@ class TTSState {
     } else {
       this.reset();
       this.loaded = false;
-      // Recycle the bun sidecar process to actually release the ORT session
-      // memory - in-process disposal works but the OS allocator keeps freed
-      // pages mapped, so RSS only visibly drops when the process is replaced.
-      // The sidecar comes right back up (it also hosts upcoming tools).
+      // Tell core to unload the TTS subprocess so ORT releases its native
+      // sessions. Core will respawn on the next /tts/load call.
       try {
-        await invoke("restart_bun_sidecar");
+        await cores().api().tts.unload();
       } catch (e) {
-        console.warn("[tts] restart_bun_sidecar failed:", e);
+        console.warn("[tts] unload failed:", e);
       }
     }
   }
@@ -336,7 +347,8 @@ class TTSState {
     this.inflight = (async () => {
       let wav: ArrayBuffer | null = null;
       try {
-        wav = await synthPromise;
+        const blob = await synthPromise;
+        wav = await blob.arrayBuffer();
       } catch (e) {
         console.warn("[tts] synth failed:", e);
       }
@@ -404,7 +416,12 @@ class TTSState {
         ? (audio.duration / playbackRate) * 1000
         : 0;
 
-    const entry: PlaybackEntry = { audio, url, effectiveDurationMs, playbackRate };
+    const entry: PlaybackEntry = {
+      audio,
+      url,
+      effectiveDurationMs,
+      playbackRate,
+    };
     audio.onended = () => this.onEntryEnded(entry);
     audio.onerror = () => this.onEntryEnded(entry);
 

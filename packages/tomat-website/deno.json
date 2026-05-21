@@ -1,0 +1,20 @@
+{
+  "name": "@tomat/website",
+  "version": "0.1.0",
+  "exports": {},
+  "tasks": {
+    "dev": "deno run -A npm:astro@^5 dev",
+    "build": "deno run -A npm:astro@^5 build",
+    "preview": "deno run -A npm:wrangler@^4 dev",
+    "deploy": "deno run -A npm:wrangler@^4 deploy"
+  },
+  "imports": {
+    "astro": "npm:astro@^5",
+    "astro/config": "npm:astro@^5/config",
+    "@astrojs/check": "npm:@astrojs/check@^0.9",
+    "zod": "npm:zod@^3"
+  },
+  "compilerOptions": {
+    "types": ["npm:astro@^5/client"]
+  }
+}

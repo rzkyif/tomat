@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { SettingField, SettingOption } from "$lib/shared/settings";
-  import { evalCondition } from "$lib/shared/settings";
+  import type { SettingField, SettingOption } from "@tomat/shared";
+  import { evalCondition } from "@tomat/shared";
   import type { Monitor } from "$lib/shared/types";
   import { settingsState } from "../../../state";
   import FieldCard from "./FieldCard.svelte";

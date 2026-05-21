@@ -17,9 +17,6 @@ pub enum AppError {
     NotFound(String),
 
     #[error("{0}")]
-    Sidecar(String),
-
-    #[error("{0}")]
     External(String),
 
     #[error(transparent)]
@@ -32,22 +29,13 @@ pub enum AppError {
     Tauri(#[from] tauri::Error),
 
     #[error(transparent)]
-    Reqwest(#[from] reqwest::Error),
-
-    #[error(transparent)]
     Keyring(#[from] keyring::Error),
 
     #[error(transparent)]
     Base64(#[from] base64::DecodeError),
 
     #[error(transparent)]
-    Url(#[from] url::ParseError),
-
-    #[error(transparent)]
     Image(#[from] image::ImageError),
-
-    #[error(transparent)]
-    Semaphore(#[from] tokio::sync::AcquireError),
 }
 
 impl AppError {
@@ -57,10 +45,6 @@ impl AppError {
 
     pub fn not_found(msg: impl Into<String>) -> Self {
         AppError::NotFound(msg.into())
-    }
-
-    pub fn sidecar(msg: impl Into<String>) -> Self {
-        AppError::Sidecar(msg.into())
     }
 
     pub fn external(msg: impl Into<String>) -> Self {

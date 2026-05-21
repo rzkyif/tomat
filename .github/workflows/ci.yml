@@ -10,47 +10,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  js:
-    name: JS / Svelte
+  # All Deno-driven checks (type-check, svelte-check, cargo check on Linux,
+  # format check, lint, clippy). Single job because deno task check already
+  # drives the full pipeline and we don't want a second worker to repeat the
+  # npm/JSR resolution.
+  deno:
+    name: Deno (check + fmt + lint)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: denoland/setup-deno@v2
         with:
-          node-version: 22
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      - run: bun install --frozen-lockfile
-      - run: bun run check:js
+          deno-version: v2.x
 
-  rs:
-    name: Rust (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            triple: x86_64-unknown-linux-gnu
-            exe_ext: ""
-          - os: macos-latest
-            triple: aarch64-apple-darwin
-            exe_ext: ""
-          - os: windows-latest
-            triple: x86_64-pc-windows-msvc
-            exe_ext: ".exe"
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      # Linux system deps for Tauri/webkit, xcap (PipeWire screen capture),
-      # and cpal/alsa-sys (audio capture for STT).
-      - name: Install Linux deps
-        if: matrix.os == 'ubuntu-latest'
+      # Cargo check (part of `deno task check`) needs the Tauri/webkit and
+      # PipeWire/ALSA system libs — same set the old CI installed for the
+      # Rust matrix.
+      - name: Install Linux deps for Tauri / xcap / cpal
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -61,66 +38,59 @@ jobs:
             libpipewire-0.3-dev \
             libasound2-dev \
             patchelf
+
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.91.1
           components: rustfmt, clippy
+
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src/tauri
-      # tauri-build validates every literal path in `externalBin` and `bundle.resources`
-      # (see src/tauri/tauri.conf.json and the per-OS tauri.<os>.conf.json overrides).
-      # Real artifacts come from `bun run fetch` and `bun run build:bun`, but aren't
-      # needed for cargo check. Empty placeholders satisfy the build script. If a new
-      # literal path is added to any tauri.conf.json, add a matching placeholder here
-      # or CI will fail with "doesn't exist". Note: Windows splits llama/whisper into
-      # binaries/llm and binaries/stt subdirs (see tauri.windows.conf.json); Linux/macOS
-      # keep all three sidecars at binaries/ top-level.
-      - name: Create placeholder sidecar binaries
-        shell: bash
-        run: |
-          mkdir -p src/tauri/binaries
-          touch "src/tauri/binaries/tomat-tools-server-${{ matrix.triple }}${{ matrix.exe_ext }}"
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            mkdir -p src/tauri/binaries/llm src/tauri/binaries/stt
-            touch "src/tauri/binaries/llm/tomat-llama-server-${{ matrix.triple }}${{ matrix.exe_ext }}"
-            touch "src/tauri/binaries/stt/tomat-whisper-server-${{ matrix.triple }}${{ matrix.exe_ext }}"
-          else
-            touch "src/tauri/binaries/tomat-llama-server-${{ matrix.triple }}${{ matrix.exe_ext }}"
-            touch "src/tauri/binaries/tomat-whisper-server-${{ matrix.triple }}${{ matrix.exe_ext }}"
-          fi
-      - name: Create placeholder bundled resources
-        shell: bash
-        run: |
-          mkdir -p src/tauri/resources/node_modules
-          touch src/tauri/resources/server.js
-          touch src/tauri/resources/runtime.js
-          # `bundle.resources` directory entries in tauri.conf.json must point
-          # at paths that exist on disk; an empty match is a hard error. Seed
-          # the cross-platform staging dir plus the per-OS shared-lib subdirs
-          # that the platform-specific tauri.<os>.conf.json overrides reference.
-          touch src/tauri/resources/node_modules/placeholder
-          case "${{ matrix.os }}" in
-            ubuntu-latest)
-              mkdir -p src/tauri/binaries/aarch64-unknown-linux-gnu \
-                       src/tauri/binaries/x86_64-unknown-linux-gnu
-              touch src/tauri/binaries/aarch64-unknown-linux-gnu/placeholder.so \
-                    src/tauri/binaries/x86_64-unknown-linux-gnu/placeholder.so
-              ;;
-            macos-latest)
-              mkdir -p src/tauri/binaries/aarch64-apple-darwin \
-                       src/tauri/binaries/x86_64-apple-darwin
-              touch src/tauri/binaries/aarch64-apple-darwin/placeholder.dylib \
-                    src/tauri/binaries/x86_64-apple-darwin/placeholder.dylib
-              ;;
-            windows-latest)
-              mkdir -p src/tauri/binaries/llm src/tauri/binaries/stt
-              touch src/tauri/binaries/llm/placeholder.dll \
-                    src/tauri/binaries/stt/placeholder.dll
-              ;;
-          esac
-      # Formatting is syntactic and OS-independent; only run once.
-      - if: matrix.os == 'ubuntu-latest'
-        run: cargo fmt --manifest-path src/tauri/Cargo.toml --check
-      - run: cargo clippy --manifest-path src/tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo check --manifest-path src/tauri/Cargo.toml --all-targets
+          workspaces: |
+            packages/tomat-client/src/tauri
+            packages/tomat-core-keychain
+
+      # Cache Deno's module + npm cache between runs.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/deno
+            ~/.deno
+          key: deno-${{ runner.os }}-${{ hashFiles('deno.lock', '**/deno.json', '**/deno.jsonc') }}
+          restore-keys: |
+            deno-${{ runner.os }}-
+
+      - run: deno task check
+      - run: deno fmt --check
+      - run: deno run -A npm:oxfmt@0.51.0 --check packages/tomat-client/src/ui packages/tomat-client/vite.config.ts packages/tomat-client/svelte.config.js packages/tomat-client/uno.config.ts packages/tomat-website/src packages/tomat-website/astro.config.mjs
+      - run: cargo fmt --manifest-path packages/tomat-client/src/tauri/Cargo.toml --check
+      - run: cargo fmt --manifest-path packages/tomat-core-keychain/Cargo.toml --check
+      - run: deno task lint
+
+  # Cross-platform Rust checks. Linux already runs inside `deno task check`
+  # above; this matrix covers macOS + Windows so the Rust crates (the Tauri
+  # shell and the core-keychain helper) stay buildable on every supported host
+  # without the rest of the Deno pipeline.
+  rs:
+    name: Cargo check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.91.1
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            packages/tomat-client/src/tauri
+            packages/tomat-core-keychain
+      - run: cargo clippy --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo check --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets
+      - run: cargo clippy --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings
+      - run: cargo check --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets

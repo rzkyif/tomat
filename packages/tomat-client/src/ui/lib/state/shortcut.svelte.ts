@@ -5,19 +5,9 @@
  * the user has configured.
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { platform } from "$lib/platform";
 import { vadManager } from "./vad.svelte";
 import { settingsState } from "./settings.svelte";
-
-async function windowIsVisible(): Promise<boolean> {
-  try {
-    return await getCurrentWindow().isVisible();
-  } catch {
-    return true;
-  }
-}
 
 /**
  * Tracks whether the main window is currently mid show / hide animation.
@@ -67,20 +57,19 @@ class ShortcutHandler {
   // still fire `request_hide_main_window` or toggle VAD off the half-press).
   private skipNextRelease = false;
 
-  private unlistenPressed: (() => void) | null = null;
-  private unlistenReleased: (() => void) | null = null;
+  private unsubscribe: (() => void) | null = null;
 
   async attach(): Promise<void> {
-    if (this.unlistenPressed) return;
-    this.unlistenPressed = await listen("shortcut-pressed", () => this.onPressed());
-    this.unlistenReleased = await listen("shortcut-released", () => this.onReleased());
+    if (this.unsubscribe) return;
+    this.unsubscribe = await platform().shortcuts.subscribeEvents({
+      onPressed: () => this.onPressed(),
+      onReleased: () => this.onReleased(),
+    });
   }
 
   detach() {
-    this.unlistenPressed?.();
-    this.unlistenReleased?.();
-    this.unlistenPressed = null;
-    this.unlistenReleased = null;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
     if (this.holdTimer) {
       clearTimeout(this.holdTimer);
       this.holdTimer = null;
@@ -107,12 +96,12 @@ class ShortcutHandler {
     this.pressStart = Date.now();
 
     if (mode === "push-to-talk") {
-      const visible = await windowIsVisible();
+      const visible = await platform().windowing.isVisible();
       this.wasVisibleOnPress = visible;
 
       if (!visible) {
         try {
-          await invoke("show_main_window");
+          await platform().windowing.show();
         } catch (e) {
           console.warn("[shortcut] show failed:", e);
         }
@@ -136,7 +125,7 @@ class ShortcutHandler {
       // window.isVisible() on the JS side and the AtomicBool on the Rust
       // side that the tray uses).
       try {
-        await invoke("toggle_main_window");
+        await platform().windowing.toggle();
       } catch (e) {
         console.warn("[shortcut] toggle failed:", e);
       }
@@ -170,7 +159,7 @@ class ShortcutHandler {
         try {
           // Route through the request path so the UI animates out before
           // the native window actually hides.
-          await invoke("request_hide_main_window");
+          await platform().windowing.requestHide();
         } catch (e) {
           console.warn("[shortcut] hide failed:", e);
         }

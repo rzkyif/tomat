@@ -9,18 +9,18 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "strict": true,
-    "moduleResolution": "bundler"
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "$lib": ["./src/ui/lib"],
+      "$lib/*": ["./src/ui/lib/*"],
+      "$app/types": ["./.svelte-kit/types/index.d.ts"],
+      "@tomat/shared": ["../tomat-shared/src/index.ts"],
+      "@tomat/shared/*": ["../tomat-shared/src/*"]
+    }
   },
   // The SvelteKit-generated tsconfig sweeps in everything under src/ via
-  // "src/**/*.{js,ts,svelte}". Exclude:
-  //   - src/tauri/   the Rust crate (its only JS is bundled bun output)
-  //   - src/toolkits/  ships as runtime user scripts; runs in the bun toolkit
-  //     worker pool with its own module resolution, so imports like
-  //     "mime-types" wouldn't resolve against the project's node_modules.
-  "exclude": ["src/tauri/**", "src/toolkits/**", "node_modules/**"]
-  // Path aliases are handled by https://svelte.dev/docs/kit/configuration#alias
-  // except $lib which is handled by https://svelte.dev/docs/kit/configuration#files
-  //
-  // If you want to overwrite includes/excludes, make sure to copy over the relevant includes/excludes
-  // from the referenced tsconfig.json - TypeScript does not merge them in
+  // "src/**/*.{js,ts,svelte}". Exclude src/tauri (the Rust crate) and
+  // node_modules.
+  "exclude": ["src/tauri/**", "node_modules/**"]
 }

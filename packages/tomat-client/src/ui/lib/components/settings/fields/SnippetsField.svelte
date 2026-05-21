@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SettingField } from "$lib/shared/settings";
+  import type { SettingField } from "@tomat/shared";
   import {
     normalizeTrigger,
     validateTrigger,

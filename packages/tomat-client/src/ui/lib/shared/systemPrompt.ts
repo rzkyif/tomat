@@ -7,7 +7,7 @@
 
 import { getCountryForTimezone } from "countries-and-timezones";
 import { settingsState } from "../state";
-import { DEFAULT_CONTEXT_TEMPLATE } from "./prompts";
+import { DEFAULT_CONTEXT_TEMPLATE } from "@tomat/shared";
 import type { SnippetOverride } from "./snippets";
 
 function getOsName(): string {

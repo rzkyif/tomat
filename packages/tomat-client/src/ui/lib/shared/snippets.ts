@@ -33,7 +33,10 @@ export type SnippetApplyResult = {
   systemOverride?: SnippetOverride;
 };
 
-export const SNIPPET_PLACEMENT_OPTIONS: { value: SnippetPlacement; label: string }[] = [
+export const SNIPPET_PLACEMENT_OPTIONS: {
+  value: SnippetPlacement;
+  label: string;
+}[] = [
   { value: "prepend-system", label: "Prepend System Prompt" },
   { value: "replace-system", label: "Replace System Prompt" },
   { value: "append-system", label: "Append System Prompt" },
@@ -62,7 +65,9 @@ export function validateTrigger(trigger: string, existingTriggers: string[]): st
   if (!/^@[A-Za-z0-9_-]+$/.test(trigger)) {
     return "Only letters, numbers, underscore, and dash are allowed";
   }
-  if (existingTriggers.includes(trigger)) return "This trigger is already used by another snippet";
+  if (existingTriggers.includes(trigger)) {
+    return "This trigger is already used by another snippet";
+  }
   return null;
 }
 

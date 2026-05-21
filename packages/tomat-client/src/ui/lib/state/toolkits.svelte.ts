@@ -1,552 +1,272 @@
 /**
- * State and transport for the user's installed toolkits, the user-defined
- * tools the LLM can call. Tracks the trusted and untrusted toolkit lists,
- * keeps a WebSocket open to the sidecar for running tools and streaming
- * progress back into the chat, and exposes install-job state for the
- * settings UI.
+ * Client-side toolkit registry: a reactive mirror of the core's installed
+ * toolkits and a thin pass-through for the npm-search install flow. The core
+ * now owns tool execution end-to-end (the LLM hop loop runs server-side), so
+ * this module no longer dispatches tool calls or proxies the per-call WS
+ * channel itself - it just:
+ *
+ *   - keeps `installed`, `searchResults`, and `installJobs` in sync from
+ *     `cores().api().toolkits.*` REST calls and the `toolkit.*` /
+ *     `tool.*` WS frames
+ *   - exposes `findToolkitForTool` for any consumer that still wants to map a
+ *     tool name to its owning toolkit
+ *   - sends the two client-originating tool frames (`tool.askuser_response`
+ *     and `tool.cancel`) through the active CoreClient
+ *
+ * The settings UI is the only writer; the chat-loop side just reads.
  */
 
-import { BUN_SIDECAR_HTTP_BASE_URL, BUN_SIDECAR_WS_BASE_URL } from "$lib/shared/network";
-import type { AskUserAnswer, AskUserQuestion, ToolCallState } from "$lib/shared/types";
+import type {
+  Grant,
+  InstallToolkitRequest,
+  ServerToClientFrame,
+  Tool,
+  Toolkit,
+  ToolkitSearchResult,
+} from "@tomat/shared";
+import type { AskUserAnswer } from "$lib/shared/types";
+import { cores } from "$lib/core";
 import { messagesState } from "./messages.svelte";
 import { streamingState } from "./streaming.svelte";
 
-const BASE_URL = BUN_SIDECAR_HTTP_BASE_URL;
-const WS_URL = `${BUN_SIDECAR_WS_BASE_URL}/ws/toolcall`;
-
-export type ToolkitRow = {
-  id: string;
-  kind: "file" | "folder";
-  entryPath: string;
-  displayName: string | null;
-  description: string | null;
-  trusted: boolean;
-  depsInstalled: boolean;
-  hasPackage: boolean;
-  enabled: boolean;
-  lastError: string | null;
-  tools: ToolRow[];
-  /** Tools in this toolkit that have an embedding row in the sidecar.
-   *  `< tools.length` means indexing isn't complete (e.g. embedding model
-   *  was unavailable when the toolkit was enabled). Phase-1 vector search
-   *  only finds tools whose embeddings exist. */
-  embeddedToolCount: number;
-};
-
-export type ToolRow = {
-  id: string;
-  toolkitId: string;
-  name: string;
-  description: string;
-  triggers: string[];
-  parameters: Record<string, unknown>;
-  fnExport: string;
-  /** When true, this tool bypasses the relevance filter (provided the user
-   *  has the "Always-Available Tools Bypass" toggle enabled). */
-  alwaysAvailable: boolean;
-};
-
-export type UntrustedRow = {
-  id: string;
-  kind: "file" | "folder";
-  entryPath: string;
-  hasPackage: boolean;
-};
-
-export type ToolDescriptor = {
-  id: string;
-  toolkitId: string;
-  name: string;
-  description: string;
-  score: number;
-};
-
-export type OpenAIToolDef = {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-};
-
 export type InstallJob = {
+  /** Job id from `toolkits.install` - identifies the install stream. */
   id: string;
+  /** Toolkit id the job is installing (may be unknown until install_done). */
+  toolkitId: string;
+  /** Display name used by the UI while the install runs; falls back to id. */
+  label: string;
   lines: { stream: "stdout" | "stderr"; line: string }[];
   status: "running" | "done" | "failed";
 };
 
-type ToolEvent =
-  | {
-      kind: "progress";
-      callId: string;
-      progress: number;
-      label?: string;
-      description?: string;
-    }
-  | {
-      kind: "ask_user_request";
-      callId: string;
-      requestId: string;
-      questions: AskUserQuestion[];
-    }
-  | {
-      kind: "log";
-      callId: string;
-      level: "debug" | "info" | "warn" | "error";
-      message: string;
-    }
-  | { kind: "tool_result"; callId: string; result: unknown }
-  | { kind: "tool_error"; callId: string; error: string }
-  | { kind: "tool_cancelled"; callId: string };
-
 class ToolkitsState {
-  trusted = $state<ToolkitRow[]>([]);
-  untrusted = $state<UntrustedRow[]>([]);
-  /** Keyed by toolkit id. */
+  /** The flat list returned by `GET /api/v1/toolkits`. Replaces the old
+   *  trusted/untrusted split - the new core treats every installed toolkit
+   *  as trusted (the gate is now per-permission grants, not a global
+   *  trust flag). */
+  installed = $state<Toolkit[]>([]);
+  searchResults = $state<ToolkitSearchResult[]>([]);
+  /** Keyed by job id. The core's `toolkit.install_log` and `install_done`
+   *  frames key off `jobId`, so we mirror that here. */
   installJobs = $state<Record<string, InstallJob>>({});
-  /** When true, the UI shows a disabled state and a "waiting for sidecar"
-   *  placeholder for WS-backed actions. */
+  /** Mirrors the active core's WS connection state. Read by the settings
+   *  UI to show a placeholder when the install action would be a no-op. */
   wsConnected = $state<boolean>(false);
 
-  private ws: WebSocket | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectDelay = 500;
-  private callEmitters = new Map<string, (ev: ToolEvent) => void>();
-  /** Last known toolkitId per active callId (for routing askUser responses
-   *  from the UI back into the right toolkit worker). */
-  private callToolkit = new Map<string, string>();
+  private unsubscribeWs: (() => void) | null = null;
+  private unsubscribeConn: (() => void) | null = null;
+  private hydrated = false;
 
-  // Auto-connect on first consumer, not in a constructor - `new WebSocket(...)`
-  // in a module-level constructor would fire during SSR. streamingState
-  // invokes `cancelAllActiveCalls()` from `interruptStreaming()` via the
-  // listener registered at the bottom of this module.
-
-  async ensureConnected(): Promise<void> {
-    if (typeof window === "undefined") return;
-    if (
-      this.ws &&
-      (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
-    ) {
-      return;
-    }
-    this.openSocket();
-  }
-
-  private openSocket(): void {
-    if (typeof window === "undefined") return;
-    try {
-      const ws = new WebSocket(WS_URL);
-      this.ws = ws;
-      ws.addEventListener("open", () => {
-        this.wsConnected = true;
-        this.reconnectDelay = 500;
-        // Hydrate the toolkit list as soon as the sidecar is reachable.
-        // Without this, `trusted` stays empty until the user opens the Tools
-        // settings tab, so the filter pipeline thinks the user has no
-        // enabled toolkits even when they do (and the embeddings already
-        // exist in SQLite from a previous session). Fires on every reconnect
-        // too, so a sidecar restart re-syncs state automatically.
+  /** Subscribe to the active core's WS feed and seed the installed list.
+   *  Called from `+page.svelte` onMount (the spec talks about `attach()`).
+   *  The CoreClient already handles reconnects internally; this method is
+   *  idempotent so re-mounts don't double-subscribe. */
+  attach(): void {
+    if (this.unsubscribeWs) return;
+    this.unsubscribeWs = cores().subscribeWs((f) => this.onFrame(f));
+    this.unsubscribeConn = cores().subscribeConnectionState((state) => {
+      this.wsConnected = state === "connected";
+      // First successful connection: hydrate the installed list. The CoreClient
+      // emits "connected" on every reconnect too, so we re-fetch each time to
+      // pick up anything that changed while we were offline.
+      if (state === "connected") {
         void this.refresh().catch((err) =>
-          console.warn("[toolkits] initial refresh on ws open failed:", err),
+          console.warn("[toolkits] hydrate on ws connect failed:", err),
         );
-      });
-      ws.addEventListener("message", (ev) => {
-        try {
-          const raw = typeof ev.data === "string" ? ev.data : "";
-          if (!raw) return;
-          const frame = JSON.parse(raw);
-          this.handleFrame(frame);
-        } catch (err) {
-          console.error("[toolkits] bad ws frame:", err);
-        }
-      });
-      ws.addEventListener("close", () => {
-        this.wsConnected = false;
-        // Any tool calls waiting on this socket will never complete - the
-        // sidecar's worker may have died with the connection. Fail them
-        // explicitly so the UI can render a clear error instead of the
-        // bubble spinning forever.
-        const stranded = Array.from(this.callEmitters.entries());
-        this.callEmitters.clear();
-        for (const [callId, emit] of stranded) {
-          try {
-            emit({
-              kind: "tool_error",
-              callId,
-              error: "Lost connection to sidecar",
-            });
-          } catch (err) {
-            console.error("[toolkits] stranded call cleanup failed:", err);
-          }
-        }
-        // Mark any in-flight install jobs as failed too. The sidecar will
-        // not resume them after a restart; the user needs to click Install
-        // again.
-        const nextJobs: Record<string, InstallJob> = {};
-        for (const [jobId, job] of Object.entries(this.installJobs)) {
-          nextJobs[jobId] = job.status === "running" ? { ...job, status: "failed" } : job;
-        }
-        this.installJobs = nextJobs;
-        this.scheduleReconnect();
-      });
-      ws.addEventListener("error", () => {
-        // Let the close handler drive reconnect so we don't double-schedule.
-      });
-    } catch (err) {
-      console.error("[toolkits] ws open failed:", err);
-      this.scheduleReconnect();
+      }
+    });
+    this.hydrated = true;
+  }
+
+  /** Backwards-compatible alias for the previous WS-bootstrap entry point.
+   *  `+page.svelte` still calls `ensureConnected()`; rather than touch that
+   *  file, we forward to `attach()`. */
+  ensureConnected(): void {
+    this.attach();
+  }
+
+  detach(): void {
+    if (this.unsubscribeWs) {
+      this.unsubscribeWs();
+      this.unsubscribeWs = null;
     }
+    if (this.unsubscribeConn) {
+      this.unsubscribeConn();
+      this.unsubscribeConn = null;
+    }
+    this.hydrated = false;
   }
 
-  private scheduleReconnect(): void {
-    if (this.reconnectTimer) return;
-    const delay = this.reconnectDelay;
-    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.openSocket();
-    }, delay);
-  }
+  // --- WS frame routing --------------------------------------------------
 
-  private handleFrame(frame: unknown): void {
-    if (!frame || typeof frame !== "object") return;
-    const f = frame as { kind?: string; callId?: string; id?: string };
-    if (f.kind === "install_log" && typeof f.id === "string") {
-      const job = this.installJobs[f.id];
-      if (job) {
-        job.lines.push({
-          stream: (frame as { stream: "stdout" | "stderr" }).stream,
-          line: (frame as { line: string }).line,
-        });
-        // Cap per-job buffer so a runaway `bun install` (npm warnings on a
-        // huge tree, for instance) can't pin arbitrary RSS on the webview.
+  private onFrame(frame: ServerToClientFrame): void {
+    switch (frame.kind) {
+      case "toolkit.snapshot":
+        void this.refresh().catch((err) =>
+          console.warn("[toolkits] refresh on snapshot failed:", err),
+        );
+        return;
+      case "toolkit.install_log": {
+        const job = this.installJobs[frame.jobId];
+        if (!job) return;
+        job.lines.push({ stream: frame.stream, line: frame.line });
+        // Cap per-job buffer so a runaway npm install (huge dependency tree,
+        // npm warnings) can't pin arbitrary RSS on the webview.
         if (job.lines.length > 1000) {
           job.lines.splice(0, job.lines.length - 1000);
         }
-        // Svelte reactivity on nested object mutation: reassign the whole
-        // record so the $state proxy picks up the change.
-        this.installJobs = { ...this.installJobs, [f.id]: job };
+        // Reassign the record so Svelte's $state proxy picks up the change
+        // (mutating nested objects in-place isn't always tracked).
+        this.installJobs = { ...this.installJobs, [frame.jobId]: { ...job } };
+        return;
       }
-      return;
-    }
-    if (f.kind === "install_done" && typeof f.id === "string") {
-      const job = this.installJobs[f.id];
-      if (job) {
-        job.status = (frame as { ok: boolean }).ok ? "done" : "failed";
-        this.installJobs = { ...this.installJobs, [f.id]: job };
+      case "toolkit.install_done": {
+        const job = this.installJobs[frame.jobId];
+        if (job) {
+          this.installJobs = {
+            ...this.installJobs,
+            [frame.jobId]: {
+              ...job,
+              status: frame.ok ? "done" : "failed",
+              toolkitId: frame.id || job.toolkitId,
+            },
+          };
+        }
+        // Refresh so the new toolkit (or the failure state) is reflected.
+        void this.refresh().catch((err) =>
+          console.warn("[toolkits] refresh after install failed:", err),
+        );
+        return;
       }
-      // Refresh the toolkit list so the UI reflects deps_installed = 1.
-      void this.refresh();
-      return;
-    }
-
-    if (typeof f.callId !== "string") return;
-    const emit = this.callEmitters.get(f.callId);
-    if (emit) {
-      emit(frame as ToolEvent);
+      // tool.* frames are routed to messagesState by streaming.svelte.ts so
+      // the active tool-call bubble updates. We don't need to mirror them
+      // here - the spec calls out emitting via a per-callId emitter, but the
+      // new arch has already moved that listener up into streaming/messages.
+      default:
+        return;
     }
   }
 
-  // --- API HTTP wrappers
+  // --- CRUD --------------------------------------------------------------
 
+  /** Pull the latest toolkit list from the core. */
   async refresh(): Promise<void> {
-    const res = await fetch(`${BASE_URL}/api/toolkits/scan`, { cache: "no-store" });
-    if (!res.ok) {
-      let detail = "";
-      try {
-        detail = await res.text();
-      } catch {
-        /* ignore */
-      }
-      throw new Error(`scan failed (${res.status}): ${detail}`.trim());
+    const list = await cores().api().toolkits.list();
+    this.installed = list;
+  }
+
+  /** npm-registry search; results land in `searchResults`. Empty query
+   *  clears the result list without a round-trip. */
+  async search(q: string): Promise<void> {
+    const trimmed = q.trim();
+    if (!trimmed) {
+      this.searchResults = [];
+      return;
     }
-    const data = (await res.json()) as { trusted?: ToolkitRow[]; untrusted?: UntrustedRow[] };
-    this.trusted = data.trusted ?? [];
-    this.untrusted = data.untrusted ?? [];
-
-    // If any enabled toolkit is missing embeddings (e.g. it was enabled
-    // before the embedding model finished downloading, so the initial
-    // refreshEmbeddingsFor silently bailed), kick off a backfill. The
-    // sidecar no-ops if the model still isn't ready, so this is safe to
-    // call eagerly and we'll re-attempt on the next refresh.
-    const needsReindex = this.trusted.some(
-      (t) => t.enabled && t.embeddedToolCount < t.tools.length,
-    );
-    if (needsReindex) {
-      void this.reindex().catch((err) => console.warn("[toolkits] reindex failed:", err));
-    }
+    const res = await cores().api().toolkits.search(trimmed);
+    this.searchResults = res.results;
   }
 
-  /** Tell the sidecar to (re-)embed every enabled toolkit's tools. Refreshes
-   *  the local row state when done so the UI picks up the new
-   *  `embeddedToolCount`. Returns the number of tools that were newly
-   *  embedded. */
-  async reindex(): Promise<{ embedded: number; skipped: boolean }> {
-    const res = await fetch(`${BASE_URL}/api/toolkits/reindex`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    });
-    if (!res.ok) {
-      let detail = "";
-      try {
-        detail = await res.text();
-      } catch {
-        /* ignore */
-      }
-      throw new Error(`reindex failed (${res.status}): ${detail}`.trim());
-    }
-    const data = (await res.json()) as { embedded: number; skipped: boolean };
-    // Re-fetch scan so embeddedToolCount reflects the new state. Use a
-    // direct fetch (not refresh) to avoid recursion.
-    const scanRes = await fetch(`${BASE_URL}/api/toolkits/scan`, { cache: "no-store" });
-    if (scanRes.ok) {
-      const scan = (await scanRes.json()) as { trusted?: ToolkitRow[]; untrusted?: UntrustedRow[] };
-      this.trusted = scan.trusted ?? [];
-      this.untrusted = scan.untrusted ?? [];
-    }
-    return data;
-  }
-
-  /** After a state-mutating POST, re-fetch the scan and assert the expected
-   *  row predicate held. Throws a loud error if the backend's reply didn't
-   *  actually land. Covers "POST succeeded but state didn't change" gaps so
-   *  the user always sees an alert instead of a no-op button. */
-  private async assertAfter(
-    id: string,
-    label: string,
-    predicate: (row: ToolkitRow | UntrustedRow | null) => boolean,
-  ): Promise<void> {
-    await this.refresh();
-    const row =
-      this.trusted.find((t) => t.id === id) ?? this.untrusted.find((u) => u.id === id) ?? null;
-    if (!predicate(row)) {
-      throw new Error(
-        `${label} looked successful but the toolkit state didn't change (id "${id}"). Check sidecar logs.`,
-      );
-    }
-  }
-
-  async trust(id: string): Promise<void> {
-    await this.post("/api/toolkits/trust", { id });
-    await this.assertAfter(id, "trust", (row) => !!row && "trusted" in row && row.trusted === true);
-  }
-
-  async untrust(id: string): Promise<void> {
-    await this.post("/api/toolkits/untrust", { id });
-    await this.assertAfter(
-      id,
-      "untrust",
-      (row) => !row || !("trusted" in row) || row.trusted === false,
-    );
-  }
-
-  async remove(id: string): Promise<void> {
-    await this.post("/api/toolkits/remove", { id });
-    await this.refresh();
-  }
-
-  async install(id: string): Promise<void> {
-    await this.ensureConnected();
+  /** Start an install. Returns the job id so the caller can correlate it
+   *  with a log panel in the UI. Optimistically registers an `InstallJob`
+   *  row so the running indicator shows up immediately. */
+  async install(req: InstallToolkitRequest): Promise<string> {
+    const label = req.source === "npm" ? req.name : (req.slug ?? req.path);
+    const res = await cores().api().toolkits.install(req);
     this.installJobs = {
       ...this.installJobs,
-      [id]: { id, lines: [], status: "running" },
+      [res.jobId]: {
+        id: res.jobId,
+        toolkitId: res.toolkitId,
+        label,
+        lines: [],
+        status: "running",
+      },
     };
-    await this.post("/api/toolkits/install", { id });
+    return res.jobId;
   }
 
-  async uninstallDeps(id: string): Promise<void> {
-    await this.post("/api/toolkits/uninstall-deps", { id });
-    await this.assertAfter(
-      id,
-      "uninstall dependencies",
-      (row) => !!row && "depsInstalled" in row && row.depsInstalled === false,
-    );
-  }
-
-  async enable(id: string): Promise<void> {
-    await this.post("/api/toolkits/enable", { id });
-    await this.assertAfter(
-      id,
-      "enable",
-      (row) => !!row && "enabled" in row && row.enabled === true,
-    );
-  }
-
-  async disable(id: string): Promise<void> {
-    await this.post("/api/toolkits/disable", { id });
-    await this.assertAfter(
-      id,
-      "disable",
-      (row) => !!row && "enabled" in row && row.enabled === false,
-    );
-  }
-
-  /** Ask the sidecar to boot every runnable trusted toolkit whose METADATA
-   *  hasn't been cached yet and stash display_name / description. Then
-   *  refresh so the UI picks up the new metadata. Called on settings open so
-   *  users see names and descriptions for toolkits trusted in previous
-   *  sessions (metadata is recomputed every cold start). */
-  async refreshMissingMetadata(): Promise<void> {
-    await this.post("/api/toolkits/refresh-metadata", {});
+  async uninstall(id: string): Promise<void> {
+    await cores().api().toolkits.delete(id);
     await this.refresh();
   }
 
-  hasEnabledTools(): boolean {
-    // Require embedded tools, not just parsed-tool count. Phase-1 vector
-    // search only finds tools whose embeddings exist in tool_embeddings,
-    // so a toolkit that's enabled but indexed=0 contributes nothing.
-    return this.trusted.some((t) => t.enabled && t.embeddedToolCount > 0);
+  async enableToolkit(id: string): Promise<void> {
+    await cores().api().toolkits.enable(id);
+    await this.refresh();
   }
 
-  /** Flat list of every tool from every enabled, trusted toolkit. Used when
-   *  the relevance filter is bypassed (filtering disabled, or the total tool
-   *  count is below the user's threshold). Excludes tools whose toolkit is
-   *  disabled or untrusted. */
-  allEnabledTools(): ToolRow[] {
-    const out: ToolRow[] = [];
-    for (const tk of this.trusted) {
-      if (!tk.enabled) continue;
-      for (const t of tk.tools) out.push(t);
-    }
-    return out;
+  async disableToolkit(id: string): Promise<void> {
+    await cores().api().toolkits.disable(id);
+    await this.refresh();
   }
 
-  /** Embed a user prompt (phase-1 relevance vector). Returns null when the
-   *  sidecar's embedding model isn't ready yet. */
-  async embed(text: string): Promise<Float32Array | null> {
+  async enableTool(toolkitId: string, toolName: string): Promise<void> {
+    await cores().api().toolkits.enableTool(toolkitId, toolName);
+    await this.refreshTools(toolkitId);
+  }
+
+  async disableTool(toolkitId: string, toolName: string): Promise<void> {
+    await cores().api().toolkits.disableTool(toolkitId, toolName);
+    await this.refreshTools(toolkitId);
+  }
+
+  /** Set grants for a single tool and refresh the toolkit's tool list so
+   *  `missingRequired` reflects the new state immediately. Throws if the
+   *  REST call fails (the UI shows the error inline). */
+  async setGrants(
+    toolkitId: string,
+    toolName: string,
+    grants: Array<{ key: string; state: Grant["state"] }>,
+  ): Promise<void> {
+    await cores().api().toolkits.setGrants(toolkitId, toolName, grants);
+    await this.refreshTools(toolkitId);
+  }
+
+  /** Refresh the tools embedded inside a single toolkit row. The /toolkits
+   *  list endpoint doesn't embed tools (per the spec: tools are nested via
+   *  /toolkits/:id/tools), so after a mutation we splice the fresh tool
+   *  list into the matching installed row. */
+  private async refreshTools(toolkitId: string): Promise<void> {
     try {
-      const res = await fetch(`${BASE_URL}/api/embed`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ texts: [text] }),
-      });
-      if (res.status === 503) return null;
-      if (!res.ok) throw new Error(`embed failed (${res.status})`);
-      const data = (await res.json()) as { vectors: number[][] };
-      if (!Array.isArray(data.vectors) || data.vectors.length === 0) return null;
-      return new Float32Array(data.vectors[0]);
-    } catch (err) {
-      console.warn("[toolkits] embed failed:", err);
-      return null;
-    }
-  }
-
-  async filter(vector: Float32Array, topK: number): Promise<ToolDescriptor[]> {
-    try {
-      const res = await fetch(`${BASE_URL}/api/toolkits/filter`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ vector: Array.from(vector), topK }),
-      });
-      if (!res.ok) throw new Error(`filter failed (${res.status})`);
-      const data = (await res.json()) as { candidates?: ToolDescriptor[] };
-      return data.candidates ?? [];
-    } catch (err) {
-      console.warn("[toolkits] filter failed:", err);
-      return [];
-    }
-  }
-
-  async toolSchemas(ids: string[]): Promise<OpenAIToolDef[]> {
-    if (ids.length === 0) return [];
-    try {
-      const res = await fetch(`${BASE_URL}/api/toolkits/tool-schemas`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ids }),
-      });
-      if (!res.ok) throw new Error(`tool-schemas failed (${res.status})`);
-      const data = (await res.json()) as { tools?: OpenAIToolDef[] };
-      return data.tools ?? [];
-    } catch (err) {
-      console.warn("[toolkits] tool-schemas failed:", err);
-      return [];
-    }
-  }
-
-  /** Resolve the owning toolkit id for a given tool name. Uses the trusted
-   *  list (scan results). Returns null if unknown. */
-  findToolkitForTool(toolName: string): { toolkitId: string; fnExport: string } | null {
-    for (const tk of this.trusted) {
-      if (!tk.enabled) continue;
-      for (const t of tk.tools) {
-        if (t.name === toolName) return { toolkitId: tk.id, fnExport: t.fnExport };
+      const { tools } = await cores().api().toolkits.listTools(toolkitId);
+      const idx = this.installed.findIndex((t) => t.id === toolkitId);
+      if (idx >= 0) {
+        this.installed[idx] = { ...this.installed[idx], tools };
+        this.installed = [...this.installed];
       }
+    } catch (err) {
+      console.warn(`[toolkits] tools refresh for ${toolkitId} failed:`, err);
     }
-    return null;
   }
 
-  /** Start a tool call. Returns a promise that resolves with the terminal
-   *  result/error and a callback to forward askUser answers back. */
-  async runToolCall(opts: {
-    callId: string;
-    toolkitId: string;
-    toolName: string;
-    argsRaw: string;
-    chatContext: { userMessage: string; sessionId: string | null };
-    onProgress?: (p: { progress: number; label?: string; description?: string }) => void;
-    onAskUser?: (req: { requestId: string; questions: AskUserQuestion[] }) => void;
-    onLog?: (line: { level: string; message: string }) => void;
-  }): Promise<{ ok: boolean; result?: unknown; error?: string; cancelled?: boolean }> {
-    await this.ensureConnected();
-    this.callToolkit.set(opts.callId, opts.toolkitId);
-    return new Promise((resolve) => {
-      const cleanup = (res: {
-        ok: boolean;
-        result?: unknown;
-        error?: string;
-        cancelled?: boolean;
-      }) => {
-        this.callEmitters.delete(opts.callId);
-        this.callToolkit.delete(opts.callId);
-        resolve(res);
-      };
-      this.callEmitters.set(opts.callId, (ev) => {
-        switch (ev.kind) {
-          case "progress":
-            opts.onProgress?.({
-              progress: ev.progress,
-              label: ev.label,
-              description: ev.description,
-            });
-            break;
-          case "ask_user_request":
-            opts.onAskUser?.({ requestId: ev.requestId, questions: ev.questions });
-            break;
-          case "log":
-            opts.onLog?.({ level: ev.level, message: ev.message });
-            break;
-          case "tool_result":
-            cleanup({ ok: true, result: ev.result });
-            break;
-          case "tool_error":
-            cleanup({ ok: false, error: ev.error });
-            break;
-          case "tool_cancelled":
-            cleanup({ ok: false, cancelled: true });
-            break;
-        }
-      });
-      this.sendFrame({
-        kind: "start",
-        callId: opts.callId,
-        toolkitId: opts.toolkitId,
-        toolName: opts.toolName,
-        arguments: opts.argsRaw,
-        chatContext: opts.chatContext,
-      });
-    });
+  /** Load the full tool list for a toolkit so the per-tool UI can render.
+   *  Public so the settings panel can lazy-load tools when the user expands
+   *  a toolkit row. */
+  async loadTools(toolkitId: string): Promise<Tool[]> {
+    const { tools } = await cores().api().toolkits.listTools(toolkitId);
+    const idx = this.installed.findIndex((t) => t.id === toolkitId);
+    if (idx >= 0) {
+      this.installed[idx] = { ...this.installed[idx], tools };
+      this.installed = [...this.installed];
+    }
+    return tools;
   }
 
-  answerAskUser(callId: string, requestId: string, answers: AskUserAnswer[]): void {
-    this.sendFrame({ kind: "ask_user_response", callId, requestId, answers });
+  // --- WS-frame senders --------------------------------------------------
+
+  /** Send the user's askUser answers back to the worker. Mirrors the choice
+   *  onto the local tool-call bubble so the UI flips out of "awaiting_user"
+   *  immediately instead of waiting for the next progress frame. */
+  respondAskUser(callId: string, requestId: string, answers: AskUserAnswer[]): void {
+    cores().api().chat.respondAskUser(callId, requestId, answers);
     messagesState.recordToolCallAskUserAnswers(callId, answers);
   }
 
-  cancelCall(callId: string): void {
-    this.sendFrame({ kind: "cancel", callId });
+  /** Cancel a single tool call. */
+  cancelToolCall(callId: string): void {
+    cores().api().chat.cancelTool(callId);
   }
 
   /** Send cancel frames for every tool call bubble still in a non-terminal
@@ -558,117 +278,31 @@ class ToolkitsState {
       const tc = m.toolCall;
       if (!tc) continue;
       if (tc.status === "pending" || tc.status === "running" || tc.status === "awaiting_user") {
-        this.cancelCall(tc.callId);
+        this.cancelToolCall(tc.callId);
       }
     }
   }
 
-  /** Helper to kick off a tool call AND wire it into messagesState's bubble
-   *  in one shot. Used by the llm.ts tool-call loop. */
-  async dispatchToolCall(params: {
-    toolCallId: string;
-    toolName: string;
-    argsRaw: string;
-    chatContext: { userMessage: string; sessionId: string | null };
-  }): Promise<{
-    ok: boolean;
-    result?: unknown;
-    error?: string;
-    cancelled?: boolean;
-    toolCallId: string;
-  }> {
-    const resolved = this.findToolkitForTool(params.toolName);
-    if (!resolved) {
-      return {
-        ok: false,
-        error: `tool "${params.toolName}" is not enabled`,
-        toolCallId: params.toolCallId,
-      };
-    }
-    const callId = `${params.toolCallId}-${Math.random().toString(36).slice(2, 8)}`;
-    let parsedArgs: Record<string, unknown> = {};
-    try {
-      const v = JSON.parse(params.argsRaw);
-      if (v && typeof v === "object" && !Array.isArray(v)) {
-        parsedArgs = v as Record<string, unknown>;
-      }
-    } catch {
-      /* leave empty */
-    }
-    const tcState: ToolCallState = {
-      callId,
-      toolCallId: params.toolCallId,
-      toolkitId: resolved.toolkitId,
-      toolName: params.toolName,
-      arguments: parsedArgs,
-      status: "running",
-      logs: [],
-    };
-    messagesState.appendToolCall(tcState);
+  // --- read-only helpers -------------------------------------------------
 
-    const outcome = await this.runToolCall({
-      callId,
-      toolkitId: resolved.toolkitId,
-      toolName: params.toolName,
-      argsRaw: params.argsRaw,
-      chatContext: params.chatContext,
-      onProgress: (p) =>
-        messagesState.updateToolCall(callId, {
-          status: "running",
-          progress: p.progress,
-          label: p.label,
-          description: p.description,
-        }),
-      onAskUser: (r) => messagesState.setToolCallAskUser(callId, r.requestId, r.questions),
-      onLog: (l) =>
-        messagesState.appendToolCallLog(callId, {
-          level: l.level as "debug" | "info" | "warn" | "error",
-          message: l.message,
-          ts: Date.now(),
-        }),
-    });
-
-    if (outcome.ok) {
-      messagesState.resolveToolCall(callId, { result: outcome.result });
-    } else if (outcome.cancelled) {
-      messagesState.resolveToolCall(callId, { cancelled: true });
-    } else {
-      messagesState.resolveToolCall(callId, { error: outcome.error });
+  /** Resolve the owning toolkit for a given tool name. Returns null if the
+   *  tool isn't enabled in any installed toolkit. Used by the LLM hop loop
+   *  (when one runs client-side) to associate a tool name with its toolkit
+   *  id - the chat orchestration is now server-side, but we keep this for
+   *  any UI code that still needs to look up a tool by name (e.g. drawing
+   *  a label next to a pending tool call). */
+  findToolkitForTool(toolName: string): { toolkitId: string; toolId: string } | null {
+    for (const tk of this.installed) {
+      if (!tk.enabled) continue;
+      const tool = tk.tools?.find((t) => t.name === toolName && t.enabled);
+      if (tool) return { toolkitId: tk.id, toolId: tool.id };
     }
-    return { ...outcome, toolCallId: params.toolCallId };
+    return null;
   }
 
-  private sendFrame(frame: unknown): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      // Defer - tryConnect and re-send once open. Keep it simple: log and
-      // drop; the round-trip will surface as a tool error from the server.
-      console.warn("[toolkits] ws not open; frame dropped");
-      void this.ensureConnected();
-      return;
-    }
-    try {
-      this.ws.send(JSON.stringify(frame));
-    } catch (err) {
-      console.error("[toolkits] ws send failed:", err);
-    }
-  }
-
-  private async post(pathname: string, body: unknown): Promise<unknown> {
-    const res = await fetch(`${BASE_URL}${pathname}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      let detail = "";
-      try {
-        detail = JSON.stringify(await res.json());
-      } catch {
-        /* ignore */
-      }
-      throw new Error(`${pathname} failed (${res.status}): ${detail}`);
-    }
-    return res.json();
+  /** Back-compat shim for callers still using the legacy method name. */
+  answerAskUser(callId: string, requestId: string, answers: AskUserAnswer[]): void {
+    this.respondAskUser(callId, requestId, answers);
   }
 }
 

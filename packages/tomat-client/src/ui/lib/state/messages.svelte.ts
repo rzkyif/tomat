@@ -4,20 +4,22 @@
  * helpers). Sister slices own the rest:
  *
  *   - sessionsState: session list + active id + title + load/new/delete
- *   - persistenceState: debounced save + beforeunload flush + attachment GC
  *   - streamingState: live LLM stream flags + buffered chunks + TTS feed +
  *     interruptStreaming orchestration
  *
- * Consumers should reach for the slice that owns what they need; this file
- * doesn't re-export anything by way of forwarders.
+ * Persistence is server-side now: addUserMessage / updateUserMessage /
+ * deleteUserMessage POST/PATCH/DELETE against cores().api().sessions before
+ * mutating local state. Tool-call and assistant-content mutations are
+ * driven by WS frames the server emits and don't round-trip back.
  */
 
+import type { Message as ServerMessage, ServerToClientFrame } from "@tomat/shared";
 import {
-  getTextContent,
-  makeMessageId,
   type AskUserAnswer,
   type AskUserQuestion,
   type Attachment,
+  getTextContent,
+  makeMessageId,
   type Message,
   type MessageContent,
   type MessagePart,
@@ -27,7 +29,7 @@ import {
   type ToolCallState,
   type ToolCallStatus,
 } from "$lib/shared/types";
-import { persistenceState } from "./persistence.svelte";
+import { cores } from "$lib/core";
 import { sessionsState } from "./sessions.svelte";
 import { settingsState } from "./settings.svelte";
 import { snippetsState } from "./snippets.svelte";
@@ -99,7 +101,6 @@ class MessagesState {
   addMessage(message: Message) {
     if (!message.id) message.id = makeMessageId();
     this.messages.unshift(message);
-    persistenceState.scheduleSave();
   }
 
   /** Insert a message at the newest position WITHIN the current turn.
@@ -118,13 +119,13 @@ class MessagesState {
     const anchorId = streamingState.turnAnchorId;
     if (anchorId === null) {
       this.messages.unshift(message);
-      persistenceState.scheduleSave();
+
       return;
     }
     const anchorIdx = this.messages.findIndex((m) => m.id === anchorId);
     if (anchorIdx < 0) {
       this.messages.unshift(message);
-      persistenceState.scheduleSave();
+
       return;
     }
     let nextNewerUserIdx = -1;
@@ -135,7 +136,6 @@ class MessagesState {
       }
     }
     this.messages.splice(nextNewerUserIdx + 1, 0, message);
-    persistenceState.scheduleSave();
   }
 
   /** Splice every non-user bubble between `anchorUserId` and the next-newer
@@ -143,9 +143,9 @@ class MessagesState {
    *  `regenerateTurn` (edit / reprocess) and `deleteUserMessage` to clear a
    *  whole multi-bubble turn atomically; both edges are preserved (the
    *  anchor user and the next user message stay put). */
-  private spliceTurnAfter(anchorUserId: string): number {
+  private spliceTurnAfter(anchorUserId: string): string[] {
     const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === anchorUserId);
-    if (userIdx < 0) return 0;
+    if (userIdx < 0) return [];
     // newest-first: walk from userIdx-1 down toward 0, stop at the first
     // other user message (or the array head). Everything in between is part
     // of this turn.
@@ -158,10 +158,30 @@ class MessagesState {
     }
     const startIdx = stopIdx + 1;
     const count = userIdx - startIdx;
+    const removedIds: string[] = [];
     if (count > 0) {
-      this.messages.splice(startIdx, count);
+      const removed = this.messages.splice(startIdx, count);
+      for (const m of removed) if (m.id) removedIds.push(m.id);
     }
-    return count;
+    // Propagate the deletions to the server so chat.start doesn't replay
+    // stale assistant / tool / reasoning bubbles. Fire-and-forget.
+    void this.serverDeleteMessages(removedIds);
+    return removedIds;
+  }
+
+  /** Best-effort batch delete on the paired core. Silently swallows per-id
+   *  failures so a transient network error doesn't break the UI flow. */
+  private async serverDeleteMessages(ids: string[]): Promise<void> {
+    const sessionId = sessionsState.id;
+    if (!sessionId || ids.length === 0) return;
+    const api = cores().api().sessions;
+    for (const id of ids) {
+      try {
+        await api.deleteMessage(sessionId, id);
+      } catch (e) {
+        console.warn(`[messages] server delete ${id} failed:`, e);
+      }
+    }
   }
 
   /**
@@ -182,11 +202,21 @@ class MessagesState {
 
     const trimmedText = payload.text.trim();
     if (!sessionsState.id) {
-      sessionsState.id = Date.now().toString();
-      sessionsState.title = sessionsState.title || sessionsState.defaultTitle;
+      // Mint the session server-side so the rest of the flow can reference
+      // a real ULID. Falls back to a local timestamp ID if the call fails
+      // (e.g. offline core) — the next persist attempt will still try.
+      try {
+        const created = await cores().api().sessions.create();
+        sessionsState.id = created.id;
+        sessionsState.title = sessionsState.title || sessionsState.defaultTitle;
+      } catch (e) {
+        console.warn("[messages] session create failed; using local id:", e);
+        sessionsState.id = payload.timestamp.toString();
+        sessionsState.title = sessionsState.title || sessionsState.defaultTitle;
+      }
     }
     const sessionId = sessionsState.id;
-    const tsStr = payload.timestamp.toString();
+    const messageId = payload.timestamp.toString();
 
     const parts: MessagePart[] = [];
     if (trimmedText) parts.push({ type: "text", text: trimmedText });
@@ -199,7 +229,13 @@ class MessagesState {
           const filename = att.filename.includes(".")
             ? att.filename
             : `${att.filename || "image"}.${ext}`;
-          const written = await writeSessionAttachment(sessionId, tsStr, filename, att.pendingData);
+          const written = await writeSessionAttachment(
+            sessionId,
+            messageId,
+            filename,
+            att.pendingData,
+            mime,
+          );
           parts.push({
             type: "image_file",
             filename: written.filename,
@@ -210,9 +246,10 @@ class MessagesState {
           const filename = ensureMarkdownExtension(att.filename || "document.md");
           const written = await writeSessionAttachment(
             sessionId,
-            tsStr,
+            messageId,
             filename,
             utf8ToBase64(att.pendingData),
+            "text/markdown",
           );
           parts.push({
             type: "document_file",
@@ -221,13 +258,13 @@ class MessagesState {
           });
         }
       } catch (e) {
-        console.error("[messages] Failed to write attachment:", e);
+        console.error("[messages] Failed to upload attachment:", e);
       }
     }
 
     const content: MessageContent =
       parts.length === 1 && parts[0].type === "text" ? parts[0].text : parts;
-    const userMsg: Message = { id: tsStr, role: "user", content };
+    const userMsg: Message = { id: messageId, role: "user", content };
     if (payload.systemPromptOverride) {
       userMsg.systemPromptOverride = payload.systemPromptOverride;
     }
@@ -241,7 +278,8 @@ class MessagesState {
         alwaysAvailable: null,
       });
     }
-    persistenceState.scheduleSave();
+    // Persist server-side so chat.start sees the message in history.
+    await this.persistUserMessage(userMsg);
   }
 
   /** Stable id convention: every tool_filter message is paired 1:1 with a
@@ -280,7 +318,6 @@ class MessagesState {
         this.messages.splice(userIdx, 0, bubble);
       }
     }
-    persistenceState.scheduleSave();
   }
 
   /** Patch the tool_filter bubble paired with `userMessageId`. No-op if the
@@ -296,7 +333,6 @@ class MessagesState {
       ...this.messages[idx],
       relevantTools: { ...existing, ...patch },
     };
-    persistenceState.scheduleSave();
   }
 
   /** Remove the tool_filter bubble paired with `userMessageId`. Used when the
@@ -364,7 +400,6 @@ class MessagesState {
       ...this.messages[idx],
       toolCall: { ...existing, ...patch },
     };
-    persistenceState.scheduleSave();
   }
 
   /** Mark a tool call terminated with either a result or an error. Sets the
@@ -394,7 +429,6 @@ class MessagesState {
         error: payload.error,
       },
     };
-    persistenceState.scheduleSave();
   }
 
   /** Record an askUser request on the bubble so the form renders. */
@@ -421,7 +455,6 @@ class MessagesState {
         askUser: { ...existing.askUser, answers },
       },
     };
-    persistenceState.scheduleSave();
   }
 
   /** Append a log line visible in the bubble's details disclosure. */
@@ -458,7 +491,7 @@ class MessagesState {
         alwaysAvailable: null,
       });
     }
-    await persistenceState.flushSave();
+
     await this.sendMessagesHandler?.(anchorUserId);
   }
 
@@ -477,7 +510,6 @@ class MessagesState {
       : this.messages.findIndex((m) => m.role === "user");
     if (userIdx < 0) return;
 
-    const prevContent = this.messages[userIdx].content;
     const userMsgId = this.messages[userIdx].id;
 
     const isEmpty =
@@ -497,7 +529,7 @@ class MessagesState {
       if (userMsgId) {
         await this.deleteUserMessage(userMsgId);
       }
-      persistenceState.cleanupRemovedAttachments(prevContent, content);
+
       return;
     }
 
@@ -523,10 +555,24 @@ class MessagesState {
 
     const updatedMsg: Message = { role: "user", content: expandedContent };
     if (userMsgId) updatedMsg.id = userMsgId;
-    if (systemPromptOverride) updatedMsg.systemPromptOverride = systemPromptOverride;
+    if (systemPromptOverride) {
+      updatedMsg.systemPromptOverride = systemPromptOverride;
+    }
     this.messages[userIdx] = updatedMsg;
 
-    persistenceState.cleanupRemovedAttachments(prevContent, content);
+    // Propagate the edit to the server so the next chat.start sees the new
+    // content (otherwise edit-and-resend regenerates against the old text).
+    if (userMsgId && sessionsState.id) {
+      void cores()
+        .api()
+        .sessions.patchMessage(sessionsState.id, userMsgId, {
+          content: expandedContent,
+          systemPromptOverride,
+        } as unknown as Partial<ServerMessage>)
+        .catch((e) => {
+          console.warn(`[messages] server patch ${userMsgId} failed:`, e);
+        });
+    }
 
     const isFirstMessage = this.messages.filter((m) => m.role === "user").length === 1;
     if (isFirstMessage) {
@@ -539,7 +585,7 @@ class MessagesState {
       // Defensive: every user message gets an id at addUserMessage time, but
       // older session files may have been hydrated without one. Without an
       // anchor we can't safely splice the turn, so fall back to a tail send.
-      await persistenceState.flushSave();
+
       await this.sendMessagesHandler?.();
       return;
     }
@@ -562,11 +608,10 @@ class MessagesState {
     const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === messageId);
     if (userIdx < 0) return;
 
-    const prevContent = this.messages[userIdx].content;
-
     // Splice the turn first (everything newer than the user message, up to
     // the next user message). Then refind the user message's index (it may
-    // have shifted) and splice it too.
+    // have shifted) and splice it too. spliceTurnAfter handles the server
+    // delete of the turn; we delete the user message separately.
     this.spliceTurnAfter(messageId);
     const refreshedUserIdx = this.messages.findIndex(
       (m) => m.role === "user" && m.id === messageId,
@@ -574,16 +619,13 @@ class MessagesState {
     if (refreshedUserIdx >= 0) {
       this.messages.splice(refreshedUserIdx, 1);
     }
-
-    persistenceState.cleanupRemovedAttachments(prevContent, "");
+    void this.serverDeleteMessages([messageId]);
 
     const remainingUsers = this.messages.filter((m) => m.role === "user").length;
     if (remainingUsers === 0) {
       await sessionsState.delete();
       return;
     }
-
-    await persistenceState.flushSave();
   }
 
   /** Regenerate the entire turn that produced the given assistant/error
@@ -660,13 +702,17 @@ class MessagesState {
     } else {
       // Orphaned bubble: nothing to anchor a turn-splice on, so just remove
       // the bubble and any paired reasoning in place.
+      const removedIds: string[] = [messageId];
       this.messages.splice(idx, 1);
       const reasoningIdx = this.messages.findIndex(
         (m) => m.role === "reasoning" && m.pairedAssistantId === messageId,
       );
       if (reasoningIdx >= 0) {
+        const reasoningId = this.messages[reasoningIdx].id;
+        if (reasoningId) removedIds.push(reasoningId);
         this.messages.splice(reasoningIdx, 1);
       }
+      void this.serverDeleteMessages(removedIds);
     }
 
     const remainingUsers = this.messages.filter((m) => m.role === "user").length;
@@ -674,8 +720,105 @@ class MessagesState {
       await sessionsState.delete();
       return;
     }
+  }
 
-    await persistenceState.flushSave();
+  // --- new helpers wired to the server-side persistence + WS frames -------
+
+  /** Apply an in-memory upsert from a server `session.updated` frame.
+   *  The server is the source of truth for assistant/tool/reasoning messages
+   *  it persists during chat streaming; this handler keeps the client mirror
+   *  honest for cases where a chunk-by-chunk delta path missed the bubble. */
+  upsertFromServer(msg: ServerMessage): void {
+    const idx = this.messages.findIndex((m) => m.id === msg.id);
+    // Round-trip the server's shape into the client's richer Message type.
+    // The server stores content_json verbatim, so for messages first authored
+    // client-side the round-trip is lossless. For messages first authored
+    // server-side (assistant chunks, tool results), the relevant fields
+    // (content, callId, status, result, error) map 1:1.
+    const local = msg as unknown as Message;
+    if (idx >= 0) {
+      this.messages[idx] = { ...this.messages[idx], ...local };
+    } else {
+      // Insert preserving newest-first ordering. Server assigns a monotonic
+      // `ord`; we don't store ord on Message, so we just unshift.
+      this.messages.unshift(local);
+    }
+  }
+
+  /** Remove a message by id (server-initiated delete). */
+  removeById(id: string): void {
+    const idx = this.messages.findIndex((m) => m.id === id);
+    if (idx >= 0) this.messages.splice(idx, 1);
+  }
+
+  /** Apply a server-emitted tool.* frame to the matching bubble. */
+  applyToolEvent(
+    frame: Extract<
+      ServerToClientFrame,
+      {
+        kind:
+          | "tool.progress"
+          | "tool.askuser_request"
+          | "tool.log"
+          | "tool.result"
+          | "tool.error"
+          | "tool.cancelled";
+      }
+    >,
+  ): void {
+    const idx = this.messages.findIndex((m) => m.toolCall?.callId === frame.callId);
+    if (idx < 0) return;
+    const existing = this.messages[idx].toolCall;
+    if (!existing) return;
+    if (frame.kind === "tool.progress") {
+      this.messages[idx] = {
+        ...this.messages[idx],
+        toolCall: {
+          ...existing,
+          progress: frame.progress,
+          label: frame.label,
+          description: frame.description,
+        },
+      };
+    } else if (frame.kind === "tool.askuser_request") {
+      this.setToolCallAskUser(frame.callId, frame.requestId, frame.questions);
+    } else if (frame.kind === "tool.log") {
+      this.appendToolCallLog(frame.callId, {
+        level: frame.level,
+        message: frame.message,
+        ts: Date.now(),
+      });
+    } else if (frame.kind === "tool.result") {
+      this.resolveToolCall(frame.callId, { result: frame.result });
+    } else if (frame.kind === "tool.error") {
+      this.resolveToolCall(frame.callId, { error: frame.error });
+    } else if (frame.kind === "tool.cancelled") {
+      this.resolveToolCall(frame.callId, { cancelled: true });
+    }
+  }
+
+  /** Upsert a tool_filter bubble paired with the most-recent user message
+   *  from a `chat.toolfilter` WS frame. */
+  upsertToolFilter(state: RelevantToolsState): void {
+    const userIdx = this.messages.findIndex((m) => m.role === "user");
+    if (userIdx < 0) return;
+    const userId = this.messages[userIdx].id;
+    if (!userId) return;
+    this.upsertToolFilterMessage(userId, state);
+  }
+
+  /** POST a freshly-added user message to the core so chat.start sees it
+   *  in the persisted history. Best-effort; failures get logged. */
+  private async persistUserMessage(msg: Message): Promise<void> {
+    const sessionId = sessionsState.id;
+    if (!sessionId) return;
+    try {
+      await cores()
+        .api()
+        .sessions.appendMessage(sessionId, msg as unknown as ServerMessage);
+    } catch (e) {
+      console.warn("[messages] persist failed:", e);
+    }
   }
 }
 

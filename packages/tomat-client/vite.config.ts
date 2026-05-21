@@ -41,6 +41,12 @@ const restartOnRustChange = (): Plugin => ({
 export default defineConfig(async () => ({
   plugins: [UnoCSS(), sveltekit(), !host && restartOnRustChange()].filter(Boolean),
 
+  resolve: {
+    alias: {
+      "@tomat/shared": new URL("../tomat-shared/src/index.ts", import.meta.url).pathname,
+    },
+  },
+
   clearScreen: false,
   server: {
     port: 1420,

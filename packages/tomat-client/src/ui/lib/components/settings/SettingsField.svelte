@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { PresetOption, SettingField } from "$lib/shared/settings";
-  import { evalCondition } from "$lib/shared/settings";
+  import type { PresetOption, SettingField } from "@tomat/shared";
+  import { evalCondition } from "@tomat/shared";
   import type { Monitor } from "$lib/shared/types";
   import { settingsState } from "../../state";
   import ColorField from "./fields/ColorField.svelte";
@@ -46,6 +46,11 @@
     <ShortcutField {field} {error} {horizontal} {onChange} {onReset} />
   {:else if field.type === "toolkits"}
     <ToolkitsField {field} />
+  {:else if field.type === "cores"}
+    <!-- Paired-cores list panel is not yet wired into the Settings UI; the
+         registry is managed via `cores()` in $lib/core/cores.ts. This branch
+         keeps SettingsField from falling through to StandardField and
+         crashing on the render-only type. -->
   {:else if field.type === "color"}
     <ColorField {field} {error} {horizontal} {onChange} {onReset} />
   {:else if field.type === "number_slider"}

@@ -1,0 +1,264 @@
+// Secrets vault for external API keys etc.
+//
+// File layout (under paths().root):
+//   .master-key   — 32 random bytes, base64; chmod 600 on POSIX.
+//                   ONLY written when the OS keychain is unavailable
+//                   (helper binary missing or libsecret unavailable on
+//                   headless Linux). Otherwise the key lives in the
+//                   keychain and this file is absent.
+//   secrets.enc   — AES-GCM ciphertext of the JSON secrets bag.
+//
+// The master key is sealed in the OS keychain via the `tomat-core-keychain`
+// helper binary (macOS Keychain, Linux libsecret, Windows Credential
+// Manager). On headless Linux without libsecret we fall back to the
+// `chmod 600` file so the daemon can still run unattended.
+//
+// First-run order, when generating a new master key:
+//   1. Try keychainSet — succeeds on macOS/Windows + Linux with libsecret.
+//   2. If that fails, write the file with chmod 600 and a loud warning.
+//
+// Subsequent reads:
+//   1. Try keychainGet.
+//   2. If that returns null AND the file exists, read the file and try to
+//      migrate it into the keychain (best-effort, deletes file on success).
+//   3. If neither has it, generate a new key (loops back to first-run).
+//
+// Wire-format of secrets.enc: a single JSON object whose keys are secret
+// names (free-form strings, e.g. "openai-api-key") and values are
+// strings. We re-encrypt the whole file on every write — secrets bags
+// are tiny so we don't need per-key crypto.
+//
+// Encryption: AES-GCM-256. Stored bytes are 12-byte nonce ‖ ciphertext.
+
+import { paths } from "../paths.ts";
+import { AppError } from "../shared/errors.ts";
+import { getLogger } from "../shared/log.ts";
+import { keychainGet, keychainSet } from "./keychain.ts";
+
+const log = getLogger("secrets");
+
+const NONCE_LEN = 12;
+const KEY_LEN = 32;
+const KEYCHAIN_SERVICE = "au.tomat.core";
+const KEYCHAIN_ACCOUNT = "master-key";
+
+let cachedKey: CryptoKey | null = null;
+
+function masterKeyPath(): string {
+  return paths().root + "/.master-key";
+}
+
+async function readMasterKeyFile(): Promise<Uint8Array | null> {
+  try {
+    const text = (await Deno.readTextFile(masterKeyPath())).trim();
+    const bytes = decodeBase64(text);
+    if (bytes.length !== KEY_LEN) {
+      throw new AppError(
+        "internal_error",
+        `.master-key has ${bytes.length} bytes; expected ${KEY_LEN}`,
+      );
+    }
+    return bytes;
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) return null;
+    if (err instanceof AppError) throw err;
+    throw new AppError(
+      "internal_error",
+      `failed to read .master-key: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
+async function writeMasterKeyFile(raw: Uint8Array): Promise<void> {
+  await Deno.writeTextFile(masterKeyPath(), encodeBase64(raw));
+  if (Deno.build.os !== "windows") {
+    try {
+      await Deno.chmod(masterKeyPath(), 0o600);
+    } catch { /* best-effort */ }
+  }
+}
+
+async function loadOrCreateMasterKey(): Promise<CryptoKey> {
+  if (cachedKey) return cachedKey;
+
+  // 1. Try the keychain first.
+  let raw: Uint8Array | null = null;
+  const fromKeychain = await keychainGet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+  if (fromKeychain) {
+    const bytes = decodeBase64(fromKeychain);
+    if (bytes.length === KEY_LEN) {
+      raw = bytes;
+    } else {
+      log.warn(
+        `keychain entry has ${bytes.length} bytes; expected ${KEY_LEN}. ` +
+          `Ignoring and falling back to file/regenerate.`,
+      );
+    }
+  }
+
+  // 2. Fall back to the file. If found, try to migrate it into the keychain
+  //    so future reads don't need the file at all.
+  if (!raw) {
+    const fromFile = await readMasterKeyFile();
+    if (fromFile) {
+      raw = fromFile;
+      const migrated = await keychainSet(
+        KEYCHAIN_SERVICE,
+        KEYCHAIN_ACCOUNT,
+        encodeBase64(raw),
+      );
+      if (migrated) {
+        try {
+          await Deno.remove(masterKeyPath());
+          log.info(`migrated master key from .master-key file → OS keychain`);
+        } catch { /* fine, file is still authoritative until next boot */ }
+      }
+    }
+  }
+
+  // 3. Neither: generate a fresh key. Prefer keychain; fall back to file.
+  if (!raw) {
+    raw = crypto.getRandomValues(new Uint8Array(KEY_LEN));
+    const sealed = await keychainSet(
+      KEYCHAIN_SERVICE,
+      KEYCHAIN_ACCOUNT,
+      encodeBase64(raw),
+    );
+    if (sealed) {
+      log.info(
+        `generated new master key, sealed in OS keychain ` +
+          `(service=${KEYCHAIN_SERVICE} account=${KEYCHAIN_ACCOUNT})`,
+      );
+    } else {
+      await writeMasterKeyFile(raw);
+      log.warn(
+        `generated new master key at ${masterKeyPath()} — OS keychain ` +
+          `unavailable (no helper binary, or libsecret missing on headless ` +
+          `Linux). Back up this file or all stored secrets are lost on a ` +
+          `reinstall.`,
+      );
+    }
+  }
+
+  cachedKey = await crypto.subtle.importKey(
+    "raw",
+    raw.buffer as ArrayBuffer,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+  return cachedKey;
+}
+
+async function readEncrypted(): Promise<Record<string, string>> {
+  let blob: Uint8Array;
+  try {
+    blob = await Deno.readFile(paths().secretsEncFile);
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) return {};
+    throw new AppError(
+      "internal_error",
+      `failed to read secrets.enc: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+  if (blob.byteLength <= NONCE_LEN) return {};
+  const key = await loadOrCreateMasterKey();
+  const nonce = blob.subarray(0, NONCE_LEN);
+  const ciphertext = blob.subarray(NONCE_LEN);
+  let plaintext: ArrayBuffer;
+  try {
+    plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: nonce.buffer as ArrayBuffer },
+      key,
+      ciphertext.buffer as ArrayBuffer,
+    );
+  } catch (err) {
+    throw new AppError(
+      "internal_error",
+      `secrets.enc decryption failed (master key mismatch?): ${
+        err instanceof Error ? err.message : err
+      }`,
+    );
+  }
+  const text = new TextDecoder().decode(plaintext);
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as Record<string, string>;
+  } catch {
+    throw new AppError(
+      "internal_error",
+      `secrets.enc decrypted but contained invalid JSON`,
+    );
+  }
+}
+
+async function writeEncrypted(bag: Record<string, string>): Promise<void> {
+  const key = await loadOrCreateMasterKey();
+  const nonce = crypto.getRandomValues(new Uint8Array(NONCE_LEN));
+  const plaintext = new TextEncoder().encode(JSON.stringify(bag));
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: nonce.buffer as ArrayBuffer },
+      key,
+      plaintext.buffer as ArrayBuffer,
+    ),
+  );
+  const out = new Uint8Array(nonce.byteLength + ciphertext.byteLength);
+  out.set(nonce, 0);
+  out.set(ciphertext, nonce.byteLength);
+
+  const tmp = paths().secretsEncFile + ".tmp";
+  await Deno.writeFile(tmp, out);
+  if (Deno.build.os !== "windows") {
+    try {
+      await Deno.chmod(tmp, 0o600);
+    } catch { /* best-effort */ }
+  }
+  await Deno.rename(tmp, paths().secretsEncFile);
+}
+
+export async function getSecret(name: string): Promise<string | undefined> {
+  const bag = await readEncrypted();
+  return bag[name];
+}
+
+export async function setSecret(name: string, value: string): Promise<void> {
+  if (!name || typeof name !== "string") {
+    throw new AppError(
+      "validation_error",
+      "secret name must be a non-empty string",
+    );
+  }
+  if (typeof value !== "string") {
+    throw new AppError("validation_error", "secret value must be a string");
+  }
+  const bag = await readEncrypted();
+  bag[name] = value;
+  await writeEncrypted(bag);
+}
+
+export async function deleteSecret(name: string): Promise<boolean> {
+  const bag = await readEncrypted();
+  if (!(name in bag)) return false;
+  delete bag[name];
+  await writeEncrypted(bag);
+  return true;
+}
+
+export async function listSecretNames(): Promise<string[]> {
+  const bag = await readEncrypted();
+  return Object.keys(bag).sort();
+}
+
+function decodeBase64(s: string): Uint8Array {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function encodeBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}

@@ -1,0 +1,13 @@
+{
+  "name": "tomat-builtin-toolkit",
+  "version": "1.0.0",
+  "description": "Reference Tomat toolkit bundling three sample tools (download_url, open_website, askuser_demo). Doubles as a worked example for third-party toolkit authors.",
+  "license": "MIT",
+  "homepage": "https://au.tomat.ing",
+  "keywords": ["tools-available", "tomat-toolkit"],
+  "main": "index.ts",
+  "files": ["tools.json", "deno.json", "index.ts", "src", "README.md"],
+  "dependencies": {
+    "mime-types": "^3.0.2"
+  }
+}

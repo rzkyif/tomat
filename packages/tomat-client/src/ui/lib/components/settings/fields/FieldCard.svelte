@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import type { SettingField } from "$lib/shared/settings";
-  import { evalCondition } from "$lib/shared/settings";
+  import type { SettingField } from "@tomat/shared";
+  import { evalCondition } from "@tomat/shared";
   import { settingsState } from "../../../state";
   import Expand from "../../Expand.svelte";
   import FieldDescription from "./FieldDescription.svelte";

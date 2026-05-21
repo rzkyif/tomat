@@ -1,10 +1,15 @@
 /**
  * Helpers for working with message attachments: base64 encode/decode,
- * save / load / delete attachment files through the Rust backend, and
- * figure out which files belong to a given message.
+ * upload/download attachment files through the core REST API, and figure
+ * out which files belong to a given message.
+ *
+ * After the rework, attachments are owned by the currently-selected core
+ * (not the local filesystem). The persisted MessagePart still uses `path`
+ * as its key — that key is now a `/api/v1/sessions/:id/attachments/:attId`
+ * URL on the core, not a local file path.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { cores } from "$lib/core";
 import type { MessageContent, MessagePart } from "./types";
 
 export type WrittenAttachment = { path: string; filename: string };
@@ -13,7 +18,9 @@ export type WrittenAttachment = { path: string; filename: string };
 export function utf8ToBase64(text: string): string {
   const bytes = new TextEncoder().encode(text);
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
   return btoa(binary);
 }
 
@@ -25,34 +32,50 @@ export function base64ToUtf8(b64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-/** Write an attachment payload into the session directory via the Rust command. */
+/** Upload an attachment to the paired core for the given message. The
+ *  returned `path` is the authed URL the AttachmentList renders from. */
 export async function writeSessionAttachment(
   sessionId: string,
-  messageTimestamp: string,
+  messageId: string,
   filename: string,
   dataBase64: string,
+  mime?: string,
 ): Promise<WrittenAttachment> {
-  return (await invoke("write_session_attachment", {
-    sessionId,
-    messageTimestamp,
-    filename,
-    dataBase64,
-  })) as WrittenAttachment;
+  const blob = base64ToBlob(dataBase64, mime ?? "application/octet-stream");
+  const api = cores().api().sessions;
+  const res = await api.uploadAttachment(sessionId, messageId, blob, filename);
+  return {
+    path: api.attachmentUrl(sessionId, res.id),
+    filename: res.filename,
+  };
 }
 
-/** Read an attachment file from disk and return it as base64. */
+/** Fetch an attachment by its core URL (the `path` stored on MessagePart)
+ *  and return its base64 contents. Bearer auth is applied by CoreClient. */
 export async function readSessionAttachment(path: string): Promise<string> {
-  return (await invoke("read_session_attachment", { path })) as string;
+  const ws = cores().currentClient();
+  if (!ws) throw new Error("no paired core selected");
+  // The stored `path` is `<baseUrl>/api/v1/sessions/.../attachments/...`.
+  // We can fetch directly with the bearer header.
+  const token = (ws as unknown as { endpoint: { token: string } }).endpoint.token;
+  const res = await fetch(path, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`fetch ${path}: ${res.status}`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
-/** Delete attachment files from disk. Silently ignores missing paths. */
-export async function deleteSessionAttachments(paths: string[]): Promise<void> {
-  if (paths.length === 0) return;
-  try {
-    await invoke("delete_session_attachments", { paths });
-  } catch (e) {
-    console.warn("[attachments] delete failed:", e);
-  }
+/** Best-effort delete of attachment files. New core garbage-collects them
+ *  on session-delete, so per-attachment delete from the client is a no-op
+ *  for now (the old Tauri command is gone). Kept as a stub so callers
+ *  don't have to be conditional. */
+export function deleteSessionAttachments(_paths: string[]): Promise<void> {
+  return Promise.resolve();
 }
 
 /** Collect the file paths referenced by any `_file` parts inside a message. */
@@ -99,7 +122,8 @@ export function ensureMarkdownExtension(filename: string): string {
   return `${filename}.md`;
 }
 
-/** Preview display list: maps persisted `_file` parts to legacy display shape the AttachmentList expects. */
+/** Preview display list: maps persisted `_file` parts to the legacy
+ *  display shape the AttachmentList expects. */
 export function toPreviewParts(content: MessageContent): MessagePart[] {
   if (typeof content === "string") return [];
   return content.filter(
@@ -109,4 +133,11 @@ export function toPreviewParts(content: MessageContent): MessagePart[] {
       p.type === "document_file" ||
       p.type === "image_file",
   );
+}
+
+function base64ToBlob(b64: string, mime: string): Blob {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
 }
