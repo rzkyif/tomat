@@ -10,14 +10,7 @@
     "sourceMap": true,
     "strict": true,
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "paths": {
-      "$lib": ["./src/ui/lib"],
-      "$lib/*": ["./src/ui/lib/*"],
-      "$app/types": ["./.svelte-kit/types/index.d.ts"],
-      "@tomat/shared": ["../tomat-shared/src/index.ts"],
-      "@tomat/shared/*": ["../tomat-shared/src/*"]
-    }
+    "allowImportingTsExtensions": true
   },
   // The SvelteKit-generated tsconfig sweeps in everything under src/ via
   // "src/**/*.{js,ts,svelte}". Exclude src/tauri (the Rust crate) and

@@ -5,7 +5,10 @@
  */
 
 import { cores } from "$lib/core";
-import type { DownloadPlan as SharedDownloadPlan } from "@tomat/shared";
+import type {
+  BinaryKind,
+  DownloadPlan as SharedDownloadPlan,
+} from "@tomat/shared";
 import { EMBED_BASE_FILES, TTS_BASE_FILES } from "@tomat/shared";
 
 export type DownloadPlan = SharedDownloadPlan;
@@ -94,20 +97,60 @@ export function collectActiveDownloads(settings: Record<string, any>): ActiveDow
   return out;
 }
 
+/** Synthetic source prefix for sidecar binaries surfaced through the same
+ *  DownloadPlan list as HF models. Settings.svelte filters by this prefix
+ *  to route the confirm action to `binaries.install` instead of
+ *  `models.download`. */
+export const BINARY_SOURCE_PREFIX = "binary:";
+
+export function isBinarySource(source: string): boolean {
+  return source.startsWith(BINARY_SOURCE_PREFIX);
+}
+
+export function binarySourceToKind(source: string): BinaryKind {
+  return source.slice(BINARY_SOURCE_PREFIX.length) as BinaryKind;
+}
+
 export interface StartupProbeResult {
   plans: DownloadPlan[];
   groupBySource: Record<string, string>;
+  missingBinaries: BinaryKind[];
 }
 
 export async function detectPendingStartup(
   settings: Record<string, any>,
 ): Promise<StartupProbeResult> {
   const candidates = collectActiveDownloads(settings);
-  if (candidates.length === 0) return { plans: [], groupBySource: {} };
   const groupBySource: Record<string, string> = {};
   for (const c of candidates) groupBySource[c.path] = c.group_id;
-  const sources = candidates.map((c) => c.path);
-  const all = await cores().api().models.probe(sources);
-  const missing = all.filter((p) => !p.alreadyHave);
-  return { plans: missing, groupBySource };
+
+  // Probe HF models + sidecar binaries in parallel — they're independent
+  // and the confirm modal shows them as one combined list.
+  const [modelPlans, binaryChecks] = await Promise.all([
+    candidates.length > 0
+      ? cores().api().models.probe(candidates.map((c) => c.path))
+      : Promise.resolve([]),
+    cores().api().binaries.list().catch(() => []),
+  ]);
+
+  const missingModels = modelPlans.filter((p) => !p.alreadyHave);
+  const missingBinaries = binaryChecks
+    .filter((b) => !b.installed)
+    .map((b) => b.kind);
+
+  // Synthesize DownloadPlan entries for each missing binary so the existing
+  // ConfirmModal renders them in the same list as model files.
+  const binaryPlans: DownloadPlan[] = missingBinaries.map((kind) => ({
+    source: `${BINARY_SOURCE_PREFIX}${kind}`,
+    alreadyHave: false,
+  }));
+  for (const kind of missingBinaries) {
+    groupBySource[`${BINARY_SOURCE_PREFIX}${kind}`] = "binary";
+  }
+
+  return {
+    plans: [...missingModels, ...binaryPlans],
+    groupBySource,
+    missingBinaries,
+  };
 }

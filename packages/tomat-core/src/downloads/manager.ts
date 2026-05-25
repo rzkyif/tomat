@@ -61,9 +61,17 @@ export class DownloadManager {
   private readonly listeners = new Set<Listener>();
   private active = false; // semaphore(1): is a download currently running?
   private readonly waitQueue: Array<() => void> = [];
+  // Track scheduled inter-download release timers so shutdown() can cancel
+  // any pending ticks and not leave the process holding a stray timer.
+  private readonly pendingTimers = new Set<number>();
 
   constructor() {
     this.normalizePersistedRows();
+  }
+
+  shutdown(): void {
+    for (const t of this.pendingTimers) clearTimeout(t);
+    this.pendingTimers.clear();
   }
 
   // Resume any rows that were Pending when the process last exited. Called
@@ -90,9 +98,9 @@ export class DownloadManager {
 
     // Fast path: file already on disk.
     return new Promise<string>((resolve, reject) => {
-      this.alreadyOnDisk(absPath).then((on) => {
+      this.alreadyOnDisk(absPath).then(async (on) => {
         if (on) {
-          this.upsertCompleted(id, spec, absPath);
+          await this.upsertCompleted(id, spec, absPath);
           this.broadcast();
           resolve(absPath);
           return;
@@ -260,7 +268,11 @@ export class DownloadManager {
     this.inFlight.delete(id);
 
     // Brief delay between successive downloads so HF doesn't burst-throttle.
-    setTimeout(() => this.release(), INTER_DOWNLOAD_DELAY_MS);
+    const handle = setTimeout(() => {
+      this.pendingTimers.delete(handle);
+      this.release();
+    }, INTER_DOWNLOAD_DELAY_MS);
+    this.pendingTimers.add(handle);
   }
 
   private async streamDownload(
@@ -399,11 +411,11 @@ export class DownloadManager {
     );
   }
 
-  private upsertCompleted(
+  private async upsertCompleted(
     id: string,
     spec: EnqueueSpec,
     absPath: string,
-  ): void {
+  ): Promise<void> {
     const existing = this.getRow(id);
     if (existing) {
       db().prepare(`
@@ -418,7 +430,7 @@ export class DownloadManager {
     }
     let sizeOnDisk: number | undefined;
     try {
-      sizeOnDisk = Deno.statSync(absPath).size;
+      sizeOnDisk = (await Deno.stat(absPath)).size;
     } catch { /* ignore */ }
     const meta = resolveMeta(spec);
     db().prepare(`
@@ -482,6 +494,9 @@ export class DownloadManager {
   // On construction: drop persisted Completed rows whose file vanished;
   // flip persisted Downloading rows to Pending (the resume loop will pick
   // them up).
+  // Boot-time pass — runs once at construction, so the sync stat here is
+  // intentional (a few hundred sync stats during startup is cheaper than
+  // restructuring the constructor to be async).
   private normalizePersistedRows(): void {
     const all = db().prepare(`SELECT id, abs_path, status FROM downloads`)
       .all() as Array<{ id: string; abs_path: string; status: string }>;
@@ -597,6 +612,10 @@ let _instance: DownloadManager | null = null;
 export function downloadManager(): DownloadManager {
   if (!_instance) _instance = new DownloadManager();
   return _instance;
+}
+
+export function __resetForTesting(): void {
+  _instance = null;
 }
 
 // Unused but exported for callers that want to mint an ad-hoc job id.

@@ -2,16 +2,24 @@ import { Hono } from "hono";
 import { join } from "@std/path";
 import type OpenAI from "openai";
 import type { Message } from "@tomat/shared";
-import { contentToText } from "@tomat/shared";
+import {
+  contentToText,
+  messageInputSchema,
+  messagePatchSchemaByRole,
+  type MessageRoleForPatch,
+} from "@tomat/shared";
 import { sessionsRepo } from "../../db/repos/sessions.ts";
 import { sessionAttachmentsDir } from "../../paths.ts";
 import { AppError } from "../../shared/errors.ts";
 import { newAttachmentId, newMessageId } from "../../shared/ids.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
-import { loadCoreSettings } from "../../services/coreSettings.ts";
-import { resolveEndpoint } from "../../services/endpointResolver.ts";
-import { llmScheduler } from "../../services/llmScheduler.ts";
-import { type LlmRequest } from "../../services/llmProvider.ts";
+import { loadCoreSettings } from "../../services/core-settings.ts";
+import { resolveEndpoint } from "../../services/endpoint-resolver.ts";
+import { llmScheduler } from "../../services/llm-scheduler.ts";
+import { type LlmRequest } from "../../services/llm-provider.ts";
+import { getLogger } from "../../shared/log.ts";
+
+const log = getLogger("http.sessions");
 
 export function sessionsRoutes(): Hono {
   const r = new Hono();
@@ -53,7 +61,15 @@ export function sessionsRoutes(): Hono {
     for (const p of attachmentPaths) {
       try {
         await Deno.remove(p);
-      } catch { /* */ }
+      } catch (err) {
+        if (!(err instanceof Deno.errors.NotFound)) {
+          log.warn(
+            `session delete: failed to remove attachment ${p}: ${
+              err instanceof Error ? err.message : err
+            }`,
+          );
+        }
+      }
     }
     return c.body(null, 204);
   });
@@ -61,16 +77,43 @@ export function sessionsRoutes(): Hono {
   r.post("/:id/messages", async (c) => {
     const me = requireClient(c);
     const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
-    const msg = (await readJson(c)) as Message;
-    return c.json(sessionsRepo().appendMessage(session.id, msg));
+    const parsed = messageInputSchema.safeParse(await readJson(c));
+    if (!parsed.success) {
+      throw new AppError("validation_error", parsed.error.message);
+    }
+    return c.json(
+      sessionsRepo().appendMessage(session.id, parsed.data as Message),
+    );
   });
 
   r.patch("/:id/messages/:msgId", async (c) => {
     const me = requireClient(c);
     const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
-    const patch = (await readJson(c)) as Partial<Message>;
+    // Look up the row first so we can validate the patch against the
+    // schema that matches its role; this is what blocks a UserMessage from
+    // being patched with assistant-only fields like `streaming` / `toolCalls`.
+    const existing = sessionsRepo().getMessage(
+      session.id,
+      c.req.param("msgId"),
+    );
+    const schema =
+      messagePatchSchemaByRole[existing.role as MessageRoleForPatch];
+    if (!schema) {
+      throw new AppError(
+        "validation_error",
+        `cannot patch message with unknown role "${existing.role}"`,
+      );
+    }
+    const parsed = schema.safeParse(await readJson(c));
+    if (!parsed.success) {
+      throw new AppError("validation_error", parsed.error.message);
+    }
     return c.json(
-      sessionsRepo().patchMessage(session.id, c.req.param("msgId"), patch),
+      sessionsRepo().patchMessage(
+        session.id,
+        c.req.param("msgId"),
+        parsed.data as Partial<Message>,
+      ),
     );
   });
 
@@ -113,7 +156,34 @@ export function sessionsRoutes(): Hono {
     const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
     const rec = sessionsRepo().getAttachment(session.id, c.req.param("attId"));
     const file = await Deno.open(rec.absPath, { read: true });
-    return new Response(file.readable, {
+    // Wrap the file's readable in a stream that explicitly closes the file
+    // on cancel/error so a client abort doesn't leak the FD. Deno's runtime
+    // closes it when the readable drains naturally; the explicit cancel
+    // handles the abnormal-termination path.
+    let closed = false;
+    const safeClose = () => {
+      if (closed) return;
+      closed = true;
+      try {
+        file.close();
+      } catch { /* already closed by drain — ignore */ }
+    };
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          for await (const chunk of file.readable) controller.enqueue(chunk);
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        } finally {
+          safeClose();
+        }
+      },
+      cancel() {
+        safeClose();
+      },
+    });
+    return new Response(body, {
       status: 200,
       headers: { "Content-Type": rec.mime ?? "application/octet-stream" },
     });
@@ -272,6 +342,39 @@ async function readJson(c: import("hono").Context): Promise<unknown> {
   }
 }
 
-function sanitizeFilename(name: string): string {
-  return name.replace(/[\0/\\]/g, "_").replace(/^\.+/, "");
+// Filenames are attacker-controlled (uploaded via /sessions/:id/attachments)
+// and end up on disk as `${id}_${filename}`. The id prefix already prevents
+// directory traversal (`/`, `\` are still stripped below), but Windows has
+// extra rules — reserved basenames, trailing dots/spaces, length limits —
+// that aren't covered by a simple replace, and control chars / pipe-shell
+// glyphs are best stripped on every host. Returns a non-empty string that
+// is safe to join into a single path segment.
+const WIN_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+const MAX_LEN = 200;
+
+// Exported for unit tests; not used outside this module.
+export function sanitizeFilename(name: string): string {
+  // 1. Strip control chars + replace path / shell / Windows-forbidden glyphs.
+  // deno-lint-ignore no-control-regex
+  let out = name.replace(/[\x00-\x1f\/\\:*?"<>|]/g, "_");
+  // 2. Strip leading dots (hidden files) and trailing dots/spaces (Windows
+  //    silently drops them, which then collides with neighboring names).
+  out = out.replace(/^\.+/, "").replace(/[. ]+$/, "");
+  // 3. Cap length, preserving the extension if any.
+  if (out.length > MAX_LEN) {
+    const dot = out.lastIndexOf(".");
+    if (dot > 0 && out.length - dot <= 16) {
+      const ext = out.slice(dot);
+      out = out.slice(0, MAX_LEN - ext.length) + ext;
+    } else {
+      out = out.slice(0, MAX_LEN);
+    }
+  }
+  // 4. Refuse Windows reserved basenames even with an extension; prefix
+  //    with `_` so the file is still recognizable.
+  if (WIN_RESERVED.test(out)) out = `_${out}`;
+  // 5. Fall back to a fixed placeholder if everything was stripped. The
+  //    caller still prepends an id, so this is just informational.
+  if (out.length === 0) out = "file";
+  return out;
 }

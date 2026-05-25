@@ -1,22 +1,14 @@
-// Translates thrown errors into the wire-format error envelope.
+// Translates thrown errors into the wire-format error envelope. Wired into
+// the app via `app.onError()` in server.ts — that's the only Hono 4 hook
+// that catches throws from sub-apps mounted via `app.route()`.
 
-import type { Context, MiddlewareHandler } from "hono";
+import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { ApiErrorBody, ErrorCode } from "@tomat/shared";
 import { AppError, isAppError, isNoSpaceError } from "../../shared/errors.ts";
 import { getLogger } from "../../shared/log.ts";
 
 const log = getLogger("http");
-
-export function errorMiddleware(): MiddlewareHandler {
-  return async (c, next) => {
-    try {
-      await next();
-    } catch (err) {
-      return sendError(c, err);
-    }
-  };
-}
 
 export function sendError(c: Context, err: unknown): Response {
   if (isAppError(err)) {

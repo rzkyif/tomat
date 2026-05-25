@@ -66,25 +66,28 @@ export type ToolCallState = {
   logs: ToolCallLogLine[];
 };
 
-export type PendingToolCall = {
-  /** The OpenAI tool_call_id. */
-  id: string;
-  /** Tool name the model chose, e.g. "open". */
-  name: string;
-  /** Raw JSON arguments string from the stream. */
-  arguments: string;
-};
+// Mirrors the on-the-wire shape from `@tomat/shared`'s `PendingToolCall`
+// frame field. Re-exported from this module so callers in `lib/state/`
+// can keep the existing import path while the field names stay aligned
+// with the wire format — saving a cast at the streaming dispatcher.
+import type { PendingToolCall as WirePendingToolCall } from "@tomat/shared";
+export type PendingToolCall = WirePendingToolCall;
 
-/** A single phase-1 (embedding similarity) candidate, snapshot for the bubble. */
+/** A single phase-1 (embedding similarity) candidate, snapshot for the
+ *  bubble. Field names mirror the on-the-wire `ToolFilterPhase1Entry`
+ *  frame shape so the streaming dispatcher can assign without remapping. */
 export type RelevantToolPhase1Entry = {
-  id: string;
+  toolId: string;
   name: string;
   description: string;
   score: number;
 };
 
-/** A single phase-2 (LLM filter) survivor. No score: phase 2 is binary keep/drop. */
+/** A single phase-2 (LLM filter) survivor. No score: phase 2 is binary
+ *  keep/drop. Mirrors the `ToolFilterEntry` frame shape (carrying
+ *  `toolId` so the bubble can key its `{#each}` reliably). */
 export type RelevantToolPhase2Entry = {
+  toolId: string;
   name: string;
   description: string;
 };

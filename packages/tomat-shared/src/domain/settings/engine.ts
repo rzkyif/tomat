@@ -25,12 +25,13 @@ import { llmGroup } from "./groups/llm.ts";
 import { promptsGroup } from "./groups/prompts.ts";
 import { snippetsGroup } from "./groups/snippets.ts";
 import { toolkitsGroup } from "./groups/toolkits.ts";
-import { dualModelGroup } from "./groups/dualModel.ts";
-import { sttInputGroup } from "./groups/sttInput.ts";
-import { sttEngineGroup } from "./groups/sttEngine.ts";
+import { dualModelGroup } from "./groups/dual-model.ts";
+import { sttInputGroup } from "./groups/stt-input.ts";
+import { sttEngineGroup } from "./groups/stt-engine.ts";
 import { ttsGroup } from "./groups/tts.ts";
 import { usageGroup } from "./groups/usage.ts";
 import { coresGroup } from "./groups/cores.ts";
+import { serverGroup } from "./groups/server.ts";
 
 // Kokoro TTS assets are fetched into ~/.tomat/models/<repo>/... by the
 // core downloader. transformers.js's `dtype: "q8"` expects an ONNX file
@@ -71,6 +72,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   sttEngineGroup,
   ttsGroup,
   usageGroup,
+  serverGroup,
   coresGroup,
 ];
 

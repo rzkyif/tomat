@@ -16,3 +16,4 @@ export { SttApi } from "./stt";
 export { TtsApi } from "./tts";
 export { CoreSettingsApi } from "./settings";
 export { PairingApi } from "./pairing";
+export { UpdateApi } from "./update";

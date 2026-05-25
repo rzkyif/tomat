@@ -1,35 +1,56 @@
 # Notice
 
 Tomat is licensed under [AGPL-3.0-only](LICENSE). It incorporates and/or
-distributes at runtime the following third-party components. Each is licensed
-separately; please consult the upstream project for its full license text.
+distributes the following third-party components. Each is licensed separately;
+please consult the upstream project for its full license text.
 
-## Downloaded at runtime (GitHub releases)
+## Binaries downloaded at runtime
 
-| Component                      | Upstream                                   | License |
-| ------------------------------ | ------------------------------------------ | ------- |
-| llama.cpp (`llama-server`)     | <https://github.com/ggml-org/llama.cpp>    | MIT     |
-| whisper.cpp (`whisper-server`) | <https://github.com/ggerganov/whisper.cpp> | MIT     |
-| ggml                           | <https://github.com/ggml-org/ggml>         | MIT     |
-| Bun runtime                    | <https://github.com/oven-sh/bun>           | MIT     |
+`tomat-core` fetches these compiled binaries from the Tomat CDN on first use.
+They are not part of this repository.
 
-## Bundled via `node_modules` / static assets
+| Component                                              | Upstream                                  | License |
+| ------------------------------------------------------ | ----------------------------------------- | ------- |
+| llama.cpp (`llama-server`)                             | <https://github.com/ggml-org/llama.cpp>   | MIT     |
+| whisper.cpp (`whisper-server`)                         | <https://github.com/ggml-org/whisper.cpp> | MIT     |
+| ggml (shared libraries shipped with the servers above) | <https://github.com/ggml-org/ggml>        | MIT     |
+| Deno runtime (`deno`)                                  | <https://github.com/denoland/deno>        | MIT     |
 
-| Component                                         | Upstream                                   | License           |
-| ------------------------------------------------- | ------------------------------------------ | ----------------- |
-| `@ricky0123/vad-web` (Silero VAD model + worklet) | <https://github.com/ricky0123/vad>         | ISC / model terms |
-| `onnxruntime-web` (WASM runtime)                  | <https://github.com/microsoft/onnxruntime> | MIT               |
+LLM, speech-to-text, and text-to-speech model weights are also downloaded at
+runtime from Hugging Face. Each model carries its own license, shown at download
+time.
 
-## Rust dependencies
+## Bundled with the desktop client
 
-See `cargo about generate` output (to be added in CI) for a machine-readable
-license report of every Rust dependency.
+These ship inside the `tomat-client` application bundle.
 
-## TypeScript dependencies
+| Component                                     | Upstream                                   | License |
+| --------------------------------------------- | ------------------------------------------ | ------- |
+| Silero VAD v5 model (`silero_vad_v5.onnx`)    | <https://github.com/snakers4/silero-vad>   | MIT     |
+| `@ricky0123/vad-web` (voice-activity worklet) | <https://github.com/ricky0123/vad>         | ISC     |
+| ONNX Runtime Web (WebAssembly runtime)        | <https://github.com/microsoft/onnxruntime> | MIT     |
 
-See `bun pm ls` / npm license tooling for a machine-readable license report of
-every JavaScript dependency.
+## Application dependencies
 
-When distributing built artifacts, ensure the upstream license texts (MIT /
-Apache-2.0 / etc.) are included alongside the binary, either in-bundle or in the
-release assets.
+`tomat-core` and `tomat-client` bundle npm and JSR packages into their compiled
+output; `tomat-client` and `tomat-core-keychain` additionally link Rust crates.
+All are declared in the per-package `deno.json` and `Cargo.toml` files. The most
+significant are:
+
+| Component                    | License               |
+| ---------------------------- | --------------------- |
+| Hono                         | MIT                   |
+| Zod                          | MIT                   |
+| OpenAI SDK (`openai`)        | Apache-2.0            |
+| `kokoro-js` (text-to-speech) | Apache-2.0            |
+| `@huggingface/transformers`  | Apache-2.0            |
+| Svelte / SvelteKit / Vite    | MIT                   |
+| UnoCSS                       | MIT                   |
+| Tauri (and official plugins) | MIT OR Apache-2.0     |
+| `keyring` (Rust)             | MIT OR Apache-2.0     |
+| DOMPurify                    | Apache-2.0 OR MPL-2.0 |
+| highlight.js                 | BSD-3-Clause          |
+
+For a complete, machine-readable license report, run `cargo about generate` for
+the Rust dependency tree and a JSR/npm license tool over the `deno.json`
+manifests.

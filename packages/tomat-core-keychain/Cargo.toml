@@ -5,6 +5,12 @@ edition = "2021"
 description = "Native OS-keychain helper for tomat-core. Reads/writes/deletes secret entries via the platform keychain (macOS Keychain, Linux libsecret, Windows Credential Manager). Stdio protocol so the Deno core can shell out to it for sealing the master key without bringing in native FFI."
 publish = false
 
+[features]
+# Opt-in by reverse-dependency tests that want to exercise the helper's
+# stdio protocol without hitting the real OS keychain. Production builds
+# leave this off so `InMemoryKeychain` is excluded from the binary.
+in-memory = []
+
 [dependencies]
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 

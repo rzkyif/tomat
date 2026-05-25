@@ -41,12 +41,6 @@ const restartOnRustChange = (): Plugin => ({
 export default defineConfig(async () => ({
   plugins: [UnoCSS(), sveltekit(), !host && restartOnRustChange()].filter(Boolean),
 
-  resolve: {
-    alias: {
-      "@tomat/shared": new URL("../tomat-shared/src/index.ts", import.meta.url).pathname,
-    },
-  },
-
   clearScreen: false,
   server: {
     port: 1420,
@@ -81,5 +75,12 @@ export default defineConfig(async () => ({
       "@tauri-apps/api/event",
       "@tauri-apps/plugin-opener",
     ],
+  },
+
+  build: {
+    // The SvelteKit page graph plus UnoCSS runtime and tauri-api surface
+    // pushes the eager chunk past the 500 kB default. Bumped to 1000 kB so
+    // we still get a fresh warning if something genuinely heavy lands.
+    chunkSizeWarningLimit: 1000,
   },
 }));

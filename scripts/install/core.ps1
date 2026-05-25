@@ -6,12 +6,40 @@
 # Task Scheduler entry for auto-start, starts the daemon, and prints the
 # initial pairing code.
 #
+# Trust model (read before pinning a vendor signing key here):
+#   1. The installer is fetched over TLS from $env:TOMAT_CDN (au.tomat.ing
+#      by default). Connection-level integrity is HTTPS.
+#   2. The manifest at $env:TOMAT_CDN/manifests/core.json is also fetched
+#      over HTTPS. Its Ed25519 signature is intentionally NOT verified by
+#      this installer: PowerShell ships no minisign tool by default and
+#      pulling one in would inflate the install surface. Instead, the
+#      installer trusts the per-binary SHA-256 from the manifest and the
+#      running tomat-core binary's own signature check (in
+#      packages/tomat-core/src/update/self-updater.ts) to verify every
+#      subsequent self-update from the same channel.
+#   3. The bundled binary is hash-verified (Get-FileHash below) against
+#      the manifest's `sha256`, so a single corrupted download is caught
+#      even without manifest signature checking.
+#
+# Consequence: a compromised TLS chain on $env:TOMAT_CDN's certificate would
+# let a MITM serve a malicious manifest + matching binary on the very first
+# install. That risk window closes at first launch (manifest signature
+# verification is mandatory inside the running binary).
+#
 # Usage (one-liner):
 #   powershell -ExecutionPolicy Bypass -Command "iwr -useb https://au.tomat.ing/install/core.ps1 | iex"
 #
 # Env overrides:
-#   $env:TOMAT_CDN        override CDN base URL (default: https://au.tomat.ing)
-#   $env:TOMAT_CORE_HOME  override install root (default: %USERPROFILE%\.tomat\core)
+#   $env:TOMAT_CDN              override CDN base URL (default: https://au.tomat.ing)
+#   $env:TOMAT_CORE_HOME        override install root (default: %USERPROFILE%\.tomat\core)
+#   $env:TOMAT_INSTALL_SERVICE  "1" (default) registers a Scheduled Task so the
+#                               core boots on login. "0" skips it; the client
+#                               launches the core on demand via the
+#                               `start_local_core` Tauri command.
+#   $env:TOMAT_INSTALL_BIND_ALL "1" seeds settings.json with server.bindAll=true
+#                               so the freshly-installed core listens on
+#                               0.0.0.0 and other LAN devices can pair. "0"
+#                               (default) keeps the loopback bind.
 
 $ErrorActionPreference = "Stop"
 
@@ -22,6 +50,8 @@ $WorkersDir = Join-Path $HomeDir "workers"
 $StagingDir = Join-Path $HomeDir "staging"
 $LogsDir = Join-Path $HomeDir "logs"
 $ManifestUrl = "$Cdn/manifests/core.json"
+$InstallService = if ($env:TOMAT_INSTALL_SERVICE) { $env:TOMAT_INSTALL_SERVICE } else { "1" }
+$InstallBindAll = if ($env:TOMAT_INSTALL_BIND_ALL) { $env:TOMAT_INSTALL_BIND_ALL } else { "0" }
 
 function Info($msg) { Write-Host ">>> $msg" -ForegroundColor Cyan }
 function Fail($msg) { Write-Host "error: $msg" -ForegroundColor Red; exit 1 }
@@ -105,6 +135,14 @@ if ($manifest.helpers) {
   }
 }
 
+# --- seed settings.json --------------------------------------------------
+
+$SettingsFile = Join-Path $HomeDir "settings.json"
+if ($InstallBindAll -eq "1" -and -not (Test-Path $SettingsFile)) {
+  Set-Content -Path $SettingsFile -Value '{"server.bindAll":true}' -Encoding ascii
+  Info "seeded $SettingsFile with server.bindAll=true"
+}
+
 # --- admin token ----------------------------------------------------------
 
 $AdminTokenFile = Join-Path $HomeDir ".admin-token"
@@ -126,20 +164,30 @@ if (-not (Test-Path $AdminTokenFile) -or (Get-Item $AdminTokenFile).Length -eq 0
 
 # --- Scheduled Task for auto-start at logon -------------------------------
 
-$TaskName = "tomat-core"
-$action = New-ScheduledTaskAction -Execute $Installed
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd `
-    -RestartCount 5 -RestartInterval (New-TimeSpan -Seconds 30) -AllowStartIfOnBatteries
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-  -Settings $settings -Principal $principal -Description "tomat-core" | Out-Null
-Info "scheduled task '$TaskName' installed"
+if ($InstallService -ne "1") {
+  Info "skipping service install (TOMAT_INSTALL_SERVICE=$InstallService)"
+  # Spawn the core ourselves so the pairing-code mint below works. The
+  # client takes over supervision on its next launch via start_local_core.
+  Start-Process -FilePath $Installed -WindowStyle Hidden `
+    -RedirectStandardOutput (Join-Path $LogsDir "core.stdout.log") `
+    -RedirectStandardError (Join-Path $LogsDir "core.stderr.log")
+  Info "started core in background"
+} else {
+  $TaskName = "tomat-core"
+  $action = New-ScheduledTaskAction -Execute $Installed
+  $trigger = New-ScheduledTaskTrigger -AtLogOn
+  $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd `
+      -RestartCount 5 -RestartInterval (New-TimeSpan -Seconds 30) -AllowStartIfOnBatteries
+  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+    -Settings $settings -Principal $principal -Description "tomat-core" | Out-Null
+  Info "scheduled task '$TaskName' installed"
 
-# Start it now.
-Start-ScheduledTask -TaskName $TaskName
-Info "core started"
+  # Start it now.
+  Start-ScheduledTask -TaskName $TaskName
+  Info "core started"
+}
 
 # --- print pairing code ----------------------------------------------------
 

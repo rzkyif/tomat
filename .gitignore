@@ -38,3 +38,8 @@ vite.config.ts.timestamp-*
 
 # Reference only
 reference/
+
+# Test suite
+# Scratch tests created by agents during dev — see AGENTS.md "Testing"
+**/*.tmp.test.ts
+**/*.tmp.test.rs

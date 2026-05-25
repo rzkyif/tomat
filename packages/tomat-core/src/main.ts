@@ -3,7 +3,12 @@
 
 import { ensureDirs, paths } from "./paths.ts";
 import { loadBootConfig } from "./config.ts";
-import { getLogger, initLogger } from "./shared/log.ts";
+import {
+  getLogger,
+  initLogger,
+  isLoggerReady,
+  scrubSecrets,
+} from "./shared/log.ts";
 import { openDb } from "./db/connection.ts";
 import { migrate } from "./db/migrate.ts";
 import { buildApp } from "./http/server.ts";
@@ -11,16 +16,37 @@ import { wsHub } from "./ws/hub.ts";
 import { downloadManager } from "./downloads/manager.ts";
 import { handleUpdateMarkerOnBoot } from "./update/rollback.ts";
 import { toolkitsRegistry } from "./toolkits/registry.ts";
-import { initSidecarBoot } from "./services/sidecarBoot.ts";
+import { initSidecarBoot } from "./services/sidecar-boot.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
 import { shutdownJobctl } from "./sidecars/jobctl.ts";
+import { loadCoreSettings } from "./services/core-settings.ts";
 
 async function main(): Promise<void> {
   const cfg = loadBootConfig();
   await ensureDirs();
   await initLogger();
   const log = getLogger();
-  log.info(`tomat-core v${cfg.version} starting on ${cfg.host}:${cfg.port}`);
+
+  // `server.bindAll` (persisted core setting) widens the listener from
+  // 127.0.0.1 to 0.0.0.0 so other devices on the LAN can pair. The
+  // TOMAT_CORE_HOST env var still wins when set — operators may need to
+  // pin to a specific interface.
+  const hostFromEnv = Deno.env.get("TOMAT_CORE_HOST");
+  let bindHost = cfg.host;
+  if (!hostFromEnv) {
+    try {
+      const settings = await loadCoreSettings();
+      if (settings["server.bindAll"] === true) bindHost = "0.0.0.0";
+    } catch (err) {
+      log.warn(
+        `could not read server.bindAll; falling back to ${cfg.host}: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+    }
+  }
+
+  log.info(`tomat-core v${cfg.version} starting on ${bindHost}:${cfg.port}`);
   log.info(`root: ${paths().root}`);
 
   // Check the update marker BEFORE we open the DB / bind the port. If
@@ -69,7 +95,7 @@ async function main(): Promise<void> {
   const hub = wsHub();
 
   const server = Deno.serve(
-    { hostname: cfg.host, port: cfg.port },
+    { hostname: bindHost, port: cfg.port },
     async (req) => {
       const url = new URL(req.url);
       // WS upgrade path.
@@ -89,6 +115,7 @@ async function main(): Promise<void> {
       Deno.addSignalListener(sig, () => {
         log.info(`received ${sig}; shutting down`);
         hub.shutdown();
+        downloadManager().shutdown();
         void sidecarManager().shutdown();
         void shutdownJobctl();
         void server.shutdown().finally(() => Deno.exit(0));
@@ -103,7 +130,15 @@ if (import.meta.main) {
   try {
     await main();
   } catch (err) {
-    console.error("tomat-core failed to start:", err);
+    const msg = err instanceof Error ? err.stack ?? err.message : String(err);
+    if (isLoggerReady()) {
+      getLogger().error(`tomat-core failed to start: ${msg}`);
+    } else {
+      // Logger setup itself failed (or boot threw before it ran); the
+      // structured sink is unavailable, so fall back to console + scrub
+      // manually since the formatter never runs.
+      console.error(scrubSecrets(`tomat-core failed to start: ${msg}`));
+    }
     Deno.exit(1);
   }
 }

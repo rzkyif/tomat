@@ -43,7 +43,7 @@ export interface CorePaths {
   cacheDir: string;
   logsDir: string;
   logFile: string;
-  // Written by selfUpdater before the binary swap; consumed by main.ts on
+  // Written by self-updater before the binary swap; consumed by main.ts on
   // startup to detect post-update first boot vs. crash-loop after a failed
   // update (→ rollback). See update/rollback.ts.
   updateMarkerFile: string;

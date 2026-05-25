@@ -19,11 +19,13 @@ import {
   chatStartWsSchema,
   toolAskUserResponseSchema,
   toolCancelSchema,
+  wsFrameEnvelopeSchema,
 } from "@tomat/shared";
 import { authService } from "../services/auth.ts";
 import { chatService } from "../services/chat.ts";
 import { downloadManager } from "../downloads/manager.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
+import { subscribeUpdate } from "../update/self-updater.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 
@@ -91,6 +93,10 @@ class WsHub {
   shutdown(): void {
     for (const set of this.byClient.values()) {
       for (const conn of set) {
+        // Clear heartbeat timers first so a scheduled tick can't fire on a
+        // half-closed socket and trigger a noisy ws.send() failure.
+        if (conn.pingTimer !== undefined) clearTimeout(conn.pingTimer);
+        if (conn.pongTimer !== undefined) clearTimeout(conn.pongTimer);
         try {
           conn.ws.close();
         } catch { /* */ }
@@ -114,12 +120,25 @@ class WsHub {
       this.armHeartbeat(conn);
     });
     ws.addEventListener("message", (ev) => {
-      let frame: unknown;
+      let raw: unknown;
       try {
-        frame = JSON.parse(typeof ev.data === "string" ? ev.data : "");
-      } catch { /* */ }
-      if (!frame || typeof frame !== "object") return;
-      this.dispatchClientFrame(conn, frame as Record<string, unknown>);
+        raw = JSON.parse(typeof ev.data === "string" ? ev.data : "");
+      } catch (err) {
+        log.warn(
+          `rejected ws frame: invalid JSON (${
+            err instanceof Error ? err.message : err
+          })`,
+        );
+        return;
+      }
+      const parsed = wsFrameEnvelopeSchema.safeParse(raw);
+      if (!parsed.success) {
+        log.warn(
+          `rejected ws frame: envelope mismatch: ${parsed.error.message}`,
+        );
+        return;
+      }
+      this.dispatchClientFrame(conn, parsed.data as Record<string, unknown>);
     });
     ws.addEventListener("close", () => this.removeConnection(conn));
     ws.addEventListener("error", () => this.removeConnection(conn));
@@ -147,13 +166,19 @@ class WsHub {
     }
     if (kind === "chat.interrupt") {
       const parsed = chatInterruptWsSchema.safeParse(raw);
-      if (!parsed.success) return;
+      if (!parsed.success) {
+        log.warn(`bad chat.interrupt: ${parsed.error.message}`);
+        return;
+      }
       chatService().interrupt(parsed.data.streamId);
       return;
     }
     if (kind === "tool.askuser_response") {
       const parsed = toolAskUserResponseSchema.safeParse(raw);
-      if (!parsed.success) return;
+      if (!parsed.success) {
+        log.warn(`bad tool.askuser_response: ${parsed.error.message}`);
+        return;
+      }
       chatService().forwardAskUserResponse(
         parsed.data.callId,
         parsed.data.requestId,
@@ -163,7 +188,10 @@ class WsHub {
     }
     if (kind === "tool.cancel") {
       const parsed = toolCancelSchema.safeParse(raw);
-      if (!parsed.success) return;
+      if (!parsed.success) {
+        log.warn(`bad tool.cancel: ${parsed.error.message}`);
+        return;
+      }
       chatService().forwardCancel(parsed.data.callId);
       return;
     }
@@ -213,6 +241,17 @@ class WsHub {
         progress: snap.progress,
       });
     });
+    subscribeUpdate((e) => {
+      if (e.kind === "staged") {
+        this.broadcastAll({ kind: "update.staged", version: e.version });
+      } else {
+        this.broadcastAll({
+          kind: "update.error",
+          code: e.code,
+          message: e.message,
+        });
+      }
+    });
   }
 }
 
@@ -220,4 +259,10 @@ let _instance: WsHub | null = null;
 export function wsHub(): WsHub {
   if (!_instance) _instance = new WsHub();
   return _instance;
+}
+
+// Test-only: closes all sockets, drops the cached instance.
+export function __resetForTesting(): void {
+  if (_instance) _instance.shutdown();
+  _instance = null;
 }

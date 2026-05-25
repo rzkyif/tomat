@@ -1,17 +1,10 @@
-// deno-lint-ignore-file tomat/no-tauri-import -- TODO: expose
-//   `windowing.setIgnoreCursorEvents` and `windowing.cursorPosition` on the
-//   Platform interface so this file can stop importing @tauri-apps directly.
-//   Tracked as part of the click-through refactor; until then this is the
-//   only call site for Tauri's cursor-poll API.
 /**
  * Makes the overlay window click-through except where there's actual app
  * content. The window passes mouse clicks through to whatever is behind it
  * unless the cursor is hovering over a real UI element.
  */
 
-import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
-
-const win = getCurrentWindow();
+import { platform } from "$lib/platform";
 
 let ignoring = true;
 let paused = false;
@@ -42,7 +35,7 @@ function stopPolling() {
 }
 
 async function switchToCapture() {
-  await win.setIgnoreCursorEvents(false);
+  await platform().cursor.setClickthrough(false);
   setIgnored(false);
   if (document.hasFocus()) {
     // Window is focused - use mousemove for responsive exit detection
@@ -57,9 +50,9 @@ async function switchToIgnore() {
   document.removeEventListener("mousemove", onMouseMove);
   window.removeEventListener("blur", onBlurWhileCapturing);
   try {
-    await win.setIgnoreCursorEvents(true);
-  } catch {
-    // ignore
+    await platform().cursor.setClickthrough(true);
+  } catch (e) {
+    console.warn("[clickthrough] setClickthrough(true) failed:", e);
   }
   setIgnored(true);
   startPolling();
@@ -68,7 +61,10 @@ async function switchToIgnore() {
 async function checkCursor() {
   if (!contentEl || paused) return;
   try {
-    const [cursor, winPos] = await Promise.all([cursorPosition(), win.outerPosition()]);
+    const [cursor, winPos] = await Promise.all([
+      platform().cursor.getPosition(),
+      platform().windowing.outerPosition(),
+    ]);
     const sf = window.devicePixelRatio || 1;
     const relX = (cursor.x - winPos.x) / sf;
     const relY = (cursor.y - winPos.y) / sf;
@@ -80,8 +76,10 @@ async function checkCursor() {
     } else if (!over && !ignoring) {
       await switchToIgnore();
     }
-  } catch {
-    // window may be hidden or unavailable
+  } catch (e) {
+    // Window may be hidden or unavailable during a polling tick; common
+    // during show/hide transitions, so log at debug volume.
+    console.debug("[clickthrough] checkCursor skipped:", e);
   }
 }
 
@@ -103,7 +101,7 @@ export async function startClickThrough(el: HTMLElement) {
   contentEl = el;
   paused = false;
   setIgnored(true);
-  await win.setIgnoreCursorEvents(true);
+  await platform().cursor.setClickthrough(true);
   startPolling();
 }
 
@@ -119,9 +117,9 @@ export async function resumeClickThrough() {
   paused = false;
   setIgnored(true);
   try {
-    await win.setIgnoreCursorEvents(true);
-  } catch {
-    // ignore
+    await platform().cursor.setClickthrough(true);
+  } catch (e) {
+    console.warn("[clickthrough] resume setClickthrough(true) failed:", e);
   }
   startPolling();
 }

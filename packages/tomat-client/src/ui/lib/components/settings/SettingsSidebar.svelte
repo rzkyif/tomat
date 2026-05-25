@@ -4,7 +4,8 @@
   import { settingsState } from "../../state";
   import ServerStatusChip from "./ServerStatusChip.svelte";
   import DownloadsButton from "./DownloadsButton.svelte";
-  import CollapsibleLabel from "../CollapsibleLabel.svelte";
+  import UpdateButton from "./UpdateButton.svelte";
+  import SidebarItem from "../ui/SidebarItem.svelte";
 
   let {
     selectedGroupId,
@@ -68,17 +69,6 @@
     Running: "bg-accent-green-200",
   };
 
-  // Gap matches pl-1.5 so the space between icon and label mirrors the icon's
-  // left inset and stays constant across the collapse. The label width and
-  // the trailing pr-2.5 collapse together so the row reduces to a centred
-  // icon (pl-1.5 + icon + gap-1.5 with empty label + pr-0). Icon-only rows
-  // skip the trailing-pad collapse to stay symmetric rectangles.
-  function rowClass(hasText: boolean): string {
-    const showText = hasText && !collapsed;
-    const padRight = hasText ? (showText ? "pr-2.5" : "pr-0") : "pr-1.5";
-    return `flex items-center h-8 pl-1.5 ${padRight} gap-1.5 rounded-medium transition-[padding,colors,background-color] duration-200`;
-  }
-
 </script>
 
 <div class="flex flex-col gap-2 overflow-y-auto justify-between">
@@ -100,23 +90,15 @@
 
     {#each visibleGroups as group (group.id)}
       {@const isActive = selectedGroupId === group.id}
-      <button
-        class="hover:cursor-pointer {rowClass(true)} {isActive
-          ? 'bg-default-300 text-default-900'
-          : 'text-default-500 hover:text-default-700 hover:bg-default-200'}"
-        onclick={() => onSelect?.(group.id)}
+      <SidebarItem
+        icon={isActive ? group.icon : (group.iconInactive ?? group.icon)}
+        label={group.name}
+        {collapsed}
+        selected={isActive}
         title={collapsed ? group.name : undefined}
-        aria-label={group.name}
-      >
-        <i
-          class="flex text-xl shrink-0 {isActive
-            ? group.icon
-            : (group.iconInactive ?? group.icon)}"
-        ></i>
-        <CollapsibleLabel {collapsed} class="text-base text-left">
-          {group.name}
-        </CollapsibleLabel>
-      </button>
+        ariaLabel={group.name}
+        onclick={() => onSelect?.(group.id)}
+      />
     {/each}
   </div>
 
@@ -160,36 +142,24 @@
 
     <DownloadsButton {collapsed} />
 
-    <button
-      class="hover:cursor-pointer {rowClass(true)} {showAdvanced
-        ? 'bg-default-300 text-default-900'
-        : 'text-default-500 hover:text-default-700 hover:bg-default-200'}"
-      onclick={toggleAdvanced}
+    <SidebarItem
+      icon={showAdvanced
+        ? "i-material-symbols-toggle-on"
+        : "i-material-symbols-toggle-off-outline"}
+      label="Advanced Fields"
+      {collapsed}
+      selected={showAdvanced}
       title={collapsed
         ? showAdvanced
           ? "Hide advanced fields"
           : "Show advanced fields"
         : undefined}
-      aria-pressed={showAdvanced}
-    >
-      <i
-        class="flex text-xl shrink-0 {showAdvanced
-          ? 'i-material-symbols-toggle-on'
-          : 'i-material-symbols-toggle-off-outline'}"
-      ></i>
-      <CollapsibleLabel {collapsed} class="text-base text-left">
-        Advanced Fields
-      </CollapsibleLabel>
-    </button>
+      ariaPressed={showAdvanced}
+      onclick={toggleAdvanced}
+    />
 
-    <div
-      class="flex items-center {rowClass(false)} text-default-900 select-none"
-    >
-      <span
-        class="w-5 h-5 bg-current shrink-0"
-        style="mask:url(/tomat.svg) center/contain no-repeat;-webkit-mask:url(/tomat.svg) center/contain no-repeat;"
-        aria-label="tomat"
-      ></span>
-    </div>
+    <!-- Versioned update affordance. Shows "Tomat Client vX.X.X" at rest;
+         drives the combined client + core + sidecar update flow on click. -->
+    <UpdateButton {collapsed} />
   </div>
 </div>

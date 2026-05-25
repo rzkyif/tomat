@@ -4,13 +4,13 @@
   import { ttsState } from "$lib/state/tts.svelte";
   import { expansionState } from "$lib/state/expansion.svelte";
   import { getTextContent, type MessageContent } from "$lib/shared/types";
-  import Bubble from "../Bubble.svelte";
+  import Bubble from "../ui/Bubble.svelte";
   import MessageMarkdown from "./MessageMarkdown.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
   import {
     showAgentMessageMenu,
     showReasoningMessageMenu,
-  } from "$lib/shared/messageMenu";
+  } from "$lib/shared/message-menu";
 
   // AgentMessage is a discriminated bubble: a `kind: "reasoning"` instance
   // shows the reasoning trace produced by the model in a `role: "reasoning"`

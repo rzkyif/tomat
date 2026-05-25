@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
   import AgentMessage from "$lib/components/messages/AgentMessage.svelte";
   import ErrorMessage from "$lib/components/messages/ErrorMessage.svelte";
   import SystemMessage from "$lib/components/messages/SystemMessage.svelte";
@@ -10,7 +9,10 @@
   import UserMessage from "$lib/components/messages/UserMessage.svelte";
   import SessionBar from "$lib/components/SessionBar.svelte";
   import Settings from "$lib/components/settings/Settings.svelte";
-  import Bubble from "$lib/components/Bubble.svelte";
+  import CoreManagement from "$lib/components/core/CoreManagement.svelte";
+  import QuickSetup from "$lib/components/core/QuickSetup.svelte";
+  import SessionList from "$lib/components/SessionList.svelte";
+  import Bubble from "$lib/components/ui/Bubble.svelte";
   import MessageStackGroup from "$lib/components/MessageStackGroup.svelte";
   import { getTextContent, type Message } from "$lib/shared/types";
   import {
@@ -22,7 +24,11 @@
     snippetsState,
     streamingState,
     toolkitsState,
+    updateState,
+    viewState,
   } from "$lib/state";
+  import { cores } from "$lib/core";
+  import { platform } from "$lib/platform";
   import { detectPendingStartup } from "$lib/shared/download";
   import {
     shortcutHandler,
@@ -33,7 +39,6 @@
     getDuration,
   } from "$lib/shared/animations";
   import MessageEnter from "$lib/components/MessageEnter.svelte";
-  import { openUrl } from "@tauri-apps/plugin-opener";
 
   // Sidecar lifecycle is server-side; the client only attaches WS-driven
   // state subscribers so status frames reach the UI.
@@ -49,7 +54,6 @@
     pauseClickThrough,
     resumeClickThrough,
   } from "$lib/shared/clickthrough";
-  import { listen } from "@tauri-apps/api/event";
 
   // Visual preferences applied directly to documentElement: theme class for
   // dark mode, root font size for the rem-based scale. SSR is off (see
@@ -104,7 +108,6 @@
     return () => themeMql.removeEventListener("change", callback);
   }
 
-  let showSettings = $state(false);
   let loaded = $state(false);
   let sessionLoading = $state(true);
   let container: HTMLElement | undefined = $state();
@@ -132,7 +135,7 @@
   const TRANSITION_EASING = "cubic-bezier(0.4, 0, 0.2, 1)";
 
   // Imperatively drive the window-level slide+fade on `container`. Mirrors
-  // the same JS+CSS pattern used for panel swap (`toggleSettings`): set
+  // the same JS+CSS pattern used for panel swap (`runSlide`): set
   // transition then target style; the WKWebView transition fires reliably
   // because the source value is already on the element.
   //   - "visible":   on screen, fully opaque
@@ -166,7 +169,7 @@
     applyWindowState("offscreen", true);
     try {
       await new Promise((r) => setTimeout(r, getDuration()));
-      await invoke("hide_main_window");
+      await platform().windowing.hide();
     } catch (e) {
       console.warn("[window] hide failed:", e);
     } finally {
@@ -184,17 +187,17 @@
         !url.hostname.includes("tauri.localhost")
       ) {
         e.preventDefault();
-        openUrl(anchor.href);
+        void platform().openExternal(anchor.href);
       }
     }
   };
 
   async function positionWindow() {
     try {
-      await invoke("position_window", {
+      await platform().windowing.position({
         monitorId: settingsState.getMonitor(),
         alignment: settingsState.getAlignment(),
-        width: settingsState.currentSettings["layout.width"] || 700,
+        width: (settingsState.currentSettings["layout.width"] as number | undefined) ?? 700,
       });
     } catch (e) {
       console.error("Failed to position window", e);
@@ -206,20 +209,92 @@
   let unlistenHideRequested: (() => void) | null = null;
   let cleanupSystemTheme: (() => void) | null = null;
 
+  // Probe disk for every HF file the current configuration references and
+  // stash any missing items in downloadsState.pendingStartup. Called on
+  // mount AND whenever the active core changes — the first-pair flow goes
+  // null → loopback core, so the on-mount probe misses it.
+  async function refreshPendingStartup(): Promise<void> {
+    try {
+      if (!cores().currentEntry()) return;
+      const { plans, groupBySource } = await detectPendingStartup(
+        settingsState.currentSettings,
+      );
+      if (plans.length > 0) {
+        downloadsState.pendingStartup = plans;
+        downloadsState.pendingStartupGroupBySource = groupBySource;
+        return;
+      }
+      // Nothing missing — clear any stale entries from a previous core.
+      downloadsState.pendingStartup = [];
+      downloadsState.pendingStartupGroupBySource = {};
+      void startConfiguredServices();
+    } catch (e) {
+      console.warn("detectPendingStartup:", e);
+    }
+  }
+
+  // On-demand mode: when the selected core points at loopback and the binary
+  // is installed locally, spawn it ourselves if no service has it running.
+  // Idempotent — start_local_core probes the port first and exits cleanly if
+  // the core is already up. Failures are non-fatal: the user sees a normal
+  // "could not reach core" error from the regular call paths.
+  async function ensureLocalCoreUpIfNeeded(): Promise<void> {
+    const current = cores().currentEntry();
+    if (!current) return;
+    if (
+      !current.baseUrl.includes("127.0.0.1") &&
+      !current.baseUrl.includes("localhost")
+    ) {
+      return;
+    }
+    try {
+      if (await platform().pairing.isLocalCoreInstalled()) {
+        await platform().pairing.startLocalCore();
+      }
+    } catch (e) {
+      console.warn("[boot] ensureLocalCoreUpIfNeeded:", e);
+    }
+  }
+
   onMount(async () => {
+    // Decide the initial mode before anything renders: with no core paired the
+    // UI is locked to core management (first launch, or the user unpaired
+    // everything); otherwise boot to chat. Mode is never persisted across
+    // restarts — the restored session is the continuity.
+    await cores().restoreSelected();
+    if (cores().currentEntry()) {
+      viewState.setImmediate("chat");
+    } else {
+      viewState.setImmediate("coreManagement");
+      viewState.setLocked(true);
+    }
+
+    // If the user installed in on-demand mode, the loopback port might not be
+    // up yet. Spawn the core before any HTTP call so settings/load doesn't
+    // race against a dead port.
+    await ensureLocalCoreUpIfNeeded();
+    // Reload the active core's sessions on every later core switch (first
+    // pair, the Settings picker, the session-list switcher). Registered after
+    // restoreSelected so boot's own select() does not double-trigger it; the
+    // boot-time session load is in the deferred block below.
+    cores().subscribe(() => void sessionsState.loadLatest());
+
     // Critical path: only the work needed to paint a correctly-themed,
     // correctly-positioned window runs before `show_main_window`. Everything
     // else (session load, snippets, sidecar wiring, TTS) is deferred so
     // first paint is not blocked on it.
     try {
       await settingsState.loadSettings();
-      // Toolkits are installed by the user (per the rework) — no first-run
-      // seed step. The state below subscribes to the core's toolkit + tool
-      // call WS frames.
-      // Connect to the sidecar's WS channel for tool-call events in the
-      // background; the toolkits state auto-reconnects if the sidecar
-      // restarts.
+      // Wire every WS-driven state store to the core's socket. These
+      // subscriptions are registered once and persist across core switches
+      // (cores().subscribeWs re-binds them on select()), so a single attach
+      // here is enough even though the first core may not be paired yet.
       void toolkitsState.ensureConnected();
+      streamingState.attach();
+      serversState.attach();
+      sessionsState.attach();
+      downloadsState.attach();
+      updateState.attach();
 
       applyTheme(settingsState.currentSettings["appearance.theme"] ?? "auto");
       applyTextSize(settingsState.currentSettings["appearance.textSize"] ?? 20);
@@ -285,16 +360,16 @@
       );
 
       // Only show the "Loading latest session…" placeholder when we're
-      // actually about to load one; "always start new" mode has nothing to
-      // load so the placeholder would be misleading.
-      sessionLoading =
+      // actually about to load one: a core must be paired, and "always start
+      // new" mode has nothing to load so the placeholder would mislead.
+      sessionLoading = !!cores().currentEntry() &&
         !settingsState.currentSettings["general.session.alwaysStartNew"];
 
       await positionWindow();
     } finally {
       loaded = true;
       await tick();
-      await invoke("show_main_window");
+      await platform().windowing.show();
       // The `window-visibility: true` event emitted by `show_main_window`
       // fires before the listener below is registered, so kick off the
       // fade-in here directly.
@@ -314,32 +389,39 @@
       void startClickThrough(contentEl);
     }
 
-    listen<boolean>("window-visibility", ({ payload: visible }) => {
-      if (visible) {
-        applyWindowState("visible", true);
-        resumeClickThrough();
-        // Mirror the slide-in animation duration so spammed shortcut presses
-        // can't reverse the in-progress show into a hide and flicker.
-        windowTransition.begin();
-        setTimeout(() => windowTransition.end(), getDuration());
-      } else {
-        pauseClickThrough();
-      }
-    }).then((unlisten) => {
-      unlistenVisibility = unlisten;
-    });
+    platform()
+      .windowing.subscribeVisibility((visible) => {
+        if (visible) {
+          applyWindowState("visible", true);
+          resumeClickThrough();
+          // Mirror the slide-in animation duration so spammed shortcut
+          // presses can't reverse the in-progress show into a hide and
+          // flicker.
+          windowTransition.begin();
+          setTimeout(() => windowTransition.end(), getDuration());
+        } else {
+          pauseClickThrough();
+        }
+      })
+      .then((unlisten) => {
+        unlistenVisibility = unlisten;
+      });
 
-    listen("window-hide-requested", () => {
-      void animateHideThenHide();
-    }).then((unlisten) => {
-      unlistenHideRequested = unlisten;
-    });
+    platform()
+      .windowing.subscribeHideRequested(() => {
+        void animateHideThenHide();
+      })
+      .then((unlisten) => {
+        unlistenHideRequested = unlisten;
+      });
 
-    listen("monitor-changed", () => {
-      if (loaded) positionWindow();
-    }).then((unlisten) => {
-      unlistenMonitor = unlisten;
-    });
+    platform()
+      .windowing.subscribeMonitorChanged(() => {
+        if (loaded) positionWindow();
+      })
+      .then((unlisten) => {
+        unlistenMonitor = unlisten;
+      });
 
     // Global-shortcut listener lives here (not in UserInput) so it stays
     // attached when the user is in the Settings view; otherwise the
@@ -355,28 +437,24 @@
     // (their `ensure()` calls hit the file-exists fast path with no
     // network I/O).
     setupSidecarListeners();
-    void (async () => {
-      try {
-        const { plans, groupBySource } = await detectPendingStartup(
-          settingsState.currentSettings,
-        );
-        if (plans.length > 0) {
-          downloadsState.pendingStartup = plans;
-          downloadsState.pendingStartupGroupBySource = groupBySource;
-          return;
-        }
-        void startConfiguredServices();
-      } catch (e) {
-        console.warn("detectPendingStartup:", e);
-      }
-    })();
+    void refreshPendingStartup();
+
+    // Re-probe whenever the active core changes — first-pair lands here,
+    // not on initial mount, so the chat view needs to see the pending nudge
+    // after the user finishes Quick Setup. Settings updates flow through
+    // settingsState's own listeners and don't need to be debounced here.
+    cores().subscribe(() => {
+      void refreshPendingStartup();
+    });
 
     void snippetsState.load();
 
     // Session load runs async with a visible "Loading latest session…"
-    // placeholder above the user input until it resolves.
+    // placeholder above the user input until it resolves. With no core paired
+    // there is nothing to load (the UI is locked to coreManagement).
     (async () => {
       try {
+        if (!cores().currentEntry()) return;
         if (settingsState.currentSettings["general.session.alwaysStartNew"]) {
           await sessionsState.loadList();
         } else {
@@ -404,7 +482,17 @@
     cleanupSystemTheme?.();
   });
 
-  async function toggleSettings() {
+  // Drive the panel slide whenever a navigation is requested. viewState holds
+  // `pendingMode` (requested) and `mode` (committed/rendered); this effect runs
+  // the 3-phase slide — out → commit (offscreen) → in — toward pendingMode.
+  $effect(() => {
+    const target = viewState.pendingMode;
+    if (target === viewState.mode) return; // settled, nothing to slide
+    if (panelToggling) return; // a slide is already mid-flight
+    void runSlide();
+  });
+
+  async function runSlide() {
     if (panelToggling) return;
     panelToggling = true;
 
@@ -413,17 +501,15 @@
 
     if (layer && dur > 0) {
       const offscreen = offscreenTransform(settingsState.getAlignment());
-      const transitionStyle = `transform ${dur}ms cubic-bezier(0.4, 0, 0.2, 1)`;
 
-      // Phase 1: slide the wrapper (and everything inside, including the
-      // mounted panel) offscreen.
-      layer.style.transition = transitionStyle;
+      // Phase 1: slide the wrapper (and everything inside) offscreen.
+      layer.style.transition = `transform ${dur}ms ${TRANSITION_EASING}`;
       layer.style.transform = offscreen;
       await new Promise((r) => setTimeout(r, dur));
 
-      // Phase 2: swap content. The wrapper stays at the offscreen transform,
-      // so the new panel mounts already offscreen with no extra positioning.
-      showSettings = !showSettings;
+      // Phase 2: commit the mode swap while offscreen, so the new mode
+      // mounts already offscreen with no extra positioning.
+      viewState.commit();
       await tick();
 
       // Phase 3: slide the wrapper back to its natural position.
@@ -431,11 +517,13 @@
       await new Promise((r) => setTimeout(r, dur));
       layer.style.transition = "";
     } else {
-      showSettings = !showSettings;
+      viewState.commit();
     }
 
     panelToggling = false;
-    if (!showSettings) scrollToBottom();
+    if (viewState.mode === "chat") scrollToBottom();
+    // pendingMode may have changed again mid-slide (rapid navigation): re-run.
+    if (viewState.pendingMode !== viewState.mode) void runSlide();
   }
 
   $effect(() => {
@@ -690,16 +778,7 @@
       style="opacity: 0"
     >
     <div bind:this={contentEl} class="flex flex-col-reverse gap-2 my-auto">
-      {#if showSettings}
-        <div
-          class="w-fit pointer-events-none"
-          class:ml-auto={settingsState.getAlignment() === "right"}
-          class:mr-auto={settingsState.getAlignment() === "left"}
-          class:mx-auto={settingsState.getAlignment() === "center"}
-        >
-          <Settings {toggleSettings} />
-        </div>
-      {:else}
+      {#if viewState.mode === "chat"}
         <div
           class="w-fit flex flex-col-reverse gap-2 pointer-events-none"
           class:ml-auto={settingsState.getAlignment() === "right"}
@@ -711,7 +790,7 @@
           </div>
 
           <div class="relative pointer-events-none z-20">
-            <UserInput {toggleSettings} {showSettings} />
+            <UserInput />
           </div>
 
           {#if sessionLoading}
@@ -845,6 +924,23 @@
               {/if}
             {/each}
           {/key}
+        </div>
+      {:else}
+        <div
+          class="w-fit pointer-events-none"
+          class:ml-auto={settingsState.getAlignment() === "right"}
+          class:mr-auto={settingsState.getAlignment() === "left"}
+          class:mx-auto={settingsState.getAlignment() === "center"}
+        >
+          {#if viewState.mode === "coreManagement"}
+            <CoreManagement />
+          {:else if viewState.mode === "quickSetup"}
+            <QuickSetup />
+          {:else if viewState.mode === "sessionList"}
+            <SessionList />
+          {:else}
+            <Settings />
+          {/if}
         </div>
       {/if}
     </div>

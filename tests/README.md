@@ -1,0 +1,203 @@
+# Tomat test suite
+
+Tests live co-located with source as `*.test.ts`. E2E specs are opt-in and live
+under `tests/e2e/specs/` with their own runner.
+
+## Filename convention
+
+| Pattern              | Where              | Gitignored? |
+| -------------------- | ------------------ | ----------- |
+| `*.test.ts`          | next to source     | no          |
+| `*.test.ts`          | `tests/e2e/specs/` | no          |
+| `*.tmp.test.{ts,rs}` | anywhere           | **yes**     |
+
+Rust uses inline `#[cfg(test)] mod tests` for unit tests. If integration tests
+grow, they go in `packages/<pkg>/tests/*.rs` (Cargo's per-file convention).
+Scratch Rust tests follow `*.tmp.test.rs` to inherit the gitignore.
+
+Scratch tests are gitignored via `**/*.tmp.test.{ts,rs}` in the repo root
+`.gitignore`. They run locally under the normal task but never reach commits or
+CI.
+
+## Quick reference
+
+| Task                    | What it runs                                                                                        |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| `deno task test`        | All tests across the whole repo (Deno + vitest + cargo).                                            |
+| `deno task test:deno`   | Deno tests only (core, shared, builtin-toolkit, core-updater).                                      |
+| `deno task test:core`   | Just `tomat-core`.                                                                                  |
+| `deno task test:shared` | Just `tomat-shared`.                                                                                |
+| `deno task test:ui`     | Vitest against the Svelte 5 UI (`packages/tomat-client`).                                           |
+| `deno task test:rs`     | `cargo test` for both Rust crates.                                                                  |
+| `deno task test:e2e`    | WebdriverIO + tauri-driver. Manual only. See [tests/e2e/README.md](e2e/README.md) for opt-in setup. |
+
+## Layout
+
+```
+packages/<pkg>/src/foo.test.ts           # co-located test
+packages/<pkg>/src/foo.tmp.test.ts       # scratch test (gitignored)
+packages/tomat-core/tests/
+  fixtures/sidecars/http-stub.ts         # reusable fake sidecar
+  fixtures/openai/*.sse                  # recorded SSE for llmProvider tests
+  helpers/db.ts                          # setupTestEnv() — tempdir DB harness
+  helpers/time.ts                        # mockClock()
+  helpers/free-port.ts                   # ephemeral-port helper
+tests/e2e/
+  wdio.conf.ts                           # WebdriverIO config
+  specs/*.test.ts                        # permanent E2Es
+  specs/*.tmp.test.ts                    # scratch E2Es (gitignored)
+```
+
+## Writing tests against `tomat-core`
+
+Any test that touches the DB or service singletons should look like this:
+
+```ts
+import { assertEquals } from "@std/assert";
+import { setupTestEnv } from "../../tests/helpers/db.ts";
+import { authService } from "./auth.ts";
+
+Deno.test("AuthService.mintPairingCode: returns 6-digit code", async () => {
+  const env = await setupTestEnv();
+  try {
+    const auth = authService();
+    const { code } = await auth.mintPairingCode();
+    assertEquals(code.length, 6);
+  } finally {
+    await env.teardown();
+  }
+});
+```
+
+What `setupTestEnv()` does:
+
+1. Creates a tempdir, points `TOMAT_CORE_HOME` at it.
+2. Opens a fresh SQLite DB and runs migrations.
+3. Inserts a synthetic logger setup (console-only — no rotating file handler).
+4. The returned `teardown()` closes the DB, resets every module-level singleton
+   (`auth`, `chat`, `sessions repo`, `sidecar manager`, `secrets`, `ws hub`),
+   restores the env, and removes the tempdir.
+
+If you need a paired client without going through the pairing-code flow, call
+`createTestClient(name?)` from the same helper — it inserts a row in `clients`
+and returns the id (use this for the `ownerClientId` FK).
+
+## Time-sensitive tests
+
+Use `mockClock()` from `tests/helpers/time.ts`:
+
+```ts
+import { mockClock } from "../../tests/helpers/time.ts";
+
+const clock = mockClock(1_700_000_000_000);
+try {
+  // ...
+  clock.advance(61_000);
+  // ...
+} finally {
+  clock.restore();
+}
+```
+
+`mockClock` patches `Date.now()`. It does NOT mock the `Date` constructor or
+`setTimeout`; redesign around the seam if you need finer control.
+
+## Mocking external APIs
+
+OpenAI: pass a fake `fetch` via `LlmEndpointConfig.fetch` (added as a test
+seam):
+
+```ts
+const endpoint = {
+  baseUrl: "https://example/api/v1",
+  apiKey: "sk-test",
+  model: "test-model",
+  fetch: (input, init) => Promise.resolve(new Response(...)),
+};
+```
+
+HuggingFace, npm registry, signed manifests: same pattern — inject a fake at the
+HTTP boundary. Recorded SSE responses go under
+`packages/tomat-core/tests/fixtures/openai/*.sse`.
+
+## Sidecar fixtures
+
+The fake server at `packages/tomat-core/tests/fixtures/sidecars/http-stub.ts` is
+a 10-line Deno script that binds `127.0.0.1:<port>` and serves a 200 on every
+path, matching the readiness contract every sidecar promises. To stand a
+sidecar-shaped subprocess up in a test:
+
+```ts
+import { freePort } from "../../tests/helpers/free-port.ts";
+import { sidecarManager } from "./manager.ts";
+
+const port = freePort();
+const STUB =
+  new URL("../../tests/fixtures/sidecars/http-stub.ts", import.meta.url)
+    .pathname;
+await sidecarManager().start("llama", {
+  binary: Deno.execPath(),
+  args: ["run", `--allow-net=127.0.0.1:${port}`, STUB, String(port)],
+  readiness: { kind: "http", url: `http://127.0.0.1:${port}/health` },
+  restartPolicy: "none",
+});
+```
+
+Per-sidecar fakes (for tests that need real protocol surface, e.g. streaming LLM
+responses on the llama-server endpoint) live under the same
+`tests/fixtures/sidecars/` folder.
+
+## Writing Svelte component tests
+
+Vitest + jsdom + `@testing-library/svelte`. Example:
+
+```ts
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render } from "@testing-library/svelte";
+import Toggle from "./Toggle.svelte";
+
+describe("Toggle", () => {
+  it("calls onchange when toggled", async () => {
+    const onchange = vi.fn();
+    const { container } = render(Toggle, {
+      props: { checked: false, onchange },
+    });
+    await fireEvent.click(container.querySelector("input")!);
+    expect(onchange).toHaveBeenCalledWith(true);
+  });
+});
+```
+
+Gotchas:
+
+- `$effect` runes don't run synchronously under jsdom. Drive them with
+  `flushSync()` from `svelte` if your assertion depends on an effect.
+- Mock the platform seam by stubbing `lib/platform/index.ts` — don't bring Tauri
+  into the test environment.
+- The global test setup (`src/ui/test-setup.ts`) stubs `IntersectionObserver`,
+  `ResizeObserver`, and `matchMedia` because jsdom doesn't ship them. If a test
+  needs real DOM observer behavior, switch the environment to `happy-dom` or
+  `vitest-browser-svelte` — but commit to one across the package.
+
+## Writing Rust tests
+
+Inline `#[cfg(test)] mod tests` for unit tests. The `KeychainStore` trait in
+both `tomat-core-keychain/src/main.rs` and
+`packages/tomat-client/src/tauri/src/commands/keychain.rs` is the pattern for
+any test that would otherwise touch a platform API — define a small trait, ship
+a `Real*` impl that wraps the real crate, and ship an `InMemory*` test impl. The
+same pattern works for filesystem (write to a tempdir under `env::temp_dir()`),
+system clock (newtype around `SystemTime::now`), and any OS resource that
+doesn't have a Rust-side mock.
+
+Annotate the test module with `#[allow(clippy::unwrap_used)]` because the
+crate's clippy config rejects `unwrap` in non-test code.
+
+## CI
+
+`.github/workflows/ci.yml` runs the always-on suite:
+
+- The `deno` job runs `deno task test:deno`, `deno task test:ui`, and
+  `deno task test:rs` on Linux.
+- The `rs` matrix runs `cargo test` for both Rust crates on macOS and Windows.
+- E2E specs are never run in CI.

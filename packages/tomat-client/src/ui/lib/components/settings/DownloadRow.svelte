@@ -3,6 +3,7 @@
   import { SETTINGS_SCHEMA } from "@tomat/shared";
   import { downloadsState } from "../../state";
   import { formatBytes } from "$lib/shared/format";
+  import IconButton from "../ui/IconButton.svelte";
 
   let { item } = $props<{ item: DownloadItem }>();
 
@@ -55,8 +56,6 @@
   // button caused the icon mask to render scaled-down rather than clipped.
   const xWrapClass =
     "overflow-clip w-0 group-hover:w-5 transition-[width] duration-150 shrink-0";
-  const xBtnClass =
-    "flex p-0.5 rounded hover:bg-default-300 text-default-600 hover:text-default-800 hover:cursor-pointer transition-colors";
 </script>
 
 <div
@@ -89,74 +88,81 @@
         {Math.round(progressPct())}%
       </span>
       <div class={xWrapClass}>
-        <button
-          class={xBtnClass}
+        <IconButton
+          icon="i-material-symbols-close-rounded"
           title="Cancel download"
+          size="sm"
+          variant="subtle"
+          class="hover:bg-default-300"
           onclick={() => downloadsState.cancel(item.id)}
-        >
-          <i class="flex i-material-symbols-close-rounded text-base"></i>
-        </button>
+        />
       </div>
     {:else if item.status === "Pending"}
       <div class={xWrapClass}>
-        <button
-          class={xBtnClass}
+        <IconButton
+          icon="i-material-symbols-close-rounded"
           title="Remove from queue"
+          size="sm"
+          variant="subtle"
+          class="hover:bg-default-300"
           onclick={() => downloadsState.cancel(item.id)}
-        >
-          <i class="flex i-material-symbols-close-rounded text-base"></i>
-        </button>
+        />
       </div>
     {:else if item.status === "Completed"}
-      <button
-        class="flex p-0.5 rounded hover:bg-default-300 text-default-600 hover:text-default-800 hover:cursor-pointer transition-colors"
+      <IconButton
+        icon="i-material-symbols-folder-open-rounded"
         title="Reveal in file manager"
+        size="sm"
+        variant="subtle"
+        class="hover:bg-default-300"
         onclick={() => downloadsState.reveal(item.abs_path)}
-      >
-        <i class="flex i-material-symbols-folder-open-rounded text-base"></i>
-      </button>
+      />
       <div class={xWrapClass}>
-        <button
-          class={xBtnClass}
+        <IconButton
+          icon="i-material-symbols-close-rounded"
           title="Remove from list"
+          size="sm"
+          variant="subtle"
+          class="hover:bg-default-300"
           onclick={() => downloadsState.remove(item.id)}
-        >
-          <i class="flex i-material-symbols-close-rounded text-base"></i>
-        </button>
+        />
       </div>
     {:else if item.status === "Error"}
-      <button
-        class="flex p-0.5 rounded hover:bg-accent-red-100 text-accent-red-400 hover:text-accent-red-600 hover:cursor-pointer transition-colors"
+      <IconButton
+        icon="i-material-symbols-refresh-rounded"
         title="Retry download"
+        size="sm"
+        class="text-accent-red-400 hover:text-accent-red-600 hover:bg-accent-red-100"
         onclick={() => downloadsState.retry(item.id)}
-      >
-        <i class="flex i-material-symbols-refresh-rounded text-base"></i>
-      </button>
+      />
       <div class={xWrapClass}>
-        <button
-          class={xBtnClass}
+        <IconButton
+          icon="i-material-symbols-close-rounded"
           title="Remove from list"
+          size="sm"
+          variant="subtle"
+          class="hover:bg-default-300"
           onclick={() => downloadsState.remove(item.id)}
-        >
-          <i class="flex i-material-symbols-close-rounded text-base"></i>
-        </button>
+        />
       </div>
     {:else if item.status === "Cancelled"}
-      <button
-        class="flex p-0.5 rounded hover:bg-default-300 text-default-600 hover:text-default-800 hover:cursor-pointer transition-colors"
+      <IconButton
+        icon="i-material-symbols-refresh-rounded"
         title="Retry download"
+        size="sm"
+        variant="subtle"
+        class="hover:bg-default-300"
         onclick={() => downloadsState.retry(item.id)}
-      >
-        <i class="flex i-material-symbols-refresh-rounded text-base"></i>
-      </button>
+      />
       <div class={xWrapClass}>
-        <button
-          class={xBtnClass}
+        <IconButton
+          icon="i-material-symbols-close-rounded"
           title="Remove from list"
+          size="sm"
+          variant="subtle"
+          class="hover:bg-default-300"
           onclick={() => downloadsState.remove(item.id)}
-        >
-          <i class="flex i-material-symbols-close-rounded text-base"></i>
-        </button>
+        />
       </div>
     {/if}
   </div>

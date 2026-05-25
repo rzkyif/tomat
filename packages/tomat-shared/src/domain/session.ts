@@ -75,7 +75,10 @@ export interface ToolCall {
   status: ToolCallStatus;
   result?: unknown; // present when status === "completed"
   error?: string; // present when status === "failed"
-  progress?: { value: number; label?: string; description?: string };
+  /** 0..1 completion fraction set by the `tool.progress` WS frame. The
+   *  frame also carries transient `label` / `description` strings; only the
+   *  number is persisted on the ToolCall. */
+  progress?: number;
   logLines?: Array<
     {
       level: "debug" | "info" | "warn" | "error";
@@ -216,4 +219,7 @@ export interface SessionListEntry {
   createdAtMs: number;
   updatedAtMs: number;
   messageCount: number;
+  /** Length-limited plain-text snippet of the first user message, computed
+   *  server-side. Empty string when the session has no user message yet. */
+  summary: string;
 }

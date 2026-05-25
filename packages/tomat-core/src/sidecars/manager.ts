@@ -18,7 +18,7 @@
 
 import { getLogger } from "../shared/log.ts";
 import { trackSidecarPid } from "./jobctl.ts";
-import { libraryEnvFor } from "./libraryPath.ts";
+import { libraryEnvFor } from "./library-path.ts";
 import {
   pollHttpHealth,
   sleep,
@@ -424,4 +424,10 @@ let _instance: SidecarManager | null = null;
 export function sidecarManager(): SidecarManager {
   if (!_instance) _instance = new SidecarManager();
   return _instance;
+}
+
+// Test-only: drops the cached instance so the next `sidecarManager()` call
+// rebuilds against a fresh listener set.
+export function __resetForTesting(): void {
+  _instance = null;
 }

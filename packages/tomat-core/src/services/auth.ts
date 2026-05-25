@@ -49,14 +49,24 @@ class IpRateLimiter {
 
   recordAndCheck(ip: string): boolean {
     const now = Date.now();
-    const arr = this.hits.get(ip) ?? [];
-    const recent = arr.filter((t) => now - t < CLAIMS_PER_IP_WINDOW_MS);
-    if (recent.length >= CLAIMS_PER_IP_MAX) {
-      this.hits.set(ip, recent);
+    const prior = this.hits.get(ip);
+    // Build the next array in one pass: drop expired entries, count remaining,
+    // append `now` if under the cap. The Map.set is the only mutation, so a
+    // concurrent reader can never observe a half-updated slot. (V8 is
+    // single-threaded today; this preserves the property if anyone ever
+    // adds an `await` inside this function.)
+    const next: number[] = [];
+    if (prior) {
+      for (const t of prior) {
+        if (now - t < CLAIMS_PER_IP_WINDOW_MS) next.push(t);
+      }
+    }
+    if (next.length >= CLAIMS_PER_IP_MAX) {
+      this.hits.set(ip, next);
       return false;
     }
-    recent.push(now);
-    this.hits.set(ip, recent);
+    next.push(now);
+    this.hits.set(ip, next);
     return true;
   }
 }
@@ -143,7 +153,7 @@ export class AuthService {
         nextAttempts,
         codeHash,
       );
-    if (nextAttempts > MAX_ATTEMPTS_PER_CODE) {
+    if (nextAttempts >= MAX_ATTEMPTS_PER_CODE) {
       db().prepare(`UPDATE pairing_codes SET claimed = 1 WHERE code_hash = ?`)
         .run(codeHash);
       throw new AppError(
@@ -235,7 +245,6 @@ export class AuthService {
       JOIN sessions s ON s.id = a.session_id
       WHERE s.owner_client_id = ?
     `).all(clientId) as Array<{ abs_path: string }>;
-    db().prepare(`UPDATE clients SET revoked = 1 WHERE id = ?`).run(clientId);
     db().prepare(`DELETE FROM clients WHERE id = ?`).run(clientId);
     return { attachmentPaths: attachments.map((a) => a.abs_path) };
   }
@@ -270,6 +279,12 @@ let _instance: AuthService | null = null;
 export function authService(): AuthService {
   if (!_instance) _instance = new AuthService();
   return _instance;
+}
+
+// Test-only: drops the cached instance so the next `authService()` call
+// rebuilds it. Use between tests when the underlying DB has been swapped.
+export function __resetForTesting(): void {
+  _instance = null;
 }
 
 // --- helpers ---------------------------------------------------------------

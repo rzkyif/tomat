@@ -67,6 +67,22 @@ jobs:
       - run: cargo fmt --manifest-path packages/tomat-core-keychain/Cargo.toml --check
       - run: deno task lint
 
+      # In-source tests. E2E (WebdriverIO + tauri-driver under tests/e2e/) is
+      # intentionally not run in CI — see tests/e2e/README.md.
+      - name: Deno tests (core + shared + builtin-toolkit + core-updater)
+        run: |
+          deno test --allow-all --no-check --quiet \
+            packages/tomat-core \
+            packages/tomat-shared \
+            packages/tomat-core-updater \
+            packages/tomat-builtin-toolkit
+
+      - name: Vitest (client UI)
+        run: deno run -A scripts/test-ui.ts run
+
+      - run: cargo test --manifest-path packages/tomat-client/src/tauri/Cargo.toml --lib
+      - run: cargo test --manifest-path packages/tomat-core-keychain/Cargo.toml
+
   # Cross-platform Rust checks. Linux already runs inside `deno task check`
   # above; this matrix covers macOS + Windows so the Rust crates (the Tauri
   # shell and the core-keychain helper) stay buildable on every supported host
@@ -92,5 +108,7 @@ jobs:
             packages/tomat-core-keychain
       - run: cargo clippy --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo check --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets
+      - run: cargo test --manifest-path packages/tomat-client/src/tauri/Cargo.toml --lib
       - run: cargo clippy --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings
       - run: cargo check --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets
+      - run: cargo test --manifest-path packages/tomat-core-keychain/Cargo.toml

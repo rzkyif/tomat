@@ -30,12 +30,53 @@ export interface InstallResult {
   jobIds: string[];
 }
 
+/** Per-binary installed-version index. Updated on successful install /
+ *  update so /api/v1/binaries/check can report what's actually on disk vs
+ *  what the manifest currently publishes. */
+async function readInstalledVersions(): Promise<Record<string, string>> {
+  try {
+    const text = await Deno.readTextFile(join(paths().binDir, "versions.json"));
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object") {
+      return parsed as Record<string, string>;
+    }
+  } catch (err) {
+    if (!(err instanceof Deno.errors.NotFound)) {
+      log.warn(
+        `could not read versions.json: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+    }
+  }
+  return {};
+}
+
+async function writeInstalledVersion(
+  kind: BinaryKind,
+  version: string,
+): Promise<void> {
+  const versions = await readInstalledVersions();
+  versions[kind] = version;
+  await Deno.writeTextFile(
+    join(paths().binDir, "versions.json"),
+    JSON.stringify(versions, null, 2) + "\n",
+  );
+}
+
+export interface BinaryUpdateCheck {
+  kind: BinaryKind;
+  installed: boolean;
+  installedVersion: string | null;
+  latestVersion: string;
+  available: boolean;
+}
+
 export class BinariesManager {
   // List the install state of every known binary kind. Used by
   // GET /api/v1/binaries.
   async list(): Promise<BinaryStatus[]> {
     const manifest = await loadBinaryManifest().catch(() => null);
-    const triple = hostTriple();
     const out: BinaryStatus[] = [];
     for (const kind of BINARY_KINDS) {
       const path = join(paths().binDir, binaryName(kind));
@@ -48,7 +89,35 @@ export class BinariesManager {
         path: installed ? path : undefined,
       });
     }
-    void triple;
+    return out;
+  }
+
+  // Compare installed binary versions to the manifest's currently-published
+  // version. Drives the UpdateButton's "updates available" affordance.
+  async check(): Promise<BinaryUpdateCheck[]> {
+    const manifest = await loadBinaryManifest({ force: true });
+    const versions = await readInstalledVersions();
+    const out: BinaryUpdateCheck[] = [];
+    for (const kind of BINARY_KINDS) {
+      const path = join(paths().binDir, binaryName(kind));
+      const installed = await fileExists(path);
+      const installedVersion = versions[kind] ?? null;
+      const latestVersion = manifest.binaries[kind]?.version ?? "unknown";
+      // "available" means we should re-install: either the binary is
+      // missing, or the recorded install version disagrees with the
+      // manifest. An installed-but-version-unknown binary (pre-tracking)
+      // is treated as "current" so we don't spam the user with phantom
+      // updates after upgrading core.
+      const available = !installed ||
+        (installedVersion !== null && installedVersion !== latestVersion);
+      out.push({
+        kind,
+        installed,
+        installedVersion,
+        latestVersion,
+        available,
+      });
+    }
     return out;
   }
 
@@ -67,12 +136,10 @@ export class BinariesManager {
     return { jobIds };
   }
 
-  // Force-update a single binary to the requested version (or latest if
-  // omitted). Implementation is currently identical to install() because
-  // the manifest's "version" field is the only one we publish at a time;
-  // version-pinning is a CDN-side concern.
-  async update(kind: BinaryKind, version?: string): Promise<{ jobId: string }> {
-    void version;
+  // Force-update a single binary to the manifest's currently-published
+  // version. No client-side version pinning — the CDN publishes one version
+  // per kind at a time, and that's what we install.
+  async update(kind: BinaryKind): Promise<{ jobId: string }> {
     const manifest = await loadBinaryManifest({ force: true });
     const triple = hostTriple();
     const jobId = this.kickoff(kind, manifest, triple);
@@ -129,7 +196,8 @@ export class BinariesManager {
         log.info(`${kind}: downloaded to ${downloaded}`);
         await extractArchive(downloaded, paths().binDir, kind);
         await Deno.remove(downloaded);
-        log.info(`${kind}: installed`);
+        await writeInstalledVersion(kind, entry.version);
+        log.info(`${kind}: installed v${entry.version}`);
       } catch (err) {
         log.error(
           `${kind}: install failed: ${
@@ -150,6 +218,10 @@ let _instance: BinariesManager | null = null;
 export function binariesManager(): BinariesManager {
   if (!_instance) _instance = new BinariesManager();
   return _instance;
+}
+
+export function __resetForTesting(): void {
+  _instance = null;
 }
 
 // --- archive extraction ----------------------------------------------------

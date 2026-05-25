@@ -157,10 +157,7 @@ class SessionsState {
     try {
       const full = await cores().api().sessions.get(sessionId);
       this.resetAll();
-      messagesState.hydrate(
-        backfillMessageIds(full.messages),
-        (full.tokenUsage ?? null) as unknown as Parameters<typeof messagesState.hydrate>[1],
-      );
+      messagesState.hydrate(backfillMessageIds(full.messages), full.tokenUsage ?? null);
       this.id = full.id;
       this.title = full.title || this.defaultTitle;
       this.currentIndex = this.list.findIndex((s) => s.id === sessionId);
@@ -169,14 +166,24 @@ class SessionsState {
     }
   }
 
-  async navigatePrev(): Promise<void> {
-    if (this.currentIndex <= 0) return;
-    await this.load(this.list[this.currentIndex - 1].id);
-  }
-
-  async navigateNext(): Promise<void> {
-    if (this.currentIndex >= this.list.length - 1) return;
-    await this.load(this.list[this.currentIndex + 1].id);
+  /** Delete an arbitrary session by id. When it's the active session this
+   *  delegates to delete() (session-boundary reset + navigation to a
+   *  neighbour); otherwise it just drops the row from the list in place. */
+  async deleteById(id: string): Promise<void> {
+    if (id === this.id) {
+      await this.delete();
+      return;
+    }
+    try {
+      await cores().api().sessions.delete(id);
+    } catch (e) {
+      console.error("Failed to delete session:", e);
+      return;
+    }
+    this.list = this.list.filter((s) => s.id !== id);
+    if (this.id) {
+      this.currentIndex = this.list.findIndex((s) => s.id === this.id);
+    }
   }
 
   async delete(): Promise<void> {

@@ -4,9 +4,9 @@
     AskUserQuestion,
     ToolCallState,
   } from "$lib/shared/types";
-  import Bubble from "../Bubble.svelte";
-  import Expandable from "../Expandable.svelte";
-  import Expand from "../Expand.svelte";
+  import Bubble from "../ui/Bubble.svelte";
+  import Expandable from "../ui/Expandable.svelte";
+  import Expand from "../ui/Expand.svelte";
   import { settingsState } from "../../state";
   import { expansionState } from "$lib/state/expansion.svelte";
   import { untrack } from "svelte";

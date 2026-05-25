@@ -20,7 +20,7 @@ import { newJobId } from "../shared/ids.ts";
 import { binaryName } from "../binaries/versions.ts";
 import { hashToolkit } from "./hash.ts";
 import { toolId, toolkitInstallPath, toolkitsRegistry } from "./registry.ts";
-import { resolveVersion } from "./npmRegistry.ts";
+import { resolveVersion } from "./npm-registry.ts";
 
 const log = getLogger("toolkit-installer");
 
@@ -142,7 +142,17 @@ async function runInstall(
     if (hadOld) {
       try {
         await Deno.rename(installPath + ".old", installPath);
-      } catch { /* */ }
+      } catch (rollbackErr) {
+        // The original install dir is now stranded at `installPath.old` and
+        // there is no `installPath`. Log so the user can recover manually
+        // (the outer error reporting only carries the primary failure).
+        log.error(
+          `${toolkitId}: rollback rename failed; previous version is at ` +
+            `${installPath}.old — ${
+              rollbackErr instanceof Error ? rollbackErr.message : rollbackErr
+            }`,
+        );
+      }
     }
     sink.done(jobId, toolkitId, false, 5);
     throw err;
@@ -407,14 +417,14 @@ async function rmrf(path: string): Promise<void> {
   }
 }
 
-function flattenNpmName(name: string): string {
+export function flattenNpmName(name: string): string {
   // @scope/name -> @scope__name to land cleanly under toolkits/<id>/.
   return name.replace("/", "__");
 }
 
 // Flatten the per-kind permission object from tools.json into a single
 // PermissionDecl[] for storage / grant key derivation.
-function flattenPermissions(
+export function flattenPermissions(
   perms: ToolsJson["tools"][number]["permissions"],
 ): Array<import("@tomat/shared").PermissionDecl> {
   if (!perms) return [];

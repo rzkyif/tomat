@@ -367,6 +367,10 @@ export function toolkitsRegistry(): ToolkitsRegistry {
   return _instance;
 }
 
+export function __resetForTesting(): void {
+  _instance = null;
+}
+
 // Resolve the on-disk install path for a toolkit id.
 export function toolkitInstallPath(id: string): string {
   return join(paths().toolkitsDir, id);

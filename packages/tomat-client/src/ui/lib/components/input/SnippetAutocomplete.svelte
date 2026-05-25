@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "$lib/shared/snippets";
+  import ListItem from "../ui/ListItem.svelte";
 
   let { options, selectedIndex, anchor, onSelect } = $props<{
     options: Snippet[];
@@ -16,22 +17,26 @@
     role="listbox"
   >
     {#each options as option, i (option.id)}
-      <button
-        type="button"
-        class="w-full text-left flex items-center justify-between gap-3 px-4 py-2 text-sm hover:cursor-pointer transition-colors {i ===
-        selectedIndex
-          ? 'bg-default-200 text-default-900'
-          : 'text-default-800 hover:bg-default-200'}"
+      <!-- onmousedown (not onclick) so the textarea keeps focus through the
+           selection; preventDefault avoids the blur. -->
+      <ListItem
+        direction="row"
+        selected={i === selectedIndex}
+        role="option"
+        ariaSelected={i === selectedIndex}
+        class="rounded-none px-4 py-2"
         onmousedown={(e) => {
           e.preventDefault();
           onSelect(option);
         }}
-        role="option"
-        aria-selected={i === selectedIndex}
       >
-        <span class="truncate flex-1">{option.name || option.trigger}</span>
-        <span class="text-xs font-mono text-default-600 shrink-0">{option.trigger}</span>
-      </button>
+        <span class="truncate flex-1 text-sm text-default-800">
+          {option.name || option.trigger}
+        </span>
+        <span class="text-xs font-mono text-default-600 shrink-0">
+          {option.trigger}
+        </span>
+      </ListItem>
     {/each}
   </div>
 {/if}

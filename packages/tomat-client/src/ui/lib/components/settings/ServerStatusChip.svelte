@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ServerStatus, ServerStatusUpdate } from "$lib/shared/types";
+  import Chip from "../ui/Chip.svelte";
 
   let { type, update } = $props<{
     type: "LLM" | "STT" | "TTS";
@@ -7,30 +8,44 @@
   }>();
 
   let isOpen = $state(false);
-  let buttonEl = $state<HTMLButtonElement>();
+  let buttonEl = $state<HTMLDivElement>();
   let popupStyle = $state("");
 
   function updatePopupPosition() {
     if (!buttonEl) return;
     const rect = buttonEl.getBoundingClientRect();
-    popupStyle = `left: ${rect.left}px; bottom: ${window.innerHeight - rect.top + 8}px;`;
+    popupStyle =
+      `left: ${rect.left}px; bottom: ${window.innerHeight - rect.top + 8}px;`;
   }
 
-  const colorMap: Record<ServerStatus, string> = {
-    Disabled: "bg-default-200 text-default-600",
-    Error: "bg-accent-red-200 text-accent-red-700",
-    Loading: "bg-accent-orange-200 text-accent-orange-700",
-    Running: "bg-accent-green-200 text-accent-green-700",
-  };
-  const color = $derived(colorMap[update.status as ServerStatus]);
+  type Variant = "default" | "accent";
+  type Accent = "blue" | "purple" | "red" | "green" | "orange" | "yellow";
 
-  const iconMap: Record<ServerStatus, string> = {
-    Disabled: "i-material-symbols-nearby-off-rounded",
-    Error: "i-material-symbols-warning-rounded",
-    Loading: "i-line-md:loading-loop",
-    Running: "i-material-symbols-check-rounded",
+  const styleByStatus: Record<
+    ServerStatus,
+    { variant: Variant; accent?: Accent; icon: string }
+  > = {
+    Disabled: {
+      variant: "default",
+      icon: "i-material-symbols-nearby-off-rounded",
+    },
+    Error: {
+      variant: "accent",
+      accent: "red",
+      icon: "i-material-symbols-warning-rounded",
+    },
+    Loading: {
+      variant: "accent",
+      accent: "orange",
+      icon: "i-line-md:loading-loop",
+    },
+    Running: {
+      variant: "accent",
+      accent: "green",
+      icon: "i-material-symbols-check-rounded",
+    },
   };
-  const icon = $derived(iconMap[update.status as ServerStatus]);
+  const style = $derived(styleByStatus[update.status as ServerStatus]);
 
   function toggle() {
     if (update.status === "Error") {
@@ -41,26 +56,21 @@
 </script>
 
 {#if update.status !== "Running" && update.status !== "Disabled"}
-  <button
-    bind:this={buttonEl}
-    class="flex items-center gap-1.5 px-3 py-1 rounded-large {color} {update.status ===
-    'Error'
-      ? 'cursor-pointer'
-      : 'cursor-default'}"
-    title={update.status !== "Error"
-      ? update.message || update.status
-      : undefined}
-    onclick={(e) => {
-      toggle();
-      e.stopPropagation();
-    }}
-  >
-    <i class={icon}></i>
-    <span>
-      {type}
-      {update.status}
-    </span>
-  </button>
+  <div bind:this={buttonEl}>
+    <Chip
+      icon={style.icon}
+      label="{type} {update.status}"
+      variant={style.variant}
+      accent={style.accent}
+      title={update.status !== "Error" ? update.message || update.status : undefined}
+      onclick={update.status === "Error"
+        ? (e) => {
+            toggle();
+            e.stopPropagation();
+          }
+        : undefined}
+    />
+  </div>
   {#if update.status === "Error" && isOpen}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->

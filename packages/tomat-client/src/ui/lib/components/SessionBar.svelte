@@ -1,6 +1,16 @@
 <script lang="ts">
-  import Bubble from "./Bubble.svelte";
-  import { messagesState, sessionsState, settingsState } from "../state";
+  import { onMount } from "svelte";
+  import Bubble from "./ui/Bubble.svelte";
+  import Chip from "./ui/Chip.svelte";
+  import ButtonGroup from "./ui/ButtonGroup.svelte";
+  import IconButton from "./ui/IconButton.svelte";
+  import {
+    messagesState,
+    sessionsState,
+    settingsState,
+    viewState,
+  } from "../state";
+  import { cores } from "$lib/core";
   import { hasAlpha } from "$lib/shared/color";
 
   // getContextSize lived in $lib/sidecar/llm and read from the LLM HTTP
@@ -24,6 +34,24 @@
   let titleText = $state(sessionsState.title);
   let editingTitle = $state(false);
   let confirmingDelete = $state(false);
+
+  // Active-core chip: shown only when more than one core is paired, so with a
+  // single core the bar matches the original, coreless look.
+  let coreCount = $state(0);
+  let coreName = $state("");
+  async function refreshCore(): Promise<void> {
+    try {
+      coreCount = (await cores().list()).length;
+      coreName = cores().currentEntry()?.name ?? "";
+    } catch {
+      /* settings not readable yet */
+    }
+  }
+  onMount(() => {
+    void refreshCore();
+    const unsub = cores().subscribe(() => void refreshCore());
+    return () => unsub();
+  });
 
   // Sync title from state
   $effect(() => {
@@ -101,12 +129,6 @@
     return n.toString();
   }
 
-  // Navigation
-  let canPrev = $derived(sessionsState.currentIndex > 0);
-  let canNext = $derived(
-    sessionsState.currentIndex < sessionsState.list.length - 1,
-  );
-
   let defaultTitle = $derived(sessionsState.defaultTitle);
   let isNewSession = $derived(messagesState.messages.length === 0);
   let storageEnabled = $derived(
@@ -114,9 +136,9 @@
   );
 
   let showTitle = $derived(!isNewSession && storageEnabled);
-  let showButtonGroup = $derived(
-    storageEnabled && (canPrev || canNext || !isNewSession),
-  );
+  // The session-list button is always available when storage is on, so the
+  // button group shows whenever storage is enabled.
+  let showButtonGroup = $derived(storageEnabled);
   let showBar = $derived(
     !!messagesState.tokenUsage || showTitle || showButtonGroup,
   );
@@ -156,6 +178,16 @@
          its own max-width cap. The invisible sizing span gets clipped by
          `overflow-hidden`, and the input shows an ellipsis when blurred so
          the user can still tell the title is truncated. -->
+    {#if coreCount > 1}
+      <Chip
+        icon="i-material-symbols-hub-rounded"
+        label={coreName}
+        title="Sessions on this core"
+        truncate
+        labelMaxWidth="8rem"
+      />
+    {/if}
+
     {#if showTitle}
       <div
         class="grid items-center min-w-0 h-8 overflow-hidden bg-default-200 rounded-large text-sm"
@@ -180,60 +212,37 @@
 
     <!-- Session navigation -->
     {#if showButtonGroup}
-      <div
-        class="flex flex-row items-center justify-center bg-default-200 h-8 px-1 rounded-large shrink-0"
-      >
-        {#if canPrev}
-          <button
-            class="text-lg rounded p-0.5 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
-            onclick={() => {
-              confirmingDelete = false;
-              sessionsState.navigatePrev();
-            }}
-            title="Previous Session"
-          >
-            <i class="flex i-material-symbols-chevron-left-rounded"></i>
-          </button>
-        {/if}
-        {#if canNext}
-          <button
-            class="text-lg rounded p-0.5 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
-            onclick={() => {
-              confirmingDelete = false;
-              sessionsState.navigateNext();
-            }}
-            title="Next Session"
-          >
-            <i class="flex i-material-symbols-chevron-right-rounded"></i>
-          </button>
-        {/if}
+      <ButtonGroup size="sm" class="shrink-0">
+        <IconButton
+          icon="i-material-symbols-format-list-bulleted-rounded"
+          title="Session List"
+          size="sm"
+          onclick={() => {
+            confirmingDelete = false;
+            viewState.navigate("sessionList");
+          }}
+        />
         {#if !isNewSession}
-          <button
-            data-delete-btn
-            class="text-lg rounded p-0.5 flex items-center hover:cursor-pointer transition-colors {confirmingDelete
-              ? 'text-default-700 hover:text-default-900'
-              : 'text-default-700 hover:text-default-900'}"
-            onclick={handleDeleteClick}
+          <IconButton
+            icon={confirmingDelete
+              ? "i-material-symbols-delete-forever-rounded"
+              : "i-material-symbols-delete-outline-rounded"}
             title={confirmingDelete ? "Confirm Delete" : "Delete Session"}
-          >
-            <i
-              class="flex {confirmingDelete
-                ? 'i-material-symbols-delete-forever-rounded'
-                : 'i-material-symbols-delete-outline-rounded'}"
-            ></i>
-          </button>
-          <button
-            class="text-lg rounded p-0.5 flex items-center hover:text-default-900 hover:cursor-pointer text-default-700 transition-colors"
+            size="sm"
+            onclick={handleDeleteClick}
+            data-delete-btn
+          />
+          <IconButton
+            icon="i-material-symbols-add-rounded"
+            title="New Session"
+            size="sm"
             onclick={() => {
               confirmingDelete = false;
               sessionsState.create();
             }}
-            title="New Session"
-          >
-            <i class="flex i-material-symbols-add-rounded"></i>
-          </button>
+          />
         {/if}
-      </div>
+      </ButtonGroup>
     {/if}
   </Bubble>
   </div>

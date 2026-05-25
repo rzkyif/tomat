@@ -1,14 +1,14 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import AttachmentList from "../AttachmentList.svelte";
-  import Bubble from "../Bubble.svelte";
+  import Bubble from "../ui/Bubble.svelte";
   import { settingsState, streamingState } from "../../state";
   import {
     getTextContent,
     type MessageContent,
     type MessagePart,
   } from "$lib/shared/types";
-  import { showUserMessageMenu } from "$lib/shared/messageMenu";
+  import { showUserMessageMenu } from "$lib/shared/message-menu";
 
   let {
     content,

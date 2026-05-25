@@ -18,12 +18,14 @@ export function binariesRoutes(): Hono {
   });
 
   r.post("/update", async (c) => {
-    const body = (await readJson(c)) as { kind: BinaryKind; version?: string };
+    const body = (await readJson(c)) as { kind: BinaryKind };
     if (!body.kind) throw new AppError("validation_error", "kind required");
-    return c.json(await binariesManager().update(body.kind, body.version));
+    return c.json(await binariesManager().update(body.kind));
   });
 
   r.get("/manifest", async (c) => c.json(await loadBinaryManifest()));
+
+  r.get("/check", async (c) => c.json(await binariesManager().check()));
 
   return r;
 }

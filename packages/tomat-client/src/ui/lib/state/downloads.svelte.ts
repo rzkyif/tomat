@@ -46,17 +46,20 @@ class DownloadsState {
         this.items = frame.items;
       }
     });
-    // Seed with the current snapshot so the badge populates before the
-    // first WS broadcast arrives.
-    void cores()
-      .api()
-      .models.downloads()
-      .then((items) => {
-        this.items = items;
-      })
-      .catch(() => {
-        /* not paired yet */
-      });
+    // Seed with the current snapshot so the badge populates before the first
+    // WS broadcast arrives. Skipped when no core is paired yet — cores().api()
+    // throws in that case, and the snapshot frame will populate items anyway.
+    if (cores().currentEntry()) {
+      void cores()
+        .api()
+        .models.downloads()
+        .then((items) => {
+          this.items = items;
+        })
+        .catch((e) => {
+          console.warn("[downloads] initial snapshot fetch failed:", e);
+        });
+    }
   }
 
   detach(): void {
@@ -111,8 +114,8 @@ class DownloadsState {
     for (const id of ids) {
       try {
         await cores().api().models.remove(id);
-      } catch {
-        /* */
+      } catch (e) {
+        console.warn(`[downloads] clearCompleted: remove(${id}) failed:`, e);
       }
     }
   }

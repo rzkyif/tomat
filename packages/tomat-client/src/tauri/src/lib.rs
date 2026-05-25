@@ -5,7 +5,7 @@ mod types;
 
 use crate::commands::*;
 use crate::state::{AppState, AppStateInner};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -63,6 +63,8 @@ pub fn run() {
             saved_volume: Mutex::new(None),
             input_shortcuts: Mutex::new(Vec::new()),
             region_capture_target: Mutex::new("primary".to_string()),
+            install_in_progress: AtomicBool::new(false),
+            install_last_finished_ms: AtomicI64::new(0),
         })))
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -70,6 +72,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .on_window_event(move |window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 let _ = window.hide();
@@ -191,6 +195,8 @@ pub fn run() {
             // Pairing / admin
             read_admin_token,
             install_local_core,
+            local_core_installed,
+            start_local_core,
             // Client settings + keychain
             read_client_settings,
             write_client_settings,
@@ -202,6 +208,13 @@ pub fn run() {
         .expect("error while running tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
+                // Best-effort: unregister the OS-level global shortcut so
+                // the OS doesn't keep our binding alive across an immediate
+                // relaunch (which would race the new instance's register
+                // call). The shortcut plugin already cleans up on plugin
+                // shutdown, but explicit unregister here makes the
+                // sequence predictable.
+                let _ = app_handle.global_shortcut().unregister_all();
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     if let Ok(mut saved) = state.0.saved_volume.lock() {
                         if let Some(v) = saved.take() {

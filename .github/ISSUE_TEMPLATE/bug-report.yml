@@ -1,5 +1,5 @@
-name: 🐛 Bug report
-description: Something isn't working as expected.
+name: Bug report
+description: Something is not working as expected.
 title: "[Bug] "
 labels:
   - bug
@@ -7,24 +7,24 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping test tomat! A few things to know before filing:
+        Thank you for testing Tomat. Before filing, please note:
 
-        - Tomat is in a rapid-development phase. Bug issues may sit open for a while - they're being read, but not necessarily fixed on a schedule.
-        - **Security vulnerabilities do not go here.** Report them privately via [SECURITY.md](https://github.com/rzkyif/tomat/blob/main/SECURITY.md).
-        - Search existing issues first - a comment on a duplicate helps more than a new thread.
-  - type: textarea
-    id: summary
+        - Security vulnerabilities must not be reported here. Use the private process in [SECURITY.md](https://github.com/rzkyif/tomat/blob/main/SECURITY.md).
+        - Search existing issues first. A comment on an existing report helps more than a duplicate.
+        - Reports are read as they arrive. A fix may not follow on a fixed schedule.
+  - type: input
+    id: section
     attributes:
-      label: What happened?
-      description: A clear, concise description of the bug.
-      placeholder: When I click X, Y happens instead of Z.
+      label: Affected section
+      description: Which part of the app does this happen in?
+      placeholder: "e.g. Settings > Models panel, chat input, push-to-talk"
     validations:
       required: true
   - type: textarea
     id: reproduce
     attributes:
       label: Steps to reproduce
-      description: A minimal sequence that triggers the bug.
+      description: The minimal sequence that triggers the bug.
       value: |
         1.
         2.
@@ -34,14 +34,22 @@ body:
   - type: textarea
     id: expected
     attributes:
-      label: Expected behavior
+      label: Expected result
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: What happened instead.
     validations:
       required: true
   - type: input
     id: version
     attributes:
       label: Tomat version / commit
-      description: Find it in Settings → About, or `git rev-parse --short HEAD` if running from source.
+      description: "Find it in Settings > About, or run `git rev-parse --short HEAD` if running from source."
       placeholder: "e.g. 0.1.0 or commit 5b849a2"
     validations:
       required: true
@@ -58,24 +66,8 @@ body:
         - Windows (ARM64)
     validations:
       required: true
-  - type: dropdown
-    id: llm-preset
-    attributes:
-      label: LLM preset in use
-      options:
-        - Local (llama.cpp)
-        - External (OpenAI-compatible)
-        - Not relevant / unsure
-    validations:
-      required: true
-  - type: textarea
-    id: logs
-    attributes:
-      label: Relevant logs
-      description: Sidecar or devtools console output, if any. Redact API keys.
-      render: shell
   - type: textarea
     id: additional
     attributes:
       label: Additional context
-      description: Screenshots, similar reports, workarounds tried.
+      description: Optional. Screenshots, relevant logs (redact API keys), or workarounds you tried.

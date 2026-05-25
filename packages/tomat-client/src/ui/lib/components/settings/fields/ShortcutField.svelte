@@ -3,6 +3,7 @@
   import { evalCondition } from "@tomat/shared";
   import { settingsState } from "../../../state";
   import FieldCard from "./FieldCard.svelte";
+  import IconButton from "../../ui/IconButton.svelte";
 
   let {
     field,
@@ -177,14 +178,14 @@
     </button>
 
     {#if editable && currentValue}
-      <button
-        type="button"
-        class="text-default-500 hover:text-red-500 transition-colors shrink-0"
+      <IconButton
+        icon="i-material-symbols-close-rounded"
         title="Disable shortcut"
+        size="sm"
+        variant="subtle"
         onclick={clearShortcut}
-      >
-        <i class="flex i-material-symbols-close-rounded text-lg"></i>
-      </button>
+        class="hover:text-red-500"
+      />
     {/if}
   </div>
 </FieldCard>

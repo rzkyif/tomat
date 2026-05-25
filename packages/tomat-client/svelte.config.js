@@ -17,6 +17,10 @@ const config = {
       routes: "src/ui/routes",
       appTemplate: "src/ui/app.html",
     },
+    alias: {
+      "@tomat/shared": "../tomat-shared/src/index.ts",
+      "@tomat/shared/*": "../tomat-shared/src/*",
+    },
   },
 };
 

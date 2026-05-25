@@ -1,10 +1,10 @@
-// Host-side TTS controller. Spawns workers/ttsWorker.ts as a Deno subprocess
+// Host-side TTS controller. Spawns workers/tts-worker.ts as a Deno subprocess
 // with minimal permissions, sends NDJSON load/synthesize/unload frames over
 // stdin, and parses NDJSON responses from stdout into Promises.
 //
 // Spawn flags:
 //   deno run --allow-read=<models-dir> --allow-env=ORT_LOG_LEVEL
-//            <core>/workers/ttsWorker.ts <models-dir>
+//            <core>/workers/tts-worker.ts <models-dir>
 
 import { join } from "@std/path";
 import { binPath } from "../paths.ts";
@@ -43,23 +43,30 @@ export class TtsController {
   private workerEntry(): string {
     // Resolved at runtime to escape `deno compile`'s static analyzer.
     // See sidecars/embedding.ts for the full rationale.
-    return join(paths().workersDir, "ttsWorker.ts");
+    return join(paths().workersDir, "tts-worker.ts");
   }
 
   async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
-    if (this.loading) {
-      await new Promise<void>((resolve, reject) => {
-        this.loadWaiters.push({ resolve, reject });
-      });
-      return;
-    }
-    this.loading = true;
-    if (!this.proc) await this.spawn();
-    await new Promise<void>((resolve, reject) => {
+    // Both the first caller and any concurrent callers push to loadWaiters
+    // and await the same handle/load lifecycle. A spawn or send failure in
+    // the first caller must reject every queued waiter and reset `loading`
+    // so a later retry can re-spawn.
+    const wait = new Promise<void>((resolve, reject) => {
       this.loadWaiters.push({ resolve, reject });
-      this.send({ kind: "load" });
     });
+    if (!this.loading) {
+      this.loading = true;
+      try {
+        if (!this.proc) await this.spawn();
+        this.send({ kind: "load" });
+      } catch (err) {
+        this.loading = false;
+        this.failPending(err instanceof Error ? err : new Error(String(err)));
+        throw err;
+      }
+    }
+    await wait;
   }
 
   // Kill the subprocess outright. TTS lives in its own process (unlike the
@@ -168,9 +175,19 @@ export class TtsController {
     if (!this.writer) {
       throw new AppError("internal_error", "tts subprocess not running");
     }
-    void this.writer.write(
+    // If stdin is already closed (worker crashed after `ready` but before
+    // proc.status fired failPending), the write rejects. Route it through
+    // failPending so the pending load/synth that queued before we noticed
+    // the crash also fails — otherwise it hangs forever.
+    this.writer.write(
       new TextEncoder().encode(JSON.stringify(frame) + "\n"),
-    );
+    ).catch((err) => {
+      this.failPending(
+        err instanceof Error
+          ? err
+          : new AppError("internal_error", `tts write failed: ${err}`),
+      );
+    });
   }
 
   private async pumpStdout(stream: ReadableStream<Uint8Array>): Promise<void> {
@@ -283,4 +300,8 @@ let _instance: TtsController | null = null;
 export function ttsController(): TtsController {
   if (!_instance) _instance = new TtsController();
   return _instance;
+}
+
+export function __resetForTesting(): void {
+  _instance = null;
 }

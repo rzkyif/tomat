@@ -7,6 +7,7 @@
 // keyed by frame kind; the client dispatches incoming frames to them.
 
 import type { ApiErrorBody, ClientToServerFrame, ServerToClientFrame } from "@tomat/shared";
+import { serverToClientFrameSchema } from "@tomat/shared";
 
 export interface CoreEndpoint {
   baseUrl: string; // e.g. "http://127.0.0.1:7800"
@@ -172,8 +173,17 @@ export class CoreClient {
     if (res.status === 204) return undefined as T;
     if (!res.ok) await this.throwApiError(res);
     const ct = res.headers.get("content-type") ?? "";
-    if (ct.includes("application/json")) return (await res.json()) as T;
-    return (await res.text()) as unknown as T;
+    if (!ct.includes("application/json")) {
+      // No JSON consumer in the workspace requests anything else through
+      // this code path — binary endpoints (TTS WAV, attachments) use
+      // `fetchBlob`, SSE goes direct. A non-JSON content-type here is a
+      // server-side bug; fail loud rather than cast a string to `T`.
+      throw new ApiError(res.status, {
+        code: "internal_error",
+        message: `expected JSON response, got content-type "${ct}"`,
+      });
+    }
+    return (await res.json()) as T;
   }
 
   private async throwApiError(res: Response): Promise<never> {
@@ -204,13 +214,31 @@ export class CoreClient {
       this.setConnState("connected");
     });
     ws.addEventListener("message", (ev) => {
-      let frame: ServerToClientFrame | undefined;
+      // Two-stage parse: JSON decode, then validate the full discriminated
+      // union via Zod. Per-variant schemas use `.passthrough()` so unknown
+      // fields survive — that lets a newer server send extras without
+      // breaking an older client. Frames that fail the kind discriminant
+      // are dropped with a warn.
+      let raw: unknown;
       try {
-        frame = JSON.parse(ev.data) as ServerToClientFrame;
-      } catch {
-        /* */
+        raw = JSON.parse(ev.data);
+      } catch (err) {
+        console.warn("[ws] rejected frame: invalid JSON", err);
+        return;
       }
-      if (!frame) return;
+      const parsed = serverToClientFrameSchema.safeParse(raw);
+      if (!parsed.success) {
+        console.warn(
+          "[ws] rejected frame: schema mismatch",
+          parsed.error.message,
+        );
+        return;
+      }
+      // Cast bridges the Zod-parsed shape (which uses `string` for the
+      // open-ended `code` field on chat.error) to the narrower TS union
+      // (which uses `ErrorCode`). The schemas validate at runtime; the
+      // TS narrowing is for downstream-handler ergonomics.
+      const frame = parsed.data as unknown as ServerToClientFrame;
       if (frame.kind === "pong") {
         if (this.pongTimeoutId !== null) clearTimeout(this.pongTimeoutId);
         this.pongTimeoutId = null;

@@ -7,7 +7,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this for **new capabilities** tomat doesn't have today. For tweaks to existing features, use **Improvement Suggestions** instead. The maintainer prioritizes based on concrete use-cases - a well-described workflow beats a vague "it would be cool if…".
+        Use this form for a new capability that Tomat does not have today. For a
+        refinement to an existing feature, use Improvement Suggestions instead.
+        Requests are prioritized by concrete use case. A well-described workflow
+        is more persuasive than a vague wish.
   - type: textarea
     id: problem
     attributes:
@@ -20,7 +23,7 @@ body:
     id: use-case
     attributes:
       label: Concrete use-case
-      description: Walk through a realistic scenario - who, when, what, why.
+      description: Walk through a realistic scenario. Who, when, what, why.
     validations:
       required: true
   - type: textarea
@@ -28,6 +31,16 @@ body:
     attributes:
       label: Proposed solution (optional)
       description: If you have a specific idea for how it should work, describe it. Otherwise leave blank and trust the maintainer to design.
+  - type: textarea
+    id: experiment
+    attributes:
+      label: Implementation notes (optional)
+      description: |
+        If you experimented with an implementation on a fork, share what you
+        found: the approach you tried, what worked and what did not, trade-offs
+        and edge cases, and links to the relevant code. Do not open a pull
+        request. Findings let a maintainer reimplement the feature with full
+        context. See CONTRIBUTING.md.
   - type: textarea
     id: alternatives
     attributes:

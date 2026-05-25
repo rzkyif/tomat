@@ -10,6 +10,7 @@
     toEightCharHex,
   } from "$lib/shared/color";
   import FieldCard from "./FieldCard.svelte";
+  import Input from "../../ui/Input.svelte";
 
   let {
     field,
@@ -82,17 +83,6 @@
     });
   }
 
-  function handleHexInput(e: Event) {
-    const v = (e.target as HTMLInputElement).value.trim();
-    hexInput = v;
-    if (isValidHex(v)) {
-      inputError = false;
-      commitDisplayedHex(v);
-    } else {
-      inputError = true;
-    }
-  }
-
   function handleHexBlur() {
     inputFocused = false;
     if (!isValidHex(hexInput)) {
@@ -125,20 +115,28 @@
       ></span>
     </button>
 
-    <input
+    <Input
       type="text"
-      aria-label="{field.name} hex value"
-      class="text-default-800 rounded-medium block w-full min-h-8 px-2 outline-none font-mono text-sm uppercase {inputError
-        ? 'bg-accent-red-300 border-accent-red-400'
-        : 'bg-default-300 focus:ring-blue-500'}"
       value={hexInput}
       placeholder="#rrggbbaa"
-      maxlength="9"
-      spellcheck="false"
+      maxlength={9}
+      spellcheck={false}
       autocomplete="off"
       disabled={!editable}
+      error={inputError}
+      mono
+      uppercase
+      ariaLabel="{field.name} hex value"
       onfocus={() => (inputFocused = true)}
-      oninput={handleHexInput}
+      oninput={(v) => {
+        hexInput = v.trim();
+        if (isValidHex(hexInput)) {
+          inputError = false;
+          commitDisplayedHex(hexInput);
+        } else {
+          inputError = true;
+        }
+      }}
       onblur={handleHexBlur}
     />
   </div>

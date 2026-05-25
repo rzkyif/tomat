@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { MessagePart } from "$lib/shared/types";
   import { readSessionAttachment } from "$lib/shared/attachments";
+  import IconButton from "./ui/IconButton.svelte";
 
   let {
     parts,
@@ -42,7 +43,7 @@
 
 {#if parts.length > 0}
   <div class="flex flex-wrap gap-2">
-    {#each parts as part, i}
+    {#each parts as part, i (("path" in part && part.path) || ("filename" in part && part.filename) || i)}
       {#if part.type === "image_url"}
         <div
           class="relative group bg-default-100 p-2 rounded-medium {editable &&
@@ -70,13 +71,15 @@
             />
           {/if}
           {#if editable && onRemove}
-            <button
-              class="absolute top-1 right-1 text-default-400 hover:text-default-900 rounded-full w-5 h-5 flex items-center justify-center transition-opacity cursor-pointer"
-              onclick={() => onRemove(i)}
+            <IconButton
+              icon="i-material-symbols-close-rounded"
               title="Remove Attachment"
-            >
-              <i class="flex i-material-symbols-close-rounded text-sm"></i>
-            </button>
+              size="xs"
+              variant="subtle"
+              surface="circle"
+              class="absolute top-1 right-1 bg-transparent"
+              onclick={() => onRemove(i)}
+            />
           {/if}
         </div>
       {:else if part.type === "image_file"}
@@ -108,13 +111,15 @@
             </div>
           {/if}
           {#if editable && onRemove}
-            <button
-              class="absolute top-1 right-1 text-default-400 hover:text-default-900 rounded-full w-5 h-5 flex items-center justify-center transition-opacity cursor-pointer"
-              onclick={() => onRemove(i)}
+            <IconButton
+              icon="i-material-symbols-close-rounded"
               title="Remove Attachment"
-            >
-              <i class="flex i-material-symbols-close-rounded text-sm"></i>
-            </button>
+              size="xs"
+              variant="subtle"
+              surface="circle"
+              class="absolute top-1 right-1 bg-transparent"
+              onclick={() => onRemove(i)}
+            />
           {/if}
         </div>
       {:else if part.type === "document" || part.type === "document_file"}
@@ -126,13 +131,14 @@
           ></i>
           <span class="max-w-32 truncate">{part.filename}</span>
           {#if editable && onRemove}
-            <button
-              class="ml-1 text-default-400 hover:text-default-900 cursor-pointer transition-colors"
-              onclick={() => onRemove(i)}
+            <IconButton
+              icon="i-material-symbols-close-rounded"
               title="Remove Attachment"
-            >
-              <i class="flex i-material-symbols-close-rounded text-sm"></i>
-            </button>
+              size="xs"
+              variant="subtle"
+              class="ml-1"
+              onclick={() => onRemove(i)}
+            />
           {/if}
         </div>
       {/if}

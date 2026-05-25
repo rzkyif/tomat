@@ -266,6 +266,7 @@ export const CORE_GROUP_IDS = [
   "dualModel",
   "toolkits",
   "stt_engine",
+  "server",
 ] as const;
 export type CoreGroupId = typeof CORE_GROUP_IDS[number];
 

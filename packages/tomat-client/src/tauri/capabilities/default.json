@@ -16,6 +16,8 @@
     "shell:default",
     "fs:default",
     "dialog:default",
+    "updater:default",
+    "process:default",
     {
       "identifier": "fs:allow-home-read-recursive",
       "allow": [{ "path": "$HOME/.tomat/**" }]

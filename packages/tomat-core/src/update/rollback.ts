@@ -1,6 +1,6 @@
 // Self-update rollback on boot.
 //
-// The marker file (paths().updateMarkerFile) is written by selfUpdater
+// The marker file (paths().updateMarkerFile) is written by self-updater
 // before it hands off to tomat-core-updater. When the new core starts:
 //
 //   - First boot after update: marker exists with attempts=0. We set
@@ -18,7 +18,7 @@
 //   - Marker present but version unrelated to current: confused state;
 //     log + delete marker, continue.
 
-import { binaryName, hostTriple, platformExe } from "../binaries/versions.ts";
+import { binaryName } from "../binaries/versions.ts";
 import { binPath, paths } from "../paths.ts";
 import { getLogger } from "../shared/log.ts";
 import { CORE_VERSION } from "../config.ts";
@@ -161,6 +161,7 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
   }
   const currentBin = binPath(binaryName("tomat-core" as never));
   const brokenBin = currentBin + ".broken";
+  const stagedOld = oldBin + ".staged";
 
   log.warn(
     `rolling back v${marker.version} → v${marker.previousVersion}: ` +
@@ -168,26 +169,106 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
   );
 
   try {
-    // Rename works on both Unix (atomic) and Windows (allowed while the
-    // file is locked, unlike delete). Preserves the broken binary for
-    // post-mortem inspection.
-    try {
-      await Deno.remove(brokenBin);
-    } catch { /* fine */ }
-    await Deno.rename(currentBin, brokenBin);
-    await Deno.rename(oldBin, currentBin);
-    if (Deno.build.os !== "windows") {
-      try {
-        await Deno.chmod(currentBin, 0o755);
-      } catch { /* ignore */ }
+    await Deno.remove(brokenBin);
+  } catch { /* fine */ }
+  try {
+    await Deno.remove(stagedOld);
+  } catch { /* fine */ }
+
+  // Best-effort free-space precheck. Deno doesn't ship a statfs/statvfs
+  // wrapper, so we shell out to `df` on Unix-likes. Windows skips the
+  // precheck (the copy step's failure path is the fallback anyway).
+  // Goal: log a clear message before the swap if we're already known to
+  // be disk-bound, so the caller doesn't have to infer it from the
+  // generic "copy-first staging failed" message that follows.
+  try {
+    const needed = (await Deno.stat(oldBin)).size;
+    const free = await estimateFreeBytes(binPath(""));
+    if (free !== null && free < needed * 2) {
+      log.warn(
+        `low free space (need ~${needed} bytes for safe swap, ` +
+          `~${free} bytes free in bin dir); will fall back if copy fails`,
+      );
     }
+  } catch { /* precheck is informational only */ }
+
+  // Two-phase swap with copy-first staging so the original `oldBin`
+  // anchor survives until the install rename has succeeded:
+  //   1. copy(oldBin → stagedOld)
+  //   2. rename(currentBin → brokenBin)   ← aside (atomic on same FS)
+  //   3. rename(stagedOld → currentBin)   ← install (atomic on same FS)
+  //   4. remove(oldBin)                   ← committed; original is fungible
+  //
+  // If step 3 fails, revert step 2 so the supervisor finds *some* binary
+  // at currentBin (still the broken one, but better than missing). If the
+  // copy in step 1 fails (disk full, permission), fall back to the older
+  // two-rename pattern that loses currentBin on a failed install rename.
+  let usedCopy = true;
+  try {
+    await Deno.copyFile(oldBin, stagedOld);
+  } catch (err) {
+    usedCopy = false;
+    log.warn(
+      `copy-first staging failed (${
+        err instanceof Error ? err.message : err
+      }); falling back to two-rename swap`,
+    );
+  }
+
+  try {
+    await Deno.rename(currentBin, brokenBin);
   } catch (err) {
     log.error(
-      `rollback failed: ${err instanceof Error ? err.message : err}`,
+      `rollback aside failed: ${err instanceof Error ? err.message : err}`,
     );
+    if (usedCopy) {
+      try {
+        await Deno.remove(stagedOld);
+      } catch { /* ignore */ }
+    }
     await deleteMarker();
     return false;
   }
+
+  const installSrc = usedCopy ? stagedOld : oldBin;
+  try {
+    await Deno.rename(installSrc, currentBin);
+  } catch (err) {
+    log.error(
+      `rollback install failed: ${err instanceof Error ? err.message : err}; ` +
+        `attempting to restore broken binary so supervisor has something to run`,
+    );
+    try {
+      await Deno.rename(brokenBin, currentBin);
+    } catch (revertErr) {
+      log.error(
+        `revert of aside also failed: ${
+          revertErr instanceof Error ? revertErr.message : revertErr
+        }. Manual reinstall required.`,
+      );
+    }
+    if (usedCopy) {
+      try {
+        await Deno.remove(stagedOld);
+      } catch { /* ignore */ }
+    }
+    await deleteMarker();
+    return false;
+  }
+
+  if (Deno.build.os !== "windows") {
+    try {
+      await Deno.chmod(currentBin, 0o755);
+    } catch { /* ignore */ }
+  }
+
+  if (usedCopy) {
+    // Committed: the original anchor is no longer needed.
+    try {
+      await Deno.remove(oldBin);
+    } catch { /* ignore — fine if anti-virus is holding it */ }
+  }
+
   await deleteMarker();
   log.info(
     `rolled back. exiting so the supervisor relaunches v${marker.previousVersion}.`,
@@ -195,7 +276,32 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
   return true;
 }
 
-// Triple is referenced for type checking by versions.ts re-export; silence
-// the unused warning the linter would otherwise emit.
-void hostTriple;
-void platformExe;
+/** Returns approximate free bytes on the filesystem hosting `path`.
+ *  Best-effort: shells out to `df` on macOS/Linux, returns null on
+ *  Windows or any failure. The caller MUST tolerate `null` (precheck
+ *  is informational; the swap path has its own failure fallback). */
+async function estimateFreeBytes(path: string): Promise<number | null> {
+  if (Deno.build.os === "windows") return null;
+  try {
+    const cmd = new Deno.Command("df", {
+      args: ["-Pk", path],
+      stdout: "piped",
+      stderr: "null",
+    });
+    const out = await cmd.output();
+    if (!out.success) return null;
+    const text = new TextDecoder().decode(out.stdout);
+    // `df -Pk` output:
+    //   Filesystem  1024-blocks  Used  Available Capacity  Mounted on
+    //   /dev/disk1s1  ...  ...  123456  ...  /
+    const lines = text.trim().split("\n");
+    if (lines.length < 2) return null;
+    const cols = lines[1].split(/\s+/);
+    if (cols.length < 4) return null;
+    const availKb = parseInt(cols[3], 10);
+    if (!Number.isFinite(availKb)) return null;
+    return availKb * 1024;
+  } catch {
+    return null;
+  }
+}

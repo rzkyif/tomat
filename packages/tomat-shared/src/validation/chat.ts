@@ -60,3 +60,17 @@ export const toolCancelSchema = z.object({
 }).strict();
 
 export type ToolCancelFrame = z.infer<typeof toolCancelSchema>;
+
+// Forward-compatible envelope used at WS receive on both sides. The full
+// discriminated union of every frame variant lives in `api/ws.ts` as TS
+// types only — adding per-variant Zod schemas for the ~20 server→client
+// kinds would couple every minor frame change to a shared-package release.
+// Instead we parse the envelope (object + non-empty kind), pass unknown
+// fields through, and log + drop only when the shape is unmistakably
+// wrong. Per-kind validation can layer on top in a later release once
+// every paired client is known to be on a compatible schema.
+export const wsFrameEnvelopeSchema = z.object({
+  kind: z.string().min(1),
+}).passthrough();
+
+export type WsFrameEnvelope = z.infer<typeof wsFrameEnvelopeSchema>;

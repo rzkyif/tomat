@@ -44,6 +44,12 @@ const KEYCHAIN_ACCOUNT = "master-key";
 
 let cachedKey: CryptoKey | null = null;
 
+// Test-only: drops the cached master key so the next call rebuilds it
+// from disk / keychain. Use between tests that swap TOMAT_CORE_HOME.
+export function __resetForTesting(): void {
+  cachedKey = null;
+}
+
 function masterKeyPath(): string {
   return paths().root + "/.master-key";
 }
@@ -163,8 +169,15 @@ async function readEncrypted(): Promise<Record<string, string>> {
   }
   if (blob.byteLength <= NONCE_LEN) return {};
   const key = await loadOrCreateMasterKey();
-  const nonce = blob.subarray(0, NONCE_LEN);
-  const ciphertext = blob.subarray(NONCE_LEN);
+  // Slice the Uint8Array views into their own buffers. We can't pass
+  // `blob.subarray(...)` directly because `subarray()` shares the
+  // underlying ArrayBuffer with `blob`; web-crypto reads `.buffer` and
+  // sees the full file, producing "Initialization vector length not
+  // supported" at decrypt time. We also can't pass the Uint8Array
+  // directly because lib.dom's BufferSource = ArrayBufferView<ArrayBuffer>
+  // which excludes Uint8Array<ArrayBufferLike>.
+  const nonce = blob.slice(0, NONCE_LEN);
+  const ciphertext = blob.slice(NONCE_LEN);
   let plaintext: ArrayBuffer;
   try {
     plaintext = await crypto.subtle.decrypt(

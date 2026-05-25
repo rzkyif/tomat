@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { join } from "@std/path";
+import { z } from "zod";
 import {
   type Grant,
   parseToolsJson,
@@ -11,10 +12,10 @@ import {
   startInstall,
 } from "../../toolkits/installer.ts";
 import { toolkitsRegistry } from "../../toolkits/registry.ts";
-import { workerPool } from "../../toolkits/workerPool.ts";
-import { resolveVersion, searchPackages } from "../../toolkits/npmRegistry.ts";
+import { workerPool } from "../../toolkits/worker-pool.ts";
+import { resolveVersion, searchPackages } from "../../toolkits/npm-registry.ts";
 import { embed } from "../../services/embedding.ts";
-import { toolFilter } from "../../services/toolFilter.ts";
+import { toolFilter } from "../../services/tool-filter.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 import { wsHub } from "../../ws/hub.ts";
@@ -212,25 +213,30 @@ export function toolkitsRoutes(): Hono {
     return c.json(result);
   });
 
-  r.post(
-    "/tool-schemas",
-    (c) =>
-      c.req.json().then((body: { ids: string[] }) => {
-        const tools = body.ids.map((id) => {
-          const tool = toolkitsRegistry().getTool(id);
-          if (!tool) throw new AppError("tool_not_found", id);
-          return {
-            type: "function" as const,
-            function: {
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.parameters,
-            },
-          };
-        });
-        return c.json({ tools });
-      }),
-  );
+  const toolSchemasBodySchema = z.object({
+    ids: z.array(z.string().min(1)).max(512),
+  }).strict();
+
+  r.post("/tool-schemas", async (c) => {
+    const raw = await readJson(c);
+    const parsed = toolSchemasBodySchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new AppError("validation_error", parsed.error.message);
+    }
+    const tools = parsed.data.ids.map((id) => {
+      const tool = toolkitsRegistry().getTool(id);
+      if (!tool) throw new AppError("tool_not_found", id);
+      return {
+        type: "function" as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      };
+    });
+    return c.json({ tools });
+  });
 
   r.post("/embed", async (c) => {
     const body = (await readJson(c)) as { texts: string[] };
@@ -250,7 +256,7 @@ function allEnabledTools(): Array<{
   triggers: string[];
 }> {
   // Cheap query straight to the tools table; toolFilter has a richer version.
-  // Duplicated here to avoid importing toolFilter.ts internals.
+  // Duplicated here to avoid importing tool-filter.ts internals.
   const list = toolkitsRegistry().list().filter((t) => t.enabled);
   const out: Array<{ id: string; description: string; triggers: string[] }> =
     [];

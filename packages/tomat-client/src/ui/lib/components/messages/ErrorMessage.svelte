@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Bubble from "../Bubble.svelte";
+  import Bubble from "../ui/Bubble.svelte";
   import { settingsState } from "../../state";
   import { getTextContent, type MessageContent } from "$lib/shared/types";
   import type { LLMErrorType } from "$lib/shared/types";

@@ -24,14 +24,15 @@ like.
 In-scope:
 
 - The Tauri host (Rust) and its commands.
-- The Bun/Elysia sidecar and its HTTP surface.
-- The fetch-required-files download and verification flow.
+- The `tomat-core` Deno service and its HTTP and WebSocket surface.
+- The binary and model download and verification flow (Ed25519-signed
+  manifests).
 - Secret handling (API keys in OS keychain).
 - Capability and CSP configuration.
 
 Out of scope:
 
-- Vulnerabilities in upstream `llama.cpp`, `whisper.cpp`, or `bun` binaries
+- Vulnerabilities in upstream `llama.cpp`, `whisper.cpp`, or `deno` binaries
   themselves. Report those upstream.
 - Attacks that require an already-compromised local user account (we assume the
   local filesystem and keychain are trusted).

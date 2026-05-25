@@ -5,7 +5,7 @@
 import { platform } from "../platform/index.ts";
 import { BinariesApi } from "./binaries";
 import { ChatApi } from "./chat";
-import { CoreClient, type WsListener } from "./client";
+import { CoreClient, type ConnectionState, type WsListener } from "./client";
 import { LlmApi } from "./llm";
 import { ModelsApi } from "./models";
 import { PairingApi } from "./pairing";
@@ -14,6 +14,7 @@ import { SessionsApi } from "./sessions";
 import { SttApi } from "./stt";
 import { ToolkitsApi } from "./toolkits";
 import { TtsApi } from "./tts";
+import { UpdateApi } from "./update";
 
 export interface PairedCoreEntry {
   id: string; // ULID returned by /pairing/claim
@@ -27,6 +28,16 @@ const CURRENT_KEY = "currentCoreId";
 class CoresRegistry {
   private current: { entry: PairedCoreEntry; client: CoreClient } | null = null;
   private listeners = new Set<() => void>();
+  // Persistent WS / connection-state listeners. These survive core switches:
+  // subscribeWs / subscribeConnectionState add to these sets, and select()
+  // re-binds every one onto the freshly-built client. Without this, a listener
+  // registered while no core was paired (or before a switch) would be bound to
+  // a dead/closed client and silently stop receiving frames. The *Bindings
+  // maps hold each listener's unsubscribe handle for the CURRENT client only.
+  private wsListeners = new Set<WsListener>();
+  private wsBindings = new Map<WsListener, () => void>();
+  private connListeners = new Set<(s: ConnectionState) => void>();
+  private connBindings = new Map<(s: ConnectionState) => void, () => void>();
   private apis: {
     sessions: SessionsApi;
     chat: ChatApi;
@@ -38,6 +49,7 @@ class CoresRegistry {
     llm: LlmApi;
     settings: CoreSettingsApi;
     pairing: PairingApi;
+    update: UpdateApi;
   } | null = null;
 
   // --- list / select -----------------------------------------------------
@@ -65,6 +77,10 @@ class CoresRegistry {
       this.current.client.close();
       this.current = null;
       this.apis = null;
+      // The closed client's subscriptions are dead; the persistent listener
+      // sets stay intact so a later select() re-binds them.
+      this.wsBindings.clear();
+      this.connBindings.clear();
     }
     this.notify();
   }
@@ -89,9 +105,25 @@ class CoresRegistry {
       llm: new LlmApi(client),
       settings: new CoreSettingsApi(client),
       pairing: new PairingApi(client),
+      update: new UpdateApi(client),
     };
+    this.rebindListeners(client);
     await this.writeCurrent(id);
     this.notify();
+  }
+
+  /** Re-subscribe every persistent WS / connection-state listener onto a
+   *  freshly-built client. The previous client was closed by `select()`, so
+   *  its subscriptions are already dead — drop the stale handles and rebind. */
+  private rebindListeners(client: CoreClient): void {
+    this.wsBindings.clear();
+    this.connBindings.clear();
+    for (const l of this.wsListeners) {
+      this.wsBindings.set(l, client.subscribe(l));
+    }
+    for (const l of this.connListeners) {
+      this.connBindings.set(l, client.onConnectionState(l));
+    }
   }
 
   async restoreSelected(): Promise<void> {
@@ -127,6 +159,7 @@ class CoresRegistry {
     llm: LlmApi;
     settings: CoreSettingsApi;
     pairing: PairingApi;
+    update: UpdateApi;
   } {
     if (!this.apis) throw new Error("no core selected; call select() first");
     return this.apis;
@@ -138,23 +171,25 @@ class CoresRegistry {
   }
 
   subscribeWs(listener: WsListener): () => void {
+    this.wsListeners.add(listener);
     const c = this.current?.client;
-    if (!c)
-      return () => {
-        /* */
-      };
-    return c.subscribe(listener);
+    if (c) this.wsBindings.set(listener, c.subscribe(listener));
+    return () => {
+      this.wsListeners.delete(listener);
+      this.wsBindings.get(listener)?.();
+      this.wsBindings.delete(listener);
+    };
   }
 
-  subscribeConnectionState(
-    listener: (state: import("./client").ConnectionState) => void,
-  ): () => void {
+  subscribeConnectionState(listener: (state: ConnectionState) => void): () => void {
+    this.connListeners.add(listener);
     const c = this.current?.client;
-    if (!c)
-      return () => {
-        /* */
-      };
-    return c.onConnectionState(listener);
+    if (c) this.connBindings.set(listener, c.onConnectionState(listener));
+    return () => {
+      this.connListeners.delete(listener);
+      this.connBindings.get(listener)?.();
+      this.connBindings.delete(listener);
+    };
   }
 
   // --- internals ---------------------------------------------------------
@@ -162,7 +197,13 @@ class CoresRegistry {
   private async writeCores(cores: PairedCoreEntry[], current?: string): Promise<void> {
     const s = await platform().clientSettings.read();
     s.cores = cores;
-    if (current) s[CURRENT_KEY] = current;
+    if (current) {
+      s[CURRENT_KEY] = current;
+    } else {
+      // Last core removed (or transition through no-current): drop the key so
+      // the next restoreSelected() doesn't search for a ghost id.
+      delete s[CURRENT_KEY];
+    }
     await platform().clientSettings.write(s);
   }
 

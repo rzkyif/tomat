@@ -1,47 +1,91 @@
 # Contributing
 
-Tomat is in a **rapid-development phase**. During this period:
+Thank you for your interest in Tomat. This document explains how the project
+accepts contributions and the most useful ways to help.
 
-- All implementation is done by the maintainer
-  ([@rzkyif](https://github.com/rzkyif)).
-- **External pull requests will not be reviewed or accepted.** Please do not
-  invest time in a PR - it will be closed unread.
-- The architecture, schemas, and public surface are churning weekly. Anything
-  submitted today could be invalidated by a refactor tomorrow.
+## How code reaches the project
 
-This policy will relax once the project reaches a stable 1.0 release. Until
-then, the most valuable ways to help are:
+All code in this repository is written and committed by the project's
+maintainers. At present that is a single maintainer
+([@rzkyif](https://github.com/rzkyif)); the group may grow over time.
 
-1. **Test the app** and
-   [**report bugs**](https://github.com/rzkyif/tomat/issues/new?template=bug-report.yml)
-   as Issues, so each one can be tracked to resolution. Bugs may sit open for a
-   while during rapid-dev - they're being read, not necessarily fixed on a
-   schedule.
-2. [**Suggest improvements**](https://github.com/rzkyif/tomat/discussions/new?category=improvement-suggestions)
-   to existing features - UX friction, confusing copy, missing shortcuts, etc.
-   These live in **Discussions** since they're wish-list items, not tracked
-   work.
-3. [**Request new features**](https://github.com/rzkyif/tomat/discussions/new?category=feature-requests)
-   with a clear use-case. Also **Discussions** - the maintainer promotes one to
-   an Issue when committing to build it.
+External code is not accepted through pull requests. Any pull request that
+contains code changes will be closed without review. This is a permanent policy.
+Please do not invest time in a code pull request.
 
-Each template lives in [.github/](.github/).
+The reasoning is straightforward:
+
+- A consistent code style and architecture is easier to maintain when every line
+  is written by the same small group.
+- Reviewing external code is a cost the project has chosen not to carry.
+  Generating an implementation from a clear description is now inexpensive. A
+  clear description of the problem, and of what a good solution would do, is the
+  part that genuinely needs human effort.
+
+The project therefore asks contributors to invest in problem descriptions,
+experiments, and findings rather than in finished code.
+
+## How you can help
+
+There are three ways to contribute, in roughly increasing order of effort.
+
+### 1. Report bugs
+
+Test the application and report anything that does not work as expected. Open a
+[bug report](https://github.com/rzkyif/tomat/issues/new?template=bug-report.yml)
+and include:
+
+- **Affected section.** Which part of the app the bug occurs in.
+- **Steps to reproduce.** The minimal sequence that triggers it.
+- **Expected result.** What you expected to happen.
+- **Actual result.** What happened instead.
+
+Search existing issues first. A comment on an existing report is more useful
+than a duplicate.
+
+### 2. Request features or improvements
+
+The project distinguishes two kinds of request:
+
+- A **feature request** asks for a new capability that Tomat does not have
+  today.
+- An **improvement** asks for a refinement to a feature that already exists,
+  such as reducing friction, clarifying copy, or adding a missing shortcut.
+
+Choose the matching form so the request lands in the right place:
+
+- [Feature requests](https://github.com/rzkyif/tomat/discussions/new?category=feature-requests)
+- [Improvement suggestions](https://github.com/rzkyif/tomat/discussions/new?category=improvement-suggestions)
+
+Describe the problem and the outcome you want. A concrete use case is more
+useful than a proposed implementation.
+
+### 3. Publish implementation experiments
+
+If you want to go further, you are welcome to experiment with an implementation
+on your own fork. Do not open a pull request with the result. Instead, publish
+what you learned in the relevant feature request or improvement discussion:
+
+- the approach you tried, and why,
+- what worked and what did not,
+- trade-offs, edge cases, and constraints you found,
+- pointers to the relevant code in your fork.
+
+Findings of this kind let a maintainer reimplement the feature directly, with
+full context, while keeping the repository's code style and structure
+consistent.
 
 ## Security issues
 
-Do **not** open a public discussion or issue for security-sensitive reports. See
-[SECURITY.md](SECURITY.md) for the private disclosure process.
+Do not report security-sensitive issues through public issues or discussions.
+See [SECURITY.md](SECURITY.md) for the private disclosure process.
 
-## Running from source (for testing)
+## Running from source
 
-If you want to test pre-release builds or unreleased changes:
+To test pre-release builds or unreleased changes, follow the setup instructions
+in [DEVELOPMENT.md](DEVELOPMENT.md#setup):
 
 ```bash
-git clone https://github.com/rzkyif/tomat.git
-cd tomat
-bun install
-bun run fetch
-bun run dev
+deno install
+deno task dev
 ```
-
-See [README.md](README.md#getting-started) for prerequisites and platform notes.

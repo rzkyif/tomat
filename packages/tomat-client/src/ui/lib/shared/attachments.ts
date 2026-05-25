@@ -53,13 +53,14 @@ export async function writeSessionAttachment(
 /** Fetch an attachment by its core URL (the `path` stored on MessagePart)
  *  and return its base64 contents. Bearer auth is applied by CoreClient. */
 export async function readSessionAttachment(path: string): Promise<string> {
-  const ws = cores().currentClient();
-  if (!ws) throw new Error("no paired core selected");
-  // The stored `path` is `<baseUrl>/api/v1/sessions/.../attachments/...`.
-  // We can fetch directly with the bearer header.
-  const token = (ws as unknown as { endpoint: { token: string } }).endpoint.token;
+  const client = cores().currentClient();
+  if (!client) throw new Error("no paired core selected");
+  // The stored `path` is `<baseUrl>/api/v1/sessions/.../attachments/...`,
+  // so we fetch directly and apply the same bearer header CoreClient
+  // would. `endpoint` is a public readonly field on CoreClient — no
+  // cast needed.
   const res = await fetch(path, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${client.endpoint.token}` },
   });
   if (!res.ok) throw new Error(`fetch ${path}: ${res.status}`);
   const bytes = new Uint8Array(await res.arrayBuffer());

@@ -45,19 +45,19 @@ import {
 } from "@tomat/shared";
 import { sessionsRepo } from "../db/repos/sessions.ts";
 import { embed } from "./embedding.ts";
-import { llmScheduler } from "./llmScheduler.ts";
+import { llmScheduler } from "./llm-scheduler.ts";
 import {
   type LlmDelta,
   type LlmEndpointConfig,
   type LlmRequest,
   streamChatCompletion,
-} from "./llmProvider.ts";
-import { toolFilter } from "./toolFilter.ts";
-import { maybeGenerateTitle } from "./titleGen.ts";
-import { resolveEndpoint } from "./endpointResolver.ts";
-import { loadCoreSettings } from "./coreSettings.ts";
+} from "./llm-provider.ts";
+import { toolFilter } from "./tool-filter.ts";
+import { maybeGenerateTitle } from "./title-gen.ts";
+import { resolveEndpoint } from "./endpoint-resolver.ts";
+import { loadCoreSettings } from "./core-settings.ts";
 import { toolkitsRegistry } from "../toolkits/registry.ts";
-import { workerPool } from "../toolkits/workerPool.ts";
+import { workerPool } from "../toolkits/worker-pool.ts";
 import { wsHub } from "../ws/hub.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
@@ -769,6 +769,13 @@ let _instance: ChatService | null = null;
 export function chatService(): ChatService {
   if (!_instance) _instance = new ChatService();
   return _instance;
+}
+
+// Test-only: drops the cached instance and clears the in-flight controllers
+// map so the next `chatService()` call rebuilds against fresh deps.
+export function __resetForTesting(): void {
+  _instance = null;
+  inFlightControllers.clear();
 }
 
 // In-flight controllers shared between the chat service (creator) and

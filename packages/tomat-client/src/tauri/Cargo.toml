@@ -29,6 +29,8 @@ tokio = { version = "1", features = ["full"] }
 anytomd = "1.2.1"
 pdf-extract = "0.10.0"
 tauri-plugin-dialog = "2.7.0"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 xcap = "0.9.4"
 image = "0.25"
 base64 = "0.22"
@@ -40,6 +42,9 @@ font-kit = "0.14"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints.clippy]
 unwrap_used = "warn"

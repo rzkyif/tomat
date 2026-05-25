@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { applyUpdate, checkForUpdate } from "../../update/selfUpdater.ts";
+import { applyUpdate, checkForUpdate } from "../../update/self-updater.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
 export function updateRoutes(): Hono {

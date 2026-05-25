@@ -4,6 +4,7 @@
   import type { Monitor } from "$lib/shared/types";
   import { evalCondition } from "@tomat/shared";
   import SettingsField from "./SettingsField.svelte";
+  import SectionHeader from "../ui/SectionHeader.svelte";
 
   let {
     section,
@@ -50,33 +51,18 @@
   <div data-section-key={sectionKey} class="flex flex-col gap-2">
     {#if section.label}
       <div class="sticky top-7 z-10">
-        {#if section.collapsible}
-          <button
-            class="flex items-center gap-2 h-7 bg-default-300 text-sm text-default-500 font-medium uppercase tracking-wide cursor-pointer hover:text-default-700 transition-colors w-full"
-            onclick={() => onToggle(sectionKey)}
-          >
-            <i
-              class="inline-block transition-transform duration-200 {isExpanded
-                ? 'i-material-symbols-expand-more-rounded'
-                : 'i-material-symbols-chevron-right-rounded'}"
-            ></i>
-            {section.label}
-          </button>
-        {:else}
-          <div
-            class="flex items-center h-7 bg-default-300 text-sm text-default-500 font-medium uppercase tracking-wide"
-          >
-            {section.label}
-          </div>
-        {/if}
-        <div
-          class="absolute left-0 right-0 top-full h-3 bg-gradient-to-b from-default-300 to-transparent pointer-events-none"
-        ></div>
+        <SectionHeader
+          label={section.label}
+          level="section"
+          collapsible={section.collapsible}
+          expanded={isExpanded}
+          onToggle={() => onToggle(sectionKey)}
+        />
       </div>
     {/if}
     {#if !section.collapsible || isExpanded}
       <div class="flex flex-col gap-1">
-        {#each visibleFields as field}
+        {#each visibleFields as field (field.id)}
           <SettingsField
             {field}
             {monitors}

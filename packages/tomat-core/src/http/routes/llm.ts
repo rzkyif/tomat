@@ -16,9 +16,9 @@ import {
   DEFAULT_AUTOCORRECT_PROMPT,
   DEFAULT_MERGE_TRANSCRIPTION_PROMPT,
 } from "@tomat/shared";
-import { loadCoreSettings } from "../../services/coreSettings.ts";
-import { resolveEndpoint } from "../../services/endpointResolver.ts";
-import { singleShot } from "../../services/singleShot.ts";
+import { loadCoreSettings } from "../../services/core-settings.ts";
+import { resolveEndpoint } from "../../services/endpoint-resolver.ts";
+import { singleShot } from "../../services/single-shot.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 

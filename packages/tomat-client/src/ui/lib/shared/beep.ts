@@ -3,12 +3,25 @@
  * the microphone turning on or off.
  */
 
+// Safari historically only exposed AudioContext as `webkitAudioContext`.
+// Modern Safari ships the unprefixed name too, but the older one is still
+// the only path for some legacy macOS / iOS builds. Declare the optional
+// vendor-prefixed constructor on Window via an ambient extension so the
+// fallback compiles without `any`.
+interface WindowWithLegacyAudio extends Window {
+  webkitAudioContext?: typeof AudioContext;
+}
+
 let audioCtx: AudioContext | null = null;
 
 function ctx(): AudioContext {
   if (!audioCtx) {
-    const Ctor = (window as any).AudioContext || (window as any).webkitAudioContext;
-    audioCtx = new Ctor() as AudioContext;
+    const w = window as WindowWithLegacyAudio;
+    const Ctor = window.AudioContext ?? w.webkitAudioContext;
+    if (!Ctor) {
+      throw new Error("Web Audio API is not available in this browser");
+    }
+    audioCtx = new Ctor();
   }
   return audioCtx;
 }

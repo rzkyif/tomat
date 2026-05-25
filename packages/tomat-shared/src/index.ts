@@ -11,6 +11,8 @@ export * from "./domain/model.ts";
 export * from "./domain/settings/index.ts";
 export * from "./domain/prompts.ts";
 
-export * from "./validation/toolsJson.ts";
+export * from "./validation/tools-json.ts";
 export * from "./validation/pairing.ts";
 export * from "./validation/chat.ts";
+export * from "./validation/session.ts";
+export * from "./validation/ws.ts";

@@ -6,15 +6,7 @@
     Attachment,
     MessagePart,
   } from "$lib/shared/types";
-  import {
-    availableMonitors,
-    currentMonitor,
-    getCurrentWindow,
-  } from "@tauri-apps/api/window";
-  import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
-  import { tempDir, join } from "@tauri-apps/api/path";
-  import { readFile, remove, writeFile } from "@tauri-apps/plugin-fs";
-  import { open } from "@tauri-apps/plugin-dialog";
+  import { platform } from "$lib/platform";
   import {
     downloadsState,
     messagesState,
@@ -22,15 +14,10 @@
     settingsState,
     snippetsState,
     streamingState,
+    viewState,
   } from "../../state";
   import { cores } from "$lib/core";
   import { connectionState } from "$lib/state/connection.svelte";
-
-  // The old $lib/sidecar/llm and $lib/sidecar/stt modules are gone; their
-  // functionality now lives server-side. The shims below preserve the
-  // existing call sites so this component compiles; the deeper
-  // autocorrect/merge UX needs a follow-up pass to wire to a new core
-  // endpoint or implement client-side post-processing.
 
   async function sendMessages(_anchorUserId?: string): Promise<void> {
     // Trigger the server-side chat turn. The streaming state subscribes
@@ -73,14 +60,12 @@
     applySystemPromptOverride,
     buildContextBlock,
     buildSystemPromptBase,
-  } from "$lib/shared/systemPrompt";
+  } from "$lib/shared/system-prompt";
   import SnippetAutocomplete from "./SnippetAutocomplete.svelte";
   import {
     pauseClickThrough,
     resumeClickThrough,
   } from "$lib/shared/clickthrough";
-  import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
   import {
     listCaptureMonitors,
     captureMonitor,
@@ -91,7 +76,12 @@
   import { shortcutHandler } from "$lib/state/shortcut.svelte";
   import type { ActivationMode } from "@tomat/shared";
   import AttachmentList from "../AttachmentList.svelte";
-  import Bubble from "../Bubble.svelte";
+  import Bubble from "../ui/Bubble.svelte";
+  import ButtonGroup from "../ui/ButtonGroup.svelte";
+  import IconButton from "../ui/IconButton.svelte";
+  import Alert from "../ui/Alert.svelte";
+  import Modal from "../ui/Modal.svelte";
+  import Select from "../ui/Select.svelte";
   import { hasAlpha } from "$lib/shared/color";
 
   const themeOverride = $derived(
@@ -102,11 +92,6 @@
   const themeOverrideHex = $derived(
     hasAlpha(themeOverride) ? themeOverride : null,
   );
-
-  let { toggleSettings, showSettings } = $props<{
-    toggleSettings: () => void;
-    showSettings: boolean;
-  }>();
 
   let text = $state("");
   let monitors: Monitor[] = $state([]);
@@ -195,7 +180,7 @@
   // would have to hardcode oklch values and re-state dark-mode variants).
   let pendingBlinkOn = $state(false);
   $effect(() => {
-    if (!downloadsState.hasPendingStartup || showSettings) {
+    if (!downloadsState.hasPendingStartup) {
       pendingBlinkOn = false;
       return;
     }
@@ -250,10 +235,6 @@
 
   function closeImagePreview() {
     previewImageUrl = null;
-  }
-
-  function handlePreviewKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") closeImagePreview();
   }
 
   // Anchors the autocomplete dropdown under the caret by measuring a Range on
@@ -348,11 +329,7 @@
   }
 
   function focusTextarea() {
-    if (
-      messagesState.messages.length == 0 &&
-      !showSettings &&
-      textareaElement
-    ) {
+    if (messagesState.messages.length == 0 && textareaElement) {
       setTimeout(() => textareaElement?.focus(), 0);
     }
   }
@@ -362,9 +339,7 @@
   }
 
   $effect(() => {
-    if (!showSettings) {
-      focusTextarea();
-    }
+    focusTextarea();
   });
 
   function handleDocClick(e: MouseEvent) {
@@ -395,32 +370,33 @@
     }
     async function registerInputShortcuts() {
       try {
-        await invoke("set_input_shortcuts", { bindings: readInputBindings() });
+        await platform().shortcuts.setInputBindings(readInputBindings());
       } catch (e) {
         console.warn("[user-input] set_input_shortcuts failed:", e);
       }
     }
     async function clearInputShortcuts() {
       try {
-        await invoke("set_input_shortcuts", { bindings: [] });
+        await platform().shortcuts.setInputBindings([]);
       } catch (e) {
         console.warn("[user-input] clear input_shortcuts failed:", e);
       }
     }
 
     // Focus the textarea on show, and (de)register input shortcuts in lockstep
-    // with window visibility. Rust emits `window-visibility` with `true` on
-    // show and `false` on hide.
-    void listen<boolean>("window-visibility", ({ payload: visible }) => {
-      if (visible) {
-        focusTextarea();
-        void registerInputShortcuts();
-      } else {
-        void clearInputShortcuts();
-      }
-    }).then((unlisten) => {
-      cleanups.push(unlisten);
-    });
+    // with window visibility.
+    void platform()
+      .windowing.subscribeVisibility((visible) => {
+        if (visible) {
+          focusTextarea();
+          void registerInputShortcuts();
+        } else {
+          void clearInputShortcuts();
+        }
+      })
+      .then((unsubscribe) => {
+        cleanups.push(unsubscribe);
+      });
 
     // Click-outside to close attachment menu
     document.addEventListener("click", handleDocClick, true);
@@ -428,26 +404,31 @@
       document.removeEventListener("click", handleDocClick, true),
     );
 
-    void listen("input-shortcut-attach-file", () => {
-      void handleAttachFileFromMenu();
-    }).then((u) => cleanups.push(u));
-    void listen("input-shortcut-capture-screen", () => {
-      // Pick the primary monitor from the captureMonitors snapshot, falling
-      // back to the first id we see. captureMonitors is populated lazily via
-      // the attach-menu open path; if it's empty we still try to fetch.
-      void (async () => {
-        let monitors = captureMonitors;
-        if (monitors.length === 0) {
-          monitors = await listCaptureMonitors();
-          captureMonitors = monitors;
-        }
-        const target = monitors.find((m) => m.isPrimary)?.id || monitors[0]?.id;
-        if (target) await captureMonitorById(target);
-      })();
-    }).then((u) => cleanups.push(u));
-    void listen("input-shortcut-capture-region", () => {
-      void handleCaptureRegionFromMenu();
-    }).then((u) => cleanups.push(u));
+    void platform()
+      .shortcuts.subscribeInputEvents({
+        onAttachFile: () => {
+          void handleAttachFileFromMenu();
+        },
+        onCaptureScreen: () => {
+          // Pick the primary monitor from the captureMonitors snapshot,
+          // falling back to the first id we see. captureMonitors is
+          // populated lazily via the attach-menu open path; if it's empty
+          // we still try to fetch.
+          void (async () => {
+            let monitors = captureMonitors;
+            if (monitors.length === 0) {
+              monitors = await listCaptureMonitors();
+              captureMonitors = monitors;
+            }
+            const target = monitors.find((m) => m.isPrimary)?.id || monitors[0]?.id;
+            if (target) await captureMonitorById(target);
+          })();
+        },
+        onCaptureRegion: () => {
+          void handleCaptureRegionFromMenu();
+        },
+      })
+      .then((unsubscribe) => cleanups.push(unsubscribe));
     cleanups.push(() => {
       void clearInputShortcuts();
     });
@@ -458,7 +439,7 @@
     // register shortcuts that should be inactive.
     void (async () => {
       try {
-        const visible = (await getCurrentWindow().isVisible()) ?? true;
+        const visible = await platform().windowing.isVisible();
         if (visible) await registerInputShortcuts();
       } catch (e) {
         console.warn("[user-input] initial visibility check failed:", e);
@@ -472,11 +453,11 @@
     void (async () => {
       try {
         try {
-          const m = await availableMonitors();
+          const m = await platform().monitors.available();
           monitors = m.map((mon, i) => ({
-            id: mon.name || i.toString(),
+            id: mon.id || i.toString(),
             name: mon.name || `Monitor ${i + 1}`,
-            isPrimary: false,
+            isPrimary: mon.isPrimary,
           }));
         } catch (err) {
           console.warn("Could not fetch monitors", err);
@@ -753,25 +734,15 @@
   }
 
   async function ingestDocumentBlob(blob: Blob, filename: string) {
-    const buf = new Uint8Array(await blob.arrayBuffer());
-    const tmpDir = await tempDir();
-    const tmpPath = await join(tmpDir, `tomat-paste-${Date.now()}-${filename}`);
-    try {
-      await writeFile(tmpPath, buf);
-      const markdown = (await invoke("convert_file_to_markdown", {
-        filePath: tmpPath,
-      })) as string;
-      attachments = [
-        ...attachments,
-        { type: "document", filename, pendingData: markdown },
-      ];
-    } finally {
-      try {
-        await remove(tmpPath);
-      } catch {
-        /* ignore */
-      }
-    }
+    // platform().fileConvert.toMarkdown handles the temp-file dance (write,
+    // convert, cleanup) internally for any File. Construct a File so the
+    // filename survives the round-trip.
+    const file = new File([blob], filename, { type: blob.type });
+    const markdown = await platform().fileConvert.toMarkdown(file);
+    attachments = [
+      ...attachments,
+      { type: "document", filename, pendingData: markdown },
+    ];
   }
 
   async function handlePaste(e: ClipboardEvent) {
@@ -828,35 +799,34 @@
         });
       }
 
-      // Shrink window and center Y to prevent macOS dimming overlay on transparent window
-      const win = getCurrentWindow();
+      // Shrink window and center Y to prevent macOS dimming overlay on
+      // transparent window while the native file picker is open.
+      const win = platform().windowing;
       const savedSize = await win.outerSize();
       const savedPos = await win.outerPosition();
-      const monitor = await currentMonitor();
+      const monitor = await win.currentMonitor();
       const centerX = Math.round(savedPos.x + savedSize.width / 2);
       const centerY = monitor
-        ? Math.round(monitor.position.y + monitor.size.height / 3)
+        ? Math.round(monitor.y + monitor.height / 3)
         : savedPos.y;
       await pauseClickThrough();
-      await win.setSize(new PhysicalSize(1, 1));
-      await win.setPosition(new PhysicalPosition(centerX, centerY));
+      await win.setOuterSize({ width: 1, height: 1 });
+      await win.setOuterPosition({ x: centerX, y: centerY });
 
-      let selected;
+      let picked: string[];
       try {
-        selected = await open({
+        picked = await platform().dialog.openFilePicker({
           multiple: false,
-          directory: false,
           filters,
         });
       } finally {
-        await win.setPosition(new PhysicalPosition(savedPos.x, savedPos.y));
-        await win.setSize(new PhysicalSize(savedSize.width, savedSize.height));
+        await win.setOuterPosition({ x: savedPos.x, y: savedPos.y });
+        await win.setOuterSize({ width: savedSize.width, height: savedSize.height });
         await resumeClickThrough();
       }
 
-      if (!selected) return;
-
-      const filePath = typeof selected === "string" ? selected : selected;
+      if (picked.length === 0) return;
+      const filePath = picked[0];
       const fileName =
         filePath.split("/").pop() || filePath.split("\\").pop() || "file";
       const ext = fileName.split(".").pop()?.toLowerCase() || "";
@@ -864,18 +834,18 @@
       const isImage = imageExtensions.includes(ext);
 
       if (isImage) {
-        const data = await readFile(filePath);
+        const data = await platform().fs.readFile(filePath);
         const mime = MIME_BY_EXT[ext] || "image/png";
-        const blob = new Blob([data], { type: mime });
+        // .slice() returns a Uint8Array backed by a fresh non-shared
+        // ArrayBuffer, which Blob's `BlobPart` signature requires.
+        const blob = new Blob([data.slice().buffer], { type: mime });
         const base64 = await blobToBase64(blob);
         attachments = [
           ...attachments,
           { type: "image", filename: fileName, pendingData: base64, mime },
         ];
       } else {
-        const markdown = (await invoke("convert_file_to_markdown", {
-          filePath,
-        })) as string;
+        const markdown = await platform().fileConvert.toMarkdownFromPath(filePath);
         attachments = [
           ...attachments,
           { type: "document", filename: fileName, pendingData: markdown },
@@ -995,36 +965,35 @@
 >
   <!-- STT error banner -->
   {#if sttError}
-    <div
-      class="flex items-center gap-2 text-sm text-default-700 bg-default-200 rounded-medium px-3 py-2"
-    >
-      <i class="flex i-material-symbols-mic-off-rounded text-base"></i>
-      <span>{sttError}</span>
-    </div>
+    <Alert variant="info" icon="i-material-symbols-mic-off-rounded">
+      {sttError}
+    </Alert>
   {/if}
 
   <!-- LLM autocorrect before -->
   {#if showAutocorrectDiff && originalTranscription !== null}
-    <div
-      class="flex items-start gap-2 text-sm text-default-700 bg-default-200 rounded-medium px-3 py-2"
-    >
-      <span class="shrink-0 font-medium">Before Autocorrect:</span>
-      <span class="whitespace-pre-wrap break-words flex-1"
-        >{originalTranscription}</span
-      >
-      <button
-        class="shrink-0 hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center text-base"
-        title="Reject autocorrect"
-        onclick={() => {
+    <Alert
+      variant="info"
+      icon={false}
+      align="start"
+      action={{
+        icon: "i-material-symbols-refresh-rounded",
+        title: "Reject autocorrect",
+        onclick: () => {
           if (originalTranscription !== null) text = originalTranscription;
           showAutocorrectDiff = false;
           originalTranscription = null;
           textareaElement?.focus();
-        }}
-      >
-        <i class="flex i-material-symbols-refresh-rounded"></i>
-      </button>
-    </div>
+        },
+      }}
+    >
+      <div class="flex items-start gap-2">
+        <span class="shrink-0 font-medium">Before Autocorrect:</span>
+        <span class="whitespace-pre-wrap break-words flex-1">
+          {originalTranscription}
+        </span>
+      </div>
+    </Alert>
   {/if}
 
   <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
@@ -1070,10 +1039,7 @@
   <div
     class="flex items-end justify-between gap-2 text-2xl text-default-700 w-full"
   >
-    <div
-      class="flex flex-row items-center justify-center bg-default-200 p-1 rounded-large"
-      data-attach-root
-    >
+    <ButtonGroup size="md" data-attach-root>
       <button
         class="hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center shrink-0 text-default-700"
         title={attachMenuOpen ? "Close" : "Attach"}
@@ -1138,11 +1104,9 @@
       {#if attachMenuOpen}
         <div class="flex h-full w-1"></div>
       {/if}
-    </div>
+    </ButtonGroup>
 
-    <div
-      class="flex flex-row items-center justify-center bg-default-200 px-2 py-1 rounded-large"
-    >
+    <ButtonGroup size="lg">
       <div
         class="relative flex items-center p-1 text-default-700 hover:text-default-900 transition-colors"
       >
@@ -1161,118 +1125,127 @@
 
       <div class="flex items-center">
         {#each ALIGNMENTS as align}
-          <button
-            class="hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center text-default-700"
-            onclick={() => handleAlignment(align.value)}
+          <IconButton
+            icon={align.icon}
             title={align.title}
-          >
-            <i class="flex {align.icon}"></i>
-          </button>
+            onclick={() => handleAlignment(align.value)}
+          />
         {/each}
       </div>
 
-      <button
-        class=" hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center transition-colors duration-300 {showSettings
-          ? 'text-blue-400'
-          : pendingBlinkOn
-            ? 'text-default-900'
-            : 'text-default-700'}"
-        onclick={toggleSettings}
-        title={downloadsState.hasPendingStartup
-          ? "Pending downloads - open settings"
-          : "Settings"}
-      >
-        <i class="flex i-material-symbols-settings-outline-rounded"></i>
-      </button>
-    </div>
+      <div class="relative">
+        <IconButton
+          icon="i-material-symbols-settings-outline-rounded"
+          title={downloadsState.hasPendingStartup
+            ? "Pending downloads - open settings"
+            : "Settings"}
+          active={pendingBlinkOn}
+          onclick={() => viewState.navigate("settings")}
+          class="transition-colors duration-300"
+        />
+        {#if downloadsState.hasPendingStartup}
+          <!-- Setup-needed badge: small red dot with an exclamation glyph
+               overlapping the gear icon. Pairs with the existing color
+               blink so the cue is impossible to miss after first pair. -->
+          <span
+            class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-accent-red-300 text-white text-[10px] font-bold flex items-center justify-center pointer-events-none select-none"
+            aria-hidden="true"
+          >
+            !
+          </span>
+        {/if}
+      </div>
+    </ButtonGroup>
 
     <div class="flex gap-2">
       {#if settingsState.currentSettings["stt.enabled"]}
-        <button
-          class="bg-default-200 p-2 rounded-large flex items-center transition-colors {vadManager.enabled
-            ? vadManager.listening
-              ? 'text-green-500'
-              : 'text-blue-400'
-            : sttStatus === 'Running' || sttStatus === 'Disabled'
-              ? 'hover:text-default-900 hover:cursor-pointer text-default-700'
-              : 'cursor-not-allowed'}"
+        {@const sttIdle =
+          sttStatus === "Running" || sttStatus === "Disabled"}
+        <IconButton
+          size="lg"
+          surface="filled"
           title={vadManager.enabled
             ? vadManager.listening
               ? "Listening..."
               : "VAD Active (click to disable)"
-            : sttStatus === "Running" || sttStatus === "Disabled"
+            : sttIdle
               ? "Enable Voice Input"
               : "Voice Input (Unavailable)"}
-          onclick={() => vadManager.toggle()}
+          class="rounded-large {vadManager.enabled
+            ? vadManager.listening
+              ? 'text-green-500'
+              : 'text-blue-400'
+            : sttIdle
+              ? 'text-default-700 hover:text-default-900'
+              : 'cursor-not-allowed'}"
           disabled={vadManager.loading ||
-            (sttStatus !== "Running" &&
-              sttStatus !== "Disabled" &&
-              !vadManager.enabled)}
+            (!sttIdle && !vadManager.enabled)}
+          onclick={() => vadManager.toggle()}
         >
-          {#if shortcutHandler.pttHolding}
-            <svg
-              class="ptt-ring flex w-[1em] h-[1em] text-default-700"
-              style="--ptt-duration: {shortcutHandler.pttHoldDuration}ms"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <circle
-                cx="12"
-                cy="12"
-                r="9"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                pathLength="100"
-                stroke-dasharray="100"
-                stroke-dashoffset="100"
-                transform="rotate(-90 12 12)"
-              />
-            </svg>
-          {:else}
-            <i
-              class="flex {vadManager.enabled
-                ? vadManager.listening
-                  ? 'i-line-md:loading-twotone-loop'
-                  : 'i-material-symbols-mic-rounded'
-                : sttStatus === 'Running' || sttStatus === 'Disabled'
-                  ? 'i-material-symbols-mic-outline-rounded'
-                  : 'i-material-symbols-mic-off-outline-rounded'}"
-            ></i>
-          {/if}
-        </button>
+          {#snippet icon()}
+            {#if shortcutHandler.pttHolding}
+              <svg
+                class="ptt-ring flex w-[1em] h-[1em] text-default-700"
+                style="--ptt-duration: {shortcutHandler.pttHoldDuration}ms"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="9"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  pathLength="100"
+                  stroke-dasharray="100"
+                  stroke-dashoffset="100"
+                  transform="rotate(-90 12 12)"
+                />
+              </svg>
+            {:else}
+              <i
+                class="flex {vadManager.enabled
+                  ? vadManager.listening
+                    ? 'i-line-md:loading-twotone-loop'
+                    : 'i-material-symbols-mic-rounded'
+                  : sttIdle
+                    ? 'i-material-symbols-mic-outline-rounded'
+                    : 'i-material-symbols-mic-off-outline-rounded'}"
+              ></i>
+            {/if}
+          {/snippet}
+        </IconButton>
       {/if}
-      <button
-        class="hover:cursor-pointer bg-default-200 p-2 rounded-large flex items-center transition-colors {hasActiveWork &&
-        !hasContent
-          ? 'text-red-500 hover:text-red-400'
-          : 'hover:text-default-900 text-default-700'}"
+      <IconButton
+        icon={hasActiveWork && !hasContent
+          ? "i-material-symbols-stop-rounded"
+          : hasActiveWork && hasContent
+            ? "i-material-symbols-arrow-upward-rounded"
+            : "i-material-symbols-send-outline-rounded"}
+        size="lg"
+        surface="filled"
         title={hasActiveWork && !hasContent
           ? "Stop"
           : hasActiveWork && hasContent
             ? "Interrupt and Send"
             : "Send"}
+        class="rounded-large {hasActiveWork && !hasContent
+          ? 'text-red-500 hover:text-red-400'
+          : ''}"
         onclick={hasActiveWork && !hasContent
           ? handleStop
           : hasActiveWork && hasContent
             ? handleInterruptAndSend
             : handleSend}
-      >
-        <i
-          class="flex {hasActiveWork && !hasContent
-            ? 'i-material-symbols-stop-rounded'
-            : hasActiveWork && hasContent
-              ? 'i-material-symbols-arrow-upward-rounded'
-              : 'i-material-symbols-send-outline-rounded'}"
-        ></i>
-      </button>
+      />
     </div>
   </div>
 </Bubble>
 </div>
 
-<svelte:window onkeydown={handlePreviewKeydown} onblur={closeImagePreview} />
+<svelte:window onblur={closeImagePreview} />
 
 {#if autocompleteOpen}
   <div style:display="contents" style:--default-base={themeOverrideHex}>
@@ -1286,22 +1259,20 @@
 {/if}
 
 {#if previewImageUrl}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    class="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-auto"
-    onclick={closeImagePreview}
+  <Modal
+    open
+    onclose={closeImagePreview}
+    positioning="fixed"
+    surface="transparent"
+    maxWidth="fit"
+    ariaLabel="Image preview"
   >
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div onclick={(e) => e.stopPropagation()}>
-      <img
-        src={previewImageUrl}
-        alt="Preview"
-        class="max-h-[calc(100vh-6rem)] max-w-[calc(100vw-6rem)] object-contain rounded-medium shadow-2xl"
-      />
-    </div>
-  </div>
+    <img
+      src={previewImageUrl}
+      alt="Preview"
+      class="max-h-[calc(100vh-6rem)] max-w-[calc(100vw-6rem)] object-contain rounded-medium shadow-2xl"
+    />
+  </Modal>
 {/if}
 
 <style>

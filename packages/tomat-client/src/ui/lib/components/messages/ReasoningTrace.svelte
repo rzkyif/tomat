@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import MessageMarkdown from "./MessageMarkdown.svelte";
-  import Expandable from "../Expandable.svelte";
+  import Expandable from "../ui/Expandable.svelte";
   import { settingsState } from "$lib/state";
   import { hasAlpha } from "$lib/shared/color";
 

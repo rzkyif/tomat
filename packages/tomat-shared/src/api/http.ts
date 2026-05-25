@@ -135,10 +135,31 @@ export interface InstallBinariesResponse {
 
 export interface UpdateBinaryRequest {
   kind: BinaryKind;
-  version: string;
 }
 export interface UpdateBinaryResponse {
   jobId: string;
+}
+
+export interface BinaryUpdateCheck {
+  kind: BinaryKind;
+  installed: boolean;
+  installedVersion: string | null;
+  latestVersion: string;
+  available: boolean;
+}
+export type CheckBinariesResponse = BinaryUpdateCheck[];
+
+// --- Core self-update ------------------------------------------------------
+
+export interface UpdateCheckResponse {
+  currentVersion: string;
+  latestVersion: string;
+  available: boolean;
+  manifestUrl: string;
+}
+
+export interface UpdateApplyRequest {
+  version?: string;
 }
 
 // --- Toolkits --------------------------------------------------------------

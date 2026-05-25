@@ -98,6 +98,10 @@ export function modelsManager(): ModelsManager {
   return _instance;
 }
 
+export function __resetForTesting(): void {
+  _instance = null;
+}
+
 /** Resolve an HF spec (`@user/repo/branch/file`) to its absolute on-disk
  *  path under the models root. Branch is dropped on disk so the same file
  *  isn't redundantly tracked per branch. Non-`@` specs are returned as-is

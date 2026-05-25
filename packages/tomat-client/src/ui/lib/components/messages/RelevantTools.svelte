@@ -4,8 +4,8 @@
     RelevantToolPhase2Entry,
     RelevantToolsState,
   } from "$lib/shared/types";
-  import Bubble from "../Bubble.svelte";
-  import Expandable from "../Expandable.svelte";
+  import Bubble from "../ui/Bubble.svelte";
+  import Expandable from "../ui/Expandable.svelte";
   import { settingsState } from "../../state";
   import { expansionState } from "$lib/state/expansion.svelte";
   import { untrack } from "svelte";
@@ -169,7 +169,7 @@
               <div
                 class="bg-default-200 rounded-large px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
               >
-                {#each phase.entries as tool, ti (tool.id ?? ti)}{#if ti > 0},
+                {#each phase.entries as tool, ti (tool.toolId ?? ti)}{#if ti > 0},
                   {/if}{tool.name}<span class="text-default-500 tabular-nums"
                     >&nbsp;({formatScore(tool.score)})</span
                   >{/each}

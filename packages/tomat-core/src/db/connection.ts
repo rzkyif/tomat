@@ -15,7 +15,11 @@ export function db(): Database {
 
 export function openDb(): Database {
   if (_db !== null) return _db;
-  _db = new Database(paths().dbFile);
+  // int64: true is required for INTEGER columns to round-trip values past
+  // 2^31 (e.g. Date.now() ms timestamps). Without it, expires_at_ms etc.
+  // come back truncated. Library returns plain `number` for values within
+  // Number.MAX_SAFE_INTEGER, bigint above that.
+  _db = new Database(paths().dbFile, { int64: true });
   return _db;
 }
 

@@ -7,13 +7,15 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this for refinements to **existing** features - friction points, confusing copy, missing shortcuts, ergonomic issues, etc. For brand-new capabilities, use **Feature Requests** instead.
+        Use this form for a refinement to a feature that already exists, such as
+        friction points, confusing copy, missing shortcuts, or ergonomic issues.
+        For a brand-new capability, use Feature Requests instead.
   - type: textarea
     id: feature
     attributes:
       label: Which existing feature?
       description: Name the feature or surface you'd like to see improved.
-      placeholder: e.g. "Push-to-talk shortcut", "Settings → Models panel", "Markdown rendering".
+      placeholder: e.g. "Push-to-talk shortcut", "Settings > Models panel", "Markdown rendering".
     validations:
       required: true
   - type: textarea
@@ -27,9 +29,19 @@ body:
     id: proposal
     attributes:
       label: Proposed improvement
-      description: What would make it better? A rough idea is fine - you don't need a complete design.
+      description: What would make it better? A rough idea is fine. You don't need a complete design.
     validations:
       required: true
+  - type: textarea
+    id: experiment
+    attributes:
+      label: Implementation notes (optional)
+      description: |
+        If you experimented with an implementation on a fork, share what you
+        found: the approach you tried, what worked and what did not, trade-offs
+        and edge cases, and links to the relevant code. Do not open a pull
+        request. Findings let a maintainer reimplement the improvement with full
+        context. See CONTRIBUTING.md.
   - type: textarea
     id: alternatives
     attributes:

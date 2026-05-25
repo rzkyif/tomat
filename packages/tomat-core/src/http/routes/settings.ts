@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import {
   loadCoreSettings,
   patchCoreSettings,
-} from "../../services/coreSettings.ts";
+} from "../../services/core-settings.ts";
 import {
   deleteSecret,
   listSecretNames,

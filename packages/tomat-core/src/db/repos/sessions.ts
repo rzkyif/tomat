@@ -4,7 +4,13 @@
 // physically impossible at the SQL layer (the AppError("not_found") falls
 // through naturally because the WHERE clause excludes the row).
 
-import type { Message, Session, SessionListEntry } from "@tomat/shared";
+import {
+  contentToText,
+  type Message,
+  type MessageContent,
+  type Session,
+  type SessionListEntry,
+} from "@tomat/shared";
 import { db } from "../connection.ts";
 import { AppError } from "../../shared/errors.ts";
 import {
@@ -12,6 +18,9 @@ import {
   newMessageId,
   newSessionId,
 } from "../../shared/ids.ts";
+import { getLogger } from "../../shared/log.ts";
+
+const log = getLogger("sessions-repo");
 
 export interface CreateSessionInput {
   ownerClientId: string;
@@ -51,7 +60,10 @@ export class SessionsRepo {
   list(ownerClientId: string): SessionListEntry[] {
     const rows = db().prepare(`
       SELECT s.id, s.title, s.created_at_ms, s.updated_at_ms,
-             (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count
+             (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count,
+             (SELECT m.content_json FROM messages m
+                WHERE m.session_id = s.id AND m.role = 'user'
+                ORDER BY m.ord ASC LIMIT 1) AS first_user_json
       FROM sessions s
       WHERE s.owner_client_id = ?
       ORDER BY s.updated_at_ms DESC
@@ -61,6 +73,7 @@ export class SessionsRepo {
       created_at_ms: number;
       updated_at_ms: number;
       message_count: number;
+      first_user_json: string | null;
     }>;
     return rows.map((r) => ({
       id: r.id,
@@ -68,6 +81,7 @@ export class SessionsRepo {
       createdAtMs: r.created_at_ms,
       updatedAtMs: r.updated_at_ms,
       messageCount: r.message_count,
+      summary: summarizeFirstMessage(r.first_user_json),
     }));
   }
 
@@ -170,6 +184,25 @@ export class SessionsRepo {
       sessionId,
     );
     return { id, ord };
+  }
+
+  getMessage(sessionId: string, messageId: string): Message {
+    const row = db().prepare(`
+      SELECT id, ord, role, content_json, created_at_ms
+      FROM messages WHERE session_id = ? AND id = ?
+    `).get(sessionId, messageId) as
+      | {
+        id: string;
+        ord: number;
+        role: string;
+        content_json: string;
+        created_at_ms: number;
+      }
+      | undefined;
+    if (!row) {
+      throw new AppError("message_not_found", `message ${messageId} not found`);
+    }
+    return rowToMessage(row);
   }
 
   patchMessage(
@@ -303,6 +336,32 @@ export function sessionsRepo(): SessionsRepo {
   return _instance;
 }
 
+// Test-only: drops the cached instance so the next `sessionsRepo()` call
+// rebuilds it against a fresh DB connection.
+export function __resetForTesting(): void {
+  _instance = null;
+}
+
+const SUMMARY_MAX_CHARS = 120;
+
+/** Build a session-list summary from the first user message's stored JSON.
+ *  Flattens multipart content to text, collapses whitespace, and truncates.
+ *  Returns "" when the session has no user message or the row is unparseable. */
+function summarizeFirstMessage(json: string | null): string {
+  if (!json) return "";
+  try {
+    const msg = JSON.parse(json) as { content?: unknown };
+    const text = contentToText((msg.content ?? "") as MessageContent)
+      .trim()
+      .replace(/\s+/g, " ");
+    return text.length > SUMMARY_MAX_CHARS
+      ? text.slice(0, SUMMARY_MAX_CHARS) + "…"
+      : text;
+  } catch {
+    return "";
+  }
+}
+
 function rowToMessage(row: {
   id: string;
   ord: number;
@@ -310,7 +369,24 @@ function rowToMessage(row: {
   content_json: string;
   created_at_ms: number;
 }): Message {
-  const parsed = JSON.parse(row.content_json) as Record<string, unknown>;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(row.content_json) as Record<string, unknown>;
+  } catch (err) {
+    log.warn(
+      `corrupt content_json for message ${row.id}; substituting error bubble: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return {
+      id: row.id,
+      ord: row.ord,
+      role: "error",
+      content: "<corrupt message>",
+      code: "message_corrupt",
+      createdAtMs: row.created_at_ms,
+    } as Message;
+  }
   return {
     ...parsed,
     id: row.id,

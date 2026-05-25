@@ -4,12 +4,14 @@
   import "../app.css"
   import { onMount } from "svelte"
   import { installTauriPlatform } from "$lib/platform/tauri"
-  import { cores } from "$lib/core"
   import { connectionState } from "$lib/state/connection.svelte"
 
-  onMount(async () => {
+  onMount(() => {
     installTauriPlatform()
-    await cores().restoreSelected()
+    // Connection-state subscription is persistent (cores() re-binds it on
+    // every select()), so it is safe to attach before any core is paired.
+    // The core restore + initial-mode decision happens in +page.svelte so it
+    // completes before the page's first render.
     connectionState.attach()
   })
 </script>

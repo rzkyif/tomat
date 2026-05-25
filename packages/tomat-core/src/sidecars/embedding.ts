@@ -1,11 +1,11 @@
-// Host-side embedding controller. Spawns workers/embeddingWorker.ts as a
+// Host-side embedding controller. Spawns workers/embedding-worker.ts as a
 // Deno subprocess with minimal permissions, sends NDJSON embed frames over
 // stdin, and parses base64-encoded Float32Array responses from stdout into
 // Promises.
 //
 // Spawn flags:
 //   deno run --allow-read=<models-dir> --allow-env=ORT_LOG_LEVEL
-//            <core>/workers/embeddingWorker.ts <models-dir>
+//            <core>/workers/embedding-worker.ts <models-dir>
 //
 // The transformers/onnxruntime dependency (~340 MB) lives only inside this
 // subprocess, keeping the main tomat-core binary lean. The subprocess is
@@ -44,7 +44,7 @@ export class EmbeddingController {
     // Resolved at runtime to escape `deno compile`'s static analyzer.
     // Source location is paths().workersDir (= ~/.tomat/core/workers in
     // prod, overridden to the in-repo source path during dev).
-    return join(paths().workersDir, "embeddingWorker.ts");
+    return join(paths().workersDir, "embedding-worker.ts");
   }
 
   async embed(texts: string[]): Promise<Float32Array[]> {
@@ -213,4 +213,8 @@ let _instance: EmbeddingController | null = null;
 export function embeddingController(): EmbeddingController {
   if (!_instance) _instance = new EmbeddingController();
   return _instance;
+}
+
+export function __resetForTesting(): void {
+  _instance = null;
 }

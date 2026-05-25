@@ -3,12 +3,12 @@
 // endpoint (stt.external.{baseUrl, apiKey, model}).
 //
 // The sidecar manager owns whether whisper-server is actually running
-// (boot wiring lives in services/sidecarBoot.ts).
+// (boot wiring lives in services/sidecar-boot.ts).
 
 import { Hono } from "hono";
 import OpenAI from "openai";
 import { sidecarManager } from "../../sidecars/manager.ts";
-import { loadCoreSettings } from "../../services/coreSettings.ts";
+import { loadCoreSettings } from "../../services/core-settings.ts";
 import { getSecret } from "../../services/secrets.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";

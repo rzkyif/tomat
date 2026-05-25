@@ -1,6 +1,7 @@
 import type {
   BinaryKind,
   BinaryManifest,
+  CheckBinariesResponse,
   InstallBinariesResponse,
   ListBinariesResponse,
   UpdateBinaryResponse,
@@ -18,11 +19,15 @@ export class BinariesApi {
     return this.client.post("/api/v1/binaries/install", { kinds });
   }
 
-  update(kind: BinaryKind, version?: string): Promise<UpdateBinaryResponse> {
-    return this.client.post("/api/v1/binaries/update", { kind, version });
+  update(kind: BinaryKind): Promise<UpdateBinaryResponse> {
+    return this.client.post("/api/v1/binaries/update", { kind });
   }
 
   manifest(): Promise<BinaryManifest> {
     return this.client.get("/api/v1/binaries/manifest");
+  }
+
+  check(): Promise<CheckBinariesResponse> {
+    return this.client.get("/api/v1/binaries/check");
   }
 }

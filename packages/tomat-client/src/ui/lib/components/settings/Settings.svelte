@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { primaryMonitor, availableMonitors } from "@tauri-apps/api/window";
-  import { invoke } from "@tauri-apps/api/core";
+  import { platform } from "$lib/platform";
   import { isTauri } from "$lib/shared/env";
   import { SETTINGS_SCHEMA } from "@tomat/shared";
   import type { PresetOption } from "@tomat/shared";
@@ -14,12 +13,16 @@
   async function startConfiguredServices(): Promise<void> {
     /* no-op: handled server-side */
   }
-  import Bubble from "../Bubble.svelte";
+  import Bubble from "../ui/Bubble.svelte";
+  import IconButton from "../ui/IconButton.svelte";
+  import SearchInput from "../ui/SearchInput.svelte";
+  import SectionHeader from "../ui/SectionHeader.svelte";
   import {
     settingsState,
     serversState,
     confirmState,
     downloadsState,
+    viewState,
   } from "../../state";
   import {
     evalCondition,
@@ -31,9 +34,9 @@
     isSectionVisible,
     searchFields,
   } from "@tomat/shared";
-  import { useSettingsSearch } from "$lib/composables/useSettingsSearch.svelte";
-  import { useScrollSpy } from "$lib/composables/useScrollSpy.svelte";
-  import { useResponsiveLayout } from "$lib/composables/useResponsiveLayout.svelte";
+  import { useSettingsSearch } from "$lib/composables/use-settings-search.svelte";
+  import { useScrollSpy } from "$lib/composables/use-scroll-spy.svelte";
+  import { useResponsiveLayout } from "$lib/composables/use-responsive-layout.svelte";
 
   // Sub-components
   import SettingsSidebar from "./SettingsSidebar.svelte";
@@ -43,9 +46,11 @@
   import ConfirmModal from "./ConfirmModal.svelte";
   import DownloadsModal from "./DownloadsModal.svelte";
   import {
+    binarySourceToKind,
     collectDownloadCandidates,
     enqueueDownloads,
     inferGroupIdFromKey,
+    isBinarySource,
     planDownloads,
     type DownloadPlan,
   } from "$lib/shared/download";
@@ -59,10 +64,6 @@
       group: (groupId as "llm" | "stt" | "tts" | "embed"),
     };
   }
-
-  let { toggleSettings } = $props<{
-    toggleSettings: () => void;
-  }>();
 
   let monitors: Monitor[] = $state([]);
   let fonts: string[] = $state([]);
@@ -134,17 +135,12 @@
   onMount(async () => {
     void loadPairedCores();
     try {
-      const [pm, all] = await Promise.all([
-        primaryMonitor(),
-        availableMonitors(),
-      ]);
-
+      const all = await platform().monitors.available();
       const mapped = all.map((mon, i) => ({
-        id: mon.name || i.toString(),
+        id: mon.id || i.toString(),
         name: mon.name || `Monitor ${i + 1}`,
-        isPrimary: pm ? mon.name === pm.name : false,
+        isPrimary: mon.isPrimary,
       }));
-
       mapped.sort((a, b) =>
         a.isPrimary === b.isPrimary ? 0 : a.isPrimary ? -1 : 1,
       );
@@ -154,7 +150,7 @@
     }
     if (isTauri()) {
       try {
-        fonts = (await invoke("list_system_fonts")) as string[];
+        fonts = await platform().fonts.list();
       } catch (e) {
         console.error("Failed to load fonts:", e);
       }
@@ -185,15 +181,38 @@
     const groups = downloadsState.pendingStartupGroupBySource;
     confirmState.request({
       title: "Download required",
-      message: `The following file${plans.length === 1 ? "" : "s"} will be downloaded to ~/.tomat/models/:`,
+      message:
+        `The following item${plans.length === 1 ? "" : "s"} will be downloaded ` +
+        `so this core can run. Models go to ~/.tomat/models/ and sidecar ` +
+        `binaries go to ~/.tomat/core/bin/.`,
       confirmLabel: "Download",
       downloads: plans,
       onConfirm: async () => {
         downloadsState.startupModalShown = true;
-        const items = plans.map((p) =>
+        const modelPlans = plans.filter((p) => !isBinarySource(p.source));
+        const binaryKinds = plans
+          .filter((p) => isBinarySource(p.source))
+          .map((p) => binarySourceToKind(p.source));
+        const items = modelPlans.map((p) =>
           planToEnqueueSpec(p, groups[p.source] ?? "general"),
         );
         await enqueueDownloads(items);
+        if (binaryKinds.length > 0) {
+          try {
+            await cores().api().binaries.install(binaryKinds);
+            // Binary downloads run with the upstream URL as the WS-broadcast
+            // `source`, so they never match the synthetic `binary:<kind>`
+            // entries in pendingStartup the way model plans do. Trim them
+            // optimistically — a follow-up startup probe will resurface
+            // anything that didn't actually land.
+            downloadsState.pendingStartup =
+              downloadsState.pendingStartup.filter(
+                (p) => !isBinarySource(p.source),
+              );
+          } catch (e) {
+            console.warn("[startup] binaries.install failed:", e);
+          }
+        }
         // Bring up every locally-managed service. Sidecar `ensure()`
         // calls join the in-flight downloads we just enqueued via the
         // manager's id-based dedupe and resolve once each file lands.
@@ -446,43 +465,40 @@
   >
     <!-- Settings Header and Back Button -->
     <div class="flex gap-2 items-center text-2xl relative">
-      <div
-        class="relative h-10 bg-default-200 rounded-large overflow-hidden w-full flex items-center px-4 pr-8"
-      >
-        <input
-          type="text"
-          placeholder="Search settings..."
-          class="bg-transparent outline-none text-base text-default-600 w-full"
-          bind:this={search.inputEl}
-          bind:value={search.query}
-          oninput={() => search.onInput()}
-          onfocus={() => {
-            if (search.query.trim() && !search.mode) {
-              void search.setMode(true);
-            }
-          }}
-        />
-        {#if search.query}
-          <button
-            class="flex absolute right-3 top-1/2 -translate-y-1/2 text-default-400 hover:text-default-600 text-lg cursor-pointer transition-colors"
-            onclick={() => search.clear()}
-            title="Clear search"
-          >
-            <i class="flex i-material-symbols-close-rounded"></i>
-          </button>
-        {:else}
-          <i
-            class="flex i-material-symbols-search-rounded absolute right-3 top-1/2 -translate-y-1/2 text-default-400 text-lg pointer-events-none"
-          ></i>
-        {/if}
-      </div>
-      <button
-        class="hover:text-default-700 text-default-400 transition-colors p-2 rounded-full bg-default-200 hover:cursor-pointer"
-        onclick={toggleSettings}
+      <SearchInput
+        bind:value={search.query}
+        bind:el={search.inputEl}
+        placeholder="Search settings..."
+        ariaLabel="Search settings"
+        oninput={() => search.onInput()}
+        onfocus={() => {
+          if (search.query.trim() && !search.mode) {
+            void search.setMode(true);
+          }
+        }}
+        onclear={() => search.clear()}
+      />
+      <IconButton
+        icon="i-material-symbols-bolt-rounded"
+        title="Quick Setup"
+        size="lg"
+        variant="subtle"
+        surface="circle"
+        onclick={() => viewState.navigate("quickSetup")}
+      />
+      <!-- Hub icon (Core Management) is intentionally hidden for now: the
+           spec says "management only done at the start and no option to
+           change the core connection" until a dedicated cores UI lands.
+           Users can still reach it indirectly: unpairing the active core
+           returns the app to the destination chooser. -->
+      <IconButton
+        icon="i-material-symbols-close-rounded"
         title="Back to Chat"
-      >
-        <i class="flex i-material-symbols-close-rounded"></i>
-      </button>
+        size="lg"
+        variant="subtle"
+        surface="circle"
+        onclick={() => viewState.navigate("chat")}
+      />
     </div>
 
     {#if pairedCores.length > 1}
@@ -588,16 +604,15 @@
                         : undefined}
                     >
                       <div class="sticky top-0 z-20">
-                        <h2
-                          class="flex items-center gap-2 h-7 bg-default-300 text-sm text-default-800 font-medium uppercase tracking-wide"
-                        >
-                          <span>{group.name}</span>
-                          {#if pairedCores.length > 1}
-                            <!-- Destination chip is only meaningful when the
-                                 user has multiple cores paired (one Settings
-                                 screen, split storage). With a single core,
-                                 the old UX had no concept of destination —
-                                 hide it. -->
+                        <SectionHeader label={group.name} level="group">
+                          {#snippet badge()}
+                            <!-- Destination chip clarifies whether a setting
+                                 lives on the paired core or on the local
+                                 client. Shown unconditionally so single-core
+                                 users still see the distinction.
+                                 Custom-sized badge (text-[10px], shade-100/300
+                                 accent) so it doesn't fight with the generic
+                                 Chip's color tokens. -->
                             <span
                               class="text-[10px] font-medium tracking-normal normal-case px-1.5 py-0.5 rounded-medium {group.destination ===
                               'core'
@@ -609,11 +624,8 @@
                             >
                               {group.destination === "core" ? "Core" : "Client"}
                             </span>
-                          {/if}
-                        </h2>
-                        <div
-                          class="absolute left-0 right-0 top-full h-3 bg-gradient-to-b from-default-300 to-transparent pointer-events-none"
-                        ></div>
+                          {/snippet}
+                        </SectionHeader>
                       </div>
                       <div
                         class="flex flex-col gap-2 {needsTopGap ? 'pt-2' : ''}"

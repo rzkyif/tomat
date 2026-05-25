@@ -9,6 +9,10 @@
   } from "$lib/shared/snippets";
   import { snippetsState, confirmState } from "../../../state";
   import FieldCard from "./FieldCard.svelte";
+  import Button from "../../ui/Button.svelte";
+  import IconButton from "../../ui/IconButton.svelte";
+  import Input from "../../ui/Input.svelte";
+  import Select from "../../ui/Select.svelte";
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -147,54 +151,46 @@
     });
   }
 
-  function handleTriggerInput(e: Event) {
-    const raw = (e.target as HTMLInputElement).value;
-    draftTrigger = normalizeTrigger(raw);
-    scheduleSave();
-  }
 </script>
 
 <FieldCard {field}>
   <div class="flex items-center gap-2">
     {#if snippetsState.snippets.length > 0}
-      <div class="relative flex-1">
-        <select
-          aria-label="Select snippet"
-          class="appearance-none bg-default-300 text-default-800 rounded-medium block w-full h-8 px-2 pr-7 outline-none"
+      <div class="flex-1">
+        <Select
           value={selectedId ?? ""}
-          onchange={handleSelectChange}
-        >
-          <option value="">Select a snippet...</option>
-          {#each snippetsState.snippets as snippet (snippet.id)}
-            <option value={snippet.id}
-              >{snippet.name || snippet.trigger} ({snippet.trigger})</option
-            >
-          {/each}
-        </select>
-        <i
-          class="i-material-symbols-expand-more-rounded absolute right-1.5 top-1/2 -translate-y-1/2 text-default-600 pointer-events-none"
-        ></i>
+          options={[
+            { value: "", label: "Select a snippet..." },
+            ...snippetsState.snippets.map((s) => ({
+              value: s.id,
+              label: `${s.name || s.trigger} (${s.trigger})`,
+            })),
+          ]}
+          onchange={(v) =>
+            void flushSave().then(() => {
+              selectedId = v || null;
+            })}
+          ariaLabel="Select snippet"
+        />
       </div>
     {/if}
-    <button
-      type="button"
-      class="flex items-center gap-1 shrink-0 bg-default-300 hover:bg-default-400 text-default-800 rounded-medium px-3 h-8 text-sm hover:cursor-pointer transition-colors"
+    <Button
+      icon="i-material-symbols-add-rounded"
       onclick={handleAdd}
       title="Add snippet"
+      class="shrink-0 hover:bg-default-400"
     >
-      <i class="flex i-material-symbols-add-rounded"></i>
-      <span>Add</span>
-    </button>
+      Add
+    </Button>
     {#if selectedId}
-      <button
-        type="button"
-        class="flex items-center shrink-0 bg-default-300 hover:bg-accent-red-500 text-default-800 hover:text-white rounded-medium w-8 h-8 justify-center hover:cursor-pointer transition-colors"
-        onclick={handleDelete}
+      <IconButton
+        icon="i-material-symbols-delete-outline-rounded"
         title="Delete snippet"
-        aria-label="Delete snippet"
-      >
-        <i class="flex i-material-symbols-delete-outline-rounded"></i>
-      </button>
+        size="lg"
+        surface="filled"
+        class="bg-default-300 hover:bg-accent-red-500 hover:text-white"
+        onclick={handleDelete}
+      />
     {/if}
   </div>
 
@@ -202,13 +198,12 @@
     <div class="flex flex-col gap-2 pt-1">
       <div class="flex flex-col gap-1">
         <div class="text-default-600 text-sm">Name</div>
-        <input
+        <Input
           type="text"
-          aria-label="Snippet name"
-          class="bg-default-300 text-default-800 rounded-medium block w-full h-8 px-2 outline-none"
           value={draftName}
-          oninput={(e) => {
-            draftName = (e.target as HTMLInputElement).value;
+          ariaLabel="Snippet name"
+          oninput={(v) => {
+            draftName = v;
             scheduleSave();
           }}
           onblur={() => flushSave()}
@@ -217,27 +212,23 @@
 
       <div class="flex flex-col gap-1">
         <div class="text-default-600 text-sm">Trigger</div>
-        <div class="flex items-center gap-2">
-          <div class="relative flex-1">
-            <span
-              class="absolute left-2 top-1/2 -translate-y-1/2 text-default-500 pointer-events-none font-mono"
-              >@</span
-            >
-            <input
-              type="text"
-              aria-label="Snippet trigger"
-              class="bg-default-300 text-default-800 rounded-medium block w-full h-8 pl-6 pr-2 outline-none font-mono {triggerError
-                ? 'bg-accent-red-300 border-accent-red-400 border'
-                : ''}"
-              value={draftTrigger.startsWith("@")
-                ? draftTrigger.slice(1)
-                : draftTrigger}
-              oninput={handleTriggerInput}
-              onblur={() => flushSave()}
-              placeholder="scientist"
-            />
-          </div>
-        </div>
+        <Input
+          type="text"
+          value={draftTrigger.startsWith("@")
+            ? draftTrigger.slice(1)
+            : draftTrigger}
+          placeholder="scientist"
+          ariaLabel="Snippet trigger"
+          mono
+          error={!!triggerError}
+          oninput={(v) => {
+            draftTrigger = normalizeTrigger(v);
+            scheduleSave();
+          }}
+          onblur={() => flushSave()}
+        >
+          {#snippet prefix()}<span class="font-mono">@</span>{/snippet}
+        </Input>
         {#if triggerError}
           <div class="text-red-500 text-sm">{triggerError}</div>
         {/if}
@@ -245,25 +236,18 @@
 
       <div class="flex flex-col gap-1">
         <div class="text-default-600 text-sm">Placement</div>
-        <div class="relative">
-          <select
-            aria-label="Snippet placement"
-            class="appearance-none bg-default-300 text-default-800 rounded-medium block w-full h-8 px-2 pr-7 outline-none"
-            value={draftPlacement}
-            onchange={(e) => {
-              draftPlacement = (e.target as HTMLSelectElement)
-                .value as SnippetPlacement;
-              scheduleSave();
-            }}
-          >
-            {#each SNIPPET_PLACEMENT_OPTIONS as opt}
-              <option value={opt.value}>{opt.label}</option>
-            {/each}
-          </select>
-          <i
-            class="i-material-symbols-expand-more-rounded absolute right-1.5 top-1/2 -translate-y-1/2 text-default-600 pointer-events-none"
-          ></i>
-        </div>
+        <Select
+          value={draftPlacement}
+          options={SNIPPET_PLACEMENT_OPTIONS.map((opt) => ({
+            value: opt.value,
+            label: opt.label,
+          }))}
+          ariaLabel="Snippet placement"
+          onchange={(v) => {
+            draftPlacement = v as SnippetPlacement;
+            scheduleSave();
+          }}
+        />
       </div>
 
       <div class="flex flex-col gap-1">

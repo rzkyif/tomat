@@ -20,11 +20,19 @@
     "fmt:js": "deno fmt && deno run -A npm:oxfmt@0.51.0 packages/tomat-client/src/ui packages/tomat-client/vite.config.ts packages/tomat-client/svelte.config.js packages/tomat-client/uno.config.ts packages/tomat-website/src packages/tomat-website/astro.config.mjs",
     "fmt:rs": "cargo fmt --manifest-path packages/tomat-client/src/tauri/Cargo.toml && cargo fmt --manifest-path packages/tomat-core-keychain/Cargo.toml",
     "lint": "deno task lint:js && deno task lint:rs",
-    "lint:js": "deno lint && deno lint --config scripts/lint-plugins/client-deno.json packages/tomat-client/src/ui && deno run -A npm:oxlint@1.66.0 -c .oxlintrc.json packages/tomat-client/src/ui packages/tomat-client/vite.config.ts packages/tomat-client/svelte.config.js packages/tomat-client/uno.config.ts packages/tomat-website/src packages/tomat-website/astro.config.mjs",
+    "lint:js": "deno lint && deno lint --config scripts/lint-plugins/client-deno.json packages/tomat-client/src/ui && deno run -A --quiet scripts/lint-plugins/check-tauri-imports-svelte.ts && deno run -A npm:oxlint@1.66.0 -c .oxlintrc.json packages/tomat-client/src/ui packages/tomat-client/vite.config.ts packages/tomat-client/svelte.config.js packages/tomat-client/uno.config.ts packages/tomat-website/src packages/tomat-website/astro.config.mjs",
     "lint:rs": "cargo clippy --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings",
     "website:dev": "deno run -A scripts/website/dev.ts",
     "website:build": "deno run -A scripts/website/deploy.ts --dry-run",
-    "website:deploy": "deno run -A scripts/website/deploy.ts"
+    "website:deploy": "deno run -A scripts/website/deploy.ts",
+    "test": "deno task test:js && deno task test:rs",
+    "test:js": "deno task test:deno && deno task test:ui",
+    "test:deno": "deno test --allow-all --no-check --quiet packages/tomat-core packages/tomat-shared packages/tomat-core-updater packages/tomat-builtin-toolkit",
+    "test:core": "deno test --allow-all --no-check --quiet packages/tomat-core",
+    "test:shared": "deno test --no-check --quiet packages/tomat-shared",
+    "test:ui": "deno run -A scripts/test-ui.ts",
+    "test:rs": "cargo test --manifest-path packages/tomat-client/src/tauri/Cargo.toml && cargo test --manifest-path packages/tomat-core-keychain/Cargo.toml",
+    "test:e2e": "deno run -A scripts/test-e2e.ts"
   },
   "lint": {
     "rules": {
@@ -63,6 +71,7 @@
     "**/.svelte-kit",
     "**/.astro",
     "**/.wrangler",
-    "**/.deno-cache"
+    "**/.deno-cache",
+    "tests/e2e"
   ]
 }

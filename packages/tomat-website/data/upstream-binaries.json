@@ -1,0 +1,32 @@
+{
+  "_doc": "Resolver config for sidecar binaries. scripts/website/deploy.ts hits the GitHub releases API for each `repo` at deploy time, finds the asset matching the per-triple pattern, and writes its upstream download URL + SHA-256 into the signed binaries.json. {tag} expands to the upstream release's tag_name (e.g. 'v2.8.0', 'b9310'). Verified against upstream releases on 2026-05-25.",
+  "llama-server": {
+    "repo": "ggml-org/llama.cpp",
+    "assets": {
+      "aarch64-apple-darwin": "llama-{tag}-bin-macos-arm64.tar.gz",
+      "x86_64-apple-darwin": "llama-{tag}-bin-macos-x64.tar.gz",
+      "aarch64-unknown-linux-gnu": "llama-{tag}-bin-ubuntu-arm64.tar.gz",
+      "x86_64-unknown-linux-gnu": "llama-{tag}-bin-ubuntu-x64.tar.gz",
+      "x86_64-pc-windows-msvc": "llama-{tag}-bin-win-cpu-x64.zip",
+      "aarch64-pc-windows-msvc": "llama-{tag}-bin-win-cpu-arm64.zip"
+    }
+  },
+  "whisper-server": {
+    "_note": "whisper.cpp upstream only ships Windows binaries. macOS/Linux users need to build from source — until we wire up a build-and-rehost step (or whisper.cpp ships them upstream), those triples will be missing from binaries.json.",
+    "repo": "ggml-org/whisper.cpp",
+    "assets": {
+      "x86_64-pc-windows-msvc": "whisper-bin-x64.zip"
+    }
+  },
+  "deno": {
+    "repo": "denoland/deno",
+    "assets": {
+      "aarch64-apple-darwin": "deno-aarch64-apple-darwin.zip",
+      "x86_64-apple-darwin": "deno-x86_64-apple-darwin.zip",
+      "aarch64-unknown-linux-gnu": "deno-aarch64-unknown-linux-gnu.zip",
+      "x86_64-unknown-linux-gnu": "deno-x86_64-unknown-linux-gnu.zip",
+      "x86_64-pc-windows-msvc": "deno-x86_64-pc-windows-msvc.zip",
+      "aarch64-pc-windows-msvc": "deno-aarch64-pc-windows-msvc.zip"
+    }
+  }
+}

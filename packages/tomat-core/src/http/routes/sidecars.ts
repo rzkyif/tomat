@@ -1,7 +1,7 @@
 // Sidecar lifecycle routes. Status + manual stop/restart per kind.
 //
 // Start args are NOT user-supplied — they're computed from settings by
-// services/sidecarBoot.ts. POST /restart re-applies the boot decision
+// services/sidecar-boot.ts. POST /restart re-applies the boot decision
 // (effectively: stop + start with fresh args from the current settings),
 // and POST /stop just terminates without re-spawning. /start exists as a
 // convenience that's equivalent to /restart in this design.
@@ -9,7 +9,7 @@
 import { Hono } from "hono";
 import type { SidecarKind } from "@tomat/shared";
 import { sidecarManager } from "../../sidecars/manager.ts";
-import { loadCoreSettings } from "../../services/coreSettings.ts";
+import { loadCoreSettings } from "../../services/core-settings.ts";
 import {
   buildLlamaStartOptions,
   llamaStartArgsFromSettings,

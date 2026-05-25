@@ -1,6 +1,6 @@
 // Toolkit, Tool, Permission, Grant — shared shapes used by core + client.
 // The on-disk source of truth for permissions is the toolkit's tools.json
-// (see validation/toolsJson.ts). These types describe the DB-projected
+// (see validation/tools-json.ts). These types describe the DB-projected
 // view that the API serves.
 
 export type ToolkitSource = "npm" | "local";

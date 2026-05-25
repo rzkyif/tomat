@@ -27,7 +27,9 @@ pub use capture::{
 pub use client_settings::{read_client_settings, write_client_settings};
 pub use fonts::list_system_fonts;
 pub use keychain::{keychain_delete_token, keychain_get_token, keychain_set_token};
-pub use pairing::{install_local_core, read_admin_token};
+pub use pairing::{
+    install_local_core, local_core_installed, read_admin_token, start_local_core,
+};
 pub use window::{
     hide_main_window, position_window, request_hide_main_window, set_global_shortcut,
     set_input_shortcuts, show_main_window, toggle_main_window, validate_shortcut,
@@ -102,15 +104,25 @@ pub async fn restore_system_volume(state: State<'_, AppState>) -> AppResult<()> 
 // Path resolution
 // -------------------------------------------------------------------
 
+/// Pure tilde-expansion. `expand_tilde("~/foo", "/home/u") -> "/home/u/foo"`.
+/// Non-`~` paths pass through unchanged.
+pub fn expand_tilde(path: &str, home: &std::path::Path) -> String {
+    if let Some(rest) = path.strip_prefix('~') {
+        let rest = rest.trim_start_matches('/');
+        home.join(rest).to_string_lossy().to_string()
+    } else {
+        std::path::Path::new(path).to_string_lossy().to_string()
+    }
+}
+
 /// Expand a leading `~` in the given path to the user's home directory.
 #[tauri::command]
 pub fn resolve_path(handle: AppHandle, path: String) -> AppResult<String> {
-    if let Some(rest) = path.strip_prefix('~') {
+    if path.starts_with('~') {
         let home = handle.path().home_dir()?;
-        let rest = rest.trim_start_matches('/');
-        Ok(home.join(rest).to_string_lossy().to_string())
+        Ok(expand_tilde(&path, &home))
     } else {
-        Ok(std::path::Path::new(&path).to_string_lossy().to_string())
+        Ok(expand_tilde(&path, std::path::Path::new("")))
     }
 }
 
@@ -120,6 +132,34 @@ pub fn resolve_path(handle: AppHandle, path: String) -> AppResult<String> {
 
 const MAX_CONVERTIBLE_FILE_BYTES: u64 = 50 * 1024 * 1024;
 
+const ALLOWED_CONVERTIBLE_EXTS: &[&str] = &[
+    "docx", "pptx", "xlsx", "xls", "csv", "html", "htm", "txt", "md", "json", "xml", "rst", "log",
+    "toml", "yaml", "ini", "py", "rs", "js", "ts", "c", "cpp", "go", "java", "pdf",
+];
+
+/// Validate `path` is small enough and its extension is in the allow-list.
+/// Returns the lowercased extension (which the caller uses to pick the
+/// pdf-extract vs anytomd branch).
+pub fn validate_convertible_file(path: &std::path::Path, size_bytes: u64) -> AppResult<String> {
+    if size_bytes > MAX_CONVERTIBLE_FILE_BYTES {
+        return Err(AppError::validation(format!(
+            "File too large ({} bytes, max 50MB)",
+            size_bytes
+        )));
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .unwrap_or_default();
+    if !ALLOWED_CONVERTIBLE_EXTS.contains(&ext.as_str()) {
+        return Err(AppError::validation(format!(
+            "Unsupported file type: .{ext}"
+        )));
+    }
+    Ok(ext)
+}
+
 /// Convert the file at `file_path` to Markdown for attachment as document
 /// context. Kept client-side so the rich Rust crate ecosystem stays
 /// available; the client POSTs the resulting markdown to core.
@@ -127,26 +167,7 @@ const MAX_CONVERTIBLE_FILE_BYTES: u64 = 50 * 1024 * 1024;
 pub async fn convert_file_to_markdown(file_path: String) -> AppResult<String> {
     let canonical = tokio::fs::canonicalize(&file_path).await?;
     let meta = tokio::fs::metadata(&canonical).await?;
-    if meta.len() > MAX_CONVERTIBLE_FILE_BYTES {
-        return Err(AppError::validation(format!(
-            "File too large ({} bytes, max 50MB)",
-            meta.len()
-        )));
-    }
-    let allowed_exts = [
-        "docx", "pptx", "xlsx", "xls", "csv", "html", "htm", "txt", "md", "json", "xml", "rst",
-        "log", "toml", "yaml", "ini", "py", "rs", "js", "ts", "c", "cpp", "go", "java", "pdf",
-    ];
-    let ext = canonical
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_lowercase)
-        .unwrap_or_default();
-    if !allowed_exts.contains(&ext.as_str()) {
-        return Err(AppError::validation(format!(
-            "Unsupported file type: .{ext}"
-        )));
-    }
+    let ext = validate_convertible_file(&canonical, meta.len())?;
     if ext == "pdf" {
         let text = pdf_extract::extract_text(&canonical)
             .map_err(|e| AppError::external(format!("Failed to extract PDF text: {e}")))?;
@@ -156,4 +177,109 @@ pub async fn convert_file_to_markdown(file_path: String) -> AppResult<String> {
     let result = anytomd::convert_file(&canonical, &options)
         .map_err(|e| AppError::external(e.to_string()))?;
     Ok(result.markdown)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn expand_tilde_replaces_leading_tilde_with_home() {
+        assert_eq!(
+            expand_tilde("~/foo/bar", &PathBuf::from("/home/u")),
+            "/home/u/foo/bar"
+        );
+    }
+
+    #[test]
+    fn expand_tilde_handles_bare_tilde() {
+        // PathBuf::join("") preserves the trailing separator on Unix; the
+        // result is still the same directory.
+        let out = expand_tilde("~", &PathBuf::from("/home/u"));
+        assert!(out == "/home/u" || out == "/home/u/", "got {out}");
+    }
+
+    #[test]
+    fn expand_tilde_handles_tilde_without_slash() {
+        // `~foo` is treated as `<home>/foo` (matches the original logic which
+        // just trims any leading slashes from the remainder).
+        assert_eq!(
+            expand_tilde("~foo", &PathBuf::from("/home/u")),
+            "/home/u/foo"
+        );
+    }
+
+    #[test]
+    fn expand_tilde_passes_through_absolute_paths() {
+        assert_eq!(
+            expand_tilde("/etc/hosts", &PathBuf::from("/home/u")),
+            "/etc/hosts"
+        );
+    }
+
+    #[test]
+    fn expand_tilde_passes_through_relative_paths() {
+        assert_eq!(
+            expand_tilde("foo/bar", &PathBuf::from("/home/u")),
+            "foo/bar"
+        );
+    }
+
+    #[test]
+    fn validate_convertible_file_accepts_known_extension() {
+        let ext = validate_convertible_file(std::path::Path::new("/tmp/note.md"), 1024).unwrap();
+        assert_eq!(ext, "md");
+    }
+
+    #[test]
+    fn validate_convertible_file_is_case_insensitive() {
+        let ext =
+            validate_convertible_file(std::path::Path::new("/tmp/REPORT.DOCX"), 1024).unwrap();
+        assert_eq!(ext, "docx");
+    }
+
+    #[test]
+    fn validate_convertible_file_rejects_unknown_extension() {
+        let err =
+            validate_convertible_file(std::path::Path::new("/tmp/binary.exe"), 1024).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("Unsupported file type"));
+        assert!(msg.contains(".exe"));
+    }
+
+    #[test]
+    fn validate_convertible_file_rejects_files_without_extension() {
+        let err =
+            validate_convertible_file(std::path::Path::new("/tmp/Makefile"), 1024).unwrap_err();
+        assert!(format!("{err}").contains("Unsupported file type"));
+    }
+
+    #[test]
+    fn validate_convertible_file_rejects_over_50mb() {
+        let err = validate_convertible_file(
+            std::path::Path::new("/tmp/huge.md"),
+            MAX_CONVERTIBLE_FILE_BYTES + 1,
+        )
+        .unwrap_err();
+        assert!(format!("{err}").contains("File too large"));
+    }
+
+    #[test]
+    fn validate_convertible_file_accepts_exactly_50mb() {
+        // Boundary: exactly the max is fine (> is the failure condition).
+        let ext = validate_convertible_file(
+            std::path::Path::new("/tmp/edge.md"),
+            MAX_CONVERTIBLE_FILE_BYTES,
+        )
+        .unwrap();
+        assert_eq!(ext, "md");
+    }
+
+    #[test]
+    fn validate_convertible_file_pdf_is_in_allowlist() {
+        let ext = validate_convertible_file(std::path::Path::new("/tmp/x.pdf"), 100).unwrap();
+        assert_eq!(ext, "pdf");
+    }
 }

@@ -16,6 +16,7 @@ import { cores } from "$lib/core";
 import { messagesState } from "./messages.svelte";
 import { sessionsState } from "./sessions.svelte";
 import { settingsState } from "./settings.svelte";
+import { ttsState } from "./tts.svelte";
 
 const STREAM_FLUSH_MS = 30;
 
@@ -59,7 +60,7 @@ class StreamingState {
   }
 
   resetTTSPlayback(): void {
-    void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
+    ttsState.reset();
   }
 
   private getActiveIndex(): number {
@@ -86,7 +87,7 @@ class StreamingState {
     const streamId = makeMessageId();
     this.messageId = assistantId;
     this.streamId = streamId;
-    void import("./tts.svelte").then(({ ttsState }) => ttsState.startStream(assistantId));
+    ttsState.startStream(assistantId);
     messagesState.insertAtTurnAnchor({
       id: assistantId,
       role: "assistant",
@@ -107,7 +108,7 @@ class StreamingState {
       return;
     }
     if (frame.kind === "chat.usage" && frame.streamId === this.streamId) {
-      messagesState.tokenUsage = frame.tokenUsage as unknown as typeof messagesState.tokenUsage;
+      messagesState.tokenUsage = frame.tokenUsage;
       return;
     }
     if (frame.kind === "chat.done" && frame.streamId === this.streamId) {
@@ -121,9 +122,9 @@ class StreamingState {
     if (frame.kind === "chat.toolfilter" && frame.streamId === this.streamId) {
       messagesState.upsertToolFilter({
         status: frame.status,
-        phase1: (frame.phase1 ?? null) as unknown as never,
-        phase2: (frame.phase2 ?? null) as unknown as never,
-        alwaysAvailable: (frame.alwaysAvailable ?? null) as unknown as never,
+        phase1: frame.phase1 ?? null,
+        phase2: frame.phase2 ?? null,
+        alwaysAvailable: frame.alwaysAvailable ?? null,
         errorMessage: frame.errorMessage,
       });
       return;
@@ -218,10 +219,9 @@ class StreamingState {
     void this.feedTTS(next, false);
   }
 
-  private async feedTTS(fullText: string, final: boolean): Promise<void> {
+  private feedTTS(fullText: string, final: boolean): void {
     const settings = settingsState.currentSettings;
     if (!settings["tts.enabled"]) return;
-    const { ttsState } = await import("./tts.svelte");
     if (!ttsState.loaded) return;
     const activeId = this.messageId;
     if (
@@ -278,12 +278,9 @@ class StreamingState {
   setPendingToolCalls(calls: PendingToolCall[]): void {
     const idx = this.getActiveIndex();
     if (idx < 0) return;
-    // Server's PendingToolCall and client's PendingToolCall differ in field
-    // names (callId/arguments vs id/arguments); cast through unknown until
-    // the client shape consolidates on the server's.
     messagesState.messages[idx] = {
       ...messagesState.messages[idx],
-      pendingToolCalls: calls as unknown as never,
+      pendingToolCalls: calls,
     };
   }
 
@@ -299,11 +296,15 @@ class StreamingState {
     const content = detail ? `${errorType}\n${detail}` : String(errorType);
     if (idx >= 0) {
       const existing = messagesState.messages[idx];
-      messagesState.messages[idx] = {
+      // Build the replacement as a typed Message — the Message union
+      // already carries `role: "error"` as a valid variant, so no cast
+      // is needed.
+      const replacement: (typeof messagesState.messages)[number] = {
         ...(existing.id ? { id: existing.id } : {}),
         role: "error",
         content,
-      } as unknown as (typeof messagesState.messages)[number];
+      };
+      messagesState.messages[idx] = replacement;
     }
   }
 

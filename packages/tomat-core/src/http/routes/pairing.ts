@@ -10,6 +10,9 @@ import {
   requireClient,
 } from "../middleware/auth.ts";
 import { AppError } from "../middleware/errors.ts";
+import { getLogger } from "../../shared/log.ts";
+
+const log = getLogger("http.pairing");
 
 export function pairingRoutes(): Hono {
   const r = new Hono();
@@ -49,11 +52,21 @@ export function pairingRoutes(): Hono {
     const me = requireClient(c);
     const id = c.req.param("id") === "me" ? me.id : c.req.param("id");
     const { attachmentPaths } = authService().revokeClient(id);
-    // Best-effort cleanup of attachment files on disk.
+    // Best-effort cleanup of attachment files on disk. We've already
+    // cascaded the DB rows so a stragglers-on-disk situation only wastes
+    // bytes; log it but don't fail the request.
     for (const p of attachmentPaths) {
       try {
         await Deno.remove(p);
-      } catch { /* ignore */ }
+      } catch (err) {
+        if (!(err instanceof Deno.errors.NotFound)) {
+          log.warn(
+            `revoke: failed to remove attachment ${p}: ${
+              err instanceof Error ? err.message : err
+            }`,
+          );
+        }
+      }
     }
     return c.body(null, 204);
   });
@@ -68,9 +81,17 @@ export function pairingRoutes(): Hono {
 }
 
 async function readJsonOrEmpty(c: import("hono").Context): Promise<unknown> {
+  // No body OR a whitespace-only body reasonably means "use defaults" for
+  // these endpoints (pairing/codes accepts an empty body for the default
+  // TTL). A body present but malformed is a real client bug — we surface
+  // it as HTTP 400 instead of silently treating it as `{}`. Content-Length
+  // is unreliable across runtimes (Request from `new Request(..., { body: '' })`
+  // may omit it), so peek at the text instead.
+  const text = await c.req.text();
+  if (text.trim().length === 0) return {};
   try {
-    return await c.req.json();
+    return JSON.parse(text);
   } catch {
-    return {};
+    throw new AppError("validation_error", "invalid JSON body");
   }
 }

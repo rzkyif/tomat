@@ -59,3 +59,56 @@ impl serde::Serialize for AppError {
 }
 
 pub type AppResult<T> = std::result::Result<T, AppError>;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn helper_constructors_set_their_variants() {
+        assert!(matches!(AppError::validation("x"), AppError::Validation(_)));
+        assert!(matches!(AppError::not_found("x"), AppError::NotFound(_)));
+        assert!(matches!(AppError::external("x"), AppError::External(_)));
+    }
+
+    #[test]
+    fn display_matches_message_for_thin_variants() {
+        assert_eq!(
+            format!("{}", AppError::validation("bad input")),
+            "bad input"
+        );
+        assert_eq!(
+            format!("{}", AppError::not_found("session")),
+            "not found: session",
+        );
+    }
+
+    #[test]
+    fn serialize_to_string_uses_display() {
+        // The wire format is a plain JSON string; the frontend reads it
+        // directly. If this ever changes the frontend's error-rendering
+        // contract breaks silently.
+        let json = serde_json::to_string(&AppError::validation("oops")).unwrap();
+        assert_eq!(json, r#""oops""#);
+    }
+
+    #[test]
+    fn io_errors_convert_via_question_mark() {
+        fn boom() -> AppResult<()> {
+            std::fs::read("/path/that/will/never/exist")?;
+            Ok(())
+        }
+        let err = boom().unwrap_err();
+        assert!(matches!(err, AppError::Io(_)));
+    }
+
+    #[test]
+    fn serde_errors_convert_via_question_mark() {
+        fn boom() -> AppResult<serde_json::Value> {
+            Ok(serde_json::from_str("{")?)
+        }
+        let err = boom().unwrap_err();
+        assert!(matches!(err, AppError::Serde(_)));
+    }
+}

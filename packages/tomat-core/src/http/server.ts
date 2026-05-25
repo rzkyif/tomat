@@ -7,7 +7,7 @@
 import { Hono } from "hono";
 import { CORE_VERSION } from "../config.ts";
 import { corsMiddleware } from "./middleware/cors.ts";
-import { errorMiddleware } from "./middleware/errors.ts";
+import { sendError } from "./middleware/errors.ts";
 import { binariesRoutes } from "./routes/binaries.ts";
 import { llmRoutes } from "./routes/llm.ts";
 import { modelsRoutes } from "./routes/models.ts";
@@ -23,7 +23,13 @@ import { updateRoutes } from "./routes/update.ts";
 export function buildApp(): Hono {
   const app = new Hono();
   app.use("*", corsMiddleware());
-  app.use("*", errorMiddleware());
+  // app.onError catches throws from anywhere — including sub-apps mounted
+  // via app.route() — which the older try/catch middleware did NOT do.
+  // Hono 4's middleware-as-error-handler pattern only sees errors from
+  // the SAME app's middleware chain; sub-route throws skip past it. The
+  // onError hook is the only sanctioned way to centralize error handling
+  // when sub-routes are in play.
+  app.onError((err, c) => sendError(c, err));
 
   app.get("/api/v1/health", (c) => {
     return c.json({

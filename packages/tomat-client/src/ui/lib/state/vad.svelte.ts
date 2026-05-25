@@ -10,6 +10,7 @@ import { platform } from "$lib/platform";
 import { playBeep } from "$lib/shared/beep";
 import { isTauri } from "$lib/shared/env";
 import { settingsState } from "./settings.svelte";
+import { ttsState } from "./tts.svelte";
 
 class VadManager {
   enabled = $state(false);
@@ -128,7 +129,7 @@ class VadManager {
     this.loading = true;
     // Turning on voice input means the user wants to speak, not listen -
     // cut any TTS that's currently playing or queued.
-    void import("./tts.svelte").then(({ ttsState }) => ttsState.reset());
+    ttsState.reset();
     try {
       const { MicVAD } = await import("@ricky0123/vad-web");
       const instance = await MicVAD.new({

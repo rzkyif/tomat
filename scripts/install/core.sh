@@ -11,8 +11,16 @@
 #   curl -fsSL https://au.tomat.ing/install/core.sh | bash
 #
 # Env overrides:
-#   TOMAT_CDN          override CDN base URL (default: https://au.tomat.ing)
-#   TOMAT_CORE_HOME    override install root (default: ~/.tomat/core)
+#   TOMAT_CDN              override CDN base URL (default: https://au.tomat.ing)
+#   TOMAT_CORE_HOME        override install root (default: ~/.tomat/core)
+#   TOMAT_INSTALL_SERVICE  "1" (default) installs the launchd / systemd unit
+#                          so the core boots on login. "0" skips it; the
+#                          client launches the core on demand via the
+#                          `start_local_core` Tauri command.
+#   TOMAT_INSTALL_BIND_ALL "1" seeds settings.json with server.bindAll=true
+#                          so the freshly-installed core listens on 0.0.0.0
+#                          and other LAN devices can pair. "0" (default)
+#                          keeps the loopback bind.
 
 set -euo pipefail
 
@@ -21,6 +29,8 @@ HOME_DIR="${TOMAT_CORE_HOME:-$HOME/.tomat/core}"
 BIN_DIR="$HOME_DIR/bin"
 WORKERS_DIR="$HOME_DIR/workers"
 MANIFEST_URL="$CDN/manifests/core.json"
+INSTALL_SERVICE="${TOMAT_INSTALL_SERVICE:-1}"
+INSTALL_BIND_ALL="${TOMAT_INSTALL_BIND_ALL:-0}"
 
 err() { echo "error: $*" >&2; exit 1; }
 info() { echo ">>> $*"; }
@@ -157,7 +167,27 @@ if [ ! -s "$ADMIN_TOKEN_FILE" ]; then
   info "admin token written to $ADMIN_TOKEN_FILE"
 fi
 
+# --- seed settings.json --------------------------------------------------
+# Only write the file when the user explicitly asked for non-default
+# behavior. The core gracefully handles a missing settings.json.
+
+SETTINGS_FILE="$HOME_DIR/settings.json"
+if [ "$INSTALL_BIND_ALL" = "1" ] && [ ! -e "$SETTINGS_FILE" ]; then
+  echo '{"server.bindAll":true}' > "$SETTINGS_FILE"
+  info "seeded $SETTINGS_FILE with server.bindAll=true"
+fi
+
 # --- service (launchd / systemd-user) -------------------------------------
+
+if [ "$INSTALL_SERVICE" != "1" ]; then
+  info "skipping service install (TOMAT_INSTALL_SERVICE=$INSTALL_SERVICE)"
+  # Start the core in the background ourselves so the pairing-code mint
+  # below still works. The client is expected to take over supervision on
+  # its next launch via start_local_core.
+  nohup "$INSTALLED" >>"$HOME_DIR/logs/core.stdout.log" 2>>"$HOME_DIR/logs/core.stderr.log" &
+  disown || true
+  info "started core in background (pid $!)"
+else
 
 case "$(uname -s)" in
   Darwin)
@@ -205,6 +235,8 @@ UNIT
     info "systemd-user unit installed: $UNIT"
     ;;
 esac
+
+fi
 
 # --- print pairing code ----------------------------------------------------
 

@@ -46,7 +46,7 @@ import {
   buildContextBlock,
   buildSystemPrompt,
   buildSystemPromptBase,
-} from "$lib/shared/systemPrompt";
+} from "$lib/shared/system-prompt";
 
 type SendMessagesHandler = (anchorUserId?: string) => Promise<void>;
 

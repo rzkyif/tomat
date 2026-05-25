@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { modelsManager } from "../../models/manager.ts";
 import { downloadManager } from "../../downloads/manager.ts";
-import { ensureKindModels } from "../../services/modelEnsure.ts";
+import { ensureKindModels } from "../../services/model-ensure.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
@@ -64,7 +64,7 @@ export function modelsRoutes(): Hono {
   // Bulk-ensure every model file the named sidecar kind needs given the
   // current settings. Skips files already on disk; enqueues downloads for
   // the rest. Returns the list of files that were enqueued (jobIds) and
-  // those that were already present. Note: `sidecarBoot` auto-calls this
+  // those that were already present. Note: `sidecar-boot` auto-calls this
   // internally on settings change, so the client only needs to hit /ensure
   // for explicit "Download required models" buttons.
   r.post("/ensure", async (c) => {

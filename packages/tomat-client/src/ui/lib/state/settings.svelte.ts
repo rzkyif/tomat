@@ -10,7 +10,7 @@
  *
  * Loaded settings are merged onto the schema defaults; saves are sparse
  * (only non-default values are persisted). External code subscribes via
- * `onChange` to react to specific keys (settingsEffects.ts).
+ * `onChange` to react to specific keys (settings-effects.ts).
  */
 
 import { browser, dev } from "$app/environment";
@@ -56,13 +56,30 @@ function destinationFor(key: string): "client" | "core" {
   return KEY_DESTINATION.get(key) ?? "client";
 }
 
+// Debounce window for coalescing rapid edits into a single round-trip.
+// 200ms is short enough that the user perceives saves as immediate but
+// long enough that a flurry of keystrokes in one text field collapses
+// into one PATCH instead of one PATCH per character.
+const FLUSH_DEBOUNCE_MS = 200;
+
 class SettingsState {
   // deno-lint-ignore no-explicit-any -- consumers treat values as untyped
   // and the schema-defaults loader builds a heterogeneous record.
   currentSettings = $state<Record<string, any>>(getDefaultSettings());
 
-  private saveChain: Promise<void> = Promise.resolve();
   private listeners = new Set<SettingChangeListener>();
+
+  // Coalesced flush state: `pendingPrev` records the *first* observed prev
+  // value per key across a debounce window so a failed flush can roll the
+  // UI back to where it started. Resolvers are notified per individual
+  // updateSettings() call.
+  private pendingPrev = new Map<string, unknown>();
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingResolvers: Array<{
+    resolve: () => void;
+    reject: (e: unknown) => void;
+  }> = [];
+  private flushInFlight: Promise<void> | null = null;
 
   onChange(fn: SettingChangeListener): () => void {
     this.listeners.add(fn);
@@ -161,13 +178,72 @@ class SettingsState {
       }
     }
 
-    await this.save();
+    // Record prev-values for rollback. Only set the FIRST observed prev per
+    // key inside the debounce window so rapid edits coalesce correctly: if
+    // the user toggles A→B→C in 50ms, a failed flush rolls back to A.
+    for (const key of Object.keys(updates)) {
+      if (!this.pendingPrev.has(key)) {
+        this.pendingPrev.set(key, prevValues[key]);
+      }
+    }
 
-    for (const [key, value] of Object.entries(updates)) {
-      this.notifyListeners(key, prevValues[key], value);
+    return await this.scheduleFlush();
+  }
+
+  /** Debounced flush scheduler. Each call resets the timer so rapid
+   *  successive updates collapse into a single round-trip; the returned
+   *  promise resolves (or rejects) when that flush completes. */
+  private scheduleFlush(): Promise<void> {
+    if (this.flushTimer !== null) clearTimeout(this.flushTimer);
+    const p = new Promise<void>((resolve, reject) => {
+      this.pendingResolvers.push({ resolve, reject });
+    });
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      void this.flush();
+    }, FLUSH_DEBOUNCE_MS);
+    return p;
+  }
+
+  private async flush(): Promise<void> {
+    // If a flush is already running, wait for it to finish before kicking
+    // off the next one so we don't fire overlapping PATCHes to core.
+    if (this.flushInFlight) {
+      await this.flushInFlight.catch(() => {});
+    }
+    const prevSnapshot = new Map(this.pendingPrev);
+    const resolvers = this.pendingResolvers.splice(0);
+    this.pendingPrev.clear();
+
+    const run = (async () => {
+      try {
+        await this.save();
+        // Notify listeners only AFTER a successful persist so they can't
+        // observe optimistically-set state that the core later rejects.
+        for (const [key, prev] of prevSnapshot) {
+          this.notifyListeners(key, prev, this.currentSettings[key]);
+        }
+        for (const r of resolvers) r.resolve();
+      } catch (e) {
+        // Roll back EVERY key in the batch — partial rollback (e.g. only
+        // shortcuts) leaves the UI lying about what core thinks.
+        for (const [key, prev] of prevSnapshot) {
+          this.currentSettings[key] = prev;
+        }
+        for (const r of resolvers) r.reject(e);
+      }
+    })();
+    this.flushInFlight = run;
+    try {
+      await run;
+    } finally {
+      this.flushInFlight = null;
     }
   }
 
+  /** Writes the current sparse-delta to every destination. Throws an
+   *  AggregateError if any destination fails — callers (flush()) treat
+   *  any failure as a full-batch rollback signal. */
   async save(): Promise<void> {
     if (!browser) return;
     const defaults = getDefaultSettings();
@@ -190,32 +266,37 @@ class SettingsState {
       else clientDelta[key] = value;
     }
 
-    this.saveChain = this.saveChain.then(async () => {
+    // Try every destination; collect errors so the caller can roll back
+    // optimistic UI state. Order: client → core PATCH → secrets, mirroring
+    // the legacy save chain.
+    const errors: unknown[] = [];
+    try {
+      await platform().clientSettings.write(clientDelta);
+    } catch (e) {
+      console.warn("Failed to save client settings:", e);
+      errors.push(e);
+    }
+    if (cores().currentEntry()) {
+      const api = cores().api().settings;
       try {
-        await platform().clientSettings.write(clientDelta);
+        await api.patch(coreDelta);
       } catch (e) {
-        console.warn("Failed to save client settings:", e);
+        console.warn("Failed to save core settings:", e);
+        errors.push(e);
       }
-      if (cores().currentEntry()) {
-        const api = cores().api().settings;
+      for (const [name, value] of Object.entries(secrets)) {
         try {
-          await api.patch(coreDelta);
+          if (value === "") await api.deleteSecret(name);
+          else await api.setSecret(name, value);
         } catch (e) {
-          console.warn("Failed to save core settings:", e);
-        }
-        // Push every secret (empty = delete) so the vault matches what
-        // the user typed in the password fields.
-        for (const [name, value] of Object.entries(secrets)) {
-          try {
-            if (value === "") await api.deleteSecret(name);
-            else await api.setSecret(name, value);
-          } catch (e) {
-            console.warn(`Failed to update secret "${name}":`, e);
-          }
+          console.warn(`Failed to update secret "${name}":`, e);
+          errors.push(e);
         }
       }
-    });
-    await this.saveChain;
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(errors, "settings save failed");
+    }
   }
 
   getAlignment(): Alignment {
