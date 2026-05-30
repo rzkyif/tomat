@@ -11,6 +11,7 @@
 // the user can still pick a tool even with a flaky LLM.
 
 import type OpenAI from "openai";
+import { errMessage } from "@tomat/shared";
 import type { Tool, ToolDescriptor } from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import { toolkitsRegistry } from "../toolkits/registry.ts";
@@ -113,7 +114,7 @@ export class ToolFilter {
     } catch (err) {
       log.warn(
         `phase-2 LLM call failed; falling back to phase-1 candidates: ${
-          err instanceof Error ? err.message : err
+          errMessage(err)
         }`,
       );
       return candidates;

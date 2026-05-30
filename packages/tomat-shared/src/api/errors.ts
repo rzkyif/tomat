@@ -84,6 +84,13 @@ export function isApiErrorBody(value: unknown): value is ApiErrorBody {
     (ERROR_CODES as readonly string[]).includes(code);
 }
 
+/** Extract a human-readable message from an unknown thrown value. Replaces the
+ *  `err instanceof Error ? err.message : String(err)` one-liner repeated across
+ *  core and client. */
+export function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // HTTP status code recommended for each error code. Core's middleware reads
 // this when serializing AppError to a Response.
 export const ERROR_STATUS: Record<ErrorCode, number> = {

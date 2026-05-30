@@ -5,10 +5,7 @@
  */
 
 import { cores } from "$lib/core";
-import type {
-  BinaryKind,
-  DownloadPlan as SharedDownloadPlan,
-} from "@tomat/shared";
+import type { BinaryKind, DownloadPlan as SharedDownloadPlan } from "@tomat/shared";
 import { EMBED_BASE_FILES, TTS_BASE_FILES } from "@tomat/shared";
 
 export type DownloadPlan = SharedDownloadPlan;
@@ -128,15 +125,18 @@ export async function detectPendingStartup(
   // and the confirm modal shows them as one combined list.
   const [modelPlans, binaryChecks] = await Promise.all([
     candidates.length > 0
-      ? cores().api().models.probe(candidates.map((c) => c.path))
+      ? cores()
+          .api()
+          .models.probe(candidates.map((c) => c.path))
       : Promise.resolve([]),
-    cores().api().binaries.list().catch(() => []),
+    cores()
+      .api()
+      .binaries.list()
+      .catch(() => []),
   ]);
 
   const missingModels = modelPlans.filter((p) => !p.alreadyHave);
-  const missingBinaries = binaryChecks
-    .filter((b) => !b.installed)
-    .map((b) => b.kind);
+  const missingBinaries = binaryChecks.filter((b) => !b.installed).map((b) => b.kind);
 
   // Synthesize DownloadPlan entries for each missing binary so the existing
   // ConfirmModal renders them in the same list as model files.

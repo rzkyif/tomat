@@ -1,15 +1,17 @@
-// Toolkit worker pool. Per-toolkit warm subprocess with LRU eviction +
-// idle timeout. Spawn flags are computed from the union of granted
-// permissions across the toolkit's currently-enabled tools.
+// Toolkit worker pool. Per-(toolkit, tool) warm subprocess with LRU eviction +
+// idle timeout. Spawn flags are computed from ONLY the invoked tool's granted
+// permissions (least privilege): a benign tool never runs in a process that
+// holds a sibling tool's net / run / ffi grants.
 //
 // Behaviorally rich part of the toolkit subsystem; ports the semantics of
-// src/bun/toolkits/worker/pool.ts to per-toolkit Deno subprocesses.
+// src/bun/toolkits/worker/pool.ts to Deno subprocesses.
 
 import type {
   AskUserAnswer,
   AskUserQuestion,
   ChatContext,
 } from "./worker-protocol.ts";
+import { errMessage } from "@tomat/shared";
 import type { Tool } from "@tomat/shared";
 import { newCallId } from "../shared/ids.ts";
 import { getLogger } from "../shared/log.ts";
@@ -99,7 +101,12 @@ export class WorkerPool {
     onEvent: (event: CallEvent) => void,
   ): CallController {
     const callId = newCallId();
-    const worker = this.getOrSpawn(spec);
+    // Workers are keyed per (toolkit, tool), not per toolkit, so each tool runs
+    // with ONLY its own granted permissions (least privilege) instead of the
+    // union of every enabled tool's grants. `key` is this call's worker
+    // identity for the pool/LRU/idle-timer maps.
+    const key = workerKey(spec.toolkitId, spec.tool.name);
+    const worker = this.getOrSpawn(spec, key);
 
     let timeout: number | undefined;
     let cancelled = false;
@@ -157,14 +164,14 @@ export class WorkerPool {
             off();
             disarm();
             worker.inFlightCalls--;
-            this.bumpIdleTimer(spec.toolkitId);
+            this.bumpIdleTimer(key);
             resolve(frame.result);
             return;
           case "tool_error":
             off();
             disarm();
             worker.inFlightCalls--;
-            this.bumpIdleTimer(spec.toolkitId);
+            this.bumpIdleTimer(key);
             // If we already emitted tool_cancelled, the consumer has moved
             // on; the worker's late tool_error is just bookkeeping. Reject
             // with the same "cancelled" message so callers waiting on
@@ -186,7 +193,7 @@ export class WorkerPool {
           return;
         }
         worker.inFlightCalls++;
-        this.clearIdleTimer(spec.toolkitId);
+        this.clearIdleTimer(key);
         worker.send({
           kind: "call",
           callId,
@@ -203,8 +210,8 @@ export class WorkerPool {
         // ToolCall bubble would never reach a terminal state.
         off();
         worker.inFlightCalls = Math.max(0, worker.inFlightCalls - 1);
-        this.bumpIdleTimer(spec.toolkitId);
-        const msg = err instanceof Error ? err.message : String(err);
+        this.bumpIdleTimer(key);
+        const msg = errMessage(err);
         try {
           onEvent({
             kind: "log",
@@ -232,7 +239,7 @@ export class WorkerPool {
         } catch { /* worker is gone; cancel is moot */ }
         offHandler();
         worker.inFlightCalls--;
-        this.bumpIdleTimer(spec.toolkitId);
+        this.bumpIdleTimer(key);
         rejectDone(new AppError("internal_error", "tool call timed out"));
       }, timeoutBudgetMs);
     };
@@ -287,17 +294,25 @@ export class WorkerPool {
     };
   }
 
-  // Kill the warm worker for `toolkitId` (e.g. after a grant change). Any
-  // in-flight calls receive tool_error("permissions_revoked") via the
-  // worker's exit -> rejection path.
+  // Kill every warm worker for `toolkitId` (e.g. after a grant change). Workers
+  // are keyed per (toolkit, tool), so a single toolkit can have several; tear
+  // them all down. Any in-flight calls receive tool_error via the worker's
+  // exit -> rejection path.
   async refreshPermissions(toolkitId: string): Promise<void> {
-    const w = this.workers.get(toolkitId);
-    if (!w) return;
-    log.info(`refreshPermissions: terminating warm worker for ${toolkitId}`);
-    await w.terminate(this.config.drainTimeoutMs);
-    this.workers.delete(toolkitId);
-    this.removeFromLru(toolkitId);
-    this.clearIdleTimer(toolkitId);
+    const prefix = workerKey(toolkitId, "");
+    const keys = [...this.workers.keys()].filter((k) => k.startsWith(prefix));
+    if (keys.length === 0) return;
+    log.info(
+      `refreshPermissions: terminating ${keys.length} warm worker(s) for ${toolkitId}`,
+    );
+    for (const key of keys) {
+      const w = this.workers.get(key);
+      if (!w) continue;
+      await w.terminate(this.config.drainTimeoutMs);
+      this.workers.delete(key);
+      this.removeFromLru(key);
+      this.clearIdleTimer(key);
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -329,10 +344,10 @@ export class WorkerPool {
 
   // --- internals ---------------------------------------------------------
 
-  private getOrSpawn(spec: ToolCallStart): WorkerHandle {
-    const existing = this.workers.get(spec.toolkitId);
+  private getOrSpawn(spec: ToolCallStart, key: string): WorkerHandle {
+    const existing = this.workers.get(key);
     if (existing) {
-      this.touchLru(spec.toolkitId);
+      this.touchLru(key);
       return existing;
     }
     if (this.workers.size >= this.config.maxWarmWorkers) {
@@ -343,21 +358,22 @@ export class WorkerPool {
         );
       }
     }
-    return this.spawn(spec);
+    return this.spawn(spec, key);
   }
 
-  private spawn(spec: ToolCallStart): WorkerHandle {
+  private spawn(spec: ToolCallStart, key: string): WorkerHandle {
     const toolkit = toolkitsRegistry().getOrThrow(spec.toolkitId);
-    const enabledTools = toolkitsRegistry().listTools(spec.toolkitId).filter((
-      t,
-    ) => t.enabled);
-    // Each enabled tool contributes its OWN persisted required permissions;
-    // the union over enabled tools' granted entries becomes the worker's
-    // --allow-* flag set.
-    const tools = enabledTools.map((t) => ({
-      required: t.requiredPermissions,
-      grants: t.grants,
-    }));
+    // Least privilege: the worker's --allow-* flags come from ONLY the tool
+    // being invoked, not the union of every enabled tool in the toolkit. So a
+    // benign tool can't run in a process that holds a sibling tool's net / run
+    // / ffi grants. The invoked tool's persisted required-permissions + grants
+    // are looked up from the registry by name.
+    const tool = toolkitsRegistry().listTools(spec.toolkitId).find((t) =>
+      t.name === spec.tool.name
+    );
+    const grantContexts = tool
+      ? [{ required: tool.requiredPermissions, grants: tool.grants }]
+      : [];
     void spec.required; // retained on ToolCallStart for back-compat; not used here
     const templates: PathTemplates = {
       home: Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? "",
@@ -366,9 +382,35 @@ export class WorkerPool {
       sessions: paths().sessionsDir,
       toolkit: toolkit.installedPath,
     };
-    const flags = flagSetToArgs(
-      tools.length > 0 ? unionFlags(tools, templates) : emptyFlagSet(),
-    );
+    const flagSet = grantContexts.length > 0
+      ? unionFlags(grantContexts, templates)
+      : emptyFlagSet();
+
+    // Surface elevated grants in the log so an operator notices an over-broad
+    // permission (these escape the Deno sandbox or expose much of $home; the
+    // secret vault itself is always denied, see worker-handle.ts). Informational
+    // only; the grant was already approved by the user.
+    const elevated: string[] = [];
+    if (flagSet.ffi) elevated.push("ffi");
+    if (flagSet.run.size > 0) {
+      elevated.push(`run(${[...flagSet.run].join(",")})`);
+    }
+    if (templates.home) {
+      for (const p of [...flagSet.read, ...flagSet.write]) {
+        if (p === templates.home || p === templates.home + "/") {
+          elevated.push(`home-wide(${p})`);
+        }
+      }
+    }
+    if (elevated.length > 0) {
+      log.warn(
+        `tool ${spec.toolkitId}/${spec.tool.name} granted elevated permissions: ${
+          elevated.join(", ")
+        }`,
+      );
+    }
+
+    const flags = flagSetToArgs(flagSet);
 
     const w = WorkerHandle.spawn({
       toolkitId: spec.toolkitId,
@@ -376,8 +418,8 @@ export class WorkerPool {
       toolkitFolder: toolkit.installedPath,
       flags,
     });
-    this.workers.set(spec.toolkitId, w);
-    this.touchLru(spec.toolkitId);
+    this.workers.set(key, w);
+    this.touchLru(key);
     return w;
   }
 
@@ -439,6 +481,14 @@ export function workerPool(): WorkerPool {
 
 export function __resetForTesting(): void {
   _instance = null;
+}
+
+/** Pool/LRU/idle-timer identity for a worker: one process per (toolkit, tool)
+ *  so each tool runs with only its own permissions. The NUL separator can't
+ *  appear in a toolkit id or tool name, so `startsWith(workerKey(id, ""))`
+ *  safely matches every tool-worker of a toolkit (used by refreshPermissions). */
+function workerKey(toolkitId: string, toolName: string): string {
+  return `${toolkitId}\u0000${toolName}`;
 }
 
 function resolveEntryPath(toolkitFolder: string): string {

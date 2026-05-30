@@ -106,7 +106,7 @@ Deno.test("writeUpdateMarker: persists attempts=0 + stagedAtMs at write time", a
 // --- performRollback (via attempts>=1 branch) -----------------------------
 
 import { binPath, paths as _paths } from "../paths.ts";
-import { binaryName } from "../binaries/versions.ts";
+import { binaryName, coreBinaryName } from "../binaries/versions.ts";
 
 async function writeMarkerWithAttempts(attempts: number): Promise<void> {
   await Deno.writeTextFile(
@@ -218,5 +218,27 @@ Deno.test("handleUpdateMarkerOnBoot: a leftover <bin>.broken from a prior attemp
     assertEquals(await Deno.readTextFile(currentBin), "WORKING");
   } finally {
     await env.teardown();
+  }
+});
+
+Deno.test("handleUpdateMarkerOnBoot: beta rolls back the channel-suffixed binary (tomat-core-beta)", async () => {
+  const priorChannel = Deno.env.get("TOMAT_CHANNEL");
+  Deno.env.set("TOMAT_CHANNEL", "beta");
+  const env = await setupTestEnv();
+  try {
+    // The rollback anchor must follow the channel suffix, not the bare name.
+    const currentBin = binPath(coreBinaryName("tomat-core"));
+    assertEquals(currentBin.endsWith("tomat-core-beta"), true);
+    const oldBin = currentBin + ".old";
+    await Deno.writeTextFile(currentBin, "BROKEN_BETA");
+    await Deno.writeTextFile(oldBin, "WORKING_BETA");
+    await writeMarkerWithAttempts(1);
+
+    assertEquals(await handleUpdateMarkerOnBoot(), true);
+    assertEquals(await Deno.readTextFile(currentBin), "WORKING_BETA");
+  } finally {
+    await env.teardown();
+    if (priorChannel === undefined) Deno.env.delete("TOMAT_CHANNEL");
+    else Deno.env.set("TOMAT_CHANNEL", priorChannel);
   }
 });

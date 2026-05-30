@@ -29,14 +29,6 @@
     {
       "identifier": "fs:allow-home-meta-recursive",
       "allow": [{ "path": "$HOME/.tomat/**" }]
-    },
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        { "name": "tomat-tools-server", "sidecar": true },
-        { "name": "tomat-llama-server", "sidecar": true },
-        { "name": "tomat-whisper-server", "sidecar": true }
-      ]
     }
   ]
 }

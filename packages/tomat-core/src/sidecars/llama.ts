@@ -6,7 +6,7 @@
 // for resolving the model path; this module assumes the file exists.
 
 import { join } from "@std/path";
-import { binPath, paths } from "../paths.ts";
+import { binPath, llmPort, paths } from "../paths.ts";
 import { platformExe } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
 import type { StartOptions } from "./types.ts";
@@ -39,7 +39,7 @@ export function llamaStartArgsFromSettings(
     modelPath: resolveHfPath(modelSpec),
     mmprojPath: mmprojSpec ? resolveHfPath(mmprojSpec) : undefined,
     host: strSetting(settings, "llm.host", "127.0.0.1"),
-    port: strSetting(settings, "llm.port", "7701"),
+    port: strSetting(settings, "llm.port", String(llmPort())),
     threads: numSetting(settings, "llm.threads", 4),
     contextSize: numSetting(settings, "llm.contextSize", 4096),
     reasoning: strSetting(settings, "llm.reasoning", "off") as
@@ -79,7 +79,13 @@ export function buildLlamaStartOptions(args: LlamaStartArgs): StartOptions {
       argv.push("--reasoning-budget", String(args.reasoningBudget));
     }
   }
-  if (args.webui) argv.push("--webui");
+  // The llama.cpp web UI is unauthenticated. Only ever enable it when the
+  // server is bound to loopback (local debugging); if the sidecar is reachable
+  // from the network (a non-loopback host), force it off so it can't be hit by
+  // other devices on the LAN.
+  const hostIsLoopback = args.host === "127.0.0.1" ||
+    args.host === "localhost" || args.host === "::1";
+  if (args.webui && hostIsLoopback) argv.push("--webui");
   else argv.push("--no-webui");
   if (args.mmprojPath) argv.push("--mmproj", args.mmprojPath);
   return {

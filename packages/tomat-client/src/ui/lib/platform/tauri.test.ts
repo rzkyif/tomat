@@ -35,10 +35,16 @@ const tauriRelaunch = vi.fn(() => Promise.resolve());
 const tauriUpdaterCheck = vi.fn(() => Promise.resolve(null));
 
 class FakePhysicalPosition {
-  constructor(public x: number, public y: number) {}
+  constructor(
+    public x: number,
+    public y: number,
+  ) {}
 }
 class FakePhysicalSize {
-  constructor(public width: number, public height: number) {}
+  constructor(
+    public width: number,
+    public height: number,
+  ) {}
 }
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -219,9 +225,7 @@ describe("Tauri platform: shortcuts (input bindings)", () => {
       onAttachFile: () => {},
       onCaptureRegion: () => {},
     });
-    const events = (listen.mock.calls as unknown as Array<[string, unknown]>).map(
-      (c) => c[0],
-    );
+    const events = (listen.mock.calls as unknown as Array<[string, unknown]>).map((c) => c[0]);
     expect(events).toContain("input-shortcut-attach-file");
     expect(events).toContain("input-shortcut-capture-region");
     expect(events).not.toContain("input-shortcut-capture-screen");
@@ -231,9 +235,7 @@ describe("Tauri platform: shortcuts (input bindings)", () => {
 describe("Tauri platform: fileConvert", () => {
   it("toMarkdownFromPath invokes convert_file_to_markdown with filePath", async () => {
     invoke.mockResolvedValueOnce("# converted");
-    expect(await p.fileConvert.toMarkdownFromPath("/abs/foo.pdf")).toBe(
-      "# converted",
-    );
+    expect(await p.fileConvert.toMarkdownFromPath("/abs/foo.pdf")).toBe("# converted");
     expect(invoke).toHaveBeenCalledWith("convert_file_to_markdown", {
       filePath: "/abs/foo.pdf",
     });

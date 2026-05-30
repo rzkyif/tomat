@@ -10,9 +10,11 @@ const SEARCH_KEYWORD = "tools-available";
 export interface NpmPackageVersion {
   version: string;
   tarballUrl: string;
-  // npm's `dist.shasum` is sha1 (advisory). We re-hash sha256 ourselves
-  // during download (currently optional for toolkits; binaries enforce it).
+  // npm's `dist.shasum` is sha1 (legacy, weak). `dist.integrity` is a
+  // Subresource-Integrity string (e.g. "sha512-<base64>") and is the strong
+  // hash we verify the downloaded tarball against before extraction.
   shasum?: string;
+  integrity?: string;
   description?: string;
   homepage?: string;
   license?: string;
@@ -74,7 +76,7 @@ export async function resolveVersion(
     "dist-tags"?: Record<string, string>;
     versions?: Record<string, {
       version: string;
-      dist: { tarball: string; shasum?: string };
+      dist: { tarball: string; shasum?: string; integrity?: string };
       description?: string;
       homepage?: string;
       license?: string;
@@ -98,6 +100,7 @@ export async function resolveVersion(
     version,
     tarballUrl: entry.dist.tarball,
     shasum: entry.dist.shasum,
+    integrity: entry.dist.integrity,
     description: entry.description,
     homepage: entry.homepage,
     license: entry.license,

@@ -16,7 +16,7 @@ import type {
 import { db } from "../db/connection.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
-import { permissionKey } from "@tomat/shared";
+import { errMessage, permissionKey } from "@tomat/shared";
 import { hashToolkit } from "./hash.ts";
 import { getLogger } from "../shared/log.ts";
 
@@ -149,7 +149,7 @@ export class ToolkitsRegistry {
       try {
         actualHash = await hashToolkit(tk.installedPath);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errMessage(err);
         log.warn(`[${tk.id}] hash failed: ${msg}`);
         this.setLastError(tk.id, `hash failed: ${msg}`);
         drifted.push(tk.id);

@@ -16,3 +16,5 @@ export * from "./validation/pairing.ts";
 export * from "./validation/chat.ts";
 export * from "./validation/session.ts";
 export * from "./validation/ws.ts";
+
+export * from "./crypto/pake.ts";

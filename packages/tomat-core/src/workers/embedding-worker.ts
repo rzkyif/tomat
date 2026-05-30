@@ -22,6 +22,7 @@
 // deno.json nearby. Keep the version pinned in lockstep with tomat-core's
 // own deno.json import.
 import { env, pipeline } from "npm:@huggingface/transformers@^4.1.0";
+import { errMessage } from "@tomat/shared";
 
 const REPO = "Xenova/all-MiniLM-L6-v2";
 
@@ -82,7 +83,7 @@ async function embed(id: string, texts: string[]): Promise<void> {
     send({
       kind: "embed_err",
       id,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMessage(err),
     });
   }
 }

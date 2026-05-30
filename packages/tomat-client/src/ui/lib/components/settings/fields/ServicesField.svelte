@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { SettingField } from "@tomat/shared";
+  import { onMount } from "svelte";
   import { serversState, settingsState } from "../../../state";
   import { ttsState } from "$lib/state/tts.svelte";
+  import { platform } from "$lib/platform";
   import FieldCard from "./FieldCard.svelte";
 
   let { field, horizontal: _horizontal = false } = $props<{
@@ -30,13 +32,24 @@
     }
   }
 
+  // Channel-aware default sidecar ports (beta → 7711/7712), resolved from the
+  // platform on mount. Until then, show the stable defaults.
+  let defaultLlmPort = $state("7701");
+  let defaultSttPort = $state("7702");
+  onMount(() => {
+    void platform().pairing.localSidecarPorts().then((p) => {
+      defaultLlmPort = String(p.llm);
+      defaultSttPort = String(p.stt);
+    }).catch(() => {});
+  });
+
   function endpointFor(key: ServiceKey): string | null {
     const s = settingsState.currentSettings;
     if (key === "llama") {
-      return `${s["llm.host"] || "127.0.0.1"}:${s["llm.port"] || "7701"}`;
+      return `${s["llm.host"] || "127.0.0.1"}:${s["llm.port"] || defaultLlmPort}`;
     }
     if (key === "whisper") {
-      return `${s["stt.host"] || "127.0.0.1"}:${s["stt.port"] || "7702"}`;
+      return `${s["stt.host"] || "127.0.0.1"}:${s["stt.port"] || defaultSttPort}`;
     }
     return null;
   }

@@ -17,6 +17,7 @@
 //   - Binary path resolution (binaries/manager.ts).
 
 import { getLogger } from "../shared/log.ts";
+import { errMessage } from "@tomat/shared";
 import { trackSidecarPid } from "./jobctl.ts";
 import { libraryEnvFor } from "./library-path.ts";
 import {
@@ -35,6 +36,46 @@ import {
 } from "./types.ts";
 
 const log = getLogger("sidecars");
+
+// Environment variables that third-party sidecar binaries (llama-server,
+// whisper-server, tts) legitimately need. We deliberately do NOT inherit the
+// core's full environment, which can carry operator secrets (e.g. GITHUB_TOKEN
+// used by the upstream resolver) that these binaries have no business seeing.
+// The dynamic-library path is added separately via libraryEnvFor().
+const SIDECAR_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TERM",
+  "USER",
+  "LOGNAME",
+  // Windows essentials.
+  "SystemRoot",
+  "SYSTEMROOT",
+  "windir",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "ProgramData",
+  "ProgramFiles",
+  "ComSpec",
+  "PATHEXT",
+  "NUMBER_OF_PROCESSORS",
+];
+
+function inheritedSidecarEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of SIDECAR_ENV_ALLOWLIST) {
+    const v = Deno.env.get(key);
+    if (v !== undefined) out[key] = v;
+  }
+  return out;
+}
 
 const GRACEFUL_SHUTDOWN_MS = 5_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
@@ -97,7 +138,7 @@ class Sidecar {
       ? libraryEnvFor(options.libraryDir)
       : { env: {} };
     const env: Record<string, string> = {
-      ...Deno.env.toObject(),
+      ...inheritedSidecarEnv(),
       ...libEnv.env,
       ...(options.env ?? {}),
     };
@@ -115,7 +156,7 @@ class Sidecar {
         stdin: "null",
       }).spawn();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errMessage(err);
       log.error(`${this.kind}: spawn failed: ${msg}`);
       this.emit({
         kind: this.kind,
@@ -347,9 +388,7 @@ class Sidecar {
       }
     } catch (err) {
       log.warn(
-        `${this.kind}: terminate failed: ${
-          err instanceof Error ? err.message : err
-        }`,
+        `${this.kind}: terminate failed: ${errMessage(err)}`,
       );
     }
     // Drain status to release resources.
@@ -412,7 +451,7 @@ export class SidecarManager {
         l(snap);
       } catch (err) {
         log.warn(
-          `sidecar listener threw: ${err instanceof Error ? err.message : err}`,
+          `sidecar listener threw: ${errMessage(err)}`,
         );
       }
     }

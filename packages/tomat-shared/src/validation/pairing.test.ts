@@ -4,9 +4,12 @@
 
 import { assertEquals } from "@std/assert";
 import {
-  pairingClaimRequestSchema,
   pairingCodeRequestSchema,
+  pakeFinishRequestSchema,
+  pakeStartRequestSchema,
 } from "./pairing.ts";
+
+const B64_32 = btoa(String.fromCharCode(...new Uint8Array(32)));
 
 Deno.test("pairingCodeRequestSchema: accepts empty body (defaults)", () => {
   const parsed = pairingCodeRequestSchema.parse({});
@@ -41,45 +44,81 @@ Deno.test("pairingCodeRequestSchema: rejects unknown fields (strict mode)", () =
   assertEquals(result.success, false);
 });
 
-Deno.test("pairingClaimRequestSchema: accepts a 6-digit code + name", () => {
-  const parsed = pairingClaimRequestSchema.parse({
-    code: "123456",
+Deno.test("pakeStartRequestSchema: accepts a well-formed start body", () => {
+  const parsed = pakeStartRequestSchema.parse({
     clientName: "my-laptop",
+    sid: B64_32,
+    msgA: B64_32,
   });
-  assertEquals(parsed.code, "123456");
   assertEquals(parsed.clientName, "my-laptop");
 });
 
-Deno.test("pairingClaimRequestSchema: rejects non-6-digit codes", () => {
-  for (const code of ["12345", "1234567", "abcdef", "12 456"]) {
-    assertEquals(
-      pairingClaimRequestSchema.safeParse({ code, clientName: "x" }).success,
-      false,
-      `should reject code: ${code}`,
-    );
-  }
-});
-
-Deno.test("pairingClaimRequestSchema: rejects empty or >64-char clientName", () => {
+Deno.test("pakeStartRequestSchema: rejects empty / >64-char clientName", () => {
   assertEquals(
-    pairingClaimRequestSchema.safeParse({ code: "123456", clientName: "" })
+    pakeStartRequestSchema.safeParse({
+      clientName: "",
+      sid: B64_32,
+      msgA: B64_32,
+    })
       .success,
     false,
   );
   assertEquals(
-    pairingClaimRequestSchema.safeParse({
-      code: "123456",
+    pakeStartRequestSchema.safeParse({
       clientName: "x".repeat(65),
+      sid: B64_32,
+      msgA: B64_32,
     }).success,
     false,
   );
 });
 
-Deno.test("pairingClaimRequestSchema: rejects unknown fields (strict mode)", () => {
-  const result = pairingClaimRequestSchema.safeParse({
-    code: "123456",
-    clientName: "x",
-    sneaky: true,
+Deno.test("pakeStartRequestSchema: rejects non-base64 msgA / sid", () => {
+  assertEquals(
+    pakeStartRequestSchema.safeParse({
+      clientName: "x",
+      sid: B64_32,
+      msgA: "not base64!!",
+    }).success,
+    false,
+  );
+});
+
+Deno.test("pakeStartRequestSchema: rejects unknown fields (strict mode)", () => {
+  assertEquals(
+    pakeStartRequestSchema.safeParse({
+      clientName: "x",
+      sid: B64_32,
+      msgA: B64_32,
+      sneaky: true,
+    }).success,
+    false,
+  );
+});
+
+Deno.test("pakeFinishRequestSchema: accepts pakeId + base64 confirmC", () => {
+  const parsed = pakeFinishRequestSchema.parse({
+    pakeId: "abc123",
+    confirmC: B64_32,
   });
-  assertEquals(result.success, false);
+  assertEquals(parsed.pakeId, "abc123");
+});
+
+Deno.test("pakeFinishRequestSchema: rejects missing/empty fields + unknowns", () => {
+  assertEquals(
+    pakeFinishRequestSchema.safeParse({ pakeId: "", confirmC: B64_32 }).success,
+    false,
+  );
+  assertEquals(
+    pakeFinishRequestSchema.safeParse({ pakeId: "x", confirmC: "@@" }).success,
+    false,
+  );
+  assertEquals(
+    pakeFinishRequestSchema.safeParse({
+      pakeId: "x",
+      confirmC: B64_32,
+      extra: 1,
+    }).success,
+    false,
+  );
 });

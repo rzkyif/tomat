@@ -2,6 +2,7 @@
 // Boots: paths → logger → DB → HTTP + WS server.
 
 import { ensureDirs, paths } from "./paths.ts";
+import { errMessage } from "@tomat/shared";
 import { loadBootConfig } from "./config.ts";
 import {
   getLogger,
@@ -20,6 +21,7 @@ import { initSidecarBoot } from "./services/sidecar-boot.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
 import { shutdownJobctl } from "./sidecars/jobctl.ts";
 import { loadCoreSettings } from "./services/core-settings.ts";
+import { tlsServeOptions } from "./services/tls.ts";
 
 async function main(): Promise<void> {
   const cfg = loadBootConfig();
@@ -27,26 +29,40 @@ async function main(): Promise<void> {
   await initLogger();
   const log = getLogger();
 
-  // `server.bindAll` (persisted core setting) widens the listener from
-  // 127.0.0.1 to 0.0.0.0 so other devices on the LAN can pair. The
-  // TOMAT_CORE_HOST env var still wins when set — operators may need to
-  // pin to a specific interface.
+  // `server.bindHost` (persisted core setting) chooses the interface the HTTP
+  // listener binds to: 127.0.0.1 (default, this machine only), a specific LAN
+  // IP, or 0.0.0.0 (all interfaces, so other devices can pair). The
+  // TOMAT_CORE_HOST env var still wins when set.
   const hostFromEnv = Deno.env.get("TOMAT_CORE_HOST");
   let bindHost = cfg.host;
   if (!hostFromEnv) {
     try {
       const settings = await loadCoreSettings();
-      if (settings["server.bindAll"] === true) bindHost = "0.0.0.0";
+      const configured = settings["server.bindHost"];
+      if (typeof configured === "string" && configured.trim().length > 0) {
+        bindHost = configured.trim();
+      }
     } catch (err) {
       log.warn(
-        `could not read server.bindAll; falling back to ${cfg.host}: ${
-          err instanceof Error ? err.message : err
+        `could not read server.bindHost; falling back to ${cfg.host}: ${
+          errMessage(err)
         }`,
       );
     }
   }
 
   log.info(`tomat-core v${cfg.version} starting on ${bindHost}:${cfg.port}`);
+  // The API is served over TLS (HTTPS/WSS) with a self-signed cert that clients
+  // pin at pairing, so traffic is encrypted and core is authenticated even on a
+  // shared network. Binding beyond loopback just widens reachability.
+  if (
+    bindHost !== "127.0.0.1" && bindHost !== "localhost" && bindHost !== "::1"
+  ) {
+    log.info(
+      `core is bound to ${bindHost} (not loopback): the HTTPS/WSS API is ` +
+        `reachable from the network. Paired clients pin the TLS cert.`,
+    );
+  }
   log.info(`root: ${paths().root}`);
 
   // Check the update marker BEFORE we open the DB / bind the port. If
@@ -75,9 +91,7 @@ async function main(): Promise<void> {
     }
   }).catch((err) => {
     log.error(
-      `toolkit verifyAllOnBoot failed: ${
-        err instanceof Error ? err.message : err
-      }`,
+      `toolkit verifyAllOnBoot failed: ${errMessage(err)}`,
     );
   });
 
@@ -87,16 +101,19 @@ async function main(): Promise<void> {
   // sidecar.status WS frames let the UI render a loading chip.
   void initSidecarBoot().catch((err) => {
     log.error(
-      `sidecar boot failed: ${err instanceof Error ? err.message : err}`,
+      `sidecar boot failed: ${errMessage(err)}`,
     );
   });
 
   const app = buildApp();
   const hub = wsHub();
 
+  // Self-signed cert + sealed key; clients pin the SPKI (see services/tls.ts).
+  const tls = await tlsServeOptions(bindHost);
+
   const server = Deno.serve(
-    { hostname: bindHost, port: cfg.port },
-    async (req) => {
+    { hostname: bindHost, port: cfg.port, cert: tls.cert, key: tls.key },
+    async (req, info) => {
       const url = new URL(req.url);
       // WS upgrade path.
       if (
@@ -105,7 +122,10 @@ async function main(): Promise<void> {
       ) {
         return await hub.handleUpgrade(req);
       }
-      return await app.fetch(req);
+      // Pass the real socket peer address into the Hono env so security-
+      // sensitive routes (pairing rate limit) can key on it instead of a
+      // spoofable X-Forwarded-For header.
+      return await app.fetch(req, { remoteAddr: info.remoteAddr });
     },
   );
 

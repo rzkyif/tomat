@@ -1,23 +1,44 @@
-// Bootstrap config + CDN URLs.
-// All hardcoded URLs live here so changing the CDN later is a one-file edit.
+// Bootstrap config + URLs.
+// All hardcoded URLs live here so changing the hostnames later is a one-file
+// edit.
+
+import { channel, corePort } from "./paths.ts";
 
 export const CORE_VERSION = "0.1.0";
 
-// Two-host CDN layout (set up because R2 custom domains hijack an entire
-// hostname; serving large binaries via Worker would cost per-request).
+// Two-host layout:
 //
-//   CDN_BASE_URL       — small static-ish files behind the Astro Worker:
-//                        /, /manifests/*, /install/*, /schemas/*.
-//   RELEASES_BASE_URL  — public R2 bucket holding compiled binaries at
-//                        /<version>/<triple>/<file>. Manifest URLs point here.
-export const CDN_BASE_URL = "https://au.tomat.ing";
-export const RELEASES_BASE_URL = "https://get.au.tomat.ing";
+//   WEBSITE_BASE_URL  — the landing page (Cloudflare Worker / Astro static
+//                       assets). Nothing release-related lives here; the core
+//                       runtime does not consume this URL.
+//   STORAGE_BASE_URL  — public R2 bucket holding every release artifact:
+//                       /<version>/<triple>/<file>, /manifests/*.json,
+//                       /install/*, /schemas/*.
+export const WEBSITE_BASE_URL = "https://au.tomat.ing";
+export const STORAGE_BASE_URL = "https://get.au.tomat.ing";
 
-export const BINARY_MANIFEST_URL = `${CDN_BASE_URL}/manifests/binaries.json`;
-export const CORE_MANIFEST_URL = `${CDN_BASE_URL}/manifests/core.json`;
-export const SCHEMAS_BASE_URL = `${CDN_BASE_URL}/schemas`;
+// Manifests live under a per-channel path segment so beta/dev publish + fetch
+// their own signed manifests without touching stable's. Stable stays bare
+// (manifests/core.json) for back-compat; dev/beta nest (manifests/beta/...).
+function manifestDir(): string {
+  const ch = channel();
+  return ch === "stable" ? "manifests" : `manifests/${ch}`;
+}
+
+export function coreManifestUrl(): string {
+  return `${STORAGE_BASE_URL}/${manifestDir()}/core.json`;
+}
+
+export function binaryManifestUrl(): string {
+  return `${STORAGE_BASE_URL}/${manifestDir()}/binaries.json`;
+}
+
+// Schemas (tools-v1.json) are channel-independent — one published copy.
+export const SCHEMAS_BASE_URL = `${STORAGE_BASE_URL}/schemas`;
 
 // Default HTTP bind. Override via TOMAT_CORE_HOST / TOMAT_CORE_PORT env.
+// DEFAULT_PORT is the stable base; loadBootConfig() applies the per-channel
+// offset via corePort() so beta/dev cores bind a distinct port by default.
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 7800;
 
@@ -29,7 +50,7 @@ export interface BootConfig {
 
 export function loadBootConfig(): BootConfig {
   const portStr = Deno.env.get("TOMAT_CORE_PORT");
-  const port = portStr ? Number(portStr) : DEFAULT_PORT;
+  const port = portStr ? Number(portStr) : corePort();
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(`invalid TOMAT_CORE_PORT: ${portStr}`);
   }

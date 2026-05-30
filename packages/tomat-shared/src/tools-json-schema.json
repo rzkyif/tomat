@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://au.tomat.ing/schemas/tools-v1.json",
+  "$id": "https://get.au.tomat.ing/schemas/tools-v1.json",
   "title": "tools.json",
   "description": "Open standard for declaring AI tools that an LLM host can execute on behalf of a user. Place at the root of a folder (or as the root of an npm package).",
   "type": "object",

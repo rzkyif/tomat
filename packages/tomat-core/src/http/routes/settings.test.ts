@@ -4,12 +4,11 @@
 
 import { assertEquals } from "@std/assert";
 import { buildApp } from "../server.ts";
-import { authService } from "../../services/auth.ts";
+import { pairClient } from "../../../tests/helpers/pairing.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
 
 async function pairOne(): Promise<string> {
-  const { code } = await authService().mintPairingCode();
-  const { token } = await authService().claim(code, "settings-t", "127.0.0.1");
+  const { token } = await pairClient("settings-t", "127.0.0.1");
   return token;
 }
 
@@ -47,6 +46,70 @@ Deno.test("PATCH /api/v1/settings: persists keys and returns the merged object",
     assertEquals(res.status, 200);
     const body = await res.json();
     assertEquals(body["ui.theme"], "dark");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("PATCH /api/v1/settings: rejects a wrong-typed known key with 400", async () => {
+  const env = await setupTestEnv();
+  try {
+    const token = await pairOne();
+    const app = buildApp();
+    // llm.host is a string setting; a number is a type mismatch.
+    const res = await app.fetch(
+      new Request("http://x/api/v1/settings", {
+        method: "PATCH",
+        headers: { ...bearer(token), "content-type": "application/json" },
+        body: JSON.stringify({ "llm.host": 1234 }),
+      }),
+    );
+    assertEquals(res.status, 400);
+    assertEquals((await res.json()).error.code, "validation_error");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("PATCH /api/v1/settings: rejects a secret-typed key (must use the vault)", async () => {
+  const env = await setupTestEnv();
+  try {
+    const token = await pairOne();
+    const app = buildApp();
+    const res = await app.fetch(
+      new Request("http://x/api/v1/settings", {
+        method: "PATCH",
+        headers: { ...bearer(token), "content-type": "application/json" },
+        body: JSON.stringify({
+          "llm.external.apiKey": "sk-should-be-rejected",
+        }),
+      }),
+    );
+    assertEquals(res.status, 400);
+    assertEquals((await res.json()).error.code, "validation_error");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("GET /api/v1/settings: never returns secret-typed values", async () => {
+  const env = await setupTestEnv();
+  try {
+    const token = await pairOne();
+    const app = buildApp();
+    // Simulate a plaintext key sitting in settings.json by writing it through
+    // the settings service directly (bypassing the route guard).
+    const { patchCoreSettings } = await import(
+      "../../services/core-settings.ts"
+    );
+    await patchCoreSettings({ "llm.external.apiKey": "sk-must-be-redacted" });
+    const res = await app.fetch(
+      new Request("http://x/api/v1/settings", { headers: bearer(token) }),
+    );
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals("llm.external.apiKey" in body, false);
+    assertEquals(JSON.stringify(body).includes("sk-must-be-redacted"), false);
   } finally {
     await env.teardown();
   }

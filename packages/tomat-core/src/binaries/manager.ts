@@ -15,7 +15,7 @@ import type {
   BinaryStatus,
   Triple,
 } from "@tomat/shared";
-import { BINARY_KINDS } from "@tomat/shared";
+import { BINARY_KINDS, errMessage, isResolverEntry } from "@tomat/shared";
 import { downloadManager } from "../downloads/manager.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
@@ -23,6 +23,7 @@ import { getLogger } from "../shared/log.ts";
 import { newJobId } from "../shared/ids.ts";
 import { loadBinaryManifest } from "./manifest.ts";
 import { binaryName, hostTriple } from "./versions.ts";
+import { resolveBinaryEntry } from "./upstream-resolver.ts";
 
 const log = getLogger("binaries");
 
@@ -43,9 +44,7 @@ async function readInstalledVersions(): Promise<Record<string, string>> {
   } catch (err) {
     if (!(err instanceof Deno.errors.NotFound)) {
       log.warn(
-        `could not read versions.json: ${
-          err instanceof Error ? err.message : err
-        }`,
+        `could not read versions.json: ${errMessage(err)}`,
       );
     }
   }
@@ -77,11 +76,20 @@ export class BinariesManager {
   // GET /api/v1/binaries.
   async list(): Promise<BinaryStatus[]> {
     const manifest = await loadBinaryManifest().catch(() => null);
+    const versions = await readInstalledVersions();
     const out: BinaryStatus[] = [];
     for (const kind of BINARY_KINDS) {
       const path = join(paths().binDir, binaryName(kind));
       const installed = await fileExists(path);
-      const version = manifest?.binaries[kind]?.version ?? "unknown";
+      const entry = manifest?.binaries[kind];
+      // Don't hit GitHub for a plain list: resolver (beta) entries report the
+      // installed version (or "latest" if not yet installed); pinned (stable)
+      // entries report their published version.
+      const version = entry
+        ? (isResolverEntry(entry)
+          ? (versions[kind] ?? "latest")
+          : entry.version)
+        : "unknown";
       out.push({
         kind,
         version,
@@ -97,19 +105,39 @@ export class BinariesManager {
   async check(): Promise<BinaryUpdateCheck[]> {
     const manifest = await loadBinaryManifest({ force: true });
     const versions = await readInstalledVersions();
+    const triple = hostTriple();
     const out: BinaryUpdateCheck[] = [];
     for (const kind of BINARY_KINDS) {
       const path = join(paths().binDir, binaryName(kind));
       const installed = await fileExists(path);
       const installedVersion = versions[kind] ?? null;
-      const latestVersion = manifest.binaries[kind]?.version ?? "unknown";
-      // "available" means we should re-install: either the binary is
-      // missing, or the recorded install version disagrees with the
-      // manifest. An installed-but-version-unknown binary (pre-tracking)
-      // is treated as "current" so we don't spam the user with phantom
-      // updates after upgrading core.
-      const available = !installed ||
-        (installedVersion !== null && installedVersion !== latestVersion);
+      // Resolve the latest available version for this host. For beta resolver
+      // entries this hits GitHub; a per-kind failure (missing asset/digest)
+      // degrades to "no update" rather than failing the whole check.
+      let latestVersion = "unknown";
+      let resolvable = false;
+      const entry = manifest.binaries[kind];
+      if (entry) {
+        try {
+          const resolved = await resolveBinaryEntry(entry, triple);
+          if (resolved) {
+            latestVersion = resolved.version;
+            resolvable = true;
+          }
+        } catch (err) {
+          log.warn(
+            `check ${kind}: resolve failed: ${errMessage(err)}`,
+          );
+        }
+      }
+      // "available" means we should (re)install: the binary is missing, or the
+      // recorded install version disagrees with the latest. Guarded on
+      // `resolvable` so a triple with no upstream asset (e.g. whisper on
+      // mac/linux) never shows a phantom update. An installed-but-unknown
+      // version (pre-tracking) is treated as current.
+      const available = resolvable &&
+        (!installed ||
+          (installedVersion !== null && installedVersion !== latestVersion));
       out.push({
         kind,
         installed,
@@ -130,7 +158,7 @@ export class BinariesManager {
     const targets = kinds ?? await this.missingKinds();
     const jobIds: string[] = [];
     for (const kind of targets) {
-      const job = this.kickoff(kind, manifest, triple);
+      const job = await this.kickoff(kind, manifest, triple);
       jobIds.push(job);
     }
     return { jobIds };
@@ -142,7 +170,7 @@ export class BinariesManager {
   async update(kind: BinaryKind): Promise<{ jobId: string }> {
     const manifest = await loadBinaryManifest({ force: true });
     const triple = hostTriple();
-    const jobId = this.kickoff(kind, manifest, triple);
+    const jobId = await this.kickoff(kind, manifest, triple);
     return { jobId };
   }
 
@@ -163,17 +191,20 @@ export class BinariesManager {
     return out;
   }
 
-  private kickoff(
+  private async kickoff(
     kind: BinaryKind,
     manifest: BinaryManifest,
     triple: Triple,
-  ): string {
+  ): Promise<string> {
     const entry = manifest.binaries[kind];
     if (!entry) {
       throw new AppError("binary_not_found", `kind ${kind} not in manifest`);
     }
-    const platform = entry.platforms[triple];
-    if (!platform) {
+    // Resolve to a concrete URL+hash+version. For pinned (stable) entries this
+    // is the stored data; for resolver (beta) entries it hits GitHub for the
+    // latest release and verifies via its published sha256 digest.
+    const resolved = await resolveBinaryEntry(entry, triple);
+    if (!resolved) {
       throw new AppError(
         "binary_not_found",
         `kind ${kind} has no entry for triple ${triple}`,
@@ -186,23 +217,21 @@ export class BinariesManager {
     void (async () => {
       try {
         const downloaded = await downloadManager().enqueue({
-          source: platform.url,
-          url: platform.url,
+          source: resolved.url,
+          url: resolved.url,
           relPath: `staging/${kind}-${jobId}.tar.gz`,
           destination: "binaries",
           groupId: `binary:${kind}`,
-          sha256: platform.sha256,
+          sha256: resolved.sha256,
         });
         log.info(`${kind}: downloaded to ${downloaded}`);
         await extractArchive(downloaded, paths().binDir, kind);
         await Deno.remove(downloaded);
-        await writeInstalledVersion(kind, entry.version);
-        log.info(`${kind}: installed v${entry.version}`);
+        await writeInstalledVersion(kind, resolved.version);
+        log.info(`${kind}: installed v${resolved.version}`);
       } catch (err) {
         log.error(
-          `${kind}: install failed: ${
-            err instanceof Error ? err.message : err
-          }`,
+          `${kind}: install failed: ${errMessage(err)}`,
         );
       } finally {
         try {

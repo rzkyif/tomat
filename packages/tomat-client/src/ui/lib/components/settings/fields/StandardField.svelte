@@ -61,6 +61,20 @@
   );
   const isNumeric = $derived(field.type === "number" || field.type === "float");
   const numericStep = $derived(field.type === "float" ? 0.1 : 1);
+
+  // Secret fields never receive their stored value from core. When one is
+  // configured server-side and the input is empty, show a "saved" placeholder
+  // so the user knows a value is set without exposing it.
+  const basePlaceholder = $derived(
+    "placeholder" in field ? (field.placeholder ?? "") : "",
+  );
+  const placeholder = $derived(
+    field.type === "password" &&
+      settingsState.isSecretConfigured(field.id) &&
+      !settingsState.currentSettings[field.id]
+      ? "•••••••••• saved"
+      : basePlaceholder,
+  );
 </script>
 
 <FieldCard {field} {error} {horizontal} {onReset}>
@@ -85,7 +99,7 @@
       value={settingsState.currentSettings[field.id]}
       step={numericStep}
       spinner={isNumeric}
-      placeholder={field.placeholder || ""}
+      {placeholder}
       disabled={!editable}
       error={hasError}
       suffix={field.suffix}

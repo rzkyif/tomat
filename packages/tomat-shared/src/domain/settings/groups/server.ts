@@ -14,12 +14,13 @@ export const serverGroup: SettingGroup = {
       label: "Network",
       fields: [
         {
-          id: "server.bindAll",
-          name: "Allow Network Access",
+          id: "server.bindHost",
+          name: "Network Interface",
           description:
-            "Bind the HTTP server to 0.0.0.0 so other devices on this network can pair with this core. When off (default), the core only accepts connections from this computer (127.0.0.1).\nRequires a core restart to take effect.",
-          type: "boolean",
-          defaultValue: false,
+            "Which network interface the core's HTTP server listens on. Leave as 127.0.0.1 to accept connections from this computer only (the default). Set a specific LAN IP to accept connections on just that interface, or 0.0.0.0 to accept on every interface so other devices can pair.\nConnections are unencrypted plain HTTP, so only widen this on a network you trust. Requires a core restart to take effect.",
+          type: "string",
+          defaultValue: "127.0.0.1",
+          placeholder: "127.0.0.1",
           descriptionTier: "always",
         },
       ],

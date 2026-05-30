@@ -15,16 +15,7 @@ export class TtsApi {
   // Returns a WAV blob. Caller wraps with `new Audio(URL.createObjectURL(...))`
   // or feeds to AudioContext.decodeAudioData.
   async synthesize(req: TtsSynthesizeRequest): Promise<Blob> {
-    const res = await fetch(`${this.client.endpoint.baseUrl}/api/v1/tts/synthesize`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.client.endpoint.token}`,
-      },
-      body: JSON.stringify(req),
-    });
-    if (!res.ok) throw new Error(`tts synthesize HTTP ${res.status}`);
-    return await res.blob();
+    return await this.client.postBlob("/api/v1/tts/synthesize", req);
   }
 
   voices(): Promise<TtsVoicesResponse> {

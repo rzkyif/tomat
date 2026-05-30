@@ -1,269 +1,1072 @@
 #!/usr/bin/env bash
 # tomat-core installer for macOS / Linux.
 #
-# Detects the host triple, downloads the signed core manifest from the CDN
-# (au.tomat.ing), picks the matching binary, verifies its SHA-256, installs
-# it to ~/.tomat/core/bin/tomat-core, creates the admin token + a launchd
-# (macOS) / systemd-user (Linux) service for auto-start, starts the daemon,
-# and prints the initial pairing code.
+# Detects the host triple, downloads the signed core manifest from the
+# storage origin (get.au.tomat.ing), picks the matching binary, verifies its
+# SHA-256, installs it to ~/.tomat/<channel>/core/bin/tomat-core, creates the
+# admin token + a launchd (macOS) / systemd-user (Linux) service for
+# auto-start, starts the daemon, and prints the initial pairing code.
 #
 # Usage:
-#   curl -fsSL https://au.tomat.ing/install/core.sh | bash
+#   curl -fsSL https://get.au.tomat.ing/install/core.sh | bash
 #
 # Env overrides:
-#   TOMAT_CDN              override CDN base URL (default: https://au.tomat.ing)
-#   TOMAT_CORE_HOME        override install root (default: ~/.tomat/core)
+#   TOMAT_STORAGE          override storage base URL (default: https://get.au.tomat.ing)
+#   TOMAT_CHANNEL          install channel: stable (default) | dev | beta. Selects
+#                          the ~/.tomat/<channel>/core subtree and is baked into the
+#                          service environment so the daemon uses the same channel.
+#   TOMAT_CORE_HOME        override install root (default: ~/.tomat/<channel>/core)
 #   TOMAT_INSTALL_SERVICE  "1" (default) installs the launchd / systemd unit
 #                          so the core boots on login. "0" skips it; the
 #                          client launches the core on demand via the
 #                          `start_local_core` Tauri command.
-#   TOMAT_INSTALL_BIND_ALL "1" seeds settings.json with server.bindAll=true
-#                          so the freshly-installed core listens on 0.0.0.0
-#                          and other LAN devices can pair. "0" (default)
-#                          keeps the loopback bind.
+#   TOMAT_INSTALL_BIND_ALL "1" seeds settings.json with
+#                          server.bindHost=0.0.0.0 so the freshly-installed
+#                          core listens on all interfaces and other LAN devices
+#                          can pair. "0" (default) keeps the loopback bind.
+#
+# UI:
+#   Each phase appears as one row. Pending rows show [ ], the active row
+#   animates as [*] (spinner in TTY mode), and rows settle into [x] (done),
+#   [~] (no-op skip), or [!] (error). Glyphs upgrade to checkmark/cross on
+#   UTF-8 locales; colors render only on a TTY. Pipe through `cat`/`tee` to
+#   get a flat transcript with no escape codes.
 
 set -euo pipefail
 
-CDN="${TOMAT_CDN:-https://au.tomat.ing}"
-HOME_DIR="${TOMAT_CORE_HOME:-$HOME/.tomat/core}"
+# ===== UI helpers begin =====
+# Self-contained UI helper block. Keep this region intact so future install
+# scripts can copy it verbatim. No external state, no shared library --
+# everything below operates on module-level variables only.
+
+# --- UI state -------------------------------------------------------------
+
+UI_TTY=0
+[ -t 1 ] && UI_TTY=1
+
+UI_UTF8=0
+case "${LANG:-}${LC_ALL:-}${LC_CTYPE:-}" in
+  *UTF-8*|*utf8*|*UTF8*) UI_UTF8=1 ;;
+esac
+
+UI_CURRENT_IDX=-1     # row currently in [*] doing state, -1 if none
+UI_SPIN_PID=0         # background spinner pid, 0 if no spinner running
+UI_CURRENT_LABEL=""   # label of the row currently doing (for spinner repaints)
+UI_CURRENT_SUFFIX=""  # mutable suffix like "(2/3)" / "(downloading)"
+
+# Row count and per-row labels need to survive command substitution because
+# `IDX=$(ui_action_add ...)` runs the helper in a subshell -- variable
+# assignments there are lost in the parent. We back them with a tiny
+# per-process state dir created in ui_init.
+UI_STATE_DIR=""        # populated by ui_init
+
+# Track every staging path we create so the EXIT/INT traps can clean them up
+# whether the script succeeded or aborted partway.
+UI_STAGING_PATHS=""
+
+# Glyphs. ASCII baseline; upgrade to unicode if locale supports it.
+UI_G_PEND=" "
+UI_G_DOING="*"
+UI_G_DONE="x"
+UI_G_SKIP="~"
+UI_G_ERR="!"
+if [ "$UI_UTF8" = 1 ]; then
+  UI_G_DONE="✓"
+  UI_G_ERR="✗"
+fi
+
+# Colors -- only when we're on a TTY with a working tput. Without working
+# cursor-up sequences we can't repaint rows in place, so degrade to non-TTY
+# mode: that path emits one line per state transition instead, which is
+# correct for dumb terminals (TERM=dumb, TERM unset, tput missing).
+UI_C_GREEN=""
+UI_C_RED=""
+UI_C_DIM=""
+UI_C_RESET=""
+if [ "$UI_TTY" = 1 ]; then
+  if ! command -v tput >/dev/null 2>&1 || [ -z "$(tput cuu 1 2>/dev/null)" ]; then
+    UI_TTY=0
+  else
+    UI_C_GREEN="$(tput setaf 2 2>/dev/null || true)"
+    UI_C_RED="$(tput setaf 1 2>/dev/null || true)"
+    UI_C_DIM="$(tput dim 2>/dev/null || true)"
+    UI_C_RESET="$(tput sgr0 2>/dev/null || true)"
+  fi
+fi
+
+# --- low-level row rendering ----------------------------------------------
+#
+# Every UI write goes through fd 3 (set up in ui_init as a dup of the
+# original stdout). This keeps `IDX=$(ui_action_add ...)` clean -- the row
+# appears on the terminal, but only the numeric index reaches the command
+# substitution on fd 1.
+
+# Format a single row as a string and emit it to fd 3.
+_ui_format_row() {
+  # $1 glyph, $2 color, $3 label, $4 suffix (may be empty)
+  local glyph="$1" color="$2" label="$3" suffix="$4"
+  if [ -n "$suffix" ]; then
+    printf '  [%s%s%s] %s %s%s%s' \
+      "$color" "$glyph" "$UI_C_RESET" "$label" \
+      "$UI_C_DIM" "$suffix" "$UI_C_RESET" >&3
+  else
+    printf '  [%s%s%s] %s' \
+      "$color" "$glyph" "$UI_C_RESET" "$label" >&3
+  fi
+}
+
+# Repaint row $1 in-place. TTY only -- caller checks UI_TTY before calling.
+_ui_repaint_row() {
+  # $1 idx, $2 glyph, $3 color, $4 label, $5 suffix
+  local idx="$1" glyph="$2" color="$3" label="$4" suffix="$5"
+  local total
+  total="$(_ui_rows_total)"
+  local offset=$((total - idx))
+  printf '\r' >&3
+  if [ "$offset" -gt 0 ]; then
+    tput cuu "$offset" >&3 2>/dev/null || true
+  fi
+  tput el >&3 2>/dev/null || true
+  _ui_format_row "$glyph" "$color" "$label" "$suffix"
+  if [ "$offset" -gt 0 ]; then
+    tput cud "$offset" >&3 2>/dev/null || true
+  fi
+  printf '\r' >&3
+}
+
+# State-dir backed helpers. Each of the row-total counter and the per-row
+# labels lives in a tiny file; this is the only way to share state across
+# the `$(...)` subshell that wraps every ui_action_add call.
+
+_ui_rows_total() {
+  if [ -n "$UI_STATE_DIR" ] && [ -f "$UI_STATE_DIR/rows_total" ]; then
+    cat "$UI_STATE_DIR/rows_total"
+  else
+    printf '0'
+  fi
+}
+
+_ui_set_rows_total() {
+  printf '%s' "$1" > "$UI_STATE_DIR/rows_total"
+}
+
+_ui_set_label() {
+  # $1 idx, $2 label
+  printf '%s' "$2" > "$UI_STATE_DIR/label_$1"
+}
+
+_ui_get_label() {
+  if [ -f "$UI_STATE_DIR/label_$1" ]; then
+    cat "$UI_STATE_DIR/label_$1"
+  else
+    printf ''
+  fi
+}
+
+# --- spinner --------------------------------------------------------------
+
+_ui_spin() {
+  local idx="$1"
+  local frames='|/-\'
+  local i=0
+  local ch
+  while :; do
+    ch="$(printf '%s' "$frames" | cut -c $((i % 4 + 1)))"
+    _ui_repaint_row "$idx" "$ch" "" "$UI_CURRENT_LABEL" "$UI_CURRENT_SUFFIX"
+    sleep 0.12
+    i=$((i + 1))
+  done
+}
+
+_ui_stop_spinner() {
+  if [ "$UI_SPIN_PID" != 0 ]; then
+    kill "$UI_SPIN_PID" 2>/dev/null || true
+    wait "$UI_SPIN_PID" 2>/dev/null || true
+    UI_SPIN_PID=0
+  fi
+}
+
+# --- staging cleanup ------------------------------------------------------
+
+_ui_track_staging() {
+  UI_STAGING_PATHS="$UI_STAGING_PATHS $1"
+}
+
+_ui_cleanup_staging() {
+  local p
+  for p in $UI_STAGING_PATHS; do
+    [ -e "$p" ] && rm -f "$p" 2>/dev/null || true
+  done
+  UI_STAGING_PATHS=""
+}
+
+# --- traps ----------------------------------------------------------------
+
+_ui_trap_err() {
+  local rc=$?
+  if [ "$UI_CURRENT_IDX" -ge 0 ]; then
+    _ui_stop_spinner
+    if [ "$UI_TTY" = 1 ]; then
+      _ui_repaint_row "$UI_CURRENT_IDX" "$UI_G_ERR" "$UI_C_RED" \
+        "$UI_CURRENT_LABEL" "(failed)"
+    else
+      printf '  [%s] %s (failed)\n' "$UI_G_ERR" "$UI_CURRENT_LABEL" >&3
+    fi
+    UI_CURRENT_IDX=-1
+  fi
+  tput cnorm >&3 2>/dev/null || true
+  _ui_cleanup_staging
+  exit "$rc"
+}
+
+_ui_trap_int() {
+  _ui_stop_spinner
+  tput cnorm >&3 2>/dev/null || true
+  _ui_cleanup_staging
+  exit 130
+}
+
+_ui_trap_exit() {
+  _ui_stop_spinner
+  tput cnorm >&3 2>/dev/null || true
+  _ui_cleanup_staging
+  if [ -n "$UI_STATE_DIR" ] && [ -d "$UI_STATE_DIR" ]; then
+    rm -rf "$UI_STATE_DIR" 2>/dev/null || true
+  fi
+}
+
+# --- public surface -------------------------------------------------------
+
+# ui_init "TITLE" -- set up fd 3 (UI sink), emit the title block, install
+# the EXIT/INT/ERR traps.
+ui_init() {
+  local title="$1"
+  # Dup stdout onto fd 3 so the rest of the UI keeps writing to the
+  # terminal even when callers wrap helpers in `$(...)`.
+  exec 3>&1
+  # State dir for the rows-total counter and per-row labels; both need to
+  # survive `IDX=$(ui_action_add ...)`'s subshell. mktemp is POSIX-y but
+  # macOS and GNU disagree on the template; the form below works on both.
+  UI_STATE_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t tomat-ui)"
+  printf '0' > "$UI_STATE_DIR/rows_total"
+  printf '\n' >&3
+  printf '  %s\n' "$title" >&3
+  printf '\n' >&3
+  if [ "$UI_TTY" = 1 ]; then
+    tput civis >&3 2>/dev/null || true
+  fi
+  trap _ui_trap_err ERR
+  trap _ui_trap_int INT
+  trap _ui_trap_exit EXIT
+}
+
+# ui_action_add "LABEL" -- register a row and print its index to stdout so
+# the caller can capture it via IDX=$(ui_action_add "...").
+ui_action_add() {
+  local label="$1"
+  local idx
+  idx="$(_ui_rows_total)"
+  _ui_set_label "$idx" "$label"
+  _ui_set_rows_total "$((idx + 1))"
+  # Print the pending row to fd 3 (the terminal) so command-substitution
+  # callers don't capture it.
+  _ui_format_row "$UI_G_PEND" "" "$label" ""
+  printf '\n' >&3
+  # Only the numeric index goes to fd 1 for capture.
+  printf '%s' "$idx"
+}
+
+# ui_action_start IDX "LABEL" ["SUFFIX"]
+# Flip the row to [*] and start the spinner in TTY mode. In non-TTY mode,
+# emit a fresh line so transcripts capture the state transition.
+ui_action_start() {
+  local idx="$1"
+  local label="$2"
+  local suffix="${3:-}"
+  UI_CURRENT_IDX="$idx"
+  UI_CURRENT_LABEL="$label"
+  UI_CURRENT_SUFFIX="$suffix"
+  if [ "$UI_TTY" = 1 ]; then
+    _ui_repaint_row "$idx" "$UI_G_DOING" "" "$label" "$suffix"
+    _ui_spin "$idx" &
+    UI_SPIN_PID=$!
+  else
+    _ui_format_row "$UI_G_DOING" "" "$label" "$suffix"
+    printf '\n' >&3
+  fi
+}
+
+# ui_action_update IDX "SUFFIX" -- mutate the in-flight row's inline suffix.
+ui_action_update() {
+  local idx="$1"
+  local suffix="$2"
+  UI_CURRENT_SUFFIX="$suffix"
+  if [ "$UI_TTY" = 1 ]; then
+    # Spinner picks up the new suffix on its next tick -- no explicit repaint
+    # is needed, and a manual one would race the spinner.
+    :
+  else
+    _ui_format_row "$UI_G_DOING" "" "$UI_CURRENT_LABEL" "$suffix"
+    printf '\n' >&3
+  fi
+}
+
+# Shared exit-of-doing-state finisher.
+_ui_action_finalize() {
+  local idx="$1" glyph="$2" color="$3" detail="${4:-}"
+  _ui_stop_spinner
+  local label
+  label="$(_ui_get_label "$idx")"
+  if [ "$UI_TTY" = 1 ]; then
+    _ui_repaint_row "$idx" "$glyph" "$color" "$label" "$detail"
+  else
+    _ui_format_row "$glyph" "$color" "$label" "$detail"
+    printf '\n' >&3
+  fi
+  UI_CURRENT_IDX=-1
+  UI_CURRENT_LABEL=""
+  UI_CURRENT_SUFFIX=""
+}
+
+ui_action_done() {
+  _ui_action_finalize "$1" "$UI_G_DONE" "$UI_C_GREEN" "${2:-}"
+}
+
+ui_action_skip() {
+  _ui_action_finalize "$1" "$UI_G_SKIP" "$UI_C_GREEN" "${2:-}"
+}
+
+ui_action_error() {
+  _ui_action_finalize "$1" "$UI_G_ERR" "$UI_C_RED" "${2:-}"
+}
+
+# ui_finish "FOOTER_LINE_1" "FOOTER_LINE_2" ... -- restore cursor, emit a
+# blank line, the footer lines (indented 2 spaces), then a trailing blank.
+ui_finish() {
+  if [ "$UI_TTY" = 1 ]; then
+    tput cnorm >&3 2>/dev/null || true
+  fi
+  printf '\n' >&3
+  local line
+  for line in "$@"; do
+    if [ -z "$line" ]; then
+      printf '\n' >&3
+    else
+      printf '  %s\n' "$line" >&3
+    fi
+  done
+  printf '\n' >&3
+}
+
+# ui_die "REASON" ["DETAIL_LINE"] ["HINT"]
+# Flip the current row to [✗] if there is one, restore the cursor, emit the
+# structured error block to stderr, run cleanup, and exit 1.
+ui_die() {
+  local reason="$1"
+  local detail="${2:-}"
+  local hint="${3:-}"
+  if [ "$UI_CURRENT_IDX" -ge 0 ]; then
+    _ui_action_finalize "$UI_CURRENT_IDX" "$UI_G_ERR" "$UI_C_RED" "$reason"
+  fi
+  if [ "$UI_TTY" = 1 ]; then
+    tput cnorm >&3 2>/dev/null || true
+  fi
+  printf '\n' >&2
+  printf '%serror:%s %s\n' "$UI_C_RED" "$UI_C_RESET" "$reason" >&2
+  if [ -n "$detail" ]; then
+    printf '       %s\n' "$detail" >&2
+  fi
+  if [ -n "$hint" ]; then
+    printf '%shint:%s  %s\n' "$UI_C_DIM" "$UI_C_RESET" "$hint" >&2
+  fi
+  printf '\n' >&2
+  # Disable the ERR trap so cleanup doesn't recurse, then bail.
+  trap - ERR
+  _ui_cleanup_staging
+  exit 1
+}
+
+# ===== UI helpers end =====
+
+# --- configuration --------------------------------------------------------
+
+STORAGE="${TOMAT_STORAGE:-https://get.au.tomat.ing}"
+# Install channel — every channel lives under ~/.tomat/<channel>/ so dev /
+# beta installs never collide with stable. Selectable via the TOMAT_CHANNEL
+# env var or a `--channel <c>` / `--beta` argument (the arg wins). Validate up
+# front; an unknown value would mis-place state and confuse the client's
+# channel resolver.
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --channel) TOMAT_CHANNEL="${2:-}"; shift 2 ;;
+    --channel=*) TOMAT_CHANNEL="${1#*=}"; shift ;;
+    --beta) TOMAT_CHANNEL="beta"; shift ;;
+    --stable) TOMAT_CHANNEL="stable"; shift ;;
+    *) shift ;;
+  esac
+done
+TOMAT_CHANNEL="${TOMAT_CHANNEL:-stable}"
+case "$TOMAT_CHANNEL" in
+  stable | dev | beta) ;;
+  *)
+    printf 'error: invalid TOMAT_CHANNEL: %s (expected stable, dev, or beta)\n' \
+      "$TOMAT_CHANNEL" >&2
+    exit 1
+    ;;
+esac
+# Per-channel naming + port. Stable stays bare (back-compat); dev/beta get a
+# suffix on binary + service names, a /<channel> manifest path segment, and a
+# port offset so both channels can run as services at once. Mirrors the
+# runtime side (core paths.ts channelSuffix/corePort + config.ts manifestDir).
+if [ "$TOMAT_CHANNEL" = "stable" ]; then
+  CHANNEL_SUFFIX=""
+  MANIFEST_DIR="manifests"
+  PORT_OFFSET=0
+else
+  CHANNEL_SUFFIX="-$TOMAT_CHANNEL"
+  MANIFEST_DIR="manifests/$TOMAT_CHANNEL"
+  case "$TOMAT_CHANNEL" in
+    beta) PORT_OFFSET=10 ;;
+    dev) PORT_OFFSET=20 ;;
+  esac
+fi
+CORE_PORT=$((7800 + PORT_OFFSET))
+HOME_DIR="${TOMAT_CORE_HOME:-$HOME/.tomat/$TOMAT_CHANNEL/core}"
 BIN_DIR="$HOME_DIR/bin"
 WORKERS_DIR="$HOME_DIR/workers"
-MANIFEST_URL="$CDN/manifests/core.json"
+STAGING_DIR="$HOME_DIR/staging"
+LOGS_DIR="$HOME_DIR/logs"
+MANIFEST_URL="$STORAGE/$MANIFEST_DIR/core.json"
 INSTALL_SERVICE="${TOMAT_INSTALL_SERVICE:-1}"
 INSTALL_BIND_ALL="${TOMAT_INSTALL_BIND_ALL:-0}"
 
-err() { echo "error: $*" >&2; exit 1; }
-info() { echo ">>> $*"; }
-
-# --- detect triple ---------------------------------------------------------
-
-detect_triple() {
-  local os arch
-  case "$(uname -s)" in
-    Darwin) os="apple-darwin" ;;
-    Linux)  os="unknown-linux-gnu" ;;
-    *)      err "unsupported OS: $(uname -s)" ;;
-  esac
-  case "$(uname -m)" in
-    x86_64|amd64) arch="x86_64" ;;
-    aarch64|arm64) arch="aarch64" ;;
-    *) err "unsupported arch: $(uname -m)" ;;
-  esac
-  echo "${arch}-${os}"
-}
-
-TRIPLE="$(detect_triple)"
-info "host triple: $TRIPLE"
-
-# --- prerequisites ---------------------------------------------------------
-
-for cmd in curl jq sha256sum; do
-  command -v "$cmd" >/dev/null 2>&1 || {
-    # macOS doesn't ship sha256sum; fall back to `shasum -a 256`
-    if [ "$cmd" = "sha256sum" ] && command -v shasum >/dev/null 2>&1; then
-      continue
-    fi
-    err "missing required command: $cmd"
-  }
-done
-SHA_CMD="sha256sum"
-command -v sha256sum >/dev/null 2>&1 || SHA_CMD="shasum -a 256"
-
-# --- fetch + parse manifest -----------------------------------------------
-
-info "fetching $MANIFEST_URL"
-MANIFEST_JSON="$(curl -fsSL "$MANIFEST_URL")"
-[ -n "$MANIFEST_JSON" ] || err "empty manifest"
-
-VERSION="$(echo "$MANIFEST_JSON" | jq -r '.version // empty')"
-[ -n "$VERSION" ] || err "manifest missing version"
-URL="$(echo "$MANIFEST_JSON" | jq -r --arg t "$TRIPLE" '.binaries[] | select(.triple==$t) | .url')"
-SHA256="$(echo "$MANIFEST_JSON" | jq -r --arg t "$TRIPLE" '.binaries[] | select(.triple==$t) | .sha256')"
-[ -n "$URL" ] && [ -n "$SHA256" ] || err "no binary for triple $TRIPLE in manifest"
-
-info "version $VERSION"
-
-# NOTE: signature verification is currently performed by the core binary
-# itself on update (via the baked-in Ed25519 public key). For the very
-# first install we trust the TLS connection to au.tomat.ing + the SHA-256
-# in the manifest. If you need stricter posture, verify the manifest
-# signature here with `openssl pkeyutl` or similar before downloading.
-
-# --- download + verify ----------------------------------------------------
-
-mkdir -p "$BIN_DIR" "$WORKERS_DIR" "$HOME_DIR/staging" "$HOME_DIR/logs"
-TMP="$HOME_DIR/staging/tomat-core-$VERSION-$$"
-info "downloading $URL"
-curl -fsSL -o "$TMP" "$URL"
-
-GOT="$($SHA_CMD "$TMP" | awk '{print $1}')"
-if [ "$GOT" != "$SHA256" ]; then
-  rm -f "$TMP"
-  err "sha256 mismatch: want $SHA256, got $GOT"
-fi
-info "sha256 ok"
-
-INSTALLED="$BIN_DIR/tomat-core"
-mv -f "$TMP" "$INSTALLED"
-chmod 0755 "$INSTALLED"
-info "installed to $INSTALLED"
-
-# --- download workers -----------------------------------------------------
-# Worker .ts files are platform-independent and run as Deno subprocesses
-# spawned by the core. Their npm deps (transformers / kokoro / onnxruntime,
-# ~1.5 GB) download lazily into ~/.tomat/core/deno-cache on first use.
-
-WORKERS_COUNT="$(echo "$MANIFEST_JSON" | jq -r '.workers // [] | length')"
-if [ "$WORKERS_COUNT" -gt 0 ]; then
-  for i in $(seq 0 $((WORKERS_COUNT - 1))); do
-    W_NAME="$(echo "$MANIFEST_JSON" | jq -r ".workers[$i].name")"
-    W_URL="$(echo "$MANIFEST_JSON" | jq -r ".workers[$i].url")"
-    W_SHA="$(echo "$MANIFEST_JSON" | jq -r ".workers[$i].sha256")"
-    W_TMP="$HOME_DIR/staging/$W_NAME-$VERSION-$$"
-    info "downloading worker $W_NAME"
-    curl -fsSL -o "$W_TMP" "$W_URL"
-    W_GOT="$($SHA_CMD "$W_TMP" | awk '{print $1}')"
-    if [ "$W_GOT" != "$W_SHA" ]; then
-      rm -f "$W_TMP"
-      err "worker $W_NAME sha256 mismatch: want $W_SHA, got $W_GOT"
-    fi
-    mv -f "$W_TMP" "$WORKERS_DIR/$W_NAME"
-    info "installed worker → $WORKERS_DIR/$W_NAME"
-  done
-fi
-
-# --- download helpers -----------------------------------------------------
-# Native helper binary (tomat-core-keychain wraps the OS keychain).
-# Each helper is per-triple — install only the ones matching our host.
-
-HELPERS_COUNT="$(echo "$MANIFEST_JSON" | jq -r '.helpers // [] | length')"
-if [ "$HELPERS_COUNT" -gt 0 ]; then
-  for i in $(seq 0 $((HELPERS_COUNT - 1))); do
-    H_TRIPLE="$(echo "$MANIFEST_JSON" | jq -r ".helpers[$i].triple")"
-    [ "$H_TRIPLE" = "$TRIPLE" ] || continue
-    H_NAME="$(echo "$MANIFEST_JSON" | jq -r ".helpers[$i].name")"
-    H_URL="$(echo "$MANIFEST_JSON" | jq -r ".helpers[$i].url")"
-    H_SHA="$(echo "$MANIFEST_JSON" | jq -r ".helpers[$i].sha256")"
-    H_TMP="$HOME_DIR/staging/$H_NAME-$VERSION-$$"
-    info "downloading helper $H_NAME"
-    curl -fsSL -o "$H_TMP" "$H_URL"
-    H_GOT="$($SHA_CMD "$H_TMP" | awk '{print $1}')"
-    if [ "$H_GOT" != "$H_SHA" ]; then
-      rm -f "$H_TMP"
-      err "helper $H_NAME sha256 mismatch: want $H_SHA, got $H_GOT"
-    fi
-    mv -f "$H_TMP" "$BIN_DIR/$H_NAME"
-    chmod 0755 "$BIN_DIR/$H_NAME"
-    info "installed helper → $BIN_DIR/$H_NAME"
-  done
-fi
-
-# --- admin token ----------------------------------------------------------
-
 ADMIN_TOKEN_FILE="$HOME_DIR/.admin-token"
-if [ ! -s "$ADMIN_TOKEN_FILE" ]; then
-  head -c 16 /dev/urandom | xxd -p -c 256 > "$ADMIN_TOKEN_FILE"
-  chmod 0600 "$ADMIN_TOKEN_FILE"
-  info "admin token written to $ADMIN_TOKEN_FILE"
-fi
-
-# --- seed settings.json --------------------------------------------------
-# Only write the file when the user explicitly asked for non-default
-# behavior. The core gracefully handles a missing settings.json.
-
 SETTINGS_FILE="$HOME_DIR/settings.json"
-if [ "$INSTALL_BIND_ALL" = "1" ] && [ ! -e "$SETTINGS_FILE" ]; then
-  echo '{"server.bindAll":true}' > "$SETTINGS_FILE"
-  info "seeded $SETTINGS_FILE with server.bindAll=true"
+INSTALLED_BIN="$BIN_DIR/tomat-core$CHANNEL_SUFFIX"
+# launchd label / systemd unit, suffixed per channel so multiple channels
+# register distinct OS services. Stable keeps the bare names.
+SERVICE_LABEL_ID="au.tomat.core$CHANNEL_SUFFIX"
+SYSTEMD_UNIT="tomat-core$CHANNEL_SUFFIX"
+
+# Resolve sha-256 command up front so all rows use the same one.
+SHA_CMD="sha256sum"
+if ! command -v sha256sum >/dev/null 2>&1; then
+  if command -v shasum >/dev/null 2>&1; then
+    SHA_CMD="shasum -a 256"
+  else
+    SHA_CMD=""
+  fi
 fi
 
-# --- service (launchd / systemd-user) -------------------------------------
+# --- prerequisites (pre-UI; if these fail we can't even draw the UI) ------
 
-if [ "$INSTALL_SERVICE" != "1" ]; then
-  info "skipping service install (TOMAT_INSTALL_SERVICE=$INSTALL_SERVICE)"
-  # Start the core in the background ourselves so the pairing-code mint
-  # below still works. The client is expected to take over supervision on
-  # its next launch via start_local_core.
-  nohup "$INSTALLED" >>"$HOME_DIR/logs/core.stdout.log" 2>>"$HOME_DIR/logs/core.stderr.log" &
-  disown || true
-  info "started core in background (pid $!)"
+for cmd in curl jq; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    printf 'error: missing required command: %s\n' "$cmd" >&2
+    printf 'hint:  install %s and re-run the installer\n' "$cmd" >&2
+    exit 1
+  fi
+done
+if [ -z "$SHA_CMD" ]; then
+  printf 'error: missing required command: sha256sum (or shasum)\n' >&2
+  printf 'hint:  install coreutils or perl (shasum) and re-run\n' >&2
+  exit 1
+fi
+
+mkdir -p "$BIN_DIR" "$WORKERS_DIR" "$STAGING_DIR" "$LOGS_DIR"
+
+# --- helper: figure out the platform-specific service label for action 7 --
+
+uname_os="$(uname -s 2>/dev/null || echo unknown)"
+
+if [ "$INSTALL_SERVICE" = "1" ] && [ "$uname_os" = "Darwin" ]; then
+  SERVICE_LABEL="Installing launchd agent at ~/Library/LaunchAgents/$SERVICE_LABEL_ID.plist"
+elif [ "$INSTALL_SERVICE" = "1" ] && [ "$uname_os" = "Linux" ]; then
+  # We don't yet know whether systemd is available -- but we can probe now
+  # and pick the label honestly.
+  if systemctl --user --version >/dev/null 2>&1; then
+    SERVICE_HAS_SYSTEMD=1
+    SERVICE_LABEL="Installing systemd user unit at ~/.config/systemd/user/$SYSTEMD_UNIT.service"
+  else
+    SERVICE_HAS_SYSTEMD=0
+    SERVICE_LABEL="Starting core in background (systemd not available, used nohup)"
+  fi
 else
+  SERVICE_HAS_SYSTEMD=0
+  SERVICE_LABEL="Starting core in background (nohup)"
+fi
+# Default for non-Linux paths so the variable is always set.
+: "${SERVICE_HAS_SYSTEMD:=0}"
+
+# --- begin UI -------------------------------------------------------------
+
+ui_init "tomat-core installer"
+
+# Register every row up front so the cursor knows the total height. The
+# settings.json row is conditional on TOMAT_INSTALL_BIND_ALL=1.
+IDX_HOST=$(ui_action_add "Detecting host")
+IDX_MANIFEST=$(ui_action_add "Fetching manifest from get.au.tomat.ing")
+IDX_BIN=$(ui_action_add "Installing core binary to $INSTALLED_BIN")
+IDX_WORKERS=$(ui_action_add "Installing workers to $WORKERS_DIR/")
+IDX_HELPERS=$(ui_action_add "Installing helpers to $BIN_DIR/")
+IDX_TOKEN=$(ui_action_add "Writing admin token to $ADMIN_TOKEN_FILE")
+IDX_SETTINGS=-1
+if [ "$INSTALL_BIND_ALL" = "1" ]; then
+  IDX_SETTINGS=$(ui_action_add "Seeding $SETTINGS_FILE")
+fi
+IDX_SERVICE=$(ui_action_add "$SERVICE_LABEL")
+IDX_PAIR=$(ui_action_add "Minting pairing code at https://127.0.0.1:$CORE_PORT")
+
+# --- action 1: detect host -----------------------------------------------
+
+ui_action_start "$IDX_HOST" "Detecting host"
 
 case "$(uname -s)" in
-  Darwin)
-    PLIST="$HOME/Library/LaunchAgents/au.tomat.core.plist"
-    mkdir -p "$(dirname "$PLIST")"
-    cat >"$PLIST" <<PLIST
+  Darwin) HOST_OS="apple-darwin" ;;
+  Linux)  HOST_OS="unknown-linux-gnu" ;;
+  *)
+    ui_die "Unsupported OS or architecture" \
+      "Detected: $(uname -s)/$(uname -m)" \
+      "tomat targets darwin/linux on x86_64/aarch64"
+    ;;
+esac
+case "$(uname -m)" in
+  x86_64|amd64)  HOST_ARCH="x86_64" ;;
+  aarch64|arm64) HOST_ARCH="aarch64" ;;
+  *)
+    ui_die "Unsupported OS or architecture" \
+      "Detected: $(uname -s)/$(uname -m)" \
+      "tomat targets darwin/linux on x86_64/aarch64"
+    ;;
+esac
+TRIPLE="${HOST_ARCH}-${HOST_OS}"
+
+ui_action_done "$IDX_HOST" "($TRIPLE)"
+
+# --- action 2: fetch manifest --------------------------------------------
+
+ui_action_start "$IDX_MANIFEST" "Fetching manifest from get.au.tomat.ing"
+
+MANIFEST_TMP="$STAGING_DIR/core-manifest-$$.json"
+_ui_track_staging "$MANIFEST_TMP"
+
+MANIFEST_HTTP_STATUS=0
+MANIFEST_CURL_RC=0
+MANIFEST_HTTP_STATUS="$(
+  curl -fsSL -o "$MANIFEST_TMP" -w '%{http_code}' "$MANIFEST_URL" 2>/dev/null
+)" || MANIFEST_CURL_RC=$?
+
+if [ "$MANIFEST_CURL_RC" -ne 0 ]; then
+  case "$MANIFEST_CURL_RC" in
+    6|7)
+      ui_die "Network error reaching get.au.tomat.ing" \
+        "curl exit $MANIFEST_CURL_RC" \
+        "check internet connectivity, then re-run"
+      ;;
+    22)
+      # HTTP 4xx/5xx -- try to get the status code from the body filename or
+      # default to the empty status.
+      if [ "$MANIFEST_HTTP_STATUS" = "404" ] || [ -z "$MANIFEST_HTTP_STATUS" ]; then
+        ui_die "Manifest not found at $MANIFEST_URL" \
+          "HTTP 404" \
+          "the storage origin may be misconfigured; report at github.com/<repo>/issues"
+      else
+        ui_die "Storage returned $MANIFEST_HTTP_STATUS" \
+          "" \
+          "transient outage at R2; try again in a few minutes"
+      fi
+      ;;
+    *)
+      ui_die "Network error reaching get.au.tomat.ing" \
+        "curl exit $MANIFEST_CURL_RC" \
+        "check internet connectivity, then re-run"
+      ;;
+  esac
+fi
+
+if [ ! -s "$MANIFEST_TMP" ]; then
+  ui_die "Empty manifest from $MANIFEST_URL" \
+    "" \
+    "transient outage at R2; try again in a few minutes"
+fi
+
+MANIFEST_JSON="$(cat "$MANIFEST_TMP")"
+rm -f "$MANIFEST_TMP"
+
+if ! VERSION="$(printf '%s' "$MANIFEST_JSON" | jq -er '.version // empty' 2>/dev/null)"; then
+  ui_die "Could not parse manifest JSON" \
+    "" \
+    "redirected or proxy interception?"
+fi
+if [ -z "$VERSION" ]; then
+  ui_die "Manifest missing version field" \
+    "" \
+    "the storage origin may be misconfigured"
+fi
+
+URL="$(printf '%s' "$MANIFEST_JSON" | jq -r --arg t "$TRIPLE" '.binaries[] | select(.triple==$t) | .url' 2>/dev/null || true)"
+SHA256="$(printf '%s' "$MANIFEST_JSON" | jq -r --arg t "$TRIPLE" '.binaries[] | select(.triple==$t) | .sha256' 2>/dev/null || true)"
+if [ -z "$URL" ] || [ -z "$SHA256" ]; then
+  ui_die "No binary for $TRIPLE in manifest" \
+    "" \
+    "your platform may not be supported yet"
+fi
+
+ui_action_done "$IDX_MANIFEST" "(v$VERSION)"
+
+# --- action 3: install core binary ---------------------------------------
+
+# Pre-check: does the on-disk binary already match?
+EXISTING_OK=0
+if [ -f "$INSTALLED_BIN" ]; then
+  EXISTING_SHA="$($SHA_CMD "$INSTALLED_BIN" 2>/dev/null | awk '{print $1}')"
+  if [ "$EXISTING_SHA" = "$SHA256" ]; then
+    EXISTING_OK=1
+  fi
+fi
+
+if [ "$EXISTING_OK" = "1" ]; then
+  ui_action_skip "$IDX_BIN" "(already current)"
+else
+  ui_action_start "$IDX_BIN" "Installing core binary to $INSTALLED_BIN" "(downloading)"
+
+  BIN_TMP="$STAGING_DIR/tomat-core-$VERSION-$$"
+  _ui_track_staging "$BIN_TMP"
+
+  BIN_CURL_RC=0
+  curl -fsSL -o "$BIN_TMP" "$URL" 2>/dev/null || BIN_CURL_RC=$?
+  if [ "$BIN_CURL_RC" -ne 0 ]; then
+    ui_die "Download interrupted" \
+      "curl exit $BIN_CURL_RC fetching $URL" \
+      "re-run; partial files were cleaned up"
+  fi
+
+  ui_action_update "$IDX_BIN" "(verifying)"
+  GOT="$($SHA_CMD "$BIN_TMP" | awk '{print $1}')"
+  if [ "$GOT" != "$SHA256" ]; then
+    ui_die "sha256 mismatch on core binary" \
+      "want $SHA256, got $GOT" \
+      "network corruption is the usual cause; re-run"
+  fi
+
+  ui_action_update "$IDX_BIN" "(installing)"
+  if ! mv -f "$BIN_TMP" "$INSTALLED_BIN" 2>/dev/null; then
+    if [ ! -w "$BIN_DIR" ]; then
+      ui_die "Permission denied writing to $BIN_DIR/" \
+        "" \
+        "check ownership of ~/.tomat"
+    fi
+    ui_die "Could not install core binary" \
+      "mv $BIN_TMP -> $INSTALLED_BIN failed" \
+      "check disk space and ownership of $BIN_DIR/"
+  fi
+  chmod 0755 "$INSTALLED_BIN"
+
+  # Pretty file size for the detail.
+  BIN_BYTES="$(wc -c < "$INSTALLED_BIN" 2>/dev/null | tr -d ' ' || echo 0)"
+  BIN_MB="$((BIN_BYTES / 1024 / 1024))"
+  ui_action_done "$IDX_BIN" "(${BIN_MB} MB)"
+fi
+
+# --- action 4: install workers -------------------------------------------
+
+WORKERS_COUNT="$(printf '%s' "$MANIFEST_JSON" | jq -r '.workers // [] | length')"
+if [ "$WORKERS_COUNT" -lt 0 ]; then
+  WORKERS_COUNT=0
+fi
+
+# Pre-check: are all workers already on disk and matching?
+WORKERS_ALL_OK=1
+if [ "$WORKERS_COUNT" -gt 0 ]; then
+  i=0
+  while [ "$i" -lt "$WORKERS_COUNT" ]; do
+    W_NAME="$(printf '%s' "$MANIFEST_JSON" | jq -r ".workers[$i].name")"
+    W_SHA="$(printf '%s' "$MANIFEST_JSON" | jq -r ".workers[$i].sha256")"
+    W_PATH="$WORKERS_DIR/$W_NAME"
+    if [ ! -f "$W_PATH" ]; then
+      WORKERS_ALL_OK=0
+      break
+    fi
+    W_GOT="$($SHA_CMD "$W_PATH" 2>/dev/null | awk '{print $1}')"
+    if [ "$W_GOT" != "$W_SHA" ]; then
+      WORKERS_ALL_OK=0
+      break
+    fi
+    i=$((i + 1))
+  done
+else
+  # No workers in manifest at all -- nothing to do.
+  WORKERS_ALL_OK=1
+fi
+
+if [ "$WORKERS_ALL_OK" = "1" ]; then
+  ui_action_skip "$IDX_WORKERS" "(${WORKERS_COUNT}/${WORKERS_COUNT} already current)"
+else
+  ui_action_start "$IDX_WORKERS" "Installing workers to $WORKERS_DIR/" "(0/${WORKERS_COUNT})"
+
+  i=0
+  while [ "$i" -lt "$WORKERS_COUNT" ]; do
+    W_NAME="$(printf '%s' "$MANIFEST_JSON" | jq -r ".workers[$i].name")"
+    W_URL="$(printf '%s' "$MANIFEST_JSON" | jq -r ".workers[$i].url")"
+    W_SHA="$(printf '%s' "$MANIFEST_JSON" | jq -r ".workers[$i].sha256")"
+    W_PATH="$WORKERS_DIR/$W_NAME"
+    W_TMP="$STAGING_DIR/$W_NAME-$VERSION-$$"
+
+    # Skip individual workers that are already correct on disk.
+    W_NEED=1
+    if [ -f "$W_PATH" ]; then
+      W_GOT="$($SHA_CMD "$W_PATH" 2>/dev/null | awk '{print $1}')"
+      if [ "$W_GOT" = "$W_SHA" ]; then
+        W_NEED=0
+      fi
+    fi
+
+    ui_action_update "$IDX_WORKERS" "($((i + 1))/${WORKERS_COUNT} $W_NAME)"
+
+    if [ "$W_NEED" = "1" ]; then
+      _ui_track_staging "$W_TMP"
+      W_CURL_RC=0
+      curl -fsSL -o "$W_TMP" "$W_URL" 2>/dev/null || W_CURL_RC=$?
+      if [ "$W_CURL_RC" -ne 0 ]; then
+        ui_die "Download interrupted" \
+          "curl exit $W_CURL_RC fetching worker $W_NAME" \
+          "re-run; partial files were cleaned up"
+      fi
+      W_GOT="$($SHA_CMD "$W_TMP" | awk '{print $1}')"
+      if [ "$W_GOT" != "$W_SHA" ]; then
+        ui_die "sha256 mismatch on worker $W_NAME" \
+          "want $W_SHA, got $W_GOT" \
+          "network corruption is the usual cause; re-run"
+      fi
+      if ! mv -f "$W_TMP" "$W_PATH" 2>/dev/null; then
+        ui_die "Permission denied writing to $WORKERS_DIR/" \
+          "could not install $W_NAME" \
+          "check ownership of ~/.tomat"
+      fi
+    fi
+
+    i=$((i + 1))
+  done
+
+  ui_action_done "$IDX_WORKERS" "(${WORKERS_COUNT}/${WORKERS_COUNT})"
+fi
+
+# --- action 5: install helpers -------------------------------------------
+
+HELPERS_COUNT="$(printf '%s' "$MANIFEST_JSON" | jq -r '.helpers // [] | length')"
+if [ "$HELPERS_COUNT" -lt 0 ]; then
+  HELPERS_COUNT=0
+fi
+
+# Count helpers matching our triple. Compute the indices of matching ones
+# (Bash 3.2 has no arrays we want to rely on, so we build a space-separated
+# list of indices).
+HELPER_INDICES=""
+HELPERS_MATCHING=0
+i=0
+while [ "$i" -lt "$HELPERS_COUNT" ]; do
+  H_TRIPLE="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$i].triple")"
+  if [ "$H_TRIPLE" = "$TRIPLE" ]; then
+    HELPER_INDICES="$HELPER_INDICES $i"
+    HELPERS_MATCHING=$((HELPERS_MATCHING + 1))
+  fi
+  i=$((i + 1))
+done
+
+if [ "$HELPERS_MATCHING" = "0" ]; then
+  ui_action_skip "$IDX_HELPERS" "(no helper for this triple)"
+else
+  # Pre-check: every matching helper already correct?
+  HELPERS_ALL_OK=1
+  for hi in $HELPER_INDICES; do
+    H_NAME="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$hi].name")"
+    H_SHA="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$hi].sha256")"
+    H_PATH="$BIN_DIR/$H_NAME"
+    if [ ! -f "$H_PATH" ]; then
+      HELPERS_ALL_OK=0
+      break
+    fi
+    H_GOT="$($SHA_CMD "$H_PATH" 2>/dev/null | awk '{print $1}')"
+    if [ "$H_GOT" != "$H_SHA" ]; then
+      HELPERS_ALL_OK=0
+      break
+    fi
+  done
+
+  if [ "$HELPERS_ALL_OK" = "1" ]; then
+    ui_action_skip "$IDX_HELPERS" "(${HELPERS_MATCHING}/${HELPERS_MATCHING} already current)"
+  else
+    ui_action_start "$IDX_HELPERS" "Installing helpers to $BIN_DIR/" "(0/${HELPERS_MATCHING})"
+
+    j=0
+    for hi in $HELPER_INDICES; do
+      H_NAME="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$hi].name")"
+      H_URL="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$hi].url")"
+      H_SHA="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$hi].sha256")"
+      H_PATH="$BIN_DIR/$H_NAME"
+      H_TMP="$STAGING_DIR/$H_NAME-$VERSION-$$"
+
+      H_NEED=1
+      if [ -f "$H_PATH" ]; then
+        H_GOT="$($SHA_CMD "$H_PATH" 2>/dev/null | awk '{print $1}')"
+        if [ "$H_GOT" = "$H_SHA" ]; then
+          H_NEED=0
+        fi
+      fi
+
+      j=$((j + 1))
+      ui_action_update "$IDX_HELPERS" "(${j}/${HELPERS_MATCHING} $H_NAME)"
+
+      if [ "$H_NEED" = "1" ]; then
+        _ui_track_staging "$H_TMP"
+        H_CURL_RC=0
+        curl -fsSL -o "$H_TMP" "$H_URL" 2>/dev/null || H_CURL_RC=$?
+        if [ "$H_CURL_RC" -ne 0 ]; then
+          ui_die "Download interrupted" \
+            "curl exit $H_CURL_RC fetching helper $H_NAME" \
+            "re-run; partial files were cleaned up"
+        fi
+        H_GOT="$($SHA_CMD "$H_TMP" | awk '{print $1}')"
+        if [ "$H_GOT" != "$H_SHA" ]; then
+          ui_die "sha256 mismatch on helper $H_NAME" \
+            "want $H_SHA, got $H_GOT" \
+            "network corruption is the usual cause; re-run"
+        fi
+        if ! mv -f "$H_TMP" "$H_PATH" 2>/dev/null; then
+          ui_die "Permission denied writing to $BIN_DIR/" \
+            "could not install $H_NAME" \
+            "check ownership of ~/.tomat"
+        fi
+        chmod 0755 "$H_PATH"
+      fi
+    done
+
+    ui_action_done "$IDX_HELPERS" "(${HELPERS_MATCHING}/${HELPERS_MATCHING})"
+  fi
+fi
+
+# --- action 6: admin token -----------------------------------------------
+
+if [ -s "$ADMIN_TOKEN_FILE" ]; then
+  ui_action_skip "$IDX_TOKEN" "(already present)"
+else
+  ui_action_start "$IDX_TOKEN" "Writing admin token to $ADMIN_TOKEN_FILE"
+
+  if [ ! -r /dev/urandom ]; then
+    ui_die "No entropy source available" \
+      "/dev/urandom is missing or unreadable" \
+      "extremely rare; check /dev/urandom"
+  fi
+  if ! command -v xxd >/dev/null 2>&1; then
+    ui_die "Missing xxd command" \
+      "" \
+      "install vim-common or busybox"
+  fi
+
+  if ! head -c 16 /dev/urandom | xxd -p -c 256 > "$ADMIN_TOKEN_FILE" 2>/dev/null; then
+    ui_die "Permission denied writing $ADMIN_TOKEN_FILE" \
+      "" \
+      "check ownership of $HOME_DIR/"
+  fi
+  chmod 0600 "$ADMIN_TOKEN_FILE"
+
+  ui_action_done "$IDX_TOKEN" "(0600)"
+fi
+
+# --- action 6b: seed settings.json ---------------------------------------
+
+if [ "$IDX_SETTINGS" != "-1" ]; then
+  if [ -e "$SETTINGS_FILE" ]; then
+    ui_action_skip "$IDX_SETTINGS" "(already present)"
+  else
+    ui_action_start "$IDX_SETTINGS" "Seeding $SETTINGS_FILE"
+    if ! printf '%s\n' '{"server.bindHost":"0.0.0.0"}' > "$SETTINGS_FILE" 2>/dev/null; then
+      ui_die "Permission denied writing $SETTINGS_FILE" \
+        "" \
+        "check ownership of $HOME_DIR/"
+    fi
+    ui_action_done "$IDX_SETTINGS" "(server.bindHost=0.0.0.0)"
+  fi
+fi
+
+# --- action 7: service registration --------------------------------------
+
+# Snapshot whether the core is already running before we touch anything,
+# so we can settle the row as [~] only when nothing user-visible happened.
+SERVICE_ALREADY_RUNNING=0
+if command -v pgrep >/dev/null 2>&1; then
+  if pgrep -f "$INSTALLED_BIN" >/dev/null 2>&1; then
+    SERVICE_ALREADY_RUNNING=1
+  fi
+fi
+
+if [ "$INSTALL_SERVICE" != "1" ]; then
+  # Nohup branch.
+  ui_action_start "$IDX_SERVICE" "$SERVICE_LABEL"
+  TOMAT_CHANNEL="$TOMAT_CHANNEL" nohup "$INSTALLED_BIN" \
+    >>"$LOGS_DIR/core.stdout.log" \
+    2>>"$LOGS_DIR/core.stderr.log" &
+  NOHUP_PID=$!
+  disown "$NOHUP_PID" 2>/dev/null || true
+  ui_action_done "$IDX_SERVICE" "(pid $NOHUP_PID)"
+
+elif [ "$uname_os" = "Darwin" ]; then
+  # macOS launchd branch.
+  ui_action_start "$IDX_SERVICE" "$SERVICE_LABEL"
+
+  PLIST="$HOME/Library/LaunchAgents/$SERVICE_LABEL_ID.plist"
+  mkdir -p "$(dirname "$PLIST")"
+
+  # Determine whether the plist already pointed at the right binary AND the
+  # service was already running. If so, we treat the re-load as a no-op.
+  PLIST_UNCHANGED=0
+  if [ -f "$PLIST" ] && grep -q "<string>$INSTALLED_BIN</string>" "$PLIST" 2>/dev/null; then
+    if launchctl list "$SERVICE_LABEL_ID" >/dev/null 2>&1; then
+      PLIST_UNCHANGED=1
+    fi
+  fi
+
+  cat >"$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key>           <string>au.tomat.core</string>
-  <key>ProgramArguments</key><array><string>$INSTALLED</string></array>
+  <key>Label</key>           <string>$SERVICE_LABEL_ID</string>
+  <key>ProgramArguments</key><array><string>$INSTALLED_BIN</string></array>
+  <key>EnvironmentVariables</key><dict><key>TOMAT_CHANNEL</key><string>$TOMAT_CHANNEL</string></dict>
   <key>RunAtLoad</key>       <true/>
   <key>KeepAlive</key>       <true/>
-  <key>StandardOutPath</key> <string>$HOME_DIR/logs/core.stdout.log</string>
-  <key>StandardErrorPath</key><string>$HOME_DIR/logs/core.stderr.log</string>
+  <key>StandardOutPath</key> <string>$LOGS_DIR/core.stdout.log</string>
+  <key>StandardErrorPath</key><string>$LOGS_DIR/core.stderr.log</string>
 </dict>
 </plist>
 PLIST
-    launchctl unload "$PLIST" 2>/dev/null || true
-    launchctl load "$PLIST"
-    info "launchd agent installed: $PLIST"
-    ;;
-  Linux)
-    UNIT_DIR="$HOME/.config/systemd/user"
-    mkdir -p "$UNIT_DIR"
-    UNIT="$UNIT_DIR/tomat-core.service"
-    cat >"$UNIT" <<UNIT
+
+  launchctl unload "$PLIST" 2>/dev/null || true
+  LOAD_RC=0
+  launchctl load "$PLIST" 2>/dev/null || LOAD_RC=$?
+  if [ "$LOAD_RC" -ne 0 ]; then
+    ui_die "launchctl load failed (exit $LOAD_RC)" \
+      "$PLIST" \
+      "inspect the plist; another user may own /Library/LaunchAgents"
+  fi
+
+  if [ "$PLIST_UNCHANGED" = "1" ] && [ "$SERVICE_ALREADY_RUNNING" = "1" ]; then
+    ui_action_skip "$IDX_SERVICE" "(reloaded)"
+  else
+    ui_action_done "$IDX_SERVICE" "(loaded)"
+  fi
+
+elif [ "$uname_os" = "Linux" ] && [ "$SERVICE_HAS_SYSTEMD" = "1" ]; then
+  # Linux systemd-user branch.
+  ui_action_start "$IDX_SERVICE" "$SERVICE_LABEL"
+
+  UNIT_DIR="$HOME/.config/systemd/user"
+  mkdir -p "$UNIT_DIR"
+  UNIT="$UNIT_DIR/$SYSTEMD_UNIT.service"
+
+  # Detect whether the existing unit file already points at the same binary
+  # AND the service is currently active. If so, we treat the reload as a
+  # no-op so the row settles [~] instead of [✓].
+  UNIT_UNCHANGED=0
+  if [ -f "$UNIT" ] && grep -q "^ExecStart=$INSTALLED_BIN\$" "$UNIT" 2>/dev/null; then
+    if systemctl --user is-active --quiet "$SYSTEMD_UNIT.service" 2>/dev/null; then
+      UNIT_UNCHANGED=1
+    fi
+  fi
+
+  cat >"$UNIT" <<UNIT
 [Unit]
-Description=tomat-core
+Description=$SYSTEMD_UNIT
 After=network-online.target
 
 [Service]
-ExecStart=$INSTALLED
+Environment=TOMAT_CHANNEL=$TOMAT_CHANNEL
+ExecStart=$INSTALLED_BIN
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:$HOME_DIR/logs/core.stdout.log
-StandardError=append:$HOME_DIR/logs/core.stderr.log
+StandardOutput=append:$LOGS_DIR/core.stdout.log
+StandardError=append:$LOGS_DIR/core.stderr.log
 
 [Install]
 WantedBy=default.target
 UNIT
-    systemctl --user daemon-reload || true
-    systemctl --user enable --now tomat-core.service || true
-    info "systemd-user unit installed: $UNIT"
-    ;;
-esac
 
+  if ! systemctl --user daemon-reload 2>/dev/null; then
+    ui_die "systemctl --user daemon-reload failed" \
+      "" \
+      "re-run with TOMAT_INSTALL_SERVICE=0 to start core via nohup"
+  fi
+  if ! systemctl --user enable --now "$SYSTEMD_UNIT.service" 2>/dev/null; then
+    ui_die "systemctl --user enable failed" \
+      "" \
+      "re-run with TOMAT_INSTALL_SERVICE=0 to start core via nohup"
+  fi
+
+  if [ "$UNIT_UNCHANGED" = "1" ] && [ "$SERVICE_ALREADY_RUNNING" = "1" ]; then
+    ui_action_skip "$IDX_SERVICE" "(reloaded)"
+  else
+    ui_action_done "$IDX_SERVICE" "(enabled)"
+  fi
+
+else
+  # Linux fallback: no user systemd available. Plan calls this out
+  # explicitly as non-fatal; we just nohup the binary.
+  ui_action_start "$IDX_SERVICE" "$SERVICE_LABEL"
+  TOMAT_CHANNEL="$TOMAT_CHANNEL" nohup "$INSTALLED_BIN" \
+    >>"$LOGS_DIR/core.stdout.log" \
+    2>>"$LOGS_DIR/core.stderr.log" &
+  NOHUP_PID=$!
+  disown "$NOHUP_PID" 2>/dev/null || true
+  ui_action_done "$IDX_SERVICE" "(used nohup)"
 fi
 
-# --- print pairing code ----------------------------------------------------
+# --- action 8: mint pairing code -----------------------------------------
 
-info "waiting 2s for core to bind…"
+ui_action_start "$IDX_PAIR" "Minting pairing code at https://127.0.0.1:$CORE_PORT" "(waiting for core)"
+
 sleep 2
 
-if command -v curl >/dev/null 2>&1; then
-  ADMIN="$(cat "$ADMIN_TOKEN_FILE")"
-  CODE_JSON="$(curl -fsS -X POST -H "X-Admin-Token: $ADMIN" \
-    "http://127.0.0.1:7800/api/v1/pairing/codes" -H "Content-Type: application/json" \
-    -d '{}' 2>/dev/null || true)"
-  CODE="$(echo "$CODE_JSON" | jq -r '.code // empty' 2>/dev/null || true)"
-  if [ -n "$CODE" ]; then
-    echo ""
-    echo "  Pairing code: $CODE"
-    echo ""
-    echo "  Open tomat-client → Pair → enter:"
-    echo "    URL : http://127.0.0.1:7800   (or this host's LAN IP)"
-    echo "    Code: $CODE"
-    echo ""
-    exit 0
+ADMIN="$(cat "$ADMIN_TOKEN_FILE" 2>/dev/null || true)"
+CODE=""
+PAIR_FAILED=0
+
+# Core serves HTTPS with a self-signed cert. This mint runs on the core host
+# over loopback and is authenticated by the on-disk admin token, so -k (skip
+# cert verification) is fine here; the client pins the cert during pairing.
+if [ -n "$ADMIN" ]; then
+  CODE_JSON="$(curl -fsS -k -X POST \
+    -H "X-Admin-Token: $ADMIN" \
+    -H 'Content-Type: application/json' \
+    -d '{}' \
+    "https://127.0.0.1:$CORE_PORT/api/v1/pairing/codes" 2>/dev/null || true)"
+  if [ -n "$CODE_JSON" ]; then
+    CODE="$(printf '%s' "$CODE_JSON" | jq -r '.code // empty' 2>/dev/null || true)"
   fi
 fi
 
-echo ""
-echo "tomat-core installed. Mint a pairing code with:"
-echo "  curl -X POST -H \"X-Admin-Token: \$(cat $ADMIN_TOKEN_FILE)\" \\"
-echo "       -H 'Content-Type: application/json' -d '{}' \\"
-echo "       http://127.0.0.1:7800/api/v1/pairing/codes"
-echo ""
+if [ -n "$CODE" ]; then
+  ui_action_done "$IDX_PAIR"
+else
+  PAIR_FAILED=1
+  ui_action_skip "$IDX_PAIR" "(could not mint; see manual instructions below)"
+fi
+
+# --- footer ---------------------------------------------------------------
+
+if [ "$PAIR_FAILED" = "0" ]; then
+  ui_finish \
+    "Pairing code: $CODE" \
+    "" \
+    "Open tomat-client → Pair → enter:" \
+    "  URL : https://127.0.0.1:$CORE_PORT   (or this host's LAN IP)" \
+    "  Code: $CODE"
+else
+  ui_finish \
+    "tomat-core installed. Mint a pairing code with:" \
+    "  curl -k -X POST -H \"X-Admin-Token: \$(cat $ADMIN_TOKEN_FILE)\" \\" \
+    "       -H 'Content-Type: application/json' -d '{}' \\" \
+    "       https://127.0.0.1:$CORE_PORT/api/v1/pairing/codes"
+fi
+
+exit 0

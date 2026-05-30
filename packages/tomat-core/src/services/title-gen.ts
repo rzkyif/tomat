@@ -12,7 +12,7 @@
 // setting (default in @tomat/shared/domain/prompts.ts).
 
 import type OpenAI from "openai";
-import { DEFAULT_TITLE_GENERATION_PROMPT } from "@tomat/shared";
+import { DEFAULT_TITLE_GENERATION_PROMPT, errMessage } from "@tomat/shared";
 import { sessionsRepo } from "../db/repos/sessions.ts";
 import { loadCoreSettings } from "./core-settings.ts";
 import { type LlmRequest, streamChatCompletion } from "./llm-provider.ts";
@@ -83,9 +83,7 @@ export async function maybeGenerateTitle(
     });
   } catch (err) {
     log.warn(
-      `title gen failed for ${sessionId}: ${
-        err instanceof Error ? err.message : err
-      }`,
+      `title gen failed for ${sessionId}: ${errMessage(err)}`,
     );
   }
 }

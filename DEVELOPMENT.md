@@ -34,7 +34,7 @@ flowchart TD
   `tools.json` schema, WS frame discriminated unions).
 - `packages/tomat-core/`: Deno service, single SQLite DB, all sidecar
   supervision, npm-based toolkit installation, in-process embeddings.
-- `packages/tomat-core-updater/`: standalone Deno binary that swaps in a staged
+- `packages/tomat-core-updater/`: standalone Rust binary that swaps in a staged
   core build during self-update, then restarts core.
 - `packages/tomat-core-keychain/`: native Rust helper that stores the core's
   master key in the OS keychain over a stdio protocol.
@@ -53,13 +53,28 @@ flowchart TD
 - **Rust toolchain** for building the Tauri shell and the core-keychain helper
   (`packages/tomat-client/src/tauri/rust-toolchain.toml` pins the version).
 - **Cargo + Tauri 2 prerequisites**: see
-  https://v2.tauri.app/start/prerequisites/.
+  https://v2.tauri.app/start/prerequisites/. On Debian/Ubuntu the full set
+  (Tauri/webkit, PipeWire + ALSA for capture/audio, libsecret for the keychain
+  helper) is:
+
+  ```bash
+  sudo apt-get install -y \
+    libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+    libsoup-3.0-dev libpipewire-0.3-dev libasound2-dev \
+    libsecret-1-dev patchelf
+  ```
 
 ### First-time setup
 
 ```bash
 deno install        # populates node_modules + warms the Deno npm cache
+deno --version      # expect 2.7+
+cargo --version     # expect 1.91.1 (pinned by rust-toolchain.toml)
 ```
+
+`.env` at the repo root is **release-only** (manifest signing + Cloudflare/R2
+credentials); it is **not** needed for `deno task dev` or `deno task test`. See
+`.env.example` if you're setting up the release pipeline.
 
 ### Development
 
@@ -68,7 +83,76 @@ deno task dev       # spawns core (deno --watch) + client (tauri dev) together
 ```
 
 The core listens on `127.0.0.1:7800` and the client UI runs at
-`http://localhost:1420`. Output from each is prefixed `[core]` / `[client]`.
+`http://localhost:1420`. Output from each is prefixed `[core]` / `[client]`, and
+`deno task dev` also prints a `[dev]` banner with a pairing code (below).
+
+#### Connecting the client to the dev core
+
+`deno task dev` runs the core from source, seeds a dev admin token at
+`~/.tomat/dev/core/.admin-token`, and prints a pairing code. In the client's
+first-run screen choose **"On another computer"**, enter the URL
+`http://127.0.0.1:7800`, and paste the printed code. The pairing persists across
+dev restarts. **Do not** click "On this computer" in dev — that path runs the
+production installer (it looks for a compiled core binary, which dev never
+builds) and would install a stable core over your dev session.
+
+#### Channels & data isolation
+
+State is namespaced by install channel via `TOMAT_CHANNEL`, so a dev or beta
+build never collides with a stable install:
+
+| `TOMAT_CHANNEL`  | data under         | keychain            |
+| ---------------- | ------------------ | ------------------- |
+| unset / `stable` | `~/.tomat/stable/` | `tomat-client`      |
+| `dev`            | `~/.tomat/dev/`    | `tomat-client-dev`  |
+| `beta`           | `~/.tomat/beta/`   | `tomat-client-beta` |
+
+`deno task dev` sets `dev` automatically. Models are the one exception: they
+stay shared at `~/.tomat/models` so multi-GB weights aren't re-downloaded per
+channel. Reset dev state with `deno task clean --dev-state` (or
+`rm -rf ~/.tomat/dev`) — it never touches a stable install.
+
+Channels are built to **coexist and run at the same time**, not just isolate
+data. Our binaries get a channel suffix (`tomat-core` → `tomat-core-beta`), the
+desktop app is a distinct bundle (`tomat` vs `tomat-beta`, separate macOS
+identifier), service labels are suffixed, and default ports are offset so two
+cores can bind at once:
+
+| channel | core | llama (`llm.port`) | whisper (`stt.port`) |
+| ------- | ---- | ------------------ | -------------------- |
+| stable  | 7800 | 7701               | 7702                 |
+| beta    | 7810 | 7711               | 7712                 |
+| dev     | 7820 | 7721               | 7722                 |
+
+(Explicit settings still win; only the defaults shift.)
+
+#### Building & releasing a beta
+
+Every build/release task has explicit `stable` / `beta` variants (the bare forms
+are stable):
+
+```bash
+deno task build:core:beta      # tomat-core-beta + updater + keychain
+deno task build:client:beta    # tomat-beta app bundle
+deno task release:beta         # umbrella: core + client + scripts/schemas/website
+deno task release:core:beta    # just the core manifest + binaries
+deno task release:client:beta  # just the client bundle + manifest
+```
+
+Beta publishes to `manifests/beta/…` on the CDN and, for the sidecar binaries
+(llama/whisper/deno), ships a _resolver_ in `binaries.json` so the running core
+fetches the **latest upstream GitHub release** at install/update time (verified
+against GitHub's sha256 digest) — upstream updates reach beta users without a
+re-release. Stable stays pinned at release time.
+
+### Cleaning build artifacts
+
+```bash
+deno task clean               # dist, target, build, .svelte-kit, .astro, .wrangler
+deno task clean --deep        # also node_modules + the Deno cache (re-run deno install)
+deno task clean --dev-state   # also ~/.tomat/dev (the isolated dev channel)
+deno task clean --beta-state  # also ~/.tomat/beta (the isolated beta channel)
+```
 
 ### Type-check + format + lint
 
@@ -85,7 +169,6 @@ deno task test          # Deno + vitest + cargo test
 deno task test:ui       # vitest against the Svelte UI
 deno task test:rs       # cargo test for the Rust crates
 deno task test:e2e      # WebdriverIO E2E (manual, opt-in)
-deno task test:coverage # all of the above with lcov output
 ```
 
 Tests are co-located with source as `*.test.ts`. E2E specs live under
@@ -106,6 +189,17 @@ curl -fsSL https://au.tomat.ing/install/core.sh | bash
 
 # Windows (PowerShell)
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://au.tomat.ing/install/core.ps1 | iex"
+```
+
+To install the **beta** channel alongside stable, pass `--beta` (or
+`TOMAT_CHANNEL=beta`); it installs `tomat-core-beta`, a `tomat-core-beta`
+service, and binds port 7810:
+
+```bash
+# macOS / Linux
+curl -fsSL https://au.tomat.ing/install/core.sh | bash -s -- --beta
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -Command "& { $env:TOMAT_CHANNEL='beta'; iwr -useb https://au.tomat.ing/install/core.ps1 | iex }"
 ```
 
 The installer downloads the signed core manifest, verifies the binary's SHA-256,

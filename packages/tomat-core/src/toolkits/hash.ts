@@ -14,6 +14,7 @@
 
 import { join, relative } from "@std/path";
 import ignore from "ignore";
+import { Sha256Stream } from "../shared/hash.ts";
 
 const NODE_MODULES = "node_modules";
 
@@ -23,7 +24,7 @@ export async function hashToolkit(rootDir: string): Promise<string> {
   await walk(rootDir, rootDir, files, ig);
   files.sort();
 
-  const digestStream = new DigestStream("SHA-256");
+  const digestStream = new Sha256Stream();
   for (const rel of files) {
     const abs = join(rootDir, rel);
     let size: number;
@@ -76,29 +77,5 @@ async function walk(
       out.push(rel);
     }
     // symlinks and other entries intentionally skipped to keep hashing deterministic
-  }
-}
-
-// Streaming hasher backed by Web Crypto. SubtleCrypto.digest is one-shot;
-// we accumulate chunks and hash on finalize. For toolkit-sized folders
-// (~tens of MB) this is fine in memory.
-class DigestStream {
-  private chunks: Uint8Array[] = [];
-  constructor(private readonly algo: "SHA-256") {}
-  update(chunk: Uint8Array): void {
-    this.chunks.push(chunk);
-  }
-  async hexDigest(): Promise<string> {
-    let total = 0;
-    for (const c of this.chunks) total += c.byteLength;
-    const merged = new Uint8Array(total);
-    let off = 0;
-    for (const c of this.chunks) {
-      merged.set(c, off);
-      off += c.byteLength;
-    }
-    const buf = await crypto.subtle.digest(this.algo, merged);
-    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
   }
 }

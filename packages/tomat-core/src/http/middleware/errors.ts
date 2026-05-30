@@ -3,10 +3,11 @@
 // that catches throws from sub-apps mounted via `app.route()`.
 
 import type { Context } from "hono";
+import { errMessage } from "@tomat/shared";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { ApiErrorBody, ErrorCode } from "@tomat/shared";
 import { AppError, isAppError, isNoSpaceError } from "../../shared/errors.ts";
-import { getLogger } from "../../shared/log.ts";
+import { getLogger, scrubSecrets } from "../../shared/log.ts";
 
 const log = getLogger("http");
 
@@ -25,7 +26,7 @@ export function sendError(c: Context, err: unknown): Response {
     );
     return c.json(toBody("insufficient_storage", message), 507);
   }
-  const message = err instanceof Error ? err.message : String(err);
+  const message = errMessage(err);
   log.error(`${c.req.method} ${c.req.path} -> internal_error: ${message}`);
   return c.json(toBody("internal_error", message), 500);
 }
@@ -35,7 +36,16 @@ function toBody(
   message: string,
   details?: Record<string, unknown>,
 ): ApiErrorBody {
-  return { error: { code, message, ...(details ? { details } : {}) } };
+  // Scrub before the message crosses the wire. Logs are already scrubbed by the
+  // logger; response bodies are not, and an internal_error can carry a raw
+  // exception string (e.g. an upstream provider error echoing a URL+token).
+  return {
+    error: {
+      code,
+      message: scrubSecrets(message),
+      ...(details ? { details } : {}),
+    },
+  };
 }
 
 export { AppError };

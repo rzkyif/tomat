@@ -6,9 +6,6 @@ dist/
 .wrangler/
 .dev.vars
 
-# Generated mirror of release artifacts (populated by `deno task website:build`).
-# These files are produced fresh on every build; the originals live in
-# scripts/install/, packages/tomat-shared/, etc.
-public/install/
-public/manifests/
-public/schemas/
+# release:website idempotency cursor — regenerated at each landing deploy
+# (its hash records the website source state at the time of the deploy).
+public/release-state.json

@@ -63,10 +63,39 @@ export interface DownloadPlan {
   sizeHint?: number;
 }
 
-// Pinned binary metadata from the runtime-fetched manifest.
-export interface BinaryManifestEntry {
+// A binary manifest entry is one of two shapes:
+//
+//  - Pinned (stable channel): exact per-triple URLs + sha256, resolved at
+//    release time. The signed manifest commits to the exact bytes.
+//  - Resolver (beta channel): an upstream GitHub repo + per-triple asset name
+//    patterns. The core resolves the LATEST release at runtime, so upstream
+//    updates reach beta users without us re-releasing. The signed manifest
+//    commits to the repo + patterns (not the version); the download is
+//    verified against GitHub's published sha256 digest.
+export interface BinaryManifestPinnedEntry {
   version: string;
   platforms: Record<Triple, { url: string; sha256: string }>;
+}
+
+// `assets` maps a triple to the upstream asset name; "{tag}" expands to the
+// release's tag_name (e.g. "llama-{tag}-bin-macos-arm64.tar.gz").
+export interface UpstreamResolver {
+  repo: string;
+  assets: Partial<Record<Triple, string>>;
+}
+
+export interface BinaryManifestResolverEntry {
+  resolver: UpstreamResolver;
+}
+
+export type BinaryManifestEntry =
+  | BinaryManifestPinnedEntry
+  | BinaryManifestResolverEntry;
+
+export function isResolverEntry(
+  e: BinaryManifestEntry,
+): e is BinaryManifestResolverEntry {
+  return (e as BinaryManifestResolverEntry).resolver !== undefined;
 }
 
 export interface BinaryManifest {
@@ -84,14 +113,15 @@ export interface BinaryStatus {
 
 // Core update manifest (separate from binaries).
 //
-// `binaries` carries the per-triple tomat-core + tomat-core-updater
-// executables. `workers` carries the platform-independent .ts files
-// (embeddingWorker, ttsWorker, toolWorker) that are spawned at runtime by
-// the core; shipping them separately keeps the compiled core binary lean
-// (their transformers/onnxruntime deps would otherwise add ~1.5 GB).
-// `helpers` carries per-triple native helper binaries built from the
-// in-repo Rust crate (tomat-core-keychain). They live next to core in
-// ~/.tomat/core/bin/ and are invoked via subprocess.
+// `binaries` carries the per-triple tomat-core executables. `workers` carries
+// the platform-independent .ts files (embeddingWorker, ttsWorker, toolWorker)
+// that are spawned at runtime by the core; shipping them separately keeps the
+// compiled core binary lean (their transformers/onnxruntime deps would
+// otherwise add ~1.5 GB). `helpers` carries per-triple binaries that ship next
+// to core in ~/.tomat/<channel>/core/bin/ and are installed (and swapped on
+// self-update) by the same code path: tomat-core-keychain (Rust crate) and
+// tomat-core-updater (Rust crate; the binary that performs the swap). They
+// are invoked via subprocess.
 export interface CoreManifest {
   schemaVersion: 1;
   version: string;

@@ -10,6 +10,7 @@
  */
 
 import { cores } from "$lib/core";
+import { platform } from "$lib/platform";
 import type { MessageContent, MessagePart } from "./types";
 
 export type WrittenAttachment = { path: string; filename: string };
@@ -55,15 +56,18 @@ export async function writeSessionAttachment(
 export async function readSessionAttachment(path: string): Promise<string> {
   const client = cores().currentClient();
   if (!client) throw new Error("no paired core selected");
-  // The stored `path` is `<baseUrl>/api/v1/sessions/.../attachments/...`,
-  // so we fetch directly and apply the same bearer header CoreClient
-  // would. `endpoint` is a public readonly field on CoreClient — no
-  // cast needed.
-  const res = await fetch(path, {
+  // The stored `path` is `<baseUrl>/api/v1/sessions/.../attachments/...`, so we
+  // fetch it through the pinned net layer with the same bearer header CoreClient
+  // would. `endpoint` is a public readonly field on CoreClient — no cast needed.
+  const res = await platform().net.fetch({
+    url: path,
     headers: { Authorization: `Bearer ${client.endpoint.token}` },
+    pin: client.endpoint.tlsPin,
   });
-  if (!res.ok) throw new Error(`fetch ${path}: ${res.status}`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`fetch ${path}: ${res.status}`);
+  }
+  const bytes = res.body;
   let binary = "";
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);

@@ -8,7 +8,7 @@
 // a separate integration. This file only verifies the WS hub envelope.
 
 import { assertEquals } from "@std/assert";
-import { authService } from "../services/auth.ts";
+import { pairClient } from "../../tests/helpers/pairing.ts";
 import { buildApp } from "../http/server.ts";
 import { wsHub } from "./hub.ts";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
@@ -41,8 +41,7 @@ function startServer(): RunningServer {
 }
 
 async function pair(): Promise<string> {
-  const { code } = await authService().mintPairingCode();
-  const { token } = await authService().claim(code, "ws-test", "127.0.0.1");
+  const { token } = await pairClient("ws-test", "127.0.0.1");
   return token;
 }
 
@@ -166,6 +165,35 @@ Deno.test({
       assertEquals(JSON.parse(b).kind, "update.staged");
       wsA.close();
       wsB.close();
+    } finally {
+      await server.stop();
+      await env.teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "WS /ws/v1: closeClient() force-closes the client's live socket",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    // Revoke/rotate call hub.closeClient(clientId) so a now-untrusted device's
+    // long-lived socket is actually cut off (the WS only authenticates once,
+    // at upgrade). Pair, connect, then close by clientId and assert the close.
+    const env = await setupTestEnv();
+    const server = startServer();
+    try {
+      const { token, clientId } = await pairClient(
+        "ws-revoke-test",
+        "127.0.0.1",
+      );
+      const ws = dial(server.port, token);
+      await once(ws, "open");
+      const closed = once<CloseEvent>(ws, "close");
+      wsHub().closeClient(clientId);
+      const ev = await closed;
+      assertEquals(ev.code, 4001);
+      assertEquals(typeof ev.reason, "string");
     } finally {
       await server.stop();
       await env.teardown();

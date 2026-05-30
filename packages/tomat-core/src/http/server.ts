@@ -5,6 +5,7 @@
 // Deno.serve hook for upgrades.
 
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { CORE_VERSION } from "../config.ts";
 import { corsMiddleware } from "./middleware/cors.ts";
 import { sendError } from "./middleware/errors.ts";
@@ -20,9 +21,31 @@ import { ttsRoutes } from "./routes/tts.ts";
 import { toolkitsRoutes } from "./routes/toolkits.ts";
 import { updateRoutes } from "./routes/update.ts";
 
+// Upper bound on a single request body. Generous enough for legitimate
+// attachment uploads and STT audio, but it caps an unbounded body so a client
+// (or the unauthenticated /pairing/claim caller) can't exhaust memory. WS
+// frames are not affected (the upgrade path bypasses app.fetch).
+const MAX_BODY_BYTES = 100 * 1024 * 1024; // 100 MiB
+
 export function buildApp(): Hono {
   const app = new Hono();
   app.use("*", corsMiddleware());
+  app.use(
+    "*",
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: (c) =>
+        c.json(
+          {
+            error: {
+              code: "validation_error",
+              message: "request body too large",
+            },
+          },
+          413,
+        ),
+    }),
+  );
   // app.onError catches throws from anywhere — including sub-apps mounted
   // via app.route() — which the older try/catch middleware did NOT do.
   // Hono 4's middleware-as-error-handler pattern only sees errors from

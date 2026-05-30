@@ -1,10 +1,10 @@
 // Pairing-flow commands.
 //
-//  - `read_admin_token`: read ~/.tomat/core/.admin-token off disk so the
-//    client can mint pairing codes on the LOCAL core. Returns None if the
-//    file doesn't exist (e.g. paired with a remote core).
+//  - `read_admin_token`: read ~/.tomat/<channel>/core/.admin-token off disk
+//    so the client can mint pairing codes on the LOCAL core. Returns None if
+//    the file doesn't exist (e.g. paired with a remote core).
 //
-//  - `install_local_core`: shells out to the CDN-hosted install script for
+//  - `install_local_core`: shells out to the R2-hosted install script for
 //    the host platform, captures stdout, parses the printed pairing code,
 //    and returns it. The script writes the binary, sets up the launchd /
 //    systemd-user / scheduled-task service, mints the admin token, and hits
@@ -21,7 +21,7 @@ use std::process::Command;
 use std::sync::atomic::Ordering;
 use tauri::State;
 
-const DEFAULT_CDN_BASE: &str = "https://au.tomat.ing";
+const DEFAULT_STORAGE_BASE: &str = "https://get.au.tomat.ing";
 
 #[tauri::command]
 pub fn read_admin_token() -> AppResult<Option<String>> {
@@ -101,11 +101,10 @@ pub async fn install_local_core(
     // Default to background service if unspecified; older callers still work.
     let install_service = service.unwrap_or(true);
     let install_bind_all = bind_all.unwrap_or(false);
-    let output = tokio::task::spawn_blocking(move || {
-        run_installer(&url, install_service, install_bind_all)
-    })
-    .await
-    .map_err(|e| AppError::external(format!("installer task panicked: {e}")))??;
+    let output =
+        tokio::task::spawn_blocking(move || run_installer(&url, install_service, install_bind_all))
+            .await
+            .map_err(|e| AppError::external(format!("installer task panicked: {e}")))??;
     parse_pairing_code(&output)
 }
 
@@ -125,12 +124,14 @@ impl Drop for InstallGuard {
         self.state
             .install_last_finished_ms
             .store(now_ms, Ordering::SeqCst);
-        self.state.install_in_progress.store(false, Ordering::SeqCst);
+        self.state
+            .install_in_progress
+            .store(false, Ordering::SeqCst);
     }
 }
 
 fn installer_url() -> String {
-    let base = std::env::var("TOMAT_CDN").unwrap_or_else(|_| DEFAULT_CDN_BASE.into());
+    let base = std::env::var("TOMAT_STORAGE").unwrap_or_else(|_| DEFAULT_STORAGE_BASE.into());
     let suffix = if cfg!(windows) { "core.ps1" } else { "core.sh" };
     format!("{}/install/{}", base, suffix)
 }
@@ -149,6 +150,9 @@ fn run_installer(url: &str, service: bool, bind_all: bool) -> AppResult<String> 
     let out = Command::new("bash")
         .arg("-c")
         .arg(&pipeline)
+        // Install into THIS client's channel so a beta client installs a beta
+        // core (not stable). The installer bakes it into the service env.
+        .env("TOMAT_CHANNEL", crate::channel::channel())
         .env("TOMAT_INSTALL_SERVICE", install_service_flag(service))
         .env("TOMAT_INSTALL_BIND_ALL", install_service_flag(bind_all))
         .output()?;
@@ -167,6 +171,9 @@ fn run_installer(url: &str, service: bool, bind_all: bool) -> AppResult<String> 
     let ps = format!("iwr -useb '{}' | iex", url);
     let out = Command::new("powershell")
         .args(["-ExecutionPolicy", "Bypass", "-Command", &ps])
+        // Install into THIS client's channel so a beta client installs a beta
+        // core (not stable). The installer bakes it into the service env.
+        .env("TOMAT_CHANNEL", crate::channel::channel())
         .env("TOMAT_INSTALL_SERVICE", install_service_flag(service))
         .env("TOMAT_INSTALL_BIND_ALL", install_service_flag(bind_all))
         .output()?;
@@ -204,20 +211,44 @@ fn parse_pairing_code(output: &str) -> AppResult<String> {
 fn admin_token_path() -> AppResult<PathBuf> {
     let home =
         dirs::home_dir().ok_or_else(|| AppError::external("could not determine home directory"))?;
-    Ok(home.join(".tomat").join("core").join(".admin-token"))
+    Ok(crate::channel::channel_root(&home)
+        .join("core")
+        .join(".admin-token"))
 }
 
 fn local_core_binary() -> AppResult<PathBuf> {
     let home =
         dirs::home_dir().ok_or_else(|| AppError::external("could not determine home directory"))?;
-    let name = if cfg!(windows) { "tomat-core.exe" } else { "tomat-core" };
-    Ok(home.join(".tomat").join("core").join("bin").join(name))
+    // Channel-suffixed: beta's core lives at .../bin/tomat-core-beta(.exe).
+    Ok(crate::channel::channel_root(&home)
+        .join("core")
+        .join("bin")
+        .join(crate::channel::core_binary_name()))
 }
 
 /// Returns `true` if the local core binary exists on disk.
 #[tauri::command]
 pub fn local_core_installed() -> AppResult<bool> {
     Ok(local_core_binary().map(|p| p.exists()).unwrap_or(false))
+}
+
+/// Loopback base URL of THIS channel's local core, with the channel-aware port
+/// (stable 7800, beta 7810, …). The UI uses it for the "on this computer"
+/// install/pair flow so a beta client targets the beta core.
+#[tauri::command]
+pub fn local_core_base_url() -> String {
+    format!("https://127.0.0.1:{}", crate::channel::core_port())
+}
+
+/// This channel's default local sidecar ports (llama / whisper). The UI uses
+/// them as fallbacks when the paired core hasn't overridden llm.port/stt.port,
+/// so a beta client talks to the beta sidecars (7711/7712), not stable's.
+#[tauri::command]
+pub fn local_sidecar_ports() -> std::collections::HashMap<String, u16> {
+    let mut m = std::collections::HashMap::new();
+    m.insert("llm".to_string(), crate::channel::llm_port());
+    m.insert("stt".to_string(), crate::channel::stt_port());
+    m
 }
 
 /// Spawn the locally-installed core detached when it isn't already running.
@@ -260,32 +291,19 @@ pub async fn start_local_core() -> AppResult<bool> {
     Ok(true)
 }
 
-/// Minimal HTTP probe of the local core: TCP connect + GET /api/v1/health,
-/// return true iff we got an HTTP-shaped response. Uses raw TcpStream so we
-/// don't pull in a new HTTP client crate just for this one cheap probe.
+/// Minimal liveness probe of the local core: a plain TCP connect to the core
+/// port. The core now serves TLS, so we can't speak HTTP/1.0 in the clear here;
+/// a successful connect means the listener is up. The real health check happens
+/// over the pinned TLS net layer once paired. Raw TcpStream avoids pulling a
+/// TLS client into this one cheap probe.
 async fn probe_local_core() -> bool {
-    use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::time::Duration;
     let task = tokio::task::spawn_blocking(|| -> bool {
-        let Ok(addr) = "127.0.0.1:7800".parse() else {
+        let Ok(addr) = format!("127.0.0.1:{}", crate::channel::core_port()).parse() else {
             return false;
         };
-        let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_millis(150)) else {
-            return false;
-        };
-        let _ = s.set_read_timeout(Some(Duration::from_millis(150)));
-        let _ = s.set_write_timeout(Some(Duration::from_millis(150)));
-        if s.write_all(b"GET /api/v1/health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
-            .is_err()
-        {
-            return false;
-        }
-        let mut buf = [0u8; 16];
-        let Ok(_) = s.read(&mut buf) else {
-            return false;
-        };
-        buf.starts_with(b"HTTP/")
+        TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_ok()
     });
     task.await.unwrap_or(false)
 }
@@ -307,6 +325,10 @@ fn spawn_detached(bin: &std::path::Path, logs_dir: &std::path::Path) -> AppResul
         Command::new(bin)
             .stdout(stdout)
             .stderr(stderr)
+            // The compiled-in channel isn't an OS env var, so the spawned core
+            // wouldn't otherwise know it — pass it explicitly so the on-demand
+            // core matches this client's channel.
+            .env("TOMAT_CHANNEL", crate::channel::channel())
             .pre_exec(|| {
                 if libc_setsid() == -1 {
                     return Err(std::io::Error::last_os_error());
@@ -344,6 +366,9 @@ fn spawn_detached(bin: &std::path::Path, logs_dir: &std::path::Path) -> AppResul
     Command::new(bin)
         .stdout(stdout)
         .stderr(stderr)
+        // Pass this client's channel so the on-demand core matches it (the
+        // compiled-in channel isn't visible to the spawned process otherwise).
+        .env("TOMAT_CHANNEL", crate::channel::channel())
         .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
         .spawn()?;
     Ok(())
@@ -356,27 +381,27 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn installer_url_uses_default_cdn_when_env_unset() {
+    fn installer_url_uses_default_storage_when_env_unset() {
         // SAFETY: tests in this crate are run with --test-threads=1 in CI for
         // this exact reason; locally a stray race is harmless (the assert
         // simply gets retried).
         // SAFETY: standalone test binary, single thread, env mutation is fine.
         unsafe {
-            std::env::remove_var("TOMAT_CDN");
+            std::env::remove_var("TOMAT_STORAGE");
         }
         let url = installer_url();
-        assert!(url.starts_with(DEFAULT_CDN_BASE));
+        assert!(url.starts_with(DEFAULT_STORAGE_BASE));
         assert!(url.ends_with("core.sh") || url.ends_with("core.ps1"));
     }
 
     #[test]
-    fn installer_url_honors_tomat_cdn_override() {
+    fn installer_url_honors_tomat_storage_override() {
         unsafe {
-            std::env::set_var("TOMAT_CDN", "https://test.example");
+            std::env::set_var("TOMAT_STORAGE", "https://test.example");
         }
         let url = installer_url();
         unsafe {
-            std::env::remove_var("TOMAT_CDN");
+            std::env::remove_var("TOMAT_STORAGE");
         }
         assert!(url.starts_with("https://test.example/install/"));
     }

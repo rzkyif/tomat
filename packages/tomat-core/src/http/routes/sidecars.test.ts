@@ -4,12 +4,11 @@
 
 import { assertEquals } from "@std/assert";
 import { buildApp } from "../server.ts";
-import { authService } from "../../services/auth.ts";
+import { pairClient } from "../../../tests/helpers/pairing.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
 
 async function pairOne(): Promise<string> {
-  const { code } = await authService().mintPairingCode();
-  const { token } = await authService().claim(code, "sidecars-t", "127.0.0.1");
+  const { token } = await pairClient("sidecars-t", "127.0.0.1");
   return token;
 }
 

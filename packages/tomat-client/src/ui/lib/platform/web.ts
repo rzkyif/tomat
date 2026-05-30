@@ -15,6 +15,43 @@ const STORAGE_PREFIX = "tomat:keychain:";
 const CLIENT_SETTINGS_KEY = "tomat:client-settings";
 
 const impl: Platform = {
+  net: {
+    // The browser does standard CA verification and exposes no certificate
+    // pinning to JS, so `pin` is ignored and `capturePin` can't read the cert.
+    // This means the web build CANNOT pair with a self-signed core (the PAKE
+    // cert-pin binding has no pin to verify) — it only works against a core
+    // with a browser-trusted (CA) cert. Documented limitation of the web build.
+    async fetch(req) {
+      const res = await fetch(req.url, {
+        method: req.method ?? "GET",
+        headers: req.headers,
+        // string | Uint8Array are both valid BodyInit at runtime; the DOM lib
+        // types are stricter than necessary here.
+        body: req.body as BodyInit | undefined,
+      });
+      const headers: Record<string, string> = {};
+      res.headers.forEach((v, k) => {
+        headers[k.toLowerCase()] = v;
+      });
+      const body = new Uint8Array(await res.arrayBuffer());
+      return { status: res.status, headers, body };
+    },
+    async connectWebSocket(url) {
+      const ws = new WebSocket(url);
+      ws.binaryType = "arraybuffer";
+      return {
+        send: (d) => ws.send(d),
+        close: () => ws.close(),
+        onOpen: (cb) => ws.addEventListener("open", () => cb()),
+        onMessage: (cb) =>
+          ws.addEventListener("message", (ev) => {
+            cb(typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data));
+          }),
+        onClose: (cb) => ws.addEventListener("close", () => cb()),
+        onError: (cb) => ws.addEventListener("error", () => cb()),
+      };
+    },
+  },
   windowing: {
     show: NOOP,
     hide: NOOP,
@@ -111,6 +148,13 @@ const impl: Platform = {
     startLocalCore() {
       return Promise.resolve(false);
     },
+    localCoreBaseUrl() {
+      // Web has no local core; return the stable default for display only.
+      return Promise.resolve("https://127.0.0.1:7800");
+    },
+    localSidecarPorts() {
+      return Promise.resolve({ llm: 7701, stt: 7702 });
+    },
   },
   fileConvert: {
     async toMarkdown() {
@@ -158,7 +202,8 @@ const impl: Platform = {
       Promise.reject(new Error("native file picker not available in browser build")),
   },
   cursor: {
-    getPosition: () => Promise.reject(new Error("cursor.getPosition not available in browser build")),
+    getPosition: () =>
+      Promise.reject(new Error("cursor.getPosition not available in browser build")),
     setClickthrough: NOOP,
   },
   menu: {

@@ -11,12 +11,15 @@
 //   - dualModel.external.baseUrl/apiKey/model        (route="secondary")
 //   - dualModel.external.contextSize
 //
-// External API keys are pulled from the encrypted secrets vault first; the
-// plain-text settings.json value is honored only as a fallback for callers
-// that haven't migrated to the vault.
+// External API keys are pulled from the encrypted secrets vault first; a
+// plain-text value placed directly in settings.json is honored as a
+// lower-precedence fallback (e.g. headless/config-file setups). The client
+// routes keys to the vault and core redacts them from GET /settings, so the
+// vault is the authoritative source.
 
 import type { LlmEndpointConfig } from "./llm-provider.ts";
 import { getSecret } from "./secrets.ts";
+import { llmPort } from "../paths.ts";
 
 export type LlmRoute = "default" | "secondary";
 
@@ -26,8 +29,8 @@ export async function resolveEndpoint(
 ): Promise<LlmEndpointConfig> {
   if (route === "secondary") {
     const settingsKey = strSetting(settings, "dualModel.external.apiKey", "");
-    const apiKey = settingsKey ||
-      (await getSecret("dualModel.external.apiKey")) || "";
+    const apiKey = (await getSecret("dualModel.external.apiKey")) ||
+      settingsKey || "";
     return {
       baseUrl: strSetting(settings, "dualModel.external.baseUrl", ""),
       apiKey,
@@ -44,8 +47,8 @@ export async function resolveEndpoint(
     | "auto";
   if (provider === "external") {
     const settingsKey = strSetting(settings, "llm.external.apiKey", "");
-    const apiKey = settingsKey ||
-      (await getSecret("llm.external.apiKey")) || "";
+    const apiKey = (await getSecret("llm.external.apiKey")) ||
+      settingsKey || "";
     return {
       baseUrl: strSetting(settings, "llm.external.baseUrl", ""),
       apiKey,
@@ -54,7 +57,7 @@ export async function resolveEndpoint(
     };
   }
   const host = strSetting(settings, "llm.host", "127.0.0.1");
-  const port = strSetting(settings, "llm.port", "7701");
+  const port = strSetting(settings, "llm.port", String(llmPort()));
   return {
     baseUrl: `http://${host}:${port}/v1`,
     apiKey: "sk-local",

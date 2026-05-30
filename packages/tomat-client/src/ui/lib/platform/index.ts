@@ -47,7 +47,12 @@ export interface UpdateHandle {
    *  per-chunk byte counts and a total when available. Resolves once the
    *  staging swap is queued; the OS-level relaunch is separate. */
   downloadAndInstall(
-    onProgress?: (event: { kind: "Started"; total?: number } | { kind: "Progress"; chunk: number } | { kind: "Finished" }) => void,
+    onProgress?: (
+      event:
+        | { kind: "Started"; total?: number }
+        | { kind: "Progress"; chunk: number }
+        | { kind: "Finished" },
+    ) => void,
   ): Promise<void>;
   /** Release the underlying handle without installing. */
   close(): Promise<void>;
@@ -82,7 +87,54 @@ export interface ShortcutBindings {
   }): Promise<() => void>;
 }
 
+// --- Networking ----------------------------------------------------------
+//
+// All traffic to a paired core goes through `platform().net`, which terminates
+// TLS with CERTIFICATE PINNING below the webview (browser fetch/WebSocket can't
+// pin a self-signed cert). The desktop impl does it in Rust (reqwest +
+// tokio-tungstenite + a custom rustls verifier on the SPKI pin); a future mobile
+// impl reuses the same Rust; the web stub falls back to browser fetch/WebSocket
+// (no pinning — relies on the browser's CA trust). `pin` is base64(SHA-256(SPKI));
+// `capturePin` is the pairing-time TOFU mode that records the presented cert's
+// pin instead of enforcing one.
+
+export interface NetRequest {
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  /** Request body. Binary (multipart, audio) is passed as bytes. */
+  body?: string | Uint8Array;
+  /** Expected SPKI pin to enforce (base64 SHA-256). Omit with capturePin. */
+  pin?: string;
+  /** Pairing TOFU: accept the presented cert and return its pin (no enforce). */
+  capturePin?: boolean;
+}
+
+export interface NetResponse {
+  status: number;
+  headers: Record<string, string>;
+  body: Uint8Array;
+  /** The pin the server presented, when `capturePin` was set. */
+  capturedPin?: string;
+}
+
+/** A pinned WebSocket. Mirrors the slice of `WebSocket` that CoreClient uses. */
+export interface NetSocket {
+  send(data: string): void;
+  close(): void;
+  onOpen(cb: () => void): void;
+  onMessage(cb: (data: string) => void): void;
+  onClose(cb: () => void): void;
+  onError(cb: () => void): void;
+}
+
 export interface Platform {
+  // Network access to a paired core, with TLS certificate pinning enforced
+  // below the webview. See the NetRequest/NetSocket docs above.
+  net: {
+    fetch(req: NetRequest): Promise<NetResponse>;
+    connectWebSocket(url: string, opts?: { pin?: string }): Promise<NetSocket>;
+  };
   // Window control.
   windowing: {
     show(): Promise<void>;
@@ -161,17 +213,23 @@ export interface Platform {
      *  `service: true` (default) registers a launchd / systemd / scheduled
      *  task so the core boots on login; `false` skips that and expects the
      *  client to spawn the core on demand. `bindAll: true` seeds the new
-     *  core's settings.json with `server.bindAll: true` so it listens on
-     *  0.0.0.0 from the very first boot (toggleable later in Settings). */
-    installLocalCore(
-      opts?: { service?: boolean; bindAll?: boolean },
-    ): Promise<string>;
+     *  core's settings.json with `server.bindHost: "0.0.0.0"` so it listens on
+     *  all interfaces from the very first boot (changeable later in Settings). */
+    installLocalCore(opts?: { service?: boolean; bindAll?: boolean }): Promise<string>;
     /** Whether ~/.tomat/core/bin/tomat-core exists. Used at boot to decide
      *  whether we should attempt to spawn the local core for on-demand mode. */
     isLocalCoreInstalled(): Promise<boolean>;
     /** Spawn ~/.tomat/core/bin/tomat-core detached if the loopback core isn't
      *  already responding. Returns `true` when a new process was started. */
     startLocalCore(): Promise<boolean>;
+    /** Loopback base URL of this channel's local core, with the channel-aware
+     *  port (stable 7800, beta 7810, …). Used by the "on this computer"
+     *  pair/install flow so a beta client targets the beta core. */
+    localCoreBaseUrl(): Promise<string>;
+    /** This channel's default local sidecar ports (llama / whisper). Used as
+     *  fallbacks when the paired core hasn't overridden llm.port / stt.port so
+     *  a beta client talks to the beta sidecars (7711/7712), not stable's. */
+    localSidecarPorts(): Promise<{ llm: number; stt: number }>;
   };
   // File-to-markdown conversion (desktop uses Rust crates; web uses core fallback).
   fileConvert: {
@@ -208,12 +266,10 @@ export interface Platform {
   // Native file-picker dialog. Returns absolute paths chosen by the user,
   // or an empty array on cancel.
   dialog: {
-    openFilePicker(
-      opts?: {
-        multiple?: boolean;
-        filters?: Array<{ name: string; extensions: string[] }>;
-      },
-    ): Promise<string[]>;
+    openFilePicker(opts?: {
+      multiple?: boolean;
+      filters?: Array<{ name: string; extensions: string[] }>;
+    }): Promise<string[]>;
   };
   // Cursor introspection + click-through toggling for the floating window.
   // Used by lib/shared/clickthrough.ts to make the transparent regions of

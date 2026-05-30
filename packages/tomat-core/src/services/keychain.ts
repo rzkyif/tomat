@@ -9,7 +9,8 @@
 // Linux, etc). Callers MUST handle null with a non-keychain fallback.
 
 import { binPath } from "../paths.ts";
-import { platformExe } from "../binaries/versions.ts";
+import { errMessage } from "@tomat/shared";
+import { coreBinaryName } from "../binaries/versions.ts";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("keychain");
@@ -17,7 +18,7 @@ const log = getLogger("keychain");
 const EXIT_ENTRY_MISSING = 1;
 
 function helperPath(): string {
-  return binPath(`tomat-core-keychain${platformExe()}`);
+  return binPath(coreBinaryName("tomat-core-keychain"));
 }
 
 async function helperExists(): Promise<boolean> {
@@ -56,9 +57,7 @@ export async function keychainGet(
     return null;
   } catch (err) {
     log.warn(
-      `keychain helper spawn failed: ${
-        err instanceof Error ? err.message : err
-      }`,
+      `keychain helper spawn failed: ${errMessage(err)}`,
     );
     return null;
   }
@@ -97,9 +96,7 @@ export async function keychainSet(
     return false;
   } catch (err) {
     log.warn(
-      `keychain helper spawn failed: ${
-        err instanceof Error ? err.message : err
-      }`,
+      `keychain helper spawn failed: ${errMessage(err)}`,
     );
     return false;
   }
@@ -128,9 +125,7 @@ export async function keychainDelete(
     return false;
   } catch (err) {
     log.warn(
-      `keychain helper spawn failed: ${
-        err instanceof Error ? err.message : err
-      }`,
+      `keychain helper spawn failed: ${errMessage(err)}`,
     );
     return false;
   }

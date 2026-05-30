@@ -14,7 +14,7 @@
 // dynamically, so swapping it for the duration of the test is enough.
 
 import { assertEquals } from "@std/assert";
-import { authService } from "./auth.ts";
+import { pairClient } from "../../tests/helpers/pairing.ts";
 import { buildApp } from "../http/server.ts";
 import { patchCoreSettings } from "./core-settings.ts";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
@@ -50,12 +50,7 @@ function startServer(): RunningServer {
 async function pair(
   port: number,
 ): Promise<{ token: string; clientId: string }> {
-  const { code } = await authService().mintPairingCode();
-  const { token, clientId } = await authService().claim(
-    code,
-    "chat-t2",
-    "127.0.0.1",
-  );
+  const { token, clientId } = await pairClient("chat-t2", "127.0.0.1");
   void port;
   return { token, clientId };
 }

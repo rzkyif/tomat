@@ -1,18 +1,19 @@
 // OS-keychain wrapper for paired-core bearer tokens.
 //
-// Service: "tomat-client". Account format: "core:<coreId>", where <coreId> is
-// the ULID assigned by the core during pairing-claim. We always go to the OS
-// keychain; there is no dev fallback, because clients are signed and the
-// keychain is reliable across the rebuild cycles that affect tomat-core's
-// secrets store.
+// Service: channel-namespaced ("tomat-client" on stable, "tomat-client-dev" /
+// "tomat-client-beta" otherwise — see `crate::channel`), so a dev/beta build's
+// tokens never collide with a stable install's. Account format: "core:<coreId>",
+// where <coreId> is the ULID assigned by the core during pairing-claim. We
+// always go to the OS keychain; there is no dev fallback, because clients are
+// signed and the keychain is reliable across the rebuild cycles that affect
+// tomat-core's secrets store.
 //
 // The `KeychainStore` trait is the test seam: production goes through
 // `RealKeychain` (the `keyring` crate); unit tests use `InMemoryKeychain`.
 
+use crate::channel::keychain_service;
 use crate::error::{AppError, AppResult};
 use keyring::Entry;
-
-const SERVICE: &str = "tomat-client";
 
 // Input limits applied at the Tauri command boundary. Real values are far
 // smaller (ULID core_id = 26 chars; bearer token = 43 chars base64url),
@@ -31,12 +32,12 @@ pub struct RealKeychain;
 
 impl KeychainStore for RealKeychain {
     fn set(&self, account: &str, token: &str) -> AppResult<()> {
-        let entry = Entry::new(SERVICE, account)?;
+        let entry = Entry::new(&keychain_service(), account)?;
         entry.set_password(token).map_err(classify_keyring_error)?;
         Ok(())
     }
     fn get(&self, account: &str) -> AppResult<Option<String>> {
-        let entry = Entry::new(SERVICE, account)?;
+        let entry = Entry::new(&keychain_service(), account)?;
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -44,7 +45,7 @@ impl KeychainStore for RealKeychain {
         }
     }
     fn delete(&self, account: &str) -> AppResult<()> {
-        let entry = Entry::new(SERVICE, account)?;
+        let entry = Entry::new(&keychain_service(), account)?;
         match entry.delete_credential() {
             Ok(_) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(err) => Err(classify_keyring_error(err)),

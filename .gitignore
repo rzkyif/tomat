@@ -13,9 +13,7 @@ packages/tomat-client/static/vad
 packages/tomat-website/dist
 packages/tomat-website/.astro
 packages/tomat-website/.wrangler
-packages/tomat-website/public/install
-packages/tomat-website/public/manifests
-packages/tomat-website/public/schemas
+packages/tomat-website/public/release-state.json
 
 # Deno
 .deno-cache

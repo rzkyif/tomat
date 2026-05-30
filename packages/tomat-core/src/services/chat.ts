@@ -42,6 +42,7 @@ import type {
 import {
   contentToText,
   DEFAULT_COMPLEXITY_DETECTION_PROMPT,
+  errMessage,
 } from "@tomat/shared";
 import { sessionsRepo } from "../db/repos/sessions.ts";
 import { embed } from "./embedding.ts";
@@ -57,7 +58,7 @@ import { maybeGenerateTitle } from "./title-gen.ts";
 import { resolveEndpoint } from "./endpoint-resolver.ts";
 import { loadCoreSettings } from "./core-settings.ts";
 import { toolkitsRegistry } from "../toolkits/registry.ts";
-import { workerPool } from "../toolkits/worker-pool.ts";
+import { type CallController, workerPool } from "../toolkits/worker-pool.ts";
 import { wsHub } from "../ws/hub.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
@@ -103,24 +104,26 @@ export class ChatService {
     this.active.set(frame.streamId, stream);
     void this.run(stream, frame).catch((err) => {
       log.error(
-        `stream ${frame.streamId} crashed: ${
-          err instanceof Error ? err.message : err
-        }`,
+        `stream ${frame.streamId} crashed: ${errMessage(err)}`,
       );
       this.send(clientId, {
         kind: "chat.error",
         streamId: frame.streamId,
         code: "internal_error",
-        message: err instanceof Error ? err.message : String(err),
+        message: errMessage(err),
       });
     }).finally(() => {
       this.active.delete(frame.streamId);
     });
   }
 
-  interrupt(streamId: string): void {
+  // Control verbs are scoped to the owning client. Stream/call ids are
+  // normally delivered only to their owner (via broadcastToClient), but enforce
+  // ownership here so one paired client can never interrupt, cancel, or answer
+  // an askUser prompt belonging to another client's in-flight chat/tool call.
+  interrupt(streamId: string, clientId: string): void {
     const s = this.active.get(streamId);
-    if (!s) return;
+    if (!s || s.clientId !== clientId) return;
     s.abort.abort();
   }
 
@@ -128,16 +131,17 @@ export class ChatService {
     callId: string,
     requestId: string,
     answers: Array<string | string[]>,
+    clientId: string,
   ): void {
-    const ctl = inFlightControllers.get(callId);
-    if (!ctl) return;
-    ctl.respondAskUser(requestId, answers);
+    const entry = inFlightControllers.get(callId);
+    if (!entry || entry.clientId !== clientId) return;
+    entry.ctl.respondAskUser(requestId, answers);
   }
 
-  forwardCancel(callId: string): void {
-    const ctl = inFlightControllers.get(callId);
-    if (!ctl) return;
-    ctl.cancel();
+  forwardCancel(callId: string, clientId: string): void {
+    const entry = inFlightControllers.get(callId);
+    if (!entry || entry.clientId !== clientId) return;
+    entry.ctl.cancel();
   }
 
   // --- internals --------------------------------------------------------
@@ -172,7 +176,7 @@ export class ChatService {
         } catch (err) {
           log.warn(
             `complexity classifier failed; defaulting to "default": ${
-              err instanceof Error ? err.message : err
+              errMessage(err)
             }`,
           );
         }
@@ -349,7 +353,7 @@ export class ChatService {
           kind: "chat.toolfilter",
           streamId: stream.streamId,
           status: "error",
-          errorMessage: err instanceof Error ? err.message : String(err),
+          errorMessage: errMessage(err),
         });
       }
     }
@@ -722,7 +726,10 @@ export class ChatService {
         }
       },
     );
-    inFlightControllers.set(pending.callId, ctl);
+    inFlightControllers.set(pending.callId, {
+      clientId: stream.clientId,
+      ctl,
+    });
     try {
       const result = await ctl.done;
       this.send(stream.clientId, {
@@ -742,7 +749,7 @@ export class ChatService {
         createdAtMs: Date.now(),
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errMessage(err);
       this.send(stream.clientId, {
         kind: "tool.error",
         callId: pending.callId,
@@ -782,9 +789,7 @@ export function __resetForTesting(): void {
 // the ws handlers (which forward tool.askuser_response and tool.cancel).
 const inFlightControllers = new Map<
   string,
-  ReturnType<typeof workerPool>["startCall"] extends (...a: never[]) => infer R
-    ? R
-    : never
+  { clientId: string; ctl: CallController }
 >();
 
 interface ResolvedPendingCall extends PendingToolCall {
@@ -916,9 +921,7 @@ async function readAttachmentAsDataUrl(
     return `data:${rec.mime ?? mime};base64,${btoa(bin)}`;
   } catch (err) {
     log.warn(
-      `image attachment load failed (${path}): ${
-        err instanceof Error ? err.message : err
-      }`,
+      `image attachment load failed (${path}): ${errMessage(err)}`,
     );
     return null;
   }
@@ -935,9 +938,7 @@ async function readAttachmentAsText(
     return await Deno.readTextFile(rec.absPath);
   } catch (err) {
     log.warn(
-      `document attachment load failed (${path}): ${
-        err instanceof Error ? err.message : err
-      }`,
+      `document attachment load failed (${path}): ${errMessage(err)}`,
     );
     return null;
   }
@@ -972,7 +973,7 @@ function listEnabledTools(): Tool[] {
 function classifyProviderError(
   err: unknown,
 ): { code: ErrorCode; message: string } {
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = errMessage(err);
   // The OpenAI SDK throws APIError with `status` + `code`; also surfaces
   // human-readable messages we can pattern-match. Try the structured
   // fields first, then fall back to message regex.

@@ -11,9 +11,10 @@ concurrency:
 
 jobs:
   # All Deno-driven checks (type-check, svelte-check, cargo check on Linux,
-  # format check, lint, clippy). Single job because deno task check already
-  # drives the full pipeline and we don't want a second worker to repeat the
-  # npm/JSR resolution.
+  # format check, lint, clippy, tests). The run steps delegate straight to the
+  # `deno task` targets in deno.json so CI can't drift from the canonical
+  # command lists. Single job because deno task check already drives the full
+  # pipeline and we don't want a second worker to repeat the npm/JSR resolution.
   deno:
     name: Deno (check + fmt + lint)
     runs-on: ubuntu-latest
@@ -49,6 +50,7 @@ jobs:
           workspaces: |
             packages/tomat-client/src/tauri
             packages/tomat-core-keychain
+            packages/tomat-core-updater
 
       # Cache Deno's module + npm cache between runs.
       - uses: actions/cache@v4
@@ -61,32 +63,18 @@ jobs:
             deno-${{ runner.os }}-
 
       - run: deno task check
-      - run: deno fmt --check
-      - run: deno run -A npm:oxfmt@0.51.0 --check packages/tomat-client/src/ui packages/tomat-client/vite.config.ts packages/tomat-client/svelte.config.js packages/tomat-client/uno.config.ts packages/tomat-website/src packages/tomat-website/astro.config.mjs
-      - run: cargo fmt --manifest-path packages/tomat-client/src/tauri/Cargo.toml --check
-      - run: cargo fmt --manifest-path packages/tomat-core-keychain/Cargo.toml --check
+      - run: deno task fmt:check
       - run: deno task lint
 
-      # In-source tests. E2E (WebdriverIO + tauri-driver under tests/e2e/) is
-      # intentionally not run in CI — see tests/e2e/README.md.
-      - name: Deno tests (core + shared + builtin-toolkit + core-updater)
-        run: |
-          deno test --allow-all --no-check --quiet \
-            packages/tomat-core \
-            packages/tomat-shared \
-            packages/tomat-core-updater \
-            packages/tomat-builtin-toolkit
-
-      - name: Vitest (client UI)
-        run: deno run -A scripts/test-ui.ts run
-
-      - run: cargo test --manifest-path packages/tomat-client/src/tauri/Cargo.toml --lib
-      - run: cargo test --manifest-path packages/tomat-core-keychain/Cargo.toml
+      # In-source tests via `deno task test` (deno + vitest one-shot + cargo).
+      # E2E (WebdriverIO + tauri-driver under tests/e2e/) is intentionally not
+      # run in CI — see tests/e2e/README.md.
+      - run: deno task test
 
   # Cross-platform Rust checks. Linux already runs inside `deno task check`
   # above; this matrix covers macOS + Windows so the Rust crates (the Tauri
-  # shell and the core-keychain helper) stay buildable on every supported host
-  # without the rest of the Deno pipeline.
+  # shell, the core-keychain helper, and the core-updater helper) stay
+  # buildable on every supported host without the rest of the Deno pipeline.
   rs:
     name: Cargo check (${{ matrix.os }})
     strategy:
@@ -106,9 +94,13 @@ jobs:
           workspaces: |
             packages/tomat-client/src/tauri
             packages/tomat-core-keychain
+            packages/tomat-core-updater
       - run: cargo clippy --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo check --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets
       - run: cargo test --manifest-path packages/tomat-client/src/tauri/Cargo.toml --lib
       - run: cargo clippy --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings
       - run: cargo check --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets
       - run: cargo test --manifest-path packages/tomat-core-keychain/Cargo.toml
+      - run: cargo clippy --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets -- -D warnings
+      - run: cargo check --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets
+      - run: cargo test --manifest-path packages/tomat-core-updater/Cargo.toml

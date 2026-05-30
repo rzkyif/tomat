@@ -4,6 +4,7 @@ import type OpenAI from "openai";
 import type { Message } from "@tomat/shared";
 import {
   contentToText,
+  errMessage,
   messageInputSchema,
   messagePatchSchemaByRole,
   type MessageRoleForPatch,
@@ -17,7 +18,7 @@ import { loadCoreSettings } from "../../services/core-settings.ts";
 import { resolveEndpoint } from "../../services/endpoint-resolver.ts";
 import { llmScheduler } from "../../services/llm-scheduler.ts";
 import { type LlmRequest } from "../../services/llm-provider.ts";
-import { getLogger } from "../../shared/log.ts";
+import { getLogger, scrubSecrets } from "../../shared/log.ts";
 
 const log = getLogger("http.sessions");
 
@@ -65,7 +66,7 @@ export function sessionsRoutes(): Hono {
         if (!(err instanceof Deno.errors.NotFound)) {
           log.warn(
             `session delete: failed to remove attachment ${p}: ${
-              err instanceof Error ? err.message : err
+              errMessage(err)
             }`,
           );
         }
@@ -272,7 +273,9 @@ export function sessionsRoutes(): Hono {
           controller.enqueue(encoder.encode(
             `data: ${
               JSON.stringify({
-                error: err instanceof Error ? err.message : String(err),
+                error: scrubSecrets(
+                  errMessage(err),
+                ),
               })
             }\n\n`,
           ));

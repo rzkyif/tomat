@@ -11,11 +11,12 @@ and a distribution website:
   Deno subprocesses), TTS/STT supervision, model + binary downloads, NPM-based
   toolkit installation, embedding-based tool relevance, multi-client auth via
   pairing codes, self-update.
-- **`@tomat/core-updater`** — tiny standalone Deno entry compiled to its own
+- **`@tomat/core-updater`** — tiny standalone Rust crate compiled to its own
   binary (`tomat-core-updater`) that ships alongside core. Invoked by core's
   self-updater flow: waits for core to exit, swaps the staged binary into place,
-  restarts core. Lives in its own package so the binary boundary is obvious from
-  the layout.
+  restarts core. A Rust crate (not a Deno entry) so the compiled binary is a few
+  hundred KB instead of the ~80 MB a `deno compile` produces. Lives in its own
+  package so the binary boundary is obvious from the layout.
 - **`@tomat/core-keychain`** — small Rust crate compiled to its own binary
   (`tomat-core-keychain`) that ships alongside core. Reads, writes, and deletes
   secret entries in the platform keychain (macOS Keychain, Linux libsecret,
@@ -56,9 +57,9 @@ through `npm:` specifiers from `deno task`.
   holds the self-update orchestrator (`self-updater.ts`) and boot-time rollback
   check (`rollback.ts`); the binary that actually performs the swap is built
   from the separate `@tomat/core-updater` package.
-- `packages/tomat-core-updater/src/main.ts` — single-file standalone updater
-  entry. Built to its own binary by `scripts/build-core.ts` and
-  `scripts/website/deploy.ts`.
+- `packages/tomat-core-updater/src/main.rs` — single-file standalone updater
+  crate. Built to its own binary by `scripts/build-core.ts` and
+  `scripts/release/core.ts`.
 - `packages/tomat-core-keychain/src/` — Rust crate for the OS-keychain helper.
   Built to its own binary by the same two scripts.
 - `packages/tomat-client/src/ui/` — Svelte 5 SPA. `lib/core/` is the HTTP+WS
@@ -71,42 +72,55 @@ through `npm:` specifiers from `deno task`.
 - `packages/tomat-builtin-toolkit/` — flat toolkit package (`tools.json`,
   `index.ts`, `src/`); the reference for the toolkit author API.
 - `packages/tomat-website/` — Astro site (`src/pages/`, `src/styles/`,
-  `public/`). Built by `scripts/website/deploy.ts`; staged release artifacts
-  (manifests, install scripts, schemas) land under `public/` at build time and
-  are gitignored.
+  `public/`). The landing page is the Worker's only payload now; release
+  artifacts (manifests, install scripts, schemas) all live on R2 at
+  `get.au.tomat.ing` and are written there by the `release:*` tasks. A small
+  `public/release-state.json` cursor is the only generated file under `public/`
+  (gitignored).
 - `scripts/` — `dev.ts`, `build-core.ts`, `build-client.ts`, `check.ts`,
-  `install/core.{sh,ps1}`, `website/{dev,deploy}.ts`.
+  `install/{core,client}.{sh,ps1}`, `website/{dev,build}.ts`,
+  `release/{main,core,client,install-scripts,schemas,website,lib}.ts`.
 
 ## Persistence Layout
 
-Everything lives under `~/.tomat/`:
+Everything lives under `~/.tomat/`. State is split by **install channel** so a
+`dev` or `beta` build never collides with a `stable` install: the channel is
+selected by the `TOMAT_CHANNEL` env var (`stable` default | `dev` | `beta`),
+resolved identically in core (`paths.ts`), client (`channel.rs`), and the
+install scripts. The one exception is `models/`, which is **shared** across
+channels at `~/.tomat/models` so multi-GB weights aren't re-downloaded per
+channel.
 
 ```
 ~/.tomat/
-├── core/                       # owned by tomat-core
-│   ├── settings.json           # sparse: only non-defaults
-│   ├── secrets.enc             # sealed with key in OS keychain
-│   ├── .admin-token            # chmod 600; mint pairing codes on local host
-│   ├── core.sqlite             # sessions, messages, attachments, toolkits, tools, grants, downloads, clients, pairing_codes
-│   ├── bin/                    # platform-neutral filenames (triple stripped)
-│   │   ├── tomat-core(.exe), tomat-core-updater(.exe), tomat-core-keychain(.exe)
-│   │   ├── llama-server(.exe), whisper-server(.exe), deno(.exe)
-│   │   └── lib/                # ggml/whisper shared libs for this host's triple
-│   ├── deno-cache/             # DENO_DIR for every spawned Deno subprocess
-│   ├── sessions/<id>/attachments/...
-│   ├── models/<hf-user>/<repo>/<file>
-│   ├── toolkits/<id>/          # flat layout; tools.json at folder root
-│   │   ├── tools.json, deno.json, deno.lock, package.json, .gitignore
-│   │   └── node_modules/       # populated by `deno install`, excluded from content hash
-│   ├── cache/binaries-manifest.json     # signed manifest cache
-│   ├── staging/                # self-update target dir
-│   └── logs/core.log           # rotated, 5×10 MB
-└── client/                     # owned by tomat-client
-    └── settings.json           # sparse: only non-defaults (UI prefs + paired-cores list)
+├── models/<hf-user>/<repo>/<file>  # SHARED across all channels (not per-channel)
+└── <channel>/                      # stable | dev | beta  (TOMAT_CHANNEL)
+    ├── core/                       # owned by tomat-core
+    │   ├── settings.json           # sparse: only non-defaults
+    │   ├── secrets.enc             # sealed with key in OS keychain
+    │   ├── .master-key             # only when keychain unavailable; chmod 600
+    │   ├── .admin-token            # chmod 600; mint pairing codes on local host
+    │   ├── core.sqlite             # sessions, messages, attachments, toolkits, tools, grants, downloads, clients, pairing_codes
+    │   ├── bin/                    # platform-neutral filenames (triple stripped)
+    │   │   ├── tomat-core(.exe), tomat-core-updater(.exe), tomat-core-keychain(.exe)
+    │   │   ├── llama-server(.exe), whisper-server(.exe), deno(.exe)
+    │   │   └── lib/                # ggml/whisper shared libs for this host's triple
+    │   ├── deno-cache/             # DENO_DIR for every spawned Deno subprocess
+    │   ├── sessions/<id>/attachments/...
+    │   ├── toolkits/<id>/          # flat layout; tools.json at folder root
+    │   │   ├── tools.json, deno.json, deno.lock, package.json, .gitignore
+    │   │   └── node_modules/       # populated by `deno install`, excluded from content hash
+    │   ├── cache/binaries-manifest.json     # signed manifest cache
+    │   ├── staging/                # self-update target dir
+    │   └── logs/core.log           # rotated, 5×10 MB
+    └── client/                     # owned by tomat-client
+        └── settings.json           # sparse: only non-defaults (UI prefs + paired-cores list)
 ```
 
-Pairing tokens (one per paired core) live in the OS keychain under the service
-`tomat-client` and account `core:<coreId>`.
+Keychain entries are channel-namespaced too: the core master key under service
+`au.tomat.core` (stable) / `au.tomat.core-dev` / `au.tomat.core-beta`, and
+pairing tokens (one per paired core) under `tomat-client` (stable) /
+`tomat-client-dev` / `tomat-client-beta`, account `core:<coreId>`.
 
 ## File Naming
 
@@ -128,7 +142,8 @@ component's name (`Toggle.test.ts` next to `Toggle.svelte`). Tests for plain
 Identifiers in code (variables, functions, types, setting-group `id` strings)
 follow TypeScript convention (`camelCase` / `PascalCase`) independent of
 filename casing. Never rename a setting `id` because the file was renamed: those
-strings are persisted in `~/.tomat/core/settings.json` and on the wire.
+strings are persisted in `~/.tomat/<channel>/core/settings.json` and on the
+wire.
 
 ## Before a Task
 
@@ -179,11 +194,12 @@ Tests live co-located with source as `*.test.ts`. E2E specs live under
 
 - `deno task test` — runs everything under `packages/**` (Deno + vitest +
   cargo).
-- `deno task test:deno` — Deno only (core + shared + builtin-toolkit + updater).
+- `deno task test:deno` — Deno only (core + shared + builtin-toolkit).
 - `deno task test:core` — just `tomat-core`.
 - `deno task test:shared` — just `tomat-shared`.
 - `deno task test:ui` — vitest against the Svelte UI.
-- `deno task test:rs` — cargo test for both Rust crates.
+- `deno task test:rs` — cargo test for the Rust crates (tauri shell,
+  core-keychain, core-updater).
 - `deno task test:e2e` — WebdriverIO; manual only.
 
 ### Agent workflow for scratch tests
@@ -269,35 +285,89 @@ For multi-step tasks, state a brief plan:
 
 ## Distribution
 
-Two hostnames, both Cloudflare-hosted:
+Two hostnames, both Cloudflare-hosted, strictly aligned with content type:
 
-- `au.tomat.ing` — Astro Worker (Static Assets). Serves `/`, `/manifests/*`,
-  `/install/*`, `/schemas/*`. Defined as `CDN_BASE_URL` in
-  `packages/tomat-core/src/config.ts`.
+- `au.tomat.ing` — Astro Worker (Static Assets). Serves the landing page
+  **only** (plus a tiny `/release-state.json` cursor used by `release:website`
+  for idempotency). Defined as `WEBSITE_BASE_URL` in
+  `packages/tomat-core/src/config.ts`. Not consumed by the core runtime.
 - `get.au.tomat.ing` — R2 public bucket (`tomat-releases`) attached as a custom
-  domain. Serves `/<version>/<triple>/<file>` for compiled core binaries (direct
-  fetch, no Worker in the path → free-tier). Defined as `RELEASES_BASE_URL` in
-  the same config.
+  domain. Serves every release artifact: `/install/*`, `/schemas/*`,
+  `/manifests/*`, and `/<version>/<triple>/<file>` (direct fetch, no Worker in
+  the path → free-tier). Defined as `STORAGE_BASE_URL` in the same config.
 
 **Trust root**: signed manifests use Ed25519. The private key lives in `.env` at
-the repo root (gitignored, auto-generated on first deploy); the public key is
+the repo root (gitignored, auto-generated on first run); the public key is
 written into `packages/tomat-core/data/signing-keys.json` (which IS committed —
 public keys are not secret) and imported into the runtime via a typed JSON
 import, so every compiled core trusts the matching signatures. One keypair signs
-both `core.json` (self-update) and `binaries.json` (helper binaries).
-`deno task website:deploy` is responsible for keeping `signing-keys.json` in
-sync with `.env`.
+both `core.json` (self-update) and `binaries.json` (helper binaries); a separate
+Tauri-format keypair signs `client.json` and the bundled installers. Every
+`release:core` / `release:client` run keeps `signing-keys.json` in sync with
+`.env`.
 
-**Deploy**: `deno task website:deploy` from the repo root runs the full pipeline
-— keypair seed → core+updater builds for every Deno-supported triple → signed
-`core.json` + signed `binaries.json` → Astro build → R2 upload →
-`wrangler
-deploy`. The helper-binary manifest (`binaries.json`) is composed from
+**Release tasks** (all idempotent — cheap probe first, work only when needed):
+
+- `deno task release` — umbrella: runs all five sub-tasks in sequence.
+- `deno task release:core` — `deno compile` core for every requested triple,
+  `cargo build` the updater + keychain helpers, hash workers, sign + upload
+  `core.json` + `binaries.json` + binaries to R2.
+- `deno task release:client` — host-only Tauri bundle build; merges the host
+  platform entry into the live `client.json` so cross-platform CI runs preserve
+  each other's bundles at the same version.
+- `deno task release:scripts` — syncs `scripts/install/*` to
+  `get.au.tomat.ing/install/*` (per-file content compare).
+- `deno task release:schemas` — syncs `tools-v1.json` to
+  `get.au.tomat.ing/schemas/`.
+- `deno task release:website` — source-hash probe against
+  `https://au.tomat.ing/release-state.json` → `astro build` → `wrangler deploy`
+  only when something changed.
+
+Every release task supports `--dry-run` (probe + build locally, skip uploads)
+and `--force` (skip the probe). `release:core` adds `--triples=<list>` and
+`--skip-build`.
+
+**Release channels (stable + beta).** `release`, `release:core`, and
+`release:client` take `--channel=stable|beta`; explicit `release:stable` /
+`release:beta` (+ `release:core:beta`, `release:client:beta`, `build:core:beta`,
+`build:client:beta`) tasks wrap them. A beta release is built so it can be
+**installed and run alongside stable**:
+
+- Our binaries get a channel suffix: `tomat-core-beta`,
+  `tomat-core-updater-beta`, `tomat-core-keychain-beta`. The client app is a
+  distinct bundle (`productName` `tomat-beta`, identifier `au.tomat.ing.beta`).
+  Stable stays bare. The suffix is `paths.ts:channelSuffix()` /
+  `channel.rs:channel_suffix_for()` — `""` for stable, `-beta` / `-dev`
+  otherwise; apply it via `channelBinName()` (TS) / `coreBinaryName()`.
+- Manifests + artifacts nest under a channel path segment: stable stays at
+  `manifests/{core,binaries,client}.json` + `/<version>/<triple>/…`; beta uses
+  `manifests/beta/…` + `/beta/<version>/<triple>/…` (`release/lib.ts`
+  `channelManifestDir` / `channelStoragePrefix`; runtime URLs from
+  `config.ts:coreManifestUrl()` / `binaryManifestUrl()` keyed off `channel()`).
+- Default ports are offset so both channels run as services at once: core 7800,
+  llama 7701, whisper 7702 for stable; `+10` for beta, `+20` for dev
+  (`paths.ts:corePort/llmPort/sttPort`; client `channel.rs:core_port()`).
+  launchd labels / systemd units / Windows tasks are channel-suffixed too.
+- The core binary is channel-agnostic at the byte level — it reads
+  `TOMAT_CHANNEL` at runtime (set by the install service + dev.ts). Only the
+  client bundle bakes its channel (`option_env!("TOMAT_CHANNEL")` via
+  `build-client.ts`, which also overrides productName/identifier/updater
+  endpoint with `tauri build --config`).
+- **Beta sidecars resolve the latest upstream at runtime.** Beta's signed
+  `binaries.json` carries a resolver (`{ resolver: { repo, assets } }`) instead
+  of pinned URLs; the core resolves the latest GitHub release at install/update
+  time (`binaries/upstream-resolver.ts`) and verifies against GitHub's published
+  sha256 digest. So upstream updates reach beta users without us re-releasing.
+  Trade-off: the concrete URL/hash isn't under our Ed25519 signature (only the
+  repo + patterns are) — trust shifts partly to GitHub + TLS for beta. Stable
+  stays pinned-at-release-time. The install scripts select a channel via the
+  `TOMAT_CHANNEL` env var or a `--channel <c>` / `--beta` argument.
+
+The helper-binary manifest (`binaries.json`) is composed from
 `packages/tomat-website/data/upstream-binaries.json`, a hand-maintained config
 of per-triple URL + sha256 entries for `llama-server`, `whisper-server`, and
 `deno`; the referenced `.tar.gz` files must already live in R2 (or any
 HTTPS-reachable origin) for installs to succeed. See
 `packages/tomat-website/README.md` for one-time setup. Use
-`deno task website:build` for a dry run (everything except the upload and worker
-deploy) and `deno task website:dev` for an Astro dev server on the landing page
-only.
+`deno task build:website` for a plain Astro build and `deno task dev:website`
+for an Astro dev server on the landing page only.

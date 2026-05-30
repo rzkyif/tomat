@@ -7,6 +7,7 @@
 // JSON record atomically.
 
 import { paths } from "../paths.ts";
+import { errMessage } from "@tomat/shared";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 
@@ -73,9 +74,7 @@ export async function patchCoreSettings(
       } catch (err) {
         // Listeners are fire-and-forget; surface log but don't block PATCH.
         log.error(
-          `settings listener error: ${
-            err instanceof Error ? err.message : err
-          }`,
+          `settings listener error: ${errMessage(err)}`,
         );
       }
     }

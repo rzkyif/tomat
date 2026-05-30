@@ -10,6 +10,7 @@ import {
   buildLlamaStartOptions,
   llamaStartArgsFromSettings,
 } from "../sidecars/llama.ts";
+import { errMessage } from "@tomat/shared";
 import {
   buildWhisperStartOptions,
   whisperStartArgsFromSettings,
@@ -115,7 +116,7 @@ async function applyLlama(settings: Record<string, unknown>): Promise<void> {
     // will re-apply once the model finishes.
     ensureKindModels("llm").catch((err) => {
       log.warn(
-        `llm model ensure failed: ${err instanceof Error ? err.message : err}`,
+        `llm model ensure failed: ${errMessage(err)}`,
       );
     });
     return;
@@ -139,7 +140,7 @@ async function applyWhisper(
     await sidecarManager().stop("whisper");
     ensureKindModels("stt").catch((err) => {
       log.warn(
-        `stt model ensure failed: ${err instanceof Error ? err.message : err}`,
+        `stt model ensure failed: ${errMessage(err)}`,
       );
     });
     return;
@@ -164,7 +165,7 @@ function anyOverlap(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
 function logErr(kind: string) {
   return (err: unknown) => {
     log.error(
-      `${kind} apply failed: ${err instanceof Error ? err.message : err}`,
+      `${kind} apply failed: ${errMessage(err)}`,
     );
   };
 }

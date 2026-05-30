@@ -1,4 +1,4 @@
-// Client-side settings JSON file at ~/.tomat/client/settings.json.
+// Client-side settings JSON file at ~/.tomat/<channel>/client/settings.json.
 // Sparse: only non-defaults are persisted. The frontend's settings schema
 // owns the field IDs and default values; this layer just reads/writes the
 // raw JSON.
@@ -48,7 +48,9 @@ pub fn write_settings_at(path: &Path, settings: Value) -> AppResult<()> {
 fn client_settings_path() -> AppResult<PathBuf> {
     let home =
         dirs::home_dir().ok_or_else(|| AppError::external("could not determine home directory"))?;
-    Ok(home.join(".tomat").join("client").join("settings.json"))
+    Ok(crate::channel::channel_root(&home)
+        .join("client")
+        .join("settings.json"))
 }
 
 #[cfg(test)]

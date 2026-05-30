@@ -8,6 +8,12 @@ import type { SidecarSnapshot } from "./types.ts";
 import { initLogger } from "../shared/log.ts";
 import { freePort } from "../../tests/helpers/free-port.ts";
 
+// Isolate core paths (incl. the logger's core.log) to a tempdir so this
+// integration test never writes into the developer's real ~/.tomat.
+Deno.env.set(
+  "TOMAT_CORE_HOME",
+  await Deno.makeTempDir({ prefix: "tomat-sidecar-test-" }),
+);
 await initLogger();
 
 const STUB_PATH = new URL(

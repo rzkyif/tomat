@@ -2,7 +2,7 @@
 // requested host triple:
 //
 //   tomat-core           (Deno compile) — the long-running service
-//   tomat-core-updater   (Deno compile) — performs the swap during self-update
+//   tomat-core-updater   (Cargo build)  — performs the swap during self-update
 //   tomat-core-keychain  (Cargo build)  — wraps the platform keychain
 //
 // Default target is the current host. Pass `--target=<triple>` to override.
@@ -15,12 +15,24 @@ import { parseArgs } from "jsr:@std/cli@^1.0.0/parse-args";
 const ROOT = new URL("..", import.meta.url).pathname;
 
 const args = parseArgs(Deno.args, {
-  string: ["target", "out"],
-  default: { out: "dist" },
+  string: ["target", "out", "channel"],
+  default: { out: "dist", channel: "stable" },
 });
 
 const target = args.target ?? Deno.build.target;
 const outDir = `${ROOT}${args.out}/${target}`;
+
+// Channel suffix on OUR binary names so a beta build (tomat-core-beta) can be
+// installed alongside stable (tomat-core). Stable stays bare. Mirrors
+// paths.ts channelSuffix() + channel.rs channel_suffix().
+const channel = args.channel;
+if (!["stable", "dev", "beta"].includes(channel)) {
+  console.error(
+    `invalid --channel: ${channel} (expected stable, dev, or beta)`,
+  );
+  Deno.exit(1);
+}
+const suffix = channel === "stable" ? "" : `-${channel}`;
 
 await Deno.mkdir(outDir, { recursive: true });
 
@@ -50,8 +62,14 @@ async function denoCompile(name: string, entry: string): Promise<void> {
   }
 }
 
-async function cargoBuild(crateDir: string, binName: string): Promise<void> {
-  console.log(`cargo build ${binName} (release) -> ${outDir}/${binName}${exe}`);
+async function cargoBuild(
+  crateDir: string,
+  builtName: string,
+  outName: string,
+): Promise<void> {
+  console.log(
+    `cargo build ${builtName} (release) -> ${outDir}/${outName}${exe}`,
+  );
   const cargoArgs = [
     "build",
     "--release",
@@ -67,20 +85,28 @@ async function cargoBuild(crateDir: string, binName: string): Promise<void> {
   });
   const { code } = await cmd.output();
   if (code !== 0) {
-    console.error(`cargo build ${binName} failed (exit ${code})`);
+    console.error(`cargo build ${builtName} failed (exit ${code})`);
     Deno.exit(code);
   }
   const builtPath =
-    `${ROOT}${crateDir}/target/${target}/release/${binName}${exe}`;
-  const dstPath = `${outDir}/${binName}${exe}`;
+    `${ROOT}${crateDir}/target/${target}/release/${builtName}${exe}`;
+  const dstPath = `${outDir}/${outName}${exe}`;
   await Deno.copyFile(builtPath, dstPath);
 }
 
-await denoCompile("tomat-core", `${ROOT}packages/tomat-core/src/main.ts`);
 await denoCompile(
-  "tomat-core-updater",
-  `${ROOT}packages/tomat-core-updater/src/main.ts`,
+  `tomat-core${suffix}`,
+  `${ROOT}packages/tomat-core/src/main.ts`,
 );
-await cargoBuild("packages/tomat-core-keychain", "tomat-core-keychain");
+await cargoBuild(
+  "packages/tomat-core-updater",
+  "tomat-core-updater",
+  `tomat-core-updater${suffix}`,
+);
+await cargoBuild(
+  "packages/tomat-core-keychain",
+  "tomat-core-keychain",
+  `tomat-core-keychain${suffix}`,
+);
 
 console.log(`done. artifacts at ${outDir}`);

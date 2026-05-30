@@ -30,7 +30,8 @@
 //
 // Encryption: AES-GCM-256. Stored bytes are 12-byte nonce ‖ ciphertext.
 
-import { paths } from "../paths.ts";
+import { channelKeychainSuffix, paths } from "../paths.ts";
+import { errMessage } from "@tomat/shared";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import { keychainGet, keychainSet } from "./keychain.ts";
@@ -39,7 +40,12 @@ const log = getLogger("secrets");
 
 const NONCE_LEN = 12;
 const KEY_LEN = 32;
-const KEYCHAIN_SERVICE = "au.tomat.core";
+// Namespaced per install channel so a dev/beta core can't read or clobber a
+// stable core's master key. Stable keeps the bare "au.tomat.core" service so
+// existing keychain entries keep resolving. (In dev the keychain helper
+// binary is usually absent and the .master-key file fallback — already under
+// the channel-isolated paths().root — is used instead.)
+const KEYCHAIN_SERVICE = `au.tomat.core${channelKeychainSuffix()}`;
 const KEYCHAIN_ACCOUNT = "master-key";
 
 let cachedKey: CryptoKey | null = null;
@@ -70,7 +76,7 @@ async function readMasterKeyFile(): Promise<Uint8Array | null> {
     if (err instanceof AppError) throw err;
     throw new AppError(
       "internal_error",
-      `failed to read .master-key: ${err instanceof Error ? err.message : err}`,
+      `failed to read .master-key: ${errMessage(err)}`,
     );
   }
 }
@@ -164,7 +170,7 @@ async function readEncrypted(): Promise<Record<string, string>> {
     if (err instanceof Deno.errors.NotFound) return {};
     throw new AppError(
       "internal_error",
-      `failed to read secrets.enc: ${err instanceof Error ? err.message : err}`,
+      `failed to read secrets.enc: ${errMessage(err)}`,
     );
   }
   if (blob.byteLength <= NONCE_LEN) return {};
@@ -189,7 +195,7 @@ async function readEncrypted(): Promise<Record<string, string>> {
     throw new AppError(
       "internal_error",
       `secrets.enc decryption failed (master key mismatch?): ${
-        err instanceof Error ? err.message : err
+        errMessage(err)
       }`,
     );
   }

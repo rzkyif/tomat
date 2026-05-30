@@ -67,7 +67,24 @@ class SettingsState {
   // and the schema-defaults loader builds a heterogeneous record.
   currentSettings = $state<Record<string, any>>(getDefaultSettings());
 
+  // Names of secret-typed settings (API keys) the core reports as configured.
+  // Core never returns secret VALUES, so the field stays empty in the UI; this
+  // set lets password fields render a "saved" placeholder. Loaded from
+  // GET /settings/secrets.
+  configuredSecrets = $state<Set<string>>(new Set());
+
+  // Secret keys the user actually edited this session. Only these are written
+  // on save — a loaded-but-untouched secret field is empty (we never receive
+  // the value), so without this guard an unrelated save would delete the
+  // configured vault entry.
+  private dirtySecrets = new Set<string>();
+
   private listeners = new Set<SettingChangeListener>();
+
+  /** True if the core reports a value stored for this secret-typed setting. */
+  isSecretConfigured(key: string): boolean {
+    return this.configuredSecrets.has(key);
+  }
 
   // Coalesced flush state: `pendingPrev` records the *first* observed prev
   // value per key across a debounce window so a failed flush can roll the
@@ -118,6 +135,21 @@ class SettingsState {
       console.warn("Failed to load core settings, falling back:", e);
     }
     this.currentSettings = merged;
+    // A fresh load discards any in-memory secret edits.
+    this.dirtySecrets.clear();
+    // Learn which secret-typed settings have a value stored in the vault so
+    // password fields can show a "saved" placeholder (the value itself is
+    // never returned).
+    try {
+      if (cores().currentEntry()) {
+        const names = await cores().api().settings.listSecrets();
+        this.configuredSecrets = new Set(names);
+      } else {
+        this.configuredSecrets = new Set();
+      }
+    } catch (e) {
+      console.warn("Failed to load configured secrets:", e);
+    }
 
     // Push the persisted shortcut so Rust overrides the startup default.
     // Boot must not abort if the shortcut is taken; log and let Settings fix.
@@ -145,6 +177,10 @@ class SettingsState {
       warnIfUnknownKey(key);
       prevValues[key] = this.currentSettings[key];
       this.currentSettings[key] = value;
+      // Record explicit user edits to secret fields so save() writes only the
+      // ones actually touched (an untouched secret field is empty because its
+      // value is never returned, and must not clobber the vault entry).
+      if (SECRET_KEY_SET.has(key)) this.dirtySecrets.add(key);
       if (key === "shortcuts.toggleWindow") toggleShortcutChanged = true;
       if (
         (key === "shortcuts.attachFile" ||
@@ -254,16 +290,20 @@ class SettingsState {
     const coreDelta: Record<string, unknown> = {};
     const secrets: Record<string, string> = {};
     for (const [key, value] of Object.entries(current)) {
-      const isSecret = SECRET_KEY_SET.has(key);
-      if (isSecret) {
-        // Always include — empty string means "clear the vault entry".
-        secrets[key] = typeof value === "string" ? value : "";
-        continue;
-      }
+      // Secrets are handled separately below: only fields the user actually
+      // edited this session are written, so an unrelated save can't wipe a
+      // configured (but empty-in-UI) vault entry.
+      if (SECRET_KEY_SET.has(key)) continue;
       if (Object.is(value, defaults[key])) continue;
       const dest = destinationFor(key);
       if (dest === "core") coreDelta[key] = value;
       else clientDelta[key] = value;
+    }
+    // Touched secrets only: a non-empty value sets the vault entry; an emptied
+    // one clears it (the user explicitly deleted it).
+    for (const key of this.dirtySecrets) {
+      const value = current[key];
+      secrets[key] = typeof value === "string" ? value : "";
     }
 
     // Try every destination; collect errors so the caller can roll back
@@ -284,15 +324,26 @@ class SettingsState {
         console.warn("Failed to save core settings:", e);
         errors.push(e);
       }
+      const nextConfigured = new Set(this.configuredSecrets);
+      const persisted: string[] = [];
       for (const [name, value] of Object.entries(secrets)) {
         try {
-          if (value === "") await api.deleteSecret(name);
-          else await api.setSecret(name, value);
+          if (value === "") {
+            await api.deleteSecret(name);
+            nextConfigured.delete(name);
+          } else {
+            await api.setSecret(name, value);
+            nextConfigured.add(name);
+          }
+          persisted.push(name);
         } catch (e) {
           console.warn(`Failed to update secret "${name}":`, e);
           errors.push(e);
         }
       }
+      // Reassign for Svelte reactivity, and forget the edits we committed.
+      this.configuredSecrets = nextConfigured;
+      for (const name of persisted) this.dirtySecrets.delete(name);
     }
     if (errors.length > 0) {
       throw new AggregateError(errors, "settings save failed");

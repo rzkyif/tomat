@@ -1,11 +1,54 @@
-// CoreClient surface that can be exercised without a real network.
-// Backoff math + reconnect orchestration is timer-heavy; we cover the
-// pure observable hooks (ApiError + connectionState + frame dispatch via
-// a stub WebSocket).
+// CoreClient surface that can be exercised without a real network. HTTP goes
+// through platform().net.fetch and WebSocket through platform().net
+// .connectWebSocket, so we install a fake Platform and drive those.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, CoreClient } from "./client";
+import {
+  type NetRequest,
+  type NetResponse,
+  type NetSocket,
+  type Platform,
+  setPlatform,
+} from "../platform/index";
 import type { ServerToClientFrame } from "@tomat/shared";
+
+const ENDPOINT = { baseUrl: "https://core", token: "T", tlsPin: "PIN" };
+
+function jsonRes(status: number, obj: unknown): NetResponse {
+  return {
+    status,
+    headers: { "content-type": "application/json" },
+    body: new TextEncoder().encode(JSON.stringify(obj)),
+  };
+}
+
+// A controllable NetSocket; tests fire its lifecycle callbacks by hand.
+class FakeNetSocket implements NetSocket {
+  opened?: () => void;
+  messaged?: (d: string) => void;
+  closed?: () => void;
+  errored?: () => void;
+  sent: string[] = [];
+  send(d: string): void {
+    this.sent.push(d);
+  }
+  close(): void {}
+  onOpen(cb: () => void): void {
+    this.opened = cb;
+  }
+  onMessage(cb: (d: string) => void): void {
+    this.messaged = cb;
+  }
+  onClose(cb: () => void): void {
+    this.closed = cb;
+  }
+  onError(cb: () => void): void {
+    this.errored = cb;
+  }
+}
+
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 describe("ApiError", () => {
   it("captures status + code + message from the error body", () => {
@@ -30,39 +73,32 @@ describe("ApiError", () => {
 });
 
 describe("CoreClient HTTP", () => {
+  let netFetch: ReturnType<typeof vi.fn>;
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    netFetch = vi.fn();
+    setPlatform({ net: { fetch: netFetch, connectWebSocket: vi.fn() } } as unknown as Platform);
   });
   afterEach(() => {
-    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
-  it("sends bearer header on non-public calls", async () => {
-    const fetchMock = vi.mocked(fetch);
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ ok: 1 }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    const c = new CoreClient({ baseUrl: "http://core", token: "T" });
+  it("sends bearer header + pin on non-public calls", async () => {
+    netFetch.mockResolvedValueOnce(jsonRes(200, { ok: 1 }));
+    const c = new CoreClient(ENDPOINT);
     const out = await c.get<{ ok: number }>("/api/v1/x");
     expect(out).toEqual({ ok: 1 });
 
-    const [, init] = fetchMock.mock.calls[0];
-    expect((init as RequestInit | undefined)?.headers as Record<string, string>).toMatchObject({
-      Authorization: "Bearer T",
-    });
+    const req = netFetch.mock.calls[0][0] as NetRequest;
+    expect(req.url).toBe("https://core/api/v1/x");
+    expect(req.headers).toMatchObject({ Authorization: "Bearer T" });
+    expect(req.pin).toBe("PIN");
   });
 
   it("translates non-2xx JSON error body into ApiError", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ error: { code: "validation_error", message: "bad" } }), {
-        status: 400,
-        headers: { "content-type": "application/json" },
-      }),
+    netFetch.mockResolvedValueOnce(
+      jsonRes(400, { error: { code: "validation_error", message: "bad" } }),
     );
-    const c = new CoreClient({ baseUrl: "http://core", token: "T" });
+    const c = new CoreClient(ENDPOINT);
     try {
       await c.get("/api/v1/x");
       throw new Error("expected throw");
@@ -74,132 +110,78 @@ describe("CoreClient HTTP", () => {
   });
 
   it("returns undefined for 204 responses", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
-    const c = new CoreClient({ baseUrl: "http://core", token: "T" });
+    netFetch.mockResolvedValueOnce({ status: 204, headers: {}, body: new Uint8Array() });
+    const c = new CoreClient(ENDPOINT);
     const out = await c.del("/api/v1/x");
     expect(out).toBeUndefined();
   });
 });
 
-// --- WebSocket stub harness -------------------------------------------------
-
-class FakeWebSocket {
-  static OPEN = 1;
-  static CLOSED = 3;
-  readyState = 0;
-  url: string;
-  onopen: ((e: Event) => void) | null = null;
-  onmessage: ((e: MessageEvent) => void) | null = null;
-  onclose: ((e: CloseEvent) => void) | null = null;
-  onerror: ((e: Event) => void) | null = null;
-  // Manual event firing in tests.
-  private listeners = new Map<string, Set<(e: Event) => void>>();
-  constructor(url: string) {
-    this.url = url;
-  }
-  addEventListener(kind: string, fn: (e: Event) => void): void {
-    if (!this.listeners.has(kind)) this.listeners.set(kind, new Set());
-    this.listeners.get(kind)!.add(fn);
-  }
-  removeEventListener(kind: string, fn: (e: Event) => void): void {
-    this.listeners.get(kind)?.delete(fn);
-  }
-  fire(kind: string, ev: Partial<Event> = {}): void {
-    for (const l of this.listeners.get(kind) ?? []) {
-      l(ev as Event);
-    }
-  }
-  send(_data: string): void {}
-  close(): void {
-    this.readyState = FakeWebSocket.CLOSED;
-    this.fire("close", { code: 1000 } as unknown as Event);
-  }
-}
-
 describe("CoreClient WebSocket dispatch", () => {
-  let originalWs: typeof WebSocket;
+  let last: FakeNetSocket | null = null;
   beforeEach(() => {
-    originalWs = globalThis.WebSocket;
-    // The harness's last-constructed instance is captured here so the test
-    // can fire fake events at it.
-    let last: FakeWebSocket | null = null;
-    (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = new Proxy(
-      FakeWebSocket as unknown as typeof WebSocket,
-      {
-        construct(_t, args) {
-          last = new FakeWebSocket(args[0] as string);
-          return last as unknown as WebSocket;
+    last = null;
+    setPlatform({
+      net: {
+        fetch: vi.fn(),
+        connectWebSocket: (_url: string) => {
+          last = new FakeNetSocket();
+          return Promise.resolve(last);
         },
       },
-    );
-    (globalThis as unknown as { __lastFakeWs: () => FakeWebSocket | null }).__lastFakeWs = () =>
-      last;
+    } as unknown as Platform);
   });
   afterEach(() => {
-    (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = originalWs;
+    vi.restoreAllMocks();
   });
 
-  function getLast(): FakeWebSocket {
-    const f = (
-      globalThis as unknown as { __lastFakeWs: () => FakeWebSocket | null }
-    ).__lastFakeWs();
-    if (!f) throw new Error("no WebSocket constructed yet");
-    return f;
+  function getLast(): FakeNetSocket {
+    if (!last) throw new Error("no socket constructed yet");
+    return last;
   }
 
-  it("subscribe() lazily opens a WebSocket and dispatches received frames", () => {
-    const c = new CoreClient({ baseUrl: "http://core", token: "T" });
+  it("subscribe() lazily opens a socket and dispatches received frames", async () => {
+    const c = new CoreClient(ENDPOINT);
     const received: ServerToClientFrame[] = [];
     c.subscribe((f) => received.push(f));
+    await flush();
     const ws = getLast();
-    expect(ws.url.startsWith("ws://core")).toBe(true);
-
-    // Simulate a chat.chunk frame coming over the wire. (The Zod
-    // discriminated union in serverToClientFrameSchema rejects unknown
-    // `kind` values, so the test has to use a real one.)
-    ws.fire("open");
+    ws.opened?.();
     const frame = { kind: "chat.chunk", streamId: "s1", contentDelta: "hi" };
-    ws.fire("message", { data: JSON.stringify(frame) } as unknown as Event);
-
+    ws.messaged?.(JSON.stringify(frame));
     expect(received).toEqual([frame]);
   });
 
-  it("subscribe() returns an unsubscribe that stops dispatch", () => {
-    const c = new CoreClient({ baseUrl: "http://core", token: "T" });
+  it("subscribe() returns an unsubscribe that stops dispatch", async () => {
+    const c = new CoreClient(ENDPOINT);
     const received: ServerToClientFrame[] = [];
     const unsubscribe = c.subscribe((f) => received.push(f));
+    await flush();
     const ws = getLast();
-    ws.fire("open");
+    ws.opened?.();
     unsubscribe();
-    ws.fire("message", {
-      data: JSON.stringify({ kind: "chat.chunk", streamId: "s1", contentDelta: "x" }),
-    } as unknown as Event);
+    ws.messaged?.(JSON.stringify({ kind: "chat.chunk", streamId: "s1", contentDelta: "x" }));
     expect(received).toEqual([]);
   });
 
   it("onConnectionState fires 'connected' once the socket opens", async () => {
-    const c = new CoreClient({ baseUrl: "http://core", token: "T" });
+    const c = new CoreClient(ENDPOINT);
     const states: string[] = [];
     c.onConnectionState((s) => states.push(s));
     c.subscribe(() => {});
-    const ws = getLast();
-    ws.fire("open");
-    // Drain microtasks so onConnectionState's queued initial callback runs.
-    await Promise.resolve();
-    // First state (queued microtask): the snapshot at register time.
-    // Then "connecting" (set immediately by connectWs), then "connected".
+    await flush();
+    getLast().opened?.();
     expect(states[states.length - 1]).toBe("connected");
   });
 
-  it("pong frames are dropped and not forwarded to listeners", () => {
-    const c = new CoreClient({ baseUrl: "http://core", token: "T" });
+  it("pong frames are dropped and not forwarded to listeners", async () => {
+    const c = new CoreClient(ENDPOINT);
     const received: ServerToClientFrame[] = [];
     c.subscribe((f) => received.push(f));
+    await flush();
     const ws = getLast();
-    ws.fire("open");
-    ws.fire("message", {
-      data: JSON.stringify({ kind: "pong" }),
-    } as unknown as Event);
+    ws.opened?.();
+    ws.messaged?.(JSON.stringify({ kind: "pong" }));
     expect(received).toEqual([]);
   });
 });

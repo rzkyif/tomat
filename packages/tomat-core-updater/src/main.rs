@@ -1,0 +1,713 @@
+//! tomat-core-updater: tiny standalone helper compiled to its own binary,
+//! separate from tomat-core. When invoked by core's self-updater flow it:
+//!   1. Waits 2s for the parent core process to exit.
+//!   2. Atomically renames `--staged` over `--current`. On Windows, the
+//!      currently-running .exe can't be replaced directly, so it renames the
+//!      old .exe to `<name>.exe.old` first; that .old is deleted on the next
+//!      core boot.
+//!   3. Spawns the new core binary with `--restart-args` (forwarded back as
+//!      the new process's argv) detached (stdin/stdout/stderr null), then exits.
+//!
+//! Usage:
+//!   tomat-core-updater --staged <path> --current <path> [--restart-args <json>]
+//!
+//! Exit codes:
+//!   0  success (swap committed + new core spawned)
+//!   2  bad arguments (missing --staged or --current)
+//!   3  swap failed at the Windows "move current aside" stage
+//!   4  swap failed at the install-rename stage
+//!   5  spawn of the new core failed (swap reverted, or revert also failed)
+//!
+//! Logging: appends `{ISO8601_UTC} {LEVEL} {msg}\n` to a per-channel log file
+//! and mirrors WARN/ERROR to stderr. Path resolution order:
+//!   1. env TOMAT_CORE_HOME -> {TOMAT_CORE_HOME}/logs/updater.log
+//!   2. derived from --current (binary at <core>/bin/<name>) ->
+//!      <core>/logs/updater.log  (two dirs up from the binary, then /logs)
+//!   3. env HOME or USERPROFILE -> {home}/.tomat/core/logs/updater.log
+//!   4. none -> skip file logging (stderr-only for warn/error)
+
+use std::ffi::OsString;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode, Stdio};
+use std::time::Duration;
+
+use time::format_description::well_known::iso8601::{
+    Config, EncodedConfig, Iso8601, TimePrecision,
+};
+use time::OffsetDateTime;
+
+// `new Date().toISOString()` == `YYYY-MM-DDTHH:MM:SS.sssZ` (UTC, 3 fractional
+// digits, literal Z). time's Iso8601 formatter at 3 decimal places matches it.
+// EncodedConfig is built in a const fn chain, so no `macros` feature is needed.
+const TS_CONFIG: EncodedConfig = Config::DEFAULT
+    .set_time_precision(TimePrecision::Second {
+        decimal_digits: std::num::NonZeroU8::new(3),
+    })
+    .encode();
+
+/// Render the current UTC instant as `YYYY-MM-DDTHH:MM:SS.sssZ`. Falls back to
+/// an empty string if formatting somehow fails (it cannot for a valid
+/// OffsetDateTime, but we stay panic-free for the `panic = "abort"` profile).
+fn now_iso8601() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Iso8601::<TS_CONFIG>)
+        .unwrap_or_default()
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Args {
+    pub staged: String,
+    pub current: String,
+    pub restart_args: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ArgsError {
+    MissingRequired,
+}
+
+/// Pure arg parser, mirroring the TS `parseUpdaterArgs`. Accepts the flags in
+/// any order; `--restart-args` defaults to "[]". Returns an error when either
+/// `--staged` or `--current` is absent (or empty — the TS guard is
+/// `if (!staged || !current)` where "" is falsy). `argv` excludes argv[0],
+/// matching Deno.args / the TS test inputs.
+pub fn parse_updater_args(argv: &[String]) -> Result<Args, ArgsError> {
+    let mut staged: Option<String> = None;
+    let mut current: Option<String> = None;
+    let mut restart_args: Option<String> = None;
+
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--staged" => {
+                if let Some(v) = argv.get(i + 1) {
+                    staged = Some(v.clone());
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+            }
+            "--current" => {
+                if let Some(v) = argv.get(i + 1) {
+                    current = Some(v.clone());
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+            }
+            "--restart-args" => {
+                if let Some(v) = argv.get(i + 1) {
+                    restart_args = Some(v.clone());
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+
+    match (staged, current) {
+        (Some(s), Some(c)) if !s.is_empty() && !c.is_empty() => Ok(Args {
+            staged: s,
+            current: c,
+            restart_args: restart_args.unwrap_or_else(|| "[]".to_string()),
+        }),
+        _ => Err(ArgsError::MissingRequired),
+    }
+}
+
+/// Outcome of `perform_swap`, mirroring the TS `SwapResult` union. The error
+/// stages map to process exit codes (aside -> 3, rename -> 4).
+#[derive(Debug)]
+pub enum SwapResult {
+    Ok,
+    /// Windows: failed to move the running binary aside (`current` ->
+    /// `current.old`). Nothing was changed on disk.
+    AsideFailed(std::io::Error),
+    /// Failed to install the staged binary (`staged` -> `current`). On Windows
+    /// the aside was already reverted before returning.
+    RenameFailed(std::io::Error),
+}
+
+/// Append `.old` to a path at the byte level (NOT via extension replacement),
+/// so a Windows `tomat-core.exe` correctly becomes `tomat-core.exe.old` —
+/// matching what core's boot-time rollback (`rollback.ts`) looks for.
+fn old_path(current: &Path) -> PathBuf {
+    let mut s: OsString = current.as_os_str().to_os_string();
+    s.push(".old");
+    PathBuf::from(s)
+}
+
+/// Move `staged` over `current`. `is_windows` is passed explicitly (not derived
+/// from the host) so tests exercise both branches on any platform — same design
+/// as the TS `performSwap(staged, current, isWindows)`.
+///
+/// Unix: a single `rename` is atomic and overwrites in place; then chmod 0o755
+/// (best-effort, unix-only API).
+///
+/// Windows: the running .exe can't be deleted but can be renamed, so move it
+/// aside first; if the follow-on install rename fails, revert the aside so the
+/// supervisor still finds the previous working binary on relaunch.
+pub fn perform_swap(staged: &Path, current: &Path, is_windows: bool) -> SwapResult {
+    if is_windows {
+        let old = old_path(current);
+        // Remove a stale `.old` from a previous swap; ignore any error.
+        let _ = std::fs::remove_file(&old);
+        if let Err(e) = std::fs::rename(current, &old) {
+            return SwapResult::AsideFailed(e);
+        }
+        if let Err(e) = std::fs::rename(staged, current) {
+            // Install rename failed after we'd moved current aside. Revert so
+            // the supervisor finds the previous binary at `current`. The caller
+            // logs and exits; manual recovery is from `.old` if this also fails.
+            let _ = std::fs::rename(&old, current);
+            return SwapResult::RenameFailed(e);
+        }
+        return SwapResult::Ok;
+    }
+
+    if let Err(e) = std::fs::rename(staged, current) {
+        return SwapResult::RenameFailed(e);
+    }
+    set_executable(current);
+    SwapResult::Ok
+}
+
+/// chmod 0o755 on `current`, best-effort. The unix permission API is gated; on
+/// non-unix hosts (where the unix branch only runs under test) this is a no-op,
+/// matching the TS which only ever chmods on the real Unix path.
+#[cfg(unix)]
+fn set_executable(current: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(current, std::fs::Permissions::from_mode(0o755));
+}
+
+#[cfg(not(unix))]
+fn set_executable(_current: &Path) {}
+
+/// Environment values the log resolver depends on, injected so path resolution
+/// is unit-testable without mutating the real process environment.
+#[derive(Default, Clone)]
+pub struct LogEnv {
+    pub tomat_core_home: Option<String>,
+    pub home: Option<String>,
+    pub user_profile: Option<String>,
+}
+
+impl LogEnv {
+    fn from_process() -> Self {
+        // Treat empty strings as absent to mirror the TS `length > 0` checks.
+        fn non_empty(key: &str) -> Option<String> {
+            std::env::var(key).ok().filter(|v| !v.is_empty())
+        }
+        LogEnv {
+            tomat_core_home: non_empty("TOMAT_CORE_HOME"),
+            home: non_empty("HOME"),
+            user_profile: non_empty("USERPROFILE"),
+        }
+    }
+}
+
+/// Resolve where to append log lines, in priority order:
+///   1. TOMAT_CORE_HOME/logs/updater.log
+///   2. <current>/../../logs/updater.log  (binary lives at <core>/bin/<name>)
+///   3. {HOME|USERPROFILE}/.tomat/core/logs/updater.log
+///   4. None -> stderr-only
+///
+/// `current` is the `--current` path (the binary being swapped). Pure: takes
+/// the env snapshot so tests pin each branch deterministically.
+pub fn resolve_log_path(current: &Path, env: &LogEnv) -> Option<PathBuf> {
+    if let Some(home) = env.tomat_core_home.as_deref().filter(|v| !v.is_empty()) {
+        return Some(Path::new(home).join("logs").join("updater.log"));
+    }
+    // Derived-from-current: <core>/bin/<name> -> two dirs up is <core>.
+    if let Some(bin_dir) = current.parent() {
+        if let Some(core_dir) = bin_dir.parent() {
+            return Some(core_dir.join("logs").join("updater.log"));
+        }
+    }
+    let home = env
+        .home
+        .as_deref()
+        .filter(|v| !v.is_empty())
+        .or_else(|| env.user_profile.as_deref().filter(|v| !v.is_empty()))?;
+    Some(
+        Path::new(home)
+            .join(".tomat")
+            .join("core")
+            .join("logs")
+            .join("updater.log"),
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    Info,
+    Warn,
+    Error,
+}
+
+impl Level {
+    fn as_str(self) -> &'static str {
+        match self {
+            Level::Info => "INFO",
+            Level::Warn => "WARN",
+            Level::Error => "ERROR",
+        }
+    }
+}
+
+/// Holds the resolved log path (computed once from `--current` + env) and lazily
+/// opens the file on each write, mirroring the TS append logger. Append failures
+/// are silently dropped (disk full, file gone); stderr is the fallback for
+/// warn/error.
+struct Logger {
+    path: Option<PathBuf>,
+}
+
+impl Logger {
+    fn new(current: &Path) -> Self {
+        Logger {
+            path: resolve_log_path(current, &LogEnv::from_process()),
+        }
+    }
+
+    fn log(&self, level: Level, msg: &str) {
+        let line = format!("{} {} {}\n", now_iso8601(), level.as_str(), msg);
+        if let Some(path) = &self.path {
+            // Create the logs dir recursively, then append. Drop any error.
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
+                let _ = f.write_all(line.as_bytes());
+            }
+        }
+        if level == Level::Error || level == Level::Warn {
+            // Mirror to stderr without the trailing newline (eprintln adds one),
+            // matching the TS `console.error(line.trimEnd())`.
+            eprintln!("{}", line.trim_end());
+        }
+    }
+}
+
+/// Parse `--restart-args` as a JSON array of strings. Any parse error (or a
+/// non-array / non-string-element shape) falls back to an empty Vec, mirroring
+/// the TS `try { JSON.parse } catch { [] }`. serde_json honours JSON string
+/// escapes (\", \n, \uXXXX, ...).
+fn parse_restart_args(raw: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
+}
+
+/// Spawn `current` with `args`, fully detached (all stdio null). std's
+/// `Command::spawn` does not wait for or reap the child, and does not kill it
+/// when this process exits, so dropping the returned `Child` detaches it on both
+/// unix and Windows — equivalent to Deno's `proc.spawn()` with null stdio.
+fn spawn_new_core(current: &Path, args: &[String]) -> std::io::Result<()> {
+    Command::new(current)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_child| ())
+}
+
+/// Revert the swap after a spawn failure. Unix: rename current back to staged.
+/// Windows: remove current, then rename `<current>.old` back to current.
+fn revert_swap(staged: &Path, current: &Path, is_windows: bool) -> std::io::Result<()> {
+    if is_windows {
+        let old = old_path(current);
+        let _ = std::fs::remove_file(current); // .catch(() => {}) in TS
+        std::fs::rename(&old, current)
+    } else {
+        std::fs::rename(current, staged)
+    }
+}
+
+fn usage() {
+    eprintln!("usage: tomat-core-updater --staged <path> --current <path> [--restart-args <json>]");
+}
+
+fn main() -> ExitCode {
+    // argv[0] is the program name; skip it to match Deno.args semantics.
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let args = match parse_updater_args(&argv) {
+        Ok(a) => a,
+        Err(ArgsError::MissingRequired) => {
+            usage();
+            return ExitCode::from(2);
+        }
+    };
+    run(&args, cfg!(windows), Duration::from_secs(2))
+}
+
+/// Core orchestration, factored out of `main` so the OS flag and settle duration
+/// are injectable. Returns the process exit code.
+fn run(args: &Args, is_windows: bool, settle: Duration) -> ExitCode {
+    // Anchor logs to the channel of the binary we're swapping before logging.
+    let log = Logger::new(Path::new(&args.current));
+    log.log(
+        Level::Info,
+        &format!("started; staged={} current={}", args.staged, args.current),
+    );
+
+    // Let core exit cleanly.
+    std::thread::sleep(settle);
+
+    let staged = Path::new(&args.staged);
+    let current = Path::new(&args.current);
+
+    match perform_swap(staged, current, is_windows) {
+        SwapResult::Ok => {}
+        SwapResult::AsideFailed(e) => {
+            log.log(
+                Level::Error,
+                &format!("failed to move current binary aside: {}", e),
+            );
+            return ExitCode::from(3);
+        }
+        SwapResult::RenameFailed(e) => {
+            log.log(
+                Level::Error,
+                &format!("failed to install staged binary: {}", e),
+            );
+            return ExitCode::from(4);
+        }
+    }
+    log.log(Level::Info, "swap committed");
+
+    let restart_args = parse_restart_args(&args.restart_args);
+    match spawn_new_core(current, &restart_args) {
+        Ok(()) => {
+            log.log(Level::Info, "spawned new core; exiting");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            log.log(Level::Error, &format!("failed to spawn new core: {}", e));
+            match revert_swap(staged, current, is_windows) {
+                Ok(()) => log.log(Level::Warn, "swap reverted after spawn failure"),
+                Err(re) => log.log(
+                    Level::Error,
+                    &format!("revert failed; manual intervention required: {}", re),
+                ),
+            }
+            ExitCode::from(5)
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Unique tempdir under std::env::temp_dir(); a process-wide counter avoids
+    // collisions between tests sharing the same nanosecond. Cleaned up on drop.
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempDir {
+        path: PathBuf,
+    }
+    impl TempDir {
+        fn new() -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "tomat-updater-test-{}-{}-{}",
+                std::process::id(),
+                nanos,
+                n
+            ));
+            std::fs::create_dir_all(&path).unwrap();
+            TempDir { path }
+        }
+        fn join(&self, name: &str) -> PathBuf {
+            self.path.join(name)
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn write(path: &Path, content: &str) {
+        std::fs::write(path, content).unwrap();
+    }
+    fn read(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap()
+    }
+    fn argv(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    // --- arg parsing (ports main.test.ts) ----------------------------------
+
+    #[test]
+    fn accepts_staged_and_current_defaults_restart_args() {
+        let r = parse_updater_args(&argv(&[
+            "--staged",
+            "/tmp/new",
+            "--current",
+            "/usr/local/bin/tomat-core",
+        ]))
+        .unwrap();
+        assert_eq!(r.staged, "/tmp/new");
+        assert_eq!(r.current, "/usr/local/bin/tomat-core");
+        assert_eq!(r.restart_args, "[]");
+    }
+
+    #[test]
+    fn forwards_restart_args_verbatim() {
+        let r = parse_updater_args(&argv(&[
+            "--staged",
+            "/tmp/new",
+            "--current",
+            "/usr/local/bin/tomat-core",
+            "--restart-args",
+            r#"["--port","8000"]"#,
+        ]))
+        .unwrap();
+        assert_eq!(r.restart_args, r#"["--port","8000"]"#);
+    }
+
+    #[test]
+    fn missing_staged_is_error() {
+        assert_eq!(
+            parse_updater_args(&argv(&["--current", "/x"])),
+            Err(ArgsError::MissingRequired)
+        );
+    }
+
+    #[test]
+    fn missing_current_is_error() {
+        assert_eq!(
+            parse_updater_args(&argv(&["--staged", "/x"])),
+            Err(ArgsError::MissingRequired)
+        );
+    }
+
+    #[test]
+    fn empty_value_is_treated_as_missing() {
+        assert_eq!(
+            parse_updater_args(&argv(&["--staged", "", "--current", "/x"])),
+            Err(ArgsError::MissingRequired)
+        );
+    }
+
+    #[test]
+    fn empty_argv_is_error() {
+        assert_eq!(parse_updater_args(&[]), Err(ArgsError::MissingRequired));
+    }
+
+    // --- swap (ports swap.test.ts) -----------------------------------------
+
+    #[test]
+    fn unix_moves_staged_over_current_and_staged_is_gone() {
+        let d = TempDir::new();
+        let staged = d.join("staged");
+        let current = d.join("current");
+        write(&staged, "v2");
+        write(&current, "v1");
+
+        assert!(matches!(
+            perform_swap(&staged, &current, false),
+            SwapResult::Ok
+        ));
+        assert_eq!(read(&current), "v2");
+        assert!(!staged.exists());
+    }
+
+    #[test]
+    fn windows_renames_current_to_old_before_install() {
+        let d = TempDir::new();
+        let staged = d.join("staged");
+        let current = d.join("current");
+        write(&staged, "v2");
+        write(&current, "v1");
+
+        assert!(matches!(
+            perform_swap(&staged, &current, true),
+            SwapResult::Ok
+        ));
+        assert_eq!(read(&current), "v2");
+        assert_eq!(read(&old_path(&current)), "v1");
+    }
+
+    #[test]
+    fn windows_stale_old_is_replaced_not_preserved() {
+        let d = TempDir::new();
+        let staged = d.join("staged");
+        let current = d.join("current");
+        write(&staged, "v3");
+        write(&current, "v2");
+        write(&old_path(&current), "v1"); // leftover from an earlier upgrade
+
+        assert!(matches!(
+            perform_swap(&staged, &current, true),
+            SwapResult::Ok
+        ));
+        assert_eq!(read(&old_path(&current)), "v2");
+    }
+
+    #[test]
+    fn rename_failure_surfaces_stage_rename() {
+        let d = TempDir::new();
+        let staged = d.join("does-not-exist");
+        let current = d.join("current");
+        write(&current, "v1");
+
+        assert!(matches!(
+            perform_swap(&staged, &current, false),
+            SwapResult::RenameFailed(_)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_chmod_makes_current_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = TempDir::new();
+        let staged = d.join("staged");
+        let current = d.join("current");
+        write(&staged, "v2");
+        write(&current, "v1");
+
+        perform_swap(&staged, &current, false);
+        let mode = std::fs::metadata(&current).unwrap().permissions().mode();
+        // set_permissions forces 0o755, so the user-exec bit is deterministic.
+        assert_ne!(mode & 0o100, 0);
+    }
+
+    #[test]
+    fn windows_rename_failure_after_aside_reverts_old_to_current() {
+        let d = TempDir::new();
+        let staged = d.join("does-not-exist");
+        let current = d.join("current");
+        write(&current, "v1");
+
+        assert!(matches!(
+            perform_swap(&staged, &current, true),
+            SwapResult::RenameFailed(_)
+        ));
+        // current restored from .old; the .old anchor is consumed by the revert.
+        assert_eq!(read(&current), "v1");
+        assert!(!old_path(&current).exists());
+    }
+
+    // --- restart-args parsing ----------------------------------------------
+
+    #[test]
+    fn restart_args_parses_string_array() {
+        assert_eq!(
+            parse_restart_args(r#"["--port","8000"]"#),
+            vec!["--port".to_string(), "8000".to_string()]
+        );
+    }
+
+    #[test]
+    fn restart_args_handles_escapes() {
+        assert_eq!(
+            parse_restart_args(r#"["a\"b","c\nd"]"#),
+            vec!["a\"b".to_string(), "c\nd".to_string()]
+        );
+    }
+
+    #[test]
+    fn restart_args_falls_back_to_empty_on_parse_error() {
+        assert_eq!(parse_restart_args("not json"), Vec::<String>::new());
+        assert_eq!(parse_restart_args("[1,2]"), Vec::<String>::new()); // not strings
+        assert_eq!(parse_restart_args("{}"), Vec::<String>::new()); // not an array
+        assert_eq!(parse_restart_args("[]"), Vec::<String>::new());
+    }
+
+    // --- log path resolution -----------------------------------------------
+
+    #[test]
+    fn log_path_prefers_tomat_core_home() {
+        let env = LogEnv {
+            tomat_core_home: Some("/srv/tcore".to_string()),
+            home: Some("/home/u".to_string()),
+            user_profile: None,
+        };
+        assert_eq!(
+            resolve_log_path(Path::new("/x/bin/tomat-core"), &env),
+            Some(PathBuf::from("/srv/tcore/logs/updater.log"))
+        );
+    }
+
+    #[test]
+    fn log_path_derives_from_current_when_no_explicit_home() {
+        let env = LogEnv {
+            tomat_core_home: None,
+            home: Some("/home/u".to_string()),
+            user_profile: None,
+        };
+        // <core>/bin/<name> -> <core>/logs/updater.log
+        assert_eq!(
+            resolve_log_path(
+                Path::new("/home/u/.tomat/beta/core/bin/tomat-core-beta"),
+                &env
+            ),
+            Some(PathBuf::from("/home/u/.tomat/beta/core/logs/updater.log"))
+        );
+    }
+
+    #[test]
+    fn log_path_falls_back_to_home_dot_tomat() {
+        // current is a bare filename, so derivation fails and we fall through.
+        let env = LogEnv {
+            tomat_core_home: None,
+            home: Some("/home/u".to_string()),
+            user_profile: None,
+        };
+        assert_eq!(
+            resolve_log_path(Path::new("tomat-core"), &env),
+            Some(PathBuf::from("/home/u/.tomat/core/logs/updater.log"))
+        );
+    }
+
+    #[test]
+    fn log_path_uses_user_profile_when_home_absent() {
+        let env = LogEnv {
+            tomat_core_home: None,
+            home: None,
+            user_profile: Some("C:\\Users\\u".to_string()),
+        };
+        let got = resolve_log_path(Path::new("tomat-core"), &env).unwrap();
+        assert!(got.ends_with("updater.log"));
+        assert!(got.to_string_lossy().contains(".tomat"));
+    }
+
+    #[test]
+    fn log_path_none_when_nothing_resolves() {
+        let env = LogEnv {
+            tomat_core_home: None,
+            home: None,
+            user_profile: None,
+        };
+        // Bare filename: no parent.parent(), and no home env -> None.
+        assert_eq!(resolve_log_path(Path::new("tomat-core"), &env), None);
+    }
+
+    // --- timestamp format --------------------------------------------------
+
+    #[test]
+    fn timestamp_matches_iso8601_millis_z() {
+        let ts = now_iso8601();
+        // YYYY-MM-DDTHH:MM:SS.sssZ -> exactly 24 chars, ends with Z, '.' at 19.
+        assert_eq!(ts.len(), 24, "got {ts}");
+        assert!(ts.ends_with('Z'), "got {ts}");
+        assert_eq!(ts.as_bytes()[19], b'.', "got {ts}");
+        assert_eq!(ts.as_bytes()[10], b'T', "got {ts}");
+    }
+}

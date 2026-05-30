@@ -1,19 +1,23 @@
-// HTTP contract for /api/v1/pairing. Drives `app.fetch()` directly
-// against the real Hono app + real authService. Admin-token paths read
-// from paths().adminTokenFile, so we seed it in the tempdir.
+// HTTP contract for /api/v1/pairing. Drives `app.fetch()` directly against the
+// real Hono app + real authService. Admin-token paths read from
+// paths().adminTokenFile, so we seed it in the tempdir. The claim flow is a
+// CPace PAKE handshake (pake/start + pake/finish); `pakeViaApp` runs the client
+// side, and `tlsCertFingerprint()` is the pin a non-MITM client would observe.
 
 import { assertEquals } from "@std/assert";
 import { buildApp } from "../server.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
+import { pakeViaApp } from "../../../tests/helpers/pairing.ts";
+import { tlsCertFingerprint } from "../../services/tls.ts";
 import { paths } from "../../paths.ts";
 
 const ADMIN_TOKEN = "test-admin-token";
 
 async function seedAdminToken(): Promise<void> {
   await Deno.writeTextFile(paths().adminTokenFile, ADMIN_TOKEN);
-  // Mirror the install scripts (core.{sh,ps1}) which write the token
-  // 0600 on Unix; tests have to match so future hardening that refuses
-  // to read world-readable tokens doesn't pass here while breaking prod.
+  // Mirror the install scripts (core.{sh,ps1}) which write the token 0600 on
+  // Unix; tests have to match so future hardening that refuses to read
+  // world-readable tokens doesn't pass here while breaking prod.
   if (Deno.build.os !== "windows") {
     await Deno.chmod(paths().adminTokenFile, 0o600);
   }
@@ -29,6 +33,16 @@ function jsonReq(
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
+}
+
+async function mintCode(app: ReturnType<typeof buildApp>): Promise<string> {
+  const res = await app.fetch(
+    jsonReq("http://x/api/v1/pairing/codes", {}, {
+      "x-admin-token": ADMIN_TOKEN,
+    }),
+  );
+  const { code } = await res.json();
+  return code;
 }
 
 Deno.test("POST /api/v1/pairing/codes: rejects without admin token (401)", async () => {
@@ -62,42 +76,56 @@ Deno.test("POST /api/v1/pairing/codes: mints a 6-digit code with the admin token
   }
 });
 
-Deno.test("POST /api/v1/pairing/claim: round-trips a real pairing flow", async () => {
+Deno.test("pake: round-trips a real pairing flow and returns a token + confirmS", async () => {
   const env = await setupTestEnv();
   try {
     await seedAdminToken();
     const app = buildApp();
-    const mint = await app.fetch(
-      jsonReq("http://x/api/v1/pairing/codes", {}, {
-        "x-admin-token": ADMIN_TOKEN,
-      }),
-    );
-    const { code } = await mint.json();
+    const code = await mintCode(app);
 
-    const claim = await app.fetch(
-      jsonReq("http://x/api/v1/pairing/claim", {
-        code,
-        clientName: "my-laptop",
-      }),
+    const finish = await pakeViaApp(
+      app,
+      code,
+      "my-laptop",
+      await tlsCertFingerprint(),
     );
-    assertEquals(claim.status, 200);
-    const body = await claim.json();
+    assertEquals(finish.status, 200);
+    const body = await finish.json();
     assertEquals(typeof body.token, "string");
     assertEquals(typeof body.clientId, "string");
     assertEquals(typeof body.coreVersion, "string");
+    assertEquals(typeof body.confirmS, "string");
   } finally {
     await env.teardown();
   }
 });
 
-Deno.test("POST /api/v1/pairing/claim: rejects malformed code with 400", async () => {
+Deno.test("pake: a MITM-substituted cert pin is rejected at finish (401)", async () => {
+  const env = await setupTestEnv();
+  try {
+    await seedAdminToken();
+    const app = buildApp();
+    const code = await mintCode(app);
+
+    // The simulated client observed a different cert pin than core's real one.
+    const finish = await pakeViaApp(app, code, "mitm-victim", "wrong-cert-pin");
+    assertEquals(finish.status, 401);
+    const body = await finish.json();
+    assertEquals(body.error.code, "invalid_pairing_code");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("POST /api/v1/pairing/pake/start: rejects a malformed body with 400", async () => {
   const env = await setupTestEnv();
   try {
     const app = buildApp();
     const res = await app.fetch(
-      jsonReq("http://x/api/v1/pairing/claim", {
-        code: "not-six-digits",
+      jsonReq("http://x/api/v1/pairing/pake/start", {
         clientName: "c",
+        sid: "dmFsaWQ=",
+        msgA: "not base64!!",
       }),
     );
     assertEquals(res.status, 400);
@@ -113,16 +141,14 @@ Deno.test("GET /api/v1/pairing/clients: lists the paired client", async () => {
   try {
     await seedAdminToken();
     const app = buildApp();
-    const mint = await app.fetch(
-      jsonReq("http://x/api/v1/pairing/codes", {}, {
-        "x-admin-token": ADMIN_TOKEN,
-      }),
+    const code = await mintCode(app);
+    const finish = await pakeViaApp(
+      app,
+      code,
+      "L1",
+      await tlsCertFingerprint(),
     );
-    const { code } = await mint.json();
-    const claim = await app.fetch(
-      jsonReq("http://x/api/v1/pairing/claim", { code, clientName: "L1" }),
-    );
-    const { token } = await claim.json();
+    const { token } = await finish.json();
     const list = await app.fetch(
       new Request("http://x/api/v1/pairing/clients", {
         headers: { authorization: `Bearer ${token}` },
@@ -143,16 +169,9 @@ Deno.test("POST /api/v1/pairing/rotate: returns a new bearer token", async () =>
   try {
     await seedAdminToken();
     const app = buildApp();
-    const mint = await app.fetch(
-      jsonReq("http://x/api/v1/pairing/codes", {}, {
-        "x-admin-token": ADMIN_TOKEN,
-      }),
-    );
-    const { code } = await mint.json();
-    const claim = await app.fetch(
-      jsonReq("http://x/api/v1/pairing/claim", { code, clientName: "L" }),
-    );
-    const { token } = await claim.json();
+    const code = await mintCode(app);
+    const finish = await pakeViaApp(app, code, "L", await tlsCertFingerprint());
+    const { token } = await finish.json();
     const rotate = await app.fetch(
       new Request("http://x/api/v1/pairing/rotate", {
         method: "POST",

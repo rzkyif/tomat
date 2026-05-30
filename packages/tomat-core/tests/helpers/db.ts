@@ -20,6 +20,7 @@ import { __resetForTesting as resetSessionsRepo } from "../../src/db/repos/sessi
 import { __resetForTesting as resetSidecarManager } from "../../src/sidecars/manager.ts";
 import { __resetForTesting as resetChat } from "../../src/services/chat.ts";
 import { __resetForTesting as resetSecrets } from "../../src/services/secrets.ts";
+import { __resetForTesting as resetTls } from "../../src/services/tls.ts";
 import { __resetForTesting as resetWsHub } from "../../src/ws/hub.ts";
 import { __resetForTesting as resetLlmScheduler } from "../../src/services/llm-scheduler.ts";
 import { __resetForTesting as resetToolFilter } from "../../src/services/tool-filter.ts";
@@ -99,6 +100,7 @@ export async function setupTestEnv(): Promise<TestEnv> {
       resetSidecarManager();
       resetChat();
       resetSecrets();
+      resetTls();
       resetLlmScheduler();
       resetToolFilter();
       resetToolkitsRegistry();

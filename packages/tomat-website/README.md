@@ -1,15 +1,17 @@
 # @tomat/website
 
-Astro static site deployed to Cloudflare Workers (Static Assets). Serves:
+Astro static site deployed to Cloudflare Workers (Static Assets). Serves
+**only** the landing page at `au.tomat.ing`. Every other artifact moved to the
+R2 public bucket at `get.au.tomat.ing`:
 
-- `/` — in-construction landing page.
-- `/manifests/core.json` — signed core self-update manifest.
-- `/manifests/binaries.json` — signed sidecar-binaries manifest.
-- `/install/core.sh`, `/install/core.ps1` — install one-liners.
-- `/schemas/tools-v1.json` — published `tools.json` JSON Schema.
+- `/install/*` — install one-liners (`core.sh`, `client.ps1`, …)
+- `/schemas/*` — published JSON schemas (`tools-v1.json`)
+- `/manifests/*` — signed manifests (`core.json`, `binaries.json`,
+  `client.json`)
+- `/<version>/<triple>/…` — compiled binaries and the host Tauri bundle
 
-Compiled binaries live on a separate hostname (**`get.au.tomat.ing`**, R2 public
-bucket direct) so the Worker stays request-free and free-tier.
+The Worker stays request-free (free-tier); R2 serves the rest as a public bucket
+with its own custom domain.
 
 ## One-time setup
 
@@ -20,7 +22,7 @@ delegated to Cloudflare. Then, from this directory:
 # 1. Authenticate wrangler (browser OAuth, persists in ~/.config/.wrangler/).
 deno run -A npm:wrangler@^4 login
 
-# 2. Create the R2 bucket that holds compiled binaries.
+# 2. Create the R2 bucket that holds every release artifact.
 deno run -A npm:wrangler@^4 r2 bucket create tomat-releases
 
 # 3. In the Cloudflare dashboard:
@@ -30,39 +32,44 @@ deno run -A npm:wrangler@^4 r2 bucket create tomat-releases
 #      → confirm `au.tomat.ing` is attached as a Custom Domain
 #        (wrangler.toml `routes` block does this on first `deploy`).
 
-# 4. Seed `.env` at the repo root (one directory up) — copy .env.example
-#    and run the deploy once; it auto-generates the signing keypair on
-#    first run.
+# 4. Seed `.env` at the repo root (one directory up) — copy .env.example.
+#    The release scripts auto-generate the signing keypair on first run.
 ```
 
-## Deploy
+## Release tasks
 
-From the **repo root**:
+All release-related work is decomposed into focused, idempotent tasks. Each one
+cheaply probes R2 (or the website's own cursor) first and exits early when
+nothing has changed. `--force` skips the probe.
 
-```sh
-deno task website:deploy
-```
+Run from the **repo root**:
 
-That script:
+| Task                        | What it owns                                                                                                         |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `deno task release`         | Runs every sub-task below in sequence                                                                                |
+| `deno task release:core`    | Compiles `tomat-core`/`updater`/`keychain`, hashes workers, signs + uploads `core.json` + `binaries.json` + binaries |
+| `deno task release:client`  | Builds the host Tauri client bundle, merges the host platform entry into `client.json`, uploads bundle + manifest    |
+| `deno task release:scripts` | Syncs `scripts/install/*` to `get.au.tomat.ing/install/*` (per-file content compare)                                 |
+| `deno task release:schemas` | Syncs `tools-v1.json` to `get.au.tomat.ing/schemas/`                                                                 |
+| `deno task release:website` | Source-hash probe → `astro build` → `wrangler deploy`                                                                |
 
-1. Loads (and seeds) the Ed25519 keypair in `.env`.
-2. Writes the public half into `packages/tomat-core/src/signing-keys.ts`.
-3. `deno compile`s tomat-core + tomat-core-updater for every Deno-supported
-   triple.
-4. Hashes each binary and writes a signed `core.json` manifest.
-5. Stages install scripts + schemas + manifests into `public/`.
-6. Builds the Astro site (`astro build`).
-7. Uploads binaries to R2 under `<version>/<triple>/<file>`.
-8. Deploys the Worker (`wrangler deploy`).
+Every release task supports `--dry-run` (probe + build locally, skip uploads)
+and `--force` (skip the idempotency probe). `release:core` also takes
+`--triples=<list>` and `--skip-build`.
 
-End state: `https://au.tomat.ing/install/core.sh` and friends are live, and
-`https://get.au.tomat.ing/<version>/<triple>/tomat-core` serves the matching
-binary.
+End state of a successful `release`:
+
+- `https://au.tomat.ing/` — landing page
+- `https://get.au.tomat.ing/install/core.sh` — install one-liner
+- `https://get.au.tomat.ing/schemas/tools-v1.json` — published schema
+- `https://get.au.tomat.ing/manifests/core.json` — signed self-update manifest
+- `https://get.au.tomat.ing/<version>/<triple>/tomat-core` — binary
 
 ## Local preview
 
 ```sh
-deno task website:dev       # Astro dev server at http://localhost:4321
+deno task dev:website       # Astro dev server at http://localhost:4321
+deno task build:website     # astro build → packages/tomat-website/dist/
 ```
 
 For a Workers-runtime preview (closer to production, after running `build`):

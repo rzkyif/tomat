@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+import { errMessage } from "@tomat/shared";
   import type {
     Alignment,
     Monitor,
@@ -39,7 +40,7 @@
       const res = await cores().api().stt.transcribe(blob, language);
       return { text: res.text };
     } catch (e) {
-      return { text: "", error: e instanceof Error ? e.message : String(e) };
+      return { text: "", error: errMessage(e) };
     }
   }
 
@@ -477,7 +478,7 @@
         }
       } catch (err) {
         console.error("[user-input] init failed:", err);
-        const detail = err instanceof Error ? err.message : String(err);
+        const detail = errMessage(err);
         sttError = `Voice input setup failed: ${detail}`;
         if (sttErrorTimeout) clearTimeout(sttErrorTimeout);
         sttErrorTimeout = setTimeout(() => {

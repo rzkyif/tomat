@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { isSecretSettingKey, validateSettingsPatch } from "@tomat/shared";
 import {
   loadCoreSettings,
   patchCoreSettings,
@@ -11,18 +12,44 @@ import {
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
+// Strip secret-typed values from a settings record before it crosses the API.
+// Sensitive values (API keys etc.) live in the encrypted vault and are never
+// returned to clients — the client learns which are configured from
+// GET /settings/secrets and renders a placeholder. A plaintext value placed
+// directly in settings.json is redacted defensively here too, so it never
+// crosses the API.
+function redactSecrets(
+  settings: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(settings)) {
+    if (!isSecretSettingKey(k)) out[k] = v;
+  }
+  return out;
+}
+
 export function settingsRoutes(): Hono {
   const r = new Hono();
   r.use("*", bearerMiddleware());
 
-  r.get("/", async (c) => c.json(await loadCoreSettings()));
+  r.get("/", async (c) => c.json(redactSecrets(await loadCoreSettings())));
 
   r.patch("/", async (c) => {
     const body = await readJson(c);
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       throw new AppError("validation_error", "object body required");
     }
-    return c.json(await patchCoreSettings(body as Record<string, unknown>));
+    const patch = body as Record<string, unknown>;
+    // Reject malformed values on KNOWN keys + secret keys (which belong in the
+    // vault). This guards against honest client mistakes (wrong types flowing
+    // into core or sidecar argv) and stops plaintext secrets from being
+    // persisted here. Unknown keys are left alone (sparse store, forward-compat
+    // with a newer client).
+    const errors = validateSettingsPatch(patch);
+    if (errors.length > 0) {
+      throw new AppError("validation_error", errors.join("; "));
+    }
+    return c.json(redactSecrets(await patchCoreSettings(patch)));
   });
 
   // --- secrets -------------------------------------------------------------

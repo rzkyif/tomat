@@ -17,6 +17,7 @@ import type { ServerToClientFrame } from "@tomat/shared";
 import {
   chatInterruptWsSchema,
   chatStartWsSchema,
+  errMessage,
   toolAskUserResponseSchema,
   toolCancelSchema,
   wsFrameEnvelopeSchema,
@@ -90,6 +91,23 @@ class WsHub {
     }
   }
 
+  // Force-close every live socket for a client. Called when a client is
+  // revoked or its token is rotated, so a now-untrusted/compromised device's
+  // long-lived WS (which only authenticates once, at upgrade) is actually cut
+  // off instead of remaining functional until it happens to disconnect.
+  closeClient(clientId: string): void {
+    const set = this.byClient.get(clientId);
+    if (!set) return;
+    for (const conn of set) {
+      if (conn.pingTimer !== undefined) clearTimeout(conn.pingTimer);
+      if (conn.pongTimer !== undefined) clearTimeout(conn.pongTimer);
+      try {
+        conn.ws.close(4001, "client revoked");
+      } catch { /* already closing */ }
+    }
+    this.byClient.delete(clientId);
+  }
+
   shutdown(): void {
     for (const set of this.byClient.values()) {
       for (const conn of set) {
@@ -125,9 +143,7 @@ class WsHub {
         raw = JSON.parse(typeof ev.data === "string" ? ev.data : "");
       } catch (err) {
         log.warn(
-          `rejected ws frame: invalid JSON (${
-            err instanceof Error ? err.message : err
-          })`,
+          `rejected ws frame: invalid JSON (${errMessage(err)})`,
         );
         return;
       }
@@ -170,7 +186,9 @@ class WsHub {
         log.warn(`bad chat.interrupt: ${parsed.error.message}`);
         return;
       }
-      chatService().interrupt(parsed.data.streamId);
+      // Pass the connection's clientId so the chat service only acts on
+      // streams/calls owned by this client (cross-client control is rejected).
+      chatService().interrupt(parsed.data.streamId, conn.clientId);
       return;
     }
     if (kind === "tool.askuser_response") {
@@ -183,6 +201,7 @@ class WsHub {
         parsed.data.callId,
         parsed.data.requestId,
         parsed.data.answers,
+        conn.clientId,
       );
       return;
     }
@@ -192,7 +211,7 @@ class WsHub {
         log.warn(`bad tool.cancel: ${parsed.error.message}`);
         return;
       }
-      chatService().forwardCancel(parsed.data.callId);
+      chatService().forwardCancel(parsed.data.callId, conn.clientId);
       return;
     }
     log.warn(`unknown ws frame kind: ${String(kind)}`);

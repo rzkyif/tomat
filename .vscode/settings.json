@@ -2,12 +2,12 @@
   "deno.enablePaths": [
     "packages/tomat-shared",
     "packages/tomat-core",
-    "packages/tomat-core-updater",
     "packages/tomat-builtin-toolkit",
     "scripts"
   ],
   "rust-analyzer.linkedProjects": [
     "packages/tomat-client/src/tauri/Cargo.toml",
-    "packages/tomat-core-keychain/Cargo.toml"
+    "packages/tomat-core-keychain/Cargo.toml",
+    "packages/tomat-core-updater/Cargo.toml"
   ]
 }

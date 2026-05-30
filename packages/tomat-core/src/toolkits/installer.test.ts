@@ -11,6 +11,7 @@ import {
   flattenNpmName,
   flattenPermissions,
   type InstallEventSink,
+  isWithin,
   startInstall,
 } from "./installer.ts";
 import { toolkitsRegistry } from "./registry.ts";
@@ -38,6 +39,21 @@ Deno.test("flattenPermissions: walks every documented kind", () => {
 
 Deno.test("flattenPermissions: returns empty array when permissions object is absent", () => {
   assertEquals(flattenPermissions(undefined), []);
+});
+
+Deno.test("isWithin: accepts in-tree paths, rejects zip-slip traversal", () => {
+  const root = "/tmp/toolkit";
+  // In-tree entries are allowed.
+  assertEquals(isWithin(root, join(root, "tools.json")), true);
+  assertEquals(isWithin(root, join(root, "src/index.ts")), true);
+  assertEquals(isWithin(root, root), true);
+  // A `package/`-stripped traversal entry must be rejected.
+  assertEquals(isWithin(root, join(root, "../../../bin/tomat-core")), false);
+  assertEquals(isWithin(root, join(root, "../sibling")), false);
+  // A sibling dir that merely shares a prefix is NOT inside root.
+  assertEquals(isWithin(root, "/tmp/toolkit-evil/x"), false);
+  // Absolute escape outside root.
+  assertEquals(isWithin(root, "/etc/passwd"), false);
 });
 
 // --- Local-install integration ----------------------------------------------

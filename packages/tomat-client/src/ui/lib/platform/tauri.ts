@@ -23,10 +23,7 @@ import {
   remove,
   writeFile as tauriWriteFile,
 } from "@tauri-apps/plugin-fs";
-import {
-  check as tauriUpdaterCheck,
-  type Update,
-} from "@tauri-apps/plugin-updater";
+import { check as tauriUpdaterCheck, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import {
   setPlatform,
@@ -40,7 +37,124 @@ export function installTauriPlatform(): void {
   setPlatform(impl);
 }
 
+// Wire shape of the Rust `net_fetch` reply (body is base64 to cross IPC).
+interface NetFetchReply {
+  status: number;
+  headers: Record<string, string>;
+  bodyB64: string;
+  capturedPin: string | null;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let s = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    s += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(s);
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 const impl: Platform = {
+  net: {
+    async fetch(req) {
+      const bodyB64 =
+        req.body === undefined
+          ? null
+          : typeof req.body === "string"
+            ? bytesToBase64(new TextEncoder().encode(req.body))
+            : bytesToBase64(req.body);
+      const res = await invoke<NetFetchReply>("net_fetch", {
+        url: req.url,
+        method: req.method ?? "GET",
+        headers: req.headers ?? {},
+        bodyB64,
+        pin: req.pin ?? null,
+        capturePin: req.capturePin ?? false,
+      });
+      return {
+        status: res.status,
+        headers: res.headers,
+        body: base64ToBytes(res.bodyB64),
+        capturedPin: res.capturedPin ?? undefined,
+      };
+    },
+    async connectWebSocket(url, opts) {
+      // The Rust side connects + forwards frames as per-id Tauri events. We
+      // register the listeners BEFORE invoking net_ws_open and buffer anything
+      // that arrives before CoreClient attaches its callbacks, so no open /
+      // message is lost in the async gap.
+      const wsId = crypto.randomUUID();
+      let onOpenCb: (() => void) | null = null;
+      let onMessageCb: ((d: string) => void) | null = null;
+      let onCloseCb: (() => void) | null = null;
+      let onErrorCb: (() => void) | null = null;
+      let openedEarly = false;
+      let closedEarly = false;
+      const pending: string[] = [];
+
+      const unlisteners: UnlistenFn[] = await Promise.all([
+        listen(`net://ws/${wsId}/open`, () => {
+          if (onOpenCb) onOpenCb();
+          else openedEarly = true;
+        }),
+        listen<string>(`net://ws/${wsId}/message`, (e) => {
+          if (onMessageCb) onMessageCb(e.payload);
+          else pending.push(e.payload);
+        }),
+        listen(`net://ws/${wsId}/close`, () => {
+          if (onCloseCb) onCloseCb();
+          else closedEarly = true;
+        }),
+        listen(`net://ws/${wsId}/error`, () => onErrorCb?.()),
+      ]);
+      const detach = (): void => {
+        for (const u of unlisteners) u();
+      };
+
+      await invoke("net_ws_open", { wsId, url, pin: opts?.pin ?? null });
+
+      return {
+        send: (data) => {
+          void invoke("net_ws_send", { wsId, data });
+        },
+        close: () => {
+          void invoke("net_ws_close", { wsId });
+          detach();
+        },
+        onOpen: (cb) => {
+          onOpenCb = cb;
+          if (openedEarly) {
+            openedEarly = false;
+            cb();
+          }
+        },
+        onMessage: (cb) => {
+          onMessageCb = cb;
+          if (pending.length) {
+            const buf = pending.splice(0);
+            for (const m of buf) cb(m);
+          }
+        },
+        onClose: (cb) => {
+          onCloseCb = cb;
+          if (closedEarly) {
+            closedEarly = false;
+            cb();
+          }
+        },
+        onError: (cb) => {
+          onErrorCb = cb;
+        },
+      };
+    },
+  },
   windowing: {
     show: () => invoke("show_main_window"),
     hide: () => invoke("hide_main_window"),
@@ -170,6 +284,8 @@ const impl: Platform = {
       }),
     isLocalCoreInstalled: () => invoke("local_core_installed"),
     startLocalCore: () => invoke("start_local_core"),
+    localCoreBaseUrl: () => invoke("local_core_base_url"),
+    localSidecarPorts: () => invoke("local_sidecar_ports"),
   },
   fileConvert: {
     toMarkdownFromPath(absPath) {

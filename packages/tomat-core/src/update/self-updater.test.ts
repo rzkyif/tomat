@@ -13,12 +13,62 @@ import {
   compareSemver,
   decodeBase64,
   emitUpdate,
+  signedManifestPayload,
   subscribeUpdate,
   type UpdateEvent,
 } from "./self-updater.ts";
 
 Deno.test("canonicalize: object keys sorted lexicographically", () => {
   assertEquals(canonicalize({ b: 1, a: 2, c: 3 }), `{"a":2,"b":1,"c":3}`);
+});
+
+Deno.test("signedManifestPayload: covers workers + helpers, excludes signature, detects tampering", () => {
+  const manifest = {
+    schemaVersion: 1,
+    version: "1.2.3",
+    binaries: [{
+      triple: "aarch64-apple-darwin",
+      url: "https://x/c",
+      sha256: "aa",
+    }],
+    workers: [{ name: "tool-worker.ts", url: "https://x/w", sha256: "bb" }],
+    helpers: [
+      {
+        name: "tomat-core-keychain",
+        triple: "aarch64-apple-darwin",
+        url: "https://x/k",
+        sha256: "cc",
+      },
+    ],
+    signature: "should-not-be-signed",
+  };
+  const payload = signedManifestPayload(manifest);
+  // Every executed field is inside the signed bytes...
+  assertEquals(payload.includes("tool-worker.ts"), true);
+  assertEquals(payload.includes("tomat-core-keychain"), true);
+  assertEquals(payload.includes("binaries"), true);
+  // ...and the signature field itself is excluded.
+  assertEquals(payload.includes("should-not-be-signed"), false);
+  // Tampering a worker URL changes the signed bytes (so the signature fails) —
+  // this is the regression guard against narrowing coverage back to
+  // {version, binaries}.
+  const tamperedWorker = {
+    ...manifest,
+    workers: [{ name: "tool-worker.ts", url: "https://evil/w", sha256: "bb" }],
+  };
+  assertEquals(
+    signedManifestPayload(manifest) === signedManifestPayload(tamperedWorker),
+    false,
+  );
+  // Tampering a helper hash likewise changes the signed bytes.
+  const tamperedHelper = {
+    ...manifest,
+    helpers: [{ ...manifest.helpers[0], sha256: "ff" }],
+  };
+  assertEquals(
+    signedManifestPayload(manifest) === signedManifestPayload(tamperedHelper),
+    false,
+  );
 });
 
 Deno.test("canonicalize: nested objects recursively sorted", () => {

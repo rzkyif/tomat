@@ -18,7 +18,8 @@
 //   - Marker present but version unrelated to current: confused state;
 //     log + delete marker, continue.
 
-import { binaryName } from "../binaries/versions.ts";
+import { coreBinaryName } from "../binaries/versions.ts";
+import { errMessage } from "@tomat/shared";
 import { binPath, paths } from "../paths.ts";
 import { getLogger } from "../shared/log.ts";
 import { CORE_VERSION } from "../config.ts";
@@ -80,8 +81,9 @@ async function bumpAttempts(m: UpdateMarker): Promise<void> {
 
 function oldBinaryPath(): string {
   // Use the platform's actual binary name + .old suffix. On Windows the
-  // updater used `.exe.old`; on Unix it's `<name>.old`.
-  return binPath(binaryName("tomat-core" as never)) + ".old";
+  // updater used `.exe.old`; on Unix it's `<name>.old`. Channel-suffixed so
+  // beta rolls back tomat-core-beta, not tomat-core.
+  return binPath(coreBinaryName("tomat-core")) + ".old";
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -159,7 +161,7 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
     await deleteMarker();
     return false;
   }
-  const currentBin = binPath(binaryName("tomat-core" as never));
+  const currentBin = binPath(coreBinaryName("tomat-core"));
   const brokenBin = currentBin + ".broken";
   const stagedOld = oldBin + ".staged";
 
@@ -210,7 +212,7 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
     usedCopy = false;
     log.warn(
       `copy-first staging failed (${
-        err instanceof Error ? err.message : err
+        errMessage(err)
       }); falling back to two-rename swap`,
     );
   }
@@ -219,7 +221,7 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
     await Deno.rename(currentBin, brokenBin);
   } catch (err) {
     log.error(
-      `rollback aside failed: ${err instanceof Error ? err.message : err}`,
+      `rollback aside failed: ${errMessage(err)}`,
     );
     if (usedCopy) {
       try {
@@ -235,7 +237,7 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
     await Deno.rename(installSrc, currentBin);
   } catch (err) {
     log.error(
-      `rollback install failed: ${err instanceof Error ? err.message : err}; ` +
+      `rollback install failed: ${errMessage(err)}; ` +
         `attempting to restore broken binary so supervisor has something to run`,
     );
     try {
@@ -243,7 +245,7 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
     } catch (revertErr) {
       log.error(
         `revert of aside also failed: ${
-          revertErr instanceof Error ? revertErr.message : revertErr
+          errMessage(revertErr)
         }. Manual reinstall required.`,
       );
     }

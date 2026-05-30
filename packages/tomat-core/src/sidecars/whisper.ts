@@ -4,7 +4,7 @@
 // has stt.enabled=true and stt.provider="local".
 
 import { join } from "@std/path";
-import { binPath, paths } from "../paths.ts";
+import { binPath, paths, sttPort } from "../paths.ts";
 import { platformExe } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
 import type { StartOptions } from "./types.ts";
@@ -26,7 +26,7 @@ export function whisperStartArgsFromSettings(
   return {
     modelPath: resolveHfPath(modelSpec),
     host: strSetting(settings, "stt.host", "127.0.0.1"),
-    port: strSetting(settings, "stt.port", "7702"),
+    port: strSetting(settings, "stt.port", String(sttPort())),
     threads: numSetting(settings, "stt.threads", 4),
   };
 }

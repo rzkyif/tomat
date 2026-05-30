@@ -9,13 +9,22 @@
 // Caller passes an `EventSink` to receive install_log + install_done frames
 // for forwarding to the requesting client over WS.
 
-import { dirname, join } from "@std/path";
+import {
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  SEPARATOR,
+} from "@std/path";
 import { UntarStream } from "@std/tar/untar-stream";
-import { parseToolsJson, type ToolsJson } from "@tomat/shared";
+import { encodeBase64 } from "jsr:@std/encoding@^1/base64";
+import { errMessage, parseToolsJson, type ToolsJson } from "@tomat/shared";
 import { binPath } from "../paths.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
+import { sha256Hex, toHex } from "../shared/hash.ts";
 import { newJobId } from "../shared/ids.ts";
 import { binaryName } from "../binaries/versions.ts";
 import { hashToolkit } from "./hash.ts";
@@ -59,9 +68,7 @@ export function startInstall(
   // Run the install in the background; caller polls/streams via sink.
   void runInstall(spec, toolkitId, jobId, sink).catch((err) => {
     log.error(
-      `install ${toolkitId} failed: ${
-        err instanceof Error ? err.message : err
-      }`,
+      `install ${toolkitId} failed: ${errMessage(err)}`,
     );
     sink.done(jobId, toolkitId, false, 1);
   });
@@ -148,9 +155,7 @@ async function runInstall(
         // (the outer error reporting only carries the primary failure).
         log.error(
           `${toolkitId}: rollback rename failed; previous version is at ` +
-            `${installPath}.old — ${
-              rollbackErr instanceof Error ? rollbackErr.message : rollbackErr
-            }`,
+            `${installPath}.old — ${errMessage(rollbackErr)}`,
         );
       }
     }
@@ -211,7 +216,10 @@ async function installNpm(
   );
 
   await Deno.mkdir(stagingPath, { recursive: true });
-  await fetchAndExtractTarball(resolved.tarballUrl, stagingPath);
+  await fetchAndExtractTarball(resolved.tarballUrl, stagingPath, {
+    integrity: resolved.integrity,
+    shasum: resolved.shasum,
+  });
 
   // Synthesize a deno.json so node_modules lands per-toolkit.
   const denoJson = {
@@ -281,6 +289,7 @@ async function installLocal(
 async function fetchAndExtractTarball(
   url: string,
   targetDir: string,
+  verify?: { integrity?: string; shasum?: string },
 ): Promise<void> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -292,8 +301,16 @@ async function fetchAndExtractTarball(
   if (!res.body) {
     throw new AppError("tarball_fetch_failed", `empty tarball body for ${url}`);
   }
+  // Verify the tarball BEFORE extraction so a tampered/MITM'd package can't
+  // even reach the untar loop. We buffer the (small) tarball, check it against
+  // npm's published SRI integrity (sha512) or, failing that, the legacy sha1
+  // shasum, then extract from the verified bytes.
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  await verifyTarball(bytes, url, verify);
   const gunzip = new DecompressionStream("gzip");
-  const entries = res.body.pipeThrough(gunzip).pipeThrough(new UntarStream());
+  const entries = new Blob([bytes]).stream().pipeThrough(gunzip).pipeThrough(
+    new UntarStream(),
+  );
 
   for await (const entry of entries) {
     const name = entry.path;
@@ -305,8 +322,35 @@ async function fetchAndExtractTarball(
       await entry.readable?.cancel();
       continue;
     }
+    // Only regular files and directories are extracted. A malicious tarball
+    // could otherwise ship a symlink/hardlink (typeflag "2"/"1") or device
+    // node and use it to escape the staging dir or follow into a sensitive
+    // path on a later write. ustar regular-file typeflags are "0" / "\0" / "".
+    const typeflag = entry.header.typeflag;
+    const isDir = typeflag === "5";
+    const isFile = typeflag === "0" || typeflag === "\0" || typeflag === "";
+    if (!isDir && !isFile) {
+      await entry.readable?.cancel();
+      throw new AppError(
+        "extract_failed",
+        `tarball entry "${name}" has unsupported type ${
+          JSON.stringify(typeflag)
+        } (symlinks/hardlinks/devices are not allowed)`,
+      );
+    }
     const out = join(targetDir, stripped);
-    if (entry.header.typeflag === "5" /* directory */) {
+    // Zip-slip guard: the resolved destination MUST stay inside targetDir.
+    // Without this, an entry like `package/../../../bin/tomat-core` would
+    // overwrite arbitrary files the core can write (binaries, worker scripts,
+    // the secrets vault).
+    if (!isWithin(targetDir, out)) {
+      await entry.readable?.cancel();
+      throw new AppError(
+        "extract_failed",
+        `tarball entry "${name}" escapes the toolkit directory`,
+      );
+    }
+    if (isDir) {
       await Deno.mkdir(out, { recursive: true });
       await entry.readable?.cancel();
       continue;
@@ -321,6 +365,60 @@ async function fetchAndExtractTarball(
     });
     await stream.pipeTo(file.writable);
   }
+}
+
+/** Verify a fetched npm tarball against npm's published integrity before it is
+ *  extracted. Prefers the SRI `dist.integrity` (sha512); falls back to the
+ *  legacy `dist.shasum` (sha1). When neither is available the tarball is left
+ *  unverified (logged) rather than blocking the install. */
+async function verifyTarball(
+  bytes: Uint8Array,
+  url: string,
+  verify?: { integrity?: string; shasum?: string },
+): Promise<void> {
+  const sha512Entry = verify?.integrity
+    ?.split(/\s+/)
+    .find((s) => s.startsWith("sha512-"));
+  if (sha512Entry) {
+    const expected = sha512Entry.slice("sha512-".length);
+    const digest = await crypto.subtle.digest(
+      "SHA-512",
+      bytes.buffer as ArrayBuffer,
+    );
+    const got = encodeBase64(new Uint8Array(digest));
+    if (got !== expected) {
+      throw new AppError(
+        "checksum_mismatch",
+        `npm tarball failed sha512 integrity check for ${url}`,
+      );
+    }
+    return;
+  }
+  if (verify?.shasum) {
+    const digest = await crypto.subtle.digest(
+      "SHA-1",
+      bytes.buffer as ArrayBuffer,
+    );
+    const got = toHex(new Uint8Array(digest));
+    if (got !== verify.shasum.toLowerCase()) {
+      throw new AppError(
+        "checksum_mismatch",
+        `npm tarball failed sha1 checksum for ${url}`,
+      );
+    }
+    return;
+  }
+  log.warn(
+    `npm tarball ${url} has no integrity/shasum metadata; installing unverified`,
+  );
+}
+
+/** True if `candidate` resolves to a path inside `root` (or root itself).
+ *  Used to reject path-traversal (zip-slip) entries during tarball extraction.
+ *  Exported for unit tests. */
+export function isWithin(root: string, candidate: string): boolean {
+  const rel = relative(resolve(root), resolve(candidate));
+  return rel !== ".." && !rel.startsWith(".." + SEPARATOR) && !isAbsolute(rel);
 }
 
 async function runDenoInstall(
@@ -397,15 +495,6 @@ async function readOptional(path: string): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-async function sha256Hex(input: string): Promise<string> {
-  const buf = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(input),
-  );
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 async function rmrf(path: string): Promise<void> {

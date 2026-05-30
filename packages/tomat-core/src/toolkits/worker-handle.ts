@@ -1,6 +1,7 @@
 // One running tool-worker subprocess + NDJSON channel.
 
 import { join } from "@std/path";
+import { errMessage } from "@tomat/shared";
 import { binPath } from "../paths.ts";
 import { paths } from "../paths.ts";
 import { binaryName } from "../binaries/versions.ts";
@@ -12,6 +13,13 @@ import type {
 } from "./worker-protocol.ts";
 
 const log = getLogger("toolworker");
+
+// Bound the per-stream line buffers so a malicious or buggy tool can't exhaust
+// core's memory by emitting an endless stream with no newline. Protocol frames
+// (NDJSON on stdout) are normally tiny; 16 MB is generous headroom for a large
+// tool result. stderr is just log lines, so a 1 MB cap is plenty.
+const MAX_STDOUT_FRAME_BYTES = 16_000_000;
+const MAX_STDERR_LINE_BYTES = 1_000_000;
 
 export interface SpawnSpec {
   toolkitId: string;
@@ -43,6 +51,19 @@ export class WorkerHandle {
     // static graph; see sidecars/embedding.ts header.
     const entry = join(paths().workersDir, "tool-worker.ts");
     const configPath = join(spec.toolkitFolder, "deno.json");
+    // Defense in depth: never let a tool worker read or write the core's secret
+    // material, even if it was granted a broad path like `$home` (which
+    // contains ~/.tomat). Deno's --deny-* flags take precedence over any
+    // --allow-*, so this holds regardless of the granted permission set.
+    const root = paths().root;
+    const deniedPaths = [
+      join(root, "secrets.enc"),
+      join(root, ".master-key"),
+      join(root, ".admin-token"),
+      join(root, "core.sqlite"),
+      join(root, "core.sqlite-wal"),
+      join(root, "core.sqlite-shm"),
+    ].join(",");
     const args = [
       "run",
       "--no-prompt",
@@ -50,6 +71,8 @@ export class WorkerHandle {
       "--quiet",
       ...spec.flags,
       `--allow-read=${spec.toolkitFolder},${paths().denoCacheDir}`,
+      `--deny-read=${deniedPaths}`,
+      `--deny-write=${deniedPaths}`,
       "--config",
       configPath,
       entry,
@@ -134,6 +157,15 @@ export class WorkerHandle {
   private async pumpStdout(stream: ReadableStream<Uint8Array>): Promise<void> {
     for await (const chunk of stream) {
       this.buf += this.decoder.decode(chunk, { stream: true });
+      if (this.buf.length > MAX_STDOUT_FRAME_BYTES) {
+        // Oversized partial frame with no newline: drop it to bound memory.
+        // The in-flight call will fail/timeout via the normal paths.
+        log.warn(
+          `[${this.toolkitId}] dropping oversized stdout frame (${this.buf.length} bytes)`,
+        );
+        this.buf = "";
+        continue;
+      }
       const lines = this.buf.split("\n");
       this.buf = lines.pop() ?? "";
       for (const line of lines) {
@@ -153,6 +185,15 @@ export class WorkerHandle {
     let buf = "";
     for await (const chunk of stream) {
       buf += decoder.decode(chunk, { stream: true });
+      if (buf.length > MAX_STDERR_LINE_BYTES) {
+        // Truncate a runaway no-newline stderr line to bound memory.
+        this.emit({
+          kind: "stderr_log",
+          line: buf.slice(0, MAX_STDERR_LINE_BYTES) + " …[truncated]",
+        });
+        buf = "";
+        continue;
+      }
       const lines = buf.split("\n");
       buf = lines.pop() ?? "";
       for (const line of lines) {
@@ -186,7 +227,7 @@ export class WorkerHandle {
         l(frame);
       } catch (err) {
         log.warn(
-          `worker listener threw: ${err instanceof Error ? err.message : err}`,
+          `worker listener threw: ${errMessage(err)}`,
         );
       }
     }

@@ -23,6 +23,7 @@
 // `deno task dev`), which is not a production path.
 
 import { getLogger } from "../shared/log.ts";
+import { errMessage } from "@tomat/shared";
 
 const log = getLogger("jobctl");
 
@@ -103,7 +104,7 @@ function ensureJob(): boolean {
     return true;
   } catch (err) {
     log.warn(
-      `jobctl FFI init failed: ${err instanceof Error ? err.message : err}`,
+      `jobctl FFI init failed: ${errMessage(err)}`,
     );
     return false;
   }
@@ -133,9 +134,7 @@ export function trackSidecarPid(pid: number): void {
     kernel32.symbols.CloseHandle(proc);
   } catch (err) {
     log.warn(
-      `jobctl track failed (pid=${pid}): ${
-        err instanceof Error ? err.message : err
-      }`,
+      `jobctl track failed (pid=${pid}): ${errMessage(err)}`,
     );
   }
 }

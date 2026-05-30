@@ -16,6 +16,7 @@ import { workerPool } from "../../toolkits/worker-pool.ts";
 import { resolveVersion, searchPackages } from "../../toolkits/npm-registry.ts";
 import { embed } from "../../services/embedding.ts";
 import { toolFilter } from "../../services/tool-filter.ts";
+import { sha256Hex } from "../../shared/hash.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 import { wsHub } from "../../ws/hub.ts";
@@ -377,13 +378,4 @@ function numQuery(c: import("hono").Context, key: string, def: number): number {
   if (!v) return def;
   const n = Number(v);
   return Number.isFinite(n) ? n : def;
-}
-
-async function sha256Hex(input: string): Promise<string> {
-  const buf = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(input),
-  );
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }

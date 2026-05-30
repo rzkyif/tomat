@@ -15,9 +15,13 @@ CREATE TABLE IF NOT EXISTS clients (
 );
 CREATE INDEX IF NOT EXISTS clients_token ON clients(token_hash);
 
--- Short-lived pairing codes
+-- Short-lived pairing codes. The code is stored in the clear (not hashed): the
+-- pairing PAKE keys off the code value itself, so core needs it for the ≤10-min
+-- code lifetime. Only one row is ever unclaimed at a time (mintPairingCode wipes
+-- prior unclaimed rows), so lookups select the single claimed=0 row.
 CREATE TABLE IF NOT EXISTS pairing_codes (
-  code_hash       TEXT PRIMARY KEY,           -- sha256(code)
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  code            TEXT NOT NULL,              -- plaintext 6-digit pairing code
   created_at_ms   INTEGER NOT NULL,
   expires_at_ms   INTEGER NOT NULL,
   attempts        INTEGER NOT NULL DEFAULT 0,

@@ -8,10 +8,13 @@
 
 import type { ApiErrorBody, ClientToServerFrame, ServerToClientFrame } from "@tomat/shared";
 import { serverToClientFrameSchema } from "@tomat/shared";
+import { type NetResponse, type NetSocket, platform } from "../platform/index.ts";
+import { Subscribers } from "../shared/subscribers.ts";
 
 export interface CoreEndpoint {
-  baseUrl: string; // e.g. "http://127.0.0.1:7800"
+  baseUrl: string; // e.g. "https://127.0.0.1:7800"
   token: string; // bearer (from OS keychain)
+  tlsPin: string; // pinned cert SPKI (base64 SHA-256), from pairing
 }
 
 export type WsListener = (frame: ServerToClientFrame) => void;
@@ -35,16 +38,16 @@ export class ApiError extends Error {
 }
 
 export class CoreClient {
-  private ws: WebSocket | null = null;
+  private ws: NetSocket | null = null;
   private wsBackoffMs = 500;
   private wsBackoffCapMs = 30_000;
-  private listeners = new Set<WsListener>();
+  private listeners = new Subscribers<WsListener>();
   private wsConnected = false;
   private wsClosing = false;
   private pongTimeoutId: number | null = null;
   private pingTimeoutId: number | null = null;
   private connState: ConnectionState = "disconnected";
-  private connListeners = new Set<ConnectionListener>();
+  private connListeners = new Subscribers<ConnectionListener>();
 
   constructor(public readonly endpoint: CoreEndpoint) {}
 
@@ -53,9 +56,9 @@ export class CoreClient {
   // change. Returns an unsubscribe function. UI consumers use this to
   // drive the "Reconnecting to <core>…" banner after a 5s disconnect.
   onConnectionState(listener: ConnectionListener): () => void {
-    this.connListeners.add(listener);
+    const off = this.connListeners.add(listener);
     queueMicrotask(() => listener(this.connState));
-    return () => this.connListeners.delete(listener);
+    return off;
   }
 
   get connectionState(): ConnectionState {
@@ -65,13 +68,7 @@ export class CoreClient {
   private setConnState(state: ConnectionState): void {
     if (this.connState === state) return;
     this.connState = state;
-    for (const l of this.connListeners) {
-      try {
-        l(state);
-      } catch {
-        /* */
-      }
-    }
+    this.connListeners.emit(state);
   }
 
   // --- REST ---------------------------------------------------------------
@@ -106,35 +103,63 @@ export class CoreClient {
     return await this.del<T>(path);
   }
 
-  // multipart for attachments + STT audio uploads
+  // multipart for attachments + STT audio uploads. FormData is encoded to raw
+  // multipart bytes here (with its boundary content-type) so the pinned Rust
+  // net layer can send it as an opaque body.
   async postForm<T>(path: string, form: FormData): Promise<T> {
-    const res = await fetch(this.endpoint.baseUrl + path, {
+    const encoded = new Response(form);
+    const body = new Uint8Array(await encoded.arrayBuffer());
+    const contentType = encoded.headers.get("content-type") ?? "multipart/form-data";
+    const res = await platform().net.fetch({
+      url: this.endpoint.baseUrl + path,
       method: "POST",
-      headers: { Authorization: `Bearer ${this.endpoint.token}` },
-      body: form,
+      headers: {
+        Authorization: `Bearer ${this.endpoint.token}`,
+        "Content-Type": contentType,
+      },
+      body,
+      pin: this.endpoint.tlsPin,
     });
     return await this.parseResponse<T>(res);
   }
 
+  // POST a JSON body and get a binary blob back (TTS synth WAV).
+  async postBlob(path: string, body: unknown): Promise<Blob> {
+    const res = await platform().net.fetch({
+      url: this.endpoint.baseUrl + path,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.endpoint.token}`,
+      },
+      body: JSON.stringify(body),
+      pin: this.endpoint.tlsPin,
+    });
+    if (!isOk(res)) this.throwApiError(res);
+    return new Blob([res.body as BlobPart]);
+  }
+
   // For binary endpoints (TTS WAV blob, attachment downloads).
   async fetchBlob(path: string): Promise<Blob> {
-    const res = await fetch(this.endpoint.baseUrl + path, {
+    const res = await platform().net.fetch({
+      url: this.endpoint.baseUrl + path,
       headers: { Authorization: `Bearer ${this.endpoint.token}` },
+      pin: this.endpoint.tlsPin,
     });
-    if (!res.ok) await this.throwApiError(res);
-    return await res.blob();
+    if (!isOk(res)) this.throwApiError(res);
+    return new Blob([res.body as BlobPart]);
   }
 
   // --- WebSocket ---------------------------------------------------------
 
   subscribe(listener: WsListener): () => void {
-    this.listeners.add(listener);
+    const off = this.listeners.add(listener);
     if (!this.ws) this.connectWs();
-    return () => this.listeners.delete(listener);
+    return off;
   }
 
   sendWs(frame: ClientToServerFrame): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws && this.wsConnected) {
       this.ws.send(JSON.stringify(frame));
     }
   }
@@ -161,18 +186,20 @@ export class CoreClient {
   ): Promise<T> {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (options.auth !== false) headers.Authorization = `Bearer ${this.endpoint.token}`;
-    const res = await fetch(this.endpoint.baseUrl + path, {
+    const res = await platform().net.fetch({
+      url: this.endpoint.baseUrl + path,
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      pin: this.endpoint.tlsPin,
     });
-    return await this.parseResponse<T>(res);
+    return this.parseResponse<T>(res);
   }
 
-  private async parseResponse<T>(res: Response): Promise<T> {
+  private parseResponse<T>(res: NetResponse): T {
     if (res.status === 204) return undefined as T;
-    if (!res.ok) await this.throwApiError(res);
-    const ct = res.headers.get("content-type") ?? "";
+    if (!isOk(res)) this.throwApiError(res);
+    const ct = res.headers["content-type"] ?? "";
     if (!ct.includes("application/json")) {
       // No JSON consumer in the workspace requests anything else through
       // this code path — binary endpoints (TTS WAV, attachments) use
@@ -183,20 +210,20 @@ export class CoreClient {
         message: `expected JSON response, got content-type "${ct}"`,
       });
     }
-    return (await res.json()) as T;
+    return JSON.parse(decodeBody(res)) as T;
   }
 
-  private async throwApiError(res: Response): Promise<never> {
+  private throwApiError(res: NetResponse): never {
     let body: ApiErrorBody | undefined;
     try {
-      body = (await res.json()) as ApiErrorBody;
+      body = JSON.parse(decodeBody(res)) as ApiErrorBody;
     } catch {
       /* */
     }
     if (body?.error) throw new ApiError(res.status, body.error);
     throw new ApiError(res.status, {
       code: "internal_error",
-      message: `HTTP ${res.status} ${res.statusText}`,
+      message: `HTTP ${res.status}`,
     });
   }
 
@@ -206,67 +233,94 @@ export class CoreClient {
       this.endpoint.baseUrl.replace(/^http/, "ws") +
       `/ws/v1?token=${encodeURIComponent(this.endpoint.token)}`;
     this.setConnState("connecting");
-    const ws = new WebSocket(wsUrl);
-    this.ws = ws;
-    ws.addEventListener("open", () => {
+    void this.openSocket(wsUrl);
+  }
+
+  // Open a pinned WebSocket through the platform net layer (Rust on desktop,
+  // browser WebSocket on web). The socket primitive differs, but the
+  // backoff / ping-pong / dispatch logic is identical to the old browser path.
+  private async openSocket(wsUrl: string): Promise<void> {
+    let sock: NetSocket;
+    try {
+      sock = await platform().net.connectWebSocket(wsUrl, {
+        pin: this.endpoint.tlsPin,
+      });
+    } catch {
+      // Connect failed (DNS / TLS pin mismatch / refused): treat like a close
+      // so the backoff reconnect loop kicks in.
+      this.handleWsClosed();
+      return;
+    }
+    // A close() may have raced in while we were connecting.
+    if (this.wsClosing) {
+      sock.close();
+      return;
+    }
+    this.ws = sock;
+    sock.onOpen(() => {
       this.wsConnected = true;
       this.wsBackoffMs = 500;
       this.setConnState("connected");
     });
-    ws.addEventListener("message", (ev) => {
-      // Two-stage parse: JSON decode, then validate the full discriminated
-      // union via Zod. Per-variant schemas use `.passthrough()` so unknown
-      // fields survive — that lets a newer server send extras without
-      // breaking an older client. Frames that fail the kind discriminant
-      // are dropped with a warn.
-      let raw: unknown;
+    sock.onMessage((data) => this.handleWsMessage(data));
+    sock.onClose(() => this.handleWsClosed());
+    sock.onError(() => {
       try {
-        raw = JSON.parse(ev.data);
-      } catch (err) {
-        console.warn("[ws] rejected frame: invalid JSON", err);
-        return;
-      }
-      const parsed = serverToClientFrameSchema.safeParse(raw);
-      if (!parsed.success) {
-        console.warn(
-          "[ws] rejected frame: schema mismatch",
-          parsed.error.message,
-        );
-        return;
-      }
-      // Cast bridges the Zod-parsed shape (which uses `string` for the
-      // open-ended `code` field on chat.error) to the narrower TS union
-      // (which uses `ErrorCode`). The schemas validate at runtime; the
-      // TS narrowing is for downstream-handler ergonomics.
-      const frame = parsed.data as unknown as ServerToClientFrame;
-      if (frame.kind === "pong") {
-        if (this.pongTimeoutId !== null) clearTimeout(this.pongTimeoutId);
-        this.pongTimeoutId = null;
-        return;
-      }
-      for (const l of this.listeners) {
-        try {
-          l(frame);
-        } catch {
-          /* */
-        }
-      }
-    });
-    ws.addEventListener("close", () => {
-      this.wsConnected = false;
-      this.ws = null;
-      this.setConnState("disconnected");
-      if (this.wsClosing || this.listeners.size === 0) return;
-      const delay = this.wsBackoffMs;
-      this.wsBackoffMs = Math.min(this.wsBackoffMs * 2, this.wsBackoffCapMs);
-      setTimeout(() => this.connectWs(), delay);
-    });
-    ws.addEventListener("error", () => {
-      try {
-        ws.close();
+        sock.close();
       } catch {
         /* */
       }
     });
   }
+
+  private handleWsMessage(data: string): void {
+    // Two-stage parse: JSON decode, then validate the full discriminated
+    // union via Zod. Per-variant schemas use `.passthrough()` so unknown
+    // fields survive — that lets a newer server send extras without
+    // breaking an older client. Frames that fail the kind discriminant
+    // are dropped with a warn.
+    let raw: unknown;
+    try {
+      raw = JSON.parse(data);
+    } catch (err) {
+      console.warn("[ws] rejected frame: invalid JSON", err);
+      return;
+    }
+    const parsed = serverToClientFrameSchema.safeParse(raw);
+    if (!parsed.success) {
+      console.warn("[ws] rejected frame: schema mismatch", parsed.error.message);
+      return;
+    }
+    // Cast bridges the Zod-parsed shape (which uses `string` for the
+    // open-ended `code` field on chat.error) to the narrower TS union
+    // (which uses `ErrorCode`). The schemas validate at runtime; the
+    // TS narrowing is for downstream-handler ergonomics.
+    const frame = parsed.data as unknown as ServerToClientFrame;
+    if (frame.kind === "pong") {
+      if (this.pongTimeoutId !== null) clearTimeout(this.pongTimeoutId);
+      this.pongTimeoutId = null;
+      return;
+    }
+    this.listeners.emit(frame);
+  }
+
+  private handleWsClosed(): void {
+    this.wsConnected = false;
+    this.ws = null;
+    this.setConnState("disconnected");
+    if (this.wsClosing || this.listeners.size === 0) return;
+    const delay = this.wsBackoffMs;
+    this.wsBackoffMs = Math.min(this.wsBackoffMs * 2, this.wsBackoffCapMs);
+    setTimeout(() => this.connectWs(), delay);
+  }
+}
+
+// True for a 2xx NetResponse.
+function isOk(res: NetResponse): boolean {
+  return res.status >= 200 && res.status < 300;
+}
+
+// Decode a NetResponse body (UTF-8 bytes) to text for JSON parsing.
+function decodeBody(res: NetResponse): string {
+  return new TextDecoder().decode(res.body);
 }

@@ -4,18 +4,28 @@
   // screen on first launch. Also openable from Settings.
 
   import { onMount } from "svelte";
+import { errMessage } from "@tomat/shared";
   import Bubble from "../ui/Bubble.svelte";
   import Alert from "../ui/Alert.svelte";
   import Button from "../ui/Button.svelte";
   import Chip from "../ui/Chip.svelte";
   import IconButton from "../ui/IconButton.svelte";
-  import { cores, PairingApi, type PairedCoreEntry } from "$lib/core";
+  import {
+    cores,
+    mintCodeWithAdminToken,
+    pairWithCode,
+    type PairedCoreEntry,
+    probeCore,
+  } from "$lib/core";
   import { platform } from "$lib/platform";
   import { isTauri } from "$lib/shared/env";
   import { settingsState, viewState } from "$lib/state";
 
   const CLIENT_NAME = "Tomat Desktop";
-  const LOCAL_BASE_URL = "http://127.0.0.1:7800";
+  // Resolved from the platform on mount so a beta client targets the beta
+  // core's port (7810) rather than the stable 7800. Falls back to the stable
+  // default until resolved (and on the web stub).
+  let localBaseUrl = $state("https://127.0.0.1:7800");
 
   let alignment = $derived(settingsState.getAlignment());
 
@@ -80,6 +90,9 @@
 
   onMount(() => {
     void decideInitialView();
+    void platform().pairing.localCoreBaseUrl().then((url) => {
+      localBaseUrl = url;
+    }).catch(() => {});
     const unsub = cores().subscribe(() => void refresh());
     return () => unsub();
   });
@@ -112,14 +125,12 @@
     name: string,
   ): Promise<void> {
     const firstEver = (await cores().list()).length === 0;
-    const res = await PairingApi.claim(baseUrl, {
-      code,
-      clientName: CLIENT_NAME,
-    });
+    const res = await pairWithCode(baseUrl, CLIENT_NAME, code);
     const entry: PairedCoreEntry = {
       id: res.clientId,
       name,
       baseUrl,
+      tlsPin: res.tlsPin,
       addedAtMs: Date.now(),
     };
     await cores().addPaired(entry, res.token);
@@ -178,26 +189,13 @@
             "delete ~/.tomat/core/ and try again.",
         );
       }
-      const res = await fetch(`${LOCAL_BASE_URL}/api/v1/pairing/codes`, {
-        method: "POST",
-        headers: {
-          "X-Admin-Token": adminToken,
-          "Content-Type": "application/json",
-        },
-        body: "{}",
-      });
-      if (!res.ok) {
-        throw new Error(
-          `mint pairing code failed: ${res.status} ${await res.text()}`,
-        );
-      }
-      const body = await res.json();
-      if (!body.code) throw new Error("response missing pairing code");
+      const { code } = await mintCodeWithAdminToken(localBaseUrl, adminToken);
+      if (!code) throw new Error("response missing pairing code");
       busy = "claiming";
-      await claimAndAdd(LOCAL_BASE_URL, body.code, "Local Core");
+      await claimAndAdd(localBaseUrl, code, "Local Core");
       view = "list";
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = errMessage(e);
       busy = null;
     }
   }
@@ -211,16 +209,22 @@
         bindAll: installNetworkChoice,
       });
       busy = "claiming";
-      await claimAndAdd(LOCAL_BASE_URL, code, "Local Core");
+      await claimAndAdd(localBaseUrl, code, "Local Core");
       view = "list";
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = errMessage(e);
       busy = null;
     }
   }
 
   function normalizedRemoteUrl(): string {
-    return remoteUrl.trim().replace(/\/+$/, "");
+    let u = remoteUrl.trim().replace(/\/+$/, "");
+    if (!u) return "";
+    // TLS-only: coerce http:// → https://, and default to https:// when the
+    // user typed a bare host:port. The core never serves plaintext.
+    if (/^http:\/\//i.test(u)) u = u.replace(/^http:\/\//i, "https://");
+    else if (!/^https:\/\//i.test(u)) u = `https://${u}`;
+    return u;
   }
 
   // Stale-check the connection state whenever the URL field changes — the
@@ -242,19 +246,10 @@
     }
     busy = "checking";
     try {
-      const res = await fetch(`${url}/api/v1/health`, { method: "GET" });
-      if (!res.ok) {
-        connectionStatus = {
-          kind: "error",
-          message: `Core responded ${res.status} ${res.statusText}.`,
-        };
-        return;
-      }
-      const body = await res.json().catch(() => ({}));
-      const version = typeof body.version === "string" ? body.version : "unknown";
+      const { version } = await probeCore(url);
       connectionStatus = { kind: "ok", version, checkedUrl: url };
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = errMessage(e);
       connectionStatus = {
         kind: "error",
         message: `Could not reach core: ${message}`,
@@ -287,7 +282,7 @@
       remoteCode = "";
       connectionStatus = { kind: "idle" };
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = errMessage(e);
       busy = null;
     }
   }
@@ -298,7 +293,7 @@
     try {
       await cores().select(id);
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = errMessage(e);
     }
     await refresh();
   }
@@ -322,7 +317,7 @@
         await cores().select(remaining[0].id);
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = errMessage(e);
     }
     await refresh();
   }
@@ -468,7 +463,7 @@
     <div class="flex gap-2">
       <input
         type="text"
-        placeholder="Core address (e.g. http://192.168.1.20:7800)"
+        placeholder="Core address (e.g. https://192.168.1.20:7800)"
         class="bg-default-200 rounded-large px-3 h-10 outline-none text-sm text-default-700 placeholder:text-default-400 flex-1"
         bind:value={remoteUrl}
         disabled={busy !== null}

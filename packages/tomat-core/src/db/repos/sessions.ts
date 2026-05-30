@@ -6,6 +6,7 @@
 
 import {
   contentToText,
+  errMessage,
   type Message,
   type MessageContent,
   type Session,
@@ -375,7 +376,7 @@ function rowToMessage(row: {
   } catch (err) {
     log.warn(
       `corrupt content_json for message ${row.id}; substituting error bubble: ${
-        err instanceof Error ? err.message : String(err)
+        errMessage(err)
       }`,
     );
     return {

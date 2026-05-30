@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { platform } from "$lib/platform";
   import { isTauri } from "$lib/shared/env";
-  import { SETTINGS_SCHEMA } from "@tomat/shared";
+  import { errMessage, SETTINGS_SCHEMA } from "@tomat/shared";
   import type { PresetOption } from "@tomat/shared";
   import type { Monitor } from "$lib/shared/types";
   import { hasAlpha } from "$lib/shared/color";
@@ -265,7 +265,7 @@
     } catch (e) {
       validationErrors = {
         ...validationErrors,
-        [key]: e instanceof Error ? e.message : String(e),
+        [key]: errMessage(e),
       };
     }
   }

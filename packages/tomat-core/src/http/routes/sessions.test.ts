@@ -6,17 +6,11 @@
 import { assertEquals } from "@std/assert";
 import { buildApp } from "../server.ts";
 import { sanitizeFilename } from "./sessions.ts";
-import { authService } from "../../services/auth.ts";
+import { pairClient } from "../../../tests/helpers/pairing.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
 
 async function pairOne(): Promise<{ token: string; clientId: string }> {
-  const auth = authService();
-  const { code } = await auth.mintPairingCode();
-  const { token, clientId } = await auth.claim(
-    code,
-    "t2-test-client",
-    "127.0.0.1",
-  );
+  const { token, clientId } = await pairClient("t2-test-client", "127.0.0.1");
   return { token, clientId };
 }
 

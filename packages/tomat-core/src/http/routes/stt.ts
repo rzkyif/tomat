@@ -6,12 +6,14 @@
 // (boot wiring lives in services/sidecar-boot.ts).
 
 import { Hono } from "hono";
+import { errMessage } from "@tomat/shared";
 import OpenAI from "openai";
 import { sidecarManager } from "../../sidecars/manager.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
 import { getSecret } from "../../services/secrets.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
+import { sttPort } from "../../paths.ts";
 
 export function sttRoutes(): Hono {
   const r = new Hono();
@@ -41,9 +43,12 @@ export function sttRoutes(): Hono {
           "external STT requires stt.external.baseUrl and stt.external.model",
         );
       }
+      // Vault is authoritative; a plaintext value in settings.json is a
+      // lower-precedence fallback (client routes keys to the vault, and core
+      // redacts them from GET).
       const settingsKey = strSetting(settings, "stt.external.apiKey", "");
-      const apiKey = settingsKey ||
-        (await getSecret("stt.external.apiKey")) || "";
+      const apiKey = (await getSecret("stt.external.apiKey")) ||
+        settingsKey || "";
       const client = new OpenAI({
         baseURL: baseUrl,
         apiKey: apiKey || "sk-stt",
@@ -61,14 +66,14 @@ export function sttRoutes(): Hono {
       } catch (err) {
         throw new AppError(
           "provider_error",
-          `external STT failed: ${err instanceof Error ? err.message : err}`,
+          `external STT failed: ${errMessage(err)}`,
         );
       }
     }
 
     // Local mode: hit the whisper-server sidecar.
     const host = strSetting(settings, "stt.host", "127.0.0.1");
-    const port = strSetting(settings, "stt.port", "7702");
+    const port = strSetting(settings, "stt.port", String(sttPort()));
     const upstream = `http://${host}:${port}/inference`;
     const upstreamForm = new FormData();
     upstreamForm.set("file", audio);
@@ -80,9 +85,7 @@ export function sttRoutes(): Hono {
     } catch (err) {
       throw new AppError(
         "server_unavailable",
-        `whisper-server not reachable at ${upstream}: ${
-          err instanceof Error ? err.message : err
-        }`,
+        `whisper-server not reachable at ${upstream}: ${errMessage(err)}`,
       );
     }
     if (!res.ok) {

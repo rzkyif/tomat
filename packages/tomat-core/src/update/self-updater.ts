@@ -12,14 +12,20 @@
 // renames the old binary to `<name>.exe.old` first and deletes it on next start.
 
 import { verifyAsync } from "@noble/ed25519";
+import { errMessage } from "@tomat/shared";
 import { join } from "@std/path";
 import type { CoreManifest, ErrorCode } from "@tomat/shared";
-import { CORE_MANIFEST_URL, CORE_VERSION } from "../config.ts";
+import { CORE_VERSION, coreManifestUrl } from "../config.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
-import { binPath } from "../paths.ts";
-import { binaryName, hostTriple, platformExe } from "../binaries/versions.ts";
+import { sha256Hex } from "../shared/hash.ts";
+import { binPath, channelBinName } from "../paths.ts";
+import {
+  coreBinaryName,
+  hostTriple,
+  platformExe,
+} from "../binaries/versions.ts";
 import signingKeys from "../../data/signing-keys.json" with { type: "json" };
 import { writeUpdateMarker } from "./rollback.ts";
 import { loadCoreSettings } from "../services/core-settings.ts";
@@ -47,7 +53,7 @@ export function emitUpdate(e: UpdateEvent): void {
       cb(e);
     } catch (err) {
       log.warn(
-        `update subscriber threw: ${err instanceof Error ? err.message : err}`,
+        `update subscriber threw: ${errMessage(err)}`,
       );
     }
   }
@@ -70,7 +76,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
     currentVersion: CORE_VERSION,
     latestVersion: manifest.version,
     available: manifest.version !== CORE_VERSION,
-    manifestUrl: CORE_MANIFEST_URL,
+    manifestUrl: coreManifestUrl(),
   };
 }
 
@@ -81,7 +87,7 @@ export async function applyUpdate(targetVersion?: string): Promise<void> {
     if (err instanceof AppError) {
       emitUpdate({ kind: "error", code: err.code, message: err.message });
     } else {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errMessage(err);
       emitUpdate({ kind: "error", code: "update_failed", message });
     }
     throw err;
@@ -128,7 +134,7 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
   await Deno.mkdir(paths().stagingDir, { recursive: true });
   const stagedPath = join(
     paths().stagingDir,
-    `tomat-core-${manifest.version}${exeSuffix()}`,
+    `${channelBinName("tomat-core")}-${manifest.version}${exeSuffix()}`,
   );
   await downloadAndVerify(entry.url, stagedPath, entry.sha256);
 
@@ -166,10 +172,8 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
     }
   }
 
-  const currentBin = binPath(binaryName("tomat-core" as unknown as never));
-  const updaterBin = binPath(
-    binaryName("tomat-core-updater" as unknown as never),
-  );
+  const currentBin = binPath(coreBinaryName("tomat-core"));
+  const updaterBin = binPath(coreBinaryName("tomat-core-updater"));
 
   // Hand off and exit. The updater is a separate compiled binary; if it
   // doesn't exist yet (early dev), we surface a clear error so the user
@@ -219,11 +223,11 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
 async function fetchCoreManifest(): Promise<CoreManifest> {
   let res: Response;
   try {
-    res = await fetch(CORE_MANIFEST_URL);
+    res = await fetch(coreManifestUrl());
   } catch (err) {
     throw new AppError(
       "manifest_fetch_failed",
-      `core manifest fetch failed: ${err instanceof Error ? err.message : err}`,
+      `core manifest fetch failed: ${errMessage(err)}`,
     );
   }
   if (!res.ok) {
@@ -243,7 +247,7 @@ async function fetchCoreManifest(): Promise<CoreManifest> {
   const pk = decodeBase64(signingKeys.publicKey);
   const sig = decodeBase64(parsed.signature);
   const body = new TextEncoder().encode(
-    canonicalize({ version: parsed.version, binaries: parsed.binaries }),
+    signedManifestPayload(parsed as unknown as Record<string, unknown>),
   );
   const ok = await verifyAsync(sig, body, pk);
   if (!ok) {
@@ -280,13 +284,7 @@ async function downloadAndVerify(
     file.close();
   }
   const merged = mergeChunks(chunks);
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    merged.buffer as ArrayBuffer,
-  );
-  const hex = [...new Uint8Array(digest)].map((b) =>
-    b.toString(16).padStart(2, "0")
-  ).join("");
+  const hex = await sha256Hex(merged);
   if (hex !== sha256.toLowerCase()) {
     try {
       await Deno.remove(tmp);
@@ -325,9 +323,25 @@ export function decodeBase64(s: string): Uint8Array {
   return out;
 }
 
+/** The exact bytes covered by the core-manifest signature: the whole manifest
+ *  minus its `signature` field, canonicalized. The signer
+ *  (`scripts/release/core.ts`) MUST sign the identical payload. Keeping this a
+ *  single named function makes the coverage testable and prevents anyone
+ *  narrowing it back to `{version, binaries}` — which would leave `workers[]`
+ *  and `helpers[]` (downloaded and EXECUTED) outside the signature and open a
+ *  tampered-manifest code-execution path. */
+export function signedManifestPayload(
+  manifest: Record<string, unknown>,
+): string {
+  const signed: Record<string, unknown> = { ...manifest };
+  delete signed.signature;
+  return canonicalize(signed);
+}
+
 /** Deterministic JSON serializer (sorted keys, recursive). The signed body
- *  of a manifest is the canonicalization of `{ version, binaries }`, so the
- *  exact key/whitespace order has to match between signer and verifier. */
+ *  of a manifest is the canonicalization of the whole manifest minus its
+ *  signature (see signedManifestPayload), so the exact key/whitespace order
+ *  has to match between signer and verifier. */
 export function canonicalize(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) {

@@ -1,3 +1,4 @@
+mod channel;
 mod commands;
 mod error;
 mod state;
@@ -196,6 +197,8 @@ pub fn run() {
             read_admin_token,
             install_local_core,
             local_core_installed,
+            local_core_base_url,
+            local_sidecar_ports,
             start_local_core,
             // Client settings + keychain
             read_client_settings,
@@ -203,6 +206,11 @@ pub fn run() {
             keychain_set_token,
             keychain_get_token,
             keychain_delete_token,
+            // Pinned core networking
+            net_fetch,
+            net_ws_open,
+            net_ws_send,
+            net_ws_close,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

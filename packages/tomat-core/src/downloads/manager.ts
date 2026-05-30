@@ -17,11 +17,13 @@
 //   - subscribe(fn)  — fire-on-change observer (used by the WS hub)
 
 import { dirname, join } from "@std/path";
+import { errMessage } from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import type { DownloadEntry, DownloadStatus } from "@tomat/shared";
 import { AppError } from "../shared/errors.ts";
 import { newJobId } from "../shared/ids.ts";
 import { getLogger } from "../shared/log.ts";
+import { Sha256Stream } from "../shared/hash.ts";
 import { paths } from "../paths.ts";
 import { parseSource } from "./sources.ts";
 
@@ -86,7 +88,7 @@ export class DownloadManager {
         sizeHint: row.sizeBytes,
       }, row.absPath).catch((err) => {
         log.warn(
-          `resume ${row.id}: ${err instanceof Error ? err.message : err}`,
+          `resume ${row.id}: ${errMessage(err)}`,
         );
       });
     }
@@ -121,7 +123,7 @@ export class DownloadManager {
         this.upsertPending(id, spec, absPath);
         this.broadcast();
         this.spawn(id, spec, absPath).catch((err) => {
-          log.warn(`spawn ${id}: ${err instanceof Error ? err.message : err}`);
+          log.warn(`spawn ${id}: ${errMessage(err)}`);
         });
       });
     });
@@ -156,7 +158,7 @@ export class DownloadManager {
       groupId: row.groupId,
       sizeHint: row.sizeBytes,
     }, row.absPath).catch((err) => {
-      log.warn(`retry ${id}: ${err instanceof Error ? err.message : err}`);
+      log.warn(`retry ${id}: ${errMessage(err)}`);
     });
   }
 
@@ -243,7 +245,7 @@ export class DownloadManager {
       await this.streamDownload(id, spec, absPath, inFlight.abort.signal);
       result = { ok: true, path: absPath };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errMessage(err);
       result = { ok: false, error: msg };
     }
 
@@ -293,7 +295,14 @@ export class DownloadManager {
       truncate: true,
     });
 
-    const sha = spec.sha256 ? new HashStream("SHA-256") : null;
+    // Verify downloaded bytes against a known sha256. An explicit spec hash
+    // wins; otherwise, for HuggingFace LFS weights we verify against HF's
+    // published sha256 (the `x-linked-etag` on the resolve redirect) so a
+    // tampered CDN response is rejected (trust = HF + TLS, same posture as the
+    // beta binary resolver). Small non-LFS files (config.json etc.) carry a git
+    // blob sha1 instead, which is not a content hash, so they stay unverified.
+    const expectedSha = spec.sha256 ?? await resolveHfSha256(url, signal);
+    const sha = expectedSha ? new Sha256Stream() : null;
     let downloaded = 0;
     let total: number | undefined = spec.sizeHint;
     let lastEmit = 0;
@@ -338,15 +347,15 @@ export class DownloadManager {
       } catch { /* fine */ }
     }
 
-    if (sha && spec.sha256) {
-      const actual = await sha.finalHex();
-      if (actual !== spec.sha256.toLowerCase()) {
+    if (sha && expectedSha) {
+      const actual = await sha.hexDigest();
+      if (actual !== expectedSha.toLowerCase()) {
         try {
           await Deno.remove(tmpPath);
         } catch { /* fine */ }
         throw new AppError(
           "checksum_mismatch",
-          `sha256 mismatch: want ${spec.sha256}, got ${actual}`,
+          `sha256 mismatch: want ${expectedSha}, got ${actual}`,
         );
       }
     }
@@ -526,9 +535,7 @@ export class DownloadManager {
         l(snap);
       } catch (err) {
         log.warn(
-          `download listener threw: ${
-            err instanceof Error ? err.message : err
-          }`,
+          `download listener threw: ${errMessage(err)}`,
         );
       }
     }
@@ -585,28 +592,6 @@ function rowToEntry(row: Record<string, unknown>): DownloadEntry {
   };
 }
 
-// Incremental SHA-256 over async chunks. Uses Web Crypto's SubtleCrypto with
-// a streaming buffer so we don't load the whole file in memory.
-class HashStream {
-  private chunks: Uint8Array[] = [];
-  constructor(private readonly algo: "SHA-256") {}
-  update(chunk: Uint8Array): void {
-    this.chunks.push(chunk);
-  }
-  async finalHex(): Promise<string> {
-    const total = this.chunks.reduce((a, c) => a + c.byteLength, 0);
-    const merged = new Uint8Array(total);
-    let off = 0;
-    for (const c of this.chunks) {
-      merged.set(c, off);
-      off += c.byteLength;
-    }
-    const buf = await crypto.subtle.digest(this.algo, merged);
-    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  }
-}
-
 // Singleton accessor for the rest of core to consume.
 let _instance: DownloadManager | null = null;
 export function downloadManager(): DownloadManager {
@@ -620,3 +605,30 @@ export function __resetForTesting(): void {
 
 // Unused but exported for callers that want to mint an ad-hoc job id.
 export { newJobId };
+
+/** Best-effort lookup of a HuggingFace file's published sha256. The resolve
+ *  endpoint 302-redirects to a CDN; for git-LFS objects (the large model
+ *  weights) the redirect carries the content sha256 in `x-linked-etag`. Returns
+ *  it (lowercase hex) when present and shaped like a sha256, else undefined
+ *  (e.g. small non-LFS files, whose etag is a git blob sha1, or a non-HF URL).
+ *  Used to verify model downloads against HF + TLS. */
+async function resolveHfSha256(
+  url: string,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  if (!url.includes("huggingface.co")) return undefined;
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      redirect: "manual",
+      signal,
+    });
+    await res.body?.cancel();
+    const raw = res.headers.get("x-linked-etag") ?? res.headers.get("etag");
+    if (!raw) return undefined;
+    const cleaned = raw.replace(/^W\//, "").replace(/"/g, "").trim();
+    return /^[0-9a-f]{64}$/i.test(cleaned) ? cleaned.toLowerCase() : undefined;
+  } catch {
+    return undefined;
+  }
+}

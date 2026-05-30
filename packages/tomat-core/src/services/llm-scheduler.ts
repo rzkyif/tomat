@@ -10,6 +10,7 @@
 // latency without protecting anything.
 
 import { AppError } from "../shared/errors.ts";
+import { errMessage } from "@tomat/shared";
 import { getLogger } from "../shared/log.ts";
 import {
   type LlmDelta,
@@ -134,9 +135,7 @@ export class LlmScheduler {
           });
         } catch (err) {
           log.warn(
-            `watchdog handler threw: ${
-              err instanceof Error ? err.message : err
-            }`,
+            `watchdog handler threw: ${errMessage(err)}`,
           );
         }
       }, watchdogTimeoutMs);

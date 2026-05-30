@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import {
+  import { errMessage,
     type Grant,
     permissionKey,
     type SettingField,
@@ -33,7 +33,7 @@
   });
 
   function reportError(action: string, err: unknown): void {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errMessage(err);
     console.error(`[toolkits] ${action} failed:`, err);
     confirmState.alert({ title: `${action} failed`, message });
   }
@@ -70,7 +70,7 @@
     try {
       await toolkitsState.search(searchQuery);
     } catch (err) {
-      searchError = err instanceof Error ? err.message : String(err);
+      searchError = errMessage(err);
     } finally {
       searching = false;
     }

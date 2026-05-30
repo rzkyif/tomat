@@ -13,6 +13,7 @@ import type {
   PoolToWorkerFrame,
   WorkerToPoolFrame,
 } from "../toolkits/worker-protocol.ts";
+import { errMessage } from "@tomat/shared";
 
 type ToolContext = {
   setProgress(progress: number, label?: string, description?: string): void;
@@ -61,7 +62,7 @@ async function handleBoot(toolkit: string, entry: string): Promise<void> {
     send({
       kind: "boot_failed",
       toolkitId: toolkit,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMessage(err),
     });
   }
 }
@@ -96,9 +97,7 @@ async function handleCall(
     send({
       kind: "tool_error",
       callId: frame.callId,
-      error: `invalid arguments JSON: ${
-        err instanceof Error ? err.message : err
-      }`,
+      error: `invalid arguments JSON: ${errMessage(err)}`,
     });
     return;
   }
@@ -147,7 +146,7 @@ async function handleCall(
     send({
       kind: "tool_error",
       callId: frame.callId,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMessage(err),
     });
   } finally {
     calls.delete(frame.callId);

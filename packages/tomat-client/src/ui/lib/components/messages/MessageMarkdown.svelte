@@ -86,14 +86,30 @@
 <script lang="ts">
   import DOMPurify from "dompurify";
   import { tick } from "svelte";
+  import { platform } from "$lib/platform";
 
   let { content }: { content: string } = $props();
+
+  // Open links from rendered (untrusted, model-authored) markdown in the system
+  // browser instead of letting them navigate the app webview in-frame. Without
+  // this, a prompt-injected link could replace the trusted app chrome
+  // (window-takeover / phishing). DOMPurify already strips javascript: hrefs.
+  function handleLinkClick(e: MouseEvent) {
+    const anchor = (e.target as HTMLElement | null)?.closest("a");
+    const href = anchor?.getAttribute("href");
+    if (!href || !/^https?:\/\//i.test(href)) return;
+    e.preventDefault();
+    void platform().openExternal(href).catch(() => {});
+  }
 
   // svelte-ignore non_reactive_update
   // oxlint-disable-next-line no-unassigned-vars
   let container: HTMLDivElement;
 
   let renderedHtml = $state<string | null>(null);
+  // Attach the external-link interceptor once via delegation on the container
+  // (rather than an inline handler on a static element, which trips a11y lints).
+  let linkHandlerAttached = false;
 
   function wrapTables(node: HTMLDivElement) {
     const tables = node.querySelectorAll("table");
@@ -141,6 +157,10 @@
       });
       tick().then(() => {
         if (container) {
+          if (!linkHandlerAttached) {
+            container.addEventListener("click", handleLinkClick);
+            linkHandlerAttached = true;
+          }
           wrapTables(container);
           wrapCodeBlocks(container);
         }

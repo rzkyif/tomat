@@ -19,6 +19,7 @@
 // no deno.json nearby. Keep versions pinned in lockstep with tomat-core's
 // own deno.json import map.
 import { env } from "npm:@huggingface/transformers@^4.1.0";
+import { errMessage } from "@tomat/shared";
 import { KokoroTTS } from "npm:kokoro-js@^1.2.1";
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
@@ -125,7 +126,7 @@ async function synthesize(
     send({
       kind: "synth_err",
       id,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMessage(err),
     });
     return;
   }
@@ -200,7 +201,7 @@ async function dispatch(frame: In): Promise<void> {
     } catch (err) {
       send({
         kind: "load_err",
-        error: err instanceof Error ? err.message : String(err),
+        error: errMessage(err),
       });
     }
   } else if (frame.kind === "synthesize") {

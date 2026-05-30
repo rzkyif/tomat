@@ -1,5 +1,5 @@
 // Runs type-checks for the Deno + Svelte/TS side of the monorepo.
-//  - `deno check` for shared + core + core-updater + website scripts
+//  - `deno check` for shared + core + website scripts
 //  - client package's own check task for the Svelte/TS side (svelte-check via npm:)
 // Rust (`cargo check`) is handled by the `check:rs` task in the root deno.json.
 
@@ -15,9 +15,9 @@ const steps: Step[] = [
       "check",
       "packages/tomat-shared/src/index.ts",
       "packages/tomat-core/src/main.ts",
-      "packages/tomat-core-updater/src/main.ts",
-      "scripts/website/deploy.ts",
+      "scripts/release/main.ts",
       "scripts/website/dev.ts",
+      "scripts/website/build.ts",
     ],
   },
   {

@@ -3,6 +3,7 @@
 // core and rebuilds the CoreClient + its per-domain APIs on switch.
 
 import { platform } from "../platform/index.ts";
+import { Subscribers } from "../shared/subscribers.ts";
 import { BinariesApi } from "./binaries";
 import { ChatApi } from "./chat";
 import { CoreClient, type ConnectionState, type WsListener } from "./client";
@@ -17,9 +18,10 @@ import { TtsApi } from "./tts";
 import { UpdateApi } from "./update";
 
 export interface PairedCoreEntry {
-  id: string; // ULID returned by /pairing/claim
+  id: string; // ULID returned by pairing
   name: string; // user-visible label
-  baseUrl: string; // e.g. http://127.0.0.1:7800
+  baseUrl: string; // e.g. https://127.0.0.1:7800
+  tlsPin: string; // pinned cert SPKI (base64 SHA-256), captured at pairing
   addedAtMs: number;
 }
 
@@ -27,7 +29,7 @@ const CURRENT_KEY = "currentCoreId";
 
 class CoresRegistry {
   private current: { entry: PairedCoreEntry; client: CoreClient } | null = null;
-  private listeners = new Set<() => void>();
+  private listeners = new Subscribers<() => void>();
   // Persistent WS / connection-state listeners. These survive core switches:
   // subscribeWs / subscribeConnectionState add to these sets, and select()
   // re-binds every one onto the freshly-built client. Without this, a listener
@@ -92,7 +94,11 @@ class CoresRegistry {
     const token = await platform().keychain.get(entry.id);
     if (!token) throw new Error(`no token for core ${entry.id}; re-pair`);
     if (this.current) this.current.client.close();
-    const client = new CoreClient({ baseUrl: entry.baseUrl, token });
+    const client = new CoreClient({
+      baseUrl: entry.baseUrl,
+      token,
+      tlsPin: entry.tlsPin,
+    });
     this.current = { entry, client };
     this.apis = {
       sessions: new SessionsApi(client),
@@ -166,8 +172,7 @@ class CoresRegistry {
   }
 
   subscribe(listener: () => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    return this.listeners.add(listener);
   }
 
   subscribeWs(listener: WsListener): () => void {
@@ -214,13 +219,7 @@ class CoresRegistry {
   }
 
   private notify(): void {
-    for (const l of this.listeners) {
-      try {
-        l();
-      } catch {
-        /* */
-      }
-    }
+    this.listeners.emit();
   }
 }
 

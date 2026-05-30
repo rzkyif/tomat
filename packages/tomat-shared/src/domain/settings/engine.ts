@@ -389,6 +389,87 @@ function fieldMatchesQuery(field: SettingField, q: string): boolean {
   return false;
 }
 
+/** True when `value` is type-compatible with `field`'s declared `type`.
+ *  Used by core-side PATCH /settings validation so a client can't persist a
+ *  wrong-typed value that would later break core or flow into a sidecar
+ *  argument. Render-only fields hold no persisted scalar, so they pass. */
+function settingValueTypeOk(field: SettingField, value: unknown): boolean {
+  switch (field.type) {
+    case "boolean":
+      return typeof value === "boolean";
+    case "number":
+    case "float":
+    case "number_slider":
+      return typeof value === "number" && Number.isFinite(value);
+    case "select":
+      return typeof value === "string" || typeof value === "number";
+    case "command_preview":
+      return typeof value === "string" || typeof value === "boolean";
+    case "string":
+    case "password":
+    case "multiline":
+    case "color":
+    case "shortcut":
+    case "preset":
+      return typeof value === "string";
+    case "services":
+    case "storage":
+    case "snippets":
+    case "toolkits":
+    case "cores":
+      return true;
+  }
+}
+
+/**
+ * Validate a PATCH body destined for a settings store (core's
+ * `PATCH /api/v1/settings`). Returns a list of human-readable errors; an empty
+ * list means the patch is acceptable. Rules:
+ *   - `null`/`undefined` values are deletions (reset to default) and always OK.
+ *   - secret-typed keys (password fields) are rejected: their values belong in
+ *     the encrypted vault via the secrets endpoint, never in settings.json.
+ *   - known keys are type-checked (and regex-checked for text fields) so a
+ *     malformed value can't be persisted.
+ *   - unknown keys are NOT errors here (forward-compat with a newer client);
+ *     callers should drop them rather than persist them.
+ */
+export function validateSettingsPatch(
+  patch: Record<string, unknown>,
+): string[] {
+  const errors: string[] = [];
+  const secretSet = new Set<string>(SECRET_KEYS);
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null || value === undefined) continue;
+    if (secretSet.has(key)) {
+      errors.push(
+        `"${key}" is a secret and must be set via the secrets endpoint, not settings`,
+      );
+      continue;
+    }
+    if (!isValidSettingKey(key)) continue;
+    const field = findField(key);
+    if (!field) continue;
+    if (!settingValueTypeOk(field, value)) {
+      errors.push(`"${key}" has the wrong type for a "${field.type}" setting`);
+      continue;
+    }
+    if (
+      (field.type === "string" || field.type === "password" ||
+        field.type === "multiline") && field.regex
+    ) {
+      const re = getValidationError(field.regex, value);
+      if (re) errors.push(`"${key}": ${re}`);
+    }
+  }
+  return errors;
+}
+
+/** True if `key` names a secret-typed (password) setting whose value must be
+ *  stored in the encrypted vault and never returned over the API. */
+export function isSecretSettingKey(key: string): boolean {
+  return (SECRET_KEYS as readonly string[]).includes(key);
+}
+
 export function getValidationError(
   regex: RegexValidation,
   value: unknown,
