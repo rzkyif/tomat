@@ -132,6 +132,13 @@ impl Drop for InstallGuard {
 
 fn installer_url() -> String {
     let base = std::env::var("TOMAT_STORAGE").unwrap_or_else(|_| DEFAULT_STORAGE_BASE.into());
+    installer_url_from_base(&base)
+}
+
+/// Pure URL builder. `installer_url` wraps this with the `TOMAT_STORAGE`
+/// lookup; keeping the formatting separate lets tests assert on it without
+/// mutating process-global env (which races under parallel test threads).
+fn installer_url_from_base(base: &str) -> String {
     let suffix = if cfg!(windows) { "core.ps1" } else { "core.sh" };
     format!("{}/install/{}", base, suffix)
 }
@@ -381,28 +388,15 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn installer_url_uses_default_storage_when_env_unset() {
-        // SAFETY: tests in this crate are run with --test-threads=1 in CI for
-        // this exact reason; locally a stray race is harmless (the assert
-        // simply gets retried).
-        // SAFETY: standalone test binary, single thread, env mutation is fine.
-        unsafe {
-            std::env::remove_var("TOMAT_STORAGE");
-        }
-        let url = installer_url();
+    fn installer_url_uses_default_storage_base() {
+        let url = installer_url_from_base(DEFAULT_STORAGE_BASE);
         assert!(url.starts_with(DEFAULT_STORAGE_BASE));
         assert!(url.ends_with("core.sh") || url.ends_with("core.ps1"));
     }
 
     #[test]
-    fn installer_url_honors_tomat_storage_override() {
-        unsafe {
-            std::env::set_var("TOMAT_STORAGE", "https://test.example");
-        }
-        let url = installer_url();
-        unsafe {
-            std::env::remove_var("TOMAT_STORAGE");
-        }
+    fn installer_url_honors_storage_override() {
+        let url = installer_url_from_base("https://test.example");
         assert!(url.starts_with("https://test.example/install/"));
     }
 

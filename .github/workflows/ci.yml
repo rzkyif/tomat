@@ -38,6 +38,7 @@ jobs:
             libsoup-3.0-dev \
             libpipewire-0.3-dev \
             libasound2-dev \
+            libgbm-dev \
             patchelf
 
       - uses: dtolnay/rust-toolchain@master
