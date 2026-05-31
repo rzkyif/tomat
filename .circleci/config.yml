@@ -25,25 +25,39 @@ orbs:
 
 jobs:
   # Full Deno-driven pipeline (type-check, svelte-check, Linux cargo check,
-  # fmt check, lint, clippy, tests). cimg/rust ships Rust 1.91.1 preinstalled,
-  # matching packages/tomat-client/src/tauri/rust-toolchain.toml.
+  # fmt check, lint, clippy, tests).
+  #
+  # Image is pinned to cimg/base:current-24.04 (Ubuntu 24.04) on purpose: the
+  # build pulls in the pipewire Rust bindings (libspa / pipewire-sys), which
+  # bindgen generates from the system PipeWire headers. Those bindings only
+  # compile against a matching PipeWire version, so the image's Ubuntu must line
+  # up with GitHub's ubuntu-latest (24.04). An image on a different Ubuntu
+  # produces a struct mismatch (e.g. `spa_video_info_raw` has no `flags` field).
+  # Do NOT use the bare `cimg/base:current` tag — its default LTS has moved to
+  # 26.04, which reintroduces the mismatch. Rust + Deno are installed on top,
+  # both pinned.
   linux:
     docker:
-      - image: cimg/rust:1.91.1
+      - image: cimg/base:current-24.04
     resource_class: large
     steps:
       - checkout
 
+      # Rust 1.91.1, matching packages/tomat-client/src/tauri/rust-toolchain.toml.
       # clippy + rustfmt are exercised by `deno task lint` / `deno task check`.
       - run:
-          name: Add rustfmt + clippy components
-          command: rustup component add rustfmt clippy
+          name: Install Rust 1.91.1 (clippy + rustfmt)
+          command: |
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | \
+              sh -s -- -y --default-toolchain 1.91.1 --component rustfmt --component clippy
+            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
 
       # System libs for Tauri / xcap / cpal — same set the GHA workflow installs,
-      # plus build tools that GitHub's ubuntu-latest preinstalls but cimg/rust
-      # does not:
+      # plus tooling the cimg/base image (unlike GitHub's runner) does not ship:
+      #   - build-essential + pkg-config: C toolchain for aws-lc-sys / ring and
+      #     the pkg-config-driven *-sys crates (alsa-sys, soup, webkit).
       #   - clang + libclang-dev: libclang for the pipewire-sys / libspa-sys
-      #     bindgen build scripts (Linux-only; the actual libclang failure).
+      #     bindgen build scripts (Linux-only).
       #   - cmake: aws-lc-sys (reqwest -> rustls -> aws-lc-rs) builds its C lib
       #     with cmake.
       # `unzip` is needed by the Deno installer below.
@@ -60,6 +74,8 @@ jobs:
               libasound2-dev \
               libgbm-dev \
               patchelf \
+              build-essential \
+              pkg-config \
               clang \
               libclang-dev \
               cmake \
@@ -80,20 +96,26 @@ jobs:
             - cargo-linux-v1-{{ checksum "packages/tomat-client/src/tauri/Cargo.lock" }}-{{ checksum "packages/tomat-core-keychain/Cargo.lock" }}-{{ checksum "packages/tomat-core-updater/Cargo.lock" }}
             - cargo-linux-v1-
 
+      # no_output_timeout on the compile-heavy steps: a cold cargo build of the
+      # three crates can run silently past CircleCI's 10m default no-output
+      # window (the deno + cargo caches below keep warm runs well under it).
       - run:
           name: deno task check
           command: deno task check
+          no_output_timeout: 30m
       - run:
           name: deno task fmt:check
           command: deno task fmt:check
       - run:
           name: deno task lint
           command: deno task lint
+          no_output_timeout: 30m
       # In-source tests (deno + vitest one-shot + cargo). E2E (WebdriverIO +
       # tauri-driver) is intentionally excluded — see tests/e2e/README.md.
       - run:
           name: deno task test
           command: deno task test
+          no_output_timeout: 30m
 
       - save_cache:
           key: deno-v1-{{ checksum "deno.lock" }}
