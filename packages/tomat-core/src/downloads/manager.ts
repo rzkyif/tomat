@@ -65,7 +65,7 @@ export class DownloadManager {
   private readonly waitQueue: Array<() => void> = [];
   // Track scheduled inter-download release timers so shutdown() can cancel
   // any pending ticks and not leave the process holding a stray timer.
-  private readonly pendingTimers = new Set<number>();
+  private readonly pendingTimers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor() {
     this.normalizePersistedRows();

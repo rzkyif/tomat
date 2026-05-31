@@ -87,7 +87,7 @@ export class WorkerPool {
   private config: PoolConfig = DEFAULT_POOL_CONFIG;
   private workers = new Map<string, WorkerHandle>();
   private lru: string[] = []; // toolkitIds in MRU order
-  private idleTimers = new Map<string, number>();
+  private idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   setConfig(cfg: Partial<PoolConfig>): void {
     this.config = { ...this.config, ...cfg };
@@ -108,7 +108,7 @@ export class WorkerPool {
     const key = workerKey(spec.toolkitId, spec.tool.name);
     const worker = this.getOrSpawn(spec, key);
 
-    let timeout: number | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     let cancelled = false;
     let askUserPending = false;
     // Tracks how much of the callTimeoutMs budget is still available so
@@ -462,7 +462,7 @@ export class WorkerPool {
       this.removeFromLru(toolkitId);
       this.idleTimers.delete(toolkitId);
     }, this.config.workerIdleMs);
-    this.idleTimers.set(toolkitId, t as unknown as number);
+    this.idleTimers.set(toolkitId, t);
   }
   private clearIdleTimer(toolkitId: string): void {
     const t = this.idleTimers.get(toolkitId);

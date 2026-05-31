@@ -39,8 +39,8 @@ interface Connection {
   ws: WebSocket;
   clientId: string;
   alive: boolean;
-  pingTimer?: number;
-  pongTimer?: number;
+  pingTimer?: ReturnType<typeof setTimeout>;
+  pongTimer?: ReturnType<typeof setTimeout>;
 }
 
 class WsHub {
@@ -238,10 +238,10 @@ class WsHub {
         try {
           conn.ws.close(4002, "pong timeout");
         } catch { /* */ }
-      }, PONG_TIMEOUT_MS) as unknown as number;
-      conn.pingTimer = setTimeout(tick, HEARTBEAT_MS) as unknown as number;
+      }, PONG_TIMEOUT_MS);
+      conn.pingTimer = setTimeout(tick, HEARTBEAT_MS);
     };
-    conn.pingTimer = setTimeout(tick, HEARTBEAT_MS) as unknown as number;
+    conn.pingTimer = setTimeout(tick, HEARTBEAT_MS);
   }
 
   // One-shot wiring of broadcast sources to the hub.

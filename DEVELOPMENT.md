@@ -48,7 +48,7 @@ flowchart TD
 
 ### Prerequisites
 
-- **Deno 2.7+** (`brew install deno` / `winget install DenoLand.Deno` / see
+- **Deno 2.8+** (`brew install deno` / `winget install DenoLand.Deno` / see
   https://deno.com/).
 - **Rust toolchain** for building the Tauri shell and the core-keychain helper
   (`packages/tomat-client/src/tauri/rust-toolchain.toml` pins the version).
@@ -68,7 +68,7 @@ flowchart TD
 
 ```bash
 deno install        # populates node_modules + warms the Deno npm cache
-deno --version      # expect 2.7+
+deno --version      # expect 2.8+
 cargo --version     # expect 1.91.1 (pinned by rust-toolchain.toml)
 ```
 

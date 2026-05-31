@@ -188,10 +188,18 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    /// `expand_tilde` joins with the host path separator (`\` on Windows),
+    /// which is correct at runtime but breaks these forward-slash string
+    /// comparisons on Windows. Normalize so the assertions hold on every
+    /// platform.
+    fn norm(s: String) -> String {
+        s.replace('\\', "/")
+    }
+
     #[test]
     fn expand_tilde_replaces_leading_tilde_with_home() {
         assert_eq!(
-            expand_tilde("~/foo/bar", &PathBuf::from("/home/u")),
+            norm(expand_tilde("~/foo/bar", &PathBuf::from("/home/u"))),
             "/home/u/foo/bar"
         );
     }
@@ -200,7 +208,7 @@ mod tests {
     fn expand_tilde_handles_bare_tilde() {
         // PathBuf::join("") preserves the trailing separator on Unix; the
         // result is still the same directory.
-        let out = expand_tilde("~", &PathBuf::from("/home/u"));
+        let out = norm(expand_tilde("~", &PathBuf::from("/home/u")));
         assert!(out == "/home/u" || out == "/home/u/", "got {out}");
     }
 
@@ -209,7 +217,7 @@ mod tests {
         // `~foo` is treated as `<home>/foo` (matches the original logic which
         // just trims any leading slashes from the remainder).
         assert_eq!(
-            expand_tilde("~foo", &PathBuf::from("/home/u")),
+            norm(expand_tilde("~foo", &PathBuf::from("/home/u"))),
             "/home/u/foo"
         );
     }
