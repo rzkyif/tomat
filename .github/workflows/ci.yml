@@ -16,7 +16,7 @@ jobs:
   # command lists. Single job because deno task check already drives the full
   # pipeline and we don't want a second worker to repeat the npm/JSR resolution.
   deno:
-    name: Deno (check + fmt + lint)
+    name: "Rust and Typescript checks (linux)"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -77,7 +77,7 @@ jobs:
   # shell, the core-keychain helper, and the core-updater helper) stay
   # buildable on every supported host without the rest of the Deno pipeline.
   rs:
-    name: Cargo check (${{ matrix.os }})
+    name: "Rust checks (${{ matrix.os }})"
     strategy:
       fail-fast: false
       matrix:
