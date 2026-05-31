@@ -46,8 +46,8 @@ pub fn write_settings_at(path: &Path, settings: Value) -> AppResult<()> {
 }
 
 fn client_settings_path() -> AppResult<PathBuf> {
-    let home =
-        dirs::home_dir().ok_or_else(|| AppError::external("could not determine home directory"))?;
+    let home = std::env::home_dir()
+        .ok_or_else(|| AppError::external("could not determine home directory"))?;
     Ok(crate::channel::channel_root(&home)
         .join("client")
         .join("settings.json"))

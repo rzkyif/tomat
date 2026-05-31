@@ -43,7 +43,7 @@ jobs:
     steps:
       - checkout
 
-      # Rust 1.91.1, matching packages/tomat-client/src/tauri/rust-toolchain.toml.
+      # Rust 1.91.1, matching rust-toolchain.toml.
       # clippy + rustfmt are exercised by `deno task lint` / `deno task check`.
       - run:
           name: Install Rust 1.91.1 (clippy + rustfmt)
@@ -93,7 +93,7 @@ jobs:
             - deno-v1-
       - restore_cache:
           keys:
-            - cargo-linux-v1-{{ checksum "packages/tomat-client/src/tauri/Cargo.lock" }}-{{ checksum "packages/tomat-core-keychain/Cargo.lock" }}-{{ checksum "packages/tomat-core-updater/Cargo.lock" }}
+            - cargo-linux-v1-{{ checksum "Cargo.lock" }}
             - cargo-linux-v1-
 
       # no_output_timeout on the compile-heavy steps: a cold cargo build of the
@@ -122,13 +122,11 @@ jobs:
           paths:
             - ~/.cache/deno
       - save_cache:
-          key: cargo-linux-v1-{{ checksum "packages/tomat-client/src/tauri/Cargo.lock" }}-{{ checksum "packages/tomat-core-keychain/Cargo.lock" }}-{{ checksum "packages/tomat-core-updater/Cargo.lock" }}
+          key: cargo-linux-v1-{{ checksum "Cargo.lock" }}
           paths:
             - ~/.cargo/registry
             - ~/.cargo/git
-            - packages/tomat-client/src/tauri/target
-            - packages/tomat-core-keychain/target
-            - packages/tomat-core-updater/target
+            - target
 
   # Cross-platform Rust checks for Windows. Linux cargo check already runs inside
   # the `linux` job's `deno task check`; this keeps the three Rust crates (Tauri
@@ -163,7 +161,7 @@ jobs:
 
       - restore_cache:
           keys:
-            - cargo-windows-v1-{{ checksum "packages/tomat-client/src/tauri/Cargo.lock" }}-{{ checksum "packages/tomat-core-keychain/Cargo.lock" }}-{{ checksum "packages/tomat-core-updater/Cargo.lock" }}
+            - cargo-windows-v1-{{ checksum "Cargo.lock" }}
             - cargo-windows-v1-
 
       - run:
@@ -186,13 +184,11 @@ jobs:
             cargo test --manifest-path packages/tomat-core-updater/Cargo.toml
 
       - save_cache:
-          key: cargo-windows-v1-{{ checksum "packages/tomat-client/src/tauri/Cargo.lock" }}-{{ checksum "packages/tomat-core-keychain/Cargo.lock" }}-{{ checksum "packages/tomat-core-updater/Cargo.lock" }}
+          key: cargo-windows-v1-{{ checksum "Cargo.lock" }}
           paths:
             - C:\Users\circleci\.cargo\registry
             - C:\Users\circleci\.cargo\git
-            - packages\tomat-client\src\tauri\target
-            - packages\tomat-core-keychain\target
-            - packages\tomat-core-updater\target
+            - target
 
 workflows:
   ci:

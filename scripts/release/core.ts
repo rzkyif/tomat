@@ -345,7 +345,6 @@ async function buildHelpers(
         }
         const builtPath = join(
           REPO_ROOT,
-          crateDir,
           "target",
           triple,
           "release",

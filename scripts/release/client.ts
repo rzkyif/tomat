@@ -46,7 +46,7 @@ import { encodeBase64 } from "jsr:@std/encoding@^1/base64";
 
 const TAURI_DIR = join(REPO_ROOT, "packages/tomat-client/src/tauri");
 const TAURI_CONF_PATH = join(TAURI_DIR, "tauri.conf.json");
-const TAURI_BUNDLE_OUT = join(TAURI_DIR, "target/release/bundle");
+const TAURI_BUNDLE_OUT = join(REPO_ROOT, "target/release/bundle");
 // Legacy placeholder, kept for forks that still ship it.
 const TAURI_PUBKEY_PLACEHOLDER = "PLACEHOLDER_REPLACE_AT_BUILD_TIME";
 

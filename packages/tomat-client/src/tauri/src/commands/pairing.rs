@@ -216,16 +216,16 @@ fn parse_pairing_code(output: &str) -> AppResult<String> {
 }
 
 fn admin_token_path() -> AppResult<PathBuf> {
-    let home =
-        dirs::home_dir().ok_or_else(|| AppError::external("could not determine home directory"))?;
+    let home = std::env::home_dir()
+        .ok_or_else(|| AppError::external("could not determine home directory"))?;
     Ok(crate::channel::channel_root(&home)
         .join("core")
         .join(".admin-token"))
 }
 
 fn local_core_binary() -> AppResult<PathBuf> {
-    let home =
-        dirs::home_dir().ok_or_else(|| AppError::external("could not determine home directory"))?;
+    let home = std::env::home_dir()
+        .ok_or_else(|| AppError::external("could not determine home directory"))?;
     // Channel-suffixed: beta's core lives at .../bin/tomat-core-beta(.exe).
     Ok(crate::channel::channel_root(&home)
         .join("core")

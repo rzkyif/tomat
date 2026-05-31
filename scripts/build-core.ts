@@ -88,8 +88,7 @@ async function cargoBuild(
     console.error(`cargo build ${builtName} failed (exit ${code})`);
     Deno.exit(code);
   }
-  const builtPath =
-    `${ROOT}${crateDir}/target/${target}/release/${builtName}${exe}`;
+  const builtPath = `${ROOT}target/${target}/release/${builtName}${exe}`;
   const dstPath = `${outDir}/${outName}${exe}`;
   await Deno.copyFile(builtPath, dstPath);
 }

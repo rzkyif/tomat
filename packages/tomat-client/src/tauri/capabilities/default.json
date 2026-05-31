@@ -13,7 +13,6 @@
     "core:window:allow-set-position",
     "core:window:allow-current-monitor",
     "opener:default",
-    "shell:default",
     "fs:default",
     "dialog:default",
     "updater:default",

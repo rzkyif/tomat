@@ -24,8 +24,7 @@ const ARTIFACTS = [
   "packages/tomat-website/.wrangler",
   "packages/tomat-client/build",
   "packages/tomat-client/.svelte-kit",
-  "packages/tomat-client/src/tauri/target",
-  "packages/tomat-core-keychain/target",
+  "target",
 ];
 
 // Removed only with --deep; re-run `deno install` afterwards.
