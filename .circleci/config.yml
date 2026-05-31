@@ -1,0 +1,161 @@
+# CircleCI pipeline — mirrors .github/workflows/ci.yml.
+#
+# GHA still runs in parallel during the transition (both CIs are live); keep the
+# two in sync until GHA is retired. As with GHA, every run step delegates to the
+# canonical `deno task` targets in deno.json so CI can't drift from the command
+# lists.
+#
+# Coverage vs the GHA workflow:
+#   - `linux`   == GHA `deno` job  (full TS + Rust + UI pipeline on Linux)
+#   - `windows` == GHA `rs` matrix, Windows leg only
+#   - macOS leg of the GHA `rs` matrix is intentionally dropped (CircleCI macOS
+#     executors require a paid resource class).
+#
+# Two GHA behaviours have no config-level equivalent on CircleCI:
+#   - Trigger filtering: GHA runs on every PR + push to main. CircleCI builds
+#     every push to every branch by default, a superset that covers both. Add a
+#     workflow branch filter here if we ever want to narrow it.
+#   - `concurrency: cancel-in-progress`: enable "Auto-cancel redundant
+#     workflows" in CircleCI Project Settings -> Advanced (UI/API only).
+
+version: 2.1
+
+orbs:
+  win: circleci/windows@5.0.0
+
+jobs:
+  # Full Deno-driven pipeline (type-check, svelte-check, Linux cargo check,
+  # fmt check, lint, clippy, tests). cimg/rust ships Rust 1.91.1 preinstalled,
+  # matching packages/tomat-client/src/tauri/rust-toolchain.toml.
+  linux:
+    docker:
+      - image: cimg/rust:1.91.1
+    resource_class: large
+    steps:
+      - checkout
+
+      # clippy + rustfmt are exercised by `deno task lint` / `deno task check`.
+      - run:
+          name: Add rustfmt + clippy components
+          command: rustup component add rustfmt clippy
+
+      # System libs for Tauri / xcap / cpal — same set the GHA workflow installs.
+      # `unzip` is needed by the Deno installer below.
+      - run:
+          name: Install Linux deps for Tauri / xcap / cpal
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y \
+              libwebkit2gtk-4.1-dev \
+              libappindicator3-dev \
+              librsvg2-dev \
+              libsoup-3.0-dev \
+              libpipewire-0.3-dev \
+              libasound2-dev \
+              libgbm-dev \
+              patchelf \
+              unzip
+
+      - run:
+          name: Install Deno 2.8.1
+          command: |
+            curl -fsSL https://deno.land/install.sh | sh -s v2.8.1
+            echo 'export PATH="$HOME/.deno/bin:$PATH"' >> "$BASH_ENV"
+
+      - restore_cache:
+          keys:
+            - deno-v1-{{ checksum "deno.lock" }}
+            - deno-v1-
+      - restore_cache:
+          keys:
+            - cargo-linux-v1-{{ checksum "packages/tomat-client/src/tauri/Cargo.lock" }}-{{ checksum "packages/tomat-core-keychain/Cargo.lock" }}-{{ checksum "packages/tomat-core-updater/Cargo.lock" }}
+            - cargo-linux-v1-
+
+      - run:
+          name: deno task check
+          command: deno task check
+      - run:
+          name: deno task fmt:check
+          command: deno task fmt:check
+      - run:
+          name: deno task lint
+          command: deno task lint
+      # In-source tests (deno + vitest one-shot + cargo). E2E (WebdriverIO +
+      # tauri-driver) is intentionally excluded — see tests/e2e/README.md.
+      - run:
+          name: deno task test
+          command: deno task test
+
+      - save_cache:
+          key: deno-v1-{{ checksum "deno.lock" }}
+          paths:
+            - ~/.cache/deno
+      - save_cache:
+          key: cargo-linux-v1-{{ checksum "packages/tomat-client/src/tauri/Cargo.lock" }}-{{ checksum "packages/tomat-core-keychain/Cargo.lock" }}-{{ checksum "packages/tomat-core-updater/Cargo.lock" }}
+          paths:
+            - ~/.cargo/registry
+            - ~/.cargo/git
+            - packages/tomat-client/src/tauri/target
+            - packages/tomat-core-keychain/target
+            - packages/tomat-core-updater/target
+
+  # Cross-platform Rust checks for Windows. Linux cargo check already runs inside
+  # the `linux` job's `deno task check`; this keeps the three Rust crates (Tauri
+  # shell, core-keychain, core-updater) buildable on Windows.
+  windows:
+    executor:
+      name: win/default
+      shell: bash.exe
+    steps:
+      - checkout
+
+      - run:
+          name: Install Rust 1.91.1 (clippy + rustfmt)
+          command: |
+            if ! command -v rustup >/dev/null 2>&1; then
+              curl -fsSL https://win.rustup.rs/x86_64 -o rustup-init.exe
+              ./rustup-init.exe -y --default-toolchain none
+              echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+              export PATH="$HOME/.cargo/bin:$PATH"
+            fi
+            rustup toolchain install 1.91.1 --component clippy --component rustfmt
+            rustup default 1.91.1
+
+      - restore_cache:
+          keys:
+            - cargo-windows-v1-{{ checksum "packages/tomat-client/src/tauri/Cargo.lock" }}-{{ checksum "packages/tomat-core-keychain/Cargo.lock" }}-{{ checksum "packages/tomat-core-updater/Cargo.lock" }}
+            - cargo-windows-v1-
+
+      - run:
+          name: tomat-client/src/tauri
+          command: |
+            cargo clippy --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings
+            cargo check --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets
+            cargo test --manifest-path packages/tomat-client/src/tauri/Cargo.toml --lib
+      - run:
+          name: tomat-core-keychain
+          command: |
+            cargo clippy --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings
+            cargo check --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets
+            cargo test --manifest-path packages/tomat-core-keychain/Cargo.toml
+      - run:
+          name: tomat-core-updater
+          command: |
+            cargo clippy --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets -- -D warnings
+            cargo check --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets
+            cargo test --manifest-path packages/tomat-core-updater/Cargo.toml
+
+      - save_cache:
+          key: cargo-windows-v1-{{ checksum "packages/tomat-client/src/tauri/Cargo.lock" }}-{{ checksum "packages/tomat-core-keychain/Cargo.lock" }}-{{ checksum "packages/tomat-core-updater/Cargo.lock" }}
+          paths:
+            - C:\Users\circleci\.cargo\registry
+            - C:\Users\circleci\.cargo\git
+            - packages\tomat-client\src\tauri\target
+            - packages\tomat-core-keychain\target
+            - packages\tomat-core-updater\target
+
+workflows:
+  ci:
+    jobs:
+      - linux
+      - windows
