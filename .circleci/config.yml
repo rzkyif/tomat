@@ -39,7 +39,13 @@ jobs:
           name: Add rustfmt + clippy components
           command: rustup component add rustfmt clippy
 
-      # System libs for Tauri / xcap / cpal — same set the GHA workflow installs.
+      # System libs for Tauri / xcap / cpal — same set the GHA workflow installs,
+      # plus build tools that GitHub's ubuntu-latest preinstalls but cimg/rust
+      # does not:
+      #   - clang + libclang-dev: libclang for the pipewire-sys / libspa-sys
+      #     bindgen build scripts (Linux-only; the actual libclang failure).
+      #   - cmake: aws-lc-sys (reqwest -> rustls -> aws-lc-rs) builds its C lib
+      #     with cmake.
       # `unzip` is needed by the Deno installer below.
       - run:
           name: Install Linux deps for Tauri / xcap / cpal
@@ -54,6 +60,9 @@ jobs:
               libasound2-dev \
               libgbm-dev \
               patchelf \
+              clang \
+              libclang-dev \
+              cmake \
               unzip
 
       - run:
@@ -120,6 +129,15 @@ jobs:
             fi
             rustup toolchain install 1.91.1 --component clippy --component rustfmt
             rustup default 1.91.1
+
+      # GitHub's windows runners preinstall NASM + CMake; the CircleCI windows
+      # image does not. Both are required to build aws-lc-sys (reqwest ->
+      # rustls -> aws-lc-rs) and ring on the MSVC target.
+      - run:
+          name: Install NASM + CMake (aws-lc-sys / ring build deps)
+          command: |
+            choco install -y nasm cmake
+            echo 'export PATH="/c/Program Files/NASM:/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
 
       - restore_cache:
           keys:
