@@ -29,8 +29,7 @@ export async function resolveEndpoint(
 ): Promise<LlmEndpointConfig> {
   if (route === "secondary") {
     const settingsKey = strSetting(settings, "dualModel.external.apiKey", "");
-    const apiKey = (await getSecret("dualModel.external.apiKey")) ||
-      settingsKey || "";
+    const apiKey = (await getSecret("dualModel.external.apiKey")) || settingsKey || "";
     return {
       baseUrl: strSetting(settings, "dualModel.external.baseUrl", ""),
       apiKey,
@@ -38,17 +37,11 @@ export async function resolveEndpoint(
       reasoning: "off",
     };
   }
-  const provider = strSetting(settings, "llm.provider", "local") as
-    | "local"
-    | "external";
-  const reasoning = strSetting(settings, "llm.reasoning", "off") as
-    | "off"
-    | "on"
-    | "auto";
+  const provider = strSetting(settings, "llm.provider", "local") as "local" | "external";
+  const reasoning = strSetting(settings, "llm.reasoning", "off") as "off" | "on" | "auto";
   if (provider === "external") {
     const settingsKey = strSetting(settings, "llm.external.apiKey", "");
-    const apiKey = (await getSecret("llm.external.apiKey")) ||
-      settingsKey || "";
+    const apiKey = (await getSecret("llm.external.apiKey")) || settingsKey || "";
     return {
       baseUrl: strSetting(settings, "llm.external.baseUrl", ""),
       apiKey,
@@ -83,20 +76,12 @@ export function resolveContextSize(
   return numSetting(settings, "llm.contextSize", 4096);
 }
 
-function strSetting(
-  s: Record<string, unknown>,
-  key: string,
-  def: string,
-): string {
+function strSetting(s: Record<string, unknown>, key: string, def: string): string {
   const v = s[key];
   return typeof v === "string" ? v : def;
 }
 
-function numSetting(
-  s: Record<string, unknown>,
-  key: string,
-  def: number,
-): number {
+function numSetting(s: Record<string, unknown>, key: string, def: number): number {
   const v = s[key];
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string" && v !== "") {

@@ -1,7 +1,7 @@
 // Single-shot LLM utility endpoints. These are non-streaming wrappers used
 // by the client for short post-processing tasks (STT autocorrect, STT
-// merge) so that no LLM traffic ever bypasses core — same provider
-// resolution + secrets vault as the streaming chat path.
+// merge) so that no LLM traffic ever bypasses core. They use the same
+// provider resolution + secrets vault as the streaming chat path.
 //
 // Routes:
 //   POST /api/v1/llm/autocorrect  { text }                  → { text }
@@ -12,10 +12,7 @@
 //   prompts.mergeTranscriptionPrompt (default: DEFAULT_MERGE_TRANSCRIPTION_PROMPT)
 
 import { Hono } from "hono";
-import {
-  DEFAULT_AUTOCORRECT_PROMPT,
-  DEFAULT_MERGE_TRANSCRIPTION_PROMPT,
-} from "@tomat/shared";
+import { DEFAULT_AUTOCORRECT_PROMPT, DEFAULT_MERGE_TRANSCRIPTION_PROMPT } from "@tomat/shared";
 import { loadCoreSettings } from "../../services/core-settings.ts";
 import { resolveEndpoint } from "../../services/endpoint-resolver.ts";
 import { singleShot } from "../../services/single-shot.ts";
@@ -33,8 +30,7 @@ export function llmRoutes(): Hono {
     }
     const settings = await loadCoreSettings();
     const systemPrompt =
-      strSetting(settings, "prompts.autocorrectPrompt", "") ||
-      DEFAULT_AUTOCORRECT_PROMPT;
+      strSetting(settings, "prompts.autocorrectPrompt", "") || DEFAULT_AUTOCORRECT_PROMPT;
     const endpoint = await resolveEndpoint(settings, "default");
     const text = await singleShot({
       systemPrompt,
@@ -48,21 +44,18 @@ export function llmRoutes(): Hono {
   r.post("/merge", async (c) => {
     const body = (await readJson(c)) as { existing?: unknown; next?: unknown };
     if (
-      typeof body.existing !== "string" || typeof body.next !== "string" ||
+      typeof body.existing !== "string" ||
+      typeof body.next !== "string" ||
       body.next.length === 0
     ) {
-      throw new AppError(
-        "validation_error",
-        "body must be { existing: string, next: string }",
-      );
+      throw new AppError("validation_error", "body must be { existing: string, next: string }");
     }
     const settings = await loadCoreSettings();
     const systemPrompt =
       strSetting(settings, "prompts.mergeTranscriptionPrompt", "") ||
       DEFAULT_MERGE_TRANSCRIPTION_PROMPT;
     const endpoint = await resolveEndpoint(settings, "default");
-    const userMessage =
-      `<existing>\n${body.existing}\n</existing>\n<new>\n${body.next}\n</new>`;
+    const userMessage = `<existing>\n${body.existing}\n</existing>\n<new>\n${body.next}\n</new>`;
     const text = await singleShot({
       systemPrompt,
       userMessage,
@@ -75,11 +68,7 @@ export function llmRoutes(): Hono {
   return r;
 }
 
-function strSetting(
-  s: Record<string, unknown>,
-  key: string,
-  def: string,
-): string {
+function strSetting(s: Record<string, unknown>, key: string, def: string): string {
   const v = s[key];
   return typeof v === "string" ? v : def;
 }

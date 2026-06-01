@@ -4,12 +4,7 @@
 import { ensureDirs, paths } from "./paths.ts";
 import { errMessage } from "@tomat/shared";
 import { loadBootConfig } from "./config.ts";
-import {
-  getLogger,
-  initLogger,
-  isLoggerReady,
-  scrubSecrets,
-} from "./shared/log.ts";
+import { getLogger, initLogger, isLoggerReady, scrubSecrets } from "./shared/log.ts";
 import { openDb } from "./db/connection.ts";
 import { migrate } from "./db/migrate.ts";
 import { buildApp } from "./http/server.ts";
@@ -43,11 +38,7 @@ async function main(): Promise<void> {
         bindHost = configured.trim();
       }
     } catch (err) {
-      log.warn(
-        `could not read server.bindHost; falling back to ${cfg.host}: ${
-          errMessage(err)
-        }`,
-      );
+      log.warn(`could not read server.bindHost; falling back to ${cfg.host}: ${errMessage(err)}`);
     }
   }
 
@@ -55,9 +46,7 @@ async function main(): Promise<void> {
   // The API is served over TLS (HTTPS/WSS) with a self-signed cert that clients
   // pin at pairing, so traffic is encrypted and core is authenticated even on a
   // shared network. Binding beyond loopback just widens reachability.
-  if (
-    bindHost !== "127.0.0.1" && bindHost !== "localhost" && bindHost !== "::1"
-  ) {
+  if (bindHost !== "127.0.0.1" && bindHost !== "localhost" && bindHost !== "::1") {
     log.info(
       `core is bound to ${bindHost} (not loopback): the HTTPS/WSS API is ` +
         `reachable from the network. Paired clients pin the TLS cert.`,
@@ -82,27 +71,26 @@ async function main(): Promise<void> {
   // it: large toolkits can take seconds to walk, and tool calls against
   // drifted toolkits are blocked by the route layer's `lastError` check
   // anyway. The first verification result is just slightly delayed.
-  void toolkitsRegistry().verifyAllOnBoot().then((drifted) => {
-    if (drifted.length > 0) {
-      log.warn(
-        `toolkit content drift: ${drifted.length} toolkit(s) marked ` +
-          `with errors: ${drifted.join(", ")}`,
-      );
-    }
-  }).catch((err) => {
-    log.error(
-      `toolkit verifyAllOnBoot failed: ${errMessage(err)}`,
-    );
-  });
+  void toolkitsRegistry()
+    .verifyAllOnBoot()
+    .then((drifted) => {
+      if (drifted.length > 0) {
+        log.warn(
+          `toolkit content drift: ${drifted.length} toolkit(s) marked ` +
+            `with errors: ${drifted.join(", ")}`,
+        );
+      }
+    })
+    .catch((err) => {
+      log.error(`toolkit verifyAllOnBoot failed: ${errMessage(err)}`);
+    });
 
   // Kick off llama / whisper sidecar boot based on the persisted settings.
-  // Runs in the background — `chat.start` and `/stt/transcribe` against a
+  // Runs in the background. `chat.start` and `/stt/transcribe` against a
   // sidecar that hasn't bound its port yet return a clear error; the
   // sidecar.status WS frames let the UI render a loading chip.
   void initSidecarBoot().catch((err) => {
-    log.error(
-      `sidecar boot failed: ${errMessage(err)}`,
-    );
+    log.error(`sidecar boot failed: ${errMessage(err)}`);
   });
 
   const app = buildApp();
@@ -116,10 +104,7 @@ async function main(): Promise<void> {
     async (req, info) => {
       const url = new URL(req.url);
       // WS upgrade path.
-      if (
-        url.pathname === "/ws/v1" &&
-        req.headers.get("upgrade")?.toLowerCase() === "websocket"
-      ) {
+      if (url.pathname === "/ws/v1" && req.headers.get("upgrade")?.toLowerCase() === "websocket") {
         return await hub.handleUpgrade(req);
       }
       // Pass the real socket peer address into the Hono env so security-
@@ -140,7 +125,9 @@ async function main(): Promise<void> {
         void shutdownJobctl();
         void server.shutdown().finally(() => Deno.exit(0));
       });
-    } catch { /* SIGTERM unsupported on Windows */ }
+    } catch {
+      /* SIGTERM unsupported on Windows */
+    }
   }
 
   await server.finished;
@@ -150,7 +137,7 @@ if (import.meta.main) {
   try {
     await main();
   } catch (err) {
-    const msg = err instanceof Error ? err.stack ?? err.message : String(err);
+    const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
     if (isLoggerReady()) {
       getLogger().error(`tomat-core failed to start: ${msg}`);
     } else {

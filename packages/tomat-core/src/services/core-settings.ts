@@ -1,7 +1,7 @@
 // Sparse settings file at ~/.tomat/core/settings.json. Only non-default
 // values are serialized; defaults come from the schema in @tomat/shared.
 //
-// This module is intentionally untyped at the value layer — the schema in
+// This module is intentionally untyped at the value layer. The schema in
 // @tomat/shared/domain/settings.ts owns field IDs and defaults, and the
 // route layer typechecks PATCH bodies against it. Here we just persist a
 // JSON record atomically.
@@ -16,7 +16,7 @@ const log = getLogger("core-settings");
 let cached: Record<string, unknown> | null = null;
 
 // Test-only: drops the in-memory cache so the next `loadCoreSettings()`
-// re-reads from disk. Also clears subscribers — test setup wires its own.
+// re-reads from disk. Also clears subscribers; test setup wires its own.
 export function __resetForTesting(): void {
   cached = null;
   listeners.clear();
@@ -73,9 +73,7 @@ export async function patchCoreSettings(
         await l(merged, changed);
       } catch (err) {
         // Listeners are fire-and-forget; surface log but don't block PATCH.
-        log.error(
-          `settings listener error: ${errMessage(err)}`,
-        );
+        log.error(`settings listener error: ${errMessage(err)}`);
       }
     }
   }

@@ -2,19 +2,13 @@
 // on the current settings, then re-evaluates on every settings PATCH and
 // (re)starts / stops the affected sidecar.
 //
-// This is the only place that decides whether a sidecar should be running
-// — `sidecarManager()` is a generic supervisor; the kind-specific gates
+// This is the only place that decides whether a sidecar should be running.
+// `sidecarManager()` is a generic supervisor; the kind-specific gates
 // (provider, enabled toggle, model file existence) live here.
 
-import {
-  buildLlamaStartOptions,
-  llamaStartArgsFromSettings,
-} from "../sidecars/llama.ts";
+import { buildLlamaStartOptions, llamaStartArgsFromSettings } from "../sidecars/llama.ts";
 import { errMessage } from "@tomat/shared";
-import {
-  buildWhisperStartOptions,
-  whisperStartArgsFromSettings,
-} from "../sidecars/whisper.ts";
+import { buildWhisperStartOptions, whisperStartArgsFromSettings } from "../sidecars/whisper.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
 import { loadCoreSettings, subscribeCoreSettings } from "./core-settings.ts";
 import { ensureKindModels } from "./model-ensure.ts";
@@ -108,25 +102,21 @@ async function applyLlama(settings: Record<string, unknown>): Promise<void> {
   }
   if (!(await fileExists(args.modelPath))) {
     log.warn(
-      `llama-server model not on disk: ${args.modelPath} — enqueueing ` +
+      `llama-server model not on disk: ${args.modelPath}; enqueueing ` +
         `download; sidecar stays Disabled until the file lands`,
     );
     await sidecarManager().stop("llama");
     // Fire and forget; the download-completion hook in initSidecarBoot
     // will re-apply once the model finishes.
     ensureKindModels("llm").catch((err) => {
-      log.warn(
-        `llm model ensure failed: ${errMessage(err)}`,
-      );
+      log.warn(`llm model ensure failed: ${errMessage(err)}`);
     });
     return;
   }
   await sidecarManager().restart("llama", buildLlamaStartOptions(args));
 }
 
-async function applyWhisper(
-  settings: Record<string, unknown>,
-): Promise<void> {
+async function applyWhisper(settings: Record<string, unknown>): Promise<void> {
   const args = whisperStartArgsFromSettings(settings);
   if (!args) {
     await sidecarManager().stop("whisper");
@@ -134,14 +124,12 @@ async function applyWhisper(
   }
   if (!(await fileExists(args.modelPath))) {
     log.warn(
-      `whisper-server model not on disk: ${args.modelPath} — enqueueing ` +
+      `whisper-server model not on disk: ${args.modelPath}; enqueueing ` +
         `download; sidecar stays Disabled until the file lands`,
     );
     await sidecarManager().stop("whisper");
     ensureKindModels("stt").catch((err) => {
-      log.warn(
-        `stt model ensure failed: ${errMessage(err)}`,
-      );
+      log.warn(`stt model ensure failed: ${errMessage(err)}`);
     });
     return;
   }
@@ -164,8 +152,6 @@ function anyOverlap(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
 
 function logErr(kind: string) {
   return (err: unknown) => {
-    log.error(
-      `${kind} apply failed: ${errMessage(err)}`,
-    );
+    log.error(`${kind} apply failed: ${errMessage(err)}`);
   };
 }

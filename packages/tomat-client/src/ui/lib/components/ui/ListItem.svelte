@@ -20,8 +20,8 @@
     disabled?: boolean;
     onclick?: () => void;
     onmousedown?: (e: MouseEvent) => void;
-    /** Inner content layout. `col` (default) stacks children vertically —
-     *  fits a title-above-summary list row. `row` flexes them horizontally —
+    /** Inner content layout. `col` (default) stacks children vertically;
+     *  fits a title-above-summary list row. `row` flexes them horizontally;
      *  fits a key-value option row (e.g. autocomplete dropdown). */
     direction?: Direction;
     leading?: Snippet;

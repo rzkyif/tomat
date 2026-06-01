@@ -156,12 +156,20 @@
       <span class="text-sm font-medium text-default-700">Language Model</span>
       <div class="flex flex-col gap-2">
         {#each modelPresets as preset (preset.id)}
+          {#snippet presetBadges()}
+            {#each preset.badges ?? [] as badge}
+              <span class="inline-flex items-center gap-1">
+                <i class="{badge.icon} text-sm"></i>
+                <span>{badge.label}</span>
+              </span>
+            {/each}
+          {/snippet}
           <OptionCard
             selected={modelPreset === preset.id}
-            selectedStyle="accent"
-            accent="blue"
+            icon={preset.icon}
             title={preset.title ?? preset.label}
-            description={preset.description?.split("\n")[0] ?? ""}
+            description={preset.description}
+            badges={preset.badges?.length ? presetBadges : undefined}
             onclick={() => applyModelPreset(preset)}
           />
         {/each}
@@ -190,7 +198,7 @@
   <Button
     variant="primary"
     onclick={() => viewState.navigate("chat")}
-    class="px-4 py-2.5 rounded-large text-accent-blue-700 hover:bg-accent-blue-300 font-medium"
+    class="px-4 py-2.5 rounded-large font-medium"
   >
     Continue to chat
   </Button>

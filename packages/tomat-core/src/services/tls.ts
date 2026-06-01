@@ -8,7 +8,7 @@
 //     and browsers support it; Ed25519 TLS certs are poorly supported.
 //   - The self-signed cert is regenerated on EVERY boot from that key with the
 //     current SANs (127.0.0.1, ::1, localhost, + bindHost when concrete). Cheap.
-//   - The pin is `base64(SHA-256(SubjectPublicKeyInfo))` — it depends only on the
+//   - The pin is `base64(SHA-256(SubjectPublicKeyInfo))`. It depends only on the
 //     KEY, so it is stable across cert regen and bindHost changes (no re-pair on
 //     an IP change). Clients pin this value, established + authenticated via the
 //     pairing PAKE. Matches the RFC 7469 / rustls pin convention.
@@ -53,10 +53,7 @@ async function loadOrCreateKeyPair(): Promise<CryptoKeyPair> {
     const jwk = JSON.parse(existing) as JsonWebKey;
     return await keyPairFromPrivateJwk(jwk);
   }
-  const kp = await crypto.subtle.generateKey(KEY_ALG, true, [
-    "sign",
-    "verify",
-  ]) as CryptoKeyPair;
+  const kp = (await crypto.subtle.generateKey(KEY_ALG, true, ["sign", "verify"])) as CryptoKeyPair;
   const jwk = await crypto.subtle.exportKey("jwk", kp.privateKey);
   await setSecret(KEY_SECRET, JSON.stringify(jwk));
   log.info("generated new TLS keypair (ECDSA P-256), sealed in secrets vault");
@@ -66,13 +63,7 @@ async function loadOrCreateKeyPair(): Promise<CryptoKeyPair> {
 // WebCrypto can't derive a public key from an imported EC private key, so we
 // reconstruct the public key from the same JWK with `d` stripped.
 async function keyPairFromPrivateJwk(jwk: JsonWebKey): Promise<CryptoKeyPair> {
-  const privateKey = await crypto.subtle.importKey(
-    "jwk",
-    jwk,
-    KEY_ALG,
-    true,
-    ["sign"],
-  );
+  const privateKey = await crypto.subtle.importKey("jwk", jwk, KEY_ALG, true, ["sign"]);
   const { d: _d, ...publicJwk } = jwk;
   const publicKey = await crypto.subtle.importKey(
     "jwk",
@@ -97,7 +88,7 @@ function sansFor(bindHost: string): x509.JsonGeneralName[] {
   ];
   const extra = bindHost.trim();
   const seen = new Set(names.map((n) => n.value));
-  // 0.0.0.0 means "all interfaces" — not a connectable name; skip it. With
+  // 0.0.0.0 means "all interfaces" (not a connectable name), so skip it. With
   // certificate pinning the verifier ignores SANs anyway, so this is cosmetic.
   if (extra && extra !== "0.0.0.0" && !seen.has(extra)) {
     names.push({ type: isIpAddress(extra) ? "ip" : "dns", value: extra });
@@ -126,8 +117,7 @@ async function build(bindHost: string): Promise<TlsMaterial> {
     extensions: [
       new x509.BasicConstraintsExtension(false, undefined, true),
       new x509.KeyUsagesExtension(
-        x509.KeyUsageFlags.digitalSignature |
-          x509.KeyUsageFlags.keyEncipherment,
+        x509.KeyUsageFlags.digitalSignature | x509.KeyUsageFlags.keyEncipherment,
         true,
       ),
       new x509.ExtendedKeyUsageExtension(["1.3.6.1.5.5.7.3.1"]), // serverAuth
@@ -154,14 +144,12 @@ async function material(bindHost: string): Promise<TlsMaterial> {
 
 /** `{ cert, key }` PEM strings for `Deno.serve`. Pass the resolved bind host so
  *  the cert SANs cover it (cosmetic under pinning, but correct for the web build). */
-export async function tlsServeOptions(
-  bindHost: string,
-): Promise<{ cert: string; key: string }> {
+export async function tlsServeOptions(bindHost: string): Promise<{ cert: string; key: string }> {
   const m = await material(bindHost);
   return { cert: m.certPem, key: m.keyPem };
 }
 
-/** base64(SHA-256(SPKI)) — the value the pairing PAKE channel-binds and clients
+/** base64(SHA-256(SPKI)): the value the pairing PAKE channel-binds and clients
  *  pin. Stable across reboots and bindHost changes. */
 export async function tlsCertFingerprint(): Promise<string> {
   // bindHost only affects SANs, not the pin; resolve against whatever the cert

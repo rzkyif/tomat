@@ -43,7 +43,9 @@ export async function hashToolkit(rootDir: string): Promise<string> {
     } finally {
       try {
         file.close();
-      } catch { /* already closed via readable */ }
+      } catch {
+        /* already closed via readable */
+      }
     }
     digestStream.update(new Uint8Array([0]));
   }
@@ -55,16 +57,13 @@ async function loadGitignore(rootDir: string): Promise<ignore.Ignore> {
   try {
     const text = await Deno.readTextFile(join(rootDir, ".gitignore"));
     ig.add(text);
-  } catch { /* no .gitignore */ }
+  } catch {
+    /* no .gitignore */
+  }
   return ig;
 }
 
-async function walk(
-  root: string,
-  dir: string,
-  out: string[],
-  ig: ignore.Ignore,
-): Promise<void> {
+async function walk(root: string, dir: string, out: string[], ig: ignore.Ignore): Promise<void> {
   for await (const entry of Deno.readDir(dir)) {
     const full = join(dir, entry.name);
     const rel = relative(root, full).replaceAll("\\", "/");

@@ -20,7 +20,7 @@ import { errMessage, permissionKey } from "@tomat/shared";
 import { hashToolkit } from "./hash.ts";
 import { getLogger } from "../shared/log.ts";
 
-const CONTENT_DRIFT_ERROR = "content changed since install — reinstall to use";
+const CONTENT_DRIFT_ERROR = "content changed since install; reinstall to use";
 
 export interface ToolkitInsertInput {
   id: string;
@@ -48,23 +48,27 @@ export class ToolkitsRegistry {
   // --- toolkit-level ------------------------------------------------------
 
   list(): Toolkit[] {
-    const rows = db().prepare(`
+    const rows = db()
+      .prepare(`
       SELECT id, source, display_name, description, version, installed_path,
              tools_json_hash, content_hash, enabled, last_error,
              installed_at_ms, updated_at_ms
       FROM toolkits
       ORDER BY display_name COLLATE NOCASE ASC
-    `).all() as Array<Record<string, unknown>>;
+    `)
+      .all() as Array<Record<string, unknown>>;
     return rows.map(rowToToolkit);
   }
 
   get(id: string): Toolkit | undefined {
-    const row = db().prepare(`
+    const row = db()
+      .prepare(`
       SELECT id, source, display_name, description, version, installed_path,
              tools_json_hash, content_hash, enabled, last_error,
              installed_at_ms, updated_at_ms
       FROM toolkits WHERE id = ?
-    `).get(id) as Record<string, unknown> | undefined;
+    `)
+      .get(id) as Record<string, unknown> | undefined;
     return row ? rowToToolkit(row) : undefined;
   }
 
@@ -78,56 +82,58 @@ export class ToolkitsRegistry {
     const now = Date.now();
     const existing = this.get(input.id);
     if (existing) {
-      db().prepare(`
+      db()
+        .prepare(`
         UPDATE toolkits
            SET source = ?, display_name = ?, description = ?, version = ?,
                installed_path = ?, tools_json_hash = ?, content_hash = ?,
                last_error = NULL, updated_at_ms = ?
          WHERE id = ?
-      `).run(
-        input.source,
-        input.displayName,
-        input.description ?? null,
-        input.version,
-        input.installedPath,
-        input.toolsJsonHash,
-        input.contentHash,
-        now,
-        input.id,
-      );
+      `)
+        .run(
+          input.source,
+          input.displayName,
+          input.description ?? null,
+          input.version,
+          input.installedPath,
+          input.toolsJsonHash,
+          input.contentHash,
+          now,
+          input.id,
+        );
     } else {
-      db().prepare(`
+      db()
+        .prepare(`
         INSERT INTO toolkits
           (id, source, display_name, description, version, installed_path,
            tools_json_hash, content_hash, enabled, last_error,
            installed_at_ms, updated_at_ms)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
-      `).run(
-        input.id,
-        input.source,
-        input.displayName,
-        input.description ?? null,
-        input.version,
-        input.installedPath,
-        input.toolsJsonHash,
-        input.contentHash,
-        now,
-        now,
-      );
+      `)
+        .run(
+          input.id,
+          input.source,
+          input.displayName,
+          input.description ?? null,
+          input.version,
+          input.installedPath,
+          input.toolsJsonHash,
+          input.contentHash,
+          now,
+          now,
+        );
     }
   }
 
   setEnabled(id: string, enabled: boolean): void {
-    db().prepare(
-      `UPDATE toolkits SET enabled = ?, updated_at_ms = ? WHERE id = ?`,
-    )
+    db()
+      .prepare(`UPDATE toolkits SET enabled = ?, updated_at_ms = ? WHERE id = ?`)
       .run(enabled ? 1 : 0, Date.now(), id);
   }
 
   setLastError(id: string, error: string | null): void {
-    db().prepare(
-      `UPDATE toolkits SET last_error = ?, updated_at_ms = ? WHERE id = ?`,
-    )
+    db()
+      .prepare(`UPDATE toolkits SET last_error = ?, updated_at_ms = ? WHERE id = ?`)
       .run(error, Date.now(), id);
   }
 
@@ -139,7 +145,7 @@ export class ToolkitsRegistry {
   // restored or reinstalled the folder out-of-band).
   //
   // Returns the IDs that drifted. Tool calls against a drifted toolkit
-  // should be refused with a 409 — that's the route layer's responsibility,
+  // should be refused with a 409. That's the route layer's responsibility,
   // gated on `toolkit.lastError`.
   async verifyAllOnBoot(): Promise<string[]> {
     const log = getLogger("toolkits.verify");
@@ -157,9 +163,10 @@ export class ToolkitsRegistry {
       }
       if (actualHash !== tk.contentHash) {
         log.warn(
-          `[${tk.id}] content drift: stored=${
-            tk.contentHash.slice(0, 12)
-          } actual=${actualHash.slice(0, 12)}`,
+          `[${tk.id}] content drift: stored=${tk.contentHash.slice(
+            0,
+            12,
+          )} actual=${actualHash.slice(0, 12)}`,
         );
         this.setLastError(tk.id, CONTENT_DRIFT_ERROR);
         drifted.push(tk.id);
@@ -184,9 +191,11 @@ export class ToolkitsRegistry {
     // Atomically replace the toolkit's tools, preserving enabled state +
     // grants on identical (name, parameters, triggers) entries so a re-install
     // doesn't blow away user permissions unless they materially changed.
-    const existing = db().prepare(`
+    const existing = db()
+      .prepare(`
       SELECT id, name, enabled FROM tools WHERE toolkit_id = ?
-    `).all(toolkitId) as Array<{ id: string; name: string; enabled: number }>;
+    `)
+      .all(toolkitId) as Array<{ id: string; name: string; enabled: number }>;
     const existingByName = new Map(existing.map((r) => [r.name, r]));
 
     db().exec("BEGIN");
@@ -195,26 +204,28 @@ export class ToolkitsRegistry {
       for (const t of tools) {
         const id = toolId(toolkitId, t.name);
         const prior = existingByName.get(t.name);
-        db().prepare(`
+        db()
+          .prepare(`
           INSERT INTO tools
             (id, toolkit_id, name, description, parameters_json, triggers_json,
              fn_export, always_available, enabled, required_permissions_json)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          id,
-          toolkitId,
-          t.name,
-          t.description,
-          JSON.stringify(t.parameters),
-          JSON.stringify(t.triggers),
-          t.fnExport,
-          t.alwaysAvailable ? 1 : 0,
-          // Conservative: disable on re-install if the required permission
-          // set may have changed. Higher-level installer can re-enable if
-          // permissions still match.
-          prior ? prior.enabled : 0,
-          JSON.stringify(t.requiredPermissions),
-        );
+        `)
+          .run(
+            id,
+            toolkitId,
+            t.name,
+            t.description,
+            JSON.stringify(t.parameters),
+            JSON.stringify(t.triggers),
+            t.fnExport,
+            t.alwaysAvailable ? 1 : 0,
+            // Conservative: disable on re-install if the required permission
+            // set may have changed. Higher-level installer can re-enable if
+            // permissions still match.
+            prior ? prior.enabled : 0,
+            JSON.stringify(t.requiredPermissions),
+          );
       }
       db().exec("COMMIT");
     } catch (err) {
@@ -224,28 +235,31 @@ export class ToolkitsRegistry {
   }
 
   listTools(toolkitId: string): Tool[] {
-    const rows = db().prepare(`
+    const rows = db()
+      .prepare(`
       SELECT id, toolkit_id, name, description, parameters_json, triggers_json,
              fn_export, always_available, enabled, required_permissions_json
       FROM tools WHERE toolkit_id = ?
       ORDER BY name ASC
-    `).all(toolkitId) as Array<Record<string, unknown>>;
+    `)
+      .all(toolkitId) as Array<Record<string, unknown>>;
     return rows.map((r) => this.attachGrants(rowToTool(r)));
   }
 
   getTool(toolId: string): Tool | undefined {
-    const row = db().prepare(`
+    const row = db()
+      .prepare(`
       SELECT id, toolkit_id, name, description, parameters_json, triggers_json,
              fn_export, always_available, enabled, required_permissions_json
       FROM tools WHERE id = ?
-    `).get(toolId) as Record<string, unknown> | undefined;
+    `)
+      .get(toolId) as Record<string, unknown> | undefined;
     return row ? this.attachGrants(rowToTool(row)) : undefined;
   }
 
   setToolEnabled(toolkitId: string, name: string, enabled: boolean): void {
-    db().prepare(
-      `UPDATE tools SET enabled = ? WHERE toolkit_id = ? AND name = ?`,
-    )
+    db()
+      .prepare(`UPDATE tools SET enabled = ? WHERE toolkit_id = ? AND name = ?`)
       .run(enabled ? 1 : 0, toolkitId, name);
   }
 
@@ -253,21 +267,21 @@ export class ToolkitsRegistry {
 
   setGrants(
     toolId: string,
-    entries: Array<
-      { key: string; kind: PermissionDecl["kind"]; state: GrantState }
-    >,
+    entries: Array<{ key: string; kind: PermissionDecl["kind"]; state: GrantState }>,
   ): Grant[] {
     const now = Date.now();
     db().exec("BEGIN");
     try {
       for (const entry of entries) {
-        db().prepare(`
+        db()
+          .prepare(`
           INSERT INTO grants (tool_id, permission_key, permission_kind, state, granted_at_ms)
           VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(tool_id, permission_key) DO UPDATE SET
             state = excluded.state,
             granted_at_ms = excluded.granted_at_ms
-        `).run(toolId, entry.key, entry.kind, entry.state, now);
+        `)
+          .run(toolId, entry.key, entry.kind, entry.state, now);
       }
       db().exec("COMMIT");
     } catch (err) {
@@ -278,10 +292,12 @@ export class ToolkitsRegistry {
   }
 
   listGrantsForTool(toolId: string): Grant[] {
-    const rows = db().prepare(`
+    const rows = db()
+      .prepare(`
       SELECT tool_id, permission_key, permission_kind, state, granted_at_ms
       FROM grants WHERE tool_id = ?
-    `).all(toolId) as Array<{
+    `)
+      .all(toolId) as Array<{
       tool_id: string;
       permission_key: string;
       permission_kind: string;
@@ -299,42 +315,29 @@ export class ToolkitsRegistry {
 
   // --- embeddings ---------------------------------------------------------
 
-  storeEmbedding(
-    toolId: string,
-    vector: Float32Array,
-    sourceHash: string,
-  ): void {
-    db().prepare(`
+  storeEmbedding(toolId: string, vector: Float32Array, sourceHash: string): void {
+    db()
+      .prepare(`
       INSERT INTO tool_embeddings (tool_id, dim, vector, source_hash)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(tool_id) DO UPDATE SET
         dim = excluded.dim,
         vector = excluded.vector,
         source_hash = excluded.source_hash
-    `).run(
-      toolId,
-      vector.length,
-      new Uint8Array(vector.buffer.slice(0)),
-      sourceHash,
-    );
+    `)
+      .run(toolId, vector.length, new Uint8Array(vector.buffer.slice(0)), sourceHash);
   }
 
-  loadEmbedding(
-    toolId: string,
-  ): { vector: Float32Array; sourceHash: string } | undefined {
-    const row = db().prepare(`
+  loadEmbedding(toolId: string): { vector: Float32Array; sourceHash: string } | undefined {
+    const row = db()
+      .prepare(`
       SELECT vector, dim, source_hash FROM tool_embeddings WHERE tool_id = ?
-    `).get(toolId) as
-      | { vector: Uint8Array; dim: number; source_hash: string }
-      | undefined;
+    `)
+      .get(toolId) as { vector: Uint8Array; dim: number; source_hash: string } | undefined;
     if (!row) return undefined;
-    const bytes = row.vector instanceof Uint8Array
-      ? row.vector
-      : new Uint8Array(row.vector as ArrayBuffer);
-    const buf = bytes.buffer.slice(
-      bytes.byteOffset,
-      bytes.byteOffset + bytes.byteLength,
-    );
+    const bytes =
+      row.vector instanceof Uint8Array ? row.vector : new Uint8Array(row.vector as ArrayBuffer);
+    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     return {
       vector: new Float32Array(buf),
       sourceHash: row.source_hash,

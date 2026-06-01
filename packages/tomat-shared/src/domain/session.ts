@@ -24,7 +24,7 @@ export interface AttachmentRef {
 // becomes a `MessagePart[]` so each piece (text, image, document) can be
 // rendered + serialized independently. `path` on `*_file` parts is the
 // core-relative `/api/v1/sessions/:sid/attachments/:aid` URL produced by
-// `uploadAttachment` — the server parses the trailing `:aid` to load bytes
+// `uploadAttachment`. The server parses the trailing `:aid` to load bytes
 // from disk when building the LLM request.
 export type MessagePart =
   | { type: "text"; text: string }
@@ -46,9 +46,7 @@ export function isMultipart(c: MessageContent): c is MessagePart[] {
 export function contentToText(c: MessageContent): string {
   if (typeof c === "string") return c;
   return c
-    .filter((p): p is Extract<MessagePart, { type: "text" }> =>
-      p.type === "text"
-    )
+    .filter((p): p is Extract<MessagePart, { type: "text" }> => p.type === "text")
     .map((p) => p.text)
     .join("");
 }
@@ -79,13 +77,11 @@ export interface ToolCall {
    *  frame also carries transient `label` / `description` strings; only the
    *  number is persisted on the ToolCall. */
   progress?: number;
-  logLines?: Array<
-    {
-      level: "debug" | "info" | "warn" | "error";
-      message: string;
-      atMs: number;
-    }
-  >;
+  logLines?: Array<{
+    level: "debug" | "info" | "warn" | "error";
+    message: string;
+    atMs: number;
+  }>;
 }
 
 // Base fields every message carries. Concrete shapes are role-specific below.
@@ -122,7 +118,7 @@ export interface AssistantMessage extends MessageBase {
   // haven't been resolved yet. Used by edit-and-resend to re-materialize
   // the pending `role: "tool"` rows.
   pendingToolCalls?: ToolCall[];
-  // Which model role produced this turn — "default" for the primary local /
+  // Which model role produced this turn: "default" for the primary local /
   // external endpoint, "secondary" when dual-model routing kicked in.
   // Drives the model-name chip the UI renders next to the bubble.
   modelUsed?: "default" | "secondary";

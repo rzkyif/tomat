@@ -5,7 +5,7 @@
 // CPace channel identifier (so the derived key itself is cert-bound) AND the key
 // confirmation. A MITM that re-terminates TLS with a different cert is therefore
 // detected twice over: the keys diverge, and `verifyConfirm` on core's
-// `confirmS` fails — so we refuse to pair. On success we return the bearer token
+// `confirmS` fails, so we refuse to pair. On success we return the bearer token
 // AND the pin to store, so every later connection enforces it.
 //
 // `PairingApi` (instance) covers operations on an ALREADY-paired core (mint a
@@ -111,7 +111,7 @@ export async function pairWithCode(
   code: string,
 ): Promise<PairResult> {
   // Step 0: capture the server's cert pin over a TOFU TLS connection (health is
-  // unauthenticated). We do NOT trust it yet — it is folded into the CPace
+  // unauthenticated). We do NOT trust it yet. It is folded into the CPace
   // channel identifier below AND the confirmation, and is only accepted once
   // core proves it knew the code AND presents this same cert.
   const probe = await platform().net.fetch({
@@ -159,7 +159,7 @@ export async function pairWithCode(
   const serverOk = verifyConfirm(fromBase64(fin.confirmS), isk, "S", init.msgA, msgB, pin);
   if (!serverOk) {
     throw new Error(
-      "core authentication failed — the TLS certificate could not be verified " +
+      "core authentication failed: the TLS certificate could not be verified " +
         "(possible man-in-the-middle). Not paired.",
     );
   }

@@ -15,11 +15,7 @@ import { errMessage } from "@tomat/shared";
 import type { Tool, ToolDescriptor } from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import { toolkitsRegistry } from "../toolkits/registry.ts";
-import {
-  type LlmEndpointConfig,
-  type LlmRequest,
-  streamChatCompletion,
-} from "./llm-provider.ts";
+import { type LlmEndpointConfig, type LlmRequest, streamChatCompletion } from "./llm-provider.ts";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("toolFilter");
@@ -41,7 +37,7 @@ export interface Phase1Result {
 export class ToolFilter {
   // Returns the top-K most similar enabled tools, plus the always-available
   // set (if requested). Tools without a stored embedding are silently
-  // skipped — re-index via /api/v1/toolkits/reindex to backfill them.
+  // skipped; re-index via /api/v1/toolkits/reindex to backfill them.
   phase1(queryVector: Float32Array, options: Phase1Options = {}): Phase1Result {
     const topK = options.topK ?? 10;
     const registry = toolkitsRegistry();
@@ -71,7 +67,7 @@ export class ToolFilter {
   // Phase-2 second-pass filter. Asks the LLM which of the phase-1
   // candidates are actually relevant to the user's query. Returns the
   // subset to expose to the chat completion. Always-available tools are
-  // NOT passed through here — the caller appends them after phase-2.
+  // NOT passed through here; the caller appends them after phase-2.
   async phase2(
     query: string,
     candidates: ToolDescriptor[],
@@ -80,9 +76,7 @@ export class ToolFilter {
   ): Promise<ToolDescriptor[]> {
     if (candidates.length === 0) return [];
 
-    const listing = candidates
-      .map((c, i) => `${i + 1}. ${c.name}: ${c.description}`)
-      .join("\n");
+    const listing = candidates.map((c, i) => `${i + 1}. ${c.name}: ${c.description}`).join("\n");
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       {
@@ -112,11 +106,7 @@ export class ToolFilter {
         if (delta.contentDelta) response += delta.contentDelta;
       }
     } catch (err) {
-      log.warn(
-        `phase-2 LLM call failed; falling back to phase-1 candidates: ${
-          errMessage(err)
-        }`,
-      );
+      log.warn(`phase-2 LLM call failed; falling back to phase-1 candidates: ${errMessage(err)}`);
       return candidates;
     }
 
@@ -131,11 +121,9 @@ export class ToolFilter {
       }
     }
     if (picks.size === 0) {
-      // Unparseable response — fail open with phase-1 set.
+      // Unparseable response: fail open with phase-1 set.
       log.warn(
-        `phase-2 response unparseable: ${
-          JSON.stringify(response.slice(0, 80))
-        }; falling back`,
+        `phase-2 response unparseable: ${JSON.stringify(response.slice(0, 80))}; falling back`,
       );
       return candidates;
     }
@@ -156,13 +144,15 @@ export function __resetForTesting(): void {
 }
 
 function enabledTools(): Tool[] {
-  const rows = db().prepare(`
+  const rows = db()
+    .prepare(`
     SELECT t.id, t.toolkit_id, t.name, t.description, t.parameters_json,
            t.triggers_json, t.fn_export, t.always_available, t.enabled
     FROM tools t
     JOIN toolkits k ON k.id = t.toolkit_id
     WHERE t.enabled = 1 AND k.enabled = 1
-  `).all() as Array<Record<string, unknown>>;
+  `)
+    .all() as Array<Record<string, unknown>>;
   return rows.map((r) => ({
     id: String(r.id),
     toolkitId: String(r.toolkit_id),

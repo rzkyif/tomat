@@ -76,7 +76,9 @@ class WsHub {
     for (const conn of set) {
       try {
         conn.ws.send(payload);
-      } catch { /* socket closing */ }
+      } catch {
+        /* socket closing */
+      }
     }
   }
 
@@ -86,7 +88,9 @@ class WsHub {
       for (const conn of set) {
         try {
           conn.ws.send(payload);
-        } catch { /* */ }
+        } catch {
+          /* */
+        }
       }
     }
   }
@@ -103,7 +107,9 @@ class WsHub {
       if (conn.pongTimer !== undefined) clearTimeout(conn.pongTimer);
       try {
         conn.ws.close(4001, "client revoked");
-      } catch { /* already closing */ }
+      } catch {
+        /* already closing */
+      }
     }
     this.byClient.delete(clientId);
   }
@@ -117,7 +123,9 @@ class WsHub {
         if (conn.pongTimer !== undefined) clearTimeout(conn.pongTimer);
         try {
           conn.ws.close();
-        } catch { /* */ }
+        } catch {
+          /* */
+        }
       }
     }
     this.byClient.clear();
@@ -142,16 +150,12 @@ class WsHub {
       try {
         raw = JSON.parse(typeof ev.data === "string" ? ev.data : "");
       } catch (err) {
-        log.warn(
-          `rejected ws frame: invalid JSON (${errMessage(err)})`,
-        );
+        log.warn(`rejected ws frame: invalid JSON (${errMessage(err)})`);
         return;
       }
       const parsed = wsFrameEnvelopeSchema.safeParse(raw);
       if (!parsed.success) {
-        log.warn(
-          `rejected ws frame: envelope mismatch: ${parsed.error.message}`,
-        );
+        log.warn(`rejected ws frame: envelope mismatch: ${parsed.error.message}`);
         return;
       }
       this.dispatchClientFrame(conn, parsed.data as Record<string, unknown>);
@@ -160,15 +164,14 @@ class WsHub {
     ws.addEventListener("error", () => this.removeConnection(conn));
   }
 
-  private dispatchClientFrame(
-    conn: Connection,
-    raw: Record<string, unknown>,
-  ): void {
+  private dispatchClientFrame(conn: Connection, raw: Record<string, unknown>): void {
     const kind = raw.kind;
     if (kind === "ping") {
       try {
         conn.ws.send(JSON.stringify({ kind: "pong" }));
-      } catch { /* */ }
+      } catch {
+        /* */
+      }
       return;
     }
     if (kind === "chat.start") {
@@ -232,12 +235,16 @@ class WsHub {
       if (conn.ws.readyState !== WebSocket.OPEN) return;
       try {
         conn.ws.send(JSON.stringify({ kind: "ping" }));
-      } catch { /* */ }
+      } catch {
+        /* */
+      }
       conn.pongTimer = setTimeout(() => {
         log.warn(`pong timeout for client ${conn.clientId}; closing`);
         try {
           conn.ws.close(4002, "pong timeout");
-        } catch { /* */ }
+        } catch {
+          /* */
+        }
       }, PONG_TIMEOUT_MS);
       conn.pingTimer = setTimeout(tick, HEARTBEAT_MS);
     };

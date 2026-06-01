@@ -1,7 +1,7 @@
 // smoke-test the Svelte 5 component path. Toggle is the smallest
 // stateful leaf; if this test runs, the runes/@testing-library/svelte/jsdom
 // stack is wired correctly. Most UI primitives don't get dedicated tests
-// (too low ROI) — this one exists to lock in the test harness.
+// (too low ROI). This one exists to lock in the test harness.
 
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/svelte";

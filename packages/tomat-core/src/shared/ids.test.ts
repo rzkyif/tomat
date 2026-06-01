@@ -1,5 +1,5 @@
 // ID generators are thin wrappers around ulid/randomUUID. The wrappers
-// exist so call sites express intent (session vs message vs etc.) — we test
+// exist so call sites express intent (session vs message vs etc.). We test
 // that intent never accidentally collapses to a shared counter, that the
 // formats stay parseable, and that uniqueness holds across a meaningful
 // batch.
@@ -19,8 +19,7 @@ import {
 // Crockford base32 ULID: 26 chars, [0-9A-HJKMNP-TV-Z].
 const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 // RFC 4122 v4 UUID: 8-4-4-4-12 hex with version nibble 4 and variant 8/9/a/b.
-const UUID_V4_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const ULID_GENERATORS = {
   session: newSessionId,

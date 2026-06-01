@@ -63,8 +63,7 @@ export type RegexValidation = string | RegexValidationRule[];
 export const SECURE_URL_VALIDATION: RegexValidationRule[] = [
   {
     regex: "^(https://|http://(localhost|127\\.0\\.0\\.1)(:|/|$))",
-    errorMessage:
-      "URL must use HTTPS, or HTTP with localhost / 127.0.0.1 only.",
+    errorMessage: "URL must use HTTPS, or HTTP with localhost / 127.0.0.1 only.",
   },
 ];
 
@@ -110,13 +109,15 @@ interface NumberLikeFieldProps {
 }
 
 export type StringField = BaseField & TextLikeFieldProps & { type: "string" };
-export type PasswordField = BaseField & TextLikeFieldProps & {
-  type: "password";
-};
-export type MultilineField = BaseField & TextLikeFieldProps & {
-  type: "multiline";
-  mono?: boolean;
-};
+export type PasswordField = BaseField &
+  TextLikeFieldProps & {
+    type: "password";
+  };
+export type MultilineField = BaseField &
+  TextLikeFieldProps & {
+    type: "multiline";
+    mono?: boolean;
+  };
 export type NumberField = BaseField & NumberLikeFieldProps & { type: "number" };
 export type FloatField = BaseField & NumberLikeFieldProps & { type: "float" };
 
@@ -149,13 +150,10 @@ export type NumberSliderField = BaseField & {
 /** A select either supplies a static `options` list or names an `optionsSource`
  *  the UI should resolve at runtime (monitors, system fonts, etc.). The two
  *  alternatives are mutually exclusive. */
-export type SelectField =
-  & BaseField
-  & {
-    type: "select";
-    defaultValue: string | number;
-  }
-  & (
+export type SelectField = BaseField & {
+  type: "select";
+  defaultValue: string | number;
+} & (
     | { options: SettingOption[]; optionsSource?: never }
     | { optionsSource: OptionsSource; options?: never }
   );
@@ -222,16 +220,16 @@ export interface SettingGroup {
 
 export type ConditionDep =
   | {
-    kind: "field";
-    fieldId: string;
-    condition: "editableWhen" | "optionalWhen";
-  }
+      kind: "field";
+      fieldId: string;
+      condition: "editableWhen" | "optionalWhen";
+    }
   | {
-    kind: "section";
-    groupId: string;
-    sectionIndex: number;
-    condition: "visibleWhen" | "expandWhen";
-  };
+      kind: "section";
+      groupId: string;
+      sectionIndex: number;
+      condition: "visibleWhen" | "expandWhen";
+    };
 
 export interface SearchResultGroup {
   groupId: string;
@@ -258,7 +256,7 @@ export const CLIENT_GROUP_IDS = [
   "tts",
   "general",
 ] as const;
-export type ClientGroupId = typeof CLIENT_GROUP_IDS[number];
+export type ClientGroupId = (typeof CLIENT_GROUP_IDS)[number];
 
 export const CORE_GROUP_IDS = [
   "llm",
@@ -268,7 +266,7 @@ export const CORE_GROUP_IDS = [
   "stt_engine",
   "server",
 ] as const;
-export type CoreGroupId = typeof CORE_GROUP_IDS[number];
+export type CoreGroupId = (typeof CORE_GROUP_IDS)[number];
 
 export type SettingGroupId = ClientGroupId | CoreGroupId;
 

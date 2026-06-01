@@ -1,5 +1,5 @@
 // HTTP contract for /api/v1/stt. Provider switching is settings-driven
-// and external mode needs network — we only assert auth + validation.
+// and external mode needs network, so we only assert auth + validation.
 
 import { assertEquals } from "@std/assert";
 import { buildApp } from "../server.ts";
@@ -16,9 +16,7 @@ Deno.test("POST /api/v1/stt/transcribe: requires bearer (401)", async () => {
   const env = await setupTestEnv();
   try {
     const app = buildApp();
-    const res = await app.fetch(
-      new Request("http://x/api/v1/stt/transcribe", { method: "POST" }),
-    );
+    const res = await app.fetch(new Request("http://x/api/v1/stt/transcribe", { method: "POST" }));
     assertEquals(res.status, 401);
   } finally {
     await env.teardown();

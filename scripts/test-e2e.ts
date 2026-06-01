@@ -1,5 +1,5 @@
-// Launches the E2E suite (WebdriverIO + tauri-driver). Manual only —
-// not invoked by CI.
+// Launches the E2E suite (WebdriverIO + tauri-driver). Manual only.
+// Not invoked by CI.
 //
 // Specs live under tests/e2e/specs/ as `*.test.ts`; scratch specs
 // (`*.tmp.test.ts`) are gitignored.
@@ -24,7 +24,7 @@ try {
   console.error(
     `wdio not installed at ${wdioBin}.\n` +
       `See tests/e2e/README.md for the one-time setup. ` +
-      `E2E is intentionally opt-in — its toolchain is heavy and most ` +
+      `E2E is intentionally opt-in. Its toolchain is heavy and most ` +
       `regression coverage already lives in the co-located test files.`,
   );
   Deno.exit(2);

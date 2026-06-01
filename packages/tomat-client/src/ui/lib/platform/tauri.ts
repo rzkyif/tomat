@@ -94,9 +94,10 @@ const impl: Platform = {
       let onOpenCb: (() => void) | null = null;
       let onMessageCb: ((d: string) => void) | null = null;
       let onCloseCb: (() => void) | null = null;
-      let onErrorCb: (() => void) | null = null;
+      let onErrorCb: ((reason?: string) => void) | null = null;
       let openedEarly = false;
       let closedEarly = false;
+      let earlyError: string | undefined;
       const pending: string[] = [];
 
       const unlisteners: UnlistenFn[] = await Promise.all([
@@ -112,7 +113,10 @@ const impl: Platform = {
           if (onCloseCb) onCloseCb();
           else closedEarly = true;
         }),
-        listen(`net://ws/${wsId}/error`, () => onErrorCb?.()),
+        listen<string>(`net://ws/${wsId}/error`, (e) => {
+          if (onErrorCb) onErrorCb(e.payload);
+          else earlyError = e.payload;
+        }),
       ]);
       const detach = (): void => {
         for (const u of unlisteners) u();
@@ -151,6 +155,11 @@ const impl: Platform = {
         },
         onError: (cb) => {
           onErrorCb = cb;
+          if (earlyError !== undefined) {
+            const r = earlyError;
+            earlyError = undefined;
+            cb(r);
+          }
         },
       };
     },
@@ -286,6 +295,7 @@ const impl: Platform = {
     startLocalCore: () => invoke("start_local_core"),
     localCoreBaseUrl: () => invoke("local_core_base_url"),
     localSidecarPorts: () => invoke("local_sidecar_ports"),
+    launchPrefill: () => invoke("read_launch_prefill"),
   },
   fileConvert: {
     toMarkdownFromPath(absPath) {
@@ -367,7 +377,7 @@ const impl: Platform = {
       const menu = await Menu.new({ items: menuItems });
       await menu.popup();
       // popup() resolves immediately on click OR on dismiss. We can't
-      // distinguish — so race the action-driven resolve with a microtask
+      // distinguish. So race the action-driven resolve with a microtask
       // timeout that returns null if no item fired.
       const dismissTimer = setTimeout(() => {
         if (resolved) resolved(null);

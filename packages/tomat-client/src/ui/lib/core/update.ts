@@ -6,14 +6,14 @@ export class UpdateApi {
 
   /** Fetches and parses the signed core manifest, comparing its version
    *  against the running core. Cheap (just a manifest fetch + signature
-   *  verify) — safe to call on a "Check for Updates" button click. */
+   *  verify), so it's safe to call on a "Check for Updates" button click. */
   check(): Promise<UpdateCheckResponse> {
     return this.client.get("/api/v1/update/check");
   }
 
   /** Downloads the staged binary, hands off to tomat-core-updater, and
    *  exits the core. The HTTP request will not return cleanly in the
-   *  success case — the core exits before flushing the 204. Callers
+   *  success case: the core exits before flushing the 204. Callers
    *  should swallow request-aborted errors and watch the
    *  `update.staged` WS frame instead. */
   apply(version?: string): Promise<void> {

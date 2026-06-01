@@ -1,26 +1,17 @@
 import { Hono } from "hono";
 import { isSecretSettingKey, validateSettingsPatch } from "@tomat/shared";
-import {
-  loadCoreSettings,
-  patchCoreSettings,
-} from "../../services/core-settings.ts";
-import {
-  deleteSecret,
-  listSecretNames,
-  setSecret,
-} from "../../services/secrets.ts";
+import { loadCoreSettings, patchCoreSettings } from "../../services/core-settings.ts";
+import { deleteSecret, listSecretNames, setSecret } from "../../services/secrets.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
 // Strip secret-typed values from a settings record before it crosses the API.
 // Sensitive values (API keys etc.) live in the encrypted vault and are never
-// returned to clients — the client learns which are configured from
+// returned to clients. The client learns which are configured from
 // GET /settings/secrets and renders a placeholder. A plaintext value placed
 // directly in settings.json is redacted defensively here too, so it never
 // crosses the API.
-function redactSecrets(
-  settings: Record<string, unknown>,
-): Record<string, unknown> {
+function redactSecrets(settings: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(settings)) {
     if (!isSecretSettingKey(k)) out[k] = v;
@@ -55,7 +46,7 @@ export function settingsRoutes(): Hono {
   // --- secrets -------------------------------------------------------------
   // Stored encrypted on disk in secrets.enc (see services/secrets.ts).
   // Plan §9 / client refactor: "Client receives only boolean flags
-  // indicating which keys are configured — never the values." So GET
+  // indicating which keys are configured, never the values." So GET
   // returns names only; values are never read back over the API.
 
   r.get("/secrets", async (c) => c.json({ names: await listSecretNames() }));
@@ -68,10 +59,7 @@ export function settingsRoutes(): Hono {
       typeof body !== "object" ||
       typeof (body as Record<string, unknown>).value !== "string"
     ) {
-      throw new AppError(
-        "validation_error",
-        "body must be { value: string }",
-      );
+      throw new AppError("validation_error", "body must be { value: string }");
     }
     await setSecret(name, (body as { value: string }).value);
     return c.body(null, 204);

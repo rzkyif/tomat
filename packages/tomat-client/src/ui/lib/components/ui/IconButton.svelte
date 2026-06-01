@@ -2,7 +2,7 @@
   import type { Snippet } from "svelte";
   import type { HTMLButtonAttributes } from "svelte/elements";
 
-  type Size = "xs" | "sm" | "md" | "lg";
+  type Size = "xs" | "sm" | "md" | "lg" | "lg-tight";
   type Variant = "default" | "subtle";
   type Surface = "none" | "filled" | "circle";
 
@@ -49,6 +49,9 @@
       sm: "p-0.5 text-lg",
       md: "p-1 text-lg",
       lg: "p-2 text-xl",
+      // Same lg icon (text-xl) but half the padding, for buttons packed into a
+      // ButtonGroup-style pill that carries the other half as its own padding.
+      "lg-tight": "p-1 text-xl",
     }[size],
   );
 

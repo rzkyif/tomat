@@ -1,19 +1,30 @@
 // OS-keychain wrapper for paired-core bearer tokens.
 //
 // Service: channel-namespaced ("tomat-client" on stable, "tomat-client-dev" /
-// "tomat-client-beta" otherwise — see `crate::channel`), so a dev/beta build's
+// "tomat-client-beta" otherwise, see `crate::channel`), so a dev/beta build's
 // tokens never collide with a stable install's. Account format: "core:<coreId>",
-// where <coreId> is the ULID assigned by the core during pairing-claim. We
-// always go to the OS keychain; there is no dev fallback, because clients are
-// signed and the keychain is reliable across the rebuild cycles that affect
-// tomat-core's secrets store.
+// where <coreId> is the ULID assigned by the core during pairing-claim.
 //
-// The `KeychainStore` trait is the test seam: production goes through
-// `RealKeychain` (the `keyring` crate); unit tests use `InMemoryKeychain`.
+// Backing store, chosen per channel by `store()`:
+//   - stable / beta (signed bundles): the real OS keychain via the `keyring`
+//     crate (`RealKeychain`).
+//   - dev (`deno task dev`, an unsigned `tauri dev` binary): a file under the
+//     channel-isolated client dir (`DevFileKeychain`). The macOS keychain
+//     silently no-ops for the unsigned dev build: `set_password` returns Ok
+//     but the entry never persists, so a freshly paired token is gone by the
+//     time `select()` reads it back ("no token for core … re-pair"). Mirrors
+//     tomat-core's `.master-key` file fallback for the same class of reason.
+//
+// The `KeychainStore` trait is the test seam: unit tests swap in
+// `InMemoryKeychain` and drive `DevFileKeychain` via tempdir paths, so they
+// exercise the shared `set_token`/`get_token`/`delete_token` + `account()`
+// plumbing without touching the real OS keychain.
 
-use crate::channel::keychain_service;
+use crate::channel::{channel, channel_root, keychain_service};
 use crate::error::{AppError, AppResult};
 use keyring::Entry;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 // Input limits applied at the Tauri command boundary. Real values are far
 // smaller (ULID core_id = 26 chars; bearer token = 43 chars base64url),
@@ -53,9 +64,79 @@ impl KeychainStore for RealKeychain {
     }
 }
 
+// --- dev file fallback ----------------------------------------------------
+
+/// File-backed keychain used only on the unsigned `dev` build (see the module
+/// header). Persists the `{ "core:<id>": "<token>" }` map as pretty JSON at
+/// `~/.tomat/dev/client/keychain.json`. Holds its own path so tests can drive
+/// it against a tempdir instead of the real home directory.
+struct DevFileKeychain {
+    path: PathBuf,
+}
+
+impl DevFileKeychain {
+    fn read_map(&self) -> AppResult<HashMap<String, String>> {
+        match std::fs::read_to_string(&self.path) {
+            Ok(text) => serde_json::from_str(&text).map_err(AppError::from),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(err) => Err(AppError::Io(err)),
+        }
+    }
+
+    fn write_map(&self, map: &HashMap<String, String>) -> AppResult<()> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let tmp = self.path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_string_pretty(map)?)?;
+        std::fs::rename(&tmp, &self.path)?;
+        Ok(())
+    }
+}
+
+impl KeychainStore for DevFileKeychain {
+    fn set(&self, account: &str, token: &str) -> AppResult<()> {
+        let mut map = self.read_map()?;
+        map.insert(account.to_string(), token.to_string());
+        self.write_map(&map)
+    }
+    fn get(&self, account: &str) -> AppResult<Option<String>> {
+        Ok(self.read_map()?.get(account).cloned())
+    }
+    fn delete(&self, account: &str) -> AppResult<()> {
+        let mut map = self.read_map()?;
+        if map.remove(account).is_some() {
+            self.write_map(&map)?;
+        }
+        Ok(())
+    }
+}
+
+/// `~/.tomat/<channel>/client/keychain.json` is the dev fallback file, alongside
+/// the client's `settings.json`.
+fn keychain_file_path() -> AppResult<PathBuf> {
+    let home = std::env::home_dir()
+        .ok_or_else(|| AppError::external("could not determine home directory"))?;
+    Ok(channel_root(&home).join("client").join("keychain.json"))
+}
+
+/// Pick the keychain backing for the active channel. The unsigned `dev` build
+/// can't use the macOS keychain (writes report success but never persist), so
+/// it stores tokens in a file; the signed stable/beta bundles use the real OS
+/// keychain.
+fn store() -> AppResult<Box<dyn KeychainStore>> {
+    if channel() == "dev" {
+        Ok(Box::new(DevFileKeychain {
+            path: keychain_file_path()?,
+        }))
+    } else {
+        Ok(Box::new(RealKeychain))
+    }
+}
+
 /// Map a raw `keyring::Error` into one of three generic codes so the UI
 /// (and any log line that captures the error) never sees platform-specific
-/// detail like exact file paths, COM HRESULTs, or DBus method names — those
+/// detail like exact file paths, COM HRESULTs, or DBus method names. Those
 /// can be useful for debugging but leak host topology to anyone who can
 /// read the client logs.
 fn classify_keyring_error(err: keyring::Error) -> AppError {
@@ -78,19 +159,19 @@ fn classify_keyring_error(err: keyring::Error) -> AppError {
 pub fn keychain_set_token(core_id: String, token: String) -> AppResult<()> {
     validate_core_id(&core_id)?;
     validate_token(&token)?;
-    set_token(&RealKeychain, &core_id, &token)
+    set_token(&*store()?, &core_id, &token)
 }
 
 #[tauri::command]
 pub fn keychain_get_token(core_id: String) -> AppResult<Option<String>> {
     validate_core_id(&core_id)?;
-    get_token(&RealKeychain, &core_id)
+    get_token(&*store()?, &core_id)
 }
 
 #[tauri::command]
 pub fn keychain_delete_token(core_id: String) -> AppResult<()> {
     validate_core_id(&core_id)?;
-    delete_token(&RealKeychain, &core_id)
+    delete_token(&*store()?, &core_id)
 }
 
 fn validate_core_id(id: &str) -> AppResult<()> {
@@ -152,6 +233,7 @@ fn account(core_id: &str) -> String {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -232,5 +314,53 @@ mod tests {
         // TooLong → denied
         let e = classify_keyring_error(keyring::Error::TooLong("svc".into(), 10));
         assert_eq!(format!("{}", e), "keychain:denied");
+    }
+
+    // --- dev file fallback ---
+
+    fn unique_keychain_path() -> PathBuf {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir()
+            .join(format!(
+                "tomat-client-keychain-{}-{}",
+                std::process::id(),
+                n
+            ))
+            .join("keychain.json")
+    }
+
+    #[test]
+    fn dev_file_keychain_round_trips_and_deletes() {
+        let store = DevFileKeychain {
+            path: unique_keychain_path(),
+        };
+        set_token(&store, "01H8XGJWBWBAQ4WG", "bearer-xyz").unwrap();
+        assert_eq!(
+            get_token(&store, "01H8XGJWBWBAQ4WG").unwrap(),
+            Some("bearer-xyz".into())
+        );
+        delete_token(&store, "01H8XGJWBWBAQ4WG").unwrap();
+        assert_eq!(get_token(&store, "01H8XGJWBWBAQ4WG").unwrap(), None);
+    }
+
+    #[test]
+    fn dev_file_keychain_persists_across_instances() {
+        // The exact bug this fixes: addPaired()'s set and select()'s get may
+        // run through different store instances; the token must survive on disk.
+        let path = unique_keychain_path();
+        set_token(&DevFileKeychain { path: path.clone() }, "core-1", "tok").unwrap();
+        assert_eq!(
+            get_token(&DevFileKeychain { path }, "core-1").unwrap(),
+            Some("tok".into())
+        );
+    }
+
+    #[test]
+    fn dev_file_keychain_get_missing_returns_none() {
+        let store = DevFileKeychain {
+            path: unique_keychain_path(),
+        };
+        assert_eq!(get_token(&store, "absent").unwrap(), None);
     }
 }

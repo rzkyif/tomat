@@ -1,16 +1,8 @@
 import { Hono } from "hono";
 import { join } from "@std/path";
 import { z } from "zod";
-import {
-  type Grant,
-  parseToolsJson,
-  permissionKey,
-  type Tool,
-} from "@tomat/shared";
-import {
-  type InstallEventSink,
-  startInstall,
-} from "../../toolkits/installer.ts";
+import { type Grant, parseToolsJson, permissionKey, type Tool } from "@tomat/shared";
+import { type InstallEventSink, startInstall } from "../../toolkits/installer.ts";
 import { toolkitsRegistry } from "../../toolkits/registry.ts";
 import { workerPool } from "../../toolkits/worker-pool.ts";
 import { resolveVersion, searchPackages } from "../../toolkits/npm-registry.ts";
@@ -87,7 +79,9 @@ export function toolkitsRoutes(): Hono {
     toolkitsRegistry().delete(id);
     try {
       await Deno.remove(toolkit.installedPath, { recursive: true });
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return c.body(null, 204);
   });
 
@@ -96,10 +90,7 @@ export function toolkitsRoutes(): Hono {
     const toolkit = toolkitsRegistry().getOrThrow(id);
     const body = (await readJson(c)) as { version?: string };
     if (toolkit.source !== "npm") {
-      throw new AppError(
-        "validation_error",
-        "only npm toolkits can be updated",
-      );
+      throw new AppError("validation_error", "only npm toolkits can be updated");
     }
     const npmName = id.replace("__", "/");
     const resolved = await resolveVersion(npmName, body.version);
@@ -123,28 +114,22 @@ export function toolkitsRoutes(): Hono {
   r.get("/:id/tools", async (c) => {
     const id = c.req.param("id");
     const tools = toolkitsRegistry().listTools(id);
-    const enriched = await Promise.all(
-      tools.map((t) => attachRequiredPermissions(t)),
-    );
+    const enriched = await Promise.all(tools.map((t) => attachRequiredPermissions(t)));
     return c.json({ tools: enriched });
   });
 
   r.post("/:id/tools/:tool/enable", async (c) => {
     const id = c.req.param("id");
     const name = c.req.param("tool");
-    const tool = toolkitsRegistry().listTools(id).find((t) => t.name === name);
+    const tool = toolkitsRegistry()
+      .listTools(id)
+      .find((t) => t.name === name);
     if (!tool) throw new AppError("tool_not_found", `${id}::${name}`);
     const enriched = await attachRequiredPermissions(tool);
     if (enriched.missingRequired.length > 0) {
-      throw new AppError(
-        "permissions_required",
-        `missing grants for ${name}`,
-        {
-          missing: enriched.missingRequired.map((i) =>
-            enriched.requiredPermissions[i]
-          ),
-        },
-      );
+      throw new AppError("permissions_required", `missing grants for ${name}`, {
+        missing: enriched.missingRequired.map((i) => enriched.requiredPermissions[i]),
+      });
     }
     toolkitsRegistry().setToolEnabled(id, name, true);
     await workerPool().refreshPermissions(id);
@@ -162,7 +147,9 @@ export function toolkitsRoutes(): Hono {
   r.post("/:id/tools/:tool/grants", async (c) => {
     const id = c.req.param("id");
     const name = c.req.param("tool");
-    const tool = toolkitsRegistry().listTools(id).find((t) => t.name === name);
+    const tool = toolkitsRegistry()
+      .listTools(id)
+      .find((t) => t.name === name);
     if (!tool) throw new AppError("tool_not_found", `${id}::${name}`);
     const body = (await readJson(c)) as {
       grants: Array<{ key: string; state: Grant["state"] }>;
@@ -172,9 +159,7 @@ export function toolkitsRoutes(): Hono {
     }
     const enriched = await attachRequiredPermissions(tool);
     const decoded = body.grants.map((g) => {
-      const decl = enriched.requiredPermissions.find((p) =>
-        permissionKey(p) === g.key
-      );
+      const decl = enriched.requiredPermissions.find((p) => permissionKey(p) === g.key);
       if (!decl) {
         throw new AppError(
           "validation_error",
@@ -214,9 +199,11 @@ export function toolkitsRoutes(): Hono {
     return c.json(result);
   });
 
-  const toolSchemasBodySchema = z.object({
-    ids: z.array(z.string().min(1)).max(512),
-  }).strict();
+  const toolSchemasBodySchema = z
+    .object({
+      ids: z.array(z.string().min(1)).max(512),
+    })
+    .strict();
 
   r.post("/tool-schemas", async (c) => {
     const raw = await readJson(c);
@@ -258,9 +245,10 @@ function allEnabledTools(): Array<{
 }> {
   // Cheap query straight to the tools table; toolFilter has a richer version.
   // Duplicated here to avoid importing tool-filter.ts internals.
-  const list = toolkitsRegistry().list().filter((t) => t.enabled);
-  const out: Array<{ id: string; description: string; triggers: string[] }> =
-    [];
+  const list = toolkitsRegistry()
+    .list()
+    .filter((t) => t.enabled);
+  const out: Array<{ id: string; description: string; triggers: string[] }> = [];
   for (const tk of list) {
     for (const t of toolkitsRegistry().listTools(tk.id)) {
       if (t.enabled) {
@@ -279,9 +267,7 @@ async function attachRequiredPermissions(tool: Tool): Promise<Tool> {
   const toolkit = toolkitsRegistry().getOrThrow(tool.toolkitId);
   const toolsJsonPath = join(toolkit.installedPath, "tools.json");
   try {
-    const parsed = parseToolsJson(
-      JSON.parse(await Deno.readTextFile(toolsJsonPath)),
-    );
+    const parsed = parseToolsJson(JSON.parse(await Deno.readTextFile(toolsJsonPath)));
     if (!parsed.ok) throw new AppError("invalid_tools_json", parsed.message);
     const def = parsed.value.tools.find((t) => t.name === tool.name);
     if (!def) {
@@ -289,9 +275,7 @@ async function attachRequiredPermissions(tool: Tool): Promise<Tool> {
     }
     const required = flattenPermissions(def.permissions);
     const grantedKeys = new Set(
-      tool.grants.filter((g) => g.state === "granted").map((g) =>
-        g.permissionKey
-      ),
+      tool.grants.filter((g) => g.state === "granted").map((g) => g.permissionKey),
     );
     const missing: number[] = [];
     for (let i = 0; i < required.length; i++) {

@@ -1,4 +1,4 @@
-// pure attachment helpers — base64 round-trip, filename hygiene, and
+// pure attachment helpers: base64 round-trip, filename hygiene, and
 // MIME -> extension mapping. The Tauri/REST sides (writeSessionAttachment
 // + readSessionAttachment) need the platform() seam and are integration-
 // tested by the running app, not here.

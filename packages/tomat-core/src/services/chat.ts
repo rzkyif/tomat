@@ -12,15 +12,15 @@
 //   llm.external.baseUrl/apiKey/model  : external provider (endpointResolver)
 //   llm.contextSize, llm.external.contextSize : usage tracking
 //   llm.reasoning                      : "off" | "on" | "auto"
-//   dualModel.enabled                  : boolean — run complexity classifier
+//   dualModel.enabled                  : boolean (run complexity classifier)
 //   dualModel.external.*               : secondary endpoint (endpointResolver)
 //   prompts.defaultSystemPrompt        : string (default "")
 //   prompts.complexityDetectionPrompt  : string (default constant)
 //   tools.enabled                      : boolean (default false)
 //   tools.maxHops                      : number (default 5)
 //   tools.filteringEnabled             : boolean (default true)
-//   tools.filteringMinTools            : number  (default 0 — always filter)
-//   tools.maxTools                     : number  (default 30 — final cap)
+//   tools.filteringMinTools            : number  (default 0, always filter)
+//   tools.maxTools                     : number  (default 30, final cap)
 //   tools.secondPassEnabled            : boolean (default true)
 //   tools.alwaysAvailableEnabled       : boolean (default true)
 
@@ -39,11 +39,7 @@ import type {
   ToolDescriptor,
   ToolMessage,
 } from "@tomat/shared";
-import {
-  contentToText,
-  DEFAULT_COMPLEXITY_DETECTION_PROMPT,
-  errMessage,
-} from "@tomat/shared";
+import { contentToText, DEFAULT_COMPLEXITY_DETECTION_PROMPT, errMessage } from "@tomat/shared";
 import { sessionsRepo } from "../db/repos/sessions.ts";
 import { embed } from "./embedding.ts";
 import { llmScheduler } from "./llm-scheduler.ts";
@@ -102,19 +98,19 @@ export class ChatService {
       activeToolCalls: new Set(),
     };
     this.active.set(frame.streamId, stream);
-    void this.run(stream, frame).catch((err) => {
-      log.error(
-        `stream ${frame.streamId} crashed: ${errMessage(err)}`,
-      );
-      this.send(clientId, {
-        kind: "chat.error",
-        streamId: frame.streamId,
-        code: "internal_error",
-        message: errMessage(err),
+    void this.run(stream, frame)
+      .catch((err) => {
+        log.error(`stream ${frame.streamId} crashed: ${errMessage(err)}`);
+        this.send(clientId, {
+          kind: "chat.error",
+          streamId: frame.streamId,
+          code: "internal_error",
+          message: errMessage(err),
+        });
+      })
+      .finally(() => {
+        this.active.delete(frame.streamId);
       });
-    }).finally(() => {
-      this.active.delete(frame.streamId);
-    });
   }
 
   // Control verbs are scoped to the owning client. Stream/call ids are
@@ -157,55 +153,41 @@ export class ChatService {
     wsHub().broadcastToClient(clientId, frame);
   }
 
-  private async run(
-    stream: ActiveStream,
-    frame: ChatStartFrame,
-  ): Promise<void> {
+  private async run(stream: ActiveStream, frame: ChatStartFrame): Promise<void> {
     const settings = await loadCoreSettings();
 
     // Resolve the route: client may pin a route explicitly, otherwise run
     // the complexity classifier when dual-model is enabled.
     let route: "default" | "secondary" = frame.route ?? "default";
     if (!frame.route && boolSetting(settings, "dualModel.enabled", false)) {
-      const last = lastUserText(
-        sessionsRepo().listMessages(stream.sessionId),
-      );
+      const last = lastUserText(sessionsRepo().listMessages(stream.sessionId));
       if (last) {
         try {
           route = await classifyComplexity(settings, last);
         } catch (err) {
-          log.warn(
-            `complexity classifier failed; defaulting to "default": ${
-              errMessage(err)
-            }`,
-          );
+          log.warn(`complexity classifier failed; defaulting to "default": ${errMessage(err)}`);
         }
       }
     }
 
     const endpoint = await resolveEndpoint(settings, route);
-    const maxHops = numSetting(
-      settings,
-      "tools.maxHops",
-      DEFAULT_MAX_TOOL_HOPS,
-    );
-    const systemPrompt = strSetting(
-      settings,
-      "prompts.defaultSystemPrompt",
-      "",
-    );
+    const maxHops = numSetting(settings, "tools.maxHops", DEFAULT_MAX_TOOL_HOPS);
+    const systemPrompt = strSetting(settings, "prompts.defaultSystemPrompt", "");
 
     // Build the initial message transcript from the persisted session (the
     // override path is for one-shot completions outside the persisted flow).
     let history = sessionsRepo().listMessages(stream.sessionId);
     if (frame.contextOverride) {
-      history = frame.contextOverride.map((m, i) => ({
-        id: `override-${i}`,
-        ord: i,
-        role: m.role as Message["role"],
-        content: m.content,
-        createdAtMs: Date.now(),
-      } as Message));
+      history = frame.contextOverride.map(
+        (m, i) =>
+          ({
+            id: `override-${i}`,
+            ord: i,
+            role: m.role as Message["role"],
+            content: m.content,
+            createdAtMs: Date.now(),
+          }) as Message,
+      );
     }
 
     // Tool path is gated on tools.enabled. If filtering is off, every
@@ -218,31 +200,16 @@ export class ChatService {
         const queryText = lastUserText(history);
         const allEnabled = listEnabledTools();
         const totalCount = allEnabled.length;
-        const filteringEnabled = boolSetting(
-          settings,
-          "tools.filteringEnabled",
-          true,
-        );
-        const minToolsToFilter = numSetting(
-          settings,
-          "tools.filteringMinTools",
-          0,
-        );
+        const filteringEnabled = boolSetting(settings, "tools.filteringEnabled", true);
+        const minToolsToFilter = numSetting(settings, "tools.filteringMinTools", 0);
         const maxTools = numSetting(settings, "tools.maxTools", 30);
-        const alwaysAvailableEnabled = boolSetting(
-          settings,
-          "tools.alwaysAvailableEnabled",
-          true,
-        );
-        const secondPassEnabled = boolSetting(
-          settings,
-          "tools.secondPassEnabled",
-          true,
-        );
+        const alwaysAvailableEnabled = boolSetting(settings, "tools.alwaysAvailableEnabled", true);
+        const secondPassEnabled = boolSetting(settings, "tools.secondPassEnabled", true);
 
         // Skip the filter entirely when disabled or when total tool count
         // is below the user's minimum threshold.
-        const shouldFilter = filteringEnabled &&
+        const shouldFilter =
+          filteringEnabled &&
           totalCount > 0 &&
           (minToolsToFilter === 0 || totalCount >= minToolsToFilter);
 
@@ -266,11 +233,7 @@ export class ChatService {
           let candidates = result.candidates;
           if (secondPassEnabled && candidates.length > 0) {
             const phase2Endpoint = await resolveEndpoint(settings, route);
-            candidates = await toolFilter().phase2(
-              queryText,
-              candidates,
-              phase2Endpoint,
-            );
+            candidates = await toolFilter().phase2(queryText, candidates, phase2Endpoint);
             phase2Entries = candidates;
           }
           const final: Array<{ toolId: string }> = [];
@@ -348,7 +311,7 @@ export class ChatService {
           payload: { messageId: filterMsg.id, message: filterMsg },
         });
       } catch (err) {
-        // Embedding model not present, etc. — non-fatal; we just skip tools.
+        // Embedding model not present, etc. This is non-fatal; we just skip tools.
         this.send(stream.clientId, {
           kind: "chat.toolfilter",
           streamId: stream.streamId,
@@ -361,11 +324,7 @@ export class ChatService {
     // Hop loop: stream, dispatch tool calls, append tool messages, repeat.
     for (let hop = 0; hop < maxHops; hop++) {
       if (stream.abort.signal.aborted) return;
-      const openaiMessages = await toOpenAiMessages(
-        history,
-        systemPrompt,
-        stream.sessionId,
-      );
+      const openaiMessages = await toOpenAiMessages(history, systemPrompt, stream.sessionId);
       const req: LlmRequest = {
         endpoint,
         messages: openaiMessages,
@@ -468,8 +427,8 @@ export class ChatService {
     toolCalls: ResolvedPendingCall[];
     error?: { code: ErrorCode; message: string };
   }> {
-    const isLocal = endpoint.baseUrl.includes("127.0.0.1") ||
-      endpoint.baseUrl.includes("localhost");
+    const isLocal =
+      endpoint.baseUrl.includes("127.0.0.1") || endpoint.baseUrl.includes("localhost");
     let assistantContent = "";
     let reasoning = "";
     // Wall-clock anchors for `reasoningDurationMs`: set on the first
@@ -477,23 +436,22 @@ export class ChatService {
     // gives "Thought for Xs" without a recompute from message timestamps.
     let reasoningStartedAtMs: number | null = null;
     let contentStartedAtMs: number | null = null;
-    const toolAssemblers = new Map<number, {
-      callId: string;
-      toolkitId: string;
-      toolName: string;
-      argsBuffer: string;
-    }>();
-    let usage:
-      | { prompt: number; completion: number; total: number }
-      | undefined;
+    const toolAssemblers = new Map<
+      number,
+      {
+        callId: string;
+        toolkitId: string;
+        toolName: string;
+        argsBuffer: string;
+      }
+    >();
+    let usage: { prompt: number; completion: number; total: number } | undefined;
 
     try {
-      for await (
-        const delta of llmScheduler().schedule(req, {
-          clientId: stream.clientId,
-          isLocal,
-        })
-      ) {
+      for await (const delta of llmScheduler().schedule(req, {
+        clientId: stream.clientId,
+        isLocal,
+      })) {
         this.handleDelta(stream, delta, {
           appendContent: (s) => {
             if (contentStartedAtMs === null) contentStartedAtMs = Date.now();
@@ -579,15 +537,16 @@ export class ChatService {
       role: "assistant",
       content: assistantContent,
       createdAtMs: Date.now(),
-      toolCalls: resolved.length > 0
-        ? resolved.map<ToolCall>((r) => ({
-          callId: r.callId,
-          toolkitId: r.toolkitId,
-          toolName: r.toolName,
-          arguments: r.arguments,
-          status: "pending",
-        }))
-        : undefined,
+      toolCalls:
+        resolved.length > 0
+          ? resolved.map<ToolCall>((r) => ({
+              callId: r.callId,
+              toolkitId: r.toolkitId,
+              toolName: r.toolName,
+              arguments: r.arguments,
+              status: "pending",
+            }))
+          : undefined,
     };
     if (usage) {
       this.send(stream.clientId, {
@@ -624,14 +583,15 @@ export class ChatService {
     sink: {
       appendContent: (s: string) => void;
       appendReasoning: (s: string) => void;
-      updateToolCall: (idx: number, chunk: {
-        id?: string;
-        name?: string;
-        argumentsDelta?: string;
-      }) => void;
-      captureUsage: (
-        u: { prompt: number; completion: number; total: number },
+      updateToolCall: (
+        idx: number,
+        chunk: {
+          id?: string;
+          name?: string;
+          argumentsDelta?: string;
+        },
       ) => void;
+      captureUsage: (u: { prompt: number; completion: number; total: number }) => void;
     },
   ): void {
     void stream;
@@ -666,9 +626,7 @@ export class ChatService {
         createdAtMs: Date.now(),
       };
     }
-    const tool = toolkitsRegistry().getTool(
-      `${pending.toolkitId}::${pending.toolName}`,
-    );
+    const tool = toolkitsRegistry().getTool(`${pending.toolkitId}::${pending.toolName}`);
     if (!tool) {
       return {
         id: newMessageId(),
@@ -689,8 +647,7 @@ export class ChatService {
         required: tool.requiredPermissions,
         argumentsJson: pending.arguments,
         chatContext: {
-          userMessage:
-            lastUserText(sessionsRepo().listMessages(stream.sessionId)) ?? "",
+          userMessage: lastUserText(sessionsRepo().listMessages(stream.sessionId)) ?? "",
           sessionId: stream.sessionId,
           locale: undefined,
         },
@@ -787,10 +744,7 @@ export function __resetForTesting(): void {
 
 // In-flight controllers shared between the chat service (creator) and
 // the ws handlers (which forward tool.askuser_response and tool.cancel).
-const inFlightControllers = new Map<
-  string,
-  { clientId: string; ctl: CallController }
->();
+const inFlightControllers = new Map<string, { clientId: string; ctl: CallController }>();
 
 interface ResolvedPendingCall extends PendingToolCall {
   unknown?: boolean;
@@ -822,17 +776,14 @@ async function toOpenAiMessages(
     } else if (m.role === "system" || m.role === "assistant") {
       // System + assistant are always plain string in this codebase (no
       // multipart support needed at the model boundary).
-      const text = typeof m.content === "string"
-        ? m.content
-        : contentToText(m.content);
+      const text = typeof m.content === "string" ? m.content : contentToText(m.content);
       out.push({ role: m.role, content: text });
     } else if (m.role === "tool") {
       out.push({
         role: "tool",
         tool_call_id: m.callId,
-        content: m.status === "completed"
-          ? JSON.stringify(m.result)
-          : JSON.stringify({ error: m.error }),
+        content:
+          m.status === "completed" ? JSON.stringify(m.result) : JSON.stringify({ error: m.error }),
       });
     } else if (m.role === "reasoning") {
       // Reasoning trace is not part of the OpenAI message protocol; omit.
@@ -848,7 +799,7 @@ async function toOpenAiMessages(
 // always converts non-image attachments to markdown before upload) and
 // inlines the text with an "[Attached document: filename]" header so the
 // model knows the boundary. Falls back to a string when the content is just
-// text — keeps the wire payload small for the common no-attachment case.
+// text, which keeps the wire payload small for the common no-attachment case.
 async function userContentToOpenAi(
   content: MessageContent,
   sessionId: string,
@@ -861,11 +812,7 @@ async function userContentToOpenAi(
     } else if (p.type === "image_url") {
       parts.push({ type: "image_url", image_url: { url: p.image_url.url } });
     } else if (p.type === "image_file") {
-      const dataUrl = await readAttachmentAsDataUrl(
-        sessionId,
-        p.path,
-        p.mime || "image/png",
-      );
+      const dataUrl = await readAttachmentAsDataUrl(sessionId, p.path, p.mime || "image/png");
       if (dataUrl) {
         parts.push({ type: "image_url", image_url: { url: dataUrl } });
       }
@@ -884,13 +831,11 @@ async function userContentToOpenAi(
       }
     }
   }
-  // Collapse to a plain string when every part is text — some providers reject
-  // a `content: [{type: "text", ...}]` shape that has no image_url siblings.
+  // Collapse to a plain string when every part is text, because some providers
+  // reject a `content: [{type: "text", ...}]` shape that has no image_url siblings.
   if (parts.every((p) => p.type === "text")) {
     return parts
-      .filter((p): p is OpenAI.Chat.Completions.ChatCompletionContentPartText =>
-        p.type === "text"
-      )
+      .filter((p): p is OpenAI.Chat.Completions.ChatCompletionContentPartText => p.type === "text")
       .map((p) => p.text)
       .join("\n");
   }
@@ -899,7 +844,7 @@ async function userContentToOpenAi(
 
 // Pull the trailing attachment id out of the URL the client stored on the
 // MessagePart (the path field is `<baseUrl>/api/v1/sessions/<sid>/attachments/<aid>`).
-// Returns null if the URL doesn't match — we just skip the attachment in that
+// Returns null if the URL doesn't match. We just skip the attachment in that
 // case rather than failing the whole turn.
 function attachmentIdFromPath(path: string): string | null {
   const m = path.match(/\/attachments\/([^/?#]+)$/);
@@ -920,34 +865,24 @@ async function readAttachmentAsDataUrl(
     for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
     return `data:${rec.mime ?? mime};base64,${btoa(bin)}`;
   } catch (err) {
-    log.warn(
-      `image attachment load failed (${path}): ${errMessage(err)}`,
-    );
+    log.warn(`image attachment load failed (${path}): ${errMessage(err)}`);
     return null;
   }
 }
 
-async function readAttachmentAsText(
-  sessionId: string,
-  path: string,
-): Promise<string | null> {
+async function readAttachmentAsText(sessionId: string, path: string): Promise<string | null> {
   const id = attachmentIdFromPath(path);
   if (!id) return null;
   try {
     const rec = sessionsRepo().getAttachment(sessionId, id);
     return await Deno.readTextFile(rec.absPath);
   } catch (err) {
-    log.warn(
-      `document attachment load failed (${path}): ${errMessage(err)}`,
-    );
+    log.warn(`document attachment load failed (${path}): ${errMessage(err)}`);
     return null;
   }
 }
 
-function enabledToolsByName(): Map<
-  string,
-  { toolkitId: string; toolId: string }
-> {
+function enabledToolsByName(): Map<string, { toolkitId: string; toolId: string }> {
   const out = new Map<string, { toolkitId: string; toolId: string }>();
   for (const tk of toolkitsRegistry().list()) {
     if (!tk.enabled) continue;
@@ -970,19 +905,17 @@ function listEnabledTools(): Tool[] {
   return out;
 }
 
-function classifyProviderError(
-  err: unknown,
-): { code: ErrorCode; message: string } {
+function classifyProviderError(err: unknown): { code: ErrorCode; message: string } {
   const msg = errMessage(err);
   // The OpenAI SDK throws APIError with `status` + `code`; also surfaces
   // human-readable messages we can pattern-match. Try the structured
   // fields first, then fall back to message regex.
   const status =
     (err as { status?: number; statusCode?: number } | null)?.status ??
-      (err as { statusCode?: number } | null)?.statusCode;
+    (err as { statusCode?: number } | null)?.statusCode;
   const code =
     (err as { code?: string; error?: { code?: string } } | null)?.code ??
-      (err as { error?: { code?: string } } | null)?.error?.code;
+    (err as { error?: { code?: string } } | null)?.error?.code;
 
   if (status === 401 || code === "invalid_api_key") {
     return { code: "provider_unauthorized", message: msg };
@@ -1021,13 +954,11 @@ async function classifyComplexity(
     { role: "user", content: userMessage },
   ];
   let response = "";
-  for await (
-    const delta of streamChatCompletion({
-      endpoint,
-      messages,
-      overrides: { temperature: 0, maxTokens: 16 },
-    })
-  ) {
+  for await (const delta of streamChatCompletion({
+    endpoint,
+    messages,
+    overrides: { temperature: 0, maxTokens: 16 },
+  })) {
     if (delta.contentDelta) response += delta.contentDelta;
   }
   const text = response.toLowerCase();
@@ -1035,27 +966,15 @@ async function classifyComplexity(
   return "default";
 }
 
-function strSetting(
-  s: Record<string, unknown>,
-  key: string,
-  def: string,
-): string {
+function strSetting(s: Record<string, unknown>, key: string, def: string): string {
   const v = s[key];
   return typeof v === "string" ? v : def;
 }
-function numSetting(
-  s: Record<string, unknown>,
-  key: string,
-  def: number,
-): number {
+function numSetting(s: Record<string, unknown>, key: string, def: number): number {
   const v = s[key];
   return typeof v === "number" && Number.isFinite(v) ? v : def;
 }
-function boolSetting(
-  s: Record<string, unknown>,
-  key: string,
-  def: boolean,
-): boolean {
+function boolSetting(s: Record<string, unknown>, key: string, def: boolean): boolean {
   const v = s[key];
   return typeof v === "boolean" ? v : def;
 }

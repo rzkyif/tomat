@@ -101,19 +101,14 @@ export class EmbeddingController {
     void this.pumpStderr(proc.stderr);
     void proc.status.then((s) => {
       log.warn(`embedding subprocess exited (code=${s.code})`);
-      this.failPending(
-        new AppError("internal_error", "embedding subprocess exited"),
-      );
+      this.failPending(new AppError("internal_error", "embedding subprocess exited"));
       this.proc = null;
       this.writer = null;
       this.ready = false;
     });
 
     await new Promise<void>((resolve, reject) => {
-      const t = setTimeout(
-        () => reject(new Error("embedding worker boot timeout")),
-        5_000,
-      );
+      const t = setTimeout(() => reject(new Error("embedding worker boot timeout")), 5_000);
       const check = () => {
         if (this.ready) {
           clearTimeout(t);
@@ -128,14 +123,9 @@ export class EmbeddingController {
 
   private send(frame: object): void {
     if (!this.writer) {
-      throw new AppError(
-        "internal_error",
-        "embedding subprocess not running",
-      );
+      throw new AppError("internal_error", "embedding subprocess not running");
     }
-    void this.writer.write(
-      new TextEncoder().encode(JSON.stringify(frame) + "\n"),
-    );
+    void this.writer.write(new TextEncoder().encode(JSON.stringify(frame) + "\n"));
   }
 
   private async pumpStdout(stream: ReadableStream<Uint8Array>): Promise<void> {
@@ -175,11 +165,7 @@ export class EmbeddingController {
         this.pending.delete(frame.id);
         const vectors = frame.vectorsBase64.map((b64) => {
           const bytes = base64ToBytes(b64);
-          return new Float32Array(
-            bytes.buffer,
-            bytes.byteOffset,
-            bytes.byteLength / 4,
-          );
+          return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
         });
         pending.resolve(vectors);
         return;
@@ -188,9 +174,7 @@ export class EmbeddingController {
         const pending = this.pending.get(frame.id);
         if (!pending) return;
         this.pending.delete(frame.id);
-        pending.reject(
-          new AppError("provider_error", `embedding: ${frame.error}`),
-        );
+        pending.reject(new AppError("provider_error", `embedding: ${frame.error}`));
         return;
       }
     }

@@ -7,10 +7,7 @@ import { paths } from "../paths.ts";
 import { binaryName } from "../binaries/versions.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
-import type {
-  PoolToWorkerFrame,
-  WorkerToPoolFrame,
-} from "./worker-protocol.ts";
+import type { PoolToWorkerFrame, WorkerToPoolFrame } from "./worker-protocol.ts";
 
 const log = getLogger("toolworker");
 
@@ -37,9 +34,7 @@ export class WorkerHandle {
   private decoder = new TextDecoder();
   private buf = "";
   private booted = false;
-  private bootWaiters: Array<
-    { resolve: () => void; reject: (e: Error) => void }
-  > = [];
+  private bootWaiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = [];
   readonly toolkitId: string;
   readonly spawnedAt = Date.now();
   inFlightCalls = 0;
@@ -109,10 +104,7 @@ export class WorkerHandle {
   async waitForBoot(timeoutMs = 10_000): Promise<void> {
     if (this.booted) return;
     return await new Promise<void>((resolve, reject) => {
-      const t = setTimeout(
-        () => reject(new Error("worker boot timeout")),
-        timeoutMs,
-      );
+      const t = setTimeout(() => reject(new Error("worker boot timeout")), timeoutMs);
       this.bootWaiters.push({
         resolve: () => {
           clearTimeout(t);
@@ -129,8 +121,7 @@ export class WorkerHandle {
   send(frame: PoolToWorkerFrame): void {
     this.lastActivityAt = Date.now();
     try {
-      this.writer.write(new TextEncoder().encode(JSON.stringify(frame) + "\n"))
-        .catch(() => {});
+      this.writer.write(new TextEncoder().encode(JSON.stringify(frame) + "\n")).catch(() => {});
     } catch {
       // writer closed; ignore (worker is dying)
     }
@@ -139,7 +130,9 @@ export class WorkerHandle {
   async terminate(drainTimeoutMs = 2_000): Promise<void> {
     try {
       this.send({ kind: "shutdown" });
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     const dead = await Promise.race([
       this.proc.status.then(() => true),
       new Promise<boolean>((r) => setTimeout(() => r(false), drainTimeoutMs)),
@@ -147,11 +140,15 @@ export class WorkerHandle {
     if (!dead) {
       try {
         this.proc.kill("SIGKILL");
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     try {
       await this.proc.status;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   private async pumpStdout(stream: ReadableStream<Uint8Array>): Promise<void> {
@@ -160,9 +157,7 @@ export class WorkerHandle {
       if (this.buf.length > MAX_STDOUT_FRAME_BYTES) {
         // Oversized partial frame with no newline: drop it to bound memory.
         // The in-flight call will fail/timeout via the normal paths.
-        log.warn(
-          `[${this.toolkitId}] dropping oversized stdout frame (${this.buf.length} bytes)`,
-        );
+        log.warn(`[${this.toolkitId}] dropping oversized stdout frame (${this.buf.length} bytes)`);
         this.buf = "";
         continue;
       }
@@ -226,9 +221,7 @@ export class WorkerHandle {
       try {
         l(frame);
       } catch (err) {
-        log.warn(
-          `worker listener threw: ${errMessage(err)}`,
-        );
+        log.warn(`worker listener threw: ${errMessage(err)}`);
       }
     }
   }

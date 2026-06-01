@@ -6,26 +6,25 @@ import { bearerMiddleware } from "../middleware/auth.ts";
 
 // Full Kokoro voice catalog, derived once from the shared settings schema
 // so the dropdown and the /voices REST endpoint stay in lock-step.
-const VOICE_CATALOG: Array<{ id: string; label: string; lang: string }> =
-  (() => {
-    for (const section of ttsGroup.sections) {
-      for (const field of section.fields) {
-        if (
-          field.id === "tts.voice" && field.type === "select" &&
-          "options" in field && field.options
-        ) {
-          return field.options.map((
-            o: { value: string | number; label: string },
-          ) => ({
-            id: String(o.value),
-            label: o.label,
-            lang: langFromVoiceId(String(o.value)),
-          }));
-        }
+const VOICE_CATALOG: Array<{ id: string; label: string; lang: string }> = (() => {
+  for (const section of ttsGroup.sections) {
+    for (const field of section.fields) {
+      if (
+        field.id === "tts.voice" &&
+        field.type === "select" &&
+        "options" in field &&
+        field.options
+      ) {
+        return field.options.map((o: { value: string | number; label: string }) => ({
+          id: String(o.value),
+          label: o.label,
+          lang: langFromVoiceId(String(o.value)),
+        }));
       }
     }
-    return [];
-  })();
+  }
+  return [];
+})();
 
 // Voice IDs are `<region><gender>_<name>`, e.g. `af_bella` (American Female
 // Bella) or `jm_kumo` (Japanese Male Kumo). The first letter encodes the
@@ -78,11 +77,7 @@ export function ttsRoutes(): Hono {
     if (!body.text || typeof body.text !== "string") {
       throw new AppError("validation_error", "text required");
     }
-    const { sampleRate, pcm } = await ttsController().synthesize(
-      body.text,
-      body.voice,
-      body.speed,
-    );
+    const { sampleRate, pcm } = await ttsController().synthesize(body.text, body.voice, body.speed);
     const wav = pcmToWav(pcm, sampleRate);
     return new Response(wav.buffer as ArrayBuffer, {
       status: 200,

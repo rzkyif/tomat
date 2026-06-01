@@ -1,4 +1,4 @@
-// permissionKey is security-relevant — grants are looked up by this key,
+// permissionKey is security-relevant: grants are looked up by this key,
 // so the function must be deterministic and unambiguous across all 7
 // permission kinds.
 
@@ -16,10 +16,7 @@ Deno.test("permissionKey: net packs host + comma-joined ports", () => {
 });
 
 Deno.test("permissionKey: read/write include the path verbatim", () => {
-  assertEquals(
-    permissionKey({ kind: "read", path: "/etc/hosts", reason: "x" }),
-    "read:/etc/hosts",
-  );
+  assertEquals(permissionKey({ kind: "read", path: "/etc/hosts", reason: "x" }), "read:/etc/hosts");
   assertEquals(
     permissionKey({ kind: "write", path: "~/.cache/foo", reason: "x" }),
     "write:~/.cache/foo",
@@ -27,10 +24,7 @@ Deno.test("permissionKey: read/write include the path verbatim", () => {
 });
 
 Deno.test("permissionKey: run uses the binary name as the discriminator", () => {
-  assertEquals(
-    permissionKey({ kind: "run", binary: "ffmpeg", reason: "x" }),
-    "run:ffmpeg",
-  );
+  assertEquals(permissionKey({ kind: "run", binary: "ffmpeg", reason: "x" }), "run:ffmpeg");
 });
 
 Deno.test("permissionKey: env keys are the variable name", () => {
@@ -45,10 +39,7 @@ Deno.test("permissionKey: ffi is the bare 'ffi' constant", () => {
 });
 
 Deno.test("permissionKey: sys carries the flag", () => {
-  assertEquals(
-    permissionKey({ kind: "sys", flag: "hostname", reason: "x" }),
-    "sys:hostname",
-  );
+  assertEquals(permissionKey({ kind: "sys", flag: "hostname", reason: "x" }), "sys:hostname");
 });
 
 Deno.test("permissionKey: identical decls produce identical keys (determinism)", () => {
@@ -64,7 +55,7 @@ Deno.test("permissionKey: identical decls produce identical keys (determinism)",
     ports: [443],
     reason: "second-with-different-reason",
   };
-  // Reason is not part of the key — only the access surface is. Two decls
+  // Reason is not part of the key: only the access surface is. Two decls
   // with the same access but different reasons must dedupe in the grants
   // table.
   assertEquals(permissionKey(a), permissionKey(b));

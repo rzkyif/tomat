@@ -3,8 +3,8 @@
 // in a browser (web/mobile build) with different implementations.
 //
 // IMPORTANT: NOTHING under packages/tomat-client/src/ui/ outside of
-// `lib/platform/` may import `@tauri-apps/*`. Components, state stores,
-// shared modules — all platform-specific calls go through `platform()`.
+// `lib/platform/` may import `@tauri-apps/*`. For components, state stores,
+// and shared modules, all platform-specific calls go through `platform()`.
 // This is enforced by an oxlint rule (see .oxlintrc.json). To add a new
 // platform-specific feature: add the method to the `Platform` interface
 // below, implement it in `tauri.ts`, stub it in `web.ts`, then call
@@ -34,7 +34,7 @@ export type ContextMenuItem =
 // --- Updater --------------------------------------------------------------
 
 /** Per-update handle returned by `updater.check()`. The Tauri impl wraps
- *  `@tauri-apps/plugin-updater`'s `Update` class — its `.downloadAndInstall`
+ *  `@tauri-apps/plugin-updater`'s `Update` class. Its `.downloadAndInstall`
  *  and `.close` are stateful, so the handle is a wrapper, not a plain
  *  value object. Callers MUST `.close()` (or call `downloadAndInstall`,
  *  which closes implicitly) to release the underlying resources. */
@@ -94,7 +94,7 @@ export interface ShortcutBindings {
 // pin a self-signed cert). The desktop impl does it in Rust (reqwest +
 // tokio-tungstenite + a custom rustls verifier on the SPKI pin); a future mobile
 // impl reuses the same Rust; the web stub falls back to browser fetch/WebSocket
-// (no pinning — relies on the browser's CA trust). `pin` is base64(SHA-256(SPKI));
+// (no pinning; relies on the browser's CA trust). `pin` is base64(SHA-256(SPKI));
 // `capturePin` is the pairing-time TOFU mode that records the presented cert's
 // pin instead of enforcing one.
 
@@ -125,7 +125,9 @@ export interface NetSocket {
   onOpen(cb: () => void): void;
   onMessage(cb: (data: string) => void): void;
   onClose(cb: () => void): void;
-  onError(cb: () => void): void;
+  /** `reason` carries the connect-failure message when available (e.g. from the
+   *  Tauri WS error event), so callers can surface it instead of a generic one. */
+  onError(cb: (reason?: string) => void): void;
 }
 
 export interface Platform {
@@ -230,6 +232,11 @@ export interface Platform {
      *  fallbacks when the paired core hasn't overridden llm.port / stt.port so
      *  a beta client talks to the beta sidecars (7711/7712), not stable's. */
     localSidecarPorts(): Promise<{ llm: number; stt: number }>;
+    /** Optional `--core-url` / `--pairing-code` launch arguments, used to
+     *  prefill the "On another computer" onboarding fields. Doubles as a
+     *  shareable setup command; `deno task dev` passes the dev core URL + code
+     *  this way. Returns null when neither flag was given (or on web). */
+    launchPrefill(): Promise<{ coreUrl?: string; pairingCode?: string } | null>;
   };
   // File-to-markdown conversion (desktop uses Rust crates; web uses core fallback).
   fileConvert: {
@@ -282,7 +289,7 @@ export interface Platform {
      *  pass through transparent pixels to the desktop. */
     setClickthrough(enabled: boolean): Promise<void>;
   };
-  // Native context menu — used for right-click message actions where the
+  // Native context menu, used for right-click message actions where the
   // browser menu would obscure the UI.
   menu: {
     /** Show a context menu at the current cursor and resolve with the
@@ -292,7 +299,7 @@ export interface Platform {
   };
   // Monitor enumeration shared between Settings (pick a monitor) and the
   // window-position math. Distinct from `capture.monitors` (xcap-based,
-  // used by the screen-capture path) — these come from Tauri's window
+  // used by the screen-capture path). These come from Tauri's window
   // module and align with `windowing.position`.
   monitors: {
     primary(): Promise<MonitorInfo | null>;

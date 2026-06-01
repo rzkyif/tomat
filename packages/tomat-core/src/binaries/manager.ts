@@ -2,8 +2,8 @@
 // archive for each binary kind referenced by the runtime-fetched manifest.
 //
 // Expected archive format: gzipped tar (.tar.gz) containing:
-//   <kind>(.exe)   — the executable, placed at bin/<kind>(.exe)
-//   lib/*          — shared libraries for this host's triple, placed at bin/lib/*
+//   <kind>(.exe)   the executable, placed at bin/<kind>(.exe)
+//   lib/*          shared libraries for this host's triple, placed at bin/lib/*
 //
 // Any other tree shape is rejected to keep the on-disk layout predictable.
 
@@ -12,6 +12,7 @@ import { join } from "@std/path";
 import type {
   BinaryKind,
   BinaryManifest,
+  BinaryProbeResult,
   BinaryStatus,
   Triple,
 } from "@tomat/shared";
@@ -43,18 +44,13 @@ async function readInstalledVersions(): Promise<Record<string, string>> {
     }
   } catch (err) {
     if (!(err instanceof Deno.errors.NotFound)) {
-      log.warn(
-        `could not read versions.json: ${errMessage(err)}`,
-      );
+      log.warn(`could not read versions.json: ${errMessage(err)}`);
     }
   }
   return {};
 }
 
-async function writeInstalledVersion(
-  kind: BinaryKind,
-  version: string,
-): Promise<void> {
+async function writeInstalledVersion(kind: BinaryKind, version: string): Promise<void> {
   const versions = await readInstalledVersions();
   versions[kind] = version;
   await Deno.writeTextFile(
@@ -86,9 +82,9 @@ export class BinariesManager {
       // installed version (or "latest" if not yet installed); pinned (stable)
       // entries report their published version.
       const version = entry
-        ? (isResolverEntry(entry)
+        ? isResolverEntry(entry)
           ? (versions[kind] ?? "latest")
-          : entry.version)
+          : entry.version
         : "unknown";
       out.push({
         kind,
@@ -125,9 +121,7 @@ export class BinariesManager {
             resolvable = true;
           }
         } catch (err) {
-          log.warn(
-            `check ${kind}: resolve failed: ${errMessage(err)}`,
-          );
+          log.warn(`check ${kind}: resolve failed: ${errMessage(err)}`);
         }
       }
       // "available" means we should (re)install: the binary is missing, or the
@@ -135,9 +129,9 @@ export class BinariesManager {
       // `resolvable` so a triple with no upstream asset (e.g. whisper on
       // mac/linux) never shows a phantom update. An installed-but-unknown
       // version (pre-tracking) is treated as current.
-      const available = resolvable &&
-        (!installed ||
-          (installedVersion !== null && installedVersion !== latestVersion));
+      const available =
+        resolvable &&
+        (!installed || (installedVersion !== null && installedVersion !== latestVersion));
       out.push({
         kind,
         installed,
@@ -149,13 +143,45 @@ export class BinariesManager {
     return out;
   }
 
+  // Resolve the version + download size for each requested kind, without
+  // installing. Backs the startup download confirmation so it can show the
+  // concrete release and size before the user commits. Per-kind failures
+  // degrade to version "unknown" / no size rather than failing the whole probe.
+  async probe(kinds: BinaryKind[]): Promise<BinaryProbeResult[]> {
+    const manifest = await loadBinaryManifest().catch(() => null);
+    const triple = hostTriple();
+    const out: BinaryProbeResult[] = [];
+    for (const kind of kinds) {
+      const entry = manifest?.binaries[kind];
+      if (!entry) {
+        out.push({ kind, version: "unknown" });
+        continue;
+      }
+      try {
+        const resolved = await resolveBinaryEntry(entry, triple);
+        if (!resolved) {
+          out.push({ kind, version: "unknown" });
+          continue;
+        }
+        // Pinned (stable) entries don't carry a size; fall back to a HEAD on
+        // the resolved URL. Resolver (beta) entries already know it.
+        const sizeBytes = resolved.sizeBytes ?? (await headContentLength(resolved.url));
+        out.push({ kind, version: resolved.version, sizeBytes });
+      } catch (err) {
+        log.warn(`probe ${kind}: resolve failed: ${errMessage(err)}`);
+        out.push({ kind, version: "unknown" });
+      }
+    }
+    return out;
+  }
+
   // Install (or replace) the named binaries. If `kinds` is omitted, installs
   // every kind not currently present. Returns one jobId per kicked-off
   // download; progress streams over the WS via downloads.snapshot.
   async install(kinds?: BinaryKind[]): Promise<InstallResult> {
     const manifest = await loadBinaryManifest();
     const triple = hostTriple();
-    const targets = kinds ?? await this.missingKinds();
+    const targets = kinds ?? (await this.missingKinds());
     const jobIds: string[] = [];
     for (const kind of targets) {
       const job = await this.kickoff(kind, manifest, triple);
@@ -165,7 +191,7 @@ export class BinariesManager {
   }
 
   // Force-update a single binary to the manifest's currently-published
-  // version. No client-side version pinning — the CDN publishes one version
+  // version. No client-side version pinning: the CDN publishes one version
   // per kind at a time, and that's what we install.
   async update(kind: BinaryKind): Promise<{ jobId: string }> {
     const manifest = await loadBinaryManifest({ force: true });
@@ -205,10 +231,7 @@ export class BinariesManager {
     // latest release and verifies via its published sha256 digest.
     const resolved = await resolveBinaryEntry(entry, triple);
     if (!resolved) {
-      throw new AppError(
-        "binary_not_found",
-        `kind ${kind} has no entry for triple ${triple}`,
-      );
+      throw new AppError("binary_not_found", `kind ${kind} has no entry for triple ${triple}`);
     }
     const jobId = newJobId();
     const stagingPath = join(paths().stagingDir, `${kind}-${jobId}.tar.gz`);
@@ -230,13 +253,13 @@ export class BinariesManager {
         await writeInstalledVersion(kind, resolved.version);
         log.info(`${kind}: installed v${resolved.version}`);
       } catch (err) {
-        log.error(
-          `${kind}: install failed: ${errMessage(err)}`,
-        );
+        log.error(`${kind}: install failed: ${errMessage(err)}`);
       } finally {
         try {
           await Deno.remove(stagingPath);
-        } catch { /* fine */ }
+        } catch {
+          /* fine */
+        }
       }
     })();
     return jobId;
@@ -270,9 +293,7 @@ async function extractArchive(
 
   const file = await Deno.open(archivePath, { read: true });
   const gunzip = new DecompressionStream("gzip");
-  const entries = file.readable.pipeThrough(gunzip).pipeThrough(
-    new UntarStream(),
-  );
+  const entries = file.readable.pipeThrough(gunzip).pipeThrough(new UntarStream());
 
   let exeFound = false;
   for await (const entry of entries) {
@@ -289,17 +310,11 @@ async function extractArchive(
       await entry.readable?.cancel();
     } else {
       await entry.readable?.cancel();
-      throw new AppError(
-        "extract_failed",
-        `unexpected archive entry for ${kind}: ${name}`,
-      );
+      throw new AppError("extract_failed", `unexpected archive entry for ${kind}: ${name}`);
     }
   }
   if (!exeFound) {
-    throw new AppError(
-      "extract_failed",
-      `archive for ${kind} missing ${exeName}`,
-    );
+    throw new AppError("extract_failed", `archive for ${kind} missing ${exeName}`);
   }
 }
 
@@ -321,8 +336,10 @@ async function writeStreamTo(
   } finally {
     try {
       // out.writable.pipeTo closes the writable side, which closes the file.
-      // Re-closing throws — swallow.
-    } catch { /* fine */ }
+      // Re-closing throws, so swallow it.
+    } catch {
+      /* fine */
+    }
   }
   if (Deno.build.os !== "windows") {
     await Deno.chmod(outPath, mode);
@@ -341,4 +358,21 @@ async function fileExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Best-effort download-size probe: HEAD the URL for its Content-Length.
+ *  Returns undefined on any failure (size is advisory, never load-bearing). */
+async function headContentLength(url: string): Promise<number | undefined> {
+  try {
+    const res = await fetch(url, { method: "HEAD" });
+    await res.body?.cancel();
+    const cl = res.headers.get("content-length");
+    if (cl) {
+      const n = Number(cl);
+      if (Number.isFinite(n)) return n;
+    }
+  } catch {
+    // best-effort
+  }
+  return undefined;
 }

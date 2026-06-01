@@ -1,4 +1,4 @@
-// permission flag-set composition. Pure logic — no I/O, no DB.
+// permission flag-set composition. Pure logic. No I/O, no DB.
 // Verifies the union semantics that drive `--allow-*` args at worker spawn.
 
 import { assertEquals } from "@std/assert";
@@ -68,10 +68,7 @@ Deno.test("unionFlags: net expands one entry per (host, port)", () => {
     ports: [80, 443],
     reason: "x",
   };
-  const flags = unionFlags(
-    [{ required: [decl], grants: [grantedFor(decl)] }],
-    templates,
-  );
+  const flags = unionFlags([{ required: [decl], grants: [grantedFor(decl)] }], templates);
   assertEquals(flags.net.has("api.example.com:80"), true);
   assertEquals(flags.net.has("api.example.com:443"), true);
 });
@@ -82,10 +79,7 @@ Deno.test("unionFlags: read/write apply path templates", () => {
     path: "$downloads/out",
     reason: "x",
   };
-  const flags = unionFlags(
-    [{ required: [decl], grants: [grantedFor(decl)] }],
-    templates,
-  );
+  const flags = unionFlags([{ required: [decl], grants: [grantedFor(decl)] }], templates);
   assertEquals(flags.write.has("/home/u/Downloads/out"), true);
 });
 
@@ -133,23 +127,14 @@ Deno.test("flagSetToArgs: omits buckets that are empty", () => {
 Deno.test("expandPath: substitutes $home/$downloads/$models/$sessions/$toolkit", () => {
   assertEquals(expandPath("$home/foo", templates), "/home/u/foo");
   assertEquals(expandPath("$downloads", templates), "/home/u/Downloads");
-  assertEquals(
-    expandPath("$models/x", templates),
-    "/home/u/.tomat/core/models/x",
-  );
-  assertEquals(
-    expandPath("$toolkit", templates),
-    "/home/u/.tomat/core/toolkits/x",
-  );
+  assertEquals(expandPath("$models/x", templates), "/home/u/.tomat/core/models/x");
+  assertEquals(expandPath("$toolkit", templates), "/home/u/.tomat/core/toolkits/x");
 });
 
 Deno.test("expandPath: substitutes $env.VAR from process env", () => {
   Deno.env.set("TOMAT_PERMISSIONS_T0_VAR", "value");
   try {
-    assertEquals(
-      expandPath("$env.TOMAT_PERMISSIONS_T0_VAR/x", templates),
-      "value/x",
-    );
+    assertEquals(expandPath("$env.TOMAT_PERMISSIONS_T0_VAR/x", templates), "value/x");
   } finally {
     Deno.env.delete("TOMAT_PERMISSIONS_T0_VAR");
   }

@@ -19,7 +19,7 @@ const impl: Platform = {
     // The browser does standard CA verification and exposes no certificate
     // pinning to JS, so `pin` is ignored and `capturePin` can't read the cert.
     // This means the web build CANNOT pair with a self-signed core (the PAKE
-    // cert-pin binding has no pin to verify) — it only works against a core
+    // cert-pin binding has no pin to verify). It only works against a core
     // with a browser-trusted (CA) cert. Documented limitation of the web build.
     async fetch(req) {
       const res = await fetch(req.url, {
@@ -155,6 +155,10 @@ const impl: Platform = {
     localSidecarPorts() {
       return Promise.resolve({ llm: 7701, stt: 7702 });
     },
+    launchPrefill() {
+      // No process launch arguments in the browser.
+      return Promise.resolve(null);
+    },
   },
   fileConvert: {
     async toMarkdown() {
@@ -177,7 +181,7 @@ const impl: Platform = {
       return "web";
     },
     async check() {
-      // No auto-updater in the browser — deployments are the update path.
+      // No auto-updater in the browser. Deployments are the update path.
       return null;
     },
     relaunch: () => Promise.reject(new Error("relaunch not available in browser build")),

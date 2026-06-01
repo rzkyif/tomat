@@ -92,7 +92,7 @@ The core listens on `127.0.0.1:7800` and the client UI runs at
 `~/.tomat/dev/core/.admin-token`, and prints a pairing code. In the client's
 first-run screen choose **"On another computer"**, enter the URL
 `http://127.0.0.1:7800`, and paste the printed code. The pairing persists across
-dev restarts. **Do not** click "On this computer" in dev — that path runs the
+dev restarts. **Do not** click "On this computer" in dev. That path runs the
 production installer (it looks for a compiled core binary, which dev never
 builds) and would install a stable core over your dev session.
 
@@ -110,7 +110,7 @@ build never collides with a stable install:
 `deno task dev` sets `dev` automatically. Models are the one exception: they
 stay shared at `~/.tomat/models` so multi-GB weights aren't re-downloaded per
 channel. Reset dev state with `deno task clean --dev-state` (or
-`rm -rf ~/.tomat/dev`) — it never touches a stable install.
+`rm -rf ~/.tomat/dev`); it never touches a stable install.
 
 Channels are built to **coexist and run at the same time**, not just isolate
 data. Our binaries get a channel suffix (`tomat-core` → `tomat-core-beta`), the
@@ -142,7 +142,7 @@ deno task release:client:beta  # just the client bundle + manifest
 Beta publishes to `manifests/beta/…` on the CDN and, for the sidecar binaries
 (llama/whisper/deno), ships a _resolver_ in `binaries.json` so the running core
 fetches the **latest upstream GitHub release** at install/update time (verified
-against GitHub's sha256 digest) — upstream updates reach beta users without a
+against GitHub's sha256 digest), so upstream updates reach beta users without a
 re-release. Stable stays pinned at release time.
 
 ### Cleaning build artifacts
@@ -158,8 +158,8 @@ deno task clean --beta-state  # also ~/.tomat/beta (the isolated beta channel)
 
 ```bash
 deno task check     # deno check + svelte-check + cargo check
-deno task fmt       # deno fmt + oxfmt + cargo fmt
-deno task lint      # deno lint + oxlint + cargo clippy
+deno task fmt       # oxfmt (all TS/JS/JSON/MD) + cargo fmt
+deno task lint      # oxlint (all TS/JS, incl. no-tauri-import plugin) + .svelte tauri grep + cargo clippy
 ```
 
 ### Tests
@@ -172,7 +172,7 @@ deno task test:e2e      # WebdriverIO E2E (manual, opt-in)
 ```
 
 Tests are co-located with source as `*.test.ts`. E2E specs live under
-`tests/e2e/specs/` with their own runner — see
+`tests/e2e/specs/` with their own runner; see
 [tests/e2e/README.md](tests/e2e/README.md) for setup. Scratch tests are
 `*.tmp.test.ts` (gitignored anywhere in the tree). The developer guide for the
 suite (helpers, fixtures, mocking patterns) is in

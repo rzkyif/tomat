@@ -11,6 +11,8 @@ type ConfirmRequest = {
   title: string;
   message: string;
   confirmLabel?: string;
+  /** Label for the dismiss button. Defaults to "Cancel". */
+  cancelLabel?: string;
   destructive?: boolean;
   onConfirm: () => void | Promise<void>;
   onCancel?: () => void;

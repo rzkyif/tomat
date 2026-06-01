@@ -67,7 +67,7 @@
         <span>System Prompt</span>
       {/snippet}
       {#snippet children()}
-        <!-- `text-left` keeps the prompt body alignment-independent — the
+        <!-- `text-left` keeps the prompt body alignment-independent. The
              Expandable wrapper would otherwise apply `text-right` when the
              bubble is right-aligned. -->
         <div

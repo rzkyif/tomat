@@ -11,12 +11,7 @@
 import { assertEquals, assertNotEquals, assertRejects } from "@std/assert";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
-import {
-  deleteSecret,
-  getSecret,
-  listSecretNames,
-  setSecret,
-} from "./secrets.ts";
+import { deleteSecret, getSecret, listSecretNames, setSecret } from "./secrets.ts";
 import { AppError } from "../shared/errors.ts";
 
 Deno.test("setSecret + getSecret: round-trips a value", async () => {
@@ -76,11 +71,7 @@ Deno.test("deleteSecret: returns true on first call, false on subsequent", async
 Deno.test("setSecret: rejects empty / non-string name and non-string value", async () => {
   const env = await setupTestEnv();
   try {
-    await assertRejects(
-      () => setSecret("", "v"),
-      AppError,
-      "non-empty string",
-    );
+    await assertRejects(() => setSecret("", "v"), AppError, "non-empty string");
     await assertRejects(
       // deno-lint-ignore no-explicit-any
       () => setSecret("k", 42 as any),
@@ -101,11 +92,7 @@ Deno.test("secrets.enc: tampered ciphertext is rejected as decryption failure", 
     // AES-GCM, so any change there must trip GCM authentication).
     blob[blob.length - 1] ^= 0xff;
     await Deno.writeFile(paths().secretsEncFile, blob);
-    await assertRejects(
-      () => getSecret("k"),
-      AppError,
-      "decryption failed",
-    );
+    await assertRejects(() => getSecret("k"), AppError, "decryption failed");
   } finally {
     await env.teardown();
   }
@@ -119,7 +106,7 @@ Deno.test("secrets.enc: nonce changes between writes (non-deterministic encrypti
     await setSecret("k", "same-value");
     const b = await Deno.readFile(paths().secretsEncFile);
     // First 12 bytes are the nonce. Across two writes of the same plaintext
-    // they MUST differ — otherwise we'd have catastrophic GCM nonce reuse.
+    // they MUST differ. Otherwise we'd have catastrophic GCM nonce reuse.
     assertNotEquals(
       Array.from(a.subarray(0, 12)).join(","),
       Array.from(b.subarray(0, 12)).join(","),

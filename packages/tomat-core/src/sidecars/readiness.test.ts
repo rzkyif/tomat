@@ -13,16 +13,8 @@ Deno.test("validateHealthCheckUrl: accepts loopback http URLs", () => {
 });
 
 Deno.test("validateHealthCheckUrl: rejects non-http schemes", () => {
-  assertThrows(
-    () => validateHealthCheckUrl("https://127.0.0.1/health"),
-    AppError,
-    "must use http",
-  );
-  assertThrows(
-    () => validateHealthCheckUrl("file:///etc/passwd"),
-    AppError,
-    "must use http",
-  );
+  assertThrows(() => validateHealthCheckUrl("https://127.0.0.1/health"), AppError, "must use http");
+  assertThrows(() => validateHealthCheckUrl("file:///etc/passwd"), AppError, "must use http");
 });
 
 Deno.test("validateHealthCheckUrl: rejects non-loopback hostnames", () => {
@@ -39,11 +31,7 @@ Deno.test("validateHealthCheckUrl: rejects non-loopback hostnames", () => {
 });
 
 Deno.test("validateHealthCheckUrl: rejects malformed URLs", () => {
-  assertThrows(
-    () => validateHealthCheckUrl("not a url"),
-    AppError,
-    "invalid health-check",
-  );
+  assertThrows(() => validateHealthCheckUrl("not a url"), AppError, "invalid health-check");
 });
 
 Deno.test("pollHttpHealth: returns true when the endpoint is immediately 200", async () => {
@@ -87,11 +75,7 @@ Deno.test("pollHttpHealth: short-circuits when the signal is already aborted", a
 Deno.test("sleep: rejects with 'aborted' when the signal fires mid-wait", async () => {
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 5);
-  await assertRejects(
-    () => sleep(1_000, controller.signal),
-    Error,
-    "aborted",
-  );
+  await assertRejects(() => sleep(1_000, controller.signal), Error, "aborted");
 });
 
 Deno.test("sleep: rejects immediately when the signal is already aborted", async () => {

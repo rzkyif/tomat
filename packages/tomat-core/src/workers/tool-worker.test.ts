@@ -6,10 +6,7 @@
 
 import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
-import type {
-  PoolToWorkerFrame,
-  WorkerToPoolFrame,
-} from "../toolkits/worker-protocol.ts";
+import type { PoolToWorkerFrame, WorkerToPoolFrame } from "../toolkits/worker-protocol.ts";
 
 const WORKER_ENTRY = new URL("./tool-worker.ts", import.meta.url).pathname;
 
@@ -79,16 +76,24 @@ function startWorker(entry: string): WorkerSession {
     async shutdown() {
       try {
         await writer.write(encode({ kind: "shutdown" }));
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       try {
         writer.releaseLock();
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       try {
         await proc.stdin.close();
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       try {
         frames.releaseLock();
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       await proc.status;
     },
   };
@@ -98,9 +103,7 @@ function encode(frame: PoolToWorkerFrame): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(frame) + "\n");
 }
 
-function pumpFrames(
-  stream: ReadableStream<Uint8Array>,
-): ReadableStream<WorkerToPoolFrame> {
+function pumpFrames(stream: ReadableStream<Uint8Array>): ReadableStream<WorkerToPoolFrame> {
   const decoder = new TextDecoder();
   let buf = "";
   return new ReadableStream<WorkerToPoolFrame>({
@@ -152,14 +155,16 @@ Deno.test("toolWorker: ready -> booted -> call returns tool_result + progress + 
     await nextOfKind(session.frames, "ready");
     await nextOfKind(session.frames, "booted");
 
-    await session.writer.write(encode({
-      kind: "call",
-      callId: "c1",
-      toolName: "echo",
-      fnExport: "echo",
-      arguments: JSON.stringify({ x: 42 }),
-      chatContext: { userMessage: "hi", sessionId: null },
-    }));
+    await session.writer.write(
+      encode({
+        kind: "call",
+        callId: "c1",
+        toolName: "echo",
+        fnExport: "echo",
+        arguments: JSON.stringify({ x: 42 }),
+        chatContext: { userMessage: "hi", sessionId: null },
+      }),
+    );
 
     const progress = await nextOfKind(session.frames, "progress");
     assertEquals(progress.callId, "c1");
@@ -184,14 +189,16 @@ Deno.test("toolWorker: a throwing tool emits tool_error with the message", async
     await nextOfKind(session.frames, "ready");
     await nextOfKind(session.frames, "booted");
 
-    await session.writer.write(encode({
-      kind: "call",
-      callId: "c2",
-      toolName: "boom",
-      fnExport: "boom",
-      arguments: "{}",
-      chatContext: { userMessage: "", sessionId: null },
-    }));
+    await session.writer.write(
+      encode({
+        kind: "call",
+        callId: "c2",
+        toolName: "boom",
+        fnExport: "boom",
+        arguments: "{}",
+        chatContext: { userMessage: "", sessionId: null },
+      }),
+    );
 
     const err = await nextOfKind(session.frames, "tool_error");
     assertEquals(err.callId, "c2");
@@ -209,14 +216,16 @@ Deno.test("toolWorker: cancel aborts an in-flight call", async () => {
     await nextOfKind(session.frames, "ready");
     await nextOfKind(session.frames, "booted");
 
-    await session.writer.write(encode({
-      kind: "call",
-      callId: "c3",
-      toolName: "slow",
-      fnExport: "slow",
-      arguments: "{}",
-      chatContext: { userMessage: "", sessionId: null },
-    }));
+    await session.writer.write(
+      encode({
+        kind: "call",
+        callId: "c3",
+        toolName: "slow",
+        fnExport: "slow",
+        arguments: "{}",
+        chatContext: { userMessage: "", sessionId: null },
+      }),
+    );
     // Wait for the first progress so the call is definitely running.
     await nextOfKind(session.frames, "progress");
 
@@ -238,24 +247,28 @@ Deno.test("toolWorker: ask_user round-trip resolves the tool with the user's ans
     await nextOfKind(session.frames, "ready");
     await nextOfKind(session.frames, "booted");
 
-    await session.writer.write(encode({
-      kind: "call",
-      callId: "c4",
-      toolName: "ask",
-      fnExport: "ask",
-      arguments: "{}",
-      chatContext: { userMessage: "", sessionId: null },
-    }));
+    await session.writer.write(
+      encode({
+        kind: "call",
+        callId: "c4",
+        toolName: "ask",
+        fnExport: "ask",
+        arguments: "{}",
+        chatContext: { userMessage: "", sessionId: null },
+      }),
+    );
 
     const ask = await nextOfKind(session.frames, "ask_user_request");
     assertEquals(ask.callId, "c4");
 
-    await session.writer.write(encode({
-      kind: "ask_user_response",
-      callId: "c4",
-      requestId: ask.requestId,
-      answers: ["picked-value"],
-    }));
+    await session.writer.write(
+      encode({
+        kind: "ask_user_response",
+        callId: "c4",
+        requestId: ask.requestId,
+        answers: ["picked-value"],
+      }),
+    );
 
     const result = await nextOfKind(session.frames, "tool_result");
     assertEquals(result.result, { picked: "picked-value" });

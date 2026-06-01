@@ -27,7 +27,7 @@ Deno.test("GET /api/v1/binaries: requires bearer (401)", async () => {
 
 // GET /api/v1/binaries hits the manifest fetch path internally (with a
 // caught error if the CDN is unreachable). We assert auth + a successful
-// status only — exercising the response body would race the in-flight
+// status only. Exercising the response body would race the in-flight
 // internal fetch and surface as a resource leak.
 
 Deno.test("POST /api/v1/binaries/update: missing kind returns 400", async () => {

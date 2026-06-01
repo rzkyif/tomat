@@ -89,7 +89,7 @@
   // `picks` holds option values; `freestyleActive` means the freeform text
   // currently counts as an answer. Single-select treats picks and freestyle
   // as mutually exclusive (clicking an option demotes freestyle, typing
-  // demotes picks); multiselect treats them as additive — picks and the
+  // demotes picks); multiselect treats them as additive: picks and the
   // freestyle entry coexist and both contribute to the final answer array.
   type DraftAnswer = {
     text: string;
@@ -136,8 +136,8 @@
       // leaves the freestyle entry alone.
       drafts[idx] = { ...d, picks: Array.from(set) };
     } else {
-      // Single-select: clicking an option always wins over freestyle —
-      // picks become the answer, freeform is marked inactive (but its text
+      // Single-select: clicking an option always wins over freestyle.
+      // Picks become the answer, freeform is marked inactive (but its text
       // is preserved so the user can come back to it).
       drafts[idx] = { ...d, picks: [value], freestyleActive: false };
     }
@@ -433,7 +433,7 @@
   );
 
   let alignment = $derived(settingsState.getAlignment());
-  // Floor the bubble width only while expanded — `min-w-60` prevents the body
+  // Floor the bubble width only while expanded. `min-w-60` prevents the body
   // (questions, args, results) from squishing into a sliver, but when
   // collapsed we want the bubble to shrink-wrap the label + description.
   let bubbleExtraClass = $derived(

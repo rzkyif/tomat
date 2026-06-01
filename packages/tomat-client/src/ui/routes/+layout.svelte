@@ -18,7 +18,9 @@
 
 {#if connectionState.showReconnectBanner}
   <div class="reconnect-banner" role="status" aria-live="polite">
-    Reconnecting to core…
+    {connectionState.reason
+      ? `Can't reach core: ${connectionState.reason}`
+      : "Reconnecting to core…"}
   </div>
 {/if}
 <slot />

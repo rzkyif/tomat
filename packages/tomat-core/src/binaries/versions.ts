@@ -16,7 +16,7 @@ export function platformExe(): "" | ".exe" {
 }
 
 // Canonical on-disk filename per sidecar binary (llama-server, whisper-server,
-// deno) — with .exe on Windows. NOT channel-suffixed: upstream sidecars are
+// deno), with .exe on Windows. NOT channel-suffixed: upstream sidecars are
 // isolated by the per-channel bin dir and keep their original names.
 export function binaryName(kind: BinaryKind): string {
   return `${kind}${platformExe()}`;

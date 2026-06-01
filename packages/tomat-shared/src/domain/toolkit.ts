@@ -1,30 +1,23 @@
-// Toolkit, Tool, Permission, Grant — shared shapes used by core + client.
+// Toolkit, Tool, Permission, Grant: shared shapes used by core + client.
 // The on-disk source of truth for permissions is the toolkit's tools.json
 // (see validation/tools-json.ts). These types describe the DB-projected
 // view that the API serves.
 
 export type ToolkitSource = "npm" | "local";
 
-export type PermissionKind =
-  | "net"
-  | "read"
-  | "write"
-  | "run"
-  | "env"
-  | "ffi"
-  | "sys";
+export type PermissionKind = "net" | "read" | "write" | "run" | "env" | "ffi" | "sys";
 
 // Wire shape mirroring tools.json permission entries. Cardinality varies by
 // kind: net entries declare host/ports; read/write declare paths; run declares
 // binaries; env declares variable names. ffi/sys are all-or-nothing keys.
 export type PermissionDecl =
   | {
-    kind: "net";
-    host: string;
-    ports: ReadonlyArray<number | "*">;
-    reason: string;
-    optional?: boolean;
-  }
+      kind: "net";
+      host: string;
+      ports: ReadonlyArray<number | "*">;
+      reason: string;
+      optional?: boolean;
+    }
   | { kind: "read"; path: string; reason: string; optional?: boolean }
   | { kind: "write"; path: string; reason: string; optional?: boolean }
   | { kind: "run"; binary: string; reason: string; optional?: boolean }

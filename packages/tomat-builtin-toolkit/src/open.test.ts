@@ -1,4 +1,4 @@
-// `open` validation prefix. Skips the actual subprocess spawn — that
+// `open` validation prefix. Skips the actual subprocess spawn, which
 // would open a real browser. Tests cover the URL-validation branches that
 // don't depend on the host OS.
 
@@ -21,26 +21,12 @@ Deno.test("open: rejects missing url", async () => {
 });
 
 Deno.test("open: rejects empty / whitespace-only url", async () => {
-  await assertRejects(
-    () => open({ url: "   " }, emptyCtx()),
-    Error,
-    "url is required",
-  );
+  await assertRejects(() => open({ url: "   " }, emptyCtx()), Error, "url is required");
 });
 
 Deno.test("open: rejects non-http(s) URLs", async () => {
-  for (
-    const url of [
-      "ftp://example.com",
-      "javascript:alert(1)",
-      "file:///etc/hosts",
-    ]
-  ) {
-    await assertRejects(
-      () => open({ url }, emptyCtx()),
-      Error,
-      "only http(s)",
-    );
+  for (const url of ["ftp://example.com", "javascript:alert(1)", "file:///etc/hosts"]) {
+    await assertRejects(() => open({ url }, emptyCtx()), Error, "only http(s)");
   }
 });
 

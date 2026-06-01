@@ -26,13 +26,9 @@ export function sttRoutes(): Hono {
       throw new AppError("validation_error", "audio file required");
     }
     const language = form.get("language");
-    const languageStr = typeof language === "string" && language.length > 0
-      ? language
-      : undefined;
+    const languageStr = typeof language === "string" && language.length > 0 ? language : undefined;
     const settings = await loadCoreSettings();
-    const provider = strSetting(settings, "stt.provider", "local") as
-      | "local"
-      | "external";
+    const provider = strSetting(settings, "stt.provider", "local") as "local" | "external";
 
     if (provider === "external") {
       const baseUrl = strSetting(settings, "stt.external.baseUrl", "");
@@ -47,8 +43,7 @@ export function sttRoutes(): Hono {
       // lower-precedence fallback (client routes keys to the vault, and core
       // redacts them from GET).
       const settingsKey = strSetting(settings, "stt.external.apiKey", "");
-      const apiKey = (await getSecret("stt.external.apiKey")) ||
-        settingsKey || "";
+      const apiKey = (await getSecret("stt.external.apiKey")) || settingsKey || "";
       const client = new OpenAI({
         baseURL: baseUrl,
         apiKey: apiKey || "sk-stt",
@@ -64,10 +59,7 @@ export function sttRoutes(): Hono {
         });
         return c.json({ text: (res as { text?: string }).text ?? "" });
       } catch (err) {
-        throw new AppError(
-          "provider_error",
-          `external STT failed: ${errMessage(err)}`,
-        );
+        throw new AppError("provider_error", `external STT failed: ${errMessage(err)}`);
       }
     }
 
@@ -91,7 +83,7 @@ export function sttRoutes(): Hono {
     if (!res.ok) {
       throw new AppError("provider_error", `whisper-server HTTP ${res.status}`);
     }
-    const body = await res.json() as { text?: string };
+    const body = (await res.json()) as { text?: string };
     return c.json({ text: body.text ?? "" });
   });
 
@@ -106,11 +98,7 @@ export function sttRoutes(): Hono {
   return r;
 }
 
-function strSetting(
-  s: Record<string, unknown>,
-  k: string,
-  def: string,
-): string {
+function strSetting(s: Record<string, unknown>, k: string, def: string): string {
   const v = s[k];
   return typeof v === "string" ? v : def;
 }

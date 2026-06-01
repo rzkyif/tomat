@@ -3,6 +3,7 @@
     "denoland.vscode-deno",
     "rust-lang.rust-analyzer",
     "svelte.svelte-vscode",
-    "astro-build.astro-vscode"
+    "astro-build.astro-vscode",
+    "oxc.oxc-vscode"
   ]
 }

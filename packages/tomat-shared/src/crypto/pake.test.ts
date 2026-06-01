@@ -6,12 +6,7 @@
 // intermediate (generator g, Ya, Yb, K, raw 64-byte ISK) is checked against the
 // draft's bytes.
 
-import {
-  assert,
-  assertEquals,
-  assertNotEquals,
-  assertThrows,
-} from "@std/assert";
+import { assert, assertEquals, assertNotEquals, assertThrows } from "@std/assert";
 
 import {
   __test,
@@ -50,7 +45,8 @@ const VEC = {
   // B.3.1 outputs
   genStr: hex(
     "11435061636552697374726574746f3235350850617373776f7264" +
-      "64" + "00".repeat(100) +
+      "64" +
+      "00".repeat(100) +
       "180b415f696e69746961746f720b425f726573706f6e646572107e4b4791d6a8ef019b936c79fb7f2c57",
   ),
   genHash: hex(
@@ -129,14 +125,7 @@ Deno.test("B.3 vector: transcript_ir matches", () => {
 });
 
 Deno.test("B.3 vector: raw ISK (initiator/responder) matches", () => {
-  const isk = __test.computeIsk(
-    VEC.sid,
-    VEC.K,
-    VEC.Ya,
-    VEC.ADa,
-    VEC.Yb,
-    VEC.ADb,
-  );
+  const isk = __test.computeIsk(VEC.sid, VEC.K, VEC.Ya, VEC.ADa, VEC.Yb, VEC.ADb);
   assertEquals(toHex(isk), toHex(VEC.ISK));
 });
 
@@ -145,14 +134,7 @@ Deno.test("B.3 vector: end-to-end through internal seam yields the vector ISK", 
   const fixedYa = () => __test.clampScalarLe(VEC.ya);
   const fixedYb = () => __test.clampScalarLe(VEC.yb);
 
-  const initiator = __test.initiatorStart(
-    "Password",
-    VEC.sid,
-    VEC.CI,
-    VEC.ADa,
-    VEC.ADb,
-    fixedYa,
-  );
+  const initiator = __test.initiatorStart("Password", VEC.sid, VEC.CI, VEC.ADa, VEC.ADb, fixedYa);
   assertEquals(toHex(initiator.msgA), toHex(VEC.Ya));
 
   const responder = __test.responder(
@@ -239,9 +221,7 @@ Deno.test("finish can only be called once", () => {
 // --- test #4: confirmation tag round-trip + tamper detection --------------
 
 Deno.test("confirmTag / verifyConfirm round-trip and tamper detection", () => {
-  const isk = randomSid().length
-    ? new Uint8Array(32).fill(7)
-    : new Uint8Array(32);
+  const isk = randomSid().length ? new Uint8Array(32).fill(7) : new Uint8Array(32);
   const msgA = new Uint8Array(32).fill(1);
   const msgB = new Uint8Array(32).fill(2);
   const pin = "cert-pin-abc";

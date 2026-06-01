@@ -1,4 +1,4 @@
-// ToolFilter.phase2 parser — accepts comma-separated picks, "none",
+// ToolFilter.phase2 parser. Accepts comma-separated picks, "none",
 // or unparseable responses (fails open by returning the candidate set).
 // Phase 2 calls streamChatCompletion through the injected fetch seam, so
 // we drive responses with hand-rolled SSE payloads.
@@ -11,9 +11,9 @@ import type { ToolDescriptor } from "@tomat/shared";
 function fixedSse(text: string): typeof fetch {
   return () => {
     const body =
-      `data: {"id":"x","object":"chat.completion.chunk","created":1,"model":"t","choices":[{"index":0,"delta":{"role":"assistant","content":${
-        JSON.stringify(text)
-      }},"finish_reason":null}]}\n\n` +
+      `data: {"id":"x","object":"chat.completion.chunk","created":1,"model":"t","choices":[{"index":0,"delta":{"role":"assistant","content":${JSON.stringify(
+        text,
+      )}},"finish_reason":null}]}\n\n` +
       `data: {"id":"x","object":"chat.completion.chunk","created":1,"model":"t","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n` +
       `data: [DONE]\n\n`;
     return Promise.resolve(
@@ -48,7 +48,10 @@ const CANDIDATES = ["a", "b", "c"].map(descriptor);
 Deno.test("phase2: returns the picked subset for a comma-separated response", async () => {
   const filter = new ToolFilter();
   const picked = await filter.phase2("query", CANDIDATES, endpoint("1, 3"));
-  assertEquals(picked.map((c) => c.name), ["a", "c"]);
+  assertEquals(
+    picked.map((c) => c.name),
+    ["a", "c"],
+  );
 });
 
 Deno.test("phase2: 'none' returns an empty list", async () => {
@@ -65,22 +68,20 @@ Deno.test("phase2: empty response is treated as 'none'", async () => {
 
 Deno.test("phase2: fails open with the candidate set on unparseable response", async () => {
   const filter = new ToolFilter();
-  const picked = await filter.phase2(
-    "q",
-    CANDIDATES,
-    endpoint("I think tool A is best"),
+  const picked = await filter.phase2("q", CANDIDATES, endpoint("I think tool A is best"));
+  assertEquals(
+    picked.map((c) => c.name),
+    ["a", "b", "c"],
   );
-  assertEquals(picked.map((c) => c.name), ["a", "b", "c"]);
 });
 
 Deno.test("phase2: silently drops out-of-range numbers", async () => {
   const filter = new ToolFilter();
-  const picked = await filter.phase2(
-    "q",
-    CANDIDATES,
-    endpoint("1,99,2"),
+  const picked = await filter.phase2("q", CANDIDATES, endpoint("1,99,2"));
+  assertEquals(
+    picked.map((c) => c.name),
+    ["a", "b"],
   );
-  assertEquals(picked.map((c) => c.name), ["a", "b"]);
 });
 
 Deno.test("phase2: empty candidates short-circuits to []", async () => {

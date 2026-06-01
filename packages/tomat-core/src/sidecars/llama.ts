@@ -32,9 +32,7 @@ export function llamaStartArgsFromSettings(
   const modelSpec = strSetting(settings, "llm.modelPath", "");
   if (!modelSpec) return null;
   const supportImages = boolSetting(settings, "llm.supportImages", true);
-  const mmprojSpec = supportImages
-    ? strSetting(settings, "llm.mmprojPath", "")
-    : "";
+  const mmprojSpec = supportImages ? strSetting(settings, "llm.mmprojPath", "") : "";
   return {
     modelPath: resolveHfPath(modelSpec),
     mmprojPath: mmprojSpec ? resolveHfPath(mmprojSpec) : undefined,
@@ -42,10 +40,7 @@ export function llamaStartArgsFromSettings(
     port: strSetting(settings, "llm.port", String(llmPort())),
     threads: numSetting(settings, "llm.threads", 4),
     contextSize: numSetting(settings, "llm.contextSize", 4096),
-    reasoning: strSetting(settings, "llm.reasoning", "off") as
-      | "off"
-      | "on"
-      | "auto",
+    reasoning: strSetting(settings, "llm.reasoning", "off") as "off" | "on" | "auto",
     reasoningBudget: optionalNumSetting(settings, "llm.reasoningBudget"),
     mmap: boolSetting(settings, "llm.mmap", true),
     webui: boolSetting(settings, "llm.webui", false),
@@ -83,8 +78,8 @@ export function buildLlamaStartOptions(args: LlamaStartArgs): StartOptions {
   // server is bound to loopback (local debugging); if the sidecar is reachable
   // from the network (a non-loopback host), force it off so it can't be hit by
   // other devices on the LAN.
-  const hostIsLoopback = args.host === "127.0.0.1" ||
-    args.host === "localhost" || args.host === "::1";
+  const hostIsLoopback =
+    args.host === "127.0.0.1" || args.host === "localhost" || args.host === "::1";
   if (args.webui && hostIsLoopback) argv.push("--webui");
   else argv.push("--no-webui");
   if (args.mmprojPath) argv.push("--mmproj", args.mmprojPath);
@@ -100,27 +95,15 @@ export function buildLlamaStartOptions(args: LlamaStartArgs): StartOptions {
   };
 }
 
-function strSetting(
-  s: Record<string, unknown>,
-  k: string,
-  def: string,
-): string {
+function strSetting(s: Record<string, unknown>, k: string, def: string): string {
   const v = s[k];
   return typeof v === "string" ? v : def;
 }
-function boolSetting(
-  s: Record<string, unknown>,
-  k: string,
-  def: boolean,
-): boolean {
+function boolSetting(s: Record<string, unknown>, k: string, def: boolean): boolean {
   const v = s[k];
   return typeof v === "boolean" ? v : def;
 }
-function numSetting(
-  s: Record<string, unknown>,
-  k: string,
-  def: number,
-): number {
+function numSetting(s: Record<string, unknown>, k: string, def: number): number {
   const v = s[k];
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string" && v !== "") {
@@ -129,10 +112,7 @@ function numSetting(
   }
   return def;
 }
-function optionalNumSetting(
-  s: Record<string, unknown>,
-  k: string,
-): number | undefined {
+function optionalNumSetting(s: Record<string, unknown>, k: string): number | undefined {
   const v = s[k];
   if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
   if (typeof v === "string" && v !== "") {

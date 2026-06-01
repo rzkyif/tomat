@@ -1,4 +1,4 @@
-// migrate() must be idempotent — every CREATE in schema.sql uses
+// migrate() must be idempotent. Every CREATE in schema.sql uses
 // IF NOT EXISTS. Running it twice against the same DB must not throw and
 // must not change the schema.
 
@@ -8,9 +8,11 @@ import { db } from "./connection.ts";
 import { migrate } from "./migrate.ts";
 
 function tableNames(): string[] {
-  return (db().prepare(
-    `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`,
-  ).all() as Array<{ name: string }>).map((r) => r.name);
+  return (
+    db().prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`).all() as Array<{
+      name: string;
+    }>
+  ).map((r) => r.name);
 }
 
 Deno.test("migrate: running twice is idempotent (no throw, schema unchanged)", async () => {

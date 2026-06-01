@@ -32,8 +32,7 @@ export const promptsGroup: SettingGroup = {
                 id: "disabled",
                 label: "None",
                 title: "None",
-                description:
-                  "No system prompt is sent. The model runs with its default behavior.",
+                description: "No system prompt is sent. The model runs with its default behavior.",
                 defaults: { "prompts.defaultSystemPrompt": "" },
               },
               {

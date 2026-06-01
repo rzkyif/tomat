@@ -3,10 +3,7 @@
 
 import type { ToolContext } from "./types.ts";
 
-export async function open(
-  args: { url?: string },
-  ctx: ToolContext,
-): Promise<{ opened: string }> {
+export async function open(args: { url?: string }, ctx: ToolContext): Promise<{ opened: string }> {
   const url = typeof args?.url === "string" ? args.url.trim() : "";
   if (!url) throw new Error("url is required");
   if (!/^https?:\/\//i.test(url)) {

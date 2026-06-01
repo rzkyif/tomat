@@ -32,10 +32,7 @@ async function helperExists(): Promise<boolean> {
 
 /** Reads a keychain entry. Returns null on missing entry or any keychain
  *  failure (helper missing, libsecret unavailable, etc). */
-export async function keychainGet(
-  service: string,
-  account: string,
-): Promise<string | null> {
+export async function keychainGet(service: string, account: string): Promise<string | null> {
   if (!(await helperExists())) return null;
   const cmd = new Deno.Command(helperPath(), {
     args: ["get", service, account],
@@ -56,9 +53,7 @@ export async function keychainGet(
     );
     return null;
   } catch (err) {
-    log.warn(
-      `keychain helper spawn failed: ${errMessage(err)}`,
-    );
+    log.warn(`keychain helper spawn failed: ${errMessage(err)}`);
     return null;
   }
 }
@@ -95,19 +90,14 @@ export async function keychainSet(
     );
     return false;
   } catch (err) {
-    log.warn(
-      `keychain helper spawn failed: ${errMessage(err)}`,
-    );
+    log.warn(`keychain helper spawn failed: ${errMessage(err)}`);
     return false;
   }
 }
 
 /** Removes a keychain entry. Idempotent: returns true if the entry is gone
  *  after the call (whether it existed or not), false on a real failure. */
-export async function keychainDelete(
-  service: string,
-  account: string,
-): Promise<boolean> {
+export async function keychainDelete(service: string, account: string): Promise<boolean> {
   if (!(await helperExists())) return false;
   const cmd = new Deno.Command(helperPath(), {
     args: ["delete", service, account],
@@ -124,9 +114,7 @@ export async function keychainDelete(
     );
     return false;
   } catch (err) {
-    log.warn(
-      `keychain helper spawn failed: ${errMessage(err)}`,
-    );
+    log.warn(`keychain helper spawn failed: ${errMessage(err)}`);
     return false;
   }
 }

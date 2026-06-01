@@ -7,7 +7,7 @@
  * overlay window on the active monitor and returns the user-selected
  * rectangle as a base64 PNG. Region capture is event-driven: the Rust
  * overlay window draws the selection and emits `region-capture-result` /
- * `region-capture-cancelled` events — there's no direct "capture this
+ * `region-capture-cancelled` events. There's no direct "capture this
  * rectangle" call from the JS side.
  *
  * All platform-specific Tauri calls go through `$lib/platform/`, so the

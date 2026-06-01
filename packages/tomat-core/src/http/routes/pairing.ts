@@ -8,11 +8,7 @@ import {
 import { decodeBase64, encodeBase64 } from "jsr:@std/encoding@^1.0.0/base64";
 import { authService } from "../../services/auth.ts";
 import { tlsCertFingerprint } from "../../services/tls.ts";
-import {
-  adminTokenMiddleware,
-  bearerMiddleware,
-  requireClient,
-} from "../middleware/auth.ts";
+import { adminTokenMiddleware, bearerMiddleware, requireClient } from "../middleware/auth.ts";
 import { AppError } from "../middleware/errors.ts";
 import { getLogger } from "../../shared/log.ts";
 import { wsHub } from "../../ws/hub.ts";
@@ -42,12 +38,11 @@ export function pairingRoutes(): Hono {
     }
     // Rate-limit key: the REAL socket peer address, threaded from Deno.serve
     // into the Hono env (see main.ts). We deliberately do NOT trust
-    // X-Forwarded-For / X-Real-IP — those are client-settable, so an attacker
+    // X-Forwarded-For / X-Real-IP, which are client-settable, so an attacker
     // would rotate them to hand every guess a fresh, empty rate-limit bucket
     // and brute-force the pairing code. There is no reverse-proxy deployment
     // mode today; add a trusted-proxy setting before honoring those headers.
-    const peer = (c.env as { remoteAddr?: { hostname?: string } } | undefined)
-      ?.remoteAddr;
+    const peer = (c.env as { remoteAddr?: { hostname?: string } } | undefined)?.remoteAddr;
     const ip = peer?.hostname ?? "local";
     const result = authService().pakeStart(
       decodeBase64(parsed.data.sid),
@@ -101,9 +96,7 @@ export function pairingRoutes(): Hono {
         await Deno.remove(p);
       } catch (err) {
         if (!(err instanceof Deno.errors.NotFound)) {
-          log.warn(
-            `revoke: failed to remove attachment ${p}: ${errMessage(err)}`,
-          );
+          log.warn(`revoke: failed to remove attachment ${p}: ${errMessage(err)}`);
         }
       }
     }
@@ -125,7 +118,7 @@ export function pairingRoutes(): Hono {
 async function readJsonOrEmpty(c: import("hono").Context): Promise<unknown> {
   // No body OR a whitespace-only body reasonably means "use defaults" for
   // these endpoints (pairing/codes accepts an empty body for the default
-  // TTL). A body present but malformed is a real client bug — we surface
+  // TTL). A body present but malformed is a real client bug. We surface
   // it as HTTP 400 instead of silently treating it as `{}`. Content-Length
   // is unreliable across runtimes (Request from `new Request(..., { body: '' })`
   // may omit it), so peek at the text instead.

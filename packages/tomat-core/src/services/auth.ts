@@ -1,6 +1,6 @@
 // Auth/pairing service.
 //
-// Pairing flow (PAKE — password-authenticated key exchange):
+// Pairing flow (PAKE, i.e. password-authenticated key exchange):
 //   1. Operator (or client running on the host) calls POST /pairing/codes
 //      with header X-Admin-Token = contents of ~/.tomat/core/.admin-token.
 //      Core mints a 6-digit code with 10-min TTL and stores it (in the clear,
@@ -130,9 +130,7 @@ export class AuthService {
   }
 
   mintPairingCode(ttlSec?: number): PairingCodeResponse {
-    const ttlMs = ttlSec
-      ? Math.min(ttlSec * 1000, MAX_CODE_TTL_MS)
-      : DEFAULT_CODE_TTL_MS;
+    const ttlMs = ttlSec ? Math.min(ttlSec * 1000, MAX_CODE_TTL_MS) : DEFAULT_CODE_TTL_MS;
     // Invalidate any previous outstanding code: only one active code per core.
     // Drop any in-flight handshakes bound to the old code too.
     db().prepare(`DELETE FROM pairing_codes WHERE claimed = 0`).run();
@@ -140,10 +138,12 @@ export class AuthService {
     const code = randomNumericCode();
     const now = Date.now();
     const expiresAtMs = now + ttlMs;
-    db().prepare(`
+    db()
+      .prepare(`
       INSERT INTO pairing_codes (code, created_at_ms, expires_at_ms, attempts, claimed)
       VALUES (?, ?, ?, 0, 0)
-    `).run(code, now, expiresAtMs);
+    `)
+      .run(code, now, expiresAtMs);
     log.info(`minted pairing code, expires in ${Math.round(ttlMs / 1000)}s`);
     return { code, expiresAtMs };
   }
@@ -155,7 +155,7 @@ export class AuthService {
   // for the rate limiter; `serverPin` is our own cert pin, folded into the CPace
   // channel identifier so the derived key is cert-bound (a client that observed
   // a different cert derives a different key and confirmation fails). The
-  // handshake does not reveal whether the client used the right code here — that
+  // handshake does not reveal whether the client used the right code here. That
   // is decided by the confirmation at finish.
   pakeStart(
     sid: Uint8Array,
@@ -165,10 +165,7 @@ export class AuthService {
     serverPin: string,
   ): PakeStartResult {
     if (!this.ipLimiter.recordAndCheck(ip)) {
-      throw new AppError(
-        "pairing_rate_limited",
-        "too many pairing attempts from your IP",
-      );
+      throw new AppError("pairing_rate_limited", "too many pairing attempts from your IP");
     }
     const row = this.activeCodeRow();
     if (!row) {
@@ -179,12 +176,7 @@ export class AuthService {
     }
     let result;
     try {
-      result = cpaceResponder(
-        row.code,
-        sid,
-        msgA,
-        new TextEncoder().encode(serverPin),
-      );
+      result = cpaceResponder(row.code, sid, msgA, new TextEncoder().encode(serverPin));
     } catch {
       // Malformed / identity msgA. Count it against the code like a bad guess.
       this.recordCodeFailure(row);
@@ -214,10 +206,7 @@ export class AuthService {
   ): Promise<PakeFinishResult> {
     const sess = this.pakeSessions.get(pakeId);
     if (!sess) {
-      throw new AppError(
-        "invalid_pairing_code",
-        "unknown or expired pairing handshake",
-      );
+      throw new AppError("invalid_pairing_code", "unknown or expired pairing handshake");
     }
     this.pakeSessions.delete(pakeId);
     if (Date.now() > sess.expiresAtMs) {
@@ -227,30 +216,17 @@ export class AuthService {
     // been claimed by another client, poisoned, or rotated in the meantime).
     const row = this.activeCodeRow();
     if (!row || row.code !== sess.code) {
-      throw new AppError(
-        "pairing_code_claimed",
-        "pairing code no longer active",
-      );
+      throw new AppError("pairing_code_claimed", "pairing code no longer active");
     }
     if (Date.now() > row.expires_at_ms) {
       throw new AppError("pairing_code_expired", "pairing code has expired");
     }
 
-    const ok = verifyConfirm(
-      confirmC,
-      sess.isk,
-      "C",
-      sess.msgA,
-      sess.msgB,
-      serverPin,
-    );
+    const ok = verifyConfirm(confirmC, sess.isk, "C", sess.msgA, sess.msgB, serverPin);
     if (!ok) {
       // Wrong code or a MITM-substituted cert. Burn an attempt; poison after 5.
       this.recordCodeFailure(row);
-      throw new AppError(
-        "invalid_pairing_code",
-        "pairing confirmation failed",
-      );
+      throw new AppError("invalid_pairing_code", "pairing confirmation failed");
     }
 
     // Confirmed: client knew the code AND observed our real cert. Mint + claim.
@@ -258,13 +234,13 @@ export class AuthService {
     const tokenHash = await sha256Hex(token);
     const id = newClientId();
     const now = Date.now();
-    db().prepare(`
+    db()
+      .prepare(`
       INSERT INTO clients (id, name, token_hash, created_at_ms, last_seen_ms, revoked)
       VALUES (?, ?, ?, ?, ?, 0)
-    `).run(id, sess.clientName, tokenHash, now, now);
-    db().prepare(`UPDATE pairing_codes SET claimed = 1 WHERE id = ?`).run(
-      row.id,
-    );
+    `)
+      .run(id, sess.clientName, tokenHash, now, now);
+    db().prepare(`UPDATE pairing_codes SET claimed = 1 WHERE id = ?`).run(row.id);
     log.info(`paired new client "${sess.clientName}" (id=${id})`);
     const confirmS = confirmTag(sess.isk, "S", sess.msgA, sess.msgB, serverPin);
     return { token, clientId: id, coreVersion: CORE_VERSION, confirmS };
@@ -272,23 +248,20 @@ export class AuthService {
 
   // The single active (unclaimed) pairing code row, if any.
   private activeCodeRow(): CodeRow | undefined {
-    return db().prepare(`
+    return db()
+      .prepare(`
       SELECT id, code, attempts, expires_at_ms FROM pairing_codes WHERE claimed = 0
-    `).get() as CodeRow | undefined;
+    `)
+      .get() as CodeRow | undefined;
   }
 
   // Count a failed attempt against the active code; poison it after the cap so a
   // brute-force run over the 6-digit space is throttled to MAX_ATTEMPTS_PER_CODE.
   private recordCodeFailure(row: CodeRow): void {
     const nextAttempts = row.attempts + 1;
-    db().prepare(`UPDATE pairing_codes SET attempts = ? WHERE id = ?`).run(
-      nextAttempts,
-      row.id,
-    );
+    db().prepare(`UPDATE pairing_codes SET attempts = ? WHERE id = ?`).run(nextAttempts, row.id);
     if (nextAttempts >= MAX_ATTEMPTS_PER_CODE) {
-      db().prepare(`UPDATE pairing_codes SET claimed = 1 WHERE id = ?`).run(
-        row.id,
-      );
+      db().prepare(`UPDATE pairing_codes SET claimed = 1 WHERE id = ?`).run(row.id);
       log.warn(`pairing code poisoned after ${nextAttempts} failed attempts`);
     }
   }
@@ -312,18 +285,20 @@ export class AuthService {
   async authenticate(bearer: string | null): Promise<AuthedClient> {
     if (!bearer) throw new AppError("missing_token", "missing bearer token");
     const tokenHash = await sha256Hex(bearer);
-    const row = db().prepare(`
+    const row = db()
+      .prepare(`
       SELECT id, name, token_hash, created_at_ms, last_seen_ms, revoked
       FROM clients WHERE token_hash = ?
-    `).get(tokenHash) as
+    `)
+      .get(tokenHash) as
       | {
-        id: string;
-        name: string;
-        token_hash: string;
-        created_at_ms: number;
-        last_seen_ms: number;
-        revoked: number;
-      }
+          id: string;
+          name: string;
+          token_hash: string;
+          created_at_ms: number;
+          last_seen_ms: number;
+          revoked: number;
+        }
       | undefined;
     if (!row) {
       throw new AppError("invalid_token", "bearer token not recognized");
@@ -343,11 +318,13 @@ export class AuthService {
   // --- client list / revoke / rotate --------------------------------------
 
   listClients(callerId: string): PairedClientEntry[] {
-    const rows = db().prepare(`
+    const rows = db()
+      .prepare(`
       SELECT id, name, created_at_ms, last_seen_ms, revoked
       FROM clients
       ORDER BY created_at_ms DESC
-    `).all() as Array<{
+    `)
+      .all() as Array<{
       id: string;
       name: string;
       created_at_ms: number;
@@ -369,12 +346,14 @@ export class AuthService {
   // via foreign-key ON DELETE CASCADE in schema.sql. Returns the list of
   // attachment abs_paths so the caller can rm them off disk.
   revokeClient(clientId: string): { attachmentPaths: string[] } {
-    const attachments = db().prepare(`
+    const attachments = db()
+      .prepare(`
       SELECT a.abs_path
       FROM attachments a
       JOIN sessions s ON s.id = a.session_id
       WHERE s.owner_client_id = ?
-    `).all(clientId) as Array<{ abs_path: string }>;
+    `)
+      .all(clientId) as Array<{ abs_path: string }>;
     db().prepare(`DELETE FROM clients WHERE id = ?`).run(clientId);
     return { attachmentPaths: attachments.map((a) => a.abs_path) };
   }
@@ -382,10 +361,7 @@ export class AuthService {
   async rotateToken(clientId: string): Promise<string> {
     const next = randomToken();
     const tokenHash = await sha256Hex(next);
-    db().prepare(`UPDATE clients SET token_hash = ? WHERE id = ?`).run(
-      tokenHash,
-      clientId,
-    );
+    db().prepare(`UPDATE clients SET token_hash = ? WHERE id = ?`).run(tokenHash, clientId);
     return next;
   }
 
@@ -398,10 +374,7 @@ export class AuthService {
     const last = this.lastSeenWriteAt.get(id) ?? 0;
     if (now - last < LAST_SEEN_DEBOUNCE_MS) return;
     this.lastSeenWriteAt.set(id, now);
-    db().prepare(`UPDATE clients SET last_seen_ms = ? WHERE id = ?`).run(
-      now,
-      id,
-    );
+    db().prepare(`UPDATE clients SET last_seen_ms = ? WHERE id = ?`).run(now, id);
   }
 }
 
@@ -423,7 +396,7 @@ function randomNumericCode(): string {
   // 6 decimal digits, uniformly drawn over 0–999999. Padded to 6 chars.
   const buf = new Uint8Array(4);
   crypto.getRandomValues(buf);
-  const n = (buf[0] << 24 | buf[1] << 16 | buf[2] << 8 | buf[3]) >>> 0;
+  const n = ((buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3]) >>> 0;
   return String(n % 1_000_000).padStart(6, "0");
 }
 

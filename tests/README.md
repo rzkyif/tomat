@@ -39,7 +39,7 @@ packages/<pkg>/src/foo.tmp.test.ts       # scratch test (gitignored)
 packages/tomat-core/tests/
   fixtures/sidecars/http-stub.ts         # reusable fake sidecar
   fixtures/openai/*.sse                  # recorded SSE for llmProvider tests
-  helpers/db.ts                          # setupTestEnv() — tempdir DB harness
+  helpers/db.ts                          # setupTestEnv(): tempdir DB harness
   helpers/time.ts                        # mockClock()
   helpers/free-port.ts                   # ephemeral-port helper
 tests/e2e/
@@ -73,13 +73,13 @@ What `setupTestEnv()` does:
 
 1. Creates a tempdir, points `TOMAT_CORE_HOME` at it.
 2. Opens a fresh SQLite DB and runs migrations.
-3. Inserts a synthetic logger setup (console-only — no rotating file handler).
+3. Inserts a synthetic logger setup (console-only, no rotating file handler).
 4. The returned `teardown()` closes the DB, resets every module-level singleton
    (`auth`, `chat`, `sessions repo`, `sidecar manager`, `secrets`, `ws hub`),
    restores the env, and removes the tempdir.
 
 If you need a paired client without going through the pairing-code flow, call
-`createTestClient(name?)` from the same helper — it inserts a row in `clients`
+`createTestClient(name?)` from the same helper. It inserts a row in `clients`
 and returns the id (use this for the `ownerClientId` FK).
 
 ## Time-sensitive tests
@@ -116,7 +116,7 @@ const endpoint = {
 };
 ```
 
-HuggingFace, npm registry, signed manifests: same pattern — inject a fake at the
+HuggingFace, npm registry, signed manifests: same pattern, inject a fake at the
 HTTP boundary. Recorded SSE responses go under
 `packages/tomat-core/tests/fixtures/openai/*.sse`.
 
@@ -132,9 +132,7 @@ import { freePort } from "../../tests/helpers/free-port.ts";
 import { sidecarManager } from "./manager.ts";
 
 const port = freePort();
-const STUB =
-  new URL("../../tests/fixtures/sidecars/http-stub.ts", import.meta.url)
-    .pathname;
+const STUB = new URL("../../tests/fixtures/sidecars/http-stub.ts", import.meta.url).pathname;
 await sidecarManager().start("llama", {
   binary: Deno.execPath(),
   args: ["run", `--allow-net=127.0.0.1:${port}`, STUB, String(port)],
@@ -172,19 +170,19 @@ Gotchas:
 
 - `$effect` runes don't run synchronously under jsdom. Drive them with
   `flushSync()` from `svelte` if your assertion depends on an effect.
-- Mock the platform seam by stubbing `lib/platform/index.ts` — don't bring Tauri
+- Mock the platform seam by stubbing `lib/platform/index.ts`. Don't bring Tauri
   into the test environment.
 - The global test setup (`src/ui/test-setup.ts`) stubs `IntersectionObserver`,
   `ResizeObserver`, and `matchMedia` because jsdom doesn't ship them. If a test
   needs real DOM observer behavior, switch the environment to `happy-dom` or
-  `vitest-browser-svelte` — but commit to one across the package.
+  `vitest-browser-svelte`, but commit to one across the package.
 
 ## Writing Rust tests
 
 Inline `#[cfg(test)] mod tests` for unit tests. The `KeychainStore` trait in
 both `tomat-core-keychain/src/main.rs` and
 `packages/tomat-client/src/tauri/src/commands/keychain.rs` is the pattern for
-any test that would otherwise touch a platform API — define a small trait, ship
+any test that would otherwise touch a platform API: define a small trait, ship
 a `Real*` impl that wraps the real crate, and ship an `InMemory*` test impl. The
 same pattern works for filesystem (write to a tempdir under `env::temp_dir()`),
 system clock (newtype around `SystemTime::now`), and any OS resource that

@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run -A
-// release:website — builds the Astro site and deploys the Worker.
+// release:website: builds the Astro site and deploys the Worker.
 //
 // Idempotent: hashes the website source tree and compares against a cursor
 // served from the Worker itself (https://${websiteDomain}/release-state.json).
@@ -40,10 +40,13 @@ interface Flags {
 
 function parseFlags(): Flags {
   // Strip the bare `--` token that `deno task <name> -- ...` passes through.
-  const args = parseArgs(Deno.args.filter((a) => a !== "--"), {
-    boolean: ["dry-run", "force", "help"],
-    default: { "dry-run": false, "force": false, "help": false },
-  });
+  const args = parseArgs(
+    Deno.args.filter((a) => a !== "--"),
+    {
+      boolean: ["dry-run", "force", "help"],
+      default: { "dry-run": false, force: false, help: false },
+    },
+  );
   if (args.help) {
     console.log(`Usage: deno task release:website [flags]
 
@@ -70,7 +73,7 @@ export async function main(): Promise<void> {
       `https://${env.websiteDomain}/release-state.json`,
     );
     if (stored?.hash === localHash) {
-      ok(`landing-page source unchanged — nothing to do`);
+      ok(`landing-page source unchanged; nothing to do`);
       return;
     }
     if (stored?.hash) {
@@ -84,11 +87,7 @@ export async function main(): Promise<void> {
   await ensureDir(dirname(STATE_FILE));
   await Deno.writeTextFile(
     STATE_FILE,
-    JSON.stringify(
-      { hash: localHash, timestamp: new Date().toISOString() },
-      null,
-      2,
-    ) + "\n",
+    JSON.stringify({ hash: localHash, timestamp: new Date().toISOString() }, null, 2) + "\n",
   );
   ok(`cursor → ${WEBSITE_STATE_REL}`);
 
@@ -104,7 +103,9 @@ export async function main(): Promise<void> {
   await wranglerDeploy();
 
   console.log(
-    "\n" + colors.green(colors.bold("✓ release:website complete")) + "\n" +
+    "\n" +
+      colors.green(colors.bold("✓ release:website complete")) +
+      "\n" +
       colors.dim("  ") +
       `https://${env.websiteDomain}/\n` +
       colors.dim("  ") +

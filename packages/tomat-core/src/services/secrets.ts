@@ -1,12 +1,12 @@
 // Secrets vault for external API keys etc.
 //
 // File layout (under paths().root):
-//   .master-key   — 32 random bytes, base64; chmod 600 on POSIX.
+//   .master-key   : 32 random bytes, base64; chmod 600 on POSIX.
 //                   ONLY written when the OS keychain is unavailable
 //                   (helper binary missing or libsecret unavailable on
 //                   headless Linux). Otherwise the key lives in the
 //                   keychain and this file is absent.
-//   secrets.enc   — AES-GCM ciphertext of the JSON secrets bag.
+//   secrets.enc   : AES-GCM ciphertext of the JSON secrets bag.
 //
 // The master key is sealed in the OS keychain via the `tomat-core-keychain`
 // helper binary (macOS Keychain, Linux libsecret, Windows Credential
@@ -14,7 +14,7 @@
 // `chmod 600` file so the daemon can still run unattended.
 //
 // First-run order, when generating a new master key:
-//   1. Try keychainSet — succeeds on macOS/Windows + Linux with libsecret.
+//   1. Try keychainSet; it succeeds on macOS/Windows + Linux with libsecret.
 //   2. If that fails, write the file with chmod 600 and a loud warning.
 //
 // Subsequent reads:
@@ -25,7 +25,7 @@
 //
 // Wire-format of secrets.enc: a single JSON object whose keys are secret
 // names (free-form strings, e.g. "openai-api-key") and values are
-// strings. We re-encrypt the whole file on every write — secrets bags
+// strings. We re-encrypt the whole file on every write. Secrets bags
 // are tiny so we don't need per-key crypto.
 //
 // Encryption: AES-GCM-256. Stored bytes are 12-byte nonce ‖ ciphertext.
@@ -43,8 +43,8 @@ const KEY_LEN = 32;
 // Namespaced per install channel so a dev/beta core can't read or clobber a
 // stable core's master key. Stable keeps the bare "au.tomat.core" service so
 // existing keychain entries keep resolving. (In dev the keychain helper
-// binary is usually absent and the .master-key file fallback — already under
-// the channel-isolated paths().root — is used instead.)
+// binary is usually absent and the .master-key file fallback, already under
+// the channel-isolated paths().root, is used instead.)
 const KEYCHAIN_SERVICE = `au.tomat.core${channelKeychainSuffix()}`;
 const KEYCHAIN_ACCOUNT = "master-key";
 
@@ -74,10 +74,7 @@ async function readMasterKeyFile(): Promise<Uint8Array | null> {
   } catch (err) {
     if (err instanceof Deno.errors.NotFound) return null;
     if (err instanceof AppError) throw err;
-    throw new AppError(
-      "internal_error",
-      `failed to read .master-key: ${errMessage(err)}`,
-    );
+    throw new AppError("internal_error", `failed to read .master-key: ${errMessage(err)}`);
   }
 }
 
@@ -86,7 +83,9 @@ async function writeMasterKeyFile(raw: Uint8Array): Promise<void> {
   if (Deno.build.os !== "windows") {
     try {
       await Deno.chmod(masterKeyPath(), 0o600);
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   }
 }
 
@@ -114,16 +113,14 @@ async function loadOrCreateMasterKey(): Promise<CryptoKey> {
     const fromFile = await readMasterKeyFile();
     if (fromFile) {
       raw = fromFile;
-      const migrated = await keychainSet(
-        KEYCHAIN_SERVICE,
-        KEYCHAIN_ACCOUNT,
-        encodeBase64(raw),
-      );
+      const migrated = await keychainSet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, encodeBase64(raw));
       if (migrated) {
         try {
           await Deno.remove(masterKeyPath());
           log.info(`migrated master key from .master-key file → OS keychain`);
-        } catch { /* fine, file is still authoritative until next boot */ }
+        } catch {
+          /* fine, file is still authoritative until next boot */
+        }
       }
     }
   }
@@ -131,11 +128,7 @@ async function loadOrCreateMasterKey(): Promise<CryptoKey> {
   // 3. Neither: generate a fresh key. Prefer keychain; fall back to file.
   if (!raw) {
     raw = crypto.getRandomValues(new Uint8Array(KEY_LEN));
-    const sealed = await keychainSet(
-      KEYCHAIN_SERVICE,
-      KEYCHAIN_ACCOUNT,
-      encodeBase64(raw),
-    );
+    const sealed = await keychainSet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, encodeBase64(raw));
     if (sealed) {
       log.info(
         `generated new master key, sealed in OS keychain ` +
@@ -144,7 +137,7 @@ async function loadOrCreateMasterKey(): Promise<CryptoKey> {
     } else {
       await writeMasterKeyFile(raw);
       log.warn(
-        `generated new master key at ${masterKeyPath()} — OS keychain ` +
+        `generated new master key at ${masterKeyPath()}. OS keychain ` +
           `unavailable (no helper binary, or libsecret missing on headless ` +
           `Linux). Back up this file or all stored secrets are lost on a ` +
           `reinstall.`,
@@ -168,10 +161,7 @@ async function readEncrypted(): Promise<Record<string, string>> {
     blob = await Deno.readFile(paths().secretsEncFile);
   } catch (err) {
     if (err instanceof Deno.errors.NotFound) return {};
-    throw new AppError(
-      "internal_error",
-      `failed to read secrets.enc: ${errMessage(err)}`,
-    );
+    throw new AppError("internal_error", `failed to read secrets.enc: ${errMessage(err)}`);
   }
   if (blob.byteLength <= NONCE_LEN) return {};
   const key = await loadOrCreateMasterKey();
@@ -194,9 +184,7 @@ async function readEncrypted(): Promise<Record<string, string>> {
   } catch (err) {
     throw new AppError(
       "internal_error",
-      `secrets.enc decryption failed (master key mismatch?): ${
-        errMessage(err)
-      }`,
+      `secrets.enc decryption failed (master key mismatch?): ${errMessage(err)}`,
     );
   }
   const text = new TextDecoder().decode(plaintext);
@@ -204,10 +192,7 @@ async function readEncrypted(): Promise<Record<string, string>> {
   try {
     return JSON.parse(text) as Record<string, string>;
   } catch {
-    throw new AppError(
-      "internal_error",
-      `secrets.enc decrypted but contained invalid JSON`,
-    );
+    throw new AppError("internal_error", `secrets.enc decrypted but contained invalid JSON`);
   }
 }
 
@@ -231,7 +216,9 @@ async function writeEncrypted(bag: Record<string, string>): Promise<void> {
   if (Deno.build.os !== "windows") {
     try {
       await Deno.chmod(tmp, 0o600);
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   }
   await Deno.rename(tmp, paths().secretsEncFile);
 }
@@ -243,10 +230,7 @@ export async function getSecret(name: string): Promise<string | undefined> {
 
 export async function setSecret(name: string, value: string): Promise<void> {
   if (!name || typeof name !== "string") {
-    throw new AppError(
-      "validation_error",
-      "secret name must be a non-empty string",
-    );
+    throw new AppError("validation_error", "secret name must be a non-empty string");
   }
   if (typeof value !== "string") {
     throw new AppError("validation_error", "secret value must be a string");

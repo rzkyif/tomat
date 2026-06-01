@@ -13,10 +13,7 @@ const FIXTURES_DIR = new URL("../fixtures/openai/", import.meta.url).pathname;
  * to parse the stream.
  */
 export function fakeOpenAIFetch(fixtureName: string): typeof fetch {
-  return async (
-    _input: RequestInfo | URL,
-    _init?: RequestInit,
-  ): Promise<Response> => {
+  return async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
     const path = join(FIXTURES_DIR, fixtureName);
     const text = await Deno.readTextFile(path);
     return new Response(text, {

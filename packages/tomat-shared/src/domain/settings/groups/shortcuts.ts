@@ -13,8 +13,7 @@ export const shortcutsGroup: SettingGroup = {
         {
           id: "shortcuts.toggleWindow",
           name: "Show / Hide Window",
-          description:
-            "Click the field and press a key combination to set it. Clear to disable.",
+          description: "Click the field and press a key combination to set it. Clear to disable.",
           type: "shortcut",
           defaultValue: "super+ctrl+shift+z",
           optional: true,

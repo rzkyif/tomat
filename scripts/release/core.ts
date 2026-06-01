@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run -A
-// release:core — builds tomat-core, tomat-core-updater, tomat-core-keychain
+// release:core: builds tomat-core, tomat-core-updater, tomat-core-keychain
 // for each requested triple, hashes the worker .ts files, composes + signs
 // core.json and binaries.json, and uploads everything to R2.
 //
@@ -63,20 +63,14 @@ const ALL_TRIPLES: Triple[] = [
 ];
 
 // Worker .ts files shipped alongside the binary (platform-independent).
-// These are NOT bundled into the core binary — at runtime, the core spawns
+// These are NOT bundled into the core binary. At runtime, the core spawns
 // them as Deno subprocesses from ~/.tomat/core/workers/.
-const WORKER_FILES = [
-  "embedding-worker.ts",
-  "tool-worker.ts",
-  "tts-worker.ts",
-] as const;
+const WORKER_FILES = ["embedding-worker.ts", "tool-worker.ts", "tts-worker.ts"] as const;
 
-const HELPER_CRATES: Array<
-  {
-    name: "tomat-core-keychain" | "tomat-core-updater";
-    crateDir: string;
-  }
-> = [
+const HELPER_CRATES: Array<{
+  name: "tomat-core-keychain" | "tomat-core-updater";
+  crateDir: string;
+}> = [
   { name: "tomat-core-keychain", crateDir: "packages/tomat-core-keychain" },
   { name: "tomat-core-updater", crateDir: "packages/tomat-core-updater" },
 ];
@@ -129,18 +123,21 @@ interface Flags {
 
 function parseFlags(): Flags {
   // Strip the bare `--` token that `deno task <name> -- ...` passes through
-  // literally — @std/cli's parseArgs otherwise treats it as end-of-options
+  // literally. @std/cli's parseArgs otherwise treats it as end-of-options
   // and silently drops the trailing flags.
-  const args = parseArgs(Deno.args.filter((a) => a !== "--"), {
-    string: ["triples", "channel"],
-    boolean: ["skip-build", "dry-run", "force", "help"],
-    default: {
-      "skip-build": false,
-      "dry-run": false,
-      "force": false,
-      "help": false,
+  const args = parseArgs(
+    Deno.args.filter((a) => a !== "--"),
+    {
+      string: ["triples", "channel"],
+      boolean: ["skip-build", "dry-run", "force", "help"],
+      default: {
+        "skip-build": false,
+        "dry-run": false,
+        force: false,
+        help: false,
+      },
     },
-  });
+  );
   if (args.help) {
     printHelp();
     Deno.exit(0);
@@ -174,8 +171,8 @@ function printHelp(): void {
 
 Flags:
   --triples=<list>   comma-separated triples to build. Special values:
-                       "host" (default) — current machine only
-                       "all"            — every supported triple
+                       "host" (default): current machine only
+                       "all"            : every supported triple
                                           (${ALL_TRIPLES.join(", ")})
                      Cross-compiling pulls native modules from the host's
                      node_modules into binaries for other platforms, which
@@ -204,22 +201,13 @@ Flags:
 async function setupCompileWorkspace(): Promise<string> {
   const dir = await Deno.makeTempDir({ prefix: "tomat-compile-" });
   await Deno.mkdir(join(dir, "packages"));
-  await Deno.symlink(
-    join(REPO_ROOT, "packages/tomat-shared"),
-    join(dir, "packages/tomat-shared"),
-  );
-  await Deno.symlink(
-    join(REPO_ROOT, "packages/tomat-core"),
-    join(dir, "packages/tomat-core"),
-  );
+  await Deno.symlink(join(REPO_ROOT, "packages/tomat-shared"), join(dir, "packages/tomat-shared"));
+  await Deno.symlink(join(REPO_ROOT, "packages/tomat-core"), join(dir, "packages/tomat-core"));
   await Deno.writeTextFile(
     join(dir, "deno.json"),
     JSON.stringify(
       {
-        workspace: [
-          "./packages/tomat-shared",
-          "./packages/tomat-core",
-        ],
+        workspace: ["./packages/tomat-shared", "./packages/tomat-core"],
         unstable: ["raw-imports"],
       },
       null,
@@ -241,15 +229,7 @@ async function compileFor(
   await ensureDir(outDir);
   const outPath = join(outDir, `${name}${exe}`);
   const cmd = new Deno.Command("deno", {
-    args: [
-      "compile",
-      "--allow-all",
-      "--target",
-      triple,
-      "--output",
-      outPath,
-      entryRelative,
-    ],
+    args: ["compile", "--allow-all", "--target", triple, "--output", outPath, entryRelative],
     cwd: compileWorkspace,
     stdout: "inherit",
     stderr: "inherit",
@@ -270,16 +250,14 @@ async function buildAll(
     for (const triple of triples) {
       const isWin = triple.includes("windows");
       const exe = isWin ? ".exe" : "";
-      for (
-        const [name, entryRelative] of [
-          ["tomat-core", "packages/tomat-core/src/main.ts"],
-        ] as const
-      ) {
+      for (const [name, entryRelative] of [
+        ["tomat-core", "packages/tomat-core/src/main.ts"],
+      ] as const) {
         // Channel-suffixed filename so beta's tomat-core-beta coexists with
         // stable's tomat-core both on disk and at the download URL.
         const filename = `${name}${suffix}${exe}`;
         const outPath = join(DIST_DIR, triple, filename);
-        if (skipBuild && await fileExists(outPath)) {
+        if (skipBuild && (await fileExists(outPath))) {
           info(`reusing ${rel(outPath)}`);
         } else {
           if (!compileWorkspace) {
@@ -287,12 +265,7 @@ async function buildAll(
             info(`compile workspace at ${compileWorkspace}`);
           }
           info(`compiling ${name}${suffix} for ${triple}`);
-          await compileFor(
-            triple,
-            `${name}${suffix}`,
-            entryRelative,
-            compileWorkspace,
-          );
+          await compileFor(triple, `${name}${suffix}`, entryRelative, compileWorkspace);
         }
         const { sha256, size } = await sha256File(outPath);
         artifacts.push({ triple, name, filename, path: outPath, sha256, size });
@@ -323,7 +296,7 @@ async function buildHelpers(
       const outDir = join(DIST_DIR, triple);
       await ensureDir(outDir);
       const outPath = join(outDir, filename);
-      if (skipBuild && await fileExists(outPath)) {
+      if (skipBuild && (await fileExists(outPath))) {
         info(`reusing ${rel(outPath)}`);
       } else {
         info(`cargo build ${name} for ${triple}`);
@@ -343,13 +316,7 @@ async function buildHelpers(
         if (code !== 0) {
           fail(`cargo build ${name} for ${triple} exited ${code}`);
         }
-        const builtPath = join(
-          REPO_ROOT,
-          "target",
-          triple,
-          "release",
-          `${name}${exe}`,
-        );
+        const builtPath = join(REPO_ROOT, "target", triple, "release", `${name}${exe}`);
         await Deno.copyFile(builtPath, outPath);
       }
       const { sha256, size } = await sha256File(outPath);
@@ -395,15 +362,13 @@ async function composeCoreManifest(
     .filter((a) => a.name === "tomat-core")
     .map((a) => ({
       triple: a.triple,
-      url:
-        `https://${storageDomain}/${storagePrefix}${version}/${a.triple}/${a.filename}`,
+      url: `https://${storageDomain}/${storagePrefix}${version}/${a.triple}/${a.filename}`,
       sha256: a.sha256,
     }));
 
   const workerEntries = workers.map((w) => ({
     name: w.name,
-    url:
-      `https://${storageDomain}/${storagePrefix}${version}/workers/${w.name}`,
+    url: `https://${storageDomain}/${storagePrefix}${version}/workers/${w.name}`,
     sha256: w.sha256,
   }));
 
@@ -411,14 +376,13 @@ async function composeCoreManifest(
   // and are installed (and swapped on self-update) by the same code path:
   // tomat-core-keychain AND tomat-core-updater. Both are Rust helper crates
   // built by buildHelpers (cargo), so they flow through `helpers` identically.
-  // Manifest helper names carry no .exe — installers/self-updater append
+  // Manifest helper names carry no .exe. Installers/self-updater append
   // platformExe() at runtime; h.entryName is suffixed without .exe, while
   // h.filename adds .exe on Windows for the download URL.
   const helperEntries = helpers.map((h) => ({
     name: h.entryName,
     triple: h.triple,
-    url:
-      `https://${storageDomain}/${storagePrefix}${version}/${h.triple}/${h.filename}`,
+    url: `https://${storageDomain}/${storagePrefix}${version}/${h.triple}/${h.filename}`,
     sha256: h.sha256,
   }));
 
@@ -465,11 +429,7 @@ async function fetchLatestRelease(repo: string): Promise<GitHubRelease> {
   if (ghToken) headers.authorization = `Bearer ${ghToken}`;
   const res = await fetch(url, { headers });
   if (!res.ok) {
-    fail(
-      `GitHub API ${res.status} for ${url}: ${await res.text().catch(() =>
-        ""
-      )}`,
-    );
+    fail(`GitHub API ${res.status} for ${url}: ${await res.text().catch(() => "")}`);
   }
   return (await res.json()) as GitHubRelease;
 }
@@ -523,13 +483,11 @@ async function composeBinaryManifest(
   for (const kind of BINARY_KINDS) {
     const resolver = resolvers![kind];
     if (!resolver || !resolver.repo || !resolver.assets) {
-      fail(
-        `${rel(UPSTREAM_BINARIES_PATH)} missing/invalid entry for "${kind}"`,
-      );
+      fail(`${rel(UPSTREAM_BINARIES_PATH)} missing/invalid entry for "${kind}"`);
     }
 
     // Beta: ship the resolver itself (repo + asset patterns) so the core
-    // resolves the LATEST upstream release at runtime. No GitHub call here —
+    // resolves the LATEST upstream release at runtime. No GitHub call here:
     // the signed manifest commits to the repo/patterns, not a pinned version.
     if (channel === "beta") {
       info(`beta resolver entry for ${kind} → ${resolver.repo}`);
@@ -619,14 +577,9 @@ export async function main(): Promise<void> {
 
   if (!flags.force) {
     step("Probing release state");
-    const live = await fetchLiveJson<{ version?: string }>(
-      env,
-      `${manifestDir}/core.json`,
-    );
+    const live = await fetchLiveJson<{ version?: string }>(env, `${manifestDir}/core.json`);
     if (live?.version === version) {
-      ok(
-        `${manifestDir}/core.json already at version ${version} — nothing to do`,
-      );
+      ok(`${manifestDir}/core.json already at version ${version}; nothing to do`);
       return;
     }
     if (live) {
@@ -639,21 +592,13 @@ export async function main(): Promise<void> {
   step(`Building Deno binaries (${flags.triples.length} triples)`);
   const artifacts = await buildAll(flags.triples, flags.skipBuild, suffix);
   for (const a of artifacts) {
-    ok(
-      `${a.triple}/${a.filename}  ${humanBytes(a.size)}  ${
-        a.sha256.slice(0, 12)
-      }…`,
-    );
+    ok(`${a.triple}/${a.filename}  ${humanBytes(a.size)}  ${a.sha256.slice(0, 12)}…`);
   }
 
   step(`Building native helpers (${flags.triples.length} triples)`);
   const helpers = await buildHelpers(flags.triples, flags.skipBuild, suffix);
   for (const h of helpers) {
-    ok(
-      `${h.triple}/${h.filename}  ${humanBytes(h.size)}  ${
-        h.sha256.slice(0, 12)
-      }…`,
-    );
+    ok(`${h.triple}/${h.filename}  ${humanBytes(h.size)}  ${h.sha256.slice(0, 12)}…`);
   }
 
   step("Hashing worker scripts");
@@ -672,32 +617,21 @@ export async function main(): Promise<void> {
     prefix,
     env.signingPrivateKey,
   );
-  const coreJsonPath = await writeManifestFile(
-    manifestDir,
-    "core.json",
-    coreManifest,
-  );
+  const coreJsonPath = await writeManifestFile(manifestDir, "core.json", coreManifest);
   ok(`signed core.json → ${rel(coreJsonPath)}`);
 
   step("Composing + signing binaries.json");
-  const binaryManifest = await composeBinaryManifest(
-    env.signingPrivateKey,
-    flags.channel,
-  );
-  const binJsonPath = await writeManifestFile(
-    manifestDir,
-    "binaries.json",
-    binaryManifest,
-  );
+  const binaryManifest = await composeBinaryManifest(env.signingPrivateKey, flags.channel);
+  const binJsonPath = await writeManifestFile(manifestDir, "binaries.json", binaryManifest);
   ok(`signed binaries.json → ${rel(binJsonPath)}`);
 
   if (flags.dryRun) {
     step("Dry-run: skipping R2 uploads");
     console.log(
       colors.yellow(
-        `\nManifests under ${
-          rel(join(DIST_DIR, manifestDir))
-        }. Re-run without --dry-run to publish.`,
+        `\nManifests under ${rel(
+          join(DIST_DIR, manifestDir),
+        )}. Re-run without --dry-run to publish.`,
       ),
     );
     return;

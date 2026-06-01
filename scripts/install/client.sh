@@ -383,7 +383,7 @@ ui_die() {
 
 STORAGE="${TOMAT_STORAGE:-https://get.au.tomat.ing}"
 
-# Install channel — selectable via TOMAT_CHANNEL env or --channel <c> / --beta
+# Install channel: selectable via TOMAT_CHANNEL env or --channel <c> / --beta
 # (the arg wins). A beta client is a distinct app (tomat-beta.app, identifier
 # au.tomat.ing.beta) that coexists with stable and updates from the beta
 # manifest. Stable stays bare for back-compat.

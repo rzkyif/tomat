@@ -1,15 +1,12 @@
-// title sanitizer. Pure transform over LLM output — the bits that
-// matter most for UI hygiene (length cap, `<think>` strip, prefix
+// title sanitizer. Pure transform over LLM output. Covers the bits
+// that matter most for UI hygiene (length cap, `<think>` strip, prefix
 // normalization).
 
 import { assertEquals } from "@std/assert";
 import { __sanitizeForTesting as sanitize } from "./title-gen.ts";
 
 Deno.test("sanitize: strips <think>...</think> blocks the model may leak", () => {
-  assertEquals(
-    sanitize("<think>hmm</think>Quick Recipe"),
-    "Quick Recipe",
-  );
+  assertEquals(sanitize("<think>hmm</think>Quick Recipe"), "Quick Recipe");
 });
 
 Deno.test("sanitize: drops everything after the first line", () => {

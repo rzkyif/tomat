@@ -26,10 +26,9 @@ export const appearanceGroup: SettingGroup = {
         {
           id: "appearance.textSize",
           name: "Text Size",
-          description:
-            "Base text size for the entire app.\nAccepted range: 12–32 pixels.",
+          description: "Base text size for the entire app.\nAccepted range: 12–32 pixels.",
           type: "number",
-          defaultValue: 18,
+          defaultValue: 16,
           suffix: "px",
           regex: [
             {
@@ -42,8 +41,7 @@ export const appearanceGroup: SettingGroup = {
         {
           id: "appearance.defaultFont",
           name: "Default Font",
-          description:
-            "Font used throughout the app. Set to Default to use the system font stack.",
+          description: "Font used throughout the app. Set to Default to use the system font stack.",
           type: "select",
           optionsSource: "fonts",
           defaultValue: "default",
@@ -76,8 +74,7 @@ export const appearanceGroup: SettingGroup = {
         {
           id: "appearance.agentBubbleColor",
           name: "Agent Bubble Color",
-          description:
-            "Color of agent message bubbles when the primary model is used.",
+          description: "Color of agent message bubbles when the primary model is used.",
           type: "color",
           defaultValue: "#93c5fdff",
           descriptionTier: "ondemand",
@@ -208,8 +205,7 @@ export const appearanceGroup: SettingGroup = {
         {
           id: "appearance.roundedSmall",
           name: "Small Roundedness",
-          description:
-            "Corner radius used by smaller chrome (code blocks, ToolCall internals).",
+          description: "Corner radius used by smaller chrome (code blocks, ToolCall internals).",
           type: "number_slider",
           defaultValue: 6,
           min: 0,
@@ -289,8 +285,7 @@ export const appearanceGroup: SettingGroup = {
         {
           id: "layout.alignment",
           name: "Window Alignment",
-          description:
-            "Align the window to the left, center, or right of the monitor.",
+          description: "Align the window to the left, center, or right of the monitor.",
           type: "select",
           defaultValue: "center",
           options: [
@@ -303,8 +298,7 @@ export const appearanceGroup: SettingGroup = {
         {
           id: "layout.width",
           name: "Window Width",
-          description:
-            "Width of the app window.\nAccepted range: 400–1200 pixels.",
+          description: "Width of the app window.\nAccepted range: 400–1200 pixels.",
           type: "number",
           defaultValue: 700,
           suffix: "px",
@@ -324,8 +318,7 @@ export const appearanceGroup: SettingGroup = {
         {
           id: "appearance.settings.showAdvanced",
           name: "Show Advanced Settings",
-          description:
-            "Reveal advanced and technical settings throughout this panel.",
+          description: "Reveal advanced and technical settings throughout this panel.",
           type: "boolean",
           defaultValue: false,
           descriptionTier: "ondemand",

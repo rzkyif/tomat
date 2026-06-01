@@ -178,7 +178,7 @@
       icon="i-material-symbols-add-rounded"
       onclick={handleAdd}
       title="Add snippet"
-      class="shrink-0 hover:bg-default-400"
+      class="shrink-0 bg-default-300 hover:bg-default-400"
     >
       Add
     </Button>

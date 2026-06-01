@@ -1,4 +1,4 @@
-// Runs schema.sql against the open DB. Idempotent — every statement is
+// Runs schema.sql against the open DB. Idempotent, since every statement is
 // CREATE TABLE / CREATE INDEX … IF NOT EXISTS, plus PRAGMAs.
 //
 // Future schema changes will need a versioned migrations table; for v1 the

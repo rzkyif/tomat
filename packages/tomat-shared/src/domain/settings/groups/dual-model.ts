@@ -57,8 +57,7 @@ export const dualModelGroup: SettingGroup = {
         {
           id: "dualModel.external.contextSize",
           name: "Context Window Size",
-          description:
-            "Maximum context window length, used for usage tracking.",
+          description: "Maximum context window length, used for usage tracking.",
           type: "number",
           defaultValue: 128000,
           advanced: true,

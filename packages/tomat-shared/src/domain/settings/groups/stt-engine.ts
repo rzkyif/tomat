@@ -1,4 +1,4 @@
-// Core-side STT settings — provider, whisper-server config, external API
+// Core-side STT settings: provider, whisper-server config, external API
 // endpoint. Persisted to ~/.tomat/core/settings.json on the paired core.
 // The microphone-side UX prefs live in `sttInput`.
 
@@ -56,8 +56,7 @@ export const sttEngineGroup: SettingGroup = {
                 description:
                   "Distilled English-only model. Very fast with low memory use, great for live dictation.",
                 defaults: {
-                  "stt.modelPath":
-                    "@distil-whisper/distil-small.en/main/ggml-distil-small.en.bin",
+                  "stt.modelPath": "@distil-whisper/distil-small.en/main/ggml-distil-small.en.bin",
                   "stt.threads": 4,
                   "stt.host": "127.0.0.1",
                   "stt.port": "7702",
@@ -83,8 +82,7 @@ export const sttEngineGroup: SettingGroup = {
                 description:
                   "More accurate with accents or background noise. A good default on modern machines.",
                 defaults: {
-                  "stt.modelPath":
-                    "@ggerganov/whisper.cpp/main/ggml-medium.bin",
+                  "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-medium.bin",
                   "stt.threads": 6,
                   "stt.host": "127.0.0.1",
                   "stt.port": "7702",
@@ -96,8 +94,7 @@ export const sttEngineGroup: SettingGroup = {
                 id: "custom",
                 label: "Custom",
                 title: "Custom",
-                description:
-                  "Configure model path, threads, and ports yourself.",
+                description: "Configure model path, threads, and ports yourself.",
               },
             ],
           },

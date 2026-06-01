@@ -1,5 +1,5 @@
 // WebdriverIO config for E2E. Drives the built debug Tauri binary
-// through tauri-driver. Manual-only — see tests/e2e/README.md for setup.
+// through tauri-driver. Manual-only; see tests/e2e/README.md for setup.
 //
 // One-time setup (do this before invoking `deno task test:e2e`):
 //   1. cargo install tauri-driver --locked
@@ -8,7 +8,7 @@
 //
 // The official Tauri 2 docs (https://v2.tauri.app/develop/tests/webdriver/)
 // describe the platform notes. As of darwin 25.4 (macOS 26) the support
-// status hasn't been verified — this conf is a starting point, not a
+// status hasn't been verified. This conf is a starting point, not a
 // proven-working harness. If you hit issues, document them in
 // tests/e2e/README.md and fall back to manual verification with
 // `deno task dev`.
@@ -18,15 +18,15 @@ import process from "node:process";
 
 let driver: ChildProcess | undefined;
 
-const tauriBinary = process.env.TOMAT_TAURI_BIN ??
-  "packages/tomat-client/src/tauri/target/debug/tomat";
+const tauriBinary =
+  process.env.TOMAT_TAURI_BIN ?? "packages/tomat-client/src/tauri/target/debug/tomat";
 
 export const config: WebdriverIO.Config = {
   hostname: "127.0.0.1",
   port: 4444,
   specs: [
     // Permanent specs (committed) + agent scratch specs (gitignored via
-    // `**/*.tmp.test.ts` in the repo root .gitignore — both globs match).
+    // `**/*.tmp.test.ts` in the repo root .gitignore; both globs match).
     "./specs/**/*.test.ts",
   ],
   maxInstances: 1,

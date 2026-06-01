@@ -27,10 +27,7 @@ type ToolContext = {
   };
 };
 
-type ToolFn = (
-  args: Record<string, unknown>,
-  ctx: ToolContext,
-) => Promise<unknown>;
+type ToolFn = (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
 
 interface CallState {
   abort: AbortController;
@@ -39,10 +36,13 @@ interface CallState {
     sessionId: string | null;
     locale?: string;
   };
-  pendingAskUser: Map<string, {
-    resolve: (a: AskUserAnswer[]) => void;
-    reject: (e: Error) => void;
-  }>;
+  pendingAskUser: Map<
+    string,
+    {
+      resolve: (a: AskUserAnswer[]) => void;
+      reject: (e: Error) => void;
+    }
+  >;
 }
 
 const calls = new Map<string, CallState>();
@@ -67,9 +67,7 @@ async function handleBoot(toolkit: string, entry: string): Promise<void> {
   }
 }
 
-async function handleCall(
-  frame: Extract<PoolToWorkerFrame, { kind: "call" }>,
-): Promise<void> {
+async function handleCall(frame: Extract<PoolToWorkerFrame, { kind: "call" }>): Promise<void> {
   if (!toolkitMod) {
     send({
       kind: "tool_error",
@@ -163,11 +161,7 @@ function handleCancel(callId: string): void {
   state.pendingAskUser.clear();
 }
 
-function handleAskUserResponse(
-  callId: string,
-  requestId: string,
-  answers: AskUserAnswer[],
-): void {
+function handleAskUserResponse(callId: string, requestId: string, answers: AskUserAnswer[]): void {
   const state = calls.get(callId);
   if (!state) return;
   const p = state.pendingAskUser.get(requestId);
@@ -185,9 +179,7 @@ function parseArgs(): { toolkitId: string; entry: string } {
     } else if (arg.startsWith("--entry=")) entry = arg.slice("--entry=".length);
   }
   if (!toolkitId || !entry) {
-    Deno.stderr.writeSync(
-      new TextEncoder().encode("missing --toolkit-id / --entry\n"),
-    );
+    Deno.stderr.writeSync(new TextEncoder().encode("missing --toolkit-id / --entry\n"));
     Deno.exit(1);
   }
   return { toolkitId, entry };

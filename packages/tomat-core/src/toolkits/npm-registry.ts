@@ -33,12 +33,9 @@ export async function searchPackages(
   const url = `${REGISTRY_BASE}/-/v1/search?${params}`;
   const res = await fetch(url);
   if (!res.ok) {
-    throw new AppError(
-      "manifest_fetch_failed",
-      `npm search HTTP ${res.status} ${res.statusText}`,
-    );
+    throw new AppError("manifest_fetch_failed", `npm search HTTP ${res.status} ${res.statusText}`);
   }
-  const body = await res.json() as { objects?: Array<NpmSearchEntry> };
+  const body = (await res.json()) as { objects?: Array<NpmSearchEntry> };
   return (body.objects ?? []).map((o) => ({
     name: o.package.name,
     description: o.package.description ?? "",
@@ -67,34 +64,32 @@ export async function resolveVersion(
 ): Promise<NpmPackageVersion> {
   const res = await fetch(`${REGISTRY_BASE}/${encodeURIComponent(name)}`);
   if (!res.ok) {
-    throw new AppError(
-      "manifest_fetch_failed",
-      `npm metadata HTTP ${res.status} for ${name}`,
-    );
+    throw new AppError("manifest_fetch_failed", `npm metadata HTTP ${res.status} for ${name}`);
   }
-  const meta = await res.json() as {
+  const meta = (await res.json()) as {
     "dist-tags"?: Record<string, string>;
-    versions?: Record<string, {
-      version: string;
-      dist: { tarball: string; shasum?: string; integrity?: string };
-      description?: string;
-      homepage?: string;
-      license?: string;
-    }>;
+    versions?: Record<
+      string,
+      {
+        version: string;
+        dist: { tarball: string; shasum?: string; integrity?: string };
+        description?: string;
+        homepage?: string;
+        license?: string;
+      }
+    >;
   };
-  const tag = versionSpec && versionSpec.startsWith("^")
-    ? meta["dist-tags"]?.latest
-    : (versionSpec ?? meta["dist-tags"]?.latest);
+  const tag =
+    versionSpec && versionSpec.startsWith("^")
+      ? meta["dist-tags"]?.latest
+      : (versionSpec ?? meta["dist-tags"]?.latest);
   const version = tag ?? meta["dist-tags"]?.latest;
   if (!version) {
     throw new AppError("toolkit_not_found", `no version for ${name}`);
   }
   const entry = meta.versions?.[version];
   if (!entry) {
-    throw new AppError(
-      "toolkit_not_found",
-      `no metadata for ${name}@${version}`,
-    );
+    throw new AppError("toolkit_not_found", `no metadata for ${name}@${version}`);
   }
   return {
     version,

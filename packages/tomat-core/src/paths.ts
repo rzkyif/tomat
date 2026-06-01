@@ -12,9 +12,7 @@ import { join } from "@std/path";
 function homeDir(): string {
   const home = Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE");
   if (!home) {
-    throw new Error(
-      "could not determine home directory (no HOME or USERPROFILE)",
-    );
+    throw new Error("could not determine home directory (no HOME or USERPROFILE)");
   }
   return home;
 }
@@ -27,21 +25,19 @@ const CHANNELS = ["stable", "dev", "beta"] as const;
 export function channel(): string {
   const raw = (Deno.env.get("TOMAT_CHANNEL") ?? "stable").trim() || "stable";
   if (!(CHANNELS as readonly string[]).includes(raw)) {
-    throw new Error(
-      `invalid TOMAT_CHANNEL: ${raw} (expected one of ${CHANNELS.join(", ")})`,
-    );
+    throw new Error(`invalid TOMAT_CHANNEL: ${raw} (expected one of ${CHANNELS.join(", ")})`);
   }
   return raw;
 }
 
-// ~/.tomat — the channel-independent base, home of the shared models dir.
+// ~/.tomat: the channel-independent base, home of the shared models dir.
 // A TOMAT_CORE_HOME override (tests) takes its place so models stay inside
 // the isolated tempdir alongside the rest of the test state.
 function tomatBase(): string {
   return Deno.env.get("TOMAT_CORE_HOME") ?? join(homeDir(), ".tomat");
 }
 
-// ~/.tomat/<channel> — the per-channel root holding core + client state.
+// ~/.tomat/<channel>: the per-channel root holding core + client state.
 function channelRoot(): string {
   return join(homeDir(), ".tomat", channel());
 }
@@ -62,7 +58,7 @@ export function channelKeychainSuffix(): string {
 // On-disk filename for one of tomat's own binaries, namespaced per channel so
 // a beta install's tomat-core-beta never collides with stable's tomat-core.
 // The .exe suffix (Windows) is added by callers via platformExe(). Upstream
-// sidecars (llama-server, …) keep their original names — they're isolated by
+// sidecars (llama-server, …) keep their original names. They're isolated by
 // the per-channel bin dir, and renaming third-party archives is pointless.
 export function channelBinName(base: string): string {
   return `${base}${channelSuffix()}`;
@@ -138,13 +134,12 @@ export function paths(): CorePaths {
   // installed under ~/.tomat/core/workers/. Computing this path here
   // (instead of `new URL("../workers/...", import.meta.url)` at every
   // spawn site) keeps the worker files OUT of `deno compile`'s static
-  // import graph — otherwise the workers' npm deps (~1.6 GB of ONNX +
+  // import graph. Otherwise the workers' npm deps (~1.6 GB of ONNX +
   // transformers + kokoro) get baked into every core binary.
   //
   // Dev override: scripts/dev.ts sets TOMAT_WORKERS_DIR to the in-repo
   // source path so editing a worker .ts has immediate effect.
-  const workersDir = Deno.env.get("TOMAT_WORKERS_DIR") ??
-    join(root, "workers");
+  const workersDir = Deno.env.get("TOMAT_WORKERS_DIR") ?? join(root, "workers");
   return {
     root,
     configFile: join(root, "core.json"),
@@ -195,21 +190,19 @@ export function binPath(name: string): string {
 // Creates every long-lived directory eagerly. Called from main.ts at boot.
 export async function ensureDirs(): Promise<void> {
   const p = paths();
-  for (
-    const dir of [
-      p.root,
-      p.binDir,
-      p.binLibDir,
-      p.denoCacheDir,
-      p.stagingDir,
-      p.sessionsDir,
-      p.modelsDir,
-      p.toolkitsDir,
-      p.workersDir,
-      p.cacheDir,
-      p.logsDir,
-    ]
-  ) {
+  for (const dir of [
+    p.root,
+    p.binDir,
+    p.binLibDir,
+    p.denoCacheDir,
+    p.stagingDir,
+    p.sessionsDir,
+    p.modelsDir,
+    p.toolkitsDir,
+    p.workersDir,
+    p.cacheDir,
+    p.logsDir,
+  ]) {
     await Deno.mkdir(dir, { recursive: true });
   }
 }

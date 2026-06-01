@@ -70,7 +70,7 @@ pub enum ArgsError {
 
 /// Pure arg parser, mirroring the TS `parseUpdaterArgs`. Accepts the flags in
 /// any order; `--restart-args` defaults to "[]". Returns an error when either
-/// `--staged` or `--current` is absent (or empty — the TS guard is
+/// `--staged` or `--current` is absent (or empty, since the TS guard is
 /// `if (!staged || !current)` where "" is falsy). `argv` excludes argv[0],
 /// matching Deno.args / the TS test inputs.
 pub fn parse_updater_args(argv: &[String]) -> Result<Args, ArgsError> {
@@ -133,7 +133,7 @@ pub enum SwapResult {
 }
 
 /// Append `.old` to a path at the byte level (NOT via extension replacement),
-/// so a Windows `tomat-core.exe` correctly becomes `tomat-core.exe.old` —
+/// so a Windows `tomat-core.exe` correctly becomes `tomat-core.exe.old`,
 /// matching what core's boot-time rollback (`rollback.ts`) looks for.
 fn old_path(current: &Path) -> PathBuf {
     let mut s: OsString = current.as_os_str().to_os_string();
@@ -142,8 +142,8 @@ fn old_path(current: &Path) -> PathBuf {
 }
 
 /// Move `staged` over `current`. `is_windows` is passed explicitly (not derived
-/// from the host) so tests exercise both branches on any platform — same design
-/// as the TS `performSwap(staged, current, isWindows)`.
+/// from the host) so tests exercise both branches on any platform (same design
+/// as the TS `performSwap(staged, current, isWindows)`).
 ///
 /// Unix: a single `rename` is atomic and overwrites in place; then chmod 0o755
 /// (best-effort, unix-only API).
@@ -305,7 +305,7 @@ fn parse_restart_args(raw: &str) -> Vec<String> {
 /// Spawn `current` with `args`, fully detached (all stdio null). std's
 /// `Command::spawn` does not wait for or reap the child, and does not kill it
 /// when this process exits, so dropping the returned `Child` detaches it on both
-/// unix and Windows — equivalent to Deno's `proc.spawn()` with null stdio.
+/// unix and Windows: equivalent to Deno's `proc.spawn()` with null stdio.
 fn spawn_new_core(current: &Path, args: &[String]) -> std::io::Result<()> {
     Command::new(current)
         .args(args)

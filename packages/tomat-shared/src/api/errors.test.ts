@@ -2,12 +2,7 @@
 // a new ERROR_CODES entry without ERROR_STATUS coverage trips the suite.
 
 import { assertEquals } from "@std/assert";
-import {
-  ERROR_CODES,
-  ERROR_STATUS,
-  type ErrorCode,
-  isApiErrorBody,
-} from "./errors.ts";
+import { ERROR_CODES, ERROR_STATUS, type ErrorCode, isApiErrorBody } from "./errors.ts";
 
 Deno.test("ERROR_STATUS: every ErrorCode has a status, every status is a 4xx/5xx", () => {
   for (const code of ERROR_CODES) {
@@ -18,10 +13,7 @@ Deno.test("ERROR_STATUS: every ErrorCode has a status, every status is a 4xx/5xx
 });
 
 Deno.test("ERROR_STATUS: no extra keys beyond ERROR_CODES", () => {
-  assertEquals(
-    Object.keys(ERROR_STATUS).sort(),
-    [...ERROR_CODES].sort(),
-  );
+  assertEquals(Object.keys(ERROR_STATUS).sort(), [...ERROR_CODES].sort());
 });
 
 Deno.test("isApiErrorBody: true for valid wire-format envelopes", () => {
@@ -32,20 +24,14 @@ Deno.test("isApiErrorBody: true for valid wire-format envelopes", () => {
 });
 
 Deno.test("isApiErrorBody: rejects malformed and unknown-code envelopes", () => {
-  for (
-    const v of [
-      null,
-      undefined,
-      "string",
-      { error: null },
-      { error: {} },
-      { error: { code: "definitely-not-a-real-code", message: "" } },
-    ]
-  ) {
-    assertEquals(
-      isApiErrorBody(v),
-      false,
-      `should reject ${JSON.stringify(v)}`,
-    );
+  for (const v of [
+    null,
+    undefined,
+    "string",
+    { error: null },
+    { error: {} },
+    { error: { code: "definitely-not-a-real-code", message: "" } },
+  ]) {
+    assertEquals(isApiErrorBody(v), false, `should reject ${JSON.stringify(v)}`);
   }
 });

@@ -1,4 +1,4 @@
-// Install channel — keeps the client's on-disk state and OS-keychain
+// Install channel. Keeps the client's on-disk state and OS-keychain
 // entries isolated per channel, mirroring tomat-core's TOMAT_CHANNEL.
 //
 // Every channel (including stable) lives under ~/.tomat/<channel>/, so a
@@ -40,7 +40,7 @@ fn channel_root_for(home: &Path, channel: &str) -> PathBuf {
     home.join(".tomat").join(channel)
 }
 
-/// `~/.tomat/<channel>` — the per-channel root for core + client state.
+/// `~/.tomat/<channel>`: the per-channel root for core + client state.
 pub fn channel_root(home: &Path) -> PathBuf {
     channel_root_for(home, channel())
 }

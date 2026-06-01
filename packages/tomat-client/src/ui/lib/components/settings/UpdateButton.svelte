@@ -3,11 +3,11 @@
   // the combined client + core + sidecar update flow.
   //
   // State machine:
-  //   idle                 — "Tomat Client vX.X.X" / hover "Check for Updates"
-  //   checking             — "Checking…"
-  //   available            — "Updates Available!" / hover "Install Updates"
-  //   updating             — "Updating…"
-  //   clientRestartPending — "Restart to Update" (relaunches Tauri)
+  //   idle                 : "Tomat Client vX.X.X" / hover "Check for Updates"
+  //   checking             : "Checking…"
+  //   available            : "Updates Available!" / hover "Install Updates"
+  //   updating             : "Updating…"
+  //   clientRestartPending : "Restart to Update" (relaunches Tauri)
 
   import { onMount } from "svelte";
   import { platform, type UpdateHandle } from "$lib/platform";
@@ -184,7 +184,7 @@
     const binaryKinds: BinaryKind[] = binariesAvailable.map((b) => b.kind);
 
     try {
-      // Kick off sidecar binary updates first — these are short and let the
+      // Kick off sidecar binary updates first. These are short and let the
       // user see progress in the downloads modal while the bigger work runs.
       for (const kind of binaryKinds) {
         try {
@@ -194,8 +194,8 @@
         }
       }
 
-      // Core self-update. The HTTP request typically does NOT return cleanly
-      // — the core exits during apply() to hand off to the updater binary.
+      // Core self-update. The HTTP request typically does NOT return cleanly.
+      // The core exits during apply() to hand off to the updater binary.
       // The next /health probe (or the WS reconnect logic) will see the new
       // version. Swallow the request-aborted error.
       if (coreAvailable) {
@@ -257,7 +257,7 @@
       <i class="flex text-xl shrink-0 {icon.className} {tone}"></i>
     {/if}
     {#if phase === "available"}
-      <!-- Small accent dot signaling "something to act on" — pairs with
+      <!-- Small accent dot signaling "something to act on". It pairs with
            the orange label below so the cue is visible even with the
            label collapsed. -->
       <span

@@ -60,7 +60,11 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState(Arc::new(AppStateInner {
             current_shortcut: Mutex::new(None),
-            visible: AtomicBool::new(true),
+            // The window is created hidden (`visible: false` in tauri.conf.json)
+            // and revealed by the frontend on boot (or via the tray/shortcut).
+            // Track it as hidden to match, so toggle_window() shows it on the
+            // first press even when the frontend never reached its show() call.
+            visible: AtomicBool::new(false),
             saved_volume: Mutex::new(None),
             input_shortcuts: Mutex::new(Vec::new()),
             region_capture_target: Mutex::new("primary".to_string()),
@@ -198,6 +202,7 @@ pub fn run() {
             local_core_base_url,
             local_sidecar_ports,
             start_local_core,
+            read_launch_prefill,
             // Client settings + keychain
             read_client_settings,
             write_client_settings,

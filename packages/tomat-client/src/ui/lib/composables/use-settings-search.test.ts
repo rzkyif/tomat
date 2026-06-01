@@ -1,4 +1,4 @@
-// SettingsSearch — the small state machine that drives the search-mode
+// SettingsSearch is the small state machine that drives the search-mode
 // slide-swap. Animation timing is irrelevant for this layer; we only care
 // that mode toggling, debounced onInput, and clear() do the right thing.
 
@@ -20,7 +20,7 @@ describe("SettingsSearch", () => {
     expect(s.mode).toBe(false);
   });
 
-  it("setMode is idempotent — same target is a no-op", async () => {
+  it("setMode is idempotent: same target is a no-op", async () => {
     const s = new SettingsSearch();
     await s.setMode(true);
     await s.setMode(true);

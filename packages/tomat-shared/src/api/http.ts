@@ -2,12 +2,7 @@
 // Many bodies are inferred from validation schemas under ./../validation/;
 // types unique to specific endpoints live here.
 
-import type {
-  Message,
-  Session,
-  SessionListEntry,
-  TokenUsage,
-} from "../domain/session.ts";
+import type { Message, Session, SessionListEntry, TokenUsage } from "../domain/session.ts";
 import type {
   Grant,
   OpenAIToolDef,
@@ -20,6 +15,7 @@ import type {
 } from "../domain/toolkit.ts";
 import type {
   BinaryKind,
+  BinaryProbeResult,
   BinaryStatus,
   DownloadEntry,
   DownloadPlan,
@@ -148,6 +144,11 @@ export interface BinaryUpdateCheck {
   available: boolean;
 }
 export type CheckBinariesResponse = BinaryUpdateCheck[];
+
+export interface ProbeBinariesRequest {
+  kinds: BinaryKind[];
+}
+export type ProbeBinariesResponse = BinaryProbeResult[];
 
 // --- Core self-update ------------------------------------------------------
 

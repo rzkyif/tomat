@@ -3,7 +3,7 @@
  *
  * The schema is composed from per-group modules under `./groups/`; shared
  * types and validation constants live in `./types.ts`. Both the client
- * renderer and core's setting reads consume this module — it's the single
+ * renderer and core's setting reads consume this module. It's the single
  * source of truth for what setting keys exist, what they default to, and
  * which destination ("client" or "core") they're persisted to.
  */
@@ -78,7 +78,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
 
 // Settings whose values are routed to the OS keychain rather than to
 // settings.json. Derived from the schema so adding a `type: "password"`
-// field automatically opts it in — no manifest update needed.
+// field automatically opts it in, with no manifest update needed.
 export const SECRET_KEYS: readonly string[] = (() => {
   const out: string[] = [];
   for (const group of SETTINGS_SCHEMA) {
@@ -153,20 +153,14 @@ export function isFieldVisible(
 /** True when a section should be rendered in non-search mode. Advanced
  *  sections hide entirely when `showAdvanced` is false; otherwise the
  *  section is hidden only if all of its fields are advanced. */
-export function isSectionVisible(
-  section: SettingSection,
-  showAdvanced: boolean,
-): boolean {
+export function isSectionVisible(section: SettingSection, showAdvanced: boolean): boolean {
   if (showAdvanced) return true;
   if (section.advanced) return false;
   return section.fields.some((f) => !f.advanced);
 }
 
 /** True when a group should appear in the sidebar in non-search mode. */
-export function isGroupVisible(
-  group: SettingGroup,
-  showAdvanced: boolean,
-): boolean {
+export function isGroupVisible(group: SettingGroup, showAdvanced: boolean): boolean {
   if (showAdvanced) return true;
   return group.sections.some((s) => isSectionVisible(s, showAdvanced));
 }
@@ -180,16 +174,10 @@ export function evalCondition(
     const val = currentSettings[cond.field];
     if (cond.eq !== undefined && val !== cond.eq) return false;
     if (cond.neq !== undefined && val === cond.neq) return false;
-    if (
-      cond.in !== undefined &&
-      !cond.in.includes(val as string | number | boolean)
-    ) {
+    if (cond.in !== undefined && !cond.in.includes(val as string | number | boolean)) {
       return false;
     }
-    if (
-      cond.nin !== undefined &&
-      cond.nin.includes(val as string | number | boolean)
-    ) {
+    if (cond.nin !== undefined && cond.nin.includes(val as string | number | boolean)) {
       return false;
     }
   }
@@ -333,7 +321,7 @@ export function searchFields(
         // command_preview is a derived display, not user-targetable; the
         // services/storage/toolkits/cores panels have no atomic field-level
         // state either. Snippets DO have searchable name + description,
-        // so they're intentionally NOT excluded — typing "snippet" in
+        // so they're intentionally NOT excluded. Typing "snippet" in
         // search jumps to the snippets panel.
         if (
           field.type === "command_preview" ||
@@ -433,17 +421,13 @@ function settingValueTypeOk(field: SettingField, value: unknown): boolean {
  *   - unknown keys are NOT errors here (forward-compat with a newer client);
  *     callers should drop them rather than persist them.
  */
-export function validateSettingsPatch(
-  patch: Record<string, unknown>,
-): string[] {
+export function validateSettingsPatch(patch: Record<string, unknown>): string[] {
   const errors: string[] = [];
   const secretSet = new Set<string>(SECRET_KEYS);
   for (const [key, value] of Object.entries(patch)) {
     if (value === null || value === undefined) continue;
     if (secretSet.has(key)) {
-      errors.push(
-        `"${key}" is a secret and must be set via the secrets endpoint, not settings`,
-      );
+      errors.push(`"${key}" is a secret and must be set via the secrets endpoint, not settings`);
       continue;
     }
     if (!isValidSettingKey(key)) continue;
@@ -454,8 +438,8 @@ export function validateSettingsPatch(
       continue;
     }
     if (
-      (field.type === "string" || field.type === "password" ||
-        field.type === "multiline") && field.regex
+      (field.type === "string" || field.type === "password" || field.type === "multiline") &&
+      field.regex
     ) {
       const re = getValidationError(field.regex, value);
       if (re) errors.push(`"${key}": ${re}`);
@@ -470,10 +454,7 @@ export function isSecretSettingKey(key: string): boolean {
   return (SECRET_KEYS as readonly string[]).includes(key);
 }
 
-export function getValidationError(
-  regex: RegexValidation,
-  value: unknown,
-): string | null {
+export function getValidationError(regex: RegexValidation, value: unknown): string | null {
   if (value === undefined || value === null || value === "") return null;
 
   const strValue = String(value);

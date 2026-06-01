@@ -1,11 +1,28 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "unicorn", "oxc"],
+  "jsPlugins": ["./scripts/lint-plugins/oxlint-plugin.ts"],
   "categories": {
     "correctness": "error"
   },
-  "rules": {},
+  "rules": {
+    "tomat/no-em-dash": "error"
+  },
   "env": {
     "builtin": true
-  }
+  },
+  "overrides": [
+    {
+      "files": ["packages/tomat-client/src/ui/**/*.{ts,tsx}"],
+      "rules": {
+        "tomat/no-tauri-import": "error"
+      }
+    },
+    {
+      "files": ["packages/tomat-client/src/ui/lib/platform/tauri.ts"],
+      "rules": {
+        "tomat/no-tauri-import": "off"
+      }
+    }
+  ]
 }

@@ -47,8 +47,9 @@ class DownloadsState {
       }
     });
     // Seed with the current snapshot so the badge populates before the first
-    // WS broadcast arrives. Skipped when no core is paired yet — cores().api()
-    // throws in that case, and the snapshot frame will populate items anyway.
+    // WS broadcast arrives. Skipped when no core is paired yet, since
+    // cores().api() throws in that case, and the snapshot frame will populate
+    // items anyway.
     if (cores().currentEntry()) {
       void cores()
         .api()

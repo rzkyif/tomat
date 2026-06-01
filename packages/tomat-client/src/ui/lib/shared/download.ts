@@ -121,7 +121,7 @@ export async function detectPendingStartup(
   const groupBySource: Record<string, string> = {};
   for (const c of candidates) groupBySource[c.path] = c.group_id;
 
-  // Probe HF models + sidecar binaries in parallel — they're independent
+  // Probe HF models + sidecar binaries in parallel. They're independent
   // and the confirm modal shows them as one combined list.
   const [modelPlans, binaryChecks] = await Promise.all([
     candidates.length > 0
@@ -138,12 +138,29 @@ export async function detectPendingStartup(
   const missingModels = modelPlans.filter((p) => !p.alreadyHave);
   const missingBinaries = binaryChecks.filter((b) => !b.installed).map((b) => b.kind);
 
+  // Resolve the version + download size for each missing binary so the confirm
+  // modal can show concrete details. Best-effort: a probe failure just leaves
+  // the row without a version/size.
+  const binaryProbes =
+    missingBinaries.length > 0
+      ? await cores()
+          .api()
+          .binaries.probe(missingBinaries)
+          .catch(() => [])
+      : [];
+  const probeByKind = new Map(binaryProbes.map((p) => [p.kind, p]));
+
   // Synthesize DownloadPlan entries for each missing binary so the existing
   // ConfirmModal renders them in the same list as model files.
-  const binaryPlans: DownloadPlan[] = missingBinaries.map((kind) => ({
-    source: `${BINARY_SOURCE_PREFIX}${kind}`,
-    alreadyHave: false,
-  }));
+  const binaryPlans: DownloadPlan[] = missingBinaries.map((kind) => {
+    const probe = probeByKind.get(kind);
+    return {
+      source: `${BINARY_SOURCE_PREFIX}${kind}`,
+      alreadyHave: false,
+      sizeHint: probe?.sizeBytes,
+      version: probe && probe.version !== "unknown" ? probe.version : undefined,
+    };
+  });
   for (const kind of missingBinaries) {
     groupBySource[`${BINARY_SOURCE_PREFIX}${kind}`] = "binary";
   }

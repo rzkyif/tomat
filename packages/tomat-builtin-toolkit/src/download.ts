@@ -25,8 +25,7 @@ export async function download(
   fs.mkdirSync(downloadsDir, { recursive: true });
 
   const baseName = deriveFilename(url, args?.filename);
-  const contentType = res.headers.get("content-type")?.split(";")[0]?.trim() ??
-    "";
+  const contentType = res.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
   const withExt = ensureExtension(baseName, contentType);
   const destPath = uniquePath(downloadsDir, withExt);
 
@@ -54,16 +53,10 @@ export async function download(
         ctx.setProgress(
           written / total,
           "Downloading",
-          `${(written / 1024 / 1024).toFixed(1)} / ${
-            (total / 1024 / 1024).toFixed(1)
-          } MB`,
+          `${(written / 1024 / 1024).toFixed(1)} / ${(total / 1024 / 1024).toFixed(1)} MB`,
         );
       } else {
-        ctx.setProgress(
-          0,
-          "Downloading",
-          `${(written / 1024 / 1024).toFixed(1)} MB`,
-        );
+        ctx.setProgress(0, "Downloading", `${(written / 1024 / 1024).toFixed(1)} MB`);
       }
     }
     file.close();
@@ -71,10 +64,14 @@ export async function download(
   } catch (err) {
     try {
       file.close();
-    } catch { /* already closed */ }
+    } catch {
+      /* already closed */
+    }
     try {
       fs.rmSync(tmp, { force: true });
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     throw err;
   }
 
@@ -97,7 +94,9 @@ function deriveFilename(url: string, override: string | undefined): string {
     const u = new URL(url);
     const last = u.pathname.split("/").filter(Boolean).pop();
     if (last) return decodeURIComponent(last);
-  } catch { /* fall through */ }
+  } catch {
+    /* fall through */
+  }
   return "download";
 }
 

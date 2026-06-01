@@ -1,4 +1,4 @@
-// ResponsiveLayout — verifies the derived `horizontal` flag tracks the
+// ResponsiveLayout: verifies the derived `horizontal` flag tracks the
 // reactive `containerWidth` against the threshold. ResizeObserver wiring
 // is exercised by the running app and the stubbed RO in test-setup.
 

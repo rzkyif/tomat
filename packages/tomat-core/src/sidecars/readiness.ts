@@ -27,10 +27,7 @@ export function validateHealthCheckUrl(url: string): void {
     throw new AppError("validation_error", "health-check URL must use http://");
   }
   if (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost") {
-    throw new AppError(
-      "validation_error",
-      "health-check URL must point to 127.0.0.1 or localhost",
-    );
+    throw new AppError("validation_error", "health-check URL must point to 127.0.0.1 or localhost");
   }
 }
 
@@ -42,10 +39,7 @@ export interface PollOptions {
 
 // Polls an HTTP health-check URL. Resolves true on first 2xx, false on
 // timeout. Returns false immediately if the signal aborts.
-export async function pollHttpHealth(
-  url: string,
-  options: PollOptions = {},
-): Promise<boolean> {
+export async function pollHttpHealth(url: string, options: PollOptions = {}): Promise<boolean> {
   const attempts = options.attempts ?? HEALTH_CHECK_ATTEMPTS;
   const intervalMs = options.intervalMs ?? HEALTH_CHECK_INTERVAL_MS;
   for (let i = 0; i < attempts; i++) {

@@ -11,16 +11,13 @@ Deno.test("parseSource: HF spec -> resolve URL + relPath stripped of branch", ()
   const out = parseSource("@user/repo/main/file.gguf");
   assertEquals(out.relPath, "user/repo/file.gguf");
   assertEquals(out.filename, "file.gguf");
-  assertEquals(
-    out.url,
-    "https://huggingface.co/user/repo/resolve/main/file.gguf?download=true",
-  );
+  assertEquals(out.url, "https://huggingface.co/user/repo/resolve/main/file.gguf?download=true");
 });
 
 Deno.test("parseSource: nested filenames keep their full path under repo", () => {
   const out = parseSource("@user/repo/main/dir/sub/file.bin");
   assertEquals(out.relPath, "user/repo/dir/sub/file.bin");
-  // Filename is the basename only — the path lives in relPath.
+  // Filename is the basename only. The path lives in relPath.
   assertEquals(out.filename, "file.bin");
 });
 

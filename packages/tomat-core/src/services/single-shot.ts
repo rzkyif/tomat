@@ -2,7 +2,7 @@
 // assistant content. Used by utility endpoints (autocorrect, merge,
 // title-gen) that don't need delta-by-delta streaming.
 //
-// We don't go through llm-scheduler here on purpose — these calls are
+// We don't go through llm-scheduler here on purpose. These calls are
 // short, parallel-safe, and shouldn't compete with chat turns for the
 // `--parallel N` slots on llama-server. If that turns out to be wrong
 // for any specific caller, it can switch to the scheduler explicitly.
@@ -24,14 +24,12 @@ export async function singleShot(opts: SingleShotOptions): Promise<string> {
     { role: "user", content: opts.userMessage },
   ];
   let text = "";
-  for await (
-    const delta of streamChatCompletion({
-      endpoint: opts.endpoint,
-      messages,
-      overrides: opts.overrides,
-      signal: opts.signal,
-    })
-  ) {
+  for await (const delta of streamChatCompletion({
+    endpoint: opts.endpoint,
+    messages,
+    overrides: opts.overrides,
+    signal: opts.signal,
+  })) {
     if (delta.contentDelta) text += delta.contentDelta;
   }
   return text.trim();

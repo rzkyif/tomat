@@ -18,7 +18,7 @@ describe("web platform stub", () => {
     it("check returns null (no in-browser auto-update)", async () => {
       expect(await p.updater.check()).toBeNull();
     });
-    it("relaunch throws — no Tauri process to relaunch", async () => {
+    it("relaunch throws: no Tauri process to relaunch", async () => {
       await expect(p.updater.relaunch()).rejects.toThrow(/relaunch/);
     });
   });

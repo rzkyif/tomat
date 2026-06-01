@@ -80,10 +80,8 @@ export const llmGroup: SettingGroup = {
                 description:
                   "Lightweight and quick. Good for short questions, simple chat, and machines with limited memory.\n\nStruggles with multi-step reasoning or long contexts.",
                 defaults: {
-                  "llm.modelPath":
-                    "@unsloth/Qwen3.5-0.8B-GGUF/main/Qwen3.5-0.8B-Q4_K_M.gguf",
-                  "llm.mmprojPath":
-                    "@unsloth/Qwen3.5-0.8B-GGUF/main/mmproj-F16.gguf",
+                  "llm.modelPath": "@unsloth/Qwen3.5-0.8B-GGUF/main/Qwen3.5-0.8B-Q4_K_M.gguf",
+                  "llm.mmprojPath": "@unsloth/Qwen3.5-0.8B-GGUF/main/mmproj-F16.gguf",
                   "llm.contextSize": 4096,
                   "llm.mmap": true,
                   "llm.threads": 4,
@@ -114,10 +112,8 @@ export const llmGroup: SettingGroup = {
                 description:
                   "A balanced default with reasoning enabled. Handles most everyday tasks comfortably on a modern laptop.",
                 defaults: {
-                  "llm.modelPath":
-                    "@unsloth/Qwen3.5-2B-GGUF/main/Qwen3.5-2B-Q4_K_M.gguf",
-                  "llm.mmprojPath":
-                    "@unsloth/Qwen3.5-2B-GGUF/main/mmproj-F16.gguf",
+                  "llm.modelPath": "@unsloth/Qwen3.5-2B-GGUF/main/Qwen3.5-2B-Q4_K_M.gguf",
+                  "llm.mmprojPath": "@unsloth/Qwen3.5-2B-GGUF/main/mmproj-F16.gguf",
                   "llm.contextSize": 8192,
                   "llm.mmap": true,
                   "llm.threads": 4,
@@ -148,10 +144,8 @@ export const llmGroup: SettingGroup = {
                 description:
                   "Best reasoning and answer quality. Recommended when you have the RAM to spare and want the strongest responses.\n\nSlower to first token.",
                 defaults: {
-                  "llm.modelPath":
-                    "@unsloth/gemma-4-E2B-it-GGUF/main/gemma-4-E2B-it-Q4_K_M.gguf",
-                  "llm.mmprojPath":
-                    "@unsloth/gemma-4-E2B-it-GGUF/main/mmproj-F16.gguf",
+                  "llm.modelPath": "@unsloth/gemma-4-E2B-it-GGUF/main/gemma-4-E2B-it-Q4_K_M.gguf",
+                  "llm.mmprojPath": "@unsloth/gemma-4-E2B-it-GGUF/main/mmproj-F16.gguf",
                   "llm.contextSize": 8192,
                   "llm.mmap": true,
                   "llm.threads": 6,
@@ -167,12 +161,13 @@ export const llmGroup: SettingGroup = {
                 id: "custom",
                 label: "Custom",
                 title: "Custom",
-                badges: [{
-                  icon: "i-material-symbols-build-rounded",
-                  label: "Manual setup",
-                }],
-                description:
-                  "Configure model path, context size, threads, and ports yourself.",
+                badges: [
+                  {
+                    icon: "i-material-symbols-build-rounded",
+                    label: "Manual setup",
+                  },
+                ],
+                description: "Configure model path, context size, threads, and ports yourself.",
               },
             ],
           },
@@ -193,8 +188,7 @@ export const llmGroup: SettingGroup = {
           name: "Model Path",
           description: "Path to the GGUF model file.",
           type: "string",
-          defaultValue:
-            "@unsloth/Qwen3.5-0.8B-GGUF/main/Qwen3.5-0.8B-Q4_K_M.gguf",
+          defaultValue: "@unsloth/Qwen3.5-0.8B-GGUF/main/Qwen3.5-0.8B-Q4_K_M.gguf",
           descriptionTier: "ondemand",
         },
         {
@@ -227,8 +221,7 @@ export const llmGroup: SettingGroup = {
         {
           id: "llm.reasoning",
           name: "Reasoning Mode",
-          description:
-            "Whether the model should produce a reasoning trace before its answer.",
+          description: "Whether the model should produce a reasoning trace before its answer.",
           type: "select",
           defaultValue: "off",
           options: [
@@ -349,8 +342,7 @@ export const llmGroup: SettingGroup = {
         {
           id: "llm.external.contextSize",
           name: "Context Window Size",
-          description:
-            "Maximum context window length in tokens. Used for usage tracking.",
+          description: "Maximum context window length in tokens. Used for usage tracking.",
           type: "number",
           defaultValue: 128000,
           advanced: true,

@@ -8,11 +8,11 @@
 //    the host platform, captures stdout, parses the printed pairing code,
 //    and returns it. The script writes the binary, sets up the launchd /
 //    systemd-user / scheduled-task service, mints the admin token, and hits
-//    /api/v1/pairing/codes itself — this command is just the trampoline.
+//    /api/v1/pairing/codes itself. This command is just the trampoline.
 //
 //  - `start_local_core`: idempotently make sure a locally-installed core
 //    is running. Used at app boot for the "on-demand" install mode where
-//    no system service was registered — the client owns liveness.
+//    no system service was registered (the client owns liveness).
 
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -22,6 +22,22 @@ use std::sync::atomic::Ordering;
 use tauri::State;
 
 const DEFAULT_STORAGE_BASE: &str = "https://get.au.tomat.ing";
+
+/// True when this is the dev-channel build. The dev core runs from source via
+/// `deno task dev`, so there's no installed binary and nothing to `curl`.
+fn is_dev() -> bool {
+    crate::channel::channel() == "dev"
+}
+
+/// True when the developer opted into exercising the fresh-install confirm
+/// screen in dev (`deno task dev:reset:install` sets TOMAT_DEV_FRESH_INSTALL).
+/// Always false outside dev.
+fn dev_fresh_install_requested() -> bool {
+    is_dev()
+        && std::env::var("TOMAT_DEV_FRESH_INSTALL")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+}
 
 #[tauri::command]
 pub fn read_admin_token() -> AppResult<Option<String>> {
@@ -57,6 +73,14 @@ pub async fn install_local_core(
     service: Option<bool>,
     bind_all: Option<bool>,
 ) -> AppResult<String> {
+    // Dev: no installer artifact and the core already runs from source, so
+    // "installing" just mints a code off the running dev core, enough to drive
+    // the fresh-install UI end to end. The service/bindAll toggles are cosmetic
+    // here.
+    if is_dev() {
+        return dev_mint_pairing_code().await;
+    }
+
     // Cooldown check: if a previous install finished less than
     // INSTALL_COOLDOWN_MS ago, reject. Reading the last-finished timestamp
     // is cheap (single atomic load) so we do it before the in-progress CAS.
@@ -196,7 +220,7 @@ fn run_installer(url: &str, service: bool, bind_all: bool) -> AppResult<String> 
 
 fn parse_pairing_code(output: &str) -> AppResult<String> {
     // Both install scripts print `Pairing code: NNNNNN` (with leading
-    // whitespace). The last occurrence wins — re-runs print the new code.
+    // whitespace). The last occurrence wins; re-runs print the new code.
     let code = output
         .lines()
         .rev()
@@ -213,6 +237,49 @@ fn parse_pairing_code(output: &str) -> AppResult<String> {
             output
         ))
     })
+}
+
+/// Dev-only: mint a pairing code straight off the running dev core (the same
+/// admin-token endpoint the installer hits in production), so the fresh-install
+/// flow can complete without an installer artifact. Returns the 6-digit code.
+async fn dev_mint_pairing_code() -> AppResult<String> {
+    let token = read_admin_token_at(&admin_token_path()?)?.ok_or_else(|| {
+        AppError::external("dev core admin token not found. Is `deno task dev` running?")
+    })?;
+    let url = format!(
+        "https://127.0.0.1:{}/api/v1/pairing/codes",
+        crate::channel::core_port()
+    );
+    // Dev loopback against a known self-signed cert. The real pairing trust
+    // (PAKE + SPKI pin) is still enforced afterwards by the TS net layer when
+    // the UI claims this code.
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| AppError::external(format!("http client: {e}")))?;
+    let resp = client
+        .post(&url)
+        .header("X-Admin-Token", token)
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .send()
+        .await
+        .map_err(|e| AppError::external(format!("mint request failed: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(AppError::external(format!(
+            "mint failed: HTTP {}",
+            resp.status()
+        )));
+    }
+    #[derive(serde::Deserialize)]
+    struct CodeResp {
+        code: String,
+    }
+    let parsed: CodeResp = resp
+        .json()
+        .await
+        .map_err(|e| AppError::external(format!("bad mint response: {e}")))?;
+    Ok(parsed.code)
 }
 
 fn admin_token_path() -> AppResult<PathBuf> {
@@ -236,6 +303,14 @@ fn local_core_binary() -> AppResult<PathBuf> {
 /// Returns `true` if the local core binary exists on disk.
 #[tauri::command]
 pub fn local_core_installed() -> AppResult<bool> {
+    // Dev runs the core from source (no installed binary), but a dev core IS
+    // running via `deno task dev`. Report it as installed so "On this computer"
+    // takes the already-installed fast path, unless the developer opted into
+    // the fresh-install flow, where `false` makes the confirm screen show and
+    // the install is then simulated against the running dev core.
+    if is_dev() {
+        return Ok(!dev_fresh_install_requested());
+    }
     Ok(local_core_binary().map(|p| p.exists()).unwrap_or(false))
 }
 
@@ -264,6 +339,18 @@ pub fn local_sidecar_ports() -> std::collections::HashMap<String, u16> {
 /// Returns `true` if a new process was started.
 #[tauri::command]
 pub async fn start_local_core() -> AppResult<bool> {
+    // Dev: the core is started from source by `deno task dev`, not a binary we
+    // can spawn here. Confirm it's reachable; never try to launch it.
+    if is_dev() {
+        return if probe_local_core().await {
+            Ok(false)
+        } else {
+            Err(AppError::external(
+                "dev core not reachable on 127.0.0.1:7820. Is `deno task dev` running?",
+            ))
+        };
+    }
+
     let bin = local_core_binary()?;
     if !bin.exists() {
         return Err(AppError::external(format!(
@@ -272,7 +359,7 @@ pub async fn start_local_core() -> AppResult<bool> {
         )));
     }
 
-    // Cheap liveness probe — if 127.0.0.1:7800 is already answering, leave it.
+    // Cheap liveness probe: if 127.0.0.1:7800 is already answering, leave it.
     if probe_local_core().await {
         return Ok(false);
     }
@@ -294,7 +381,7 @@ pub async fn start_local_core() -> AppResult<bool> {
             return Ok(true);
         }
     }
-    // It might still be coming up — return success rather than block the UI.
+    // It might still be coming up, so return success rather than block the UI.
     Ok(true)
 }
 
@@ -333,7 +420,7 @@ fn spawn_detached(bin: &std::path::Path, logs_dir: &std::path::Path) -> AppResul
             .stdout(stdout)
             .stderr(stderr)
             // The compiled-in channel isn't an OS env var, so the spawned core
-            // wouldn't otherwise know it — pass it explicitly so the on-demand
+            // wouldn't otherwise know it. Pass it explicitly so the on-demand
             // core matches this client's channel.
             .env("TOMAT_CHANNEL", crate::channel::channel())
             .pre_exec(|| {
@@ -379,6 +466,46 @@ fn spawn_detached(bin: &std::path::Path, logs_dir: &std::path::Path) -> AppResul
         .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
         .spawn()?;
     Ok(())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchPrefill {
+    core_url: Option<String>,
+    pairing_code: Option<String>,
+}
+
+/// Read optional `--core-url` / `--pairing-code` launch arguments (both
+/// `--flag value` and `--flag=value` accepted) for the onboarding "On another
+/// computer" prefill. `None` when neither is present. Doubles as a shareable
+/// setup command, and is how `deno task dev` hands the dev core URL + minted
+/// code to the client.
+#[tauri::command]
+pub fn read_launch_prefill() -> Option<LaunchPrefill> {
+    let args: Vec<String> = std::env::args().collect();
+    let core_url = arg_value(&args, "--core-url");
+    let pairing_code = arg_value(&args, "--pairing-code");
+    if core_url.is_none() && pairing_code.is_none() {
+        return None;
+    }
+    Some(LaunchPrefill {
+        core_url,
+        pairing_code,
+    })
+}
+
+/// Find `--name=value` or `--name value` in `args`; `None` if absent.
+fn arg_value(args: &[String], name: &str) -> Option<String> {
+    let eq_prefix = format!("{name}=");
+    for (i, a) in args.iter().enumerate() {
+        if let Some(v) = a.strip_prefix(&eq_prefix) {
+            return Some(v.to_string());
+        }
+        if a == name {
+            return args.get(i + 1).cloned();
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -451,5 +578,29 @@ mod tests {
             read_admin_token_at(&path).unwrap(),
             Some("abc123".to_string())
         );
+    }
+
+    #[test]
+    fn arg_value_reads_equals_form() {
+        let args = vec!["app".into(), "--core-url=https://x:7820".into()];
+        assert_eq!(
+            arg_value(&args, "--core-url").as_deref(),
+            Some("https://x:7820")
+        );
+    }
+
+    #[test]
+    fn arg_value_reads_space_form() {
+        let args = vec!["app".into(), "--pairing-code".into(), "123456".into()];
+        assert_eq!(
+            arg_value(&args, "--pairing-code").as_deref(),
+            Some("123456")
+        );
+    }
+
+    #[test]
+    fn arg_value_absent_is_none() {
+        let args = vec!["app".into(), "--other".into()];
+        assert_eq!(arg_value(&args, "--core-url"), None);
     }
 }

@@ -115,12 +115,14 @@ Deno.test("toolsJsonSchema: defaults populate empty permission arrays", () => {
   const result = toolsJsonSchema.safeParse({
     name: "x",
     description: "y",
-    tools: [{
-      name: "t",
-      description: "d",
-      parameters: {},
-      function: "f",
-    }],
+    tools: [
+      {
+        name: "t",
+        description: "d",
+        parameters: {},
+        function: "f",
+      },
+    ],
   });
   assertEquals(result.success, true);
   if (result.success) {

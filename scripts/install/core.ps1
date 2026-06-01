@@ -278,7 +278,7 @@ function Ui-Die($Reason, $Detail, $Hint) {
 # --- configuration --------------------------------------------------------
 
 $Storage = if ($env:TOMAT_STORAGE) { $env:TOMAT_STORAGE } else { "https://get.au.tomat.ing" }
-# Install channel — every channel lives under %USERPROFILE%\.tomat\<channel>\
+# Install channel. Every channel lives under %USERPROFILE%\.tomat\<channel>\
 # so dev / beta installs never collide with stable. Validate up front.
 $Channel = if ($env:TOMAT_CHANNEL) { $env:TOMAT_CHANNEL } else { "stable" }
 if ($Channel -notin @("stable", "dev", "beta")) {

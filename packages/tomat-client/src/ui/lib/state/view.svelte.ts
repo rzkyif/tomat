@@ -7,7 +7,7 @@
  * OFFSCREEN midpoint, not when the request is made. Components call
  * `navigate(next)`, which sets `pendingMode`; +page.svelte watches
  * `pendingMode`, runs the slide, and calls `commit()` mid-slide. The store
- * itself stays DOM-free — the panel element it animates lives in +page.svelte.
+ * itself stays DOM-free. The panel element it animates lives in +page.svelte.
  */
 
 export type AppMode = "coreManagement" | "quickSetup" | "chat" | "sessionList" | "settings";

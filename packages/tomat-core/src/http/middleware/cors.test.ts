@@ -28,7 +28,7 @@ Deno.test("isOriginAllowed: rejects everything else", () => {
   assertEquals(isOriginAllowed("file://"), false);
   // Subdomain attack on tauri.localhost.
   assertEquals(isOriginAllowed("https://x.tauri.localhost"), false);
-  // 127.0.0.1 lookalike — only the canonical form matches.
+  // 127.0.0.1 lookalike: only the canonical form matches.
   assertEquals(isOriginAllowed("http://127.0.0.2"), false);
 });
 
@@ -40,10 +40,7 @@ Deno.test("CORS: reflects allowed origin and emits Vary", async () => {
     }),
   );
   assertEquals(res.status, 200);
-  assertEquals(
-    res.headers.get("access-control-allow-origin"),
-    "tauri://localhost",
-  );
+  assertEquals(res.headers.get("access-control-allow-origin"), "tauri://localhost");
   assertEquals(res.headers.get("vary"), "Origin");
 });
 
@@ -78,7 +75,7 @@ Deno.test("CORS: preflight from cross-origin is 204 with no allow headers", asyn
   assertEquals(res.headers.get("access-control-allow-origin"), null);
 });
 
-Deno.test("CORS: no Origin header → no CORS headers, request proceeds", async () => {
+Deno.test("CORS: no Origin header means no CORS headers, request proceeds", async () => {
   // curl / native http clients don't send Origin; CORS doesn't apply to
   // them anyway, so the middleware just lets the request through.
   const app = appWithCors();

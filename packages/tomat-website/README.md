@@ -4,11 +4,11 @@ Astro static site deployed to Cloudflare Workers (Static Assets). Serves
 **only** the landing page at `au.tomat.ing`. Every other artifact moved to the
 R2 public bucket at `get.au.tomat.ing`:
 
-- `/install/*` — install one-liners (`core.sh`, `client.ps1`, …)
-- `/schemas/*` — published JSON schemas (`tools-v1.json`)
-- `/manifests/*` — signed manifests (`core.json`, `binaries.json`,
+- `/install/*`: install one-liners (`core.sh`, `client.ps1`, …)
+- `/schemas/*`: published JSON schemas (`tools-v1.json`)
+- `/manifests/*`: signed manifests (`core.json`, `binaries.json`,
   `client.json`)
-- `/<version>/<triple>/…` — compiled binaries and the host Tauri bundle
+- `/<version>/<triple>/…`: compiled binaries and the host Tauri bundle
 
 The Worker stays request-free (free-tier); R2 serves the rest as a public bucket
 with its own custom domain.
@@ -32,7 +32,7 @@ deno run -A npm:wrangler@^4 r2 bucket create tomat-releases
 #      → confirm `au.tomat.ing` is attached as a Custom Domain
 #        (wrangler.toml `routes` block does this on first `deploy`).
 
-# 4. Seed `.env` at the repo root (one directory up) — copy .env.example.
+# 4. Seed `.env` at the repo root (one directory up) by copying .env.example.
 #    The release scripts auto-generate the signing keypair on first run.
 ```
 
@@ -59,11 +59,11 @@ and `--force` (skip the idempotency probe). `release:core` also takes
 
 End state of a successful `release`:
 
-- `https://au.tomat.ing/` — landing page
-- `https://get.au.tomat.ing/install/core.sh` — install one-liner
-- `https://get.au.tomat.ing/schemas/tools-v1.json` — published schema
-- `https://get.au.tomat.ing/manifests/core.json` — signed self-update manifest
-- `https://get.au.tomat.ing/<version>/<triple>/tomat-core` — binary
+- `https://au.tomat.ing/`: landing page
+- `https://get.au.tomat.ing/install/core.sh`: install one-liner
+- `https://get.au.tomat.ing/schemas/tools-v1.json`: published schema
+- `https://get.au.tomat.ing/manifests/core.json`: signed self-update manifest
+- `https://get.au.tomat.ing/<version>/<triple>/tomat-core`: binary
 
 ## Local preview
 

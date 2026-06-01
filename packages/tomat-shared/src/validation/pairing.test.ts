@@ -17,26 +17,11 @@ Deno.test("pairingCodeRequestSchema: accepts empty body (defaults)", () => {
 });
 
 Deno.test("pairingCodeRequestSchema: enforces ttlSec bounds (60 .. 3600)", () => {
-  assertEquals(
-    pairingCodeRequestSchema.safeParse({ ttlSec: 60 }).success,
-    true,
-  );
-  assertEquals(
-    pairingCodeRequestSchema.safeParse({ ttlSec: 3600 }).success,
-    true,
-  );
-  assertEquals(
-    pairingCodeRequestSchema.safeParse({ ttlSec: 59 }).success,
-    false,
-  );
-  assertEquals(
-    pairingCodeRequestSchema.safeParse({ ttlSec: 3601 }).success,
-    false,
-  );
-  assertEquals(
-    pairingCodeRequestSchema.safeParse({ ttlSec: 100.5 }).success,
-    false,
-  );
+  assertEquals(pairingCodeRequestSchema.safeParse({ ttlSec: 60 }).success, true);
+  assertEquals(pairingCodeRequestSchema.safeParse({ ttlSec: 3600 }).success, true);
+  assertEquals(pairingCodeRequestSchema.safeParse({ ttlSec: 59 }).success, false);
+  assertEquals(pairingCodeRequestSchema.safeParse({ ttlSec: 3601 }).success, false);
+  assertEquals(pairingCodeRequestSchema.safeParse({ ttlSec: 100.5 }).success, false);
 });
 
 Deno.test("pairingCodeRequestSchema: rejects unknown fields (strict mode)", () => {
@@ -59,8 +44,7 @@ Deno.test("pakeStartRequestSchema: rejects empty / >64-char clientName", () => {
       clientName: "",
       sid: B64_32,
       msgA: B64_32,
-    })
-      .success,
+    }).success,
     false,
   );
   assertEquals(
@@ -105,14 +89,8 @@ Deno.test("pakeFinishRequestSchema: accepts pakeId + base64 confirmC", () => {
 });
 
 Deno.test("pakeFinishRequestSchema: rejects missing/empty fields + unknowns", () => {
-  assertEquals(
-    pakeFinishRequestSchema.safeParse({ pakeId: "", confirmC: B64_32 }).success,
-    false,
-  );
-  assertEquals(
-    pakeFinishRequestSchema.safeParse({ pakeId: "x", confirmC: "@@" }).success,
-    false,
-  );
+  assertEquals(pakeFinishRequestSchema.safeParse({ pakeId: "", confirmC: B64_32 }).success, false);
+  assertEquals(pakeFinishRequestSchema.safeParse({ pakeId: "x", confirmC: "@@" }).success, false);
   assertEquals(
     pakeFinishRequestSchema.safeParse({
       pakeId: "x",

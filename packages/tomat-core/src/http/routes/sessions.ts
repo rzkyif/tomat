@@ -34,9 +34,7 @@ export function sessionsRoutes(): Hono {
   r.post("/", async (c) => {
     const me = requireClient(c);
     const body = (await readJson(c)) as { title?: string };
-    return c.json(
-      sessionsRepo().create({ ownerClientId: me.id, title: body.title }),
-    );
+    return c.json(sessionsRepo().create({ ownerClientId: me.id, title: body.title }));
   });
 
   r.get("/:id", (c) => {
@@ -64,11 +62,7 @@ export function sessionsRoutes(): Hono {
         await Deno.remove(p);
       } catch (err) {
         if (!(err instanceof Deno.errors.NotFound)) {
-          log.warn(
-            `session delete: failed to remove attachment ${p}: ${
-              errMessage(err)
-            }`,
-          );
+          log.warn(`session delete: failed to remove attachment ${p}: ${errMessage(err)}`);
         }
       }
     }
@@ -82,9 +76,7 @@ export function sessionsRoutes(): Hono {
     if (!parsed.success) {
       throw new AppError("validation_error", parsed.error.message);
     }
-    return c.json(
-      sessionsRepo().appendMessage(session.id, parsed.data as Message),
-    );
+    return c.json(sessionsRepo().appendMessage(session.id, parsed.data as Message));
   });
 
   r.patch("/:id/messages/:msgId", async (c) => {
@@ -93,12 +85,8 @@ export function sessionsRoutes(): Hono {
     // Look up the row first so we can validate the patch against the
     // schema that matches its role; this is what blocks a UserMessage from
     // being patched with assistant-only fields like `streaming` / `toolCalls`.
-    const existing = sessionsRepo().getMessage(
-      session.id,
-      c.req.param("msgId"),
-    );
-    const schema =
-      messagePatchSchemaByRole[existing.role as MessageRoleForPatch];
+    const existing = sessionsRepo().getMessage(session.id, c.req.param("msgId"));
+    const schema = messagePatchSchemaByRole[existing.role as MessageRoleForPatch];
     if (!schema) {
       throw new AppError(
         "validation_error",
@@ -167,7 +155,9 @@ export function sessionsRoutes(): Hono {
       closed = true;
       try {
         file.close();
-      } catch { /* already closed by drain — ignore */ }
+      } catch {
+        /* already closed by drain; ignore */
+      }
     };
     const body = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -190,8 +180,8 @@ export function sessionsRoutes(): Hono {
     });
   });
 
-  // SSE chat fallback for non-WS clients (plan §4). One-shot completion —
-  // no tool support, no reasoning trace, no multi-stream multiplexing. The
+  // SSE chat fallback for non-WS clients (plan §4). One-shot completion.
+  // No tool support, no reasoning trace, no multi-stream multiplexing. The
   // WS path (chat.start) covers all of those.
   //
   // Body: { content: string }
@@ -205,10 +195,7 @@ export function sessionsRoutes(): Hono {
     const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
     const body = (await readJson(c)) as { content?: unknown };
     if (typeof body.content !== "string" || body.content.length === 0) {
-      throw new AppError(
-        "validation_error",
-        "body must be { content: string }",
-      );
+      throw new AppError("validation_error", "body must be { content: string }");
     }
 
     // Persist the user message so the SSE response can be replayed from
@@ -225,10 +212,7 @@ export function sessionsRoutes(): Hono {
     const settings = await loadCoreSettings();
     const endpoint = await resolveEndpoint(settings, "default");
     const isLocal = strSetting(settings, "llm.provider", "local") === "local";
-    const messages = historyToOpenAI(
-      history,
-      strSetting(settings, "llm.systemPrompt", ""),
-    );
+    const messages = historyToOpenAI(history, strSetting(settings, "llm.systemPrompt", ""));
 
     const req: LlmRequest = { endpoint, messages };
 
@@ -236,24 +220,18 @@ export function sessionsRoutes(): Hono {
     const stream = new ReadableStream({
       async start(controller) {
         let assistantText = "";
-        let usage:
-          | { prompt: number; completion: number; total: number }
-          | undefined;
+        let usage: { prompt: number; completion: number; total: number } | undefined;
         try {
-          for await (
-            const delta of llmScheduler().schedule(req, {
-              clientId: me.id,
-              isLocal,
-              parallelSlots: numSetting(settings, "llm.local.parallelSlots", 4),
-            })
-          ) {
+          for await (const delta of llmScheduler().schedule(req, {
+            clientId: me.id,
+            isLocal,
+            parallelSlots: numSetting(settings, "llm.local.parallelSlots", 4),
+          })) {
             if (delta.contentDelta) {
               assistantText += delta.contentDelta;
-              controller.enqueue(encoder.encode(
-                `data: ${
-                  JSON.stringify({ contentDelta: delta.contentDelta })
-                }\n\n`,
-              ));
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ contentDelta: delta.contentDelta })}\n\n`),
+              );
             }
             if (delta.usage) usage = delta.usage;
           }
@@ -266,19 +244,15 @@ export function sessionsRoutes(): Hono {
               createdAtMs: Date.now(),
             } as Message);
           }
-          controller.enqueue(encoder.encode(
-            `data: ${JSON.stringify({ done: true, usage })}\n\n`,
-          ));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true, usage })}\n\n`));
         } catch (err) {
-          controller.enqueue(encoder.encode(
-            `data: ${
-              JSON.stringify({
-                error: scrubSecrets(
-                  errMessage(err),
-                ),
-              })
-            }\n\n`,
-          ));
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                error: scrubSecrets(errMessage(err)),
+              })}\n\n`,
+            ),
+          );
         } finally {
           controller.close();
         }
@@ -290,7 +264,7 @@ export function sessionsRoutes(): Hono {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
+        Connection: "keep-alive",
       },
     });
   });
@@ -307,7 +281,7 @@ function historyToOpenAI(
   const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
   if (systemPrompt) out.push({ role: "system", content: systemPrompt });
   for (const m of history) {
-    // Only carry user/assistant/system through the fallback — tool messages
+    // Only carry user/assistant/system through the fallback. Tool messages
     // and reasoning are WS-path concerns. SSE doesn't transport images, so
     // multipart content collapses to its text parts (attachments inlined as
     // text are still useful; image bytes are dropped without warning).
@@ -319,20 +293,12 @@ function historyToOpenAI(
   return out;
 }
 
-function strSetting(
-  s: Record<string, unknown>,
-  key: string,
-  def: string,
-): string {
+function strSetting(s: Record<string, unknown>, key: string, def: string): string {
   const v = s[key];
   return typeof v === "string" ? v : def;
 }
 
-function numSetting(
-  s: Record<string, unknown>,
-  key: string,
-  def: number,
-): number {
+function numSetting(s: Record<string, unknown>, key: string, def: number): number {
   const v = s[key];
   return typeof v === "number" ? v : def;
 }
@@ -348,7 +314,7 @@ async function readJson(c: import("hono").Context): Promise<unknown> {
 // Filenames are attacker-controlled (uploaded via /sessions/:id/attachments)
 // and end up on disk as `${id}_${filename}`. The id prefix already prevents
 // directory traversal (`/`, `\` are still stripped below), but Windows has
-// extra rules — reserved basenames, trailing dots/spaces, length limits —
+// extra rules (reserved basenames, trailing dots/spaces, length limits)
 // that aren't covered by a simple replace, and control chars / pipe-shell
 // glyphs are best stripped on every host. Returns a non-empty string that
 // is safe to join into a single path segment.
@@ -358,8 +324,8 @@ const MAX_LEN = 200;
 // Exported for unit tests; not used outside this module.
 export function sanitizeFilename(name: string): string {
   // 1. Strip control chars + replace path / shell / Windows-forbidden glyphs.
-  // deno-lint-ignore no-control-regex
-  let out = name.replace(/[\x00-\x1f\/\\:*?"<>|]/g, "_");
+  // oxlint-disable-next-line no-control-regex
+  let out = name.replace(/[\x00-\x1f/\\:*?"<>|]/g, "_");
   // 2. Strip leading dots (hidden files) and trailing dots/spaces (Windows
   //    silently drops them, which then collides with neighboring names).
   out = out.replace(/^\.+/, "").replace(/[. ]+$/, "");

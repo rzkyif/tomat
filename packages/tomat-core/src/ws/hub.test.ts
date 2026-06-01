@@ -1,10 +1,10 @@
-// WS upgrade contract — bearer auth at handshake, ping/pong round-trip.
+// WS upgrade contract: bearer auth at handshake, ping/pong round-trip.
 // Uses a real Deno.serve on an ephemeral port and a real WebSocket dial-back
 // because `app.fetch()` can't drive Deno.upgradeWebSocket; this is the only
 // way to exercise the actual upgrade hook.
 //
 // The chat orchestrator (chat.start through to streamed assistant deltas) is
-// intentionally NOT exercised here — it requires a fake LLM endpoint and is
+// intentionally NOT exercised here. It requires a fake LLM endpoint and is
 // a separate integration. This file only verifies the WS hub envelope.
 
 import { assertEquals } from "@std/assert";
@@ -22,14 +22,11 @@ function startServer(): RunningServer {
   const app = buildApp();
   const hub = wsHub();
   const abort = new AbortController();
-  const server = Deno.serve(
-    { port: 0, hostname: "127.0.0.1", signal: abort.signal },
-    (req) => {
-      const url = new URL(req.url);
-      if (url.pathname === "/ws/v1") return hub.handleUpgrade(req);
-      return app.fetch(req);
-    },
-  );
+  const server = Deno.serve({ port: 0, hostname: "127.0.0.1", signal: abort.signal }, (req) => {
+    const url = new URL(req.url);
+    if (url.pathname === "/ws/v1") return hub.handleUpgrade(req);
+    return app.fetch(req);
+  });
   const port = (server.addr as Deno.NetAddr).port;
   return {
     port,
@@ -109,7 +106,7 @@ Deno.test({
     const env = await setupTestEnv();
     const server = startServer();
     try {
-      // Plain HTTP GET to /ws/v1 without an Upgrade header — the auth check
+      // Plain HTTP GET to /ws/v1 without an Upgrade header. The auth check
       // runs BEFORE the upgrade attempt, so we get the 401 directly.
       const res = await fetch(`http://127.0.0.1:${server.port}/ws/v1`);
       assertEquals(res.status, 401);
@@ -129,9 +126,7 @@ Deno.test({
     const env = await setupTestEnv();
     const server = startServer();
     try {
-      const res = await fetch(
-        `http://127.0.0.1:${server.port}/ws/v1?token=not-real`,
-      );
+      const res = await fetch(`http://127.0.0.1:${server.port}/ws/v1?token=not-real`);
       assertEquals(res.status, 401);
     } finally {
       await server.stop();
@@ -155,7 +150,7 @@ Deno.test({
       const wsB = dial(server.port, tokenB);
       await Promise.all([once(wsA, "open"), once(wsB, "open")]);
 
-      // Fire a broadcast through the hub (synthetic — production triggers
+      // Fire a broadcast through the hub (synthetic; production triggers
       // come from downloadManager / sidecarManager / update subscribers).
       const recvA = nextMessage(wsA);
       const recvB = nextMessage(wsB);
@@ -183,10 +178,7 @@ Deno.test({
     const env = await setupTestEnv();
     const server = startServer();
     try {
-      const { token, clientId } = await pairClient(
-        "ws-revoke-test",
-        "127.0.0.1",
-      );
+      const { token, clientId } = await pairClient("ws-revoke-test", "127.0.0.1");
       const ws = dial(server.port, token);
       await once(ws, "open");
       const closed = once<CloseEvent>(ws, "close");
@@ -216,7 +208,7 @@ Deno.test({
       const ws = dial(server.port, token);
       await once(ws, "open");
       ws.send("not-json-at-all{");
-      // Valid follow-up: ping → expect a pong, proving the socket survived.
+      // Valid follow-up: ping, then expect a pong, proving the socket survived.
       ws.send(JSON.stringify({ kind: "ping" }));
       const reply = await nextMessage(ws);
       assertEquals(JSON.parse(reply), { kind: "pong" });

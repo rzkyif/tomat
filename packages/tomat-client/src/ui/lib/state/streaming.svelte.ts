@@ -296,7 +296,7 @@ class StreamingState {
     const content = detail ? `${errorType}\n${detail}` : String(errorType);
     if (idx >= 0) {
       const existing = messagesState.messages[idx];
-      // Build the replacement as a typed Message — the Message union
+      // Build the replacement as a typed Message. The Message union
       // already carries `role: "error"` as a valid variant, so no cast
       // is needed.
       const replacement: (typeof messagesState.messages)[number] = {

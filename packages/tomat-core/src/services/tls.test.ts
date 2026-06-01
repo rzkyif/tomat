@@ -5,11 +5,7 @@
 import { assertEquals } from "@std/assert";
 import * as x509 from "@peculiar/x509";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import {
-  __resetForTesting,
-  tlsCertFingerprint,
-  tlsServeOptions,
-} from "./tls.ts";
+import { __resetForTesting, tlsCertFingerprint, tlsServeOptions } from "./tls.ts";
 
 x509.cryptoProvider.set(crypto);
 

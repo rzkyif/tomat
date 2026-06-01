@@ -38,18 +38,13 @@ export interface ToolGrantContext {
 
 // Compose the union flag set across an array of (decl, grant) contexts.
 // Per-permission keys must appear in both `required` and `grants` (granted
-// state) to contribute. Unknown grant keys are ignored — they're stale
+// state) to contribute. Unknown grant keys are ignored. They're stale
 // holdovers from a previous tools.json version.
-export function unionFlags(
-  tools: ToolGrantContext[],
-  templates: PathTemplates,
-): FlagSet {
+export function unionFlags(tools: ToolGrantContext[], templates: PathTemplates): FlagSet {
   const out = emptyFlagSet();
   for (const tool of tools) {
     const grantedKeys = new Set(
-      tool.grants.filter((g) => g.state === "granted").map((g) =>
-        g.permissionKey
-      ),
+      tool.grants.filter((g) => g.state === "granted").map((g) => g.permissionKey),
     );
     for (const decl of tool.required) {
       const key = declKey(decl);
@@ -96,11 +91,7 @@ export function expandPath(template: string, templates: PathTemplates): string {
     .replace(/\$env\.([A-Z_][A-Z0-9_]*)/g, (_, key) => Deno.env.get(key) ?? "");
 }
 
-function applyDecl(
-  flags: FlagSet,
-  decl: PermissionDecl,
-  templates: PathTemplates,
-): void {
+function applyDecl(flags: FlagSet, decl: PermissionDecl, templates: PathTemplates): void {
   switch (decl.kind) {
     case "net": {
       for (const port of decl.ports) {

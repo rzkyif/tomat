@@ -2,7 +2,7 @@ import type { SettingGroup } from "../types.ts";
 
 // Core HTTP server settings. Persisted in ~/.tomat/core/settings.json
 // (destination: "core") because they affect the binding of the core's
-// HTTP listener itself — toggling requires a core restart.
+// HTTP listener itself. Toggling requires a core restart.
 export const serverGroup: SettingGroup = {
   id: "server",
   destination: "core",

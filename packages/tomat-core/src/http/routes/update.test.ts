@@ -1,6 +1,6 @@
 // HTTP contract for /api/v1/update. Both endpoints go through the
 // real self-updater which fetches/signature-verifies the manifest from
-// the live CDN — we only assert that auth is enforced.
+// the live CDN. We only assert that auth is enforced.
 
 import { assertEquals } from "@std/assert";
 import { buildApp } from "../server.ts";
@@ -21,9 +21,7 @@ Deno.test("POST /api/v1/update/apply: requires bearer (401)", async () => {
   const env = await setupTestEnv();
   try {
     const app = buildApp();
-    const res = await app.fetch(
-      new Request("http://x/api/v1/update/apply", { method: "POST" }),
-    );
+    const res = await app.fetch(new Request("http://x/api/v1/update/apply", { method: "POST" }));
     assertEquals(res.status, 401);
   } finally {
     await env.teardown();

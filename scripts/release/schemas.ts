@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run -A
-// release:schemas — uploads the published JSON schemas (currently just
+// release:schemas: uploads the published JSON schemas (currently just
 // tools-v1.json) to R2 under schemas/. Per-file idempotent.
 //
 // Flags:
@@ -38,10 +38,13 @@ interface Flags {
 
 function parseFlags(): Flags {
   // Strip the bare `--` token that `deno task <name> -- ...` passes through.
-  const args = parseArgs(Deno.args.filter((a) => a !== "--"), {
-    boolean: ["dry-run", "force", "help"],
-    default: { "dry-run": false, "force": false, "help": false },
-  });
+  const args = parseArgs(
+    Deno.args.filter((a) => a !== "--"),
+    {
+      boolean: ["dry-run", "force", "help"],
+      default: { "dry-run": false, force: false, help: false },
+    },
+  );
   if (args.help) {
     console.log(`Usage: deno task release:schemas [flags]
 
@@ -74,13 +77,7 @@ export async function main(): Promise<void> {
       info(`would upload ${r2Key}`);
       continue;
     }
-    await r2Put(
-      env,
-      r2Key,
-      fullSrc,
-      "application/json",
-      SCHEMA_CACHE_CONTROL,
-    );
+    await r2Put(env, r2Key, fullSrc, "application/json", SCHEMA_CACHE_CONTROL);
     ok(`uploaded ${r2Key}`);
     uploaded++;
   }

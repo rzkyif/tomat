@@ -71,10 +71,12 @@ function initTestLogger(): void {
 export function createTestClient(name = "test-client"): string {
   const id = newClientId();
   const now = Date.now();
-  db().prepare(`
+  db()
+    .prepare(`
     INSERT INTO clients (id, name, token_hash, created_at_ms, last_seen_ms, revoked)
     VALUES (?, ?, ?, ?, ?, 0)
-  `).run(id, name, `hash-${id}`, now, now);
+  `)
+    .run(id, name, `hash-${id}`, now, now);
   return id;
 }
 

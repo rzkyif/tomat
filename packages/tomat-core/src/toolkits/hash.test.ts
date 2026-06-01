@@ -1,6 +1,6 @@
 // toolkit content-hash determinism + .gitignore semantics. Uses real
 // tempdir filesystem because the function walks Deno.readDir; not feasible
-// to mock without a lot of indirection. Tempdir-only — no global state.
+// to mock without a lot of indirection. Tempdir-only, no global state.
 
 import { assertEquals, assertNotEquals } from "@std/assert";
 import { join } from "@std/path";
@@ -72,8 +72,8 @@ Deno.test("hashToolkit: .gitignore'd files are excluded but the .gitignore itsel
     ".gitignore": "secrets/\n",
     "secrets/key": `s3cret`,
   });
-  // Same layout, but secrets/ contents differ — must hash the same since
-  // they're excluded.
+  // Same layout, but secrets/ contents differ. They must hash the same
+  // since they're excluded.
   const b = await makeToolkit({
     "tools.json": `{}`,
     ".gitignore": "secrets/\n",

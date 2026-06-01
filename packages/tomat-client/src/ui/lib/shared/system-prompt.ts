@@ -6,7 +6,13 @@
  */
 
 import { getCountryForTimezone } from "countries-and-timezones";
-import { settingsState } from "../state";
+// Import settingsState from its module directly, NOT the `../state` barrel: the
+// barrel re-exports messages.svelte, which imports this file, so going through
+// it forms a cycle (messages -> system-prompt -> state/index -> messages). Under
+// WebKit's strict ESM evaluation that cycle aborts +page.svelte's module init
+// and surfaces as the SvelteKit "Cannot access 'component' before
+// initialization" TDZ (sveltejs/kit#15287), blocking the whole UI in dev.
+import { settingsState } from "../state/settings.svelte";
 import { DEFAULT_CONTEXT_TEMPLATE } from "@tomat/shared";
 import type { SnippetOverride } from "./snippets";
 
@@ -114,7 +120,7 @@ function collectContextVars(): Record<string, string> {
  *  Driven by `prompts.contextTemplate`: the user can edit the template freely
  *  using `{name}` placeholders and `[name:body]` conditional segments. See
  *  `renderContextTemplate` and `DEFAULT_CONTEXT_TEMPLATE` for the syntax.
- *  The `[toolsAvailable:...]` segment is intentionally NOT rendered here — it
+ *  The `[toolsAvailable:...]` segment is intentionally NOT rendered here. It
  *  is appended separately at turn time via `buildToolsHint` so the hint only
  *  shows up on turns where tools actually survive the relevance filter.
  */

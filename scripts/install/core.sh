@@ -391,7 +391,7 @@ ui_die() {
 # --- configuration --------------------------------------------------------
 
 STORAGE="${TOMAT_STORAGE:-https://get.au.tomat.ing}"
-# Install channel — every channel lives under ~/.tomat/<channel>/ so dev /
+# Install channel. Every channel lives under ~/.tomat/<channel>/ so dev /
 # beta installs never collide with stable. Selectable via the TOMAT_CHANNEL
 # env var or a `--channel <c>` / `--beta` argument (the arg wins). Validate up
 # front; an unknown value would mis-place state and confuse the client's

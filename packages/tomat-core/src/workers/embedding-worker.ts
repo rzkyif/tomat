@@ -11,7 +11,7 @@
 //   out <- { kind: "embedded", id, vectorsBase64 }
 //        | { kind: "embed_err", id, error }
 //
-// The worker emits { kind: "ready" } once env config is in place — the
+// The worker emits { kind: "ready" } once env config is in place. The
 // host waits for this before sending any embed request.
 //
 // Vectors are Float32Array serialized as base64-encoded little-endian

@@ -5,9 +5,59 @@
     "packages/tomat-builtin-toolkit",
     "scripts"
   ],
+  "deno.lint": false,
   "rust-analyzer.linkedProjects": [
     "packages/tomat-client/src/tauri/Cargo.toml",
     "packages/tomat-core-keychain/Cargo.toml",
     "packages/tomat-core-updater/Cargo.toml"
-  ]
+  ],
+  "unocss.root": ["packages/tomat-client"],
+  "unocss.exclude": ["**/node_modules/**", "**/target/**", "**/.git/**"],
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/target/**": true,
+    "**/.deno/**": true,
+    "**/.git/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/target": true,
+    "**/.deno": true
+  },
+  "search.followSymlinks": false,
+  "oxc.enable.oxfmt": true,
+  "oxc.fmt.experimental": true,
+  "oxc.fmt.configPath": ".oxfmtrc.json",
+  "editor.formatOnSave": true,
+  "editor.formatOnSaveMode": "file",
+  "[typescript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[markdown]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[svelte]": {
+    "editor.defaultFormatter": "svelte.svelte-vscode"
+  },
+  "[astro]": {
+    "editor.defaultFormatter": "astro-build.astro-vscode"
+  },
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  }
 }

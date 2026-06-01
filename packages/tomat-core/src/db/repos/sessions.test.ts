@@ -1,7 +1,7 @@
 // SessionsRepo CRUD + the cross-client tenancy guarantee that the
 // owner_client_id WHERE clauses are supposed to enforce. Skips message and
 // attachment edge cases that are sufficiently covered by the chat.ts
-// integration test — keep this slim.
+// integration test. Keep this slim.
 
 import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
 import type { Message } from "@tomat/shared";

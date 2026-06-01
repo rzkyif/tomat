@@ -1,4 +1,4 @@
-// SnippetsState — load/save/delete against an in-memory platform mock.
+// SnippetsState: load/save/delete against an in-memory platform mock.
 // Verifies the round-trip through platform().clientSettings + the reactive
 // `snippets` field.
 

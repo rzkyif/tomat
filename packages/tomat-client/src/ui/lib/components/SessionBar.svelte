@@ -136,9 +136,11 @@
   );
 
   let showTitle = $derived(!isNewSession && storageEnabled);
-  // The session-list button is always available when storage is on, so the
-  // button group shows whenever storage is enabled.
-  let showButtonGroup = $derived(storageEnabled);
+  // The session-list button only makes sense when there are stored sessions to
+  // list. In a fresh new-chat with no existing sessions the whole bar stays
+  // hidden. The only action (new session) is already the current state.
+  let hasSessions = $derived(sessionsState.list.length > 0);
+  let showButtonGroup = $derived(storageEnabled && hasSessions);
   let showBar = $derived(
     !!messagesState.tokenUsage || showTitle || showButtonGroup,
   );

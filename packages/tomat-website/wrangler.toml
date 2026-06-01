@@ -15,16 +15,14 @@ compatibility_date = "2026-05-20"
 
 # Attach au.tomat.ing as a Custom Domain. Cloudflare manages the DNS
 # record automatically; you only need the zone in your CF account.
-# `routes` MUST be top-level (not inside [assets]) — TOML scoping rules
+# `routes` MUST be top-level (not inside [assets]). TOML scoping rules
 # would otherwise place it under the preceding [assets] header, where
 # wrangler ignores it with a warning.
-routes = [
-  { pattern = "au.tomat.ing", custom_domain = true },
-]
+routes = [{ pattern = "au.tomat.ing", custom_domain = true }]
 
 [assets]
 # Astro builds into ./dist; wrangler serves every file from there at the
-# corresponding URL path. SPA-style fallback is off — 404s render Astro's
+# corresponding URL path. SPA-style fallback is off, so 404s render Astro's
 # 404 page (when we add one) rather than rewriting to index.html.
 directory = "./dist"
 not_found_handling = "404-page"

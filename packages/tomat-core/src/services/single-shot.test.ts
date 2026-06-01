@@ -11,12 +11,11 @@ import { singleShot } from "./single-shot.ts";
 // streamChatCompletion adapter.
 function fakeSse(chunks: string[]): Response {
   const lines = chunks
-    .map((c) =>
-      `data: ${
-        JSON.stringify({
+    .map(
+      (c) =>
+        `data: ${JSON.stringify({
           choices: [{ delta: { content: c }, index: 0, finish_reason: null }],
-        })
-      }\n\n`
+        })}\n\n`,
     )
     .concat("data: [DONE]\n\n");
   const body = new TextEncoder().encode(lines.join(""));
@@ -27,8 +26,7 @@ function fakeSse(chunks: string[]): Response {
 }
 
 Deno.test("singleShot: concatenates content deltas and trims the result", async () => {
-  const fakeFetch = () =>
-    Promise.resolve(fakeSse(["  Hello", ", ", "world!  "]));
+  const fakeFetch = () => Promise.resolve(fakeSse(["  Hello", ", ", "world!  "]));
   const out = await singleShot({
     systemPrompt: "You are terse.",
     userMessage: "Greet me",

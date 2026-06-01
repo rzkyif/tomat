@@ -9,18 +9,29 @@
 
 import { z } from "zod";
 
-// Base64 of an N-byte buffer (no padding tolerance needed — both ends use btoa).
+// Base64 of an N-byte buffer (no padding tolerance needed since both ends use btoa).
 const base64 = (label: string) =>
-  z.string().min(1).max(512).regex(/^[A-Za-z0-9+/]+=*$/, {
-    message: `${label} must be base64`,
-  });
+  z
+    .string()
+    .min(1)
+    .max(512)
+    .regex(/^[A-Za-z0-9+/]+=*$/, {
+      message: `${label} must be base64`,
+    });
 
 const clientName = z.string().min(1).max(64);
 
-export const pairingCodeRequestSchema = z.object({
-  // Optional caller-requested TTL in seconds. Core enforces a 60-min ceiling.
-  ttlSec: z.number().int().min(60).max(60 * 60).optional(),
-}).strict();
+export const pairingCodeRequestSchema = z
+  .object({
+    // Optional caller-requested TTL in seconds. Core enforces a 60-min ceiling.
+    ttlSec: z
+      .number()
+      .int()
+      .min(60)
+      .max(60 * 60)
+      .optional(),
+  })
+  .strict();
 
 export type PairingCodeRequest = z.infer<typeof pairingCodeRequestSchema>;
 
@@ -33,11 +44,13 @@ export interface PairingCodeResponse {
 
 // Step 1: client (initiator) → core. `sid` is the CPace session id the client
 // generated; `msgA` is the client's CPace public element (Ya).
-export const pakeStartRequestSchema = z.object({
-  clientName,
-  sid: base64("sid"),
-  msgA: base64("msgA"),
-}).strict();
+export const pakeStartRequestSchema = z
+  .object({
+    clientName,
+    sid: base64("sid"),
+    msgA: base64("msgA"),
+  })
+  .strict();
 
 export type PakeStartRequest = z.infer<typeof pakeStartRequestSchema>;
 
@@ -49,10 +62,12 @@ export interface PakeStartResponse {
 }
 
 // Step 2: client → core. `confirmC` is MAC(K, "C" ‖ transcript ‖ pinClientSaw).
-export const pakeFinishRequestSchema = z.object({
-  pakeId: z.string().min(1).max(64),
-  confirmC: base64("confirmC"),
-}).strict();
+export const pakeFinishRequestSchema = z
+  .object({
+    pakeId: z.string().min(1).max(64),
+    confirmC: base64("confirmC"),
+  })
+  .strict();
 
 export type PakeFinishRequest = z.infer<typeof pakeFinishRequestSchema>;
 
@@ -60,7 +75,7 @@ export interface PakeFinishResponse {
   token: string;
   clientId: string;
   coreVersion: string;
-  // MAC(K, "S" ‖ transcript ‖ pinCoreHas) — the client verifies it against the
+  // MAC(K, "S" ‖ transcript ‖ pinCoreHas). The client verifies it against the
   // pin it observed, authenticating core and confirming the pin (no MITM).
   confirmS: string;
 }

@@ -47,15 +47,13 @@ interface MockResponse {
 
 function installFakeFetch(plan: (url: string) => MockResponse): () => void {
   const original = globalThis.fetch;
-  globalThis.fetch = ((
-    input: RequestInfo | URL,
-    _init?: RequestInit,
-  ) => {
-    const url = typeof input === "string"
-      ? input
-      : input instanceof URL
-      ? input.toString()
-      : (input as Request).url;
+  globalThis.fetch = ((input: RequestInfo | URL, _init?: RequestInit) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as Request).url;
     const r = plan(url);
     const body = r.body ?? new Uint8Array(0);
     return Promise.resolve(
@@ -63,7 +61,7 @@ function installFakeFetch(plan: (url: string) => MockResponse): () => void {
         status: r.status ?? 200,
         headers: {
           "content-length": String(body.byteLength),
-          ...(r.headers ?? {}),
+          ...r.headers,
         },
       }),
     );
@@ -73,9 +71,7 @@ function installFakeFetch(plan: (url: string) => MockResponse): () => void {
   };
 }
 
-async function withTempDownloads<T>(
-  fn: (dir: string) => Promise<T>,
-): Promise<T> {
+async function withTempDownloads<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await Deno.makeTempDir({ prefix: "tomat-download-t1-" });
   const prior = Deno.env.get("XDG_DOWNLOAD_DIR");
   Deno.env.set("XDG_DOWNLOAD_DIR", dir);
@@ -94,10 +90,7 @@ Deno.test("download: writes the body to XDG_DOWNLOAD_DIR and reports bytes", asy
     const restore = installFakeFetch(() => ({ body: payload }));
     try {
       const ctx = makeCtx();
-      const result = await download(
-        { url: "https://example.com/file.txt" },
-        ctx,
-      );
+      const result = await download({ url: "https://example.com/file.txt" }, ctx);
       assertEquals(result.bytes, payload.byteLength);
       assertEquals(result.path.startsWith(dir), true);
       const written = await Deno.readFile(result.path);
@@ -127,11 +120,7 @@ Deno.test("download: setProgress fires 0 at start and 1 at completion", async ()
 Deno.test("download: rejects non-http(s) URLs before touching fetch", async () => {
   await withTempDownloads(async () => {
     const ctx = makeCtx();
-    await assertRejects(
-      () => download({ url: "ftp://example.com/x" }, ctx),
-      Error,
-      "only http(s)",
-    );
+    await assertRejects(() => download({ url: "ftp://example.com/x" }, ctx), Error, "only http(s)");
   });
 });
 
@@ -160,10 +149,7 @@ Deno.test("download: honors ctx.signal aborted before the first chunk", async ()
       const abort = new AbortController();
       abort.abort();
       const ctx = makeCtx(abort.signal);
-      await assertRejects(
-        () => download({ url: "https://example.com/x" }, ctx),
-        Error,
-      );
+      await assertRejects(() => download({ url: "https://example.com/x" }, ctx), Error);
     } finally {
       restore();
     }
@@ -177,10 +163,7 @@ Deno.test("download: derives filename from URL path when no filename arg is give
     }));
     try {
       const ctx = makeCtx();
-      const result = await download(
-        { url: "https://example.com/sub/MyFile.bin" },
-        ctx,
-      );
+      const result = await download({ url: "https://example.com/sub/MyFile.bin" }, ctx);
       assertEquals(result.path, `${dir}/MyFile.bin`);
     } finally {
       restore();

@@ -91,11 +91,7 @@ function concat(...parts: Uint8Array[]): Uint8Array {
  *   len(prepend_len(DSI)) - 1). The zero padding fills the first hash block so
  * the byte count to hash is independent of short-password length.
  */
-function generatorString(
-  prs: Uint8Array,
-  ci: Uint8Array,
-  sid: Uint8Array,
-): Uint8Array {
+function generatorString(prs: Uint8Array, ci: Uint8Array, sid: Uint8Array): Uint8Array {
   const lenZpad = Math.max(
     0,
     HASH_BLOCK_BYTES - prependLen(prs).length - prependLen(DSI).length - 1,
@@ -108,11 +104,7 @@ function generatorString(
  * SHA-512, then apply ristretto255 element_derivation (hashToCurve). Returns the
  * decoded internal point _g.
  */
-function calculateGenerator(
-  prs: Uint8Array,
-  ci: Uint8Array,
-  sid: Uint8Array,
-): Pt {
+function calculateGenerator(prs: Uint8Array, ci: Uint8Array, sid: Uint8Array): Pt {
   const genStr = generatorString(prs, ci, sid);
   const genHash = sha512(genStr).subarray(0, 2 * FIELD_SIZE_BYTES);
   return Point.hashToCurve(genHash);
@@ -188,10 +180,7 @@ function computeIsk(
   yb: Uint8Array,
   adb: Uint8Array,
 ): Uint8Array {
-  const input = concat(
-    lvCat(DSI_ISK, sid, k),
-    transcriptIr(ya, ada, yb, adb),
-  );
+  const input = concat(lvCat(DSI_ISK, sid, k), transcriptIr(ya, ada, yb, adb));
   return sha512(input);
 }
 
@@ -241,7 +230,7 @@ export interface CpaceInitiator {
  * `ci` is the CPace channel identifier: a public value both parties must agree
  * on for the run to succeed (it is folded into the generator, so the derived key
  * differs if the two sides disagree). In tomat we pass the observed TLS cert
- * pin, binding it INTO the key — a MITM that presents a different cert yields a
+ * pin, binding it INTO the key. A MITM that presents a different cert yields a
  * different key on each side, so the handshake fails.
  */
 export function cpaceInitiatorStart(
@@ -249,14 +238,7 @@ export function cpaceInitiatorStart(
   sid: Uint8Array,
   ci: Uint8Array = EMPTY,
 ): CpaceInitiator {
-  return cpaceInitiatorStartInternal(
-    password,
-    sid,
-    ci,
-    EMPTY,
-    EMPTY,
-    () => sampleScalar(),
-  );
+  return cpaceInitiatorStartInternal(password, sid, ci, EMPTY, EMPTY, () => sampleScalar());
 }
 
 function cpaceInitiatorStartInternal(
@@ -296,7 +278,7 @@ export interface CpaceResponderResult {
  * Run CPace as the responder (party B): consume msgA (Ya) and the shared
  * password, producing msgB to send back plus the derived key. Throws if msgA is
  * an invalid / identity / wrong-length encoding. `ci` is the channel identifier
- * (see `cpaceInitiatorStart`) — pass the server's real cert pin.
+ * (see `cpaceInitiatorStart`); pass the server's real cert pin.
  */
 export function cpaceResponder(
   password: string,
@@ -304,15 +286,7 @@ export function cpaceResponder(
   msgA: Uint8Array,
   ci: Uint8Array = EMPTY,
 ): CpaceResponderResult {
-  return cpaceResponderInternal(
-    password,
-    sid,
-    msgA,
-    ci,
-    EMPTY,
-    EMPTY,
-    () => sampleScalar(),
-  );
+  return cpaceResponderInternal(password, sid, msgA, ci, EMPTY, EMPTY, () => sampleScalar());
 }
 
 function cpaceResponderInternal(
@@ -360,12 +334,7 @@ export function confirmTag(
   msgB: Uint8Array,
   pin: string,
 ): Uint8Array {
-  const msg = concat(
-    Uint8Array.from([ROLE_BYTE[role]]),
-    lv2(msgA),
-    lv2(msgB),
-    lv2(utf8(pin)),
-  );
+  const msg = concat(Uint8Array.from([ROLE_BYTE[role]]), lv2(msgA), lv2(msgB), lv2(utf8(pin)));
   return hmac(sha256, isk, msg);
 }
 

@@ -1,4 +1,4 @@
-// ColorPickerState — open/close + apply-callback semantics.
+// ColorPickerState: open/close + apply-callback semantics.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { colorPickerState } from "./color-picker.svelte";

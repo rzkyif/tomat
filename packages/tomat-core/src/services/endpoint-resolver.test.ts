@@ -1,4 +1,4 @@
-// endpoint resolver — pure transform over a settings record. Secret
+// endpoint resolver: pure transform over a settings record. Secret
 // lookups are mocked through the secrets module (we don't need to stand
 // up the encrypted vault for this).
 
@@ -39,11 +39,14 @@ Deno.test("resolveEndpoint: external provider routes to llm.external.* fields", 
 });
 
 Deno.test("resolveEndpoint: route=secondary reads dualModel.* fields", async () => {
-  const cfg = await resolveEndpoint({
-    "dualModel.external.baseUrl": "https://api2.example.com/v1",
-    "dualModel.external.model": "fast-model",
-    "dualModel.external.apiKey": "sk-2",
-  }, "secondary");
+  const cfg = await resolveEndpoint(
+    {
+      "dualModel.external.baseUrl": "https://api2.example.com/v1",
+      "dualModel.external.model": "fast-model",
+      "dualModel.external.apiKey": "sk-2",
+    },
+    "secondary",
+  );
   assertEquals(cfg.baseUrl, "https://api2.example.com/v1");
   assertEquals(cfg.model, "fast-model");
   assertEquals(cfg.apiKey, "sk-2");
@@ -56,20 +59,11 @@ Deno.test("resolveContextSize: returns local default 4096 when nothing is set", 
 });
 
 Deno.test("resolveContextSize: returns 128000 for external on default route", () => {
-  assertEquals(
-    resolveContextSize({ "llm.provider": "external" }),
-    128000,
-  );
+  assertEquals(resolveContextSize({ "llm.provider": "external" }), 128000);
 });
 
 Deno.test("resolveContextSize: secondary route reads dualModel.external.contextSize", () => {
-  assertEquals(
-    resolveContextSize(
-      { "dualModel.external.contextSize": 64000 },
-      "secondary",
-    ),
-    64000,
-  );
+  assertEquals(resolveContextSize({ "dualModel.external.contextSize": 64000 }, "secondary"), 64000);
 });
 
 Deno.test("resolveContextSize: coerces numeric string", () => {

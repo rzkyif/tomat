@@ -23,7 +23,7 @@ export type WsListener = (frame: ServerToClientFrame) => void;
 // before the first open, plus during reconnect attempts after a close.
 export type ConnectionState = "connecting" | "connected" | "disconnected";
 
-export type ConnectionListener = (state: ConnectionState) => void;
+export type ConnectionListener = (state: ConnectionState, reason?: string) => void;
 
 export class ApiError extends Error {
   readonly code: string;
@@ -48,6 +48,10 @@ export class CoreClient {
   private pingTimeoutId: number | null = null;
   private connState: ConnectionState = "disconnected";
   private connListeners = new Subscribers<ConnectionListener>();
+  // Last WS connect-failure reason (from the Tauri error event or an IPC
+  // failure), surfaced with the "disconnected" transition so the UI banner can
+  // show why. Cleared on a successful open.
+  private lastWsError: string | null = null;
 
   constructor(public readonly endpoint: CoreEndpoint) {}
 
@@ -57,7 +61,7 @@ export class CoreClient {
   // drive the "Reconnecting to <core>…" banner after a 5s disconnect.
   onConnectionState(listener: ConnectionListener): () => void {
     const off = this.connListeners.add(listener);
-    queueMicrotask(() => listener(this.connState));
+    queueMicrotask(() => listener(this.connState, this.lastWsError ?? undefined));
     return off;
   }
 
@@ -65,10 +69,10 @@ export class CoreClient {
     return this.connState;
   }
 
-  private setConnState(state: ConnectionState): void {
+  private setConnState(state: ConnectionState, reason?: string): void {
     if (this.connState === state) return;
     this.connState = state;
-    this.connListeners.emit(state);
+    this.connListeners.emit(state, reason);
   }
 
   // --- REST ---------------------------------------------------------------
@@ -202,7 +206,7 @@ export class CoreClient {
     const ct = res.headers["content-type"] ?? "";
     if (!ct.includes("application/json")) {
       // No JSON consumer in the workspace requests anything else through
-      // this code path — binary endpoints (TTS WAV, attachments) use
+      // this code path. Binary endpoints (TTS WAV, attachments) use
       // `fetchBlob`, SSE goes direct. A non-JSON content-type here is a
       // server-side bug; fail loud rather than cast a string to `T`.
       throw new ApiError(res.status, {
@@ -245,9 +249,12 @@ export class CoreClient {
       sock = await platform().net.connectWebSocket(wsUrl, {
         pin: this.endpoint.tlsPin,
       });
-    } catch {
-      // Connect failed (DNS / TLS pin mismatch / refused): treat like a close
-      // so the backoff reconnect loop kicks in.
+    } catch (err) {
+      // IPC-level failure (rare). The common connect failure (DNS / TLS pin
+      // mismatch / refused) arrives later via the WS error event (onError
+      // below). Record the reason and treat like a close so the backoff
+      // reconnect loop kicks in.
+      this.lastWsError = String(err);
       this.handleWsClosed();
       return;
     }
@@ -260,11 +267,13 @@ export class CoreClient {
     sock.onOpen(() => {
       this.wsConnected = true;
       this.wsBackoffMs = 500;
+      this.lastWsError = null;
       this.setConnState("connected");
     });
     sock.onMessage((data) => this.handleWsMessage(data));
     sock.onClose(() => this.handleWsClosed());
-    sock.onError(() => {
+    sock.onError((reason) => {
+      if (reason) this.lastWsError = reason;
       try {
         sock.close();
       } catch {
@@ -276,7 +285,7 @@ export class CoreClient {
   private handleWsMessage(data: string): void {
     // Two-stage parse: JSON decode, then validate the full discriminated
     // union via Zod. Per-variant schemas use `.passthrough()` so unknown
-    // fields survive — that lets a newer server send extras without
+    // fields survive, which lets a newer server send extras without
     // breaking an older client. Frames that fail the kind discriminant
     // are dropped with a warn.
     let raw: unknown;
@@ -307,7 +316,7 @@ export class CoreClient {
   private handleWsClosed(): void {
     this.wsConnected = false;
     this.ws = null;
-    this.setConnState("disconnected");
+    this.setConnState("disconnected", this.lastWsError ?? undefined);
     if (this.wsClosing || this.listeners.size === 0) return;
     const delay = this.wsBackoffMs;
     this.wsBackoffMs = Math.min(this.wsBackoffMs * 2, this.wsBackoffCapMs);

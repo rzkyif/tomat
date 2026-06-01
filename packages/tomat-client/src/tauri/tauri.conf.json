@@ -45,14 +45,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "app",
-      "appimage",
-      "deb",
-      "rpm",
-      "msi",
-      "nsis"
-    ],
+    "targets": ["app", "appimage", "deb", "rpm", "msi", "nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -67,9 +60,7 @@
   },
   "plugins": {
     "updater": {
-      "endpoints": [
-        "https://get.au.tomat.ing/manifests/client.json"
-      ],
+      "endpoints": ["https://get.au.tomat.ing/manifests/client.json"],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRFREEyNUM0MjM2QUQyMEYKUldRUDBtb2p4Q1hhVHIvYTNVaG8zSDFYRFFLQlJpYmJuaStGdUtPcVA3V1J2ZVFZQjUvOTRaRmEK"
     }
   }

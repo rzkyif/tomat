@@ -1,9 +1,9 @@
 // Builds the three binaries that make up a tomat-core install for the
 // requested host triple:
 //
-//   tomat-core           (Deno compile) — the long-running service
-//   tomat-core-updater   (Cargo build)  — performs the swap during self-update
-//   tomat-core-keychain  (Cargo build)  — wraps the platform keychain
+//   tomat-core           (Deno compile): the long-running service
+//   tomat-core-updater   (Cargo build):  performs the swap during self-update
+//   tomat-core-keychain  (Cargo build):  wraps the platform keychain
 //
 // Default target is the current host. Pass `--target=<triple>` to override.
 // Cargo cross-compilation for non-host triples requires the matching Rust
@@ -27,9 +27,7 @@ const outDir = `${ROOT}${args.out}/${target}`;
 // paths.ts channelSuffix() + channel.rs channel_suffix().
 const channel = args.channel;
 if (!["stable", "dev", "beta"].includes(channel)) {
-  console.error(
-    `invalid --channel: ${channel} (expected stable, dev, or beta)`,
-  );
+  console.error(`invalid --channel: ${channel} (expected stable, dev, or beta)`);
   Deno.exit(1);
 }
 const suffix = channel === "stable" ? "" : `-${channel}`;
@@ -43,15 +41,7 @@ async function denoCompile(name: string, entry: string): Promise<void> {
   const outPath = `${outDir}/${name}${exe}`;
   console.log(`compiling ${name} -> ${outPath}`);
   const cmd = new Deno.Command("deno", {
-    args: [
-      "compile",
-      "--allow-all",
-      "--target",
-      target,
-      "--output",
-      outPath,
-      entry,
-    ],
+    args: ["compile", "--allow-all", "--target", target, "--output", outPath, entry],
     stdout: "inherit",
     stderr: "inherit",
   });
@@ -62,14 +52,8 @@ async function denoCompile(name: string, entry: string): Promise<void> {
   }
 }
 
-async function cargoBuild(
-  crateDir: string,
-  builtName: string,
-  outName: string,
-): Promise<void> {
-  console.log(
-    `cargo build ${builtName} (release) -> ${outDir}/${outName}${exe}`,
-  );
+async function cargoBuild(crateDir: string, builtName: string, outName: string): Promise<void> {
+  console.log(`cargo build ${builtName} (release) -> ${outDir}/${outName}${exe}`);
   const cargoArgs = [
     "build",
     "--release",
@@ -93,10 +77,7 @@ async function cargoBuild(
   await Deno.copyFile(builtPath, dstPath);
 }
 
-await denoCompile(
-  `tomat-core${suffix}`,
-  `${ROOT}packages/tomat-core/src/main.ts`,
-);
+await denoCompile(`tomat-core${suffix}`, `${ROOT}packages/tomat-core/src/main.ts`);
 await cargoBuild(
   "packages/tomat-core-updater",
   "tomat-core-updater",

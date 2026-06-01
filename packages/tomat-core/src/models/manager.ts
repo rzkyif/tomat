@@ -2,11 +2,7 @@
 // Backed by the centralized DownloadManager so progress surfaces over WS.
 
 import { join, relative } from "@std/path";
-import type {
-  DownloadEntry,
-  ModelEntry,
-  ProbeModelsResponse,
-} from "@tomat/shared";
+import type { DownloadEntry, ModelEntry, ProbeModelsResponse } from "@tomat/shared";
 import { downloadManager } from "../downloads/manager.ts";
 import { probeSource } from "../downloads/sources.ts";
 import { newJobId } from "../shared/ids.ts";
@@ -27,21 +23,21 @@ export class ModelsManager {
 
   // Enqueue downloads for one or more HF specs. Returns the jobId for the
   // first download (each spec gets its own row in the queue, keyed by file).
-  download(
-    items: Array<{ source: string; group?: ModelGroup }>,
-  ): string[] {
+  download(items: Array<{ source: string; group?: ModelGroup }>): string[] {
     const jobIds: string[] = [];
     for (const item of items) {
       const id = newJobId();
-      void downloadManager().enqueue({
-        source: item.source,
-        destination: "models",
-        groupId: item.group ?? "llm",
-      }).catch(() => {
-        // Errors surface on the WS via the downloads.snapshot broadcast; we
-        // don't need to propagate them here because the caller already
-        // received jobIds and is subscribed.
-      });
+      void downloadManager()
+        .enqueue({
+          source: item.source,
+          destination: "models",
+          groupId: item.group ?? "llm",
+        })
+        .catch(() => {
+          // Errors surface on the WS via the downloads.snapshot broadcast; we
+          // don't need to propagate them here because the caller already
+          // received jobIds and is subscribed.
+        });
       jobIds.push(id);
     }
     return jobIds;
@@ -76,9 +72,9 @@ export class ModelsManager {
 
   // Convenience pass-throughs for the model download UI.
   downloads(): DownloadEntry[] {
-    return downloadManager().snapshot().filter((d) =>
-      d.destination === "models"
-    );
+    return downloadManager()
+      .snapshot()
+      .filter((d) => d.destination === "models");
   }
 
   cancel(id: string): void {
@@ -122,11 +118,7 @@ function sanitizeRelPath(relPath: string): string {
   return relPath.replace(/^\/+/, "");
 }
 
-async function walk(
-  root: string,
-  dir: string,
-  out: ModelEntry[],
-): Promise<void> {
+async function walk(root: string, dir: string, out: ModelEntry[]): Promise<void> {
   let entries: AsyncIterable<Deno.DirEntry>;
   try {
     entries = Deno.readDir(dir);
@@ -148,7 +140,9 @@ async function walk(
           absPath: full,
           sizeBytes: st.size,
         });
-      } catch { /* skip unreadable */ }
+      } catch {
+        /* skip unreadable */
+      }
     }
   }
 }

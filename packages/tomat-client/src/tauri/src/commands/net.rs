@@ -26,7 +26,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async_tls_with_config, Connector};
 
-// One shared crypto provider (rustls' default — aws-lc-rs). The pin verifier
+// One shared crypto provider (rustls' default: aws-lc-rs). The pin verifier
 // delegates signature checks to it, so the TLS handshake still proves the
 // server holds the cert's private key; we only override chain/name validation.
 static PROVIDER: LazyLock<Arc<rustls::crypto::CryptoProvider>> =
@@ -184,6 +184,13 @@ pub async fn net_fetch(
     let tls = build_client_config(parse_pin(pin)?, captured.clone())?;
     let client = reqwest::Client::builder()
         .use_preconfigured_tls(tls)
+        // Without explicit timeouts a stalled core (e.g. a wedged TLS handshake
+        // or a peer that accepts but never replies) hangs `send().await`
+        // forever. On the boot path this awaited request gates the window-show
+        // and first render (see +page.svelte onMount), so an unbounded hang
+        // leaves the app running with no window. Bound both phases.
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| AppError::external(format!("http client: {e}")))?;
 
@@ -262,8 +269,11 @@ pub async fn net_ws_open(
         let connector = Connector::Rustls(Arc::new(tls));
         let stream = match connect_async_tls_with_config(&url, None, false, Some(connector)).await {
             Ok((s, _)) => s,
-            Err(_) => {
-                let _ = app.emit(&ev(&ws_id, "error"), ());
+            Err(e) => {
+                // Surface the connect failure reason (e.g. "Connection refused
+                // (os error 61)", TLS/pin errors) so the client can show it in
+                // the reconnect banner instead of a generic message.
+                let _ = app.emit(&ev(&ws_id, "error"), e.to_string());
                 let _ = app.emit(&ev(&ws_id, "close"), ());
                 remove_handle(&ws_id);
                 return;

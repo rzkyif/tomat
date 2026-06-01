@@ -1,5 +1,5 @@
 // chat-related Zod schemas. The chat WS frames are the contract between
-// the client and the chat orchestrator — strict-mode + min-length checks
+// the client and the chat orchestrator. Strict-mode + min-length checks
 // catch the common shapes silently breaking.
 
 import { assertEquals } from "@std/assert";
@@ -17,25 +17,13 @@ Deno.test("chatRequestSchema: route defaults to 'default' when omitted", () => {
 });
 
 Deno.test("chatRequestSchema: rejects out-of-range temperature/topP", () => {
-  assertEquals(
-    chatRequestSchema.safeParse({ overrides: { temperature: -0.1 } }).success,
-    false,
-  );
-  assertEquals(
-    chatRequestSchema.safeParse({ overrides: { temperature: 2.1 } }).success,
-    false,
-  );
-  assertEquals(
-    chatRequestSchema.safeParse({ overrides: { topP: 1.1 } }).success,
-    false,
-  );
+  assertEquals(chatRequestSchema.safeParse({ overrides: { temperature: -0.1 } }).success, false);
+  assertEquals(chatRequestSchema.safeParse({ overrides: { temperature: 2.1 } }).success, false);
+  assertEquals(chatRequestSchema.safeParse({ overrides: { topP: 1.1 } }).success, false);
 });
 
 Deno.test("chatRequestSchema: rejects unknown top-level fields (strict)", () => {
-  assertEquals(
-    chatRequestSchema.safeParse({ unknown: true }).success,
-    false,
-  );
+  assertEquals(chatRequestSchema.safeParse({ unknown: true }).success, false);
 });
 
 Deno.test("chatStartWsSchema: requires kind, streamId, sessionId", () => {
@@ -67,13 +55,11 @@ Deno.test("chatStartWsSchema: requires kind, streamId, sessionId", () => {
 
 Deno.test("chatInterruptWsSchema: requires non-empty streamId", () => {
   assertEquals(
-    chatInterruptWsSchema.safeParse({ kind: "chat.interrupt", streamId: "x" })
-      .success,
+    chatInterruptWsSchema.safeParse({ kind: "chat.interrupt", streamId: "x" }).success,
     true,
   );
   assertEquals(
-    chatInterruptWsSchema.safeParse({ kind: "chat.interrupt", streamId: "" })
-      .success,
+    chatInterruptWsSchema.safeParse({ kind: "chat.interrupt", streamId: "" }).success,
     false,
   );
 });
@@ -101,12 +87,6 @@ Deno.test("toolAskUserResponseSchema: accepts string OR string[] entries in answ
 });
 
 Deno.test("toolCancelSchema: requires non-empty callId", () => {
-  assertEquals(
-    toolCancelSchema.safeParse({ kind: "tool.cancel", callId: "c1" }).success,
-    true,
-  );
-  assertEquals(
-    toolCancelSchema.safeParse({ kind: "tool.cancel", callId: "" }).success,
-    false,
-  );
+  assertEquals(toolCancelSchema.safeParse({ kind: "tool.cancel", callId: "c1" }).success, true);
+  assertEquals(toolCancelSchema.safeParse({ kind: "tool.cancel", callId: "" }).success, false);
 });

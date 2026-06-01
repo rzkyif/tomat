@@ -2,8 +2,8 @@
 //
 // On Windows, core creates a Job Object with KILL_ON_JOB_CLOSE at first use
 // and assigns every freshly-spawned sidecar PID to it. Core holds the only
-// handle to the job; when core exits — gracefully OR via a hard kill
-// (SIGKILL / `taskkill /F`) — the OS closes that handle, the job closes, and
+// handle to the job; when core exits, gracefully OR via a hard kill
+// (SIGKILL / `taskkill /F`), the OS closes that handle, the job closes, and
 // the kernel terminates every assigned process. This is the only way to
 // guarantee orphan-free sidecar cleanup on Windows when core itself dies
 // without running its shutdown path.
@@ -35,7 +35,7 @@ const PROCESS_ACCESS = 0x0101; // PROCESS_SET_QUOTA | PROCESS_TERMINATE
 
 // JOBOBJECT_EXTENDED_LIMIT_INFORMATION is 144 bytes on 64-bit Windows
 // (x86_64 and aarch64 share the LLP64 layout). The only field we set is
-// BasicLimitInformation.LimitFlags — a u32 at byte offset 16.
+// BasicLimitInformation.LimitFlags, a u32 at byte offset 16.
 const EXT_LIMIT_INFO_SIZE = 144;
 const LIMIT_FLAGS_OFFSET = 16;
 
@@ -60,7 +60,7 @@ let initAttempted = false;
 
 /** Lazily open kernel32 and create the kill-on-close Job Object. Windows
  *  only; a no-op returning false everywhere else. Best-effort: any failure
- *  is logged and disables tracking — it never throws. */
+ *  is logged and disables tracking. It never throws. */
 function ensureJob(): boolean {
   if (Deno.build.os !== "windows") return false;
   if (job) return true;
@@ -103,47 +103,40 @@ function ensureJob(): boolean {
     log.info("job object created; sidecar PIDs will be tracked");
     return true;
   } catch (err) {
-    log.warn(
-      `jobctl FFI init failed: ${errMessage(err)}`,
-    );
+    log.warn(`jobctl FFI init failed: ${errMessage(err)}`);
     return false;
   }
 }
 
 /** Register a freshly-spawned sidecar PID with the kill-on-close job object
  *  so a hard core crash doesn't leave the sidecar running. Best-effort:
- *  failures are logged but do NOT throw — the sidecar still runs, it just
+ *  failures are logged but do NOT throw. The sidecar still runs, it just
  *  loses orphan-cleanup protection. Windows only; no-op elsewhere. */
 export function trackSidecarPid(pid: number): void {
   if (!ensureJob() || !job || !kernel32) return;
   try {
     const proc = kernel32.symbols.OpenProcess(PROCESS_ACCESS, 0, pid);
     if (!proc) {
-      log.warn(
-        `OpenProcess(${pid}) failed (err=${kernel32.symbols.GetLastError()})`,
-      );
+      log.warn(`OpenProcess(${pid}) failed (err=${kernel32.symbols.GetLastError()})`);
       return;
     }
     const assigned = kernel32.symbols.AssignProcessToJobObject(job, proc);
     if (assigned === 0) {
       log.warn(
-        `AssignProcessToJobObject(${pid}) failed ` +
-          `(err=${kernel32.symbols.GetLastError()})`,
+        `AssignProcessToJobObject(${pid}) failed ` + `(err=${kernel32.symbols.GetLastError()})`,
       );
     }
     kernel32.symbols.CloseHandle(proc);
   } catch (err) {
-    log.warn(
-      `jobctl track failed (pid=${pid}): ${errMessage(err)}`,
-    );
+    log.warn(`jobctl track failed (pid=${pid}): ${errMessage(err)}`);
   }
 }
 
 /** Kept for call-site compatibility with the previous helper-based
  *  implementation. Intentionally a no-op: the Job Object handle must NOT be
- *  closed here — closing it would immediately kill every sidecar, racing the
+ *  closed here. Closing it would immediately kill every sidecar, racing the
  *  sidecar manager's graceful shutdown. Core simply exiting closes the
  *  handle as its last act, which is the correct ordering. */
 export async function shutdownJobctl(): Promise<void> {
-  // Intentionally empty — see the doc comment above.
+  // Intentionally empty (see the doc comment above).
 }

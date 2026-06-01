@@ -6,7 +6,7 @@ import { platform } from "../platform/index.ts";
 import { Subscribers } from "../shared/subscribers.ts";
 import { BinariesApi } from "./binaries";
 import { ChatApi } from "./chat";
-import { CoreClient, type ConnectionState, type WsListener } from "./client";
+import { CoreClient, type ConnectionListener, type WsListener } from "./client";
 import { LlmApi } from "./llm";
 import { ModelsApi } from "./models";
 import { PairingApi } from "./pairing";
@@ -38,8 +38,8 @@ class CoresRegistry {
   // maps hold each listener's unsubscribe handle for the CURRENT client only.
   private wsListeners = new Set<WsListener>();
   private wsBindings = new Map<WsListener, () => void>();
-  private connListeners = new Set<(s: ConnectionState) => void>();
-  private connBindings = new Map<(s: ConnectionState) => void, () => void>();
+  private connListeners = new Set<ConnectionListener>();
+  private connBindings = new Map<ConnectionListener, () => void>();
   private apis: {
     sessions: SessionsApi;
     chat: ChatApi;
@@ -120,7 +120,7 @@ class CoresRegistry {
 
   /** Re-subscribe every persistent WS / connection-state listener onto a
    *  freshly-built client. The previous client was closed by `select()`, so
-   *  its subscriptions are already dead — drop the stale handles and rebind. */
+   *  its subscriptions are already dead, so drop the stale handles and rebind. */
   private rebindListeners(client: CoreClient): void {
     this.wsBindings.clear();
     this.connBindings.clear();
@@ -140,8 +140,11 @@ class CoresRegistry {
     if (pick) {
       try {
         await this.select(pick.id);
-      } catch {
-        /* offline / unpaired */
+      } catch (e) {
+        // Don't abort boot. The window is already up and the chat view renders
+        // with the reconnect banner. But make the failure visible (keychain
+        // miss, missing token, etc.) instead of swallowing it silently.
+        console.error("[cores] restoreSelected: select failed:", e);
       }
     }
   }
@@ -186,7 +189,7 @@ class CoresRegistry {
     };
   }
 
-  subscribeConnectionState(listener: (state: ConnectionState) => void): () => void {
+  subscribeConnectionState(listener: ConnectionListener): () => void {
     this.connListeners.add(listener);
     const c = this.current?.client;
     if (c) this.connBindings.set(listener, c.onConnectionState(listener));

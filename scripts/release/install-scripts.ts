@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run -A
-// release:scripts — uploads scripts/install/*.{sh,ps1} to R2 under install/.
+// release:scripts: uploads scripts/install/*.{sh,ps1} to R2 under install/.
 // Per-script idempotent: fetches the remote body and only re-uploads files
 // whose content differs.
 //
@@ -43,10 +43,13 @@ interface Flags {
 
 function parseFlags(): Flags {
   // Strip the bare `--` token that `deno task <name> -- ...` passes through.
-  const args = parseArgs(Deno.args.filter((a) => a !== "--"), {
-    boolean: ["dry-run", "force", "help"],
-    default: { "dry-run": false, "force": false, "help": false },
-  });
+  const args = parseArgs(
+    Deno.args.filter((a) => a !== "--"),
+    {
+      boolean: ["dry-run", "force", "help"],
+      default: { "dry-run": false, force: false, help: false },
+    },
+  );
   if (args.help) {
     console.log(`Usage: deno task release:scripts [flags]
 

@@ -1,4 +1,4 @@
-// snippet expansion. Pure transform — drives the @trigger substitution
+// snippet expansion. Pure transform that drives the @trigger substitution
 // + placement semantics that snake through the UI's input pipeline.
 
 import { describe, expect, it } from "vitest";

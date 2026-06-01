@@ -41,10 +41,55 @@ export function scrubSecrets(input: string): string {
   return out;
 }
 
-function formatRecord(rec: log.LogRecord): string {
+// File handler: full ISO timestamp, no color, scrubbed. The on-disk core.log is
+// a machine record, so its shape never changes.
+function fileFormatter(rec: log.LogRecord): string {
   const ts = new Date(rec.datetime).toISOString();
   const scope = rec.loggerName === "default" ? "" : ` [${rec.loggerName}]`;
   return scrubSecrets(`${ts} ${rec.levelName}${scope} ${rec.msg}`);
+}
+
+// SGR color per level for the console formatter: DEBUG dim, INFO green, WARN
+// yellow, ERROR red. Unknown levels fall through uncolored.
+const LEVEL_COLOR: Record<string, string> = {
+  DEBUG: "2",
+  INFO: "32",
+  WARN: "33",
+  ERROR: "31",
+};
+
+// Console formatter, tuned for human reading.
+//  - TOMAT_LOG_NO_TIME=1 drops the timestamp (set by scripts/dev.ts, which owns
+//    a single timestamp column for the multiplexed dev console). Otherwise a
+//    compact HH:MM:SS.mmm wall-clock time is shown.
+//  - Color is on when TOMAT_LOG_COLOR=1 (forced by dev.ts, since core's stderr
+//    is piped there and not a TTY) or when stderr is a TTY and NO_COLOR is unset.
+const noTime = Deno.env.get("TOMAT_LOG_NO_TIME") === "1";
+const consoleColor =
+  Deno.env.get("TOMAT_LOG_COLOR") === "1" ||
+  (Deno.stderr.isTerminal() && !Deno.env.get("NO_COLOR"));
+
+function paint(code: string, s: string): string {
+  return consoleColor ? `\x1b[${code}m${s}\x1b[0m` : s;
+}
+
+function consoleFormatter(rec: log.LogRecord): string {
+  const d = new Date(rec.datetime);
+  const time = noTime
+    ? ""
+    : `${paint(
+        "2",
+        `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(
+          2,
+          "0",
+        )}:${String(d.getSeconds()).padStart(2, "0")}.${String(d.getMilliseconds()).padStart(
+          3,
+          "0",
+        )}`,
+      )} `;
+  const level = paint(LEVEL_COLOR[rec.levelName] ?? "0", rec.levelName.padEnd(5));
+  const scope = rec.loggerName === "default" ? "" : `${paint("2", `[${rec.loggerName}]`)} `;
+  return scrubSecrets(`${time}${level} ${scope}${rec.msg}`);
 }
 
 export async function initLogger(): Promise<void> {
@@ -54,12 +99,17 @@ export async function initLogger(): Promise<void> {
 
   log.setup({
     handlers: {
-      console: new log.ConsoleHandler("DEBUG", { formatter: formatRecord }),
+      // useColors:false because consoleFormatter owns all coloring (gated on TTY /
+      // TOMAT_LOG_COLOR). Otherwise std wraps every line in its own level color.
+      console: new log.ConsoleHandler("DEBUG", {
+        formatter: consoleFormatter,
+        useColors: false,
+      }),
       file: new log.RotatingFileHandler("INFO", {
         filename: paths().logFile,
         maxBytes: 10 * 1024 * 1024,
         maxBackupCount: 5,
-        formatter: formatRecord,
+        formatter: fileFormatter,
       }),
     },
     loggers: {

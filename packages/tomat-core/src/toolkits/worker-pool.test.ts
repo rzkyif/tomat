@@ -6,11 +6,7 @@
 // These tests cover the bits that can be exercised without spawning.
 
 import { assertEquals } from "@std/assert";
-import {
-  __resetForTesting,
-  DEFAULT_POOL_CONFIG,
-  workerPool,
-} from "./worker-pool.ts";
+import { __resetForTesting, DEFAULT_POOL_CONFIG, workerPool } from "./worker-pool.ts";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 
 Deno.test("DEFAULT_POOL_CONFIG: sane defaults", () => {

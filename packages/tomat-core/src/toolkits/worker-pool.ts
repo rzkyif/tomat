@@ -6,23 +6,14 @@
 // Behaviorally rich part of the toolkit subsystem; ports the semantics of
 // src/bun/toolkits/worker/pool.ts to Deno subprocesses.
 
-import type {
-  AskUserAnswer,
-  AskUserQuestion,
-  ChatContext,
-} from "./worker-protocol.ts";
+import type { AskUserAnswer, AskUserQuestion, ChatContext } from "./worker-protocol.ts";
 import { errMessage } from "@tomat/shared";
 import type { Tool } from "@tomat/shared";
 import { newCallId } from "../shared/ids.ts";
 import { getLogger } from "../shared/log.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
-import {
-  emptyFlagSet,
-  flagSetToArgs,
-  type PathTemplates,
-  unionFlags,
-} from "./permissions.ts";
+import { emptyFlagSet, flagSetToArgs, type PathTemplates, unionFlags } from "./permissions.ts";
 import { toolkitsRegistry } from "./registry.ts";
 import { WorkerHandle } from "./worker-handle.ts";
 
@@ -54,16 +45,16 @@ export interface ToolCallStart {
 
 export type CallEvent =
   | {
-    kind: "progress";
-    progress: number;
-    label?: string;
-    description?: string;
-  }
+      kind: "progress";
+      progress: number;
+      label?: string;
+      description?: string;
+    }
   | {
-    kind: "ask_user_request";
-    requestId: string;
-    questions: AskUserQuestion[];
-  }
+      kind: "ask_user_request";
+      requestId: string;
+      questions: AskUserQuestion[];
+    }
   | { kind: "log"; level: "debug" | "info" | "warn" | "error"; message: string }
   | { kind: "stderr_log"; line: string }
   // Emitted synchronously when cancel() is invoked so the UI's ToolCall
@@ -96,10 +87,7 @@ export class WorkerPool {
   // Execute a single tool call. Returns a controller for cancel/askUser
   // forwarding; the `done` promise settles with the tool's return value
   // (resolved on tool_result) or rejects on tool_error / cancel / timeout.
-  startCall(
-    spec: ToolCallStart,
-    onEvent: (event: CallEvent) => void,
-  ): CallController {
+  startCall(spec: ToolCallStart, onEvent: (event: CallEvent) => void): CallController {
     const callId = newCallId();
     // Workers are keyed per (toolkit, tool), not per toolkit, so each tool runs
     // with ONLY its own granted permissions (least privilege) instead of the
@@ -186,45 +174,50 @@ export class WorkerPool {
       });
       offHandler = off;
 
-      worker.waitForBoot().then(() => {
-        if (cancelled) {
-          off();
-          reject(new AppError("internal_error", "cancelled before boot"));
-          return;
-        }
-        worker.inFlightCalls++;
-        this.clearIdleTimer(key);
-        worker.send({
-          kind: "call",
-          callId,
-          toolName: spec.tool.name,
-          fnExport: spec.tool.fnExport,
-          arguments: spec.argumentsJson,
-          chatContext: spec.chatContext,
-        });
-        armTimeout();
-      }).catch((err) => {
-        // Worker boot failed → synthesize a tool_error event so the UI
-        // doesn't hang in "running", then reject `done` so the caller's
-        // catch path runs. Without the synthetic event the chat-side
-        // ToolCall bubble would never reach a terminal state.
-        off();
-        worker.inFlightCalls = Math.max(0, worker.inFlightCalls - 1);
-        this.bumpIdleTimer(key);
-        const msg = errMessage(err);
-        try {
-          onEvent({
-            kind: "log",
-            level: "error",
-            message: `worker boot failed: ${msg}`,
+      worker
+        .waitForBoot()
+        .then(() => {
+          if (cancelled) {
+            off();
+            reject(new AppError("internal_error", "cancelled before boot"));
+            return;
+          }
+          worker.inFlightCalls++;
+          this.clearIdleTimer(key);
+          worker.send({
+            kind: "call",
+            callId,
+            toolName: spec.tool.name,
+            fnExport: spec.tool.fnExport,
+            arguments: spec.argumentsJson,
+            chatContext: spec.chatContext,
           });
-        } catch { /* listener errors are non-fatal here */ }
-        reject(
-          err instanceof Error
-            ? err
-            : new AppError("internal_error", `worker boot failed: ${msg}`),
-        );
-      });
+          armTimeout();
+        })
+        .catch((err) => {
+          // Worker boot failed → synthesize a tool_error event so the UI
+          // doesn't hang in "running", then reject `done` so the caller's
+          // catch path runs. Without the synthetic event the chat-side
+          // ToolCall bubble would never reach a terminal state.
+          off();
+          worker.inFlightCalls = Math.max(0, worker.inFlightCalls - 1);
+          this.bumpIdleTimer(key);
+          const msg = errMessage(err);
+          try {
+            onEvent({
+              kind: "log",
+              level: "error",
+              message: `worker boot failed: ${msg}`,
+            });
+          } catch {
+            /* listener errors are non-fatal here */
+          }
+          reject(
+            err instanceof Error
+              ? err
+              : new AppError("internal_error", `worker boot failed: ${msg}`),
+          );
+        });
     });
 
     const armTimeout = () => {
@@ -233,10 +226,12 @@ export class WorkerPool {
       timeout = setTimeout(() => {
         if (askUserPending) return;
         // Bookkeeping must run even if the worker is already dead and
-        // `send` throws — otherwise the listener leaks and `done` hangs.
+        // `send` throws. Otherwise the listener leaks and `done` hangs.
         try {
           worker.send({ kind: "cancel", callId });
-        } catch { /* worker is gone; cancel is moot */ }
+        } catch {
+          /* worker is gone; cancel is moot */
+        }
         offHandler();
         worker.inFlightCalls--;
         this.bumpIdleTimer(key);
@@ -271,7 +266,9 @@ export class WorkerPool {
         // tool_error frame (or the worker exits before then).
         try {
           onEvent({ kind: "tool_cancelled" });
-        } catch { /* listener errors are non-fatal here */ }
+        } catch {
+          /* listener errors are non-fatal here */
+        }
         worker.send({ kind: "cancel", callId });
         disarm();
       },
@@ -302,9 +299,7 @@ export class WorkerPool {
     const prefix = workerKey(toolkitId, "");
     const keys = [...this.workers.keys()].filter((k) => k.startsWith(prefix));
     if (keys.length === 0) return;
-    log.info(
-      `refreshPermissions: terminating ${keys.length} warm worker(s) for ${toolkitId}`,
-    );
+    log.info(`refreshPermissions: terminating ${keys.length} warm worker(s) for ${toolkitId}`);
     for (const key of keys) {
       const w = this.workers.get(key);
       if (!w) continue;
@@ -317,10 +312,7 @@ export class WorkerPool {
 
   async shutdown(): Promise<void> {
     await Promise.all(
-      Array.from(
-        this.workers.values(),
-        (w) => w.terminate(this.config.drainTimeoutMs),
-      ),
+      Array.from(this.workers.values(), (w) => w.terminate(this.config.drainTimeoutMs)),
     );
     this.workers.clear();
     this.lru = [];
@@ -368,12 +360,10 @@ export class WorkerPool {
     // benign tool can't run in a process that holds a sibling tool's net / run
     // / ffi grants. The invoked tool's persisted required-permissions + grants
     // are looked up from the registry by name.
-    const tool = toolkitsRegistry().listTools(spec.toolkitId).find((t) =>
-      t.name === spec.tool.name
-    );
-    const grantContexts = tool
-      ? [{ required: tool.requiredPermissions, grants: tool.grants }]
-      : [];
+    const tool = toolkitsRegistry()
+      .listTools(spec.toolkitId)
+      .find((t) => t.name === spec.tool.name);
+    const grantContexts = tool ? [{ required: tool.requiredPermissions, grants: tool.grants }] : [];
     void spec.required; // retained on ToolCallStart for back-compat; not used here
     const templates: PathTemplates = {
       home: Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? "",
@@ -382,9 +372,8 @@ export class WorkerPool {
       sessions: paths().sessionsDir,
       toolkit: toolkit.installedPath,
     };
-    const flagSet = grantContexts.length > 0
-      ? unionFlags(grantContexts, templates)
-      : emptyFlagSet();
+    const flagSet =
+      grantContexts.length > 0 ? unionFlags(grantContexts, templates) : emptyFlagSet();
 
     // Surface elevated grants in the log so an operator notices an over-broad
     // permission (these escape the Deno sandbox or expose much of $home; the
@@ -404,9 +393,9 @@ export class WorkerPool {
     }
     if (elevated.length > 0) {
       log.warn(
-        `tool ${spec.toolkitId}/${spec.tool.name} granted elevated permissions: ${
-          elevated.join(", ")
-        }`,
+        `tool ${spec.toolkitId}/${spec.tool.name} granted elevated permissions: ${elevated.join(
+          ", ",
+        )}`,
       );
     }
 
@@ -506,7 +495,9 @@ function resolveEntryPath(toolkitFolder: string): string {
     if (typeof pkg.main === "string" && pkg.main.length > 0) {
       return `${toolkitFolder}/${pkg.main.replace(/^\.\//, "")}`;
     }
-  } catch { /* no package.json */ }
+  } catch {
+    /* no package.json */
+  }
   return `${toolkitFolder}/index.ts`;
 }
 

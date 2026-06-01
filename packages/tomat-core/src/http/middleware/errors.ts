@@ -1,5 +1,5 @@
 // Translates thrown errors into the wire-format error envelope. Wired into
-// the app via `app.onError()` in server.ts — that's the only Hono 4 hook
+// the app via `app.onError()` in server.ts. That's the only Hono 4 hook
 // that catches throws from sub-apps mounted via `app.route()`.
 
 import type { Context } from "hono";
@@ -14,16 +14,11 @@ const log = getLogger("http");
 export function sendError(c: Context, err: unknown): Response {
   if (isAppError(err)) {
     log.warn(`${c.req.method} ${c.req.path} -> ${err.code}: ${err.message}`);
-    return c.json(
-      toBody(err.code, err.message, err.details),
-      err.status as ContentfulStatusCode,
-    );
+    return c.json(toBody(err.code, err.message, err.details), err.status as ContentfulStatusCode);
   }
   if (isNoSpaceError(err)) {
     const message = (err as Error).message;
-    log.warn(
-      `${c.req.method} ${c.req.path} -> insufficient_storage: ${message}`,
-    );
+    log.warn(`${c.req.method} ${c.req.path} -> insufficient_storage: ${message}`);
     return c.json(toBody("insufficient_storage", message), 507);
   }
   const message = errMessage(err);
@@ -31,11 +26,7 @@ export function sendError(c: Context, err: unknown): Response {
   return c.json(toBody("internal_error", message), 500);
 }
 
-function toBody(
-  code: ErrorCode,
-  message: string,
-  details?: Record<string, unknown>,
-): ApiErrorBody {
+function toBody(code: ErrorCode, message: string, details?: Record<string, unknown>): ApiErrorBody {
   // Scrub before the message crosses the wire. Logs are already scrubbed by the
   // logger; response bodies are not, and an internal_error can carry a raw
   // exception string (e.g. an upstream provider error echoing a URL+token).

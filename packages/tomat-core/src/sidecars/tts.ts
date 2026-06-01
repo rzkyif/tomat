@@ -34,9 +34,7 @@ export class TtsController {
   private ready = false;
   private loaded = false;
   private loading = false;
-  private loadWaiters: Array<
-    { resolve: () => void; reject: (e: Error) => void }
-  > = [];
+  private loadWaiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = [];
   private synthsInFlight = new Map<string, PendingSynth>();
   private synthCounter = 0;
 
@@ -80,15 +78,15 @@ export class TtsController {
     if (!this.proc) return Promise.resolve();
     try {
       this.proc.kill("SIGTERM");
-    } catch { /* already exited */ }
+    } catch {
+      /* already exited */
+    }
     this.proc = null;
     this.writer = null;
     this.ready = false;
     this.loaded = false;
     this.loading = false;
-    this.failPending(
-      new AppError("internal_error", "tts subprocess killed"),
-    );
+    this.failPending(new AppError("internal_error", "tts subprocess killed"));
     return Promise.resolve();
   }
 
@@ -99,12 +97,10 @@ export class TtsController {
   ): Promise<{ sampleRate: number; pcm: Uint8Array }> {
     await this.ensureLoaded();
     const id = `s${++this.synthCounter}`;
-    return new Promise<{ sampleRate: number; pcm: Uint8Array }>(
-      (resolve, reject) => {
-        this.synthsInFlight.set(id, { resolve, reject });
-        this.send({ kind: "synthesize", id, text, voice, speed });
-      },
-    );
+    return new Promise<{ sampleRate: number; pcm: Uint8Array }>((resolve, reject) => {
+      this.synthsInFlight.set(id, { resolve, reject });
+      this.send({ kind: "synthesize", id, text, voice, speed });
+    });
   }
 
   status(): { loaded: boolean; loading: boolean } {
@@ -155,10 +151,7 @@ export class TtsController {
 
     // Wait for the worker to send its initial "ready" frame.
     await new Promise<void>((resolve, reject) => {
-      const t = setTimeout(
-        () => reject(new Error("tts worker boot timeout")),
-        5_000,
-      );
+      const t = setTimeout(() => reject(new Error("tts worker boot timeout")), 5_000);
       const check = () => {
         if (this.ready) {
           clearTimeout(t);
@@ -178,14 +171,10 @@ export class TtsController {
     // If stdin is already closed (worker crashed after `ready` but before
     // proc.status fired failPending), the write rejects. Route it through
     // failPending so the pending load/synth that queued before we noticed
-    // the crash also fails — otherwise it hangs forever.
-    this.writer.write(
-      new TextEncoder().encode(JSON.stringify(frame) + "\n"),
-    ).catch((err) => {
+    // the crash also fails. Otherwise it hangs forever.
+    this.writer.write(new TextEncoder().encode(JSON.stringify(frame) + "\n")).catch((err) => {
       this.failPending(
-        err instanceof Error
-          ? err
-          : new AppError("internal_error", `tts write failed: ${err}`),
+        err instanceof Error ? err : new AppError("internal_error", `tts write failed: ${err}`),
       );
     });
   }
@@ -231,10 +220,7 @@ export class TtsController {
       }
       case "load_err": {
         this.loading = false;
-        const err = new AppError(
-          "provider_error",
-          `tts load failed: ${frame.error}`,
-        );
+        const err = new AppError("provider_error", `tts load failed: ${frame.error}`);
         for (const w of this.loadWaiters) w.reject(err);
         this.loadWaiters = [];
         return;

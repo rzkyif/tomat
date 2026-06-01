@@ -40,15 +40,13 @@ Deno.test("isAppError: true only for AppError instances", () => {
 });
 
 Deno.test("helper throwers: each tags the right code and re-uses the message", () => {
-  for (
-    const [thrower, code] of [
-      [notFound, "not_found"],
-      [validation, "validation_error"],
-      [conflict, "conflict"],
-      [forbidden, "forbidden"],
-      [internal, "internal_error"],
-    ] as const
-  ) {
+  for (const [thrower, code] of [
+    [notFound, "not_found"],
+    [validation, "validation_error"],
+    [conflict, "conflict"],
+    [forbidden, "forbidden"],
+    [internal, "internal_error"],
+  ] as const) {
     try {
       thrower("boom");
     } catch (err) {
@@ -73,13 +71,11 @@ Deno.test("isNoSpaceError: matches Windows ERROR_DISK_FULL", () => {
 });
 
 Deno.test("isNoSpaceError: matches by message when error has no code", () => {
-  for (
-    const msg of [
-      "No space left on device",
-      "disk full while flushing",
-      "Quota exceeded for current user",
-    ]
-  ) {
+  for (const msg of [
+    "No space left on device",
+    "disk full while flushing",
+    "Quota exceeded for current user",
+  ]) {
     assertEquals(isNoSpaceError(new Error(msg)), true, `should match: ${msg}`);
   }
 });

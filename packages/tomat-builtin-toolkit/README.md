@@ -13,10 +13,10 @@ fresh setups; doubles as a worked example for third-party toolkit authors.
 
 ```
 .
-├── tools.json     # Tomat manifest — names, parameters, triggers, permissions
+├── tools.json     # Tomat manifest: names, parameters, triggers, permissions
 ├── package.json   # npm metadata + the single npm dep (mime-types)
 ├── deno.json      # nodeModulesDir + lockfile pointer for the worker spawn
-├── index.ts       # entry — re-exports the three tool functions
+├── index.ts       # entry point: re-exports the three tool functions
 └── src/
     ├── download.ts
     ├── open.ts
@@ -34,7 +34,7 @@ Specifically:
   and **env** access for `XDG_DOWNLOAD_DIR` / `HOME` / `USERPROFILE`.
 - `open_website` needs **run** access for `open`, `xdg-open`, and `cmd` (one per
   host OS).
-- `askuser_demo` needs nothing — it's pure conversational.
+- `askuser_demo` needs nothing: it's pure conversational.
 
 ## Author guide
 
@@ -55,11 +55,11 @@ Toolkits.
 ## Testing your toolkit
 
 This package ships co-located tests as the worked example for testing a toolkit.
-They mock the `ToolContext` directly — no real worker bridge — so they run
+They mock the `ToolContext` directly (no real worker bridge) so they run
 wherever `deno test` does:
 
-- `src/demo.test.ts` — exercises `askUser` (questions, progress, answer shapes).
-- `src/open.test.ts` — exercises URL validation; skips the actual subprocess
+- `src/demo.test.ts`: exercises `askUser` (questions, progress, answer shapes).
+- `src/open.test.ts`: exercises URL validation; skips the actual subprocess
   spawn (which would open a real browser).
 
 The pattern, reduced to the minimum:
@@ -90,11 +90,11 @@ Deno.test("myTool: progress runs 0 -> 1", async () => {
 
 What to assert:
 
-- **Progress order** — `setProgress` is called in non-decreasing order and ends
+- **Progress order**: `setProgress` is called in non-decreasing order and ends
   at 1.
-- **Abort honored** — when `ctx.signal.aborted` flips mid-call, the tool exits
+- **Abort honored**: when `ctx.signal.aborted` flips mid-call, the tool exits
   with a thrown error or returns early.
-- **Permission boundary** — the tool only touches the resources its `tools.json`
+- **Permission boundary**: the tool only touches the resources its `tools.json`
   declares. If it tries to fetch a host that's not in `net`, the worker pool
   blocks it; your test can assert the tool propagates the rejection cleanly.
 

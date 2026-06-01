@@ -14,10 +14,7 @@ import OpenAI from "openai";
 // The SDK's exposed fetch contract. Re-declared here (rather than
 // imported from the SDK's `./internal/...`) so we don't depend on
 // internal paths. Kept synchronized with @openai/Fetch.
-type SdkFetch = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
+type SdkFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export type LlmRoute = "default" | "secondary";
 
@@ -80,18 +77,16 @@ export function buildClient(endpoint: LlmEndpointConfig): OpenAI {
     // The SDK's `Fetch` type ultimately resolves through DOM's RequestInit;
     // Deno's RequestInit body differs at the ReadableStream<.read(view)>
     // level (DOM allows ArrayBufferView<ArrayBufferLike>, Deno is
-    // stricter). They're runtime-compatible — the SDK only constructs
-    // requests via Request/string/URL, never passes a ReadableStream body
-    // — but TS can't see that. The cast is the boundary marker.
+    // stricter). They're runtime-compatible (the SDK only constructs
+    // requests via Request/string/URL, never passes a ReadableStream body)
+    // but TS can't see that. The cast is the boundary marker.
     // deno-lint-ignore no-explicit-any
     ...(endpoint.fetch ? { fetch: endpoint.fetch as any } : {}),
   });
 }
 
 // Runs a streaming chat completion and yields normalized deltas.
-export async function* streamChatCompletion(
-  req: LlmRequest,
-): AsyncIterable<LlmDelta> {
+export async function* streamChatCompletion(req: LlmRequest): AsyncIterable<LlmDelta> {
   const client = buildClient(req.endpoint);
 
   const temperature = req.overrides?.temperature ?? req.endpoint.temperature;
@@ -110,11 +105,12 @@ export async function* streamChatCompletion(
     } else {
       // OpenAI-compatible servers accept `reasoning_effort`. Map our
       // tri-state to the effort levels: on→high, auto→low, off→minimal.
-      extra.reasoning_effort = req.endpoint.reasoning === "on"
-        ? "high"
-        : req.endpoint.reasoning === "auto"
-        ? "low"
-        : "minimal";
+      extra.reasoning_effort =
+        req.endpoint.reasoning === "on"
+          ? "high"
+          : req.endpoint.reasoning === "auto"
+            ? "low"
+            : "minimal";
     }
   }
 
@@ -168,6 +164,7 @@ export async function* streamChatCompletion(
 }
 
 function isLocalEndpoint(baseUrl: string): boolean {
-  return baseUrl.includes("127.0.0.1") || baseUrl.includes("localhost") ||
-    baseUrl.includes("0.0.0.0");
+  return (
+    baseUrl.includes("127.0.0.1") || baseUrl.includes("localhost") || baseUrl.includes("0.0.0.0")
+  );
 }

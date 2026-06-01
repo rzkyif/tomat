@@ -87,7 +87,7 @@ describe("hasAlpha", () => {
     expect(hasAlpha("#aabbccff")).toBe(true);
   });
   it("is false for missing / non-string input and wrong-length strings", () => {
-    // `hasAlpha` is permissive about content — it only inspects length
+    // `hasAlpha` is permissive about content: it only inspects length
     // and the trailing two characters. We cover the explicit non-string
     // and the length-mismatch branches; 7- or 9-char strings are
     // treated as a 7-char hex (opaque) or 9-char hex (alpha-bearing)

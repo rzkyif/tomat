@@ -14,11 +14,7 @@ import {
 } from "@tomat/shared";
 import { db } from "../connection.ts";
 import { AppError } from "../../shared/errors.ts";
-import {
-  newAttachmentId,
-  newMessageId,
-  newSessionId,
-} from "../../shared/ids.ts";
+import { newAttachmentId, newMessageId, newSessionId } from "../../shared/ids.ts";
 import { getLogger } from "../../shared/log.ts";
 
 const log = getLogger("sessions-repo");
@@ -45,10 +41,12 @@ export class SessionsRepo {
   create(input: CreateSessionInput): Session {
     const id = newSessionId();
     const now = Date.now();
-    db().prepare(`
+    db()
+      .prepare(`
       INSERT INTO sessions (id, owner_client_id, title, created_at_ms, updated_at_ms)
       VALUES (?, ?, ?, ?, ?)
-    `).run(id, input.ownerClientId, input.title ?? "", now, now);
+    `)
+      .run(id, input.ownerClientId, input.title ?? "", now, now);
     return {
       id,
       ownerClientId: input.ownerClientId,
@@ -59,7 +57,8 @@ export class SessionsRepo {
   }
 
   list(ownerClientId: string): SessionListEntry[] {
-    const rows = db().prepare(`
+    const rows = db()
+      .prepare(`
       SELECT s.id, s.title, s.created_at_ms, s.updated_at_ms,
              (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count,
              (SELECT m.content_json FROM messages m
@@ -68,7 +67,8 @@ export class SessionsRepo {
       FROM sessions s
       WHERE s.owner_client_id = ?
       ORDER BY s.updated_at_ms DESC
-    `).all(ownerClientId) as Array<{
+    `)
+      .all(ownerClientId) as Array<{
       id: string;
       title: string;
       created_at_ms: number;
@@ -87,19 +87,21 @@ export class SessionsRepo {
   }
 
   getOrThrow(ownerClientId: string, sessionId: string): Session {
-    const row = db().prepare(`
+    const row = db()
+      .prepare(`
       SELECT id, owner_client_id, title, created_at_ms, updated_at_ms, token_usage
       FROM sessions
       WHERE id = ? AND owner_client_id = ?
-    `).get(sessionId, ownerClientId) as
+    `)
+      .get(sessionId, ownerClientId) as
       | {
-        id: string;
-        owner_client_id: string;
-        title: string;
-        created_at_ms: number;
-        updated_at_ms: number;
-        token_usage: string | null;
-      }
+          id: string;
+          owner_client_id: string;
+          title: string;
+          created_at_ms: number;
+          updated_at_ms: number;
+          token_usage: string | null;
+        }
       | undefined;
     if (!row) {
       throw new AppError("session_not_found", `session ${sessionId} not found`);
@@ -115,33 +117,34 @@ export class SessionsRepo {
   }
 
   patchTitle(ownerClientId: string, sessionId: string, title: string): void {
-    const res = db().prepare(`
+    const res = db()
+      .prepare(`
       UPDATE sessions SET title = ?, updated_at_ms = ?
       WHERE id = ? AND owner_client_id = ?
-    `).run(title, Date.now(), sessionId, ownerClientId);
+    `)
+      .run(title, Date.now(), sessionId, ownerClientId);
     if (res === 0) throw new AppError("session_not_found", "session not found");
   }
 
   setTokenUsage(sessionId: string, tokenUsage: Session["tokenUsage"]): void {
-    db().prepare(`
+    db()
+      .prepare(`
       UPDATE sessions SET token_usage = ?, updated_at_ms = ? WHERE id = ?
-    `).run(
-      tokenUsage ? JSON.stringify(tokenUsage) : null,
-      Date.now(),
-      sessionId,
-    );
+    `)
+      .run(tokenUsage ? JSON.stringify(tokenUsage) : null, Date.now(), sessionId);
   }
 
-  delete(
-    ownerClientId: string,
-    sessionId: string,
-  ): { attachmentPaths: string[] } {
-    const paths = db().prepare(`
+  delete(ownerClientId: string, sessionId: string): { attachmentPaths: string[] } {
+    const paths = db()
+      .prepare(`
       SELECT abs_path FROM attachments WHERE session_id = ?
-    `).all(sessionId) as Array<{ abs_path: string }>;
-    const res = db().prepare(`
+    `)
+      .all(sessionId) as Array<{ abs_path: string }>;
+    const res = db()
+      .prepare(`
       DELETE FROM sessions WHERE id = ? AND owner_client_id = ?
-    `).run(sessionId, ownerClientId);
+    `)
+      .run(sessionId, ownerClientId);
     if (res === 0) throw new AppError("session_not_found", "session not found");
     return { attachmentPaths: paths.map((p) => p.abs_path) };
   }
@@ -149,10 +152,12 @@ export class SessionsRepo {
   // --- messages ------------------------------------------------------------
 
   listMessages(sessionId: string): Message[] {
-    const rows = db().prepare(`
+    const rows = db()
+      .prepare(`
       SELECT id, ord, role, content_json, created_at_ms
       FROM messages WHERE session_id = ? ORDER BY ord ASC
-    `).all(sessionId) as Array<{
+    `)
+      .all(sessionId) as Array<{
       id: string;
       ord: number;
       role: string;
@@ -162,43 +167,34 @@ export class SessionsRepo {
     return rows.map(rowToMessage);
   }
 
-  appendMessage(
-    sessionId: string,
-    message: Message,
-  ): { id: string; ord: number } {
+  appendMessage(sessionId: string, message: Message): { id: string; ord: number } {
     const id = message.id || newMessageId();
     const ord = this.nextOrd(sessionId);
     const content = JSON.stringify(message);
-    db().prepare(`
+    db()
+      .prepare(`
       INSERT INTO messages (id, session_id, ord, role, content_json, created_at_ms)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      sessionId,
-      ord,
-      message.role,
-      content,
-      message.createdAtMs || Date.now(),
-    );
-    db().prepare(`UPDATE sessions SET updated_at_ms = ? WHERE id = ?`).run(
-      Date.now(),
-      sessionId,
-    );
+    `)
+      .run(id, sessionId, ord, message.role, content, message.createdAtMs || Date.now());
+    db().prepare(`UPDATE sessions SET updated_at_ms = ? WHERE id = ?`).run(Date.now(), sessionId);
     return { id, ord };
   }
 
   getMessage(sessionId: string, messageId: string): Message {
-    const row = db().prepare(`
+    const row = db()
+      .prepare(`
       SELECT id, ord, role, content_json, created_at_ms
       FROM messages WHERE session_id = ? AND id = ?
-    `).get(sessionId, messageId) as
+    `)
+      .get(sessionId, messageId) as
       | {
-        id: string;
-        ord: number;
-        role: string;
-        content_json: string;
-        created_at_ms: number;
-      }
+          id: string;
+          ord: number;
+          role: string;
+          content_json: string;
+          created_at_ms: number;
+        }
       | undefined;
     if (!row) {
       throw new AppError("message_not_found", `message ${messageId} not found`);
@@ -211,17 +207,19 @@ export class SessionsRepo {
     messageId: string,
     patch: Partial<Message>,
   ): { id: string; ord: number } {
-    const row = db().prepare(`
+    const row = db()
+      .prepare(`
       SELECT id, ord, role, content_json, created_at_ms
       FROM messages WHERE session_id = ? AND id = ?
-    `).get(sessionId, messageId) as
+    `)
+      .get(sessionId, messageId) as
       | {
-        id: string;
-        ord: number;
-        role: string;
-        content_json: string;
-        created_at_ms: number;
-      }
+          id: string;
+          ord: number;
+          role: string;
+          content_json: string;
+          created_at_ms: number;
+        }
       | undefined;
     if (!row) {
       throw new AppError("message_not_found", `message ${messageId} not found`);
@@ -234,24 +232,21 @@ export class SessionsRepo {
       role: current.role,
     } as Message;
     const content = JSON.stringify(merged);
-    db().prepare(
-      `UPDATE messages SET content_json = ? WHERE id = ? AND session_id = ?`,
-    )
+    db()
+      .prepare(`UPDATE messages SET content_json = ? WHERE id = ? AND session_id = ?`)
       .run(content, messageId, sessionId);
-    db().prepare(`UPDATE sessions SET updated_at_ms = ? WHERE id = ?`)
-      .run(Date.now(), sessionId);
+    db().prepare(`UPDATE sessions SET updated_at_ms = ? WHERE id = ?`).run(Date.now(), sessionId);
     return { id: row.id, ord: row.ord };
   }
 
   deleteMessage(sessionId: string, messageId: string): void {
-    const res = db().prepare(`
+    const res = db()
+      .prepare(`
       DELETE FROM messages WHERE session_id = ? AND id = ?
-    `).run(sessionId, messageId);
+    `)
+      .run(sessionId, messageId);
     if (res === 0) throw new AppError("message_not_found", "message not found");
-    db().prepare(`UPDATE sessions SET updated_at_ms = ? WHERE id = ?`).run(
-      Date.now(),
-      sessionId,
-    );
+    db().prepare(`UPDATE sessions SET updated_at_ms = ? WHERE id = ?`).run(Date.now(), sessionId);
   }
 
   // --- attachments ---------------------------------------------------------
@@ -266,20 +261,13 @@ export class SessionsRepo {
   ): AttachmentRecord {
     const id = newAttachmentId();
     const now = Date.now();
-    db().prepare(`
+    db()
+      .prepare(`
       INSERT INTO attachments
         (id, session_id, message_id, filename, mime, size_bytes, abs_path, created_at_ms)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      sessionId,
-      messageId,
-      filename,
-      mime ?? null,
-      sizeBytes,
-      absPath,
-      now,
-    );
+    `)
+      .run(id, sessionId, messageId, filename, mime ?? null, sizeBytes, absPath, now);
     return {
       id,
       sessionId,
@@ -293,20 +281,22 @@ export class SessionsRepo {
   }
 
   getAttachment(sessionId: string, attachmentId: string): AttachmentRecord {
-    const row = db().prepare(`
+    const row = db()
+      .prepare(`
       SELECT id, session_id, message_id, filename, mime, size_bytes, abs_path, created_at_ms
       FROM attachments WHERE id = ? AND session_id = ?
-    `).get(attachmentId, sessionId) as
+    `)
+      .get(attachmentId, sessionId) as
       | {
-        id: string;
-        session_id: string;
-        message_id: string;
-        filename: string;
-        mime: string | null;
-        size_bytes: number;
-        abs_path: string;
-        created_at_ms: number;
-      }
+          id: string;
+          session_id: string;
+          message_id: string;
+          filename: string;
+          mime: string | null;
+          size_bytes: number;
+          abs_path: string;
+          created_at_ms: number;
+        }
       | undefined;
     if (!row) throw new AppError("not_found", "attachment not found");
     return {
@@ -324,9 +314,11 @@ export class SessionsRepo {
   // --- helpers -------------------------------------------------------------
 
   private nextOrd(sessionId: string): number {
-    const row = db().prepare(`
+    const row = db()
+      .prepare(`
       SELECT COALESCE(MAX(ord), -1) AS max_ord FROM messages WHERE session_id = ?
-    `).get(sessionId) as { max_ord: number };
+    `)
+      .get(sessionId) as { max_ord: number };
     return row.max_ord + 1;
   }
 }
@@ -355,9 +347,7 @@ function summarizeFirstMessage(json: string | null): string {
     const text = contentToText((msg.content ?? "") as MessageContent)
       .trim()
       .replace(/\s+/g, " ");
-    return text.length > SUMMARY_MAX_CHARS
-      ? text.slice(0, SUMMARY_MAX_CHARS) + "…"
-      : text;
+    return text.length > SUMMARY_MAX_CHARS ? text.slice(0, SUMMARY_MAX_CHARS) + "…" : text;
   } catch {
     return "";
   }
@@ -375,9 +365,7 @@ function rowToMessage(row: {
     parsed = JSON.parse(row.content_json) as Record<string, unknown>;
   } catch (err) {
     log.warn(
-      `corrupt content_json for message ${row.id}; substituting error bubble: ${
-        errMessage(err)
-      }`,
+      `corrupt content_json for message ${row.id}; substituting error bubble: ${errMessage(err)}`,
     );
     return {
       id: row.id,
@@ -393,6 +381,6 @@ function rowToMessage(row: {
     id: row.id,
     ord: row.ord,
     role: row.role,
-    createdAtMs: parsed.createdAtMs as number ?? row.created_at_ms,
+    createdAtMs: (parsed.createdAtMs as number) ?? row.created_at_ms,
   } as Message;
 }

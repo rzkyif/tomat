@@ -1,4 +1,4 @@
-// Message discriminated union — one parse per role, strict-mode
+// Message discriminated union: one parse per role, strict-mode
 // rejection of cross-role fields, and PATCH schemas that don't accept
 // `role` updates. This file is the contract test that prevents silent
 // drift between core's appendMessage and the client's typed senders.
@@ -39,10 +39,7 @@ Deno.test("messageInputSchema: parses each of the 7 roles", () => {
 });
 
 Deno.test("userMessageInputSchema: accepts string content and multipart array", () => {
-  assertEquals(
-    userMessageInputSchema.safeParse({ role: "user", content: "hi" }).success,
-    true,
-  );
+  assertEquals(userMessageInputSchema.safeParse({ role: "user", content: "hi" }).success, true);
   assertEquals(
     userMessageInputSchema.safeParse({
       role: "user",
@@ -108,12 +105,9 @@ Deno.test("messagePatchSchemaByRole: rejects `role` in patch bodies", () => {
 });
 
 Deno.test("messagePatchSchemaByRole: rejects cross-role fields per role", () => {
-  // Patch a UserMessage with an assistant-only field — must fail.
-  assertEquals(
-    messagePatchSchemaByRole.user.safeParse({ streaming: true }).success,
-    false,
-  );
-  // Patch an AssistantMessage with a user-only field — must fail.
+  // Patch a UserMessage with an assistant-only field, which must fail.
+  assertEquals(messagePatchSchemaByRole.user.safeParse({ streaming: true }).success, false);
+  // Patch an AssistantMessage with a user-only field, which must fail.
   assertEquals(
     messagePatchSchemaByRole.assistant.safeParse({
       systemPromptOverride: "x",
@@ -123,28 +117,23 @@ Deno.test("messagePatchSchemaByRole: rejects cross-role fields per role", () => 
 });
 
 Deno.test("messagePatchSchemaByRole: accepts a partial of fields valid for the role", () => {
-  assertEquals(
-    messagePatchSchemaByRole.assistant.safeParse({ content: "edited" }).success,
-    true,
-  );
-  assertEquals(
-    messagePatchSchemaByRole.assistant.safeParse({ streaming: false }).success,
-    true,
-  );
+  assertEquals(messagePatchSchemaByRole.assistant.safeParse({ content: "edited" }).success, true);
+  assertEquals(messagePatchSchemaByRole.assistant.safeParse({ streaming: false }).success, true);
 });
 
 Deno.test("reasoning + tool_filter + error: each parses its minimum body", () => {
-  for (
-    const [schema, body] of [
-      [reasoningMessageInputSchema, { role: "reasoning", content: "" }],
-      [toolFilterMessageInputSchema, {
+  for (const [schema, body] of [
+    [reasoningMessageInputSchema, { role: "reasoning", content: "" }],
+    [
+      toolFilterMessageInputSchema,
+      {
         role: "tool_filter",
         status: "filtering",
-      }],
-      [errorMessageInputSchema, { role: "error", content: "boom" }],
-      [systemMessageInputSchema, { role: "system", content: "s" }],
-    ] as const
-  ) {
+      },
+    ],
+    [errorMessageInputSchema, { role: "error", content: "boom" }],
+    [systemMessageInputSchema, { role: "system", content: "s" }],
+  ] as const) {
     assertEquals(schema.safeParse(body).success, true);
   }
 });

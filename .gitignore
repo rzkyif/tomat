@@ -6,6 +6,7 @@ dist
 # Build / generated (under packages/tomat-client/)
 packages/tomat-client/build
 packages/tomat-client/.svelte-kit
+packages/tomat-client/.vite
 packages/tomat-client/package
 packages/tomat-client/static/vad
 
@@ -38,6 +39,6 @@ vite.config.ts.timestamp-*
 reference/
 
 # Test suite
-# Scratch tests created by agents during dev — see AGENTS.md "Testing"
+# Scratch tests created by agents during dev. See AGENTS.md "Testing".
 **/*.tmp.test.ts
 **/*.tmp.test.rs

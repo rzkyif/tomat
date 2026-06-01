@@ -118,7 +118,7 @@
     if (delta === 0) return;
     // Detect visual edges via element rects (not scrollLeft), since under
     // flex-row-reverse the scrollLeft range flips negative and the usual
-    // `>= max` check would never fire — leaving the wheel handler eating
+    // `>= max` check would never fire, leaving the wheel handler eating
     // events past the actual edge instead of letting the page scroll.
     const wrapperRect = wrapper.getBoundingClientRect();
     const leftChild = alignment === "right" ? last : first;

@@ -24,9 +24,7 @@ const args = parseArgs(Deno.args, {
 
 const channel = args.channel;
 if (!["stable", "dev", "beta"].includes(channel)) {
-  console.error(
-    `invalid --channel: ${channel} (expected stable, dev, or beta)`,
-  );
+  console.error(`invalid --channel: ${channel} (expected stable, dev, or beta)`);
   Deno.exit(1);
 }
 

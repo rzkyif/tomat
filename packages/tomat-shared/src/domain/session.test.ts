@@ -1,5 +1,5 @@
 // tiny session-domain helpers. `isMultipart` is a type guard, but
-// `contentToText` has interesting behavior worth pinning down — every
+// `contentToText` has interesting behavior worth pinning down. Every
 // caller that needs a flat representation of (possibly multipart)
 // MessageContent funnels through it.
 

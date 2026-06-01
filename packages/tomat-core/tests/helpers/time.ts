@@ -1,7 +1,7 @@
 // Date.now() mock harness for tests that exercise TTL, rate-limit windows,
 // or other wall-clock logic. Patches Date.now globally; restore() puts the
 // original implementation back. Does NOT mock the Date constructor itself
-// or setTimeout — anything that touches those must be redesigned around
+// or setTimeout. Anything that touches those must be redesigned around
 // the seam this provides.
 
 export interface ClockHandle {

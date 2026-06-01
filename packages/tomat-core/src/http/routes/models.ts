@@ -70,13 +70,12 @@ export function modelsRoutes(): Hono {
   r.post("/ensure", async (c) => {
     const body = (await readJson(c)) as { kind?: string };
     if (
-      body.kind !== "llm" && body.kind !== "stt" && body.kind !== "tts" &&
+      body.kind !== "llm" &&
+      body.kind !== "stt" &&
+      body.kind !== "tts" &&
       body.kind !== "embed"
     ) {
-      throw new AppError(
-        "validation_error",
-        "kind must be one of: llm, stt, tts, embed",
-      );
+      throw new AppError("validation_error", "kind must be one of: llm, stt, tts, embed");
     }
     return c.json(await ensureKindModels(body.kind as ModelKind));
   });

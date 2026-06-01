@@ -1,4 +1,4 @@
-// expansion state — the small per-message map that bubbles read/write
+// expansion state: the small per-message map that bubbles read/write
 // to decide whether they break the horizontal stack.
 
 import { describe, expect, it, beforeEach } from "vitest";

@@ -1,7 +1,7 @@
 // In-process pairing helpers for tests.
 //
 // `pairClient` runs the full CPace PAKE handshake against the auth service and
-// returns a real bearer token — the convenient replacement for the old
+// returns a real bearer token. It is the convenient replacement for the old
 // `authService().claim(code, ...)` one-liner most route/service tests used.
 // `pakeViaApp` drives the same handshake over `app.fetch()` for the route
 // contract test (where the cert pin must come from the real tls service).
@@ -34,7 +34,7 @@ export async function pairClient(
 
 /**
  * Drive the PAKE over the HTTP app for a given code. `observedPin` is the cert
- * pin the simulated client saw — pass the real `tlsCertFingerprint()` for the
+ * pin the simulated client saw: pass the real `tlsCertFingerprint()` for the
  * happy path, or a different value to simulate a MITM-substituted cert. Returns
  * the raw `/pake/finish` Response so callers can assert status + body.
  */
@@ -47,11 +47,7 @@ export async function pakeViaApp(
   const sid = randomSid();
   // The client folds the pin IT observed into the CPace channel id; the route
   // folds core's real pin server-side, so a mismatch (MITM) diverges the keys.
-  const init = cpaceInitiatorStart(
-    code,
-    sid,
-    new TextEncoder().encode(observedPin),
-  );
+  const init = cpaceInitiatorStart(code, sid, new TextEncoder().encode(observedPin));
   const startRes = await app.fetch(
     jsonReq("http://x/api/v1/pairing/pake/start", {
       clientName,

@@ -30,7 +30,7 @@
 
   const variantClass = $derived(
     {
-      primary: "bg-accent-blue-200 text-white",
+      primary: "bg-default-inverted-300 text-default-inverted-900",
       secondary: "bg-default-200 text-default-800",
       destructive: "bg-accent-red-200 text-white",
       ghost: "bg-transparent text-default-800 hover:bg-default-200",

@@ -1,17 +1,13 @@
 // ToolkitsRegistry CRUD + the grant/tool relationship that the
-// permission system depends on. Skip the hash-drift / verifyAllOnBoot path
-// — that's exercised separately under hash.test.ts plus an installer
+// permission system depends on. Skip the hash-drift / verifyAllOnBoot path.
+// That's exercised separately under hash.test.ts plus an installer
 // integration test.
 
 import { assertEquals, assertThrows } from "@std/assert";
 import type { PermissionDecl } from "@tomat/shared";
 import { permissionKey } from "@tomat/shared";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import {
-  type ToolInsertInput,
-  type ToolkitInsertInput,
-  toolkitsRegistry,
-} from "./registry.ts";
+import { type ToolInsertInput, type ToolkitInsertInput, toolkitsRegistry } from "./registry.ts";
 import { AppError } from "../shared/errors.ts";
 
 function tk(overrides: Partial<ToolkitInsertInput> = {}): ToolkitInsertInput {
@@ -76,16 +72,10 @@ Deno.test("replaceTools: drops old tools, inserts new, preserves enabled on matc
   try {
     const r = toolkitsRegistry();
     r.upsertToolkit(tk());
-    r.replaceTools("example-toolkit", [
-      tool({ name: "keep" }),
-      tool({ name: "drop" }),
-    ]);
+    r.replaceTools("example-toolkit", [tool({ name: "keep" }), tool({ name: "drop" })]);
     r.setToolEnabled("example-toolkit", "keep", true);
     // Re-install: "keep" stays, "drop" is gone, "new" arrives disabled.
-    r.replaceTools("example-toolkit", [
-      tool({ name: "keep" }),
-      tool({ name: "new" }),
-    ]);
+    r.replaceTools("example-toolkit", [tool({ name: "keep" }), tool({ name: "new" })]);
     const tools = r.listTools("example-toolkit");
     const byName = new Map(tools.map((t) => [t.name, t]));
     assertEquals(byName.has("keep"), true);
@@ -118,7 +108,7 @@ Deno.test("setGrants + listGrantsForTool: records granted + denied, upserts by (
     let grants = r.listGrantsForTool(toolId);
     assertEquals(grants.length, 1);
     assertEquals(grants[0].state, "granted");
-    // Upsert to denied — must not duplicate the row.
+    // Upsert to denied must not duplicate the row.
     r.setGrants(toolId, [{ key, kind: "net", state: "denied" }]);
     grants = r.listGrantsForTool(toolId);
     assertEquals(grants.length, 1);
@@ -136,11 +126,13 @@ Deno.test("delete: cascades to tools and grants", async () => {
     r.replaceTools("example-toolkit", [tool()]);
     const toolId = r.listTools("example-toolkit")[0].id;
     const decl: PermissionDecl = { kind: "ffi", reason: "x" };
-    r.setGrants(toolId, [{
-      key: permissionKey(decl),
-      kind: "ffi",
-      state: "granted",
-    }]);
+    r.setGrants(toolId, [
+      {
+        key: permissionKey(decl),
+        kind: "ffi",
+        state: "granted",
+      },
+    ]);
     r.delete("example-toolkit");
     assertEquals(r.get("example-toolkit"), undefined);
     assertEquals(r.listTools("example-toolkit"), []);

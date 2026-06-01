@@ -1,4 +1,4 @@
-// Removes build artifacts. Explicit allowlist only — never a glob walk and
+// Removes build artifacts. Explicit allowlist only. Never a glob walk and
 // never `git clean` (which would also wipe gitignored secrets like .env).
 //
 //   deno task clean                build outputs (dist, target, .svelte-kit, …)
@@ -28,17 +28,12 @@ const ARTIFACTS = [
 ];
 
 // Removed only with --deep; re-run `deno install` afterwards.
-const DEEP = [
-  "node_modules",
-  ".deno-cache",
-];
+const DEEP = ["node_modules", ".deno-cache"];
 
 function homeDir(): string {
   const home = Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE");
   if (!home) {
-    throw new Error(
-      "could not determine home directory (no HOME or USERPROFILE)",
-    );
+    throw new Error("could not determine home directory (no HOME or USERPROFILE)");
   }
   return home;
 }
@@ -52,7 +47,7 @@ async function rm(absPath: string, label: string): Promise<void> {
       console.log(`skip     ${label} (absent)`);
     } else if (err instanceof Deno.errors.PermissionDenied) {
       console.warn(
-        `WARN     ${label}: permission denied — close your editor / stop cargo, then retry`,
+        `WARN     ${label}: permission denied. Close your editor / stop cargo, then retry`,
       );
     } else {
       throw err;

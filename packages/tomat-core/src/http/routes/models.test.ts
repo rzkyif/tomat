@@ -33,9 +33,7 @@ Deno.test("GET /api/v1/models: returns empty array on a fresh tempdir", async ()
   try {
     const { token } = await pairOne();
     const app = buildApp();
-    const res = await app.fetch(
-      new Request("http://x/api/v1/models", { headers: bearer(token) }),
-    );
+    const res = await app.fetch(new Request("http://x/api/v1/models", { headers: bearer(token) }));
     assertEquals(res.status, 200);
     assertEquals(await res.json(), []);
   } finally {

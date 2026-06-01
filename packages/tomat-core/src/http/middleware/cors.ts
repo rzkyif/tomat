@@ -5,17 +5,14 @@
 // enforce CORS at all, so omitting CORS headers for them is harmless.
 //
 // Why this matters even on loopback: we accept `X-Admin-Token` here, which
-// is a custom header — without an Origin allowlist, a malicious browser
+// is a custom header. Without an Origin allowlist, a malicious browser
 // page could trigger a CORS preflight to a core bound on 0.0.0.0 and then
 // send the token-stealing request. Reflecting `*` plus `X-Admin-Token` in
 // Allow-Headers was effectively a wildcard credential grant.
 
 import type { MiddlewareHandler } from "hono";
 
-const ALLOWED_ORIGINS = new Set<string>([
-  "tauri://localhost",
-  "https://tauri.localhost",
-]);
+const ALLOWED_ORIGINS = new Set<string>(["tauri://localhost", "https://tauri.localhost"]);
 
 const LOOPBACK_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
@@ -31,10 +28,7 @@ export function corsMiddleware(): MiddlewareHandler {
       c.header("Access-Control-Allow-Origin", origin);
       c.header("Vary", "Origin");
       c.header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
-      c.header(
-        "Access-Control-Allow-Headers",
-        "Authorization,Content-Type,X-Admin-Token",
-      );
+      c.header("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Admin-Token");
       c.header("Access-Control-Max-Age", "86400");
     }
     // No Origin header (curl, native HTTP, server-to-server) → no CORS

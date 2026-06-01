@@ -11,9 +11,10 @@ export function toHex(bytes: Uint8Array): string {
 export async function sha256Hex(input: string | Uint8Array): Promise<string> {
   // A passed-in Uint8Array is typed over ArrayBufferLike; digest wants a view
   // backed by a plain ArrayBuffer, so assert it (TextEncoder already returns one).
-  const data = typeof input === "string"
-    ? new TextEncoder().encode(input)
-    : (input as Uint8Array<ArrayBuffer>);
+  const data =
+    typeof input === "string"
+      ? new TextEncoder().encode(input)
+      : (input as Uint8Array<ArrayBuffer>);
   const buf = await crypto.subtle.digest("SHA-256", data);
   return toHex(new Uint8Array(buf));
 }

@@ -79,7 +79,7 @@ export async function showAgentMessageMenu(ctx: AgentMenuCtx): Promise<void> {
       items.push({ id: "tts-stop", label: "Stop Speaking" });
       dispatch["tts-stop"] = () => ttsState.reset();
     } else if (ctx.isSynthesizing) {
-      // Disabled — no dispatch entry needed.
+      // Disabled, so no dispatch entry needed.
       items.push({ id: "tts-synthesizing", label: "Synthesizing...", enabled: false });
     } else {
       items.push({ id: "tts-play", label: "Read Aloud" });

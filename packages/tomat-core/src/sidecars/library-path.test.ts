@@ -1,6 +1,6 @@
 // shared-library search-path prepending. Per-platform behavior is
 // the one place where a wrong env var would break llama / whisper
-// silently — `DYLD_LIBRARY_PATH` on macOS, `LD_LIBRARY_PATH` on Linux,
+// silently. It uses `DYLD_LIBRARY_PATH` on macOS, `LD_LIBRARY_PATH` on Linux,
 // and `PATH` + cwd-override on Windows. The function takes `platform`
 // as an injected arg so tests don't have to spoof `Deno.build.os`.
 
@@ -10,10 +10,7 @@ import { libraryEnvFor } from "./library-path.ts";
 Deno.test("libraryEnvFor: macOS sets DYLD_LIBRARY_PATH only", () => {
   const out = libraryEnvFor("/usr/local/lib", "darwin");
   assertEquals(Object.keys(out.env), ["DYLD_LIBRARY_PATH"]);
-  assertEquals(
-    out.env.DYLD_LIBRARY_PATH.startsWith("/usr/local/lib"),
-    true,
-  );
+  assertEquals(out.env.DYLD_LIBRARY_PATH.startsWith("/usr/local/lib"), true);
   assertEquals(out.cwd, undefined);
 });
 

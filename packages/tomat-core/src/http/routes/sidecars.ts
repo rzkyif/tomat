@@ -1,6 +1,6 @@
 // Sidecar lifecycle routes. Status + manual stop/restart per kind.
 //
-// Start args are NOT user-supplied — they're computed from settings by
+// Start args are NOT user-supplied; they're computed from settings by
 // services/sidecar-boot.ts. POST /restart re-applies the boot decision
 // (effectively: stop + start with fresh args from the current settings),
 // and POST /stop just terminates without re-spawning. /start exists as a
@@ -10,23 +10,13 @@ import { Hono } from "hono";
 import type { SidecarKind } from "@tomat/shared";
 import { sidecarManager } from "../../sidecars/manager.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
-import {
-  buildLlamaStartOptions,
-  llamaStartArgsFromSettings,
-} from "../../sidecars/llama.ts";
-import {
-  buildWhisperStartOptions,
-  whisperStartArgsFromSettings,
-} from "../../sidecars/whisper.ts";
+import { buildLlamaStartOptions, llamaStartArgsFromSettings } from "../../sidecars/llama.ts";
+import { buildWhisperStartOptions, whisperStartArgsFromSettings } from "../../sidecars/whisper.ts";
 import { ttsController } from "../../sidecars/tts.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
-const SUPERVISED: ReadonlySet<SidecarKind> = new Set([
-  "llama",
-  "whisper",
-  "tts",
-]);
+const SUPERVISED: ReadonlySet<SidecarKind> = new Set(["llama", "whisper", "tts"]);
 
 export function sidecarsRoutes(): Hono {
   const r = new Hono();
@@ -45,7 +35,7 @@ export function sidecarsRoutes(): Hono {
     return c.body(null, 204);
   });
 
-  // POST /:kind/start and POST /:kind/restart are equivalent — both
+  // POST /:kind/start and POST /:kind/restart are equivalent: both
   // recompute the start args from current settings and (re-)start.
   for (const op of ["start", "restart"] as const) {
     r.post(`/:kind/${op}`, async (c) => {
@@ -73,10 +63,7 @@ export function sidecarsRoutes(): Hono {
             "whisper-server cannot start: stt is disabled or external",
           );
         }
-        await sidecarManager().restart(
-          "whisper",
-          buildWhisperStartOptions(args),
-        );
+        await sidecarManager().restart("whisper", buildWhisperStartOptions(args));
       }
       return c.body(null, 204);
     });
@@ -87,9 +74,6 @@ export function sidecarsRoutes(): Hono {
 
 function assertSupervised(kind: SidecarKind): void {
   if (!SUPERVISED.has(kind)) {
-    throw new AppError(
-      "validation_error",
-      `sidecar "${kind}" is not externally controllable`,
-    );
+    throw new AppError("validation_error", `sidecar "${kind}" is not externally controllable`);
   }
 }

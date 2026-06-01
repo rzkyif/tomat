@@ -4,6 +4,7 @@ import type {
   CheckBinariesResponse,
   InstallBinariesResponse,
   ListBinariesResponse,
+  ProbeBinariesResponse,
   UpdateBinaryResponse,
 } from "@tomat/shared";
 import type { CoreClient } from "./client";
@@ -29,5 +30,9 @@ export class BinariesApi {
 
   check(): Promise<CheckBinariesResponse> {
     return this.client.get("/api/v1/binaries/check");
+  }
+
+  probe(kinds: BinaryKind[]): Promise<ProbeBinariesResponse> {
+    return this.client.post("/api/v1/binaries/probe", { kinds });
   }
 }

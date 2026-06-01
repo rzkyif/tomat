@@ -23,8 +23,7 @@ export const generalGroup: SettingGroup = {
         {
           id: "general.context.agentName",
           name: "Agent Name",
-          description:
-            "A name for the agent. Leave empty to let the agent pick or stay nameless.",
+          description: "A name for the agent. Leave empty to let the agent pick or stay nameless.",
           type: "string",
           defaultValue: "",
           optional: true,
@@ -53,8 +52,7 @@ export const generalGroup: SettingGroup = {
         {
           id: "general.context.location",
           name: "Location",
-          description:
-            "A location the agent can reference. Sent as plain text. No network calls.",
+          description: "A location the agent can reference. Sent as plain text. No network calls.",
           type: "string",
           defaultValue: "",
           optional: true,

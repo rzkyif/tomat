@@ -57,7 +57,7 @@
 
   // The legacy planToEnqueueSpec converted a probed plan into a Tauri-side
   // EnqueueSpec. After the rework, models.download takes the same shape
-  // directly — pass-through helper for compat.
+  // directly. Pass-through helper for compat.
   function planToEnqueueSpec(plan: DownloadPlan, groupId: string) {
     return {
       source: plan.source,
@@ -180,12 +180,14 @@
     const plans = downloadsState.pendingStartupRemaining;
     const groups = downloadsState.pendingStartupGroupBySource;
     confirmState.request({
-      title: "Download required",
+      title: "Core Required Downloads",
       message:
-        `The following item${plans.length === 1 ? "" : "s"} will be downloaded ` +
-        `so this core can run. Models go to ~/.tomat/models/ and sidecar ` +
-        `binaries go to ~/.tomat/core/bin/.`,
+        `The following file${plans.length === 1 ? "" : "s"} need${plans.length === 1 ? "s" : ""} to be downloaded ` +
+        `so the core can run with the current configuration. Click "Do It ` +
+        `Later" to change anything first; reopening Settings will show the ` +
+        `updated download list.`,
       confirmLabel: "Download",
+      cancelLabel: "Do It Later",
       downloads: plans,
       onConfirm: async () => {
         downloadsState.startupModalShown = true;
@@ -203,7 +205,7 @@
             // Binary downloads run with the upstream URL as the WS-broadcast
             // `source`, so they never match the synthetic `binary:<kind>`
             // entries in pendingStartup the way model plans do. Trim them
-            // optimistically — a follow-up startup probe will resurface
+            // optimistically. A follow-up startup probe will resurface
             // anything that didn't actually land.
             downloadsState.pendingStartup =
               downloadsState.pendingStartup.filter(
@@ -614,10 +616,7 @@
                                  accent) so it doesn't fight with the generic
                                  Chip's color tokens. -->
                             <span
-                              class="text-[10px] font-medium tracking-normal normal-case px-1.5 py-0.5 rounded-medium {group.destination ===
-                              'core'
-                                ? 'bg-accent-blue-100 text-accent-blue-300'
-                                : 'bg-default-200 text-default-600'}"
+                              class="text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded-medium bg-default-400 text-default-700"
                               title={group.destination === "core"
                                 ? "Stored on the paired core (~/.tomat/core/settings.json)"
                                 : "Stored on this device (~/.tomat/client/settings.json)"}

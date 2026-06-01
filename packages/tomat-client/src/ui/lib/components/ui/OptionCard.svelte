@@ -26,9 +26,9 @@
      *  ToolCall). `md` is a multi-line card (icon + title + badges +
      *  description) for preset pickers. */
     size?: Size;
-    /** `invert` (default) flips bg/text on select — used by settings preset
+    /** `invert` (default) flips bg/text on select, used by settings preset
      *  pickers and tool-call options. `accent` uses a coloured border + tinted
-     *  bg on select — used by quick-setup model cards. */
+     *  bg on select, used by quick-setup model cards. */
     selectedStyle?: SelectedStyle;
     /** Accent hue when `selectedStyle === "accent"`. */
     accent?: Accent;
@@ -41,7 +41,7 @@
     /** HTML `title` attribute (tooltip). */
     htmlTitle?: string;
     class?: string;
-    /** Custom body — when provided, overrides the default icon/title/badges/
+    /** Custom body. When provided, overrides the default icon/title/badges/
      *  description rendering. */
     children?: Snippet;
   } = $props();

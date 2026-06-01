@@ -15,7 +15,7 @@
     disabled?: boolean;
     /** `labels` (default) is the full-width settings switch with embedded
      *  "on"/"off" labels that slide across the track. `pill` is the compact
-     *  iOS-style switch with a sliding circular thumb — used for quick
+     *  iOS-style switch with a sliding circular thumb, used for quick
      *  toggles where state should read at a glance without explicit labels. */
     variant?: Variant;
     /** Only used when variant === "labels". */
@@ -45,7 +45,7 @@
   />
   {#if variant === "pill"}
     <div
-      class="tomat-toggle-pill w-11 h-6 relative bg-default-300 peer-focus:outline-none rounded-full peer peer-checked:bg-accent-green-300 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-5 after:h-5 after:rounded-full after:bg-default-100 after:transition-transform peer-checked:after:translate-x-5 shrink-0"
+      class="tomat-toggle-pill w-11 h-6 relative bg-default-400 peer-focus:outline-none rounded-full peer peer-checked:bg-default-inverted-300 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-5 after:h-5 after:rounded-full after:bg-default-100 after:transition-transform peer-checked:after:translate-x-5 shrink-0"
     ></div>
   {:else}
     <div

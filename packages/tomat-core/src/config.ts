@@ -8,10 +8,10 @@ export const CORE_VERSION = "0.1.0";
 
 // Two-host layout:
 //
-//   WEBSITE_BASE_URL  — the landing page (Cloudflare Worker / Astro static
+//   WEBSITE_BASE_URL  is the landing page (Cloudflare Worker / Astro static
 //                       assets). Nothing release-related lives here; the core
 //                       runtime does not consume this URL.
-//   STORAGE_BASE_URL  — public R2 bucket holding every release artifact:
+//   STORAGE_BASE_URL  is the public R2 bucket holding every release artifact:
 //                       /<version>/<triple>/<file>, /manifests/*.json,
 //                       /install/*, /schemas/*.
 export const WEBSITE_BASE_URL = "https://au.tomat.ing";
@@ -33,7 +33,7 @@ export function binaryManifestUrl(): string {
   return `${STORAGE_BASE_URL}/${manifestDir()}/binaries.json`;
 }
 
-// Schemas (tools-v1.json) are channel-independent — one published copy.
+// Schemas (tools-v1.json) are channel-independent: one published copy.
 export const SCHEMAS_BASE_URL = `${STORAGE_BASE_URL}/schemas`;
 
 // Default HTTP bind. Override via TOMAT_CORE_HOST / TOMAT_CORE_PORT env.

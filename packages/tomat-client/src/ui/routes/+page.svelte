@@ -30,6 +30,7 @@
   import { cores } from "$lib/core";
   import { platform } from "$lib/platform";
   import { detectPendingStartup } from "$lib/shared/download";
+  import { withTimeout } from "$lib/shared/async";
   import {
     shortcutHandler,
     windowTransition,
@@ -211,7 +212,7 @@
 
   // Probe disk for every HF file the current configuration references and
   // stash any missing items in downloadsState.pendingStartup. Called on
-  // mount AND whenever the active core changes — the first-pair flow goes
+  // mount AND whenever the active core changes. The first-pair flow goes
   // null → loopback core, so the on-mount probe misses it.
   async function refreshPendingStartup(): Promise<void> {
     try {
@@ -224,7 +225,7 @@
         downloadsState.pendingStartupGroupBySource = groupBySource;
         return;
       }
-      // Nothing missing — clear any stale entries from a previous core.
+      // Nothing missing, so clear any stale entries from a previous core.
       downloadsState.pendingStartup = [];
       downloadsState.pendingStartupGroupBySource = {};
       void startConfiguredServices();
@@ -235,7 +236,7 @@
 
   // On-demand mode: when the selected core points at loopback and the binary
   // is installed locally, spawn it ourselves if no service has it running.
-  // Idempotent — start_local_core probes the port first and exits cleanly if
+  // Idempotent: start_local_core probes the port first and exits cleanly if
   // the core is already up. Failures are non-fatal: the user sees a normal
   // "could not reach core" error from the regular call paths.
   async function ensureLocalCoreUpIfNeeded(): Promise<void> {
@@ -252,120 +253,109 @@
         await platform().pairing.startLocalCore();
       }
     } catch (e) {
-      console.warn("[boot] ensureLocalCoreUpIfNeeded:", e);
+      console.error("[boot] ensureLocalCoreUpIfNeeded:", e);
     }
   }
 
+  // Apply every appearance/layout DOM setting from the (client-local) settings.
+  // Runs on the boot critical path before show so the window paints correctly
+  // themed; the per-key $effects below re-apply on any later change.
+  function applyAllAppearance(): void {
+    applyTheme(settingsState.currentSettings["appearance.theme"] ?? "auto");
+    applyTextSize(settingsState.currentSettings["appearance.textSize"] ?? 16);
+    applyBubbleColor(
+      "--user-bubble-bg-light",
+      settingsState.currentSettings["appearance.userBubbleColor"],
+    );
+    applyBubbleColor(
+      "--agent-bubble-bg-light",
+      settingsState.currentSettings["appearance.agentBubbleColor"],
+    );
+    applyBubbleColor(
+      "--agent2-bubble-bg-light",
+      settingsState.currentSettings["appearance.secondaryAgentBubbleColor"],
+    );
+    applyBubbleColor(
+      "--default-base",
+      settingsState.currentSettings["appearance.defaultColor"],
+    );
+    applyBubbleColor(
+      "--accent-red-base",
+      settingsState.currentSettings["appearance.accentRed"],
+    );
+    applyBubbleColor(
+      "--accent-blue-base",
+      settingsState.currentSettings["appearance.accentBlue"],
+    );
+    applyBubbleColor(
+      "--accent-purple-base",
+      settingsState.currentSettings["appearance.accentPurple"],
+    );
+    applyBubbleColor(
+      "--accent-green-base",
+      settingsState.currentSettings["appearance.accentGreen"],
+    );
+    applyBubbleColor(
+      "--accent-orange-base",
+      settingsState.currentSettings["appearance.accentOrange"],
+    );
+    applyBubbleColor(
+      "--accent-yellow-base",
+      settingsState.currentSettings["appearance.accentYellow"],
+    );
+    applyCssVarPx(
+      "--rounded-small",
+      settingsState.currentSettings["appearance.roundedSmall"] as number,
+    );
+    applyCssVarPx(
+      "--rounded-medium",
+      settingsState.currentSettings["appearance.roundedMedium"] as number,
+    );
+    applyCssVarPx(
+      "--rounded-large",
+      settingsState.currentSettings["appearance.roundedLarge"] as number,
+    );
+    applyFont(
+      "--font-default",
+      settingsState.currentSettings["appearance.defaultFont"],
+    );
+    applyFont(
+      "--font-mono",
+      settingsState.currentSettings["appearance.monoFont"],
+    );
+  }
+
+  // Bound the deferred core-settings fetch so a wedged core fails fast (and
+  // loud) rather than leaving the merge pending. Just above net_fetch's 10s
+  // connect timeout so the HTTP layer surfaces the real error first.
+  const CORE_SETTINGS_TIMEOUT_MS = 12_000;
+
   onMount(async () => {
-    // Decide the initial mode before anything renders: with no core paired the
-    // UI is locked to core management (first launch, or the user unpaired
-    // everything); otherwise boot to chat. Mode is never persisted across
-    // restarts — the restored session is the continuity.
-    await cores().restoreSelected();
-    if (cores().currentEntry()) {
-      viewState.setImmediate("chat");
-    } else {
-      viewState.setImmediate("coreManagement");
-      viewState.setLocked(true);
-    }
-
-    // If the user installed in on-demand mode, the loopback port might not be
-    // up yet. Spawn the core before any HTTP call so settings/load doesn't
-    // race against a dead port.
-    await ensureLocalCoreUpIfNeeded();
-    // Reload the active core's sessions on every later core switch (first
-    // pair, the Settings picker, the session-list switcher). Registered after
-    // restoreSelected so boot's own select() does not double-trigger it; the
-    // boot-time session load is in the deferred block below.
-    cores().subscribe(() => void sessionsState.loadLatest());
-
-    // Critical path: only the work needed to paint a correctly-themed,
-    // correctly-positioned window runs before `show_main_window`. Everything
-    // else (session load, snippets, sidecar wiring, TTS) is deferred so
-    // first paint is not blocked on it.
+    // Local critical path: do ONLY the local work needed to position + theme
+    // the window, then show it. Everything that touches the core / network /
+    // keychain is deferred to after the window is visible (the deferred phase
+    // below), so a slow or unreachable core can never keep the window hidden.
     try {
-      await settingsState.loadSettings();
-      // Wire every WS-driven state store to the core's socket. These
-      // subscriptions are registered once and persist across core switches
-      // (cores().subscribeWs re-binds them on select()), so a single attach
-      // here is enough even though the first core may not be paired yet.
-      void toolkitsState.ensureConnected();
-      streamingState.attach();
-      serversState.attach();
-      sessionsState.attach();
-      downloadsState.attach();
-      updateState.attach();
-
-      applyTheme(settingsState.currentSettings["appearance.theme"] ?? "auto");
-      applyTextSize(settingsState.currentSettings["appearance.textSize"] ?? 20);
-      applyBubbleColor(
-        "--user-bubble-bg-light",
-        settingsState.currentSettings["appearance.userBubbleColor"],
-      );
-      applyBubbleColor(
-        "--agent-bubble-bg-light",
-        settingsState.currentSettings["appearance.agentBubbleColor"],
-      );
-      applyBubbleColor(
-        "--agent2-bubble-bg-light",
-        settingsState.currentSettings["appearance.secondaryAgentBubbleColor"],
-      );
-      applyBubbleColor(
-        "--default-base",
-        settingsState.currentSettings["appearance.defaultColor"],
-      );
-      applyBubbleColor(
-        "--accent-red-base",
-        settingsState.currentSettings["appearance.accentRed"],
-      );
-      applyBubbleColor(
-        "--accent-blue-base",
-        settingsState.currentSettings["appearance.accentBlue"],
-      );
-      applyBubbleColor(
-        "--accent-purple-base",
-        settingsState.currentSettings["appearance.accentPurple"],
-      );
-      applyBubbleColor(
-        "--accent-green-base",
-        settingsState.currentSettings["appearance.accentGreen"],
-      );
-      applyBubbleColor(
-        "--accent-orange-base",
-        settingsState.currentSettings["appearance.accentOrange"],
-      );
-      applyBubbleColor(
-        "--accent-yellow-base",
-        settingsState.currentSettings["appearance.accentYellow"],
-      );
-      applyCssVarPx(
-        "--rounded-small",
-        settingsState.currentSettings["appearance.roundedSmall"] as number,
-      );
-      applyCssVarPx(
-        "--rounded-medium",
-        settingsState.currentSettings["appearance.roundedMedium"] as number,
-      );
-      applyCssVarPx(
-        "--rounded-large",
-        settingsState.currentSettings["appearance.roundedLarge"] as number,
-      );
-      applyFont(
-        "--font-default",
-        settingsState.currentSettings["appearance.defaultFont"],
-      );
-      applyFont(
-        "--font-mono",
-        settingsState.currentSettings["appearance.monoFont"],
-      );
-
-      // Only show the "Loading latest session…" placeholder when we're
-      // actually about to load one: a core must be paired, and "always start
-      // new" mode has nothing to load so the placeholder would mislead.
-      sessionLoading = !!cores().currentEntry() &&
+      await settingsState.loadClientSettings();
+      // Decide the initial mode from LOCAL data only: whether a core is paired
+      // is the client-settings `cores` list, with no select()/keychain/network.
+      const paired = (await cores().list()).length > 0;
+      if (paired) {
+        viewState.setImmediate("chat");
+      } else {
+        viewState.setImmediate("coreManagement");
+        viewState.setLocked(true);
+      }
+      applyAllAppearance();
+      // Only show the "Loading latest session…" placeholder when we're actually
+      // about to load one: a core must be paired, and "always start new" mode
+      // has nothing to load so the placeholder would mislead.
+      sessionLoading = paired &&
         !settingsState.currentSettings["general.session.alwaysStartNew"];
-
       await positionWindow();
+    } catch (e) {
+      // A local read should never keep the window hidden. Log and show anyway.
+      console.error("[boot] local critical path failed:", e);
     } finally {
       loaded = true;
       await tick();
@@ -437,31 +427,59 @@
     // (their `ensure()` calls hit the file-exists fast path with no
     // network I/O).
     setupSidecarListeners();
-    void refreshPendingStartup();
-
-    // Re-probe whenever the active core changes — first-pair lands here,
-    // not on initial mount, so the chat view needs to see the pending nudge
-    // after the user finishes Quick Setup. Settings updates flow through
-    // settingsState's own listeners and don't need to be debounced here.
-    cores().subscribe(() => {
-      void refreshPendingStartup();
-    });
-
-    void snippetsState.load();
-
-    // Session load runs async with a visible "Loading latest session…"
-    // placeholder above the user input until it resolves. With no core paired
-    // there is nothing to load (the UI is locked to coreManagement).
-    (async () => {
+    // Deferred core phase: the window is already visible. Connect to the core,
+    // merge its (non-visual) settings, and wire the WS-driven stores. Each
+    // essential step logs on failure (console.error) so a developer sees it
+    // with dev tools open; the window is up regardless.
+    void (async () => {
       try {
-        if (!cores().currentEntry()) return;
-        if (settingsState.currentSettings["general.session.alwaysStartNew"]) {
-          await sessionsState.loadList();
-        } else {
-          await sessionsState.loadLatest();
+        await cores().restoreSelected();
+      } catch (e) {
+        console.error("[boot] core restore failed:", e);
+      }
+      // Reload the active core's sessions on every later core switch. Registered
+      // after restoreSelected so boot's own select() doesn't double-trigger it.
+      cores().subscribe(() => void sessionsState.loadLatest());
+      // On-demand install: spawn the loopback core if it isn't up yet.
+      await ensureLocalCoreUpIfNeeded();
+      // Wire every WS-driven store to the core socket. These register listeners
+      // synchronously and persist across core switches (cores().subscribeWs
+      // re-binds on select()), so one attach is enough even before a core is
+      // selected. This also kicks off the WS connect, whose failures now surface
+      // in the reconnect banner.
+      toolkitsState.ensureConnected();
+      streamingState.attach();
+      serversState.attach();
+      sessionsState.attach();
+      downloadsState.attach();
+      updateState.attach();
+      // Merge the core's settings over the local ones (appearance is local, so
+      // this is non-visual). Bounded so a wedged core fails fast and loud.
+      try {
+        await withTimeout(
+          settingsState.loadCoreSettings(),
+          CORE_SETTINGS_TIMEOUT_MS,
+          "core settings",
+        );
+      } catch (e) {
+        console.error("[boot] core settings merge failed:", e);
+      }
+      // Probe disk for referenced HF files + load snippets now that a core may
+      // be selected; re-probe on later core switches too.
+      void refreshPendingStartup();
+      cores().subscribe(() => void refreshPendingStartup());
+      void snippetsState.load();
+      // Initial session load, with the "Loading latest session…" placeholder.
+      try {
+        if (cores().currentEntry()) {
+          if (settingsState.currentSettings["general.session.alwaysStartNew"]) {
+            await sessionsState.loadList();
+          } else {
+            await sessionsState.loadLatest();
+          }
         }
       } catch (e) {
-        console.warn("session load:", e);
+        console.error("[boot] session load failed:", e);
       } finally {
         sessionLoading = false;
         // Enable per-message entry animations only AFTER the bulk restore
@@ -484,7 +502,7 @@
 
   // Drive the panel slide whenever a navigation is requested. viewState holds
   // `pendingMode` (requested) and `mode` (committed/rendered); this effect runs
-  // the 3-phase slide — out → commit (offscreen) → in — toward pendingMode.
+  // the 3-phase slide (out → commit (offscreen) → in) toward pendingMode.
   $effect(() => {
     const target = viewState.pendingMode;
     if (target === viewState.mode) return; // settled, nothing to slide
@@ -625,7 +643,7 @@
   );
   let lastUserMsgId = $derived(lastUserMsg?.id ?? null);
 
-  // Single shared "which user message is in edit mode" — only one bubble can
+  // Single shared "which user message is in edit mode": only one bubble can
   // edit at a time. Defaults to (and resets to) the latest user message
   // whenever a new turn arrives or the latest is deleted; double-clicking a
   // different user bubble switches the target without losing pending debounced

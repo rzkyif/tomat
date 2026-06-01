@@ -42,11 +42,7 @@ export function libraryEnvFor(
   return { env: {} };
 }
 
-function prepend(
-  existing: string | undefined,
-  addition: string,
-  sep: string,
-): string {
+function prepend(existing: string | undefined, addition: string, sep: string): string {
   if (!existing) return addition;
   return `${addition}${sep}${existing}`;
 }

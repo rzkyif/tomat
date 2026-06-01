@@ -31,8 +31,7 @@ export function parseSource(source: string): ParsedSource {
   const [username, reponame, branchname, ...fileParts] = parts;
   const filename = fileParts.join("/");
   const relPath = `${username}/${reponame}/${filename}`;
-  const url =
-    `https://huggingface.co/${username}/${reponame}/resolve/${branchname}/${filename}?download=true`;
+  const url = `https://huggingface.co/${username}/${reponame}/resolve/${branchname}/${filename}?download=true`;
   const baseName = filename.split("/").pop() ?? filename;
   return { relPath, url, filename: baseName };
 }
@@ -49,10 +48,7 @@ export interface ProbeResult {
 // HF resolve URLs 302-redirect to a CDN that often omits Content-Length on
 // HEAD. The 302 itself carries the size in `x-linked-size`, so probe without
 // following redirects first and fall back to a normal HEAD if needed.
-export async function probeSource(
-  source: string,
-  destinationRoot: string,
-): Promise<ProbeResult> {
+export async function probeSource(source: string, destinationRoot: string): Promise<ProbeResult> {
   const parsed = parseSource(source);
   const absPath = join(destinationRoot, parsed.relPath);
   const alreadyHave = await pathExists(absPath);

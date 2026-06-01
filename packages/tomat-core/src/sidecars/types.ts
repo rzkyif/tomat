@@ -7,22 +7,22 @@ export type { SidecarKind, SidecarStatus };
 // How the supervisor decides a freshly-spawned sidecar is "ready".
 export type ReadinessCheck =
   | {
-    kind: "http";
-    // Must be loopback-only (127.0.0.1 / localhost). Validated at start().
-    url: string;
-    expectStatus?: number; // default: any 2xx
-  }
+      kind: "http";
+      // Must be loopback-only (127.0.0.1 / localhost). Validated at start().
+      url: string;
+      expectStatus?: number; // default: any 2xx
+    }
   | {
-    kind: "stdout";
-    // Substring that the subprocess writes to stdout/stderr to signal ready.
-    // Default: "READY\n".
-    marker?: string;
-  }
+      kind: "stdout";
+      // Substring that the subprocess writes to stdout/stderr to signal ready.
+      // Default: "READY\n".
+      marker?: string;
+    }
   | {
-    kind: "warmup";
-    // No active check; sleep this long after spawn, then declare Running.
-    ms: number;
-  };
+      kind: "warmup";
+      // No active check; sleep this long after spawn, then declare Running.
+      ms: number;
+    };
 
 // Restart-after-crash policy. unexpectedly-exited sidecars retry with
 // exponential backoff, capped, up to maxAttempts.

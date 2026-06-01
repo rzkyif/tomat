@@ -69,7 +69,7 @@ export type ToolCallState = {
 // Mirrors the on-the-wire shape from `@tomat/shared`'s `PendingToolCall`
 // frame field. Re-exported from this module so callers in `lib/state/`
 // can keep the existing import path while the field names stay aligned
-// with the wire format — saving a cast at the streaming dispatcher.
+// with the wire format (saving a cast at the streaming dispatcher).
 import type { PendingToolCall as WirePendingToolCall } from "@tomat/shared";
 export type PendingToolCall = WirePendingToolCall;
 

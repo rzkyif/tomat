@@ -1,5 +1,5 @@
-// Global test setup loaded by vitest before every test file. Keep this thin
-// — anything specific to one test should live in that test's beforeEach.
+// Global test setup loaded by vitest before every test file. Keep this thin.
+// Anything specific to one test should live in that test's beforeEach.
 //
 // IntersectionObserver and ResizeObserver are unimplemented in jsdom; the
 // UI uses both, so stub them here. matchMedia is also unimplemented and is

@@ -10,23 +10,14 @@ import { encodeHex } from "jsr:@std/encoding@^1/hex";
 import { copy } from "jsr:@std/fs@^1/copy";
 import { ensureDir } from "jsr:@std/fs@^1/ensure-dir";
 import { walk } from "jsr:@std/fs@^1/walk";
-import {
-  dirname,
-  fromFileUrl,
-  join,
-  relative,
-  resolve,
-} from "jsr:@std/path@^1";
+import { dirname, fromFileUrl, join, relative, resolve } from "jsr:@std/path@^1";
 import { load as loadDotenv } from "jsr:@std/dotenv@^0.225";
 import * as ed from "jsr:@noble/ed25519@^2";
 
 // ---------------------------------------------------------------------------
 // paths
 
-export const REPO_ROOT = resolve(
-  dirname(fromFileUrl(import.meta.url)),
-  "../..",
-);
+export const REPO_ROOT = resolve(dirname(fromFileUrl(import.meta.url)), "../..");
 export const WEBSITE_DIR = join(REPO_ROOT, "packages/tomat-website");
 export const CORE_DIR = join(REPO_ROOT, "packages/tomat-core");
 export const SHARED_DIR = join(REPO_ROOT, "packages/tomat-shared");
@@ -35,10 +26,7 @@ export const DIST_DIR = join(REPO_ROOT, "dist");
 export const ENV_PATH = join(REPO_ROOT, ".env");
 export const ENV_EXAMPLE_PATH = join(REPO_ROOT, ".env.example");
 export const SIGNING_KEYS_PATH = join(CORE_DIR, "data/signing-keys.json");
-export const UPSTREAM_BINARIES_PATH = join(
-  WEBSITE_DIR,
-  "data/upstream-binaries.json",
-);
+export const UPSTREAM_BINARIES_PATH = join(WEBSITE_DIR, "data/upstream-binaries.json");
 export const CONFIG_PATH = join(CORE_DIR, "src/config.ts");
 
 // ---------------------------------------------------------------------------
@@ -97,14 +85,9 @@ export function humanBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-export async function sha256File(
-  path: string,
-): Promise<{ sha256: string; size: number }> {
+export async function sha256File(path: string): Promise<{ sha256: string; size: number }> {
   const data = await Deno.readFile(path);
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    data.buffer as ArrayBuffer,
-  );
+  const digest = await crypto.subtle.digest("SHA-256", data.buffer as ArrayBuffer);
   return {
     sha256: encodeHex(new Uint8Array(digest)),
     size: data.byteLength,
@@ -142,7 +125,7 @@ export interface DeployEnv {
   storageDomain: string;
   r2Bucket: string;
   /** Raw text of the Tauri updater keys (minisign format). Empty when the
-   *  user hasn't set up client updates yet — release:client skips itself
+   *  user hasn't set up client updates yet. release:client skips itself
    *  with a yellow warning when missing. */
   tauriUpdaterPublicKey: string;
   tauriUpdaterPrivateKey: string;
@@ -154,7 +137,7 @@ export async function loadOrSeedEnv(): Promise<DeployEnv> {
     if (!(await exists(ENV_EXAMPLE_PATH))) {
       fail(`neither .env nor .env.example found at ${REPO_ROOT}`);
     }
-    info(`.env missing — seeding from .env.example`);
+    info(`.env missing; seeding from .env.example`);
     await copyFile(ENV_EXAMPLE_PATH, ENV_PATH);
   }
 
@@ -213,10 +196,7 @@ export async function loadOrSeedEnv(): Promise<DeployEnv> {
 
 /** In-place .env editor that preserves comments and ordering. Falls back to
  *  appending the key at the bottom if not present. */
-export async function persistEnvKey(
-  key: string,
-  value: string,
-): Promise<void> {
+export async function persistEnvKey(key: string, value: string): Promise<void> {
   const text = await Deno.readTextFile(ENV_PATH);
   const lines = text.split("\n");
   let found = false;
@@ -260,9 +240,7 @@ export function canonicalize(value: unknown): string {
   }
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj).sort();
-  return "{" +
-    keys.map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") +
-    "}";
+  return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") + "}";
 }
 
 // ---------------------------------------------------------------------------
@@ -382,26 +360,18 @@ export async function r2Put(
   await verifyR2Upload(env, key, localSize);
 }
 
-async function verifyR2Upload(
-  env: DeployEnv,
-  key: string,
-  expectedSize: number,
-): Promise<void> {
+async function verifyR2Upload(env: DeployEnv, key: string, expectedSize: number): Promise<void> {
   const url = `https://${env.storageDomain}/${key}?_v=${Date.now()}`;
   let res: Response;
   try {
     res = await fetch(url, { method: "HEAD" });
   } catch (err) {
-    fail(
-      `r2 put ${key}: post-upload HEAD failed: ${
-        err instanceof Error ? err.message : err
-      }`,
-    );
+    fail(`r2 put ${key}: post-upload HEAD failed: ${err instanceof Error ? err.message : err}`);
   }
   if (!res.ok) {
     fail(
-      `r2 put ${key}: post-upload HEAD returned ${res.status} ${res.statusText} ` +
-        `— wrangler likely crashed mid-upload despite exit 0. Re-run the task.`,
+      `r2 put ${key}: post-upload HEAD returned ${res.status} ${res.statusText}. ` +
+        `Wrangler likely crashed mid-upload despite exit 0. Re-run the task.`,
     );
   }
   const remoteSize = Number(res.headers.get("content-length") ?? "-1");
@@ -434,10 +404,7 @@ export async function r2PutInline(
 
 /** GET an R2-hosted JSON at `https://${storageDomain}/${r2Key}`. Returns null
  *  on 404 (treated as "not yet published"). Throws on other non-2xx. */
-export async function fetchLiveJson<T>(
-  env: DeployEnv,
-  r2Key: string,
-): Promise<T | null> {
+export async function fetchLiveJson<T>(env: DeployEnv, r2Key: string): Promise<T | null> {
   return await fetchHttpsJson<T>(`https://${env.storageDomain}/${r2Key}`);
 }
 
@@ -447,11 +414,7 @@ export async function fetchHttpsJson<T>(url: string): Promise<T | null> {
   try {
     res = await fetch(url);
   } catch (err) {
-    fail(
-      `network error fetching ${url}: ${
-        err instanceof Error ? err.message : err
-      }`,
-    );
+    fail(`network error fetching ${url}: ${err instanceof Error ? err.message : err}`);
   }
   if (res.status === 404) return null;
   if (!res.ok) fail(`fetch ${url} returned ${res.status} ${res.statusText}`);
@@ -463,20 +426,13 @@ export async function fetchHttpsJson<T>(url: string): Promise<T | null> {
 }
 
 /** GET an R2-hosted file body. Returns null on 404. Throws on other non-2xx. */
-export async function fetchR2Bytes(
-  env: DeployEnv,
-  r2Key: string,
-): Promise<Uint8Array | null> {
+export async function fetchR2Bytes(env: DeployEnv, r2Key: string): Promise<Uint8Array | null> {
   const url = `https://${env.storageDomain}/${r2Key}`;
   let res: Response;
   try {
     res = await fetch(url);
   } catch (err) {
-    fail(
-      `network error fetching ${url}: ${
-        err instanceof Error ? err.message : err
-      }`,
-    );
+    fail(`network error fetching ${url}: ${err instanceof Error ? err.message : err}`);
   }
   if (res.status === 404) return null;
   if (!res.ok) fail(`fetch ${url} returned ${res.status} ${res.statusText}`);
@@ -486,12 +442,7 @@ export async function fetchR2Bytes(
 // ---------------------------------------------------------------------------
 // website source hashing (for release:website idempotency)
 
-const WEBSITE_HASH_INPUTS = [
-  "src",
-  "public",
-  "astro.config.mjs",
-  "wrangler.toml",
-];
+const WEBSITE_HASH_INPUTS = ["src", "public", "astro.config.mjs", "wrangler.toml"];
 
 /** Path (relative to packages/tomat-website/) of the release-state cursor
  *  itself. Excluded from the hash so it doesn't feed back into the hash it
@@ -517,21 +468,13 @@ export async function hashWebsiteSource(): Promise<string> {
     }
   }
   entries.sort((a, b) => a.path.localeCompare(b.path));
-  return await sha256String(
-    entries.map((e) => `${e.path}\t${e.sha}`).join("\n"),
-  );
+  return await sha256String(entries.map((e) => `${e.path}\t${e.sha}`).join("\n"));
 }
 
 // ---------------------------------------------------------------------------
 // signing convenience
 
-export async function signEd25519(
-  privateKey: Uint8Array,
-  body: unknown,
-): Promise<string> {
-  const sig = await ed.signAsync(
-    new TextEncoder().encode(canonicalize(body)),
-    privateKey,
-  );
+export async function signEd25519(privateKey: Uint8Array, body: unknown): Promise<string> {
+  const sig = await ed.signAsync(new TextEncoder().encode(canonicalize(body)), privateKey);
   return encodeBase64(sig);
 }

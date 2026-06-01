@@ -1,7 +1,7 @@
 # E2E
 
 E2E specs drive the real Tauri shell through `tauri-driver` and WebdriverIO.
-They are NOT run in CI — invoke them manually with `deno task test:e2e`.
+They are NOT run in CI. Invoke them manually with `deno task test:e2e`.
 
 ## One-time setup
 
@@ -39,13 +39,13 @@ If `hello.test.ts` passes, the harness is good. Expand coverage from there.
 
 ## Platform notes
 
-- **macOS** — `tauri-driver` historically had rough edges on recent macOS. As of
+- **macOS**: `tauri-driver` historically had rough edges on recent macOS. As of
   darwin 25.4 / macOS 26 the support story is **unverified**. If `tauri-driver`
   fails to launch or fails to attach to the WebView, document the limitation
   here and rely on Svelte component tests via vitest plus manual
   `deno task dev` smoke tests until upstream catches up.
-- **Linux** — usually the most reliable; uses `WebKitWebDriver` from webkit2gtk.
-- **Windows** — requires `msedgedriver` matching the installed Edge WebView2
+- **Linux**: usually the most reliable; uses `WebKitWebDriver` from webkit2gtk.
+- **Windows**: requires `msedgedriver` matching the installed Edge WebView2
   version.
 
 ## Naming convention
@@ -64,5 +64,5 @@ boundary is load-bearing AND the in-source tests can't prove the behavior:
   parsing layer is in-source)
 - screen capture / region capture overlay
 
-Everything else — the chat surface, settings, message rendering — should be
+Everything else (the chat surface, settings, message rendering) should be
 covered with vitest + `@testing-library/svelte` and a mocked `platform()`.

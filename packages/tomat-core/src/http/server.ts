@@ -46,8 +46,8 @@ export function buildApp(): Hono {
         ),
     }),
   );
-  // app.onError catches throws from anywhere — including sub-apps mounted
-  // via app.route() — which the older try/catch middleware did NOT do.
+  // app.onError catches throws from anywhere (including sub-apps mounted
+  // via app.route()), which the older try/catch middleware did NOT do.
   // Hono 4's middleware-as-error-handler pattern only sees errors from
   // the SAME app's middleware chain; sub-route throws skip past it. The
   // onError hook is the only sanctioned way to centralize error handling

@@ -65,7 +65,7 @@ export const ERROR_CODES = [
   "internal_error",
 ] as const;
 
-export type ErrorCode = typeof ERROR_CODES[number];
+export type ErrorCode = (typeof ERROR_CODES)[number];
 
 export interface ApiErrorBody {
   error: {
@@ -80,8 +80,7 @@ export function isApiErrorBody(value: unknown): value is ApiErrorBody {
   const err = (value as { error?: unknown }).error;
   if (!err || typeof err !== "object") return false;
   const code = (err as { code?: unknown }).code;
-  return typeof code === "string" &&
-    (ERROR_CODES as readonly string[]).includes(code);
+  return typeof code === "string" && (ERROR_CODES as readonly string[]).includes(code);
 }
 
 /** Extract a human-readable message from an unknown thrown value. Replaces the

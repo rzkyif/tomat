@@ -1,5 +1,5 @@
 // HTTP contract test for /api/v1/sessions. Mounts the real Hono app
-// in-memory and drives requests through `app.fetch()` — no socket binding.
+// in-memory and drives requests through `app.fetch()` (no socket binding).
 // Uses the auth service to mint a real bearer token, then
 // exercises the route surface that touches DB + middleware.
 

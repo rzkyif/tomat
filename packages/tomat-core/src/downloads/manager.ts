@@ -8,13 +8,13 @@
 // Self-heal: persisted Completed rows whose file no longer exists are dropped.
 //
 // Caller surface:
-//   - enqueue(spec)  — start (or join) a download; resolves to the abs path
-//   - cancel(id)     — abort an active download or remove a queued one
-//   - retry(id)      — re-queue a previously-failed download
-//   - remove(id)     — drop a Completed/Error/Cancelled row from the queue
-//   - snapshot()     — all rows
-//   - markAllSeen()  — flip seen=true on every row
-//   - subscribe(fn)  — fire-on-change observer (used by the WS hub)
+//   - enqueue(spec):  start (or join) a download; resolves to the abs path
+//   - cancel(id):     abort an active download or remove a queued one
+//   - retry(id):      re-queue a previously-failed download
+//   - remove(id):     drop a Completed/Error/Cancelled row from the queue
+//   - snapshot():     all rows
+//   - markAllSeen():  flip seen=true on every row
+//   - subscribe(fn):  fire-on-change observer (used by the WS hub)
 
 import { dirname, join } from "@std/path";
 import { errMessage } from "@tomat/shared";
@@ -81,15 +81,17 @@ export class DownloadManager {
   resumePending(): void {
     const rows = this.snapshot().filter((r) => r.status === "Pending");
     for (const row of rows) {
-      this.spawn(row.id, {
-        source: row.source,
-        destination: row.destination as EnqueueSpec["destination"],
-        groupId: row.groupId,
-        sizeHint: row.sizeBytes,
-      }, row.absPath).catch((err) => {
-        log.warn(
-          `resume ${row.id}: ${errMessage(err)}`,
-        );
+      this.spawn(
+        row.id,
+        {
+          source: row.source,
+          destination: row.destination as EnqueueSpec["destination"],
+          groupId: row.groupId,
+          sizeHint: row.sizeBytes,
+        },
+        row.absPath,
+      ).catch((err) => {
+        log.warn(`resume ${row.id}: ${errMessage(err)}`);
       });
     }
   }
@@ -152,12 +154,16 @@ export class DownloadManager {
     this.broadcast();
     const ctrl = new AbortController();
     this.inFlight.set(id, { abort: ctrl, resolvers: [] });
-    this.spawn(id, {
-      source: row.source,
-      destination: row.destination as EnqueueSpec["destination"],
-      groupId: row.groupId,
-      sizeHint: row.sizeBytes,
-    }, row.absPath).catch((err) => {
+    this.spawn(
+      id,
+      {
+        source: row.source,
+        destination: row.destination as EnqueueSpec["destination"],
+        groupId: row.groupId,
+        sizeHint: row.sizeBytes,
+      },
+      row.absPath,
+    ).catch((err) => {
       log.warn(`retry ${id}: ${errMessage(err)}`);
     });
   }
@@ -171,17 +177,19 @@ export class DownloadManager {
   }
 
   snapshot(): DownloadEntry[] {
-    const rows = db().prepare(`
+    const rows = db()
+      .prepare(`
       SELECT id, source, destination, rel_path, abs_path, filename, group_id,
              size_bytes, downloaded_bytes, status, error, added_at_ms
       FROM downloads
       ORDER BY added_at_ms DESC
-    `).all() as Array<Record<string, unknown>>;
+    `)
+      .all() as Array<Record<string, unknown>>;
     return rows.map(rowToEntry);
   }
 
   markAllSeen(): void {
-    // No `seen` column in the schema — the client tracks read state locally.
+    // No `seen` column in the schema. The client tracks read state locally.
     // Method preserved on the API for symmetry with the old Tauri command.
   }
 
@@ -219,11 +227,7 @@ export class DownloadManager {
     }
   }
 
-  private async spawn(
-    id: string,
-    spec: EnqueueSpec,
-    absPath: string,
-  ): Promise<void> {
+  private async spawn(id: string, spec: EnqueueSpec, absPath: string): Promise<void> {
     await this.acquire();
     const inFlight = this.inFlight.get(id);
     if (!inFlight) {
@@ -255,12 +259,16 @@ export class DownloadManager {
       this.setStatus(id, "Cancelled", { error: result.error });
       try {
         await Deno.remove(absPath + ".tmp");
-      } catch { /* fine */ }
+      } catch {
+        /* fine */
+      }
     } else {
       this.setStatus(id, "Error", { error: result.error });
       try {
         await Deno.remove(absPath + ".tmp");
-      } catch { /* fine */ }
+      } catch {
+        /* fine */
+      }
     }
     this.broadcast();
 
@@ -301,7 +309,7 @@ export class DownloadManager {
     // tampered CDN response is rejected (trust = HF + TLS, same posture as the
     // beta binary resolver). Small non-LFS files (config.json etc.) carry a git
     // blob sha1 instead, which is not a content hash, so they stay unverified.
-    const expectedSha = spec.sha256 ?? await resolveHfSha256(url, signal);
+    const expectedSha = spec.sha256 ?? (await resolveHfSha256(url, signal));
     const sha = expectedSha ? new Sha256Stream() : null;
     let downloaded = 0;
     let total: number | undefined = spec.sizeHint;
@@ -344,7 +352,9 @@ export class DownloadManager {
     } finally {
       try {
         file.close();
-      } catch { /* fine */ }
+      } catch {
+        /* fine */
+      }
     }
 
     if (sha && expectedSha) {
@@ -352,7 +362,9 @@ export class DownloadManager {
       if (actual !== expectedSha.toLowerCase()) {
         try {
           await Deno.remove(tmpPath);
-        } catch { /* fine */ }
+        } catch {
+          /* fine */
+        }
         throw new AppError(
           "checksum_mismatch",
           `sha256 mismatch: want ${expectedSha}, got ${actual}`,
@@ -391,74 +403,80 @@ export class DownloadManager {
     const existing = this.getRow(id);
     const now = Date.now();
     if (existing) {
-      db().prepare(`
+      db()
+        .prepare(`
         UPDATE downloads
            SET status = 'Pending',
                error = NULL,
                downloaded_bytes = 0,
                size_bytes = COALESCE(?, size_bytes)
          WHERE id = ?
-      `).run(spec.sizeHint ?? null, id);
+      `)
+        .run(spec.sizeHint ?? null, id);
       return;
     }
     const meta = resolveMeta(spec);
-    db().prepare(`
+    db()
+      .prepare(`
       INSERT INTO downloads
         (id, source, destination, rel_path, abs_path, filename, group_id,
          size_bytes, downloaded_bytes, status, error, added_at_ms)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'Pending', NULL, ?)
-    `).run(
-      id,
-      spec.source,
-      spec.destination,
-      meta.relPath,
-      absPath,
-      meta.filename,
-      spec.groupId,
-      spec.sizeHint ?? null,
-      now,
-    );
+    `)
+      .run(
+        id,
+        spec.source,
+        spec.destination,
+        meta.relPath,
+        absPath,
+        meta.filename,
+        spec.groupId,
+        spec.sizeHint ?? null,
+        now,
+      );
   }
 
-  private async upsertCompleted(
-    id: string,
-    spec: EnqueueSpec,
-    absPath: string,
-  ): Promise<void> {
+  private async upsertCompleted(id: string, spec: EnqueueSpec, absPath: string): Promise<void> {
     const existing = this.getRow(id);
     if (existing) {
-      db().prepare(`
+      db()
+        .prepare(`
         UPDATE downloads
            SET status = 'Completed',
                error = NULL,
                abs_path = ?,
                downloaded_bytes = COALESCE(size_bytes, downloaded_bytes)
          WHERE id = ?
-      `).run(absPath, id);
+      `)
+        .run(absPath, id);
       return;
     }
     let sizeOnDisk: number | undefined;
     try {
       sizeOnDisk = (await Deno.stat(absPath)).size;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     const meta = resolveMeta(spec);
-    db().prepare(`
+    db()
+      .prepare(`
       INSERT INTO downloads
         (id, source, destination, rel_path, abs_path, filename, group_id,
          size_bytes, downloaded_bytes, status, error, added_at_ms)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Completed', NULL, ?)
-    `).run(
-      id,
-      spec.source,
-      spec.destination,
-      meta.relPath,
-      absPath,
-      meta.filename,
-      spec.groupId,
-      sizeOnDisk ?? null,
-      sizeOnDisk ?? 0,
-      Date.now(),
-    );
+    `)
+      .run(
+        id,
+        spec.source,
+        spec.destination,
+        meta.relPath,
+        absPath,
+        meta.filename,
+        spec.groupId,
+        sizeOnDisk ?? null,
+        sizeOnDisk ?? 0,
+        Date.now(),
+      );
   }
 
   private setStatus(
@@ -467,48 +485,55 @@ export class DownloadManager {
     opts: { error?: string; downloadedBytes?: number } = {},
   ): void {
     if (opts.downloadedBytes !== undefined) {
-      db().prepare(`
+      db()
+        .prepare(`
         UPDATE downloads
            SET status = ?, error = ?, downloaded_bytes = ?
          WHERE id = ?
-      `).run(status, opts.error ?? null, opts.downloadedBytes, id);
+      `)
+        .run(status, opts.error ?? null, opts.downloadedBytes, id);
     } else {
-      db().prepare(`
+      db()
+        .prepare(`
         UPDATE downloads
            SET status = ?, error = ?
          WHERE id = ?
-      `).run(status, opts.error ?? null, id);
+      `)
+        .run(status, opts.error ?? null, id);
     }
   }
 
   private updateProgress(id: string, downloadedBytes: number): void {
-    db().prepare(`UPDATE downloads SET downloaded_bytes = ? WHERE id = ?`)
-      .run(downloadedBytes, id);
+    db().prepare(`UPDATE downloads SET downloaded_bytes = ? WHERE id = ?`).run(downloadedBytes, id);
   }
 
   private updateSize(id: string, sizeBytes: number): void {
-    db().prepare(`UPDATE downloads SET size_bytes = ? WHERE id = ?`)
-      .run(sizeBytes, id);
+    db().prepare(`UPDATE downloads SET size_bytes = ? WHERE id = ?`).run(sizeBytes, id);
   }
 
   private getRow(id: string): DownloadEntry | undefined {
-    const row = db().prepare(`
+    const row = db()
+      .prepare(`
       SELECT id, source, destination, rel_path, abs_path, filename, group_id,
              size_bytes, downloaded_bytes, status, error, added_at_ms
       FROM downloads WHERE id = ?
-    `).get(id) as Record<string, unknown> | undefined;
+    `)
+      .get(id) as Record<string, unknown> | undefined;
     return row ? rowToEntry(row) : undefined;
   }
 
   // On construction: drop persisted Completed rows whose file vanished;
   // flip persisted Downloading rows to Pending (the resume loop will pick
   // them up).
-  // Boot-time pass — runs once at construction, so the sync stat here is
+  // Boot-time pass that runs once at construction, so the sync stat here is
   // intentional (a few hundred sync stats during startup is cheaper than
   // restructuring the constructor to be async).
   private normalizePersistedRows(): void {
-    const all = db().prepare(`SELECT id, abs_path, status FROM downloads`)
-      .all() as Array<{ id: string; abs_path: string; status: string }>;
+    const all = db().prepare(`SELECT id, abs_path, status FROM downloads`).all() as Array<{
+      id: string;
+      abs_path: string;
+      status: string;
+    }>;
     for (const row of all) {
       if (row.status === "Completed") {
         try {
@@ -517,10 +542,12 @@ export class DownloadManager {
           db().prepare(`DELETE FROM downloads WHERE id = ?`).run(row.id);
         }
       } else if (row.status === "Downloading") {
-        db().prepare(`
+        db()
+          .prepare(`
           UPDATE downloads SET status = 'Pending', downloaded_bytes = 0
           WHERE id = ?
-        `).run(row.id);
+        `)
+          .run(row.id);
       }
     }
   }
@@ -534,9 +561,7 @@ export class DownloadManager {
       try {
         l(snap);
       } catch (err) {
-        log.warn(
-          `download listener threw: ${errMessage(err)}`,
-        );
+        log.warn(`download listener threw: ${errMessage(err)}`);
       }
     }
   }
@@ -564,8 +589,7 @@ function downloadId(dest: EnqueueSpec["destination"], absPath: string): string {
 
 function resolveMeta(spec: EnqueueSpec): { relPath: string; filename: string } {
   if (spec.relPath) {
-    const filename = spec.filename ?? spec.relPath.split("/").pop() ??
-      spec.relPath;
+    const filename = spec.filename ?? spec.relPath.split("/").pop() ?? spec.relPath;
     return { relPath: spec.relPath, filename };
   }
   const parsed = parseSource(spec.source);
@@ -612,10 +636,7 @@ export { newJobId };
  *  it (lowercase hex) when present and shaped like a sha256, else undefined
  *  (e.g. small non-LFS files, whose etag is a git blob sha1, or a non-HF URL).
  *  Used to verify model downloads against HF + TLS. */
-async function resolveHfSha256(
-  url: string,
-  signal: AbortSignal,
-): Promise<string | undefined> {
+async function resolveHfSha256(url: string, signal: AbortSignal): Promise<string | undefined> {
   if (!url.includes("huggingface.co")) return undefined;
   try {
     const res = await fetch(url, {

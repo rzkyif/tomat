@@ -99,9 +99,7 @@ Deno.test("GET /api/v1/settings: never returns secret-typed values", async () =>
     const app = buildApp();
     // Simulate a plaintext key sitting in settings.json by writing it through
     // the settings service directly (bypassing the route guard).
-    const { patchCoreSettings } = await import(
-      "../../services/core-settings.ts"
-    );
+    const { patchCoreSettings } = await import("../../services/core-settings.ts");
     await patchCoreSettings({ "llm.external.apiKey": "sk-must-be-redacted" });
     const res = await app.fetch(
       new Request("http://x/api/v1/settings", { headers: bearer(token) }),

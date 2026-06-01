@@ -81,7 +81,7 @@ describe("expandToFiles", () => {
   });
 
   it("a folder path expands to its direct file children only", () => {
-    // /root/models/u has a single folder child (r), not a file — so
+    // /root/models/u has a single folder child (r), not a file, so
     // expandToFiles emits no files for it (only DIRECT file children are
     // returned). This catches a regression where the function would recurse.
     expect(expandToFiles(TREE, ["/root/models/u"])).toEqual([]);

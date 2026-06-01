@@ -5,17 +5,13 @@
 // beta core always installs the LATEST upstream release without us having to
 // re-publish the manifest. The signed manifest commits to the repo + patterns;
 // the concrete download is verified against GitHub's own published sha256
-// digest. We REFUSE to install an asset that lacks a sha256 digest — there'd
+// digest. We REFUSE to install an asset that lacks a sha256 digest. There'd
 // be no verifiable anchor for the bytes we're about to execute.
 //
 // On the STABLE channel, manifest entries are pinned at release time and this
 // module isn't involved.
 
-import type {
-  BinaryManifestEntry,
-  Triple,
-  UpstreamResolver,
-} from "@tomat/shared";
+import type { BinaryManifestEntry, Triple, UpstreamResolver } from "@tomat/shared";
 import { errMessage, isResolverEntry } from "@tomat/shared";
 import { AppError } from "../shared/errors.ts";
 
@@ -23,6 +19,7 @@ interface GitHubReleaseAsset {
   name: string;
   browser_download_url: string;
   digest?: string | null;
+  size?: number;
 }
 
 interface GitHubRelease {
@@ -35,6 +32,9 @@ export interface ResolvedBinary {
   version: string;
   url: string;
   sha256: string;
+  /** Download size in bytes when the source publishes it (GitHub asset size on
+   *  beta resolver entries). Pinned entries leave this unset. */
+  sizeBytes?: number;
 }
 
 // Short-lived per-repo cache of the latest-release lookup. A beta update check
@@ -43,20 +43,14 @@ export interface ResolvedBinary {
 // rapid re-resolves. The signed manifest's resolver config is the trust
 // anchor; this only caches the volatile version lookup, briefly.
 const RELEASE_CACHE_TTL_MS = 5 * 60_000;
-const releaseCache = new Map<
-  string,
-  { release: GitHubRelease; atMs: number }
->();
+const releaseCache = new Map<string, { release: GitHubRelease; atMs: number }>();
 
 /** Test hook: drop the cached releases so mocked-fetch cases stay isolated. */
 export function __resetResolverCacheForTesting(): void {
   releaseCache.clear();
 }
 
-async function fetchLatestRelease(
-  repo: string,
-  signal?: AbortSignal,
-): Promise<GitHubRelease> {
+async function fetchLatestRelease(repo: string, signal?: AbortSignal): Promise<GitHubRelease> {
   const cached = releaseCache.get(repo);
   if (cached && Date.now() - cached.atMs < RELEASE_CACHE_TTL_MS) {
     return cached.release;
@@ -90,7 +84,7 @@ async function fetchLatestRelease(
 
 /** Resolve an upstream resolver to the latest binary for `triple`. Returns
  *  null when upstream doesn't publish this triple at all (e.g. whisper.cpp
- *  ships only Windows assets — mac/linux beta has no whisper, same as stable).
+ *  ships only Windows assets, so mac/linux beta has no whisper, same as stable).
  *  Throws when the expected asset or its sha256 digest is missing. */
 export async function resolveUpstream(
   resolver: UpstreamResolver,
@@ -119,6 +113,7 @@ export async function resolveUpstream(
     version: release.tag_name,
     url: asset.browser_download_url,
     sha256: asset.digest.slice("sha256:".length),
+    sizeBytes: typeof asset.size === "number" ? asset.size : undefined,
   };
 }
 

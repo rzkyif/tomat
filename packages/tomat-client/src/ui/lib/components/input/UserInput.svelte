@@ -78,7 +78,6 @@ import { errMessage } from "@tomat/shared";
   import type { ActivationMode } from "@tomat/shared";
   import AttachmentList from "../AttachmentList.svelte";
   import Bubble from "../ui/Bubble.svelte";
-  import ButtonGroup from "../ui/ButtonGroup.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import Alert from "../ui/Alert.svelte";
   import Modal from "../ui/Modal.svelte";
@@ -165,7 +164,6 @@ import { errMessage } from "@tomat/shared";
     }
   });
 
-  let attachMenuOpen = $state(false);
   let captureMonitors = $state<CaptureMonitorInfo[]>([]);
   let capturing = $state(false);
 
@@ -343,14 +341,6 @@ import { errMessage } from "@tomat/shared";
     focusTextarea();
   });
 
-  function handleDocClick(e: MouseEvent) {
-    if (!attachMenuOpen) return;
-    const target = e.target as HTMLElement;
-    if (!target.closest("[data-attach-root]")) {
-      closeAttachMenu();
-    }
-  }
-
   onMount(() => {
     const cleanups: Array<() => void> = [];
 
@@ -399,11 +389,10 @@ import { errMessage } from "@tomat/shared";
         cleanups.push(unsubscribe);
       });
 
-    // Click-outside to close attachment menu
-    document.addEventListener("click", handleDocClick, true);
-    cleanups.push(() =>
-      document.removeEventListener("click", handleDocClick, true),
-    );
+    // Populate the monitor list for the always-visible screen-capture select.
+    void listCaptureMonitors().then((m) => {
+      captureMonitors = m;
+    });
 
     void platform()
       .shortcuts.subscribeInputEvents({
@@ -526,7 +515,7 @@ import { errMessage } from "@tomat/shared";
     if (hasActiveWork) return;
     // Block send when the core WS isn't connected. Without this the message
     // optimistically lands in the local list and the chat.start frame is
-    // dropped on the floor — user sees a queued message that never streams.
+    // dropped on the floor. The user sees a queued message that never streams.
     if (connectionState.state !== "connected") return;
 
     const trimmedText = text.trim();
@@ -862,21 +851,7 @@ import { errMessage } from "@tomat/shared";
     attachments = attachments.filter((_, i) => i !== index);
   }
 
-  async function toggleAttachMenu() {
-    if (attachMenuOpen) {
-      attachMenuOpen = false;
-    } else {
-      attachMenuOpen = true;
-      captureMonitors = await listCaptureMonitors();
-    }
-  }
-
-  function closeAttachMenu() {
-    attachMenuOpen = false;
-  }
-
   async function handleAttachFileFromMenu() {
-    closeAttachMenu();
     await handleAttachFile();
   }
 
@@ -889,7 +864,6 @@ import { errMessage } from "@tomat/shared";
 
   async function captureMonitorById(monitorId: string) {
     if (capturing) return;
-    closeAttachMenu();
     capturing = true;
     try {
       const base64 = await captureMonitor(monitorId);
@@ -912,7 +886,6 @@ import { errMessage } from "@tomat/shared";
 
   async function handleCaptureRegionFromMenu() {
     if (capturing) return;
-    closeAttachMenu();
     capturing = true;
     try {
       const base64 = await captureRegion();
@@ -1040,34 +1013,19 @@ import { errMessage } from "@tomat/shared";
   <div
     class="flex items-end justify-between gap-2 text-2xl text-default-700 w-full"
   >
-    <ButtonGroup size="md" data-attach-root>
-      <button
-        class="hover:text-default-900 hover:cursor-pointer rounded p-1 flex items-center shrink-0 text-default-700"
-        title={attachMenuOpen ? "Close" : "Attach"}
-        onclick={toggleAttachMenu}
-      >
-        <i
-          class="flex i-material-symbols-add-rounded transition-transform duration-100 {attachMenuOpen
-            ? 'rotate-45'
-            : ''}"
-        ></i>
-      </button>
-
-      <button
-        class="hover:text-default-900 hover:cursor-pointer rounded flex items-center shrink-0 overflow-hidden transition-all duration-100 {attachMenuOpen
-          ? 'w-8 p-1 opacity-100'
-          : 'w-0 p-0 opacity-0 pointer-events-none'}"
+    <div class="flex items-center bg-default-200 rounded-large p-1">
+      <IconButton
+        icon="i-material-symbols-attach-file-rounded"
         title="Attach File"
+        size="lg-tight"
         onclick={handleAttachFileFromMenu}
-        tabindex={attachMenuOpen ? 0 : -1}
-      >
-        <i class="flex i-material-symbols-attach-file-rounded"></i>
-      </button>
+      />
 
+      <!-- Screen capture: an icon with an overlaid monitor <select>. A <select>
+           can't live inside a <button>, so this matches IconButton's lg-tight
+           sizing (p-1 text-xl) by hand instead of using the component. -->
       <div
-        class="relative shrink-0 flex items-center overflow-hidden transition-all duration-100 rounded hover:text-default-900 {attachMenuOpen
-          ? 'w-8 p-1 opacity-100'
-          : 'w-0 p-0 opacity-0 pointer-events-none'}"
+        class="relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hover:text-default-900 rounded transition-colors"
       >
         <i class="flex i-material-symbols-screenshot-monitor-outline-rounded"
         ></i>
@@ -1076,8 +1034,7 @@ import { errMessage } from "@tomat/shared";
           title="Screen Capture"
           aria-label="Screen Capture Monitor"
           onchange={handleCaptureSelect}
-          disabled={!attachMenuOpen || capturing}
-          tabindex={attachMenuOpen ? 0 : -1}
+          disabled={capturing}
           value=""
         >
           <option value="" disabled>Select Monitor</option>
@@ -1089,29 +1046,21 @@ import { errMessage } from "@tomat/shared";
         </select>
       </div>
 
-      <button
-        class="hover:text-default-900 hover:cursor-pointer rounded flex items-center shrink-0 overflow-hidden transition-all duration-100 {attachMenuOpen
-          ? 'w-8 p-1 opacity-100'
-          : 'w-0 p-0 opacity-0 pointer-events-none'}"
+      <IconButton
+        icon="i-material-symbols-crop-free-rounded"
         title="Capture Region"
-        aria-label="Capture Screen Region"
+        ariaLabel="Capture Screen Region"
+        size="lg-tight"
+        disabled={capturing}
         onclick={handleCaptureRegionFromMenu}
-        disabled={!attachMenuOpen || capturing}
-        tabindex={attachMenuOpen ? 0 : -1}
-      >
-        <i class="flex i-material-symbols-crop-free-rounded"></i>
-      </button>
+      />
+    </div>
 
-      {#if attachMenuOpen}
-        <div class="flex h-full w-1"></div>
-      {/if}
-    </ButtonGroup>
-
-    <ButtonGroup size="lg">
+    <div class="flex items-center bg-default-200 rounded-large p-1">
       <div
-        class="relative flex items-center p-1 text-default-700 hover:text-default-900 transition-colors"
+        class="relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hover:text-default-900 rounded transition-colors"
       >
-        <i class="i-material-symbols-desktop-windows-outline-rounded"></i>
+        <i class="flex i-material-symbols-desktop-windows-outline-rounded"></i>
         <select
           class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
           onchange={handleMonitorChange}
@@ -1129,6 +1078,7 @@ import { errMessage } from "@tomat/shared";
           <IconButton
             icon={align.icon}
             title={align.title}
+            size="lg-tight"
             onclick={() => handleAlignment(align.value)}
           />
         {/each}
@@ -1141,6 +1091,7 @@ import { errMessage } from "@tomat/shared";
             ? "Pending downloads - open settings"
             : "Settings"}
           active={pendingBlinkOn}
+          size="lg-tight"
           onclick={() => viewState.navigate("settings")}
           class="transition-colors duration-300"
         />
@@ -1149,14 +1100,14 @@ import { errMessage } from "@tomat/shared";
                overlapping the gear icon. Pairs with the existing color
                blink so the cue is impossible to miss after first pair. -->
           <span
-            class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-accent-red-300 text-white text-[10px] font-bold flex items-center justify-center pointer-events-none select-none"
+            class="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-accent-red-300 text-white text-[9px] font-bold flex items-center justify-center pointer-events-none select-none"
             aria-hidden="true"
           >
             !
           </span>
         {/if}
       </div>
-    </ButtonGroup>
+    </div>
 
     <div class="flex gap-2">
       {#if settingsState.currentSettings["stt.enabled"]}

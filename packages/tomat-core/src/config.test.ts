@@ -1,18 +1,10 @@
-// boot config env override + port validation. Pure logic — reads
+// boot config env override + port validation. Pure logic: reads
 // Deno.env but doesn't write anything else.
 
 import { assertEquals, assertThrows } from "@std/assert";
-import {
-  CORE_VERSION,
-  DEFAULT_HOST,
-  DEFAULT_PORT,
-  loadBootConfig,
-} from "./config.ts";
+import { CORE_VERSION, DEFAULT_HOST, DEFAULT_PORT, loadBootConfig } from "./config.ts";
 
-function withEnv(
-  patch: Record<string, string | undefined>,
-  fn: () => void,
-): void {
+function withEnv(patch: Record<string, string | undefined>, fn: () => void): void {
   const prior: Record<string, string | undefined> = {};
   for (const k of Object.keys(patch)) prior[k] = Deno.env.get(k);
   try {

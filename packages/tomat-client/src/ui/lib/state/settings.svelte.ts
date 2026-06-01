@@ -73,8 +73,14 @@ class SettingsState {
   // GET /settings/secrets.
   configuredSecrets = $state<Set<string>>(new Set());
 
+  // True once the paired core's settings have been merged into currentSettings
+  // (loadCoreSettings). Until then the boot path holds only client-local +
+  // default values, so save() must not PATCH core-destination keys. Doing so
+  // would overwrite the core's real value with a stale default. See save().
+  coreLoaded = $state(false);
+
   // Secret keys the user actually edited this session. Only these are written
-  // on save — a loaded-but-untouched secret field is empty (we never receive
+  // on save. A loaded-but-untouched secret field is empty (we never receive
   // the value), so without this guard an unrelated save would delete the
   // configured vault entry.
   private dirtySecrets = new Set<string>();
@@ -115,47 +121,60 @@ class SettingsState {
     }
   }
 
-  async loadSettings(): Promise<void> {
+  /** Local-only load: defaults + the client settings file. Fast, no network.
+   *  This is all the boot path needs before it can position, theme, and show
+   *  the window. Resets the core-derived state so a stale core's values don't
+   *  linger; loadCoreSettings() re-populates it. */
+  async loadClientSettings(): Promise<void> {
     if (!browser) return;
-    const defaults = getDefaultSettings();
     // deno-lint-ignore no-explicit-any
-    let merged: Record<string, any> = { ...defaults };
+    let merged: Record<string, any> = { ...getDefaultSettings() };
     try {
       const clientStored = await platform().clientSettings.read();
       merged = { ...merged, ...clientStored };
     } catch (e) {
       console.warn("Failed to load client settings, using defaults:", e);
     }
-    try {
-      if (cores().currentEntry()) {
-        const coreStored = await cores().api().settings.load();
-        merged = { ...merged, ...coreStored };
-      }
-    } catch (e) {
-      console.warn("Failed to load core settings, falling back:", e);
-    }
     this.currentSettings = merged;
-    // A fresh load discards any in-memory secret edits.
+    // A fresh load discards any in-memory secret edits and core-derived state.
     this.dirtySecrets.clear();
-    // Learn which secret-typed settings have a value stored in the vault so
-    // password fields can show a "saved" placeholder (the value itself is
-    // never returned).
-    try {
-      if (cores().currentEntry()) {
-        const names = await cores().api().settings.listSecrets();
-        this.configuredSecrets = new Set(names);
-      } else {
-        this.configuredSecrets = new Set();
-      }
-    } catch (e) {
-      console.warn("Failed to load configured secrets:", e);
-    }
+    this.configuredSecrets = new Set();
+    this.coreLoaded = false;
 
-    // Push the persisted shortcut so Rust overrides the startup default.
-    // Boot must not abort if the shortcut is taken; log and let Settings fix.
+    // Push the persisted shortcut so Rust overrides the startup default. Local
+    // Rust call; boot must not abort if the shortcut is taken. Log it and let
+    // Settings fix.
     this.applyToggleWindowShortcut(this.currentSettings["shortcuts.toggleWindow"]).catch((e) =>
       console.warn("Failed to register persisted shortcut:", e),
     );
+  }
+
+  /** Merge the paired core's settings (and configured-secret names) over the
+   *  already-loaded local settings. Networked: runs in the deferred boot phase
+   *  after the window is visible. No-op when no core is paired. Lets failures
+   *  propagate so the caller can surface them (console.error on the boot path).
+   *  Appearance/layout keys are client-local, so this never changes the window. */
+  async loadCoreSettings(): Promise<void> {
+    if (!browser || !cores().currentEntry()) return;
+    const coreStored = await cores().api().settings.load();
+    this.currentSettings = { ...this.currentSettings, ...coreStored };
+    // Learn which secret-typed settings have a value stored in the vault so
+    // password fields can show a "saved" placeholder (the value is never
+    // returned).
+    const names = await cores().api().settings.listSecrets();
+    this.configuredSecrets = new Set(names);
+    this.coreLoaded = true;
+  }
+
+  /** Back-compat: local load then core merge. Prefer the split methods on the
+   *  boot path so the window can show before the core round-trip. */
+  async loadSettings(): Promise<void> {
+    await this.loadClientSettings();
+    try {
+      await this.loadCoreSettings();
+    } catch (e) {
+      console.warn("Failed to load core settings, falling back:", e);
+    }
   }
 
   private async applyToggleWindowShortcut(value: unknown): Promise<void> {
@@ -261,7 +280,7 @@ class SettingsState {
         }
         for (const r of resolvers) r.resolve();
       } catch (e) {
-        // Roll back EVERY key in the batch — partial rollback (e.g. only
+        // Roll back EVERY key in the batch. Partial rollback (e.g. only
         // shortcuts) leaves the UI lying about what core thinks.
         for (const [key, prev] of prevSnapshot) {
           this.currentSettings[key] = prev;
@@ -278,7 +297,7 @@ class SettingsState {
   }
 
   /** Writes the current sparse-delta to every destination. Throws an
-   *  AggregateError if any destination fails — callers (flush()) treat
+   *  AggregateError if any destination fails. Callers (flush()) treat
    *  any failure as a full-batch rollback signal. */
   async save(): Promise<void> {
     if (!browser) return;
@@ -318,11 +337,24 @@ class SettingsState {
     }
     if (cores().currentEntry()) {
       const api = cores().api().settings;
-      try {
-        await api.patch(coreDelta);
-      } catch (e) {
-        console.warn("Failed to save core settings:", e);
-        errors.push(e);
+      // Don't PATCH core keys until loadCoreSettings() has merged the core's
+      // real values: before that a non-default key still holds a client/default
+      // value, and patching it would overwrite the core's value. Client +
+      // secrets saves below are unaffected. The window between show and merge is
+      // sub-second, so this only bites a save made in that gap (or while the
+      // core is unreachable, where the PATCH would fail anyway).
+      if (Object.keys(coreDelta).length > 0 && !this.coreLoaded) {
+        console.warn(
+          "[settings] skipping core save before core settings loaded:",
+          Object.keys(coreDelta),
+        );
+      } else {
+        try {
+          await api.patch(coreDelta);
+        } catch (e) {
+          console.warn("Failed to save core settings:", e);
+          errors.push(e);
+        }
       }
       const nextConfigured = new Set(this.configuredSecrets);
       const persisted: string[] = [];

@@ -32,9 +32,7 @@ Deno.test("GET /api/v1/tts/voices: derives catalog from the shared settings sche
       new Request("http://x/api/v1/tts/voices", { headers: bearer(token) }),
     );
     assertEquals(res.status, 200);
-    const body = await res.json() as Array<
-      { id: string; label: string; lang: string }
-    >;
+    const body = (await res.json()) as Array<{ id: string; label: string; lang: string }>;
     assertEquals(Array.isArray(body), true);
     assertEquals(body.length > 0, true);
     // Every voice has the three fields the UI reads.

@@ -5,7 +5,7 @@
  *
  * After the rework, attachments are owned by the currently-selected core
  * (not the local filesystem). The persisted MessagePart still uses `path`
- * as its key — that key is now a `/api/v1/sessions/:id/attachments/:attId`
+ * as its key. That key is now a `/api/v1/sessions/:id/attachments/:attId`
  * URL on the core, not a local file path.
  */
 
@@ -58,7 +58,7 @@ export async function readSessionAttachment(path: string): Promise<string> {
   if (!client) throw new Error("no paired core selected");
   // The stored `path` is `<baseUrl>/api/v1/sessions/.../attachments/...`, so we
   // fetch it through the pinned net layer with the same bearer header CoreClient
-  // would. `endpoint` is a public readonly field on CoreClient — no cast needed.
+  // would. `endpoint` is a public readonly field on CoreClient, so no cast is needed.
   const res = await platform().net.fetch({
     url: path,
     headers: { Authorization: `Bearer ${client.endpoint.token}` },

@@ -13,17 +13,8 @@ import {
 // paths.ts reads HOME / TOMAT_CHANNEL / TOMAT_CORE_HOME at call time. Snapshot
 // and restore the relevant vars around each case so they don't leak into
 // sibling tests (the suite runs single-threaded, so save/restore is enough).
-function withEnv(
-  env: Record<string, string | undefined>,
-  fn: () => void,
-): void {
-  const keys = [
-    "HOME",
-    "USERPROFILE",
-    "TOMAT_CHANNEL",
-    "TOMAT_CORE_HOME",
-    "TOMAT_WORKERS_DIR",
-  ];
+function withEnv(env: Record<string, string | undefined>, fn: () => void): void {
+  const keys = ["HOME", "USERPROFILE", "TOMAT_CHANNEL", "TOMAT_CORE_HOME", "TOMAT_WORKERS_DIR"];
   const prior: Record<string, string | undefined> = {};
   for (const k of keys) prior[k] = Deno.env.get(k);
   try {
@@ -45,13 +36,10 @@ function withEnv(
 const HOME = "/fake/home";
 
 Deno.test("stable channel nests core/client under ~/.tomat/stable", () => {
-  withEnv(
-    { HOME, TOMAT_CHANNEL: undefined, TOMAT_CORE_HOME: undefined },
-    () => {
-      assertEquals(coreRoot(), "/fake/home/.tomat/stable/core");
-      assertEquals(clientRoot(), "/fake/home/.tomat/stable/client");
-    },
-  );
+  withEnv({ HOME, TOMAT_CHANNEL: undefined, TOMAT_CORE_HOME: undefined }, () => {
+    assertEquals(coreRoot(), "/fake/home/.tomat/stable/core");
+    assertEquals(clientRoot(), "/fake/home/.tomat/stable/client");
+  });
 });
 
 Deno.test("dev and beta channels each get their own subtree", () => {
@@ -90,14 +78,8 @@ Deno.test("channelSuffix is bare on stable and suffixed otherwise", () => {
   withEnv({ HOME, TOMAT_CHANNEL: undefined }, () => {
     assertEquals(channelSuffix(), "");
   });
-  withEnv(
-    { HOME, TOMAT_CHANNEL: "beta" },
-    () => assertEquals(channelSuffix(), "-beta"),
-  );
-  withEnv(
-    { HOME, TOMAT_CHANNEL: "dev" },
-    () => assertEquals(channelSuffix(), "-dev"),
-  );
+  withEnv({ HOME, TOMAT_CHANNEL: "beta" }, () => assertEquals(channelSuffix(), "-beta"));
+  withEnv({ HOME, TOMAT_CHANNEL: "dev" }, () => assertEquals(channelSuffix(), "-dev"));
 });
 
 Deno.test("channelBinName suffixes tomat's own binaries per channel", () => {
@@ -106,10 +88,7 @@ Deno.test("channelBinName suffixes tomat's own binaries per channel", () => {
   });
   withEnv({ HOME, TOMAT_CHANNEL: "beta" }, () => {
     assertEquals(channelBinName("tomat-core"), "tomat-core-beta");
-    assertEquals(
-      channelBinName("tomat-core-updater"),
-      "tomat-core-updater-beta",
-    );
+    assertEquals(channelBinName("tomat-core-updater"), "tomat-core-updater-beta");
   });
 });
 

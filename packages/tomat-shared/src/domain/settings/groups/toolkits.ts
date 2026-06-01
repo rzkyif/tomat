@@ -52,10 +52,12 @@ export const toolkitsGroup: SettingGroup = {
             "Skip filtering and send all enabled tools to the model when the total tool count is below this number.\nUseful when you only have a handful of tools and would rather not pay the embedding+AI cost. Set to 0 to always filter.",
           type: "number",
           defaultValue: 0,
-          regex: [{
-            regex: "^([0-9]|[1-9][0-9]{1,2}|1000)$",
-            errorMessage: "Must be 0-1000",
-          }],
+          regex: [
+            {
+              regex: "^([0-9]|[1-9][0-9]{1,2}|1000)$",
+              errorMessage: "Must be 0-1000",
+            },
+          ],
           visibleWhen: { field: "tools.filteringEnabled", eq: true },
           advanced: true,
           descriptionTier: "ondemand",
@@ -118,8 +120,7 @@ export const toolkitsGroup: SettingGroup = {
         {
           id: "tools.filterReasoningBudget",
           name: "Max Tokens for Filter Thinking",
-          description:
-            "Number of tokens reserved for the filter reasoning trace.",
+          description: "Number of tokens reserved for the filter reasoning trace.",
           type: "number",
           defaultValue: "",
           visibleWhen: {
@@ -170,10 +171,12 @@ export const toolkitsGroup: SettingGroup = {
           type: "number",
           defaultValue: 300000,
           suffix: "ms",
-          regex: [{
-            regex: "^[0-9]+$",
-            errorMessage: "Must be a non-negative integer",
-          }],
+          regex: [
+            {
+              regex: "^[0-9]+$",
+              errorMessage: "Must be a non-negative integer",
+            },
+          ],
           advanced: true,
           descriptionTier: "ondemand",
         },
@@ -185,10 +188,12 @@ export const toolkitsGroup: SettingGroup = {
           type: "number",
           defaultValue: 60000,
           suffix: "ms",
-          regex: [{
-            regex: "^[0-9]+$",
-            errorMessage: "Must be a non-negative integer",
-          }],
+          regex: [
+            {
+              regex: "^[0-9]+$",
+              errorMessage: "Must be a non-negative integer",
+            },
+          ],
           advanced: true,
           descriptionTier: "ondemand",
         },

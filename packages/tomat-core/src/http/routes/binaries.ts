@@ -27,6 +27,11 @@ export function binariesRoutes(): Hono {
 
   r.get("/check", async (c) => c.json(await binariesManager().check()));
 
+  r.post("/probe", async (c) => {
+    const body = (await readJson(c)) as { kinds?: BinaryKind[] };
+    return c.json(await binariesManager().probe(body.kinds ?? []));
+  });
+
   return r;
 }
 

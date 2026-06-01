@@ -1,4 +1,4 @@
-// toolkit installer — local install path (no network, no npm tarball
+// toolkit installer: local install path (no network, no npm tarball
 // fetch). Drives the full path from source dir -> registry rows via the
 // real `startInstall`. The npm tarball path is covered by integration in
 // real installs; isolating it would require a fixture tarball server.
@@ -112,10 +112,7 @@ Deno.test("startInstall(local): copies tree -> validates tools.json -> upserts r
     );
 
     const sink = makeRecordingSink();
-    const { toolkitId } = startInstall(
-      { source: "local", path: srcDir, slug: "mini-test" },
-      sink,
-    );
+    const { toolkitId } = startInstall({ source: "local", path: srcDir, slug: "mini-test" }, sink);
     assertEquals(toolkitId, "mini-test");
 
     const out = await awaitDone(sink);
@@ -135,9 +132,7 @@ Deno.test("startInstall(local): copies tree -> validates tools.json -> upserts r
 
     // Files landed at the install path.
     const installed = join(paths().toolkitsDir, "mini-test");
-    const installedToolsJson = await Deno.readTextFile(
-      join(installed, "tools.json"),
-    );
+    const installedToolsJson = await Deno.readTextFile(join(installed, "tools.json"));
     assertEquals(installedToolsJson, MIN_TOOLS_JSON);
   } finally {
     await env.teardown();

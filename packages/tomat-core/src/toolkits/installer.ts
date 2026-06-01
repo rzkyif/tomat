@@ -9,14 +9,7 @@
 // Caller passes an `EventSink` to receive install_log + install_done frames
 // for forwarding to the requesting client over WS.
 
-import {
-  dirname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-  SEPARATOR,
-} from "@std/path";
+import { dirname, isAbsolute, join, relative, resolve, SEPARATOR } from "@std/path";
 import { UntarStream } from "@std/tar/untar-stream";
 import { encodeBase64 } from "jsr:@std/encoding@^1/base64";
 import { errMessage, parseToolsJson, type ToolsJson } from "@tomat/shared";
@@ -38,12 +31,7 @@ export type InstallSource =
   | { source: "local"; path: string; slug: string };
 
 export interface InstallEventSink {
-  log(
-    jobId: string,
-    id: string,
-    stream: "stdout" | "stderr",
-    line: string,
-  ): void;
+  log(jobId: string, id: string, stream: "stdout" | "stderr", line: string): void;
   done(jobId: string, id: string, ok: boolean, code: number): void;
 }
 
@@ -53,8 +41,12 @@ export interface InstallStarted {
 }
 
 const NOOP_SINK: InstallEventSink = {
-  log() {/* */},
-  done() {/* */},
+  log() {
+    /* */
+  },
+  done() {
+    /* */
+  },
 };
 
 export function startInstall(
@@ -62,14 +54,10 @@ export function startInstall(
   sink: InstallEventSink = NOOP_SINK,
 ): InstallStarted {
   const jobId = newJobId();
-  const toolkitId = spec.source === "npm"
-    ? flattenNpmName(spec.name)
-    : spec.slug;
+  const toolkitId = spec.source === "npm" ? flattenNpmName(spec.name) : spec.slug;
   // Run the install in the background; caller polls/streams via sink.
   void runInstall(spec, toolkitId, jobId, sink).catch((err) => {
-    log.error(
-      `install ${toolkitId} failed: ${errMessage(err)}`,
-    );
+    log.error(`install ${toolkitId} failed: ${errMessage(err)}`);
     sink.done(jobId, toolkitId, false, 1);
   });
   return { jobId, toolkitId };
@@ -93,12 +81,7 @@ async function runInstall(
     }
   } catch (err) {
     await rmrf(stagingPath);
-    sink.done(
-      jobId,
-      toolkitId,
-      false,
-      err instanceof AppError ? 1 : 2,
-    );
+    sink.done(jobId, toolkitId, false, err instanceof AppError ? 1 : 2);
     return;
   }
 
@@ -107,10 +90,7 @@ async function runInstall(
   if (!toolsJsonText) {
     await rmrf(stagingPath);
     sink.done(jobId, toolkitId, false, 3);
-    throw new AppError(
-      "no_tools_json",
-      `no tools.json at root of ${toolkitId}`,
-    );
+    throw new AppError("no_tools_json", `no tools.json at root of ${toolkitId}`);
   }
   let parsed: ToolsJson;
   try {
@@ -125,10 +105,7 @@ async function runInstall(
     await rmrf(stagingPath);
     sink.done(jobId, toolkitId, false, 4);
     if (err instanceof AppError) throw err;
-    throw new AppError(
-      "invalid_tools_json",
-      `invalid JSON in tools.json: ${err}`,
-    );
+    throw new AppError("invalid_tools_json", `invalid JSON in tools.json: ${err}`);
   }
 
   // Compute hashes.
@@ -142,7 +119,9 @@ async function runInstall(
     await Deno.stat(installPath);
     await Deno.rename(installPath, installPath + ".old");
     hadOld = true;
-  } catch { /* fresh install */ }
+  } catch {
+    /* fresh install */
+  }
   try {
     await Deno.rename(stagingPath, installPath);
   } catch (err) {
@@ -155,7 +134,7 @@ async function runInstall(
         // (the outer error reporting only carries the primary failure).
         log.error(
           `${toolkitId}: rollback rename failed; previous version is at ` +
-            `${installPath}.old — ${errMessage(rollbackErr)}`,
+            `${installPath}.old: ${errMessage(rollbackErr)}`,
         );
       }
     }
@@ -166,9 +145,8 @@ async function runInstall(
 
   // Upsert registry.
   const registry = toolkitsRegistry();
-  const version = spec.source === "npm"
-    ? (await resolveVersion(spec.name, spec.version)).version
-    : "local";
+  const version =
+    spec.source === "npm" ? (await resolveVersion(spec.name, spec.version)).version : "local";
   registry.upsertToolkit({
     id: toolkitId,
     source: spec.source === "npm" ? "npm" : "local",
@@ -208,12 +186,7 @@ async function installNpm(
   sink: InstallEventSink,
 ): Promise<void> {
   const resolved = await resolveVersion(spec.name, spec.version);
-  sink.log(
-    jobId,
-    flattenNpmName(spec.name),
-    "stdout",
-    `resolved ${spec.name}@${resolved.version}`,
-  );
+  sink.log(jobId, flattenNpmName(spec.name), "stdout", `resolved ${spec.name}@${resolved.version}`);
 
   await Deno.mkdir(stagingPath, { recursive: true });
   await fetchAndExtractTarball(resolved.tarballUrl, stagingPath, {
@@ -226,10 +199,7 @@ async function installNpm(
     nodeModulesDir: "auto" as const,
     lock: "./deno.lock",
   };
-  await Deno.writeTextFile(
-    join(stagingPath, "deno.json"),
-    JSON.stringify(denoJson, null, 2),
-  );
+  await Deno.writeTextFile(join(stagingPath, "deno.json"), JSON.stringify(denoJson, null, 2));
 
   // Run deno install if the package declared dependencies.
   const pkgPath = join(stagingPath, "package.json");
@@ -241,8 +211,7 @@ async function installNpm(
     } catch {
       throw new AppError("invalid_tools_json", "invalid package.json");
     }
-    const hasDeps = pkg.dependencies &&
-      Object.keys(pkg.dependencies).length > 0;
+    const hasDeps = pkg.dependencies && Object.keys(pkg.dependencies).length > 0;
     if (hasDeps) {
       await runDenoInstall(stagingPath, jobId, flattenNpmName(spec.name), sink);
     }
@@ -293,10 +262,7 @@ async function fetchAndExtractTarball(
 ): Promise<void> {
   const res = await fetch(url);
   if (!res.ok) {
-    throw new AppError(
-      "tarball_fetch_failed",
-      `npm tarball HTTP ${res.status} for ${url}`,
-    );
+    throw new AppError("tarball_fetch_failed", `npm tarball HTTP ${res.status} for ${url}`);
   }
   if (!res.body) {
     throw new AppError("tarball_fetch_failed", `empty tarball body for ${url}`);
@@ -308,16 +274,12 @@ async function fetchAndExtractTarball(
   const bytes = new Uint8Array(await res.arrayBuffer());
   await verifyTarball(bytes, url, verify);
   const gunzip = new DecompressionStream("gzip");
-  const entries = new Blob([bytes]).stream().pipeThrough(gunzip).pipeThrough(
-    new UntarStream(),
-  );
+  const entries = new Blob([bytes]).stream().pipeThrough(gunzip).pipeThrough(new UntarStream());
 
   for await (const entry of entries) {
     const name = entry.path;
     // npm tarballs always begin with `package/`. Strip it.
-    const stripped = name.startsWith("package/")
-      ? name.slice("package/".length)
-      : name;
+    const stripped = name.startsWith("package/") ? name.slice("package/".length) : name;
     if (!stripped) {
       await entry.readable?.cancel();
       continue;
@@ -333,9 +295,9 @@ async function fetchAndExtractTarball(
       await entry.readable?.cancel();
       throw new AppError(
         "extract_failed",
-        `tarball entry "${name}" has unsupported type ${
-          JSON.stringify(typeflag)
-        } (symlinks/hardlinks/devices are not allowed)`,
+        `tarball entry "${name}" has unsupported type ${JSON.stringify(
+          typeflag,
+        )} (symlinks/hardlinks/devices are not allowed)`,
       );
     }
     const out = join(targetDir, stripped);
@@ -345,10 +307,7 @@ async function fetchAndExtractTarball(
     // the secrets vault).
     if (!isWithin(targetDir, out)) {
       await entry.readable?.cancel();
-      throw new AppError(
-        "extract_failed",
-        `tarball entry "${name}" escapes the toolkit directory`,
-      );
+      throw new AppError("extract_failed", `tarball entry "${name}" escapes the toolkit directory`);
     }
     if (isDir) {
       await Deno.mkdir(out, { recursive: true });
@@ -376,15 +335,10 @@ async function verifyTarball(
   url: string,
   verify?: { integrity?: string; shasum?: string },
 ): Promise<void> {
-  const sha512Entry = verify?.integrity
-    ?.split(/\s+/)
-    .find((s) => s.startsWith("sha512-"));
+  const sha512Entry = verify?.integrity?.split(/\s+/).find((s) => s.startsWith("sha512-"));
   if (sha512Entry) {
     const expected = sha512Entry.slice("sha512-".length);
-    const digest = await crypto.subtle.digest(
-      "SHA-512",
-      bytes.buffer as ArrayBuffer,
-    );
+    const digest = await crypto.subtle.digest("SHA-512", bytes.buffer as ArrayBuffer);
     const got = encodeBase64(new Uint8Array(digest));
     if (got !== expected) {
       throw new AppError(
@@ -395,22 +349,14 @@ async function verifyTarball(
     return;
   }
   if (verify?.shasum) {
-    const digest = await crypto.subtle.digest(
-      "SHA-1",
-      bytes.buffer as ArrayBuffer,
-    );
+    const digest = await crypto.subtle.digest("SHA-1", bytes.buffer as ArrayBuffer);
     const got = toHex(new Uint8Array(digest));
     if (got !== verify.shasum.toLowerCase()) {
-      throw new AppError(
-        "checksum_mismatch",
-        `npm tarball failed sha1 checksum for ${url}`,
-      );
+      throw new AppError("checksum_mismatch", `npm tarball failed sha1 checksum for ${url}`);
     }
     return;
   }
-  log.warn(
-    `npm tarball ${url} has no integrity/shasum metadata; installing unverified`,
-  );
+  log.warn(`npm tarball ${url} has no integrity/shasum metadata; installing unverified`);
 }
 
 /** True if `candidate` resolves to a path inside `root` (or root itself).
@@ -437,14 +383,8 @@ async function runDenoInstall(
   }).spawn();
 
   await Promise.all([
-    pumpLines(
-      proc.stdout,
-      (line) => sink.log(jobId, toolkitId, "stdout", line),
-    ),
-    pumpLines(
-      proc.stderr,
-      (line) => sink.log(jobId, toolkitId, "stderr", line),
-    ),
+    pumpLines(proc.stdout, (line) => sink.log(jobId, toolkitId, "stdout", line)),
+    pumpLines(proc.stderr, (line) => sink.log(jobId, toolkitId, "stderr", line)),
   ]);
   const status = await proc.status;
   if (!status.success) {
@@ -472,10 +412,7 @@ async function pumpLines(
   if (buf.length > 0) fn(buf);
 }
 
-async function copyTreeExcludingNodeModules(
-  src: string,
-  dst: string,
-): Promise<void> {
+async function copyTreeExcludingNodeModules(src: string, dst: string): Promise<void> {
   for await (const entry of Deno.readDir(src)) {
     if (entry.name === "node_modules") continue;
     const s = join(src, entry.name);

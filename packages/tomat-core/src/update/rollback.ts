@@ -6,7 +6,7 @@
 //   - First boot after update: marker exists with attempts=0. We set
 //     attempts=1 and schedule deleteMarker() after MARKER_TTL_MS of
 //     uptime. The marker delete also removes the `<bin>.old` rollback
-//     anchor — past this point we consider the update committed.
+//     anchor. Past this point we consider the update committed.
 //
 //   - Second boot with marker still present: the previous boot crashed
 //     before scheduling its delete. We trust that this means the new
@@ -69,7 +69,9 @@ async function readMarker(): Promise<UpdateMarker | null> {
 async function deleteMarker(): Promise<void> {
   try {
     await Deno.remove(paths().updateMarkerFile);
-  } catch { /* fine */ }
+  } catch {
+    /* fine */
+  }
 }
 
 async function bumpAttempts(m: UpdateMarker): Promise<void> {
@@ -106,8 +108,7 @@ export async function handleUpdateMarkerOnBoot(): Promise<boolean> {
     if (marker.previousVersion === CORE_VERSION) {
       // We rolled back already (or the swap never happened); clean up.
       log.info(
-        `update marker present but we're already on previousVersion ` +
-          `${CORE_VERSION}; clearing`,
+        `update marker present but we're already on previousVersion ` + `${CORE_VERSION}; clearing`,
       );
     } else {
       log.warn(
@@ -130,9 +131,7 @@ export async function handleUpdateMarkerOnBoot(): Promise<boolean> {
   await bumpAttempts(marker);
   log.info(
     `update marker: first boot of v${marker.version} ` +
-      `(was v${marker.previousVersion}); cleanup scheduled in ${
-        MARKER_TTL_MS / 1000
-      }s`,
+      `(was v${marker.previousVersion}); cleanup scheduled in ${MARKER_TTL_MS / 1000}s`,
   );
   scheduleMarkerCleanup();
   return false;
@@ -145,7 +144,9 @@ function scheduleMarkerCleanup(): void {
       try {
         await Deno.remove(oldBin);
         log.info(`update committed; removed rollback anchor ${oldBin}`);
-      } catch { /* may not exist on first install — fine */ }
+      } catch {
+        /* may not exist on first install (fine) */
+      }
       await deleteMarker();
     })();
   }, MARKER_TTL_MS);
@@ -172,10 +173,14 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
 
   try {
     await Deno.remove(brokenBin);
-  } catch { /* fine */ }
+  } catch {
+    /* fine */
+  }
   try {
     await Deno.remove(stagedOld);
-  } catch { /* fine */ }
+  } catch {
+    /* fine */
+  }
 
   // Best-effort free-space precheck. Deno doesn't ship a statfs/statvfs
   // wrapper, so we shell out to `df` on Unix-likes. Windows skips the
@@ -192,7 +197,9 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
           `~${free} bytes free in bin dir); will fall back if copy fails`,
       );
     }
-  } catch { /* precheck is informational only */ }
+  } catch {
+    /* precheck is informational only */
+  }
 
   // Two-phase swap with copy-first staging so the original `oldBin`
   // anchor survives until the install rename has succeeded:
@@ -210,23 +217,19 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
     await Deno.copyFile(oldBin, stagedOld);
   } catch (err) {
     usedCopy = false;
-    log.warn(
-      `copy-first staging failed (${
-        errMessage(err)
-      }); falling back to two-rename swap`,
-    );
+    log.warn(`copy-first staging failed (${errMessage(err)}); falling back to two-rename swap`);
   }
 
   try {
     await Deno.rename(currentBin, brokenBin);
   } catch (err) {
-    log.error(
-      `rollback aside failed: ${errMessage(err)}`,
-    );
+    log.error(`rollback aside failed: ${errMessage(err)}`);
     if (usedCopy) {
       try {
         await Deno.remove(stagedOld);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     await deleteMarker();
     return false;
@@ -244,15 +247,15 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
       await Deno.rename(brokenBin, currentBin);
     } catch (revertErr) {
       log.error(
-        `revert of aside also failed: ${
-          errMessage(revertErr)
-        }. Manual reinstall required.`,
+        `revert of aside also failed: ${errMessage(revertErr)}. Manual reinstall required.`,
       );
     }
     if (usedCopy) {
       try {
         await Deno.remove(stagedOld);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     await deleteMarker();
     return false;
@@ -261,20 +264,22 @@ async function performRollback(marker: UpdateMarker): Promise<boolean> {
   if (Deno.build.os !== "windows") {
     try {
       await Deno.chmod(currentBin, 0o755);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   if (usedCopy) {
     // Committed: the original anchor is no longer needed.
     try {
       await Deno.remove(oldBin);
-    } catch { /* ignore — fine if anti-virus is holding it */ }
+    } catch {
+      /* ignore; fine if anti-virus is holding it */
+    }
   }
 
   await deleteMarker();
-  log.info(
-    `rolled back. exiting so the supervisor relaunches v${marker.previousVersion}.`,
-  );
+  log.info(`rolled back. exiting so the supervisor relaunches v${marker.previousVersion}.`);
   return true;
 }
 

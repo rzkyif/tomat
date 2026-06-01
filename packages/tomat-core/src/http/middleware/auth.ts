@@ -16,10 +16,7 @@ export function bearerMiddleware(): MiddlewareHandler {
     const header = c.req.header("authorization") ?? "";
     const match = /^Bearer\s+(.+)$/i.exec(header);
     if (!match) {
-      throw new AppError(
-        "missing_token",
-        "missing Authorization: Bearer header",
-      );
+      throw new AppError("missing_token", "missing Authorization: Bearer header");
     }
     const token = match[1].trim();
     const client = await authService().authenticate(token);

@@ -19,7 +19,7 @@
 //!       Exits 0 on success, 2 on error.
 //!
 //!   tomat-core-keychain delete <service> <account>
-//!       Removes the entry. Idempotent — exits 0 whether or not the entry
+//!       Removes the entry. Idempotent: exits 0 whether or not the entry
 //!       existed. Exits 2 on other errors.
 
 #[cfg(any(test, feature = "in-memory"))]
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn set_rejects_invalid_utf8() {
         let s = store();
-        // Lone continuation byte — invalid UTF-8.
+        // Lone continuation byte: invalid UTF-8.
         let mut stdin: &[u8] = &[0x80];
         let mut stdout: Vec<u8> = Vec::new();
         let code = run(&s, "set", "svc", "acct", &mut stdin, &mut stdout);

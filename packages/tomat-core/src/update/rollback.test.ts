@@ -1,4 +1,4 @@
-// handleUpdateMarkerOnBoot — decision branches around the update
+// handleUpdateMarkerOnBoot: decision branches around the update
 // marker file. Driven against tempdir-isolated paths().updateMarkerFile.
 // The 30s cleanup setTimeout is left scheduled by the "first boot" case;
 // we sanitizeOps:false on that test since we don't want to wait 30s.
@@ -6,11 +6,7 @@
 import { assertEquals } from "@std/assert";
 import { CORE_VERSION } from "../config.ts";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import {
-  handleUpdateMarkerOnBoot,
-  type UpdateMarker,
-  writeUpdateMarker,
-} from "./rollback.ts";
+import { handleUpdateMarkerOnBoot, type UpdateMarker, writeUpdateMarker } from "./rollback.ts";
 import { paths } from "../paths.ts";
 
 async function readRaw(): Promise<UpdateMarker | null> {
@@ -62,8 +58,7 @@ Deno.test("handleUpdateMarkerOnBoot: clears marker when running the rolled-back 
 });
 
 Deno.test({
-  name:
-    "handleUpdateMarkerOnBoot: first boot bumps attempts to 1 and schedules cleanup",
+  name: "handleUpdateMarkerOnBoot: first boot bumps attempts to 1 and schedules cleanup",
   // scheduleMarkerCleanup uses setTimeout(30_000); we don't want to wait for it.
   sanitizeOps: false,
   sanitizeResources: false,
@@ -124,7 +119,7 @@ Deno.test("handleUpdateMarkerOnBoot: returns false when rollback anchor is missi
   const env = await setupTestEnv();
   try {
     await writeMarkerWithAttempts(1);
-    // No <bin>.old anchor written — performRollback should log + bail.
+    // No <bin>.old anchor written, so performRollback should log + bail.
     assertEquals(await handleUpdateMarkerOnBoot(), false);
     // Marker cleared so we don't loop on next boot.
     assertEquals(await readRaw(), null);
@@ -147,10 +142,7 @@ Deno.test("handleUpdateMarkerOnBoot: rolls back current binary to <bin>.old cont
     // currentBin now holds previous-version bytes.
     assertEquals(await Deno.readTextFile(currentBin), "WORKING_V998");
     // Broken binary preserved for post-mortem.
-    assertEquals(
-      await Deno.readTextFile(currentBin + ".broken"),
-      "BROKEN_V999",
-    );
+    assertEquals(await Deno.readTextFile(currentBin + ".broken"), "BROKEN_V999");
     // Original oldBin is consumed once the copy-first install committed.
     let oldStillThere = true;
     try {
@@ -188,7 +180,7 @@ Deno.test("handleUpdateMarkerOnBoot: copy-first failure falls back to two-rename
     assertEquals(await Deno.readTextFile(currentBin), "WORKING");
     assertEquals(await Deno.readTextFile(currentBin + ".broken"), "BROKEN");
     // In the fallback path oldBin was renamed (not copied), so it's gone
-    // for a different reason than the happy path — but observably absent.
+    // for a different reason than the happy path, but observably absent.
     let oldStillThere = true;
     try {
       await Deno.stat(oldBin);

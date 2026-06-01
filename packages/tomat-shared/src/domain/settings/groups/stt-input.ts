@@ -1,4 +1,4 @@
-// Client-side STT settings — microphone input UX, VAD activation, and
+// Client-side STT settings: microphone input UX, VAD activation, and
 // post-processing prefs. Persisted to ~/.tomat/client/settings.json. The
 // engine side (whisper-server config, provider URLs) lives in `sttEngine`.
 

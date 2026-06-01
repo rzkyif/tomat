@@ -5,7 +5,7 @@
 // the session. The client picks it up via the `session.updated` WS frame
 // with op="title_changed".
 //
-// Designed to be fire-and-forget — failures are logged but never surface
+// Designed to be fire-and-forget. Failures are logged but never surface
 // to the user. The session keeps its empty title; another turn can retry.
 //
 // The system prompt is the user-overridable `prompts.titleGenerationPrompt`
@@ -26,10 +26,7 @@ const log = getLogger("title-gen");
 // for ~5 words but adversarial / runaway models can ignore that.
 const MAX_TITLE_CHARS = 80;
 
-export async function maybeGenerateTitle(
-  sessionId: string,
-  ownerClientId: string,
-): Promise<void> {
+export async function maybeGenerateTitle(sessionId: string, ownerClientId: string): Promise<void> {
   try {
     let session;
     try {
@@ -82,9 +79,7 @@ export async function maybeGenerateTitle(
       payload: { title },
     });
   } catch (err) {
-    log.warn(
-      `title gen failed for ${sessionId}: ${errMessage(err)}`,
-    );
+    log.warn(`title gen failed for ${sessionId}: ${errMessage(err)}`);
   }
 }
 
@@ -103,7 +98,7 @@ function sanitize(raw: string): string {
   s = s.split("\n")[0] ?? "";
   s = s.trim();
   // Strip an optional "Title:" prefix the model often re-emits.
-  s = s.replace(/^title\s*[:\-]\s*/i, "");
+  s = s.replace(/^title\s*[:-]\s*/i, "");
   // Strip surrounding quotes and trailing punctuation the model often adds
   // despite the instruction.
   s = s.replace(/^["'`]+|["'`]+$/g, "");
@@ -134,11 +129,7 @@ function extractText(m: { content?: unknown }): string {
   return "";
 }
 
-function strSetting(
-  s: Record<string, unknown>,
-  key: string,
-  def: string,
-): string {
+function strSetting(s: Record<string, unknown>, key: string, def: string): string {
   const v = s[key];
   return typeof v === "string" && v.length > 0 ? v : def;
 }

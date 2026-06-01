@@ -1,7 +1,7 @@
 /**
  * Reactive WebSocket connection state for the currently-selected core,
  * driving the "Reconnecting to <core>…" banner. Hides flashes of
- * disconnection that resolve within RECONNECT_BANNER_DELAY_MS — the
+ * disconnection that resolve within RECONNECT_BANNER_DELAY_MS. The
  * underlying CoreClient already retries with exp backoff (500 ms → 30 s),
  * so a brief reconnect during normal operation shouldn't be visible.
  */
@@ -19,19 +19,27 @@ class ConnectionStateStore {
   // as plain state (not $derived) so we can manage the delay timer.
   showReconnectBanner = $state(false);
 
+  // Last connect-failure reason from CoreClient (e.g. "Connection refused"),
+  // shown in the banner. Retained across the connecting/disconnected churn of
+  // the reconnect loop; cleared once connected.
+  reason = $state<string | null>(null);
+
   private unsubscribe: (() => void) | null = null;
   // ReturnType so the type works under both browser (number) and node typing.
   private bannerTimer: ReturnType<typeof setTimeout> | null = null;
 
   attach(): void {
     if (this.unsubscribe) return;
-    this.unsubscribe = cores().subscribeConnectionState((s) => {
+    this.unsubscribe = cores().subscribeConnectionState((s, r) => {
       this.state = s;
       if (s === "connected") {
         this.disconnectedSinceMs = null;
         this.clearBannerTimer();
         this.showReconnectBanner = false;
+        this.reason = null;
       } else if (s === "disconnected" || s === "connecting") {
+        // Keep the last known reason through the connecting/disconnected churn.
+        if (r) this.reason = r;
         if (this.disconnectedSinceMs === null) {
           this.disconnectedSinceMs = Date.now();
         }
@@ -54,6 +62,7 @@ class ConnectionStateStore {
     this.state = "connecting";
     this.disconnectedSinceMs = null;
     this.showReconnectBanner = false;
+    this.reason = null;
   }
 
   private clearBannerTimer(): void {

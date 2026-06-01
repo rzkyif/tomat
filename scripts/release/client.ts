@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run -A
-// release:client — builds the Tauri client bundle for the host platform,
+// release:client builds the Tauri client bundle for the host platform,
 // signs it with the Tauri updater key, uploads the bundle to R2, and merges
 // the host-platform entry into manifests/client.json on R2.
 //
@@ -81,11 +81,14 @@ interface Flags {
 
 function parseFlags(): Flags {
   // Strip the bare `--` token that `deno task <name> -- ...` passes through.
-  const args = parseArgs(Deno.args.filter((a) => a !== "--"), {
-    string: ["channel"],
-    boolean: ["dry-run", "force", "help"],
-    default: { "dry-run": false, "force": false, "help": false },
-  });
+  const args = parseArgs(
+    Deno.args.filter((a) => a !== "--"),
+    {
+      string: ["channel"],
+      boolean: ["dry-run", "force", "help"],
+      default: { "dry-run": false, force: false, help: false },
+    },
+  );
   if (args.help) {
     console.log(`Usage: deno task release:client [flags]
 
@@ -147,10 +150,7 @@ async function injectTauriPubkey(pubkey: string): Promise<() => Promise<void>> {
 // ---------------------------------------------------------------------------
 // build client + locate bundle
 
-async function buildClient(
-  env: DeployEnv,
-  channel: ReleaseChannel,
-): Promise<void> {
+async function buildClient(env: DeployEnv, channel: ReleaseChannel): Promise<void> {
   // Drive build-client.ts directly with the channel so it bakes TOMAT_CHANNEL
   // + applies the per-channel app-identity config override.
   const cmd = new Deno.Command("deno", {
@@ -203,12 +203,8 @@ async function findClientBundle(triple: Triple): Promise<ClientBundle> {
     }
   }
   fail(
-    `no Tauri bundle + .sig found for ${triple} under ${
-      rel(TAURI_BUNDLE_OUT)
-    } ` +
-      `(checked ${
-        candidates.map((c) => `${rel(c.dir)}/*${c.ext}`).join(", ")
-      })`,
+    `no Tauri bundle + .sig found for ${triple} under ${rel(TAURI_BUNDLE_OUT)} ` +
+      `(checked ${candidates.map((c) => `${rel(c.dir)}/*${c.ext}`).join(", ")})`,
   );
 }
 
@@ -232,7 +228,7 @@ function composeClientManifest(
   live: ClientManifest | null,
 ): ClientManifest {
   // Carry forward platform entries from the prior manifest only if it's the
-  // same version — a version bump invalidates platforms that haven't been
+  // same version. A version bump invalidates platforms that haven't been
   // re-published yet.
   const carryover = live?.version === version ? live.platforms : {};
   return {
@@ -273,7 +269,7 @@ export async function main(): Promise<void> {
   if (!env.tauriUpdaterPublicKey || !env.tauriUpdaterPrivateKey) {
     info(
       colors.yellow(
-        `Tauri updater keys not set in .env — skipping release:client. ` +
+        `Tauri updater keys not set in .env. Skipping release:client. ` +
           `Generate with \`cargo tauri signer generate -w .env\` to enable.`,
       ),
     );
@@ -291,16 +287,11 @@ export async function main(): Promise<void> {
   const hostKey = tauriPlatformKey(hostTriple);
   info(`host triple: ${hostTriple} (tauri key: ${hostKey})`);
 
-  const live = await fetchLiveJson<ClientManifest>(
-    env,
-    `${manifestDir}/client.json`,
-  );
+  const live = await fetchLiveJson<ClientManifest>(env, `${manifestDir}/client.json`);
 
   if (!flags.force) {
     if (live?.version === version && live.platforms[hostKey]) {
-      ok(
-        `client.json already at version ${version} for ${hostKey} — nothing to do`,
-      );
+      ok(`client.json already at version ${version} for ${hostKey}. Nothing to do`);
       return;
     }
     if (live) {
@@ -319,16 +310,11 @@ export async function main(): Promise<void> {
   try {
     await buildClient(env, flags.channel);
     const bundle = await findClientBundle(hostTriple);
-    ok(
-      `${hostTriple}/${bundle.filename}  ${humanBytes(bundle.size)}  → ${
-        rel(bundle.sigPath)
-      }`,
-    );
+    ok(`${hostTriple}/${bundle.filename}  ${humanBytes(bundle.size)}  → ${rel(bundle.sigPath)}`);
 
     let bundleUrl: string;
     if (flags.dryRun) {
-      bundleUrl =
-        `https://${env.storageDomain}/${storagePrefix}${version}/${bundle.triple}/${bundle.filename}`;
+      bundleUrl = `https://${env.storageDomain}/${storagePrefix}${version}/${bundle.triple}/${bundle.filename}`;
     } else {
       step(`Uploading client bundle to R2 bucket "${env.r2Bucket}"`);
       bundleUrl = await uploadClientBundle(env, version, bundle, storagePrefix);
@@ -336,27 +322,15 @@ export async function main(): Promise<void> {
 
     step("Composing client.json (Tauri updater manifest)");
     const signature = (await Deno.readTextFile(bundle.sigPath)).trim();
-    const manifest = composeClientManifest(
-      version,
-      hostKey,
-      bundleUrl,
-      signature,
-      live,
-    );
-    const clientJsonPath = await writeManifestFile(
-      manifestDir,
-      "client.json",
-      manifest,
-    );
+    const manifest = composeClientManifest(version, hostKey, bundleUrl, signature, live);
+    const clientJsonPath = await writeManifestFile(manifestDir, "client.json", manifest);
     ok(`client.json → ${rel(clientJsonPath)}`);
 
     if (flags.dryRun) {
       step("Dry-run: skipping manifest upload");
       console.log(
         colors.yellow(
-          `\nManifest under ${
-            rel(clientJsonPath)
-          }. Re-run without --dry-run to publish.`,
+          `\nManifest under ${rel(clientJsonPath)}. Re-run without --dry-run to publish.`,
         ),
       );
       return;
@@ -377,9 +351,7 @@ export async function main(): Promise<void> {
 
   console.log(
     "\n" +
-      colors.green(
-        colors.bold(`✓ release:client complete (${flags.channel})`),
-      ) +
+      colors.green(colors.bold(`✓ release:client complete (${flags.channel})`)) +
       "\n" +
       colors.dim("  ") +
       `https://${env.storageDomain}/${manifestDir}/client.json\n`,

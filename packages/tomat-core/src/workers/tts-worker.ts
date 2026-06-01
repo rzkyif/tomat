@@ -28,8 +28,8 @@ const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 // even though the shipped weights cover 56 voices (incl. Japanese, Mandarin,
 // etc.). Patch the validator to accept any non-empty string. Mirrors the
 // existing Bun sidecar fix.
-(KokoroTTS as unknown as { prototype: Record<string, unknown> }).prototype
-  ._validate_voice = function (voice: string): string {
+(KokoroTTS as unknown as { prototype: Record<string, unknown> }).prototype._validate_voice =
+  function (voice: string): string {
     if (typeof voice !== "string" || voice.length === 0) {
       throw new Error("Voice must be a non-empty string");
     }
@@ -39,12 +39,12 @@ const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 type In =
   | { kind: "load" }
   | {
-    kind: "synthesize";
-    id: string;
-    text: string;
-    voice?: string;
-    speed?: number;
-  }
+      kind: "synthesize";
+      id: string;
+      text: string;
+      voice?: string;
+      speed?: number;
+    }
   | { kind: "unload" }
   | { kind: "ready" }; // ignored
 
@@ -96,7 +96,9 @@ async function unload(): Promise<void> {
   if (model) {
     try {
       await (model.model as { dispose?: () => Promise<unknown> }).dispose?.();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -130,9 +132,7 @@ async function synthesize(
     });
     return;
   }
-  const audioResult = result as
-    | { audio: Float32Array; sampling_rate: number }
-    | null;
+  const audioResult = result as { audio: Float32Array; sampling_rate: number } | null;
   if (!audioResult) {
     send({ kind: "synth_err", id, error: "no audio produced" });
     return;

@@ -72,21 +72,3 @@
     <span class="text-default-500 text-sm shrink-0">{suffix}</span>
   {/if}
 </div>
-
-<style>
-  /* Override the global slider track color (which assumes a `bg-default-300`
-     surface). Sliders are typically rendered inside a `bg-default-200` card
-     (FormField), so we shift the track one step lighter to keep it visible. */
-  :global(.tomat-slider::-webkit-slider-runnable-track) {
-    background: var(--default-100);
-  }
-  :global(html.dark .tomat-slider::-webkit-slider-runnable-track) {
-    background: var(--default-d-100);
-  }
-  :global(.tomat-slider::-moz-range-track) {
-    background: var(--default-100);
-  }
-  :global(html.dark .tomat-slider::-moz-range-track) {
-    background: var(--default-d-100);
-  }
-</style>

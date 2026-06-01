@@ -39,25 +39,11 @@ async function runPake(
   const sid = randomSid();
   // Client folds the pin IT observed (clientPin) into the channel id; server
   // folds serverPin. Under MITM they differ, diverging the keys.
-  const init = cpaceInitiatorStart(
-    code,
-    sid,
-    new TextEncoder().encode(clientPin),
-  );
-  const { pakeId, msgB } = auth.pakeStart(
-    sid,
-    init.msgA,
-    clientName,
-    ip,
-    serverPin,
-  );
+  const init = cpaceInitiatorStart(code, sid, new TextEncoder().encode(clientPin));
+  const { pakeId, msgB } = auth.pakeStart(sid, init.msgA, clientName, ip, serverPin);
   const isk = init.finish(msgB);
   const confirmC = confirmTag(isk, "C", init.msgA, msgB, clientPin);
-  const { token, clientId } = await auth.pakeFinish(
-    pakeId,
-    confirmC,
-    serverPin,
-  );
+  const { token, clientId } = await auth.pakeFinish(pakeId, confirmC, serverPin);
   return { token, clientId };
 }
 
@@ -81,11 +67,7 @@ Deno.test("mintPairingCode: a new code supersedes prior unclaimed codes", async 
     auth.mintPairingCode();
     // Pairing with the OLD code now fails confirmation: core responds with the
     // NEW code, so the handshakes derive different keys.
-    await assertRejects(
-      () => runPake(auth, { code: first.code }),
-      AppError,
-      "confirmation failed",
-    );
+    await assertRejects(() => runPake(auth, { code: first.code }), AppError, "confirmation failed");
   } finally {
     await env.teardown();
   }
@@ -105,11 +87,7 @@ Deno.test("pake: happy path returns token + clientId, claims the code", async ()
     assertEquals(authed.id, clientId);
     assertEquals(authed.name, "my-laptop");
     // The code is single-use: a second handshake finds no active code.
-    await assertRejects(
-      () => runPake(auth, { code }),
-      AppError,
-      "no active pairing code",
-    );
+    await assertRejects(() => runPake(auth, { code }), AppError, "no active pairing code");
   } finally {
     await env.teardown();
   }
@@ -120,8 +98,8 @@ Deno.test("pake: a MITM-substituted cert (pin mismatch) fails confirmation", asy
   try {
     const auth = authService();
     const { code } = auth.mintPairingCode();
-    // Client knows the right code but observed a DIFFERENT cert pin than core's
-    // — exactly the active-MITM-at-pairing case. Confirmation must reject.
+    // Client knows the right code but observed a DIFFERENT cert pin than core's:
+    // exactly the active-MITM-at-pairing case. Confirmation must reject.
     await assertRejects(
       () =>
         runPake(auth, {
@@ -152,11 +130,7 @@ Deno.test("pake: poisons the code after 5 failed confirmations", async () => {
     }
     // 6th attempt with the CORRECT code: the code is now poisoned (claimed), so
     // there is no active code to start a handshake against.
-    await assertRejects(
-      () => runPake(auth, { code }),
-      AppError,
-      "no active pairing code",
-    );
+    await assertRejects(() => runPake(auth, { code }), AppError, "no active pairing code");
   } finally {
     await env.teardown();
   }
@@ -169,11 +143,7 @@ Deno.test("pake: rejects an expired pairing code", async () => {
     const auth = authService();
     const { code } = auth.mintPairingCode(60); // 60-sec TTL
     clock.advance(61_000);
-    await assertRejects(
-      () => runPake(auth, { code }),
-      AppError,
-      "has expired",
-    );
+    await assertRejects(() => runPake(auth, { code }), AppError, "has expired");
   } finally {
     clock.restore();
     await env.teardown();
@@ -184,13 +154,15 @@ Deno.test("pake: rate-limits the 21st start from the same IP", async () => {
   const env = await setupTestEnv();
   try {
     const auth = authService();
-    // No active code, so each start throws "no active pairing code" — but the
+    // No active code, so each start throws "no active pairing code". But the
     // IP gate is checked first, so the bucket still fills.
     const msgA = new Uint8Array(32);
     for (let i = 0; i < 20; i++) {
       try {
         auth.pakeStart(randomSid(), msgA, "x", "192.168.1.1");
-      } catch { /* expected */ }
+      } catch {
+        /* expected */
+      }
     }
     assertRejects_(
       () => auth.pakeStart(randomSid(), msgA, "x", "192.168.1.1"),
@@ -211,19 +183,11 @@ Deno.test("authenticate: rejects missing, unknown, and revoked tokens", async ()
   try {
     const auth = authService();
     await assertRejects(() => auth.authenticate(null), AppError, "missing");
-    await assertRejects(
-      () => auth.authenticate("not-a-real-token"),
-      AppError,
-      "not recognized",
-    );
+    await assertRejects(() => auth.authenticate("not-a-real-token"), AppError, "not recognized");
     const { code } = auth.mintPairingCode();
     const { token, clientId } = await runPake(auth, { code, clientName: "c" });
     auth.revokeClient(clientId);
-    await assertRejects(
-      () => auth.authenticate(token),
-      AppError,
-      "not recognized",
-    );
+    await assertRejects(() => auth.authenticate(token), AppError, "not recognized");
   } finally {
     await env.teardown();
   }
@@ -238,11 +202,7 @@ Deno.test("verifyAdminToken: matches the on-disk token via constant-time compare
       await Deno.chmod(paths().adminTokenFile, 0o600);
     }
     await auth.verifyAdminToken("secret-admin");
-    await assertRejects(
-      () => auth.verifyAdminToken("wrong"),
-      AppError,
-      "mismatch",
-    );
+    await assertRejects(() => auth.verifyAdminToken("wrong"), AppError, "mismatch");
     await assertRejects(() => auth.verifyAdminToken(null), AppError, "missing");
   } finally {
     await env.teardown();
@@ -262,8 +222,6 @@ function assertRejects_(fn: () => unknown, includes: string): void {
     throw new Error(`expected AppError, got ${threw}`);
   }
   if (!threw.message.includes(includes)) {
-    throw new Error(
-      `expected message to include "${includes}", got "${threw.message}"`,
-    );
+    throw new Error(`expected message to include "${includes}", got "${threw.message}"`);
   }
 }

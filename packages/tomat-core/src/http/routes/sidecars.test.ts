@@ -1,6 +1,6 @@
 // HTTP contract for /api/v1/sidecars. Only covers the read-side
 // (/status) and the invalid-kind guard. Actual start/stop calls would
-// spawn real binaries — covered separately by sidecars/manager.test.ts.
+// spawn real binaries; those are covered separately by sidecars/manager.test.ts.
 
 import { assertEquals } from "@std/assert";
 import { buildApp } from "../server.ts";

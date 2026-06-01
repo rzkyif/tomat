@@ -1,6 +1,6 @@
 // Hello-world spec: launches the debug Tauri binary, confirms the main window
 // appears, and exits. The point of this spec is to validate the harness
-// (tauri-driver + WDIO + Mocha) on the developer's machine — if it passes,
+// (tauri-driver + WDIO + Mocha) on the developer's machine. If it passes,
 // add real E2E coverage; if it fails, document the platform limitation in
 // tests/e2e/README.md and don't invest further until upstream fixes land.
 

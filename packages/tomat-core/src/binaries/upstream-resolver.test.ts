@@ -9,10 +9,7 @@ import {
 
 // Swap globalThis.fetch for a canned GitHub /releases/latest response so the
 // digest-verification branches are exercised without touching the network.
-function withMockRelease(
-  body: unknown,
-  fn: () => Promise<void>,
-): () => Promise<void> {
+function withMockRelease(body: unknown, fn: () => Promise<void>): () => Promise<void> {
   return async () => {
     const orig = globalThis.fetch;
     __resetResolverCacheForTesting();
@@ -70,7 +67,7 @@ Deno.test("resolveBinaryEntry returns null for a triple the entry doesn't cover"
 });
 
 Deno.test("resolveUpstream returns null (no GitHub call) when the triple has no asset", async () => {
-  // whisper.cpp ships only Windows assets — mac/linux beta must degrade to
+  // whisper.cpp ships only Windows assets, so mac/linux beta must degrade to
   // null, not throw, and must not hit the network.
   const resolver = {
     repo: "ggml-org/whisper.cpp",
@@ -84,11 +81,14 @@ Deno.test(
   withMockRelease(
     {
       tag_name: "b9999",
-      assets: [{
-        name: "llama-b9999-bin-macos-arm64.tar.gz",
-        browser_download_url: "https://github.test/llama-b9999.tar.gz",
-        digest: "sha256:deadbeef",
-      }],
+      assets: [
+        {
+          name: "llama-b9999-bin-macos-arm64.tar.gz",
+          browser_download_url: "https://github.test/llama-b9999.tar.gz",
+          digest: "sha256:deadbeef",
+          size: 8675309,
+        },
+      ],
     },
     async () => {
       const got = await resolveUpstream(
@@ -104,6 +104,7 @@ Deno.test(
         version: "b9999",
         url: "https://github.test/llama-b9999.tar.gz",
         sha256: "deadbeef",
+        sizeBytes: 8675309,
       });
     },
   ),
@@ -114,11 +115,13 @@ Deno.test(
   withMockRelease(
     {
       tag_name: "b9999",
-      assets: [{
-        name: "llama-b9999-bin-macos-arm64.tar.gz",
-        browser_download_url: "https://github.test/llama-b9999.tar.gz",
-        digest: null,
-      }],
+      assets: [
+        {
+          name: "llama-b9999-bin-macos-arm64.tar.gz",
+          browser_download_url: "https://github.test/llama-b9999.tar.gz",
+          digest: null,
+        },
+      ],
     },
     () =>
       assertRejects(

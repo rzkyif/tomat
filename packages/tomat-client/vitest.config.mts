@@ -20,19 +20,14 @@ export default defineConfig({
   plugins: [svelte(), svelteTesting({ autoCleanup: false })],
   resolve: {
     alias: {
-      "@tomat/shared": new URL(
-        "../tomat-shared/src/index.ts",
-        import.meta.url,
-      ).pathname,
+      "@tomat/shared": new URL("../tomat-shared/src/index.ts", import.meta.url).pathname,
       // SvelteKit's `$lib` alias is supplied here for vitest since we don't
       // load the SvelteKit plugin (see top-of-file comment).
       $lib: new URL("./src/ui/lib", import.meta.url).pathname,
       // SvelteKit virtual modules. We don't run SvelteKit under vitest, so
       // these point at tiny shim files that export the same surface.
-      "$app/environment": new URL(
-        "./src/ui/test-shims/app-environment.ts",
-        import.meta.url,
-      ).pathname,
+      "$app/environment": new URL("./src/ui/test-shims/app-environment.ts", import.meta.url)
+        .pathname,
     },
   },
   server: { hmr: false },
@@ -41,7 +36,7 @@ export default defineConfig({
     include: ["src/ui/**/*.test.ts"],
     setupFiles: ["./src/ui/test-setup.ts"],
     globals: false,
-    // Run the suite serially per file — Svelte 5 runes share a hidden
+    // Run the suite serially per file. Svelte 5 runes share a hidden
     // global effect-tracking context, and parallel runs in jsdom can
     // produce flaky teardown order. Drop this once we have a real
     // motivating reason for parallelism.

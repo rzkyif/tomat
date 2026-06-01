@@ -20,12 +20,7 @@ import { getLogger } from "../shared/log.ts";
 import { errMessage } from "@tomat/shared";
 import { trackSidecarPid } from "./jobctl.ts";
 import { libraryEnvFor } from "./library-path.ts";
-import {
-  pollHttpHealth,
-  sleep,
-  STARTUP_WARMUP_MS,
-  validateHealthCheckUrl,
-} from "./readiness.ts";
+import { pollHttpHealth, sleep, STARTUP_WARMUP_MS, validateHealthCheckUrl } from "./readiness.ts";
 import {
   DEFAULT_RESTART_POLICY,
   type RestartPolicy,
@@ -134,13 +129,11 @@ class Sidecar {
     this.emit({ kind: this.kind, status: "Loading", message: "Starting…" });
 
     // 3. Build env. Workspace env + caller env + library-path env.
-    const libEnv = options.libraryDir
-      ? libraryEnvFor(options.libraryDir)
-      : { env: {} };
+    const libEnv = options.libraryDir ? libraryEnvFor(options.libraryDir) : { env: {} };
     const env: Record<string, string> = {
       ...inheritedSidecarEnv(),
       ...libEnv.env,
-      ...(options.env ?? {}),
+      ...options.env,
     };
     const cwd = options.cwd ?? libEnv.cwd;
 
@@ -183,9 +176,7 @@ class Sidecar {
     // 5. Wire output capture + monitor unexpected exit.
     void this.captureOutput(
       active,
-      options.readiness?.kind === "stdout"
-        ? options.readiness.marker ?? "READY\n"
-        : null,
+      options.readiness?.kind === "stdout" ? (options.readiness.marker ?? "READY\n") : null,
     );
     void this.watchExit(active, options);
 
@@ -234,10 +225,7 @@ class Sidecar {
   // Pipe stdout+stderr through a tee so we can both (a) detect a stdout
   // readiness marker on one branch and (b) keep a ring buffer of the last
   // 10 lines on the other for error context if the process dies.
-  private async captureOutput(
-    active: Active,
-    marker: string | null,
-  ): Promise<void> {
+  private async captureOutput(active: Active, marker: string | null): Promise<void> {
     const decoder = new TextDecoder();
     const pump = async (
       stream: ReadableStream<Uint8Array>,
@@ -266,20 +254,12 @@ class Sidecar {
         // Stream closed; expected on process exit.
       }
     };
-    await Promise.all([
-      pump(active.proc.stdout, "stdout"),
-      pump(active.proc.stderr, "stderr"),
-    ]);
+    await Promise.all([pump(active.proc.stdout, "stdout"), pump(active.proc.stderr, "stderr")]);
   }
 
-  private async runReadiness(
-    active: Active,
-    options: StartOptions,
-  ): Promise<boolean> {
-    const readiness = options.readiness ??
-      { kind: "warmup", ms: STARTUP_WARMUP_MS };
-    const startupTimeoutMs = options.startupTimeoutMs ??
-      DEFAULT_STARTUP_TIMEOUT_MS;
+  private async runReadiness(active: Active, options: StartOptions): Promise<boolean> {
+    const readiness = options.readiness ?? { kind: "warmup", ms: STARTUP_WARMUP_MS };
+    const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
 
     if (readiness.kind === "warmup") {
       try {
@@ -316,10 +296,7 @@ class Sidecar {
     return false;
   }
 
-  private async watchExit(
-    active: Active,
-    options: StartOptions,
-  ): Promise<void> {
+  private async watchExit(active: Active, options: StartOptions): Promise<void> {
     const status = await active.proc.status;
     // If this active was superseded or stopped intentionally, ignore.
     if (!this.isCurrent(active.startId)) return;
@@ -328,41 +305,32 @@ class Sidecar {
       return;
     }
     // Unexpected exit.
-    const msg = active.recentLogs.length > 0
-      ? active.recentLogs.join("\n")
-      : `exited with code ${status.code}${
-        status.signal ? ` (signal ${status.signal})` : ""
-      }`;
+    const msg =
+      active.recentLogs.length > 0
+        ? active.recentLogs.join("\n")
+        : `exited with code ${status.code}${status.signal ? ` (signal ${status.signal})` : ""}`;
     log.warn(`${this.kind}: unexpected exit: ${msg}`);
     this.active = null;
     this.emit({ kind: this.kind, status: "Error", message: msg });
 
     // Restart with backoff if policy allows.
-    const policy = options.restartPolicy === "none" ? null : (
-      options.restartPolicy ?? DEFAULT_RESTART_POLICY
-    );
+    const policy =
+      options.restartPolicy === "none" ? null : (options.restartPolicy ?? DEFAULT_RESTART_POLICY);
     if (!policy) return;
     await this.restartWithBackoff(options, policy);
   }
 
-  private async restartWithBackoff(
-    options: StartOptions,
-    policy: RestartPolicy,
-  ): Promise<void> {
+  private async restartWithBackoff(options: StartOptions, policy: RestartPolicy): Promise<void> {
     let delay = policy.initialDelayMs;
     for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
-      log.info(
-        `${this.kind}: restart attempt ${attempt}/${policy.maxAttempts} in ${delay}ms`,
-      );
+      log.info(`${this.kind}: restart attempt ${attempt}/${policy.maxAttempts} in ${delay}ms`);
       await sleep(delay);
       if (this.pendingStop) return;
       await this.start(options);
       if (this.current.status === "Running") return;
       delay = Math.min(delay * 2, policy.maxDelayMs);
     }
-    log.error(
-      `${this.kind}: gave up restarting after ${policy.maxAttempts} attempts`,
-    );
+    log.error(`${this.kind}: gave up restarting after ${policy.maxAttempts} attempts`);
   }
 
   private async terminateActive(active: Active): Promise<void> {
@@ -387,9 +355,7 @@ class Sidecar {
         }
       }
     } catch (err) {
-      log.warn(
-        `${this.kind}: terminate failed: ${errMessage(err)}`,
-      );
+      log.warn(`${this.kind}: terminate failed: ${errMessage(err)}`);
     }
     // Drain status to release resources.
     try {
@@ -427,8 +393,7 @@ export class SidecarManager {
   }
 
   status(kind: SidecarKind): SidecarSnapshot {
-    return this.sidecars.get(kind)?.snapshot() ??
-      { kind, status: "Disabled" };
+    return this.sidecars.get(kind)?.snapshot() ?? { kind, status: "Disabled" };
   }
 
   getStatuses(): SidecarSnapshot[] {
@@ -450,15 +415,13 @@ export class SidecarManager {
       try {
         l(snap);
       } catch (err) {
-        log.warn(
-          `sidecar listener threw: ${errMessage(err)}`,
-        );
+        log.warn(`sidecar listener threw: ${errMessage(err)}`);
       }
     }
   }
 }
 
-// Singleton accessor — the rest of core wires routes/WS into this one.
+// Singleton accessor. The rest of core wires routes/WS into this one.
 let _instance: SidecarManager | null = null;
 export function sidecarManager(): SidecarManager {
   if (!_instance) _instance = new SidecarManager();

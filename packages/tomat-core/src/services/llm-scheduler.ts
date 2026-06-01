@@ -5,18 +5,14 @@
 // can't monopolize the model. Queue depth > parallelSlots * 4 returns
 // server_busy immediately.
 //
-// External providers (OpenAI etc.) bypass the semaphore entirely — they
+// External providers (OpenAI etc.) bypass the semaphore entirely. They
 // enforce their own rate limits, and queueing locally would just add
 // latency without protecting anything.
 
 import { AppError } from "../shared/errors.ts";
 import { errMessage } from "@tomat/shared";
 import { getLogger } from "../shared/log.ts";
-import {
-  type LlmDelta,
-  type LlmRequest,
-  streamChatCompletion,
-} from "./llm-provider.ts";
+import { type LlmDelta, type LlmRequest, streamChatCompletion } from "./llm-provider.ts";
 
 const log = getLogger("llm-scheduler");
 
@@ -41,10 +37,7 @@ export interface ScheduleOptions {
   parallelSlots?: number;
 }
 
-export type WatchdogHandler = (info: {
-  clientId: string;
-  elapsedMs: number;
-}) => void;
+export type WatchdogHandler = (info: { clientId: string; elapsedMs: number }) => void;
 
 export class LlmScheduler {
   private localActive = 0;
@@ -72,7 +65,7 @@ export class LlmScheduler {
   // Wire a callback the scheduler invokes when a local slot stays held
   // past `callTimeoutMs + WATCHDOG_GRACE_MS`. Typical handler: restart the
   // llama-server sidecar. The scheduler itself only aborts the upstream
-  // stream and releases the slot — restart logic lives in the supervisor.
+  // stream and releases the slot; restart logic lives in the supervisor.
   setWatchdogHandler(fn: WatchdogHandler | null): void {
     this.watchdogHandler = fn;
   }
@@ -90,10 +83,7 @@ export class LlmScheduler {
   // Streams a chat completion through the scheduler. Yields the same
   // LlmDelta sequence as streamChatCompletion, with semaphore acquisition
   // gating local provider work.
-  async *schedule(
-    req: LlmRequest,
-    opts: ScheduleOptions,
-  ): AsyncIterable<LlmDelta> {
+  async *schedule(req: LlmRequest, opts: ScheduleOptions): AsyncIterable<LlmDelta> {
     if (opts.isLocal) {
       if (opts.parallelSlots !== undefined) {
         this.setParallelSlots(opts.parallelSlots);
@@ -101,8 +91,7 @@ export class LlmScheduler {
       if (this.queueLen() >= this.maxQueueDepth()) {
         throw new AppError(
           "server_busy",
-          `llama-server queue full (${this.queueLen()} waiting, ` +
-            `${this.parallelSlots} slots)`,
+          `llama-server queue full (${this.queueLen()} waiting, ` + `${this.parallelSlots} slots)`,
         );
       }
       await this.acquireLocal(opts.clientId);
@@ -127,16 +116,16 @@ export class LlmScheduler {
               `llm scheduler watchdog timeout after ${watchdogTimeoutMs}ms`,
             ),
           );
-        } catch { /* signal already aborted */ }
+        } catch {
+          /* signal already aborted */
+        }
         try {
           this.watchdogHandler?.({
             clientId: opts.clientId,
             elapsedMs: Date.now() - startedAt,
           });
         } catch (err) {
-          log.warn(
-            `watchdog handler threw: ${errMessage(err)}`,
-          );
+          log.warn(`watchdog handler threw: ${errMessage(err)}`);
         }
       }, watchdogTimeoutMs);
       try {

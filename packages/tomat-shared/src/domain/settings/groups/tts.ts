@@ -107,10 +107,12 @@ export const ttsGroup: SettingGroup = {
           type: "number",
           defaultValue: 8,
           suffix: "words",
-          regex: [{
-            regex: "^[1-9][0-9]*$",
-            errorMessage: "Must be a positive integer",
-          }],
+          regex: [
+            {
+              regex: "^[1-9][0-9]*$",
+              errorMessage: "Must be a positive integer",
+            },
+          ],
           advanced: true,
           descriptionTier: "ondemand",
         },
@@ -150,8 +152,7 @@ export const ttsGroup: SettingGroup = {
         {
           id: "tts.volume",
           name: "Volume",
-          description:
-            "Playback volume for synthesized speech.\nAccepted range: 0 to 100.",
+          description: "Playback volume for synthesized speech.\nAccepted range: 0 to 100.",
           type: "number_slider",
           defaultValue: 70,
           min: 0,

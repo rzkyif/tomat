@@ -29,10 +29,7 @@ Deno.test("validateSettingsPatch: accepts a well-typed boolean value", () => {
 Deno.test("validateSettingsPatch: rejects a wrong-typed known value", () => {
   const id = firstFieldOfType("boolean");
   if (!id) return;
-  assertEquals(
-    validateSettingsPatch({ [id]: "not-a-boolean" }).length > 0,
-    true,
-  );
+  assertEquals(validateSettingsPatch({ [id]: "not-a-boolean" }).length > 0, true);
 });
 
 Deno.test("validateSettingsPatch: rejects secret-typed keys (vault only)", () => {

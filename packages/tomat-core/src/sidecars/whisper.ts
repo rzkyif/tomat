@@ -54,27 +54,15 @@ export function buildWhisperStartOptions(args: WhisperStartArgs): StartOptions {
   };
 }
 
-function strSetting(
-  s: Record<string, unknown>,
-  k: string,
-  def: string,
-): string {
+function strSetting(s: Record<string, unknown>, k: string, def: string): string {
   const v = s[k];
   return typeof v === "string" ? v : def;
 }
-function boolSetting(
-  s: Record<string, unknown>,
-  k: string,
-  def: boolean,
-): boolean {
+function boolSetting(s: Record<string, unknown>, k: string, def: boolean): boolean {
   const v = s[k];
   return typeof v === "boolean" ? v : def;
 }
-function numSetting(
-  s: Record<string, unknown>,
-  k: string,
-  def: number,
-): number {
+function numSetting(s: Record<string, unknown>, k: string, def: number): number {
   const v = s[k];
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string" && v !== "") {

@@ -21,11 +21,7 @@ import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import { sha256Hex } from "../shared/hash.ts";
 import { binPath, channelBinName } from "../paths.ts";
-import {
-  coreBinaryName,
-  hostTriple,
-  platformExe,
-} from "../binaries/versions.ts";
+import { coreBinaryName, hostTriple, platformExe } from "../binaries/versions.ts";
 import signingKeys from "../../data/signing-keys.json" with { type: "json" };
 import { writeUpdateMarker } from "./rollback.ts";
 import { loadCoreSettings } from "../services/core-settings.ts";
@@ -38,9 +34,7 @@ export type UpdateEvent =
 
 const updateSubscribers = new Set<(e: UpdateEvent) => void>();
 
-export function subscribeUpdate(
-  cb: (e: UpdateEvent) => void,
-): () => void {
+export function subscribeUpdate(cb: (e: UpdateEvent) => void): () => void {
   updateSubscribers.add(cb);
   return () => {
     updateSubscribers.delete(cb);
@@ -52,9 +46,7 @@ export function emitUpdate(e: UpdateEvent): void {
     try {
       cb(e);
     } catch (err) {
-      log.warn(
-        `update subscriber threw: ${errMessage(err)}`,
-      );
+      log.warn(`update subscriber threw: ${errMessage(err)}`);
     }
   }
 }
@@ -126,10 +118,7 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
   const triple = hostTriple();
   const entry = manifest.binaries.find((b) => b.triple === triple);
   if (!entry) {
-    throw new AppError(
-      "update_failed",
-      `no binary for triple ${triple} in manifest`,
-    );
+    throw new AppError("update_failed", `no binary for triple ${triple} in manifest`);
   }
   await Deno.mkdir(paths().stagingDir, { recursive: true });
   const stagedPath = join(
@@ -140,7 +129,7 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
 
   // Workers are platform-independent .ts files. Download + verify each,
   // then atomic-rename into paths().workersDir. They're not gated on the
-  // binary swap because they're just text — a new binary doesn't break
+  // binary swap because they're just text. A new binary doesn't break
   // old workers and vice versa (the spawn protocol is stable).
   if (manifest.workers && manifest.workers.length > 0) {
     await Deno.mkdir(paths().workersDir, { recursive: true });
@@ -155,16 +144,13 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
 
   // Helpers are per-triple native binaries (keychain). Only the
   // entries matching our triple apply. Swap them at the same time as the
-  // main binary to keep version invariants — the manifest is one atomic
+  // main binary to keep version invariants: the manifest is one atomic
   // unit, and a stale helper paired with a new core has no version pinning.
   if (manifest.helpers && manifest.helpers.length > 0) {
     const exe = platformExe();
     for (const h of manifest.helpers) {
       if (h.triple !== triple) continue;
-      const tmpPath = join(
-        paths().stagingDir,
-        `${h.name}.${manifest.version}${exe}`,
-      );
+      const tmpPath = join(paths().stagingDir, `${h.name}.${manifest.version}${exe}`);
       await downloadAndVerify(h.url, tmpPath, h.sha256);
       const dstPath = binPath(`${h.name}${exe}`);
       await Deno.rename(tmpPath, dstPath);
@@ -225,10 +211,7 @@ async function fetchCoreManifest(): Promise<CoreManifest> {
   try {
     res = await fetch(coreManifestUrl());
   } catch (err) {
-    throw new AppError(
-      "manifest_fetch_failed",
-      `core manifest fetch failed: ${errMessage(err)}`,
-    );
+    throw new AppError("manifest_fetch_failed", `core manifest fetch failed: ${errMessage(err)}`);
   }
   if (!res.ok) {
     throw new AppError(
@@ -239,10 +222,7 @@ async function fetchCoreManifest(): Promise<CoreManifest> {
   const raw = await res.text();
   const parsed = JSON.parse(raw) as CoreManifest;
   if (parsed.schemaVersion !== 1) {
-    throw new AppError(
-      "manifest_fetch_failed",
-      `bad core manifest schemaVersion`,
-    );
+    throw new AppError("manifest_fetch_failed", `bad core manifest schemaVersion`);
   }
   const pk = decodeBase64(signingKeys.publicKey);
   const sig = decodeBase64(parsed.signature);
@@ -256,17 +236,10 @@ async function fetchCoreManifest(): Promise<CoreManifest> {
   return parsed;
 }
 
-async function downloadAndVerify(
-  url: string,
-  outPath: string,
-  sha256: string,
-): Promise<void> {
+async function downloadAndVerify(url: string, outPath: string, sha256: string): Promise<void> {
   const res = await fetch(url);
   if (!res.ok || !res.body) {
-    throw new AppError(
-      "update_failed",
-      `download HTTP ${res.status} for ${url}`,
-    );
+    throw new AppError("update_failed", `download HTTP ${res.status} for ${url}`);
   }
   const tmp = outPath + ".tmp";
   const file = await Deno.open(tmp, {
@@ -288,11 +261,10 @@ async function downloadAndVerify(
   if (hex !== sha256.toLowerCase()) {
     try {
       await Deno.remove(tmp);
-    } catch { /* */ }
-    throw new AppError(
-      "checksum_mismatch",
-      `update sha256 mismatch: want ${sha256}, got ${hex}`,
-    );
+    } catch {
+      /* */
+    }
+    throw new AppError("checksum_mismatch", `update sha256 mismatch: want ${sha256}, got ${hex}`);
   }
   await Deno.rename(tmp, outPath);
   if (Deno.build.os !== "windows") {
@@ -327,12 +299,10 @@ export function decodeBase64(s: string): Uint8Array {
  *  minus its `signature` field, canonicalized. The signer
  *  (`scripts/release/core.ts`) MUST sign the identical payload. Keeping this a
  *  single named function makes the coverage testable and prevents anyone
- *  narrowing it back to `{version, binaries}` — which would leave `workers[]`
+ *  narrowing it back to `{version, binaries}`, which would leave `workers[]`
  *  and `helpers[]` (downloaded and EXECUTED) outside the signature and open a
  *  tampered-manifest code-execution path. */
-export function signedManifestPayload(
-  manifest: Record<string, unknown>,
-): string {
+export function signedManifestPayload(manifest: Record<string, unknown>): string {
   const signed: Record<string, unknown> = { ...manifest };
   delete signed.signature;
   return canonicalize(signed);
@@ -349,15 +319,13 @@ export function canonicalize(value: unknown): string {
   }
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj).sort();
-  return "{" +
-    keys.map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") +
-    "}";
+  return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") + "}";
 }
 
 /** Compare two semver strings (major.minor.patch). Returns -1 if a < b,
  *  0 if equal, 1 if a > b. Pre-release tags and build metadata are
- *  ignored — sufficient for downgrade detection where the manifest publishes
- *  release versions only. */
+ *  ignored. That is sufficient for downgrade detection where the manifest
+ *  publishes release versions only. */
 export function compareSemver(a: string, b: string): number {
   const parse = (v: string): [number, number, number] => {
     const core = v.split(/[-+]/)[0]; // drop prerelease + build

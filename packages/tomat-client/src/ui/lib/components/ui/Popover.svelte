@@ -36,7 +36,7 @@
     if (!backdropEl || !popupEl || !anchor) return;
     const aRect = anchor.getBoundingClientRect();
     const b = backdropEl.getBoundingClientRect();
-    // Measure actual popup height — content varies and a hardcoded estimate
+    // Measure actual popup height. Content varies and a hardcoded estimate
     // routinely under-counted, causing "above" placement to clip when the
     // real popup couldn't fit.
     const ph = popupEl.offsetHeight;

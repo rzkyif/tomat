@@ -23,11 +23,7 @@ async function seedAdminToken(): Promise<void> {
   }
 }
 
-function jsonReq(
-  url: string,
-  body: unknown,
-  headers: HeadersInit = {},
-): Request {
+function jsonReq(url: string, body: unknown, headers: HeadersInit = {}): Request {
   return new Request(url, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
@@ -37,9 +33,13 @@ function jsonReq(
 
 async function mintCode(app: ReturnType<typeof buildApp>): Promise<string> {
   const res = await app.fetch(
-    jsonReq("http://x/api/v1/pairing/codes", {}, {
-      "x-admin-token": ADMIN_TOKEN,
-    }),
+    jsonReq(
+      "http://x/api/v1/pairing/codes",
+      {},
+      {
+        "x-admin-token": ADMIN_TOKEN,
+      },
+    ),
   );
   const { code } = await res.json();
   return code;
@@ -63,9 +63,13 @@ Deno.test("POST /api/v1/pairing/codes: mints a 6-digit code with the admin token
     await seedAdminToken();
     const app = buildApp();
     const res = await app.fetch(
-      jsonReq("http://x/api/v1/pairing/codes", {}, {
-        "x-admin-token": ADMIN_TOKEN,
-      }),
+      jsonReq(
+        "http://x/api/v1/pairing/codes",
+        {},
+        {
+          "x-admin-token": ADMIN_TOKEN,
+        },
+      ),
     );
     assertEquals(res.status, 200);
     const body = await res.json();
@@ -83,12 +87,7 @@ Deno.test("pake: round-trips a real pairing flow and returns a token + confirmS"
     const app = buildApp();
     const code = await mintCode(app);
 
-    const finish = await pakeViaApp(
-      app,
-      code,
-      "my-laptop",
-      await tlsCertFingerprint(),
-    );
+    const finish = await pakeViaApp(app, code, "my-laptop", await tlsCertFingerprint());
     assertEquals(finish.status, 200);
     const body = await finish.json();
     assertEquals(typeof body.token, "string");
@@ -142,12 +141,7 @@ Deno.test("GET /api/v1/pairing/clients: lists the paired client", async () => {
     await seedAdminToken();
     const app = buildApp();
     const code = await mintCode(app);
-    const finish = await pakeViaApp(
-      app,
-      code,
-      "L1",
-      await tlsCertFingerprint(),
-    );
+    const finish = await pakeViaApp(app, code, "L1", await tlsCertFingerprint());
     const { token } = await finish.json();
     const list = await app.fetch(
       new Request("http://x/api/v1/pairing/clients", {

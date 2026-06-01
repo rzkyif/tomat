@@ -204,7 +204,7 @@ class MessagesState {
     if (!sessionsState.id) {
       // Mint the session server-side so the rest of the flow can reference
       // a real ULID. Falls back to a local timestamp ID if the call fails
-      // (e.g. offline core) — the next persist attempt will still try.
+      // (e.g. offline core). The next persist attempt will still try.
       try {
         const created = await cores().api().sessions.create();
         sessionsState.id = created.id;

@@ -257,7 +257,7 @@ if ($Channel -notin @("stable", "dev", "beta")) {
 }
 $ClientDir = Join-Path $HOME ".tomat\$Channel\client"
 # Match this channel's product only. Stable is bare "tomat" (followed by a
-# space or end — NOT "tomat-beta"); non-stable matches "tomat-<channel>".
+# space or end, but NOT "tomat-beta"); non-stable matches "tomat-<channel>".
 if ($Channel -eq "stable") {
   $ProductPattern = "^[Tt]omat($| )"
 } else {

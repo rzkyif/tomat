@@ -26,11 +26,13 @@ Deno.test("signedManifestPayload: covers workers + helpers, excludes signature, 
   const manifest = {
     schemaVersion: 1,
     version: "1.2.3",
-    binaries: [{
-      triple: "aarch64-apple-darwin",
-      url: "https://x/c",
-      sha256: "aa",
-    }],
+    binaries: [
+      {
+        triple: "aarch64-apple-darwin",
+        url: "https://x/c",
+        sha256: "aa",
+      },
+    ],
     workers: [{ name: "tool-worker.ts", url: "https://x/w", sha256: "bb" }],
     helpers: [
       {
@@ -49,26 +51,20 @@ Deno.test("signedManifestPayload: covers workers + helpers, excludes signature, 
   assertEquals(payload.includes("binaries"), true);
   // ...and the signature field itself is excluded.
   assertEquals(payload.includes("should-not-be-signed"), false);
-  // Tampering a worker URL changes the signed bytes (so the signature fails) —
-  // this is the regression guard against narrowing coverage back to
+  // Tampering a worker URL changes the signed bytes (so the signature fails).
+  // This is the regression guard against narrowing coverage back to
   // {version, binaries}.
   const tamperedWorker = {
     ...manifest,
     workers: [{ name: "tool-worker.ts", url: "https://evil/w", sha256: "bb" }],
   };
-  assertEquals(
-    signedManifestPayload(manifest) === signedManifestPayload(tamperedWorker),
-    false,
-  );
+  assertEquals(signedManifestPayload(manifest) === signedManifestPayload(tamperedWorker), false);
   // Tampering a helper hash likewise changes the signed bytes.
   const tamperedHelper = {
     ...manifest,
     helpers: [{ ...manifest.helpers[0], sha256: "ff" }],
   };
-  assertEquals(
-    signedManifestPayload(manifest) === signedManifestPayload(tamperedHelper),
-    false,
-  );
+  assertEquals(signedManifestPayload(manifest) === signedManifestPayload(tamperedHelper), false);
 });
 
 Deno.test("canonicalize: nested objects recursively sorted", () => {
@@ -102,7 +98,7 @@ Deno.test("canonicalize: realistic manifest body round-trips deterministically",
     ],
   };
   // Two independent invocations produce the same bytes (signing+verifying
-  // both call this — bit-for-bit equality is the contract).
+  // both call this, so bit-for-bit equality is the contract).
   assertEquals(canonicalize(body), canonicalize(body));
   // Reordering input keys produces the same output.
   const reorder = { binaries: body.binaries, version: body.version };

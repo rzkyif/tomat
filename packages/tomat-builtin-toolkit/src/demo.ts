@@ -14,9 +14,7 @@ export async function demo(
 }> {
   ctx.setProgress(0, "Starting demo");
 
-  const [rawName] = await ctx.askUser([
-    { question: "What's your name?" },
-  ]);
+  const [rawName] = await ctx.askUser([{ question: "What's your name?" }]);
   const name = typeof rawName === "string" ? rawName.trim() : "";
   ctx.setProgress(0.33, "Got name", name || "(empty)");
 

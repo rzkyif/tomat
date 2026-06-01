@@ -2,24 +2,27 @@
   import { confirmState } from "../../state";
   import { formatBytes } from "$lib/shared/format";
   import { isBinarySource, binarySourceToKind } from "$lib/shared/download";
+  import type { DownloadPlan } from "@tomat/shared";
   import Modal from "../ui/Modal.svelte";
   import Button from "../ui/Button.svelte";
 
-  // Friendly display of `binary:llama-server` etc. — the raw synthetic
+  // Friendly display of `binary:llama-server` etc. The raw synthetic
   // source string is ugly. HF paths still get the filename-extract
   // treatment below.
   function displayTitle(source: string): string {
     if (isBinarySource(source)) {
-      return `${binarySourceToKind(source)} (sidecar binary)`;
+      return binarySourceToKind(source);
     }
     return source.split("/").pop() ?? source;
   }
 
-  function displaySubtitle(source: string): string {
-    if (isBinarySource(source)) {
-      return "Downloaded from the upstream release";
+  function displaySubtitle(d: DownloadPlan): string {
+    if (isBinarySource(d.source)) {
+      // Show the resolved release; fall back to "latest" when the probe
+      // couldn't pin a concrete version.
+      return d.version ?? "latest";
     }
-    return source;
+    return d.source;
   }
 </script>
 
@@ -51,25 +54,27 @@
                 {displayTitle(d.source)}
               </div>
               <div class="text-default-500 text-xs truncate">
-                {displaySubtitle(d.source)}
+                {displaySubtitle(d)}
               </div>
             </div>
-            <div class="text-default-500 text-xs tabular-nums shrink-0">
-              {formatBytes(d.sizeHint ?? 0)}
-            </div>
+            {#if d.sizeHint}
+              <div class="text-default-500 text-xs tabular-nums shrink-0">
+                {formatBytes(d.sizeHint)}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
     {/if}
     <div class="flex items-center justify-end gap-2">
-      {#if downloads.length > 0}
+      {#if downloads.length > 0 && total > 0}
         <span class="text-default-500 text-sm mr-auto">
           Total: {formatBytes(total)}{anyUnknown ? " +" : ""}
         </span>
       {/if}
       {#if !p.alert}
         <Button variant="secondary" onclick={() => confirmState.cancel()}>
-          Cancel
+          {p.cancelLabel ?? "Cancel"}
         </Button>
       {/if}
       <Button

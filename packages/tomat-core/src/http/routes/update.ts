@@ -11,9 +11,11 @@ export function updateRoutes(): Hono {
   r.post("/apply", async (c) => {
     let version: string | undefined;
     try {
-      const body = await c.req.json() as { version?: string };
+      const body = (await c.req.json()) as { version?: string };
       version = body.version;
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
     // applyUpdate hands off to the updater binary and calls Deno.exit; the
     // 204 response is never delivered if everything works. Return it for
     // the typecheck.

@@ -32,9 +32,7 @@ export interface FetchOptions {
   signal?: AbortSignal;
 }
 
-export async function loadBinaryManifest(
-  opts: FetchOptions = {},
-): Promise<BinaryManifest> {
+export async function loadBinaryManifest(opts: FetchOptions = {}): Promise<BinaryManifest> {
   const cached = await readCachedManifest();
   if (cached && !opts.force) return cached;
   const fetched = await fetchAndVerify(opts.signal);
@@ -63,10 +61,7 @@ async function fetchAndVerify(signal?: AbortSignal): Promise<BinaryManifest> {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new AppError(
-      "manifest_fetch_failed",
-      `invalid manifest JSON: ${errMessage(err)}`,
-    );
+    throw new AppError("manifest_fetch_failed", `invalid manifest JSON: ${errMessage(err)}`);
   }
   assertManifestShape(parsed);
   await verifyManifestSignature(parsed);
@@ -114,9 +109,7 @@ function canonicalize(value: unknown): string {
   }
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj).sort();
-  return "{" +
-    keys.map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") +
-    "}";
+  return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") + "}";
 }
 
 function decodeBase64(s: string): Uint8Array {

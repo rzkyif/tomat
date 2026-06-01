@@ -11,15 +11,11 @@ export const TRIPLES = [
   "aarch64-unknown-linux-gnu",
 ] as const;
 
-export type Triple = typeof TRIPLES[number];
+export type Triple = (typeof TRIPLES)[number];
 
-export const BINARY_KINDS = [
-  "llama-server",
-  "whisper-server",
-  "deno",
-] as const;
+export const BINARY_KINDS = ["llama-server", "whisper-server", "deno"] as const;
 
-export type BinaryKind = typeof BINARY_KINDS[number];
+export type BinaryKind = (typeof BINARY_KINDS)[number];
 
 // HF-style spec: "@user/repo/branch/file". Branch may be "main".
 // The model storage path is derived by stripping the leading "@" and treating
@@ -33,12 +29,7 @@ export interface ModelEntry {
   sizeBytes: number;
 }
 
-export type DownloadStatus =
-  | "Pending"
-  | "Downloading"
-  | "Completed"
-  | "Error"
-  | "Cancelled";
+export type DownloadStatus = "Pending" | "Downloading" | "Completed" | "Error" | "Cancelled";
 
 // Wire shape served by /api/v1/models/downloads and broadcast over WS as
 // `downloads.snapshot`.
@@ -61,6 +52,9 @@ export interface DownloadPlan {
   source: string;
   alreadyHave: boolean;
   sizeHint?: number;
+  /** Resolved version for sidecar-binary plans (e.g. an upstream release tag).
+   *  Unset for model files. */
+  version?: string;
 }
 
 // A binary manifest entry is one of two shapes:
@@ -88,13 +82,9 @@ export interface BinaryManifestResolverEntry {
   resolver: UpstreamResolver;
 }
 
-export type BinaryManifestEntry =
-  | BinaryManifestPinnedEntry
-  | BinaryManifestResolverEntry;
+export type BinaryManifestEntry = BinaryManifestPinnedEntry | BinaryManifestResolverEntry;
 
-export function isResolverEntry(
-  e: BinaryManifestEntry,
-): e is BinaryManifestResolverEntry {
+export function isResolverEntry(e: BinaryManifestEntry): e is BinaryManifestResolverEntry {
   return (e as BinaryManifestResolverEntry).resolver !== undefined;
 }
 
@@ -109,6 +99,16 @@ export interface BinaryStatus {
   version: string;
   installed: boolean;
   path?: string;
+}
+
+// Resolved download metadata for a not-yet-installed binary, surfaced in the
+// startup download confirmation. `version` is the resolved release (or
+// "unknown" when it couldn't be resolved); `sizeBytes` is the download size
+// when known (GitHub asset size on beta, HEAD Content-Length on stable).
+export interface BinaryProbeResult {
+  kind: BinaryKind;
+  version: string;
+  sizeBytes?: number;
 }
 
 // Core update manifest (separate from binaries).
@@ -127,9 +127,7 @@ export interface CoreManifest {
   version: string;
   binaries: Array<{ triple: Triple; url: string; sha256: string }>;
   workers: Array<{ name: string; url: string; sha256: string }>;
-  helpers: Array<
-    { name: string; triple: Triple; url: string; sha256: string }
-  >;
+  helpers: Array<{ name: string; triple: Triple; url: string; sha256: string }>;
   signature: string;
 }
 

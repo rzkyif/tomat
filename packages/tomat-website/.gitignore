@@ -6,6 +6,6 @@ dist/
 .wrangler/
 .dev.vars
 
-# release:website idempotency cursor — regenerated at each landing deploy
+# release:website idempotency cursor, regenerated at each landing deploy
 # (its hash records the website source state at the time of the deploy).
 public/release-state.json

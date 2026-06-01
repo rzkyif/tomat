@@ -8,7 +8,6 @@
   import { onMount } from "svelte";
   import Bubble from "./ui/Bubble.svelte";
   import IconButton from "./ui/IconButton.svelte";
-  import ListItem from "./ui/ListItem.svelte";
   import Select from "./ui/Select.svelte";
   import { sessionsState, settingsState, viewState } from "$lib/state";
   import { cores, type PairedCoreEntry } from "$lib/core";
@@ -54,7 +53,7 @@
     await sessionsState.deleteById(id);
   }
 
-  // Switching the core in the list commits the active core — the same
+  // Switching the core in the list commits the active core. It is the same
   // "active core" the Settings picker switches. The core-change subscription
   // in +layout reloads the session list for the newly-selected core.
   async function switchCore(): Promise<void> {
@@ -72,21 +71,26 @@
   }
 </script>
 
-<Bubble
-  selectedAlignment={alignment}
-  extraClass="flex flex-col gap-3 w-[32rem] max-w-full"
+<!-- A scrollable column of floating bubbles on the transparent window
+     background: a header bubble, then one bubble per session, using the same
+     bubble look as chat messages, not a card. -->
+<div
+  class="flex flex-col gap-2 max-h-[80vh] overflow-y-auto min-h-0 -mr-1 pr-1"
 >
-  <!-- Header -->
-  <div class="flex items-center gap-2">
+  <!-- Header bubble -->
+  <Bubble
+    selectedAlignment={alignment}
+    size="small"
+    extraClass="flex items-center gap-2"
+  >
     <IconButton
       icon="i-material-symbols-arrow-back-rounded"
       title="Back to Chat"
-      size="lg"
+      size="md"
       variant="subtle"
-      surface="circle"
       onclick={() => viewState.navigate("chat")}
     />
-    <h1 class="text-lg font-medium text-default-800 flex-1">Sessions</h1>
+    <h1 class="text-sm font-medium text-default-800 flex-1">Sessions</h1>
     {#if pairedCores.length > 1}
       <div class="shrink-0">
         <Select
@@ -105,47 +109,55 @@
     <IconButton
       icon="i-material-symbols-add-rounded"
       title="New Session"
-      size="lg"
+      size="md"
       variant="subtle"
-      surface="circle"
       onclick={newSession}
     />
-  </div>
+  </Bubble>
 
   <!-- Session bubbles -->
-  <div class="flex flex-col gap-2 max-h-[60vh] overflow-y-auto min-h-0 -mr-1 pr-1">
-    {#if sessionsState.list.length === 0}
-      <div class="text-sm text-default-500 px-3 py-8 text-center">
-        No sessions yet. Start one with the + button above.
-      </div>
-    {:else}
-      {#each sessionsState.list as entry (entry.id)}
-        <ListItem
-          selected={entry.id === sessionsState.id}
-          onclick={() => openSession(entry.id)}
-        >
+  {#if sessionsState.list.length === 0}
+    <Bubble
+      selectedAlignment={alignment}
+      size="small"
+      extraClass="text-sm text-default-500"
+    >
+      No sessions yet. Start one with the + button above.
+    </Bubble>
+  {:else}
+    {#each sessionsState.list as entry (entry.id)}
+      <Bubble
+        selectedAlignment={alignment}
+        size="small"
+        active={entry.id === sessionsState.id}
+        borderColorClass="border-default-400"
+        onclick={() => openSession(entry.id)}
+        extraClass="flex items-center gap-3 cursor-pointer w-[28rem] max-w-full"
+      >
+        <div class="flex flex-col min-w-0 flex-1">
           <span class="text-sm text-default-800 truncate">
             {sessionTitle(entry.title)}
           </span>
           <span class="text-xs text-default-500 truncate">
             {entry.summary || "No messages yet"}
           </span>
-          {#snippet trailing()}
-            <IconButton
-              icon={confirmingDelete === entry.id
-                ? "i-material-symbols-delete-forever-rounded"
-                : "i-material-symbols-delete-outline-rounded"}
-              title={confirmingDelete === entry.id
-                ? "Confirm delete"
-                : "Delete session"}
-              size="md"
-              variant="subtle"
-              onclick={() => deleteSession(entry.id)}
-              class={confirmingDelete === entry.id ? "text-accent-red-700" : ""}
-            />
-          {/snippet}
-        </ListItem>
-      {/each}
-    {/if}
-  </div>
-</Bubble>
+        </div>
+        <IconButton
+          icon={confirmingDelete === entry.id
+            ? "i-material-symbols-delete-forever-rounded"
+            : "i-material-symbols-delete-outline-rounded"}
+          title={confirmingDelete === entry.id
+            ? "Confirm delete"
+            : "Delete session"}
+          size="md"
+          variant="subtle"
+          onclick={(e) => {
+            e.stopPropagation();
+            void deleteSession(entry.id);
+          }}
+          class={confirmingDelete === entry.id ? "text-accent-red-700" : ""}
+        />
+      </Bubble>
+    {/each}
+  {/if}
+</div>

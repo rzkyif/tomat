@@ -12,24 +12,22 @@
 
 {#snippet presetButton(opt: PresetOption)}
   {@const selected = settingsState.currentSettings[field.id] === opt.id}
+  {#snippet badgesSnippet()}
+    {#each opt.badges ?? [] as badge}
+      <span class="inline-flex items-center gap-1">
+        <i class="{badge.icon} text-sm"></i>
+        <span>{badge.label}</span>
+      </span>
+    {/each}
+  {/snippet}
   <OptionCard
     {selected}
     icon={opt.icon}
     title={opt.title ?? opt.label}
     description={opt.description}
+    badges={opt.badges?.length ? badgesSnippet : undefined}
     onclick={() => onPresetSelect(field.id, opt)}
-  >
-    {#if opt.badges && opt.badges.length > 0}
-      {#snippet badges()}
-        {#each opt.badges as badge}
-          <span class="inline-flex items-center gap-1">
-            <i class="{badge.icon} text-sm"></i>
-            <span>{badge.label}</span>
-          </span>
-        {/each}
-      {/snippet}
-    {/if}
-  </OptionCard>
+  />
 {/snippet}
 
 <FieldCard {field}>

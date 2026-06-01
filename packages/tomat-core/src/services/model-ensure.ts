@@ -61,8 +61,6 @@ export async function ensureKindModels(kind: ModelKind): Promise<EnsureResult> {
   const alreadyHave = probes.filter((p) => p.alreadyHave).map((p) => p.source);
   const missing = probes.filter((p) => !p.alreadyHave).map((p) => p.source);
   if (missing.length === 0) return { enqueued: [], alreadyHave };
-  const enqueued = modelsManager().download(
-    missing.map((source) => ({ source, group: kind })),
-  );
+  const enqueued = modelsManager().download(missing.map((source) => ({ source, group: kind })));
   return { enqueued, alreadyHave };
 }
