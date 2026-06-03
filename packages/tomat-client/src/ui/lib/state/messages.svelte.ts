@@ -30,6 +30,7 @@ import {
   type ToolCallStatus,
 } from "$lib/shared/types";
 import { cores } from "$lib/core";
+import { getLogger } from "$lib/shared/log";
 import { sessionsState } from "./sessions.svelte";
 import { settingsState } from "./settings.svelte";
 import { snippetsState } from "./snippets.svelte";
@@ -49,6 +50,8 @@ import {
 } from "$lib/shared/system-prompt";
 
 type SendMessagesHandler = (anchorUserId?: string) => Promise<void>;
+
+const log = getLogger("messages");
 
 class MessagesState {
   messages = $state<Message[]>([]);
@@ -179,7 +182,7 @@ class MessagesState {
       try {
         await api.deleteMessage(sessionId, id);
       } catch (e) {
-        console.warn(`[messages] server delete ${id} failed:`, e);
+        log.warn(`server delete ${id} failed:`, e);
       }
     }
   }
@@ -210,7 +213,7 @@ class MessagesState {
         sessionsState.id = created.id;
         sessionsState.title = sessionsState.title || sessionsState.defaultTitle;
       } catch (e) {
-        console.warn("[messages] session create failed; using local id:", e);
+        log.warn("session create failed; using local id:", e);
         sessionsState.id = payload.timestamp.toString();
         sessionsState.title = sessionsState.title || sessionsState.defaultTitle;
       }
@@ -258,7 +261,7 @@ class MessagesState {
           });
         }
       } catch (e) {
-        console.error("[messages] Failed to upload attachment:", e);
+        log.error("Failed to upload attachment:", e);
       }
     }
 
@@ -523,7 +526,7 @@ class MessagesState {
     if (isEmpty) {
       const userCount = this.messages.filter((m) => m.role === "user").length;
       if (userCount <= 1) {
-        console.warn("[messages] refusing to empty the only user message of this session");
+        log.warn("refusing to empty the only user message of this session");
         return;
       }
       if (userMsgId) {
@@ -570,7 +573,7 @@ class MessagesState {
           systemPromptOverride,
         } as unknown as Partial<ServerMessage>)
         .catch((e) => {
-          console.warn(`[messages] server patch ${userMsgId} failed:`, e);
+          log.warn(`server patch ${userMsgId} failed:`, e);
         });
     }
 
@@ -817,7 +820,7 @@ class MessagesState {
         .api()
         .sessions.appendMessage(sessionId, msg as unknown as ServerMessage);
     } catch (e) {
-      console.warn("[messages] persist failed:", e);
+      log.warn("persist failed:", e);
     }
   }
 }

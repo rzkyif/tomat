@@ -440,7 +440,7 @@ pub fn set_input_shortcuts(
         ) {
             Ok(()) => current.push((event_name, accel)),
             Err(e) => {
-                eprintln!("[input-shortcut] failed to register '{event_name}' = '{accel}': {e}");
+                log::warn!(target: "tomat::input-shortcut", "failed to register '{event_name}' = '{accel}': {e}");
             }
         }
     }

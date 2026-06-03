@@ -8,8 +8,11 @@
 
 import { browser } from "$app/environment";
 import { cores } from "$lib/core";
+import { getLogger } from "$lib/shared/log";
 import { stripEmojisForTTS, stripMarkdownForTTS } from "$lib/shared/text";
 import { settingsState } from "./settings.svelte";
+
+const log = getLogger("tts");
 
 // Local shims that replace the deleted $lib/sidecar/tts module.
 async function loadTtsModel(): Promise<void> {
@@ -173,11 +176,11 @@ class TTSState {
           );
           await synthesizeTts("Hi.", voice, synthSpeed);
         } catch (e) {
-          console.warn("[tts] pre-warm failed (non-fatal):", e);
+          log.warn("pre-warm failed (non-fatal):", e);
         }
         this.loaded = true;
       } catch (e) {
-        console.error("[tts] load failed:", e);
+        log.error("load failed:", e);
         this.loaded = false;
       } finally {
         this.loading = false;
@@ -190,7 +193,7 @@ class TTSState {
       try {
         await cores().api().tts.unload();
       } catch (e) {
-        console.warn("[tts] unload failed:", e);
+        log.warn("unload failed:", e);
       }
     }
   }
@@ -347,7 +350,7 @@ class TTSState {
         const blob = await synthPromise;
         wav = await blob.arrayBuffer();
       } catch (e) {
-        console.warn("[tts] synth failed:", e);
+        log.warn("synth failed:", e);
       }
       // If reset() fired while this synth was in flight, drop the result -
       // otherwise the user hears a chunk of audio pop in after they hit stop.
@@ -366,7 +369,7 @@ class TTSState {
         try {
           await this.scheduleAudio(wav);
         } catch (e) {
-          console.warn("[tts] decode/play failed:", e);
+          log.warn("decode/play failed:", e);
         }
       }
       this.inflight = null;
@@ -446,7 +449,7 @@ class TTSState {
     const volPct = Number.isFinite(volRaw) ? volRaw : 100;
     a.volume = Math.max(0, Math.min(100, volPct)) / 100;
     entry.audio.play().catch((e) => {
-      console.warn("[tts] play failed:", e);
+      log.warn("play failed:", e);
       this.onEntryEnded(entry);
     });
   }

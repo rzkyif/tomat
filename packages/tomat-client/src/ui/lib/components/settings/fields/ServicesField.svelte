@@ -4,7 +4,10 @@
   import { serversState, settingsState } from "../../../state";
   import { ttsState } from "$lib/state/tts.svelte";
   import { platform } from "$lib/platform";
+  import { getLogger } from "$lib/shared/log";
   import FieldCard from "./FieldCard.svelte";
+
+  const log = getLogger("services");
 
   let { field, horizontal: _horizontal = false } = $props<{
     field: SettingField;
@@ -37,10 +40,15 @@
   let defaultLlmPort = $state("7701");
   let defaultSttPort = $state("7702");
   onMount(() => {
-    void platform().pairing.localSidecarPorts().then((p) => {
-      defaultLlmPort = String(p.llm);
-      defaultSttPort = String(p.stt);
-    }).catch(() => {});
+    void platform()
+      .pairing.localSidecarPorts()
+      .then((p) => {
+        defaultLlmPort = String(p.llm);
+        defaultSttPort = String(p.stt);
+      })
+      // Benign: falls back to the stable default ports shown above. Debug-only
+      // (terminal, never the file) so it stays a breadcrumb, not noise.
+      .catch((e) => log.debug("localSidecarPorts failed", e));
   });
 
   function endpointFor(key: ServiceKey): string | null {

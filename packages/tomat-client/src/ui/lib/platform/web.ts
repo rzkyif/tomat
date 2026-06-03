@@ -218,4 +218,10 @@ const impl: Platform = {
     primary: async () => null,
     available: async () => [],
   },
+  logging: {
+    // No Rust backend in the browser build: route to the matching console method.
+    log(level, scope, message) {
+      (console[level] ?? console.log)(scope ? `[${scope}] ${message}` : message);
+    },
+  },
 };

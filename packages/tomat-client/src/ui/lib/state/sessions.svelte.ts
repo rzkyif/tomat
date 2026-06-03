@@ -15,9 +15,12 @@ import type {
 } from "@tomat/shared";
 import type { Message } from "$lib/shared/types";
 import { cores } from "$lib/core";
+import { getLogger } from "$lib/shared/log";
 import { messagesState } from "./messages.svelte";
 import { settingsState } from "./settings.svelte";
 import { streamingState } from "./streaming.svelte";
+
+const log = getLogger("sessions");
 
 export type SessionInfo = SessionListEntry;
 
@@ -114,7 +117,7 @@ class SessionsState {
         this.currentIndex = this.list.findIndex((s) => s.id === this.id);
       }
     } catch (e) {
-      console.error("Failed to load session list:", e);
+      log.error("Failed to load session list:", e);
     }
   }
 
@@ -126,7 +129,7 @@ class SessionsState {
       const idx = this.list.findIndex((s) => s.id === this.id);
       if (idx >= 0) this.list[idx] = { ...this.list[idx], title };
     } catch (e) {
-      console.error("Failed to save session title:", e);
+      log.error("Failed to save session title:", e);
     }
   }
 
@@ -147,7 +150,7 @@ class SessionsState {
       const first = this.list[0];
       await this.load(first.id);
     } catch (e) {
-      console.error("Failed to load latest:", e);
+      log.error("Failed to load latest:", e);
     }
   }
 
@@ -162,7 +165,7 @@ class SessionsState {
       this.title = full.title || this.defaultTitle;
       this.currentIndex = this.list.findIndex((s) => s.id === sessionId);
     } catch (e) {
-      console.error("Failed to load session:", e);
+      log.error("Failed to load session:", e);
     }
   }
 
@@ -177,7 +180,7 @@ class SessionsState {
     try {
       await cores().api().sessions.delete(id);
     } catch (e) {
-      console.error("Failed to delete session:", e);
+      log.error("Failed to delete session:", e);
       return;
     }
     this.list = this.list.filter((s) => s.id !== id);
@@ -199,7 +202,7 @@ class SessionsState {
     try {
       await cores().api().sessions.delete(sessionToDelete);
     } catch (e) {
-      console.error("Failed to delete session:", e);
+      log.error("Failed to delete session:", e);
     }
     this.list = remaining;
 
@@ -223,7 +226,7 @@ class SessionsState {
       await this.loadList();
       this.currentIndex = this.list.findIndex((s) => s.id === session.id);
     } catch (e) {
-      console.error("Failed to create session:", e);
+      log.error("Failed to create session:", e);
     }
   }
 }

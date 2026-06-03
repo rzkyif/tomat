@@ -6,8 +6,11 @@
  */
 
 import { platform } from "$lib/platform";
+import { getLogger } from "$lib/shared/log";
 import { vadManager } from "./vad.svelte";
 import { settingsState } from "./settings.svelte";
+
+const log = getLogger("shortcut");
 
 /**
  * Tracks whether the main window is currently mid show / hide animation.
@@ -103,7 +106,7 @@ class ShortcutHandler {
         try {
           await platform().windowing.show();
         } catch (e) {
-          console.warn("[shortcut] show failed:", e);
+          log.warn("show failed:", e);
         }
       }
 
@@ -127,7 +130,7 @@ class ShortcutHandler {
       try {
         await platform().windowing.toggle();
       } catch (e) {
-        console.warn("[shortcut] toggle failed:", e);
+        log.warn("toggle failed:", e);
       }
     }
   }
@@ -161,7 +164,7 @@ class ShortcutHandler {
           // the native window actually hides.
           await platform().windowing.requestHide();
         } catch (e) {
-          console.warn("[shortcut] hide failed:", e);
+          log.warn("hide failed:", e);
         }
       }
     } else if (vadManager.enabled) {

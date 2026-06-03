@@ -1,10 +1,12 @@
 mod channel;
 mod commands;
 mod error;
+mod logging;
 mod state;
 mod types;
 
 use crate::commands::*;
+use crate::logging::client_log;
 use crate::state::{AppState, AppStateInner};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -54,6 +56,10 @@ pub fn toggle_window(app: &AppHandle, visible: &AtomicBool) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::expect_used)]
 pub fn run() {
+    // First thing: stand up logging so even Builder/plugin init is captured.
+    logging::init();
+    log::info!(target: "tomat::boot", "tomat client starting (channel={})", crate::channel::channel());
+
     let last_monitor: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let move_last_monitor = last_monitor.clone();
 
@@ -214,6 +220,8 @@ pub fn run() {
             net_ws_open,
             net_ws_send,
             net_ws_close,
+            // Logging
+            client_log,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

@@ -19,6 +19,12 @@ import { errMessage } from "@tomat/shared";
   } from "../../state";
   import { cores } from "$lib/core";
   import { connectionState } from "$lib/state/connection.svelte";
+  import { getLogger } from "$lib/shared/log";
+
+  const log = getLogger("user-input");
+  const sttLog = getLogger("stt");
+  const attachLog = getLogger("attach");
+  const uiLog = getLogger("ui");
 
   async function sendMessages(_anchorUserId?: string): Promise<void> {
     // Trigger the server-side chat turn. The streaming state subscribes
@@ -364,14 +370,14 @@ import { errMessage } from "@tomat/shared";
       try {
         await platform().shortcuts.setInputBindings(readInputBindings());
       } catch (e) {
-        console.warn("[user-input] set_input_shortcuts failed:", e);
+        log.warn("set_input_shortcuts failed:", e);
       }
     }
     async function clearInputShortcuts() {
       try {
         await platform().shortcuts.setInputBindings([]);
       } catch (e) {
-        console.warn("[user-input] clear input_shortcuts failed:", e);
+        log.warn("clear input_shortcuts failed:", e);
       }
     }
 
@@ -433,7 +439,7 @@ import { errMessage } from "@tomat/shared";
         const visible = await platform().windowing.isVisible();
         if (visible) await registerInputShortcuts();
       } catch (e) {
-        console.warn("[user-input] initial visibility check failed:", e);
+        log.warn("initial visibility check failed:", e);
       }
     })();
 
@@ -451,7 +457,7 @@ import { errMessage } from "@tomat/shared";
             isPrimary: mon.isPrimary,
           }));
         } catch (err) {
-          console.warn("Could not fetch monitors", err);
+          log.warn("Could not fetch monitors", err);
         }
 
         await vadManager.attach(handleVadAudio);
@@ -467,7 +473,7 @@ import { errMessage } from "@tomat/shared";
           await vadManager.toggle();
         }
       } catch (err) {
-        console.error("[user-input] init failed:", err);
+        log.error("init failed:", err);
         const detail = errMessage(err);
         sttError = `Voice input setup failed: ${detail}`;
         if (sttErrorTimeout) clearTimeout(sttErrorTimeout);
@@ -566,7 +572,7 @@ import { errMessage } from "@tomat/shared";
       });
       await sendMessages();
     } catch (err) {
-      console.error("[ui] sendMessages failed:", err);
+      uiLog.error("sendMessages failed:", err);
     }
   }
 
@@ -634,7 +640,7 @@ import { errMessage } from "@tomat/shared";
         const result = await autocorrectTranscription(raw);
         if (result) corrected = result;
       } catch (e) {
-        console.warn("[stt] Autocorrect failed:", e);
+        sttLog.warn("Autocorrect failed:", e);
       }
     }
 
@@ -651,7 +657,7 @@ import { errMessage } from "@tomat/shared";
           if (mergedCorrected) corrected = mergedCorrected;
         }
       } catch (e) {
-        console.warn("[stt] Merge transcription failed:", e);
+        sttLog.warn("Merge transcription failed:", e);
       }
     }
 
@@ -762,7 +768,7 @@ import { errMessage } from "@tomat/shared";
           await ingestDocumentBlob(file, name);
         }
       } catch (err) {
-        console.error("[attach] Paste ingestion failed:", err);
+        attachLog.error("Paste ingestion failed:", err);
       }
     }
 
@@ -844,7 +850,7 @@ import { errMessage } from "@tomat/shared";
       }
       focusInput();
     } catch (err) {
-      console.error("[attach] File attach failed:", err);
+      attachLog.error("File attach failed:", err);
     }
   }
 

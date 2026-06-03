@@ -8,7 +8,10 @@
     type Toolkit,
   } from "@tomat/shared";
   import { confirmState, toolkitsState } from "../../../state";
+  import { getLogger } from "$lib/shared/log";
   import FieldCard from "./FieldCard.svelte";
+
+  const log = getLogger("toolkits");
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -34,7 +37,7 @@
 
   function reportError(action: string, err: unknown): void {
     const message = errMessage(err);
-    console.error(`[toolkits] ${action} failed:`, err);
+    log.error(`${action} failed:`, err);
     confirmState.alert({ title: `${action} failed`, message });
   }
 

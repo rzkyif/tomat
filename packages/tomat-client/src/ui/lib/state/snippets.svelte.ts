@@ -6,7 +6,10 @@
 
 import { browser } from "$app/environment";
 import { platform } from "$lib/platform";
+import { getLogger } from "$lib/shared/log";
 import type { Snippet } from "$lib/shared/snippets";
+
+const log = getLogger("snippets");
 
 const KEY = "snippets";
 
@@ -20,7 +23,7 @@ class SnippetsState {
       const raw = settings[KEY];
       this.snippets = Array.isArray(raw) ? (raw as Snippet[]) : [];
     } catch (e) {
-      console.warn("Failed to load snippets:", e);
+      log.warn("Failed to load snippets:", e);
     }
   }
 

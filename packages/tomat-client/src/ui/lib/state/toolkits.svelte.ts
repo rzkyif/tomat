@@ -26,8 +26,11 @@ import type {
 } from "@tomat/shared";
 import type { AskUserAnswer } from "$lib/shared/types";
 import { cores } from "$lib/core";
+import { getLogger } from "$lib/shared/log";
 import { messagesState } from "./messages.svelte";
 import { streamingState } from "./streaming.svelte";
+
+const log = getLogger("toolkits");
 
 export type InstallJob = {
   /** Job id from `toolkits.install` - identifies the install stream. */
@@ -71,9 +74,7 @@ class ToolkitsState {
       // emits "connected" on every reconnect too, so we re-fetch each time to
       // pick up anything that changed while we were offline.
       if (state === "connected") {
-        void this.refresh().catch((err) =>
-          console.warn("[toolkits] hydrate on ws connect failed:", err),
-        );
+        void this.refresh().catch((err) => log.warn("hydrate on ws connect failed:", err));
       }
     });
     this.hydrated = true;
@@ -103,9 +104,7 @@ class ToolkitsState {
   private onFrame(frame: ServerToClientFrame): void {
     switch (frame.kind) {
       case "toolkit.snapshot":
-        void this.refresh().catch((err) =>
-          console.warn("[toolkits] refresh on snapshot failed:", err),
-        );
+        void this.refresh().catch((err) => log.warn("refresh on snapshot failed:", err));
         return;
       case "toolkit.install_log": {
         const job = this.installJobs[frame.jobId];
@@ -134,9 +133,7 @@ class ToolkitsState {
           };
         }
         // Refresh so the new toolkit (or the failure state) is reflected.
-        void this.refresh().catch((err) =>
-          console.warn("[toolkits] refresh after install failed:", err),
-        );
+        void this.refresh().catch((err) => log.warn("refresh after install failed:", err));
         return;
       }
       // tool.* frames are routed to messagesState by streaming.svelte.ts so
@@ -237,7 +234,7 @@ class ToolkitsState {
         this.installed = [...this.installed];
       }
     } catch (err) {
-      console.warn(`[toolkits] tools refresh for ${toolkitId} failed:`, err);
+      log.warn(`tools refresh for ${toolkitId} failed:`, err);
     }
   }
 

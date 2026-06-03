@@ -3,6 +3,10 @@
  * the microphone turning on or off.
  */
 
+import { getLogger } from "$lib/shared/log";
+
+const log = getLogger("beep");
+
 // Safari historically only exposed AudioContext as `webkitAudioContext`.
 // Modern Safari ships the unprefixed name too, but the older one is still
 // the only path for some legacy macOS / iOS builds. Declare the optional
@@ -48,6 +52,6 @@ export function playBeep(type: "on" | "off"): void {
     osc.start(now);
     osc.stop(now + 0.16);
   } catch (e) {
-    console.warn("[beep] Failed to play beep:", e);
+    log.warn("Failed to play beep:", e);
   }
 }

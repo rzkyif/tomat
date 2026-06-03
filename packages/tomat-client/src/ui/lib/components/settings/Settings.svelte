@@ -6,6 +6,9 @@
   import type { PresetOption } from "@tomat/shared";
   import type { Monitor } from "$lib/shared/types";
   import { hasAlpha } from "$lib/shared/color";
+  import { getLogger } from "$lib/shared/log";
+
+  const log = getLogger("settings");
 
   // Sidecar (re)starts are server-side now: PATCH /api/v1/settings triggers
   // core to spawn / restart its sidecars based on the new config. The UI
@@ -17,13 +20,7 @@
   import IconButton from "../ui/IconButton.svelte";
   import SearchInput from "../ui/SearchInput.svelte";
   import SectionHeader from "../ui/SectionHeader.svelte";
-  import {
-    settingsState,
-    serversState,
-    confirmState,
-    downloadsState,
-    viewState,
-  } from "../../state";
+  import { settingsState, serversState, downloadsState, viewState } from "../../state";
   import {
     evalCondition,
     findField,
@@ -73,7 +70,7 @@
     try {
       await cores().select(selectedCoreId);
     } catch (e) {
-      console.warn("[settings] select core failed:", e);
+      log.warn("select core failed:", e);
     }
   }
   let validationErrors = $state<Record<string, string>>({});
@@ -152,13 +149,13 @@
       );
       monitors = mapped;
     } catch (e) {
-      console.error("Failed to load monitors:", e);
+      log.error("Failed to load monitors:", e);
     }
     if (isTauri()) {
       try {
         fonts = await platform().fonts.list();
       } catch (e) {
-        console.error("Failed to load fonts:", e);
+        log.error("Failed to load fonts:", e);
       }
     }
     validateAllFields();
@@ -172,13 +169,20 @@
   // nagging, but a settings change that alters the set (e.g. picking a
   // different model) re-shows the popup with the full updated list.
   let dismissedSignature = $state<string | null>(null);
+  let shownSignature = $state<string | null>(null);
   $effect(() => {
     const sig = downloadsState.missingSignature;
     if (!downloadsState.hasPending) {
       dismissedSignature = null;
+      shownSignature = null;
       return;
     }
-    if (sig === dismissedSignature || confirmState.pending) return;
+    // Re-show whenever the missing set changes (e.g. picking a different model
+    // preset), even while the popup is open, so it reflects the new set instead
+    // of the stale one. `shownSignature` guards against re-issuing for the set
+    // already on screen (which would otherwise reopen it right after Download).
+    if (sig === dismissedSignature || sig === shownSignature) return;
+    shownSignature = sig;
     downloadsState.requestRequiredModal({
       onConfirm: () => (dismissedSignature = null),
       onCancel: () => (dismissedSignature = sig),

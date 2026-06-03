@@ -6,7 +6,7 @@
   let { collapsed } = $props<{ collapsed: boolean }>();
 
   // Pending (required files missing) takes precedence over an in-flight queue:
-  // while pending, clicking re-opens the Required Downloads modal and the
+  // while pending, clicking re-opens the Pending Downloads modal and the
   // download list is intentionally unreachable (accepted drawback).
   const isPending = $derived(downloadsState.hasPending);
   const isActive = $derived(!isPending && downloadsState.active.length > 0);

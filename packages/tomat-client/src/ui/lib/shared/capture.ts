@@ -17,6 +17,9 @@
  */
 
 import { platform, type MonitorInfo } from "$lib/platform";
+import { getLogger } from "$lib/shared/log";
+
+const log = getLogger("capture");
 
 // Alias kept so consumers don't have to import from `$lib/platform`. The
 // shape is the canonical `MonitorInfo` returned by the platform's capture
@@ -27,7 +30,7 @@ export async function listCaptureMonitors(): Promise<CaptureMonitorInfo[]> {
   try {
     return await platform().capture.monitors();
   } catch (e) {
-    console.warn("[capture] Failed to list monitors:", e);
+    log.warn("Failed to list monitors:", e);
     return [];
   }
 }
@@ -47,14 +50,14 @@ export async function captureMonitor(monitorId: string): Promise<string | null> 
     }
     return await platform().capture.captureMonitor(monitorId);
   } catch (e) {
-    console.error("[capture] Failed to capture monitor:", e);
+    log.error("Failed to capture monitor:", e);
     return null;
   } finally {
     if (shouldHide) {
       try {
         await platform().windowing.show();
       } catch (e) {
-        console.warn("[capture] Failed to restore window:", e);
+        log.warn("Failed to restore window:", e);
       }
     }
   }
@@ -103,12 +106,12 @@ export async function captureRegion(): Promise<string | null> {
     try {
       await platform().capture.setRegionTarget(xcapMonitorId);
     } catch (e) {
-      console.warn("[capture] setRegionTarget failed:", e);
+      log.warn("setRegionTarget failed:", e);
     }
 
     return await resultPromise;
   } catch (e) {
-    console.error("[capture] region capture failed:", e);
+    log.error("region capture failed:", e);
     return null;
   } finally {
     if (unsubscribe) unsubscribe();
@@ -121,7 +124,7 @@ export async function captureRegion(): Promise<string | null> {
       try {
         await platform().windowing.show();
       } catch (e) {
-        console.warn("[capture] restore main window failed:", e);
+        log.warn("restore main window failed:", e);
       }
     }
   }

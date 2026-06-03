@@ -31,6 +31,7 @@
   import { platform } from "$lib/platform";
   import { withTimeout } from "$lib/shared/async";
   import { darkFromLight } from "$lib/shared/color";
+  import { getLogger } from "$lib/shared/log";
   import {
     shortcutHandler,
     windowTransition,
@@ -55,6 +56,9 @@
     pauseClickThrough,
     resumeClickThrough,
   } from "$lib/shared/clickthrough";
+
+  const log = getLogger("boot");
+  const windowLog = getLogger("window");
 
   // Visual preferences applied directly to documentElement: theme class for
   // dark mode, root font size for the rem-based scale. SSR is off (see
@@ -190,7 +194,7 @@
       await new Promise((r) => setTimeout(r, getDuration()));
       await platform().windowing.hide();
     } catch (e) {
-      console.warn("[window] hide failed:", e);
+      windowLog.warn("hide failed:", e);
     } finally {
       hidingInFlight = false;
       windowTransition.end();
@@ -219,7 +223,7 @@
         width: (settingsState.currentSettings["layout.width"] as number | undefined) ?? 700,
       });
     } catch (e) {
-      console.error("Failed to position window", e);
+      windowLog.error("Failed to position window", e);
     }
   }
 
@@ -247,7 +251,7 @@
         await platform().pairing.startLocalCore();
       }
     } catch (e) {
-      console.error("[boot] ensureLocalCoreUpIfNeeded:", e);
+      log.error("ensureLocalCoreUpIfNeeded:", e);
     }
   }
 
@@ -357,7 +361,7 @@
       await positionWindow();
     } catch (e) {
       // A local read should never keep the window hidden. Log and show anyway.
-      console.error("[boot] local critical path failed:", e);
+      log.error("local critical path failed:", e);
     } finally {
       loaded = true;
       await tick();
@@ -431,13 +435,14 @@
     setupSidecarListeners();
     // Deferred core phase: the window is already visible. Connect to the core,
     // merge its (non-visual) settings, and wire the WS-driven stores. Each
-    // essential step logs on failure (console.error) so a developer sees it
-    // with dev tools open; the window is up regardless.
+    // essential step logs on failure so a developer sees it in the dev console;
+    // the window is up regardless.
     void (async () => {
+      log.info("deferred boot: connecting to core");
       try {
         await cores().restoreSelected();
       } catch (e) {
-        console.error("[boot] core restore failed:", e);
+        log.error("core restore failed:", e);
       }
       // Reload the active core's sessions on every later core switch. Registered
       // after restoreSelected so boot's own select() doesn't double-trigger it.
@@ -464,7 +469,7 @@
           "core settings",
         );
       } catch (e) {
-        console.error("[boot] core settings merge failed:", e);
+        log.error("core settings merge failed:", e);
       }
       // Pull the required-files snapshot now that a core may be selected, and
       // re-pull on later core switches (downloadsState also keeps it live via
@@ -482,7 +487,7 @@
           }
         }
       } catch (e) {
-        console.error("[boot] session load failed:", e);
+        log.error("session load failed:", e);
       } finally {
         sessionLoading = false;
         // Enable per-message entry animations only AFTER the bulk restore

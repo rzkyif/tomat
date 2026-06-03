@@ -9,7 +9,11 @@
 
 import type { DownloadEntry, RequiredFile, ServerToClientFrame } from "@tomat/shared";
 import { cores } from "$lib/core";
+import { getLogger } from "$lib/shared/log";
 import { confirmState } from "./confirm.svelte";
+
+const log = getLogger("downloads");
+const reqLog = getLogger("requirements");
 
 class DownloadsState {
   items = $state<DownloadEntry[]>([]);
@@ -71,7 +75,7 @@ class DownloadsState {
           this.items = items;
         })
         .catch((e) => {
-          console.warn("[downloads] initial snapshot fetch failed:", e);
+          log.warn("initial snapshot fetch failed:", e);
         });
       void this.refetchRequirements();
     }
@@ -91,11 +95,11 @@ class DownloadsState {
       this.missing = snap.missing;
       this.requirementsLoaded = true;
     } catch (e) {
-      console.warn("[requirements] initial fetch failed:", e);
+      reqLog.warn("initial fetch failed:", e);
     }
   }
 
-  /** Build + fire the "Required Downloads" confirm modal from the current
+  /** Build + fire the "Pending Downloads" confirm modal from the current
    *  `missing` set. `hooks` lets the Settings auto-popup layer its dismissal
    *  bookkeeping on top; the sidebar button calls it with no hooks to force a
    *  re-show while pending. */
@@ -107,7 +111,7 @@ class DownloadsState {
       version: m.version,
     }));
     confirmState.request({
-      title: "Required Downloads",
+      title: "Pending Downloads",
       message:
         `The following file${plans.length === 1 ? "" : "s"} need${plans.length === 1 ? "s" : ""} to be downloaded ` +
         `so the core can run with the current configuration.`,
@@ -119,7 +123,7 @@ class DownloadsState {
         try {
           await cores().api().requirements.download();
         } catch (e) {
-          console.warn("[requirements] download failed:", e);
+          reqLog.warn("download failed:", e);
         }
       },
       onCancel: () => hooks?.onCancel?.(),
@@ -153,7 +157,7 @@ class DownloadsState {
     try {
       await cores().api().models.cancel(id);
     } catch (e) {
-      console.warn("[downloads] cancel failed:", e);
+      log.warn("cancel failed:", e);
     }
   }
 
@@ -161,7 +165,7 @@ class DownloadsState {
     try {
       await cores().api().models.retry(id);
     } catch (e) {
-      console.warn("[downloads] retry failed:", e);
+      log.warn("retry failed:", e);
     }
   }
 
@@ -169,7 +173,7 @@ class DownloadsState {
     try {
       await cores().api().models.remove(id);
     } catch (e) {
-      console.warn("[downloads] remove failed:", e);
+      log.warn("remove failed:", e);
     }
   }
 
@@ -179,7 +183,7 @@ class DownloadsState {
       try {
         await cores().api().models.remove(id);
       } catch (e) {
-        console.warn(`[downloads] clearCompleted: remove(${id}) failed:`, e);
+        log.warn(`clearCompleted: remove(${id}) failed:`, e);
       }
     }
   }

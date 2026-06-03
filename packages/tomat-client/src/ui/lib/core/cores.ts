@@ -3,6 +3,7 @@
 // core and rebuilds the CoreClient + its per-domain APIs on switch.
 
 import { platform } from "../platform/index.ts";
+import { getLogger } from "$lib/shared/log";
 import { Subscribers } from "../shared/subscribers.ts";
 import { BinariesApi } from "./binaries";
 import { ChatApi } from "./chat";
@@ -18,6 +19,8 @@ import { SttApi } from "./stt";
 import { ToolkitsApi } from "./toolkits";
 import { TtsApi } from "./tts";
 import { UpdateApi } from "./update";
+
+const log = getLogger("cores");
 
 export interface PairedCoreEntry {
   id: string; // ULID returned by pairing
@@ -150,7 +153,7 @@ class CoresRegistry {
         // Don't abort boot. The window is already up and the chat view renders
         // with the reconnect banner. But make the failure visible (keychain
         // miss, missing token, etc.) instead of swallowing it silently.
-        console.error("[cores] restoreSelected: select failed:", e);
+        log.error("restoreSelected: select failed:", e);
       }
     }
   }

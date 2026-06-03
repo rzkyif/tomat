@@ -9,8 +9,11 @@
 import { platform } from "$lib/platform";
 import { playBeep } from "$lib/shared/beep";
 import { isTauri } from "$lib/shared/env";
+import { getLogger } from "$lib/shared/log";
 import { settingsState } from "./settings.svelte";
 import { ttsState } from "./tts.svelte";
+
+const log = getLogger("vad");
 
 class VadManager {
   enabled = $state(false);
@@ -72,7 +75,7 @@ class VadManager {
       // the safety net.
       void platform()
         .audio.restoreSystemVolume()
-        .catch((e) => console.warn("[vad] restoreSystemVolume on detach failed:", e));
+        .catch((e) => log.warn("restoreSystemVolume on detach failed:", e));
     }
   }
 
@@ -119,7 +122,7 @@ class VadManager {
       try {
         await platform().audio.restoreSystemVolume();
       } catch (e) {
-        console.warn("[vad] restoreSystemVolume failed:", e);
+        log.warn("restoreSystemVolume failed:", e);
       }
     }
   }
@@ -183,11 +186,11 @@ class VadManager {
           await platform().audio.setSystemVolume(target);
           this.volumeRestorePending = true;
         } catch (e) {
-          console.warn("[vad] setSystemVolume failed:", e);
+          log.warn("setSystemVolume failed:", e);
         }
       }
     } catch (err) {
-      console.error("[vad] Failed to initialize:", err);
+      log.error("Failed to initialize:", err);
       this.enabled = false;
     } finally {
       this.loading = false;

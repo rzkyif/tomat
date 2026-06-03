@@ -1786,6 +1786,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fern"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4316185f709b23713e41e3195f90edef7fb00c3ed4adc79769cf09cc762a3b29"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "field-offset"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1793,6 +1802,16 @@ checksum = "38e2275cc4e4fc009b0669731a1e5ab7ebf11f469eaede2bab9309a5b4d6057f"
 dependencies = [
  "memoffset",
  "rustc_version",
+]
+
+[[package]]
+name = "file-rotate"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a3ed82142801f5b1363f7d463963d114db80f467e860b1cd82228eaebc627a0"
+dependencies = [
+ "chrono",
+ "flate2",
 ]
 
 [[package]]
@@ -6441,13 +6460,18 @@ version = "0.1.0"
 dependencies = [
  "anytomd",
  "base64 0.22.1",
+ "chrono",
  "cpvc",
+ "fern",
+ "file-rotate",
  "font-kit",
  "futures-util",
  "image",
  "keyring",
+ "log",
  "pdf-extract",
  "rcgen",
+ "regex",
  "reqwest 0.12.28",
  "rustls",
  "serde",

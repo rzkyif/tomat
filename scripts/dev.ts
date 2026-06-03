@@ -76,6 +76,69 @@ function linePrefix(name: string, code: string): string {
   return `${color("2", stamp())} ${color(code, name.padEnd(LABEL_WIDTH))} `;
 }
 
+// Strip ANSI escape sequences so the line matchers see plain text (tauri runs
+// cargo with `--color always`, and Deno bolds its "Watcher" prefix). Matches the
+// full CSI family, not just SGR color (`m`): cargo prefixes its final "Finished"
+// status with a clear-line `\x1b[2K`, so an `m`-only strip would leave a leading
+// ESC and miss the match.
+// oxlint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g;
+
+// Our own logs (core's @std/log + the client's fern) start every line with a
+// lowercase, padded level word. That positive signal is how we recognize a line
+// as ours and pass it through untouched; anything else is build noise (dropped)
+// or a leak (wrapped, below).
+const LEVEL_RE = /^(?:error|warn|info|debug|trace)\s/;
+
+// The tauri-cli / cargo / deno-task orchestration chatter that shares the child's
+// stream with the app's own logs. Pure noise, dropped outright. Build
+// ERRORS/warnings don't match these, so they fall through to the leak path and
+// still surface (clearly marked as not-ours).
+const BUILD_NOISE = [
+  /^Running BeforeDevCommand\b/,
+  /^Running DevCommand\b/,
+  /^Running `/,
+  /^Compiling\b/,
+  /^Finished\b/,
+  /^Building\b/,
+  /^Blocking\b/,
+  /^Updating\b/,
+  /^Locking\b/,
+  /^Info\b/, // tauri-cli "Info Watching ... for changes..." (our logs are lowercase)
+  /^Task\b/, // deno "Task dev:vite deno run ..."
+];
+
+// Leak sources we recognize well enough to attach a module label to. The capture
+// group is the message body shown after the marker.
+const LEAK_SOURCES: Array<{ re: RegExp; module: string }> = [
+  // Deno's `--watch` supervisor: "Watcher Process started.", etc.
+  { re: /^Watcher\s+(.*)$/, module: "watcher" },
+];
+
+// Wrap a line that did NOT come from our logging system in a distinct, bold
+// "leak" marker so it's obvious it bypassed our format. We rely on a denylist
+// for build noise, so new leaks are inevitable; marking (not hiding) them keeps
+// them visible and labels the source when we recognize it.
+function leakLine(module: string | null, content: string): string {
+  const mark = color("2", "leak".padEnd(5)); // dim gray, matching trace/debug
+  const mod = module ? `${color("2", module)} ` : "";
+  return `${mark} ${mod}${content}`;
+}
+
+// Decide how a raw child line is presented: pass our own logs through verbatim,
+// drop build noise, and wrap everything else as a leak. Returns null to drop.
+function formatChildLine(raw: string): string | null {
+  const plain = raw.replace(ANSI_RE, "").trimStart();
+  if (plain.trim() === "") return null; // blank spacing from build tools
+  if (BUILD_NOISE.some((re) => re.test(plain))) return null;
+  if (LEVEL_RE.test(plain)) return raw; // our log: keep it (and its colors) verbatim
+  for (const src of LEAK_SOURCES) {
+    const m = plain.match(src.re);
+    if (m) return leakLine(src.module, m[1]);
+  }
+  return leakLine(null, plain);
+}
+
 type Child = {
   name: string;
   proc: Deno.ChildProcess;
@@ -138,11 +201,16 @@ async function pipe(
       const lines = buf.split("\n");
       buf = lines.pop() ?? "";
       for (const line of lines) {
-        await writer.write(encoder.encode(`${linePrefix(name, code)}${settle(line)}\n`));
+        const out = formatChildLine(settle(line));
+        if (out === null) continue;
+        await writer.write(encoder.encode(`${linePrefix(name, code)}${out}\n`));
       }
     }
     if (buf.length > 0) {
-      await writer.write(encoder.encode(`${linePrefix(name, code)}${settle(buf)}\n`));
+      const out = formatChildLine(settle(buf));
+      if (out !== null) {
+        await writer.write(encoder.encode(`${linePrefix(name, code)}${out}\n`));
+      }
     }
   } catch {
     // Stream ended; ignore.
@@ -447,13 +515,15 @@ if (!FRESH_INSTALL) {
 // don't spawn the client into a tearing-down session.
 if (!shuttingDown) {
   children.push(
-    spawn(
-      "client",
-      "35",
-      clientCmd,
-      `${ROOT}packages/tomat-client`,
-      FRESH_INSTALL ? { ...CHANNEL_ENV, TOMAT_DEV_FRESH_INSTALL: "1" } : CHANNEL_ENV,
-    ),
+    spawn("client", "35", clientCmd, `${ROOT}packages/tomat-client`, {
+      ...CHANNEL_ENV,
+      // dev.ts owns the timestamp + badge column and the client's stdout is
+      // piped here (not a TTY), so the client emits bare lines and forces color
+      // on, exactly like the core spawn above.
+      TOMAT_LOG_NO_TIME: "1",
+      ...(useColor ? { TOMAT_LOG_COLOR: "1" } : {}),
+      ...(FRESH_INSTALL ? { TOMAT_DEV_FRESH_INSTALL: "1" } : {}),
+    }),
   );
 }
 

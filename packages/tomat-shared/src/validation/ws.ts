@@ -66,6 +66,15 @@ const pongSchema = z
   })
   .passthrough();
 
+// Server heartbeat ping; the client replies with a "pong" client frame. Without
+// this variant the client would reject the heartbeat and the hub would drop the
+// connection after the pong timeout (see armHeartbeat).
+const pingFrameSchema = z
+  .object({
+    kind: z.literal("ping"),
+  })
+  .passthrough();
+
 const chatToolfilterFrameSchema = z
   .object({
     kind: z.literal("chat.toolfilter"),
@@ -218,6 +227,20 @@ const downloadsSnapshotFrameSchema = z
   })
   .passthrough();
 
+// RequiredFile is a domain shape; like downloads.snapshot we keep the payload
+// loose (arrays of unknown) so the envelope passes without copying every nested
+// field. `downloads.svelte.ts` assigns these straight onto its domain-typed
+// state. Without this variant the discriminated union rejects every
+// requirements.snapshot broadcast, so the pending-downloads popup only ever
+// reflects the boot-time HTTP fetch and never live settings changes.
+const requirementsSnapshotFrameSchema = z
+  .object({
+    kind: z.literal("requirements.snapshot"),
+    required: z.array(z.unknown()),
+    missing: z.array(z.unknown()),
+  })
+  .passthrough();
+
 const sidecarStatusFrameSchema = z
   .object({
     kind: z.literal("sidecar.status"),
@@ -267,6 +290,7 @@ const updateErrorFrameSchema = z
  *  updated. */
 export const serverToClientFrameSchema = z.discriminatedUnion("kind", [
   pongSchema,
+  pingFrameSchema,
   chatToolfilterFrameSchema,
   chatChunkFrameSchema,
   chatToolcallRequestedFrameSchema,
@@ -283,6 +307,7 @@ export const serverToClientFrameSchema = z.discriminatedUnion("kind", [
   toolkitInstallDoneFrameSchema,
   toolkitSnapshotFrameSchema,
   downloadsSnapshotFrameSchema,
+  requirementsSnapshotFrameSchema,
   sidecarStatusFrameSchema,
   sessionUpdatedFrameSchema,
   updateStagedFrameSchema,

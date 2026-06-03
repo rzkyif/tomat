@@ -16,6 +16,9 @@
   import type { BinaryKind, BinaryUpdateCheck } from "@tomat/shared";
   import CollapsibleLabel from "../ui/CollapsibleLabel.svelte";
   import { useBlink } from "$lib/composables/use-blink.svelte";
+  import { getLogger } from "$lib/shared/log";
+
+  const log = getLogger("update");
 
   let { collapsed } = $props<{ collapsed: boolean }>();
 
@@ -103,7 +106,7 @@
       try {
         await platform().updater.relaunch();
       } catch (e) {
-        console.warn("[update] relaunch failed:", e);
+        log.warn("relaunch failed:", e);
       }
       return;
     }
@@ -131,7 +134,7 @@
           coreCurrent = res.currentVersion;
           coreLatest = res.latestVersion;
         } catch (e) {
-          console.warn("[update] core check failed:", e);
+          log.warn("core check failed:", e);
         }
       })(),
     );
@@ -143,7 +146,7 @@
           const res = await cores().api().binaries.check();
           binariesAvailable = res.filter((b) => b.available);
         } catch (e) {
-          console.warn("[update] binaries check failed:", e);
+          log.warn("binaries check failed:", e);
         }
       })(),
     );
@@ -154,7 +157,7 @@
         try {
           clientUpdate = await platform().updater.check();
         } catch (e) {
-          console.warn("[update] client check failed:", e);
+          log.warn("client check failed:", e);
         }
       })(),
     );
@@ -203,7 +206,7 @@
         try {
           await cores().api().binaries.update(kind);
         } catch (e) {
-          console.warn(`[update] binary update ${kind} failed:`, e);
+          log.warn(`binary update ${kind} failed:`, e);
         }
       }
 
@@ -215,10 +218,7 @@
         try {
           await cores().api().update.apply();
         } catch (e) {
-          console.warn(
-            "[update] core.apply error (expected during handoff):",
-            e,
-          );
+          log.warn("core.apply error (expected during handoff):", e);
         }
       }
 
@@ -231,13 +231,13 @@
           phase = "clientRestartPending";
           return;
         } catch (e) {
-          console.warn("[update] client downloadAndInstall failed:", e);
+          log.warn("client downloadAndInstall failed:", e);
         }
       }
 
       phase = "idle";
     } catch (e) {
-      console.warn("[update] install failed:", e);
+      log.warn("install failed:", e);
       phase = "idle";
     }
   }

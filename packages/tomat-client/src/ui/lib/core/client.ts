@@ -9,7 +9,10 @@
 import type { ApiErrorBody, ClientToServerFrame, ServerToClientFrame } from "@tomat/shared";
 import { serverToClientFrameSchema } from "@tomat/shared";
 import { type NetResponse, type NetSocket, platform } from "../platform/index.ts";
+import { getLogger } from "../shared/log.ts";
 import { Subscribers } from "../shared/subscribers.ts";
+
+const log = getLogger("ws");
 
 export interface CoreEndpoint {
   baseUrl: string; // e.g. "https://127.0.0.1:7800"
@@ -292,12 +295,16 @@ export class CoreClient {
     try {
       raw = JSON.parse(data);
     } catch (err) {
-      console.warn("[ws] rejected frame: invalid JSON", err);
+      log.warn("rejected frame: invalid JSON", err);
       return;
     }
     const parsed = serverToClientFrameSchema.safeParse(raw);
     if (!parsed.success) {
-      console.warn("[ws] rejected frame: schema mismatch", parsed.error.message);
+      // Name the offending kind: an unknown/unhandled frame kind (the exact
+      // class of bug that silently dropped requirements.snapshot) is the most
+      // useful thing to see here.
+      const kind = (raw as { kind?: unknown } | null)?.kind;
+      log.warn(`rejected frame (kind=${String(kind)}): schema mismatch`, parsed.error.message);
       return;
     }
     // Cast bridges the Zod-parsed shape (which uses `string` for the
@@ -305,6 +312,16 @@ export class CoreClient {
     // (which uses `ErrorCode`). The schemas validate at runtime; the
     // TS narrowing is for downstream-handler ergonomics.
     const frame = parsed.data as unknown as ServerToClientFrame;
+    if (frame.kind === "ping") {
+      // Reply to the server heartbeat so the hub doesn't drop us after its pong
+      // timeout (see core ws/hub.ts armHeartbeat).
+      try {
+        this.ws?.send(JSON.stringify({ kind: "pong" }));
+      } catch {
+        /* socket closing */
+      }
+      return;
+    }
     if (frame.kind === "pong") {
       if (this.pongTimeoutId !== null) clearTimeout(this.pongTimeoutId);
       this.pongTimeoutId = null;

@@ -8,7 +8,10 @@
     type SnippetPlacement,
   } from "$lib/shared/snippets";
   import { snippetsState, confirmState } from "../../../state";
+  import { getLogger } from "$lib/shared/log";
   import FieldCard from "./FieldCard.svelte";
+
+  const log = getLogger("snippets");
   import Button from "../../ui/Button.svelte";
   import IconButton from "../../ui/IconButton.svelte";
   import Input from "../../ui/Input.svelte";
@@ -83,7 +86,7 @@
     try {
       await snippetsState.save(next);
     } catch (e) {
-      console.error("Failed to save snippet:", e);
+      log.error("Failed to save snippet:", e);
     }
   }
 
@@ -117,7 +120,7 @@
       await snippetsState.save(snippet);
       selectedId = id;
     } catch (e) {
-      console.error("Failed to create snippet:", e);
+      log.error("Failed to create snippet:", e);
     }
   }
 
@@ -139,7 +142,7 @@
           await snippetsState.delete(id);
           selectedId = null;
         } catch (e) {
-          console.error("Failed to delete snippet:", e);
+          log.error("Failed to delete snippet:", e);
         }
       },
     });

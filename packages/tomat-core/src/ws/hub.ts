@@ -177,6 +177,15 @@ class WsHub {
       }
       return;
     }
+    if (kind === "pong") {
+      // Reply to our heartbeat ping (armHeartbeat): the client is alive, so
+      // cancel the pending pong-timeout that would otherwise close the socket.
+      if (conn.pongTimer !== undefined) {
+        clearTimeout(conn.pongTimer);
+        conn.pongTimer = undefined;
+      }
+      return;
+    }
     if (kind === "chat.start") {
       const parsed = chatStartWsSchema.safeParse(raw);
       if (!parsed.success) {

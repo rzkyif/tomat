@@ -44,6 +44,13 @@ tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 x509-parser = "0.16"
 sha2 = "0.10"
+# Logging: `log` facade + fern sinks (stdout + size-capped file), with `regex`
+# for secret scrubbing and `chrono` for ISO-8601 file timestamps. See logging.rs.
+log = "0.4"
+fern = "0.7"
+regex = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+file-rotate = "0.7"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"

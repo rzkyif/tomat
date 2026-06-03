@@ -20,9 +20,11 @@ import { errMessage } from "@tomat/shared";
     probeCore,
   } from "$lib/core";
   import { platform } from "$lib/platform";
+  import { getLogger } from "$lib/shared/log";
   import { isTauri } from "$lib/shared/env";
   import { settingsState, viewState } from "$lib/state";
 
+  const log = getLogger("cores");
   const CLIENT_NAME = "Tomat Desktop";
   // Resolved from the platform on mount so a beta client targets the beta
   // core's port (7810) rather than the stable 7800. Falls back to the stable
@@ -114,9 +116,12 @@ import { errMessage } from "@tomat/shared";
 
   onMount(() => {
     void decideInitialView();
-    void platform().pairing.localCoreBaseUrl().then((url) => {
-      localBaseUrl = url;
-    }).catch(() => {});
+    void platform()
+      .pairing.localCoreBaseUrl()
+      .then((url) => {
+        localBaseUrl = url;
+      })
+      .catch((e) => log.warn("localCoreBaseUrl failed", e));
     const unsub = cores().subscribe(() => void refresh());
     return () => unsub();
   });

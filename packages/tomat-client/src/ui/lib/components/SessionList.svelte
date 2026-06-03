@@ -11,6 +11,9 @@
   import Select from "./ui/Select.svelte";
   import { sessionsState, settingsState, viewState } from "$lib/state";
   import { cores, type PairedCoreEntry } from "$lib/core";
+  import { getLogger } from "$lib/shared/log";
+
+  const log = getLogger("sessions");
 
   let alignment = $derived(settingsState.getAlignment());
 
@@ -62,7 +65,7 @@
     try {
       await cores().select(currentCoreId);
     } catch (e) {
-      console.warn("[sessionList] switch core failed:", e);
+      log.warn("switch core failed:", e);
     }
   }
 

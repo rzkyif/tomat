@@ -5,12 +5,19 @@ import { patchKitTdzRace, restartOnRustChange } from "./vite-dev-plugins";
 
 const host = process.env.TAURI_DEV_HOST;
 
-export default defineConfig(async () => ({
+export default defineConfig(async ({ command }) => ({
   // patchKitTdzRace + restartOnRustChange are dev-only workarounds for the
   // WebKit ESM TDZ race in SvelteKit's bootstrap; see vite-dev-plugins.ts.
   plugins: [patchKitTdzRace(), UnoCSS(), sveltekit(), !host && restartOnRustChange()].filter(
     Boolean,
   ),
+
+  // Quiet the dev server: `deno task dev` multiplexes this output under the
+  // "client" badge, where vite's HMR/reload/ready chatter drowns out the app's
+  // own logging. "warn" drops that info noise but keeps transform/import/syntax
+  // errors and warnings visible. Gated to the dev server ("serve") so production
+  // `vite build` output is unchanged.
+  logLevel: (command === "serve" ? "warn" : "info") as "warn" | "info",
 
   clearScreen: false,
   server: {

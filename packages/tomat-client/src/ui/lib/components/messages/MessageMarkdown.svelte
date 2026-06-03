@@ -87,6 +87,9 @@
   import DOMPurify from "dompurify";
   import { tick } from "svelte";
   import { platform } from "$lib/platform";
+  import { getLogger } from "$lib/shared/log";
+
+  const log = getLogger("markdown");
 
   let { content }: { content: string } = $props();
 
@@ -99,7 +102,9 @@
     const href = anchor?.getAttribute("href");
     if (!href || !/^https?:\/\//i.test(href)) return;
     e.preventDefault();
-    void platform().openExternal(href).catch(() => {});
+    void platform()
+      .openExternal(href)
+      .catch((e) => log.warn("openExternal failed", e));
   }
 
   // svelte-ignore non_reactive_update

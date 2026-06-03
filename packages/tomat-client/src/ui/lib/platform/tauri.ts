@@ -32,6 +32,9 @@ import {
   type Platform,
   type UpdateHandle,
 } from "./index";
+import { getLogger } from "$lib/shared/log";
+
+const log = getLogger("platform");
 
 export function installTauriPlatform(): void {
   setPlatform(impl);
@@ -317,7 +320,7 @@ const impl: Platform = {
         try {
           await remove(relPath, { baseDir: BaseDirectory.Temp });
         } catch (e) {
-          console.warn("[platform] temp file cleanup failed:", e);
+          log.warn("temp file cleanup failed:", e);
         }
       }
     },
@@ -398,6 +401,13 @@ const impl: Platform = {
       const list = await tauriAvailableMonitors();
       const primary = await tauriPrimaryMonitor();
       return list.map((m) => toMonitorInfo(m, primary?.name === m.name));
+    },
+  },
+  logging: {
+    log(level, scope, message) {
+      // Fire-and-forget into the Rust fern sinks; a failed IPC (e.g. during
+      // teardown) must never throw into the caller.
+      void invoke("client_log", { level, scope, message }).catch(() => {});
     },
   },
 };

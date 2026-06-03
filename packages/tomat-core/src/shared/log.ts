@@ -87,9 +87,16 @@ function consoleFormatter(rec: log.LogRecord): string {
           "0",
         )}`,
       )} `;
-  const level = paint(LEVEL_COLOR[rec.levelName] ?? "0", rec.levelName.padEnd(5));
-  const scope = rec.loggerName === "default" ? "" : `${paint("2", `[${rec.loggerName}]`)} `;
-  return scrubSecrets(`${time}${level} ${scope}${rec.msg}`);
+  // Unified terminal scheme (shared with the client): lowercase right-padded
+  // level as the first word, then an optional lowercase dim module/scope (no
+  // brackets), then the message. The file formatter keeps the UPPERCASE [scope]
+  // machine shape.
+  const level = paint(LEVEL_COLOR[rec.levelName] ?? "0", rec.levelName.toLowerCase().padEnd(5));
+  const scope = rec.loggerName === "default" ? "" : `${paint("2", rec.loggerName.toLowerCase())} `;
+  // Per-line head so a multi-line message keeps the level + scope on every line
+  // (the dev multiplexer recognizes our lines by their leading level word).
+  const head = `${time}${level} ${scope}`;
+  return head + scrubSecrets(rec.msg).replace(/\n/g, `\n${head}`);
 }
 
 export async function initLogger(): Promise<void> {

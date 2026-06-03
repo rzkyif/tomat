@@ -130,6 +130,9 @@ export interface NetSocket {
   onError(cb: (reason?: string) => void): void;
 }
 
+/** Severity levels for the client logger (lib/shared/log.ts). */
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
 export interface Platform {
   // Network access to a paired core, with TLS certificate pinning enforced
   // below the webview. See the NetRequest/NetSocket docs above.
@@ -304,6 +307,14 @@ export interface Platform {
   monitors: {
     primary(): Promise<MonitorInfo | null>;
     available(): Promise<MonitorInfo[]>;
+  };
+  // Structured logging routed to the Rust backend so lines reach the dev
+  // terminal and the persisted client.log (WARN/ERROR only). Callers use
+  // getLogger(scope) from lib/shared/log.ts, not this directly.
+  logging: {
+    /** Fire-and-forget. `message` is already fully formatted; `scope` is passed
+     *  separately so the backend can render it as the module column. */
+    log(level: LogLevel, scope: string, message: string): void;
   };
 }
 

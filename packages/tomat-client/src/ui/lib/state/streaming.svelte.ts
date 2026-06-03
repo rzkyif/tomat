@@ -13,10 +13,13 @@ import type { ErrorCode, PendingToolCall, ServerToClientFrame } from "@tomat/sha
 import { type LLMErrorType, makeMessageId } from "$lib/shared/types";
 import { stripEmojisForTTS, stripMarkdownForTTS } from "$lib/shared/text";
 import { cores } from "$lib/core";
+import { getLogger } from "$lib/shared/log";
 import { messagesState } from "./messages.svelte";
 import { sessionsState } from "./sessions.svelte";
 import { settingsState } from "./settings.svelte";
 import { ttsState } from "./tts.svelte";
+
+const log = getLogger("streaming");
 
 const STREAM_FLUSH_MS = 30;
 
@@ -75,7 +78,7 @@ class StreamingState {
   start(modelUsed: "default" | "secondary" = "default"): void {
     const sessionId = sessionsState.id;
     if (!sessionId) {
-      console.warn("[streaming] start called without an active session");
+      log.warn("start called without an active session");
       return;
     }
     this.isActive = true;

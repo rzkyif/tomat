@@ -1,7 +1,10 @@
 <script lang="ts">
   import type { MessagePart } from "$lib/shared/types";
   import { readSessionAttachment } from "$lib/shared/attachments";
+  import { getLogger } from "$lib/shared/log";
   import IconButton from "./ui/IconButton.svelte";
+
+  const log = getLogger("attachments");
 
   let {
     parts,
@@ -26,7 +29,7 @@
       imageUrlCache = { ...imageUrlCache, [path]: url };
       return url;
     } catch (e) {
-      console.warn("[attach] failed to read image:", path, e);
+      log.warn(`failed to read image: ${path}`, e);
       return "";
     }
   }

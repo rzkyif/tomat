@@ -25,11 +25,14 @@ import {
 } from "@tomat/shared";
 import { platform } from "$lib/platform";
 import { cores } from "$lib/core";
+import { getLogger } from "$lib/shared/log";
 import type { Alignment } from "$lib/shared/types";
+
+const log = getLogger("settings");
 
 function warnIfUnknownKey(key: string): void {
   if (dev && !isValidSettingKey(key)) {
-    console.warn(`[settings] writing unknown setting key: "${key}"`);
+    log.warn(`writing unknown setting key: "${key}"`);
   }
 }
 
@@ -85,6 +88,14 @@ class SettingsState {
   // configured vault entry.
   private dirtySecrets = new Set<string>();
 
+  // Mirrors the core's sparse settings file: the non-default core-destination
+  // keys it currently persists. save() diffs the current sparse delta against
+  // this to send explicit nulls for keys that reverted to default, since the
+  // core PATCH merges and would otherwise keep the stale value (e.g. switching
+  // back to the default model preset must drop llm.modelPath so requirements
+  // recompute). Repopulated by loadCoreSettings() and after each save.
+  private coreSparseKeys = new Set<string>();
+
   private listeners = new Set<SettingChangeListener>();
 
   /** True if the core reports a value stored for this secret-typed setting. */
@@ -113,10 +124,10 @@ class SettingsState {
     for (const fn of this.listeners) {
       try {
         void Promise.resolve(fn(key, prev, next)).catch((e) =>
-          console.warn(`[settings] onChange listener for "${key}" failed:`, e),
+          log.warn(`onChange listener for "${key}" failed:`, e),
         );
       } catch (e) {
-        console.warn(`[settings] onChange listener for "${key}" failed:`, e);
+        log.warn(`onChange listener for "${key}" failed:`, e);
       }
     }
   }
@@ -133,19 +144,20 @@ class SettingsState {
       const clientStored = await platform().clientSettings.read();
       merged = { ...merged, ...clientStored };
     } catch (e) {
-      console.warn("Failed to load client settings, using defaults:", e);
+      log.warn("Failed to load client settings, using defaults:", e);
     }
     this.currentSettings = merged;
     // A fresh load discards any in-memory secret edits and core-derived state.
     this.dirtySecrets.clear();
     this.configuredSecrets = new Set();
+    this.coreSparseKeys = new Set();
     this.coreLoaded = false;
 
     // Push the persisted shortcut so Rust overrides the startup default. Local
     // Rust call; boot must not abort if the shortcut is taken. Log it and let
     // Settings fix.
     this.applyToggleWindowShortcut(this.currentSettings["shortcuts.toggleWindow"]).catch((e) =>
-      console.warn("Failed to register persisted shortcut:", e),
+      log.warn("Failed to register persisted shortcut:", e),
     );
   }
 
@@ -158,6 +170,9 @@ class SettingsState {
     if (!browser || !cores().currentEntry()) return;
     const coreStored = await cores().api().settings.load();
     this.currentSettings = { ...this.currentSettings, ...coreStored };
+    // The core returns its sparse file (non-default core keys only). Remember
+    // it so save() knows which keys to delete when they revert to default.
+    this.coreSparseKeys = new Set(Object.keys(coreStored));
     // Learn which secret-typed settings have a value stored in the vault so
     // password fields can show a "saved" placeholder (the value is never
     // returned).
@@ -173,7 +188,7 @@ class SettingsState {
     try {
       await this.loadCoreSettings();
     } catch (e) {
-      console.warn("Failed to load core settings, falling back:", e);
+      log.warn("Failed to load core settings, falling back:", e);
     }
   }
 
@@ -324,6 +339,13 @@ class SettingsState {
       const value = current[key];
       secrets[key] = typeof value === "string" ? value : "";
     }
+    // The core PATCH merges, so a core key that reverted to its default is
+    // absent from coreDelta above and would linger on disk. Send null (the
+    // core's reset sentinel) for every previously-persisted core key no longer
+    // in the delta so the core deletes it and requirements recompute.
+    for (const key of this.coreSparseKeys) {
+      if (!(key in coreDelta)) coreDelta[key] = null;
+    }
 
     // Try every destination; collect errors so the caller can roll back
     // optimistic UI state. Order: client → core PATCH → secrets, mirroring
@@ -344,7 +366,7 @@ class SettingsState {
       }
       await platform().clientSettings.write({ ...preserved, ...clientDelta });
     } catch (e) {
-      console.warn("Failed to save client settings:", e);
+      log.warn("Failed to save client settings:", e);
       errors.push(e);
     }
     if (cores().currentEntry()) {
@@ -356,15 +378,18 @@ class SettingsState {
       // sub-second, so this only bites a save made in that gap (or while the
       // core is unreachable, where the PATCH would fail anyway).
       if (Object.keys(coreDelta).length > 0 && !this.coreLoaded) {
-        console.warn(
-          "[settings] skipping core save before core settings loaded:",
-          Object.keys(coreDelta),
-        );
+        log.warn("skipping core save before core settings loaded:", Object.keys(coreDelta));
       } else {
         try {
           await api.patch(coreDelta);
+          // Track what the core now persists (non-default keys) so the next
+          // save knows which reverted keys to delete. Only update on success;
+          // a failed patch leaves the last-known core state intact.
+          this.coreSparseKeys = new Set(
+            Object.keys(coreDelta).filter((k) => coreDelta[k] !== null),
+          );
         } catch (e) {
-          console.warn("Failed to save core settings:", e);
+          log.warn("Failed to save core settings:", e);
           errors.push(e);
         }
       }
@@ -381,7 +406,7 @@ class SettingsState {
           }
           persisted.push(name);
         } catch (e) {
-          console.warn(`Failed to update secret "${name}":`, e);
+          log.warn(`Failed to update secret "${name}":`, e);
           errors.push(e);
         }
       }

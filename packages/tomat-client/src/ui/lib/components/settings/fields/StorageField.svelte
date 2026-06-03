@@ -19,7 +19,10 @@
     type StorageNode,
     type StorageTree,
   } from "$lib/shared/storage-tree";
+  import { getLogger } from "$lib/shared/log";
   import FieldCard from "./FieldCard.svelte";
+
+  const log = getLogger("storage");
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -48,7 +51,7 @@
       for (const p of selected) if (all.has(p)) next.add(p);
       selected = next;
     } catch (e) {
-      console.warn("[storage] load failed:", e);
+      log.warn("load failed:", e);
     } finally {
       loading = false;
     }
@@ -106,7 +109,7 @@
     try {
       await cores().api().storage.deletePaths(paths);
     } catch (err) {
-      console.error("[storage] delete failed:", err);
+      log.error("delete failed:", err);
     }
     await refresh();
   }

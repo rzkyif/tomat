@@ -10,6 +10,9 @@ import type { ErrorCode } from "./errors.ts";
 
 export type ClientToServerFrame =
   | { kind: "ping" }
+  // Reply to the server's heartbeat ping (see ServerToClientFrame "ping" and
+  // the WS hub's armHeartbeat). Keeps the connection from being dropped.
+  | { kind: "pong" }
   | {
       kind: "chat.start";
       streamId: string;
@@ -62,6 +65,9 @@ export interface ToolFilterEntry {
 
 export type ServerToClientFrame =
   | { kind: "pong" }
+  // Server heartbeat ping; the client must reply with a "pong" frame or the WS
+  // hub drops the connection after the pong timeout (see armHeartbeat).
+  | { kind: "ping" }
   // Chat stream events
   | {
       kind: "chat.toolfilter";

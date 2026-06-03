@@ -5,11 +5,17 @@
  */
 
 import { platform } from "$lib/platform";
+import { getLogger } from "$lib/shared/log";
+
+const log = getLogger("clickthrough");
 
 let ignoring = true;
 let paused = false;
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 let contentEl: HTMLElement | null = null;
+// checkCursor runs at 25 Hz; throttle its failure log so a persistent fault
+// can't flood the dev console. Wall-clock ms of the last emitted skip log.
+let lastSkipLogMs = 0;
 
 function setIgnored(value: boolean) {
   ignoring = value;
@@ -52,7 +58,7 @@ async function switchToIgnore() {
   try {
     await platform().cursor.setClickthrough(true);
   } catch (e) {
-    console.warn("[clickthrough] setClickthrough(true) failed:", e);
+    log.warn("setClickthrough(true) failed:", e);
   }
   setIgnored(true);
   startPolling();
@@ -78,8 +84,13 @@ async function checkCursor() {
     }
   } catch (e) {
     // Window may be hidden or unavailable during a polling tick; common
-    // during show/hide transitions, so log at debug volume.
-    console.debug("[clickthrough] checkCursor skipped:", e);
+    // during show/hide transitions, so log at debug volume - and throttle to
+    // ~1/sec since this loop ticks 25 times a second.
+    const now = Date.now();
+    if (now - lastSkipLogMs > 1000) {
+      lastSkipLogMs = now;
+      log.debug("checkCursor skipped:", e);
+    }
   }
 }
 
@@ -119,7 +130,7 @@ export async function resumeClickThrough() {
   try {
     await platform().cursor.setClickthrough(true);
   } catch (e) {
-    console.warn("[clickthrough] resume setClickthrough(true) failed:", e);
+    log.warn("resume setClickthrough(true) failed:", e);
   }
   startPolling();
 }
