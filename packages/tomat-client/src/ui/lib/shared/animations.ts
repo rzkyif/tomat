@@ -110,18 +110,32 @@ export function runMessageEnter(node: HTMLElement, alignment: Alignment, msgId?:
  * explicit width; this lets the same span handle dynamic content (e.g.
  * "Downloads" → "Downloading…") without caching a stale natural width.
  */
-export function applyLabelCollapse(el: HTMLElement, collapsed: boolean, instant: boolean): void {
-  const dur = instant ? 0 : getDuration();
-  const trans = `width ${dur}ms ${CSS_EASING}, opacity ${dur}ms ${CSS_EASING}`;
+// Sidebar labels share one expansion SPEED, not one duration: the transition
+// time scales with each label's pixel width, so every row sweeps open (and
+// closed) at the same px/ms regardless of text length. A single fixed duration
+// makes wide rows look faster than narrow ones, which reads as choppy and
+// inconsistent. No upper clamp (that is what made short labels lag); the small
+// floor only guards against a sub-frame duration for a near-empty label.
+const LABEL_REF_WIDTH = 96; // px that animate in exactly BASE_MS at the shared speed
+const LABEL_MIN_MS = 50;
 
+function labelCollapseDuration(width: number, instant: boolean): number {
+  if (instant) return 0;
+  const base = Math.max(LABEL_MIN_MS, (Math.max(0, width) / LABEL_REF_WIDTH) * BASE_MS);
+  return getDuration(base);
+}
+
+export function applyLabelCollapse(el: HTMLElement, collapsed: boolean, instant: boolean): void {
   if (collapsed) {
+    const w = el.scrollWidth || el.getBoundingClientRect().width;
+    const dur = labelCollapseDuration(w, instant);
     if (dur === 0) {
       el.style.transition = "";
       el.style.width = "0px";
       el.style.opacity = "0";
       return;
     }
-    const w = el.scrollWidth || el.getBoundingClientRect().width;
+    const trans = `width ${dur}ms ${CSS_EASING}, opacity ${dur}ms ${CSS_EASING}`;
     el.style.transition = "none";
     el.style.width = `${w}px`;
     el.style.opacity = "1";
@@ -134,10 +148,12 @@ export function applyLabelCollapse(el: HTMLElement, collapsed: boolean, instant:
     el.style.width = "auto";
     el.style.opacity = "1";
     const w = el.scrollWidth;
+    const dur = labelCollapseDuration(w, instant);
     if (dur === 0) {
       el.style.width = "";
       return;
     }
+    const trans = `width ${dur}ms ${CSS_EASING}, opacity ${dur}ms ${CSS_EASING}`;
     el.style.width = "0px";
     el.style.opacity = "0";
     void el.offsetHeight;

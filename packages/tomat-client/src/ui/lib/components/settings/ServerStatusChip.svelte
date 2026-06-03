@@ -19,7 +19,7 @@
   }
 
   type Variant = "default" | "accent";
-  type Accent = "blue" | "purple" | "red" | "green" | "orange" | "yellow";
+  type Accent = "blue" | "purple" | "red" | "green" | "yellow";
 
   const styleByStatus: Record<
     ServerStatus,
@@ -36,7 +36,7 @@
     },
     Loading: {
       variant: "accent",
-      accent: "orange",
+      accent: "yellow",
       icon: "i-line-md:loading-loop",
     },
     Running: {
@@ -58,6 +58,7 @@
 {#if update.status !== "Running" && update.status !== "Disabled"}
   <div bind:this={buttonEl}>
     <Chip
+      class="w-full"
       icon={style.icon}
       label="{type} {update.status}"
       variant={style.variant}
@@ -75,7 +76,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
-      class="fixed bg-default-900 backdrop-blur text-accent-red-400 p-3 rounded-large shadow-xl border border-default-700 w-96 max-h-64 overflow-y-auto font-mono text-xs text-left z-50 overflow-x-hidden whitespace-pre-wrap break-words cursor-text"
+      class="tomat-scroll-inset fixed bg-accent-red-100 text-accent-red-900 border border-accent-red-300 p-3 rounded-large shadow-xl w-96 max-h-64 overflow-y-auto font-mono text-xs text-left z-50 overflow-x-hidden whitespace-pre-wrap break-words cursor-text"
       style={popupStyle}
       onclick={(e) => e.stopPropagation()}
     >

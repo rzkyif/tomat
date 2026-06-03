@@ -29,12 +29,27 @@
     class?: string;
   } = $props();
 
+  // Live value shown while dragging, so the paired number tracks the thumb even
+  // though the actual setting only commits on release (onchange). Cleared
+  // whenever the committed `value` prop changes (the commit landed, a reset, or
+  // any external update), so we fall back to the source of truth.
+  let dragValue = $state<number | undefined>(undefined);
+  $effect(() => {
+    void value;
+    dragValue = undefined;
+  });
+  const shown = $derived(dragValue ?? value);
+
   function commit(raw: string | number, kind: "input" | "change") {
     const n = typeof raw === "number" ? raw : parseFloat(raw);
     if (Number.isNaN(n)) return;
     const clamped = Math.max(min, Math.min(max, n));
-    if (kind === "input") oninput?.(clamped);
-    else onchange?.(clamped);
+    if (kind === "input") {
+      dragValue = clamped;
+      oninput?.(clamped);
+    } else {
+      onchange?.(clamped);
+    }
   }
 </script>
 
@@ -48,7 +63,7 @@
     {min}
     {max}
     {step}
-    {value}
+    value={shown}
     {disabled}
     oninput={(e) => commit((e.target as HTMLInputElement).value, "input")}
     onchange={(e) => commit((e.target as HTMLInputElement).value, "change")}
@@ -57,7 +72,7 @@
     <div class="w-16 shrink-0">
       <Input
         type="number"
-        {value}
+        value={shown}
         {min}
         {max}
         {step}

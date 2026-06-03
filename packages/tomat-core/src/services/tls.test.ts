@@ -3,6 +3,7 @@
 // because it is computed over the persisted key's SubjectPublicKeyInfo.
 
 import { assertEquals } from "@std/assert";
+import { encodeBase64 } from "jsr:@std/encoding@^1.0.0/base64";
 import * as x509 from "@peculiar/x509";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { __resetForTesting, tlsCertFingerprint, tlsServeOptions } from "./tls.ts";
@@ -34,6 +35,26 @@ Deno.test("tls: cert SANs cover loopback + the configured bind host", async () =
     for (const want of ["127.0.0.1", "localhost", "::1", "192.168.1.50"]) {
       assertEquals(sans.includes(want), true, `SAN missing ${want}: ${sans}`);
     }
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("tls: pin == base64(SHA-256(SPKI)) of the cert's own key (Rust-verifier parity)", async () => {
+  const env = await setupTestEnv();
+  try {
+    const { cert } = await tlsServeOptions("127.0.0.1");
+    const pin = await tlsCertFingerprint();
+    // Derive the pin independently from the cert's embedded SubjectPublicKeyInfo
+    // exactly as the client's Rust SpkiPinVerifier does over the presented cert
+    // (sha256 of x509 public_key().raw, base64-standard). If either side's
+    // derivation drifts, pairing's key confirmation silently fails; this locks
+    // the core half of that contract.
+    const spki = new x509.X509Certificate(cert).publicKey.rawData;
+    const expected = encodeBase64(new Uint8Array(await crypto.subtle.digest("SHA-256", spki)));
+    assertEquals(pin, expected);
+    // Standard padded base64 of a 32-byte digest.
+    assertEquals(atob(pin).length, 32);
   } finally {
     await env.teardown();
   }

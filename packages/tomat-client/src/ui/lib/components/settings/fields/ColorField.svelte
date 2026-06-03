@@ -5,9 +5,11 @@
   import { colorPickerState, settingsState } from "../../../state";
   import {
     darkFromLight,
-    isValidHex,
+    formatOklch,
+    isValidColor,
     lightFromDark,
-    toEightCharHex,
+    parseColor,
+    withLightness,
   } from "$lib/shared/color";
   import FieldCard from "./FieldCard.svelte";
   import Input from "../../ui/Input.svelte";
@@ -30,9 +32,9 @@
     evalCondition(field.editableWhen, settingsState.currentSettings),
   );
 
-  // The stored value is always the light-mode hex (8-char with alpha). We
-  // re-render it as the dark variant when the user is currently looking at
-  // the dark theme so the picker shows what they're editing in context.
+  // The stored value is the light-mode color (an `oklch(...)` string, or a
+  // legacy hex). We re-render it as the dark variant when the user is currently
+  // in the dark theme so the picker shows what they're editing in context.
   const themeMql =
     typeof window !== "undefined"
       ? window.matchMedia("(prefers-color-scheme: dark)")
@@ -51,42 +53,75 @@
     return systemDark;
   });
 
+  // Seed colors (default/accent/override bases) only contribute hue+chroma to a
+  // derived scale; the theme picks each shade's lightness. A field with
+  // `lockedLightness` is pinned to that lightness -- the LIGHT-mode lightness of
+  // the shade the color is seen at most (the default color uses bg-surface,
+  // ~0.985). The picker hides the lightness slider. The value is still
+  // theme-inverted for display, so the preview matches that exact shade in both
+  // themes: darkFromLight(0.985) lands on the dark surface lightness, so the
+  // dark preview equals --default-d-50 (= bg-surface in dark). Storing OKLCH
+  // keeps chroma exact even at these near-white/near-black lightnesses (the
+  // browser gamut-maps only at paint, exactly like the real surface does).
+  // Colors rendered as-is (bubbles, shadow) leave it unset: free lightness slider.
+  const lockedLightness = $derived(
+    field.type === "color" ? field.lockedLightness : undefined,
+  );
+
   const storedLight = $derived(
     settingsState.currentSettings[field.id] as string,
   );
-  const displayedHex = $derived(
-    isDark ? darkFromLight(storedLight) : storedLight,
+  // Light-mode form: seed colors pinned to their locked lightness, others as
+  // stored. Then theme-inverted for the dark theme.
+  const lightForm = $derived(
+    lockedLightness != null ? withLightness(storedLight, lockedLightness) : storedLight,
+  );
+  // Always an `oklch(...)` string matching how the color renders in the current
+  // theme (legacy hex normalized to oklch).
+  const displayedColor = $derived(
+    isDark ? darkFromLight(lightForm) : formatOklch(parseColor(lightForm)),
   );
 
-  let hexInput = $state(untrack(() => displayedHex));
+  let colorInput = $state(untrack(() => displayedColor));
   let inputError = $state(false);
   let inputFocused = $state(false);
   $effect(() => {
-    const next = displayedHex;
-    if (!inputFocused) hexInput = next;
+    const next = displayedColor;
+    if (!inputFocused) colorInput = next;
   });
 
   let swatchEl: HTMLButtonElement | undefined = $state();
 
-  function commitDisplayedHex(newDisplayed: string) {
-    const eight = toEightCharHex(newDisplayed);
-    const lightHex = isDark ? lightFromDark(eight) : eight;
-    onChange(field.id, lightHex);
+  function commitColor(newDisplayed: string) {
+    // Normalize to our canonical oklch form so the no-op guard compares like
+    // with like (and a pasted hex is converted to oklch on the way in).
+    const next = formatOklch(parseColor(newDisplayed));
+    // No-op guard: applying the value we're already showing must not rewrite
+    // the store.
+    if (next === displayedColor) return;
+    // Convert the displayed (current-theme) value back to the light-mode form,
+    // then pin seed colors to their locked lightness.
+    const asLight = isDark ? lightFromDark(next) : next;
+    const stored = lockedLightness != null
+      ? withLightness(asLight, lockedLightness)
+      : asLight;
+    onChange(field.id, stored);
   }
 
   function openPicker() {
     if (!swatchEl) return;
     colorPickerState.open({
       anchor: swatchEl,
-      initialHex: toEightCharHex(displayedHex),
-      onApply: commitDisplayedHex,
+      initialColor: displayedColor,
+      onApply: commitColor,
+      lockLightness: lockedLightness != null,
     });
   }
 
-  function handleHexBlur() {
+  function handleColorBlur() {
     inputFocused = false;
-    if (!isValidHex(hexInput)) {
-      hexInput = displayedHex;
+    if (!isValidColor(colorInput)) {
+      colorInput = displayedColor;
       inputError = false;
     }
   }
@@ -111,33 +146,32 @@
            edges; combined with the parent's overflow-hidden + rounded corners,
            this guarantees the color reaches the rounded edge with no
            sub-pixel gap to the checkerboard background. -->
-      <span class="absolute inset-[-4px]" style:background-color={displayedHex}
+      <span class="absolute inset-[-4px]" style:background-color={displayedColor}
       ></span>
     </button>
 
     <Input
       type="text"
-      value={hexInput}
-      placeholder="#rrggbbaa"
-      maxlength={9}
+      value={colorInput}
+      placeholder="oklch(L C H / A) or #hex"
+      maxlength={40}
       spellcheck={false}
       autocomplete="off"
       disabled={!editable}
       error={inputError}
       mono
-      uppercase
-      ariaLabel="{field.name} hex value"
+      ariaLabel="{field.name} value"
       onfocus={() => (inputFocused = true)}
       oninput={(v) => {
-        hexInput = v.trim();
-        if (isValidHex(hexInput)) {
+        colorInput = v.trim();
+        if (isValidColor(colorInput)) {
           inputError = false;
-          commitDisplayedHex(hexInput);
+          commitColor(colorInput);
         } else {
           inputError = true;
         }
       }}
-      onblur={handleHexBlur}
+      onblur={handleColorBlur}
     />
   </div>
 </FieldCard>

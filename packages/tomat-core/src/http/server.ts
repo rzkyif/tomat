@@ -13,9 +13,11 @@ import { binariesRoutes } from "./routes/binaries.ts";
 import { llmRoutes } from "./routes/llm.ts";
 import { modelsRoutes } from "./routes/models.ts";
 import { pairingRoutes } from "./routes/pairing.ts";
+import { requirementsRoutes } from "./routes/requirements.ts";
 import { sessionsRoutes } from "./routes/sessions.ts";
 import { settingsRoutes } from "./routes/settings.ts";
 import { sidecarsRoutes } from "./routes/sidecars.ts";
+import { storageRoutes } from "./routes/storage.ts";
 import { sttRoutes } from "./routes/stt.ts";
 import { ttsRoutes } from "./routes/tts.ts";
 import { toolkitsRoutes } from "./routes/toolkits.ts";
@@ -66,12 +68,14 @@ export function buildApp(): Hono {
   app.route("/api/v1/sessions", sessionsRoutes());
   app.route("/api/v1/models", modelsRoutes());
   app.route("/api/v1/binaries", binariesRoutes());
+  app.route("/api/v1/requirements", requirementsRoutes());
   app.route("/api/v1/toolkits", toolkitsRoutes());
   app.route("/api/v1/settings", settingsRoutes());
   app.route("/api/v1/stt", sttRoutes());
   app.route("/api/v1/tts", ttsRoutes());
   app.route("/api/v1/llm", llmRoutes());
   app.route("/api/v1/sidecars", sidecarsRoutes());
+  app.route("/api/v1/storage", storageRoutes());
   app.route("/api/v1/update", updateRoutes());
 
   return app;

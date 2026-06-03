@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { modelsManager } from "../../models/manager.ts";
 import { downloadManager } from "../../downloads/manager.ts";
 import { ensureKindModels } from "../../services/model-ensure.ts";
+import { notifyRequirementsChanged } from "../../services/requirements.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
@@ -33,6 +34,10 @@ export function modelsRoutes(): Hono {
 
   r.delete("/:relPath{.+}", async (c) => {
     await modelsManager().delete(c.req.param("relPath"));
+    // A deleted model file can re-expose a requirement (computeRequirements
+    // only re-probes when notified), so recompute now; otherwise the client's
+    // pending-downloads snapshot keeps reporting the file as present.
+    void notifyRequirementsChanged();
     return c.body(null, 204);
   });
 

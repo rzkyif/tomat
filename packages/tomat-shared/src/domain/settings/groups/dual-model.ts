@@ -60,7 +60,6 @@ export const dualModelGroup: SettingGroup = {
           description: "Maximum context window length, used for usage tracking.",
           type: "number",
           defaultValue: 128000,
-          advanced: true,
           descriptionTier: "ondemand",
         },
       ],

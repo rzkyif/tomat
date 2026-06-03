@@ -6,7 +6,7 @@ import { type InstallEventSink, startInstall } from "../../toolkits/installer.ts
 import { toolkitsRegistry } from "../../toolkits/registry.ts";
 import { workerPool } from "../../toolkits/worker-pool.ts";
 import { resolveVersion, searchPackages } from "../../toolkits/npm-registry.ts";
-import { embed } from "../../services/embedding.ts";
+import { embed, isEmbeddingModelReady } from "../../services/embedding.ts";
 import { toolFilter } from "../../services/tool-filter.ts";
 import { sha256Hex } from "../../shared/hash.ts";
 import { AppError } from "../../shared/errors.ts";
@@ -174,6 +174,12 @@ export function toolkitsRoutes(): Hono {
   });
 
   r.post("/reindex", async (c) => {
+    // Tool-relevance RAG needs the embed model. If it isn't downloaded yet,
+    // skip cleanly (embedded: 0) rather than letting embed() throw an opaque
+    // worker error; the requirements flow prompts the download separately.
+    if (!(await isEmbeddingModelReady())) {
+      return c.json({ embedded: 0, skipped: true });
+    }
     let count = 0;
     const tools = allEnabledTools();
     for (const t of tools) {
@@ -230,6 +236,9 @@ export function toolkitsRoutes(): Hono {
     const body = (await readJson(c)) as { texts: string[] };
     if (!Array.isArray(body.texts)) {
       throw new AppError("validation_error", "texts array required");
+    }
+    if (!(await isEmbeddingModelReady())) {
+      throw new AppError("server_unavailable", "embedding model not downloaded yet");
     }
     const vectors = await embed(body.texts);
     return c.json({ vectors: vectors.map((v) => Array.from(v)) });

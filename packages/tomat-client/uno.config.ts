@@ -55,17 +55,30 @@ export default defineConfig({
       ([, s]) => `via-[var(--default-${s})] dark:via-[var(--default-d-${s})]`,
     ],
     [
-      /^bg-accent-(blue|purple|red|green|orange|yellow)-(\d+)$/,
+      /^bg-accent-(blue|purple|red|green|yellow)-(\d+)$/,
       ([, c, s]) => `bg-[var(--accent-${c}-${s})] dark:bg-[var(--accent-${c}-d-${s})]`,
     ],
     [
-      /^text-accent-(blue|purple|red|green|orange|yellow)-(\d+)$/,
+      /^text-accent-(blue|purple|red|green|yellow)-(\d+)$/,
       ([, c, s]) => `text-[var(--accent-${c}-${s})] dark:text-[var(--accent-${c}-d-${s})]`,
     ],
     [
-      /^border-accent-(blue|purple|red|green|orange|yellow)-(\d+)$/,
+      /^border-accent-(blue|purple|red|green|yellow)-(\d+)$/,
       ([, c, s]) => `border-[var(--accent-${c}-${s})] dark:border-[var(--accent-${c}-d-${s})]`,
     ],
+    // Semantic surface tokens: the single source of truth for what shade a
+    // panel vs an on-panel well/control paints. Each expands to a `*-default-N`
+    // shortcut above, so dark-mode inversion and per-component `--default-base`
+    // theming carry through for free. The flat surface model is one `surface`
+    // for every panel/card/bubble/modal/popover, one `inset` for wells and
+    // filled controls, and a deeper `inset-strong` reserved for the few
+    // multi-shade controls (toggles, segmented control, a neutral chip sitting
+    // on an inset row). Pure indicators (slider track/thumb, segmented
+    // selected fill) intentionally keep raw `bg-default-400/500`.
+    ["bg-surface", "bg-default-50"],
+    ["bg-surface-inset", "bg-default-200"],
+    ["bg-surface-inset-strong", "bg-default-300"],
+    ["border-surface", "border-default-200"],
   ],
   rules: [
     // Three customizable roundedness buckets driven by

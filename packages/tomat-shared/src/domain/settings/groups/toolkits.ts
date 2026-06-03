@@ -32,7 +32,7 @@ export const toolkitsGroup: SettingGroup = {
     },
     {
       label: "Tool Selection",
-      advanced: true,
+      defaultCollapsed: true,
       visibleWhen: { field: "tools.enabled", eq: true },
       fields: [
         {
@@ -42,7 +42,6 @@ export const toolkitsGroup: SettingGroup = {
             "Filter the available toolset down to a relevance-ranked shortlist before each turn (embedding similarity + optional AI second pass).\nDisable to send every enabled tool to the model on every turn. Simpler, but eats more context and slows down small models when many toolkits are installed.",
           type: "boolean",
           defaultValue: true,
-          advanced: true,
           descriptionTier: "always",
         },
         {
@@ -59,7 +58,6 @@ export const toolkitsGroup: SettingGroup = {
             },
           ],
           visibleWhen: { field: "tools.filteringEnabled", eq: true },
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {
@@ -70,7 +68,6 @@ export const toolkitsGroup: SettingGroup = {
           type: "boolean",
           defaultValue: true,
           visibleWhen: { field: "tools.filteringEnabled", eq: true },
-          advanced: true,
           descriptionTier: "always",
         },
         {
@@ -82,7 +79,6 @@ export const toolkitsGroup: SettingGroup = {
           defaultValue: 30,
           regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
           visibleWhen: { field: "tools.filteringEnabled", eq: true },
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {
@@ -93,7 +89,6 @@ export const toolkitsGroup: SettingGroup = {
           type: "boolean",
           defaultValue: true,
           visibleWhen: { field: "tools.filteringEnabled", eq: true },
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {
@@ -114,7 +109,6 @@ export const toolkitsGroup: SettingGroup = {
               { field: "tools.secondPassEnabled", eq: true },
             ],
           },
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {
@@ -131,7 +125,6 @@ export const toolkitsGroup: SettingGroup = {
           },
           optional: true,
           placeholder: "optional",
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {
@@ -142,14 +135,13 @@ export const toolkitsGroup: SettingGroup = {
           type: "number",
           defaultValue: 5,
           regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
-          advanced: true,
           descriptionTier: "ondemand",
         },
       ],
     },
     {
       label: "Worker Pool",
-      advanced: true,
+      defaultCollapsed: true,
       visibleWhen: { field: "tools.enabled", eq: true },
       fields: [
         {
@@ -160,7 +152,6 @@ export const toolkitsGroup: SettingGroup = {
           type: "number",
           defaultValue: 8,
           regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {
@@ -177,7 +168,6 @@ export const toolkitsGroup: SettingGroup = {
               errorMessage: "Must be a non-negative integer",
             },
           ],
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {
@@ -194,7 +184,6 @@ export const toolkitsGroup: SettingGroup = {
               errorMessage: "Must be a non-negative integer",
             },
           ],
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {
@@ -204,7 +193,6 @@ export const toolkitsGroup: SettingGroup = {
             "Pass `--ignore-scripts` to `bun install` so dependency postinstall hooks don't run.\nRecommended on: postinstall scripts from transitive dependencies are a common vector for surprise code execution. Disable only if a toolkit's dependencies require native builds.",
           type: "boolean",
           defaultValue: true,
-          advanced: true,
           descriptionTier: "ondemand",
         },
       ],

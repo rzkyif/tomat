@@ -11,20 +11,7 @@
     "packages/tomat-core-keychain/Cargo.toml",
     "packages/tomat-core-updater/Cargo.toml"
   ],
-  "unocss.root": ["packages/tomat-client"],
-  "unocss.exclude": ["**/node_modules/**", "**/target/**", "**/.git/**"],
-  "files.watcherExclude": {
-    "**/node_modules/**": true,
-    "**/target/**": true,
-    "**/.deno/**": true,
-    "**/.git/**": true
-  },
-  "search.exclude": {
-    "**/node_modules": true,
-    "**/target": true,
-    "**/.deno": true
-  },
-  "search.followSymlinks": false,
+  "unocss.colorPreview": false,
   "oxc.enable.oxfmt": true,
   "oxc.fmt.experimental": true,
   "oxc.fmt.configPath": ".oxfmtrc.json",

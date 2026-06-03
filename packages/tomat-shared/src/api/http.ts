@@ -20,8 +20,10 @@ import type {
   DownloadEntry,
   DownloadPlan,
   ModelEntry,
+  RequirementsSnapshot,
   SidecarSnapshot,
 } from "../domain/model.ts";
+import type { StorageTree } from "../domain/storage.ts";
 
 export const API_BASE = "/api/v1";
 
@@ -149,6 +151,21 @@ export interface ProbeBinariesRequest {
   kinds: BinaryKind[];
 }
 export type ProbeBinariesResponse = BinaryProbeResult[];
+
+// --- Requirements ----------------------------------------------------------
+
+export type GetRequirementsResponse = RequirementsSnapshot;
+export interface DownloadRequirementsResponse {
+  modelJobIds: string[];
+  binaryJobIds: string[];
+}
+
+// --- Storage ---------------------------------------------------------------
+
+export type GetStorageResponse = StorageTree;
+export interface DeleteStoragePathsRequest {
+  paths: string[];
+}
 
 // --- Core self-update ------------------------------------------------------
 

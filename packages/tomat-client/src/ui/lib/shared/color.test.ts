@@ -4,12 +4,15 @@
 import { describe, expect, it } from "vitest";
 import {
   darkFromLight,
+  formatOklch,
   hasAlpha,
   hexToOklch,
   isValidHex,
   lightFromDark,
   oklchToHex,
+  parseColor,
   toEightCharHex,
+  withLightness,
 } from "./color";
 
 describe("isValidHex", () => {
@@ -61,17 +64,40 @@ describe("hexToOklch + oklchToHex", () => {
   });
 });
 
+describe("parseColor / formatOklch", () => {
+  it("round-trips an oklch string exactly", () => {
+    const s = "oklch(0.7 0.4 0 / 1)";
+    expect(formatOklch(parseColor(s))).toBe(s);
+  });
+  it("preserves out-of-sRGB chroma (no gamut clamp)", () => {
+    // 0.4 chroma at this hue/lightness is outside sRGB; storing it must keep it.
+    expect(parseColor("oklch(0.7 0.4 0 / 1)").c).toBe(0.4);
+  });
+  it("parses legacy hex", () => {
+    const o = parseColor("#000000ff");
+    expect(o.l).toBeCloseTo(0, 3);
+    expect(o.a).toBe(1);
+  });
+  it("withLightness keeps chroma/hue/alpha, swaps lightness", () => {
+    const out = parseColor(withLightness("oklch(0.3 0.12 250 / 0.5)", 0.7));
+    expect(out.l).toBeCloseTo(0.7, 4);
+    expect(out.c).toBeCloseTo(0.12, 4);
+    expect(out.h).toBeCloseTo(250, 2);
+    expect(out.a).toBeCloseTo(0.5, 3);
+  });
+});
+
 describe("darkFromLight / lightFromDark", () => {
-  it("inverse functions roughly cancel out", () => {
-    const start = "#5577aa";
-    const dark = darkFromLight(start);
-    const back = lightFromDark(dark);
-    // Allow 4-byte tolerance per channel for OKLCH round-trip jitter.
-    for (let i = 1; i < 7; i += 2) {
-      const a = parseInt(start.slice(i, i + 2), 16);
-      const b = parseInt(back.slice(i, i + 2), 16);
-      expect(Math.abs(a - b)).toBeLessThanOrEqual(4);
-    }
+  it("inverse functions cancel in OKLCH (lightness round-trips; hue/chroma/alpha kept)", () => {
+    const start = parseColor("#5577aa");
+    const back = parseColor(lightFromDark(darkFromLight("#5577aa")));
+    expect(back.l).toBeCloseTo(start.l, 3);
+    expect(back.c).toBeCloseTo(start.c, 3);
+    expect(back.h).toBeCloseTo(start.h, 1);
+    expect(back.a).toBeCloseTo(start.a, 3);
+  });
+  it("returns oklch() strings", () => {
+    expect(darkFromLight("#5577aa").startsWith("oklch(")).toBe(true);
   });
 });
 

@@ -29,31 +29,34 @@ body {
   min-height: 100vh;
 }
 
-/* User-customizable bubble colors. Only the three `*-bg-light` variables
-   are written from JS (driven by appearance.{user,agent,secondaryAgent}BubbleColor
-   settings); the border-light, bg-dark, and border-dark slots are derived
-   from them via `oklch(from ...)` so the four shades stay in sync with
-   whatever color the user picks. Lightness deltas approximate the Tailwind
-   300/400/500/600 ladder used previously. The trailing `/ alpha` keeps
+/* User-customizable bubble colors. The `*-bg-light` AND `*-bg-dark` variables
+   are both written from JS: +page.svelte sets `-light` to the stored hex and
+   `-dark` to its theme inversion (color.ts `darkFromLight`, the same reversible
+   stepping curve every custom color uses). The `calc(l - 0.24)` here is only a
+   pre-JS fallback; JS overrides `-bg-dark` before first paint. border-light is
+   derived from bg-light (slightly darker, for an edge against light
+   surroundings); border-dark is derived from the resolved bg-dark (slightly
+   lighter, for an edge against dark surroundings). The trailing `/ alpha` keeps
    transparency from the source through every derivation. */
 :root {
   --user-bubble-bg-light: #86efacff;
   --agent-bubble-bg-light: #93c5fdff;
   --agent2-bubble-bg-light: #d8b4feff;
 
-  --user-bubble-border-light: oklch(from var(--user-bubble-bg-light) calc(l - 0.08) c h / alpha);
   --user-bubble-bg-dark: oklch(from var(--user-bubble-bg-light) calc(l - 0.24) c h / alpha);
-  --user-bubble-border-dark: oklch(from var(--user-bubble-bg-light) calc(l - 0.15) c h / alpha);
+  --agent-bubble-bg-dark: oklch(from var(--agent-bubble-bg-light) calc(l - 0.24) c h / alpha);
+  --agent2-bubble-bg-dark: oklch(from var(--agent2-bubble-bg-light) calc(l - 0.24) c h / alpha);
+
+  --user-bubble-border-light: oklch(from var(--user-bubble-bg-light) calc(l - 0.08) c h / alpha);
+  --user-bubble-border-dark: oklch(from var(--user-bubble-bg-dark) calc(l + 0.08) c h / alpha);
 
   --agent-bubble-border-light: oklch(from var(--agent-bubble-bg-light) calc(l - 0.08) c h / alpha);
-  --agent-bubble-bg-dark: oklch(from var(--agent-bubble-bg-light) calc(l - 0.24) c h / alpha);
-  --agent-bubble-border-dark: oklch(from var(--agent-bubble-bg-light) calc(l - 0.15) c h / alpha);
+  --agent-bubble-border-dark: oklch(from var(--agent-bubble-bg-dark) calc(l + 0.08) c h / alpha);
 
   --agent2-bubble-border-light: oklch(
     from var(--agent2-bubble-bg-light) calc(l - 0.08) c h / alpha
   );
-  --agent2-bubble-bg-dark: oklch(from var(--agent2-bubble-bg-light) calc(l - 0.24) c h / alpha);
-  --agent2-bubble-border-dark: oklch(from var(--agent2-bubble-bg-light) calc(l - 0.15) c h / alpha);
+  --agent2-bubble-border-dark: oklch(from var(--agent2-bubble-bg-dark) calc(l + 0.08) c h / alpha);
 
   /* Bubble text colors derived from the same bubble base. We override the
      L to a dark/light extreme and force alpha=1 so a transparent bubble
@@ -65,6 +68,20 @@ body {
   --agent-bubble-text-dark: oklch(from var(--agent-bubble-bg-light) 0.95 c h / 1);
   --agent2-bubble-text-light: oklch(from var(--agent2-bubble-bg-light) 0.2 c h / 1);
   --agent2-bubble-text-dark: oklch(from var(--agent2-bubble-bg-light) 0.95 c h / 1);
+}
+
+/* Bubble shadow + frosted-edge halo. The shadow is centered (no offset); the
+   halo is a backdrop blur strongest at the bubble edge that fades to nothing by
+   `--bubble-shadow-distance` (kept below the window padding so it stays inside the
+   transparent window). BOTH the `-light` and `-dark` shadow colors are written
+   from JS (appearance.bubbleShadowColor + the reversible inversion in color.ts),
+   so the shadow flips with the theme exactly like every other custom color. The
+   literals here are just pre-JS fallbacks: the default black (light) / white
+   (dark) pair. */
+:root {
+  --bubble-shadow-color-light: #000000ff;
+  --bubble-shadow-color-dark: #ffffffff;
+  --bubble-shadow-distance: 16px;
 }
 
 .bubble-user {
@@ -100,16 +117,62 @@ body {
   color: var(--agent2-bubble-text-dark);
 }
 
+/* Centered drop shadow painted on the bubble body. `box-shadow` renders
+   outside the border box, so the body's own `overflow-hidden` does not clip
+   it. 0 0 = no directional offset; blur = the distance; spread 0. */
+.bubble-body {
+  box-shadow: 0 0 var(--bubble-shadow-distance) 0 var(--bubble-shadow-color-light);
+}
+.dark .bubble-body {
+  box-shadow: 0 0 var(--bubble-shadow-distance) 0 var(--bubble-shadow-color-dark);
+}
+
+/* Frosted halo: N concentric rounded layers behind the bubble body (Bubble.svelte
+   renders exactly `appearance.bubbleBlurRings` of them, 0 when the effect is off,
+   each carrying `--ring-index` 0..N-1 and `--ring-count` N). One rule derives
+   every layer's geometry from those two props + `--bubble-shadow-distance`:
+   ring 0 is the outermost (inset = -length, weakest opacity), ring N-1 hugs the
+   bubble edge (smallest inset, strongest blur, full opacity). backdrop-filter is
+   auto-clipped to each layer's border-radius, so the falloff is correct on all
+   sides and corners for any aspect ratio. */
+.bubble-halo {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+  inset: calc(-1 * var(--bubble-shadow-distance) * (1 - var(--ring-index) / var(--ring-count)));
+  border-radius: calc(
+    var(--rounded-large) + var(--bubble-shadow-distance) *
+      (1 - var(--ring-index) / var(--ring-count))
+  );
+  -webkit-backdrop-filter: blur(
+    calc(var(--bubble-shadow-distance) * (var(--ring-index) + 1) / var(--ring-count) * 0.8)
+  );
+  backdrop-filter: blur(
+    calc(var(--bubble-shadow-distance) * (var(--ring-index) + 1) / var(--ring-count) * 0.8)
+  );
+  opacity: calc((var(--ring-index) + 1) / var(--ring-count));
+}
+
 /* App-wide theme: the `*-default-*` and `*-accent-*-*` UnoCSS shortcuts
    compile to `var(--default-N)` / `var(--default-d-N)` / `var(--accent-{c}-N)`
    etc. Each scope has a single base hex (settable from JS via the appearance
    color pickers); the 9 light + 9 dark shades are derived from that base via
-   OKLCH. The L table matches Tailwind v4's neutral OKLCH ladder; the dark
-   column applies the existing inversion map (50↔900, 100↔800, 200↔700,
-   300↔600, 400↔500, 500↔400, 600↔400, 700↔300, 800↔200, 900↔100) so
-   visuals stay consistent with the pre-themable behavior at default values.
-   The trailing `/ alpha` carries the base hex's alpha through every shade
-   so a fully-transparent base disables the layer cleanly. */
+   OKLCH. The light L table matches Tailwind v4's neutral OKLCH ladder. The dark
+   column started as a strict inversion mirror, but a strict mirror dumps the
+   light ladder's large near-black steps (700/800/900) into the dark SURFACE
+   region (d-50/d-100/d-200), making bg-surface vs bg-surface-inset far too
+   stark in dark mode. Per dark-mode best practice (light/dark are perceptually
+   asymmetric; dark elevation wants subtle ~3-5pt ascending steps), the dark
+   surface shades are now hand-tuned (d-50 .205 / d-100 .245 / d-200 .280) so
+   surface->inset reads as gently as it does in light. Mid/high dark shades
+   mostly keep their mirror values to preserve text contrast and the
+   `*-inverted-*` tokens (which consume the dark ladder in LIGHT mode). d-300
+   is held near .42 because bg-default-inverted-300 paints prominent light-mode
+   primary buttons; d-600 is .79 (was a stray duplicate of d-500's .708) so the
+   whole dark ladder is strictly monotonic -- which also lets color.ts use this
+   light<->dark pairing as a perfectly reversible color-inversion curve. The
+   trailing `/ alpha` carries the base hex's alpha through every shade so a
+   fully-transparent base disables the layer cleanly. */
 
 /* `--default-base` defaults to neutral-500 sRGB (`#737373`) so the derived
    ladder lands on the original Tailwind neutral palette at chroma=0. The
@@ -134,12 +197,12 @@ body {
   --default-900: oklch(from var(--default-base) 0.205 c h / alpha);
 
   --default-d-50: oklch(from var(--default-base) 0.205 c h / alpha);
-  --default-d-100: oklch(from var(--default-base) 0.269 c h / alpha);
-  --default-d-200: oklch(from var(--default-base) 0.371 c h / alpha);
-  --default-d-300: oklch(from var(--default-base) 0.439 c h / alpha);
+  --default-d-100: oklch(from var(--default-base) 0.245 c h / alpha);
+  --default-d-200: oklch(from var(--default-base) 0.28 c h / alpha);
+  --default-d-300: oklch(from var(--default-base) 0.42 c h / alpha);
   --default-d-400: oklch(from var(--default-base) 0.556 c h / alpha);
   --default-d-500: oklch(from var(--default-base) 0.708 c h / alpha);
-  --default-d-600: oklch(from var(--default-base) 0.708 c h / alpha);
+  --default-d-600: oklch(from var(--default-base) 0.79 c h / alpha);
   --default-d-700: oklch(from var(--default-base) 0.871 c h / alpha);
   --default-d-800: oklch(from var(--default-base) 0.922 c h / alpha);
   --default-d-900: oklch(from var(--default-base) 0.97 c h / alpha);
@@ -154,7 +217,6 @@ body {
   --accent-blue-base: #3b82f6ff;
   --accent-purple-base: #a855f7ff;
   --accent-green-base: #22c55eff;
-  --accent-orange-base: #f97316ff;
   --accent-yellow-base: #eab308ff;
 
   --accent-red-50: oklch(from var(--accent-red-base) 0.985 c h / alpha);
@@ -241,27 +303,6 @@ body {
   --accent-green-d-800: oklch(from var(--accent-green-base) 0.922 c h / alpha);
   --accent-green-d-900: oklch(from var(--accent-green-base) 0.97 c h / alpha);
 
-  --accent-orange-50: oklch(from var(--accent-orange-base) 0.985 c h / alpha);
-  --accent-orange-100: oklch(from var(--accent-orange-base) 0.97 c h / alpha);
-  --accent-orange-200: oklch(from var(--accent-orange-base) 0.922 c h / alpha);
-  --accent-orange-300: oklch(from var(--accent-orange-base) 0.871 c h / alpha);
-  --accent-orange-400: oklch(from var(--accent-orange-base) 0.708 c h / alpha);
-  --accent-orange-500: oklch(from var(--accent-orange-base) 0.556 c h / alpha);
-  --accent-orange-600: oklch(from var(--accent-orange-base) 0.439 c h / alpha);
-  --accent-orange-700: oklch(from var(--accent-orange-base) 0.371 c h / alpha);
-  --accent-orange-800: oklch(from var(--accent-orange-base) 0.269 c h / alpha);
-  --accent-orange-900: oklch(from var(--accent-orange-base) 0.205 c h / alpha);
-  --accent-orange-d-50: oklch(from var(--accent-orange-base) 0.205 c h / alpha);
-  --accent-orange-d-100: oklch(from var(--accent-orange-base) 0.269 c h / alpha);
-  --accent-orange-d-200: oklch(from var(--accent-orange-base) 0.371 c h / alpha);
-  --accent-orange-d-300: oklch(from var(--accent-orange-base) 0.439 c h / alpha);
-  --accent-orange-d-400: oklch(from var(--accent-orange-base) 0.556 c h / alpha);
-  --accent-orange-d-500: oklch(from var(--accent-orange-base) 0.708 c h / alpha);
-  --accent-orange-d-600: oklch(from var(--accent-orange-base) 0.708 c h / alpha);
-  --accent-orange-d-700: oklch(from var(--accent-orange-base) 0.871 c h / alpha);
-  --accent-orange-d-800: oklch(from var(--accent-orange-base) 0.922 c h / alpha);
-  --accent-orange-d-900: oklch(from var(--accent-orange-base) 0.97 c h / alpha);
-
   --accent-yellow-50: oklch(from var(--accent-yellow-base) 0.985 c h / alpha);
   --accent-yellow-100: oklch(from var(--accent-yellow-base) 0.97 c h / alpha);
   --accent-yellow-200: oklch(from var(--accent-yellow-base) 0.922 c h / alpha);
@@ -292,6 +333,16 @@ body {
   --rounded-small: 6px;
   --rounded-medium: 8px;
   --rounded-large: 16px;
+}
+
+/* Code-block surface. Intentionally NON-inverting: syntax-highlighted code
+   reads against a dark, editor-style background in both light and dark themes,
+   so these have no `.dark` override. `oklch(0.2 0 0)` is the OKLCH equivalent
+   of the previously hardcoded `#1e1e1e`; the inline variant keeps the prior
+   0.75 alpha used for inline code / tool-name pills. */
+:root {
+  --code-bg: oklch(0.2 0 0);
+  --code-bg-inline: oklch(0.2 0 0 / 0.75);
 }
 
 /* Themed range-input styling. Removes native chrome and paints track + thumb
@@ -354,6 +405,76 @@ input[type="range"]::-moz-range-thumb {
 }
 .dark input[type="range"]::-moz-range-thumb {
   background: var(--default-d-500);
+}
+
+/* Shared scrollbar styling. One canonical look (8px, transparent track, a
+   thumb that tracks the themable default scale and darkens on hover) applied
+   via three classes that differ only by the surface the scroller sits on:
+
+     .tomat-scroll        content on the panel surface (bg-surface/default-50)
+                          or a transparent window: thumb default-200/d-200.
+     .tomat-scroll-inset  content on an inset well (bg-surface-inset and
+                          -strong) where a default-200 thumb would vanish:
+                          thumb steps down to default-400/d-400.
+     .tomat-scroll-dark   content on a dark or code background: white-alpha
+                          thumb that reads on any dark fill.
+
+   Both axes get an 8px scrollbar so the same class covers vertical and
+   horizontal scrollers. */
+.tomat-scroll::-webkit-scrollbar,
+.tomat-scroll-inset::-webkit-scrollbar,
+.tomat-scroll-dark::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.tomat-scroll::-webkit-scrollbar-track,
+.tomat-scroll-inset::-webkit-scrollbar-track,
+.tomat-scroll::-webkit-scrollbar-corner,
+.tomat-scroll-inset::-webkit-scrollbar-corner {
+  background: transparent;
+  border-radius: 4px;
+}
+.tomat-scroll::-webkit-scrollbar-thumb,
+.tomat-scroll-inset::-webkit-scrollbar-thumb,
+.tomat-scroll-dark::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+}
+
+.tomat-scroll::-webkit-scrollbar-thumb {
+  background: var(--default-200);
+}
+.tomat-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--default-400);
+}
+.dark .tomat-scroll::-webkit-scrollbar-thumb {
+  background: var(--default-d-200);
+}
+.dark .tomat-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--default-d-400);
+}
+
+.tomat-scroll-inset::-webkit-scrollbar-thumb {
+  background: var(--default-400);
+}
+.tomat-scroll-inset::-webkit-scrollbar-thumb:hover {
+  background: var(--default-500);
+}
+.dark .tomat-scroll-inset::-webkit-scrollbar-thumb {
+  background: var(--default-d-400);
+}
+.dark .tomat-scroll-inset::-webkit-scrollbar-thumb:hover {
+  background: var(--default-d-500);
+}
+
+.tomat-scroll-dark::-webkit-scrollbar-track,
+.tomat-scroll-dark::-webkit-scrollbar-corner {
+  background: rgba(255, 255, 255, 0.05);
+}
+.tomat-scroll-dark::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+.tomat-scroll-dark::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 /* Checkerboard backdrop used behind partially-transparent color swatches

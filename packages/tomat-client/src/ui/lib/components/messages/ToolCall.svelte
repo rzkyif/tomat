@@ -442,14 +442,14 @@
 
   // Selected vs. unselected styling for option buttons and the freeform
   // input: selection fully inverts bg/text. Hover (or focus while
-  // `keyboardNav` is active) just bumps the bg one shade lighter as a
+  // `keyboardNav` is active) just bumps the bg one shade darker as a
   // subtle highlight; text stays put. Switching hover→focus during keyboard
   // nav prevents a stale mouse-hover from competing with the focused
   // element.
   let unselectedClasses = $derived(
     keyboardNav
-      ? "bg-default-200 text-default-800 focus:bg-default-100"
-      : "bg-default-200 text-default-800 hover:bg-default-100",
+      ? "bg-surface-inset text-default-800 focus:bg-surface-inset-strong"
+      : "bg-surface-inset text-default-800 hover:bg-surface-inset-strong",
   );
   const selectedClasses =
     "bg-default-inverted-200 text-default-inverted-800";
@@ -565,7 +565,7 @@
                   <input
                     type="text"
                     data-tc-nav
-                    class="bg-default-200 text-default-800 rounded block w-full h-8 px-2 outline-none text-xs transition-colors duration-100"
+                    class="bg-surface-inset text-default-800 rounded block w-full h-8 px-2 outline-none text-xs transition-colors duration-100"
                     value={drafts[qi]?.text ?? ""}
                     oninput={(e) =>
                       setText(qi, (e.target as HTMLInputElement).value)}
@@ -583,7 +583,7 @@
               <button
                 type="button"
                 data-tc-nav
-                class="text-xs px-3 py-1 rounded bg-default-200 text-default-800 cursor-pointer outline-none transition-colors duration-100"
+                class="text-xs px-3 py-1 rounded bg-surface-inset text-default-800 cursor-pointer outline-none transition-colors duration-100"
                 onclick={submit}
               >
                 Submit
@@ -594,29 +594,29 @@
 
         {#if hasCancelledError}
           <pre
-            class="text-xs font-mono text-default-700 bg-default-200 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{toolCall.error}</pre>
+            class="tomat-scroll-inset text-xs font-mono text-default-700 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{toolCall.error}</pre>
         {/if}
 
         <div class="flex flex-col gap-1 text-xs">
           {#if hasArgs}
             <div class="text-default-600">Arguments</div>
             <pre
-              class="text-default-800 bg-default-200 rounded-small px-2 py-1 max-h-32 overflow-auto whitespace-pre">{argsText}</pre>
+              class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-32 overflow-auto whitespace-pre">{argsText}</pre>
           {/if}
           {#if hasResult}
             <div class="text-default-600">Result</div>
             <pre
-              class="text-default-800 bg-default-200 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{resultText}</pre>
+              class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{resultText}</pre>
           {/if}
           {#if hasError}
             <div class="text-default-600">Error</div>
             <pre
-              class="font-mono text-default-800 bg-default-200 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{toolCall.error}</pre>
+              class="tomat-scroll-inset font-mono text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{toolCall.error}</pre>
           {/if}
           {#if hasLogs}
             <div class="text-default-600">Logs</div>
             <div
-              class="bg-default-200 rounded-small px-2 py-1 max-h-32 overflow-auto flex flex-col gap-0.5 whitespace-pre"
+              class="tomat-scroll-inset bg-surface-inset rounded-small px-2 py-1 max-h-32 overflow-auto flex flex-col gap-0.5 whitespace-pre"
             >
               {#each toolCall.logs as log, i (i)}
                 <div class="text-default-700">
@@ -638,7 +638,7 @@
      the tool name in the header reads like a `code span` from the markdown
      renderer used in AgentMessage. */
   .tc-inline {
-    background-color: rgba(30, 30, 30, 0.75);
+    background-color: var(--code-bg-inline);
     color: white;
     padding: 0.15em 0.4em;
     border-radius: 6px;

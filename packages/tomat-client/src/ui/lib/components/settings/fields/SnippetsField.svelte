@@ -13,6 +13,7 @@
   import IconButton from "../../ui/IconButton.svelte";
   import Input from "../../ui/Input.svelte";
   import Select from "../../ui/Select.svelte";
+  import Textarea from "../../ui/Textarea.svelte";
 
   let { field } = $props<{ field: SettingField }>();
 
@@ -178,7 +179,7 @@
       icon="i-material-symbols-add-rounded"
       onclick={handleAdd}
       title="Add snippet"
-      class="shrink-0 bg-default-300 hover:bg-default-400"
+      class="shrink-0"
     >
       Add
     </Button>
@@ -188,7 +189,7 @@
         title="Delete snippet"
         size="lg"
         surface="filled"
-        class="bg-default-300 hover:bg-accent-red-500 hover:text-white"
+        class="hover:bg-accent-red-500 hover:text-white"
         onclick={handleDelete}
       />
     {/if}
@@ -252,16 +253,17 @@
 
       <div class="flex flex-col gap-1">
         <div class="text-default-600 text-sm">Text</div>
-        <textarea
-          aria-label="Snippet text"
-          class="bg-default-300 text-default-800 rounded-medium w-full px-2 py-1.5 outline-none resize-none max-h-64 min-h-24 overflow-y-auto whitespace-pre-wrap break-words text-sm"
+        <Textarea
+          ariaLabel="Snippet text"
+          autoResize="none"
+          class="max-h-64 min-h-24 overflow-y-auto resize-none"
           value={draftText}
-          oninput={(e) => {
-            draftText = (e.target as HTMLTextAreaElement).value;
+          oninput={(v) => {
+            draftText = v;
             scheduleSave();
           }}
           onblur={() => flushSave()}
-        ></textarea>
+        />
       </div>
     </div>
   {/if}

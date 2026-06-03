@@ -22,7 +22,7 @@ import type {
   CoreManifest,
   Triple,
 } from "../../packages/tomat-shared/src/domain/model.ts";
-import { BINARY_KINDS } from "../../packages/tomat-shared/src/domain/model.ts";
+import { BINARY_KINDS, UPSTREAM_BINARIES } from "../../packages/tomat-shared/src/domain/model.ts";
 import {
   channelBinSuffix,
   channelManifestDir,
@@ -45,7 +45,6 @@ import {
   sha256File,
   signEd25519,
   step,
-  UPSTREAM_BINARIES_PATH,
   writeSigningKeys,
 } from "./lib.ts";
 import { encodeBase64 } from "jsr:@std/encoding@^1/base64";
@@ -403,11 +402,6 @@ async function composeCoreManifest(
   return { ...manifest, signature };
 }
 
-interface UpstreamResolver {
-  repo: string;
-  assets: Record<string, string>;
-}
-
 interface GitHubReleaseAsset {
   name: string;
   browser_download_url: string;
@@ -467,24 +461,9 @@ async function composeBinaryManifest(
   privateKey: Uint8Array,
   channel: ReleaseChannel,
 ): Promise<BinaryManifest> {
-  const text = await Deno.readTextFile(UPSTREAM_BINARIES_PATH);
-  let resolvers: Record<string, UpstreamResolver>;
-  try {
-    resolvers = JSON.parse(text) as Record<string, UpstreamResolver>;
-  } catch (err) {
-    fail(
-      `${rel(UPSTREAM_BINARIES_PATH)} is not valid JSON: ${
-        err instanceof Error ? err.message : err
-      }`,
-    );
-  }
-
   const binaries = {} as Record<BinaryKind, BinaryManifestEntry>;
   for (const kind of BINARY_KINDS) {
-    const resolver = resolvers![kind];
-    if (!resolver || !resolver.repo || !resolver.assets) {
-      fail(`${rel(UPSTREAM_BINARIES_PATH)} missing/invalid entry for "${kind}"`);
-    }
+    const resolver = UPSTREAM_BINARIES[kind];
 
     // Beta: ship the resolver itself (repo + asset patterns) so the core
     // resolves the LATEST upstream release at runtime. No GitHub call here:

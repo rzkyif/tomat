@@ -51,12 +51,12 @@
 
   {#if downloadsState.items.length === 0}
     <div
-      class="bg-default-200 rounded-medium px-4 py-6 text-default-500 text-sm text-center"
+      class="bg-surface-inset rounded-medium px-4 py-6 text-default-500 text-sm text-center"
     >
       No downloads
     </div>
   {:else}
-    <div class="flex flex-col gap-1 overflow-y-auto pr-1">
+    <div class="tomat-scroll flex flex-col gap-1 overflow-y-auto pr-1">
       {#each sortedItems() as item (item.id)}
         <DownloadRow {item} />
       {/each}

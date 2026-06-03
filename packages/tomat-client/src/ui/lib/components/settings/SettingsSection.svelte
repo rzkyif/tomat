@@ -36,33 +36,44 @@
     evalCondition(section.visibleWhen, settingsState.currentSettings),
   );
 
-  const showAdvanced = $derived(
-    !!settingsState.currentSettings["appearance.settings.showAdvanced"],
-  );
+  // Every labeled section is collapsible; the label row is the toggle.
+  // Unlabeled sections have no header, so they always render inline.
+  const collapsible = $derived(!!section.label);
 
-  const sectionAdvancedHidden = $derived(!!section.advanced && !showAdvanced);
-
-  const visibleFields = $derived(
-    section.fields.filter((f: any) => showAdvanced || !f.advanced),
-  );
+  // A collapsed section is just its header row. The container's gap-3 is sized
+  // for the space below an expanded section's last field, so stacked between
+  // bare headers it reads as too airy; pull the next section up with a negative
+  // bottom margin. Only the gap after a collapsed section tightens: header to
+  // first field, field to field, and last field to next section keep full gap.
+  const isCollapsed = $derived(collapsible && !isExpanded);
 </script>
 
-{#if isVisible && !sectionAdvancedHidden && visibleFields.length > 0}
-  <div data-section-key={sectionKey} class="flex flex-col gap-2">
+{#if isVisible && section.fields.length > 0}
+  <!-- gap-1: the header hugs its own fields (same spacing as field-to-field).
+       Separation BETWEEN sections comes from the container gap in Settings,
+       so a section reads as one unit with clear space before the next. -->
+  <div
+    data-section-key={sectionKey}
+    class="flex flex-col gap-1 {isCollapsed ? '-mb-2' : ''}"
+  >
     {#if section.label}
-      <div class="sticky top-7 z-10">
+      <div class="sticky top-7 z-10 pt-1.5 bg-surface">
         <SectionHeader
           label={section.label}
           level="section"
-          collapsible={section.collapsible}
+          {collapsible}
           expanded={isExpanded}
           onToggle={() => onToggle(sectionKey)}
         />
       </div>
     {/if}
-    {#if !section.collapsible || isExpanded}
-      <div class="flex flex-col gap-1">
-        {#each visibleFields as field (field.id)}
+    {#if !collapsible || isExpanded}
+      <!-- Labeled (collapsible) sections indent their fields so the column's
+           left edge lines up with the header label text: chevron (1em) + the
+           header's gap-1 (0.25rem) = 1.25rem = pl-5. Unlabeled sections render
+           flush. Both units scale with appearance.textSize. -->
+      <div class="flex flex-col gap-1" class:pl-5={collapsible}>
+        {#each section.fields as field (field.id)}
           <SettingsField
             {field}
             {monitors}

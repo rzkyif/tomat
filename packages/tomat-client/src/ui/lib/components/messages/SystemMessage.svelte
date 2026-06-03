@@ -71,7 +71,7 @@
              Expandable wrapper would otherwise apply `text-right` when the
              bubble is right-aligned. -->
         <div
-          class="whitespace-pre-wrap bg-default-200 text-default-700 text-xs text-left px-4 py-2 rounded-large"
+          class="whitespace-pre-wrap bg-surface-inset text-default-700 text-xs text-left px-4 py-2 rounded-large"
         >
           {content}
         </div>

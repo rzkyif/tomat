@@ -10,20 +10,20 @@ import type { SettingGroup } from "../types.ts";
 // the Settings UI has a stable group id to slot a paired-clients panel
 // into in the future.
 //
-// The section is `advanced: true` so the group is hidden from the
-// sidebar by default until a real rendering component lands; the
-// `cores.list` field has type "cores", which is currently a no-op in
-// SettingsField. Registering it means the field-type union is honest
-// about what the schema can carry.
+// The group is `hidden: true` so it is omitted from the settings UI
+// entirely until a real rendering component lands; the `cores.list` field
+// has type "cores", which is currently a no-op in SettingsField.
+// Registering it means the field-type union is honest about what the schema
+// can carry.
 export const coresGroup: SettingGroup = {
   id: "cores",
+  hidden: true,
   destination: "client",
   name: "Paired Cores",
   icon: "i-material-symbols-hub-rounded",
   iconInactive: "i-material-symbols-hub-outline-rounded",
   sections: [
     {
-      advanced: true,
       fields: [
         {
           id: "cores.list",

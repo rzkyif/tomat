@@ -1,11 +1,12 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { Alignment } from "$lib/shared/types";
+  import { settingsState } from "../../state";
 
   let {
     selectedAlignment,
     size = "large",
-    bgClass = "bg-default-300",
+    bgClass = "bg-surface",
     extraClass = "",
     active = false,
     pulse = false,
@@ -46,7 +47,7 @@
      *  rect so text and other UI elements over the bar read inverted. */
     progress?: number | null;
     /** Override for the determinate/indeterminate fill colour. Defaults to
-     *  `bg-default-800` to pair with the default `bg-default-300` track. */
+     *  `bg-default-800` to pair with the default `bg-surface` track. */
     progressFillBgClass?: string;
     onclick?: (e: MouseEvent) => void;
     oncontextmenu?: (e: MouseEvent) => void;
@@ -65,74 +66,101 @@
   // `right-0` instead of `left-0`; the indeterminate sweep and the
   // inverted-layer clip-path use mirrored keyframes / inset values.
   let isRight = $derived(selectedAlignment === "right");
+
+  // Frosted-edge halo: render exactly N concentric blur rings (0 when the
+  // effect is off). Reading the appearance settings here keeps the ring count
+  // a single global knob without threading a prop through every Bubble caller;
+  // rendering exactly N layers (vs a fixed max) is what makes the count an
+  // actual perf control. Geometry per ring is computed in CSS from the
+  // `--ring-index` / `--ring-count` custom props set below.
+  let ringCount = $derived(
+    settingsState.currentSettings["appearance.bubbleBlurEnabled"] === false
+      ? 0
+      : ((settingsState.currentSettings["appearance.bubbleBlurRings"] as number) ?? 3),
+  );
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+<!-- Positioning + halo-containment wrapper. The body below clips its own
+     overflow, so the blur halo (which extends beyond the bubble) lives out
+     here as sibling layers behind the body. Alignment margins live on the
+     wrapper so it stays the laid-out element in the parent flex column. -->
 <div
-  {onclick}
-  {oncontextmenu}
-  {ondblclick}
-  role={onclick ? "presentation" : undefined}
-  class="{bgClass} {minHClass} relative overflow-hidden rounded-large w-fit max-w-[calc(100vw-5rem)] break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
+  class="relative w-fit pointer-events-none"
   class:mr-auto={selectedAlignment === "left"}
-  class:rounded-l-small={selectedAlignment === "left" || neighborLeft}
-  class:border-l-8={selectedAlignment === "left" && active}
-  class:border-l-0={selectedAlignment === "left" && !active}
   class:ml-auto={selectedAlignment === "right"}
-  class:rounded-r-small={selectedAlignment === "right" || neighborRight}
-  class:border-r-8={selectedAlignment === "right" && active}
-  class:border-r-0={selectedAlignment === "right" && !active}
   class:mx-auto={selectedAlignment === "center"}
-  class:border-b-8={selectedAlignment === "center" && active}
-  class:border-b-0={selectedAlignment === "center" && !active}
-  class:bubble-border-pulse={active && pulse}
 >
-  {#if hasProgress}
-    {#if percent === null}
-      <div
-        class="absolute top-0 h-8 {progressFillBgClass}"
-        class:left-0={!isRight}
-        class:right-0={isRight}
-        class:bubble-progress-indet={!isRight}
-        class:bubble-progress-indet-rtl={isRight}
-      ></div>
-    {:else}
-      <div
-        class="absolute top-0 h-8 {progressFillBgClass} transition-all"
-        class:left-0={!isRight}
-        class:right-0={isRight}
-        style="width: {percent}%"
-      ></div>
-    {/if}
-  {/if}
-  <div class="relative z-10 {paddingClass} {extraClass}">
-    {@render children()}
-  </div>
-  {#if hasProgress}
-    <!-- Inverted layer: same content rendered atop the fill, clipped to the
-         filled rect. `filter: invert(1) hue-rotate(180deg)` flips all colours
-         (text, icons, inline-pill bg/fg) to a perceptually-inverted version
-         in one shot, no need to thread invert-color props through every
-         descendant. The clip-path bottom inset keeps the inversion confined
-         to the top h-8 header zone so an expanded body below renders
-         normally. Children are rendered twice; Svelte's bind:expanded on the
-         shared parent state keeps both Expandable instances in lockstep, and
-         pointer-events:none on this layer routes all clicks to the lower
-         (un-filtered) copy. -->
+  {#each Array(ringCount) as _, i (i)}
     <div
-      class="bubble-progress-invert absolute inset-0 z-20 {paddingClass} {extraClass}"
-      class:bubble-progress-invert-indet={percent === null && !isRight}
-      class:bubble-progress-invert-indet-rtl={percent === null && isRight}
-      style:clip-path={percent === null
-        ? undefined
-        : isRight
-          ? `inset(0 0 calc(100% - 2rem) calc(100% - ${percent}%))`
-          : `inset(0 calc(100% - ${percent}%) calc(100% - 2rem) 0)`}
+      class="bubble-halo"
+      style="--ring-index: {i}; --ring-count: {ringCount}"
       aria-hidden="true"
-    >
+    ></div>
+  {/each}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div
+    {onclick}
+    {oncontextmenu}
+    {ondblclick}
+    role={onclick ? "presentation" : undefined}
+    class="bubble-body {bgClass} {minHClass} relative z-10 overflow-hidden rounded-large w-fit max-w-[calc(100vw-5rem)] break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
+    class:rounded-l-small={selectedAlignment === "left" || neighborLeft}
+    class:border-l-8={selectedAlignment === "left" && active}
+    class:border-l-0={selectedAlignment === "left" && !active}
+    class:rounded-r-small={selectedAlignment === "right" || neighborRight}
+    class:border-r-8={selectedAlignment === "right" && active}
+    class:border-r-0={selectedAlignment === "right" && !active}
+    class:border-b-8={selectedAlignment === "center" && active}
+    class:border-b-0={selectedAlignment === "center" && !active}
+    class:bubble-border-pulse={active && pulse}
+  >
+    {#if hasProgress}
+      {#if percent === null}
+        <div
+          class="absolute top-0 h-8 {progressFillBgClass}"
+          class:left-0={!isRight}
+          class:right-0={isRight}
+          class:bubble-progress-indet={!isRight}
+          class:bubble-progress-indet-rtl={isRight}
+        ></div>
+      {:else}
+        <div
+          class="absolute top-0 h-8 {progressFillBgClass} transition-all"
+          class:left-0={!isRight}
+          class:right-0={isRight}
+          style="width: {percent}%"
+        ></div>
+      {/if}
+    {/if}
+    <div class="relative z-10 {paddingClass} {extraClass}">
       {@render children()}
     </div>
-  {/if}
+    {#if hasProgress}
+      <!-- Inverted layer: same content rendered atop the fill, clipped to the
+           filled rect. `filter: invert(1) hue-rotate(180deg)` flips all colours
+           (text, icons, inline-pill bg/fg) to a perceptually-inverted version
+           in one shot, no need to thread invert-color props through every
+           descendant. The clip-path bottom inset keeps the inversion confined
+           to the top h-8 header zone so an expanded body below renders
+           normally. Children are rendered twice; Svelte's bind:expanded on the
+           shared parent state keeps both Expandable instances in lockstep, and
+           pointer-events:none on this layer routes all clicks to the lower
+           (un-filtered) copy. -->
+      <div
+        class="bubble-progress-invert absolute inset-0 z-20 {paddingClass} {extraClass}"
+        class:bubble-progress-invert-indet={percent === null && !isRight}
+        class:bubble-progress-invert-indet-rtl={percent === null && isRight}
+        style:clip-path={percent === null
+          ? undefined
+          : isRight
+            ? `inset(0 0 calc(100% - 2rem) calc(100% - ${percent}%))`
+            : `inset(0 calc(100% - ${percent}%) calc(100% - 2rem) 0)`}
+        aria-hidden="true"
+      >
+        {@render children()}
+      </div>
+    {/if}
+  </div>
 </div>
 
 <style>

@@ -233,16 +233,16 @@
       </div>
     {/each}
   </div>
-  <!-- Edge fades: solid `bg-default-100` at the scrollable edge fading to
+  <!-- Edge fades: solid `bg-surface` at the scrollable edge fading to
        transparent towards the row, hinting that more bubbles exist past
        the viewport without using a hard cutoff. Width collapses to 0 when
        there's nothing hidden on that side. -->
   <div
-    class="absolute inset-y-0 left-0 z-30 bg-default-100 pointer-events-none stack-fade-left"
+    class="absolute inset-y-0 left-0 z-30 bg-surface pointer-events-none stack-fade-left"
     style:width={fadeLeft}
   ></div>
   <div
-    class="absolute inset-y-0 right-0 z-30 bg-default-100 pointer-events-none stack-fade-right"
+    class="absolute inset-y-0 right-0 z-30 bg-surface pointer-events-none stack-fade-right"
     style:width={fadeRight}
   ></div>
 </div>

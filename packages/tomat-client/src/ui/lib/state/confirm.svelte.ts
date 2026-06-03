@@ -5,7 +5,7 @@
  * don't have to be wired through the component tree.
  */
 
-import type { DownloadPlan } from "$lib/shared/download";
+import type { DownloadPlan } from "@tomat/shared";
 
 type ConfirmRequest = {
   title: string;

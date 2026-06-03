@@ -224,7 +224,7 @@
             type="text"
             aria-label="Search npm for toolkits"
             placeholder="Search npm for toolkits..."
-            class="bg-default-300 text-default-800 rounded-medium block w-full h-8 pl-7 pr-2 outline-none"
+            class="bg-surface-inset text-default-800 rounded-medium block w-full h-8 pl-7 pr-2 outline-none"
             value={searchQuery}
             oninput={(e) =>
               handleSearchInput((e.target as HTMLInputElement).value)}
@@ -249,7 +249,7 @@
           {@const alreadyInstalled = toolkitsState.installed.some(
             (t) => t.id === result.name || t.id === result.name.replace("/", "__"),
           )}
-          <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-large">
+          <div class="flex flex-col gap-2 p-3 bg-surface-inset rounded-large">
             <div class="flex flex-col gap-0.5">
               <div class="font-medium text-default-800 break-words">
                 {result.name}
@@ -270,7 +270,7 @@
             </div>
             <button
               type="button"
-              class="w-full text-sm px-3 py-1.5 rounded bg-default-400 text-default-800 hover:bg-green-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-400 disabled:hover:text-default-800"
+              class="w-full text-sm px-3 py-1.5 rounded bg-surface-inset-strong text-default-800 hover:bg-accent-green-500 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-inset-strong disabled:hover:text-default-800"
               disabled={alreadyInstalled || busyId === `install:${result.name}`}
               onclick={() => handleInstall(result.name)}
             >
@@ -292,7 +292,7 @@
       <div class="flex flex-col gap-2">
         <div class="text-default-600 text-sm">Installing</div>
         {#each runningJobs as job (job.id)}
-          <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-large">
+          <div class="flex flex-col gap-2 p-3 bg-surface-inset rounded-large">
             <div class="flex flex-col gap-0.5">
               <div class="font-medium text-default-800 break-words">
                 {job.label}
@@ -304,7 +304,7 @@
                 >Install output</summary
               >
               <pre
-                class="text-default-700 bg-default-400 rounded-small px-2 py-1 mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words">{job.lines
+                class="tomat-scroll-inset text-default-700 bg-surface-inset-strong rounded-small px-2 py-1 mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words">{job.lines
                   .map((l) => l.line)
                   .join("\n")}</pre>
             </details>
@@ -320,7 +320,7 @@
         {#each toolkitsState.installed as tk (tk.id)}
           {@const status = toolkitStatus(tk)}
           {@const expanded = expandedToolkits.has(tk.id)}
-          <div class="flex flex-col gap-2 p-3 bg-default-300 rounded-large">
+          <div class="flex flex-col gap-2 p-3 bg-surface-inset rounded-large">
             <div class="flex flex-col gap-0.5">
               <div class="font-medium text-default-800 break-words">
                 {tk.displayName || tk.id}
@@ -343,7 +343,7 @@
             <div class="flex flex-col gap-1.5">
               <button
                 type="button"
-                class="w-full text-sm px-3 py-1.5 rounded bg-default-400 text-default-800 hover:bg-default-500 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-400 disabled:hover:text-default-800"
+                class="w-full text-sm px-3 py-1.5 rounded bg-surface-inset-strong text-default-800 hover:bg-default-400 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-inset-strong disabled:hover:text-default-800"
                 disabled={busyId === tk.id}
                 onclick={() => handleExpandToolkit(tk)}
               >
@@ -354,7 +354,7 @@
               </button>
               <button
                 type="button"
-                class="w-full text-sm px-3 py-1.5 rounded bg-default-400 text-default-800 hover:bg-green-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-400 disabled:hover:text-default-800"
+                class="w-full text-sm px-3 py-1.5 rounded bg-surface-inset-strong text-default-800 hover:bg-accent-green-500 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-inset-strong disabled:hover:text-default-800"
                 disabled={busyId === tk.id}
                 onclick={() => handleToggleToolkit(tk)}
               >
@@ -362,7 +362,7 @@
               </button>
               <button
                 type="button"
-                class="w-full text-sm px-3 py-1.5 rounded bg-default-400 text-default-800 hover:bg-red-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-400 disabled:hover:text-default-800"
+                class="w-full text-sm px-3 py-1.5 rounded bg-surface-inset-strong text-default-800 hover:bg-accent-red-500 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-inset-strong disabled:hover:text-default-800"
                 disabled={busyId === tk.id}
                 onclick={() => confirmUninstall(tk)}
               >
@@ -383,7 +383,7 @@
                   {@const toolExpanded = expandedTools.has(toolKey)}
                   {@const missing = tool.missingRequired.length}
                   <div
-                    class="flex flex-col gap-2 p-2 bg-default-400 rounded-medium"
+                    class="flex flex-col gap-2 p-2 bg-surface-inset-strong rounded-medium"
                   >
                     <div class="flex flex-col gap-0.5">
                       <span class="font-mono text-sm text-default-800 break-all"
@@ -406,7 +406,7 @@
                       {#if tool.requiredPermissions.length > 0}
                         <button
                           type="button"
-                          class="w-full text-xs px-2 py-1 rounded bg-default-300 text-default-800 hover:bg-default-500 transition-colors cursor-pointer"
+                          class="w-full text-xs px-2 py-1 rounded bg-surface-inset text-default-800 hover:bg-surface-inset-strong transition-colors cursor-pointer"
                           onclick={() => toggleExpandTool(tk.id, tool.name)}
                         >
                           {toolExpanded ? "Hide" : "Show"} permissions ({tool
@@ -415,7 +415,7 @@
                       {/if}
                       <button
                         type="button"
-                        class="w-full text-xs px-2 py-1 rounded bg-default-300 text-default-800 hover:bg-green-600 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-default-300 disabled:hover:text-default-800"
+                        class="w-full text-xs px-2 py-1 rounded bg-surface-inset text-default-800 hover:bg-accent-green-500 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-inset disabled:hover:text-default-800"
                         disabled={busyId === toolKey ||
                           (!tool.enabled && missing > 0)}
                         title={!tool.enabled && missing > 0
@@ -434,7 +434,7 @@
                           {@const key = permissionKey(decl)}
                           {@const state = grantStateFor(tool, key)}
                           <div
-                            class="flex flex-col gap-1 p-2 bg-default-300 rounded-small"
+                            class="flex flex-col gap-1 p-2 bg-surface-inset rounded-small"
                           >
                             <div class="flex flex-col gap-0.5">
                               <span

@@ -451,7 +451,7 @@ export function flattenNpmName(name: string): string {
 // Flatten the per-kind permission object from tools.json into a single
 // PermissionDecl[] for storage / grant key derivation.
 export function flattenPermissions(
-  perms: ToolsJson["tools"][number]["permissions"],
+  perms: ToolsJson["tools"][number]["permissions"] | undefined,
 ): Array<import("@tomat/shared").PermissionDecl> {
   if (!perms) return [];
   const out: Array<import("@tomat/shared").PermissionDecl> = [];

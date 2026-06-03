@@ -3,7 +3,7 @@
 // (streamId / callId / jobId) for the client to route it.
 
 import type { AttachmentRef, TokenUsage, ToolCall } from "../domain/session.ts";
-import type { DownloadEntry, SidecarSnapshot } from "../domain/model.ts";
+import type { DownloadEntry, RequiredFile, SidecarSnapshot } from "../domain/model.ts";
 import type { ErrorCode } from "./errors.ts";
 
 // --- Client → Server -------------------------------------------------------
@@ -128,6 +128,11 @@ export type ServerToClientFrame =
   | { kind: "toolkit.snapshot" }
   // Downloads + sidecars
   | { kind: "downloads.snapshot"; items: DownloadEntry[] }
+  | {
+      kind: "requirements.snapshot";
+      required: RequiredFile[];
+      missing: RequiredFile[];
+    }
   | {
       kind: "sidecar.status";
       sidecar: SidecarSnapshot["kind"];

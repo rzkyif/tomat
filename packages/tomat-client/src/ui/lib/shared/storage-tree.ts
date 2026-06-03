@@ -5,36 +5,12 @@
  * easy to follow and unit-testable.
  */
 
+import type { StorageNode, StorageTree } from "@tomat/shared";
 import { EMBED_BASE_FILES, TTS_BASE_FILES } from "@tomat/shared";
 
-export type StorageFile = {
-  kind: "file";
-  name: string;
-  path: string;
-  size: number;
-};
-
-export type StorageFolder = {
-  kind: "folder";
-  name: string;
-  path: string;
-  size: number;
-  children: StorageNode[];
-};
-
-export type StorageNode = StorageFile | StorageFolder;
-
-export type StorageTree = {
-  models: StorageNode[];
-  sessions: StorageNode[];
-  snippets: StorageNode[];
-  total_size: number;
-  models_size: number;
-  sessions_size: number;
-  snippets_size: number;
-  settings_size: number;
-  root_path: string;
-};
+// The tree shape now lives in @tomat/shared (it's a core/client wire type);
+// re-export so existing importers of these from this module keep working.
+export type { StorageFile, StorageFolder, StorageNode, StorageTree } from "@tomat/shared";
 
 const ROOTS = ["models", "sessions", "snippets"] as const;
 

@@ -20,6 +20,9 @@
     variant?: Variant;
     surface?: Surface;
     active?: boolean;
+    /** Override the text-color classes entirely (e.g. an accent-yellow ping).
+     *  When set, replaces the variant's default color logic. */
+    colorClass?: string;
     disabled?: boolean;
     type?: "button" | "submit";
     onclick?: (e: MouseEvent) => void;
@@ -35,6 +38,7 @@
     variant = "default",
     surface = "none",
     active = false,
+    colorClass,
     disabled = false,
     type = "button",
     onclick,
@@ -56,20 +60,21 @@
   );
 
   const variantClass = $derived(
-    variant === "subtle"
-      ? active
-        ? "text-default-700"
-        : "text-default-400 hover:text-default-700"
-      : active
-        ? "text-default-900"
-        : "text-default-700 hover:text-default-900",
+    colorClass ??
+      (variant === "subtle"
+        ? active
+          ? "text-default-700"
+          : "text-default-400 hover:text-default-700"
+        : active
+          ? "text-default-900"
+          : "text-default-700 hover:text-default-900"),
   );
 
   const surfaceClass = $derived(
     {
       none: "rounded",
-      filled: "bg-default-200 rounded-medium",
-      circle: "bg-default-200 rounded-full",
+      filled: "bg-surface-inset rounded-medium",
+      circle: "bg-surface-inset rounded-full",
     }[surface],
   );
 </script>

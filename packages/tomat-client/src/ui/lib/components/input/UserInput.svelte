@@ -75,6 +75,7 @@ import { errMessage } from "@tomat/shared";
   } from "$lib/shared/capture";
   import { vadManager } from "$lib/state/vad.svelte";
   import { shortcutHandler } from "$lib/state/shortcut.svelte";
+  import { useBlink } from "$lib/composables/use-blink.svelte";
   import type { ActivationMode } from "@tomat/shared";
   import AttachmentList from "../AttachmentList.svelte";
   import Bubble from "../ui/Bubble.svelte";
@@ -172,31 +173,31 @@ import { errMessage } from "@tomat/shared";
 
   let llmStatus = $derived(serversState.serverStatuses.llama.status);
 
-  // Drives the gear-icon flash while there are pending startup downloads
-  // and Settings is closed. We toggle the bool on a 500ms interval so the
-  // button can swap between its default and hover color tokens with a
-  // smooth transition-colors tween (CSS keyframes against design tokens
-  // would have to hardcode oklch values and re-state dark-mode variants).
-  let pendingBlinkOn = $state(false);
-  $effect(() => {
-    if (!downloadsState.hasPendingStartup) {
-      pendingBlinkOn = false;
-      return;
-    }
-    const id = setInterval(() => {
-      pendingBlinkOn = !pendingBlinkOn;
-    }, 500);
-    return () => clearInterval(id);
-  });
+  // Pulses the gear yellow while there are pending startup downloads and
+  // Settings is closed. Yellow sits at the 700/900 lightness levels so it
+  // matches the adjacent default-700 icon buttons, just yellow-tinted. Interval
+  // matches the IconButton's duration-500 so the color is always mid-tween. See
+  // useBlink.
+  const settingsBlink = useBlink();
+  $effect(() => settingsBlink.run(downloadsState.hasPending));
+  const gearTone = $derived(
+    downloadsState.hasPending
+      ? settingsBlink.on
+        ? "text-accent-yellow-900"
+        : "text-accent-yellow-700"
+      : undefined,
+  );
   // True whenever the user has something to interrupt: either an LLM stream
   // or an active tool call (running or awaiting input). Drives the stop button
   // so tool calls can be aborted the same way streams are.
   let hasActiveWork = $derived(streamingState.hasActiveWork);
   let hasContent = $derived(text.trim().length > 0 || attachments.length > 0);
   let placeholderText = $derived(
-    downloadsState.hasPendingStartup
+    downloadsState.hasPending
       ? "Pending download, open settings!"
-      : vadManager.enabled && vadManager.listening
+      : downloadsState.loading
+        ? "Connecting to core..."
+        : vadManager.enabled && vadManager.listening
         ? "Listening..."
         : vadManager.enabled
           ? "Waiting for speech..."
@@ -996,7 +997,8 @@ import { errMessage } from "@tomat/shared";
       cols="1"
       class="col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-[calc(100vw-80px)] max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words"
       placeholder={placeholderText}
-      disabled={downloadsState.hasPendingStartup ||
+      disabled={downloadsState.hasPending ||
+        downloadsState.loading ||
         connectionState.state !== "connected" ||
         (llmStatus !== "Running" && llmStatus !== "Disabled")}
     ></textarea>
@@ -1013,7 +1015,7 @@ import { errMessage } from "@tomat/shared";
   <div
     class="flex items-end justify-between gap-2 text-2xl text-default-700 w-full"
   >
-    <div class="flex items-center bg-default-200 rounded-large p-1">
+    <div class="flex items-center bg-surface-inset rounded-large p-1">
       <IconButton
         icon="i-material-symbols-attach-file-rounded"
         title="Attach File"
@@ -1056,7 +1058,7 @@ import { errMessage } from "@tomat/shared";
       />
     </div>
 
-    <div class="flex items-center bg-default-200 rounded-large p-1">
+    <div class="flex items-center bg-surface-inset rounded-large p-1">
       <div
         class="relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hover:text-default-900 rounded transition-colors"
       >
@@ -1084,29 +1086,16 @@ import { errMessage } from "@tomat/shared";
         {/each}
       </div>
 
-      <div class="relative">
-        <IconButton
-          icon="i-material-symbols-settings-outline-rounded"
-          title={downloadsState.hasPendingStartup
-            ? "Pending downloads - open settings"
-            : "Settings"}
-          active={pendingBlinkOn}
-          size="lg-tight"
-          onclick={() => viewState.navigate("settings")}
-          class="transition-colors duration-300"
-        />
-        {#if downloadsState.hasPendingStartup}
-          <!-- Setup-needed badge: small red dot with an exclamation glyph
-               overlapping the gear icon. Pairs with the existing color
-               blink so the cue is impossible to miss after first pair. -->
-          <span
-            class="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-accent-red-300 text-white text-[9px] font-bold flex items-center justify-center pointer-events-none select-none"
-            aria-hidden="true"
-          >
-            !
-          </span>
-        {/if}
-      </div>
+      <IconButton
+        icon="i-material-symbols-settings-outline-rounded"
+        title={downloadsState.hasPending
+          ? "Pending downloads - open settings"
+          : "Settings"}
+        colorClass={gearTone}
+        size="lg-tight"
+        onclick={() => viewState.navigate("settings")}
+        class="transition-colors duration-500"
+      />
     </div>
 
     <div class="flex gap-2">

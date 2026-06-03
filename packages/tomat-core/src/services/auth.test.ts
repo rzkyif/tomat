@@ -159,18 +159,18 @@ Deno.test("pake: rate-limits the 21st start from the same IP", async () => {
     const msgA = new Uint8Array(32);
     for (let i = 0; i < 20; i++) {
       try {
-        auth.pakeStart(randomSid(), msgA, "x", "192.168.1.1");
+        auth.pakeStart(randomSid(), msgA, "x", "192.168.1.1", SERVER_PIN);
       } catch {
         /* expected */
       }
     }
     assertRejects_(
-      () => auth.pakeStart(randomSid(), msgA, "x", "192.168.1.1"),
+      () => auth.pakeStart(randomSid(), msgA, "x", "192.168.1.1", SERVER_PIN),
       "too many pairing attempts",
     );
     // A different IP is unaffected (fails for a different reason).
     assertRejects_(
-      () => auth.pakeStart(randomSid(), msgA, "x", "10.0.0.1"),
+      () => auth.pakeStart(randomSid(), msgA, "x", "10.0.0.1", SERVER_PIN),
       "no active pairing code",
     );
   } finally {

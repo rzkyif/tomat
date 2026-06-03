@@ -17,7 +17,7 @@
   } = $props();
 
   const variantClass = $derived(
-    variant === "raised" ? "bg-default-300" : "bg-default-200",
+    variant === "raised" ? "bg-surface-inset" : "bg-surface",
   );
 
   const padClass = $derived(

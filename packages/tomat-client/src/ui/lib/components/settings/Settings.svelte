@@ -32,10 +32,11 @@
     getConditionDeps,
     isGroupVisible,
     isSectionVisible,
+    defaultExpandedSections,
     searchFields,
   } from "@tomat/shared";
   import { useSettingsSearch } from "$lib/composables/use-settings-search.svelte";
-  import { useScrollSpy } from "$lib/composables/use-scroll-spy.svelte";
+  import { useSettingsScroll } from "$lib/composables/use-settings-scroll.svelte";
   import { useResponsiveLayout } from "$lib/composables/use-responsive-layout.svelte";
 
   // Sub-components
@@ -45,25 +46,6 @@
   import ColorPickerModal from "./ColorPickerModal.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
   import DownloadsModal from "./DownloadsModal.svelte";
-  import {
-    binarySourceToKind,
-    collectDownloadCandidates,
-    enqueueDownloads,
-    inferGroupIdFromKey,
-    isBinarySource,
-    planDownloads,
-    type DownloadPlan,
-  } from "$lib/shared/download";
-
-  // The legacy planToEnqueueSpec converted a probed plan into a Tauri-side
-  // EnqueueSpec. After the rework, models.download takes the same shape
-  // directly. Pass-through helper for compat.
-  function planToEnqueueSpec(plan: DownloadPlan, groupId: string) {
-    return {
-      source: plan.source,
-      group: (groupId as "llm" | "stt" | "tts" | "embed"),
-    };
-  }
 
   let monitors: Monitor[] = $state([]);
   let fonts: string[] = $state([]);
@@ -97,16 +79,22 @@
   let validationErrors = $state<Record<string, string>>({});
 
   const search = useSettingsSearch();
-  const scroll = useScrollSpy(SETTINGS_SCHEMA[0].id);
+  const scroll = useSettingsScroll();
   const layout = useResponsiveLayout();
 
-  const showAdvanced = $derived(
-    !!settingsState.currentSettings["appearance.settings.showAdvanced"],
+  // The single group whose sections are shown on the right. Switching it plays
+  // the layer slide (see selectGroup); the sidebar reflects it as active.
+  let selectedGroupId = $state(SETTINGS_SCHEMA[0].id);
+  // Scroll-viewport height; sizes the group to at least full height so the
+  // slide animation travels the whole panel.
+  let viewportHeight = $state(0);
+
+  const visibleGroups = $derived(SETTINGS_SCHEMA.filter((g) => isGroupVisible(g)));
+  // The one group rendered on the right (sectioned view); undefined only if the
+  // selected id somehow isn't visible.
+  const selectedGroup = $derived(
+    visibleGroups.find((g) => g.id === selectedGroupId),
   );
-  const visibleGroups = $derived(
-    SETTINGS_SCHEMA.filter((g) => isGroupVisible(g, showAdvanced)),
-  );
-  scroll.setVisibleGroups(() => visibleGroups);
 
   // Track the user's horizontal-mode threshold setting.
   $effect(() => {
@@ -120,19 +108,37 @@
     !!settingsState.currentSettings["appearance.animationsEnabled"],
   );
 
-  async function handleSidebarSelect(groupId: string) {
-    if (search.mode) {
-      search.query = "";
-      // Await so groupRefs are populated by the time we scroll.
-      await search.setMode(false);
+  async function selectGroup(groupId: string) {
+    // Re-clicking the active group (when not searching) restores its sections'
+    // default expand/collapse state instead of replaying the slide.
+    if (!search.mode && selectedGroupId === groupId) {
+      withScrollAnchor(() => resetGroupToDefault(groupId));
+      return;
     }
-    scroll.scrollTo(groupId, animationsEnabled);
+    // Search lives "above" group 0 (index -1), so exiting search slides "down"
+    // exactly like clearing the query does; later groups slide down, earlier up.
+    const fromIdx = search.mode
+      ? -1
+      : visibleGroups.findIndex((g) => g.id === selectedGroupId);
+    const toIdx = visibleGroups.findIndex((g) => g.id === groupId);
+    const dir: "up" | "down" = toIdx < fromIdx ? "up" : "down";
+    await search.slideSwap(dir, () => {
+      search.mode = false;
+      search.query = "";
+      selectedGroupId = groupId;
+      // Reset while offscreen so the new group starts at the top. Search-exit
+      // (the X button) intentionally does NOT reset, returning you where you were.
+      if (scroll.scrollEl) scroll.scrollEl.scrollTop = 0;
+    });
   }
 
   // Container width watcher driving horizontal-mode flip.
   $effect(() => layout.observe());
 
   onMount(async () => {
+    // Seed collapse state: every labeled section starts expanded except those
+    // flagged `defaultCollapsed`.
+    expandedSections = defaultExpandedSections();
     void loadPairedCores();
     try {
       const all = await platform().monitors.available();
@@ -160,66 +166,22 @@
     scroll.updateFades();
   });
 
-  // If any required HF files were missing at app startup, prompt the user
-  // with a ConfirmModal listing all of them. Wrapped in $effect so it
-  // also fires when the probe finishes after Settings has mounted. The
-  // modal mirrors the setting-change download prompt (same title /
-  // message / Download + Cancel buttons) for visual consistency.
-  //
-  // Confirm enqueues every missing file AND brings up sidecars / TTS
-  // (gated until now because no auto-downloads run at startup). Cancel
-  // closes the modal without changing anything; the cue stays so the
-  // next time the user opens Settings the prompt re-appears via the
-  // per-mount `askedThisMount` guard.
-  let askedThisMount = false;
+  // Single pending-downloads popup, driven by the core's authoritative
+  // `missing` requirements snapshot. Shows whenever something required is
+  // missing; "Do It Later" records the current missing-set so it stops
+  // nagging, but a settings change that alters the set (e.g. picking a
+  // different model) re-shows the popup with the full updated list.
+  let dismissedSignature = $state<string | null>(null);
   $effect(() => {
-    if (askedThisMount) return;
-    if (downloadsState.startupModalShown) return;
-    if (!downloadsState.hasPendingStartup) return;
-    askedThisMount = true;
-    const plans = downloadsState.pendingStartupRemaining;
-    const groups = downloadsState.pendingStartupGroupBySource;
-    confirmState.request({
-      title: "Core Required Downloads",
-      message:
-        `The following file${plans.length === 1 ? "" : "s"} need${plans.length === 1 ? "s" : ""} to be downloaded ` +
-        `so the core can run with the current configuration. Click "Do It ` +
-        `Later" to change anything first; reopening Settings will show the ` +
-        `updated download list.`,
-      confirmLabel: "Download",
-      cancelLabel: "Do It Later",
-      downloads: plans,
-      onConfirm: async () => {
-        downloadsState.startupModalShown = true;
-        const modelPlans = plans.filter((p) => !isBinarySource(p.source));
-        const binaryKinds = plans
-          .filter((p) => isBinarySource(p.source))
-          .map((p) => binarySourceToKind(p.source));
-        const items = modelPlans.map((p) =>
-          planToEnqueueSpec(p, groups[p.source] ?? "general"),
-        );
-        await enqueueDownloads(items);
-        if (binaryKinds.length > 0) {
-          try {
-            await cores().api().binaries.install(binaryKinds);
-            // Binary downloads run with the upstream URL as the WS-broadcast
-            // `source`, so they never match the synthetic `binary:<kind>`
-            // entries in pendingStartup the way model plans do. Trim them
-            // optimistically. A follow-up startup probe will resurface
-            // anything that didn't actually land.
-            downloadsState.pendingStartup =
-              downloadsState.pendingStartup.filter(
-                (p) => !isBinarySource(p.source),
-              );
-          } catch (e) {
-            console.warn("[startup] binaries.install failed:", e);
-          }
-        }
-        // Bring up every locally-managed service. Sidecar `ensure()`
-        // calls join the in-flight downloads we just enqueued via the
-        // manager's id-based dedupe and resolve once each file lands.
-        void startConfiguredServices();
-      },
+    const sig = downloadsState.missingSignature;
+    if (!downloadsState.hasPending) {
+      dismissedSignature = null;
+      return;
+    }
+    if (sig === dismissedSignature || confirmState.pending) return;
+    downloadsState.requestRequiredModal({
+      onConfirm: () => (dismissedSignature = null),
+      onCancel: () => (dismissedSignature = sig),
     });
   });
 
@@ -242,22 +204,12 @@
     }
   }
 
+  // Apply optimistically. The core recomputes the required-files snapshot and
+  // re-broadcasts it; the pending-downloads popup ($effect above) reacts with
+  // the full updated list. No pre-download probe / revert here.
   async function handleChange(key: string, value: any) {
     validateField(key, value);
     if (validationErrors[key]) return;
-
-    const prev = { ...$state.snapshot(settingsState.currentSettings) };
-    const next = { ...prev, [key]: value };
-    const candidates = collectDownloadCandidates(prev, next);
-    if (candidates.length > 0) {
-      const plans = await planDownloads(candidates);
-      if (plans.length > 0) {
-        requestDownloadConfirm(plans, inferGroupIdFromKey(key), () =>
-          tryApply(key, value),
-        );
-        return;
-      }
-    }
     await tryApply(key, value);
   }
 
@@ -358,22 +310,11 @@
     }
   }
 
+  // Apply optimistically (like handleChange); the requirements popup reacts to
+  // whatever the core then reports as missing.
   async function handlePresetSelect(fieldId: string, option: PresetOption) {
     const updates: Record<string, any> = { [fieldId]: option.id };
     if (option.defaults) Object.assign(updates, option.defaults);
-
-    const prev = { ...$state.snapshot(settingsState.currentSettings) };
-    const next = { ...prev, ...updates };
-    const candidates = collectDownloadCandidates(prev, next);
-    if (candidates.length > 0) {
-      const plans = await planDownloads(candidates);
-      if (plans.length > 0) {
-        requestDownloadConfirm(plans, inferGroupIdFromKey(fieldId), () =>
-          applyPresetUpdates(updates),
-        );
-        return;
-      }
-    }
     await applyPresetUpdates(updates);
   }
 
@@ -381,29 +322,6 @@
     await settingsState.updateSettings(updates);
     validateAllFields();
     reEvaluateDeps(...Object.keys(updates));
-  }
-
-  function requestDownloadConfirm(
-    plans: DownloadPlan[],
-    groupId: string,
-    apply: () => Promise<void>,
-  ) {
-    confirmState.request({
-      title: "Download required",
-      message: `The following file${plans.length === 1 ? "" : "s"} will be downloaded to ~/.tomat/models/:`,
-      confirmLabel: "Download",
-      downloads: plans,
-      onConfirm: async () => {
-        // Enqueue the downloads through the central manager BEFORE applying
-        // the setting. The sidecar restart triggered by the apply call will
-        // then await the same files via the manager's in-flight dedupe.
-        await enqueueDownloads(plans.map((p) => planToEnqueueSpec(p, groupId)));
-        await apply();
-      },
-      onCancel: () => {
-        settingsState.currentSettings = { ...settingsState.currentSettings };
-      },
-    });
   }
 
   function reEvaluateDeps(...keys: string[]) {
@@ -452,6 +370,49 @@
 
   const withScrollAnchor = (fn: () => void) => scroll.withAnchor(fn);
 
+  // Section keys (`${groupId}-${sectionIndex}`) for a group's labeled (thus
+  // collapsible) sections. Unlabeled sections render inline and have no key.
+  function groupLabeledSectionKeys(groupId: string): string[] {
+    const group = SETTINGS_SCHEMA.find((g) => g.id === groupId);
+    if (!group) return [];
+    const keys: string[] = [];
+    group.sections.forEach((section, si) => {
+      if (section.label) keys.push(`${groupId}-${si}`);
+    });
+    return keys;
+  }
+
+  function expandAllInGroup(groupId: string) {
+    withScrollAnchor(() => {
+      const next = new Set(expandedSections);
+      for (const key of groupLabeledSectionKeys(groupId)) next.add(key);
+      expandedSections = next;
+    });
+  }
+
+  function collapseAllInGroup(groupId: string) {
+    withScrollAnchor(() => {
+      const next = new Set(expandedSections);
+      for (const key of groupLabeledSectionKeys(groupId)) next.delete(key);
+      expandedSections = next;
+    });
+  }
+
+  // Restore a group's sections to their schema defaults (expanded unless the
+  // section is `defaultCollapsed`). Caller wraps in withScrollAnchor.
+  function resetGroupToDefault(groupId: string) {
+    const group = SETTINGS_SCHEMA.find((g) => g.id === groupId);
+    if (!group) return;
+    const next = new Set(expandedSections);
+    group.sections.forEach((section, si) => {
+      if (!section.label) return;
+      const key = `${groupId}-${si}`;
+      if (section.defaultCollapsed) next.delete(key);
+      else next.add(key);
+    });
+    expandedSections = next;
+  }
+
   const themeOverride = $derived(
     settingsState.currentSettings["appearance.settingsDefaultColor"] as string,
   );
@@ -461,9 +422,14 @@
 </script>
 
 <div style:display="contents" style:--default-base={themeOverrideHex}>
+  <!-- Fixed width (capped to the available space) instead of `w-full`, which
+       made the bubble size to its content. Content-fit width fed the
+       responsive horizontal-mode flip, a feedback loop that could settle narrow
+       when a modal overlaid the panel during its first measurement. A
+       deterministic width removes that loop entirely. -->
   <Bubble
     selectedAlignment={settingsState.getAlignment()}
-    extraClass="flex flex-col gap-3 overflow-hidden transition-all w-full h-80vh relative"
+    extraClass="flex flex-col gap-3 overflow-hidden transition-all w-[760px] max-w-[calc(100vw-5rem)] h-80vh relative"
   >
     <!-- Settings Header and Back Button -->
     <div class="flex gap-2 items-center text-2xl relative">
@@ -510,7 +476,7 @@
       <div class="flex items-center gap-2 px-1 py-1 text-sm">
         <span class="text-default-600">Editing settings for:</span>
         <select
-          class="bg-default-200 text-default-800 rounded-medium px-2 py-1 hover:cursor-pointer"
+          class="bg-surface-inset text-default-800 rounded-medium px-2 py-1 hover:cursor-pointer"
           bind:value={selectedCoreId}
           onchange={() => onSelectedCoreChanged()}
         >
@@ -524,8 +490,8 @@
     <div class="flex flex-1 overflow-hidden min-h-0 -mr-2 gap-3">
       <!-- Sidebar -->
       <SettingsSidebar
-        selectedGroupId={scroll.selectedGroupId}
-        onSelect={handleSidebarSelect}
+        {selectedGroupId}
+        onSelect={selectGroup}
         llmStatus={serversState.serverStatuses.llama}
         sttStatus={serversState.serverStatuses.whisper}
         ttsStatus={serversState.serverStatuses.tts}
@@ -535,10 +501,10 @@
       <!-- Main Panel -->
       <div class="relative flex-1 min-h-0 min-w-0">
         <div
-          class="settings-scroll overflow-y-auto pr-2 h-full"
+          class="tomat-scroll overflow-y-auto pr-2 h-full"
           bind:this={scroll.scrollEl}
-          bind:clientHeight={scroll.viewportHeight}
-          onscroll={() => scroll.onScroll(search.mode)}
+          bind:clientHeight={viewportHeight}
+          onscroll={() => scroll.updateFades()}
         >
           <div bind:this={layout.containerEl} class="relative">
             <div
@@ -550,7 +516,7 @@
                   {#each searchFields(search.query, settingsState.currentSettings) as group (group.sectionKey)}
                     <div class="flex flex-col gap-2">
                       <div
-                        class="text-sm text-default-500 font-medium uppercase tracking-wide"
+                        class="text-base text-default-500 font-medium uppercase tracking-wide"
                       >
                         {group.groupName}{group.sectionLabel
                           ? ` › ${group.sectionLabel}`
@@ -571,93 +537,89 @@
                     </div>
                   {:else}
                     <div
-                      class="bg-default-200 rounded-large px-4 py-2 text-default-600 text-base"
+                      class="bg-surface-inset rounded-large px-4 py-2 text-default-600 text-base"
                     >
                       No matching settings found.
                     </div>
                   {/each}
                 </div>
-              {:else}
-                <div class="flex flex-col gap-4">
-                  {#each visibleGroups as group, gi (group.id)}
-                    {@const isLast = gi === visibleGroups.length - 1}
-                    {#if gi > 0}
-                      <div
-                        class="h-0.5 mt-2 bg-default-400"
-                        aria-hidden="true"
-                      ></div>
-                    {/if}
-                    {@const firstRenderedSection = group.sections.find(
-                      (s) =>
-                        isSectionVisible(s, showAdvanced) &&
-                        evalCondition(
-                          s.visibleWhen,
-                          settingsState.currentSettings,
-                        ),
-                    )}
-                    {@const needsTopGap =
-                      firstRenderedSection && !firstRenderedSection.label}
-                    <section
-                      data-group-id={group.id}
-                      bind:this={scroll.groupRefs[group.id]}
-                      class="flex flex-col"
-                      style={isLast && scroll.viewportHeight
-                        ? `min-height: ${scroll.viewportHeight}px`
-                        : undefined}
-                    >
-                      <div class="sticky top-0 z-20">
-                        <SectionHeader label={group.name} level="group">
-                          {#snippet badge()}
-                            <!-- Destination chip clarifies whether a setting
-                                 lives on the paired core or on the local
-                                 client. Shown unconditionally so single-core
-                                 users still see the distinction.
-                                 Custom-sized badge (text-[10px], shade-100/300
-                                 accent) so it doesn't fight with the generic
-                                 Chip's color tokens. -->
-                            <span
-                              class="text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded-medium bg-default-400 text-default-700"
-                              title={group.destination === "core"
-                                ? "Stored on the paired core (~/.tomat/core/settings.json)"
-                                : "Stored on this device (~/.tomat/client/settings.json)"}
-                            >
-                              {group.destination === "core" ? "Core" : "Client"}
-                            </span>
-                          {/snippet}
-                        </SectionHeader>
-                      </div>
-                      <div
-                        class="flex flex-col gap-2 {needsTopGap ? 'pt-2' : ''}"
-                      >
-                        {#each group.sections as section, si}
-                          {#if isSectionVisible(section, showAdvanced)}
-                            <SettingsSection
-                              {section}
-                              sectionKey={`${group.id}-${si}`}
-                              isExpanded={expandedSections.has(
-                                `${group.id}-${si}`,
-                              )}
-                              {monitors}
-                              {fonts}
-                              {validationErrors}
-                              horizontal={layout.horizontal}
-                              onToggle={toggleSection}
-                              onChange={handleChange}
-                              onReset={resetToDefault}
-                              onPresetSelect={handlePresetSelect}
-                            />
-                          {/if}
-                        {/each}
-                      </div>
-                    </section>
-                  {/each}
-                </div>
+              {:else if selectedGroup}
+                <section
+                  data-group-id={selectedGroup.id}
+                  class="flex flex-col"
+                  style:min-height={viewportHeight
+                    ? `${viewportHeight}px`
+                    : undefined}
+                >
+                  <div class="sticky top-0 z-20">
+                    <SectionHeader label={selectedGroup.name} level="group">
+                      {#snippet badge()}
+                        <!-- Destination chip clarifies whether a setting
+                             lives on the paired core or on the local
+                             client. Shown unconditionally so single-core
+                             users still see the distinction.
+                             Custom inline badge sized to the header text
+                             height and painted with the input-field
+                             surface (bg-surface-inset). -->
+                        <span
+                          class="text-[10px] font-medium uppercase tracking-wider px-1.5 inline-flex items-center h-4 leading-none rounded-medium bg-surface-inset text-default-700"
+                          title={selectedGroup.destination === "core"
+                            ? "Stored on the paired core (~/.tomat/core/settings.json)"
+                            : "Stored on this device (~/.tomat/client/settings.json)"}
+                        >
+                          {selectedGroup.destination === "core"
+                            ? "Core"
+                            : "Client"}
+                        </span>
+                      {/snippet}
+                      {#snippet actions()}
+                        <IconButton
+                          icon="i-material-symbols-unfold-more-rounded"
+                          title="Expand all sections"
+                          size="sm"
+                          variant="subtle"
+                          onclick={() => expandAllInGroup(selectedGroup.id)}
+                        />
+                        <IconButton
+                          icon="i-material-symbols-unfold-less-rounded"
+                          title="Collapse all sections"
+                          size="sm"
+                          variant="subtle"
+                          onclick={() => collapseAllInGroup(selectedGroup.id)}
+                        />
+                      {/snippet}
+                    </SectionHeader>
+                  </div>
+                  <!-- gap-3 separates sections so each (tight) section reads
+                       as a unit with clear space before the next one. -->
+                  <div class="flex flex-col gap-3">
+                    {#each selectedGroup.sections as section, si}
+                      {#if isSectionVisible(section)}
+                        <SettingsSection
+                          {section}
+                          sectionKey={`${selectedGroup.id}-${si}`}
+                          isExpanded={expandedSections.has(
+                            `${selectedGroup.id}-${si}`,
+                          )}
+                          {monitors}
+                          {fonts}
+                          {validationErrors}
+                          horizontal={layout.horizontal}
+                          onToggle={toggleSection}
+                          onChange={handleChange}
+                          onReset={resetToDefault}
+                          onPresetSelect={handlePresetSelect}
+                        />
+                      {/if}
+                    {/each}
+                  </div>
+                </section>
               {/if}
             </div>
           </div>
         </div>
         <div
-          class="absolute left-0 right-0 bottom-0 h-6 pointer-events-none z-1 bg-gradient-to-t from-default-300 to-transparent transition-opacity duration-100 {scroll.showBottomFade
+          class="absolute left-0 right-0 bottom-0 h-6 pointer-events-none z-1 bg-gradient-to-t from-default-50 to-transparent transition-opacity duration-100 {scroll.showBottomFade
             ? 'opacity-100'
             : 'opacity-0'}"
         ></div>
@@ -669,30 +631,3 @@
     <ColorPickerModal />
   </Bubble>
 </div>
-
-<style>
-  /* Scrollbar colors track the themable default scale so a tinted Default
-     Color flows through. Light and dark variants pull from `--default-200`
-     and `--default-d-200`; hover steps to `--default-400` / `--default-d-400`
-     for a consistent darkening (and lightening in dark mode). */
-  .settings-scroll::-webkit-scrollbar {
-    width: 8px;
-  }
-  .settings-scroll::-webkit-scrollbar-track {
-    background: transparent;
-    border-radius: 4px;
-  }
-  .settings-scroll::-webkit-scrollbar-thumb {
-    background: var(--default-200);
-    border-radius: 4px;
-  }
-  .settings-scroll::-webkit-scrollbar-thumb:hover {
-    background: var(--default-400);
-  }
-  :global(html.dark) .settings-scroll::-webkit-scrollbar-thumb {
-    background: var(--default-d-200);
-  }
-  :global(html.dark) .settings-scroll::-webkit-scrollbar-thumb:hover {
-    background: var(--default-d-400);
-  }
-</style>

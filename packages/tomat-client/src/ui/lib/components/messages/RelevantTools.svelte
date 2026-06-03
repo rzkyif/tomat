@@ -148,7 +148,7 @@
           <div class="flex flex-col gap-1">
             <div class="text-accent-red-700 font-bold">Filter Error</div>
             <pre
-              class="font-mono text-accent-red-900 bg-accent-red-100 border border-accent-red-300 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre-wrap break-words">{relevantTools.errorMessage}</pre>
+              class="tomat-scroll-inset font-mono text-accent-red-900 bg-accent-red-100 border border-accent-red-300 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre-wrap break-words">{relevantTools.errorMessage}</pre>
             <div class="text-accent-red-700">
               Phase-1 candidates are kept as a fallback so the main model still
               sees tools.
@@ -167,7 +167,7 @@
               </div>
             {:else if phase.kind === "embedding"}
               <div
-                class="bg-default-200 rounded-large px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
+                class="bg-surface-inset rounded-large px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
               >
                 {#each phase.entries as tool, ti (tool.toolId ?? ti)}{#if ti > 0},
                   {/if}{tool.name}<span class="text-default-500 tabular-nums"
@@ -176,7 +176,7 @@
               </div>
             {:else}
               <div
-                class="bg-default-200 rounded-large px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
+                class="bg-surface-inset rounded-large px-4 py-2 font-mono text-default-800 whitespace-pre-wrap break-words"
               >
                 {#each phase.entries as tool, ti (tool.name + ti)}{#if ti > 0},
                   {/if}{tool.name}{/each}

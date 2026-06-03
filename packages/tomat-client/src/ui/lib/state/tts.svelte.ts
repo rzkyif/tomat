@@ -8,7 +8,6 @@
 
 import { browser } from "$app/environment";
 import { cores } from "$lib/core";
-import { TTS_BASE_FILES } from "@tomat/shared";
 import { stripEmojisForTTS, stripMarkdownForTTS } from "$lib/shared/text";
 import { settingsState } from "./settings.svelte";
 
@@ -152,13 +151,11 @@ class TTSState {
       if (this.loaded || this.loading) return;
       this.loading = true;
       try {
-        // Ensure model files are present in core's model store; downloads
-        // surface in the standard download queue.
-        await cores()
-          .api()
-          .models.download({
-            items: TTS_BASE_FILES.map((source) => ({ source, group: "tts" as const })),
-          });
+        // Don't download here: flipping `tts.enabled` makes the core add the
+        // Kokoro files to its required-files snapshot, which the single
+        // requirements popup prompts for (user-confirmed). We just try to load;
+        // if the files / `deno` worker aren't present yet, this fails
+        // gracefully and TTS loads lazily on the next synth once they land.
         await loadTtsModel();
         // Pre-warm: kokoro-js lazy-loads the per-voice tensor on the first
         // generate() call (and ORT does its JIT pass then too). Without this

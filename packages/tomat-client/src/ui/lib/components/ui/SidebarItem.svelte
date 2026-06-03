@@ -7,6 +7,8 @@
     label,
     collapsed,
     selected = false,
+    ping = false,
+    pingTone = "default",
     badge,
     onclick,
     title,
@@ -18,6 +20,12 @@
     label?: string;
     collapsed: boolean;
     selected?: boolean;
+    /** Pulse the text color to draw the eye; toggle on an interval (see
+     *  useBlink) for the attention "ping". */
+    ping?: boolean;
+    /** Ping palette: "default" pulses the grey brightness tokens, "accent"
+     *  pulses accent-yellow (a "needs action" cue, like the Update button). */
+    pingTone?: "default" | "accent";
     /** Optional badge content positioned at the icon's top-right. */
     badge?: Snippet;
     onclick: () => void;
@@ -36,13 +44,22 @@
 
   const stateClass = $derived(
     selected
-      ? "bg-default-300 text-default-900"
-      : "text-default-500 hover:text-default-700 hover:bg-default-200",
+      ? "bg-surface-inset text-default-900"
+      : pingTone === "accent"
+        // "Needs action" ping: pulse accent-yellow from the resting 500 up to
+        // 700 (on = off + 200, same direction as the gear's 700 -> 900).
+        ? ping
+          ? "text-accent-yellow-700 hover:bg-surface-inset"
+          : "text-accent-yellow-500 hover:bg-surface-inset"
+        // Default ping: grey brightness pulse (off 500 <-> on 700).
+        : ping
+          ? "text-default-700 hover:bg-surface-inset"
+          : "text-default-500 hover:text-default-700 hover:bg-surface-inset",
   );
 </script>
 
 <button
-  class="hover:cursor-pointer flex items-center h-8 pl-1.5 {padRight} gap-1.5 rounded-medium transition-[padding,colors,background-color] duration-200 {stateClass} {extraClass}"
+  class="hover:cursor-pointer flex items-center h-8 pl-1.5 {padRight} gap-1.5 rounded-medium [transition:color_500ms,background-color_200ms,padding_200ms] {stateClass} {extraClass}"
   {title}
   aria-label={ariaLabel ?? label}
   aria-pressed={ariaPressed}

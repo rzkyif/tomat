@@ -43,6 +43,27 @@ Deno.test("GET /api/v1/toolkits: empty list before any install", async () => {
   }
 });
 
+Deno.test("POST /api/v1/toolkits/embed: 503 server_unavailable when the embed model is absent", async () => {
+  const env = await setupTestEnv();
+  try {
+    const { token } = await pairOne();
+    const app = buildApp();
+    // Fresh tempdir: no embed model on disk, so the gate trips before the
+    // worker is ever spawned (a clean 503 instead of an opaque 500).
+    const res = await app.fetch(
+      new Request("http://x/api/v1/toolkits/embed", {
+        method: "POST",
+        headers: { ...bearer(token), "content-type": "application/json" },
+        body: JSON.stringify({ texts: ["hello"] }),
+      }),
+    );
+    assertEquals(res.status, 503);
+    assertEquals((await res.json()).error.code, "server_unavailable");
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("DELETE /api/v1/toolkits/:id: 404 with toolkit_not_found when id is unknown", async () => {
   const env = await setupTestEnv();
   try {

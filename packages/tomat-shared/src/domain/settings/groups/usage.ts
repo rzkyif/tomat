@@ -20,8 +20,7 @@ export const usageGroup: SettingGroup = {
         {
           id: "usage.storage",
           name: "Storage",
-          description:
-            "Downloaded models and saved sessions.\nSelect items and press Delete (or ⌘⌫) to remove them.",
+          description: "Downloaded models.\nSelect items and press Delete (or ⌘⌫) to remove them.",
           type: "storage",
           defaultValue: "",
           descriptionTier: "ondemand",

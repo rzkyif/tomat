@@ -1,6 +1,5 @@
 <script lang="ts">
   type Variant = "default" | "invisible";
-  type Surface = "default" | "subtle";
 
   type OptionValue = string | number;
   type Option = { value: OptionValue; label: string; disabled?: boolean };
@@ -11,7 +10,6 @@
     onchange,
     disabled = false,
     variant = "default",
-    surface = "default",
     ariaLabel,
     title,
     class: extraClass = "",
@@ -21,15 +19,13 @@
     onchange?: (v: string) => void;
     disabled?: boolean;
     variant?: Variant;
-    surface?: Surface;
     ariaLabel?: string;
     title?: string;
     class?: string;
   } = $props();
 
-  const surfaceClass = $derived(
-    surface === "subtle" ? "bg-default-200" : "bg-default-300",
-  );
+  // Every Select renders as one recessed inset well on the flat surface.
+  const surfaceClass = "bg-surface-inset";
 </script>
 
 {#if variant === "invisible"}

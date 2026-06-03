@@ -11,6 +11,8 @@ export { SessionsApi } from "./sessions";
 export { ChatApi } from "./chat";
 export { ModelsApi } from "./models";
 export { BinariesApi } from "./binaries";
+export { RequirementsApi } from "./requirements";
+export { StorageApi } from "./storage";
 export { ToolkitsApi } from "./toolkits";
 export { SttApi } from "./stt";
 export { TtsApi } from "./tts";

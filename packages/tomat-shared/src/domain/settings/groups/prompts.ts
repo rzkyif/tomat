@@ -17,6 +17,19 @@ export const promptsGroup: SettingGroup = {
   iconInactive: "i-material-symbols-chat-bubble-outline-rounded",
   sections: [
     {
+      fields: [
+        {
+          id: "prompts.showSystemPrompt",
+          name: "Show System Prompt Bubble",
+          description:
+            "Display the active system prompt as a collapsible bubble at the top of each session.\nThe bubble updates to reflect any snippet-triggered changes.",
+          type: "boolean",
+          defaultValue: false,
+          descriptionTier: "ondemand",
+        },
+      ],
+    },
+    {
       label: "Default System Prompt",
       fields: [
         {
@@ -65,7 +78,7 @@ export const promptsGroup: SettingGroup = {
         },
         {
           id: "prompts.defaultSystemPrompt",
-          name: "Default System Prompt",
+          name: "Prompt",
           description:
             "The system prompt sent to the agent.\nEditing this manually switches the preset to Custom.",
           type: "multiline",
@@ -75,45 +88,30 @@ export const promptsGroup: SettingGroup = {
             field: "prompts.defaultSystemPrompt.preset",
             eq: "custom",
           },
-          advanced: true,
           descriptionTier: "always",
         },
       ],
     },
     {
-      fields: [
-        {
-          id: "prompts.showSystemPrompt",
-          name: "Show System Prompt Bubble",
-          description:
-            "Display the active system prompt as a collapsible bubble at the top of each session.\nThe bubble updates to reflect any snippet-triggered changes.",
-          type: "boolean",
-          defaultValue: false,
-          descriptionTier: "ondemand",
-        },
-      ],
-    },
-    {
       label: "Context Template",
-      advanced: true,
+      defaultCollapsed: true,
       fields: [
         {
           id: "prompts.contextTemplate",
-          name: "Context Template",
+          name: "Template",
           description:
             "Template appended to the system prompt when any context setting (agent name, language, location, date/time, OS, etc.) is enabled.\nUse `{name}` for placeholders and `[name:body]` for conditional segments that disappear when the named setting is unset. Available names: agentName, language, userName, location, dateTime, os.\nThe `[toolsAvailable:body]` segment is special: it does not render in the steady-state context, but its body is appended on turns where at least one toolkit tool passes the relevance filter. Edit or remove that segment to customize the tool-use nudge.",
           type: "multiline",
           defaultValue: DEFAULT_CONTEXT_TEMPLATE,
           regex: [{ regex: "\\S", errorMessage: "Template cannot be empty" }],
           mono: true,
-          advanced: true,
           descriptionTier: "always",
         },
       ],
     },
     {
       label: "Title Generation",
-      advanced: true,
+      defaultCollapsed: true,
       fields: [
         {
           id: "prompts.titleGenerationPrompt",
@@ -123,14 +121,13 @@ export const promptsGroup: SettingGroup = {
           type: "multiline",
           defaultValue: DEFAULT_TITLE_GENERATION_PROMPT,
           regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
-          advanced: true,
           descriptionTier: "always",
         },
       ],
     },
     {
       label: "Autocorrect",
-      advanced: true,
+      defaultCollapsed: true,
       fields: [
         {
           id: "prompts.autocorrectPrompt",
@@ -140,14 +137,13 @@ export const promptsGroup: SettingGroup = {
           type: "multiline",
           defaultValue: DEFAULT_AUTOCORRECT_PROMPT,
           regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
-          advanced: true,
           descriptionTier: "always",
         },
       ],
     },
     {
       label: "Merge Transcription",
-      advanced: true,
+      defaultCollapsed: true,
       fields: [
         {
           id: "prompts.mergeTranscriptionPrompt",
@@ -157,14 +153,13 @@ export const promptsGroup: SettingGroup = {
           type: "multiline",
           defaultValue: DEFAULT_MERGE_TRANSCRIPTION_PROMPT,
           regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
-          advanced: true,
           descriptionTier: "always",
         },
       ],
     },
     {
       label: "Complexity Detection",
-      advanced: true,
+      defaultCollapsed: true,
       fields: [
         {
           id: "prompts.complexityDetectionPrompt",
@@ -174,7 +169,6 @@ export const promptsGroup: SettingGroup = {
           type: "multiline",
           defaultValue: DEFAULT_COMPLEXITY_DETECTION_PROMPT,
           regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
-          advanced: true,
           descriptionTier: "always",
         },
       ],

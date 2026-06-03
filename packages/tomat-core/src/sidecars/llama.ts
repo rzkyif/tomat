@@ -5,9 +5,8 @@
 // the SidecarManager needs to spawn `llama-server`. Caller is responsible
 // for resolving the model path; this module assumes the file exists.
 
-import { join } from "@std/path";
 import { binPath, llmPort, paths } from "../paths.ts";
-import { platformExe } from "../binaries/versions.ts";
+import { libDirFor, platformExe } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
 import type { StartOptions } from "./types.ts";
 
@@ -90,7 +89,7 @@ export function buildLlamaStartOptions(args: LlamaStartArgs): StartOptions {
       kind: "http",
       url: `http://${args.host}:${args.port}/health`,
     },
-    libraryDir: join(paths().binDir, "lib"),
+    libraryDir: libDirFor(paths().binDir, "llama-server"),
     startupTimeoutMs: 60_000,
   };
 }

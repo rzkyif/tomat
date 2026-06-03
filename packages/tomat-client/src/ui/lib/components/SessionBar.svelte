@@ -117,11 +117,9 @@
   let contextColor = $derived(
     contextRatio < 0.5
       ? "bg-accent-green-200"
-      : contextRatio < 0.75
+      : contextRatio < 0.9
         ? "bg-accent-yellow-200"
-        : contextRatio < 0.9
-          ? "bg-accent-orange-200"
-          : "bg-accent-red-200",
+        : "bg-accent-red-200",
   );
 
   function formatTokens(n: number): string {
@@ -157,7 +155,7 @@
     {#if messagesState.tokenUsage}
       <!-- Context progress bar with text inside -->
       <div
-        class="relative w-12 h-8 bg-default-200 rounded-large overflow-hidden shrink-0 border-0.25em border-default-200"
+        class="relative w-12 h-8 bg-surface-inset rounded-large overflow-hidden shrink-0 border-0.25em border-default-200"
         title="Context: {formatTokens(contextUsed)} / {formatTokens(
           contextMax,
         )}"
@@ -192,7 +190,7 @@
 
     {#if showTitle}
       <div
-        class="grid items-center min-w-0 h-8 overflow-hidden bg-default-200 rounded-large text-sm"
+        class="grid items-center min-w-0 h-8 overflow-hidden bg-surface-inset rounded-large text-sm"
       >
         <span
           class="invisible row-start-1 col-start-1 whitespace-pre px-3 py-1"

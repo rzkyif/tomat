@@ -10,10 +10,14 @@
 type ColorPickerRequest = {
   /** Element the popup positions itself relative to. */
   anchor: HTMLElement;
-  /** Hex (8-char) the popup opens with. */
-  initialHex: string;
+  /** The color the popup opens with (an `oklch(...)` string, or legacy hex). */
+  initialColor: string;
   /** Called when the user commits via the Apply button or Enter. */
   onApply: (hex: string) => void;
+  /** When true, the lightness slider is hidden and L is pinned to 0.5. Used by
+   *  "seed" colors (the default/accent/override bases) whose lightness the theme
+   *  ladders ignore: only hue/chroma/alpha matter, so editing L would mislead. */
+  lockLightness?: boolean;
 };
 
 class ColorPickerState {

@@ -7,11 +7,10 @@ export const serverGroup: SettingGroup = {
   id: "server",
   destination: "core",
   name: "Server",
-  icon: "i-material-symbols-dns-rounded",
-  iconInactive: "i-material-symbols-dns-outline-rounded",
+  icon: "i-material-symbols-host-rounded",
+  iconInactive: "i-material-symbols-host-outline-rounded",
   sections: [
     {
-      label: "Network",
       fields: [
         {
           id: "server.bindHost",
@@ -23,11 +22,6 @@ export const serverGroup: SettingGroup = {
           placeholder: "127.0.0.1",
           descriptionTier: "always",
         },
-      ],
-    },
-    {
-      label: "Updates",
-      fields: [
         {
           id: "updates.allowDowngrade",
           name: "Allow Version Downgrade",

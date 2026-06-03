@@ -18,10 +18,11 @@ import { verifyAsync } from "@noble/ed25519";
 import { errMessage } from "@tomat/shared";
 import { join } from "@std/path";
 import { binaryManifestUrl } from "../config.ts";
-import { paths } from "../paths.ts";
+import { channel, paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import signingKeys from "../../data/signing-keys.json" with { type: "json" };
-import type { BinaryManifest } from "@tomat/shared";
+import type { BinaryKind, BinaryManifest, BinaryManifestEntry } from "@tomat/shared";
+import { BINARY_KINDS, UPSTREAM_BINARIES } from "@tomat/shared";
 
 const SIG_ALGO_LABEL = "ed25519-base64";
 
@@ -33,11 +34,27 @@ export interface FetchOptions {
 }
 
 export async function loadBinaryManifest(opts: FetchOptions = {}): Promise<BinaryManifest> {
+  // Dev runs from source, so there is no published manifests/dev/binaries.json
+  // to fetch and sign-verify. The resolver config embedded in this build IS the
+  // trust anchor, so build resolver entries in-code: a dev core then pulls the
+  // LATEST upstream sidecar release at install/update time, exactly like beta.
+  if (channel() === "dev") return devManifest();
   const cached = await readCachedManifest();
   if (cached && !opts.force) return cached;
   const fetched = await fetchAndVerify(opts.signal);
   await writeCachedManifest(fetched);
   return fetched;
+}
+
+/** In-code resolver manifest for the dev channel (no network, no signature:
+ *  the config is part of this from-source build). Same shape a beta release
+ *  would publish, so the runtime resolver path is identical. */
+function devManifest(): BinaryManifest {
+  const binaries = {} as Record<BinaryKind, BinaryManifestEntry>;
+  for (const kind of BINARY_KINDS) {
+    binaries[kind] = { resolver: UPSTREAM_BINARIES[kind] };
+  }
+  return { schemaVersion: 1, binaries, signature: "" };
 }
 
 async function fetchAndVerify(signal?: AbortSignal): Promise<BinaryManifest> {

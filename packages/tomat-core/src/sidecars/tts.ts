@@ -7,12 +7,11 @@
 //            <core>/workers/tts-worker.ts <models-dir>
 
 import { join } from "@std/path";
-import { binPath } from "../paths.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
-import { binaryName } from "../binaries/versions.ts";
 import { trackSidecarPid } from "./jobctl.ts";
+import { requireWorkerDeno } from "./worker-deno.ts";
 
 const log = getLogger("tts");
 
@@ -60,8 +59,12 @@ export class TtsController {
         this.send({ kind: "load" });
       } catch (err) {
         this.loading = false;
+        // `failPending` rejects `wait` (and any concurrent waiters); the first
+        // caller then surfaces the error through `await wait` below. Do NOT
+        // also rethrow here: that would skip `await wait`, orphaning the
+        // already-rejected promise into an uncaught rejection that kills the
+        // core (e.g. when the `deno` worker binary isn't installed yet).
         this.failPending(err instanceof Error ? err : new Error(String(err)));
-        throw err;
       }
     }
     await wait;
@@ -77,7 +80,7 @@ export class TtsController {
   unload(): Promise<void> {
     if (!this.proc) return Promise.resolve();
     try {
-      this.proc.kill("SIGTERM");
+      this.proc.kill(ttsKillSignal());
     } catch {
       /* already exited */
     }
@@ -110,7 +113,7 @@ export class TtsController {
   // --- internals -----------------------------------------------------------
 
   private async spawn(): Promise<void> {
-    const denoBin = binPath(binaryName("deno"));
+    const denoBin = await requireWorkerDeno();
     const entry = this.workerEntry();
     const modelsRoot = paths().modelsDir;
 
@@ -251,6 +254,15 @@ export class TtsController {
     for (const p of this.synthsInFlight.values()) p.reject(err);
     this.synthsInFlight.clear();
   }
+}
+
+/** Signal `unload()` uses to terminate the TTS worker. Windows (Deno) has no
+ *  SIGTERM: sending it throws, the kill is swallowed, and the worker survives
+ *  with its ORT/ONNX native sessions held until core exits, so toggling TTS
+ *  leaks a worker each time. SIGKILL is the only option there, matching the
+ *  sidecar manager's platform handling. Exported for testing. */
+export function ttsKillSignal(os: typeof Deno.build.os = Deno.build.os): Deno.Signal {
+  return os === "windows" ? "SIGKILL" : "SIGTERM";
 }
 
 // Wraps caller-supplied PCM in a standard 16-bit mono WAV header.

@@ -80,9 +80,6 @@ interface BaseField {
   editableWhen?: FieldCondition;
   optionalWhen?: FieldCondition;
   optional?: boolean;
-  /** When true, hidden unless `appearance.settings.showAdvanced` is on.
-   *  Search results always include advanced fields regardless. */
-  advanced?: boolean;
   /** Controls how the description is presented:
    *  - `none`: never shown (no info button).
    *  - `ondemand`: hidden behind an info-button toggle (default for non-empty descriptions).
@@ -125,7 +122,19 @@ export type BooleanField = BaseField & {
   type: "boolean";
   defaultValue: boolean;
 };
-export type ColorField = BaseField & { type: "color"; defaultValue: string };
+export type ColorField = BaseField & {
+  type: "color";
+  defaultValue: string;
+  /** When set, this color only seeds a derived light/dark scale (its hue and
+   *  chroma are used; the theme sets each shade's lightness). The picker hides
+   *  the lightness slider and pins OKLCH L to this value, since editing
+   *  lightness would have no rendered effect. Choose the light-mode lightness
+   *  of the shade where the color is seen most (e.g. the default color uses the
+   *  bg-surface step, ~0.985); the picker still theme-inverts it, so dark mode
+   *  shows the matching dark shade. Omit for colors rendered as-is (bubbles,
+   *  shadow), which keep a free lightness slider. */
+  lockedLightness?: number;
+};
 export type ShortcutField = BaseField & {
   type: "shortcut";
   defaultValue: string;
@@ -188,13 +197,20 @@ export type SettingField =
 export type SettingType = SettingField["type"];
 
 export interface SettingSection {
+  /** A labeled section is collapsible: the label row is the collapse toggle.
+   *  An unlabeled section renders its fields inline (always visible, no
+   *  toggle). Inline sections are allowed, but a group's unlabeled sections
+   *  must come first, above any labeled (collapsible) ones; never place an
+   *  inline section below a collapsible one. */
   label?: string;
-  collapsible?: boolean;
   visibleWhen?: FieldCondition;
   expandWhen?: FieldCondition;
   fields: SettingField[];
-  /** When true, the entire section is hidden unless advanced settings are shown. */
-  advanced?: boolean;
+  /** When true, the section starts collapsed (its fields hidden behind the
+   *  section header) on a fresh load and on "reset group to defaults". Only
+   *  meaningful for labeled sections, since the label is the collapse toggle.
+   *  Unlabeled sections always render their fields inline. */
+  defaultCollapsed?: boolean;
 }
 
 /** Where the group's settings are persisted: "client" → ~/.tomat/client/settings.json
@@ -206,6 +222,10 @@ export type SettingDestination = "client" | "core";
 export interface SettingGroup {
   id: string;
   name: string;
+  /** When true, the group is omitted from the settings UI entirely (no sidebar
+   *  entry, not rendered). Used for groups that exist only to register setting
+   *  ids / a persistence destination (e.g. `cores`). */
+  hidden?: boolean;
   /** Where this group's values are persisted. Each group is single-
    *  destination; mixed groups must be split (e.g. legacy `stt` →
    *  `stt_input` + `stt_engine`). */

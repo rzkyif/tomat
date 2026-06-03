@@ -17,6 +17,7 @@ import type {
   SettingGroup,
   SettingSection,
 } from "./types.ts";
+import type { RequiredModelRef } from "../model.ts";
 
 import { generalGroup } from "./groups/general.ts";
 import { shortcutsGroup } from "./groups/shortcuts.ts";
@@ -58,6 +59,34 @@ export const EMBED_BASE_FILES: readonly string[] = [
   `${EMBED_REPO}/tokenizer_config.json`,
   `${EMBED_REPO}/onnx/model_quantized.onnx`,
 ];
+
+function isHfSpec(v: unknown): v is string {
+  return typeof v === "string" && v.startsWith("@") && v.length > 1;
+}
+
+/** Model files (HF specs) the current settings require, tagged with their
+ *  requirement group. The single source of truth consumed by both the core
+ *  (`sourcesForKind` / requirements) and the client. llm local → modelPath
+ *  (+ mmproj if image support); stt enabled+local → modelPath; tts (when
+ *  enabled) → base files; embed → base files (always, for tool-relevance RAG). */
+export function requiredModelRefs(s: Record<string, unknown>): RequiredModelRef[] {
+  const out: RequiredModelRef[] = [];
+  const llmLocal = s["llm.provider"] !== "external";
+  const sttActive = !!s["stt.enabled"] && s["stt.provider"] !== "external";
+  const imagesOn = !!s["llm.supportImages"];
+
+  const llmModel = s["llm.modelPath"];
+  if (llmLocal && isHfSpec(llmModel)) out.push({ source: llmModel, group: "llm" });
+  const mmproj = s["llm.mmprojPath"];
+  if (llmLocal && imagesOn && isHfSpec(mmproj)) out.push({ source: mmproj, group: "llm" });
+  const sttModel = s["stt.modelPath"];
+  if (sttActive && isHfSpec(sttModel)) out.push({ source: sttModel, group: "stt" });
+  if (s["tts.enabled"]) {
+    for (const f of TTS_BASE_FILES) out.push({ source: f, group: "tts" });
+  }
+  for (const f of EMBED_BASE_FILES) out.push({ source: f, group: "embed" });
+  return out;
+}
 
 export const SETTINGS_SCHEMA: SettingGroup[] = [
   generalGroup,
@@ -137,32 +166,35 @@ export function getDefaultSettings(): Record<string, unknown> {
   return defaults;
 }
 
-/** True when a field/section pair should be visible given the user's
- *  advanced-settings preference. Advanced sections hide every child; an
- *  advanced field hides itself even within a non-advanced section. */
-export function isFieldVisible(
-  field: SettingField,
-  section: SettingSection,
-  showAdvanced: boolean,
-): boolean {
-  if (showAdvanced) return true;
-  if (section.advanced) return false;
-  return !field.advanced;
+/** True when a section should be rendered in non-search mode. A section only
+ *  disappears when it has no fields; per-field `visibleWhen` is applied by the
+ *  renderer. (Collapse is a separate, purely-UI concern; a collapsed section is
+ *  still "visible" here, just rendered header-only.) */
+export function isSectionVisible(section: SettingSection): boolean {
+  return section.fields.length > 0;
 }
 
-/** True when a section should be rendered in non-search mode. Advanced
- *  sections hide entirely when `showAdvanced` is false; otherwise the
- *  section is hidden only if all of its fields are advanced. */
-export function isSectionVisible(section: SettingSection, showAdvanced: boolean): boolean {
-  if (showAdvanced) return true;
-  if (section.advanced) return false;
-  return section.fields.some((f) => !f.advanced);
+/** True when a group should appear in the settings UI. */
+export function isGroupVisible(group: SettingGroup): boolean {
+  return !group.hidden;
 }
 
-/** True when a group should appear in the sidebar in non-search mode. */
-export function isGroupVisible(group: SettingGroup, showAdvanced: boolean): boolean {
-  if (showAdvanced) return true;
-  return group.sections.some((s) => isSectionVisible(s, showAdvanced));
+/** The set of section keys (`${groupId}-${sectionIndex}`) that are expanded by
+ *  default: every labeled section in a non-hidden group that isn't flagged
+ *  `defaultCollapsed`. Used to seed the Settings panel on mount and to restore
+ *  a group's default expand/collapse state. Unlabeled sections render their
+ *  fields inline (no collapse), so they're omitted. */
+export function defaultExpandedSections(): Set<string> {
+  const expanded = new Set<string>();
+  for (const group of SETTINGS_SCHEMA) {
+    if (group.hidden) continue;
+    group.sections.forEach((section, si) => {
+      if (section.label && !section.defaultCollapsed) {
+        expanded.add(`${group.id}-${si}`);
+      }
+    });
+  }
+  return expanded;
 }
 
 export function evalCondition(

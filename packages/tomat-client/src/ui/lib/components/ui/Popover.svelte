@@ -92,18 +92,22 @@
   <div
     bind:this={backdropEl}
     class="absolute inset-0 z-50 bg-black/20 backdrop-blur"
-    onclick={onclose}
+    onpointerdown={onclose}
   >
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- Dismiss on pointerdown OUTSIDE only (not click): a press that starts
+         inside the popup (e.g. dragging a slider) and releases on the backdrop
+         must not close it. Stopping pointerdown here keeps presses that begin
+         inside from reaching the backdrop. -->
     <div
       bind:this={popupEl}
-      class="absolute bg-default-300 rounded-large p-5 flex flex-col gap-3 {extraClass}"
+      class="absolute bg-surface rounded-large p-5 shadow-xl flex flex-col gap-3 {extraClass}"
       style={popupStyle}
       role="dialog"
       tabindex="-1"
       aria-label={ariaLabel}
-      onclick={(e) => e.stopPropagation()}
+      onpointerdown={(e) => e.stopPropagation()}
     >
       {@render children()}
     </div>

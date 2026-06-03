@@ -101,7 +101,7 @@ Deno.test("writeUpdateMarker: persists attempts=0 + stagedAtMs at write time", a
 // --- performRollback (via attempts>=1 branch) -----------------------------
 
 import { binPath, paths as _paths } from "../paths.ts";
-import { binaryName, coreBinaryName } from "../binaries/versions.ts";
+import { coreBinaryName } from "../binaries/versions.ts";
 
 async function writeMarkerWithAttempts(attempts: number): Promise<void> {
   await Deno.writeTextFile(
@@ -131,7 +131,7 @@ Deno.test("handleUpdateMarkerOnBoot: returns false when rollback anchor is missi
 Deno.test("handleUpdateMarkerOnBoot: rolls back current binary to <bin>.old contents", async () => {
   const env = await setupTestEnv();
   try {
-    const currentBin = binPath(binaryName("tomat-core"));
+    const currentBin = binPath(coreBinaryName("tomat-core"));
     const oldBin = currentBin + ".old";
     await Deno.writeTextFile(currentBin, "BROKEN_V999");
     await Deno.writeTextFile(oldBin, "WORKING_V998");
@@ -162,7 +162,7 @@ Deno.test("handleUpdateMarkerOnBoot: copy-first failure falls back to two-rename
   const env = await setupTestEnv();
   const originalCopyFile = Deno.copyFile;
   try {
-    const currentBin = binPath(binaryName("tomat-core"));
+    const currentBin = binPath(coreBinaryName("tomat-core"));
     const oldBin = currentBin + ".old";
     await Deno.writeTextFile(currentBin, "BROKEN");
     await Deno.writeTextFile(oldBin, "WORKING");
@@ -197,7 +197,7 @@ Deno.test("handleUpdateMarkerOnBoot: copy-first failure falls back to two-rename
 Deno.test("handleUpdateMarkerOnBoot: a leftover <bin>.broken from a prior attempt is overwritten, not appended", async () => {
   const env = await setupTestEnv();
   try {
-    const currentBin = binPath(binaryName("tomat-core"));
+    const currentBin = binPath(coreBinaryName("tomat-core"));
     const oldBin = currentBin + ".old";
     const brokenBin = currentBin + ".broken";
     await Deno.writeTextFile(currentBin, "NEW_BROKEN");

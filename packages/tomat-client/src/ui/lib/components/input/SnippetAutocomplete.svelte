@@ -12,7 +12,7 @@
 
 {#if options.length > 0}
   <div
-    class="fixed z-50 bg-default-300 rounded-large shadow-xl border border-default-400 overflow-hidden min-w-48 max-w-80 max-h-72 overflow-y-auto pointer-events-auto"
+    class="tomat-scroll fixed z-50 bg-surface rounded-large shadow-xl border border-surface overflow-hidden min-w-48 max-w-80 max-h-72 overflow-y-auto pointer-events-auto"
     style="top: {anchor.top}px; left: {anchor.left}px;"
     role="listbox"
   >

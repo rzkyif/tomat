@@ -3,9 +3,8 @@
 // Mirrors llama.ts but for the STT sidecar. Only kicks in when the user
 // has stt.enabled=true and stt.provider="local".
 
-import { join } from "@std/path";
 import { binPath, paths, sttPort } from "../paths.ts";
-import { platformExe } from "../binaries/versions.ts";
+import { libDirFor, platformExe } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
 import type { StartOptions } from "./types.ts";
 
@@ -49,7 +48,7 @@ export function buildWhisperStartOptions(args: WhisperStartArgs): StartOptions {
       kind: "http",
       url: `http://${args.host}:${args.port}/`,
     },
-    libraryDir: join(paths().binDir, "lib"),
+    libraryDir: libDirFor(paths().binDir, "whisper-server"),
     startupTimeoutMs: 60_000,
   };
 }

@@ -330,7 +330,19 @@ class SettingsState {
     // the legacy save chain.
     const errors: unknown[] = [];
     try {
-      await platform().clientSettings.write(clientDelta);
+      // The client settings file is also where `cores().*` persists the paired
+      // cores list + selected core id. `clientSettings.write` is a full
+      // overwrite, so writing only this save's schema delta would wipe those
+      // keys (booting the app back into the welcome flow). Read-modify-write:
+      // strip the client-schema keys this save owns, keep everything else
+      // (cores, currentCoreId, ...), then overlay the fresh sparse delta.
+      const ownedKeys = new Set(Object.keys(defaults).filter((k) => destinationFor(k) !== "core"));
+      const existing = await platform().clientSettings.read();
+      const preserved: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(existing)) {
+        if (!ownedKeys.has(k)) preserved[k] = v;
+      }
+      await platform().clientSettings.write({ ...preserved, ...clientDelta });
     } catch (e) {
       console.warn("Failed to save client settings:", e);
       errors.push(e);

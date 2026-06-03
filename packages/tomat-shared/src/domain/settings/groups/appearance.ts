@@ -12,7 +12,7 @@ export const appearanceGroup: SettingGroup = {
       fields: [
         {
           id: "appearance.theme",
-          name: "Theme",
+          name: "Color Mode",
           description: "Choose between light, dark, or system-matching theme.",
           type: "select",
           defaultValue: "auto",
@@ -88,6 +88,50 @@ export const appearanceGroup: SettingGroup = {
           defaultValue: "#d8b4feff",
           descriptionTier: "ondemand",
         },
+        {
+          id: "appearance.bubbleShadowColor",
+          name: "Shadow Color",
+          description:
+            "Color of the centered drop shadow around bubbles. It inverts automatically between light and dark themes (a black shadow in light becomes white in dark). Set alpha to 0 to disable the shadow.",
+          type: "color",
+          defaultValue: "#00000033",
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "appearance.bubbleShadowDistance",
+          name: "Shadow Distance",
+          description:
+            "How far the drop shadow and blur reach out from the bubble edge.\nThe maximum keeps the effect inside the window's padding at the default text size. Accepted range: 0-40 pixels.",
+          type: "number_slider",
+          defaultValue: 20,
+          min: 0,
+          max: 40,
+          step: 1,
+          suffix: "px",
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "appearance.bubbleBlurEnabled",
+          name: "Shadow Blur",
+          description:
+            "Blur whatever is drawn behind the bubble in a halo around its edge, so it stands out from the apps behind the transparent window. Turn off for a plain drop shadow.",
+          type: "boolean",
+          defaultValue: true,
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "appearance.bubbleBlurRings",
+          name: "Shadow Blur Steps",
+          description:
+            "Number of concentric blur rings drawn around each bubble. More steps make the blur fade out more smoothly, at a higher rendering cost.",
+          type: "number_slider",
+          defaultValue: 3,
+          min: 1,
+          max: 6,
+          step: 1,
+          editableWhen: { field: "appearance.bubbleBlurEnabled", eq: true },
+          descriptionTier: "ondemand",
+        },
       ],
     },
     {
@@ -99,6 +143,7 @@ export const appearanceGroup: SettingGroup = {
           description:
             "Source color for the entire neutral scale used across the app (backgrounds, borders, text, etc.). All nine light shades and their dark variants are derived from this single hex via OKLCH lightness adjustments. Pick a desaturated near-gray for a classic neutral, or a tinted hex for a themed app.",
           type: "color",
+          lockedLightness: 0.985,
           defaultValue: "#737373ff",
           descriptionTier: "ondemand",
         },
@@ -108,6 +153,7 @@ export const appearanceGroup: SettingGroup = {
           description:
             "Override the default color for system-message bubbles (reasoning, tool call, relevant tools). Set alpha to 0 (fully transparent) to inherit the global Default Color.",
           type: "color",
+          lockedLightness: 0.985,
           defaultValue: "#00000000",
           descriptionTier: "ondemand",
         },
@@ -117,6 +163,7 @@ export const appearanceGroup: SettingGroup = {
           description:
             "Override the default color for the user input area at the bottom. Set alpha to 0 (fully transparent) to inherit the global Default Color.",
           type: "color",
+          lockedLightness: 0.985,
           defaultValue: "#00000000",
           descriptionTier: "ondemand",
         },
@@ -126,6 +173,7 @@ export const appearanceGroup: SettingGroup = {
           description:
             "Override the default color for the session bar. Set alpha to 0 (fully transparent) to inherit the global Default Color.",
           type: "color",
+          lockedLightness: 0.985,
           defaultValue: "#00000000",
           descriptionTier: "ondemand",
         },
@@ -135,6 +183,7 @@ export const appearanceGroup: SettingGroup = {
           description:
             "Override the default color for the settings panel. Set alpha to 0 (fully transparent) to inherit the global Default Color.",
           type: "color",
+          lockedLightness: 0.985,
           defaultValue: "#00000000",
           descriptionTier: "ondemand",
         },
@@ -149,6 +198,7 @@ export const appearanceGroup: SettingGroup = {
           description:
             "Source color for the red accent scale (used for errors and destructive actions). All shades are derived from this hex.",
           type: "color",
+          lockedLightness: 0.922,
           defaultValue: "#ef4444ff",
           descriptionTier: "ondemand",
         },
@@ -158,6 +208,7 @@ export const appearanceGroup: SettingGroup = {
           description:
             "Source color for the blue accent scale. All shades are derived from this hex.",
           type: "color",
+          lockedLightness: 0.922,
           defaultValue: "#3b82f6ff",
           descriptionTier: "ondemand",
         },
@@ -167,6 +218,7 @@ export const appearanceGroup: SettingGroup = {
           description:
             "Source color for the purple accent scale. All shades are derived from this hex.",
           type: "color",
+          lockedLightness: 0.922,
           defaultValue: "#a855f7ff",
           descriptionTier: "ondemand",
         },
@@ -176,31 +228,24 @@ export const appearanceGroup: SettingGroup = {
           description:
             "Source color for the green accent scale (used for success states). All shades are derived from this hex.",
           type: "color",
+          lockedLightness: 0.922,
           defaultValue: "#22c55eff",
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "appearance.accentOrange",
-          name: "Orange Accent",
-          description:
-            "Source color for the orange accent scale (used for warnings/loading). All shades are derived from this hex.",
-          type: "color",
-          defaultValue: "#f97316ff",
           descriptionTier: "ondemand",
         },
         {
           id: "appearance.accentYellow",
           name: "Yellow Accent",
           description:
-            "Source color for the yellow accent scale. All shades are derived from this hex.",
+            "Source color for the yellow accent scale (used for warnings/loading). All shades are derived from this hex.",
           type: "color",
+          lockedLightness: 0.922,
           defaultValue: "#eab308ff",
           descriptionTier: "ondemand",
         },
       ],
     },
     {
-      label: "Roundedness",
+      label: "Style",
       fields: [
         {
           id: "appearance.roundedSmall",
@@ -240,11 +285,6 @@ export const appearanceGroup: SettingGroup = {
           suffix: "px",
           descriptionTier: "ondemand",
         },
-      ],
-    },
-    {
-      label: "Animations",
-      fields: [
         {
           id: "appearance.animationsEnabled",
           name: "Enable Animations",
@@ -271,7 +311,7 @@ export const appearanceGroup: SettingGroup = {
       ],
     },
     {
-      label: "Window",
+      label: "Layout",
       fields: [
         {
           id: "layout.monitor",
@@ -310,26 +350,12 @@ export const appearanceGroup: SettingGroup = {
           ],
           descriptionTier: "ondemand",
         },
-      ],
-    },
-    {
-      label: "Settings UI",
-      fields: [
-        {
-          id: "appearance.settings.showAdvanced",
-          name: "Show Advanced Settings",
-          description: "Reveal advanced and technical settings throughout this panel.",
-          type: "boolean",
-          defaultValue: false,
-          descriptionTier: "ondemand",
-        },
         {
           id: "appearance.settings.sidebarCollapsed",
           name: "Collapse Settings Sidebar",
           description: "Shrink the settings sidebar to a thin icon strip.",
           type: "boolean",
           defaultValue: false,
-          advanced: true,
           descriptionTier: "none",
         },
         {
@@ -340,7 +366,6 @@ export const appearanceGroup: SettingGroup = {
           type: "number",
           defaultValue: 450,
           suffix: "px",
-          advanced: true,
           descriptionTier: "ondemand",
           regex: [
             {

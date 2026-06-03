@@ -93,7 +93,6 @@ export const sttInputGroup: SettingGroup = {
             "Drop the system output volume to a configurable level while voice input is active, then restore it when listening stops.\nUseful for letting your own voice be heard over media playback.",
           type: "boolean",
           defaultValue: false,
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {
@@ -108,7 +107,6 @@ export const sttInputGroup: SettingGroup = {
           step: 1,
           suffix: "%",
           visibleWhen: { field: "stt.autoVolumeEnabled", eq: true },
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {

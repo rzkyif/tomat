@@ -112,6 +112,15 @@ stay shared at `~/.tomat/models` so multi-GB weights aren't re-downloaded per
 channel. Reset dev state with `deno task clean --dev-state` (or
 `rm -rf ~/.tomat/dev`); it never touches a stable install.
 
+**Secrets in dev.** Core seals secrets (external API keys) in `secrets.enc` with
+a master key kept in the OS keychain, falling back to a `chmod 600`
+`~/.tomat/dev/core/.master-key` file when the keychain helper binary isn't built
+(the usual dev case). If you delete that file (or the keychain entry) but keep
+`secrets.enc`, the stored secrets can no longer be decrypted: core logs a loud
+warning at startup and reads fail with a clear "master key mismatch". Preserve
+`~/.tomat/dev/core/.master-key` across rebuilds, or just re-enter the secrets in
+Settings. A full `--dev-state` reset clears both together, so it's unaffected.
+
 Channels are built to **coexist and run at the same time**, not just isolate
 data. Our binaries get a channel suffix (`tomat-core` → `tomat-core-beta`), the
 desktop app is a distinct bundle (`tomat` vs `tomat-beta`, separate macOS

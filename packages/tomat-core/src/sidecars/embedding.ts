@@ -13,12 +13,11 @@
 // crashes.
 
 import { join } from "@std/path";
-import { binPath } from "../paths.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
-import { binaryName } from "../binaries/versions.ts";
 import { trackSidecarPid } from "./jobctl.ts";
+import { requireWorkerDeno } from "./worker-deno.ts";
 
 const log = getLogger("embedding");
 
@@ -69,7 +68,7 @@ export class EmbeddingController {
   }
 
   private async spawn(): Promise<void> {
-    const denoBin = binPath(binaryName("deno"));
+    const denoBin = await requireWorkerDeno();
     const entry = this.workerEntry();
     const modelsRoot = paths().modelsDir;
 

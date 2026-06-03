@@ -24,7 +24,7 @@
 </script>
 
 <div
-  class="relative h-10 bg-default-200 rounded-large overflow-hidden w-full flex items-center px-4 pr-8 {extraClass}"
+  class="relative h-10 bg-surface-inset rounded-large overflow-hidden w-full flex items-center px-4 pr-8 {extraClass}"
 >
   <input
     bind:this={el}

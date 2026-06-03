@@ -9,6 +9,8 @@ import { ChatApi } from "./chat";
 import { CoreClient, type ConnectionListener, type WsListener } from "./client";
 import { LlmApi } from "./llm";
 import { ModelsApi } from "./models";
+import { RequirementsApi } from "./requirements";
+import { StorageApi } from "./storage";
 import { PairingApi } from "./pairing";
 import { CoreSettingsApi } from "./settings";
 import { SessionsApi } from "./sessions";
@@ -45,6 +47,8 @@ class CoresRegistry {
     chat: ChatApi;
     models: ModelsApi;
     binaries: BinariesApi;
+    requirements: RequirementsApi;
+    storage: StorageApi;
     toolkits: ToolkitsApi;
     stt: SttApi;
     tts: TtsApi;
@@ -105,6 +109,8 @@ class CoresRegistry {
       chat: new ChatApi(client),
       models: new ModelsApi(client),
       binaries: new BinariesApi(client),
+      requirements: new RequirementsApi(client),
+      storage: new StorageApi(client),
       toolkits: new ToolkitsApi(client),
       stt: new SttApi(client),
       tts: new TtsApi(client),
@@ -162,6 +168,8 @@ class CoresRegistry {
     chat: ChatApi;
     models: ModelsApi;
     binaries: BinariesApi;
+    requirements: RequirementsApi;
+    storage: StorageApi;
     toolkits: ToolkitsApi;
     stt: SttApi;
     tts: TtsApi;

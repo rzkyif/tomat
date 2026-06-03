@@ -34,7 +34,7 @@
   const dirClass = $derived(direction === "column" ? "flex-col" : "flex-row");
 
   const surfaceClass = $derived(
-    surface === "transparent" ? "" : "bg-default-200",
+    surface === "transparent" ? "" : "bg-surface-inset",
   );
 </script>
 

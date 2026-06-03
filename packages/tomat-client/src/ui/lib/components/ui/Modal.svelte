@@ -50,7 +50,7 @@
   );
 
   const surfaceClass = $derived(
-    surface === "transparent" ? "" : "bg-default-300 rounded-large p-5",
+    surface === "transparent" ? "" : "bg-surface rounded-large p-5 shadow-xl",
   );
 
   $effect(() => {
@@ -71,17 +71,21 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="{positioningClass} inset-0 bg-black/20 backdrop-blur flex items-center justify-center z-50 rounded-large"
-    onclick={dismissOnBackdrop ? onclose : undefined}
+    onpointerdown={dismissOnBackdrop ? onclose : undefined}
   >
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- Dismiss on pointerdown OUTSIDE only (not click): a press that starts
+         inside the dialog (e.g. dragging a slider) and releases on the backdrop
+         must not close it. Stopping pointerdown here keeps inside-presses from
+         reaching the backdrop. -->
     <div
       class="{surfaceClass} {sizeClass} flex flex-col gap-3 {extraClass}"
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel}
       tabindex={-1}
-      onclick={(e) => e.stopPropagation()}
+      onpointerdown={(e) => e.stopPropagation()}
     >
       {@render children()}
     </div>

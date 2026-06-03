@@ -144,17 +144,17 @@
 </script>
 
 <FieldCard {field} {error} {horizontal} {onReset}>
-  <div class="flex flex-row items-center gap-2 w-full">
+  <div class="flex flex-row items-center gap-1.5 w-full">
     <button
       type="button"
       aria-label={field.name}
       class="flex-1 min-h-8 px-2 py-1 rounded-medium text-left flex flex-row items-center gap-1 flex-wrap outline-none {!editable
         ? 'opacity-60 pointer-events-none'
         : ''} {capturing
-        ? 'bg-default-300'
+        ? 'bg-surface-inset'
         : hasError
           ? 'bg-accent-red-300 border-accent-red-400'
-          : 'bg-default-300 cursor-pointer'}"
+          : 'bg-surface-inset cursor-pointer'}"
       onclick={startCapture}
     >
       {#if capturing}
@@ -169,7 +169,7 @@
             <span class="text-default-500 text-xs">+</span>
           {/if}
           <kbd
-            class="bg-default-200 text-default-800 px-1.5 py-0.5 rounded text-xs font-mono uppercase"
+            class="bg-surface-inset-strong text-default-800 px-1.5 py-0.5 rounded text-xs font-mono uppercase tracking-wide"
           >
             {seg}
           </kbd>
@@ -179,8 +179,8 @@
 
     {#if editable && currentValue}
       <IconButton
-        icon="i-material-symbols-close-rounded"
-        title="Disable shortcut"
+        icon="i-material-symbols-delete-outline-rounded"
+        title="Clear shortcut"
         size="sm"
         variant="subtle"
         onclick={clearShortcut}

@@ -34,10 +34,10 @@
 
   const surfaceClass = $derived(
     selected
-      ? "bg-default-300"
+      ? "bg-surface-inset"
       : onclick || onmousedown
-        ? "bg-default-200 hover:bg-default-300"
-        : "bg-default-200",
+        ? "bg-transparent hover:bg-surface-inset"
+        : "bg-transparent",
   );
 
   const contentLayoutClass = $derived(

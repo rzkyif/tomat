@@ -9,7 +9,7 @@ import {
 
 // Swap globalThis.fetch for a canned GitHub /releases/latest response so the
 // digest-verification branches are exercised without touching the network.
-function withMockRelease(body: unknown, fn: () => Promise<void>): () => Promise<void> {
+function withMockRelease(body: unknown, fn: () => Promise<unknown>): () => Promise<void> {
   return async () => {
     const orig = globalThis.fetch;
     __resetResolverCacheForTesting();

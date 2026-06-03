@@ -54,6 +54,7 @@ import { maybeGenerateTitle } from "./title-gen.ts";
 import { resolveEndpoint } from "./endpoint-resolver.ts";
 import { loadCoreSettings } from "./core-settings.ts";
 import { toolkitsRegistry } from "../toolkits/registry.ts";
+import { validateAndNormalizeToolArgs } from "../toolkits/validate-args.ts";
 import { type CallController, workerPool } from "../toolkits/worker-pool.ts";
 import { wsHub } from "../ws/hub.ts";
 import { AppError } from "../shared/errors.ts";
@@ -640,12 +641,35 @@ export class ChatService {
         createdAtMs: Date.now(),
       };
     }
+    // Pre-flight before dispatch: (1) re-verify the toolkit's content hash so a
+    // toolkit tampered since boot can't execute; (2) validate the model-emitted
+    // arguments against the tool's declared schema and fill defaults, so the
+    // worker receives normalized args (not raw model output).
+    let normalizedArgs: string;
+    try {
+      await toolkitsRegistry().verifyHashFresh(pending.toolkitId);
+      normalizedArgs = validateAndNormalizeToolArgs(tool, pending.arguments);
+    } catch (err) {
+      const msg = errMessage(err);
+      this.send(stream.clientId, { kind: "tool.error", callId: pending.callId, error: msg });
+      return {
+        id: newMessageId(),
+        ord: -1,
+        role: "tool",
+        callId: pending.callId,
+        toolkitId: pending.toolkitId,
+        toolName: pending.toolName,
+        status: "failed",
+        error: msg,
+        createdAtMs: Date.now(),
+      };
+    }
     const ctl = workerPool().startCall(
       {
         toolkitId: pending.toolkitId,
         tool,
         required: tool.requiredPermissions,
-        argumentsJson: pending.arguments,
+        argumentsJson: normalizedArgs,
         chatContext: {
           userMessage: lastUserText(sessionsRepo().listMessages(stream.sessionId)) ?? "",
           sessionId: stream.sessionId,

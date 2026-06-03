@@ -1,12 +1,13 @@
 /**
- * Search-mode state + the slide-swap animation between the group list and
- * the search results layer. Sequential transition: phase 1 slides the
- * current content out in the direction the next mode "leaves" toward,
- * phase 2 swaps content while offscreen on the opposite side, phase 3
- * slides it in.
+ * Search-mode state + a reusable slide-swap animation for the settings panel's
+ * content layer. `slideSwap` runs a sequential transition: phase 1 slides the
+ * current content out, phase 2 swaps it while offscreen on the opposite side,
+ * phase 3 slides the new content in. It drives both entering/exiting search
+ * and switching between setting groups (Settings.svelte computes the direction
+ * from group order).
  *
- * "up" = entering search (search lives conceptually above the group list);
- * "down" = exiting search.
+ * "up" = current content leaves upward, new content enters from below (entering
+ * search, or moving to an earlier group); "down" is the reverse.
  */
 
 import { tick } from "svelte";
@@ -20,10 +21,14 @@ export class SettingsSearch {
 
   private transitioning = false;
 
-  async setMode(active: boolean): Promise<void> {
-    if (this.mode === active || this.transitioning) return;
+  /**
+   * Slide the layer out in direction `dir`, run `swap` while it's offscreen on
+   * the opposite side, then slide the new content in. With no layer attached
+   * (tests) or animations disabled, `swap` runs synchronously and we return.
+   */
+  async slideSwap(dir: "up" | "down", swap: () => void): Promise<void> {
+    if (this.transitioning) return;
 
-    const dir: "up" | "down" = active ? "up" : "down";
     const dur = getDuration();
 
     if (this.layerEl && dur > 0) {
@@ -31,30 +36,36 @@ export class SettingsSearch {
 
       const outSign = dir === "up" ? 1 : -1;
       const inSign = -outSign;
-      const trans = `transform ${dur}ms ${CSS_EASING}, opacity ${dur}ms ${CSS_EASING}`;
+      // Slide only, no cross-fade: the layer is a single element, so a pure
+      // translate reads as one piece of content pushing the next in/out.
+      const trans = `transform ${dur}ms ${CSS_EASING}`;
 
       this.layerEl.style.transition = trans;
       this.layerEl.style.transform = `translateY(${100 * outSign}%)`;
-      this.layerEl.style.opacity = "0";
       await new Promise((r) => setTimeout(r, dur));
 
-      this.mode = active;
+      swap();
       await tick();
       this.layerEl.style.transition = "none";
       this.layerEl.style.transform = `translateY(${100 * inSign}%)`;
-      this.layerEl.style.opacity = "0";
       void this.layerEl.offsetHeight;
 
       this.layerEl.style.transition = trans;
       this.layerEl.style.transform = "";
-      this.layerEl.style.opacity = "1";
       await new Promise((r) => setTimeout(r, dur));
       this.layerEl.style.transition = "";
 
       this.transitioning = false;
     } else {
-      this.mode = active;
+      swap();
     }
+  }
+
+  async setMode(active: boolean): Promise<void> {
+    if (this.mode === active) return;
+    await this.slideSwap(active ? "up" : "down", () => {
+      this.mode = active;
+    });
   }
 
   onInput(): void {

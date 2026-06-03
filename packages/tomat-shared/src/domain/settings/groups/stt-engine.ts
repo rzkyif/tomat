@@ -8,12 +8,12 @@ import { SECURE_URL_VALIDATION } from "../types.ts";
 export const sttEngineGroup: SettingGroup = {
   id: "stt_engine",
   destination: "core",
-  name: "Speech-to-Text Engine",
+  name: "Speech-to-Text",
   icon: "i-material-symbols-graphic-eq-rounded",
   iconInactive: "i-material-symbols-graphic-eq-rounded",
   sections: [
     {
-      label: "Provider",
+      label: "Model",
       visibleWhen: { field: "stt.enabled", eq: true },
       fields: [
         {
@@ -29,20 +29,10 @@ export const sttEngineGroup: SettingGroup = {
           ],
           descriptionTier: "ondemand",
         },
-      ],
-    },
-    {
-      label: "Model",
-      visibleWhen: {
-        allOf: [
-          { field: "stt.enabled", eq: true },
-          { field: "stt.provider", eq: "local" },
-        ],
-      },
-      fields: [
         {
           id: "stt.preset",
           name: "Preset",
+          visibleWhen: { field: "stt.provider", eq: "local" },
           description:
             "Pick a starter model. Selecting a preset replaces the model path and decoding settings below. Editing any of those settings switches this to Custom.",
           type: "preset",
@@ -140,7 +130,6 @@ export const sttEngineGroup: SettingGroup = {
               errorMessage: "Must be a valid IPv4 address",
             },
           ],
-          advanced: true,
           descriptionTier: "always",
         },
         {
@@ -157,7 +146,6 @@ export const sttEngineGroup: SettingGroup = {
               errorMessage: "Port must be 1–65535",
             },
           ],
-          advanced: true,
           descriptionTier: "always",
         },
         {
@@ -167,7 +155,6 @@ export const sttEngineGroup: SettingGroup = {
           type: "command_preview",
           defaultValue: "",
           commandType: "stt",
-          advanced: true,
         },
       ],
     },

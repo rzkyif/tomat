@@ -1,13 +1,19 @@
 // Binaries manager: download + extract + install the platform-specific
 // archive for each binary kind referenced by the runtime-fetched manifest.
 //
-// Expected archive format: gzipped tar (.tar.gz) containing:
-//   <kind>(.exe)   the executable, placed at bin/<kind>(.exe)
-//   lib/*          shared libraries for this host's triple, placed at bin/lib/*
+// Two archive shapes are supported, picked by the asset's extension:
+//   .tar.gz  (llama.cpp upstream): strict layout - the executable named
+//            `<kind>(.exe)` at the root, plus `lib/*` entries. Other entries
+//            are rejected to keep the on-disk layout predictable.
+//   .zip     (whisper-server personal repo, Windows llama): lenient layout -
+//            the executable (`<kind>(.exe)`) and any shared libraries
+//            (.so/.dylib/.dll) are located wherever they sit in the archive.
 //
-// Any other tree shape is rejected to keep the on-disk layout predictable.
+// Either way the executable lands at bin/<kind>(.exe) and shared libs at
+// bin/lib/* (the dir each sidecar is launched with as its library path).
 
 import { UntarStream } from "@std/tar/untar-stream";
+import { configure, Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js";
 import { join } from "@std/path";
 import type {
   BinaryKind,
@@ -23,13 +29,29 @@ import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import { newJobId } from "../shared/ids.ts";
 import { loadBinaryManifest } from "./manifest.ts";
-import { binaryName, hostTriple } from "./versions.ts";
+import { binaryName, hostTriple, libDirFor } from "./versions.ts";
 import { resolveBinaryEntry } from "./upstream-resolver.ts";
 
 const log = getLogger("binaries");
 
+// zip-js spins up Web Workers by default; Deno's worker model differs, so run
+// inline (binaries are tens of MB - acceptable to decode on the main thread).
+configure({ useWebWorkers: false });
+
 export interface InstallResult {
   jobIds: string[];
+}
+
+// Notified after a binary is fully installed (downloaded AND extracted to
+// bin/). Distinct from the download-completion broadcast, which fires on the
+// .tar.gz finishing, before extraction. `sidecar-boot` listens here so a
+// sidecar left Disabled for a missing binary can start once it lands.
+type BinaryInstalledListener = (kind: BinaryKind) => void;
+const binaryInstalledListeners = new Set<BinaryInstalledListener>();
+
+export function onBinaryInstalled(fn: BinaryInstalledListener): () => void {
+  binaryInstalledListeners.add(fn);
+  return () => binaryInstalledListeners.delete(fn);
 }
 
 /** Per-binary installed-version index. Updated on successful install /
@@ -200,14 +222,6 @@ export class BinariesManager {
     return { jobId };
   }
 
-  // Used by manager.start() / boot flow.
-  async installMissing(): Promise<InstallResult> {
-    const missing = await this.missingKinds();
-    if (missing.length === 0) return { jobIds: [] };
-    log.info(`installing missing binaries: ${missing.join(", ")}`);
-    return await this.install(missing);
-  }
-
   private async missingKinds(): Promise<BinaryKind[]> {
     const out: BinaryKind[] = [];
     for (const kind of BINARY_KINDS) {
@@ -234,7 +248,9 @@ export class BinariesManager {
       throw new AppError("binary_not_found", `kind ${kind} has no entry for triple ${triple}`);
     }
     const jobId = newJobId();
-    const stagingPath = join(paths().stagingDir, `${kind}-${jobId}.tar.gz`);
+    const ext = resolved.url.toLowerCase().endsWith(".zip") ? "zip" : "tar.gz";
+    const relPath = `staging/${kind}-${jobId}.${ext}`;
+    const stagingPath = join(paths().stagingDir, `${kind}-${jobId}.${ext}`);
 
     // Run the download + extract in the background; the WS shows progress.
     void (async () => {
@@ -242,7 +258,7 @@ export class BinariesManager {
         const downloaded = await downloadManager().enqueue({
           source: resolved.url,
           url: resolved.url,
-          relPath: `staging/${kind}-${jobId}.tar.gz`,
+          relPath,
           destination: "binaries",
           groupId: `binary:${kind}`,
           sha256: resolved.sha256,
@@ -252,6 +268,13 @@ export class BinariesManager {
         await Deno.remove(downloaded);
         await writeInstalledVersion(kind, resolved.version);
         log.info(`${kind}: installed v${resolved.version}`);
+        for (const fn of binaryInstalledListeners) {
+          try {
+            fn(kind);
+          } catch (err) {
+            log.warn(`binary-installed listener for ${kind}: ${errMessage(err)}`);
+          }
+        }
       } catch (err) {
         log.error(`${kind}: install failed: ${errMessage(err)}`);
       } finally {
@@ -278,18 +301,37 @@ export function __resetForTesting(): void {
 
 // --- archive extraction ----------------------------------------------------
 
-// Extracts a .tar.gz at `archivePath` into `targetDir`. The archive must
-// contain exactly two kinds of entries:
-//   - the executable named `<kind>(.exe)` (placed at <targetDir>/<exeName>)
-//   - any number of entries under `lib/` (placed at <targetDir>/lib/...)
-// Anything else is rejected.
-async function extractArchive(
+// Dispatch on the archive extension. `.zip` uses the lenient extractor; every
+// other archive is treated as `.tar.gz`. Exported for testing.
+export async function extractArchive(
+  archivePath: string,
+  targetDir: string,
+  kind: BinaryKind,
+): Promise<void> {
+  if (archivePath.toLowerCase().endsWith(".zip")) {
+    return await extractZip(archivePath, targetDir, kind);
+  }
+  return await extractTarGz(archivePath, targetDir, kind);
+}
+
+// Extracts a .tar.gz at `archivePath` into `targetDir`. Lenient, like the .zip
+// path: the executable (`<kind>(.exe)`) and any shared libraries (.so/.dylib,
+// including versioned SONAMEs) are located by BASENAME wherever they sit in the
+// archive. Real release tarballs nest everything under a tag-named dir (e.g.
+// `llama-bNNNN/llama-server`, `llama-bNNNN/libggml-base.so`) and ship many
+// extra binaries + a LICENSE, so a strict "exe-at-root + lib/* only" layout
+// would reject them. The exe lands at <targetDir>/<exeName>, libs at
+// <targetDir>/lib/<kind>/<basename> (per-kind, no collisions); the SONAME
+// symlink chain (libfoo.so -> libfoo.so.0 -> libfoo.so.0.X) is recreated so the
+// dynamic loader resolves it; everything else is ignored.
+async function extractTarGz(
   archivePath: string,
   targetDir: string,
   kind: BinaryKind,
 ): Promise<void> {
   const exeName = binaryName(kind);
-  await Deno.mkdir(join(targetDir, "lib"), { recursive: true });
+  const libDir = libDirFor(targetDir, kind);
+  await Deno.mkdir(libDir, { recursive: true });
 
   const file = await Deno.open(archivePath, { read: true });
   const gunzip = new DecompressionStream("gzip");
@@ -297,25 +339,79 @@ async function extractArchive(
 
   let exeFound = false;
   for await (const entry of entries) {
-    const name = entry.path;
-    if (name === exeName) {
+    const base = entry.path.split("/").pop() ?? entry.path;
+    const flag = entry.header.typeflag;
+    if (flag === "5" /* directory */) {
+      await entry.readable?.cancel();
+      continue;
+    }
+    if (flag === "2" /* symlink: the SONAME chain for shared libs */) {
+      await entry.readable?.cancel();
+      const linkname = (entry.header as { linkname?: string }).linkname ?? "";
+      if (isSharedLib(base) && linkname) {
+        const targetBase = linkname.split("/").pop() ?? linkname;
+        const dest = join(libDir, base);
+        await Deno.remove(dest).catch(() => {});
+        await Deno.symlink(targetBase, dest).catch(() => {});
+      }
+      continue;
+    }
+    if (base === exeName) {
       await writeStreamTo(entry.readable, join(targetDir, exeName), 0o755);
       exeFound = true;
-    } else if (name.startsWith("lib/")) {
-      const out = join(targetDir, name);
-      await Deno.mkdir(dirOf(out), { recursive: true });
-      await writeStreamTo(entry.readable, out, 0o644);
-    } else if (entry.header.typeflag === "5" /* directory */) {
-      // ignore
-      await entry.readable?.cancel();
+    } else if (isSharedLib(base)) {
+      await writeStreamTo(entry.readable, join(libDir, base), 0o644);
     } else {
-      await entry.readable?.cancel();
-      throw new AppError("extract_failed", `unexpected archive entry for ${kind}: ${name}`);
+      await entry.readable?.cancel(); // other binaries, licenses, READMEs
     }
   }
   if (!exeFound) {
     throw new AppError("extract_failed", `archive for ${kind} missing ${exeName}`);
   }
+}
+
+// Extracts a `.zip` at `archivePath` into `targetDir`, locating the executable
+// (`<kind>(.exe)`) and any shared libraries (.so/.dylib/.dll) wherever they sit
+// in the archive: the exe lands at <targetDir>/<exeName>, libs at
+// <targetDir>/lib/<kind>/<basename> (per-kind so same-named libs from different
+// sidecars never collide). Tolerant of extra files (READMEs, licenses).
+async function extractZip(archivePath: string, targetDir: string, kind: BinaryKind): Promise<void> {
+  const exeName = binaryName(kind);
+  const libDir = libDirFor(targetDir, kind);
+  await Deno.mkdir(libDir, { recursive: true });
+
+  const bytes = await Deno.readFile(archivePath);
+  const reader = new ZipReader(new Uint8ArrayReader(bytes));
+  let exeFound = false;
+  try {
+    for (const entry of await reader.getEntries()) {
+      if (entry.directory || !entry.getData) continue;
+      const base = entry.filename.split("/").pop() ?? entry.filename;
+      if (base === exeName) {
+        const data = await entry.getData(new Uint8ArrayWriter());
+        await writeBytesTo(data, join(targetDir, exeName), 0o755);
+        exeFound = true;
+      } else if (isSharedLib(base)) {
+        const data = await entry.getData(new Uint8ArrayWriter());
+        await writeBytesTo(data, join(libDir, base), 0o644);
+      }
+    }
+  } finally {
+    await reader.close();
+  }
+  if (!exeFound) {
+    throw new AppError("extract_failed", `archive for ${kind} missing ${exeName}`);
+  }
+}
+
+// Matches shared-library filenames: libfoo.so, libfoo.so.1.2, foo.dylib, foo.dll.
+function isSharedLib(name: string): boolean {
+  return /\.(so|dylib|dll)(\.\d+)*$/i.test(name);
+}
+
+async function writeBytesTo(bytes: Uint8Array, outPath: string, mode: number): Promise<void> {
+  await Deno.writeFile(outPath, bytes);
+  if (Deno.build.os !== "windows") await Deno.chmod(outPath, mode);
 }
 
 async function writeStreamTo(
@@ -344,11 +440,6 @@ async function writeStreamTo(
   if (Deno.build.os !== "windows") {
     await Deno.chmod(outPath, mode);
   }
-}
-
-function dirOf(path: string): string {
-  const i = path.lastIndexOf("/");
-  return i < 0 ? "." : path.substring(0, i);
 }
 
 async function fileExists(path: string): Promise<boolean> {

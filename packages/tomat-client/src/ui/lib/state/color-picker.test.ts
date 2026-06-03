@@ -14,21 +14,25 @@ describe("colorPickerState", () => {
 
   it("open() stores the request, close() clears it", () => {
     const anchor = {} as HTMLElement;
-    colorPickerState.open({ anchor, initialHex: "#aabbccff", onApply: () => {} });
-    expect(colorPickerState.pending?.initialHex).toBe("#aabbccff");
+    colorPickerState.open({
+      anchor,
+      initialColor: "oklch(0.7 0.1 250 / 1)",
+      onApply: () => {},
+    });
+    expect(colorPickerState.pending?.initialColor).toBe("oklch(0.7 0.1 250 / 1)");
     colorPickerState.close();
     expect(colorPickerState.pending).toBeNull();
   });
 
-  it("apply(hex) clears pending and invokes the onApply callback", () => {
+  it("apply(color) clears pending and invokes the onApply callback", () => {
     const onApply = vi.fn();
     colorPickerState.open({
       anchor: {} as HTMLElement,
-      initialHex: "#000000ff",
+      initialColor: "oklch(0 0 0 / 1)",
       onApply,
     });
-    colorPickerState.apply("#112233ff");
-    expect(onApply).toHaveBeenCalledWith("#112233ff");
+    colorPickerState.apply("oklch(0.2 0.05 250 / 1)");
+    expect(onApply).toHaveBeenCalledWith("oklch(0.2 0.05 250 / 1)");
     expect(colorPickerState.pending).toBeNull();
   });
 

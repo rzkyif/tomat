@@ -27,6 +27,9 @@ import { chatService } from "../services/chat.ts";
 import { downloadManager } from "../downloads/manager.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
 import { subscribeUpdate } from "../update/self-updater.ts";
+import { onRequirementsChanged, notifyRequirementsChanged } from "../services/requirements.ts";
+import { subscribeCoreSettings } from "../services/core-settings.ts";
+import { onBinaryInstalled } from "../binaries/manager.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 
@@ -255,8 +258,36 @@ class WsHub {
   private wireListenersOnce(): void {
     if (this.listenersWired) return;
     this.listenersWired = true;
+
+    // Rebroadcast the authoritative requirements snapshot whenever it's
+    // recomputed (settings change / download completion / binary install).
+    onRequirementsChanged((snap) => {
+      this.broadcastAll({
+        kind: "requirements.snapshot",
+        required: snap.required,
+        missing: snap.missing,
+      });
+    });
+    subscribeCoreSettings(() => void notifyRequirementsChanged());
+    onBinaryInstalled(() => void notifyRequirementsChanged());
+
+    // Track per-download status so a recompute fires only on edges that can
+    // change `missing`, not on every progress tick: a row reaching "Completed"
+    // (a file becoming present) or a tracked row disappearing (the user cleared
+    // a completed download, which can re-expose a now-missing file).
+    const lastDownloadStatus = new Map<string, string>();
     downloadManager().subscribe((snap) => {
       this.broadcastAll({ kind: "downloads.snapshot", items: snap });
+      const currentIds = new Set(snap.map((e) => e.id));
+      let changed = false;
+      for (const e of snap) {
+        const prev = lastDownloadStatus.get(e.id);
+        if (prev !== "Completed" && e.status === "Completed") changed = true;
+        lastDownloadStatus.set(e.id, e.status);
+      }
+      const removed = [...lastDownloadStatus.keys()].filter((id) => !currentIds.has(id));
+      for (const id of removed) lastDownloadStatus.delete(id);
+      if (changed || removed.length > 0) void notifyRequirementsChanged();
     });
     sidecarManager().subscribe((snap) => {
       this.broadcastAll({

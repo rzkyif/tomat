@@ -253,6 +253,32 @@ export async function listSecretNames(): Promise<string[]> {
   return Object.keys(bag).sort();
 }
 
+/** Boot-time integrity check (NON-mutating: never generates a key). If a sealed
+ *  vault exists but no master key can be found (OS keychain empty AND no
+ *  .master-key file), the stored secrets can't be decrypted - surface that at
+ *  startup so the operator can restore the key instead of hitting an opaque
+ *  failure mid-request. Common in dev when a rebuild drops the keychain entry /
+ *  file but leaves secrets.enc behind. */
+export async function warnIfVaultUnreadable(): Promise<void> {
+  let blob: Uint8Array;
+  try {
+    blob = await Deno.readFile(paths().secretsEncFile);
+  } catch {
+    return; // no vault
+  }
+  if (blob.byteLength <= NONCE_LEN) return; // empty vault, nothing sealed
+  const inKeychain = await keychainGet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).catch(() => null);
+  if (inKeychain) return;
+  const onDisk = await readMasterKeyFile().catch(() => null);
+  if (onDisk) return;
+  log.warn(
+    `secrets.enc exists but no master key was found (OS keychain empty and no ` +
+      `${masterKeyPath()}). Stored secrets can't be decrypted; restore the ` +
+      `master key or re-enter your secrets in Settings. In dev, preserve ` +
+      `${masterKeyPath()} across rebuilds (see DEVELOPMENT.md).`,
+  );
+}
+
 function decodeBase64(s: string): Uint8Array {
   const bin = atob(s);
   const out = new Uint8Array(bin.length);

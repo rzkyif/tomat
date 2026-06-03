@@ -16,6 +16,7 @@ import { initSidecarBoot } from "./services/sidecar-boot.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
 import { shutdownJobctl } from "./sidecars/jobctl.ts";
 import { loadCoreSettings } from "./services/core-settings.ts";
+import { warnIfVaultUnreadable } from "./services/secrets.ts";
 import { tlsServeOptions } from "./services/tls.ts";
 
 async function main(): Promise<void> {
@@ -85,6 +86,12 @@ async function main(): Promise<void> {
       log.error(`toolkit verifyAllOnBoot failed: ${errMessage(err)}`);
     });
 
+  // Surface an unreadable secrets vault (sealed secrets.enc but no master key)
+  // at startup rather than mid-request. Background, non-mutating.
+  void warnIfVaultUnreadable().catch((err) => {
+    log.warn(`secrets vault check failed: ${errMessage(err)}`);
+  });
+
   // Kick off llama / whisper sidecar boot based on the persisted settings.
   // Runs in the background. `chat.start` and `/stt/transcribe` against a
   // sidecar that hasn't bound its port yet return a clear error; the
@@ -123,7 +130,18 @@ async function main(): Promise<void> {
         downloadManager().shutdown();
         void sidecarManager().shutdown();
         void shutdownJobctl();
-        void server.shutdown().finally(() => Deno.exit(0));
+        // Under `deno run --watch` (dev), the watcher sends SIGTERM to request a
+        // graceful restart and re-runs this module in the same process. Calling
+        // Deno.exit() here would hard-kill the watcher and end the dev session,
+        // so we only shut the server down and let `await server.finished` return
+        // so the watcher can restart. In standalone/compiled core we must exit
+        // explicitly, since stray timers/sidecars could otherwise keep the loop
+        // alive after the server closes.
+        if (Deno.env.get("TOMAT_DEV_WATCH")) {
+          void server.shutdown();
+        } else {
+          void server.shutdown().finally(() => Deno.exit(0));
+        }
       });
     } catch {
       /* SIGTERM unsupported on Windows */

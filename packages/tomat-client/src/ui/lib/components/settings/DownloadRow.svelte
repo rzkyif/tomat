@@ -93,7 +93,7 @@
           title="Cancel download"
           size="sm"
           variant="subtle"
-          class="hover:bg-default-300"
+          class="hover:bg-surface-inset"
           onclick={() => downloadsState.cancel(item.id)}
         />
       </div>
@@ -104,7 +104,7 @@
           title="Remove from queue"
           size="sm"
           variant="subtle"
-          class="hover:bg-default-300"
+          class="hover:bg-surface-inset"
           onclick={() => downloadsState.cancel(item.id)}
         />
       </div>
@@ -114,7 +114,7 @@
         title="Reveal in file manager"
         size="sm"
         variant="subtle"
-        class="hover:bg-default-300"
+        class="hover:bg-surface-inset"
         onclick={() => downloadsState.reveal(item.abs_path)}
       />
       <div class={xWrapClass}>
@@ -123,7 +123,7 @@
           title="Remove from list"
           size="sm"
           variant="subtle"
-          class="hover:bg-default-300"
+          class="hover:bg-surface-inset"
           onclick={() => downloadsState.remove(item.id)}
         />
       </div>
@@ -141,7 +141,7 @@
           title="Remove from list"
           size="sm"
           variant="subtle"
-          class="hover:bg-default-300"
+          class="hover:bg-surface-inset"
           onclick={() => downloadsState.remove(item.id)}
         />
       </div>
@@ -151,7 +151,7 @@
         title="Retry download"
         size="sm"
         variant="subtle"
-        class="hover:bg-default-300"
+        class="hover:bg-surface-inset"
         onclick={() => downloadsState.retry(item.id)}
       />
       <div class={xWrapClass}>
@@ -160,7 +160,7 @@
           title="Remove from list"
           size="sm"
           variant="subtle"
-          class="hover:bg-default-300"
+          class="hover:bg-surface-inset"
           onclick={() => downloadsState.remove(item.id)}
         />
       </div>

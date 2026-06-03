@@ -26,7 +26,6 @@ export const DIST_DIR = join(REPO_ROOT, "dist");
 export const ENV_PATH = join(REPO_ROOT, ".env");
 export const ENV_EXAMPLE_PATH = join(REPO_ROOT, ".env.example");
 export const SIGNING_KEYS_PATH = join(CORE_DIR, "data/signing-keys.json");
-export const UPSTREAM_BINARIES_PATH = join(WEBSITE_DIR, "data/upstream-binaries.json");
 export const CONFIG_PATH = join(CORE_DIR, "src/config.ts");
 
 // ---------------------------------------------------------------------------

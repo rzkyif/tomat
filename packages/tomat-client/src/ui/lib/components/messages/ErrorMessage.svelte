@@ -46,7 +46,7 @@
   {errorMessage}
   {#if errorDetail}
     <div class="error-code-wrapper">
-      <div class="error-code-scroller">
+      <div class="error-code-scroller tomat-scroll-dark">
         <pre><code>{errorDetail}</code></pre>
       </div>
     </div>
@@ -58,25 +58,11 @@
     overflow: hidden;
     border-radius: 6px;
     margin-top: 0.5rem;
-    background-color: #1e1e1e;
+    background-color: var(--code-bg);
   }
   .error-code-scroller {
     overflow-x: auto;
     overflow-y: clip;
-    &::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    &::-webkit-scrollbar-track {
-      background: rgba(255, 255, 255, 0.05);
-    }
-    &::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.2);
-      border-radius: 4px;
-    }
-    &::-webkit-scrollbar-thumb:hover {
-      background: rgba(255, 255, 255, 0.3);
-    }
   }
   pre {
     display: flex;

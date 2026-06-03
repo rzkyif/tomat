@@ -25,25 +25,11 @@
     withScrollAnchor: (fn: () => void) => void;
   }>();
 
-  const showAdvanced = $derived(
-    !!settingsState.currentSettings["appearance.settings.showAdvanced"],
-  );
   const collapsed = $derived(
     !!settingsState.currentSettings["appearance.settings.sidebarCollapsed"],
   );
 
-  const visibleGroups = $derived(
-    SETTINGS_SCHEMA.filter((g) => isGroupVisible(g, showAdvanced)),
-  );
-
-  function toggleAdvanced() {
-    withScrollAnchor(() => {
-      settingsState.updateSetting(
-        "appearance.settings.showAdvanced",
-        !showAdvanced,
-      );
-    });
-  }
+  const visibleGroups = $derived(SETTINGS_SCHEMA.filter((g) => isGroupVisible(g)));
 
   function toggleCollapse() {
     withScrollAnchor(() => {
@@ -63,20 +49,20 @@
   // Mirrors the bg half of ServerStatusChip's colorMap so collapsed dots
   // share their expanded-chip colour.
   const chipBgMap: Record<ServerStatus, string> = {
-    Disabled: "bg-default-200",
+    Disabled: "bg-surface-inset",
     Error: "bg-accent-red-200",
-    Loading: "bg-accent-orange-200",
+    Loading: "bg-accent-yellow-200",
     Running: "bg-accent-green-200",
   };
 
 </script>
 
-<div class="flex flex-col gap-2 overflow-y-auto justify-between">
+<div class="tomat-scroll flex flex-col gap-2 overflow-y-auto justify-between">
   <div class="flex flex-col gap-1">
     <!-- h-7 (matches the sticky group header) so the icon's vertical center
          lines up with the h2 text when the panel is scrolled to the top. -->
     <button
-      class="hover:cursor-pointer text-default-500 hover:text-default-700 hover:bg-default-200 w-fit flex items-center gap-2 h-6.5 pl-1.5 pr-1.5 rounded-medium transition-colors"
+      class="hover:cursor-pointer text-default-500 hover:text-default-700 hover:bg-surface-inset w-fit flex items-center gap-2 h-6.5 pl-1.5 pr-1.5 rounded-medium transition-colors"
       onclick={toggleCollapse}
       title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -141,22 +127,6 @@
     {/if}
 
     <DownloadsButton {collapsed} />
-
-    <SidebarItem
-      icon={showAdvanced
-        ? "i-material-symbols-toggle-on"
-        : "i-material-symbols-toggle-off-outline"}
-      label="Advanced Fields"
-      {collapsed}
-      selected={showAdvanced}
-      title={collapsed
-        ? showAdvanced
-          ? "Hide advanced fields"
-          : "Show advanced fields"
-        : undefined}
-      ariaPressed={showAdvanced}
-      onclick={toggleAdvanced}
-    />
 
     <!-- Versioned update affordance. Shows "Tomat Client vX.X.X" at rest;
          drives the combined client + core + sidecar update flow on click. -->

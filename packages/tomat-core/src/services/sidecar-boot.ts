@@ -11,8 +11,10 @@ import { errMessage } from "@tomat/shared";
 import { buildWhisperStartOptions, whisperStartArgsFromSettings } from "../sidecars/whisper.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
 import { loadCoreSettings, subscribeCoreSettings } from "./core-settings.ts";
-import { ensureKindModels } from "./model-ensure.ts";
 import { downloadManager } from "../downloads/manager.ts";
+import { onBinaryInstalled } from "../binaries/manager.ts";
+import { binaryName } from "../binaries/versions.ts";
+import { binPath } from "../paths.ts";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("sidecar-boot");
@@ -92,9 +94,22 @@ export async function initSidecarBoot(): Promise<void> {
       }
     })();
   });
+  // Binary installs don't surface through the download-completion hook above:
+  // their model `groupId` is `binary:<kind>` and the .tar.gz download reports
+  // Completed *before* extraction finishes, so the on-disk executable isn't
+  // there yet at that point. `onBinaryInstalled` fires after extraction, so a
+  // sidecar whose binary was missing (and was therefore left Disabled) can
+  // start once its binary actually lands.
+  onBinaryInstalled((kind) => {
+    void (async () => {
+      const s = await loadCoreSettings();
+      if (kind === "llama-server") await applyLlama(s).catch(logErr("llama"));
+      if (kind === "whisper-server") await applyWhisper(s).catch(logErr("whisper"));
+    })();
+  });
 }
 
-async function applyLlama(settings: Record<string, unknown>): Promise<void> {
+export async function applyLlama(settings: Record<string, unknown>): Promise<void> {
   const args = llamaStartArgsFromSettings(settings);
   if (!args) {
     await sidecarManager().stop("llama");
@@ -102,15 +117,33 @@ async function applyLlama(settings: Record<string, unknown>): Promise<void> {
   }
   if (!(await fileExists(args.modelPath))) {
     log.warn(
-      `llama-server model not on disk: ${args.modelPath}; enqueueing ` +
-        `download; sidecar stays Disabled until the file lands`,
+      `llama-server model not on disk: ${args.modelPath}; sidecar stays ` +
+        `Disabled until the user downloads it (requirements flow). The ` +
+        `download-completion hook re-applies once the file lands`,
     );
     await sidecarManager().stop("llama");
-    // Fire and forget; the download-completion hook in initSidecarBoot
-    // will re-apply once the model finishes.
-    ensureKindModels("llm").catch((err) => {
-      log.warn(`llm model ensure failed: ${errMessage(err)}`);
-    });
+    return;
+  }
+  // A configured-but-missing mmproj would be passed to llama-server as
+  // `--mmproj <missing>`, which makes the whole sidecar fail to boot (not just
+  // vision). The requirements flow lists mmproj for download; until it lands,
+  // stay Disabled rather than spawn a doomed process. The download-completion
+  // hook re-applies once the file arrives.
+  if (args.mmprojPath && !(await fileExists(args.mmprojPath))) {
+    log.warn(
+      `llama-server mmproj not on disk: ${args.mmprojPath}; sidecar stays ` +
+        `Disabled until the user downloads it (requirements flow)`,
+    );
+    await sidecarManager().stop("llama");
+    return;
+  }
+  if (!(await fileExists(binPath(binaryName("llama-server"))))) {
+    log.warn(
+      `llama-server binary not installed; sidecar stays Disabled until it ` +
+        `is downloaded (the client re-prompts the pending download on the ` +
+        `next settings change)`,
+    );
+    await sidecarManager().stop("llama");
     return;
   }
   await sidecarManager().restart("llama", buildLlamaStartOptions(args));
@@ -124,13 +157,20 @@ async function applyWhisper(settings: Record<string, unknown>): Promise<void> {
   }
   if (!(await fileExists(args.modelPath))) {
     log.warn(
-      `whisper-server model not on disk: ${args.modelPath}; enqueueing ` +
-        `download; sidecar stays Disabled until the file lands`,
+      `whisper-server model not on disk: ${args.modelPath}; sidecar stays ` +
+        `Disabled until the user downloads it (requirements flow). The ` +
+        `download-completion hook re-applies once the file lands`,
     );
     await sidecarManager().stop("whisper");
-    ensureKindModels("stt").catch((err) => {
-      log.warn(`stt model ensure failed: ${errMessage(err)}`);
-    });
+    return;
+  }
+  if (!(await fileExists(binPath(binaryName("whisper-server"))))) {
+    log.warn(
+      `whisper-server binary not installed; sidecar stays Disabled until it ` +
+        `is downloaded (the client re-prompts the pending download on the ` +
+        `next settings change)`,
+    );
+    await sidecarManager().stop("whisper");
     return;
   }
   await sidecarManager().restart("whisper", buildWhisperStartOptions(args));

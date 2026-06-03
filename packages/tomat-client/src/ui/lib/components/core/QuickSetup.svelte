@@ -120,7 +120,7 @@
         title="Smaller"
         size="lg"
         surface="filled"
-        class="w-8 h-8 hover:bg-default-300"
+        class="w-8 h-8 hover:bg-surface-inset-strong"
         disabled={textSize <= 12}
         onclick={() => changeTextSize(-1)}
       />
@@ -132,7 +132,7 @@
         title="Larger"
         size="lg"
         surface="filled"
-        class="w-8 h-8 hover:bg-default-300"
+        class="w-8 h-8 hover:bg-surface-inset-strong"
         disabled={textSize >= 32}
         onclick={() => changeTextSize(1)}
       />

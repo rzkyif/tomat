@@ -8,7 +8,6 @@ export const shortcutsGroup: SettingGroup = {
   iconInactive: "i-material-symbols-keyboard-outline-rounded",
   sections: [
     {
-      label: "Global",
       fields: [
         {
           id: "shortcuts.toggleWindow",
@@ -19,11 +18,6 @@ export const shortcutsGroup: SettingGroup = {
           optional: true,
           descriptionTier: "ondemand",
         },
-      ],
-    },
-    {
-      label: "Input",
-      fields: [
         {
           id: "shortcuts.attachFile",
           name: "Attach File",

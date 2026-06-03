@@ -91,14 +91,14 @@
       ? "bg-transparent outline-none"
       : error
         ? "bg-accent-red-300 border-accent-red-400 text-default-800 rounded-medium px-2 py-1.5 outline-none"
-        : "bg-default-300 focus:ring-blue-500 text-default-800 rounded-medium px-2 py-1.5 outline-none",
+        : "bg-surface-inset focus:ring-blue-500 text-default-800 rounded-medium px-2 py-1.5 outline-none",
   );
 
   const sizeClass = $derived(
     autoResize === "grid"
       ? "min-w-0 w-full overflow-hidden resize-none whitespace-pre-wrap break-words"
       : autoResize === "scroll"
-        ? `${minHeight} w-full resize-y overflow-y-hidden focus:overflow-y-auto whitespace-pre-wrap break-words tomat-multiline-scroll`
+        ? `${minHeight} w-full resize-y overflow-y-hidden focus:overflow-y-auto whitespace-pre-wrap break-words tomat-scroll`
         : "w-full",
   );
 
@@ -162,26 +162,3 @@
     {oncompositionend}
   ></textarea>
 {/if}
-
-<style>
-  :global(.tomat-multiline-scroll::-webkit-scrollbar) {
-    width: 8px;
-  }
-  :global(.tomat-multiline-scroll::-webkit-scrollbar-track) {
-    background: transparent;
-    border-radius: 4px;
-  }
-  :global(.tomat-multiline-scroll::-webkit-scrollbar-thumb) {
-    background: var(--default-200);
-    border-radius: 4px;
-  }
-  :global(.tomat-multiline-scroll::-webkit-scrollbar-thumb:hover) {
-    background: var(--default-400);
-  }
-  :global(html.dark .tomat-multiline-scroll::-webkit-scrollbar-thumb) {
-    background: var(--default-d-200);
-  }
-  :global(html.dark .tomat-multiline-scroll::-webkit-scrollbar-thumb:hover) {
-    background: var(--default-d-400);
-  }
-</style>

@@ -52,7 +52,7 @@
       <IconButton
         icon="i-material-symbols-info-outline-rounded"
         title="Show description"
-        size="sm"
+        size="xs"
         variant="subtle"
         active={descriptionExpanded}
         onclick={() => (descriptionExpanded = !descriptionExpanded)}
@@ -63,7 +63,7 @@
       <IconButton
         icon="i-material-symbols-refresh-rounded"
         title="Reset to default"
-        size="sm"
+        size="xs"
         variant="subtle"
         onclick={() => onReset?.()}
       />
@@ -73,7 +73,7 @@
       <IconButton
         icon="i-material-symbols-refresh-rounded"
         title="Reset to default"
-        size="sm"
+        size="xs"
         variant="subtle"
         onclick={() => onReset?.()}
       />
@@ -82,7 +82,7 @@
       <IconButton
         icon="i-material-symbols-info-outline-rounded"
         title="Show description"
-        size="sm"
+        size="xs"
         variant="subtle"
         active={descriptionExpanded}
         onclick={() => (descriptionExpanded = !descriptionExpanded)}
@@ -94,12 +94,10 @@
 
 <div
   data-field-id={fieldId}
-  class="flex flex-col gap-2 max-w-full overflow-clip px-3 pt-1 {horizontal
-    ? 'pb-1'
-    : 'pb-2'} text-base rounded-medium bg-default-200 {extraClass}"
+  class="flex flex-col gap-2 max-w-full overflow-clip text-sm {extraClass}"
 >
-  <div class="flex {horizontal ? 'flex-row items-center gap-3' : 'flex-col gap-1'}">
-    <div class="flex flex-col flex-1 min-w-0 gap-1">
+  <div class="flex {horizontal ? 'flex-row items-start gap-3' : 'flex-col gap-1'}">
+    <div class="flex flex-col flex-1 min-w-0 gap-0.5">
       {#if horizontal}
         <!-- Smart line-break: keep the last word of the label glued to the
              inline buttons so the buttons never wrap to the next line alone. -->
@@ -110,7 +108,7 @@
           <div class="min-w-0">
             {head}<span class="whitespace-nowrap"
               >{tail}{#if hasButtons}<span
-                  class="ml-1.5 inline-flex items-center gap-0.5 align-middle relative -top-px"
+                  class="ml-1 inline-flex items-center gap-0 align-middle relative -top-px"
                   >{@render buttons()}</span
                 >{/if}</span
             >
@@ -120,7 +118,7 @@
         <div class="flex flex-row items-center gap-2 min-h-8">
           <div class="flex-1 text-default-800 min-w-0">{label}</div>
           {#if hasButtons}
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-0.5">
               {@render buttons()}
             </div>
           {/if}

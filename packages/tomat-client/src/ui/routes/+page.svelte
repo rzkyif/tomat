@@ -29,8 +29,8 @@
   } from "$lib/state";
   import { cores } from "$lib/core";
   import { platform } from "$lib/platform";
-  import { detectPendingStartup } from "$lib/shared/download";
   import { withTimeout } from "$lib/shared/async";
+  import { darkFromLight } from "$lib/shared/color";
   import {
     shortcutHandler,
     windowTransition,
@@ -79,6 +79,20 @@
   function applyCssVarPx(cssVar: string, value: number | undefined) {
     if (typeof value !== "number" || !Number.isFinite(value)) return;
     document.documentElement.style.setProperty(cssVar, `${value}px`);
+  }
+
+  // Theme-adaptive color: write the stored light-mode hex to `lightVar` and its
+  // theme inversion (color.ts `darkFromLight`, the reversible stepping curve) to
+  // `darkVar`, so the `.dark` rules render the flipped color. The same curve
+  // backs the picker round-trip, so what's stored, previewed, and rendered agree.
+  function setThemeColor(
+    lightVar: string,
+    darkVar: string,
+    hex: string | undefined,
+  ) {
+    if (typeof hex !== "string" || hex.length === 0) return;
+    document.documentElement.style.setProperty(lightVar, hex);
+    document.documentElement.style.setProperty(darkVar, darkFromLight(hex));
   }
 
   // Fallback stacks appended after the user's chosen family so a missing
@@ -135,12 +149,15 @@
 
   const TRANSITION_EASING = "cubic-bezier(0.4, 0, 0.2, 1)";
 
-  // Imperatively drive the window-level slide+fade on `container`. Mirrors
-  // the same JS+CSS pattern used for panel swap (`runSlide`): set
-  // transition then target style; the WKWebView transition fires reliably
-  // because the source value is already on the element.
-  //   - "visible":   on screen, fully opaque
-  //   - "offscreen": slid out per alignment, fully transparent
+  // Imperatively drive the window-level slide on `container`. Mirrors the
+  // same JS+CSS pattern used for panel swap (`runSlide`): set transition then
+  // target style; the WKWebView transition fires reliably because the source
+  // value is already on the element.
+  //   - "visible":   on screen (transform cleared) and opaque. The opacity
+  //                  matters only on the very first show, fading the window up
+  //                  from the inlined opacity:0 below; later shows are already
+  //                  opaque, so they read as a pure slide-in.
+  //   - "offscreen": slid out per alignment (no fade out).
   // First paint inlines opacity:0 directly on the element so the window
   // doesn't flash visible before the first applyWindowState() runs.
   function applyWindowState(state: "visible" | "offscreen", animate: boolean) {
@@ -154,10 +171,11 @@
       container.style.transform = "";
       container.style.opacity = "1";
     } else {
+      // Slide out only: leave opacity at 1 so the window slides off without
+      // fading (a full-100% translate already clears it from the viewport).
       container.style.transform = offscreenTransform(
         settingsState.getAlignment(),
       );
-      container.style.opacity = "0";
     }
   }
 
@@ -210,30 +228,6 @@
   let unlistenHideRequested: (() => void) | null = null;
   let cleanupSystemTheme: (() => void) | null = null;
 
-  // Probe disk for every HF file the current configuration references and
-  // stash any missing items in downloadsState.pendingStartup. Called on
-  // mount AND whenever the active core changes. The first-pair flow goes
-  // null → loopback core, so the on-mount probe misses it.
-  async function refreshPendingStartup(): Promise<void> {
-    try {
-      if (!cores().currentEntry()) return;
-      const { plans, groupBySource } = await detectPendingStartup(
-        settingsState.currentSettings,
-      );
-      if (plans.length > 0) {
-        downloadsState.pendingStartup = plans;
-        downloadsState.pendingStartupGroupBySource = groupBySource;
-        return;
-      }
-      // Nothing missing, so clear any stale entries from a previous core.
-      downloadsState.pendingStartup = [];
-      downloadsState.pendingStartupGroupBySource = {};
-      void startConfiguredServices();
-    } catch (e) {
-      console.warn("detectPendingStartup:", e);
-    }
-  }
-
   // On-demand mode: when the selected core points at loopback and the binary
   // is installed locally, spawn it ourselves if no service has it running.
   // Idempotent: start_local_core probes the port first and exits cleanly if
@@ -263,16 +257,19 @@
   function applyAllAppearance(): void {
     applyTheme(settingsState.currentSettings["appearance.theme"] ?? "auto");
     applyTextSize(settingsState.currentSettings["appearance.textSize"] ?? 16);
-    applyBubbleColor(
+    setThemeColor(
       "--user-bubble-bg-light",
+      "--user-bubble-bg-dark",
       settingsState.currentSettings["appearance.userBubbleColor"],
     );
-    applyBubbleColor(
+    setThemeColor(
       "--agent-bubble-bg-light",
+      "--agent-bubble-bg-dark",
       settingsState.currentSettings["appearance.agentBubbleColor"],
     );
-    applyBubbleColor(
+    setThemeColor(
       "--agent2-bubble-bg-light",
+      "--agent2-bubble-bg-dark",
       settingsState.currentSettings["appearance.secondaryAgentBubbleColor"],
     );
     applyBubbleColor(
@@ -294,10 +291,6 @@
     applyBubbleColor(
       "--accent-green-base",
       settingsState.currentSettings["appearance.accentGreen"],
-    );
-    applyBubbleColor(
-      "--accent-orange-base",
-      settingsState.currentSettings["appearance.accentOrange"],
     );
     applyBubbleColor(
       "--accent-yellow-base",
@@ -322,6 +315,15 @@
     applyFont(
       "--font-mono",
       settingsState.currentSettings["appearance.monoFont"],
+    );
+    setThemeColor(
+      "--bubble-shadow-color-light",
+      "--bubble-shadow-color-dark",
+      settingsState.currentSettings["appearance.bubbleShadowColor"],
+    );
+    applyCssVarPx(
+      "--bubble-shadow-distance",
+      settingsState.currentSettings["appearance.bubbleShadowDistance"] as number,
     );
   }
 
@@ -464,10 +466,11 @@
       } catch (e) {
         console.error("[boot] core settings merge failed:", e);
       }
-      // Probe disk for referenced HF files + load snippets now that a core may
-      // be selected; re-probe on later core switches too.
-      void refreshPendingStartup();
-      cores().subscribe(() => void refreshPendingStartup());
+      // Pull the required-files snapshot now that a core may be selected, and
+      // re-pull on later core switches (downloadsState also keeps it live via
+      // the requirements.snapshot WS frame).
+      void downloadsState.refetchRequirements();
+      cores().subscribe(() => void downloadsState.refetchRequirements());
       void snippetsState.load();
       // Initial session load, with the "Loading latest session…" placeholder.
       try {
@@ -566,18 +569,18 @@
 
   $effect(() => {
     const v = settingsState.currentSettings["appearance.userBubbleColor"];
-    if (loaded) applyBubbleColor("--user-bubble-bg-light", v);
+    if (loaded) setThemeColor("--user-bubble-bg-light", "--user-bubble-bg-dark", v);
   });
 
   $effect(() => {
     const v = settingsState.currentSettings["appearance.agentBubbleColor"];
-    if (loaded) applyBubbleColor("--agent-bubble-bg-light", v);
+    if (loaded) setThemeColor("--agent-bubble-bg-light", "--agent-bubble-bg-dark", v);
   });
 
   $effect(() => {
     const v =
       settingsState.currentSettings["appearance.secondaryAgentBubbleColor"];
-    if (loaded) applyBubbleColor("--agent2-bubble-bg-light", v);
+    if (loaded) setThemeColor("--agent2-bubble-bg-light", "--agent2-bubble-bg-dark", v);
   });
 
   $effect(() => {
@@ -599,10 +602,6 @@
   $effect(() => {
     const v = settingsState.currentSettings["appearance.accentGreen"];
     if (loaded) applyBubbleColor("--accent-green-base", v);
-  });
-  $effect(() => {
-    const v = settingsState.currentSettings["appearance.accentOrange"];
-    if (loaded) applyBubbleColor("--accent-orange-base", v);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.accentYellow"];
@@ -628,6 +627,18 @@
     const v = settingsState.currentSettings["appearance.monoFont"];
     if (loaded) applyFont("--font-mono", v);
   });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.bubbleShadowColor"];
+    if (loaded) {
+      setThemeColor("--bubble-shadow-color-light", "--bubble-shadow-color-dark", v);
+    }
+  });
+  $effect(() => {
+    const v = settingsState.currentSettings["appearance.bubbleShadowDistance"];
+    if (loaded) applyCssVarPx("--bubble-shadow-distance", v as number);
+  });
+  // bubbleBlurEnabled / bubbleBlurRings drive the halo layer count directly in
+  // Bubble.svelte (reactive read of settingsState), so no DOM apply here.
 
   async function scrollToBottom() {
     await tick();

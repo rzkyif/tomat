@@ -75,7 +75,7 @@
      background: a header bubble, then one bubble per session, using the same
      bubble look as chat messages, not a card. -->
 <div
-  class="flex flex-col gap-2 max-h-[80vh] overflow-y-auto min-h-0 -mr-1 pr-1"
+  class="tomat-scroll flex flex-col gap-2 max-h-[80vh] overflow-y-auto min-h-0 -mr-1 pr-1"
 >
   <!-- Header bubble -->
   <Bubble
@@ -100,7 +100,6 @@
             currentCoreId = v;
             void switchCore();
           }}
-          surface="subtle"
           title="Core"
           class="w-auto"
         />

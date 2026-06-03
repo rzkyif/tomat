@@ -100,7 +100,7 @@
 {#if kind === "reasoning"}
   <Bubble
     selectedAlignment={settingsState.getAlignment()}
-    bgClass="bg-default-300"
+    bgClass="bg-surface"
     extraClass="markdown overflow-clip"
     size="small"
     {neighborLeft}
@@ -115,7 +115,7 @@
     <ReasoningTrace
       reasoning={displayText}
       {isStreaming}
-      pillBgClass="bg-default-200"
+      pillBgClass="bg-surface-inset"
       {reasoningDurationMs}
       bind:expanded={reasoningExpanded}
     />

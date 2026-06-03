@@ -18,11 +18,41 @@ import { Sha256Stream } from "../shared/hash.ts";
 
 const NODE_MODULES = "node_modules";
 
-export async function hashToolkit(rootDir: string): Promise<string> {
+/** The sorted, forward-slash relative paths that the hash covers (node_modules
+ *  and .gitignore-listed paths excluded; .gitignore itself included). Shared by
+ *  `hashToolkit` and `newestIncludedMtimeMs`. */
+export async function listIncludedFiles(rootDir: string): Promise<string[]> {
   const ig = await loadGitignore(rootDir);
   const files: string[] = [];
   await walk(rootDir, rootDir, files, ig);
   files.sort();
+  return files;
+}
+
+/** Newest mtime (ms) across the hashed file set, or 0 when empty/unreadable. A
+ *  cheap change signal: when it matches a previously-verified value the content
+ *  hash is unchanged, so a per-call re-hash can be skipped. */
+export async function newestIncludedMtimeMs(rootDir: string): Promise<number> {
+  let files: string[];
+  try {
+    files = await listIncludedFiles(rootDir);
+  } catch {
+    return 0;
+  }
+  let newest = 0;
+  for (const rel of files) {
+    try {
+      const st = await Deno.stat(join(rootDir, rel));
+      if (st.mtime) newest = Math.max(newest, st.mtime.getTime());
+    } catch {
+      /* vanished mid-walk; ignore */
+    }
+  }
+  return newest;
+}
+
+export async function hashToolkit(rootDir: string): Promise<string> {
+  const files = await listIncludedFiles(rootDir);
 
   const digestStream = new Sha256Stream();
   for (const rel of files) {

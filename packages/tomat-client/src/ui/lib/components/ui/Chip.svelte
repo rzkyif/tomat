@@ -3,7 +3,7 @@
 
   type Size = "xs" | "sm" | "md";
   type Variant = "default" | "subtle" | "accent";
-  type Accent = "blue" | "green" | "red" | "orange" | "yellow" | "purple";
+  type Accent = "blue" | "green" | "red" | "yellow" | "purple";
 
   let {
     label,
@@ -46,17 +46,16 @@
     blue: "bg-accent-blue-200 text-accent-blue-700",
     green: "bg-accent-green-200 text-accent-green-700",
     red: "bg-accent-red-200 text-accent-red-700",
-    orange: "bg-accent-orange-200 text-accent-orange-700",
     yellow: "bg-accent-yellow-200 text-accent-yellow-700",
     purple: "bg-accent-purple-200 text-accent-purple-700",
   };
 
   const colorClass = $derived(
     variant === "subtle"
-      ? "bg-default-300 text-default-600"
+      ? "bg-surface-inset-strong text-default-600"
       : variant === "accent"
         ? accentMap[accent]
-        : "bg-default-200 text-default-600",
+        : "bg-surface-inset text-default-600",
   );
 
   const interactive = $derived(!!onclick);

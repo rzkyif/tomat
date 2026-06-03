@@ -61,7 +61,7 @@
   const stateClass = $derived(
     error
       ? "bg-accent-red-300 border-accent-red-400"
-      : "bg-default-300 focus:ring-blue-500",
+      : "bg-surface-inset focus:ring-blue-500",
   );
   const fontClass = $derived(
     `${mono ? "font-mono" : ""} ${uppercase ? "uppercase" : ""}`,

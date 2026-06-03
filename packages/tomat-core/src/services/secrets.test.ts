@@ -11,7 +11,13 @@
 import { assertEquals, assertNotEquals, assertRejects } from "@std/assert";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
-import { deleteSecret, getSecret, listSecretNames, setSecret } from "./secrets.ts";
+import {
+  deleteSecret,
+  getSecret,
+  listSecretNames,
+  setSecret,
+  warnIfVaultUnreadable,
+} from "./secrets.ts";
 import { AppError } from "../shared/errors.ts";
 
 Deno.test("setSecret + getSecret: round-trips a value", async () => {
@@ -78,6 +84,33 @@ Deno.test("setSecret: rejects empty / non-string name and non-string value", asy
       AppError,
       "must be a string",
     );
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("warnIfVaultUnreadable: no-op when there is no vault", async () => {
+  const env = await setupTestEnv();
+  try {
+    await warnIfVaultUnreadable(); // no secrets.enc -> returns without throwing
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("warnIfVaultUnreadable: a lost master key is reported WITHOUT regenerating a key", async () => {
+  const env = await setupTestEnv();
+  try {
+    // Seal a secret (writes secrets.enc + the .master-key file fallback, since
+    // the keychain helper is absent in tests).
+    await setSecret("k", "v");
+    const keyPath = paths().root + "/.master-key";
+    await Deno.remove(keyPath); // simulate a dev rebuild that dropped the key
+
+    // Must surface the problem (a warning) but stay non-mutating: it must NOT
+    // generate a fresh key, which would orphan the still-encrypted vault.
+    await warnIfVaultUnreadable();
+    await assertRejects(() => Deno.stat(keyPath), Deno.errors.NotFound);
   } finally {
     await env.teardown();
   }

@@ -45,7 +45,7 @@
   // every variant.
   const filledClass = $derived(
     {
-      info: "bg-default-200 text-default-700",
+      info: "bg-surface-inset text-default-700",
       warning: "bg-accent-yellow-200 text-accent-yellow-700",
       error: "bg-accent-red-200 text-accent-red-700",
       success: "bg-accent-green-200 text-accent-green-700",

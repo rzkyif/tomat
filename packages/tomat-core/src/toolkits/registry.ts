@@ -17,7 +17,7 @@ import { db } from "../db/connection.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { errMessage, permissionKey } from "@tomat/shared";
-import { hashToolkit } from "./hash.ts";
+import { hashToolkit, newestIncludedMtimeMs } from "./hash.ts";
 import { getLogger } from "../shared/log.ts";
 
 const CONTENT_DRIFT_ERROR = "content changed since install; reinstall to use";
@@ -45,6 +45,11 @@ export interface ToolInsertInput {
 }
 
 export class ToolkitsRegistry {
+  // Per-call hash-verify skip cache: toolkitId -> { mtimeMs, hash }. When the
+  // newest mtime across a toolkit's files is unchanged from a prior successful
+  // verify, the content can't have changed, so the per-call re-hash is skipped.
+  private hashVerifiedCache = new Map<string, { mtimeMs: number; hash: string }>();
+
   // --- toolkit-level ------------------------------------------------------
 
   list(): Toolkit[] {
@@ -178,6 +183,39 @@ export class ToolkitsRegistry {
       }
     }
     return drifted;
+  }
+
+  // Per-call integrity check: re-verify a toolkit's content hash at tool-call
+  // time so a toolkit tampered AFTER boot can't execute (verifyAllOnBoot only
+  // runs at startup). Cheap when unchanged via the mtime skip-cache. Throws
+  // toolkit_hash_drift (and flags the row) when the on-disk content no longer
+  // matches the trusted hash; clears a stale drift flag when it matches again.
+  async verifyHashFresh(toolkitId: string): Promise<void> {
+    const tk = this.get(toolkitId);
+    if (!tk) return; // unknown toolkit; the tool lookup already handled this
+    const newest = await newestIncludedMtimeMs(tk.installedPath);
+    const cached = this.hashVerifiedCache.get(toolkitId);
+    if (cached && cached.mtimeMs === newest && cached.hash === tk.contentHash) return;
+    let actual: string;
+    try {
+      actual = await hashToolkit(tk.installedPath);
+    } catch (err) {
+      throw new AppError(
+        "toolkit_hash_drift",
+        `toolkit ${toolkitId} hash failed: ${errMessage(err)}`,
+      );
+    }
+    if (actual === tk.contentHash) {
+      this.hashVerifiedCache.set(toolkitId, { mtimeMs: newest, hash: actual });
+      if (tk.lastError === CONTENT_DRIFT_ERROR) this.setLastError(toolkitId, null);
+      return;
+    }
+    this.hashVerifiedCache.delete(toolkitId);
+    this.setLastError(toolkitId, CONTENT_DRIFT_ERROR);
+    throw new AppError(
+      "toolkit_hash_drift",
+      `toolkit ${toolkitId} content changed since it was trusted`,
+    );
   }
 
   delete(id: string): void {

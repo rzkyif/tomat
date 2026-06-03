@@ -32,7 +32,7 @@ export const llmGroup: SettingGroup = {
       ],
     },
     {
-      label: "Provider",
+      label: "Model",
       fields: [
         {
           id: "llm.provider",
@@ -47,15 +47,10 @@ export const llmGroup: SettingGroup = {
           ],
           descriptionTier: "ondemand",
         },
-      ],
-    },
-    {
-      label: "Model",
-      visibleWhen: { field: "llm.provider", eq: "local" },
-      fields: [
         {
           id: "llm.preset",
           name: "Preset",
+          visibleWhen: { field: "llm.provider", eq: "local" },
           description:
             "Pick a starter model. Selecting a preset replaces the model paths and tuning below. Editing any of those settings switches this to Custom.",
           type: "preset",
@@ -250,7 +245,6 @@ export const llmGroup: SettingGroup = {
             "Use memory-mapped I/O when loading the model.\n\nFaster startup and lower RAM usage in most cases. Disable if you see stability issues on unusual filesystems.",
           type: "boolean",
           defaultValue: true,
-          advanced: true,
           descriptionTier: "always",
         },
         {
@@ -266,7 +260,6 @@ export const llmGroup: SettingGroup = {
               errorMessage: "Must be a valid IPv4 address",
             },
           ],
-          advanced: true,
           descriptionTier: "always",
         },
         {
@@ -283,7 +276,6 @@ export const llmGroup: SettingGroup = {
               errorMessage: "Port must be 1–65535",
             },
           ],
-          advanced: true,
           descriptionTier: "always",
         },
         {
@@ -292,7 +284,6 @@ export const llmGroup: SettingGroup = {
           description: "Enable the llama.cpp built-in web interface.",
           type: "boolean",
           defaultValue: false,
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {
@@ -302,7 +293,6 @@ export const llmGroup: SettingGroup = {
           type: "command_preview",
           defaultValue: "",
           commandType: "llm",
-          advanced: true,
         },
       ],
     },
@@ -345,7 +335,6 @@ export const llmGroup: SettingGroup = {
           description: "Maximum context window length in tokens. Used for usage tracking.",
           type: "number",
           defaultValue: 128000,
-          advanced: true,
           descriptionTier: "ondemand",
         },
       ],

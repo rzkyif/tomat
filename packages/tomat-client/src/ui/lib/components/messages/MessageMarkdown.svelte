@@ -118,7 +118,7 @@
         const wrapper = document.createElement("div");
         wrapper.className = "table-wrapper";
         const scroller = document.createElement("div");
-        scroller.className = "table-scroller";
+        scroller.className = "table-scroller tomat-scroll";
         table.parentNode?.insertBefore(wrapper, table);
         wrapper.appendChild(scroller);
         scroller.appendChild(table);
@@ -133,7 +133,7 @@
         const wrapper = document.createElement("div");
         wrapper.className = "code-wrapper";
         const scroller = document.createElement("div");
-        scroller.className = "code-scroller";
+        scroller.className = "code-scroller tomat-scroll-dark";
         pre.parentNode?.insertBefore(wrapper, pre);
         wrapper.appendChild(scroller);
         scroller.appendChild(pre);
@@ -336,7 +336,7 @@
       overflow: hidden;
       border-radius: 6px;
       margin-bottom: 1em;
-      background-color: #1e1e1e;
+      background-color: var(--code-bg);
       :global(pre) {
         border-radius: 0;
         margin-bottom: 0;
@@ -346,24 +346,10 @@
       overflow-x: auto;
       overflow-y: clip;
     }
-    :global(.code-scroller::-webkit-scrollbar) {
-      width: 8px;
-      height: 8px;
-    }
-    :global(.code-scroller::-webkit-scrollbar-track) {
-      background: rgba(255, 255, 255, 0.05);
-    }
-    :global(.code-scroller::-webkit-scrollbar-thumb) {
-      background: rgba(255, 255, 255, 0.2);
-      border-radius: 4px;
-    }
-    :global(.code-scroller::-webkit-scrollbar-thumb:hover) {
-      background: rgba(255, 255, 255, 0.3);
-    }
     :global(pre) {
       display: flex;
       line-height: 1.45;
-      background-color: #1e1e1e;
+      background-color: var(--code-bg);
       border-radius: 6px;
       padding: 1em;
       margin-bottom: 1em;
@@ -377,7 +363,7 @@
       }
     }
     :global(code) {
-      background-color: rgba(30, 30, 30, 0.75);
+      background-color: var(--code-bg-inline);
       color: white;
       padding: 0.15em 0.4em;
       border-radius: 6px;
@@ -450,22 +436,6 @@
       max-height: 600px;
       overflow: auto;
     }
-    :global(.table-scroller::-webkit-scrollbar) {
-      width: 8px;
-      height: 8px;
-    }
-    :global(.table-scroller::-webkit-scrollbar-track) {
-      background: var(--default-50);
-    }
-    :global(.table-scroller::-webkit-scrollbar-thumb) {
-      background: var(--default-300);
-    }
-    :global(.table-scroller::-webkit-scrollbar-thumb:hover) {
-      background: var(--default-500);
-    }
-    :global(.table-scroller::-webkit-scrollbar-corner) {
-      background: var(--default-50);
-    }
     :global(table) {
       width: max-content;
       min-width: 100%;
@@ -514,18 +484,6 @@
     :global(.table-wrapper) {
       background: var(--default-d-50);
       color: var(--default-d-800);
-    }
-    :global(.table-scroller::-webkit-scrollbar-track) {
-      background: var(--default-d-50);
-    }
-    :global(.table-scroller::-webkit-scrollbar-thumb) {
-      background: var(--default-d-300);
-    }
-    :global(.table-scroller::-webkit-scrollbar-thumb:hover) {
-      background: var(--default-d-500);
-    }
-    :global(.table-scroller::-webkit-scrollbar-corner) {
-      background: var(--default-d-50);
     }
     :global(th) {
       background-color: var(--default-d-100);

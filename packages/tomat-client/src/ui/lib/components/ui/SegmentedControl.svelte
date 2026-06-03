@@ -17,7 +17,7 @@
 </script>
 
 <div
-  class="flex gap-1 bg-default-200 rounded-large p-1 {extraClass}"
+  class="flex gap-1 bg-surface-inset rounded-large p-1 {extraClass}"
   role="radiogroup"
   aria-label={ariaLabel}
 >

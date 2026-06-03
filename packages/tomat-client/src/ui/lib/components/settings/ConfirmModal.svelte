@@ -1,7 +1,7 @@
 <script lang="ts">
   import { confirmState } from "../../state";
   import { formatBytes } from "$lib/shared/format";
-  import { isBinarySource, binarySourceToKind } from "$lib/shared/download";
+  import { binarySourceToKind, isBinarySource } from "@tomat/shared";
   import type { DownloadPlan } from "@tomat/shared";
   import Modal from "../ui/Modal.svelte";
   import Button from "../ui/Button.svelte";
@@ -41,10 +41,10 @@
       {p.message}
     </div>
     {#if downloads.length > 0}
-      <div class="flex flex-col gap-1 max-h-64 overflow-y-auto">
+      <div class="tomat-scroll flex flex-col gap-1 max-h-64 overflow-y-auto pr-1">
         {#each downloads as d (d.source)}
           <div
-            class="flex items-center gap-2 bg-default-200 rounded-medium px-3 py-2"
+            class="flex items-center gap-2 bg-surface-inset rounded-medium px-3 py-2"
           >
             <i
               class="flex i-material-symbols-cloud-download-outline-rounded text-default-500"

@@ -81,18 +81,28 @@ Deno.test("sourcesForKind('stt'): empty when stt.provider is external", async ()
   }
 });
 
-Deno.test("sourcesForKind('tts'/'embed'): returns fixed base files regardless of settings", async () => {
+Deno.test("sourcesForKind('embed'): always returns the fixed base files", async () => {
   const env = await setupTestEnv();
   try {
-    const tts = await sourcesForKind("tts");
     const embed = await sourcesForKind("embed");
     // The exact set is governed by shared constants; here we only assert the
     // wiring (non-empty, every item is an HF spec).
-    assertEquals(tts.length > 0, true);
     assertEquals(embed.length > 0, true);
-    for (const s of [...tts, ...embed]) {
-      assertEquals(s.startsWith("@"), true);
-    }
+    for (const s of embed) assertEquals(s.startsWith("@"), true);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("sourcesForKind('tts'): empty when disabled, base files when enabled", async () => {
+  const env = await setupTestEnv();
+  try {
+    // tts.enabled defaults to false.
+    assertEquals(await sourcesForKind("tts"), []);
+    await patchCoreSettings({ "tts.enabled": true });
+    const tts = await sourcesForKind("tts");
+    assertEquals(tts.length > 0, true);
+    for (const s of tts) assertEquals(s.startsWith("@"), true);
   } finally {
     await env.teardown();
   }

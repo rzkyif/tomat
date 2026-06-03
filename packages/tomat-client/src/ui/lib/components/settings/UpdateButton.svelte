@@ -15,6 +15,7 @@
   import { confirmState, downloadsState } from "$lib/state";
   import type { BinaryKind, BinaryUpdateCheck } from "@tomat/shared";
   import CollapsibleLabel from "../ui/CollapsibleLabel.svelte";
+  import { useBlink } from "$lib/composables/use-blink.svelte";
 
   let { collapsed } = $props<{ collapsed: boolean }>();
 
@@ -47,7 +48,7 @@
       case "checking":
         return "Checking…";
       case "available":
-        return hovering ? "Install Updates" : "Updates Available!";
+        return hovering ? "Install Updates" : "Updates Available";
       case "updating":
         return "Updating…";
       case "clientRestartPending":
@@ -79,9 +80,21 @@
     }
   });
 
+  // Pulse between two yellow shades while an update is available: a same-hue
+  // attention ping. Interval matches the button's 500ms color transition so the
+  // color is always mid-tween (no flat hold). See useBlink.
+  const updateBlink = useBlink();
+  $effect(() => updateBlink.run(phase === "available"));
+
+  // Lives on the button so the icon (currentColor) and label inherit it and the
+  // button's 500ms color transition tweens the whole row together.
   const tone = $derived.by<string>(() => {
-    if (phase === "available") return "text-accent-orange-300";
-    return "text-default-700";
+    if (phase === "available") {
+      return updateBlink.on
+        ? "text-accent-yellow-700"
+        : "text-accent-yellow-500";
+    }
+    return "text-default-500 hover:text-default-700";
   });
 
   async function onClick() {
@@ -237,7 +250,7 @@
   type="button"
   class="hover:cursor-pointer flex items-center h-8 pl-1.5 {collapsed
     ? 'pr-0'
-    : 'pr-2.5'} gap-1.5 rounded-medium transition-[padding,colors,background-color] duration-200 text-default-500 hover:text-default-700 hover:bg-default-200"
+    : 'pr-2.5'} gap-1.5 rounded-medium [transition:color_500ms,background-color_200ms,padding_200ms] {tone} hover:bg-surface-inset"
   title={collapsed ? label : undefined}
   aria-label={label}
   onmouseenter={() => (hovering = true)}
@@ -249,21 +262,12 @@
   <span class="relative flex shrink-0">
     {#if icon.kind === "tomat"}
       <span
-        class="w-5 h-5 bg-current shrink-0 {tone}"
+        class="w-5 h-5 bg-current shrink-0"
         style="mask:url(/tomat.svg) center/contain no-repeat;-webkit-mask:url(/tomat.svg) center/contain no-repeat;"
         aria-hidden="true"
       ></span>
     {:else}
-      <i class="flex text-xl shrink-0 {icon.className} {tone}"></i>
-    {/if}
-    {#if phase === "available"}
-      <!-- Small accent dot signaling "something to act on". It pairs with
-           the orange label below so the cue is visible even with the
-           label collapsed. -->
-      <span
-        class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-accent-orange-300 pointer-events-none"
-        aria-hidden="true"
-      ></span>
+      <i class="flex text-xl shrink-0 {icon.className}"></i>
     {/if}
   </span>
   <CollapsibleLabel {collapsed} class="text-base text-left">

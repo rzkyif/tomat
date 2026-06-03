@@ -432,7 +432,7 @@ import { errMessage } from "@tomat/shared";
         class="flex items-start gap-3 rounded-large px-3 py-3 text-left transition-colors hover:cursor-pointer {destination ===
         'local'
           ? 'bg-default-inverted-300'
-          : 'bg-default-200 hover:bg-default-100'}"
+          : 'bg-surface-inset hover:bg-surface-inset-strong'}"
         onclick={() => (destination = "local")}
         disabled={busy !== null}
       >
@@ -473,7 +473,7 @@ import { errMessage } from "@tomat/shared";
         class="flex items-start gap-3 rounded-large px-3 py-3 text-left transition-colors hover:cursor-pointer {destination ===
         'remote'
           ? 'bg-default-inverted-300'
-          : 'bg-default-200 hover:bg-default-100'}"
+          : 'bg-surface-inset hover:bg-surface-inset-strong'}"
         onclick={() => (destination = "remote")}
         disabled={busy !== null}
       >
@@ -627,7 +627,7 @@ import { errMessage } from "@tomat/shared";
         ></i>
         <span>
           Binaries and data go to
-          <code class="bg-default-200 px-1 rounded-small">~/.tomat/core/</code>.
+          <code class="bg-surface-inset-strong px-1 rounded-small">~/.tomat/core/</code>.
         </span>
       </li>
       <li class="flex gap-2">
@@ -644,7 +644,7 @@ import { errMessage } from "@tomat/shared";
     <!-- Service mode toggle -->
     <button
       type="button"
-      class="flex items-start gap-3 bg-default-200 rounded-large px-3 py-2.5 text-left hover:bg-default-300 hover:cursor-pointer transition-colors"
+      class="flex items-start gap-3 bg-surface-inset rounded-large px-3 py-2.5 text-left hover:bg-surface-inset-strong hover:cursor-pointer transition-colors"
       onclick={() => (installServiceChoice = !installServiceChoice)}
       disabled={busy !== null}
     >
@@ -668,7 +668,7 @@ import { errMessage } from "@tomat/shared";
     <!-- Network bind toggle -->
     <button
       type="button"
-      class="flex items-start gap-3 bg-default-200 rounded-large px-3 py-2.5 text-left hover:bg-default-300 hover:cursor-pointer transition-colors"
+      class="flex items-start gap-3 bg-surface-inset rounded-large px-3 py-2.5 text-left hover:bg-surface-inset-strong hover:cursor-pointer transition-colors"
       onclick={() => (installNetworkChoice = !installNetworkChoice)}
       disabled={busy !== null}
     >
@@ -683,11 +683,11 @@ import { errMessage } from "@tomat/shared";
         </span>
         <span class="text-xs text-default-500">
           When on, the core listens on <code
-            class="bg-default-300 px-1 rounded-small">0.0.0.0:7800</code
+            class="bg-surface-inset-strong px-1 rounded-small">0.0.0.0:7800</code
           >
           so other clients in your LAN can connect. When off (default), only
           this device can reach it via <code
-            class="bg-default-300 px-1 rounded-small">127.0.0.1</code
+            class="bg-surface-inset-strong px-1 rounded-small">127.0.0.1</code
           >. Toggleable later in Settings → Server.
         </span>
       </div>
@@ -719,7 +719,7 @@ import { errMessage } from "@tomat/shared";
       <div class="flex flex-col gap-2">
         {#each pairedCores as core (core.id)}
           <div
-            class="flex items-center gap-2 bg-default-200 rounded-large px-3 py-2"
+            class="flex items-center gap-2 bg-surface-inset rounded-large px-3 py-2"
           >
             <i
               class="flex i-material-symbols-hub-rounded text-lg text-default-600 shrink-0"
@@ -740,7 +740,7 @@ import { errMessage } from "@tomat/shared";
               size="sm"
               class={confirmingUnpair === core.id
                 ? "shrink-0"
-                : "bg-default-300 hover:bg-default-400 shrink-0"}
+                : "bg-surface-inset-strong hover:bg-default-400 shrink-0"}
               onclick={() => unpair(core.id)}
             >
               {confirmingUnpair === core.id ? "Confirm" : "Unpair"}

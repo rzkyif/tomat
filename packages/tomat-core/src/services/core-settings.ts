@@ -7,7 +7,7 @@
 // JSON record atomically.
 
 import { paths } from "../paths.ts";
-import { errMessage } from "@tomat/shared";
+import { errMessage, getDefaultSettings } from "@tomat/shared";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 
@@ -46,6 +46,15 @@ export async function loadCoreSettings(): Promise<Record<string, unknown>> {
     }
     throw err;
   }
+}
+
+/** Settings with schema defaults applied; persisted (sparse) values win. The
+ *  on-disk file stores only non-default values, so any consumer that needs the
+ *  effective configuration - not just the keys the user explicitly changed -
+ *  must read through this. Requirement computation relies on it (e.g. the
+ *  default model path / `llm.supportImages` aren't persisted when unchanged). */
+export async function loadCoreSettingsResolved(): Promise<Record<string, unknown>> {
+  return { ...getDefaultSettings(), ...(await loadCoreSettings()) };
 }
 
 export async function patchCoreSettings(

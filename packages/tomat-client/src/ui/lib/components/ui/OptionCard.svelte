@@ -4,7 +4,7 @@
 
   type Size = "sm" | "md";
   type SelectedStyle = "invert" | "accent";
-  type Accent = "blue" | "green" | "red" | "orange" | "yellow" | "purple";
+  type Accent = "blue" | "green" | "red" | "yellow" | "purple";
 
   let {
     selected,
@@ -57,7 +57,6 @@
     blue: "border-accent-blue-300 bg-accent-blue-100",
     green: "border-accent-green-300 bg-accent-green-100",
     red: "border-accent-red-300 bg-accent-red-100",
-    orange: "border-accent-orange-300 bg-accent-orange-100",
     yellow: "border-accent-yellow-300 bg-accent-yellow-100",
     purple: "border-accent-purple-300 bg-accent-purple-100",
   };
@@ -66,10 +65,10 @@
     selectedStyle === "accent"
       ? selected
         ? `border-2 ${accentSelectedMap[accent]} text-default-800`
-        : "border-2 border-transparent bg-default-200 hover:bg-default-300 text-default-800"
+        : "border-2 border-transparent bg-surface-inset hover:bg-surface-inset-strong text-default-800"
       : selected
         ? "bg-default-inverted-300 text-default-inverted-800"
-        : "bg-default-300 text-default-800",
+        : "bg-surface-inset text-default-800",
   );
 
   const descriptionClass = $derived(

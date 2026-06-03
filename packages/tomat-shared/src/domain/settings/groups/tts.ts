@@ -36,7 +36,7 @@ export const ttsGroup: SettingGroup = {
       fields: [
         {
           id: "tts.voice",
-          name: "Voice",
+          name: "Voice Model",
           description:
             "Voice model used for speech synthesis.\nSelecting a voice downloads its file the first time it is used.",
           type: "select",
@@ -113,7 +113,6 @@ export const ttsGroup: SettingGroup = {
               errorMessage: "Must be a positive integer",
             },
           ],
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {
@@ -130,7 +129,6 @@ export const ttsGroup: SettingGroup = {
               errorMessage: "Must be between 0.25 and 3",
             },
           ],
-          advanced: true,
           descriptionTier: "ondemand",
         },
         {

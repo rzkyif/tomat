@@ -405,6 +405,12 @@ children.push(
     {
       ...CHANNEL_ENV,
       TOMAT_WORKERS_DIR: `${ROOT}packages/tomat-core/src/workers`,
+      // Core runs under `deno run --watch`. On a file change the watcher sends
+      // SIGTERM and waits for the program to wind down so it can re-run the
+      // module in-process. This flag tells core's SIGTERM handler to skip its
+      // Deno.exit(0) (which would hard-kill the watcher and end the dev session)
+      // and instead let the event loop drain for the restart. See main.ts.
+      TOMAT_DEV_WATCH: "1",
       // dev.ts owns the timestamp + badge column, so core emits bare console
       // lines (no ISO timestamp). Its stderr is piped here (not a TTY), so force
       // color on so level coloring survives.
