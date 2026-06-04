@@ -274,8 +274,8 @@ $UninstallKeys = @(
 try {
   Ui-Init "tomat-client uninstaller"
 
-  $IdxLocate = Ui-ActionAdd "Locating Tomat in Windows uninstall registry"
-  $IdxRemove = Ui-ActionAdd "Uninstalling Tomat via msiexec /x (a small msiexec progress dialog will appear)"
+  $IdxLocate = Ui-ActionAdd "Locating tomat in Windows uninstall registry"
+  $IdxRemove = Ui-ActionAdd "Uninstalling tomat via msiexec /x (a small msiexec progress dialog will appear)"
   $IdxPurge  = -1
   if ($Purge) {
     $IdxPurge = Ui-ActionAdd "Removing $ClientDir (per -Purge)"
@@ -283,7 +283,7 @@ try {
 
   # --- action 1: locate product in uninstall registry --------------------
 
-  Ui-ActionStart $IdxLocate "Locating Tomat in Windows uninstall registry"
+  Ui-ActionStart $IdxLocate "Locating tomat in Windows uninstall registry"
 
   # Case-insensitive match on DisplayName, scoped to this channel's product
   # (tomat 0.1.0 / tomat-beta 0.1.0). $ProductPattern excludes other channels
@@ -307,7 +307,7 @@ try {
   if (-not $product) {
     Ui-ActionSkip $IdxRemove "(skipped -- nothing installed)"
   } else {
-    Ui-ActionStart $IdxRemove "Uninstalling Tomat via msiexec /x (a small msiexec progress dialog will appear)"
+    Ui-ActionStart $IdxRemove "Uninstalling tomat via msiexec /x (a small msiexec progress dialog will appear)"
 
     $code = $product.PSChildName
 
@@ -367,7 +367,7 @@ try {
       } catch {
         Ui-Die "Permission denied removing $ClientDir" `
           $_.Exception.Message `
-          "quit Tomat and re-run"
+          "quit tomat and re-run"
       }
       Ui-ActionDone $IdxPurge "(removed)"
     }

@@ -1,5 +1,5 @@
 // tools.json is the open-standard contract every toolkit MUST satisfy
-// to load into Tomat (or any compatible host). This is the test that locks
+// to load into tomat (or any compatible host). This is the test that locks
 // down the validator against contract drift.
 
 import { assertEquals } from "@std/assert";

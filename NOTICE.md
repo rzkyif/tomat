@@ -1,12 +1,12 @@
 # Notice
 
-Tomat is licensed under [AGPL-3.0-only](LICENSE). It incorporates and/or
+tomat is licensed under [AGPL-3.0-only](LICENSE). It incorporates and/or
 distributes the following third-party components. Each is licensed separately;
 please consult the upstream project for its full license text.
 
 ## Binaries downloaded at runtime
 
-`tomat-core` fetches these compiled binaries from the Tomat CDN on first use.
+`tomat-core` fetches these compiled binaries from the tomat CDN on first use.
 They are not part of this repository.
 
 | Component                                              | Upstream                                  | License |

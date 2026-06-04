@@ -7,7 +7,7 @@ import { applySystemPromptOverride, renderContextTemplate } from "./system-promp
 
 describe("renderContextTemplate", () => {
   it("substitutes simple {name} placeholders", () => {
-    expect(renderContextTemplate("Hi {who}.", { who: "Tomat" })).toBe("Hi Tomat.");
+    expect(renderContextTemplate("Hi {who}.", { who: "tomat" })).toBe("Hi tomat.");
   });
 
   it("missing variable substitutes empty string", () => {

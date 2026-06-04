@@ -1,10 +1,10 @@
-# Developing Tomat
+# Developing tomat
 
-This document covers Tomat's architecture and how to build and run it from
+This document covers tomat's architecture and how to build and run it from
 source. For the project's contribution policy, see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Tomat is a local-first modular AI client. **Tomat** runs the LLM,
+tomat is a local-first modular AI client. **tomat** runs the LLM,
 speech-to-text, text-to-speech, and tool execution as a long-running service
 (`tomat-core`) that can sit on the same machine as the UI or on a different one
 (e.g. your gaming PC). The desktop client (`tomat-client`) is a small

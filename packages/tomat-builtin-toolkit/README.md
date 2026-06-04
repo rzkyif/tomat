@@ -1,6 +1,6 @@
 # tomat-builtin-toolkit
 
-Reference Tomat toolkit bundling three sample tools. Installed by default on
+Reference tomat toolkit bundling three sample tools. Installed by default on
 fresh setups; doubles as a worked example for third-party toolkit authors.
 
 | Tool           | Function | What it does                                                                   |
@@ -13,7 +13,7 @@ fresh setups; doubles as a worked example for third-party toolkit authors.
 
 ```
 .
-├── tools.json     # Tomat manifest: names, parameters, triggers, permissions
+├── tools.json     # tomat manifest: names, parameters, triggers, permissions
 ├── package.json   # npm metadata + the single npm dep (mime-types)
 ├── deno.json      # nodeModulesDir + lockfile pointer for the worker spawn
 ├── index.ts       # entry point: re-exports the three tool functions
@@ -27,7 +27,7 @@ fresh setups; doubles as a worked example for third-party toolkit authors.
 ## Permissions
 
 Each tool declares the minimum set of Deno permissions it needs in `tools.json`.
-The Tomat worker pool reads them on spawn and turns them into `--allow-*` flags.
+The tomat worker pool reads them on spawn and turns them into `--allow-*` flags.
 Specifically:
 
 - `download_url` needs **net** (any http(s) host), **write** to `$downloads`,
@@ -41,7 +41,7 @@ Specifically:
 Use this toolkit as a template for your own. The shape every toolkit must
 respect:
 
-1. A `tools.json` at the package root, validated against the Tomat `tools-v1`
+1. A `tools.json` at the package root, validated against the tomat `tools-v1`
    schema (`https://au.tomat.ing/schemas/tools-v1.json`).
 2. A `package.json` with `"keywords": ["tools-available"]` so it shows up in the
    in-app toolkit search.

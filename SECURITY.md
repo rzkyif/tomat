@@ -1,6 +1,6 @@
 # Security Policy
 
-Tomat is a local-first desktop app: a Deno service (`tomat-core`) that owns all
+tomat is a local-first desktop app: a Deno service (`tomat-core`) that owns all
 state and compute, paired with a deliberately thin Tauri + Svelte client
 (`tomat-client`), plus helper binaries, a bundled toolkit, and a Cloudflare/R2
 distribution site. The interesting attack surface is binary and model

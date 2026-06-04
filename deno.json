@@ -29,7 +29,7 @@
     "fmt:check:js": "deno run -A npm:oxfmt@0.51.0 --check .",
     "fmt:check:rs": "cargo fmt --manifest-path packages/tomat-client/src/tauri/Cargo.toml --check && cargo fmt --manifest-path packages/tomat-core-keychain/Cargo.toml --check && cargo fmt --manifest-path packages/tomat-core-updater/Cargo.toml --check",
     "lint": "deno task lint:js && deno task lint:rs",
-    "lint:js": "deno run -A npm:oxlint@1.66.0 -c .oxlintrc.json . && deno run -A --quiet scripts/lint-plugins/check-tauri-imports-svelte.ts && deno run -A --quiet scripts/lint-plugins/check-em-dash.ts",
+    "lint:js": "deno run -A npm:oxlint@1.66.0 -c .oxlintrc.json . && deno run -A --quiet scripts/lint-plugins/check-tauri-imports-svelte.ts && deno run -A --quiet scripts/lint-plugins/check-em-dash.ts && deno run -A --quiet scripts/lint-plugins/check-uppercase-tomat.ts",
     "lint:rs": "cargo clippy --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets -- -D warnings",
     "dev:website": "deno run -A scripts/website/dev.ts",
     "build:website": "deno run -A scripts/website/build.ts",

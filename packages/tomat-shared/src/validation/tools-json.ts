@@ -1,7 +1,7 @@
 // Canonical tools.json schema (open standard). Parsed by core's installer to
 // validate every toolkit at install time and re-validated on hash drift.
 //
-// Per the plan, tools.json carries no Tomat-specific marker. Any package
+// Per the plan, tools.json carries no tomat-specific marker. Any package
 // shipping a valid tools.json is a valid toolkit for any compatible host.
 
 import { z } from "zod";

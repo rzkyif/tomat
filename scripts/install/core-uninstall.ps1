@@ -343,7 +343,7 @@ try {
     } catch {
       Ui-Die "Failed to remove $HomeDir" `
         $_.Exception.Message `
-        "a process may still be holding the directory open; re-run after closing Tomat"
+        "a process may still be holding the directory open; re-run after closing tomat"
     }
     Ui-ActionDone $IdxData "(removed)"
   }

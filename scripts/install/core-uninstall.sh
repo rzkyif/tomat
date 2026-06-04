@@ -512,7 +512,7 @@ else
   RM_ERR="$(rm -rf "$HOME_DIR" 2>&1)" || \
     ui_die "Failed to remove $HOME_DIR" \
       "$RM_ERR" \
-      "a process may still be holding the directory open; re-run after closing Tomat"
+      "a process may still be holding the directory open; re-run after closing tomat"
   ui_action_done "$IDX_REMOVE" "(removed)"
 fi
 

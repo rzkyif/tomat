@@ -1,6 +1,6 @@
 {
   "$schema": "https://get.au.tomat.ing/schemas/tools-v1.json",
-  "name": "Tomat Built-in Toolkit",
+  "name": "tomat built-in toolkit",
   "description": "Reference toolkit bundling three sample tools: download a URL to the user's Downloads folder, open a URL in the default browser, and a UI-walkthrough for the askUser flow. Useful as both a fresh-install starter and a worked example for third-party toolkit authors.",
   "license": "MIT",
   "homepage": "https://au.tomat.ing",

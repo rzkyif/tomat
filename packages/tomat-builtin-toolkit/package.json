@@ -1,7 +1,7 @@
 {
   "name": "tomat-builtin-toolkit",
   "version": "1.0.0",
-  "description": "Reference Tomat toolkit bundling three sample tools (download_url, open_website, askuser_demo). Doubles as a worked example for third-party toolkit authors.",
+  "description": "Reference tomat toolkit bundling three sample tools (download_url, open_website, askuser_demo). Doubles as a worked example for third-party toolkit authors.",
   "keywords": [
     "tomat-toolkit",
     "tools-available"

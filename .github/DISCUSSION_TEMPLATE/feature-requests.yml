@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this form for a new capability that Tomat does not have today. For a
+        Use this form for a new capability that tomat does not have today. For a
         refinement to an existing feature, use Improvement Suggestions instead.
         Requests are prioritized by concrete use case. A well-described workflow
         is more persuasive than a vague wish.

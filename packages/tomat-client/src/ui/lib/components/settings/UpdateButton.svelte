@@ -3,7 +3,7 @@
   // the combined client + core + sidecar update flow.
   //
   // State machine:
-  //   idle                 : "Tomat Client vX.X.X" / hover "Check for Updates"
+  //   idle                 : "tomat client vX.X.X" / hover "Check for Updates"
   //   checking             : "Checking…"
   //   available            : "Updates Available!" / hover "Install Updates"
   //   updating             : "Updating…"
@@ -60,7 +60,7 @@
       case "clientRestartPending":
         return "Restart to Update";
       default:
-        return hovering ? "Check for Updates" : `Tomat Client v${clientVersion}`;
+        return hovering ? "Check for Updates" : `tomat client v${clientVersion}`;
     }
   });
 
@@ -175,10 +175,10 @@
   async function confirmInstall() {
     const lines: string[] = [];
     if (clientUpdate) {
-      lines.push(`Tomat Client v${clientUpdate.version} (client)`);
+      lines.push(`tomat client v${clientUpdate.version} (client)`);
     }
     if (coreAvailable) {
-      lines.push(`Tomat Core v${coreLatest} (core, currently v${coreCurrent})`);
+      lines.push(`tomat core v${coreLatest} (core, currently v${coreCurrent})`);
     }
     for (const b of binariesAvailable) {
       lines.push(

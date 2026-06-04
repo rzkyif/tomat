@@ -6,7 +6,8 @@
     "correctness": "error"
   },
   "rules": {
-    "tomat/no-em-dash": "error"
+    "tomat/no-em-dash": "error",
+    "tomat/no-uppercase-tomat": "error"
   },
   "env": {
     "builtin": true
@@ -22,6 +23,12 @@
       "files": ["packages/tomat-client/src/ui/lib/platform/tauri.ts"],
       "rules": {
         "tomat/no-tauri-import": "off"
+      }
+    },
+    {
+      "files": ["**/*.svelte"],
+      "rules": {
+        "tomat/no-uppercase-tomat": "off"
       }
     }
   ]

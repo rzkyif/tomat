@@ -492,7 +492,7 @@ if [ "$IDX_PURGE" != "-1" ]; then
     if ! rm -rf "$CLIENT_DATA_DIR" 2>/dev/null; then
       ui_die "Permission denied removing $CLIENT_DATA_DIR" \
         "" \
-        "quit Tomat and re-run"
+        "quit tomat and re-run"
     fi
     ui_action_done "$IDX_PURGE" "(removed)"
   fi

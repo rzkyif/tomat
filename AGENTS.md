@@ -7,7 +7,7 @@ not here. When tempted to add something, prefer the canonical doc and link it._
 
 ## Project Overview
 
-Tomat is a local-first modular AI client split into a long-running service and a
+tomat is a local-first modular AI client split into a long-running service and a
 thin desktop UI that talk over an HTTP+WS API, plus helper binaries, a bundled
 toolkit, and a distribution website. The packages:
 
@@ -68,6 +68,14 @@ through `npm:` specifiers from `deno task`.
   whole repo (code, comments, strings, Markdown, and every other tracked file).
   When flagged, reword so the sentence reads naturally rather than swapping in
   another symbol.
+- **Brand is lowercase.** The product is always written lowercase **tomat**,
+  even at the start of a sentence or heading. The thin vocabulary: `tomat` (the
+  product), `tomat core` (the service), `tomat client` (the desktop UI), and
+  `tomat built-in toolkit`. Hyphenated package names (`tomat-core`), the all-caps
+  `TOMAT_*` env vars, and `au.tomat.ing` identifiers are separate tokens and keep
+  their own casing. `deno task lint` rejects a capital-initial spelling repo-wide
+  via the `tomat/no-uppercase-tomat` oxlint rule plus `check-uppercase-tomat.ts`
+  (the same oxlint-rule-plus-walker pair as the em-dash ban).
 - **Logging.** `tomat-core` modules log via `getLogger("scope")` from
   `src/shared/log.ts`; `console.*` is forbidden except the boot-failure catch in
   `main.ts`. Every line runs through `scrubSecrets` (same module) which masks

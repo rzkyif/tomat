@@ -408,13 +408,13 @@ esac
 if [ "$TOMAT_CHANNEL" = "stable" ]; then
   CHANNEL_SUFFIX=""
   MANIFEST_DIR="manifests"
-  DISPLAY_NAME="Tomat"
+  DISPLAY_NAME="tomat"
 else
   CHANNEL_SUFFIX="-$TOMAT_CHANNEL"
   MANIFEST_DIR="manifests/$TOMAT_CHANNEL"
   case "$TOMAT_CHANNEL" in
-    beta) DISPLAY_NAME="Tomat Beta" ;;
-    dev) DISPLAY_NAME="Tomat Dev" ;;
+    beta) DISPLAY_NAME="tomat beta" ;;
+    dev) DISPLAY_NAME="tomat dev" ;;
   esac
 fi
 MANIFEST_URL="$STORAGE/$MANIFEST_DIR/client.json"
@@ -600,9 +600,9 @@ if [ "$uname_os" = "Darwin" ]; then
         "$EXTRACT_ERR" \
         "partial download; re-run"
 
-    # Discover the actual app bundle name (tomat.app or Tomat.app -- depends
-    # on Tauri config). We use the one we find, but the destination path is
-    # always /Applications/tomat.app to match the current productName.
+    # Discover the actual app bundle name (the .app basename may be any case,
+    # depending on Tauri config). We use the one we find, but the destination
+    # path is always /Applications/tomat.app to match the current productName.
     APP_SRC="$(find "$EXTRACT_DIR" -maxdepth 2 -name "*.app" -type d | head -n1)"
     if [ -z "$APP_SRC" ]; then
       ui_die "Client tarball is corrupted" \

@@ -233,7 +233,7 @@ function composeClientManifest(
   const carryover = live?.version === version ? live.platforms : {};
   return {
     version,
-    notes: `Tomat ${version}`,
+    notes: `tomat ${version}`,
     pub_date: new Date().toISOString(),
     platforms: {
       ...carryover,

@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in Tomat. This document explains how the project
+Thank you for your interest in tomat. This document explains how the project
 accepts contributions and the most useful ways to help.
 
 ## How code reaches the project
@@ -47,7 +47,7 @@ than a duplicate.
 
 The project distinguishes two kinds of request:
 
-- A **feature request** asks for a new capability that Tomat does not have
+- A **feature request** asks for a new capability that tomat does not have
   today.
 - An **improvement** asks for a refinement to a feature that already exists,
   such as reducing friction, clarifying copy, or adding a missing shortcut.

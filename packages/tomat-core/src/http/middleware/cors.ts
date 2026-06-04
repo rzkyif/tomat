@@ -1,4 +1,4 @@
-// Allowlisted CORS. Tomat-core's only browser caller is the Tauri webview
+// Allowlisted CORS. tomat-core's only browser caller is the Tauri webview
 // (origins `tauri://localhost` on mac/linux, `https://tauri.localhost` on
 // windows) and the Vite dev server on a loopback port. Native HTTP clients
 // (curl, the Tauri rust side, anyone using a raw `fetch` from node) don't

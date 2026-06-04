@@ -81,7 +81,7 @@ export async function download(
 
 function pickDownloadsDir(): string {
   // Cross-platform heuristic: honor XDG_DOWNLOAD_DIR when set, otherwise
-  // fall back to ~/Downloads. Works for the three desktop platforms Tomat
+  // fall back to ~/Downloads. Works for the three desktop platforms tomat
   // supports.
   const xdg = Deno.env.get("XDG_DOWNLOAD_DIR");
   if (xdg && fs.existsSync(xdg)) return xdg;

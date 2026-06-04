@@ -130,7 +130,7 @@
 
     <DownloadsButton {collapsed} disabled={connectionState.reconnecting} />
 
-    <!-- Versioned update affordance. Shows "Tomat Client vX.X.X" at rest;
+    <!-- Versioned update affordance. Shows "tomat client vX.X.X" at rest;
          drives the combined client + core + sidecar update flow on click. -->
     <UpdateButton {collapsed} disabled={connectionState.reconnecting} />
   </div>

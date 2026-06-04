@@ -25,7 +25,7 @@ import { errMessage } from "@tomat/shared";
   import { settingsState, viewState } from "$lib/state";
 
   const log = getLogger("cores");
-  const CLIENT_NAME = "Tomat Desktop";
+  const CLIENT_NAME = "tomat client";
   // Resolved from the platform on mount so a beta client targets the beta
   // core's port (7810) rather than the stable 7800. Falls back to the stable
   // default until resolved (and on the web stub).
@@ -374,7 +374,7 @@ import { errMessage } from "@tomat/shared";
         style="mask:url(/tomat.svg) center/contain no-repeat;-webkit-mask:url(/tomat.svg) center/contain no-repeat;"
         aria-hidden="true"
       ></span>
-      <h1 class="text-lg font-medium text-default-800">Welcome to Tomat</h1>
+      <h1 class="text-lg font-medium text-default-800">Welcome to tomat</h1>
     </div>
   {:else}
     <!-- Header -->
@@ -405,7 +405,7 @@ import { errMessage } from "@tomat/shared";
         ></i>
         <h1 class="text-lg font-medium text-default-800 flex-1">
           {#if viewState.locked}
-            Welcome to Tomat
+            Welcome to tomat
           {:else}
             Cores
           {/if}
@@ -427,7 +427,7 @@ import { errMessage } from "@tomat/shared";
   {#if view === "chooseDestination"}
     <!-- Step 1 of initial setup: pick where the core runs. -->
     <p class="text-sm text-default-600">
-      Tomat needs a core: the local service that runs language models, speech
+      tomat needs a core: the local service that runs language models, speech
       services and tools. Where should it run?
     </p>
 
@@ -621,7 +621,7 @@ import { errMessage } from "@tomat/shared";
   {:else if view === "localConfirm"}
     <!-- Step 2 (local branch): confirm install + per-install toggles. -->
     <p class="text-sm text-default-600">
-      Tomat will install the core service on this computer. Here's what
+      tomat will install the core service on this computer. Here's what
       that means:
     </p>
 

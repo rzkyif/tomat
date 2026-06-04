@@ -1,4 +1,4 @@
-# Tomat test suite
+# tomat test suite
 
 Tests live co-located with source as `*.test.ts`. E2E specs are opt-in and live
 under `tests/e2e/specs/` with their own runner.
