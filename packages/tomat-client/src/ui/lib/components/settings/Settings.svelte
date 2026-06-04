@@ -21,6 +21,8 @@
   import SearchInput from "../ui/SearchInput.svelte";
   import SectionHeader from "../ui/SectionHeader.svelte";
   import { settingsState, serversState, downloadsState, viewState } from "../../state";
+  import { confirmState } from "$lib/state/confirm.svelte";
+  import { connectionState } from "$lib/state/connection.svelte";
   import {
     evalCondition,
     findField,
@@ -105,6 +107,13 @@
     !!settingsState.currentSettings["appearance.animationsEnabled"],
   );
 
+  // When reconnecting, a core-destination group's fields can't be edited (the
+  // writes would fail). `inert` blocks all pointer/focus interaction for every
+  // nested field at once; pair with dimming for the visual cue.
+  const coreGroupLocked = $derived(
+    connectionState.reconnecting && selectedGroup?.destination === "core",
+  );
+
   async function selectGroup(groupId: string) {
     // Re-clicking the active group (when not searching) restores its sections'
     // default expand/collapse state instead of replaying the slide.
@@ -170,8 +179,22 @@
   // different model) re-shows the popup with the full updated list.
   let dismissedSignature = $state<string | null>(null);
   let shownSignature = $state<string | null>(null);
+
+  // While the core is unreachable, settings can't be read/written: lock the
+  // view down (the search box clears, core groups + fields disable via the
+  // sidebar / the inert wrapper below) and dismiss the pending-downloads modal
+  // since acting on it requires the core.
+  $effect(() => {
+    if (!connectionState.reconnecting) return;
+    if (search.query) search.clear();
+    if (confirmState.pending?.title === "Pending Downloads") confirmState.cancel();
+  });
+
   $effect(() => {
     const sig = downloadsState.missingSignature;
+    // Don't (re)open the pending popup while disconnected; the close effect
+    // above tears down any open one.
+    if (connectionState.reconnecting) return;
     if (!downloadsState.hasPending) {
       dismissedSignature = null;
       shownSignature = null;
@@ -440,8 +463,11 @@
       <SearchInput
         bind:value={search.query}
         bind:el={search.inputEl}
-        placeholder="Search settings..."
+        placeholder={connectionState.reconnecting
+          ? "Reconnecting to core..."
+          : "Search settings..."}
         ariaLabel="Search settings"
+        disabled={connectionState.reconnecting}
         oninput={() => search.onInput()}
         onfocus={() => {
           if (search.query.trim() && !search.mode) {
@@ -596,7 +622,11 @@
                   </div>
                   <!-- gap-3 separates sections so each (tight) section reads
                        as a unit with clear space before the next one. -->
-                  <div class="flex flex-col gap-3">
+                  <div
+                    class="flex flex-col gap-3 transition-opacity"
+                    class:opacity-50={coreGroupLocked}
+                    inert={coreGroupLocked}
+                  >
                     {#each selectedGroup.sections as section, si}
                       {#if isSectionVisible(section)}
                         <SettingsSection

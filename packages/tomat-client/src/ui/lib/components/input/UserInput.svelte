@@ -199,7 +199,9 @@ import { errMessage } from "@tomat/shared";
   let hasActiveWork = $derived(streamingState.hasActiveWork);
   let hasContent = $derived(text.trim().length > 0 || attachments.length > 0);
   let placeholderText = $derived(
-    downloadsState.hasPending
+    connectionState.reconnecting
+      ? "Reconnecting to core..."
+      : downloadsState.hasPending
       ? "Pending download, open settings!"
       : downloadsState.loading
         ? "Connecting to core..."
@@ -1005,7 +1007,7 @@ import { errMessage } from "@tomat/shared";
       placeholder={placeholderText}
       disabled={downloadsState.hasPending ||
         downloadsState.loading ||
-        connectionState.state !== "connected" ||
+        connectionState.reconnecting ||
         (llmStatus !== "Running" && llmStatus !== "Disabled")}
     ></textarea>
   </div>
@@ -1181,6 +1183,7 @@ import { errMessage } from "@tomat/shared";
         class="rounded-large {hasActiveWork && !hasContent
           ? 'text-red-500 hover:text-red-400'
           : ''}"
+        disabled={connectionState.reconnecting}
         onclick={hasActiveWork && !hasContent
           ? handleStop
           : hasActiveWork && hasContent

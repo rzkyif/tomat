@@ -514,6 +514,15 @@ if (!FRESH_INSTALL) {
 // The core may have exited during the health poll (which triggers shutdown);
 // don't spawn the client into a tearing-down session.
 if (!shuttingDown) {
+  // The Tauri CLI builds vite + cargo before the app binary runs and emits its
+  // first "tomat client starting" line, and that build chatter is filtered out
+  // here. Emit a synthetic client line up front (mirroring the client's fern
+  // format) so the console shows the client is building; it stays the latest
+  // client message until the binary starts (or a build error leaks through
+  // pipe()). Written directly like devLog, so it bypasses formatChildLine.
+  console.log(
+    `${linePrefix("client", "35")}${color("32", "info ")} ${color("2", "boot")} tomat client building`,
+  );
   children.push(
     spawn("client", "35", clientCmd, `${ROOT}packages/tomat-client`, {
       ...CHANNEL_ENV,

@@ -20,7 +20,10 @@
 
   const log = getLogger("update");
 
-  let { collapsed } = $props<{ collapsed: boolean }>();
+  let { collapsed, disabled = false } = $props<{
+    collapsed: boolean;
+    disabled?: boolean;
+  }>();
 
   type Phase =
     | "idle"
@@ -250,9 +253,10 @@
   type="button"
   class="hover:cursor-pointer flex items-center h-8 pl-1.5 {collapsed
     ? 'pr-0'
-    : 'pr-2.5'} gap-1.5 rounded-medium [transition:color_500ms,background-color_200ms,padding_200ms] {tone} hover:bg-surface-inset"
+    : 'pr-2.5'} gap-1.5 rounded-medium [transition:color_500ms,background-color_200ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {tone} hover:bg-surface-inset"
   title={collapsed ? label : undefined}
   aria-label={label}
+  {disabled}
   onmouseenter={() => (hovering = true)}
   onmouseleave={() => (hovering = false)}
   onfocus={() => (hovering = true)}

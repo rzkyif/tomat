@@ -2,6 +2,7 @@
   import { SETTINGS_SCHEMA, isGroupVisible } from "@tomat/shared";
   import type { ServerStatus, ServerStatusUpdate } from "$lib/shared/types";
   import { settingsState } from "../../state";
+  import { connectionState } from "$lib/state/connection.svelte";
   import ServerStatusChip from "./ServerStatusChip.svelte";
   import DownloadsButton from "./DownloadsButton.svelte";
   import UpdateButton from "./UpdateButton.svelte";
@@ -81,6 +82,7 @@
         label={group.name}
         {collapsed}
         selected={isActive}
+        disabled={connectionState.reconnecting && group.destination === "core"}
         title={collapsed ? group.name : undefined}
         ariaLabel={group.name}
         onclick={() => onSelect?.(group.id)}
@@ -126,10 +128,10 @@
       </div>
     {/if}
 
-    <DownloadsButton {collapsed} />
+    <DownloadsButton {collapsed} disabled={connectionState.reconnecting} />
 
     <!-- Versioned update affordance. Shows "Tomat Client vX.X.X" at rest;
          drives the combined client + core + sidecar update flow on click. -->
-    <UpdateButton {collapsed} />
+    <UpdateButton {collapsed} disabled={connectionState.reconnecting} />
   </div>
 </div>

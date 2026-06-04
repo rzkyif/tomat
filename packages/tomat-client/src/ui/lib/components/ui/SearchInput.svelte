@@ -6,6 +6,7 @@
     onclear,
     placeholder = "Search...",
     ariaLabel,
+    disabled = false,
     el = $bindable<HTMLInputElement | undefined>(undefined),
     class: extraClass = "",
   }: {
@@ -18,6 +19,7 @@
     onclear?: () => void;
     placeholder?: string;
     ariaLabel?: string;
+    disabled?: boolean;
     el?: HTMLInputElement | undefined;
     class?: string;
   } = $props();
@@ -25,14 +27,16 @@
 
 <div
   class="relative h-10 bg-surface-inset rounded-large overflow-hidden w-full flex items-center px-4 pr-8 {extraClass}"
+  class:opacity-50={disabled}
 >
   <input
     bind:this={el}
     bind:value
     type="text"
     {placeholder}
+    {disabled}
     aria-label={ariaLabel}
-    class="bg-transparent outline-none text-base text-default-600 w-full"
+    class="bg-transparent outline-none text-base text-default-600 w-full disabled:cursor-not-allowed"
     oninput={(e) => oninput?.((e.target as HTMLInputElement).value)}
     {onfocus}
   />

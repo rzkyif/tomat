@@ -14,6 +14,7 @@
     title,
     ariaLabel,
     ariaPressed,
+    disabled = false,
     class: extraClass = "",
   }: {
     icon: string;
@@ -32,6 +33,7 @@
     title?: string;
     ariaLabel?: string;
     ariaPressed?: boolean;
+    disabled?: boolean;
     class?: string;
   } = $props();
 
@@ -59,10 +61,11 @@
 </script>
 
 <button
-  class="hover:cursor-pointer flex items-center h-8 pl-1.5 {padRight} gap-1.5 rounded-medium [transition:color_500ms,background-color_200ms,padding_200ms] {stateClass} {extraClass}"
+  class="hover:cursor-pointer flex items-center h-8 pl-1.5 {padRight} gap-1.5 rounded-medium [transition:color_500ms,background-color_200ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {stateClass} {extraClass}"
   {title}
   aria-label={ariaLabel ?? label}
   aria-pressed={ariaPressed}
+  {disabled}
   {onclick}
 >
   <span class="relative flex shrink-0">

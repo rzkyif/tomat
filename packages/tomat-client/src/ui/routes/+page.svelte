@@ -27,6 +27,7 @@
     updateState,
     viewState,
   } from "$lib/state";
+  import { connectionState } from "$lib/state/connection.svelte";
   import { cores } from "$lib/core";
   import { platform } from "$lib/platform";
   import { withTimeout } from "$lib/shared/async";
@@ -335,6 +336,16 @@
   // loud) rather than leaving the merge pending. Just above net_fetch's 10s
   // connect timeout so the HTTP layer surfaces the real error first.
   const CORE_SETTINGS_TIMEOUT_MS = 12_000;
+
+  // Redirect out of the two core-backed transient modes while reconnecting:
+  // quick setup falls back to settings (which shows its own disabled state) and
+  // the session list (which reads/loads sessions from the core) falls back to
+  // chat, the safe resting mode.
+  $effect(() => {
+    if (!connectionState.reconnecting) return;
+    if (viewState.mode === "quickSetup") viewState.navigate("settings");
+    else if (viewState.mode === "sessionList") viewState.navigate("chat");
+  });
 
   onMount(async () => {
     // Local critical path: do ONLY the local work needed to position + theme

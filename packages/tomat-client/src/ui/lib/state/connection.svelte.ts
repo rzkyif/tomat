@@ -1,9 +1,10 @@
 /**
- * Reactive WebSocket connection state for the currently-selected core,
- * driving the "Reconnecting to <core>…" banner. Hides flashes of
- * disconnection that resolve within RECONNECT_BANNER_DELAY_MS. The
- * underlying CoreClient already retries with exp backoff (500 ms → 30 s),
- * so a brief reconnect during normal operation shouldn't be visible.
+ * Reactive WebSocket connection state for the currently-selected core, driving
+ * the adaptive reconnecting UI (chat input, settings lock-down, quick-settings
+ * redirect). Hides flashes of disconnection that resolve within
+ * RECONNECT_BANNER_DELAY_MS. The underlying CoreClient already retries with exp
+ * backoff (500 ms → 30 s), so a brief reconnect during normal operation
+ * shouldn't be visible.
  */
 
 import type { ConnectionState } from "$lib/core/client";
@@ -16,8 +17,9 @@ class ConnectionStateStore {
   disconnectedSinceMs = $state<number | null>(null);
 
   // True once disconnected for at least RECONNECT_BANNER_DELAY_MS. Kept
-  // as plain state (not $derived) so we can manage the delay timer.
-  showReconnectBanner = $state(false);
+  // as plain state (not $derived) so we can manage the delay timer. Drives the
+  // adaptive reconnecting UI across chat / settings / quick-settings modes.
+  reconnecting = $state(false);
 
   // Last connect-failure reason from CoreClient (e.g. "Connection refused"),
   // shown in the banner. Retained across the connecting/disconnected churn of
@@ -35,7 +37,7 @@ class ConnectionStateStore {
       if (s === "connected") {
         this.disconnectedSinceMs = null;
         this.clearBannerTimer();
-        this.showReconnectBanner = false;
+        this.reconnecting = false;
         this.reason = null;
       } else if (s === "disconnected" || s === "connecting") {
         // Keep the last known reason through the connecting/disconnected churn.
@@ -43,12 +45,12 @@ class ConnectionStateStore {
         if (this.disconnectedSinceMs === null) {
           this.disconnectedSinceMs = Date.now();
         }
-        if (!this.showReconnectBanner && this.bannerTimer === null) {
+        if (!this.reconnecting && this.bannerTimer === null) {
           this.bannerTimer = setTimeout(() => {
             this.bannerTimer = null;
             // Re-check at fire time: a quick reconnect may have already
             // flipped state back.
-            if (this.state !== "connected") this.showReconnectBanner = true;
+            if (this.state !== "connected") this.reconnecting = true;
           }, RECONNECT_BANNER_DELAY_MS);
         }
       }
@@ -61,7 +63,7 @@ class ConnectionStateStore {
     this.clearBannerTimer();
     this.state = "connecting";
     this.disconnectedSinceMs = null;
-    this.showReconnectBanner = false;
+    this.reconnecting = false;
     this.reason = null;
   }
 

@@ -3,7 +3,10 @@
   import { useBlink } from "$lib/composables/use-blink.svelte";
   import SidebarItem from "../ui/SidebarItem.svelte";
 
-  let { collapsed } = $props<{ collapsed: boolean }>();
+  let { collapsed, disabled = false } = $props<{
+    collapsed: boolean;
+    disabled?: boolean;
+  }>();
 
   // Pending (required files missing) takes precedence over an in-flight queue:
   // while pending, clicking re-opens the Pending Downloads modal and the
@@ -35,6 +38,7 @@
   {icon}
   {label}
   {collapsed}
+  {disabled}
   ping={blink.on}
   pingTone={isPending ? "accent" : "default"}
   title={collapsed ? label : undefined}
