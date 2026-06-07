@@ -143,7 +143,31 @@ export type ShortcutField = BaseField & {
 /** Render-only fields whose value is ignored; defaultValue exists only so the
  *  defaults loader has a stable initial entry. */
 export type RenderOnlyField = BaseField & {
-  type: "services" | "storage" | "snippets" | "toolkits" | "cores";
+  type: "services" | "storage";
+  defaultValue: string | number | boolean;
+};
+
+/** Discriminator selecting which client-side manager renders an
+ *  object_management field. The schema names WHICH manager, never HOW: data
+ *  loading, actions, and detail rendering live in the per-type field component
+ *  (`components/settings/fields/{Snippets,Toolkits,Cores}Field.svelte`), which
+ *  `SettingsField.svelte` dispatches to on this value. */
+export type ObjectManagementType = "snippets" | "toolkits" | "cores";
+
+/** A scrollable, searchable manager for a list of objects (snippets, toolkits,
+ *  paired cores, and later notes / scheduled tasks). Render-only as far as the
+ *  settings store is concerned: the managed objects live in their own stores
+ *  (client settings, core REST, keychain), never in this field's value. The
+ *  `objectType` discriminator picks the client provider from the registry. */
+// description is optional here (unlike other fields): an object_management
+// field has no label or field-level description of its own; any descriptive
+// copy lives on the owning group (SettingGroup.description), rendered under the
+// group header.
+export type ObjectManagementField = Omit<BaseField, "description"> & {
+  type: "object_management";
+  objectType: ObjectManagementType;
+  description?: string;
+  /** Present only so the defaults loader has a stable entry; ignored. */
   defaultValue: string | number | boolean;
 };
 
@@ -189,6 +213,7 @@ export type SettingField =
   | ColorField
   | ShortcutField
   | RenderOnlyField
+  | ObjectManagementField
   | NumberSliderField
   | SelectField
   | PresetField
@@ -222,6 +247,13 @@ export type SettingDestination = "client" | "core";
 export interface SettingGroup {
   id: string;
   name: string;
+  /** Optional group-level description rendered under the group header. Same
+   *  presentation tiers as a field's description: `always` shows it
+   *  persistently, `ondemand` keeps it behind the header's info-button toggle,
+   *  `none` (or unset, when description is empty) shows nothing. Primarily for
+   *  object_management groups whose single field carries no label of its own. */
+  description?: string;
+  descriptionTier?: "none" | "ondemand" | "always";
   /** When true, the group is omitted from the settings UI entirely (no sidebar
    *  entry, not rendered). Used for groups that exist only to register setting
    *  ids / a persistence destination (e.g. `cores`). */
@@ -266,11 +298,15 @@ export type SettingsRecord = Record<string, unknown>;
 // --- Group id registry -----------------------------------------------------
 // The full set of group ids known to the schema, classified by destination.
 // Used by the client persistence layer to decide which settings go where.
+// Hand-maintained here so they carry literal types (ClientGroupId/CoreGroupId);
+// a derive-check in engine.test.ts fails CI if these ever drift from each
+// group's `destination` in SETTINGS_SCHEMA.
 
 export const CLIENT_GROUP_IDS = [
   "appearance",
   "shortcuts",
   "snippets",
+  "cores",
   "usage",
   "stt_input",
   "tts",
@@ -283,6 +319,7 @@ export const CORE_GROUP_IDS = [
   "prompts",
   "dualModel",
   "toolkits",
+  "tools",
   "stt_engine",
   "server",
 ] as const;

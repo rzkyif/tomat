@@ -10,6 +10,7 @@ import { buildLlamaStartOptions, llamaStartArgsFromSettings } from "../sidecars/
 import { errMessage } from "@tomat/shared";
 import { buildWhisperStartOptions, whisperStartArgsFromSettings } from "../sidecars/whisper.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
+import { llmScheduler } from "./llm-scheduler.ts";
 import { loadCoreSettings, subscribeCoreSettings } from "./core-settings.ts";
 import { downloadManager } from "../downloads/manager.ts";
 import { onBinaryInstalled } from "../binaries/manager.ts";
@@ -59,6 +60,20 @@ const lastSeenStatus = new Map<string, string>();
 export async function initSidecarBoot(): Promise<void> {
   if (initialized) return;
   initialized = true;
+  // Wire the LLM scheduler watchdog so a wedged llama-server actually self-heals:
+  // when a local slot stays held past callTimeoutMs + grace, the scheduler aborts
+  // the upstream stream and calls this handler, which restarts the sidecar so
+  // subsequent requests hit a healthy server. Without this the documented
+  // self-healing never fires (the handler had zero callers).
+  llmScheduler().setWatchdogHandler(({ clientId, elapsedMs }) => {
+    log.error(
+      `llm watchdog: client ${clientId} slot wedged ${elapsedMs}ms; restarting llama-server`,
+    );
+    void (async () => {
+      const s = await loadCoreSettings();
+      await applyLlama(s).catch(logErr("llama"));
+    })();
+  });
   const settings = await loadCoreSettings();
   await applyLlama(settings).catch(logErr("llama"));
   await applyWhisper(settings).catch(logErr("whisper"));

@@ -12,15 +12,19 @@ import type {
   Tool,
   Toolkit,
   ToolkitSource,
+  ToolkitStatus,
 } from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { errMessage, permissionKey } from "@tomat/shared";
-import { hashToolkit, newestIncludedMtimeMs } from "./hash.ts";
+import { hashToolkit, statSignature } from "./hash.ts";
 import { getLogger } from "../shared/log.ts";
 
-const CONTENT_DRIFT_ERROR = "content changed since install; reinstall to use";
+// Human-readable last_error set when the content hash cannot even be computed
+// at verify time (a real I/O error, distinct from the `drift` status which a
+// plain content mismatch sets on its own).
+const HASH_FAILED_PREFIX = "content hash failed";
 
 export interface ToolkitInsertInput {
   id: string;
@@ -30,7 +34,10 @@ export interface ToolkitInsertInput {
   version: string;
   installedPath: string;
   toolsJsonHash: string;
+  // Empty string until the toolkit is installed; download leaves it unpinned.
   contentHash: string;
+  // Defaults to "downloaded" when omitted (the download path never installs).
+  status?: ToolkitStatus;
 }
 
 export interface ToolInsertInput {
@@ -45,10 +52,12 @@ export interface ToolInsertInput {
 }
 
 export class ToolkitsRegistry {
-  // Per-call hash-verify skip cache: toolkitId -> { mtimeMs, hash }. When the
-  // newest mtime across a toolkit's files is unchanged from a prior successful
-  // verify, the content can't have changed, so the per-call re-hash is skipped.
-  private hashVerifiedCache = new Map<string, { mtimeMs: number; hash: string }>();
+  // Per-call hash-verify skip cache: toolkitId -> { sig, hash }. When the
+  // stat signature (count + total size + newest mtime) across a toolkit's files
+  // is unchanged from a prior successful verify, the content is very unlikely to
+  // have changed, so the per-call re-hash is skipped. (mtime alone was forgeable
+  // by a tool resetting its own files' mtime; see statSignature.)
+  private hashVerifiedCache = new Map<string, { sig: string; hash: string }>();
 
   // --- toolkit-level ------------------------------------------------------
 
@@ -56,7 +65,7 @@ export class ToolkitsRegistry {
     const rows = db()
       .prepare(`
       SELECT id, source, display_name, description, version, installed_path,
-             tools_json_hash, content_hash, enabled, last_error,
+             tools_json_hash, content_hash, status, last_error,
              installed_at_ms, updated_at_ms
       FROM toolkits
       ORDER BY display_name COLLATE NOCASE ASC
@@ -69,7 +78,7 @@ export class ToolkitsRegistry {
     const row = db()
       .prepare(`
       SELECT id, source, display_name, description, version, installed_path,
-             tools_json_hash, content_hash, enabled, last_error,
+             tools_json_hash, content_hash, status, last_error,
              installed_at_ms, updated_at_ms
       FROM toolkits WHERE id = ?
     `)
@@ -92,7 +101,7 @@ export class ToolkitsRegistry {
         UPDATE toolkits
            SET source = ?, display_name = ?, description = ?, version = ?,
                installed_path = ?, tools_json_hash = ?, content_hash = ?,
-               last_error = NULL, updated_at_ms = ?
+               status = ?, last_error = NULL, updated_at_ms = ?
          WHERE id = ?
       `)
         .run(
@@ -103,6 +112,7 @@ export class ToolkitsRegistry {
           input.installedPath,
           input.toolsJsonHash,
           input.contentHash,
+          input.status ?? "downloaded",
           now,
           input.id,
         );
@@ -111,9 +121,9 @@ export class ToolkitsRegistry {
         .prepare(`
         INSERT INTO toolkits
           (id, source, display_name, description, version, installed_path,
-           tools_json_hash, content_hash, enabled, last_error,
+           tools_json_hash, content_hash, status, last_error,
            installed_at_ms, updated_at_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
       `)
         .run(
           input.id,
@@ -124,16 +134,51 @@ export class ToolkitsRegistry {
           input.installedPath,
           input.toolsJsonHash,
           input.contentHash,
+          input.status ?? "downloaded",
           now,
           now,
         );
     }
   }
 
-  setEnabled(id: string, enabled: boolean): void {
+  setStatus(id: string, status: ToolkitStatus): void {
     db()
-      .prepare(`UPDATE toolkits SET enabled = ?, updated_at_ms = ? WHERE id = ?`)
-      .run(enabled ? 1 : 0, Date.now(), id);
+      .prepare(`UPDATE toolkits SET status = ?, updated_at_ms = ? WHERE id = ?`)
+      .run(status, Date.now(), id);
+  }
+
+  // Install (deps done): pin the content hash, flip to 'installed', clear any
+  // prior error. Invalidates the per-call hash skip-cache so the next verify
+  // compares against the freshly pinned hash.
+  markInstalled(id: string, contentHash: string): void {
+    db()
+      .prepare(
+        `UPDATE toolkits SET status = 'installed', content_hash = ?, last_error = NULL, updated_at_ms = ? WHERE id = ?`,
+      )
+      .run(contentHash, Date.now(), id);
+    this.hashVerifiedCache.delete(id);
+  }
+
+  // Out-of-band content change detected. Flip to 'drift' (keeping the pinned
+  // hash for reference) and leave it for the user to confirm. Callers also call
+  // disableAllTools(id) so a drifted toolkit can never be LLM-exposed.
+  markDrift(id: string): void {
+    db()
+      .prepare(`UPDATE toolkits SET status = 'drift', updated_at_ms = ? WHERE id = ?`)
+      .run(Date.now(), id);
+    this.hashVerifiedCache.delete(id);
+  }
+
+  // Confirm-reenable: re-pin the CURRENT on-disk content as trusted, clear the
+  // drift state + any error, return to 'installed'. The user re-enables tools
+  // afterward (they were disabled when drift was flagged).
+  repinAndClear(id: string, contentHash: string): void {
+    db()
+      .prepare(
+        `UPDATE toolkits SET status = 'installed', content_hash = ?, last_error = NULL, updated_at_ms = ? WHERE id = ?`,
+      )
+      .run(contentHash, Date.now(), id);
+    this.hashVerifiedCache.delete(id);
   }
 
   setLastError(id: string, error: string | null): void {
@@ -142,27 +187,29 @@ export class ToolkitsRegistry {
       .run(error, Date.now(), id);
   }
 
-  // Boot-time integrity check. Walks every installed toolkit, recomputes
-  // its content hash (per hash.ts: excludes node_modules + .gitignore-listed
-  // paths; includes .gitignore itself), and marks the row with
-  // CONTENT_DRIFT_ERROR if it differs from the stored hash. Conversely,
-  // clears a stale drift error if the hash now matches (user could have
-  // restored or reinstalled the folder out-of-band).
+  // Boot-time integrity check. Walks every INSTALLED toolkit, recomputes its
+  // content hash (per hash.ts: excludes node_modules + deno.lock + .gitignore-
+  // listed paths; includes .gitignore itself), and on a mismatch flips the row
+  // to status='drift' AND disables all its tools so a tampered toolkit can never
+  // be LLM-exposed. A 'downloaded' toolkit has no pinned hash to check; a 'drift'
+  // toolkit is already flagged. There is NO auto-clear on match: leaving drift
+  // requires the user's explicit confirm-reenable (which re-pins the hash).
   //
-  // Returns the IDs that drifted. Tool calls against a drifted toolkit
-  // should be refused with a 409. That's the route layer's responsibility,
-  // gated on `toolkit.lastError`.
+  // Returns the IDs that drifted (for boot logging).
   async verifyAllOnBoot(): Promise<string[]> {
     const log = getLogger("toolkits.verify");
     const drifted: string[] = [];
     for (const tk of this.list()) {
+      if (tk.status !== "installed") continue;
       let actualHash: string;
       try {
         actualHash = await hashToolkit(tk.installedPath);
       } catch (err) {
         const msg = errMessage(err);
-        log.warn(`[${tk.id}] hash failed: ${msg}`);
-        this.setLastError(tk.id, `hash failed: ${msg}`);
+        log.warn(`[${tk.id}] hash failed: ${msg}; flagging drift`);
+        this.markDrift(tk.id);
+        this.disableAllTools(tk.id);
+        this.setLastError(tk.id, `${HASH_FAILED_PREFIX}: ${msg}`);
         drifted.push(tk.id);
         continue;
       }
@@ -171,15 +218,11 @@ export class ToolkitsRegistry {
           `[${tk.id}] content drift: stored=${tk.contentHash.slice(
             0,
             12,
-          )} actual=${actualHash.slice(0, 12)}`,
+          )} actual=${actualHash.slice(0, 12)}; disabling tools`,
         );
-        this.setLastError(tk.id, CONTENT_DRIFT_ERROR);
+        this.markDrift(tk.id);
+        this.disableAllTools(tk.id);
         drifted.push(tk.id);
-      } else if (tk.lastError === CONTENT_DRIFT_ERROR) {
-        // Drift error was set on a previous boot but the user has since
-        // reverted; clear it so tools can be called again.
-        log.info(`[${tk.id}] content hash now matches; clearing drift error`);
-        this.setLastError(tk.id, null);
       }
     }
     return drifted;
@@ -187,31 +230,42 @@ export class ToolkitsRegistry {
 
   // Per-call integrity check: re-verify a toolkit's content hash at tool-call
   // time so a toolkit tampered AFTER boot can't execute (verifyAllOnBoot only
-  // runs at startup). Cheap when unchanged via the mtime skip-cache. Throws
-  // toolkit_hash_drift (and flags the row) when the on-disk content no longer
-  // matches the trusted hash; clears a stale drift flag when it matches again.
+  // runs at startup). Cheap when unchanged via the stat skip-cache. On mismatch
+  // (or hash failure) it flips the toolkit to status='drift', disables all its
+  // tools, and throws toolkit_hash_drift. There is no auto-clear: re-enabling
+  // requires the user's explicit confirm-reenable.
   async verifyHashFresh(toolkitId: string): Promise<void> {
     const tk = this.get(toolkitId);
     if (!tk) return; // unknown toolkit; the tool lookup already handled this
-    const newest = await newestIncludedMtimeMs(tk.installedPath);
+    // Defense in depth: a call should only reach here for an installed toolkit
+    // (the chat-exposure gate excludes non-installed). Refuse otherwise.
+    if (tk.status !== "installed") {
+      throw new AppError(
+        "toolkit_hash_drift",
+        `toolkit ${toolkitId} is not installed (status ${tk.status})`,
+      );
+    }
+    const sig = await statSignature(tk.installedPath);
     const cached = this.hashVerifiedCache.get(toolkitId);
-    if (cached && cached.mtimeMs === newest && cached.hash === tk.contentHash) return;
+    if (cached && cached.sig === sig && cached.hash === tk.contentHash) return;
     let actual: string;
     try {
       actual = await hashToolkit(tk.installedPath);
     } catch (err) {
+      this.markDrift(toolkitId);
+      this.disableAllTools(toolkitId);
+      this.setLastError(toolkitId, `${HASH_FAILED_PREFIX}: ${errMessage(err)}`);
       throw new AppError(
         "toolkit_hash_drift",
         `toolkit ${toolkitId} hash failed: ${errMessage(err)}`,
       );
     }
     if (actual === tk.contentHash) {
-      this.hashVerifiedCache.set(toolkitId, { mtimeMs: newest, hash: actual });
-      if (tk.lastError === CONTENT_DRIFT_ERROR) this.setLastError(toolkitId, null);
+      this.hashVerifiedCache.set(toolkitId, { sig, hash: actual });
       return;
     }
-    this.hashVerifiedCache.delete(toolkitId);
-    this.setLastError(toolkitId, CONTENT_DRIFT_ERROR);
+    this.markDrift(toolkitId);
+    this.disableAllTools(toolkitId);
     throw new AppError(
       "toolkit_hash_drift",
       `toolkit ${toolkitId} content changed since it was trusted`,
@@ -226,15 +280,28 @@ export class ToolkitsRegistry {
   // --- tool-level ---------------------------------------------------------
 
   replaceTools(toolkitId: string, tools: ToolInsertInput[]): void {
-    // Atomically replace the toolkit's tools, preserving enabled state +
-    // grants on identical (name, parameters, triggers) entries so a re-install
-    // doesn't blow away user permissions unless they materially changed.
+    // Atomically replace the toolkit's tools. Across a re-download we preserve
+    // each surviving tool's `enabled` flag (by name) so the user's tool
+    // selection isn't lost on an update, and we preserve its permission grants
+    // ONLY when the required-permission SET is also unchanged. A changed perm
+    // set drops the grants so the user must re-review (the tool stays
+    // enabled-but-not-exposed until re-granted). Grants would otherwise be lost
+    // entirely: the DELETE below cascades them away (grants.tool_id FK), so we
+    // snapshot + re-insert. Tool ids are deterministic (`toolkitId::name`), so a
+    // re-inserted tool keeps the same id its grants reference.
     const existing = db()
       .prepare(`
-      SELECT id, name, enabled FROM tools WHERE toolkit_id = ?
+      SELECT id, name, enabled, required_permissions_json FROM tools WHERE toolkit_id = ?
     `)
-      .all(toolkitId) as Array<{ id: string; name: string; enabled: number }>;
+      .all(toolkitId) as Array<{
+      id: string;
+      name: string;
+      enabled: number;
+      required_permissions_json: string;
+    }>;
     const existingByName = new Map(existing.map((r) => [r.name, r]));
+    const grantsByToolId = new Map<string, Grant[]>();
+    for (const r of existing) grantsByToolId.set(r.id, this.listGrantsForTool(r.id));
 
     db().exec("BEGIN");
     try {
@@ -258,12 +325,23 @@ export class ToolkitsRegistry {
             JSON.stringify(t.triggers),
             t.fnExport,
             t.alwaysAvailable ? 1 : 0,
-            // Conservative: disable on re-install if the required permission
-            // set may have changed. Higher-level installer can re-enable if
-            // permissions still match.
             prior ? prior.enabled : 0,
             JSON.stringify(t.requiredPermissions),
           );
+        if (
+          prior &&
+          permKeySet(prior.required_permissions_json) ===
+            permKeySet(JSON.stringify(t.requiredPermissions))
+        ) {
+          for (const g of grantsByToolId.get(prior.id) ?? []) {
+            db()
+              .prepare(`
+              INSERT INTO grants (tool_id, permission_key, permission_kind, state, granted_at_ms)
+              VALUES (?, ?, ?, ?, ?)
+            `)
+              .run(id, g.permissionKey, g.permissionKind, g.state, g.grantedAtMs);
+          }
+        }
       }
       db().exec("COMMIT");
     } catch (err) {
@@ -299,6 +377,17 @@ export class ToolkitsRegistry {
     db()
       .prepare(`UPDATE tools SET enabled = ? WHERE toolkit_id = ? AND name = ?`)
       .run(enabled ? 1 : 0, toolkitId, name);
+  }
+
+  // Bulk toggles backing the "Enable all / Disable all" toolkit-detail action.
+  // Enabling does not grant permissions: a tool with ungranted required perms
+  // ends up enabled-but-not-exposed (the chat layer is the final gate).
+  enableAllTools(toolkitId: string): void {
+    db().prepare(`UPDATE tools SET enabled = 1 WHERE toolkit_id = ?`).run(toolkitId);
+  }
+
+  disableAllTools(toolkitId: string): void {
+    db().prepare(`UPDATE tools SET enabled = 0 WHERE toolkit_id = ?`).run(toolkitId);
   }
 
   // --- grants -------------------------------------------------------------
@@ -373,13 +462,20 @@ export class ToolkitsRegistry {
     `)
       .get(toolId) as { vector: Uint8Array; dim: number; source_hash: string } | undefined;
     if (!row) return undefined;
-    const bytes =
-      row.vector instanceof Uint8Array ? row.vector : new Uint8Array(row.vector as ArrayBuffer);
-    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-    return {
-      vector: new Float32Array(buf),
-      sourceHash: row.source_hash,
-    };
+    return decodeEmbeddingRow(row);
+  }
+
+  // Batch-load every stored tool embedding in a single query. The relevance
+  // filter (phase1) runs on every chat turn over all enabled tools; calling
+  // loadEmbedding() per tool was N prepared statements + N round-trips. Keyed by
+  // tool id; tools without an embedding are simply absent.
+  loadAllEmbeddings(): Map<string, { vector: Float32Array; sourceHash: string }> {
+    const rows = db()
+      .prepare(`SELECT tool_id, vector, dim, source_hash FROM tool_embeddings`)
+      .all() as Array<{ tool_id: string; vector: Uint8Array; dim: number; source_hash: string }>;
+    const out = new Map<string, { vector: Float32Array; sourceHash: string }>();
+    for (const row of rows) out.set(String(row.tool_id), decodeEmbeddingRow(row));
+    return out;
   }
 
   // --- helpers ------------------------------------------------------------
@@ -394,8 +490,36 @@ export class ToolkitsRegistry {
   }
 }
 
+// Decode a tool_embeddings row's BLOB into a Float32Array view, copying out of
+// the SQLite-owned buffer at the right offset.
+function decodeEmbeddingRow(row: { vector: Uint8Array; source_hash: string }): {
+  vector: Float32Array;
+  sourceHash: string;
+} {
+  const bytes =
+    row.vector instanceof Uint8Array ? row.vector : new Uint8Array(row.vector as ArrayBuffer);
+  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  return { vector: new Float32Array(buf), sourceHash: row.source_hash };
+}
+
 export function toolId(toolkitId: string, toolName: string): string {
   return `${toolkitId}::${toolName}`;
+}
+
+// Canonical, order-independent signature of a tool's required-permission set
+// (by permission key), used by replaceTools to decide whether grants survive a
+// re-download. Two perm declarations that produce the same key set are treated
+// as unchanged.
+function permKeySet(requiredPermissionsJson: string): string {
+  try {
+    const decls = JSON.parse(requiredPermissionsJson) as PermissionDecl[];
+    return decls
+      .map((d) => permissionKey(d))
+      .sort()
+      .join("|");
+  } catch {
+    return requiredPermissionsJson;
+  }
 }
 
 // Re-export so external callers can compute permission keys without importing
@@ -429,7 +553,7 @@ function rowToToolkit(row: Record<string, unknown>): Toolkit {
     installedPath: String(row.installed_path),
     toolsJsonHash: String(row.tools_json_hash),
     contentHash: String(row.content_hash),
-    enabled: Number(row.enabled) === 1,
+    status: String(row.status) as ToolkitStatus,
     lastError: row.last_error == null ? undefined : String(row.last_error),
     installedAtMs: Number(row.installed_at_ms),
     updatedAtMs: Number(row.updated_at_ms),

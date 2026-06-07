@@ -79,7 +79,10 @@ async function readMasterKeyFile(): Promise<Uint8Array | null> {
 }
 
 async function writeMasterKeyFile(raw: Uint8Array): Promise<void> {
-  await Deno.writeTextFile(masterKeyPath(), encodeBase64(raw));
+  // Set the mode at creation so the key is never briefly world-readable: the
+  // old write-then-chmod left a 0644 TOCTOU window. The follow-up chmod also
+  // tightens a file left at 0644 by an older build. mode/chmod are Unix-only.
+  await Deno.writeTextFile(masterKeyPath(), encodeBase64(raw), { mode: 0o600 });
   if (Deno.build.os !== "windows") {
     try {
       await Deno.chmod(masterKeyPath(), 0o600);
@@ -212,7 +215,10 @@ async function writeEncrypted(bag: Record<string, string>): Promise<void> {
   out.set(ciphertext, nonce.byteLength);
 
   const tmp = paths().secretsEncFile + ".tmp";
-  await Deno.writeFile(tmp, out);
+  // mode at creation closes the world-readable window before the chmod (the
+  // encrypted bag still leaks nothing without the master key, but the tmp file
+  // is a pointless exposure otherwise). The chmod stays as a fallback.
+  await Deno.writeFile(tmp, out, { mode: 0o600 });
   if (Deno.build.os !== "windows") {
     try {
       await Deno.chmod(tmp, 0o600);

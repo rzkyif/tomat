@@ -21,6 +21,7 @@ import { errMessage } from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import type { DownloadEntry, DownloadStatus } from "@tomat/shared";
 import { AppError } from "../shared/errors.ts";
+import { isWithin } from "../shared/fs-safety.ts";
 import { newJobId } from "../shared/ids.ts";
 import { getLogger } from "../shared/log.ts";
 import { Sha256Stream } from "../shared/hash.ts";
@@ -203,7 +204,14 @@ export class DownloadManager {
   private resolveAbsPath(spec: EnqueueSpec): string {
     const relPath = spec.relPath ?? parseSource(spec.source).relPath;
     const root = this.destinationRoot(spec.destination);
-    return join(root, relPath);
+    const abs = join(root, relPath);
+    // `spec.relPath` can be supplied directly (bypassing parseSource's component
+    // checks), so guard the final joined path: a `..`-bearing relPath must not
+    // write outside the destination root.
+    if (!isWithin(root, abs)) {
+      throw new AppError("validation_error", `download path escapes ${spec.destination} root`);
+    }
+    return abs;
   }
 
   private destinationRoot(dest: EnqueueSpec["destination"]): string {

@@ -58,6 +58,20 @@ interface NpmSearchEntry {
   downloads?: { weekly?: number };
 }
 
+/** Lightweight latest-version lookup for update checks: fetches the registry
+ *  metadata and returns `dist-tags.latest` without resolving tarball URLs or
+ *  integrity (which `resolveVersion` does for an actual install). */
+export async function resolveLatestVersion(name: string): Promise<string> {
+  const res = await fetch(`${REGISTRY_BASE}/${encodeURIComponent(name)}`);
+  if (!res.ok) {
+    throw new AppError("manifest_fetch_failed", `npm metadata HTTP ${res.status} for ${name}`);
+  }
+  const meta = (await res.json()) as { "dist-tags"?: Record<string, string> };
+  const latest = meta["dist-tags"]?.latest;
+  if (!latest) throw new AppError("toolkit_not_found", `no latest version for ${name}`);
+  return latest;
+}
+
 export async function resolveVersion(
   name: string,
   versionSpec?: string,

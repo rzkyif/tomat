@@ -115,6 +115,13 @@ class Sidecar {
     //    while terminateActive is still in its post-race cleanup).
     this.startId += 1;
     const myStartId = this.startId;
+    // Clear any stale stop intent from a prior stop(): a fresh start means we
+    // want this process supervised. Without this, a stop() -> start() sequence
+    // leaves pendingStop=true and the NEXT unexpected crash is swallowed by
+    // watchExit (treated as an intentional stop) instead of triggering a
+    // restart. The reset in watchExit's stop branch never runs on the stop()
+    // path because stop() nulls `active` first, so isCurrent() returns early.
+    this.pendingStop = false;
     if (this.active) {
       const old = this.active;
       this.active = null;

@@ -10,7 +10,7 @@
 //
 // Delegates the actual build to the client package's `build` task.
 
-import { parseArgs } from "jsr:@std/cli@^1.0.0/parse-args";
+import { parseArgs } from "@std/cli/parse-args";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 

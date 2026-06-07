@@ -14,8 +14,7 @@ fresh setups; doubles as a worked example for third-party toolkit authors.
 ```
 .
 ├── tools.json     # tomat manifest: names, parameters, triggers, permissions
-├── package.json   # npm metadata + the single npm dep (mime-types)
-├── deno.json      # nodeModulesDir + lockfile pointer for the worker spawn
+├── deno.json      # exports (entry) + imports (incl. the npm:mime-types dep)
 ├── index.ts       # entry point: re-exports the three tool functions
 └── src/
     ├── download.ts
@@ -43,14 +42,17 @@ respect:
 
 1. A `tools.json` at the package root, validated against the tomat `tools-v1`
    schema (`https://au.tomat.ing/schemas/tools-v1.json`).
-2. A `package.json` with `"keywords": ["tools-available"]` so it shows up in the
-   in-app toolkit search.
+2. Dependencies declared in `deno.json` `imports` (use `npm:` / `jsr:`
+   specifiers). The host installs them with `deno install` and never edits your
+   `deno.json`. A deno-native toolkit like this built-in needs no `package.json`.
 3. Named async exports matching each tool's `"function"` field in `tools.json`.
    They're called as `fn(args, ctx)`.
 
-Publish to npm with a name starting `tomat-toolkit-` (convention, not enforced)
-and the keyword `tools-available` so users can `Install` it from Settings →
-Toolkits.
+To distribute via npm, add a `package.json` with a name starting `tomat-toolkit-`
+(convention, not enforced) and `"keywords": ["tools-available"]` so users can
+find it in the in-app marketplace and `Download` it from Settings → Toolkits.
+npm packages declare deps in `package.json`; the host installs deps from either
+`package.json` or `deno.json`.
 
 ## Testing your toolkit
 

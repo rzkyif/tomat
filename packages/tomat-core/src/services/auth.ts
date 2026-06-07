@@ -21,7 +21,7 @@
 //     a MITM-substituted cert both surface as a failed confirmation.
 //   - Per IP: 20 start attempts per 10-minute sliding window → 429.
 
-import { encodeBase64Url } from "jsr:@std/encoding@^1.0.0/base64url";
+import { encodeBase64Url } from "@std/encoding/base64url";
 import { confirmTag, cpaceResponder, verifyConfirm } from "@tomat/shared";
 import { CORE_VERSION } from "../config.ts";
 import { db } from "../db/connection.ts";
@@ -178,8 +178,11 @@ export class AuthService {
     try {
       result = cpaceResponder(row.code, sid, msgA, new TextEncoder().encode(serverPin));
     } catch {
-      // Malformed / identity msgA. Count it against the code like a bad guess.
-      this.recordCodeFailure(row);
+      // Malformed / identity msgA. Do NOT poison the code here: a structurally
+      // invalid message is not a code guess, and counting it would let an
+      // unpaired peer burn the legit user's active code with junk in 5 cheap
+      // requests. Real wrong guesses are still counted at pakeFinish
+      // (verifyConfirm); the per-IP limiter already bounds junk pakeStarts.
       throw new AppError("invalid_pairing_code", "invalid pairing message");
     }
     this.prunePakeSessions();

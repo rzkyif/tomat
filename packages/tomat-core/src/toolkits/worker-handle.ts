@@ -18,6 +18,30 @@ const log = getLogger("toolworker");
 const MAX_STDOUT_FRAME_BYTES = 16_000_000;
 const MAX_STDERR_LINE_BYTES = 1_000_000;
 
+// Non-secret operational env a tool worker may legitimately need (PATH so a
+// `run`-granted tool can resolve binaries, HOME/temp/locale). Everything else
+// the core process holds (e.g. an operator's OPENAI_API_KEY, TOMAT_* vars) is
+// dropped via clearEnv; env keys the tool was explicitly granted are re-added.
+const WORKER_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  // Windows essentials.
+  "SystemRoot",
+  "SYSTEMROOT",
+  "windir",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "ComSpec",
+  "PATHEXT",
+];
+
 export interface SpawnSpec {
   toolkitId: string;
   entryPath: string; // absolute path to the toolkit's entry .ts/.js
@@ -45,38 +69,72 @@ export class WorkerHandle {
     // Runtime-resolved path keeps the worker .ts out of deno-compile's
     // static graph; see sidecars/embedding.ts header.
     const entry = join(paths().workersDir, "tool-worker.ts");
+    // The shipped deno.json is the toolkit's runtime config (imports incl. npm:
+    // deps). Pass it via --config when present; npm-only toolkits (no deno.json)
+    // rely on deno's package.json auto-discovery instead. We never write it.
     const configPath = join(spec.toolkitFolder, "deno.json");
+    const hasDenoJson = fileExistsSync(configPath);
+    // A deno.lock exists only after `deno install` ran (deps present). When it
+    // does, run --frozen so the worker never tries to rewrite it at runtime (it
+    // holds no write grant for the folder).
+    const hasLock = fileExistsSync(join(spec.toolkitFolder, "deno.lock"));
     // Defense in depth: never let a tool worker read or write the core's secret
     // material, even if it was granted a broad path like `$home` (which
     // contains ~/.tomat). Deno's --deny-* flags take precedence over any
-    // --allow-*, so this holds regardless of the granted permission set.
-    const root = paths().root;
+    // --allow-*, so this holds regardless of the granted permission set. A
+    // blanket deny of `root` isn't usable because sessions live under it (and a
+    // tool may be granted $sessions), so the secret + DB files are enumerated
+    // exhaustively, including the transient/legacy siblings.
+    const p = paths();
     const deniedPaths = [
-      join(root, "secrets.enc"),
-      join(root, ".master-key"),
-      join(root, ".admin-token"),
-      join(root, "core.sqlite"),
-      join(root, "core.sqlite-wal"),
-      join(root, "core.sqlite-shm"),
+      p.secretsEncFile,
+      p.secretsEncFile + ".tmp", // transient write target during re-encrypt
+      p.secretsPlainFile, // legacy plaintext path (declared but unused)
+      join(p.root, ".master-key"),
+      p.adminTokenFile,
+      p.dbFile,
+      p.dbFile + "-wal",
+      p.dbFile + "-shm",
+      p.dbFile + "-journal", // non-WAL fallback journal
     ].join(",");
     const args = [
       "run",
       "--no-prompt",
       "--no-check",
       "--quiet",
+      // node_modules was created in the folder by `deno install --node-modules-dir=auto`;
+      // resolve npm deps from it (the folder is allow-read'd below).
+      "--node-modules-dir=auto",
+      ...(hasLock ? ["--frozen"] : []),
       ...spec.flags,
       `--allow-read=${spec.toolkitFolder},${paths().denoCacheDir}`,
       `--deny-read=${deniedPaths}`,
       `--deny-write=${deniedPaths}`,
-      "--config",
-      configPath,
+      ...(hasDenoJson ? ["--config", configPath] : []),
       entry,
       `--toolkit-id=${spec.toolkitId}`,
       `--entry=${spec.entryPath}`,
     ];
+    // Build the worker env explicitly. clearEnv drops the inherited superset so
+    // the --allow-env list is authoritative: only DENO_DIR, a non-secret
+    // operational base, and the keys the tool was actually granted are present.
+    const env: Record<string, string> = { DENO_DIR: paths().denoCacheDir };
+    for (const key of WORKER_ENV_ALLOWLIST) {
+      const v = Deno.env.get(key);
+      if (v !== undefined) env[key] = v;
+    }
+    const allowEnvFlag = spec.flags.find((f) => f.startsWith("--allow-env="));
+    if (allowEnvFlag) {
+      for (const key of allowEnvFlag.slice("--allow-env=".length).split(",")) {
+        if (!key) continue;
+        const v = Deno.env.get(key);
+        if (v !== undefined) env[key] = v;
+      }
+    }
     const proc = new Deno.Command(denoBin, {
       args,
-      env: { DENO_DIR: paths().denoCacheDir },
+      clearEnv: true,
+      env,
       stdin: "piped",
       stdout: "piped",
       stderr: "piped",
@@ -229,5 +287,13 @@ export class WorkerHandle {
   private failBoot(err: Error): void {
     for (const w of this.bootWaiters) w.reject(err);
     this.bootWaiters = [];
+  }
+}
+
+function fileExistsSync(path: string): boolean {
+  try {
+    return Deno.statSync(path).isFile;
+  } catch {
+    return false;
   }
 }

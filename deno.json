@@ -8,6 +8,15 @@
   ],
   "nodeModulesDir": "auto",
   "unstable": ["raw-imports"],
+  "imports": {
+    "@std/cli": "jsr:@std/cli@^1.0.0",
+    "@std/path": "jsr:@std/path@^1.0.0",
+    "@std/fs": "jsr:@std/fs@^1.0.0",
+    "@std/encoding": "jsr:@std/encoding@^1.0.0",
+    "@std/dotenv": "jsr:@std/dotenv@^0.225",
+    "@std/tar": "jsr:@std/tar@^0.1.0",
+    "@noble/ed25519": "jsr:@noble/ed25519@^2.1.0"
+  },
   "tasks": {
     "dev": "deno run -A --unsafely-ignore-certificate-errors=127.0.0.1 scripts/dev.ts",
     "dev:reset": "deno run -A --unsafely-ignore-certificate-errors=127.0.0.1 scripts/dev.ts --reset",
@@ -33,15 +42,14 @@
     "lint:rs": "cargo clippy --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets -- -D warnings",
     "dev:website": "deno run -A scripts/website/dev.ts",
     "build:website": "deno run -A scripts/website/build.ts",
-    "release": "deno run -A scripts/release/main.ts --channel=stable",
     "release:stable": "deno run -A scripts/release/main.ts --channel=stable",
     "release:beta": "deno run -A scripts/release/main.ts --channel=beta",
-    "release:core": "deno run -A scripts/release/core.ts --channel=stable",
     "release:core:stable": "deno run -A scripts/release/core.ts --channel=stable",
     "release:core:beta": "deno run -A scripts/release/core.ts --channel=beta",
-    "release:client": "deno run -A scripts/release/client.ts --channel=stable",
     "release:client:stable": "deno run -A scripts/release/client.ts --channel=stable",
     "release:client:beta": "deno run -A scripts/release/client.ts --channel=beta",
+    "release:toolkit:stable": "deno run -A scripts/release/toolkit.ts --channel=stable",
+    "release:toolkit:beta": "deno run -A scripts/release/toolkit.ts --channel=beta",
     "release:scripts": "deno run -A scripts/release/install-scripts.ts",
     "release:schemas": "deno run -A scripts/release/schemas.ts",
     "release:website": "deno run -A scripts/release/website.ts",
@@ -64,5 +72,16 @@
     "**/.wrangler",
     "**/.deno-cache",
     "tests/e2e"
+  ],
+  "allowScripts": [
+    "npm:esbuild@0.21.5",
+    "npm:esbuild@0.27.3",
+    "npm:esbuild@0.27.7",
+    "npm:fsevents@2.3.3",
+    "npm:onnxruntime-node@1.21.0",
+    "npm:onnxruntime-node@1.24.3",
+    "npm:protobufjs@7.5.8",
+    "npm:sharp@0.34.5",
+    "npm:workerd@1.20260518.1"
   ]
 }

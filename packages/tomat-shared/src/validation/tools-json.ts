@@ -140,7 +140,7 @@ export function parseToolsJson(input: unknown): ToolsJsonParseResult {
     ok: false,
     message: result.error.message,
     issues: result.error.issues.map((i) => ({
-      path: [...i.path],
+      path: i.path.filter((p): p is string | number => typeof p !== "symbol"),
       message: i.message,
     })),
   };

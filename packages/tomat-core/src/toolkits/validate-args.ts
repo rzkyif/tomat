@@ -7,12 +7,66 @@
 // tool code uncaught). This restores it, mirroring the old Bun toolkit
 // service's Ajv usage.
 
-import { Ajv, type ValidateFunction } from "ajv";
+import { Ajv, type AnySchema, type ValidateFunction } from "ajv";
+// No npm types ship for safe-regex; the default export is a predicate that
+// flags catastrophic-backtracking regexes (nested quantifiers / high star
+// height).
+import safeRegexUntyped from "safe-regex";
 import type { Tool } from "@tomat/shared";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("toolkits.validate");
+
+const isSafeRegex = safeRegexUntyped as (re: string | RegExp, opts?: { limit?: number }) => boolean;
+
+// A tool author controls the `parameters` schema, including JSON-Schema
+// `pattern` / `patternProperties` regexes. Ajv compiles those into the
+// validator and runs them SYNCHRONOUSLY against LLM-emitted argument strings on
+// the core's single event loop, so a catastrophic-backtracking pattern (e.g.
+// `(a+)+$`) plus a pathological argument would pin the loop and freeze every
+// client. A synchronous regex can't be interrupted by a timer, so the only real
+// defense is to keep the dangerous regex from ever compiling: we strip any
+// unsafe `pattern`/`patternProperties` regex from the schema before compiling
+// (everything else still validates + fills defaults).
+function isUnsafePattern(p: unknown): boolean {
+  if (typeof p !== "string") return false;
+  try {
+    return !isSafeRegex(p);
+  } catch {
+    return true; // unparseable regex -> treat as unsafe and strip it
+  }
+}
+
+function stripUnsafePatterns(node: unknown, stripped: string[]): unknown {
+  if (Array.isArray(node)) return node.map((n) => stripUnsafePatterns(n, stripped));
+  if (node && typeof node === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      // `pattern` can appear at any depth (properties.*, items, propertyNames,
+      // $defs, ...); the recursion below reaches all of them.
+      if (key === "pattern" && isUnsafePattern(value)) {
+        stripped.push(String(value));
+        continue;
+      }
+      if (key === "patternProperties" && value && typeof value === "object") {
+        const safe: Record<string, unknown> = {};
+        for (const [re, sub] of Object.entries(value as Record<string, unknown>)) {
+          if (isUnsafePattern(re)) {
+            stripped.push(re);
+            continue;
+          }
+          safe[re] = stripUnsafePatterns(sub, stripped);
+        }
+        out[key] = safe;
+        continue;
+      }
+      out[key] = stripUnsafePatterns(value, stripped);
+    }
+    return out;
+  }
+  return node;
+}
 
 // `useDefaults` fills missing properties' defaults during validate(); it
 // mutates the data object in place, so we re-serialize afterward. `strict:
@@ -45,7 +99,14 @@ export function validateAndNormalizeToolArgs(tool: Tool, argumentsJson: string):
   if (!entry || entry.schemaJson !== schemaJson) {
     let validate: ValidateFunction;
     try {
-      validate = ajv.compile(schema);
+      const stripped: string[] = [];
+      const safeSchema = stripUnsafePatterns(schema, stripped);
+      if (stripped.length > 0) {
+        log.warn(
+          `tool ${tool.id}: stripped ${stripped.length} unsafe regex pattern(s) from parameters schema (ReDoS guard)`,
+        );
+      }
+      validate = ajv.compile(safeSchema as AnySchema);
     } catch (err) {
       log.warn(
         `tool ${tool.id}: unusable parameters schema, skipping validation: ${

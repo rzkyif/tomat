@@ -28,7 +28,7 @@ export interface MonitorInfo {
 // --- Context menu --------------------------------------------------------
 
 export type ContextMenuItem =
-  | { id: string; label: string; enabled?: boolean }
+  | { id: string; label: string; enabled?: boolean; checked?: boolean }
   | { separator: true };
 
 // --- Updater --------------------------------------------------------------

@@ -66,6 +66,26 @@ Deno.test("hashToolkit: node_modules is always excluded (no hash drift from npm 
   }
 });
 
+Deno.test("hashToolkit: the root deno.lock is excluded (no drift from deno install)", async () => {
+  const a = await makeToolkit({
+    "tools.json": `{}`,
+    "deno.json": `{ "imports": {} }`,
+    "deno.lock": `{ "version": "4" }`,
+  });
+  // Same source, but the lockfile differs (as it would after deno install).
+  const b = await makeToolkit({
+    "tools.json": `{}`,
+    "deno.json": `{ "imports": {} }`,
+    "deno.lock": `{ "version": "4", "specifiers": { "npm:mime-types": "3.0.2" } }`,
+  });
+  try {
+    assertEquals(await hashToolkit(a), await hashToolkit(b));
+  } finally {
+    await Deno.remove(a, { recursive: true });
+    await Deno.remove(b, { recursive: true });
+  }
+});
+
 Deno.test("hashToolkit: .gitignore'd files are excluded but the .gitignore itself is hashed", async () => {
   const a = await makeToolkit({
     "tools.json": `{}`,

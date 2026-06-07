@@ -67,6 +67,9 @@ vi.mock("@tauri-apps/api/path", () => ({
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: tauriGetVersion }));
 vi.mock("@tauri-apps/api/menu", () => ({
   Menu: { new: vi.fn(() => Promise.resolve({ popup: vi.fn(() => Promise.resolve()) })) },
+  MenuItem: { new: vi.fn((o) => Promise.resolve(o)) },
+  CheckMenuItem: { new: vi.fn((o) => Promise.resolve(o)) },
+  PredefinedMenuItem: { new: vi.fn((o) => Promise.resolve(o)) },
 }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: openDialog }));

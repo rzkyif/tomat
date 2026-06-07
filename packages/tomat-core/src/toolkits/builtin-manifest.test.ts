@@ -1,0 +1,64 @@
+// Pure sign/verify + shape-assertion tests for the built-in toolkit manifest.
+// The signature is Ed25519 over canonicalize(manifest without `signature`),
+// matching the release signer (scripts/release/toolkit.ts).
+
+import { assertEquals, assertThrows } from "@std/assert";
+import * as ed from "@noble/ed25519";
+import { encodeBase64 } from "@std/encoding/base64";
+import { canonicalize } from "@tomat/shared";
+import type { BuiltinToolkitManifest } from "@tomat/shared";
+import { assertManifestShape, verifyBuiltinManifestSignature } from "./builtin-manifest.ts";
+import { AppError } from "../shared/errors.ts";
+
+async function sign(version: string, sk: Uint8Array): Promise<BuiltinToolkitManifest> {
+  const unsigned = {
+    schemaVersion: 1 as const,
+    version,
+    id: "tomat-builtin-toolkit",
+    tarballUrl: "https://cdn/x.tgz",
+    sha256: "a".repeat(64),
+  };
+  const sig = await ed.signAsync(new TextEncoder().encode(canonicalize(unsigned)), sk);
+  return { ...unsigned, signature: encodeBase64(sig) };
+}
+
+Deno.test("verifyBuiltinManifestSignature: round-trips a valid signature", async () => {
+  const sk = ed.utils.randomPrivateKey();
+  const pk = await ed.getPublicKeyAsync(sk);
+  assertEquals(await verifyBuiltinManifestSignature(await sign("1.2.3", sk), pk), true);
+});
+
+Deno.test("verifyBuiltinManifestSignature: rejects a tampered manifest", async () => {
+  const sk = ed.utils.randomPrivateKey();
+  const pk = await ed.getPublicKeyAsync(sk);
+  const m = await sign("1.2.3", sk);
+  m.version = "9.9.9"; // tamper after signing
+  assertEquals(await verifyBuiltinManifestSignature(m, pk), false);
+});
+
+Deno.test("verifyBuiltinManifestSignature: rejects a different signer's key", async () => {
+  const sk = ed.utils.randomPrivateKey();
+  const otherPk = await ed.getPublicKeyAsync(ed.utils.randomPrivateKey());
+  assertEquals(await verifyBuiltinManifestSignature(await sign("1.0.0", sk), otherPk), false);
+});
+
+Deno.test("assertManifestShape: accepts a well-formed manifest", () => {
+  assertManifestShape({
+    schemaVersion: 1,
+    version: "1.0.0",
+    id: "tomat-builtin-toolkit",
+    tarballUrl: "https://cdn/x.tgz",
+    sha256: "a".repeat(64),
+    signature: "sig",
+  });
+});
+
+Deno.test("assertManifestShape: rejects bad shapes", () => {
+  assertThrows(() => assertManifestShape(null), AppError);
+  assertThrows(() => assertManifestShape({ schemaVersion: 2 }), AppError);
+  // missing sha256 + signature
+  assertThrows(
+    () => assertManifestShape({ schemaVersion: 1, version: "1", id: "x", tarballUrl: "u" }),
+    AppError,
+  );
+});

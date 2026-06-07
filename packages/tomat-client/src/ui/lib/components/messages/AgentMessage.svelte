@@ -143,6 +143,6 @@
       });
     }}
   >
-    <MessageMarkdown content={displayText} />
+    <MessageMarkdown content={displayText} {isStreaming} />
   </Bubble>
 {/if}

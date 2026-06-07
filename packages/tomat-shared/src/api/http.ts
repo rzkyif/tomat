@@ -188,24 +188,52 @@ export interface SearchToolkitsResponse {
   results: ToolkitSearchResult[];
 }
 
-export type InstallToolkitRequest =
+// Acquire a toolkit's files (POST /download): fetch + extract an npm tarball,
+// copy the built-in, or register a locally dropped-in folder. Deps are NOT
+// installed here; that is the separate POST /:id/install step.
+export type DownloadToolkitRequest =
   | { source: "npm"; name: string; version?: string }
-  | { source: "local"; path: string; slug?: string };
+  | { source: "local"; path: string; slug?: string }
+  | { source: "builtin" };
 
-export interface InstallToolkitResponse {
+// Returned by every endpoint that starts a streamed background job (download,
+// install-deps, update). Progress + completion arrive over the
+// toolkit.install_log / toolkit.install_done WS frames, keyed by `jobId`.
+export interface ToolkitJobResponse {
   jobId: string;
   toolkitId: string;
+}
+
+// Returned by the synchronous toolkit actions: enable-all / disable-all /
+// confirm-reenable.
+export interface ToolkitActionResponse {
+  id: string;
 }
 
 export interface UpdateToolkitRequest {
   version?: string;
 }
-export interface UpdateToolkitResponse {
-  jobId: string;
-}
 
 export interface ListToolkitToolsResponse {
   tools: Tool[];
+}
+
+// Check installed toolkits for newer versions. With no `ids`, every installed
+// toolkit is checked. npm toolkits resolve `dist-tags.latest`; the built-in
+// resolves its signed manifest version; local toolkits have no upstream and
+// report `latestVersion: null`.
+export interface CheckUpdatesRequest {
+  ids?: string[];
+}
+export interface ToolkitUpdateStatus {
+  id: string;
+  installedVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  error?: string;
+}
+export interface CheckUpdatesResponse {
+  results: ToolkitUpdateStatus[];
 }
 
 export interface SetGrantsRequest {

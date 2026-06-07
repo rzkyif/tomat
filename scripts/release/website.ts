@@ -13,9 +13,9 @@
 //   --force     skip the source-hash idempotency probe
 //   --help
 
-import { parseArgs } from "jsr:@std/cli@^1/parse-args";
-import { ensureDir } from "jsr:@std/fs@^1/ensure-dir";
-import { dirname, join } from "jsr:@std/path@^1";
+import { parseArgs } from "@std/cli/parse-args";
+import { ensureDir } from "@std/fs/ensure-dir";
+import { dirname, join } from "@std/path";
 import {
   astroBuild,
   colors,

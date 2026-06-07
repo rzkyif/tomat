@@ -25,6 +25,12 @@ jobs:
         with:
           deno-version: 2.8.x
 
+      # Fail fast if the committed deno.lock no longer matches what the manifests
+      # resolve to: the signed core binary is built from this graph, so a drifted
+      # lock must never pass CI green.
+      - name: Verify frozen deno lockfile
+        run: deno install --frozen
+
       # Cargo check (part of `deno task check`) needs the Tauri/webkit and
       # PipeWire/ALSA system libs (the same set the old CI installed for the
       # Rust matrix).
@@ -41,9 +47,9 @@ jobs:
             libgbm-dev \
             patchelf
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.91.1
+          toolchain: 1.96.0
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -86,9 +92,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.91.1
+          toolchain: 1.96.0
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -96,12 +102,14 @@ jobs:
             packages/tomat-client/src/tauri
             packages/tomat-core-keychain
             packages/tomat-core-updater
-      - run: cargo clippy --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo check --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets
-      - run: cargo test --manifest-path packages/tomat-client/src/tauri/Cargo.toml --lib
-      - run: cargo clippy --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings
-      - run: cargo check --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets
-      - run: cargo test --manifest-path packages/tomat-core-keychain/Cargo.toml
-      - run: cargo clippy --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets -- -D warnings
-      - run: cargo check --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets
-      - run: cargo test --manifest-path packages/tomat-core-updater/Cargo.toml
+      # --locked fails if any Cargo.lock would change, so a drifted lock can't
+      # pass CI (the signed helper binaries are built from these locks).
+      - run: cargo clippy --locked --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo check --locked --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets
+      - run: cargo test --locked --manifest-path packages/tomat-client/src/tauri/Cargo.toml --lib
+      - run: cargo clippy --locked --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings
+      - run: cargo check --locked --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets
+      - run: cargo test --locked --manifest-path packages/tomat-core-keychain/Cargo.toml
+      - run: cargo clippy --locked --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets -- -D warnings
+      - run: cargo check --locked --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets
+      - run: cargo test --locked --manifest-path packages/tomat-core-updater/Cargo.toml

@@ -41,6 +41,6 @@ export default defineConfig({
     // produce flaky teardown order. Drop this once we have a real
     // motivating reason for parallelism.
     pool: "forks",
-    poolOptions: { forks: { singleFork: true } },
+    fileParallelism: false,
   },
 });

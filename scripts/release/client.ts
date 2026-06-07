@@ -12,9 +12,9 @@
 //   --force                              skip the version+platform probe
 //   --help
 
-import { parseArgs } from "jsr:@std/cli@^1/parse-args";
-import { ensureDir } from "jsr:@std/fs@^1/ensure-dir";
-import { join } from "jsr:@std/path@^1";
+import { parseArgs } from "@std/cli/parse-args";
+import { ensureDir } from "@std/fs/ensure-dir";
+import { join } from "@std/path";
 import type { Triple } from "../../packages/tomat-shared/src/domain/model.ts";
 import {
   channelManifestDir,
@@ -39,7 +39,7 @@ import {
   step,
   writeSigningKeys,
 } from "./lib.ts";
-import { encodeBase64 } from "jsr:@std/encoding@^1/base64";
+import { encodeBase64 } from "@std/encoding/base64";
 
 // ---------------------------------------------------------------------------
 // paths
@@ -90,7 +90,7 @@ function parseFlags(): Flags {
     },
   );
   if (args.help) {
-    console.log(`Usage: deno task release:client [flags]
+    console.log(`Usage: deno task release:client:<channel> [flags]
 
 Flags:
   --channel=<c>  stable (default) | beta. Beta builds a distinctly-named app

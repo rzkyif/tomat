@@ -18,16 +18,15 @@
 // 64-byte value is only reachable through the test-only `__test` seam so the
 // appendix vector can be reproduced byte-for-byte.
 
-import { ristretto255 } from "@noble/curves/ed25519";
-import { sha512 } from "@noble/hashes/sha512";
-import { sha256 } from "@noble/hashes/sha256";
-import { hmac } from "@noble/hashes/hmac";
+import { ristretto255, ristretto255_hasher } from "@noble/curves/ed25519.js";
+import { sha256, sha512 } from "@noble/hashes/sha2.js";
+import { hmac } from "@noble/hashes/hmac.js";
 
-// @noble/curves ^1.9 exposes the group as `ristretto255.Point`. Statics we use:
-// `hashToCurve` (the ristretto255 element-derivation / one-way map taking a
-// 64-byte uniform string), `fromBytes` (decode, throws on bad length / invalid
-// encoding), `ZERO` (identity). Instance: `multiply(scalar)`, `toBytes`,
-// `is0()`.
+// @noble/curves exposes the ristretto255 group as `ristretto255.Point`. Statics
+// we use: `fromBytes` (decode, throws on bad length / invalid encoding), `ZERO`
+// (identity). Instance: `multiply(scalar)`, `toBytes`, `is0()`. The
+// element-derivation / one-way map taking a 64-byte uniform string is
+// `ristretto255_hasher.deriveToCurve`.
 const Point = ristretto255.Point;
 type Pt = InstanceType<typeof Point>;
 
@@ -101,13 +100,13 @@ function generatorString(prs: Uint8Array, ci: Uint8Array, sid: Uint8Array): Uint
 
 /**
  * calculate_generator: hash the generator string to 2*field_size bytes with
- * SHA-512, then apply ristretto255 element_derivation (hashToCurve). Returns the
- * decoded internal point _g.
+ * SHA-512, then apply ristretto255 element_derivation (deriveToCurve). Returns
+ * the decoded internal point _g.
  */
 function calculateGenerator(prs: Uint8Array, ci: Uint8Array, sid: Uint8Array): Pt {
   const genStr = generatorString(prs, ci, sid);
   const genHash = sha512(genStr).subarray(0, 2 * FIELD_SIZE_BYTES);
-  return Point.hashToCurve(genHash);
+  return ristretto255_hasher.deriveToCurve!(genHash);
 }
 
 // --- scalars (draft Section 8.3) ------------------------------------------

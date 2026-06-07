@@ -2,7 +2,7 @@
 // ToolContext (no real worker bridge). Doubles as the worked example for
 // third-party toolkit authors looking to test their tools.
 
-import { assertEquals } from "jsr:@std/assert@^1";
+import { assertEquals } from "@std/assert";
 import { demo } from "./demo.ts";
 import type { AskUserAnswer, AskUserQuestion, ToolContext } from "./types.ts";
 

@@ -94,6 +94,20 @@ class CoresRegistry {
     this.notify();
   }
 
+  /** Rename a paired core in place. Preserves the current-core pointer and
+   *  keeps the in-memory active entry's name in sync. */
+  async rename(id: string, name: string): Promise<void> {
+    const s = await platform().clientSettings.read();
+    const list = (Array.isArray(s.cores) ? s.cores : []) as PairedCoreEntry[];
+    if (!list.some((c) => c.id === id)) return;
+    s.cores = list.map((c) => (c.id === id ? { ...c, name } : c));
+    await platform().clientSettings.write(s);
+    if (this.current?.entry.id === id) {
+      this.current = { ...this.current, entry: { ...this.current.entry, name } };
+    }
+    this.notify();
+  }
+
   async select(id: string): Promise<void> {
     const cores = await this.list();
     const entry = cores.find((c) => c.id === id);

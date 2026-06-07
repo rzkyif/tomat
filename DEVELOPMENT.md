@@ -69,7 +69,7 @@ flowchart TD
 ```bash
 deno install        # populates node_modules + warms the Deno npm cache
 deno --version      # expect 2.8+
-cargo --version     # expect 1.91.1 (pinned by rust-toolchain.toml)
+cargo --version     # expect 1.96.0 (pinned by rust-toolchain.toml)
 ```
 
 `.env` at the repo root is **release-only** (manifest signing + Cloudflare/R2
@@ -137,14 +137,15 @@ cores can bind at once:
 
 #### Building & releasing a beta
 
-Every build/release task has explicit `stable` / `beta` variants (the bare forms
-are stable):
+Build tasks keep a bare (stable) form; release tasks require an explicit
+`:stable` / `:beta` channel (so a publish is never ambiguous):
 
 ```bash
 deno task build:core:beta      # tomat-core-beta + updater + keychain
 deno task build:client:beta    # tomat-beta app bundle
-deno task release:beta         # umbrella: core + client + scripts/schemas/website
+deno task release:beta         # umbrella: core + toolkit + client + scripts/schemas/website
 deno task release:core:beta    # just the core manifest + binaries
+deno task release:toolkit:beta # just the built-in toolkit manifest + tarball
 deno task release:client:beta  # just the client bundle + manifest
 ```
 

@@ -7,6 +7,7 @@
 //            <core>/workers/tts-worker.ts <models-dir>
 
 import { join } from "@std/path";
+import { errMessage } from "@tomat/shared";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
@@ -14,6 +15,16 @@ import { trackSidecarPid } from "./jobctl.ts";
 import { requireWorkerDeno } from "./worker-deno.ts";
 
 const log = getLogger("tts");
+
+// Boot handshake deadline: the worker must emit `ready` within this.
+const BOOT_TIMEOUT_MS = 5_000;
+// Per-synthesize deadline: a wedged-but-loaded worker (ORT inference stall)
+// must not hang the HTTP request handler indefinitely.
+const SYNTH_CALL_TIMEOUT_MS = 60_000;
+// Crash backoff: after a failed boot/load, refuse new spawns for a growing
+// window so a deterministically-crashing worker is not re-spawned on every call.
+const BACKOFF_BASE_MS = 1_000;
+const BACKOFF_MAX_MS = 30_000;
 
 type WorkerFrame =
   | { kind: "ready" }
@@ -25,6 +36,7 @@ type WorkerFrame =
 interface PendingSynth {
   resolve: (out: { sampleRate: number; pcm: Uint8Array }) => void;
   reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 export class TtsController {
@@ -36,6 +48,13 @@ export class TtsController {
   private loadWaiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = [];
   private synthsInFlight = new Map<string, PendingSynth>();
   private synthCounter = 0;
+  // Boot handshake settlers, owned by the in-flight spawn(); the `ready` frame
+  // resolves and a subprocess exit rejects, instead of a self-rescheduling poll.
+  private bootResolve: (() => void) | null = null;
+  private bootReject: ((err: Error) => void) | null = null;
+  // Crash-backoff state.
+  private consecutiveBootFailures = 0;
+  private nextRetryAt = 0;
 
   private workerEntry(): string {
     // Resolved at runtime to escape `deno compile`'s static analyzer.
@@ -53,21 +72,46 @@ export class TtsController {
       this.loadWaiters.push({ resolve, reject });
     });
     if (!this.loading) {
-      this.loading = true;
-      try {
-        if (!this.proc) await this.spawn();
-        this.send({ kind: "load" });
-      } catch (err) {
-        this.loading = false;
-        // `failPending` rejects `wait` (and any concurrent waiters); the first
-        // caller then surfaces the error through `await wait` below. Do NOT
-        // also rethrow here: that would skip `await wait`, orphaning the
-        // already-rejected promise into an uncaught rejection that kills the
-        // core (e.g. when the `deno` worker binary isn't installed yet).
-        this.failPending(err instanceof Error ? err : new Error(String(err)));
+      if (Date.now() < this.nextRetryAt) {
+        // Still inside the crash-backoff window: reject this batch of waiters
+        // without re-spawning (and without extending the backoff).
+        this.failPending(
+          new AppError(
+            "server_busy",
+            `tts worker in backoff after ${this.consecutiveBootFailures} failed boot(s)`,
+          ),
+        );
+      } else {
+        this.loading = true;
+        try {
+          if (!this.proc) await this.spawn();
+          this.send({ kind: "load" });
+        } catch (err) {
+          this.loading = false;
+          this.recordBootFailure(err);
+          // `failPending` rejects `wait` (and any concurrent waiters); the first
+          // caller then surfaces the error through `await wait` below. Do NOT
+          // also rethrow here: that would skip `await wait`, orphaning the
+          // already-rejected promise into an uncaught rejection that kills the
+          // core (e.g. when the `deno` worker binary isn't installed yet).
+          this.failPending(err instanceof Error ? err : new Error(String(err)));
+        }
       }
     }
     await wait;
+  }
+
+  private recordBootFailure(err: unknown): void {
+    this.consecutiveBootFailures++;
+    const delay = Math.min(
+      BACKOFF_BASE_MS * 2 ** (this.consecutiveBootFailures - 1),
+      BACKOFF_MAX_MS,
+    );
+    this.nextRetryAt = Date.now() + delay;
+    log.warn(
+      `tts boot failed (${this.consecutiveBootFailures} in a row); ` +
+        `backing off ${delay}ms: ${errMessage(err)}`,
+    );
   }
 
   // Kill the subprocess outright. TTS lives in its own process (unlike the
@@ -101,7 +145,16 @@ export class TtsController {
     await this.ensureLoaded();
     const id = `s${++this.synthCounter}`;
     return new Promise<{ sampleRate: number; pcm: Uint8Array }>((resolve, reject) => {
-      this.synthsInFlight.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.synthsInFlight.delete(id);
+        reject(
+          new AppError(
+            "internal_error",
+            `tts synthesize timed out after ${SYNTH_CALL_TIMEOUT_MS}ms`,
+          ),
+        );
+      }, SYNTH_CALL_TIMEOUT_MS);
+      this.synthsInFlight.set(id, { resolve, reject, timer });
       this.send({ kind: "synthesize", id, text, voice, speed });
     });
   }
@@ -146,24 +199,35 @@ export class TtsController {
     void proc.status.then((s) => {
       log.warn(`tts subprocess exited (code=${s.code})`);
       this.failPending(new AppError("internal_error", "tts subprocess exited"));
+      // If the exit races the boot handshake, reject the boot promise too so the
+      // spawn doesn't hang until the boot timeout.
+      this.bootReject?.(new AppError("internal_error", "tts subprocess exited during boot"));
+      this.bootResolve = null;
+      this.bootReject = null;
       this.proc = null;
       this.writer = null;
       this.ready = false;
       this.loaded = false;
     });
 
-    // Wait for the worker to send its initial "ready" frame.
+    // Wait for the worker's initial "ready" frame. Settle on `ready`, on
+    // subprocess exit (above), or on a hard timeout. No self-rescheduling poll:
+    // an earlier version rescheduled a 50ms timer that kept firing for the whole
+    // process lifetime when boot never completed.
     await new Promise<void>((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("tts worker boot timeout")), 5_000);
-      const check = () => {
-        if (this.ready) {
-          clearTimeout(t);
-          resolve();
-        } else {
-          setTimeout(check, 50);
-        }
+      const t = setTimeout(() => {
+        this.bootResolve = null;
+        this.bootReject = null;
+        reject(new Error("tts worker boot timeout"));
+      }, BOOT_TIMEOUT_MS);
+      this.bootResolve = () => {
+        clearTimeout(t);
+        resolve();
       };
-      check();
+      this.bootReject = (err) => {
+        clearTimeout(t);
+        reject(err);
+      };
     });
   }
 
@@ -213,10 +277,15 @@ export class TtsController {
     switch (frame.kind) {
       case "ready":
         this.ready = true;
+        this.bootResolve?.();
+        this.bootResolve = null;
+        this.bootReject = null;
         return;
       case "load_ok": {
         this.loaded = true;
         this.loading = false;
+        this.consecutiveBootFailures = 0;
+        this.nextRetryAt = 0;
         for (const w of this.loadWaiters) w.resolve();
         this.loadWaiters = [];
         return;
@@ -232,6 +301,7 @@ export class TtsController {
         const pending = this.synthsInFlight.get(frame.id);
         if (!pending) return;
         this.synthsInFlight.delete(frame.id);
+        clearTimeout(pending.timer);
         pending.resolve({
           sampleRate: frame.sampleRate,
           pcm: base64ToBytes(frame.pcmBase64),
@@ -242,6 +312,7 @@ export class TtsController {
         const pending = this.synthsInFlight.get(frame.id);
         if (!pending) return;
         this.synthsInFlight.delete(frame.id);
+        clearTimeout(pending.timer);
         pending.reject(new AppError("provider_error", `tts: ${frame.error}`));
         return;
       }
@@ -251,7 +322,10 @@ export class TtsController {
   private failPending(err: Error): void {
     for (const w of this.loadWaiters) w.reject(err);
     this.loadWaiters = [];
-    for (const p of this.synthsInFlight.values()) p.reject(err);
+    for (const p of this.synthsInFlight.values()) {
+      clearTimeout(p.timer);
+      p.reject(err);
+    }
     this.synthsInFlight.clear();
   }
 }

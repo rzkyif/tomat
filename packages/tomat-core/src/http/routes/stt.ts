@@ -15,6 +15,12 @@ import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 import { sttPort } from "../../paths.ts";
 
+// Upper bound on a single local transcription. whisper-server inference is
+// synchronous and unbounded; without this a wedged-but-listening sidecar would
+// pin this HTTP handler forever on a single cheap POST. Generous enough for a
+// long voice clip on CPU.
+const STT_LOCAL_TIMEOUT_MS = 120_000;
+
 export function sttRoutes(): Hono {
   const r = new Hono();
   r.use("*", bearerMiddleware());
@@ -71,9 +77,13 @@ export function sttRoutes(): Hono {
     upstreamForm.set("file", audio);
     if (languageStr) upstreamForm.set("language", languageStr);
     upstreamForm.set("response-format", "json");
+    // Bound the upstream call and also cancel it if the client disconnects
+    // mid-decode, so neither a wedged sidecar nor an abandoned request keeps the
+    // handler (and the whisper inference) running indefinitely.
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(STT_LOCAL_TIMEOUT_MS)]);
     let res: Response;
     try {
-      res = await fetch(upstream, { method: "POST", body: upstreamForm });
+      res = await fetch(upstream, { method: "POST", body: upstreamForm, signal });
     } catch (err) {
       throw new AppError(
         "server_unavailable",

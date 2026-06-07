@@ -15,7 +15,7 @@
 // missing binaries offline (assuming the operator's prior fetch was good).
 
 import { verifyAsync } from "@noble/ed25519";
-import { errMessage } from "@tomat/shared";
+import { canonicalize, decodeBase64, errMessage } from "@tomat/shared";
 import { join } from "@std/path";
 import { binaryManifestUrl } from "../config.ts";
 import { channel, paths } from "../paths.ts";
@@ -85,7 +85,7 @@ async function fetchAndVerify(signal?: AbortSignal): Promise<BinaryManifest> {
   return parsed;
 }
 
-function assertManifestShape(value: unknown): asserts value is BinaryManifest {
+export function assertManifestShape(value: unknown): asserts value is BinaryManifest {
   if (!value || typeof value !== "object") {
     throw new AppError("manifest_fetch_failed", "manifest is not an object");
   }
@@ -104,36 +104,28 @@ function assertManifestShape(value: unknown): asserts value is BinaryManifest {
   }
 }
 
+/** Verify a binaries-manifest signature: Ed25519 over canonicalize(binaries).
+ *  Key-injectable + pure so it's unit-testable with a throwaway keypair; the
+ *  production path passes the embedded signing key. Exported for testing. */
+export async function verifyBinariesSignature(
+  binaries: unknown,
+  signatureB64: string,
+  publicKey: Uint8Array,
+): Promise<boolean> {
+  const sig = decodeBase64(signatureB64);
+  const message = new TextEncoder().encode(canonicalize(binaries));
+  return await verifyAsync(sig, message, publicKey);
+}
+
 async function verifyManifestSignature(m: BinaryManifest): Promise<void> {
   const pk = decodeBase64(signingKeys.publicKey);
-  const sig = decodeBase64(m.signature);
-  const message = new TextEncoder().encode(canonicalize(m.binaries));
-  const ok = await verifyAsync(sig, message, pk);
+  const ok = await verifyBinariesSignature(m.binaries, m.signature, pk);
   if (!ok) {
     throw new AppError(
       "signature_invalid",
       `manifest signature (${SIG_ALGO_LABEL}) verification failed`,
     );
   }
-}
-
-// Stable JSON serialization: sorted keys, no whitespace. Both the signing
-// tool and this verifier must agree on this representation.
-function canonicalize(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    return "[" + value.map(canonicalize).join(",") + "]";
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") + "}";
-}
-
-function decodeBase64(s: string): Uint8Array {
-  const bin = atob(s);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
 }
 
 async function readCachedManifest(): Promise<BinaryManifest | null> {

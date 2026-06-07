@@ -1,9 +1,40 @@
 import type { SettingGroup } from "../types.ts";
 
+// Toolkit management lives in its own group with a single object_management
+// field, so the manager owns the full panel height (vertical scroll). The
+// tool-calling options that used to share this group moved to `toolsGroup`
+// below. The manager is intentionally NOT gated behind `tools.enabled`: you can
+// install and configure toolkits before turning tool use on.
 export const toolkitsGroup: SettingGroup = {
   id: "toolkits",
   destination: "core",
-  name: "Tools",
+  name: "Toolkits",
+  description: "Installed toolkits are shown by default. Add @npm to search the npm marketplace.",
+  descriptionTier: "always",
+  icon: "i-material-symbols-extension-rounded",
+  iconInactive: "i-material-symbols-extension-outline-rounded",
+  sections: [
+    {
+      fields: [
+        {
+          id: "toolkits.list",
+          name: "Toolkits",
+          type: "object_management",
+          objectType: "toolkits",
+          defaultValue: "",
+        },
+      ],
+    },
+  ],
+};
+
+// Tool-calling runtime options, split out of the old combined Tools group so
+// toolkit management can be its own single-field group. `tools.enabled` gates
+// the rest, exactly as before.
+export const toolsGroup: SettingGroup = {
+  id: "tools",
+  destination: "core",
+  name: "Tool Calling",
   icon: "i-material-symbols-build-rounded",
   iconInactive: "i-material-symbols-build-outline-rounded",
   sections: [
@@ -16,16 +47,6 @@ export const toolkitsGroup: SettingGroup = {
             "Allow trusted toolkits to inject tools into each chat turn.\nWhen on, relevant tools are added to the model request, letting it call them mid-turn.",
           type: "boolean",
           defaultValue: false,
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "toolkits.list",
-          name: "Installed Toolkits",
-          description:
-            "Drop a .ts file or folder into ~/.tomat/toolkits/, press Refresh, then Trust/Install/Enable.\nOnly trusted + enabled toolkits contribute tools to the agent.",
-          type: "toolkits",
-          defaultValue: "",
-          visibleWhen: { field: "tools.enabled", eq: true },
           descriptionTier: "ondemand",
         },
       ],

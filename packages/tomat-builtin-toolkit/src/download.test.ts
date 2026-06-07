@@ -3,7 +3,7 @@
 // abort. Demonstrates the worked-example test pattern for toolkit
 // authors who want to test their own network-touching tools.
 
-import { assertEquals, assertRejects } from "jsr:@std/assert@^1";
+import { assertEquals, assertRejects } from "@std/assert";
 import { download } from "./download.ts";
 import type { ToolContext } from "./types.ts";
 

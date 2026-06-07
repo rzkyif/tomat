@@ -11,8 +11,8 @@
 // are never removed. Channel state nests our binaries by suffix
 // (tomat-core-beta), so build outputs in dist/ never need a per-channel clean.
 
-import { parseArgs } from "jsr:@std/cli@^1.0.0/parse-args";
-import { join } from "jsr:@std/path@^1";
+import { parseArgs } from "@std/cli/parse-args";
+import { join } from "@std/path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 

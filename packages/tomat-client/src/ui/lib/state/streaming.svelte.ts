@@ -38,6 +38,13 @@ class StreamingState {
   private streamBuffer = "";
   private streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private ttsCursor = 0;
+  // Cached array positions of the active assistant + reasoning messages so the
+  // hot streaming path doesn't findIndex() over the whole transcript on every
+  // flushed chunk. The id check below makes a stale cache self-correcting: if
+  // the array shifted, the fast path misses and we re-scan, so this can never
+  // return a wrong index.
+  private cachedActiveIdx = -1;
+  private cachedReasoningIdx = -1;
   private reasoningStartTime: number | null = null;
   private interruptListeners: InterruptListener[] = [];
   private unsubscribeWs: (() => void) | null = null;
@@ -68,7 +75,30 @@ class StreamingState {
 
   private getActiveIndex(): number {
     if (this.messageId === null) return -1;
-    return messagesState.messages.findIndex((m) => m.id === this.messageId);
+    const msgs = messagesState.messages;
+    if (
+      this.cachedActiveIdx >= 0 &&
+      this.cachedActiveIdx < msgs.length &&
+      msgs[this.cachedActiveIdx]?.id === this.messageId
+    ) {
+      return this.cachedActiveIdx;
+    }
+    this.cachedActiveIdx = msgs.findIndex((m) => m.id === this.messageId);
+    return this.cachedActiveIdx;
+  }
+
+  private getReasoningIndex(): number {
+    if (this.reasoningId === null) return -1;
+    const msgs = messagesState.messages;
+    if (
+      this.cachedReasoningIdx >= 0 &&
+      this.cachedReasoningIdx < msgs.length &&
+      msgs[this.cachedReasoningIdx]?.id === this.reasoningId
+    ) {
+      return this.cachedReasoningIdx;
+    }
+    this.cachedReasoningIdx = msgs.findIndex((m) => m.id === this.reasoningId);
+    return this.cachedReasoningIdx;
   }
 
   beginTurn(anchorUserId: string | null): void {
@@ -86,6 +116,8 @@ class StreamingState {
     this.reasoningStartTime = null;
     this.reasoningId = null;
     this.ttsCursor = 0;
+    this.cachedActiveIdx = -1;
+    this.cachedReasoningIdx = -1;
     const assistantId = makeMessageId();
     const streamId = makeMessageId();
     this.messageId = assistantId;
@@ -164,7 +196,7 @@ class StreamingState {
     if (this.messageId === null) return;
     if (this.firstChunkReceived) return;
     if (this.reasoningId === null) {
-      const contentIdx = messagesState.messages.findIndex((m) => m.id === this.messageId);
+      const contentIdx = this.getActiveIndex();
       if (contentIdx < 0) return;
       const contentMsg = messagesState.messages[contentIdx];
       const reasoningId = makeMessageId();
@@ -177,9 +209,11 @@ class StreamingState {
         modelUsed: contentMsg.modelUsed,
         pairedAssistantId: contentMsg.id,
       });
+      // The reasoning row sits right after the content row; seed its cache.
+      this.cachedReasoningIdx = contentIdx + 1;
       return;
     }
-    const idx = messagesState.messages.findIndex((m) => m.id === this.reasoningId);
+    const idx = this.getReasoningIndex();
     if (idx < 0) return;
     const cur = (messagesState.messages[idx].content as string) || "";
     messagesState.messages[idx] = { ...messagesState.messages[idx], content: cur + delta };
@@ -190,7 +224,7 @@ class StreamingState {
       this.reasoningStartTime = null;
       return;
     }
-    const idx = messagesState.messages.findIndex((m) => m.id === this.reasoningId);
+    const idx = this.getReasoningIndex();
     if (idx < 0) {
       this.reasoningId = null;
       this.reasoningStartTime = null;
@@ -371,6 +405,8 @@ class StreamingState {
     this.streamId = null;
     this.streamBuffer = "";
     this.ttsCursor = 0;
+    this.cachedActiveIdx = -1;
+    this.cachedReasoningIdx = -1;
     this.reasoningStartTime = null;
     if (this.streamFlushTimer) {
       clearTimeout(this.streamFlushTimer);

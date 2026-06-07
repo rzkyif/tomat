@@ -1,17 +1,18 @@
 import type {
+  CheckUpdatesResponse,
+  DownloadToolkitRequest,
   EmbedRequest,
   EmbedResponse,
   Grant,
-  InstallToolkitRequest,
-  InstallToolkitResponse,
   ListToolkitsResponse,
   ListToolkitToolsResponse,
   SearchToolkitsResponse,
   SetGrantsResponse,
   ToolFilterRequest,
   ToolFilterResponse,
+  ToolkitActionResponse,
+  ToolkitJobResponse,
   ToolSchemasResponse,
-  UpdateToolkitResponse,
 } from "@tomat/shared";
 import type { CoreClient } from "./client";
 
@@ -32,28 +33,45 @@ export class ToolkitsApi {
     return this.client.get(`/api/v1/toolkits/search?${params}`);
   }
 
-  install(req: InstallToolkitRequest): Promise<InstallToolkitResponse> {
-    return this.client.post("/api/v1/toolkits/install", req);
+  // Phase 1: acquire a toolkit's files (npm/local/builtin). Returns a streamed
+  // job; deps are installed separately via installDeps.
+  download(req: DownloadToolkitRequest): Promise<ToolkitJobResponse> {
+    return this.client.post("/api/v1/toolkits/download", req);
+  }
+
+  // Phase 2: install a downloaded toolkit's dependencies + pin its hash.
+  installDeps(id: string): Promise<ToolkitJobResponse> {
+    return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/install`, {});
   }
 
   delete(id: string): Promise<void> {
     return this.client.del(`/api/v1/toolkits/${encodeURIComponent(id)}`) as Promise<void>;
   }
 
-  update(id: string, version?: string): Promise<UpdateToolkitResponse> {
+  update(id: string, version?: string): Promise<ToolkitJobResponse> {
     return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/update`, { version });
   }
 
-  enable(id: string): Promise<void> {
-    return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/enable`, {});
-  }
-
-  disable(id: string): Promise<void> {
-    return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/disable`, {});
+  /** Check installed toolkits for newer versions. Omit `ids` to check all. */
+  checkUpdates(ids?: string[]): Promise<CheckUpdatesResponse> {
+    return this.client.post("/api/v1/toolkits/check-updates", { ids });
   }
 
   listTools(id: string): Promise<ListToolkitToolsResponse> {
     return this.client.get(`/api/v1/toolkits/${encodeURIComponent(id)}/tools`);
+  }
+
+  enableAllTools(id: string): Promise<ToolkitActionResponse> {
+    return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/tools/enable-all`, {});
+  }
+
+  disableAllTools(id: string): Promise<ToolkitActionResponse> {
+    return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/tools/disable-all`, {});
+  }
+
+  // Re-pin the current on-disk content + clear the drift warning.
+  confirmReenable(id: string): Promise<ToolkitActionResponse> {
+    return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/confirm-reenable`, {});
   }
 
   enableTool(id: string, tool: string): Promise<{ ok: boolean }> {
@@ -83,6 +101,10 @@ export class ToolkitsApi {
 
   reindex(): Promise<{ embedded: number }> {
     return this.client.post("/api/v1/toolkits/reindex", {});
+  }
+
+  rescan(): Promise<{ added: number; updated: number; removed: number }> {
+    return this.client.post("/api/v1/toolkits/rescan", {});
   }
 
   filter(req: ToolFilterRequest): Promise<ToolFilterResponse> {

@@ -21,7 +21,7 @@
 // can run standalone from ~/.tomat/core/workers/ after install, with no
 // deno.json nearby. Keep the version pinned in lockstep with tomat-core's
 // own deno.json import.
-import { env, pipeline } from "npm:@huggingface/transformers@^4.1.0";
+import { env, pipeline } from "npm:@huggingface/transformers@^4.2.0";
 import { errMessage } from "@tomat/shared";
 
 const REPO = "Xenova/all-MiniLM-L6-v2";

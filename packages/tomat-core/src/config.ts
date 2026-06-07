@@ -33,6 +33,12 @@ export function binaryManifestUrl(): string {
   return `${STORAGE_BASE_URL}/${manifestDir()}/binaries.json`;
 }
 
+// Signed manifest for the CDN-distributed built-in toolkit, nested per channel
+// alongside core.json / binaries.json.
+export function builtinToolkitManifestUrl(): string {
+  return `${STORAGE_BASE_URL}/${manifestDir()}/toolkit.json`;
+}
+
 // Schemas (tools-v1.json) are channel-independent: one published copy.
 export const SCHEMAS_BASE_URL = `${STORAGE_BASE_URL}/schemas`;
 

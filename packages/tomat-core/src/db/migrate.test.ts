@@ -2,10 +2,10 @@
 // IF NOT EXISTS. Running it twice against the same DB must not throw and
 // must not change the schema.
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { db } from "./connection.ts";
-import { migrate } from "./migrate.ts";
+import { CURRENT_SCHEMA_VERSION, migrate } from "./migrate.ts";
 
 function tableNames(): string[] {
   return (
@@ -13,6 +13,11 @@ function tableNames(): string[] {
       name: string;
     }>
   ).map((r) => r.name);
+}
+
+function userVersion(): number {
+  const row = db().prepare("PRAGMA user_version").get() as { user_version?: number | bigint };
+  return Number(row?.user_version ?? 0);
 }
 
 Deno.test("migrate: running twice is idempotent (no throw, schema unchanged)", async () => {
@@ -27,6 +32,28 @@ Deno.test("migrate: running twice is idempotent (no throw, schema unchanged)", a
     assertEquals(before.includes("messages"), true);
     assertEquals(before.includes("clients"), true);
     assertEquals(before.includes("pairing_codes"), true);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("migrate: stamps the DB with the current schema version", async () => {
+  const env = await setupTestEnv();
+  try {
+    // setupTestEnv already ran migrate(); the version must be stamped.
+    assertEquals(userVersion(), CURRENT_SCHEMA_VERSION);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("migrate: refuses a DB written by a newer core (forward-compat guard)", async () => {
+  const env = await setupTestEnv();
+  try {
+    // Simulate an update rollback / channel downgrade: the on-disk DB carries a
+    // schema version this older binary doesn't understand.
+    db().exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION + 1}`);
+    assertThrows(() => migrate(), Error, "newer than this core supports");
   } finally {
     await env.teardown();
   }

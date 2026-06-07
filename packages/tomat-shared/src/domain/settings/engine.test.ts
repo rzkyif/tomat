@@ -8,6 +8,27 @@ import {
   SETTINGS_SCHEMA,
   validateSettingsPatch,
 } from "./engine.ts";
+import { CLIENT_GROUP_IDS, CORE_GROUP_IDS, isClientGroup, isCoreGroup } from "./types.ts";
+
+Deno.test("group-id registry stays in sync with schema destinations (no drift)", () => {
+  // CLIENT_GROUP_IDS / CORE_GROUP_IDS are hand-maintained for their literal
+  // types; this is the derive-check that fails if a group's `destination` in the
+  // schema ever disagrees with the registry (the prior silent-inconsistency
+  // class: a new "core" group not added to CORE_GROUP_IDS).
+  const schemaClient = SETTINGS_SCHEMA.filter((g) => g.destination === "client")
+    .map((g) => g.id)
+    .sort();
+  const schemaCore = SETTINGS_SCHEMA.filter((g) => g.destination === "core")
+    .map((g) => g.id)
+    .sort();
+  assertEquals(schemaClient, [...CLIENT_GROUP_IDS].sort());
+  assertEquals(schemaCore, [...CORE_GROUP_IDS].sort());
+  // The classifier helpers must agree with each group's declared destination.
+  for (const g of SETTINGS_SCHEMA) {
+    assertEquals(isClientGroup(g.id), g.destination === "client");
+    assertEquals(isCoreGroup(g.id), g.destination === "core");
+  }
+});
 
 function firstFieldOfType(type: string): string | undefined {
   for (const group of SETTINGS_SCHEMA) {

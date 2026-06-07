@@ -16,8 +16,13 @@
 // `tlsServeOptions()` feeds `Deno.serve({ ..., cert, key })`; `tlsCertFingerprint()`
 // is the pin the pairing handshake binds.
 
+// @peculiar/x509 wires its providers through tsyringe, which needs a Reflect
+// metadata polyfill in scope before x509 evaluates. This is the sole x509
+// importer, so this side-effect import covers the app entry and the co-located
+// tests alike. Must stay above the x509 import.
+import "reflect-metadata";
 import * as x509 from "@peculiar/x509";
-import { encodeBase64 } from "jsr:@std/encoding@^1.0.0/base64";
+import { encodeBase64 } from "@std/encoding/base64";
 import { getLogger } from "../shared/log.ts";
 import { toHex } from "../shared/hash.ts";
 import { getSecret, setSecret } from "./secrets.ts";

@@ -38,19 +38,28 @@ function tool(overrides: Partial<ToolInsertInput> = {}): ToolInsertInput {
   };
 }
 
-Deno.test("upsertToolkit: insert then update preserves enabled state", async () => {
+Deno.test("upsertToolkit + status transitions: downloaded -> installed -> drift", async () => {
   const env = await setupTestEnv();
   try {
     const r = toolkitsRegistry();
-    r.upsertToolkit(tk());
-    assertEquals(r.get("example-toolkit")?.enabled, true);
-    r.setEnabled("example-toolkit", false);
-    // Re-upsert with the same id must not reset `enabled` (only an explicit
-    // setEnabled does that). Update path runs UPDATE without touching the
-    // enabled column.
-    r.upsertToolkit(tk({ version: "1.0.1" }));
-    assertEquals(r.get("example-toolkit")?.enabled, false);
+    // Download leaves the toolkit unpinned + 'downloaded'.
+    r.upsertToolkit(tk({ contentHash: "" }));
+    assertEquals(r.get("example-toolkit")?.status, "downloaded");
+    assertEquals(r.get("example-toolkit")?.contentHash, "");
+    // Install pins the hash + flips to 'installed'.
+    r.markInstalled("example-toolkit", "cafebabe");
+    assertEquals(r.get("example-toolkit")?.status, "installed");
+    assertEquals(r.get("example-toolkit")?.contentHash, "cafebabe");
+    // A re-download resets to 'downloaded' + clears the pin (re-install needed).
+    r.upsertToolkit(tk({ version: "1.0.1", contentHash: "" }));
+    assertEquals(r.get("example-toolkit")?.status, "downloaded");
+    assertEquals(r.get("example-toolkit")?.contentHash, "");
     assertEquals(r.get("example-toolkit")?.version, "1.0.1");
+    // Drift keeps the pinned hash but flips status.
+    r.markInstalled("example-toolkit", "feedface");
+    r.markDrift("example-toolkit");
+    assertEquals(r.get("example-toolkit")?.status, "drift");
+    assertEquals(r.get("example-toolkit")?.contentHash, "feedface");
   } finally {
     await env.teardown();
   }
@@ -85,6 +94,51 @@ Deno.test("replaceTools: drops old tools, inserts new, preserves enabled on matc
     assertEquals(byName.get("keep")?.enabled, true);
     // New tool defaults to disabled (conservative re-install policy).
     assertEquals(byName.get("new")?.enabled, false);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("replaceTools: preserves grants when required perms unchanged, drops when changed", async () => {
+  const env = await setupTestEnv();
+  try {
+    const r = toolkitsRegistry();
+    r.upsertToolkit(tk());
+    const net: PermissionDecl = { kind: "net", host: "x.example.com", ports: [443], reason: "y" };
+    r.replaceTools("example-toolkit", [tool({ name: "t", requiredPermissions: [net] })]);
+    const toolId = r.listTools("example-toolkit")[0].id;
+    r.setGrants(toolId, [{ key: permissionKey(net), kind: "net", state: "granted" }]);
+
+    // Re-download with the SAME required-permission set: grant survives.
+    r.replaceTools("example-toolkit", [tool({ name: "t", requiredPermissions: [net] })]);
+    assertEquals(r.listGrantsForTool(toolId).length, 1);
+    assertEquals(r.listGrantsForTool(toolId)[0].state, "granted");
+
+    // Re-download with a CHANGED required-permission set: grant dropped.
+    const net2: PermissionDecl = { kind: "net", host: "y.example.com", ports: [443], reason: "y" };
+    r.replaceTools("example-toolkit", [tool({ name: "t", requiredPermissions: [net2] })]);
+    assertEquals(r.listGrantsForTool(toolId).length, 0);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("enableAllTools / disableAllTools: flip every tool in a toolkit", async () => {
+  const env = await setupTestEnv();
+  try {
+    const r = toolkitsRegistry();
+    r.upsertToolkit(tk());
+    r.replaceTools("example-toolkit", [tool({ name: "a" }), tool({ name: "b" })]);
+    r.enableAllTools("example-toolkit");
+    assertEquals(
+      r.listTools("example-toolkit").every((t) => t.enabled),
+      true,
+    );
+    r.disableAllTools("example-toolkit");
+    assertEquals(
+      r.listTools("example-toolkit").every((t) => !t.enabled),
+      true,
+    );
   } finally {
     await env.teardown();
   }

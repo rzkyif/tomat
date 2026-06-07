@@ -4,6 +4,9 @@ export const snippetsGroup: SettingGroup = {
   id: "snippets",
   destination: "client",
   name: "Snippets",
+  description:
+    "Reusable text fragments triggered via @trigger in the chat input. Snippets can prepend, append, replace, or insert text into either the user message or the system prompt.",
+  descriptionTier: "always",
   icon: "i-material-symbols-text-snippet-rounded",
   iconInactive: "i-material-symbols-text-snippet-outline-rounded",
   sections: [
@@ -12,11 +15,9 @@ export const snippetsGroup: SettingGroup = {
         {
           id: "snippets.list",
           name: "Snippets",
-          description:
-            "Reusable text fragments triggered via @trigger in the chat input. Snippets can prepend, append, replace, or insert text into either the user message or the system prompt.",
-          type: "snippets",
+          type: "object_management",
+          objectType: "snippets",
           defaultValue: "",
-          descriptionTier: "always",
         },
       ],
     },

@@ -80,3 +80,41 @@ Deno.test({
     assertEquals(mgr.status("llama").status, "Disabled");
   },
 });
+
+Deno.test({
+  name: "SidecarManager: a crash after stop() -> start() surfaces as Error, not swallowed",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    __resetForTesting();
+    const mgr = sidecarManager();
+    const port = freePort();
+    const opts = buildOpts(port); // restartPolicy: "none" -> a crash emits Error and stops
+    await mgr.start("llama", opts);
+    assertEquals(mgr.status("llama").status, "Running");
+
+    // An intentional stop sets pendingStop=true; the fresh start must clear it.
+    // Before the fix, pendingStop lingered and the next crash was swallowed by
+    // watchExit (treated as an intentional stop) with no Error and no restart.
+    await mgr.stop("llama");
+    await mgr.start("llama", opts);
+    assertEquals(mgr.status("llama").status, "Running");
+
+    // Crash the live process; this is an unexpected exit and must surface.
+    await fetch(`http://127.0.0.1:${port}/exit`).catch(() => {});
+    await waitForStatus(mgr, "Error", 8_000);
+    assertEquals(mgr.status("llama").status, "Error");
+  },
+});
+
+async function waitForStatus(
+  mgr: ReturnType<typeof sidecarManager>,
+  status: SidecarSnapshot["status"],
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (mgr.status("llama").status === status) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}

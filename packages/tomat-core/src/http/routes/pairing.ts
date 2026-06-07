@@ -5,7 +5,7 @@ import {
   pakeFinishRequestSchema,
   pakeStartRequestSchema,
 } from "@tomat/shared";
-import { decodeBase64, encodeBase64 } from "jsr:@std/encoding@^1.0.0/base64";
+import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
 import { authService } from "../../services/auth.ts";
 import { tlsCertFingerprint } from "../../services/tls.ts";
 import { adminTokenMiddleware, bearerMiddleware, requireClient } from "../middleware/auth.ts";

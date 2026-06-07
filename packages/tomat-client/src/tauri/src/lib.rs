@@ -60,6 +60,13 @@ pub fn run() {
     logging::init();
     log::info!(target: "tomat::boot", "tomat client starting (channel={})", crate::channel::channel());
 
+    // Register the OS keychain as keyring-core's default store before any
+    // paired-core token op. Non-fatal: the dev build uses a file store, and a
+    // real failure surfaces cleanly when a keychain command runs.
+    if let Err(e) = init_default_store() {
+        log::warn!(target: "tomat::boot", "keychain store init failed: {e}");
+    }
+
     let last_monitor: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let move_last_monitor = last_monitor.clone();
 

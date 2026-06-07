@@ -19,6 +19,9 @@
     size?: Size;
     variant?: Variant;
     surface?: Surface;
+    /** Override the surface's default corner radius (e.g. "rounded-large" to
+     *  match an adjacent search bar). Defaults to the per-surface radius. */
+    rounded?: string;
     active?: boolean;
     /** Override the text-color classes entirely (e.g. an accent-yellow ping).
      *  When set, replaces the variant's default color logic. */
@@ -37,6 +40,7 @@
     size = "md",
     variant = "default",
     surface = "none",
+    rounded,
     active = false,
     colorClass,
     disabled = false,
@@ -72,10 +76,19 @@
 
   const surfaceClass = $derived(
     {
-      none: "rounded",
-      filled: "bg-surface-inset rounded-medium",
-      circle: "bg-surface-inset rounded-full",
+      none: "",
+      filled: "bg-surface-inset",
+      circle: "bg-surface-inset",
     }[surface],
+  );
+
+  const roundedClass = $derived(
+    rounded ??
+      {
+        none: "rounded",
+        filled: "rounded-medium",
+        circle: "rounded-full",
+      }[surface],
   );
 </script>
 
@@ -86,7 +99,7 @@
   {title}
   aria-label={ariaLabel ?? title}
   {onclick}
-  class="flex items-center justify-center shrink-0 {sizeClass} {variantClass} {surfaceClass} hover:cursor-pointer transition-colors disabled:opacity-50 disabled:pointer-events-none {extraClass}"
+  class="flex items-center justify-center shrink-0 {sizeClass} {variantClass} {surfaceClass} {roundedClass} hover:cursor-pointer transition-colors disabled:opacity-50 disabled:pointer-events-none {extraClass}"
 >
   {#if badge}
     <span class="relative flex shrink-0">

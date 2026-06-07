@@ -6,8 +6,8 @@
 // where <coreId> is the ULID assigned by the core during pairing-claim.
 //
 // Backing store, chosen per channel by `store()`:
-//   - stable / beta (signed bundles): the real OS keychain via the `keyring`
-//     crate (`RealKeychain`).
+//   - stable / beta (signed bundles): the real OS keychain via keyring-core
+//     and the platform credential store (`RealKeychain`).
 //   - dev (`deno task dev`, an unsigned `tauri dev` binary): a file under the
 //     channel-isolated client dir (`DevFileKeychain`). The macOS keychain
 //     silently no-ops for the unsigned dev build: `set_password` returns Ok
@@ -22,7 +22,7 @@
 
 use crate::channel::{channel, channel_root, keychain_service};
 use crate::error::{AppError, AppResult};
-use keyring::Entry;
+use keyring_core::Entry;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -51,17 +51,33 @@ impl KeychainStore for RealKeychain {
         let entry = Entry::new(&keychain_service(), account)?;
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(err) => Err(classify_keyring_error(err)),
         }
     }
     fn delete(&self, account: &str) -> AppResult<()> {
         let entry = Entry::new(&keychain_service(), account)?;
         match entry.delete_credential() {
-            Ok(_) | Err(keyring::Error::NoEntry) => Ok(()),
+            Ok(_) | Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(err) => Err(classify_keyring_error(err)),
         }
     }
+}
+
+/// Register the platform credential store as keyring-core's process-global
+/// default so `RealKeychain` entries resolve. Called once at client startup
+/// (see `run()`); the dev channel uses the file-backed store instead, so a
+/// failure here is non-fatal and only logged.
+pub fn init_default_store() -> AppResult<()> {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    let store = apple_native_keyring_store::keychain::Store::new()?;
+    #[cfg(target_os = "windows")]
+    let store = windows_native_keyring_store::Store::new()?;
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))]
+    let store = dbus_secret_service_keyring_store::Store::new()?;
+
+    keyring_core::set_default_store(store);
+    Ok(())
 }
 
 // --- dev file fallback ----------------------------------------------------
@@ -134,13 +150,13 @@ fn store() -> AppResult<Box<dyn KeychainStore>> {
     }
 }
 
-/// Map a raw `keyring::Error` into one of three generic codes so the UI
+/// Map a raw `keyring_core::Error` into one of three generic codes so the UI
 /// (and any log line that captures the error) never sees platform-specific
 /// detail like exact file paths, COM HRESULTs, or DBus method names. Those
 /// can be useful for debugging but leak host topology to anyone who can
 /// read the client logs.
-fn classify_keyring_error(err: keyring::Error) -> AppError {
-    use keyring::Error as E;
+fn classify_keyring_error(err: keyring_core::Error) -> AppError {
+    use keyring_core::Error as E;
     let code = match err {
         E::NoEntry => "keychain:not_found",
         // PlatformFailure / NoStorageAccess on macOS map to the user
@@ -306,13 +322,13 @@ mod tests {
     #[test]
     fn classify_keyring_error_maps_to_generic_codes() {
         // NoEntry → not_found
-        let e = classify_keyring_error(keyring::Error::NoEntry);
+        let e = classify_keyring_error(keyring_core::Error::NoEntry);
         assert_eq!(format!("{}", e), "keychain:not_found");
         // BadEncoding → denied (caller-input mistake)
-        let e = classify_keyring_error(keyring::Error::BadEncoding(vec![0xff]));
+        let e = classify_keyring_error(keyring_core::Error::BadEncoding(vec![0xff]));
         assert_eq!(format!("{}", e), "keychain:denied");
         // TooLong → denied
-        let e = classify_keyring_error(keyring::Error::TooLong("svc".into(), 10));
+        let e = classify_keyring_error(keyring_core::Error::TooLong("svc".into(), 10));
         assert_eq!(format!("{}", e), "keychain:denied");
     }
 

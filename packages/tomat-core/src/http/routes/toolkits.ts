@@ -1,23 +1,39 @@
 import { Hono } from "hono";
 import { join } from "@std/path";
 import { z } from "zod";
-import { type Grant, parseToolsJson, permissionKey, type Tool } from "@tomat/shared";
-import { type InstallEventSink, startInstall } from "../../toolkits/installer.ts";
+import { errMessage, type Grant, parseToolsJson, permissionKey, type Tool } from "@tomat/shared";
+import {
+  type InstallEventSink,
+  registerLocalDownloaded,
+  startDownload,
+  startInstallDeps,
+  startUpdate,
+} from "../../toolkits/installer.ts";
 import { toolkitsRegistry } from "../../toolkits/registry.ts";
+import { hashToolkit } from "../../toolkits/hash.ts";
 import { workerPool } from "../../toolkits/worker-pool.ts";
-import { resolveVersion, searchPackages } from "../../toolkits/npm-registry.ts";
+import { paths } from "../../paths.ts";
+import {
+  resolveLatestVersion,
+  resolveVersion,
+  searchPackages,
+} from "../../toolkits/npm-registry.ts";
+import { loadBuiltinToolkitManifest } from "../../toolkits/builtin-manifest.ts";
 import { embed, isEmbeddingModelReady } from "../../services/embedding.ts";
 import { toolFilter } from "../../services/tool-filter.ts";
 import { sha256Hex } from "../../shared/hash.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 import { wsHub } from "../../ws/hub.ts";
+import { getLogger } from "../../shared/log.ts";
+
+const log = getLogger("toolkits.routes");
 
 // Sink that broadcasts install_log + install_done frames to every paired
 // client. The client's toolkits state subscribes to these and renders
 // streamed progress in the install modal. install_done also triggers a
 // `toolkit.snapshot` so the installed list refreshes without polling.
-const BROADCAST_SINK: InstallEventSink = {
+export const BROADCAST_SINK: InstallEventSink = {
   log(jobId, id, stream, line) {
     wsHub().broadcastAll({
       kind: "toolkit.install_log",
@@ -52,25 +68,51 @@ export function toolkitsRoutes(): Hono {
     return c.json({ results: await searchPackages(q, limit, offset) });
   });
 
-  r.post("/install", async (c) => {
+  // Phase 1: acquire a toolkit's files (npm tarball / built-in / local folder).
+  // Deps are NOT installed here; the toolkit lands in status 'downloaded'.
+  r.post("/download", async (c) => {
     const body = (await readJson(c)) as
       | { source: "npm"; name: string; version?: string }
-      | { source: "local"; path: string; slug?: string };
+      | { source: "local"; path: string; slug?: string }
+      | { source: "builtin" };
     if (body.source === "npm") {
-      const result = startInstall(body, BROADCAST_SINK);
-      return c.json(result);
+      return c.json(startDownload(body, BROADCAST_SINK));
     } else if (body.source === "local") {
       if (!body.slug) {
         throw new AppError("validation_error", "slug required for local");
       }
-      const result = startInstall(
-        { source: "local", path: body.path, slug: body.slug },
-        BROADCAST_SINK,
+      return c.json(
+        startDownload({ source: "local", path: body.path, slug: body.slug }, BROADCAST_SINK),
       );
-      return c.json(result);
+    } else if (body.source === "builtin") {
+      return c.json(startDownload({ source: "builtin" }, BROADCAST_SINK));
     }
     throw new AppError("validation_error", "unknown source");
   });
+
+  // Phase 2: install a downloaded toolkit's dependencies, pin its content hash,
+  // and flip it to status 'installed' so its tools can be enabled.
+  r.post("/:id/install", (c) => {
+    const id = c.req.param("id");
+    const tk = toolkitsRegistry().getOrThrow(id);
+    if (tk.status === "drift") {
+      throw new AppError("toolkit_hash_drift", `${id} content drift; confirm re-enable first`);
+    }
+    return c.json(startInstallDeps(id, BROADCAST_SINK));
+  });
+
+  // Check installed toolkits for newer versions (npm `dist-tags.latest`, the
+  // built-in's signed manifest; local toolkits have no upstream). Per-toolkit
+  // errors are isolated so one unreachable registry doesn't fail the batch.
+  r.post("/check-updates", async (c) => c.json(await checkUpdates(await readJson(c))));
+
+  // Reconcile the toolkits directory with the registry: register folders the
+  // user dropped in (as 'downloaded'), re-register ones whose tools.json changed
+  // (resetting them to 'downloaded' so the user re-Installs), and prune local
+  // toolkits whose folder is gone. Rescan never installs deps or pins a hash;
+  // that is the per-toolkit Install step. The toolkit.snapshot broadcast repaints
+  // the client.
+  r.post("/rescan", async (c) => c.json(await rescanToolkits()));
 
   r.delete("/:id", async (c) => {
     const id = c.req.param("id");
@@ -89,26 +131,19 @@ export function toolkitsRoutes(): Hono {
     const id = c.req.param("id");
     const toolkit = toolkitsRegistry().getOrThrow(id);
     const body = (await readJson(c)) as { version?: string };
+    if (toolkit.source === "builtin") {
+      // Re-download + re-install from the latest CDN manifest (same id). The
+      // install path re-pins the hash, so a legitimate update never trips drift.
+      return c.json(startUpdate({ source: "builtin" }, BROADCAST_SINK));
+    }
     if (toolkit.source !== "npm") {
-      throw new AppError("validation_error", "only npm toolkits can be updated");
+      throw new AppError("validation_error", "only npm and built-in toolkits can be updated");
     }
     const npmName = id.replace("__", "/");
     const resolved = await resolveVersion(npmName, body.version);
-    const result = startInstall(
-      { source: "npm", name: npmName, version: resolved.version },
-      BROADCAST_SINK,
+    return c.json(
+      startUpdate({ source: "npm", name: npmName, version: resolved.version }, BROADCAST_SINK),
     );
-    return c.json(result);
-  });
-
-  r.post("/:id/enable", (c) => {
-    toolkitsRegistry().setEnabled(c.req.param("id"), true);
-    return c.json({ id: c.req.param("id") });
-  });
-
-  r.post("/:id/disable", (c) => {
-    toolkitsRegistry().setEnabled(c.req.param("id"), false);
-    return c.json({ id: c.req.param("id") });
   });
 
   r.get("/:id/tools", async (c) => {
@@ -121,16 +156,17 @@ export function toolkitsRoutes(): Hono {
   r.post("/:id/tools/:tool/enable", async (c) => {
     const id = c.req.param("id");
     const name = c.req.param("tool");
+    const tk = toolkitsRegistry().getOrThrow(id);
+    if (tk.status === "drift") {
+      throw new AppError("toolkit_hash_drift", `${id} content drift; confirm re-enable first`);
+    }
     const tool = toolkitsRegistry()
       .listTools(id)
       .find((t) => t.name === name);
     if (!tool) throw new AppError("tool_not_found", `${id}::${name}`);
-    const enriched = await attachRequiredPermissions(tool);
-    if (enriched.missingRequired.length > 0) {
-      throw new AppError("permissions_required", `missing grants for ${name}`, {
-        missing: enriched.missingRequired.map((i) => enriched.requiredPermissions[i]),
-      });
-    }
+    // Enabling is allowed even with ungranted required permissions: the tool is
+    // then "enabled but not exposed" (a warning state in the UI). chat.ts's
+    // exposure gate is the authority on what the model actually sees.
     toolkitsRegistry().setToolEnabled(id, name, true);
     await workerPool().refreshPermissions(id);
     return c.json({ ok: true });
@@ -142,6 +178,40 @@ export function toolkitsRoutes(): Hono {
     toolkitsRegistry().setToolEnabled(id, name, false);
     await workerPool().refreshPermissions(id);
     return c.json({ ok: true });
+  });
+
+  // Bulk toggles backing "Enable all / Disable all" in the toolkit detail view.
+  // These only flip the per-tool enabled flag; permission grants are untouched
+  // (granted one by one for safety), so enabling-all may leave some tools in the
+  // not-yet-granted warning state.
+  r.post("/:id/tools/enable-all", async (c) => {
+    const id = c.req.param("id");
+    const tk = toolkitsRegistry().getOrThrow(id);
+    if (tk.status === "drift") {
+      throw new AppError("toolkit_hash_drift", `${id} content drift; confirm re-enable first`);
+    }
+    toolkitsRegistry().enableAllTools(id);
+    await workerPool().refreshPermissions(id);
+    return c.json({ id });
+  });
+
+  r.post("/:id/tools/disable-all", async (c) => {
+    const id = c.req.param("id");
+    toolkitsRegistry().getOrThrow(id);
+    toolkitsRegistry().disableAllTools(id);
+    await workerPool().refreshPermissions(id);
+    return c.json({ id });
+  });
+
+  // Confirm-reenable: the user reviewed an out-of-band content change and trusts
+  // the current on-disk content. Re-pin the hash, clear drift, return to
+  // 'installed'. Tools were disabled when drift was flagged; the user re-enables.
+  r.post("/:id/confirm-reenable", async (c) => {
+    const id = c.req.param("id");
+    const tk = toolkitsRegistry().getOrThrow(id);
+    const hash = await hashToolkit(tk.installedPath);
+    toolkitsRegistry().repinAndClear(id, hash);
+    return c.json({ id });
   });
 
   r.post("/:id/tools/:tool/grants", async (c) => {
@@ -247,6 +317,107 @@ export function toolkitsRoutes(): Hono {
   return r;
 }
 
+/** Toolkit directory ids present on disk, skipping the `.new` / `.old` staging
+ *  dirs the installer creates during an atomic swap. */
+async function listToolkitDirIds(): Promise<string[]> {
+  const ids: string[] = [];
+  try {
+    for await (const entry of Deno.readDir(paths().toolkitsDir)) {
+      if (!entry.isDirectory) continue;
+      if (entry.name.endsWith(".new") || entry.name.endsWith(".old")) continue;
+      ids.push(entry.name);
+    }
+  } catch {
+    // toolkitsDir does not exist yet: treat as empty.
+  }
+  return ids;
+}
+
+async function readToolkitToolsJson(id: string): Promise<string | null> {
+  try {
+    return await Deno.readTextFile(join(paths().toolkitsDir, id, "tools.json"));
+  } catch {
+    return null;
+  }
+}
+
+async function checkUpdates(
+  body: unknown,
+): Promise<{ results: import("@tomat/shared").ToolkitUpdateStatus[] }> {
+  const ids = (body as { ids?: unknown })?.ids;
+  const all = toolkitsRegistry().list();
+  const targets = Array.isArray(ids) ? all.filter((t) => (ids as unknown[]).includes(t.id)) : all;
+
+  const results: import("@tomat/shared").ToolkitUpdateStatus[] = [];
+  // Sequential to stay polite to the npm registry; only installed npm/builtin
+  // toolkits hit the network, and a per-toolkit failure is isolated.
+  for (const tk of targets) {
+    const base = { id: tk.id, installedVersion: tk.version };
+    if (tk.source === "local") {
+      results.push({ ...base, latestVersion: null, updateAvailable: false });
+      continue;
+    }
+    try {
+      const latestVersion =
+        tk.source === "builtin"
+          ? (await loadBuiltinToolkitManifest({ force: true })).version
+          : await resolveLatestVersion(tk.id.replace("__", "/"));
+      results.push({
+        ...base,
+        latestVersion,
+        updateAvailable: latestVersion !== tk.version,
+      });
+    } catch (err) {
+      results.push({
+        ...base,
+        latestVersion: null,
+        updateAvailable: false,
+        error: errMessage(err),
+      });
+    }
+  }
+  return { results };
+}
+
+async function rescanToolkits(): Promise<{ added: number; updated: number; removed: number }> {
+  const ids = await listToolkitDirIds();
+  const onDisk = new Set(ids);
+  let added = 0;
+  let updated = 0;
+  let removed = 0;
+
+  for (const id of ids) {
+    const toolsJsonText = await readToolkitToolsJson(id);
+    if (!toolsJsonText) continue; // a stray folder without a tools.json: ignore.
+    const existing = toolkitsRegistry().get(id);
+    // Only (re)register when new or when tools.json changed (cheap heuristic; a
+    // code-only edit with an unchanged tools.json is left alone). Re-registering
+    // resets the row to 'downloaded' so the user must re-Install before its tools
+    // run. One folder with invalid tools.json must not fail the whole rescan.
+    if (existing && (await sha256Hex(toolsJsonText)) === existing.toolsJsonHash) continue;
+    try {
+      await registerLocalDownloaded(id);
+      if (existing) updated++;
+      else added++;
+    } catch (err) {
+      log.warn(`rescan: skipping ${id}: ${errMessage(err)}`);
+    }
+  }
+
+  // Prune local toolkits whose folder was removed from disk.
+  for (const tk of toolkitsRegistry().list()) {
+    if (tk.source === "local" && !onDisk.has(tk.id)) {
+      await workerPool().refreshPermissions(tk.id);
+      toolkitsRegistry().delete(tk.id);
+      removed++;
+    }
+  }
+
+  // Repaint clients now; each started install also fires its own snapshot on done.
+  wsHub().broadcastAll({ kind: "toolkit.snapshot" });
+  return { added, updated, removed };
+}
+
 function allEnabledTools(): Array<{
   id: string;
   description: string;
@@ -256,7 +427,7 @@ function allEnabledTools(): Array<{
   // Duplicated here to avoid importing tool-filter.ts internals.
   const list = toolkitsRegistry()
     .list()
-    .filter((t) => t.enabled);
+    .filter((t) => t.status === "installed");
   const out: Array<{ id: string; description: string; triggers: string[] }> = [];
   for (const tk of list) {
     for (const t of toolkitsRegistry().listTools(tk.id)) {

@@ -249,6 +249,21 @@ export interface CoreManifest {
   signature: string;
 }
 
+// Signed manifest for the CDN-distributed built-in toolkit. Mirrors CoreManifest:
+// the whole object minus `signature` is canonicalized + Ed25519-signed at release
+// time, and the runtime verifier reconstructs the same payload by stripping
+// `signature`. `version` is the toolkit's package.json version; `tarballUrl`
+// points at the gzipped tarball for that version and `sha256` is verified before
+// extraction.
+export interface BuiltinToolkitManifest {
+  schemaVersion: 1;
+  version: string;
+  id: string;
+  tarballUrl: string;
+  sha256: string;
+  signature: string;
+}
+
 export type SidecarKind = "llama" | "whisper" | "tts" | "tool";
 
 export type SidecarStatus = "Disabled" | "Loading" | "Running" | "Error";

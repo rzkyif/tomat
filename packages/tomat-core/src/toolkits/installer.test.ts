@@ -1,19 +1,25 @@
-// toolkit installer: local install path (no network, no npm tarball
-// fetch). Drives the full path from source dir -> registry rows via the
-// real `startInstall`. The npm tarball path is covered by integration in
-// real installs; isolating it would require a fixture tarball server.
+// toolkit installer: local download/install path (no network, no npm tarball
+// fetch). Drives the full path from source dir -> registry rows via the real
+// `startDownload` + `startInstallDeps`. The npm tarball path is covered by
+// integration in real installs; isolating it would require a fixture server.
 
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertRejects, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
+import { encodeBase64 } from "@std/encoding/base64";
+import { encodeHex } from "@std/encoding/hex";
 import {
+  extractableEntryType,
   flattenNpmName,
   flattenPermissions,
   type InstallEventSink,
   isWithin,
-  startInstall,
+  startDownload,
+  startInstallDeps,
+  verifyTarball,
 } from "./installer.ts";
+import { AppError } from "../shared/errors.ts";
 import { toolkitsRegistry } from "./registry.ts";
 
 // --- Pure helper tests ------------------------------------------------------
@@ -54,6 +60,83 @@ Deno.test("isWithin: accepts in-tree paths, rejects zip-slip traversal", () => {
   assertEquals(isWithin(root, "/tmp/toolkit-evil/x"), false);
   // Absolute escape outside root.
   assertEquals(isWithin(root, "/etc/passwd"), false);
+});
+
+Deno.test("extractableEntryType: only regular files + dirs are extractable", () => {
+  // Regular-file typeflags.
+  assertEquals(extractableEntryType("0"), "file");
+  assertEquals(extractableEntryType("\0"), "file");
+  assertEquals(extractableEntryType(""), "file");
+  // Directory.
+  assertEquals(extractableEntryType("5"), "dir");
+  // Symlink / hardlink / char-device / fifo must be refused (sandbox escape).
+  assertEquals(extractableEntryType("2"), null); // symlink
+  assertEquals(extractableEntryType("1"), null); // hardlink
+  assertEquals(extractableEntryType("3"), null); // char device
+  assertEquals(extractableEntryType("6"), null); // fifo
+});
+
+Deno.test("verifyTarball: accepts a matching sha512 SRI integrity", async () => {
+  const bytes = new TextEncoder().encode("tarball-contents");
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-512", bytes.buffer as ArrayBuffer));
+  const integrity = `sha512-${encodeBase64(digest)}`;
+  // Resolves (no throw) on a correct digest.
+  await verifyTarball(bytes, "https://reg/x.tgz", { integrity });
+});
+
+Deno.test("verifyTarball: rejects a mismatched sha512 integrity", async () => {
+  const bytes = new TextEncoder().encode("tarball-contents");
+  const wrong = `sha512-${encodeBase64(new Uint8Array(64))}`; // all-zero digest
+  await assertRejects(
+    () => verifyTarball(bytes, "https://reg/x.tgz", { integrity: wrong }),
+    AppError,
+    "sha512",
+  );
+});
+
+Deno.test("verifyTarball: falls back to the legacy sha1 shasum", async () => {
+  const bytes = new TextEncoder().encode("tarball-contents");
+  const sha1 = encodeHex(
+    new Uint8Array(await crypto.subtle.digest("SHA-1", bytes.buffer as ArrayBuffer)),
+  );
+  await verifyTarball(bytes, "https://reg/x.tgz", { shasum: sha1 }); // matches -> ok
+  await assertRejects(
+    () => verifyTarball(bytes, "https://reg/x.tgz", { shasum: "0".repeat(40) }),
+    AppError,
+    "sha1",
+  );
+});
+
+Deno.test("verifyTarball: accepts a matching sha256 hex (built-in toolkit path)", async () => {
+  const bytes = new TextEncoder().encode("tarball-contents");
+  const sha256 = encodeHex(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", bytes.buffer as ArrayBuffer)),
+  );
+  await verifyTarball(bytes, "https://cdn/x.tgz", { sha256 }); // matches -> ok
+  await assertRejects(
+    () => verifyTarball(bytes, "https://cdn/x.tgz", { sha256: "0".repeat(64) }),
+    AppError,
+    "sha256",
+  );
+});
+
+Deno.test("verifyTarball: no integrity metadata installs unverified (does not throw)", async () => {
+  const bytes = new TextEncoder().encode("tarball-contents");
+  // The 'no metadata' branch logs a warning and returns rather than blocking.
+  await verifyTarball(bytes, "https://reg/x.tgz", undefined);
+  await verifyTarball(bytes, "https://reg/x.tgz", {});
+});
+
+Deno.test("startDownload(local): rejects a path-traversal slug before doing any work", () => {
+  // The slug becomes a path segment under the toolkits dir; a `..`/separator
+  // slug must be refused so it can't escape (e.g. overwrite a core binary).
+  for (const slug of ["../../bin/tomat-core", "..", "a/b", "with space", "x".repeat(65)]) {
+    assertThrows(
+      () => startDownload({ source: "local", path: "/tmp/whatever", slug }),
+      AppError,
+      "invalid toolkit slug",
+    );
+  }
 });
 
 // --- Local-install integration ----------------------------------------------
@@ -100,7 +183,7 @@ function makeRecordingSink() {
   return sink;
 }
 
-Deno.test("startInstall(local): copies tree -> validates tools.json -> upserts registry", async () => {
+Deno.test("download -> install lifecycle (local): downloaded then installed, hash pinned", async () => {
   const env = await setupTestEnv();
   try {
     // Synthesize a "local" toolkit on disk with tools.json + index.ts.
@@ -111,35 +194,41 @@ Deno.test("startInstall(local): copies tree -> validates tools.json -> upserts r
       `export async function noop() { return null; }\n`,
     );
 
+    // Phase 1: download registers the row as 'downloaded' with no pinned hash.
     const sink = makeRecordingSink();
-    const { toolkitId } = startInstall({ source: "local", path: srcDir, slug: "mini-test" }, sink);
+    const { toolkitId } = startDownload({ source: "local", path: srcDir, slug: "mini-test" }, sink);
     assertEquals(toolkitId, "mini-test");
+    assertEquals((await awaitDone(sink)).ok, true);
 
-    const out = await awaitDone(sink);
-    assertEquals(out.ok, true);
-    assertEquals(out.code, 0);
-
-    // Registry row exists with the right metadata.
     const tk = toolkitsRegistry().get("mini-test");
     assertExists(tk);
     assertEquals(tk?.displayName, "mini");
-    // Local installs are recorded with version "local".
     assertEquals(tk?.version, "local");
-    // Tool row exists.
+    assertEquals(tk?.status, "downloaded");
+    assertEquals(tk?.contentHash, "");
     const tools = toolkitsRegistry().listTools("mini-test");
     assertEquals(tools.length, 1);
     assertEquals(tools[0].name, "noop");
 
-    // Files landed at the install path.
+    // Files landed at the install path, byte-identical (no deno.json injected).
     const installed = join(paths().toolkitsDir, "mini-test");
-    const installedToolsJson = await Deno.readTextFile(join(installed, "tools.json"));
-    assertEquals(installedToolsJson, MIN_TOOLS_JSON);
+    assertEquals(await Deno.readTextFile(join(installed, "tools.json")), MIN_TOOLS_JSON);
+    await assertRejects(() => Deno.stat(join(installed, "deno.json")));
+
+    // Phase 2: install. No declared deps -> no deno install runs, but the hash
+    // is pinned and the row flips to 'installed'.
+    const sink2 = makeRecordingSink();
+    startInstallDeps("mini-test", sink2);
+    assertEquals((await awaitDone(sink2)).ok, true);
+    const tk2 = toolkitsRegistry().get("mini-test");
+    assertEquals(tk2?.status, "installed");
+    assertEquals((tk2?.contentHash ?? "").length > 0, true);
   } finally {
     await env.teardown();
   }
 });
 
-Deno.test("startInstall(local): missing tools.json reports failure code 3", async () => {
+Deno.test("startDownload(local): missing tools.json fails, writes no registry row", async () => {
   const env = await setupTestEnv();
   try {
     const srcDir = await Deno.makeTempDir({ prefix: "tomat-tk-bad-" });
@@ -147,10 +236,8 @@ Deno.test("startInstall(local): missing tools.json reports failure code 3", asyn
     await Deno.writeTextFile(join(srcDir, "index.ts"), `export const x = 1;`);
 
     const sink = makeRecordingSink();
-    startInstall({ source: "local", path: srcDir, slug: "bad" }, sink);
-    const out = await awaitDone(sink);
-    assertEquals(out.ok, false);
-    assertEquals(out.code, 3);
+    startDownload({ source: "local", path: srcDir, slug: "bad" }, sink);
+    assertEquals((await awaitDone(sink)).ok, false);
 
     // No registry row written.
     assertEquals(toolkitsRegistry().get("bad"), undefined);
@@ -159,17 +246,15 @@ Deno.test("startInstall(local): missing tools.json reports failure code 3", asyn
   }
 });
 
-Deno.test("startInstall(local): malformed tools.json reports failure code 4", async () => {
+Deno.test("startDownload(local): malformed tools.json fails", async () => {
   const env = await setupTestEnv();
   try {
     const srcDir = await Deno.makeTempDir({ prefix: "tomat-tk-malformed-" });
     await Deno.writeTextFile(join(srcDir, "tools.json"), `{ not valid json`);
 
     const sink = makeRecordingSink();
-    startInstall({ source: "local", path: srcDir, slug: "malformed" }, sink);
-    const out = await awaitDone(sink);
-    assertEquals(out.ok, false);
-    assertEquals(out.code, 4);
+    startDownload({ source: "local", path: srcDir, slug: "malformed" }, sink);
+    assertEquals((await awaitDone(sink)).ok, false);
   } finally {
     await env.teardown();
   }

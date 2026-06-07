@@ -18,6 +18,15 @@ export interface ParsedSource {
   filename: string;
 }
 
+// Reject a path component that would let `relPath` escape the destination root
+// when joined: traversal (`.`/`..`), empties, null bytes, or a path separator
+// where a single segment is expected.
+function assertSafeComponent(c: string, source: string): void {
+  if (c === "" || c === "." || c === ".." || c.includes("\0") || c.includes("\\")) {
+    throw new AppError("validation_error", `unsafe source component in ${source}`);
+  }
+}
+
 export function parseSource(source: string): ParsedSource {
   if (!source.startsWith("@")) {
     // Absolute path; not downloadable.
@@ -29,7 +38,13 @@ export function parseSource(source: string): ParsedSource {
     throw new AppError("validation_error", `invalid source format: ${source}`);
   }
   const [username, reponame, branchname, ...fileParts] = parts;
+  assertSafeComponent(username, source);
+  assertSafeComponent(reponame, source);
+  assertSafeComponent(branchname, source);
+  // filename may legitimately be a nested repo path (e.g. `subdir/model.gguf`);
+  // validate each segment so none is `..`.
   const filename = fileParts.join("/");
+  for (const seg of filename.split("/")) assertSafeComponent(seg, source);
   const relPath = `${username}/${reponame}/${filename}`;
   const url = `https://huggingface.co/${username}/${reponame}/resolve/${branchname}/${filename}?download=true`;
   const baseName = filename.split("/").pop() ?? filename;

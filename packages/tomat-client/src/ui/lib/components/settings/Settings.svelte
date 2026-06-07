@@ -3,7 +3,7 @@
   import { platform } from "$lib/platform";
   import { isTauri } from "$lib/shared/env";
   import { errMessage, SETTINGS_SCHEMA } from "@tomat/shared";
-  import type { PresetOption } from "@tomat/shared";
+  import type { PresetOption, SettingField, SettingGroup } from "@tomat/shared";
   import type { Monitor } from "$lib/shared/types";
   import { hasAlpha } from "$lib/shared/color";
   import { getLogger } from "$lib/shared/log";
@@ -17,6 +17,7 @@
     /* no-op: handled server-side */
   }
   import Bubble from "../ui/Bubble.svelte";
+  import HelpText from "../ui/HelpText.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import SearchInput from "../ui/SearchInput.svelte";
   import SectionHeader from "../ui/SectionHeader.svelte";
@@ -49,6 +50,10 @@
   let monitors: Monitor[] = $state([]);
   let fonts: string[] = $state([]);
   let expandedSections = $state<Set<string>>(new Set());
+  // Group-description visibility, rendered under the group header. Starts at the
+  // group's tier default ("always" => open, "ondemand" => collapsed) and resets
+  // on group change (the effect below); the header's info button toggles it.
+  let groupDescOpen = $state(false);
 
   // Multi-core "editing settings for" picker: lists every paired core; when
   // changed, re-selects that core so cores().api() / core-side settings load
@@ -94,6 +99,23 @@
   const selectedGroup = $derived(
     visibleGroups.find((g) => g.id === selectedGroupId),
   );
+  // Reset the description toggle to the active group's tier default on switch.
+  // Reads selectedGroup (not groupDescOpen), so user toggles don't re-trigger it.
+  $effect(() => {
+    const g = selectedGroup;
+    groupDescOpen = !!g?.description && (g.descriptionTier ?? "ondemand") === "always";
+  });
+
+  // An object_management group is a single section holding a single
+  // object_management field. It owns the full panel height (its own internal
+  // vertical scroll), so it bypasses the normal min-height section stack and
+  // renders in a definite-height flex child instead.
+  function objectManagementFieldOf(group: SettingGroup): SettingField | null {
+    if (group.sections.length !== 1) return null;
+    const fields = group.sections[0].fields;
+    if (fields.length !== 1) return null;
+    return fields[0].type === "object_management" ? fields[0] : null;
+  }
 
   // Track the user's horizontal-mode threshold setting.
   $effect(() => {
@@ -220,8 +242,7 @@
             field.type === "command_preview" ||
             field.type === "services" ||
             field.type === "storage" ||
-            field.type === "snippets" ||
-            field.type === "cores"
+            field.type === "object_management"
           )
             continue;
           const value = settingsState.currentSettings[field.id];
@@ -574,10 +595,23 @@
                   {/each}
                 </div>
               {:else if selectedGroup}
+                {@const omField = objectManagementFieldOf(selectedGroup)}
+                {@const hasCollapsibleSections = selectedGroup.sections.some(
+                  (s) =>
+                    !!s.label &&
+                    isSectionVisible(s) &&
+                    evalCondition(s.visibleWhen, settingsState.currentSettings),
+                )}
+                {@const descTier = selectedGroup.description
+                  ? (selectedGroup.descriptionTier ?? "ondemand")
+                  : "none"}
                 <section
                   data-group-id={selectedGroup.id}
                   class="flex flex-col"
-                  style:min-height={viewportHeight
+                  style:height={omField && viewportHeight
+                    ? `${viewportHeight}px`
+                    : undefined}
+                  style:min-height={!omField && viewportHeight
                     ? `${viewportHeight}px`
                     : undefined}
                 >
@@ -603,50 +637,95 @@
                         </span>
                       {/snippet}
                       {#snippet actions()}
-                        <IconButton
-                          icon="i-material-symbols-unfold-more-rounded"
-                          title="Expand all sections"
-                          size="sm"
-                          variant="subtle"
-                          onclick={() => expandAllInGroup(selectedGroup.id)}
-                        />
-                        <IconButton
-                          icon="i-material-symbols-unfold-less-rounded"
-                          title="Collapse all sections"
-                          size="sm"
-                          variant="subtle"
-                          onclick={() => collapseAllInGroup(selectedGroup.id)}
-                        />
+                        {#if descTier !== "none"}
+                          <!-- Leftmost; same subtle color as expand/collapse.
+                               Shown for any group with a description (the toggle
+                               works for both the always and ondemand tiers). -->
+                          <IconButton
+                            icon="i-material-symbols-info-outline-rounded"
+                            title="Toggle description"
+                            size="sm"
+                            variant="subtle"
+                            aria-pressed={groupDescOpen}
+                            onclick={() => (groupDescOpen = !groupDescOpen)}
+                          />
+                        {/if}
+                        {#if hasCollapsibleSections}
+                          <IconButton
+                            icon="i-material-symbols-unfold-more-rounded"
+                            title="Expand all sections"
+                            size="sm"
+                            variant="subtle"
+                            onclick={() => expandAllInGroup(selectedGroup.id)}
+                          />
+                          <IconButton
+                            icon="i-material-symbols-unfold-less-rounded"
+                            title="Collapse all sections"
+                            size="sm"
+                            variant="subtle"
+                            onclick={() => collapseAllInGroup(selectedGroup.id)}
+                          />
+                        {/if}
                       {/snippet}
                     </SectionHeader>
                   </div>
-                  <!-- gap-3 separates sections so each (tight) section reads
-                       as a unit with clear space before the next one. -->
-                  <div
-                    class="flex flex-col gap-3 transition-opacity"
-                    class:opacity-50={coreGroupLocked}
-                    inert={coreGroupLocked}
-                  >
-                    {#each selectedGroup.sections as section, si}
-                      {#if isSectionVisible(section)}
-                        <SettingsSection
-                          {section}
-                          sectionKey={`${selectedGroup.id}-${si}`}
-                          isExpanded={expandedSections.has(
-                            `${selectedGroup.id}-${si}`,
-                          )}
-                          {monitors}
-                          {fonts}
-                          {validationErrors}
-                          horizontal={layout.horizontal}
-                          onToggle={toggleSection}
-                          onChange={handleChange}
-                          onReset={resetToDefault}
-                          onPresetSelect={handlePresetSelect}
-                        />
-                      {/if}
-                    {/each}
-                  </div>
+                  {#if selectedGroup.description && groupDescOpen}
+                    <!-- Group-level description, toggled by the header info
+                         button. shrink-0 so it sits above the (scrolling) group
+                         body in both the object-management and sectioned views. -->
+                    <div class="shrink-0 pt-1">
+                      <HelpText text={selectedGroup.description} />
+                    </div>
+                  {/if}
+                  {#if omField}
+                    <!-- Object-management groups own the full panel height and
+                         scroll internally, so the field renders in a definite-
+                         height flex child rather than the min-height section flow. -->
+                    <div
+                      class="flex-1 min-h-0 pt-1 transition-opacity"
+                      class:opacity-50={coreGroupLocked}
+                      inert={coreGroupLocked}
+                    >
+                      <SettingsField
+                        field={omField}
+                        {monitors}
+                        {fonts}
+                        error={validationErrors[omField.id] ?? null}
+                        horizontal={layout.horizontal}
+                        onChange={handleChange}
+                        onReset={resetToDefault}
+                        onPresetSelect={handlePresetSelect}
+                      />
+                    </div>
+                  {:else}
+                    <!-- gap-3 separates sections so each (tight) section reads
+                         as a unit with clear space before the next one. -->
+                    <div
+                      class="flex flex-col gap-3 transition-opacity"
+                      class:opacity-50={coreGroupLocked}
+                      inert={coreGroupLocked}
+                    >
+                      {#each selectedGroup.sections as section, si}
+                        {#if isSectionVisible(section)}
+                          <SettingsSection
+                            {section}
+                            sectionKey={`${selectedGroup.id}-${si}`}
+                            isExpanded={expandedSections.has(
+                              `${selectedGroup.id}-${si}`,
+                            )}
+                            {monitors}
+                            {fonts}
+                            {validationErrors}
+                            horizontal={layout.horizontal}
+                            onToggle={toggleSection}
+                            onChange={handleChange}
+                            onReset={resetToDefault}
+                            onPresetSelect={handlePresetSelect}
+                          />
+                        {/if}
+                      {/each}
+                    </div>
+                  {/if}
                 </section>
               {/if}
             </div>

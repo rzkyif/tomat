@@ -29,7 +29,7 @@ pub enum AppError {
     Tauri(#[from] tauri::Error),
 
     #[error(transparent)]
-    Keyring(#[from] keyring::Error),
+    Keyring(#[from] keyring_core::Error),
 
     #[error(transparent)]
     Base64(#[from] base64::DecodeError),

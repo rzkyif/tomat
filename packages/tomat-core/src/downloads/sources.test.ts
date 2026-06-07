@@ -37,3 +37,12 @@ Deno.test("parseSource: rejects HF specs missing branch or file", () => {
   assertThrows(() => parseSource("@u/r"), Error, "invalid source format");
   assertThrows(() => parseSource("@u/r/b"), Error, "invalid source format");
 });
+
+Deno.test("parseSource: rejects path-traversal components", () => {
+  // A `..` in any component would let the joined relPath escape the
+  // destination root.
+  assertThrows(() => parseSource("@../r/b/file"), Error, "unsafe source component");
+  assertThrows(() => parseSource("@u/../b/file"), Error, "unsafe source component");
+  assertThrows(() => parseSource("@u/r/b/../escape"), Error, "unsafe source component");
+  assertThrows(() => parseSource("@u/r/b/../../etc/passwd"), Error, "unsafe source component");
+});

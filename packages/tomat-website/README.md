@@ -44,18 +44,24 @@ nothing has changed. `--force` skips the probe.
 
 Run from the **repo root**:
 
-| Task                        | What it owns                                                                                                         |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `deno task release`         | Runs every sub-task below in sequence                                                                                |
-| `deno task release:core`    | Compiles `tomat-core`/`updater`/`keychain`, hashes workers, signs + uploads `core.json` + `binaries.json` + binaries |
-| `deno task release:client`  | Builds the host Tauri client bundle, merges the host platform entry into `client.json`, uploads bundle + manifest    |
-| `deno task release:scripts` | Syncs `scripts/install/*` to `get.au.tomat.ing/install/*` (per-file content compare)                                 |
-| `deno task release:schemas` | Syncs `tools-v1.json` to `get.au.tomat.ing/schemas/`                                                                 |
-| `deno task release:website` | Source-hash probe → `astro build` → `wrangler deploy`                                                                |
+Channelled tasks require an explicit channel (`:stable` or `:beta`); the
+channel-independent ones (`scripts`/`schemas`/`website`) serve every channel.
+
+| Task                               | What it owns                                                                                                         |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `deno task release:stable`         | Runs every sub-task below in sequence (use `release:beta` for the beta channel)                                      |
+| `deno task release:core:stable`    | Compiles `tomat-core`/`updater`/`keychain`, hashes workers, signs + uploads `core.json` + `binaries.json` + binaries |
+| `deno task release:toolkit:stable` | Packs the built-in toolkit, signs + uploads `toolkit.json` + the gzipped tarball (version read from its deno.json)   |
+| `deno task release:client:stable`  | Builds the host Tauri client bundle, merges the host platform entry into `client.json`, uploads bundle + manifest    |
+| `deno task release:scripts`        | Syncs `scripts/install/*` to `get.au.tomat.ing/install/*` (per-file content compare)                                 |
+| `deno task release:schemas`        | Syncs `tools-v1.json` to `get.au.tomat.ing/schemas/`                                                                 |
+| `deno task release:website`        | Source-hash probe → `astro build` → `wrangler deploy`                                                                |
 
 Every release task supports `--dry-run` (probe + build locally, skip uploads)
-and `--force` (skip the idempotency probe). `release:core` also takes
-`--triples=<list>` and `--skip-build`.
+and `--force` (skip the idempotency probe). `release:core:*` also takes
+`--triples=<list>` and `--skip-build`. To cut a new built-in toolkit version,
+bump `packages/tomat-builtin-toolkit/deno.json` and run
+`deno task release:toolkit:stable`.
 
 End state of a successful `release`:
 
@@ -63,6 +69,7 @@ End state of a successful `release`:
 - `https://get.au.tomat.ing/install/core.sh`: install one-liner
 - `https://get.au.tomat.ing/schemas/tools-v1.json`: published schema
 - `https://get.au.tomat.ing/manifests/core.json`: signed self-update manifest
+- `https://get.au.tomat.ing/manifests/toolkit.json`: signed built-in toolkit manifest
 - `https://get.au.tomat.ing/<version>/<triple>/tomat-core`: binary
 
 ## Local preview

@@ -2,7 +2,7 @@
 // would open a real browser. Tests cover the URL-validation branches that
 // don't depend on the host OS.
 
-import { assertEquals, assertRejects } from "jsr:@std/assert@^1";
+import { assertEquals, assertRejects } from "@std/assert";
 import { open } from "./open.ts";
 import type { ToolContext } from "./types.ts";
 

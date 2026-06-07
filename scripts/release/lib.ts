@@ -5,14 +5,15 @@
 // website.ts) compose these helpers; main.ts imports each sub-script's
 // main() to run the umbrella release.
 
-import { encodeBase64 } from "jsr:@std/encoding@^1/base64";
-import { encodeHex } from "jsr:@std/encoding@^1/hex";
-import { copy } from "jsr:@std/fs@^1/copy";
-import { ensureDir } from "jsr:@std/fs@^1/ensure-dir";
-import { walk } from "jsr:@std/fs@^1/walk";
-import { dirname, fromFileUrl, join, relative, resolve } from "jsr:@std/path@^1";
-import { load as loadDotenv } from "jsr:@std/dotenv@^0.225";
-import * as ed from "jsr:@noble/ed25519@^2";
+import { encodeBase64 } from "@std/encoding/base64";
+import { encodeHex } from "@std/encoding/hex";
+import { copy } from "@std/fs/copy";
+import { ensureDir } from "@std/fs/ensure-dir";
+import { walk } from "@std/fs/walk";
+import { dirname, fromFileUrl, join, relative, resolve } from "@std/path";
+import { load as loadDotenv } from "@std/dotenv";
+import * as ed from "@noble/ed25519";
+import { canonicalize } from "../../packages/tomat-shared/src/crypto/canonical.ts";
 
 // ---------------------------------------------------------------------------
 // paths
@@ -230,17 +231,10 @@ export async function readCoreVersion(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// canonical JSON for signing
-
-export function canonicalize(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    return "[" + value.map(canonicalize).join(",") + "]";
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") + "}";
-}
+// canonical JSON for signing. Single-sourced in @tomat/shared (imported above)
+// so the signer here and the core verifiers (binaries/manifest.ts,
+// update/self-updater.ts) recompute byte-identical bytes and can't drift.
+export { canonicalize };
 
 // ---------------------------------------------------------------------------
 // host triple detection (same logic the install scripts use)
@@ -296,7 +290,7 @@ export function channelStoragePrefix(channel: ReleaseChannel): string {
 
 export async function astroBuild(): Promise<void> {
   const cmd = new Deno.Command("deno", {
-    args: ["run", "-A", "npm:astro@^5", "build"],
+    args: ["run", "-A", "npm:astro@^6.4.4", "build"],
     cwd: WEBSITE_DIR,
     stdout: "inherit",
     stderr: "inherit",
@@ -350,33 +344,43 @@ export async function r2Put(
   const { code } = await cmd.output();
   if (code !== 0) fail(`wrangler r2 put ${key} exited ${code}`);
 
-  // Verify the upload actually landed. Wrangler has a bug where transient
-  // node TLS errors (`node:_tls_wrap: Uncaught TypeError: this._handle.start
-  // is not a function`) crash a PUT mid-stream but still exit 0, leaving the
-  // object missing from R2. HEAD the public URL with a cachebusting query
-  // param and confirm both status and Content-Length.
-  const localSize = (await Deno.stat(file)).size;
-  await verifyR2Upload(env, key, localSize);
+  // Verify the upload actually landed AND matches byte-for-byte. Wrangler has a
+  // bug where transient node TLS errors (`node:_tls_wrap: Uncaught TypeError:
+  // this._handle.start is not a function`) crash a PUT mid-stream but still exit
+  // 0, leaving the object missing or truncated. GET the public URL with a
+  // cachebusting query param and compare sha256 (a Content-Length check alone
+  // would pass a same-length corruption or count-preserving truncation).
+  await verifyR2Upload(env, key, file);
 }
 
-async function verifyR2Upload(env: DeployEnv, key: string, expectedSize: number): Promise<void> {
+async function verifyR2Upload(env: DeployEnv, key: string, file: string): Promise<void> {
   const url = `https://${env.storageDomain}/${key}?_v=${Date.now()}`;
   let res: Response;
   try {
-    res = await fetch(url, { method: "HEAD" });
+    res = await fetch(url);
   } catch (err) {
-    fail(`r2 put ${key}: post-upload HEAD failed: ${err instanceof Error ? err.message : err}`);
+    fail(`r2 put ${key}: post-upload GET failed: ${err instanceof Error ? err.message : err}`);
   }
-  if (!res.ok) {
+  if (!res.ok || !res.body) {
     fail(
-      `r2 put ${key}: post-upload HEAD returned ${res.status} ${res.statusText}. ` +
+      `r2 put ${key}: post-upload GET returned ${res.status} ${res.statusText}. ` +
         `Wrangler likely crashed mid-upload despite exit 0. Re-run the task.`,
     );
   }
-  const remoteSize = Number(res.headers.get("content-length") ?? "-1");
-  if (remoteSize !== expectedSize) {
+  const remoteBytes = new Uint8Array(await res.arrayBuffer());
+  const remoteHash = encodeHex(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", remoteBytes.buffer as ArrayBuffer)),
+  );
+  const local = await sha256File(file);
+  if (remoteBytes.byteLength !== local.size) {
     fail(
-      `r2 put ${key}: size mismatch (local ${expectedSize}, remote ${remoteSize}). ` +
+      `r2 put ${key}: size mismatch (local ${local.size}, remote ${remoteBytes.byteLength}). ` +
+        `Re-run the task.`,
+    );
+  }
+  if (remoteHash !== local.sha256) {
+    fail(
+      `r2 put ${key}: sha256 mismatch (local ${local.sha256}, remote ${remoteHash}). ` +
         `Re-run the task.`,
     );
   }

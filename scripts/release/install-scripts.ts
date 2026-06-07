@@ -8,8 +8,8 @@
 //   --force     upload every file regardless of equality
 //   --help
 
-import { parseArgs } from "jsr:@std/cli@^1/parse-args";
-import { join } from "jsr:@std/path@^1";
+import { parseArgs } from "@std/cli/parse-args";
+import { join } from "@std/path";
 import {
   bytesEqual,
   colors,

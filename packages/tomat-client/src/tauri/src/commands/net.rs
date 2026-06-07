@@ -285,7 +285,7 @@ pub async fn net_ws_open(
             tokio::select! {
                 out = rx.recv() => match out {
                     Some(WsOut::Text(s)) => {
-                        if write.send(Message::Text(s)).await.is_err() { break; }
+                        if write.send(Message::Text(s.into())).await.is_err() { break; }
                     }
                     Some(WsOut::Close) | None => {
                         let _ = write.send(Message::Close(None)).await;

@@ -16,7 +16,7 @@ export const serverGroup: SettingGroup = {
           id: "server.bindHost",
           name: "Network Interface",
           description:
-            "Which network interface the core's HTTP server listens on. Leave as 127.0.0.1 to accept connections from this computer only (the default). Set a specific LAN IP to accept connections on just that interface, or 0.0.0.0 to accept on every interface so other devices can pair.\nConnections are unencrypted plain HTTP, so only widen this on a network you trust. Requires a core restart to take effect.",
+            "Which network interface the core's HTTP server listens on. Leave as 127.0.0.1 to accept connections from this computer only (the default). Set a specific LAN IP to accept connections on just that interface, or 0.0.0.0 to accept on every interface so other devices can pair.\nThe API is served over self-signed TLS that paired clients pin during pairing, so traffic is encrypted and authenticated regardless of interface; widening this only increases who can reach the listener. Requires a core restart to take effect.",
           type: "string",
           defaultValue: "127.0.0.1",
           placeholder: "127.0.0.1",

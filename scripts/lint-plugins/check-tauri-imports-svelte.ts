@@ -7,7 +7,7 @@
 //
 // Wired into `deno task lint` alongside the oxlint pass.
 
-import { walk } from "jsr:@std/fs@^1/walk";
+import { walk } from "@std/fs/walk";
 
 const ROOT = new URL("../../packages/tomat-client/src/ui/", import.meta.url).pathname;
 const ALLOW = "lib/platform/tauri.ts";

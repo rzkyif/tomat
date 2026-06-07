@@ -1,0 +1,15 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Workers ship as raw .ts and run standalone (no deno.json), and some scripts pass npm: specifiers as subprocess args. Both are in-source, which the deno manager ignores, so track them here.",
+      "managerFilePatterns": ["/^packages/tomat-core/src/workers/.*\\.ts$/", "/^scripts/.*\\.ts$/"],
+      "matchStrings": [
+        "\"npm:(?<depName>@[^@\"/]+/[^@\"]+|[^@\":/][^@\"]*)@(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "npm"
+    }
+  ]
+}

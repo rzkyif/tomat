@@ -16,13 +16,14 @@
  * The settings UI is the only writer; the chat-loop side just reads.
  */
 
-import type {
-  Grant,
-  InstallToolkitRequest,
-  ServerToClientFrame,
-  Tool,
-  Toolkit,
-  ToolkitSearchResult,
+import {
+  BUILTIN_TOOLKIT_ID,
+  type DownloadToolkitRequest,
+  type Grant,
+  type ServerToClientFrame,
+  type Tool,
+  type Toolkit,
+  type ToolkitSearchResult,
 } from "@tomat/shared";
 import type { AskUserAnswer } from "$lib/shared/types";
 import { cores } from "$lib/core";
@@ -33,7 +34,7 @@ import { streamingState } from "./streaming.svelte";
 const log = getLogger("toolkits");
 
 export type InstallJob = {
-  /** Job id from `toolkits.install` - identifies the install stream. */
+  /** Job id from `toolkits.download` / `installDeps` - identifies the stream. */
   id: string;
   /** Toolkit id the job is installing (may be unknown until install_done). */
   toolkitId: string;
@@ -56,6 +57,17 @@ class ToolkitsState {
   /** Mirrors the active core's WS connection state. Read by the settings
    *  UI to show a placeholder when the install action would be a no-op. */
   wsConnected = $state<boolean>(false);
+  /** Latest-version status per toolkit id, populated by `checkUpdates()`.
+   *  Transient (session-only); drives the "Update available" badge + action and
+   *  the `@update-available` filter. */
+  updateStatus = $state<Record<string, { latestVersion: string | null; updateAvailable: boolean }>>(
+    {},
+  );
+
+  /** Whether the built-in toolkit is currently installed. */
+  get isBuiltinInstalled(): boolean {
+    return this.installed.some((t) => t.id === BUILTIN_TOOLKIT_ID);
+  }
 
   private unsubscribeWs: (() => void) | null = null;
   private unsubscribeConn: (() => void) | null = null;
@@ -132,6 +144,12 @@ class ToolkitsState {
             },
           };
         }
+        // A successful (re)install clears any stale update flag for that id so
+        // the "Update available" badge/action disappears.
+        if (frame.ok && frame.id && this.updateStatus[frame.id]) {
+          const { [frame.id]: _gone, ...rest } = this.updateStatus;
+          this.updateStatus = rest;
+        }
         // Refresh so the new toolkit (or the failure state) is reflected.
         void this.refresh().catch((err) => log.warn("refresh after install failed:", err));
         return;
@@ -165,23 +183,36 @@ class ToolkitsState {
     this.searchResults = res.results;
   }
 
-  /** Start an install. Returns the job id so the caller can correlate it
-   *  with a log panel in the UI. Optimistically registers an `InstallJob`
-   *  row so the running indicator shows up immediately. */
-  async install(req: InstallToolkitRequest): Promise<string> {
-    const label = req.source === "npm" ? req.name : (req.slug ?? req.path);
-    const res = await cores().api().toolkits.install(req);
+  /** Phase 1: download (acquire) a toolkit's files. Returns the job id so the
+   *  caller can correlate it with a log panel. Optimistically registers an
+   *  `InstallJob` row so the running indicator shows up immediately. The toolkit
+   *  lands in status 'downloaded'; the user then calls installDeps. */
+  async download(req: DownloadToolkitRequest): Promise<string> {
+    const label =
+      req.source === "npm"
+        ? req.name
+        : req.source === "builtin"
+          ? BUILTIN_TOOLKIT_ID
+          : (req.slug ?? req.path);
+    const res = await cores().api().toolkits.download(req);
+    this.registerJob(res.jobId, res.toolkitId, label);
+    return res.jobId;
+  }
+
+  /** Phase 2: install a downloaded toolkit's deps + pin its hash. Registers a
+   *  second streamed job; the install_log/install_done handling is phase-agnostic. */
+  async installDeps(toolkitId: string): Promise<string> {
+    const label = this.installed.find((t) => t.id === toolkitId)?.displayName || toolkitId;
+    const res = await cores().api().toolkits.installDeps(toolkitId);
+    this.registerJob(res.jobId, res.toolkitId, label);
+    return res.jobId;
+  }
+
+  private registerJob(jobId: string, toolkitId: string, label: string): void {
     this.installJobs = {
       ...this.installJobs,
-      [res.jobId]: {
-        id: res.jobId,
-        toolkitId: res.toolkitId,
-        label,
-        lines: [],
-        status: "running",
-      },
+      [jobId]: { id: jobId, toolkitId, label, lines: [], status: "running" },
     };
-    return res.jobId;
   }
 
   async uninstall(id: string): Promise<void> {
@@ -189,14 +220,38 @@ class ToolkitsState {
     await this.refresh();
   }
 
-  async enableToolkit(id: string): Promise<void> {
-    await cores().api().toolkits.enable(id);
-    await this.refresh();
+  /** Download the built-in toolkit from the CDN (codebase in dev). */
+  async downloadBuiltin(): Promise<string> {
+    return await this.download({ source: "builtin" });
   }
 
-  async disableToolkit(id: string): Promise<void> {
-    await cores().api().toolkits.disable(id);
-    await this.refresh();
+  /** Update a toolkit to its latest version (npm registry or built-in CDN
+   *  manifest). The core streams progress + a `toolkit.install_done` frame. */
+  async updateToolkit(id: string): Promise<void> {
+    await cores().api().toolkits.update(id);
+  }
+
+  /** Check installed toolkits for newer versions and store the result so the UI
+   *  can flag + filter the updatable ones. */
+  async checkUpdates(): Promise<void> {
+    const { results } = await cores().api().toolkits.checkUpdates();
+    const next: Record<string, { latestVersion: string | null; updateAvailable: boolean }> = {};
+    for (const r of results) {
+      next[r.id] = { latestVersion: r.latestVersion, updateAvailable: r.updateAvailable };
+    }
+    this.updateStatus = next;
+  }
+
+  /** Reconcile the core's toolkits directory with its registry (registers
+   *  dropped-in folders, prunes removed ones). The core broadcasts
+   *  `toolkit.snapshot`, so the installed list refreshes via onFrame. */
+  async rescan(): Promise<{ added: number; updated: number; removed: number }> {
+    return await cores().api().toolkits.rescan();
+  }
+
+  /** Recompute tool-relevance embeddings for every enabled tool. */
+  async reindex(): Promise<{ embedded: number }> {
+    return await cores().api().toolkits.reindex();
   }
 
   async enableTool(toolkitId: string, toolName: string): Promise<void> {
@@ -206,6 +261,24 @@ class ToolkitsState {
 
   async disableTool(toolkitId: string, toolName: string): Promise<void> {
     await cores().api().toolkits.disableTool(toolkitId, toolName);
+    await this.refreshTools(toolkitId);
+  }
+
+  async enableAllTools(toolkitId: string): Promise<void> {
+    await cores().api().toolkits.enableAllTools(toolkitId);
+    await this.refreshTools(toolkitId);
+  }
+
+  async disableAllTools(toolkitId: string): Promise<void> {
+    await cores().api().toolkits.disableAllTools(toolkitId);
+    await this.refreshTools(toolkitId);
+  }
+
+  /** Re-pin the current on-disk content + clear the drift warning. Refresh so
+   *  the toolkit returns to 'installed' with its (now disabled) tools shown. */
+  async confirmReenable(toolkitId: string): Promise<void> {
+    await cores().api().toolkits.confirmReenable(toolkitId);
+    await this.refresh();
     await this.refreshTools(toolkitId);
   }
 
@@ -290,7 +363,7 @@ class ToolkitsState {
    *  a label next to a pending tool call). */
   findToolkitForTool(toolName: string): { toolkitId: string; toolId: string } | null {
     for (const tk of this.installed) {
-      if (!tk.enabled) continue;
+      if (tk.status !== "installed") continue;
       const tool = tk.tools?.find((t) => t.name === toolName && t.enabled);
       if (tool) return { toolkitId: tk.id, toolId: tool.id };
     }

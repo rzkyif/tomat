@@ -17,6 +17,6 @@ export { shortcutsGroup } from "./groups/shortcuts.ts";
 export { snippetsGroup } from "./groups/snippets.ts";
 export { sttInputGroup } from "./groups/stt-input.ts";
 export { sttEngineGroup } from "./groups/stt-engine.ts";
-export { toolkitsGroup } from "./groups/toolkits.ts";
+export { toolkitsGroup, toolsGroup } from "./groups/toolkits.ts";
 export { ttsGroup } from "./groups/tts.ts";
 export { usageGroup } from "./groups/usage.ts";

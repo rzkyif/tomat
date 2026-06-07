@@ -434,6 +434,7 @@ CORE_PORT=$((7800 + PORT_OFFSET))
 HOME_DIR="${TOMAT_CORE_HOME:-$HOME/.tomat/$TOMAT_CHANNEL/core}"
 BIN_DIR="$HOME_DIR/bin"
 WORKERS_DIR="$HOME_DIR/workers"
+TOOLKITS_DIR="$HOME_DIR/toolkits"
 STAGING_DIR="$HOME_DIR/staging"
 LOGS_DIR="$HOME_DIR/logs"
 MANIFEST_URL="$STORAGE/$MANIFEST_DIR/core.json"
@@ -473,7 +474,7 @@ if [ -z "$SHA_CMD" ]; then
   exit 1
 fi
 
-mkdir -p "$BIN_DIR" "$WORKERS_DIR" "$STAGING_DIR" "$LOGS_DIR"
+mkdir -p "$BIN_DIR" "$WORKERS_DIR" "$TOOLKITS_DIR" "$STAGING_DIR" "$LOGS_DIR"
 
 # --- helper: figure out the platform-specific service label for action 7 --
 
@@ -509,6 +510,12 @@ IDX_MANIFEST=$(ui_action_add "Fetching manifest from get.au.tomat.ing")
 IDX_BIN=$(ui_action_add "Installing core binary to $INSTALLED_BIN")
 IDX_WORKERS=$(ui_action_add "Installing workers to $WORKERS_DIR/")
 IDX_HELPERS=$(ui_action_add "Installing helpers to $BIN_DIR/")
+# Built-in toolkit is CDN-distributed for stable/beta; dev sources it from the
+# codebase at runtime, so there's nothing to fetch here.
+IDX_TOOLKIT=-1
+if [ "$TOMAT_CHANNEL" != "dev" ]; then
+  IDX_TOOLKIT=$(ui_action_add "Installing built-in toolkit to $TOOLKITS_DIR/")
+fi
 IDX_TOKEN=$(ui_action_add "Writing admin token to $ADMIN_TOKEN_FILE")
 IDX_SETTINGS=-1
 if [ "$INSTALL_BIND_ALL" = "1" ]; then
@@ -842,6 +849,53 @@ else
     done
 
     ui_action_done "$IDX_HELPERS" "(${HELPERS_MATCHING}/${HELPERS_MATCHING})"
+  fi
+fi
+
+# --- action 5b: built-in toolkit -----------------------------------------
+# Download + extract the CDN-distributed built-in toolkit so a fresh core has it
+# out of the box. Core registers + activates it (deps install, enable, grants) on
+# first boot; if this is skipped (manifest not yet published), core seeds it then.
+
+if [ "$IDX_TOOLKIT" != "-1" ]; then
+  TK_DIR="$TOOLKITS_DIR/tomat-builtin-toolkit"
+  if [ -f "$TK_DIR/tools.json" ]; then
+    ui_action_skip "$IDX_TOOLKIT" "(already present)"
+  else
+    TK_MANIFEST="$(curl -fsSL "$STORAGE/$MANIFEST_DIR/toolkit.json" 2>/dev/null || true)"
+    TK_URL="$(printf '%s' "$TK_MANIFEST" | jq -r '.tarballUrl // empty' 2>/dev/null || true)"
+    TK_SHA="$(printf '%s' "$TK_MANIFEST" | jq -r '.sha256 // empty' 2>/dev/null || true)"
+    if [ -z "$TK_URL" ] || [ -z "$TK_SHA" ]; then
+      # Non-fatal: core seeds the built-in on first boot if this is missing.
+      ui_action_skip "$IDX_TOOLKIT" "(manifest unavailable; core will seed)"
+    else
+      ui_action_start "$IDX_TOOLKIT" "Installing built-in toolkit to $TOOLKITS_DIR/" "(downloading)"
+      TK_TMP="$STAGING_DIR/builtin-toolkit-$$.tgz"
+      _ui_track_staging "$TK_TMP"
+      TK_RC=0
+      curl -fsSL -o "$TK_TMP" "$TK_URL" 2>/dev/null || TK_RC=$?
+      if [ "$TK_RC" -ne 0 ]; then
+        ui_die "Download interrupted" \
+          "curl exit $TK_RC fetching built-in toolkit" \
+          "re-run; partial files were cleaned up"
+      fi
+      TK_GOT="$($SHA_CMD "$TK_TMP" | awk '{print $1}')"
+      if [ "$TK_GOT" != "$TK_SHA" ]; then
+        ui_die "sha256 mismatch on built-in toolkit" \
+          "want $TK_SHA, got $TK_GOT" \
+          "network corruption is the usual cause; re-run"
+      fi
+      ui_action_update "$IDX_TOOLKIT" "(extracting)"
+      rm -rf "$TK_DIR"
+      mkdir -p "$TK_DIR"
+      if ! tar -xzf "$TK_TMP" -C "$TK_DIR" 2>/dev/null; then
+        ui_die "Could not extract built-in toolkit" \
+          "tar failed on $TK_TMP" \
+          "re-run; check ~/.tomat permissions"
+      fi
+      rm -f "$TK_TMP"
+      ui_action_done "$IDX_TOOLKIT" "(installed)"
+    fi
   fi
 fi
 

@@ -1,34 +1,52 @@
-// Toolkit installer: fetch tarball → extract to toolkit folder → run
-// `deno install` for transitive deps → validate tools.json → hash →
-// upsert registry rows.
+// Toolkit installer, split into two user-triggered phases:
+//   Download: fetch tarball / copy folder -> validate tools.json -> upsert rows
+//             (status 'downloaded'). The folder is left byte-identical to what
+//             was downloaded; we never edit deno.json.
+//   Install:  run `deno install` for any declared deps -> pin content hash ->
+//             flip to status 'installed'.
 //
-// All Deno subprocesses run with DENO_DIR=~/.tomat/core/deno-cache and each
-// toolkit's synthesized deno.json has `nodeModulesDir: "auto"` so installs
-// stay entirely under ~/.tomat/.
+// All Deno subprocesses run with DENO_DIR=~/.tomat/core/deno-cache, and
+// `deno install --node-modules-dir=auto` lands node_modules + deno.lock in the
+// toolkit folder, so everything stays under ~/.tomat/ without modifying the
+// shipped deno.json.
 //
 // Caller passes an `EventSink` to receive install_log + install_done frames
 // for forwarding to the requesting client over WS.
 
-import { dirname, isAbsolute, join, relative, resolve, SEPARATOR } from "@std/path";
+import { dirname, join } from "@std/path";
 import { UntarStream } from "@std/tar/untar-stream";
-import { encodeBase64 } from "jsr:@std/encoding@^1/base64";
+import { encodeBase64 } from "@std/encoding/base64";
 import { errMessage, parseToolsJson, type ToolsJson } from "@tomat/shared";
 import { binPath } from "../paths.ts";
-import { paths } from "../paths.ts";
+import { channel, paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
+import { isWithin } from "../shared/fs-safety.ts";
 import { getLogger } from "../shared/log.ts";
+
+// Re-exported for callers/tests that import it from here; the implementation now
+// lives in shared/fs-safety.ts so the download + install paths share one guard.
+export { isWithin };
 import { sha256Hex, toHex } from "../shared/hash.ts";
 import { newJobId } from "../shared/ids.ts";
 import { binaryName } from "../binaries/versions.ts";
 import { hashToolkit } from "./hash.ts";
-import { toolId, toolkitInstallPath, toolkitsRegistry } from "./registry.ts";
+import { toolkitInstallPath, toolkitsRegistry } from "./registry.ts";
 import { resolveVersion } from "./npm-registry.ts";
+import {
+  builtinCodebasePath,
+  BUILTIN_TOOLKIT_ID,
+  loadBuiltinToolkitManifest,
+} from "./builtin-manifest.ts";
 
 const log = getLogger("toolkit-installer");
 
 export type InstallSource =
   | { source: "npm"; name: string; version?: string }
-  | { source: "local"; path: string; slug: string };
+  | { source: "local"; path: string; slug: string }
+  // The CDN-distributed built-in toolkit. Bytes are resolved at install time:
+  // the codebase (dev), `preferLocalDir` if it exists (install-script-placed
+  // files, used by first-boot seeding), else the signed CDN tarball.
+  | { source: "builtin"; preferLocalDir?: string };
 
 export interface InstallEventSink {
   log(jobId: string, id: string, stream: "stdout" | "stderr", line: string): void;
@@ -49,70 +67,223 @@ const NOOP_SINK: InstallEventSink = {
   },
 };
 
-export function startInstall(
+// A local-install slug becomes a filesystem path segment under the toolkits
+// dir; constrain it to a safe identifier charset so it can't contain `.`/`..`
+// or separators that would escape the dir.
+const SLUG_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+// Phase 1: acquire a toolkit's files (fetch/extract npm, copy the built-in, copy
+// a local folder) WITHOUT installing deps or pinning the content hash. The row
+// lands in status='downloaded'. The caller then triggers startInstallDeps.
+export function startDownload(
   spec: InstallSource,
   sink: InstallEventSink = NOOP_SINK,
 ): InstallStarted {
   const jobId = newJobId();
-  const toolkitId = spec.source === "npm" ? flattenNpmName(spec.name) : spec.slug;
-  // Run the install in the background; caller polls/streams via sink.
-  void runInstall(spec, toolkitId, jobId, sink).catch((err) => {
-    log.error(`install ${toolkitId} failed: ${errMessage(err)}`);
-    sink.done(jobId, toolkitId, false, 1);
-  });
+  if (spec.source === "local" && !SLUG_RE.test(spec.slug)) {
+    throw new AppError(
+      "validation_error",
+      `invalid toolkit slug "${spec.slug}"; allowed: ${SLUG_RE.source}`,
+    );
+  }
+  const toolkitId = toolkitIdForSpec(spec);
+  void runDownload(spec, toolkitId, jobId, sink)
+    .then(() => sink.done(jobId, toolkitId, true, 0))
+    .catch((err) => {
+      log.error(`download ${toolkitId} failed: ${errMessage(err)}`);
+      sink.done(jobId, toolkitId, false, 1);
+    });
   return { jobId, toolkitId };
 }
 
-async function runInstall(
+// Phase 2: install an already-downloaded toolkit's dependencies (deno install
+// for any declared deno.json/package.json deps), pin the content hash, and flip
+// the row to status='installed'.
+export function startInstallDeps(
+  toolkitId: string,
+  sink: InstallEventSink = NOOP_SINK,
+): InstallStarted {
+  const jobId = newJobId();
+  void runInstallDeps(toolkitId, jobId, sink)
+    .then(() => sink.done(jobId, toolkitId, true, 0))
+    .catch((err) => {
+      log.error(`install ${toolkitId} failed: ${errMessage(err)}`);
+      toolkitsRegistry().setLastError(toolkitId, `install failed: ${errMessage(err)}`);
+      sink.done(jobId, toolkitId, false, 1);
+    });
+  return { jobId, toolkitId };
+}
+
+// Update: re-download the latest bytes THEN re-install deps under one job, so an
+// updated toolkit lands back in status='installed'. Because the install path
+// re-pins the content hash, a legitimate update never trips drift.
+export function startUpdate(
+  spec: InstallSource,
+  sink: InstallEventSink = NOOP_SINK,
+): InstallStarted {
+  const jobId = newJobId();
+  const toolkitId = toolkitIdForSpec(spec);
+  void runDownload(spec, toolkitId, jobId, sink)
+    .then(() => runInstallDeps(toolkitId, jobId, sink))
+    .then(() => sink.done(jobId, toolkitId, true, 0))
+    .catch((err) => {
+      log.error(`update ${toolkitId} failed: ${errMessage(err)}`);
+      sink.done(jobId, toolkitId, false, 1);
+    });
+  return { jobId, toolkitId };
+}
+
+function toolkitIdForSpec(spec: InstallSource): string {
+  return spec.source === "npm"
+    ? flattenNpmName(spec.name)
+    : spec.source === "builtin"
+      ? BUILTIN_TOOLKIT_ID
+      : spec.slug;
+}
+
+async function runDownload(
   spec: InstallSource,
   toolkitId: string,
   jobId: string,
   sink: InstallEventSink,
 ): Promise<void> {
   const installPath = toolkitInstallPath(toolkitId);
+  // Defense in depth: whatever the id resolves to must stay inside the toolkits
+  // dir (covers the flattened-npm-name path too, not just the local slug).
+  if (!isWithin(paths().toolkitsDir, installPath)) {
+    throw new AppError(
+      "validation_error",
+      `toolkit "${toolkitId}" resolves outside the toolkits dir`,
+    );
+  }
   const stagingPath = installPath + ".new";
   await rmrf(stagingPath);
 
   try {
+    // Extract/copy the bytes AS-IS (no deno.json edit). Deps are installed in
+    // the separate install phase; the content hash is pinned there too.
+    let version: string;
     if (spec.source === "npm") {
-      await installNpm(spec, stagingPath, jobId, sink);
+      version = await installNpm(spec, stagingPath, jobId, sink);
+    } else if (spec.source === "builtin") {
+      version = await installBuiltin(spec, stagingPath, jobId, sink);
     } else {
       await installLocal(spec, stagingPath);
+      version = "local";
     }
+
+    // Validate tools.json at the folder root (no code execution).
+    const toolsJsonText = await readOptional(join(stagingPath, "tools.json"));
+    if (!toolsJsonText) {
+      throw new AppError("no_tools_json", `no tools.json at root of ${toolkitId}`);
+    }
+    const parsed = parseToolsJsonOrThrow(toolsJsonText);
+    const toolsJsonHash = await sha256Hex(toolsJsonText);
+
+    await swapIntoPlace(stagingPath, installPath, toolkitId);
+    registerDownloaded(toolkitId, spec.source, version, installPath, parsed, toolsJsonHash);
+    log.info(`downloaded ${toolkitId}@${version}`);
   } catch (err) {
     await rmrf(stagingPath);
-    sink.done(jobId, toolkitId, false, err instanceof AppError ? 1 : 2);
-    return;
+    throw err;
   }
+}
 
-  // Validate tools.json at folder root.
-  const toolsJsonText = await readOptional(join(stagingPath, "tools.json"));
+async function runInstallDeps(
+  toolkitId: string,
+  jobId: string,
+  sink: InstallEventSink,
+): Promise<void> {
+  const registry = toolkitsRegistry();
+  const tk = registry.get(toolkitId);
+  if (!tk) throw new AppError("toolkit_not_found", `toolkit ${toolkitId} not found`);
+  if (tk.status === "drift") {
+    throw new AppError(
+      "toolkit_hash_drift",
+      `toolkit ${toolkitId} has drifted; confirm re-enable before installing`,
+    );
+  }
+  // Install deps in place: the download already swapped the folder into its final
+  // location, no worker can spawn against a not-yet-installed toolkit (so no
+  // race), and node_modules + deno.lock are hash-excluded. No second swap.
+  await installDeps(tk.installedPath, jobId, toolkitId, sink);
+  // Pin the content hash AFTER deps land. node_modules + deno.lock are excluded
+  // from the hash, so this equals the pristine downloaded content.
+  const contentHash = await hashToolkit(tk.installedPath);
+  registry.markInstalled(toolkitId, contentHash);
+  log.info(`installed ${toolkitId}`);
+}
+
+// Register a locally dropped-in folder (already under the toolkits dir) as
+// 'downloaded' WITHOUT copying or installing: validate its tools.json, upsert
+// the row + tools. Used by Rescan. Never writes into the folder.
+export async function registerLocalDownloaded(toolkitId: string): Promise<void> {
+  const installPath = toolkitInstallPath(toolkitId);
+  const toolsJsonText = await readOptional(join(installPath, "tools.json"));
   if (!toolsJsonText) {
-    await rmrf(stagingPath);
-    sink.done(jobId, toolkitId, false, 3);
     throw new AppError("no_tools_json", `no tools.json at root of ${toolkitId}`);
   }
-  let parsed: ToolsJson;
+  const parsed = parseToolsJsonOrThrow(toolsJsonText);
+  const toolsJsonHash = await sha256Hex(toolsJsonText);
+  registerDownloaded(toolkitId, "local", "local", installPath, parsed, toolsJsonHash);
+}
+
+function parseToolsJsonOrThrow(text: string): ToolsJson {
+  let result: ReturnType<typeof parseToolsJson>;
   try {
-    const result = parseToolsJson(JSON.parse(toolsJsonText));
-    if (!result.ok) {
-      throw new AppError("invalid_tools_json", result.message, {
-        issues: result.issues,
-      });
-    }
-    parsed = result.value;
+    result = parseToolsJson(JSON.parse(text));
   } catch (err) {
-    await rmrf(stagingPath);
-    sink.done(jobId, toolkitId, false, 4);
-    if (err instanceof AppError) throw err;
     throw new AppError("invalid_tools_json", `invalid JSON in tools.json: ${err}`);
   }
+  if (!result.ok) {
+    throw new AppError("invalid_tools_json", result.message, { issues: result.issues });
+  }
+  return result.value;
+}
 
-  // Compute hashes.
-  const toolsJsonHash = await sha256Hex(toolsJsonText);
-  const contentHash = await hashToolkit(stagingPath);
+function registerDownloaded(
+  toolkitId: string,
+  source: InstallSource["source"],
+  version: string,
+  installPath: string,
+  parsed: ToolsJson,
+  toolsJsonHash: string,
+): void {
+  const registry = toolkitsRegistry();
+  registry.upsertToolkit({
+    id: toolkitId,
+    source,
+    displayName: parsed.name,
+    description: parsed.description,
+    version,
+    installedPath: installPath,
+    toolsJsonHash,
+    // Not pinned until install; download leaves the row in 'downloaded'.
+    contentHash: "",
+    status: "downloaded",
+  });
+  registry.replaceTools(
+    toolkitId,
+    parsed.tools.map((t) => ({
+      toolkitId,
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+      triggers: t.triggers ?? [],
+      fnExport: t.function,
+      alwaysAvailable: t.alwaysAvailable ?? false,
+      requiredPermissions: flattenPermissions(t.permissions),
+    })),
+  );
+}
 
-  // Atomic swap: <id>.new -> <id>.old + <id>.new -> <id>
+// Atomic swap: <id>.new -> <id>.old (if present) + <id>.new -> <id>, with
+// rollback of the previous version if the final rename fails.
+async function swapIntoPlace(
+  stagingPath: string,
+  installPath: string,
+  toolkitId: string,
+): Promise<void> {
   await rmrf(installPath + ".old");
   let hadOld = false;
   try {
@@ -138,43 +309,9 @@ async function runInstall(
         );
       }
     }
-    sink.done(jobId, toolkitId, false, 5);
     throw err;
   }
   await rmrf(installPath + ".old");
-
-  // Upsert registry.
-  const registry = toolkitsRegistry();
-  const version =
-    spec.source === "npm" ? (await resolveVersion(spec.name, spec.version)).version : "local";
-  registry.upsertToolkit({
-    id: toolkitId,
-    source: spec.source === "npm" ? "npm" : "local",
-    displayName: parsed.name,
-    description: parsed.description,
-    version,
-    installedPath: installPath,
-    toolsJsonHash,
-    contentHash,
-  });
-  registry.replaceTools(
-    toolkitId,
-    parsed.tools.map((t) => ({
-      toolkitId,
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters,
-      triggers: t.triggers ?? [],
-      fnExport: t.function,
-      alwaysAvailable: t.alwaysAvailable ?? false,
-      requiredPermissions: flattenPermissions(t.permissions),
-    })),
-  );
-
-  sink.done(jobId, toolkitId, true, 0);
-  log.info(`installed ${toolkitId}@${version}`);
-  // Unused-var nudge: id helper kept around for callers.
-  void toolId;
 }
 
 // --- npm path -------------------------------------------------------------
@@ -184,7 +321,7 @@ async function installNpm(
   stagingPath: string,
   jobId: string,
   sink: InstallEventSink,
-): Promise<void> {
+): Promise<string> {
   const resolved = await resolveVersion(spec.name, spec.version);
   sink.log(jobId, flattenNpmName(spec.name), "stdout", `resolved ${spec.name}@${resolved.version}`);
 
@@ -193,29 +330,93 @@ async function installNpm(
     integrity: resolved.integrity,
     shasum: resolved.shasum,
   });
+  // Deps are NOT installed here; that is the separate install phase.
+  return resolved.version;
+}
 
-  // Synthesize a deno.json so node_modules lands per-toolkit.
-  const denoJson = {
-    nodeModulesDir: "auto" as const,
-    lock: "./deno.lock",
-  };
-  await Deno.writeTextFile(join(stagingPath, "deno.json"), JSON.stringify(denoJson, null, 2));
+// --- builtin path ---------------------------------------------------------
 
-  // Run deno install if the package declared dependencies.
-  const pkgPath = join(stagingPath, "package.json");
-  const pkgText = await readOptional(pkgPath);
+async function installBuiltin(
+  spec: Extract<InstallSource, { source: "builtin" }>,
+  stagingPath: string,
+  jobId: string,
+  sink: InstallEventSink,
+): Promise<string> {
+  // Resolve the latest version (and CDN tarball, when used) from the signed
+  // manifest. In dev this is the codebase-derived dev manifest.
+  const manifest = await loadBuiltinToolkitManifest();
+  await Deno.mkdir(stagingPath, { recursive: true });
+
+  if (channel() === "dev") {
+    sink.log(jobId, BUILTIN_TOOLKIT_ID, "stdout", "installing built-in toolkit from codebase");
+    await copyTreeExcludingNodeModules(builtinCodebasePath(), stagingPath);
+  } else if (spec.preferLocalDir && (await dirExists(spec.preferLocalDir))) {
+    sink.log(
+      jobId,
+      BUILTIN_TOOLKIT_ID,
+      "stdout",
+      `installing built-in toolkit from ${spec.preferLocalDir}`,
+    );
+    await copyTreeExcludingNodeModules(spec.preferLocalDir, stagingPath);
+  } else {
+    sink.log(
+      jobId,
+      BUILTIN_TOOLKIT_ID,
+      "stdout",
+      `downloading built-in toolkit ${manifest.version}`,
+    );
+    await fetchAndExtractTarball(manifest.tarballUrl, stagingPath, { sha256: manifest.sha256 });
+  }
+
+  // Deps run in the install phase like every other source; download just gets
+  // the files into the folder.
+  return manifest.version;
+}
+
+/** Install a toolkit's declared dependencies with `deno install`, when it
+ *  declares any. `--node-modules-dir=auto` lands node_modules in the folder
+ *  without us editing the shipped deno.json. Run from the install phase on the
+ *  live folder. */
+async function installDeps(
+  dir: string,
+  jobId: string,
+  toolkitId: string,
+  sink: InstallEventSink,
+): Promise<void> {
+  if (await hasDeclaredDeps(dir)) {
+    await runDenoInstall(dir, jobId, toolkitId, sink);
+  }
+}
+
+/** True when the toolkit declares dependencies in deno.json `imports`
+ *  (npm:/jsr: specifiers) or package.json `dependencies`. Throws on an
+ *  unparseable config rather than silently skipping its deps. */
+async function hasDeclaredDeps(dir: string): Promise<boolean> {
+  const denoText = await readOptional(join(dir, "deno.json"));
+  if (denoText) {
+    let cfg: { imports?: Record<string, string> };
+    try {
+      cfg = JSON.parse(denoText);
+    } catch {
+      throw new AppError("deps_install_failed", `unparseable deno.json in ${dir}`);
+    }
+    for (const spec of Object.values(cfg.imports ?? {})) {
+      if (typeof spec === "string" && (spec.startsWith("npm:") || spec.startsWith("jsr:"))) {
+        return true;
+      }
+    }
+  }
+  const pkgText = await readOptional(join(dir, "package.json"));
   if (pkgText) {
     let pkg: { dependencies?: Record<string, string> };
     try {
       pkg = JSON.parse(pkgText);
     } catch {
-      throw new AppError("invalid_tools_json", "invalid package.json");
+      throw new AppError("deps_install_failed", `unparseable package.json in ${dir}`);
     }
-    const hasDeps = pkg.dependencies && Object.keys(pkg.dependencies).length > 0;
-    if (hasDeps) {
-      await runDenoInstall(stagingPath, jobId, flattenNpmName(spec.name), sink);
-    }
+    if (pkg.dependencies && Object.keys(pkg.dependencies).length > 0) return true;
   }
+  return false;
 }
 
 // --- local path -----------------------------------------------------------
@@ -224,33 +425,11 @@ async function installLocal(
   spec: Extract<InstallSource, { source: "local" }>,
   stagingPath: string,
 ): Promise<void> {
-  // Copy spec.path tree into stagingPath, excluding node_modules.
+  // Copy the source tree AS-IS (excluding node_modules). No deno.json edit and
+  // no deno install here: deps run in the install phase, and the folder is left
+  // byte-identical to what the user placed.
   await Deno.mkdir(stagingPath, { recursive: true });
   await copyTreeExcludingNodeModules(spec.path, stagingPath);
-
-  // Ensure deno.json has nodeModulesDir: "auto".
-  const denoPath = join(stagingPath, "deno.json");
-  let denoCfg: Record<string, unknown>;
-  try {
-    denoCfg = JSON.parse(await Deno.readTextFile(denoPath));
-  } catch {
-    denoCfg = {};
-  }
-  if (denoCfg.nodeModulesDir !== "auto") {
-    denoCfg.nodeModulesDir = "auto";
-    await Deno.writeTextFile(denoPath, JSON.stringify(denoCfg, null, 2));
-  }
-
-  // If package.json has deps, run deno install.
-  const pkgText = await readOptional(join(stagingPath, "package.json"));
-  if (pkgText) {
-    const pkg = JSON.parse(pkgText) as {
-      dependencies?: Record<string, string>;
-    };
-    if (pkg.dependencies && Object.keys(pkg.dependencies).length > 0) {
-      await runDenoInstall(stagingPath, "", spec.slug, NOOP_SINK);
-    }
-  }
 }
 
 // --- helpers --------------------------------------------------------------
@@ -258,7 +437,7 @@ async function installLocal(
 async function fetchAndExtractTarball(
   url: string,
   targetDir: string,
-  verify?: { integrity?: string; shasum?: string },
+  verify?: { integrity?: string; shasum?: string; sha256?: string },
 ): Promise<void> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -288,18 +467,17 @@ async function fetchAndExtractTarball(
     // could otherwise ship a symlink/hardlink (typeflag "2"/"1") or device
     // node and use it to escape the staging dir or follow into a sensitive
     // path on a later write. ustar regular-file typeflags are "0" / "\0" / "".
-    const typeflag = entry.header.typeflag;
-    const isDir = typeflag === "5";
-    const isFile = typeflag === "0" || typeflag === "\0" || typeflag === "";
-    if (!isDir && !isFile) {
+    const kind = extractableEntryType(entry.header.typeflag);
+    if (kind === null) {
       await entry.readable?.cancel();
       throw new AppError(
         "extract_failed",
         `tarball entry "${name}" has unsupported type ${JSON.stringify(
-          typeflag,
+          entry.header.typeflag,
         )} (symlinks/hardlinks/devices are not allowed)`,
       );
     }
+    const isDir = kind === "dir";
     const out = join(targetDir, stripped);
     // Zip-slip guard: the resolved destination MUST stay inside targetDir.
     // Without this, an entry like `package/../../../bin/tomat-core` would
@@ -326,15 +504,35 @@ async function fetchAndExtractTarball(
   }
 }
 
+/** ustar typeflag classification for tarball extraction. Regular files are
+ *  "0"/"\0"/""; directories are "5". Anything else (symlink "2", hardlink "1",
+ *  device/fifo) could escape the staging dir on a later write and is rejected.
+ *  Exported for testing. */
+export function extractableEntryType(typeflag: string): "file" | "dir" | null {
+  if (typeflag === "5") return "dir";
+  if (typeflag === "0" || typeflag === "\0" || typeflag === "") return "file";
+  return null;
+}
+
 /** Verify a fetched npm tarball against npm's published integrity before it is
  *  extracted. Prefers the SRI `dist.integrity` (sha512); falls back to the
  *  legacy `dist.shasum` (sha1). When neither is available the tarball is left
- *  unverified (logged) rather than blocking the install. */
-async function verifyTarball(
+ *  unverified (logged) rather than blocking the install. Exported for testing. */
+export async function verifyTarball(
   bytes: Uint8Array,
   url: string,
-  verify?: { integrity?: string; shasum?: string },
+  verify?: { integrity?: string; shasum?: string; sha256?: string },
 ): Promise<void> {
+  // Plain sha256-hex (used by the built-in toolkit's signed manifest, which
+  // pins the tarball hash directly rather than npm's SRI/shasum metadata).
+  if (verify?.sha256) {
+    const digest = await crypto.subtle.digest("SHA-256", bytes.buffer as ArrayBuffer);
+    const got = toHex(new Uint8Array(digest));
+    if (got !== verify.sha256.toLowerCase()) {
+      throw new AppError("checksum_mismatch", `tarball failed sha256 check for ${url}`);
+    }
+    return;
+  }
   const sha512Entry = verify?.integrity?.split(/\s+/).find((s) => s.startsWith("sha512-"));
   if (sha512Entry) {
     const expected = sha512Entry.slice("sha512-".length);
@@ -359,14 +557,6 @@ async function verifyTarball(
   log.warn(`npm tarball ${url} has no integrity/shasum metadata; installing unverified`);
 }
 
-/** True if `candidate` resolves to a path inside `root` (or root itself).
- *  Used to reject path-traversal (zip-slip) entries during tarball extraction.
- *  Exported for unit tests. */
-export function isWithin(root: string, candidate: string): boolean {
-  const rel = relative(resolve(root), resolve(candidate));
-  return rel !== ".." && !rel.startsWith(".." + SEPARATOR) && !isAbsolute(rel);
-}
-
 async function runDenoInstall(
   cwd: string,
   jobId: string,
@@ -374,8 +564,11 @@ async function runDenoInstall(
   sink: InstallEventSink,
 ): Promise<void> {
   const denoBin = binPath(binaryName("deno"));
+  // --node-modules-dir=auto lands node_modules in the toolkit folder without us
+  // editing the shipped deno.json; DENO_DIR keeps the package cache under
+  // ~/.tomat. --allow-scripts=false blocks npm postinstall hooks.
   const proc = new Deno.Command(denoBin, {
-    args: ["install", "--allow-scripts=false", "--quiet"],
+    args: ["install", "--allow-scripts=false", "--node-modules-dir=auto", "--quiet"],
     cwd,
     env: { DENO_DIR: paths().denoCacheDir },
     stdout: "piped",
@@ -431,6 +624,14 @@ async function readOptional(path: string): Promise<string | null> {
     return await Deno.readTextFile(path);
   } catch {
     return null;
+  }
+}
+
+async function dirExists(path: string): Promise<boolean> {
+  try {
+    return (await Deno.stat(path)).isDirectory;
+  } catch {
+    return false;
   }
 }
 

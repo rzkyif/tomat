@@ -12,7 +12,16 @@ publish = false
 in-memory = []
 
 [dependencies]
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+keyring-core = "1"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = "1"
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))'.dependencies]
+dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
 [lints.clippy]
 unwrap_used = "warn"

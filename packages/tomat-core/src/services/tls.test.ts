@@ -2,8 +2,11 @@
 // that the pin is stable across cert regeneration (and bindHost/SAN changes)
 // because it is computed over the persisted key's SubjectPublicKeyInfo.
 
+// Loads the Reflect polyfill @peculiar/x509 needs (see tls.ts); must stay above
+// the direct x509 import below since this test is its own entry point.
+import "reflect-metadata";
 import { assertEquals } from "@std/assert";
-import { encodeBase64 } from "jsr:@std/encoding@^1.0.0/base64";
+import { encodeBase64 } from "@std/encoding/base64";
 import * as x509 from "@peculiar/x509";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { __resetForTesting, tlsCertFingerprint, tlsServeOptions } from "./tls.ts";

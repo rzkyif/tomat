@@ -39,7 +39,12 @@ import type {
   ToolDescriptor,
   ToolMessage,
 } from "@tomat/shared";
-import { contentToText, DEFAULT_COMPLEXITY_DETECTION_PROMPT, errMessage } from "@tomat/shared";
+import {
+  contentToText,
+  DEFAULT_COMPLEXITY_DETECTION_PROMPT,
+  errMessage,
+  permissionKey,
+} from "@tomat/shared";
 import { sessionsRepo } from "../db/repos/sessions.ts";
 import { embed } from "./embedding.ts";
 import { llmScheduler } from "./llm-scheduler.ts";
@@ -60,6 +65,7 @@ import { wsHub } from "../ws/hub.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import { newCallId, newMessageId } from "../shared/ids.ts";
+import { encodeBase64 } from "@std/encoding/base64";
 
 const log = getLogger("chat");
 
@@ -256,7 +262,10 @@ export class ChatService {
         toolList = chosenTools
           .map((c) => toolkitsRegistry().getTool(c.toolId))
           .filter((t): t is NonNullable<typeof t> => t !== undefined)
-          .filter((t) => t.enabled)
+          // Final exposure gate: the relevance filter's candidate set is not
+          // grant-aware, so re-apply enabled + fully-granted here (status is
+          // already gated upstream) so an ungranted tool never reaches the model.
+          .filter((t) => t.enabled && toolFullyGranted(t))
           .map((t) => ({
             type: "function" as const,
             function: {
@@ -322,10 +331,20 @@ export class ChatService {
       }
     }
 
+    // Reading + base64-encoding image attachments is the costly part of building
+    // the provider messages, and the whole transcript is rebuilt every hop.
+    // Memoize each attachment's encoded form for the life of this turn so a
+    // multi-hop tool conversation reads + encodes each attachment at most once.
+    const attachmentCache = new Map<string, string | null>();
     // Hop loop: stream, dispatch tool calls, append tool messages, repeat.
     for (let hop = 0; hop < maxHops; hop++) {
       if (stream.abort.signal.aborted) return;
-      const openaiMessages = await toOpenAiMessages(history, systemPrompt, stream.sessionId);
+      const openaiMessages = await toOpenAiMessages(
+        history,
+        systemPrompt,
+        stream.sessionId,
+        attachmentCache,
+      );
       const req: LlmRequest = {
         endpoint,
         messages: openaiMessages,
@@ -448,6 +467,39 @@ export class ChatService {
     >();
     let usage: { prompt: number; completion: number; total: number } | undefined;
 
+    // Coalesce outgoing content/reasoning deltas over a short window instead of
+    // one ws frame per token. A fast local model emits many small tokens; one
+    // JSON.stringify + ws.send each dominates the cost and grows the send buffer
+    // under a slow consumer. We still accumulate every token into the saved
+    // message synchronously (below), so coalescing is lossless; only the wire
+    // frames are batched. The trailing tail is flushed in `finally`.
+    const COALESCE_MS = 30;
+    let pendingContent = "";
+    let pendingReasoning = "";
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+    const flushDeltas = () => {
+      flushTimer = undefined;
+      if (pendingContent) {
+        this.send(stream.clientId, {
+          kind: "chat.chunk",
+          streamId: stream.streamId,
+          contentDelta: pendingContent,
+        });
+        pendingContent = "";
+      }
+      if (pendingReasoning) {
+        this.send(stream.clientId, {
+          kind: "chat.chunk",
+          streamId: stream.streamId,
+          reasoningDelta: pendingReasoning,
+        });
+        pendingReasoning = "";
+      }
+    };
+    const scheduleFlush = () => {
+      if (flushTimer === undefined) flushTimer = setTimeout(flushDeltas, COALESCE_MS);
+    };
+
     try {
       for await (const delta of llmScheduler().schedule(req, {
         clientId: stream.clientId,
@@ -457,22 +509,16 @@ export class ChatService {
           appendContent: (s) => {
             if (contentStartedAtMs === null) contentStartedAtMs = Date.now();
             assistantContent += s;
-            this.send(stream.clientId, {
-              kind: "chat.chunk",
-              streamId: stream.streamId,
-              contentDelta: s,
-            });
+            pendingContent += s;
+            scheduleFlush();
           },
           appendReasoning: (s) => {
             if (reasoningStartedAtMs === null) {
               reasoningStartedAtMs = Date.now();
             }
             reasoning += s;
-            this.send(stream.clientId, {
-              kind: "chat.chunk",
-              streamId: stream.streamId,
-              reasoningDelta: s,
-            });
+            pendingReasoning += s;
+            scheduleFlush();
           },
           updateToolCall: (idx, chunk) => {
             let asm = toolAssemblers.get(idx);
@@ -506,6 +552,11 @@ export class ChatService {
         toolCalls: [],
         error: classifyProviderError(err),
       };
+    } finally {
+      // Flush any buffered tail on both the success and error paths (runs before
+      // the catch's `return` completes), so trailing tokens are never dropped.
+      if (flushTimer !== undefined) clearTimeout(flushTimer);
+      flushDeltas();
     }
     // Resolve tool names to (toolkitId, name) pairs.
     const allEnabled = enabledToolsByName();
@@ -788,6 +839,7 @@ async function toOpenAiMessages(
   history: Message[],
   systemPrompt: string,
   sessionId: string,
+  attachmentCache?: Map<string, string | null>,
 ): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam[]> {
   const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
   if (systemPrompt) out.push({ role: "system", content: systemPrompt });
@@ -795,7 +847,7 @@ async function toOpenAiMessages(
     if (m.role === "user") {
       out.push({
         role: "user",
-        content: await userContentToOpenAi(m.content, sessionId),
+        content: await userContentToOpenAi(m.content, sessionId, attachmentCache),
       });
     } else if (m.role === "system" || m.role === "assistant") {
       // System + assistant are always plain string in this codebase (no
@@ -827,6 +879,7 @@ async function toOpenAiMessages(
 async function userContentToOpenAi(
   content: MessageContent,
   sessionId: string,
+  attachmentCache?: Map<string, string | null>,
 ): Promise<string | OpenAI.Chat.Completions.ChatCompletionContentPart[]> {
   if (typeof content === "string") return content;
   const parts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [];
@@ -836,7 +889,12 @@ async function userContentToOpenAi(
     } else if (p.type === "image_url") {
       parts.push({ type: "image_url", image_url: { url: p.image_url.url } });
     } else if (p.type === "image_file") {
-      const dataUrl = await readAttachmentAsDataUrl(sessionId, p.path, p.mime || "image/png");
+      const dataUrl = await readAttachmentAsDataUrl(
+        sessionId,
+        p.path,
+        p.mime || "image/png",
+        attachmentCache,
+      );
       if (dataUrl) {
         parts.push({ type: "image_url", image_url: { url: dataUrl } });
       }
@@ -846,7 +904,7 @@ async function userContentToOpenAi(
         text: `[Attached document: ${p.filename}]\n\n${p.markdown}`,
       });
     } else if (p.type === "document_file") {
-      const text = await readAttachmentAsText(sessionId, p.path);
+      const text = await readAttachmentAsText(sessionId, p.path, attachmentCache);
       if (text !== null) {
         parts.push({
           type: "text",
@@ -879,40 +937,66 @@ async function readAttachmentAsDataUrl(
   sessionId: string,
   path: string,
   mime: string,
+  cache?: Map<string, string | null>,
 ): Promise<string | null> {
   const id = attachmentIdFromPath(path);
   if (!id) return null;
+  const cacheKey = `img:${id}`;
+  if (cache?.has(cacheKey)) return cache.get(cacheKey) ?? null;
+  let result: string | null = null;
   try {
     const rec = sessionsRepo().getAttachment(sessionId, id);
     const bytes = await Deno.readFile(rec.absPath);
-    let bin = "";
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-    return `data:${rec.mime ?? mime};base64,${btoa(bin)}`;
+    // encodeBase64 over the Uint8Array directly, instead of an O(n) per-byte
+    // String.fromCharCode loop that builds a giant intermediate binary string
+    // on the event loop for every multi-MB image.
+    result = `data:${rec.mime ?? mime};base64,${encodeBase64(bytes)}`;
   } catch (err) {
     log.warn(`image attachment load failed (${path}): ${errMessage(err)}`);
-    return null;
+    result = null;
   }
+  cache?.set(cacheKey, result);
+  return result;
 }
 
-async function readAttachmentAsText(sessionId: string, path: string): Promise<string | null> {
+async function readAttachmentAsText(
+  sessionId: string,
+  path: string,
+  cache?: Map<string, string | null>,
+): Promise<string | null> {
   const id = attachmentIdFromPath(path);
   if (!id) return null;
+  const cacheKey = `doc:${id}`;
+  if (cache?.has(cacheKey)) return cache.get(cacheKey) ?? null;
+  let result: string | null = null;
   try {
     const rec = sessionsRepo().getAttachment(sessionId, id);
-    return await Deno.readTextFile(rec.absPath);
+    result = await Deno.readTextFile(rec.absPath);
   } catch (err) {
     log.warn(`document attachment load failed (${path}): ${errMessage(err)}`);
-    return null;
+    result = null;
   }
+  cache?.set(cacheKey, result);
+  return result;
+}
+
+// LLM-exposure gate: a tool reaches the model only when its toolkit is
+// 'installed' (not 'downloaded'/'drift'), the tool is enabled, AND every
+// non-optional required permission is granted. An enabled-but-ungranted tool is
+// in the UI "warning" state and is intentionally withheld here.
+function toolFullyGranted(t: Tool): boolean {
+  const granted = new Set(
+    t.grants.filter((g) => g.state === "granted").map((g) => g.permissionKey),
+  );
+  return t.requiredPermissions.every((d) => d.optional || granted.has(permissionKey(d)));
 }
 
 function enabledToolsByName(): Map<string, { toolkitId: string; toolId: string }> {
   const out = new Map<string, { toolkitId: string; toolId: string }>();
   for (const tk of toolkitsRegistry().list()) {
-    if (!tk.enabled) continue;
+    if (tk.status !== "installed") continue;
     for (const t of toolkitsRegistry().listTools(tk.id)) {
-      if (!t.enabled) continue;
-      out.set(t.name, { toolkitId: tk.id, toolId: t.id });
+      if (t.enabled && toolFullyGranted(t)) out.set(t.name, { toolkitId: tk.id, toolId: t.id });
     }
   }
   return out;
@@ -921,9 +1005,9 @@ function enabledToolsByName(): Map<string, { toolkitId: string; toolId: string }
 function listEnabledTools(): Tool[] {
   const out: Tool[] = [];
   for (const tk of toolkitsRegistry().list()) {
-    if (!tk.enabled) continue;
+    if (tk.status !== "installed") continue;
     for (const t of toolkitsRegistry().listTools(tk.id)) {
-      if (t.enabled) out.push(t);
+      if (t.enabled && toolFullyGranted(t)) out.push(t);
     }
   }
   return out;

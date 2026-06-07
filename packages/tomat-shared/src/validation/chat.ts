@@ -71,14 +71,16 @@ export const toolCancelSchema = z
 
 export type ToolCancelFrame = z.infer<typeof toolCancelSchema>;
 
-// Forward-compatible envelope used at WS receive on both sides. The full
-// discriminated union of every frame variant lives in `api/ws.ts` as TS
-// types only. Adding per-variant Zod schemas for the ~20 server→client
-// kinds would couple every minor frame change to a shared-package release.
-// Instead we parse the envelope (object + non-empty kind), pass unknown
-// fields through, and log + drop only when the shape is unmistakably
-// wrong. Per-kind validation can layer on top in a later release once
-// every paired client is known to be on a compatible schema.
+// Minimal envelope for the CLIENT->server receive path on the WS hub
+// (ws/hub.ts), where only `kind` routing matters: parse object + non-empty
+// kind, pass unknown fields through, and log + drop only when the shape is
+// unmistakably wrong.
+//
+// NOTE: the server->client direction IS validated per-variant by
+// `serverToClientFrameSchema` in `validation/ws.ts` (the client uses it in
+// core/client.ts); those variants use `.passthrough()` for forward-compat, and
+// a test in `validation/ws.test.ts` asserts the Zod union covers every TS
+// `ServerToClientFrame` kind so the two can't drift.
 export const wsFrameEnvelopeSchema = z
   .object({
     kind: z.string().min(1),

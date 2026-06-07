@@ -14,7 +14,7 @@ import {
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { join as tauriJoin, tempDir as tauriTempDir } from "@tauri-apps/api/path";
 import { getVersion as tauriGetVersion } from "@tauri-apps/api/app";
-import { Menu, type MenuItemOptions } from "@tauri-apps/api/menu";
+import { CheckMenuItem, Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -115,13 +115,20 @@ const impl: Platform = {
         listen(`net://ws/${wsId}/close`, () => {
           if (onCloseCb) onCloseCb();
           else closedEarly = true;
+          // The socket is gone: detach the JS-side listeners so a server- or
+          // network-initiated close (not just an explicit close()) can't leak
+          // 4 Tauri listeners per reconnect over a long-lived session.
+          detach();
         }),
         listen<string>(`net://ws/${wsId}/error`, (e) => {
           if (onErrorCb) onErrorCb(e.payload);
           else earlyError = e.payload;
         }),
       ]);
+      let detached = false;
       const detach = (): void => {
+        if (detached) return;
+        detached = true;
         for (const u of unlisteners) u();
       };
 
@@ -366,17 +373,24 @@ const impl: Platform = {
       const result = new Promise<string | null>((resolve) => {
         resolved = resolve;
       });
-      const menuItems: Array<MenuItemOptions | { item: "Separator" }> = items.map((item) => {
-        if ("separator" in item) return { item: "Separator" };
-        return {
-          id: item.id,
-          text: item.label,
-          enabled: item.enabled ?? true,
-          action: () => {
-            if (resolved) resolved(item.id);
-          },
-        };
-      });
+      // Build concrete item instances so check items (CheckMenuItem) and
+      // separators (PredefinedMenuItem) are unambiguous to the native layer.
+      const menuItems = await Promise.all(
+        items.map((item) => {
+          if ("separator" in item) return PredefinedMenuItem.new({ item: "Separator" });
+          const opts = {
+            id: item.id,
+            text: item.label,
+            enabled: item.enabled ?? true,
+            action: () => {
+              if (resolved) resolved(item.id);
+            },
+          };
+          return item.checked === undefined
+            ? MenuItem.new(opts)
+            : CheckMenuItem.new({ ...opts, checked: item.checked });
+        }),
+      );
       const menu = await Menu.new({ items: menuItems });
       await menu.popup();
       // popup() resolves immediately on click OR on dismiss. We can't

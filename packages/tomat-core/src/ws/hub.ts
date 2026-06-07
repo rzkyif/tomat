@@ -23,6 +23,7 @@ import {
   wsFrameEnvelopeSchema,
 } from "@tomat/shared";
 import { authService } from "../services/auth.ts";
+import { isOriginAllowed } from "../http/middleware/cors.ts";
 import { chatService } from "../services/chat.ts";
 import { downloadManager } from "../downloads/manager.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
@@ -53,6 +54,14 @@ class WsHub {
   // Called on the Deno.serve hook when /ws/v1 receives an upgrade request.
   async handleUpgrade(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    // Mirror the HTTP CORS allowlist on the WS upgrade. The upgrade already
+    // requires a valid bearer in ?token=, but rejecting a cross-origin browser
+    // upgrade here is defense in depth (e.g. if a token ever leaked into a web
+    // context). Native clients (Tauri rust, curl) send no Origin and pass.
+    const origin = req.headers.get("origin");
+    if (origin && !isOriginAllowed(origin)) {
+      return new Response("forbidden origin", { status: 403 });
+    }
     const token = url.searchParams.get("token");
     if (!token) {
       return new Response("missing token", { status: 401 });

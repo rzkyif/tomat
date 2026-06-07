@@ -11,9 +11,10 @@
   import ServicesField from "./fields/ServicesField.svelte";
   import ShortcutField from "./fields/ShortcutField.svelte";
   import SnippetsField from "./fields/SnippetsField.svelte";
+  import ToolkitsField from "./fields/ToolkitsField.svelte";
+  import CoresField from "./fields/CoresField.svelte";
   import StandardField from "./fields/StandardField.svelte";
   import StorageField from "./fields/StorageField.svelte";
-  import ToolkitsField from "./fields/ToolkitsField.svelte";
 
   let { field, monitors, fonts, error, horizontal = false, onChange, onReset, onPresetSelect } = $props<{
     field: SettingField;
@@ -40,17 +41,16 @@
     <ServicesField {field} {horizontal} />
   {:else if field.type === "storage"}
     <StorageField {field} />
-  {:else if field.type === "snippets"}
-    <SnippetsField {field} />
   {:else if field.type === "shortcut"}
     <ShortcutField {field} {error} {horizontal} {onChange} {onReset} />
-  {:else if field.type === "toolkits"}
-    <ToolkitsField {field} />
-  {:else if field.type === "cores"}
-    <!-- Paired-cores list panel is not yet wired into the Settings UI; the
-         registry is managed via `cores()` in $lib/core/cores.ts. This branch
-         keeps SettingsField from falling through to StandardField and
-         crashing on the render-only type. -->
+  {:else if field.type === "object_management"}
+    {#if field.objectType === "snippets"}
+      <SnippetsField />
+    {:else if field.objectType === "toolkits"}
+      <ToolkitsField />
+    {:else if field.objectType === "cores"}
+      <CoresField />
+    {/if}
   {:else if field.type === "color"}
     <ColorField {field} {error} {horizontal} {onChange} {onReset} />
   {:else if field.type === "number_slider"}

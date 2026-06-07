@@ -26,6 +26,18 @@ const log = getLogger("title-gen");
 // for ~5 words but adversarial / runaway models can ignore that.
 const MAX_TITLE_CHARS = 80;
 
+// Cap on the raw streamed output we accumulate before sanitizing. A
+// non-compliant endpoint can ignore `maxTokens` and stream unboundedly;
+// `sanitize()` runs regexes (the `<think>` strip) over this string, so an
+// unbounded accumulation would let it do super-linear work on the event loop.
+// Generous enough for any legitimate title plus a stray `<think>` block.
+const MAX_TITLE_RAW_CHARS = 4096;
+
+// Title generation runs outside the LLM scheduler (and its watchdog), so it
+// gets its own deadline: a wedged endpoint must not keep a streaming
+// connection (and this fire-and-forget task) alive forever.
+const TITLE_GEN_TIMEOUT_MS = 30_000;
+
 export async function maybeGenerateTitle(sessionId: string, ownerClientId: string): Promise<void> {
   try {
     let session;
@@ -62,11 +74,16 @@ export async function maybeGenerateTitle(sessionId: string, ownerClientId: strin
       endpoint,
       messages: llmMessages,
       overrides: { temperature: 0.3, maxTokens: 32 },
+      signal: AbortSignal.timeout(TITLE_GEN_TIMEOUT_MS),
     };
 
     let title = "";
     for await (const delta of streamChatCompletion(req)) {
       if (delta.contentDelta) title += delta.contentDelta;
+      // Stop accumulating once we have far more than any real title needs;
+      // breaking the loop also returns the async generator so the upstream
+      // stream is torn down.
+      if (title.length > MAX_TITLE_RAW_CHARS) break;
     }
     title = sanitize(title);
     if (!title) return;

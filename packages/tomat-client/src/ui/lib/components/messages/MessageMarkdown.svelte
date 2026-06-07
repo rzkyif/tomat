@@ -91,7 +91,7 @@
 
   const log = getLogger("markdown");
 
-  let { content }: { content: string } = $props();
+  let { content, isStreaming = false }: { content: string; isStreaming?: boolean } = $props();
 
   // Open links from rendered (untrusted, model-authored) markdown in the system
   // browser instead of letting them navigate the app webview in-frame. Without
@@ -115,6 +115,17 @@
   // Attach the external-link interceptor once via delegation on the container
   // (rather than an inline handler on a static element, which trips a11y lints).
   let linkHandlerAttached = false;
+
+  // Streaming flushes fire ~33x/s. Parsing + sanitizing + re-highlighting the
+  // full (growing) message on every one is O(n^2) over the answer length and
+  // pins a CPU core on long replies. While streaming we coalesce to at most one
+  // parse per STREAM_PARSE_THROTTLE_MS (still feels live) and always run a final
+  // parse when streaming ends so the completed message renders cleanly.
+  const STREAM_PARSE_THROTTLE_MS = 120;
+  let lastParseAt = 0;
+  let throttleTimer: ReturnType<typeof setTimeout> | undefined;
+  // Bumped per parse so a superseded async parse can't overwrite a newer one.
+  let parseGen = 0;
 
   function wrapTables(node: HTMLDivElement) {
     const tables = node.querySelectorAll("table");
@@ -146,15 +157,11 @@
     });
   }
 
-  $effect(() => {
-    const text = content;
-    if (!text) {
-      renderedHtml = null;
-      return;
-    }
-    let cancelled = false;
+  function renderNow(text: string) {
+    const gen = ++parseGen;
+    lastParseAt = Date.now();
     ensureRenderer().then((marked) => {
-      if (cancelled) return;
+      if (gen !== parseGen) return; // a newer parse superseded this one
       renderedHtml = DOMPurify.sanitize(marked.parse(text) as string, {
         ALLOWED_TAGS,
         ALLOWED_ATTR,
@@ -171,8 +178,42 @@
         }
       });
     });
+  }
+
+  $effect(() => {
+    const text = content;
+    const streaming = isStreaming;
+    if (!text) {
+      renderedHtml = null;
+      return;
+    }
+    if (!streaming) {
+      // Final or non-streamed render: parse the complete text immediately and
+      // drop any pending throttled parse.
+      if (throttleTimer) {
+        clearTimeout(throttleTimer);
+        throttleTimer = undefined;
+      }
+      renderNow(text);
+      return;
+    }
+    // Streaming: coalesce to a coarse cadence. A trailing timer always reads the
+    // freshest `content`, so no streamed chunk is lost.
+    if (throttleTimer) return;
+    const elapsed = Date.now() - lastParseAt;
+    if (elapsed >= STREAM_PARSE_THROTTLE_MS) {
+      renderNow(text);
+    } else {
+      throttleTimer = setTimeout(() => {
+        throttleTimer = undefined;
+        renderNow(content);
+      }, STREAM_PARSE_THROTTLE_MS - elapsed);
+    }
+  });
+
+  $effect(() => {
     return () => {
-      cancelled = true;
+      if (throttleTimer) clearTimeout(throttleTimer);
     };
   });
 </script>

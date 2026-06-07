@@ -19,3 +19,4 @@ export * from "./validation/session.ts";
 export * from "./validation/ws.ts";
 
 export * from "./crypto/pake.ts";
+export * from "./crypto/canonical.ts";

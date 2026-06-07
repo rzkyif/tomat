@@ -42,13 +42,15 @@ export class ToolFilter {
     const topK = options.topK ?? 10;
     const registry = toolkitsRegistry();
     const tools = enabledTools();
+    // One batched query instead of one loadEmbedding() round-trip per tool.
+    const embeddings = registry.loadAllEmbeddings();
     const scored: Array<{ tool: Tool; score: number }> = [];
     const always: ToolDescriptor[] = [];
     for (const tool of tools) {
       if (tool.alwaysAvailable && options.includeAlwaysAvailable !== false) {
         always.push(toDescriptor(tool));
       }
-      const emb = registry.loadEmbedding(tool.id);
+      const emb = embeddings.get(tool.id);
       if (!emb) continue;
       const score = cosineNormalized(queryVector, emb.vector);
       scored.push({ tool, score });
@@ -150,7 +152,7 @@ function enabledTools(): Tool[] {
            t.triggers_json, t.fn_export, t.always_available, t.enabled
     FROM tools t
     JOIN toolkits k ON k.id = t.toolkit_id
-    WHERE t.enabled = 1 AND k.enabled = 1
+    WHERE t.enabled = 1 AND k.status = 'installed'
   `)
     .all() as Array<Record<string, unknown>>;
   return rows.map((r) => ({

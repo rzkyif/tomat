@@ -54,31 +54,31 @@ impl std::fmt::Display for KeychainError {
     }
 }
 
-/// Production impl: delegates to the platform-specific keyring crate.
+/// Production impl: delegates to keyring-core and the platform credential store.
 pub struct RealKeychain;
 
 impl KeychainStore for RealKeychain {
     fn get(&self, service: &str, account: &str) -> Result<String, KeychainError> {
-        let entry = keyring::Entry::new(service, account)
-            .map_err(|e| KeychainError::Other(format!("keyring::Entry::new failed: {}", e)))?;
+        let entry = keyring_core::Entry::new(service, account)
+            .map_err(|e| KeychainError::Other(format!("keyring_core::Entry::new failed: {}", e)))?;
         match entry.get_password() {
             Ok(pw) => Ok(pw),
-            Err(keyring::Error::NoEntry) => Err(KeychainError::NoEntry),
+            Err(keyring_core::Error::NoEntry) => Err(KeychainError::NoEntry),
             Err(e) => Err(KeychainError::Other(format!("get_password failed: {}", e))),
         }
     }
     fn set(&self, service: &str, account: &str, password: &str) -> Result<(), KeychainError> {
-        let entry = keyring::Entry::new(service, account)
-            .map_err(|e| KeychainError::Other(format!("keyring::Entry::new failed: {}", e)))?;
+        let entry = keyring_core::Entry::new(service, account)
+            .map_err(|e| KeychainError::Other(format!("keyring_core::Entry::new failed: {}", e)))?;
         entry
             .set_password(password)
             .map_err(|e| KeychainError::Other(format!("set_password failed: {}", e)))
     }
     fn delete(&self, service: &str, account: &str) -> Result<(), KeychainError> {
-        let entry = keyring::Entry::new(service, account)
-            .map_err(|e| KeychainError::Other(format!("keyring::Entry::new failed: {}", e)))?;
+        let entry = keyring_core::Entry::new(service, account)
+            .map_err(|e| KeychainError::Other(format!("keyring_core::Entry::new failed: {}", e)))?;
         match entry.delete_credential() {
-            Ok(_) | Err(keyring::Error::NoEntry) => Ok(()),
+            Ok(_) | Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(e) => Err(KeychainError::Other(format!(
                 "delete_credential failed: {}",
                 e
@@ -138,6 +138,24 @@ impl KeychainStore for InMemoryKeychain {
     }
 }
 
+/// Register the platform credential store as keyring-core's process-global
+/// default. Must run once before any `RealKeychain` operation; each target
+/// links exactly one store crate (see Cargo.toml), so the body is selected
+/// per OS.
+fn init_default_store() -> Result<(), KeychainError> {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    let store = apple_native_keyring_store::keychain::Store::new();
+    #[cfg(target_os = "windows")]
+    let store = windows_native_keyring_store::Store::new();
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))]
+    let store = dbus_secret_service_keyring_store::Store::new();
+
+    let store =
+        store.map_err(|e| KeychainError::Other(format!("keychain store init failed: {e}")))?;
+    keyring_core::set_default_store(store);
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 4 {
@@ -145,6 +163,10 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     let (mode, service, account) = (args[1].as_str(), args[2].as_str(), args[3].as_str());
+    if let Err(e) = init_default_store() {
+        eprintln!("{e}");
+        return ExitCode::from(2);
+    }
     let store = RealKeychain;
     ExitCode::from(run(
         &store,

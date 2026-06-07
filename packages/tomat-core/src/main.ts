@@ -5,13 +5,15 @@ import { ensureDirs, paths } from "./paths.ts";
 import { errMessage } from "@tomat/shared";
 import { loadBootConfig } from "./config.ts";
 import { getLogger, initLogger, isLoggerReady, scrubSecrets } from "./shared/log.ts";
-import { openDb } from "./db/connection.ts";
+import { closeDb, openDb } from "./db/connection.ts";
 import { migrate } from "./db/migrate.ts";
 import { buildApp } from "./http/server.ts";
 import { wsHub } from "./ws/hub.ts";
 import { downloadManager } from "./downloads/manager.ts";
 import { handleUpdateMarkerOnBoot } from "./update/rollback.ts";
 import { toolkitsRegistry } from "./toolkits/registry.ts";
+import { seedBuiltinToolkitIfNeeded } from "./toolkits/builtin-seed.ts";
+import { BROADCAST_SINK } from "./http/routes/toolkits.ts";
 import { initSidecarBoot } from "./services/sidecar-boot.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
 import { shutdownJobctl } from "./sidecars/jobctl.ts";
@@ -68,23 +70,31 @@ async function main(): Promise<void> {
   // Resume any persisted-Pending downloads from the previous run.
   downloadManager().resumePending();
 
-  // Verify toolkit content hashes in the background. Don't gate boot on
-  // it: large toolkits can take seconds to walk, and tool calls against
-  // drifted toolkits are blocked by the route layer's `lastError` check
-  // anyway. The first verification result is just slightly delayed.
+  // Verify toolkit content hashes in the background. Don't gate boot on it:
+  // large toolkits can take seconds to walk. A drifted toolkit is flipped to
+  // status='drift' and has its tools disabled, so the chat-exposure gate blocks
+  // its tools until the user confirms re-enable. The first verification result
+  // is just slightly delayed.
   void toolkitsRegistry()
     .verifyAllOnBoot()
     .then((drifted) => {
       if (drifted.length > 0) {
         log.warn(
-          `toolkit content drift: ${drifted.length} toolkit(s) marked ` +
-            `with errors: ${drifted.join(", ")}`,
+          `toolkit content drift: ${drifted.length} toolkit(s) flipped to ` +
+            `status='drift' (tools disabled): ${drifted.join(", ")}`,
         );
       }
     })
     .catch((err) => {
       log.error(`toolkit verifyAllOnBoot failed: ${errMessage(err)}`);
     });
+
+  // Seed the built-in toolkit on a fresh install (background, non-blocking).
+  // Respects a prior user delete via the seed marker; retries next boot if the
+  // first attempt is offline.
+  void seedBuiltinToolkitIfNeeded(BROADCAST_SINK).catch((err) => {
+    log.warn(`builtin toolkit seed failed (will retry next boot): ${errMessage(err)}`);
+  });
 
   // Surface an unreadable secrets vault (sealed secrets.enc but no master key)
   // at startup rather than mid-request. Background, non-mutating.
@@ -138,9 +148,19 @@ async function main(): Promise<void> {
         // explicitly, since stray timers/sidecars could otherwise keep the loop
         // alive after the server closes.
         if (Deno.env.get("TOMAT_DEV_WATCH")) {
+          // Dev `--watch` re-runs this module in the same process; leave the DB
+          // open (openDb() reuses it on the re-run).
           void server.shutdown();
         } else {
-          void server.shutdown().finally(() => Deno.exit(0));
+          void server.shutdown().finally(() => {
+            // Checkpoint + close the DB so the WAL is folded back before exit.
+            try {
+              closeDb();
+            } catch {
+              /* best-effort */
+            }
+            Deno.exit(0);
+          });
         }
       });
     } catch {

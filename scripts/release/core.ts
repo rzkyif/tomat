@@ -11,9 +11,9 @@
 //   --force                              skip the version-equality probe
 //   --help
 
-import { parseArgs } from "jsr:@std/cli@^1/parse-args";
-import { ensureDir } from "jsr:@std/fs@^1/ensure-dir";
-import { join } from "jsr:@std/path@^1";
+import { parseArgs } from "@std/cli/parse-args";
+import { ensureDir } from "@std/fs/ensure-dir";
+import { join } from "@std/path";
 import type {
   BinaryKind,
   BinaryManifest,
@@ -47,7 +47,7 @@ import {
   step,
   writeSigningKeys,
 } from "./lib.ts";
-import { encodeBase64 } from "jsr:@std/encoding@^1/base64";
+import { encodeBase64 } from "@std/encoding/base64";
 
 // ---------------------------------------------------------------------------
 // constants
@@ -166,7 +166,7 @@ function parseFlags(): Flags {
 }
 
 function printHelp(): void {
-  console.log(`Usage: deno task release:core [flags]
+  console.log(`Usage: deno task release:core:<channel> [flags]
 
 Flags:
   --triples=<list>   comma-separated triples to build. Special values:
@@ -213,6 +213,13 @@ async function setupCompileWorkspace(): Promise<string> {
       2,
     ),
   );
+  // Seed the committed lockfile so the signed binary is built from the exact
+  // locked dependency graph rather than a fresh (drift-prone) resolution. We
+  // can't pass `--frozen` here because this is a SUBSET workspace (core+shared
+  // only), so deno would want to drop the client/website lock entries; instead
+  // the lock pins resolution (the temp lock it rewrites is discarded with the
+  // dir), and CI's `deno install --frozen` gate keeps the committed lock honest.
+  await Deno.copyFile(join(REPO_ROOT, "deno.lock"), join(dir, "deno.lock"));
   return dir;
 }
 

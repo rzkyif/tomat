@@ -2,13 +2,19 @@
 //
 // Algorithm (deterministic across platforms):
 //   1. Walk the folder; for each regular file, decide whether to include it.
-//   2. Always exclude `node_modules/...`.
+//   2. Always exclude `node_modules/...` and the root `deno.lock`.
 //   3. If `<root>/.gitignore` exists, exclude any path it matches (but
 //      the .gitignore file itself is INCLUDED so changes to ignore rules
 //      drift the hash too).
 //   4. Sort included paths lexicographically (forward-slash form).
 //   5. Hash the concatenation of `path\0sizeBytes\0content` for each file
 //      into a single SHA-256 digest, hex-encoded lowercase.
+//
+// node_modules + deno.lock are excluded because `deno install` generates them
+// AFTER the hash is pinned (and a later `deno run` can rewrite deno.lock), so
+// including them would read benign install churn as content drift. The
+// `deno.json` they derive from IS hashed, so tampering with declared imports is
+// still detected.
 //
 // Uses npm:ignore for gitignore parsing (battle-tested by ESLint/Prettier).
 
@@ -17,6 +23,7 @@ import ignore from "ignore";
 import { Sha256Stream } from "../shared/hash.ts";
 
 const NODE_MODULES = "node_modules";
+const DENO_LOCK = "deno.lock";
 
 /** The sorted, forward-slash relative paths that the hash covers (node_modules
  *  and .gitignore-listed paths excluded; .gitignore itself included). Shared by
@@ -49,6 +56,35 @@ export async function newestIncludedMtimeMs(rootDir: string): Promise<number> {
     }
   }
   return newest;
+}
+
+/** A cheap stat-only fingerprint of the hashed file set: `count:totalSize:newestMtime`.
+ *  Used as the per-call re-hash skip key instead of mtime alone, which a tool
+ *  with write access to its own folder could reset to the previously-verified
+ *  value to bypass the integrity re-check. Matching count + total size as well
+ *  is far harder to forge while actually changing content, so a tampered file
+ *  re-triggers a full re-hash. */
+export async function statSignature(rootDir: string): Promise<string> {
+  let files: string[];
+  try {
+    files = await listIncludedFiles(rootDir);
+  } catch {
+    return "0:0:0";
+  }
+  let count = 0;
+  let totalSize = 0;
+  let newest = 0;
+  for (const rel of files) {
+    try {
+      const st = await Deno.stat(join(rootDir, rel));
+      count++;
+      totalSize += st.size;
+      if (st.mtime) newest = Math.max(newest, st.mtime.getTime());
+    } catch {
+      /* vanished mid-walk; ignore */
+    }
+  }
+  return `${count}:${totalSize}:${newest}`;
 }
 
 export async function hashToolkit(rootDir: string): Promise<string> {
@@ -102,6 +138,7 @@ async function walk(root: string, dir: string, out: string[], ig: ignore.Ignore)
       if (rel && ig.ignores(rel + "/")) continue;
       await walk(root, full, out, ig);
     } else if (entry.isFile) {
+      if (rel === DENO_LOCK) continue;
       if (rel && ig.ignores(rel)) continue;
       out.push(rel);
     }

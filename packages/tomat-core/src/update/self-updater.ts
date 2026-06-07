@@ -8,11 +8,13 @@
 //      current bin path; updater waits 2s, renames atomic, restarts core.
 //   5. Exit (the updater takes over).
 //
-// On Windows, the running .exe can't be replaced directly; the updater
-// renames the old binary to `<name>.exe.old` first and deletes it on next start.
+// The updater preserves the previous binary as `<name>.old` on both platforms
+// (Unix via a hard link before the atomic rename; Windows by renaming the old
+// .exe aside) so core's boot-time rollback can restore it if the new binary
+// crash-loops; the anchor is deleted once the update is committed.
 
 import { verifyAsync } from "@noble/ed25519";
-import { errMessage } from "@tomat/shared";
+import { canonicalize, decodeBase64, errMessage } from "@tomat/shared";
 import { join } from "@std/path";
 import type { CoreManifest, ErrorCode } from "@tomat/shared";
 import { CORE_VERSION, coreManifestUrl } from "../config.ts";
@@ -127,34 +129,43 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
   );
   await downloadAndVerify(entry.url, stagedPath, entry.sha256);
 
-  // Workers are platform-independent .ts files. Download + verify each,
-  // then atomic-rename into paths().workersDir. They're not gated on the
-  // binary swap because they're just text. A new binary doesn't break
-  // old workers and vice versa (the spawn protocol is stable).
+  // Download + verify EVERY worker/helper artifact into staging FIRST, recording
+  // where each should land. The renames into the live directories happen only
+  // after all have verified (just before the handoff). A mid-update failure
+  // (network drop on artifact N) then leaves staging dirty but never half-installs
+  // the manifest: the live workers/helpers stay consistent with the old binary
+  // until the whole set is ready.
+  const pendingRenames: Array<{ from: string; to: string; label: string }> = [];
+
+  // Workers are platform-independent .ts files. A new binary doesn't break old
+  // workers and vice versa (the spawn protocol is stable).
   if (manifest.workers && manifest.workers.length > 0) {
     await Deno.mkdir(paths().workersDir, { recursive: true });
     for (const w of manifest.workers) {
       const tmpPath = join(paths().stagingDir, `${w.name}.${manifest.version}`);
       await downloadAndVerify(w.url, tmpPath, w.sha256);
-      const dstPath = join(paths().workersDir, w.name);
-      await Deno.rename(tmpPath, dstPath);
-      log.info(`updated worker ${w.name}`);
+      pendingRenames.push({
+        from: tmpPath,
+        to: join(paths().workersDir, w.name),
+        label: `worker ${w.name}`,
+      });
     }
   }
 
-  // Helpers are per-triple native binaries (keychain). Only the
-  // entries matching our triple apply. Swap them at the same time as the
-  // main binary to keep version invariants: the manifest is one atomic
-  // unit, and a stale helper paired with a new core has no version pinning.
+  // Helpers are per-triple native binaries (keychain). Only the entries matching
+  // our triple apply. Swapped at the same time as the main binary to keep
+  // version invariants: the manifest is one atomic unit.
   if (manifest.helpers && manifest.helpers.length > 0) {
     const exe = platformExe();
     for (const h of manifest.helpers) {
       if (h.triple !== triple) continue;
       const tmpPath = join(paths().stagingDir, `${h.name}.${manifest.version}${exe}`);
       await downloadAndVerify(h.url, tmpPath, h.sha256);
-      const dstPath = binPath(`${h.name}${exe}`);
-      await Deno.rename(tmpPath, dstPath);
-      log.info(`updated helper ${h.name}`);
+      pendingRenames.push({
+        from: tmpPath,
+        to: binPath(`${h.name}${exe}`),
+        label: `helper ${h.name}`,
+      });
     }
   }
 
@@ -163,7 +174,8 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
 
   // Hand off and exit. The updater is a separate compiled binary; if it
   // doesn't exist yet (early dev), we surface a clear error so the user
-  // knows the updater needs to be built/shipped alongside core.
+  // knows the updater needs to be built/shipped alongside core. Checked BEFORE
+  // committing any rename, so a missing updater leaves the live dirs untouched.
   try {
     await Deno.stat(updaterBin);
   } catch {
@@ -172,6 +184,14 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
       `tomat-core-updater not installed at ${updaterBin}; ` +
         `rebuild + ship the updater binary or run the install script`,
     );
+  }
+
+  // Everything is staged + verified: commit the workers/helpers now, as close to
+  // the binary handoff as possible to minimize the window where they could be
+  // skewed against the running (old) binary.
+  for (const r of pendingRenames) {
+    await Deno.rename(r.from, r.to);
+    log.info(`updated ${r.label}`);
   }
 
   // Write the rollback marker BEFORE handing off to the updater. The new
@@ -288,12 +308,11 @@ function mergeChunks(chunks: Uint8Array[]): Uint8Array {
   return out;
 }
 
-export function decodeBase64(s: string): Uint8Array {
-  const bin = atob(s);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
+// canonicalize + decodeBase64 are the signature-critical serializers, now
+// single-sourced in @tomat/shared (imported above for use here) so the signer
+// and both verifiers can't drift. Re-exported because self-updater.test.ts (and
+// historical callers) import them from this module.
+export { canonicalize, decodeBase64 };
 
 /** The exact bytes covered by the core-manifest signature: the whole manifest
  *  minus its `signature` field, canonicalized. The signer
@@ -306,20 +325,6 @@ export function signedManifestPayload(manifest: Record<string, unknown>): string
   const signed: Record<string, unknown> = { ...manifest };
   delete signed.signature;
   return canonicalize(signed);
-}
-
-/** Deterministic JSON serializer (sorted keys, recursive). The signed body
- *  of a manifest is the canonicalization of the whole manifest minus its
- *  signature (see signedManifestPayload), so the exact key/whitespace order
- *  has to match between signer and verifier. */
-export function canonicalize(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    return "[" + value.map(canonicalize).join(",") + "]";
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") + "}";
 }
 
 /** Compare two semver strings (major.minor.patch). Returns -1 if a < b,

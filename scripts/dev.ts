@@ -5,7 +5,10 @@
 // pairing code so connecting the client is a one-paste step.
 // Stops both children on SIGINT/SIGTERM or when either exits.
 
-import { join } from "jsr:@std/path@^1";
+import { join } from "@std/path";
+import { ensureDir } from "@std/fs/ensure-dir";
+import { BUILTIN_TOOLKIT_ID } from "@tomat/shared";
+import { hashToolkit } from "../packages/tomat-core/src/toolkits/hash.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
@@ -30,6 +33,58 @@ function homeDir(): string {
 
 const DEV_CORE_DIR = join(homeDir(), ".tomat", "dev", "core");
 const ADMIN_TOKEN_FILE = join(DEV_CORE_DIR, ".admin-token");
+
+// Dev built-in toolkit manifest. There is no published manifests/dev/toolkit.json,
+// so dev.ts generates one from the in-repo toolkit (and regenerates it on edits)
+// at the cache path core reads. The version carries a content hash so any edit to
+// the codebase toolkit reads as "Update available" after a check; "Update" then
+// reinstalls the codebase copy. Keep the version formula in sync with
+// computeDevManifest() in packages/tomat-core/src/toolkits/builtin-manifest.ts.
+const BUILTIN_SRC_DIR = join(ROOT, "packages", "tomat-builtin-toolkit");
+const DEV_TOOLKIT_MANIFEST = join(DEV_CORE_DIR, "cache", "builtin-toolkit-manifest.json");
+
+async function writeDevToolkitManifest(): Promise<void> {
+  let pkgVersion = "0.0.0";
+  try {
+    const cfg = JSON.parse(await Deno.readTextFile(join(BUILTIN_SRC_DIR, "deno.json"))) as {
+      version?: string;
+    };
+    pkgVersion = cfg.version ?? "0.0.0";
+  } catch {
+    // fall through with the default version
+  }
+  const contentHash = await hashToolkit(BUILTIN_SRC_DIR);
+  const manifest = {
+    schemaVersion: 1,
+    version: `${pkgVersion}+dev.${contentHash.slice(0, 8)}`,
+    id: BUILTIN_TOOLKIT_ID,
+    tarballUrl: "",
+    sha256: "",
+    signature: "",
+  };
+  await ensureDir(join(DEV_CORE_DIR, "cache"));
+  const tmp = DEV_TOOLKIT_MANIFEST + ".tmp";
+  await Deno.writeTextFile(tmp, JSON.stringify(manifest, null, 2));
+  await Deno.rename(tmp, DEV_TOOLKIT_MANIFEST);
+}
+
+/** Regenerate the dev manifest now, then on every change under the codebase
+ *  toolkit (debounced). Fire-and-forget: the watcher lives for the dev session
+ *  and is torn down when the orchestrator exits. */
+async function startDevToolkitManifest(): Promise<void> {
+  await writeDevToolkitManifest();
+  void (async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      for await (const _event of Deno.watchFs(BUILTIN_SRC_DIR)) {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => void writeDevToolkitManifest().catch(() => {}), 200);
+      }
+    } catch {
+      // watch failures are non-fatal in dev
+    }
+  })();
+}
 // The dev client persists its paired-cores list here; deleting it sends the
 // next boot back through core management (see the boot gate in
 // packages/tomat-client/src/ui/routes/+page.svelte).
@@ -460,6 +515,11 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 }
 
 const adminToken = await ensureAdminToken();
+
+// Generate the dev built-in toolkit manifest before core boots so first-boot
+// seeding can resolve a version, and keep it fresh as the codebase toolkit is
+// edited.
+await startDevToolkitManifest();
 
 children.push(
   spawn(

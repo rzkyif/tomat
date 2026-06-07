@@ -10,7 +10,7 @@
 // target installed (`rustup target add <triple>`); plain `cargo build`
 // outputs only host artifacts.
 
-import { parseArgs } from "jsr:@std/cli@^1.0.0/parse-args";
+import { parseArgs } from "@std/cli/parse-args";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 

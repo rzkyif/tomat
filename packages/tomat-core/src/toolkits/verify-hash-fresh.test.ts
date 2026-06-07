@@ -16,6 +16,7 @@ async function makeToolkitDir(): Promise<string> {
 }
 
 function upsert(id: string, dir: string, contentHash: string): void {
+  // verifyHashFresh only acts on installed toolkits; seed status accordingly.
   toolkitsRegistry().upsertToolkit({
     id,
     source: "npm",
@@ -25,7 +26,25 @@ function upsert(id: string, dir: string, contentHash: string): void {
     installedPath: dir,
     toolsJsonHash: "x",
     contentHash,
+    status: "installed",
   });
+}
+
+function addEnabledTool(id: string, name: string): void {
+  const r = toolkitsRegistry();
+  r.replaceTools(id, [
+    {
+      toolkitId: id,
+      name,
+      description: "d",
+      parameters: { type: "object", properties: {} },
+      triggers: [],
+      fnExport: name,
+      alwaysAvailable: false,
+      requiredPermissions: [],
+    },
+  ]);
+  r.setToolEnabled(id, name, true);
 }
 
 Deno.test("verifyHashFresh: resolves when on-disk content matches the trusted hash", async () => {
@@ -40,11 +59,12 @@ Deno.test("verifyHashFresh: resolves when on-disk content matches the trusted ha
   }
 });
 
-Deno.test("verifyHashFresh: refuses (toolkit_hash_drift) and flags the row when content changed", async () => {
+Deno.test("verifyHashFresh: drift flips status to 'drift' and disables tools", async () => {
   const env = await setupTestEnv();
   try {
     const dir = await makeToolkitDir();
     upsert("tk-drift", dir, await hashToolkit(dir));
+    addEnabledTool("tk-drift", "t");
     // Tamper after "install": the content no longer matches the trusted hash.
     await Deno.writeTextFile(join(dir, "index.ts"), "export const x = 999; // changed\n");
     await assertRejects(
@@ -52,7 +72,9 @@ Deno.test("verifyHashFresh: refuses (toolkit_hash_drift) and flags the row when 
       AppError,
       "content changed",
     );
-    assertEquals(typeof toolkitsRegistry().get("tk-drift")?.lastError, "string");
+    assertEquals(toolkitsRegistry().get("tk-drift")?.status, "drift");
+    // Tools are auto-disabled so a drifted toolkit can never be LLM-exposed.
+    assertEquals(toolkitsRegistry().listTools("tk-drift")[0].enabled, false);
     await Deno.remove(dir, { recursive: true });
   } finally {
     await env.teardown();

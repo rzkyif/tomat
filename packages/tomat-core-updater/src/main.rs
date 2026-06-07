@@ -1,10 +1,11 @@
 //! tomat-core-updater: tiny standalone helper compiled to its own binary,
 //! separate from tomat-core. When invoked by core's self-updater flow it:
 //!   1. Waits 2s for the parent core process to exit.
-//!   2. Atomically renames `--staged` over `--current`. On Windows, the
-//!      currently-running .exe can't be replaced directly, so it renames the
-//!      old .exe to `<name>.exe.old` first; that .old is deleted on the next
-//!      core boot.
+//!   2. Atomically renames `--staged` over `--current`, preserving the previous
+//!      binary as `<name>.old` (Unix: a hard link kept before the atomic
+//!      rename; Windows: the old .exe renamed aside first). core's boot-time
+//!      rollback restores that `.old` if the new binary crash-loops, and deletes
+//!      it once the update is committed.
 //!   3. Spawns the new core binary with `--restart-args` (forwarded back as
 //!      the new process's argv) detached (stdin/stdout/stderr null), then exits.
 //!
@@ -145,12 +146,17 @@ fn old_path(current: &Path) -> PathBuf {
 /// from the host) so tests exercise both branches on any platform (same design
 /// as the TS `performSwap(staged, current, isWindows)`).
 ///
-/// Unix: a single `rename` is atomic and overwrites in place; then chmod 0o755
-/// (best-effort, unix-only API).
+/// Both platforms preserve the previous binary as `<current>.old` so core's
+/// boot-time rollback (`rollback.ts`) can restore it if the new binary
+/// crash-loops.
+///
+/// Unix: hard-link `current` -> `<current>.old` (instant, same-FS, keeps the old
+/// inode alive), then a single atomic `rename(staged, current)` swaps the new
+/// binary in with no window where `current` is missing; then chmod 0o755.
 ///
 /// Windows: the running .exe can't be deleted but can be renamed, so move it
-/// aside first; if the follow-on install rename fails, revert the aside so the
-/// supervisor still finds the previous working binary on relaunch.
+/// aside to `.old` first; if the follow-on install rename fails, revert the
+/// aside so the supervisor still finds the previous working binary on relaunch.
 pub fn perform_swap(staged: &Path, current: &Path, is_windows: bool) -> SwapResult {
     if is_windows {
         let old = old_path(current);
@@ -169,6 +175,16 @@ pub fn perform_swap(staged: &Path, current: &Path, is_windows: bool) -> SwapResu
         return SwapResult::Ok;
     }
 
+    // Unix: preserve the old binary as `<current>.old` before the atomic rename.
+    // A hard link keeps the old inode alive without a copy and without ever
+    // leaving `current` missing. Fall back to a copy on filesystems that lack
+    // hard links; if even that fails, proceed without a rollback anchor rather
+    // than abort the update.
+    let old = old_path(current);
+    let _ = std::fs::remove_file(&old);
+    if std::fs::hard_link(current, &old).is_err() {
+        let _ = std::fs::copy(current, &old);
+    }
     if let Err(e) = std::fs::rename(staged, current) {
         return SwapResult::RenameFailed(e);
     }
@@ -316,16 +332,19 @@ fn spawn_new_core(current: &Path, args: &[String]) -> std::io::Result<()> {
         .map(|_child| ())
 }
 
-/// Revert the swap after a spawn failure. Unix: rename current back to staged.
-/// Windows: remove current, then rename `<current>.old` back to current.
-fn revert_swap(staged: &Path, current: &Path, is_windows: bool) -> std::io::Result<()> {
+/// Revert the swap after a spawn failure by restoring the previous binary from
+/// the `<current>.old` anchor that perform_swap preserved on both platforms.
+/// `rename(old, current)` atomically replaces the unspawnable new binary, so
+/// `current` is never missing. (The old Unix path renamed `current` back to
+/// `staged`, which left `current` missing entirely.)
+fn revert_swap(current: &Path, is_windows: bool) -> std::io::Result<()> {
+    let old = old_path(current);
     if is_windows {
-        let old = old_path(current);
+        // Windows can't overwrite the (failed-to-spawn) running-ish binary via
+        // rename, so remove it first, then move `.old` back.
         let _ = std::fs::remove_file(current); // .catch(() => {}) in TS
-        std::fs::rename(&old, current)
-    } else {
-        std::fs::rename(current, staged)
     }
+    std::fs::rename(&old, current)
 }
 
 fn usage() {
@@ -388,7 +407,7 @@ fn run(args: &Args, is_windows: bool, settle: Duration) -> ExitCode {
         }
         Err(e) => {
             log.log(Level::Error, &format!("failed to spawn new core: {}", e));
-            match revert_swap(staged, current, is_windows) {
+            match revert_swap(current, is_windows) {
                 Ok(()) => log.log(Level::Warn, "swap reverted after spawn failure"),
                 Err(re) => log.log(
                     Level::Error,
@@ -512,7 +531,7 @@ mod tests {
     // --- swap (ports swap.test.ts) -----------------------------------------
 
     #[test]
-    fn unix_moves_staged_over_current_and_staged_is_gone() {
+    fn unix_moves_staged_over_current_and_preserves_old_anchor() {
         let d = TempDir::new();
         let staged = d.join("staged");
         let current = d.join("current");
@@ -525,6 +544,28 @@ mod tests {
         ));
         assert_eq!(read(&current), "v2");
         assert!(!staged.exists());
+        // The previous binary must survive as `<current>.old` so boot rollback
+        // can restore it on Unix (it didn't before; rollback was a no-op there).
+        assert_eq!(read(&old_path(&current)), "v1");
+    }
+
+    #[test]
+    fn unix_revert_restores_old_binary_over_current() {
+        let d = TempDir::new();
+        let staged = d.join("staged");
+        let current = d.join("current");
+        write(&staged, "v2");
+        write(&current, "v1");
+
+        // Install v2, preserving v1 as `.old`.
+        assert!(matches!(
+            perform_swap(&staged, &current, false),
+            SwapResult::Ok
+        ));
+        // Spawn-failure revert must put the working v1 back at `current` (the old
+        // path renamed current -> staged, leaving current missing).
+        revert_swap(&current, false).unwrap();
+        assert_eq!(read(&current), "v1");
     }
 
     #[test]

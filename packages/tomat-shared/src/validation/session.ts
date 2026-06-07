@@ -179,7 +179,7 @@ export const errorMessageInputSchema = z
     role: z.literal("error"),
     content: z.string(),
     code: z.string().optional(),
-    details: z.record(z.unknown()).optional(),
+    details: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 

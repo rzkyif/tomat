@@ -25,7 +25,7 @@ import { appearanceGroup } from "./groups/appearance.ts";
 import { llmGroup } from "./groups/llm.ts";
 import { promptsGroup } from "./groups/prompts.ts";
 import { snippetsGroup } from "./groups/snippets.ts";
-import { toolkitsGroup } from "./groups/toolkits.ts";
+import { toolkitsGroup, toolsGroup } from "./groups/toolkits.ts";
 import { dualModelGroup } from "./groups/dual-model.ts";
 import { sttInputGroup } from "./groups/stt-input.ts";
 import { sttEngineGroup } from "./groups/stt-engine.ts";
@@ -96,6 +96,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   promptsGroup,
   snippetsGroup,
   toolkitsGroup,
+  toolsGroup,
   dualModelGroup,
   sttInputGroup,
   sttEngineGroup,
@@ -154,9 +155,7 @@ export function getDefaultSettings(): Record<string, unknown> {
           field.type !== "command_preview" &&
           field.type !== "services" &&
           field.type !== "storage" &&
-          field.type !== "snippets" &&
-          field.type !== "toolkits" &&
-          field.type !== "cores"
+          field.type !== "object_management"
         ) {
           defaults[field.id] = field.defaultValue;
         }
@@ -351,16 +350,15 @@ export function searchFields(
       const matched: SettingField[] = [];
       for (const field of section.fields) {
         // command_preview is a derived display, not user-targetable; the
-        // services/storage/toolkits/cores panels have no atomic field-level
-        // state either. Snippets DO have searchable name + description,
-        // so they're intentionally NOT excluded. Typing "snippet" in
-        // search jumps to the snippets panel.
+        // services/storage display panels and object_management managers
+        // (snippets/toolkits/cores) have no atomic field-level state to surface
+        // in search results, and a manager is a full scrolling surface that
+        // doesn't render sensibly inline, so they're excluded.
         if (
           field.type === "command_preview" ||
           field.type === "services" ||
           field.type === "storage" ||
-          field.type === "toolkits" ||
-          field.type === "cores"
+          field.type === "object_management"
         ) {
           continue;
         }
@@ -387,7 +385,8 @@ export function searchFields(
 
 function fieldMatchesQuery(field: SettingField, q: string): boolean {
   if (field.name.toLowerCase().includes(q)) return true;
-  if (field.description.toLowerCase().includes(q)) return true;
+  // description is optional on object_management fields (it lives on the group).
+  if (field.description?.toLowerCase().includes(q)) return true;
 
   if (field.type === "select" && field.options) {
     for (const opt of field.options) {
@@ -434,9 +433,7 @@ function settingValueTypeOk(field: SettingField, value: unknown): boolean {
       return typeof value === "string";
     case "services":
     case "storage":
-    case "snippets":
-    case "toolkits":
-    case "cores":
+    case "object_management":
       return true;
   }
 }

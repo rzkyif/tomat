@@ -82,6 +82,15 @@
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   });
+
+  // Move focus into the dialog on open and restore it to the previously-focused
+  // element on close, so keyboard users aren't stranded at the document root.
+  $effect(() => {
+    if (!open) return;
+    const prevFocus = document.activeElement as HTMLElement | null;
+    requestAnimationFrame(() => popupEl?.focus());
+    return () => prevFocus?.focus?.();
+  });
 </script>
 
 <svelte:window onresize={computeStyle} />
@@ -102,7 +111,7 @@
          inside from reaching the backdrop. -->
     <div
       bind:this={popupEl}
-      class="absolute bg-surface rounded-large p-5 shadow-xl flex flex-col gap-3 {extraClass}"
+      class="absolute bg-surface rounded-large shadow-xl flex flex-col p-5 gap-3 {extraClass}"
       style={popupStyle}
       role="dialog"
       tabindex="-1"

@@ -47,6 +47,11 @@ export class CoreClient {
   private listeners = new Subscribers<WsListener>();
   private wsConnected = false;
   private wsClosing = false;
+  // A connect is in flight (openSocket running) or a reconnect timer is armed.
+  // Together with `ws` these gate connectWs() so subscribe() during the backoff
+  // window can't open a second socket racing the scheduled reconnect.
+  private wsConnecting = false;
+  private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pongTimeoutId: number | null = null;
   private pingTimeoutId: number | null = null;
   private connState: ConnectionState = "disconnected";
@@ -173,6 +178,11 @@ export class CoreClient {
 
   close(): void {
     this.wsClosing = true;
+    this.wsConnecting = false;
+    if (this.wsReconnectTimer !== null) {
+      clearTimeout(this.wsReconnectTimer);
+      this.wsReconnectTimer = null;
+    }
     if (this.pingTimeoutId !== null) clearTimeout(this.pingTimeoutId);
     if (this.pongTimeoutId !== null) clearTimeout(this.pongTimeoutId);
     this.ws?.close();
@@ -236,6 +246,10 @@ export class CoreClient {
 
   private connectWs(): void {
     if (this.wsClosing) return;
+    // Already connected, a connect is in flight, or a reconnect is scheduled:
+    // don't open a competing socket.
+    if (this.ws || this.wsConnecting || this.wsReconnectTimer !== null) return;
+    this.wsConnecting = true;
     const wsUrl =
       this.endpoint.baseUrl.replace(/^http/, "ws") +
       `/ws/v1?token=${encodeURIComponent(this.endpoint.token)}`;
@@ -263,10 +277,13 @@ export class CoreClient {
     }
     // A close() may have raced in while we were connecting.
     if (this.wsClosing) {
+      this.wsConnecting = false;
       sock.close();
       return;
     }
     this.ws = sock;
+    // Connected: the `ws` guard in connectWs() now applies.
+    this.wsConnecting = false;
     sock.onOpen(() => {
       this.wsConnected = true;
       this.wsBackoffMs = 500;
@@ -332,12 +349,17 @@ export class CoreClient {
 
   private handleWsClosed(): void {
     this.wsConnected = false;
+    this.wsConnecting = false;
     this.ws = null;
     this.setConnState("disconnected", this.lastWsError ?? undefined);
     if (this.wsClosing || this.listeners.size === 0) return;
+    if (this.wsReconnectTimer !== null) return; // a reconnect is already scheduled
     const delay = this.wsBackoffMs;
     this.wsBackoffMs = Math.min(this.wsBackoffMs * 2, this.wsBackoffCapMs);
-    setTimeout(() => this.connectWs(), delay);
+    this.wsReconnectTimer = setTimeout(() => {
+      this.wsReconnectTimer = null;
+      this.connectWs();
+    }, delay);
   }
 }
 

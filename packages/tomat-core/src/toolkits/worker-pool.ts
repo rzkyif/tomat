@@ -98,6 +98,7 @@ export class WorkerPool {
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let cancelled = false;
+    let settled = false;
     let askUserPending = false;
     // Tracks how much of the callTimeoutMs budget is still available so
     // askUser can pause + resume the timer (instead of resetting it).
@@ -151,6 +152,7 @@ export class WorkerPool {
           case "tool_result":
             off();
             disarm();
+            settled = true;
             worker.inFlightCalls--;
             this.bumpIdleTimer(key);
             resolve(frame.result);
@@ -158,6 +160,7 @@ export class WorkerPool {
           case "tool_error":
             off();
             disarm();
+            settled = true;
             worker.inFlightCalls--;
             this.bumpIdleTimer(key);
             // If we already emitted tool_cancelled, the consumer has moved
@@ -200,6 +203,7 @@ export class WorkerPool {
           // catch path runs. Without the synthetic event the chat-side
           // ToolCall bubble would never reach a terminal state.
           off();
+          settled = true;
           worker.inFlightCalls = Math.max(0, worker.inFlightCalls - 1);
           this.bumpIdleTimer(key);
           const msg = errMessage(err);
@@ -225,16 +229,17 @@ export class WorkerPool {
       timeoutArmedAt = Date.now();
       timeout = setTimeout(() => {
         if (askUserPending) return;
-        // Bookkeeping must run even if the worker is already dead and
-        // `send` throws. Otherwise the listener leaks and `done` hangs.
-        try {
-          worker.send({ kind: "cancel", callId });
-        } catch {
-          /* worker is gone; cancel is moot */
-        }
+        // Bookkeeping must run even if the worker is already dead. Otherwise the
+        // listener leaks and `done` hangs.
         offHandler();
-        worker.inFlightCalls--;
-        this.bumpIdleTimer(key);
+        settled = true;
+        worker.inFlightCalls = Math.max(0, worker.inFlightCalls - 1);
+        // A cooperative `cancel` frame is useless against a CPU-bound or wedged
+        // tool: it never reaches the worker's event loop. Force-kill the worker
+        // and drop it from the pool so it stops burning a core, instead of
+        // leaving it warm until idle eviction (~5 min). A fresh worker spawns on
+        // the next call.
+        this.killWorker(key, worker);
         rejectDone(new AppError("internal_error", "tool call timed out"));
       }, timeoutBudgetMs);
     };
@@ -271,6 +276,17 @@ export class WorkerPool {
         }
         worker.send({ kind: "cancel", callId });
         disarm();
+        // If the worker doesn't ack the cancel within a short grace window
+        // (wedged / CPU-bound, so the cooperative frame never runs), force-kill
+        // it so `done` settles and the process stops consuming a core.
+        setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          offHandler();
+          worker.inFlightCalls = Math.max(0, worker.inFlightCalls - 1);
+          this.killWorker(key, worker);
+          rejectDone(new AppError("internal_error", "tool call cancelled"));
+        }, this.config.drainTimeoutMs);
       },
       respondAskUser: (requestId, answers) => {
         askUserPending = false;
@@ -412,6 +428,19 @@ export class WorkerPool {
     return w;
   }
 
+  // Force-kill a specific worker and drop it from the pool. Used when a call
+  // times out or a cancel goes unacked: the worker is wedged/CPU-bound, so we
+  // can't reuse it. The identity check avoids tearing down a replacement worker
+  // that may already have taken this key.
+  private killWorker(key: string, worker: WorkerHandle): void {
+    if (this.workers.get(key) === worker) {
+      this.workers.delete(key);
+      this.removeFromLru(key);
+      this.clearIdleTimer(key);
+    }
+    void worker.terminate(this.config.drainTimeoutMs);
+  }
+
   private evictLeastRecent(): boolean {
     // Walk LRU head-to-tail (oldest first) and evict the first idle worker.
     // In-flight workers are skipped without disturbing LRU order; if every
@@ -481,17 +510,25 @@ function workerKey(toolkitId: string, toolName: string): string {
 }
 
 function resolveEntryPath(toolkitFolder: string): string {
-  // Default to index.ts / index.js / package.json main. Worker uses
-  // dynamic import("file://..."), so we just point at the file Deno's
-  // module resolver should treat as the entry. For npm-extracted toolkits
-  // the package.json "main" field is the most reliable; for local toolkits
-  // we fall back to index.ts.
-  // Caller resolution defers to a simple convention here; richer logic can
-  // be added later if needed.
+  // Resolution order: deno.json "exports" (string form) for deno-native
+  // toolkits (e.g. the built-in, which ships no package.json), then
+  // package.json "main" for npm-extracted toolkits, then the index.ts
+  // convention. The worker imports this via file://, so we just need the right
+  // entry file.
   try {
-    const pkgPath = `${toolkitFolder}/package.json`;
-    const text = Deno.readTextFileSync(pkgPath);
-    const pkg = JSON.parse(text) as { main?: string; exports?: unknown };
+    const cfg = JSON.parse(Deno.readTextFileSync(`${toolkitFolder}/deno.json`)) as {
+      exports?: unknown;
+    };
+    if (typeof cfg.exports === "string" && cfg.exports.length > 0) {
+      return `${toolkitFolder}/${cfg.exports.replace(/^\.\//, "")}`;
+    }
+  } catch {
+    /* no deno.json (or no string exports) */
+  }
+  try {
+    const pkg = JSON.parse(Deno.readTextFileSync(`${toolkitFolder}/package.json`)) as {
+      main?: string;
+    };
     if (typeof pkg.main === "string" && pkg.main.length > 0) {
       return `${toolkitFolder}/${pkg.main.replace(/^\.\//, "")}`;
     }

@@ -13,6 +13,7 @@
 // crashes.
 
 import { join } from "@std/path";
+import { errMessage } from "@tomat/shared";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
@@ -20,6 +21,18 @@ import { trackSidecarPid } from "./jobctl.ts";
 import { requireWorkerDeno } from "./worker-deno.ts";
 
 const log = getLogger("embedding");
+
+// Boot handshake deadline: the worker must emit `ready` within this.
+const BOOT_TIMEOUT_MS = 5_000;
+// Per-embed deadline. chat tool-filtering awaits embed() inline, so a
+// wedged-but-alive worker (lost frame, ORT stall) must not hang the turn
+// forever.
+const EMBED_CALL_TIMEOUT_MS = 30_000;
+// Crash backoff: after a failed boot, refuse new spawns for a growing window so
+// a deterministically-crashing worker (corrupt model, missing dep) is not
+// re-spawned (a ~340MB import) on every embed() call.
+const BACKOFF_BASE_MS = 1_000;
+const BACKOFF_MAX_MS = 30_000;
 
 type WorkerFrame =
   | { kind: "ready" }
@@ -29,6 +42,7 @@ type WorkerFrame =
 interface PendingEmbed {
   resolve: (vectors: Float32Array[]) => void;
   reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 export class EmbeddingController {
@@ -38,6 +52,13 @@ export class EmbeddingController {
   private spawning: Promise<void> | null = null;
   private pending = new Map<string, PendingEmbed>();
   private counter = 0;
+  // Boot handshake settlers, owned by the in-flight spawn(); the `ready` frame
+  // resolves and a subprocess exit rejects, instead of a self-rescheduling poll.
+  private bootResolve: (() => void) | null = null;
+  private bootReject: ((err: Error) => void) | null = null;
+  // Crash-backoff state.
+  private consecutiveBootFailures = 0;
+  private nextRetryAt = 0;
 
   private workerEntry(): string {
     // Resolved at runtime to escape `deno compile`'s static analyzer.
@@ -51,7 +72,16 @@ export class EmbeddingController {
     await this.ensureSpawned();
     const id = `e${++this.counter}`;
     return new Promise<Float32Array[]>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(
+          new AppError(
+            "internal_error",
+            `embedding call timed out after ${EMBED_CALL_TIMEOUT_MS}ms`,
+          ),
+        );
+      }, EMBED_CALL_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject, timer });
       this.send({ kind: "embed", id, texts });
     });
   }
@@ -61,10 +91,36 @@ export class EmbeddingController {
   private ensureSpawned(): Promise<void> {
     if (this.ready) return Promise.resolve();
     if (this.spawning) return this.spawning;
-    this.spawning = this.spawn().finally(() => {
+    this.spawning = this.spawnWithBackoff().finally(() => {
       this.spawning = null;
     });
     return this.spawning;
+  }
+
+  private async spawnWithBackoff(): Promise<void> {
+    if (Date.now() < this.nextRetryAt) {
+      throw new AppError(
+        "server_busy",
+        `embedding worker is in backoff after ${this.consecutiveBootFailures} failed boot(s)`,
+      );
+    }
+    try {
+      await this.spawn();
+      this.consecutiveBootFailures = 0;
+      this.nextRetryAt = 0;
+    } catch (err) {
+      this.consecutiveBootFailures++;
+      const delay = Math.min(
+        BACKOFF_BASE_MS * 2 ** (this.consecutiveBootFailures - 1),
+        BACKOFF_MAX_MS,
+      );
+      this.nextRetryAt = Date.now() + delay;
+      log.warn(
+        `embedding boot failed (${this.consecutiveBootFailures} in a row); ` +
+          `backing off ${delay}ms: ${errMessage(err)}`,
+      );
+      throw err;
+    }
   }
 
   private async spawn(): Promise<void> {
@@ -101,22 +157,34 @@ export class EmbeddingController {
     void proc.status.then((s) => {
       log.warn(`embedding subprocess exited (code=${s.code})`);
       this.failPending(new AppError("internal_error", "embedding subprocess exited"));
+      // If the exit races the boot handshake, reject the boot promise too so the
+      // spawn doesn't hang until the boot timeout.
+      this.bootReject?.(new AppError("internal_error", "embedding subprocess exited during boot"));
+      this.bootResolve = null;
+      this.bootReject = null;
       this.proc = null;
       this.writer = null;
       this.ready = false;
     });
 
+    // Settle on the first `ready` frame, on subprocess exit (above), or on a
+    // hard timeout. No self-rescheduling poll: an earlier version rescheduled a
+    // 50ms timer that kept firing for the whole process lifetime when boot never
+    // completed.
     await new Promise<void>((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("embedding worker boot timeout")), 5_000);
-      const check = () => {
-        if (this.ready) {
-          clearTimeout(t);
-          resolve();
-        } else {
-          setTimeout(check, 50);
-        }
+      const t = setTimeout(() => {
+        this.bootResolve = null;
+        this.bootReject = null;
+        reject(new Error("embedding worker boot timeout"));
+      }, BOOT_TIMEOUT_MS);
+      this.bootResolve = () => {
+        clearTimeout(t);
+        resolve();
       };
-      check();
+      this.bootReject = (err) => {
+        clearTimeout(t);
+        reject(err);
+      };
     });
   }
 
@@ -124,7 +192,16 @@ export class EmbeddingController {
     if (!this.writer) {
       throw new AppError("internal_error", "embedding subprocess not running");
     }
-    void this.writer.write(new TextEncoder().encode(JSON.stringify(frame) + "\n"));
+    // If stdin is already closed (worker crashed after `ready` but before
+    // proc.status fired), the write rejects. Route it through failPending so the
+    // embed that queued before we noticed the crash fails instead of hanging.
+    this.writer.write(new TextEncoder().encode(JSON.stringify(frame) + "\n")).catch((err) => {
+      this.failPending(
+        err instanceof Error
+          ? err
+          : new AppError("internal_error", `embedding write failed: ${err}`),
+      );
+    });
   }
 
   private async pumpStdout(stream: ReadableStream<Uint8Array>): Promise<void> {
@@ -157,11 +234,15 @@ export class EmbeddingController {
     switch (frame.kind) {
       case "ready":
         this.ready = true;
+        this.bootResolve?.();
+        this.bootResolve = null;
+        this.bootReject = null;
         return;
       case "embedded": {
         const pending = this.pending.get(frame.id);
         if (!pending) return;
         this.pending.delete(frame.id);
+        clearTimeout(pending.timer);
         const vectors = frame.vectorsBase64.map((b64) => {
           const bytes = base64ToBytes(b64);
           return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
@@ -173,6 +254,7 @@ export class EmbeddingController {
         const pending = this.pending.get(frame.id);
         if (!pending) return;
         this.pending.delete(frame.id);
+        clearTimeout(pending.timer);
         pending.reject(new AppError("provider_error", `embedding: ${frame.error}`));
         return;
       }
@@ -180,7 +262,10 @@ export class EmbeddingController {
   }
 
   private failPending(err: Error): void {
-    for (const p of this.pending.values()) p.reject(err);
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(err);
+    }
     this.pending.clear();
   }
 }

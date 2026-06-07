@@ -12,7 +12,7 @@
 //
 // Once that's done, this script exec's `wdio run wdio.conf.ts`.
 
-import { join } from "jsr:@std/path@^1";
+import { join } from "@std/path";
 
 const repoRoot = new URL("..", import.meta.url).pathname;
 const e2eDir = join(repoRoot, "tests", "e2e");

@@ -3,7 +3,20 @@
 // (see validation/tools-json.ts). These types describe the DB-projected
 // view that the API serves.
 
-export type ToolkitSource = "npm" | "local";
+export type ToolkitSource = "npm" | "local" | "builtin";
+
+// Gated lifecycle status. `downloaded`: files on disk, deps not installed,
+// content hash not pinned. `installed`: deps installed, content hash pinned,
+// tools enable-able + (if perms granted) LLM-exposed. `drift`: on-disk content
+// no longer matches the pinned hash; all tools auto-disabled until the user
+// re-confirms (which re-pins the current content).
+export type ToolkitStatus = "downloaded" | "installed" | "drift";
+
+// The built-in toolkit is CDN-distributed (never published to npm) and carries a
+// fixed id, which doubles as its on-disk folder name under the toolkits dir. It
+// is the package's own name and already satisfies the local-slug charset, so no
+// flattening is applied.
+export const BUILTIN_TOOLKIT_ID = "tomat-builtin-toolkit";
 
 export type PermissionKind = "net" | "read" | "write" | "run" | "env" | "ffi" | "sys";
 
@@ -83,8 +96,9 @@ export interface Toolkit {
   version: string;
   installedPath: string;
   toolsJsonHash: string;
+  // The pinned trust anchor. Empty string until the toolkit is installed.
   contentHash: string;
-  enabled: boolean;
+  status: ToolkitStatus;
   lastError?: string;
   installedAtMs: number;
   updatedAtMs: number;

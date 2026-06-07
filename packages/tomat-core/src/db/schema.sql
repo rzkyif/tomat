@@ -65,17 +65,21 @@ CREATE TABLE IF NOT EXISTS attachments (
   created_at_ms INTEGER NOT NULL
 );
 
--- Installed toolkits (one row per npm package or local folder)
+-- Toolkits (one row per npm package, local folder, or the built-in). The
+-- `status` column tracks the gated lifecycle: 'downloaded' (files on disk, deps
+-- not installed, content_hash not yet pinned), 'installed' (deps installed,
+-- content_hash pinned, tools enable-able), 'drift' (on-disk content no longer
+-- matches the pinned hash; all tools auto-disabled until the user re-confirms).
 CREATE TABLE IF NOT EXISTS toolkits (
   id              TEXT PRIMARY KEY,           -- flat folder name
-  source          TEXT NOT NULL,              -- 'npm' | 'local'
+  source          TEXT NOT NULL,              -- 'npm' | 'local' | 'builtin'
   display_name    TEXT NOT NULL,
   description     TEXT,
   version         TEXT NOT NULL,
   installed_path  TEXT NOT NULL,
   tools_json_hash TEXT NOT NULL,
-  content_hash    TEXT NOT NULL,
-  enabled         INTEGER NOT NULL DEFAULT 0,
+  content_hash    TEXT NOT NULL DEFAULT '',   -- '' until pinned at install; the trust anchor
+  status          TEXT NOT NULL DEFAULT 'downloaded',  -- 'downloaded' | 'installed' | 'drift'
   last_error      TEXT,
   installed_at_ms INTEGER NOT NULL,
   updated_at_ms   INTEGER NOT NULL
