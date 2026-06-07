@@ -50,6 +50,7 @@
     "@iconify/json": "npm:@iconify/json@^2.2.483",
     "sass-embedded": "npm:sass-embedded@^1.100.0",
     "svelte-check": "npm:svelte-check@^4.6.0",
+    "@types/node": "npm:@types/node@^25.7.0",
     "vitest": "npm:vitest@^4.1.8",
     "@vitest/coverage-v8": "npm:@vitest/coverage-v8@^4.1.8",
     "@testing-library/svelte": "npm:@testing-library/svelte@^5.3.1",
