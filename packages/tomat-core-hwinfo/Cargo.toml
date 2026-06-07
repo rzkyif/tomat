@@ -1,0 +1,18 @@
+[package]
+name = "tomat-core-hwinfo"
+version = "0.1.0"
+edition = "2021"
+description = "Hardware-introspection helper for tomat-core. Prints a small JSON blob (total/available RAM, physical CPU cores, GPU backend + VRAM, unified-memory flag) on stdout so the Deno core can size local models to the device without native FFI. Standalone binary alongside the keychain/updater helpers."
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+dbg_macro = "warn"

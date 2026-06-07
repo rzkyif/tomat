@@ -70,9 +70,18 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="{positioningClass} inset-0 bg-black/20 backdrop-blur flex items-center justify-center z-50 rounded-large"
+    class="{positioningClass} inset-0 flex items-center justify-center z-50 rounded-large"
     onpointerdown={dismissOnBackdrop ? onclose : undefined}
   >
+    <!-- Blur+dim lives on its OWN layer behind the dialog, never as the dialog's
+         parent. WebKit folds a backdrop-filter element's compositing-layer
+         children (e.g. a scroll container) into the filtered region, which would
+         blur the dialog's own content. Keeping this layer childless and the
+         dialog a separate sibling above it avoids that. -->
+    <div
+      class="absolute inset-0 bg-black/20 backdrop-blur rounded-large pointer-events-none"
+      aria-hidden="true"
+    ></div>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <!-- Dismiss on pointerdown OUTSIDE only (not click): a press that starts
@@ -80,7 +89,7 @@
          must not close it. Stopping pointerdown here keeps inside-presses from
          reaching the backdrop. -->
     <div
-      class="{surfaceClass} {sizeClass} flex flex-col gap-3 {extraClass}"
+      class="relative {surfaceClass} {sizeClass} flex flex-col gap-3 {extraClass}"
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel}

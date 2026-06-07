@@ -11,15 +11,15 @@
   // download (e.g. the LLM brain icon for an llm.modelPath fetch). Falls
   // back to a generic download icon when the group_id is unknown.
   const groupIcon = $derived(
-    SETTINGS_SCHEMA.find((g) => g.id === item.group_id)?.icon ??
+    SETTINGS_SCHEMA.find((g) => g.id === item.groupId)?.icon ??
       "i-material-symbols-download-rounded",
   );
 
   const isFlashing = $derived(downloadsState.flashingIds.has(item.id));
 
   const progressPct = $derived(() => {
-    if (item.size_bytes && item.size_bytes > 0) {
-      return Math.min(100, (item.downloaded_bytes / item.size_bytes) * 100);
+    if (item.sizeBytes && item.sizeBytes > 0) {
+      return Math.min(100, (item.downloadedBytes / item.sizeBytes) * 100);
     }
     return 0;
   });
@@ -42,10 +42,10 @@
   });
 
   const sizeText = $derived(() => {
-    if (item.size_bytes != null && item.status === "Downloading") {
-      return `${formatBytes(item.downloaded_bytes)} / ${formatBytes(item.size_bytes)}`;
+    if (item.sizeBytes != null && item.status === "Downloading") {
+      return `${formatBytes(item.downloadedBytes)} / ${formatBytes(item.sizeBytes)}`;
     }
-    if (item.size_bytes != null) return formatBytes(item.size_bytes);
+    if (item.sizeBytes != null) return formatBytes(item.sizeBytes);
     return "";
   });
 
@@ -60,7 +60,7 @@
 
 <div
   class="group relative flex items-center gap-2 h-8 px-2 rounded-small overflow-hidden transition-colors duration-1000 {rowBg()}"
-  title={item.error ?? `${item.filename} (${item.rel_path})`}
+  title={item.error ?? `${item.filename} (${item.relPath})`}
 >
   {#if item.status === "Downloading"}
     <!-- progress fill behind the row content -->
@@ -109,14 +109,16 @@
         />
       </div>
     {:else if item.status === "Completed"}
-      <IconButton
-        icon="i-material-symbols-folder-open-rounded"
-        title="Reveal in file manager"
-        size="sm"
-        variant="subtle"
-        class="hover:bg-surface-inset"
-        onclick={() => downloadsState.reveal(item.abs_path)}
-      />
+      {#if downloadsState.localCore}
+        <IconButton
+          icon="i-material-symbols-folder-open-rounded"
+          title="Reveal in file manager"
+          size="sm"
+          variant="subtle"
+          class="hover:bg-surface-inset"
+          onclick={() => downloadsState.reveal(item.absPath)}
+        />
+      {/if}
       <div class={xWrapClass}>
         <IconButton
           icon="i-material-symbols-close-rounded"

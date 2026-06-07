@@ -100,9 +100,18 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     bind:this={backdropEl}
-    class="absolute inset-0 z-50 bg-black/20 backdrop-blur"
+    class="absolute inset-0 z-50"
     onpointerdown={onclose}
   >
+    <!-- Blur+dim lives on its OWN layer, never as the popup's parent. WebKit
+         folds a backdrop-filter element's compositing-layer children (e.g. a
+         scroll container) into the filtered region, which would blur the popup's
+         own content. Keeping this layer childless and the popup a separate
+         sibling above it avoids that. -->
+    <div
+      class="absolute inset-0 bg-black/20 backdrop-blur pointer-events-none"
+      aria-hidden="true"
+    ></div>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <!-- Dismiss on pointerdown OUTSIDE only (not click): a press that starts

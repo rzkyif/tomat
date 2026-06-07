@@ -58,6 +58,7 @@ import { toolFilter } from "./tool-filter.ts";
 import { maybeGenerateTitle } from "./title-gen.ts";
 import { resolveEndpoint } from "./endpoint-resolver.ts";
 import { loadCoreSettings } from "./core-settings.ts";
+import { llmIdle } from "./llm-idle.ts";
 import { toolkitsRegistry } from "../toolkits/registry.ts";
 import { validateAndNormalizeToolArgs } from "../toolkits/validate-args.ts";
 import { type CallController, workerPool } from "../toolkits/worker-pool.ts";
@@ -105,6 +106,9 @@ export class ChatService {
       activeToolCalls: new Set(),
     };
     this.active.set(frame.streamId, stream);
+    // Cancel any pending idle-unload as soon as a turn begins (the model is
+    // about to be used). run() reloads it before scheduling if it was unloaded.
+    llmIdle().noteActivity();
     void this.run(stream, frame)
       .catch((err) => {
         log.error(`stream ${frame.streamId} crashed: ${errMessage(err)}`);
@@ -117,6 +121,8 @@ export class ChatService {
       })
       .finally(() => {
         this.active.delete(frame.streamId);
+        // When the last turn ends, arm idle-unload (no-op unless enabled).
+        llmIdle().onTurnEnd(this.active.size);
       });
   }
 
@@ -173,6 +179,8 @@ export class ChatService {
 
   private async run(stream: ActiveStream, frame: ChatStartFrame): Promise<void> {
     const settings = await loadCoreSettings();
+    // Reload the local model if idle-unload stopped it (no-op otherwise).
+    await llmIdle().ensureLoaded(settings);
 
     // Resolve the route: client may pin a route explicitly, otherwise run
     // the complexity classifier when dual-model is enabled.

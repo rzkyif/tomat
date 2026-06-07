@@ -8,6 +8,8 @@ export * from "./api/ws.ts";
 export * from "./domain/session.ts";
 export * from "./domain/toolkit.ts";
 export * from "./domain/model.ts";
+export * from "./domain/catalog.ts";
+export * from "./domain/recommend.ts";
 export * from "./domain/storage.ts";
 export * from "./domain/settings/index.ts";
 export * from "./domain/prompts.ts";

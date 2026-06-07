@@ -1,0 +1,22 @@
+#!/usr/bin/env -S deno run -A
+// catalog:build: validate the hand-authored @tomat/model-catalog families and
+// write an UNSIGNED catalog.json to dist/ for local inspection. No keys, no
+// upload. Use `deno task release:catalog:<channel>` to sign + publish.
+
+import { join } from "@std/path";
+import { ensureDir } from "@std/fs/ensure-dir";
+import { buildCatalogPayload } from "../../packages/tomat-model-catalog/src/index.ts";
+
+const REPO_ROOT = new URL("../..", import.meta.url).pathname;
+const OUT = join(REPO_ROOT, "dist", "catalog.unsigned.json");
+
+const payload = buildCatalogPayload(new Date().toISOString());
+const models = payload.families.flatMap((f) => f.models);
+await ensureDir(join(REPO_ROOT, "dist"));
+await Deno.writeTextFile(OUT, JSON.stringify(payload, null, 2));
+
+console.log(`✓ catalog valid: ${payload.families.length} families, ${models.length} models`);
+for (const f of payload.families) {
+  console.log(`  ${f.family}: ${f.models.map((m) => m.name).join(", ")}`);
+}
+console.log(`→ ${OUT}`);

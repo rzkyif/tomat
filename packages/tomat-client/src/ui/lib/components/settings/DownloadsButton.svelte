@@ -8,10 +8,11 @@
     disabled?: boolean;
   }>();
 
-  // Pending (required files missing) takes precedence over an in-flight queue:
-  // while pending, clicking re-opens the Pending Downloads modal and the
-  // download list is intentionally unreachable (accepted drawback).
-  const isPending = $derived(downloadsState.hasPending);
+  // Until the user approves the missing files, the button is in pending mode:
+  // clicking re-opens the Pending Downloads modal. Once approved (downloads
+  // enqueued) it flips to download-manager mode so the running queue is
+  // reachable, even though the app stays gated until the files land.
+  const isPending = $derived(downloadsState.needsApproval);
   const isActive = $derived(!isPending && downloadsState.active.length > 0);
   const label = $derived(
     isPending ? "Pending Downloads" : isActive ? "Downloading..." : "Downloads",

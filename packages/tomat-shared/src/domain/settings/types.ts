@@ -49,6 +49,11 @@ export interface PresetOption {
 export interface PresetConfig {
   options: PresetOption[];
   secondaryOptions?: PresetOption[];
+  /** Setting ids this preset controls, beyond any in an option's `defaults`.
+   *  Editing one of these flips the preset to "custom". Used when the preset's
+   *  values are computed at runtime (e.g. the adaptive LLM presets) rather than
+   *  baked into static `defaults`. */
+  managedKeys?: string[];
 }
 
 export interface RegexValidationRule {
@@ -200,6 +205,15 @@ export type PresetField = BaseField & {
   presetConfig: PresetConfig;
 };
 
+/** Like `preset`, but the cards' models + tuning are computed per-device at
+ *  runtime (the adaptive LLM presets) rather than applying static `defaults`.
+ *  Rendered by ModelPresetField; otherwise handled identically to `preset`. */
+export type ModelPresetField = BaseField & {
+  type: "model_preset";
+  defaultValue: string;
+  presetConfig: PresetConfig;
+};
+
 export type CommandPreviewField = BaseField & {
   type: "command_preview";
   defaultValue: string | boolean;
@@ -220,6 +234,7 @@ export type SettingField =
   | NumberSliderField
   | SelectField
   | PresetField
+  | ModelPresetField
   | CommandPreviewField;
 
 export type SettingType = SettingField["type"];

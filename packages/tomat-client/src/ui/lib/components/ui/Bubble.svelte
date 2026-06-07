@@ -83,9 +83,13 @@
 <!-- Positioning + halo-containment wrapper. The body below clips its own
      overflow, so the blur halo (which extends beyond the bubble) lives out
      here as sibling layers behind the body. Alignment margins live on the
-     wrapper so it stays the laid-out element in the parent flex column. -->
+     wrapper so it stays the laid-out element in the parent flex column.
+     `isolate` makes the bubble its own stacking context so the halo (z-0) ->
+     body (z-10) order is resolved WITHIN the bubble rather than against sibling
+     bubbles / ancestor layers. Without it WebKit intermittently mis-samples the
+     halo's backdrop-filter and blurs the body that should sit on top of it. -->
 <div
-  class="relative w-fit pointer-events-none"
+  class="relative isolate w-fit pointer-events-none"
   class:mr-auto={selectedAlignment === "left"}
   class:ml-auto={selectedAlignment === "right"}
   class:mx-auto={selectedAlignment === "center"}
@@ -104,6 +108,7 @@
     {ondblclick}
     role={onclick ? "presentation" : undefined}
     class="bubble-body {bgClass} {minHClass} relative z-10 overflow-hidden rounded-large w-fit max-w-[calc(100vw-5rem)] break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
+    class:bubble-body-promote={ringCount > 0}
     class:rounded-l-small={selectedAlignment === "left" || neighborLeft}
     class:border-l-8={selectedAlignment === "left" && active}
     class:border-l-0={selectedAlignment === "left" && !active}
@@ -176,6 +181,20 @@
     to {
       border-color: transparent;
     }
+  }
+
+  /* Force the body onto its own compositing layer whenever halo rings exist.
+     The halo's `backdrop-filter` is meant to frost the desktop behind this
+     transparent window, but WebKit has a bug: under an ancestor with a
+     `transform` / `will-change: transform` (the panel slide wrapper), a
+     backdrop-filter samples the FOREGROUND of its compositing group instead of
+     the true backdrop, so the halo blurs the bubble's own content. Content that
+     already lives on its own layer is excluded from that bad sample (which is
+     why an inner `overflow-y-auto` scroll area stays sharp while the rest
+     blurs). Promoting the whole body to its own layer makes ALL of it escape
+     the same way, leaving the halo to blur only the desktop behind it. */
+  .bubble-body-promote {
+    transform: translateZ(0);
   }
 
   .bubble-progress-invert {

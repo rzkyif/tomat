@@ -184,6 +184,9 @@ const impl: Platform = {
   openExternal: async (url) => {
     window.open(url, "_blank", "noopener,noreferrer");
   },
+  // No OS file manager in a browser; the reveal affordance is hidden on web
+  // (and for remote cores) anyway.
+  revealPath: async () => {},
   updater: {
     async getVersion() {
       // Web build has no `app.getVersion()` analogue; the bundle's version

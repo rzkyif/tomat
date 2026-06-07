@@ -1,8 +1,13 @@
 // Resolve which model files each sidecar kind needs from the current
-// settings, then enqueue downloads for any that aren't on disk yet. Shared
-// between `POST /api/v1/models/ensure` (explicit client-driven trigger) and
-// `sidecar-boot` (implicit auto-download when applying a sidecar finds its
-// model missing).
+// settings, then enqueue downloads for any that aren't on disk yet.
+//
+// Note: ensureKindModels enqueues real (multi-GB) downloads, so it should only
+// run from a user-confirmed path: POST /api/v1/models/ensure (an explicit
+// download button) or POST /api/v1/requirements/download (the Pending Downloads
+// confirm modal). It is deliberately not called on a settings change or a
+// preset/model select; those just write settings, which prompts the client's
+// confirm modal via the requirements snapshot, and the user starts the download
+// from there.
 
 import { requiredModelRefs } from "@tomat/shared";
 import type { RequirementGroup } from "@tomat/shared";

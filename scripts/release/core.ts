@@ -67,11 +67,12 @@ const ALL_TRIPLES: Triple[] = [
 const WORKER_FILES = ["embedding-worker.ts", "tool-worker.ts", "tts-worker.ts"] as const;
 
 const HELPER_CRATES: Array<{
-  name: "tomat-core-keychain" | "tomat-core-updater";
+  name: "tomat-core-keychain" | "tomat-core-updater" | "tomat-core-hwinfo";
   crateDir: string;
 }> = [
   { name: "tomat-core-keychain", crateDir: "packages/tomat-core-keychain" },
   { name: "tomat-core-updater", crateDir: "packages/tomat-core-updater" },
+  { name: "tomat-core-hwinfo", crateDir: "packages/tomat-core-hwinfo" },
 ];
 
 const MANIFEST_CACHE_CONTROL = "public, max-age=300";

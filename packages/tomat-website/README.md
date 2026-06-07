@@ -7,7 +7,7 @@ R2 public bucket at `get.au.tomat.ing`:
 - `/install/*`: install one-liners (`core.sh`, `client.ps1`, …)
 - `/schemas/*`: published JSON schemas (`tools-v1.json`)
 - `/manifests/*`: signed manifests (`core.json`, `binaries.json`,
-  `client.json`)
+  `client.json`, `catalog.json`)
 - `/<version>/<triple>/…`: compiled binaries and the host Tauri bundle
 
 The Worker stays request-free (free-tier); R2 serves the rest as a public bucket
@@ -47,21 +47,25 @@ Run from the **repo root**:
 Channelled tasks require an explicit channel (`:stable` or `:beta`); the
 channel-independent ones (`scripts`/`schemas`/`website`) serve every channel.
 
-| Task                               | What it owns                                                                                                         |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `deno task release:stable`         | Runs every sub-task below in sequence (use `release:beta` for the beta channel)                                      |
-| `deno task release:core:stable`    | Compiles `tomat-core`/`updater`/`keychain`, hashes workers, signs + uploads `core.json` + `binaries.json` + binaries |
-| `deno task release:toolkit:stable` | Packs the built-in toolkit, signs + uploads `toolkit.json` + the gzipped tarball (version read from its deno.json)   |
-| `deno task release:client:stable`  | Builds the host Tauri client bundle, merges the host platform entry into `client.json`, uploads bundle + manifest    |
-| `deno task release:scripts`        | Syncs `scripts/install/*` to `get.au.tomat.ing/install/*` (per-file content compare)                                 |
-| `deno task release:schemas`        | Syncs `tools-v1.json` to `get.au.tomat.ing/schemas/`                                                                 |
-| `deno task release:website`        | Source-hash probe → `astro build` → `wrangler deploy`                                                                |
+| Task                               | What it owns                                                                                                                            |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `deno task release:stable`         | Runs every sub-task below in sequence (use `release:beta` for the beta channel)                                                         |
+| `deno task release:core:stable`    | Compiles `tomat-core`/`updater`/`keychain`/`hwinfo`, hashes workers, signs + uploads `core.json` + `binaries.json` + binaries           |
+| `deno task release:toolkit:stable` | Packs the built-in toolkit, signs + uploads `toolkit.json` + the gzipped tarball (version read from its deno.json)                      |
+| `deno task release:catalog:stable` | Compiles the `@tomat/model-catalog` families into one `catalog.json`, signs + uploads it (the local-model catalog the fit engine reads) |
+| `deno task release:client:stable`  | Builds the host Tauri client bundle, merges the host platform entry into `client.json`, uploads bundle + manifest                       |
+| `deno task release:scripts`        | Syncs `scripts/install/*` to `get.au.tomat.ing/install/*` (per-file content compare)                                                    |
+| `deno task release:schemas`        | Syncs `tools-v1.json` to `get.au.tomat.ing/schemas/`                                                                                    |
+| `deno task release:website`        | Source-hash probe → `astro build` → `wrangler deploy`                                                                                   |
 
 Every release task supports `--dry-run` (probe + build locally, skip uploads)
 and `--force` (skip the idempotency probe). `release:core:*` also takes
 `--triples=<list>` and `--skip-build`. To cut a new built-in toolkit version,
 bump `packages/tomat-builtin-toolkit/deno.json` and run
-`deno task release:toolkit:stable`.
+`deno task release:toolkit:stable`. To refresh the local-model catalog, edit the
+per-family files under `packages/tomat-model-catalog/` (see that package's
+README; `deno task catalog:build` validates locally) and run
+`deno task release:catalog:stable`.
 
 End state of a successful `release`:
 
@@ -70,6 +74,7 @@ End state of a successful `release`:
 - `https://get.au.tomat.ing/schemas/tools-v1.json`: published schema
 - `https://get.au.tomat.ing/manifests/core.json`: signed self-update manifest
 - `https://get.au.tomat.ing/manifests/toolkit.json`: signed built-in toolkit manifest
+- `https://get.au.tomat.ing/manifests/catalog.json`: signed local-model catalog
 - `https://get.au.tomat.ing/<version>/<triple>/tomat-core`: binary
 
 ## Local preview

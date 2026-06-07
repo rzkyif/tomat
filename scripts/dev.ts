@@ -187,6 +187,13 @@ function formatChildLine(raw: string): string | null {
   if (plain.trim() === "") return null; // blank spacing from build tools
   if (BUILD_NOISE.some((re) => re.test(plain))) return null;
   if (LEVEL_RE.test(plain)) return raw; // our log: keep it (and its colors) verbatim
+  // Deno `--watch` prints "Waiting for graceful termination..." the instant it
+  // signals core, on BOTH a reload and on Ctrl-C shutdown, so it's not a
+  // reliable reload marker; drop it as noise. The watcher's "Restarting! File
+  // change detected: ..." line (handled by LEAK_SOURCES below) fires only on an
+  // actual reload, so with core's shutdown steps now at debug it naturally reads
+  // as the lead, and nothing spurious shows on shutdown.
+  if (/^Watcher\s+Waiting for graceful termination/.test(plain)) return null;
   for (const src of LEAK_SOURCES) {
     const m = plain.match(src.re);
     if (m) return leakLine(src.module, m[1]);

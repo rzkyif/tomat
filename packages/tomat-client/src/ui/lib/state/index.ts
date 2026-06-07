@@ -17,6 +17,7 @@ export * from "./toolkits.svelte";
 export * from "./expansion.svelte";
 export * from "./downloads.svelte";
 export * from "./update.svelte";
+export * from "./model-recommend.svelte";
 // tts.svelte is not re-exported here. Consumers that need it import it
 // directly from "$lib/state/tts.svelte".
 

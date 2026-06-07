@@ -6642,6 +6642,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tomat-core-hwinfo"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sysinfo",
+]
+
+[[package]]
 name = "tomat-core-keychain"
 version = "0.1.0"
 dependencies = [

@@ -9,11 +9,25 @@
 
 import type { DownloadEntry, RequiredFile, ServerToClientFrame } from "@tomat/shared";
 import { cores } from "$lib/core";
+import { platform } from "$lib/platform";
 import { getLogger } from "$lib/shared/log";
 import { confirmState } from "./confirm.svelte";
 
 const log = getLogger("downloads");
 const reqLog = getLogger("requirements");
+
+/** True when a core's files live on this same device, i.e. its base URL is
+ *  loopback. Only then can we reveal a downloaded file in the local file
+ *  manager (a remote core's paths don't exist on this machine). */
+function isLocalBaseUrl(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return false;
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+  } catch {
+    return false;
+  }
+}
 
 class DownloadsState {
   items = $state<DownloadEntry[]>([]);
@@ -31,6 +45,17 @@ class DownloadsState {
   // core-switch show a loading state instead of defaulting to "ready" and then
   // flipping to "pending" once a snapshot reveals missing files.
   requirementsLoaded = $state(false);
+  // True when the current core is on this same device (loopback). Gates the
+  // "reveal in file manager" affordance, since a remote core's file paths don't
+  // exist on this machine. Refreshed whenever snapshots are (re)seeded.
+  localCore = $state(false);
+  // Missing-file sources the user has approved downloading (via the Pending
+  // Downloads modal). Pruned on every snapshot to whatever is still missing, so
+  // approval persists as the batch downloads + shrinks, but a newly-surfaced
+  // requirement (e.g. switching model) needs approval again. Drives the
+  // download button: pending->approve flips it to download-manager mode while
+  // the app stays gated until the files actually land.
+  approvedSources = $state<Set<string>>(new Set());
 
   active = $derived(this.items.filter((i) => i.status === "Pending" || i.status === "Downloading"));
   completed = $derived(this.items.filter((i) => i.status === "Completed"));
@@ -39,6 +64,11 @@ class DownloadsState {
   hasAny = $derived(this.items.length > 0);
 
   hasPending = $derived(this.missing.length > 0);
+  /** Missing files the user hasn't approved downloading yet. While true the
+   *  download button stays in "Pending Downloads" mode (opens the confirm
+   *  modal); once approved it flips to download-manager mode even though the app
+   *  is still gated (`hasPending`) until the files finish downloading. */
+  needsApproval = $derived(this.missing.some((m) => !this.approvedSources.has(m.source)));
   /** True until the first requirements snapshot arrives for the current core:
    *  callers show a loading state rather than assuming "ready". */
   loading = $derived(!this.requirementsLoaded);
@@ -52,6 +82,7 @@ class DownloadsState {
   );
 
   private unsubscribeWs: (() => void) | null = null;
+  private unsubscribeConn: (() => void) | null = null;
 
   attach(): void {
     if (this.unsubscribeWs) return;
@@ -59,26 +90,35 @@ class DownloadsState {
       if (frame.kind === "downloads.snapshot") {
         this.items = frame.items;
       } else if (frame.kind === "requirements.snapshot") {
-        this.required = frame.required;
-        this.missing = frame.missing;
-        this.requirementsLoaded = true;
+        this.applyRequirements(frame.required, frame.missing);
       }
     });
-    // Seed before the first WS broadcast arrives. Skipped when no core is
-    // paired yet (cores().api() throws); the WS frames populate everything
-    // once a core is selected.
-    if (cores().currentEntry()) {
-      void cores()
-        .api()
-        .models.downloads()
-        .then((items) => {
-          this.items = items;
-        })
-        .catch((e) => {
-          log.warn("initial snapshot fetch failed:", e);
-        });
-      void this.refetchRequirements();
-    }
+    // The core pushes downloads/requirements as deltas over the WS but never
+    // replays a full snapshot on connect, so (re)seed over HTTP whenever the
+    // socket reaches "connected". onConnectionState fires synchronously with the
+    // current state on subscribe, so this also covers the very first connect.
+    // Covering reconnect is what un-sticks the UI after the core restarts (dev
+    // hot-reload): without it, requirementsLoaded could stay false forever.
+    this.unsubscribeConn = cores().subscribeConnectionState((state) => {
+      if (state === "connected") this.reseedSnapshots();
+    });
+  }
+
+  /** Pull the REST-only snapshots (downloads + requirements) for the current
+   *  core. Skipped when no core is paired yet (cores().api() throws). */
+  private reseedSnapshots(): void {
+    this.localCore = isLocalBaseUrl(cores().currentEntry()?.baseUrl);
+    if (!cores().currentEntry()) return;
+    void cores()
+      .api()
+      .models.downloads()
+      .then((items) => {
+        this.items = items;
+      })
+      .catch((e) => {
+        log.warn("snapshot fetch failed:", e);
+      });
+    void this.refetchRequirements();
   }
 
   /** Pull the requirements snapshot over HTTP. Load-bearing at startup (the
@@ -91,12 +131,21 @@ class DownloadsState {
     this.requirementsLoaded = false;
     try {
       const snap = await cores().api().requirements.get();
-      this.required = snap.required;
-      this.missing = snap.missing;
-      this.requirementsLoaded = true;
+      this.applyRequirements(snap.required, snap.missing);
     } catch (e) {
       reqLog.warn("initial fetch failed:", e);
     }
+  }
+
+  /** Apply an authoritative requirements snapshot. Prunes `approvedSources` to
+   *  what is still missing, so approval persists across the batch shrinking but
+   *  is forgotten once a file lands (so re-deleting it prompts again). */
+  private applyRequirements(required: RequiredFile[], missing: RequiredFile[]): void {
+    this.required = required;
+    this.missing = missing;
+    const stillMissing = new Set(missing.map((m) => m.source));
+    this.approvedSources = new Set([...this.approvedSources].filter((s) => stillMissing.has(s)));
+    this.requirementsLoaded = true;
   }
 
   /** Build + fire the "Pending Downloads" confirm modal from the current
@@ -120,6 +169,13 @@ class DownloadsState {
       downloads: plans,
       onConfirm: async () => {
         hooks?.onConfirm?.();
+        // Mark everything currently missing as approved up front, so the button
+        // flips to download-manager mode immediately (the app stays gated on
+        // `hasPending` until the files actually land).
+        this.approvedSources = new Set([
+          ...this.approvedSources,
+          ...this.missing.map((m) => m.source),
+        ]);
         try {
           await cores().api().requirements.download();
         } catch (e) {
@@ -134,6 +190,10 @@ class DownloadsState {
     if (this.unsubscribeWs) {
       this.unsubscribeWs();
       this.unsubscribeWs = null;
+    }
+    if (this.unsubscribeConn) {
+      this.unsubscribeConn();
+      this.unsubscribeConn = null;
     }
   }
 
@@ -188,10 +248,15 @@ class DownloadsState {
     }
   }
 
-  reveal(_absPath: string): void {
-    // Reveal-on-disk only meaningful for the local same-PC core. For a
-    // remote core we have nothing useful to do. Punted until the
-    // platform abstraction grows a reveal verb.
+  async reveal(absPath: string): Promise<void> {
+    // Only meaningful for a same-device core; the UI only shows the affordance
+    // when `localCore` is true, so the path exists on this machine.
+    if (!this.localCore) return;
+    try {
+      await platform().revealPath(absPath);
+    } catch (e) {
+      log.warn("reveal failed:", e);
+    }
   }
 }
 

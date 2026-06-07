@@ -6098,6 +6098,12 @@
           "npm:zod@^4.4.3"
         ]
       },
+      "packages/tomat-model-catalog": {
+        "dependencies": [
+          "jsr:@std/assert@1",
+          "npm:zod@^4.4.3"
+        ]
+      },
       "packages/tomat-shared": {
         "dependencies": [
           "jsr:@std/assert@1",

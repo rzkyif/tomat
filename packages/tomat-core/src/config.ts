@@ -39,6 +39,13 @@ export function builtinToolkitManifestUrl(): string {
   return `${STORAGE_BASE_URL}/${manifestDir()}/toolkit.json`;
 }
 
+// Signed model catalog (hand-authored in @tomat/model-catalog, compiled +
+// published by `deno task release:catalog`). The core fetches + verifies it and
+// runs the on-device fit engine against it. Nested per channel like the others.
+export function modelsCatalogUrl(): string {
+  return `${STORAGE_BASE_URL}/${manifestDir()}/catalog.json`;
+}
+
 // Schemas (tools-v1.json) are channel-independent: one published copy.
 export const SCHEMAS_BASE_URL = `${STORAGE_BASE_URL}/schemas`;
 

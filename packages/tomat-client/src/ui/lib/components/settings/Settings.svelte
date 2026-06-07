@@ -223,7 +223,10 @@
     // Don't (re)open the pending popup while disconnected; the close effect
     // above tears down any open one.
     if (connectionState.reconnecting) return;
-    if (!downloadsState.hasPending) {
+    // Only auto-popup while there are unapproved missing files. Once the user
+    // approves (downloads start), stop re-popping even though the app is still
+    // gated and the missing set is shrinking as files land.
+    if (!downloadsState.needsApproval) {
       dismissedSignature = null;
       shownSignature = null;
       return;

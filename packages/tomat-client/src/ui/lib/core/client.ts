@@ -42,8 +42,13 @@ export class ApiError extends Error {
 
 export class CoreClient {
   private ws: NetSocket | null = null;
-  private wsBackoffMs = 500;
-  private wsBackoffCapMs = 30_000;
+  private wsBackoffMs: number;
+  private readonly wsBackoffInitialMs: number;
+  private readonly wsBackoffCapMs: number;
+  // How long to wait for `onOpen` after a connect starts before giving up on it
+  // (see armConnectWatchdog). Tighter for a loopback core, looser for remote.
+  private readonly wsConnectTimeoutMs: number;
+  private readonly isLocalCore: boolean;
   private listeners = new Subscribers<WsListener>();
   private wsConnected = false;
   private wsClosing = false;
@@ -52,6 +57,11 @@ export class CoreClient {
   // window can't open a second socket racing the scheduled reconnect.
   private wsConnecting = false;
   private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Deadline timer for the in-flight connect; cleared once the socket opens.
+  private wsConnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Bumped on every connect attempt (and on watchdog/close) so a late-resolving
+  // connectWebSocket() from a superseded attempt is discarded, not adopted.
+  private wsConnectGen = 0;
   private pongTimeoutId: number | null = null;
   private pingTimeoutId: number | null = null;
   private connState: ConnectionState = "disconnected";
@@ -61,7 +71,16 @@ export class CoreClient {
   // show why. Cleared on a successful open.
   private lastWsError: string | null = null;
 
-  constructor(public readonly endpoint: CoreEndpoint) {}
+  constructor(public readonly endpoint: CoreEndpoint) {
+    // A loopback core (dev hot-reload, on-demand local spawn) restarts in well
+    // under a second, so reconnect briskly with a low cap; a remote core can be
+    // down a while, so back off further to avoid hammering the link.
+    this.isLocalCore = /\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?:[:/]|$)/.test(endpoint.baseUrl);
+    this.wsBackoffInitialMs = this.isLocalCore ? 250 : 500;
+    this.wsBackoffCapMs = this.isLocalCore ? 2_000 : 30_000;
+    this.wsConnectTimeoutMs = this.isLocalCore ? 4_000 : 12_000;
+    this.wsBackoffMs = this.wsBackoffInitialMs;
+  }
 
   // Subscribe to connection-state transitions. The listener is invoked
   // synchronously on register with the current state, and then on every
@@ -179,6 +198,8 @@ export class CoreClient {
   close(): void {
     this.wsClosing = true;
     this.wsConnecting = false;
+    this.wsConnectGen++; // discard any in-flight connect
+    this.clearConnectWatchdog();
     if (this.wsReconnectTimer !== null) {
       clearTimeout(this.wsReconnectTimer);
       this.wsReconnectTimer = null;
@@ -250,23 +271,28 @@ export class CoreClient {
     // don't open a competing socket.
     if (this.ws || this.wsConnecting || this.wsReconnectTimer !== null) return;
     this.wsConnecting = true;
+    const gen = ++this.wsConnectGen;
     const wsUrl =
       this.endpoint.baseUrl.replace(/^http/, "ws") +
       `/ws/v1?token=${encodeURIComponent(this.endpoint.token)}`;
     this.setConnState("connecting");
-    void this.openSocket(wsUrl);
+    this.armConnectWatchdog();
+    void this.openSocket(wsUrl, gen);
   }
 
   // Open a pinned WebSocket through the platform net layer (Rust on desktop,
   // browser WebSocket on web). The socket primitive differs, but the
   // backoff / ping-pong / dispatch logic is identical to the old browser path.
-  private async openSocket(wsUrl: string): Promise<void> {
+  private async openSocket(wsUrl: string, gen: number): Promise<void> {
     let sock: NetSocket;
     try {
       sock = await platform().net.connectWebSocket(wsUrl, {
         pin: this.endpoint.tlsPin,
       });
     } catch (err) {
+      // A newer attempt (watchdog/close) superseded this one while it was in
+      // flight: drop it silently so we don't double-schedule a reconnect.
+      if (gen !== this.wsConnectGen) return;
       // IPC-level failure (rare). The common connect failure (DNS / TLS pin
       // mismatch / refused) arrives later via the WS error event (onError
       // below). Record the reason and treat like a close so the backoff
@@ -275,24 +301,48 @@ export class CoreClient {
       this.handleWsClosed();
       return;
     }
-    // A close() may have raced in while we were connecting.
-    if (this.wsClosing) {
-      this.wsConnecting = false;
-      sock.close();
+    // Superseded by a newer attempt, or close() raced in while we were
+    // connecting: discard this socket.
+    if (gen !== this.wsConnectGen || this.wsClosing) {
+      try {
+        sock.close();
+      } catch {
+        /* */
+      }
       return;
     }
     this.ws = sock;
     // Connected: the `ws` guard in connectWs() now applies.
     this.wsConnecting = false;
+    // Every callback is generation-guarded: once the watchdog (or a close)
+    // abandons this attempt by bumping wsConnectGen, a late event from this now-
+    // stale socket must NOT drive state, or it could tear down the healthy
+    // socket a newer attempt has since opened.
     sock.onOpen(() => {
+      if (gen !== this.wsConnectGen) {
+        try {
+          sock.close();
+        } catch {
+          /* */
+        }
+        return;
+      }
+      this.clearConnectWatchdog();
       this.wsConnected = true;
-      this.wsBackoffMs = 500;
+      this.wsBackoffMs = this.wsBackoffInitialMs;
       this.lastWsError = null;
       this.setConnState("connected");
     });
-    sock.onMessage((data) => this.handleWsMessage(data));
-    sock.onClose(() => this.handleWsClosed());
+    sock.onMessage((data) => {
+      if (gen !== this.wsConnectGen) return;
+      this.handleWsMessage(data);
+    });
+    sock.onClose(() => {
+      if (gen !== this.wsConnectGen) return;
+      this.handleWsClosed();
+    });
     sock.onError((reason) => {
+      if (gen !== this.wsConnectGen) return;
       if (reason) this.lastWsError = reason;
       try {
         sock.close();
@@ -300,6 +350,40 @@ export class CoreClient {
         /* */
       }
     });
+  }
+
+  // Some transports resolve connectWebSocket() before the socket is truly open
+  // (or never deliver a close for a half-open socket), which would wedge us in
+  // "connecting" forever with no reconnect and a stuck "Reconnecting…" banner.
+  // Arm a deadline when a connect starts; if `onOpen` hasn't cleared it in time,
+  // tear the attempt down and fall into the backoff loop. Bumping the generation
+  // discards a late resolve from the abandoned attempt.
+  private armConnectWatchdog(): void {
+    this.clearConnectWatchdog();
+    this.wsConnectTimer = setTimeout(() => {
+      this.wsConnectTimer = null;
+      if (this.wsConnected || this.wsClosing) return;
+      log.warn(`ws connect timed out after ${this.wsConnectTimeoutMs}ms; retrying`);
+      this.wsConnectGen++;
+      const sock = this.ws;
+      this.ws = null;
+      this.wsConnecting = false;
+      if (sock) {
+        try {
+          sock.close();
+        } catch {
+          /* */
+        }
+      }
+      this.handleWsClosed();
+    }, this.wsConnectTimeoutMs);
+  }
+
+  private clearConnectWatchdog(): void {
+    if (this.wsConnectTimer !== null) {
+      clearTimeout(this.wsConnectTimer);
+      this.wsConnectTimer = null;
+    }
   }
 
   private handleWsMessage(data: string): void {
@@ -348,6 +432,7 @@ export class CoreClient {
   }
 
   private handleWsClosed(): void {
+    this.clearConnectWatchdog();
     this.wsConnected = false;
     this.wsConnecting = false;
     this.ws = null;

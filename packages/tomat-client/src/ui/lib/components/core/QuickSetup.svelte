@@ -12,7 +12,9 @@
   import SegmentedControl from "../ui/SegmentedControl.svelte";
   import Toggle from "../ui/Toggle.svelte";
   import { settingsState, viewState } from "$lib/state";
-  import { findField, type PresetOption } from "@tomat/shared";
+  import { modelRecommendState } from "$lib/state/model-recommend.svelte";
+  import { cores } from "$lib/core";
+  import { findField, type PresetBucket, type PresetOption } from "@tomat/shared";
 
   type SegOption = { value: string; label: string };
 
@@ -22,7 +24,7 @@
   // never drifts from the full Settings UI.
   const presetField = findField("llm.preset");
   const modelPresets: PresetOption[] =
-    presetField && presetField.type === "preset"
+    presetField && presetField.type === "model_preset"
       ? presetField.presetConfig.options
       : [];
 
@@ -49,6 +51,18 @@
   let ttsEnabled = $derived(!!settingsState.currentSettings["tts.enabled"]);
   let modelPreset = $derived(settingsState.currentSettings["llm.preset"]);
 
+  // The adaptive presets compute their model per-device; load them once paired.
+  const rs = modelRecommendState;
+  $effect(() => {
+    if (cores().currentEntry() && !rs.recommendations && !rs.loading) {
+      void rs.load();
+    }
+  });
+
+  function gb(bytes: number): string {
+    return `${(bytes / 1e9).toFixed(1)} GB`;
+  }
+
   function set(key: string, value: unknown): void {
     void settingsState.updateSetting(key, value);
   }
@@ -58,9 +72,7 @@
   }
 
   function applyModelPreset(preset: PresetOption): void {
-    const updates: Record<string, unknown> = { "llm.preset": preset.id };
-    if (preset.defaults) Object.assign(updates, preset.defaults);
-    void settingsState.updateSettings(updates);
+    void rs.applyBucket(preset.id as PresetBucket);
   }
 </script>
 
@@ -156,21 +168,29 @@
       <span class="text-sm font-medium text-default-700">Language Model</span>
       <div class="flex flex-col gap-2">
         {#each modelPresets as preset (preset.id)}
+          {@const rec = rs.recommendations?.buckets[preset.id as PresetBucket] ?? null}
           {#snippet presetBadges()}
-            {#each preset.badges ?? [] as badge}
+            {#if rec}
               <span class="inline-flex items-center gap-1">
-                <i class="{badge.icon} text-sm"></i>
-                <span>{badge.label}</span>
+                <i class="i-material-symbols-psychology-alt-rounded text-sm"></i>
+                <span>{rec.name}</span>
               </span>
-            {/each}
+              <span class="inline-flex items-center gap-1">
+                <i class="i-material-symbols-memory-rounded text-sm"></i>
+                <span>{gb(rec.footprintBytes)}</span>
+              </span>
+            {:else if rs.loading}
+              <span class="opacity-60">Computing for your device…</span>
+            {:else}
+              <span class="opacity-60">No model fits this tier</span>
+            {/if}
           {/snippet}
           <OptionCard
             selected={modelPreset === preset.id}
-            icon={preset.icon}
             title={preset.title ?? preset.label}
             description={preset.description}
-            badges={preset.badges?.length ? presetBadges : undefined}
-            onclick={() => applyModelPreset(preset)}
+            badges={presetBadges}
+            onclick={() => rec && applyModelPreset(preset)}
           />
         {/each}
       </div>

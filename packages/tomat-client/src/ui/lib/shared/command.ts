@@ -41,6 +41,13 @@ export const COMMANDS: Record<CommandType, CommandDefinition> = {
       { flag: "--mmap", settingId: "llm.mmap", argType: "boolean" },
       { flag: "-t", settingId: "llm.threads", argType: "value" },
       {
+        flag: "--n-gpu-layers",
+        settingId: "llm.gpuLayers",
+        argType: "value",
+        omitEmpty: true,
+      },
+      { flag: "--flash-attn", settingId: "llm.flashAttn", argType: "boolean" },
+      {
         flag: "--reasoning",
         settingId: "llm.reasoning",
         argType: "value",

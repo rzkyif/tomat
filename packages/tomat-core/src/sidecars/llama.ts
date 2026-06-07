@@ -21,6 +21,11 @@ export interface LlamaStartArgs {
   reasoningBudget?: number;
   mmap: boolean;
   webui: boolean;
+  /** Layers to offload to the GPU. 0 = CPU only; a large value (e.g. 999) =
+   *  offload all. Omitted/undefined lets llama.cpp use its own default. */
+  gpuLayers?: number;
+  /** Enable flash attention (faster attention; broadly supported). */
+  flashAttn: boolean;
 }
 
 export function llamaStartArgsFromSettings(
@@ -43,6 +48,8 @@ export function llamaStartArgsFromSettings(
     reasoningBudget: optionalNumSetting(settings, "llm.reasoningBudget"),
     mmap: boolSetting(settings, "llm.mmap", true),
     webui: boolSetting(settings, "llm.webui", false),
+    gpuLayers: presentNumSetting(settings, "llm.gpuLayers"),
+    flashAttn: boolSetting(settings, "llm.flashAttn", false),
   };
 }
 
@@ -67,6 +74,8 @@ export function buildLlamaStartOptions(args: LlamaStartArgs): StartOptions {
     "--cont-batching",
   ];
   if (args.mmap) argv.push("--mmap");
+  if (typeof args.gpuLayers === "number") argv.push("--n-gpu-layers", String(args.gpuLayers));
+  if (args.flashAttn) argv.push("--flash-attn", "on");
   if (args.reasoning !== "off") {
     argv.push("--reasoning", args.reasoning);
     if (typeof args.reasoningBudget === "number" && args.reasoningBudget > 0) {
@@ -110,6 +119,17 @@ function numSetting(s: Record<string, unknown>, k: string, def: number): number 
     if (Number.isFinite(n)) return n;
   }
   return def;
+}
+/** Like optionalNumSetting but keeps 0 (a meaningful value for gpuLayers). Returns
+ *  undefined only when the key is absent/blank/non-numeric. */
+function presentNumSetting(s: Record<string, unknown>, k: string): number | undefined {
+  const v = s[k];
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
 }
 function optionalNumSetting(s: Record<string, unknown>, k: string): number | undefined {
   const v = s[k];

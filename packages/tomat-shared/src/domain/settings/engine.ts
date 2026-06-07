@@ -314,7 +314,8 @@ export function getPresetFieldIds(groupId: string): Set<string> {
   if (!group) return ids;
   for (const section of group.sections) {
     for (const field of section.fields) {
-      if (field.type !== "preset" || !field.presetConfig) continue;
+      if ((field.type !== "preset" && field.type !== "model_preset") || !field.presetConfig)
+        continue;
       const allOptions = [
         ...field.presetConfig.options,
         ...(field.presetConfig.secondaryOptions || []),
@@ -325,6 +326,9 @@ export function getPresetFieldIds(groupId: string): Set<string> {
             ids.add(key);
           }
         }
+      }
+      for (const key of field.presetConfig.managedKeys ?? []) {
+        ids.add(key);
       }
     }
   }
@@ -394,7 +398,7 @@ function fieldMatchesQuery(field: SettingField, q: string): boolean {
     }
   }
 
-  if (field.type === "preset") {
+  if (field.type === "preset" || field.type === "model_preset") {
     for (const opt of field.presetConfig.options) {
       if (opt.label.toLowerCase().includes(q)) return true;
     }
@@ -430,6 +434,7 @@ function settingValueTypeOk(field: SettingField, value: unknown): boolean {
     case "color":
     case "shortcut":
     case "preset":
+    case "model_preset":
       return typeof value === "string";
     case "services":
     case "storage":

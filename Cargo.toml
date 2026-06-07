@@ -4,6 +4,7 @@ members = [
   "packages/tomat-client/src/tauri",
   "packages/tomat-core-keychain",
   "packages/tomat-core-updater",
+  "packages/tomat-core-hwinfo",
 ]
 # `reference/` is a local-only, git-ignored area (e.g. old app versions kept for
 # reference); keep anything inside it out of the workspace.
@@ -25,4 +26,7 @@ panic = "abort"
 opt-level = "z"
 
 [profile.release.package.tomat-core-updater]
+opt-level = "z"
+
+[profile.release.package.tomat-core-hwinfo]
 opt-level = "z"

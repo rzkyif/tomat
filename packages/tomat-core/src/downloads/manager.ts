@@ -177,6 +177,27 @@ export class DownloadManager {
     this.broadcast();
   }
 
+  /** Drop Completed rows whose file is no longer on disk (deleted in-app or
+   *  externally), so a stale "done" entry self-clears. Only removes on a
+   *  definite NotFound; other stat errors (permissions, etc.) leave the row. */
+  async reconcileCompleted(): Promise<void> {
+    const rows = db()
+      .prepare(`SELECT id, abs_path FROM downloads WHERE status = 'Completed'`)
+      .all() as Array<{ id: string; abs_path: string }>;
+    let changed = false;
+    for (const row of rows) {
+      try {
+        await Deno.stat(row.abs_path);
+      } catch (err) {
+        if (err instanceof Deno.errors.NotFound) {
+          db().prepare("DELETE FROM downloads WHERE id = ?").run(row.id);
+          changed = true;
+        }
+      }
+    }
+    if (changed) this.broadcast();
+  }
+
   snapshot(): DownloadEntry[] {
     const rows = db()
       .prepare(`

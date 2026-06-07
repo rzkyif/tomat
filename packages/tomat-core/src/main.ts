@@ -15,6 +15,7 @@ import { toolkitsRegistry } from "./toolkits/registry.ts";
 import { seedBuiltinToolkitIfNeeded } from "./toolkits/builtin-seed.ts";
 import { BROADCAST_SINK } from "./http/routes/toolkits.ts";
 import { initSidecarBoot } from "./services/sidecar-boot.ts";
+import { llmIdle } from "./services/llm-idle.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
 import { shutdownJobctl } from "./sidecars/jobctl.ts";
 import { loadCoreSettings } from "./services/core-settings.ts";
@@ -131,44 +132,86 @@ async function main(): Promise<void> {
     },
   );
 
-  // Graceful shutdown.
-  for (const sig of ["SIGINT", "SIGTERM"] as const) {
-    try {
-      Deno.addSignalListener(sig, () => {
-        log.info(`received ${sig}; shutting down`);
-        hub.shutdown();
-        downloadManager().shutdown();
-        void sidecarManager().shutdown();
-        void shutdownJobctl();
-        // Under `deno run --watch` (dev), the watcher sends SIGTERM to request a
-        // graceful restart and re-runs this module in the same process. Calling
-        // Deno.exit() here would hard-kill the watcher and end the dev session,
-        // so we only shut the server down and let `await server.finished` return
-        // so the watcher can restart. In standalone/compiled core we must exit
-        // explicitly, since stray timers/sidecars could otherwise keep the loop
-        // alive after the server closes.
-        if (Deno.env.get("TOMAT_DEV_WATCH")) {
-          // Dev `--watch` re-runs this module in the same process; leave the DB
-          // open (openDb() reuses it on the re-run).
-          void server.shutdown();
-        } else {
-          void server.shutdown().finally(() => {
-            // Checkpoint + close the DB so the WAL is folded back before exit.
-            try {
-              closeDb();
-            } catch {
-              /* best-effort */
-            }
-            Deno.exit(0);
-          });
+  // Graceful shutdown. Register one handler per signal and have the first
+  // signal remove BOTH: under dev `--watch` the runtime re-runs this module in
+  // the same process WITHOUT clearing prior signal listeners, so leaving ours
+  // installed makes every reload add another pair (the handler would then fire,
+  // log, and shut down once per past reload). An installed listener also keeps
+  // the event loop alive, so removing it is part of letting the dev drain end.
+  const signals = ["SIGINT", "SIGTERM"] as const;
+  const handlers = new Map<(typeof signals)[number], () => void>();
+  const onSignal = (sig: (typeof signals)[number]): void => {
+    for (const [s, h] of handlers) {
+      try {
+        Deno.removeSignalListener(s, h);
+      } catch {
+        /* already gone */
+      }
+    }
+    handlers.clear();
+
+    const devWatch = Boolean(Deno.env.get("TOMAT_DEV_WATCH"));
+    // Under dev `--watch` the console shows a single friendly "reloading" marker
+    // (scripts/dev.ts reformats the watcher notice), so keep the shutdown
+    // chatter at debug; standalone keeps it as operational info.
+    const trace = devWatch ? log.debug.bind(log) : log.info.bind(log);
+    trace(`received ${sig}; shutting down`);
+
+    hub.shutdown();
+    downloadManager().shutdown();
+    // Cancel the pending idle-unload timer so it can't keep the event loop
+    // alive; under dev `--watch` a pending timer stalls the restart for up to
+    // `llm.idleUnloadSeconds`.
+    llmIdle().dispose();
+    // Tear down sidecars + jobctl in the background, NOT awaited before the
+    // server close below: reaping the llama child can take up to the 5s graceful
+    // window, and serializing the server behind it would leave the HTTP listener
+    // up (so `await server.finished` never returns and the watcher never gets
+    // its drain). Run them in parallel.
+    void sidecarManager()
+      .shutdown()
+      .then(() => trace("shutdown: sidecars stopped"))
+      .catch((err) => log.warn(`shutdown: sidecar stop failed: ${errMessage(err)}`));
+    void shutdownJobctl();
+    // Close the HTTP server immediately so `await server.finished` in main() can
+    // return.
+    const closed = server.shutdown().then(() => trace("shutdown: http server closed"));
+    if (devWatch) {
+      // `deno run --watch` re-runs this module in the same process once the
+      // event loop drains to empty; Deno.exit() would kill the watcher and end
+      // the dev session, so rely on the drain. Leave the DB open (openDb()
+      // reuses it on the re-run).
+      void closed;
+    } else {
+      // Standalone/compiled core: nothing supervises us, so exit explicitly once
+      // the server closes. Checkpoint + close the DB so the WAL folds back.
+      void closed.finally(() => {
+        try {
+          closeDb();
+        } catch {
+          /* best-effort */
         }
+        Deno.exit(0);
       });
+    }
+  };
+  for (const sig of signals) {
+    try {
+      const handler = (): void => onSignal(sig);
+      handlers.set(sig, handler);
+      Deno.addSignalListener(sig, handler);
     } catch {
       /* SIGTERM unsupported on Windows */
     }
   }
 
   await server.finished;
+  // Under dev `--watch` the module must return so the watcher can re-run it. If
+  // this prints but the watcher never restarts, the server closed fine and a
+  // lingering timer/child is what's holding the event loop open.
+  if (Deno.env.get("TOMAT_DEV_WATCH")) {
+    log.debug("server.finished resolved; entrypoint returning for watcher restart");
+  }
 }
 
 if (import.meta.main) {

@@ -49,106 +49,51 @@ export const llmGroup: SettingGroup = {
         },
         {
           id: "llm.preset",
-          name: "Preset",
+          name: "Smart Preset",
           visibleWhen: { field: "llm.provider", eq: "local" },
           description:
-            "Pick a starter model. Selecting a preset replaces the model paths and tuning below. Editing any of those settings switches this to Custom.",
-          type: "preset",
-          defaultValue: "0.8b",
+            'tomat picks the best model for your device in each tier. The model shown on each card is computed from your hardware and the latest catalog; use "Check for Newer Models" to re-evaluate.',
+          type: "model_preset",
+          defaultValue: "smallest",
           presetConfig: {
+            // The adaptive presets compute their values at runtime (no static
+            // `defaults`), so list the keys they manage here: editing any of
+            // them flips the preset to Custom.
+            managedKeys: [
+              "llm.modelPath",
+              "llm.mmprojPath",
+              "llm.contextSize",
+              "llm.threads",
+              "llm.gpuLayers",
+              "llm.flashAttn",
+              "llm.supportImages",
+              "llm.idleUnloadSeconds",
+            ],
+            // These are placeholders: the client fills each card's title, badges,
+            // and description from GET /api/v1/models/recommend, and selecting a
+            // card calls POST /api/v1/models/select { bucket } rather than
+            // applying static defaults.
             options: [
               {
-                id: "0.8b",
-                label: "0.8B",
-                title: "Qwen 3.5 0.8B",
-                badges: [
-                  {
-                    icon: "i-material-symbols-memory-rounded",
-                    label: "~1 GB RAM",
-                  },
-                  { icon: "i-material-symbols-bolt-rounded", label: "Fastest" },
-                  {
-                    icon: "i-material-symbols-lightbulb-outline-rounded",
-                    label: "Basic",
-                  },
-                ],
+                id: "smallest",
+                label: "Smallest",
+                title: "Smallest",
                 description:
-                  "Lightweight and quick. Good for short questions, simple chat, and machines with limited memory.\n\nStruggles with multi-step reasoning or long contexts.",
-                defaults: {
-                  "llm.modelPath": "@unsloth/Qwen3.5-0.8B-GGUF/main/Qwen3.5-0.8B-Q4_K_M.gguf",
-                  "llm.mmprojPath": "@unsloth/Qwen3.5-0.8B-GGUF/main/mmproj-F16.gguf",
-                  "llm.contextSize": 4096,
-                  "llm.mmap": true,
-                  "llm.threads": 4,
-                  "llm.reasoning": "off",
-                  "llm.reasoningBudget": "",
-                  "llm.host": "127.0.0.1",
-                  "llm.port": "7701",
-                },
+                  "The lightest model that still works well with tomat. Minimal memory use, runs on anything.",
               },
               {
-                id: "2b",
-                label: "2B",
-                title: "Qwen 3.5 2B",
-                badges: [
-                  {
-                    icon: "i-material-symbols-memory-rounded",
-                    label: "~2 GB RAM",
-                  },
-                  {
-                    icon: "i-material-symbols-speed-rounded",
-                    label: "Balanced",
-                  },
-                  {
-                    icon: "i-material-symbols-psychology-rounded",
-                    label: "Reasoning",
-                  },
-                ],
+                id: "half",
+                label: "Half",
+                title: "Balanced",
                 description:
-                  "A balanced default with reasoning enabled. Handles most everyday tasks comfortably on a modern laptop.",
-                defaults: {
-                  "llm.modelPath": "@unsloth/Qwen3.5-2B-GGUF/main/Qwen3.5-2B-Q4_K_M.gguf",
-                  "llm.mmprojPath": "@unsloth/Qwen3.5-2B-GGUF/main/mmproj-F16.gguf",
-                  "llm.contextSize": 8192,
-                  "llm.mmap": true,
-                  "llm.threads": 4,
-                  "llm.reasoning": "on",
-                  "llm.reasoningBudget": 512,
-                  "llm.host": "127.0.0.1",
-                  "llm.port": "7701",
-                },
+                  "The smartest model that uses around half of your device's memory. A comfortable everyday default.",
               },
               {
-                id: "5b-e2b",
-                label: "5B E2B",
-                title: "Gemma 4 5B E2B",
-                badges: [
-                  {
-                    icon: "i-material-symbols-memory-rounded",
-                    label: "~5 GB RAM",
-                  },
-                  {
-                    icon: "i-material-symbols-hourglass-top-rounded",
-                    label: "Slower",
-                  },
-                  {
-                    icon: "i-material-symbols-psychology-alt-rounded",
-                    label: "Smartest",
-                  },
-                ],
+                id: "full",
+                label: "Full",
+                title: "Smartest",
                 description:
-                  "Best reasoning and answer quality. Recommended when you have the RAM to spare and want the strongest responses.\n\nSlower to first token.",
-                defaults: {
-                  "llm.modelPath": "@unsloth/gemma-4-E2B-it-GGUF/main/gemma-4-E2B-it-Q4_K_M.gguf",
-                  "llm.mmprojPath": "@unsloth/gemma-4-E2B-it-GGUF/main/mmproj-F16.gguf",
-                  "llm.contextSize": 8192,
-                  "llm.mmap": true,
-                  "llm.threads": 6,
-                  "llm.reasoning": "on",
-                  "llm.reasoningBudget": 512,
-                  "llm.host": "127.0.0.1",
-                  "llm.port": "7701",
-                },
+                  "The smartest model your device can run without crashing. Unloads itself when idle to free memory.",
               },
             ],
             secondaryOptions: [
@@ -162,7 +107,8 @@ export const llmGroup: SettingGroup = {
                     label: "Manual setup",
                   },
                 ],
-                description: "Configure model path, context size, threads, and ports yourself.",
+                description:
+                  "Pick a specific model from the catalog, or configure the model path, context size, threads, and ports yourself.",
               },
             ],
           },
@@ -211,6 +157,36 @@ export const llmGroup: SettingGroup = {
           description: "Number of CPU threads used for inference.",
           type: "number",
           defaultValue: 4,
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.gpuLayers",
+          name: "GPU Layers",
+          description:
+            "How many model layers to offload to the GPU.\n\n0 runs entirely on the CPU; a large value such as 999 offloads every layer. Leave blank to let llama.cpp decide.",
+          type: "number",
+          defaultValue: "",
+          optional: true,
+          placeholder: "auto",
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.flashAttn",
+          name: "Flash Attention",
+          description:
+            "Use flash attention for faster, more memory-efficient attention. Recommended on supported hardware.",
+          type: "boolean",
+          defaultValue: false,
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.idleUnloadSeconds",
+          name: "Idle Unload",
+          description:
+            "Stop the local model after this many seconds with no activity, freeing its memory; it reloads automatically on the next message.\n\n0 keeps it loaded. The Full preset enables this automatically.",
+          type: "number",
+          defaultValue: 0,
+          suffix: "s",
           descriptionTier: "ondemand",
         },
         {

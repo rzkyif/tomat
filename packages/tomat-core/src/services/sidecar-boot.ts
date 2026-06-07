@@ -11,6 +11,7 @@ import { errMessage } from "@tomat/shared";
 import { buildWhisperStartOptions, whisperStartArgsFromSettings } from "../sidecars/whisper.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
 import { llmScheduler } from "./llm-scheduler.ts";
+import { llmIdle } from "./llm-idle.ts";
 import { loadCoreSettings, subscribeCoreSettings } from "./core-settings.ts";
 import { downloadManager } from "../downloads/manager.ts";
 import { onBinaryInstalled } from "../binaries/manager.ts";
@@ -35,6 +36,8 @@ const LLAMA_KEYS = new Set([
   "llm.reasoningBudget",
   "llm.mmap",
   "llm.webui",
+  "llm.gpuLayers",
+  "llm.flashAttn",
 ]);
 
 const WHISPER_KEYS = new Set([
@@ -75,14 +78,20 @@ export async function initSidecarBoot(): Promise<void> {
     })();
   });
   const settings = await loadCoreSettings();
+  llmIdle().configure(settings);
   await applyLlama(settings).catch(logErr("llama"));
   await applyWhisper(settings).catch(logErr("whisper"));
-  subscribeCoreSettings(async (next, changed) => {
+  subscribeCoreSettings((next, changed) => {
+    if (changed.has("llm.idleUnloadSeconds")) llmIdle().configure(next);
+    // Fire-and-forget the restarts: a sidecar relaunch loads a multi-GB model
+    // and takes seconds, so awaiting it here would stall every settings PATCH
+    // (e.g. the response to /models/select). The sidecar reports its loading
+    // state to the client separately. Matches the download/binary hooks below.
     if (anyOverlap(changed, LLAMA_KEYS)) {
-      await applyLlama(next).catch(logErr("llama"));
+      void applyLlama(next).catch(logErr("llama"));
     }
     if (anyOverlap(changed, WHISPER_KEYS)) {
-      await applyWhisper(next).catch(logErr("whisper"));
+      void applyWhisper(next).catch(logErr("whisper"));
     }
   });
   // When an llm/stt model file finishes downloading, retry the affected
@@ -123,6 +132,8 @@ export async function initSidecarBoot(): Promise<void> {
     })();
   });
 }
+
+// (idle-unload supervisor; configured above + on settings change)
 
 export async function applyLlama(settings: Record<string, unknown>): Promise<void> {
   const args = llamaStartArgsFromSettings(settings);

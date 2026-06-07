@@ -88,5 +88,6 @@ await cargoBuild(
   "tomat-core-keychain",
   `tomat-core-keychain${suffix}`,
 );
+await cargoBuild("packages/tomat-core-hwinfo", "tomat-core-hwinfo", `tomat-core-hwinfo${suffix}`);
 
 console.log(`done. artifacts at ${outDir}`);

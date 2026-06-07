@@ -269,6 +269,10 @@ export interface Platform {
   resolvePath(path: string): Promise<string>;
   // Default Downloads folder.
   openExternal(url: string): Promise<void>;
+  // Reveal a file in the OS file manager (Finder/Explorer), selecting it.
+  // Only meaningful when the file is on this same device (e.g. a download from
+  // a same-device core); callers gate on that before showing the affordance.
+  revealPath(absPath: string): Promise<void>;
   // Tauri auto-updater. Wraps @tauri-apps/plugin-updater so UpdateButton
   // doesn't have to import the plugin directly.
   updater: {

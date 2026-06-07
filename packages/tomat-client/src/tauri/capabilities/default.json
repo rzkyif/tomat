@@ -13,6 +13,7 @@
     "core:window:allow-set-position",
     "core:window:allow-current-monitor",
     "opener:default",
+    "opener:allow-reveal-item-in-dir",
     "fs:default",
     "dialog:default",
     "updater:default",

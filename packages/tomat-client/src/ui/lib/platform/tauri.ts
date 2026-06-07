@@ -15,7 +15,7 @@ import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { join as tauriJoin, tempDir as tauriTempDir } from "@tauri-apps/api/path";
 import { getVersion as tauriGetVersion } from "@tauri-apps/api/app";
 import { CheckMenuItem, Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   BaseDirectory,
@@ -341,6 +341,7 @@ const impl: Platform = {
   },
   resolvePath: (path) => invoke("resolve_path", { path }),
   openExternal: (url) => openUrl(url),
+  revealPath: (absPath) => revealItemInDir(absPath),
   updater: {
     getVersion: () => tauriGetVersion(),
     async check() {

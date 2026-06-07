@@ -54,6 +54,9 @@ export class ModelsManager {
       }
       throw err;
     }
+    // Drop any Completed download row for the file we just removed so the list
+    // stays in sync with disk.
+    await downloadManager().reconcileCompleted();
   }
 
   async probe(sources: string[]): Promise<ProbeModelsResponse> {

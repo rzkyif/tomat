@@ -154,17 +154,22 @@
 
   const TRANSITION_EASING = "cubic-bezier(0.4, 0, 0.2, 1)";
 
+  // First launch parks the content offscreen, reveals the (transparent)
+  // window, then waits this long before sliding the content in, giving the
+  // freshly mounted UI a beat to settle so the slide starts from a stable
+  // layout instead of shifting mid-animation.
+  const BOOT_SHOW_DELAY_MS = 1000;
+
   // Imperatively drive the window-level slide on `container`. Mirrors the
   // same JS+CSS pattern used for panel swap (`runSlide`): set transition then
   // target style; the WKWebView transition fires reliably because the source
   // value is already on the element.
-  //   - "visible":   on screen (transform cleared) and opaque. The opacity
-  //                  matters only on the very first show, fading the window up
-  //                  from the inlined opacity:0 below; later shows are already
-  //                  opaque, so they read as a pure slide-in.
-  //   - "offscreen": slid out per alignment (no fade out).
+  //   - "visible":   on screen (transform cleared) and opaque.
+  //   - "offscreen": slid out per alignment and held opaque, so the slide
+  //                  reads as pure motion with no fade in either direction.
   // First paint inlines opacity:0 directly on the element so the window
-  // doesn't flash visible before the first applyWindowState() runs.
+  // doesn't flash visible before the first applyWindowState() runs; the first
+  // "offscreen" call lifts it to 1 while the content is safely off-screen.
   function applyWindowState(state: "visible" | "offscreen", animate: boolean) {
     if (!container) return;
     const dur = animate ? getDuration() : 0;
@@ -176,8 +181,11 @@
       container.style.transform = "";
       container.style.opacity = "1";
     } else {
-      // Slide out only: leave opacity at 1 so the window slides off without
-      // fading (a full-100% translate already clears it from the viewport).
+      // Hold opacity at 1 so the window slides without fading (a full-100%
+      // translate already clears it from the viewport). Setting it explicitly
+      // also lifts the first-paint opacity:0 so the initial boot slide-in is
+      // pure motion rather than a fade.
+      container.style.opacity = "1";
       container.style.transform = offscreenTransform(
         settingsState.getAlignment(),
       );
@@ -200,6 +208,17 @@
       hidingInFlight = false;
       windowTransition.end();
     }
+  }
+
+  // Tail of the first-launch reveal: the onMount finally below has already
+  // parked the content offscreen, opened the `windowTransition` guard, and
+  // shown the window. After a settle beat, slide the content in with the same
+  // animation as a shortcut-driven show, then close the guard once it lands.
+  async function revealAfterSettle() {
+    await new Promise((r) => setTimeout(r, BOOT_SHOW_DELAY_MS));
+    applyWindowState("visible", true);
+    await new Promise((r) => setTimeout(r, getDuration()));
+    windowTransition.end();
   }
 
   const linkHandler = (e: MouseEvent) => {
@@ -376,11 +395,22 @@
     } finally {
       loaded = true;
       await tick();
-      await platform().windowing.show();
-      // The `window-visibility: true` event emitted by `show_main_window`
-      // fires before the listener below is registered, so kick off the
-      // fade-in here directly.
-      applyWindowState("visible", true);
+      if (getDuration() > 0) {
+        // Park the content offscreen (no transition), reveal the window while
+        // it is still clear of the viewport, then slide it in after a settle
+        // beat. `windowTransition` spans the whole reveal so an early shortcut
+        // press can't fight the slide. show() stays awaited so its
+        // `window-visibility: true` event fires before the listener below
+        // registers; otherwise that listener would slide the content in early.
+        windowTransition.begin();
+        applyWindowState("offscreen", false);
+        await platform().windowing.show();
+        void revealAfterSettle();
+      } else {
+        // Animations off: show immediately with no slide.
+        await platform().windowing.show();
+        applyWindowState("visible", false);
+      }
     }
 
     // Post-paint work. Fire-and-forget; the window is already visible.
