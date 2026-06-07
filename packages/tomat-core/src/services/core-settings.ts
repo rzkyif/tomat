@@ -89,6 +89,26 @@ export async function patchCoreSettings(
   return merged;
 }
 
+/** Reset all settings to their schema defaults: the sparse on-disk file becomes
+ *  empty (`{}` means "every value is the default") and listeners fire with every
+ *  previously-set key marked changed. Used by the Storage view's "clear
+ *  settings" (factory reset). Secrets are wiped separately by the caller. */
+export async function resetCoreSettings(): Promise<void> {
+  const previous = await loadCoreSettings();
+  const changed = new Set(Object.keys(previous));
+  await writeAtomic({});
+  cached = {};
+  if (changed.size > 0) {
+    for (const l of listeners) {
+      try {
+        await l(cached, changed);
+      } catch (err) {
+        log.error(`settings listener error: ${errMessage(err)}`);
+      }
+    }
+  }
+}
+
 /** Subscribe to settings changes. Listener fires AFTER the atomic write
  *  with the full merged settings + a set of just-changed keys. */
 export function subscribeCoreSettings(listener: SettingsListener): () => void {

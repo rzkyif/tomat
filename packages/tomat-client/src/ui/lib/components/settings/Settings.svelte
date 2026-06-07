@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { platform } from "$lib/platform";
   import { isTauri } from "$lib/shared/env";
-  import { errMessage, SETTINGS_SCHEMA } from "@tomat/shared";
+  import { errMessage, groupDestinations, SETTINGS_SCHEMA } from "@tomat/shared";
   import type { PresetOption, SettingField, SettingGroup } from "@tomat/shared";
   import type { Monitor } from "$lib/shared/types";
   import { hasAlpha } from "$lib/shared/color";
@@ -46,6 +46,7 @@
   import ColorPickerModal from "./ColorPickerModal.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
   import DownloadsModal from "./DownloadsModal.svelte";
+  import DeletionsModal from "./DeletionsModal.svelte";
 
   let monitors: Monitor[] = $state([]);
   let fonts: string[] = $state([]);
@@ -129,11 +130,16 @@
     !!settingsState.currentSettings["appearance.animationsEnabled"],
   );
 
-  // When reconnecting, a core-destination group's fields can't be edited (the
-  // writes would fail). `inert` blocks all pointer/focus interaction for every
-  // nested field at once; pair with dimming for the visual cue.
+  // When reconnecting, a purely-core group's fields can't be edited (the writes
+  // would fail). `inert` blocks all pointer/focus interaction for every nested
+  // field at once; pair with dimming for the visual cue. A multi-destination
+  // group (usage) is NOT locked: its client half stays usable, and its core
+  // half shows its own loading/error state.
   const coreGroupLocked = $derived(
-    connectionState.reconnecting && selectedGroup?.destination === "core",
+    connectionState.reconnecting &&
+      !!selectedGroup &&
+      groupDestinations(selectedGroup).length === 1 &&
+      groupDestinations(selectedGroup)[0] === "core",
   );
 
   async function selectGroup(groupId: string) {
@@ -618,22 +624,22 @@
                   <div class="sticky top-0 z-20">
                     <SectionHeader label={selectedGroup.name} level="group">
                       {#snippet badge()}
-                        <!-- Destination chip clarifies whether a setting
-                             lives on the paired core or on the local
-                             client. Shown unconditionally so single-core
-                             users still see the distinction.
-                             Custom inline badge sized to the header text
-                             height and painted with the input-field
+                        <!-- Destination chip(s): whether a setting lives on the
+                             paired core, the local client, or (for the usage
+                             group) both. One chip per destination. Sized to the
+                             header text height; painted with the input-field
                              surface (bg-surface-inset). -->
-                        <span
-                          class="text-[10px] font-medium uppercase tracking-wider px-1.5 inline-flex items-center h-4 leading-none rounded-medium bg-surface-inset text-default-700"
-                          title={selectedGroup.destination === "core"
-                            ? "Stored on the paired core (~/.tomat/core/settings.json)"
-                            : "Stored on this device (~/.tomat/client/settings.json)"}
-                        >
-                          {selectedGroup.destination === "core"
-                            ? "Core"
-                            : "Client"}
+                        <span class="inline-flex items-center gap-1">
+                          {#each groupDestinations(selectedGroup) as dest (dest)}
+                            <span
+                              class="text-[10px] font-medium uppercase tracking-wider px-1.5 inline-flex items-center h-4 leading-none rounded-medium bg-surface-inset text-default-700"
+                              title={dest === "core"
+                                ? "Stored on the paired core (~/.tomat/core/settings.json)"
+                                : "Stored on this device (~/.tomat/client/settings.json)"}
+                            >
+                              {dest === "core" ? "Core" : "Client"}
+                            </span>
+                          {/each}
                         </span>
                       {/snippet}
                       {#snippet actions()}
@@ -741,6 +747,7 @@
 
     <ConfirmModal />
     <DownloadsModal />
+    <DeletionsModal />
     <ColorPickerModal />
   </Bubble>
 </div>

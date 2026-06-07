@@ -8,25 +8,31 @@ import {
   SETTINGS_SCHEMA,
   validateSettingsPatch,
 } from "./engine.ts";
-import { CLIENT_GROUP_IDS, CORE_GROUP_IDS, isClientGroup, isCoreGroup } from "./types.ts";
+import {
+  CLIENT_GROUP_IDS,
+  CORE_GROUP_IDS,
+  groupDestinations,
+  isClientGroup,
+  isCoreGroup,
+} from "./types.ts";
 
 Deno.test("group-id registry stays in sync with schema destinations (no drift)", () => {
   // CLIENT_GROUP_IDS / CORE_GROUP_IDS are hand-maintained for their literal
   // types; this is the derive-check that fails if a group's `destination` in the
-  // schema ever disagrees with the registry (the prior silent-inconsistency
-  // class: a new "core" group not added to CORE_GROUP_IDS).
-  const schemaClient = SETTINGS_SCHEMA.filter((g) => g.destination === "client")
+  // schema ever disagrees with the registry. A multi-destination group is
+  // listed in both registries.
+  const schemaClient = SETTINGS_SCHEMA.filter((g) => groupDestinations(g).includes("client"))
     .map((g) => g.id)
     .sort();
-  const schemaCore = SETTINGS_SCHEMA.filter((g) => g.destination === "core")
+  const schemaCore = SETTINGS_SCHEMA.filter((g) => groupDestinations(g).includes("core"))
     .map((g) => g.id)
     .sort();
   assertEquals(schemaClient, [...CLIENT_GROUP_IDS].sort());
   assertEquals(schemaCore, [...CORE_GROUP_IDS].sort());
-  // The classifier helpers must agree with each group's declared destination.
+  // The classifier helpers must agree with each group's declared destination(s).
   for (const g of SETTINGS_SCHEMA) {
-    assertEquals(isClientGroup(g.id), g.destination === "client");
-    assertEquals(isCoreGroup(g.id), g.destination === "core");
+    assertEquals(isClientGroup(g.id), groupDestinations(g).includes("client"));
+    assertEquals(isCoreGroup(g.id), groupDestinations(g).includes("core"));
   }
 });
 

@@ -45,7 +45,7 @@ import {
   errMessage,
   permissionKey,
 } from "@tomat/shared";
-import { sessionsRepo } from "../db/repos/sessions.ts";
+import { sessionsRepo } from "./sessions-store.ts";
 import { embed } from "./embedding.ts";
 import { llmScheduler } from "./llm-scheduler.ts";
 import {
@@ -145,6 +145,17 @@ export class ChatService {
     const entry = inFlightControllers.get(callId);
     if (!entry || entry.clientId !== clientId) return;
     entry.ctl.cancel();
+  }
+
+  /** Session ids with an in-flight turn (the model is generating, or awaiting /
+   *  executing a tool). A stream stays in `active` for the whole turn and is
+   *  removed in the start() `.finally`, so a session NOT in this set is idle
+   *  (only waiting for user input). Used by the storage view to refuse deleting
+   *  an active session. */
+  activeSessionIds(): Set<string> {
+    const out = new Set<string>();
+    for (const s of this.active.values()) out.add(s.sessionId);
+    return out;
   }
 
   // --- internals --------------------------------------------------------

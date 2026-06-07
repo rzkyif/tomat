@@ -1,24 +1,145 @@
-// Storage view for the Settings "Storage" field: enumerates downloaded model
-// files (the disk-space-significant content) and deletes selected ones. Ports
-// the old Tauri storage.rs models-tree builder to the core. Sessions live in
-// SQLite (managed from the session bar); snippets are client-local (stored in
-// ~/.tomat/client/settings.json, managed in the Snippets settings field) and so
-// aren't part of the core's disk view. Only core-owned model files are
-// enumerated here.
+// Storage view for the Settings "Storage" field: a full per-category view of
+// everything tomat keeps on disk (downloaded models, sidecar binaries, the
+// sessions JSON store, installed toolkits, caches, logs, settings) plus the
+// clear/delete operations for each. The core is the sole authority on what may
+// be removed: every node is tagged with a `lock_reason` when it's in use, and a
+// delete request re-derives that lock server-side and refuses anything locked
+// (never trusting the client's view).
+//
+// In-use ("locked") rules per category:
+//   - models:   required by the current settings (requiredModelRefs)
+//   - binaries: required by settings OR its sidecar is running
+//   - cache:    never (regenerable)
+//   - logs:     the live core.log only
+//   - sessions: an agent is mid-turn on it (chat activeSessionIds)
+//   - toolkits: it has an enabled tool, or it's the built-in toolkit
+//   - settings: never; "clearing" it is a factory reset (defaults + wipe secrets)
 
 import { basename, dirname, isAbsolute, join, normalize, relative } from "@std/path";
-import type { StorageNode, StorageTree } from "@tomat/shared";
-import { paths } from "../paths.ts";
+import type { BinaryKind, StorageCategory, StorageCategoryId, StorageNode } from "@tomat/shared";
+import { requiredBinaryKinds, requiredModelRefs } from "@tomat/shared";
+import { paths, sessionDir, toolkitDir } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
-import { notifyRequirementsChanged } from "./requirements.ts";
 import { getLogger } from "../shared/log.ts";
+import { resolveHfPath } from "../models/manager.ts";
+import { binariesManager } from "../binaries/manager.ts";
+import { sidecarManager } from "../sidecars/manager.ts";
+import { toolkitsRegistry } from "../toolkits/registry.ts";
+import { uninstallToolkit } from "../toolkits/uninstall.ts";
+import { sessionsRepo } from "./sessions-store.ts";
+import { chatService } from "./chat.ts";
+import { loadCoreSettingsResolved, resetCoreSettings } from "./core-settings.ts";
+import { clearAllSecrets } from "./secrets.ts";
+import { notifyRequirementsChanged } from "./requirements.ts";
 
 const log = getLogger("storage");
 
-// Extensions that count as model / support files in the storage view: gguf
-// (llama.cpp), bin (whisper.cpp + some ORT tensors), onnx + json (Kokoro /
-// transformers.js), pt (PyTorch voice tensors). Matches the old storage.rs set.
+// Extensions that count as model / support files: gguf (llama.cpp), bin
+// (whisper.cpp + some ORT tensors), onnx + json (Kokoro / transformers.js),
+// pt (PyTorch voice tensors).
 const MODEL_FILE_EXTS = new Set(["gguf", "bin", "onnx", "json", "pt"]);
+
+// Running sidecar kind -> the binary it runs. deno is always required (it runs
+// the tts / tool / embedding workers), so it's covered by requiredBinaryKinds.
+const SIDECAR_BINARY: Partial<Record<string, BinaryKind>> = {
+  llama: "llama-server",
+  whisper: "whisper-server",
+};
+
+// --- lock context ----------------------------------------------------------
+
+interface LockContext {
+  requiredModelPaths: Set<string>;
+  lockedBinaryKinds: Set<BinaryKind>;
+  activeSessionIds: Set<string>;
+  enabledToolkitIds: Set<string>;
+}
+
+async function buildLockContext(): Promise<LockContext> {
+  const settings = await loadCoreSettingsResolved();
+
+  const requiredModelPaths = new Set(
+    requiredModelRefs(settings).map((r) => normalize(resolveHfPath(r.source))),
+  );
+
+  const lockedBinaryKinds = new Set<BinaryKind>(requiredBinaryKinds(settings));
+  for (const s of sidecarManager().getStatuses()) {
+    if (s.status !== "Running") continue;
+    const bin = SIDECAR_BINARY[s.kind];
+    if (bin) lockedBinaryKinds.add(bin);
+  }
+
+  const enabledToolkitIds = new Set<string>();
+  try {
+    for (const tk of toolkitsRegistry().list()) {
+      if (
+        toolkitsRegistry()
+          .listTools(tk.id)
+          .some((t) => t.enabled)
+      ) {
+        enabledToolkitIds.add(tk.id);
+      }
+    }
+  } catch (err) {
+    // A toolkit-registry read failure (e.g. a stale DB schema) must not blank
+    // the whole storage view; fall back to "nothing enabled" (the toolkits
+    // category itself degrades to empty below).
+    log.warn(`toolkit lock scan failed: ${err instanceof Error ? err.message : err}`);
+  }
+
+  return {
+    requiredModelPaths,
+    lockedBinaryKinds,
+    activeSessionIds: chatService().activeSessionIds(),
+    enabledToolkitIds,
+  };
+}
+
+// --- node helpers ----------------------------------------------------------
+
+function fileNode(name: string, path: string, size: number, lock?: string): StorageNode {
+  return lock
+    ? { kind: "file", name, path, size, lock_reason: lock }
+    : { kind: "file", name, path, size };
+}
+
+function folderNode(
+  name: string,
+  path: string,
+  size: number,
+  children: StorageNode[] = [],
+  lock?: string,
+): StorageNode {
+  return lock
+    ? { kind: "folder", name, path, size, children, lock_reason: lock }
+    : { kind: "folder", name, path, size, children };
+}
+
+async function statSize(path: string): Promise<number> {
+  try {
+    return (await Deno.stat(path)).size;
+  } catch {
+    return 0;
+  }
+}
+
+async function dirSize(path: string): Promise<number> {
+  let total = 0;
+  let entries: AsyncIterable<Deno.DirEntry>;
+  try {
+    entries = Deno.readDir(path);
+  } catch {
+    return 0;
+  }
+  for await (const e of entries) {
+    const full = join(path, e.name);
+    if (e.isDirectory) total += await dirSize(full);
+    else if (e.isFile) total += await statSize(full);
+  }
+  return total;
+}
+
+// --- models ----------------------------------------------------------------
 
 async function collectModelFiles(base: string, dir: string, out: StorageNode[]): Promise<void> {
   let entries: AsyncIterable<Deno.DirEntry>;
@@ -34,18 +155,31 @@ async function collectModelFiles(base: string, dir: string, out: StorageNode[]):
     } else if (e.isFile) {
       const ext = (e.name.includes(".") ? e.name.split(".").pop()! : "").toLowerCase();
       if (!MODEL_FILE_EXTS.has(ext)) continue;
-      let size = 0;
-      try {
-        size = (await Deno.stat(p)).size;
-      } catch {
-        continue;
-      }
+      const size = await statSize(p);
       out.push({ kind: "file", name: relative(base, p).replaceAll("\\", "/"), path: p, size });
     }
   }
 }
 
-async function buildModelsTree(modelsDir: string): Promise<StorageNode[]> {
+function applyModelLock(node: StorageNode, ctx: LockContext): boolean {
+  // Annotate a model file/folder with a lock reason in place. Returns whether
+  // the node ended up locked (a folder is locked iff every child is).
+  if (node.kind === "file") {
+    if (ctx.requiredModelPaths.has(normalize(node.path))) {
+      node.lock_reason = "Required by current settings";
+      return true;
+    }
+    return false;
+  }
+  if (node.children.length === 0) return false;
+  let allLocked = true;
+  for (const c of node.children) if (!applyModelLock(c, ctx)) allLocked = false;
+  if (allLocked) node.lock_reason = "Required by current settings";
+  return allLocked;
+}
+
+async function buildModelNodes(ctx: LockContext): Promise<StorageNode[]> {
+  const modelsDir = paths().modelsDir;
   const out: StorageNode[] = [];
   let users: AsyncIterable<Deno.DirEntry>;
   try {
@@ -73,82 +207,311 @@ async function buildModelsTree(modelsDir: string): Promise<StorageNode[]> {
       const hasMmproj = files.some((f) => basename(f.name).toLowerCase().startsWith("mmproj"));
       if (hasMmproj || files.length > 1) {
         const size = files.reduce((s, f) => s + f.size, 0);
-        out.push({ kind: "folder", name: display, path: repoPath, size, children: files });
+        out.push(folderNode(display, repoPath, size, files));
       } else {
-        // Single-file repo: render inline "user/repo/filename" so the list
-        // stays dense when only one file matters (e.g. whisper).
         const f = files[0];
-        out.push({ kind: "file", name: `${display}/${f.name}`, path: f.path, size: f.size });
+        out.push(fileNode(`${display}/${f.name}`, f.path, f.size));
       }
     }
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
+  for (const n of out) applyModelLock(n, ctx);
   return out;
 }
 
-export async function buildStorageTree(): Promise<StorageTree> {
-  const p = paths();
-  const models = await buildModelsTree(p.modelsDir);
-  const models_size = models.reduce((s, n) => s + n.size, 0);
-  let settings_size = 0;
+// --- category descriptors --------------------------------------------------
+
+interface CategoryDescriptor {
+  id: StorageCategoryId;
+  label: string;
+  deletable: boolean;
+  buildNodes(ctx: LockContext): Promise<StorageNode[]>;
+  deleteNode(node: StorageNode): Promise<void>;
+}
+
+const CATEGORIES: CategoryDescriptor[] = [
+  {
+    id: "models",
+    label: "Models",
+    deletable: true,
+    buildNodes: buildModelNodes,
+    deleteNode: async (node) => {
+      assertUnder(node.path, paths().modelsDir);
+      await removePath(node.path);
+    },
+  },
+  {
+    id: "binaries",
+    label: "Binaries",
+    deletable: true,
+    async buildNodes(ctx) {
+      const list = await binariesManager()
+        .list()
+        .catch(() => []);
+      const out: StorageNode[] = [];
+      for (const b of list) {
+        if (!b.installed || !b.path) continue;
+        const lock = ctx.lockedBinaryKinds.has(b.kind)
+          ? "Required by an enabled feature"
+          : undefined;
+        out.push(fileNode(b.kind, b.path, await statSize(b.path), lock));
+      }
+      return out;
+    },
+    deleteNode: async (node) => {
+      assertUnder(node.path, paths().binDir);
+      await removePath(node.path);
+    },
+  },
+  {
+    id: "cache",
+    label: "Cache",
+    deletable: true,
+    async buildNodes() {
+      const p = paths();
+      const dirs: Array<[string, string]> = [
+        ["cache", p.cacheDir],
+        ["deno-cache", p.denoCacheDir],
+        ["staging", p.stagingDir],
+      ];
+      const out: StorageNode[] = [];
+      for (const [name, dir] of dirs) out.push(folderNode(name, dir, await dirSize(dir)));
+      return out;
+    },
+    deleteNode: async (node) => {
+      await removePath(node.path);
+      // Cache dirs are long-lived (created by ensureDirs); recreate empty.
+      await Deno.mkdir(node.path, { recursive: true });
+    },
+  },
+  {
+    id: "logs",
+    label: "Logs",
+    deletable: true,
+    async buildNodes() {
+      const p = paths();
+      const out: StorageNode[] = [];
+      let entries: AsyncIterable<Deno.DirEntry>;
+      try {
+        entries = Deno.readDir(p.logsDir);
+      } catch {
+        return out;
+      }
+      for await (const e of entries) {
+        if (!e.isFile) continue;
+        const path = join(p.logsDir, e.name);
+        // All logs are clearable: the active core.log is truncated (not removed)
+        // so the running core keeps logging to it; rotated backups are removed.
+        out.push(fileNode(e.name, path, await statSize(path)));
+      }
+      out.sort((a, b) => a.name.localeCompare(b.name));
+      return out;
+    },
+    deleteNode: async (node) => {
+      assertUnder(node.path, paths().logsDir);
+      if (normalize(node.path) === normalize(paths().logFile)) {
+        // Active log: truncate in place. Deleting the open file wouldn't reclaim
+        // space on Unix (the handler keeps the inode) and fails on Windows;
+        // truncation empties it now and the logger keeps appending from 0.
+        await Deno.truncate(node.path, 0).catch(() => {});
+      } else {
+        await removePath(node.path);
+      }
+    },
+  },
+  {
+    id: "sessions",
+    label: "Sessions",
+    deletable: true,
+    buildNodes(ctx) {
+      const out = sessionsRepo()
+        .listAll()
+        .sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+        .map((s) =>
+          folderNode(
+            s.title || "Untitled session",
+            sessionDir(s.id),
+            s.sizeBytes,
+            [],
+            ctx.activeSessionIds.has(s.id) ? "Session is active" : undefined,
+          ),
+        );
+      return Promise.resolve(out);
+    },
+    deleteNode: (node) => {
+      sessionsRepo().deleteById(basename(node.path));
+      return Promise.resolve();
+    },
+  },
+  {
+    id: "toolkits",
+    label: "Toolkits",
+    deletable: true,
+    async buildNodes(ctx) {
+      const out: StorageNode[] = [];
+      for (const tk of toolkitsRegistry().list()) {
+        const dir = toolkitDir(tk.id);
+        const lock =
+          tk.source === "builtin"
+            ? "Built-in toolkit"
+            : ctx.enabledToolkitIds.has(tk.id)
+              ? "Has enabled tools"
+              : undefined;
+        out.push(folderNode(tk.displayName || tk.id, dir, await dirSize(dir), [], lock));
+      }
+      out.sort((a, b) => a.name.localeCompare(b.name));
+      return out;
+    },
+    deleteNode: async (node) => {
+      await uninstallToolkit(basename(node.path));
+    },
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    deletable: true,
+    async buildNodes() {
+      const p = paths();
+      const size = (await statSize(p.settingsFile)) + (await statSize(p.secretsEncFile));
+      // Never locked; deleting it is a factory reset, not a file removal.
+      return [fileNode("Settings + secrets", p.settingsFile, size)];
+    },
+    deleteNode: async () => {
+      await resetCoreSettings();
+      await clearAllSecrets();
+    },
+  },
+];
+
+const CATEGORY_BY_ID = new Map(CATEGORIES.map((c) => [c.id, c]));
+
+// --- public API ------------------------------------------------------------
+
+/** Build one category's nodes, degrading to an empty list (logged) on failure
+ *  so a single broken category can never blank the whole storage view. */
+async function safeBuildNodes(desc: CategoryDescriptor, ctx: LockContext): Promise<StorageNode[]> {
   try {
-    settings_size = (await Deno.stat(p.settingsFile)).size;
-  } catch {
-    /* no settings.json yet */
+    return await desc.buildNodes(ctx);
+  } catch (err) {
+    log.warn(
+      `storage category ${desc.id} failed to build: ${err instanceof Error ? err.message : err}`,
+    );
+    return [];
+  }
+}
+
+export async function buildStorageTree() {
+  const ctx = await buildLockContext();
+  const categories: StorageCategory[] = [];
+  for (const desc of CATEGORIES) {
+    const nodes = await safeBuildNodes(desc, ctx);
+    const size = nodes.reduce((s, n) => s + n.size, 0);
+    categories.push({ id: desc.id, label: desc.label, deletable: desc.deletable, nodes, size });
   }
   return {
-    models,
-    sessions: [],
-    snippets: [],
-    models_size,
-    sessions_size: 0,
-    snippets_size: 0,
-    settings_size,
-    total_size: models_size + settings_size,
-    // `<root_path>/models` must equal the models dir so the UI can map an HF
-    // spec to its on-disk path for in-use locking.
-    root_path: dirname(p.modelsDir),
+    categories,
+    total_size: categories.reduce((s, c) => s + c.size, 0),
+    // `<root_path>/models` is the models dir, so the client can still map an HF
+    // spec to disk if needed.
+    root_path: dirname(paths().modelsDir),
   };
 }
 
-/** Delete the given absolute paths. Each must resolve under the models dir (the
- *  only deletable storage here); anything else is rejected. Recomputes
- *  requirements afterward so a now-missing model re-surfaces as required. */
+/** Delete the given paths. Each must match a node in the freshly-built tree,
+ *  belong to a deletable category, and not be locked (nor contain any locked
+ *  descendant). The lock is recomputed here server-side, so a stale or tampered
+ *  client view can't force a locked delete. Unknown paths are skipped
+ *  (idempotent). */
 export async function deleteStoragePaths(targets: string[]): Promise<void> {
-  const modelsDir = paths().modelsDir;
+  const { byPath } = await indexTree();
+  const ops: Array<{ desc: CategoryDescriptor; node: StorageNode }> = [];
   for (const t of targets) {
-    const safe = assertUnderModels(t, modelsDir);
+    const hit = byPath.get(normalize(t));
+    if (!hit) continue; // already gone
+    const { desc, node } = hit;
+    if (!desc.deletable) {
+      throw new AppError("validation_error", `category ${desc.id} is not deletable`);
+    }
+    if (subtreeLockReason(node)) {
+      throw new AppError("validation_error", `cannot delete in-use item: ${node.path}`);
+    }
+    ops.push({ desc, node });
+  }
+  for (const { desc, node } of ops) {
     try {
-      await Deno.remove(safe, { recursive: true });
+      await desc.deleteNode(node);
     } catch (err) {
-      if (!(err instanceof Deno.errors.NotFound)) {
-        log.warn(`delete ${safe} failed: ${err instanceof Error ? err.message : err}`);
-        throw err;
-      }
+      log.warn(`delete ${node.path} failed: ${err instanceof Error ? err.message : err}`);
+      throw err;
     }
   }
   void notifyRequirementsChanged();
 }
 
-/** Remove every downloaded model (the contents of the models dir). */
-export async function clearModels(): Promise<void> {
-  const modelsDir = paths().modelsDir;
-  try {
-    await Deno.remove(modelsDir, { recursive: true });
-  } catch (err) {
-    if (!(err instanceof Deno.errors.NotFound)) throw err;
+/** Clear an entire category: delete every non-locked top-level node in it. For
+ *  `settings` this performs the factory reset. */
+export async function clearStorageCategory(categoryId: string): Promise<void> {
+  const desc = CATEGORY_BY_ID.get(categoryId as StorageCategoryId);
+  if (!desc) throw new AppError("validation_error", `unknown storage category: ${categoryId}`);
+  if (!desc.deletable) {
+    throw new AppError("validation_error", `category ${desc.id} is not deletable`);
   }
-  await Deno.mkdir(modelsDir, { recursive: true });
+  const ctx = await buildLockContext();
+  const nodes = await safeBuildNodes(desc, ctx);
+  for (const node of nodes) {
+    if (subtreeLockReason(node)) continue;
+    try {
+      await desc.deleteNode(node);
+    } catch (err) {
+      log.warn(`clear ${node.path} failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
   void notifyRequirementsChanged();
 }
 
-// Reject any path that doesn't sit strictly inside the models dir (no escaping
-// via `..`, no absolute re-roots, not the dir itself).
-function assertUnderModels(target: string, modelsDir: string): string {
-  const norm = normalize(target);
-  const rel = relative(normalize(modelsDir), norm);
-  if (rel === "" || rel === "." || rel.startsWith("..") || isAbsolute(rel)) {
-    throw new AppError("validation_error", `path is not under the models dir: ${target}`);
+// --- internals -------------------------------------------------------------
+
+async function indexTree(): Promise<{
+  byPath: Map<string, { desc: CategoryDescriptor; node: StorageNode }>;
+}> {
+  const ctx = await buildLockContext();
+  const byPath = new Map<string, { desc: CategoryDescriptor; node: StorageNode }>();
+  const add = (desc: CategoryDescriptor, node: StorageNode) => {
+    byPath.set(normalize(node.path), { desc, node });
+    if (node.kind === "folder") for (const c of node.children) add(desc, c);
+  };
+  for (const desc of CATEGORIES) {
+    for (const node of await safeBuildNodes(desc, ctx)) add(desc, node);
   }
-  return norm;
+  return { byPath };
+}
+
+/** The lock reason for a node or, for a folder, the first locked descendant.
+ *  Used to refuse deleting anything in use. */
+function subtreeLockReason(node: StorageNode): string | undefined {
+  if (node.lock_reason) return node.lock_reason;
+  if (node.kind === "folder") {
+    for (const c of node.children) {
+      const r = subtreeLockReason(c);
+      if (r) return r;
+    }
+  }
+  return undefined;
+}
+
+async function removePath(path: string): Promise<void> {
+  try {
+    await Deno.remove(path, { recursive: true });
+  } catch (err) {
+    if (!(err instanceof Deno.errors.NotFound)) throw err;
+  }
+}
+
+// Reject any path that doesn't sit strictly inside `root` (no `..` escape, no
+// absolute re-root, not the root itself).
+function assertUnder(target: string, root: string): void {
+  const rel = relative(normalize(root), normalize(target));
+  if (rel === "" || rel === "." || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new AppError("validation_error", `path is not under ${root}: ${target}`);
+  }
 }

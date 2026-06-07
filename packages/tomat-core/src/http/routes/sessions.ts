@@ -9,7 +9,7 @@ import {
   messagePatchSchemaByRole,
   type MessageRoleForPatch,
 } from "@tomat/shared";
-import { sessionsRepo } from "../../db/repos/sessions.ts";
+import { sessionsRepo } from "../../services/sessions-store.ts";
 import { sessionAttachmentsDir } from "../../paths.ts";
 import { AppError } from "../../shared/errors.ts";
 import { newAttachmentId, newMessageId } from "../../shared/ids.ts";

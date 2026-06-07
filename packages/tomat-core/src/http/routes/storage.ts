@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import type { DeleteStoragePathsRequest } from "@tomat/shared";
-import { buildStorageTree, clearModels, deleteStoragePaths } from "../../services/storage.ts";
+import {
+  buildStorageTree,
+  clearStorageCategory,
+  deleteStoragePaths,
+} from "../../services/storage.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
@@ -8,11 +12,13 @@ export function storageRoutes(): Hono {
   const r = new Hono();
   r.use("*", bearerMiddleware());
 
-  // The on-disk storage tree (downloaded models + sizes) for the Settings view.
+  // The full on-disk storage tree (every category + sizes) for the Settings
+  // view.
   r.get("/", async (c) => c.json(await buildStorageTree()));
 
-  // Delete the selected model files/folders (validated to sit under the models
-  // dir). Recomputes requirements so a now-missing model re-surfaces.
+  // Delete the selected files/folders. The core re-derives each item's lock
+  // server-side and refuses anything in use; unknown paths are skipped.
+  // Recomputes requirements so a now-missing model re-surfaces.
   r.post("/delete", async (c) => {
     const body = (await readJson(c)) as DeleteStoragePathsRequest;
     if (!Array.isArray(body.paths)) {
@@ -22,9 +28,14 @@ export function storageRoutes(): Hono {
     return c.body(null, 204);
   });
 
-  // Remove every downloaded model.
-  r.post("/clear-models", async (c) => {
-    await clearModels();
+  // Clear an entire category: delete its non-locked items. For `settings` this
+  // is a factory reset (defaults + wiped secrets).
+  r.post("/clear", async (c) => {
+    const body = (await readJson(c)) as { categoryId?: unknown };
+    if (typeof body.categoryId !== "string") {
+      throw new AppError("validation_error", "categoryId string required");
+    }
+    await clearStorageCategory(body.categoryId);
     return c.body(null, 204);
   });
 

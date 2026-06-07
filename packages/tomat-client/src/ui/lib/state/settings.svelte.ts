@@ -16,6 +16,7 @@
 import { browser, dev } from "$app/environment";
 import {
   getDefaultSettings,
+  groupDestinations,
   isClientGroup,
   isCoreGroup,
   isValidSettingKey,
@@ -44,9 +45,12 @@ type SettingChangeListener = (key: string, prev: unknown, next: unknown) => void
 const KEY_DESTINATION = (() => {
   const map = new Map<string, "client" | "core">();
   for (const group of SETTINGS_SCHEMA) {
+    // A multi-destination group (e.g. usage) is render-only, so its fields never
+    // persist; routing uses the first listed destination as a harmless default.
+    const dest = groupDestinations(group)[0];
     for (const section of group.sections) {
       for (const field of section.fields) {
-        map.set(field.id, group.destination);
+        map.set(field.id, dest);
       }
     }
   }

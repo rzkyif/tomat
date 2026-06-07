@@ -28,42 +28,10 @@ CREATE TABLE IF NOT EXISTS pairing_codes (
   claimed         INTEGER NOT NULL DEFAULT 0
 );
 
--- Sessions are owned by a single client
-CREATE TABLE IF NOT EXISTS sessions (
-  id              TEXT PRIMARY KEY,           -- ULID (sortable by time)
-  owner_client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-  title           TEXT NOT NULL DEFAULT '',
-  created_at_ms   INTEGER NOT NULL,
-  updated_at_ms   INTEGER NOT NULL,
-  token_usage     TEXT                        -- JSON {prompt,completion,total}
-);
-CREATE INDEX IF NOT EXISTS sessions_owner_updated
-  ON sessions(owner_client_id, updated_at_ms DESC);
-
--- Messages: one row per bubble; full JSON content. Append-only typical, but
--- PATCH (edit) is supported and rewrites a single row.
-CREATE TABLE IF NOT EXISTS messages (
-  id            TEXT PRIMARY KEY,             -- client-supplied or core-generated
-  session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  ord           INTEGER NOT NULL,             -- monotonic within session
-  role          TEXT NOT NULL,                -- user|assistant|system|tool|reasoning|tool_filter|error
-  content_json  TEXT NOT NULL,                -- serialized Message minus id/role
-  created_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS messages_session_ord ON messages(session_id, ord);
-
--- Session attachments stored on disk under sessions/<id>/attachments/.
--- One row per attachment for accounting + GC on session delete.
-CREATE TABLE IF NOT EXISTS attachments (
-  id            TEXT PRIMARY KEY,
-  session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  message_id    TEXT NOT NULL,
-  filename      TEXT NOT NULL,
-  mime          TEXT,
-  size_bytes    INTEGER NOT NULL,
-  abs_path      TEXT NOT NULL UNIQUE,
-  created_at_ms INTEGER NOT NULL
-);
+-- Sessions, messages, and attachments are NOT in SQLite: they live as plain
+-- JSON files under ~/.tomat/<channel>/core/sessions/<id>/session.json, managed
+-- by services/sessions-store.ts (one session.json per session, attachment bytes
+-- alongside under attachments/).
 
 -- Toolkits (one row per npm package, local folder, or the built-in). The
 -- `status` column tracks the gated lifecycle: 'downloaded' (files on disk, deps

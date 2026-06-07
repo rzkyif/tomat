@@ -259,6 +259,21 @@ export async function listSecretNames(): Promise<string[]> {
   return Object.keys(bag).sort();
 }
 
+/** Remove the entire encrypted vault (every stored secret). Used by the Storage
+ *  view's "clear settings" factory reset. The master key in the OS keychain is
+ *  harmless without ciphertext, so we just delete the file (and any stale tmp).
+ *  NotFound-tolerant. */
+export async function clearAllSecrets(): Promise<void> {
+  for (const path of [paths().secretsEncFile, paths().secretsEncFile + ".tmp"]) {
+    try {
+      await Deno.remove(path);
+    } catch (err) {
+      if (!(err instanceof Deno.errors.NotFound)) throw err;
+    }
+  }
+  cachedKey = null;
+}
+
 /** Boot-time integrity check (NON-mutating: never generates a key). If a sealed
  *  vault exists but no master key can be found (OS keychain empty AND no
  *  .master-key file), the stored secrets can't be decrypted - surface that at

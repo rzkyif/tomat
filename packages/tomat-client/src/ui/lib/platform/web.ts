@@ -94,6 +94,16 @@ const impl: Platform = {
   fonts: {
     list: async () => [],
   },
+  process: {
+    // The browser can't read its own process metrics; the Services field treats
+    // zeros as "unavailable" and just omits live numbers for this row.
+    selfMetrics: async () => ({ pid: 0, rssMb: 0, cpuPct: 0 }),
+  },
+  clientStorage: {
+    // No local filesystem in the browser build; show an empty tree.
+    tree: async () => ({ categories: [], total_size: 0, root_path: "" }),
+    truncateActiveLog: async () => {},
+  },
   shortcuts: {
     // Browsers can't register OS-level global shortcuts. UI should hide the
     // relevant settings groups when running in web mode.

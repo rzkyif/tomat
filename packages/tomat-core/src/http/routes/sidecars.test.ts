@@ -12,7 +12,7 @@ async function pairOne(): Promise<string> {
   return token;
 }
 
-Deno.test("GET /api/v1/sidecars/status: returns an array of supervised sidecar statuses", async () => {
+Deno.test("GET /api/v1/sidecars/status: returns sidecar statuses + core process metrics", async () => {
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
@@ -24,7 +24,11 @@ Deno.test("GET /api/v1/sidecars/status: returns an array of supervised sidecar s
     );
     assertEquals(res.status, 200);
     const body = await res.json();
-    assertEquals(Array.isArray(body), true);
+    assertEquals(Array.isArray(body.sidecars), true);
+    // The core process is always sampled (its own PID), so metrics are present.
+    assertEquals(typeof body.core.pid, "number");
+    assertEquals(typeof body.core.rssMb, "number");
+    assertEquals(typeof body.core.cpuPct, "number");
   } finally {
     await env.teardown();
   }

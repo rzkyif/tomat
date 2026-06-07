@@ -248,6 +248,13 @@ const impl: Platform = {
   fonts: {
     list: () => invoke("list_system_fonts"),
   },
+  process: {
+    selfMetrics: () => invoke("get_self_metrics"),
+  },
+  clientStorage: {
+    tree: () => invoke("get_client_storage"),
+    truncateActiveLog: () => invoke("truncate_client_log"),
+  },
   shortcuts: {
     setBinding(accelerator) {
       return invoke("set_global_shortcut", { accelerator });

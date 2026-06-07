@@ -208,6 +208,9 @@ pub fn run() {
             restore_system_volume,
             resolve_path,
             convert_file_to_markdown,
+            get_self_metrics,
+            get_client_storage,
+            truncate_client_log,
             // Pairing / admin
             read_admin_token,
             install_local_core,

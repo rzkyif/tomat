@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SETTINGS_SCHEMA, isGroupVisible } from "@tomat/shared";
+  import { groupDestinations, SETTINGS_SCHEMA, isGroupVisible } from "@tomat/shared";
   import type { ServerStatus, ServerStatusUpdate } from "$lib/shared/types";
   import { settingsState } from "../../state";
   import { connectionState } from "$lib/state/connection.svelte";
@@ -82,7 +82,9 @@
         label={group.name}
         {collapsed}
         selected={isActive}
-        disabled={connectionState.reconnecting && group.destination === "core"}
+        disabled={connectionState.reconnecting &&
+          groupDestinations(group).length === 1 &&
+          groupDestinations(group)[0] === "core"}
         title={collapsed ? group.name : undefined}
         ariaLabel={group.name}
         onclick={() => onSelect?.(group.id)}

@@ -13,7 +13,7 @@
 
 import type OpenAI from "openai";
 import { DEFAULT_TITLE_GENERATION_PROMPT, errMessage } from "@tomat/shared";
-import { sessionsRepo } from "../db/repos/sessions.ts";
+import { sessionsRepo } from "./sessions-store.ts";
 import { loadCoreSettings } from "./core-settings.ts";
 import { type LlmRequest, streamChatCompletion } from "./llm-provider.ts";
 import { resolveEndpoint } from "./endpoint-resolver.ts";

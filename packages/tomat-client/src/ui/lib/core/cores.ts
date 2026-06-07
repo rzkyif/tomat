@@ -11,6 +11,7 @@ import { CoreClient, type ConnectionListener, type WsListener } from "./client";
 import { LlmApi } from "./llm";
 import { ModelsApi } from "./models";
 import { RequirementsApi } from "./requirements";
+import { SidecarsApi } from "./sidecars";
 import { StorageApi } from "./storage";
 import { PairingApi } from "./pairing";
 import { CoreSettingsApi } from "./settings";
@@ -51,6 +52,7 @@ class CoresRegistry {
     models: ModelsApi;
     binaries: BinariesApi;
     requirements: RequirementsApi;
+    sidecars: SidecarsApi;
     storage: StorageApi;
     toolkits: ToolkitsApi;
     stt: SttApi;
@@ -127,6 +129,7 @@ class CoresRegistry {
       models: new ModelsApi(client),
       binaries: new BinariesApi(client),
       requirements: new RequirementsApi(client),
+      sidecars: new SidecarsApi(client),
       storage: new StorageApi(client),
       toolkits: new ToolkitsApi(client),
       stt: new SttApi(client),
@@ -186,6 +189,7 @@ class CoresRegistry {
     models: ModelsApi;
     binaries: BinariesApi;
     requirements: RequirementsApi;
+    sidecars: SidecarsApi;
     storage: StorageApi;
     toolkits: ToolkitsApi;
     stt: SttApi;

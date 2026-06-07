@@ -306,7 +306,21 @@ export interface UpdateApplyRequest {
 
 // --- Sidecars --------------------------------------------------------------
 
-export type SidecarStatusResponse = SidecarSnapshot[];
+/** Live resource sample for a single process. */
+export interface ProcessMetricsLite {
+  pid: number;
+  rssMb: number;
+  cpuPct: number;
+}
+
+/** Response of GET /api/v1/sidecars/status. The route samples only its own
+ *  tracked processes (sidecar PIDs + the core process); it never accepts a PID
+ *  from the caller. `sidecars` carries llama/whisper (and tts when loaded) with
+ *  `rssMb`/`cpuPct` populated; `core` is the core process itself. */
+export interface SidecarsStatusResponse {
+  sidecars: SidecarSnapshot[];
+  core: ProcessMetricsLite;
+}
 
 // --- Helpers shared by clients --------------------------------------------
 

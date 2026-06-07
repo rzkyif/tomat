@@ -14,10 +14,12 @@
 
 pub mod capture;
 pub mod client_settings;
+pub mod client_storage;
 pub mod fonts;
 pub mod keychain;
 pub mod net;
 pub mod pairing;
+pub mod process;
 pub mod window;
 
 pub use capture::{
@@ -26,6 +28,7 @@ pub use capture::{
     show_region_capture_overlay,
 };
 pub use client_settings::{read_client_settings, write_client_settings};
+pub use client_storage::{get_client_storage, truncate_client_log};
 pub use fonts::list_system_fonts;
 pub use keychain::{
     init_default_store, keychain_delete_token, keychain_get_token, keychain_set_token,
@@ -35,6 +38,7 @@ pub use pairing::{
     install_local_core, local_core_base_url, local_core_installed, local_sidecar_ports,
     read_admin_token, read_launch_prefill, start_local_core,
 };
+pub use process::get_self_metrics;
 pub use window::{
     hide_main_window, position_window, request_hide_main_window, set_global_shortcut,
     set_input_shortcuts, show_main_window, toggle_main_window, validate_shortcut,

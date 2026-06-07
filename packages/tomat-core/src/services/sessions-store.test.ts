@@ -1,14 +1,16 @@
-// SessionsRepo CRUD + the cross-client tenancy guarantee that the
-// owner_client_id WHERE clauses are supposed to enforce. Skips message and
-// attachment edge cases that are sufficiently covered by the chat.ts
+// SessionsRepo CRUD + the cross-client tenancy guarantee that the owner checks
+// enforce, plus the filesystem specifics (on-disk session.json, listAll,
+// deleteById). Message/attachment edge cases are covered by the chat.ts
 // integration test. Keep this slim.
 
 import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
+import { join } from "@std/path";
 import type { Message } from "@tomat/shared";
-import { sessionsRepo } from "./sessions.ts";
-import { createTestClient, setupTestEnv } from "../../../tests/helpers/db.ts";
-import { newMessageId } from "../../shared/ids.ts";
-import { AppError } from "../../shared/errors.ts";
+import { sessionsRepo } from "./sessions-store.ts";
+import { createTestClient, setupTestEnv } from "../../tests/helpers/db.ts";
+import { paths } from "../paths.ts";
+import { newMessageId } from "../shared/ids.ts";
+import { AppError } from "../shared/errors.ts";
 
 function userMessage(content = "hello"): Message {
   return {
@@ -30,6 +32,9 @@ Deno.test("SessionsRepo.create: returns session with id, timestamps, and default
     assertEquals(s.title, "");
     assertEquals(typeof s.id, "string");
     assertEquals(s.createdAtMs, s.updatedAtMs);
+    // Persisted as a JSON file on disk.
+    const onDisk = Deno.statSync(join(paths().sessionsDir, s.id, "session.json"));
+    assertEquals(onDisk.isFile, true);
   } finally {
     await env.teardown();
   }
@@ -61,7 +66,6 @@ Deno.test("SessionsRepo.getOrThrow: rejects access from a non-owner client", asy
     const owner = createTestClient("owner");
     const intruder = createTestClient("intruder");
     const s = repo.create({ ownerClientId: owner });
-    // Owner can read; intruder cannot.
     repo.getOrThrow(owner, s.id);
     assertThrows(() => repo.getOrThrow(intruder, s.id), AppError);
   } finally {
@@ -69,14 +73,13 @@ Deno.test("SessionsRepo.getOrThrow: rejects access from a non-owner client", asy
   }
 });
 
-Deno.test("SessionsRepo.patchTitle: persists across reads and updates updated_at", async () => {
+Deno.test("SessionsRepo.patchTitle: persists across reads and updates updatedAt", async () => {
   const env = await setupTestEnv();
   try {
     const repo = sessionsRepo();
     const owner = createTestClient("owner");
     const s = repo.create({ ownerClientId: owner });
     const before = repo.getOrThrow(owner, s.id).updatedAtMs;
-    // Ensure measurable clock movement.
     await new Promise((r) => setTimeout(r, 5));
     repo.patchTitle(owner, s.id, "renamed");
     const after = repo.getOrThrow(owner, s.id);
@@ -96,6 +99,7 @@ Deno.test("SessionsRepo.delete: removes and rejects subsequent reads", async () 
     const { attachmentPaths } = repo.delete(owner, s.id);
     assertEquals(attachmentPaths, []);
     assertThrows(() => repo.getOrThrow(owner, s.id), AppError);
+    assertThrows(() => Deno.statSync(join(paths().sessionsDir, s.id)), Deno.errors.NotFound);
   } finally {
     await env.teardown();
   }
@@ -109,7 +113,6 @@ Deno.test("SessionsRepo.delete: rejects when invoked from a non-owner client", a
     const intruder = createTestClient("intruder");
     const s = repo.create({ ownerClientId: owner });
     assertThrows(() => repo.delete(intruder, s.id), AppError);
-    // Original session is untouched.
     repo.getOrThrow(owner, s.id);
   } finally {
     await env.teardown();
@@ -134,7 +137,7 @@ Deno.test("SessionsRepo.appendMessage + listMessages: round-trips message in ord
   }
 });
 
-Deno.test("SessionsRepo: deleting a session cascades to its messages", async () => {
+Deno.test("SessionsRepo: deleting a session removes its messages", async () => {
   const env = await setupTestEnv();
   try {
     const repo = sessionsRepo();
@@ -142,8 +145,33 @@ Deno.test("SessionsRepo: deleting a session cascades to its messages", async () 
     const s = repo.create({ ownerClientId: owner });
     repo.appendMessage(s.id, userMessage("doomed"));
     repo.delete(owner, s.id);
-    // After cascade, listing messages on a deleted session must return [].
     assertEquals(repo.listMessages(s.id), []);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("SessionsRepo.listAll: spans clients with on-disk sizes; deleteById is owner-agnostic", async () => {
+  const env = await setupTestEnv();
+  try {
+    const repo = sessionsRepo();
+    const a = createTestClient("a");
+    const b = createTestClient("b");
+    const s1 = repo.create({ ownerClientId: a, title: "a-1" });
+    const s2 = repo.create({ ownerClientId: b, title: "b-1" });
+    repo.appendMessage(s1.id, userMessage("hello"));
+
+    const all = repo.listAll();
+    assertEquals(all.length, 2);
+    const e1 = all.find((e) => e.id === s1.id)!;
+    assertEquals(e1.ownerClientId, a);
+    assertEquals(e1.sizeBytes > 0, true);
+
+    // deleteById removes without an owner argument.
+    const res = repo.deleteById(s2.id);
+    assertEquals(res?.ownerClientId, b);
+    assertEquals(repo.listAll().length, 1);
+    assertEquals(repo.deleteById("nonexistent"), null);
   } finally {
     await env.teardown();
   }

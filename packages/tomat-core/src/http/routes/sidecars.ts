@@ -7,12 +7,13 @@
 // convenience that's equivalent to /restart in this design.
 
 import { Hono } from "hono";
-import type { SidecarKind } from "@tomat/shared";
+import type { SidecarKind, SidecarSnapshot, SidecarsStatusResponse } from "@tomat/shared";
 import { sidecarManager } from "../../sidecars/manager.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
 import { buildLlamaStartOptions, llamaStartArgsFromSettings } from "../../sidecars/llama.ts";
 import { buildWhisperStartOptions, whisperStartArgsFromSettings } from "../../sidecars/whisper.ts";
 import { ttsController } from "../../sidecars/tts.ts";
+import { sampleProcessMetrics } from "../../sidecars/process-metrics.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
@@ -22,7 +23,36 @@ export function sidecarsRoutes(): Hono {
   const r = new Hono();
   r.use("*", bearerMiddleware());
 
-  r.get("/status", (c) => c.json(sidecarManager().getStatuses()));
+  // Live status + resource usage for the core process and its sidecars. The
+  // set of sampled PIDs is fixed by this route (manager-tracked sidecars + the
+  // tts worker + the core process); no PID is ever taken from the request.
+  r.get("/status", async (c) => {
+    // Manager sidecars (llama/whisper) carry `pid` on their Running snapshot;
+    // tts is a separate controller, synthesized here when its worker is up.
+    const sidecars: SidecarSnapshot[] = sidecarManager().getStatuses();
+    const ttsPid = ttsController().pid();
+    if (ttsPid !== null) {
+      sidecars.push({ kind: "tts", status: "Running", pid: ttsPid });
+    }
+
+    const pids = [Deno.pid, ...sidecars.flatMap((s) => (s.pid !== undefined ? [s.pid] : []))];
+    const samples = await sampleProcessMetrics(pids);
+
+    const withMetrics = sidecars.map((s): SidecarSnapshot => {
+      const m = s.pid !== undefined ? samples.get(s.pid) : undefined;
+      return m ? { ...s, rssMb: m.rssMb, cpuPct: m.cpuPct } : s;
+    });
+    const coreSample = samples.get(Deno.pid);
+    const body: SidecarsStatusResponse = {
+      sidecars: withMetrics,
+      core: {
+        pid: Deno.pid,
+        rssMb: coreSample?.rssMb ?? 0,
+        cpuPct: coreSample?.cpuPct ?? 0,
+      },
+    };
+    return c.json(body);
+  });
 
   r.post("/:kind/stop", async (c) => {
     const kind = c.req.param("kind") as SidecarKind;

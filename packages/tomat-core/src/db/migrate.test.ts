@@ -27,11 +27,12 @@ Deno.test("migrate: running twice is idempotent (no throw, schema unchanged)", a
     migrate();
     const after = tableNames();
     assertEquals(before, after);
-    // Spot-check that the canonical tables exist after migration.
-    assertEquals(before.includes("sessions"), true);
-    assertEquals(before.includes("messages"), true);
+    // Spot-check that the canonical tables exist after migration. Sessions /
+    // messages / attachments are NOT in SQLite (they're JSON files on disk).
     assertEquals(before.includes("clients"), true);
     assertEquals(before.includes("pairing_codes"), true);
+    assertEquals(before.includes("toolkits"), true);
+    assertEquals(before.includes("downloads"), true);
   } finally {
     await env.teardown();
   }

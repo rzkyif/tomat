@@ -12,6 +12,7 @@ import {
 import { toolkitsRegistry } from "../../toolkits/registry.ts";
 import { hashToolkit } from "../../toolkits/hash.ts";
 import { workerPool } from "../../toolkits/worker-pool.ts";
+import { uninstallToolkit } from "../../toolkits/uninstall.ts";
 import { paths } from "../../paths.ts";
 import {
   resolveLatestVersion,
@@ -116,14 +117,7 @@ export function toolkitsRoutes(): Hono {
 
   r.delete("/:id", async (c) => {
     const id = c.req.param("id");
-    const toolkit = toolkitsRegistry().getOrThrow(id);
-    await workerPool().refreshPermissions(id);
-    toolkitsRegistry().delete(id);
-    try {
-      await Deno.remove(toolkit.installedPath, { recursive: true });
-    } catch {
-      /* ignore */
-    }
+    await uninstallToolkit(id);
     return c.body(null, 204);
   });
 

@@ -16,7 +16,7 @@ import { ensureDirs } from "../../src/paths.ts";
 import { migrate } from "../../src/db/migrate.ts";
 import { newClientId } from "../../src/shared/ids.ts";
 import { __resetForTesting as resetAuth } from "../../src/services/auth.ts";
-import { __resetForTesting as resetSessionsRepo } from "../../src/db/repos/sessions.ts";
+import { __resetForTesting as resetSessionsRepo } from "../../src/services/sessions-store.ts";
 import { __resetForTesting as resetSidecarManager } from "../../src/sidecars/manager.ts";
 import { __resetForTesting as resetChat } from "../../src/services/chat.ts";
 import { __resetForTesting as resetSecrets } from "../../src/services/secrets.ts";

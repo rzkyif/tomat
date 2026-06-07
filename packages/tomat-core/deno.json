@@ -29,6 +29,7 @@
     "ignore": "npm:ignore@^7.0.5",
     "openai": "npm:openai@^6.42.0",
     "kokoro-js": "npm:kokoro-js@^1.2.1",
-    "@huggingface/transformers": "npm:@huggingface/transformers@^4.2.0"
+    "@huggingface/transformers": "npm:@huggingface/transformers@^4.2.0",
+    "pidusage": "npm:pidusage@^4.0.1"
   }
 }

@@ -163,6 +163,12 @@ export class TtsController {
     return { loaded: this.loaded, loading: this.loading };
   }
 
+  /** PID of the live tts worker subprocess, or null when not running. Used by
+   *  the sidecars status route to sample its resource usage. */
+  pid(): number | null {
+    return this.proc?.pid ?? null;
+  }
+
   // --- internals -----------------------------------------------------------
 
   private async spawn(): Promise<void> {

@@ -10,6 +10,8 @@
 // below, implement it in `tauri.ts`, stub it in `web.ts`, then call
 // `platform().<namespace>.<method>()` from the consumer.
 
+import type { StorageTree } from "@tomat/shared";
+
 // Mirrors the Rust `list_capture_monitors` return shape so the
 // `lib/shared/capture.ts` flow can cast without information loss. Physical
 // pixel bounds (x, y, width, height) let the region-capture flow match the
@@ -198,6 +200,20 @@ export interface Platform {
   };
   // Installed fonts.
   fonts: { list(): Promise<string[]> };
+  // This (client) process's own resource usage, for the Services field's
+  // "Main Application" row. rssMb = resident memory in MB, cpuPct = CPU %.
+  process: {
+    selfMetrics(): Promise<{ pid: number; rssMb: number; cpuPct: number }>;
+  };
+  // The local client's on-disk storage tree (settings + logs) for the
+  // "Client → Storage" usage field. Read-only; deletes/clears are done by the
+  // caller via fs.remove + clientSettings.
+  clientStorage: {
+    tree(): Promise<StorageTree>;
+    /** Empty the active client.log in place (logging continues). Rotated
+     *  backups are deleted via fs.remove. */
+    truncateActiveLog(): Promise<void>;
+  };
   // Global / input shortcuts.
   shortcuts: ShortcutBindings;
   // Client-only settings file at ~/.tomat/client/settings.json.

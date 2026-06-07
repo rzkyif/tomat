@@ -141,9 +141,12 @@ export type ShortcutField = BaseField & {
 };
 
 /** Render-only fields whose value is ignored; defaultValue exists only so the
- *  defaults loader has a stable initial entry. */
+ *  defaults loader has a stable initial entry. `scope` selects whose resources
+ *  the field reflects: the local client (process + on-device files) or the
+ *  paired core (service + sidecars + its persistence tree). */
 export type RenderOnlyField = BaseField & {
   type: "services" | "storage";
+  scope: "client" | "core";
   defaultValue: string | number | boolean;
 };
 
@@ -258,10 +261,14 @@ export interface SettingGroup {
    *  entry, not rendered). Used for groups that exist only to register setting
    *  ids / a persistence destination (e.g. `cores`). */
   hidden?: boolean;
-  /** Where this group's values are persisted. Each group is single-
-   *  destination; mixed groups must be split (e.g. legacy `stt` →
-   *  `stt_input` + `stt_engine`). */
-  destination: SettingDestination;
+  /** Where this group's values are persisted. Usually a single destination. A
+   *  group may declare BOTH (an array) when it spans client and core - currently
+   *  only the render-only `usage` group, which shows client + core resources
+   *  side by side. A group with real (persistable) fields should stay single-
+   *  destination, since persistable fields route to the first listed
+   *  destination; only render-only groups should span both. The header renders
+   *  one chip per destination. */
+  destination: SettingDestination | SettingDestination[];
   /** Filled-variant icon class. Used when the group is the active sidebar entry. */
   icon: string;
   /** Outline-variant icon class. Falls back to `icon` when the icon set has no
@@ -302,6 +309,9 @@ export type SettingsRecord = Record<string, unknown>;
 // a derive-check in engine.test.ts fails CI if these ever drift from each
 // group's `destination` in SETTINGS_SCHEMA.
 
+// A group id appears in CLIENT_GROUP_IDS if its destinations include "client"
+// and in CORE_GROUP_IDS if they include "core". A multi-destination group (e.g.
+// `usage`) is therefore listed in BOTH.
 export const CLIENT_GROUP_IDS = [
   "appearance",
   "shortcuts",
@@ -322,6 +332,7 @@ export const CORE_GROUP_IDS = [
   "tools",
   "stt_engine",
   "server",
+  "usage",
 ] as const;
 export type CoreGroupId = (typeof CORE_GROUP_IDS)[number];
 
@@ -333,4 +344,11 @@ export function isClientGroup(id: string): id is ClientGroupId {
 
 export function isCoreGroup(id: string): id is CoreGroupId {
   return (CORE_GROUP_IDS as readonly string[]).includes(id);
+}
+
+/** Normalize a group's destination(s) to an array. */
+export function groupDestinations(group: {
+  destination: SettingDestination | SettingDestination[];
+}): SettingDestination[] {
+  return Array.isArray(group.destination) ? group.destination : [group.destination];
 }

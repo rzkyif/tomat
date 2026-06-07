@@ -30,6 +30,7 @@ import { AppError } from "../shared/errors.ts";
 import { newClientId } from "../shared/ids.ts";
 import { getLogger } from "../shared/log.ts";
 import { sha256Hex, toHex } from "../shared/hash.ts";
+import { sessionsRepo } from "./sessions-store.ts";
 import type { PairedClientEntry, PairingCodeResponse } from "@tomat/shared";
 
 const log = getLogger("auth");
@@ -345,20 +346,20 @@ export class AuthService {
       }));
   }
 
-  // Revokes the named client. Cascade-deletes sessions/messages/attachments
-  // via foreign-key ON DELETE CASCADE in schema.sql. Returns the list of
-  // attachment abs_paths so the caller can rm them off disk.
+  // Revokes the named client. Sessions/messages/attachments now live as JSON
+  // files on disk (no FK cascade), so this GCs the client's sessions explicitly
+  // via the sessions store. Returns the attachment abs_paths so the caller can
+  // rm them off disk (the session dir, including attachments, is already
+  // removed here; the paths are returned for symmetry with the old contract).
   revokeClient(clientId: string): { attachmentPaths: string[] } {
-    const attachments = db()
-      .prepare(`
-      SELECT a.abs_path
-      FROM attachments a
-      JOIN sessions s ON s.id = a.session_id
-      WHERE s.owner_client_id = ?
-    `)
-      .all(clientId) as Array<{ abs_path: string }>;
+    const attachmentPaths: string[] = [];
+    for (const s of sessionsRepo().listAll()) {
+      if (s.ownerClientId !== clientId) continue;
+      const res = sessionsRepo().deleteById(s.id);
+      if (res) attachmentPaths.push(...res.attachmentPaths);
+    }
     db().prepare(`DELETE FROM clients WHERE id = ?`).run(clientId);
-    return { attachmentPaths: attachments.map((a) => a.abs_path) };
+    return { attachmentPaths };
   }
 
   async rotateToken(clientId: string): Promise<string> {

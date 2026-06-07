@@ -38,9 +38,9 @@
   {:else if field.type === "multiline"}
     <MultilineField {field} {error} {onChange} {onReset} />
   {:else if field.type === "services"}
-    <ServicesField {field} {horizontal} />
+    <ServicesField {field} scope={field.scope} {horizontal} />
   {:else if field.type === "storage"}
-    <StorageField {field} />
+    <StorageField {field} scope={field.scope} />
   {:else if field.type === "shortcut"}
     <ShortcutField {field} {error} {horizontal} {onChange} {onReset} />
   {:else if field.type === "object_management"}

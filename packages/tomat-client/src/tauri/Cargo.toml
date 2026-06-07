@@ -36,6 +36,8 @@ keyring-core = "1"
 thiserror = "2"
 cpvc = "0.6"
 font-kit = "0.14"
+# Per-process CPU / memory for the Services field's "Main Application" row.
+sysinfo = "0.33"
 # Pinned core networking (see commands/net.rs). reqwest + tokio-tungstenite both
 # terminate TLS with a custom rustls verifier on the cert SPKI pin.
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
