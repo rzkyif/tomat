@@ -130,7 +130,6 @@ fn file_writer() -> std::io::Result<Box<dyn Write + Send>> {
         AppendCount::new(1),
         ContentLimit::Bytes(5 * 1024 * 1024),
         Compression::None,
-        #[cfg(unix)]
         None,
     );
     Ok(Box::new(rotator))
