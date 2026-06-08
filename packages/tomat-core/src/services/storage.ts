@@ -25,7 +25,7 @@ import { resolveHfPath } from "../models/manager.ts";
 import { binariesManager } from "../binaries/manager.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
 import { toolkitsRegistry } from "../toolkits/registry.ts";
-import { uninstallToolkit } from "../toolkits/uninstall.ts";
+import { deleteToolkit } from "../toolkits/uninstall.ts";
 import { sessionsRepo } from "./sessions-store.ts";
 import { chatService } from "./chat.ts";
 import { loadCoreSettingsResolved, resetCoreSettings } from "./core-settings.ts";
@@ -363,7 +363,7 @@ const CATEGORIES: CategoryDescriptor[] = [
       return out;
     },
     deleteNode: async (node) => {
-      await uninstallToolkit(basename(node.path));
+      await deleteToolkit(basename(node.path));
     },
   },
   {

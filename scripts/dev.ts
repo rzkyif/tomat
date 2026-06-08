@@ -163,42 +163,45 @@ const BUILD_NOISE = [
   /^Task\b/, // deno "Task dev:vite deno run ..."
 ];
 
-// Leak sources we recognize well enough to attach a module label to. The capture
-// group is the message body shown after the marker.
-const LEAK_SOURCES: Array<{ re: RegExp; module: string }> = [
-  // Deno's `--watch` supervisor: "Watcher Process started.", etc.
-  { re: /^Watcher\s+(.*)$/, module: "watcher" },
-];
+// Level SGR codes, matching core's @std/log + the client's fern coloring (see
+// each package's log module): debug dim, info green, warn yellow, error red.
+const LEVEL_CODE = { debug: "2", info: "32", warn: "33", error: "31" } as const;
 
-// Wrap a line that did NOT come from our logging system in a distinct, bold
-// "leak" marker so it's obvious it bypassed our format. We rely on a denylist
-// for build noise, so new leaks are inevitable; marking (not hiding) them keeps
-// them visible and labels the source when we recognize it.
-function leakLine(module: string | null, content: string): string {
-  const mark = color("2", "leak".padEnd(5)); // dim gray, matching trace/debug
-  const mod = module ? `${color("2", module)} ` : "";
-  return `${mark} ${mod}${content}`;
+// Render a line dev.ts synthesizes itself in the same `<level> <scope> <message>`
+// shape the children's own logs use, so it groups with them visually. The level
+// word is padded to 5 like @std/log / fern; the scope is dim.
+function levelLine(level: keyof typeof LEVEL_CODE, scope: string, message: string): string {
+  return `${color(LEVEL_CODE[level], level.padEnd(5))} ${color("2", scope)} ${message}`;
+}
+
+// Wrap a line that did NOT come from our logging system in a dim "leak" marker
+// so it's obvious it bypassed our format. We rely on a denylist for build noise,
+// so new leaks are inevitable; marking (not hiding) them keeps them visible.
+function leakLine(content: string): string {
+  return `${color("2", "leak".padEnd(5))} ${content}`;
 }
 
 // Decide how a raw child line is presented: pass our own logs through verbatim,
-// drop build noise, and wrap everything else as a leak. Returns null to drop.
+// drop build noise, render the known watcher lines as standard leveled logs, and
+// wrap everything else as a leak. Returns null to drop.
 function formatChildLine(raw: string): string | null {
   const plain = raw.replace(ANSI_RE, "").trimStart();
   if (plain.trim() === "") return null; // blank spacing from build tools
   if (BUILD_NOISE.some((re) => re.test(plain))) return null;
   if (LEVEL_RE.test(plain)) return raw; // our log: keep it (and its colors) verbatim
-  // Deno `--watch` prints "Waiting for graceful termination..." the instant it
-  // signals core, on BOTH a reload and on Ctrl-C shutdown, so it's not a
-  // reliable reload marker; drop it as noise. The watcher's "Restarting! File
-  // change detected: ..." line (handled by LEAK_SOURCES below) fires only on an
-  // actual reload, so with core's shutdown steps now at debug it naturally reads
-  // as the lead, and nothing spurious shows on shutdown.
-  if (/^Watcher\s+Waiting for graceful termination/.test(plain)) return null;
-  for (const src of LEAK_SOURCES) {
-    const m = plain.match(src.re);
-    if (m) return leakLine(src.module, m[1]);
+  // Deno's `--watch` supervisor emits a small, known family of lines on core's
+  // stream: "Restarting! File change detected: ..." (only on an actual reload),
+  // "Waiting for graceful termination..." (on every reload and on Ctrl-C), and
+  // "Process started/finished.". They're fully expected, so render them as
+  // standard leveled `watcher`-scoped logs instead of leaks: the reload event as
+  // info, the rest as debug chatter.
+  const watcher = plain.match(/^Watcher\s+(.*)$/);
+  if (watcher) {
+    const body = watcher[1];
+    const level = body.startsWith("Restarting!") ? "info" : "debug";
+    return levelLine(level, "watcher", body);
   }
-  return leakLine(null, plain);
+  return leakLine(plain);
 }
 
 type Child = {
@@ -587,9 +590,7 @@ if (!shuttingDown) {
   // format) so the console shows the client is building; it stays the latest
   // client message until the binary starts (or a build error leaks through
   // pipe()). Written directly like devLog, so it bypasses formatChildLine.
-  console.log(
-    `${linePrefix("client", "35")}${color("32", "info ")} ${color("2", "boot")} tomat client building`,
-  );
+  console.log(`${linePrefix("client", "35")}${levelLine("info", "boot", "tomat client building")}`);
   children.push(
     spawn("client", "35", clientCmd, `${ROOT}packages/tomat-client`, {
       ...CHANNEL_ENV,

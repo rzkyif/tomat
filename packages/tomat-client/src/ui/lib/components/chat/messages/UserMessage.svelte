@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import AttachmentList from "../AttachmentList.svelte";
-  import Bubble from "../ui/Bubble.svelte";
-  import { settingsState, streamingState } from "../../state";
+  import Bubble from "../../ui/Bubble.svelte";
+  import { settingsState, streamingState } from "../../../state";
   import {
     getTextContent,
     type MessageContent,

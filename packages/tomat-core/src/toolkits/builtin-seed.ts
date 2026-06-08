@@ -9,7 +9,7 @@ import { errMessage } from "@tomat/shared";
 import { loadCoreSettings, patchCoreSettings } from "../services/core-settings.ts";
 import { paths } from "../paths.ts";
 import { getLogger } from "../shared/log.ts";
-import { type InstallEventSink, startDownload, startInstallDeps } from "./installer.ts";
+import { type InstallEventSink, startDownload } from "./installer.ts";
 import { BUILTIN_TOOLKIT_ID } from "./builtin-manifest.ts";
 import { toolkitsRegistry } from "./registry.ts";
 
@@ -23,16 +23,19 @@ export async function seedBuiltinToolkitIfNeeded(sink: InstallEventSink): Promis
   const settings = await loadCoreSettings();
   if (settings[BUILTIN_SEEDED_KEY] === true) return; // already seeded / deleted by the user
   if (toolkitsRegistry().get(BUILTIN_TOOLKIT_ID)) {
-    // Present already (e.g. installed manually before the first seed ran).
+    // Present already (downloaded by a prior boot, or installed manually): just
+    // record the seed so a later user delete isn't undone on the next boot.
     await patchCoreSettings({ [BUILTIN_SEEDED_KEY]: true });
     return;
   }
 
-  // First boot: download the built-in, then install its deps so it ends up
-  // 'installed' (ready for the user to enable tools). The seed marker flips only
-  // after the install phase succeeds; an offline/failed first boot leaves it
-  // unset so the next boot retries. (Tools start disabled; the user enables.)
-  const installSink: InstallEventSink = {
+  // First boot: DOWNLOAD the built-in only, leaving it at status 'downloaded'.
+  // We deliberately do NOT auto-install its deps: installing needs the deno
+  // worker runtime (which may not be downloaded yet this early in boot), and -
+  // like every other toolkit - Install + per-tool Enable are explicit user
+  // steps. The seed marker flips after a successful download so a user who
+  // deletes the built-in later doesn't get it re-seeded.
+  const wrapped: InstallEventSink = {
     log: (jobId, id, stream, line) => sink.log(jobId, id, stream, line),
     done: (jobId, id, ok, code) => {
       sink.done(jobId, id, ok, code);
@@ -44,16 +47,8 @@ export async function seedBuiltinToolkitIfNeeded(sink: InstallEventSink): Promis
     },
   };
 
-  const downloadSink: InstallEventSink = {
-    log: (jobId, id, stream, line) => sink.log(jobId, id, stream, line),
-    done: (jobId, id, ok, code) => {
-      sink.done(jobId, id, ok, code);
-      if (ok) startInstallDeps(BUILTIN_TOOLKIT_ID, installSink);
-    },
-  };
-
   startDownload(
     { source: "builtin", preferLocalDir: join(paths().toolkitsDir, BUILTIN_TOOLKIT_ID) },
-    downloadSink,
+    wrapped,
   );
 }

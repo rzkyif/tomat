@@ -7,6 +7,7 @@
   import ObjectManager from "$lib/components/ui/ObjectManager.svelte";
   import ObjectCard from "$lib/components/ui/ObjectCard.svelte";
   import ObjectDetailHeader from "$lib/components/ui/ObjectDetailHeader.svelte";
+  import ObjectDetailScroll from "$lib/components/ui/ObjectDetailScroll.svelte";
   import FormField from "$lib/components/ui/FormField.svelte";
   import Input from "$lib/components/ui/Input.svelte";
 
@@ -67,8 +68,9 @@
       confirmLabel: "Unpair",
       onConfirm: async () => {
         await cores().removePaired(c.id);
-        // Mirror CoreManagement: lock back to setup if none remain, else make
-        // sure some core is active again when the removed one was current.
+        // Lock back to the add-core flow if none remain (setLocked auto-navigates
+        // to newCore); otherwise make sure some core is active again when the
+        // removed one was the current one.
         const remaining = await cores().list();
         if (remaining.length === 0) viewState.setLocked(true);
         else if (!cores().currentEntry()) await cores().select(remaining[0].id);
@@ -134,7 +136,7 @@
   hasMenu
   onMenu={() =>
     showObjectActionMenu([
-      { id: "pair", label: "Pair New Core", onSelect: () => viewState.navigate("coreManagement") },
+      { id: "pair", label: "Pair New Core", onSelect: () => viewState.navigate("newCore") },
     ])}
 >
   {#snippet card(item, open)}
@@ -152,25 +154,23 @@
       badges={isCurrent(item.id) ? [{ label: "Current", accent: "green" }] : []}
       actions={detailActions(item, close)}
     />
-    <div class="tomat-scroll flex-1 min-h-0 overflow-y-auto">
-      <div class="flex flex-col gap-3">
-        <FormField label="Name">
-          <Input
-            type="text"
-            value={draftName}
-            ariaLabel="Core name"
-            oninput={(v) => {
-              draftName = v;
-              scheduleSave();
-            }}
-            onblur={() => flushSave()}
-          />
-        </FormField>
-        <FormField label="Address">
-          <div class="text-sm text-default-700 font-mono break-all">{item.baseUrl}</div>
-        </FormField>
-      </div>
-    </div>
+    <ObjectDetailScroll>
+      <FormField label="Name">
+        <Input
+          type="text"
+          value={draftName}
+          ariaLabel="Core name"
+          oninput={(v) => {
+            draftName = v;
+            scheduleSave();
+          }}
+          onblur={() => flushSave()}
+        />
+      </FormField>
+      <FormField label="Address">
+        <div class="text-sm text-default-700 font-mono break-all">{item.baseUrl}</div>
+      </FormField>
+    </ObjectDetailScroll>
   {/snippet}
   {#snippet empty()}
     <div class="flex flex-col items-center justify-center gap-1 py-12 text-center">

@@ -2,13 +2,12 @@
   import { onMount } from "svelte";
   import { errMessage, type Grant, permissionKey, type Tool, type Toolkit } from "@tomat/shared";
   import { confirmState, toolkitsState } from "$lib/state";
-  import Button from "$lib/components/ui/Button.svelte";
+  import Toggle from "$lib/components/ui/Toggle.svelte";
 
   let { toolkit }: { toolkit: Toolkit } = $props();
 
   let busyId = $state<string | null>(null);
-  let bulkBusy = $state(false);
-  let expandedTools = $state<Set<string>>(new Set());
+  let loadingTools = $state(false);
   let toolsError = $state<string | null>(null);
 
   // A drifted toolkit had its tools disabled; block all toggling until the user
@@ -20,10 +19,14 @@
   });
 
   async function loadTools(id: string) {
+    loadingTools = true;
+    toolsError = null;
     try {
       await toolkitsState.loadTools(id);
     } catch (e) {
       toolsError = errMessage(e);
+    } finally {
+      loadingTools = false;
     }
   }
 
@@ -38,33 +41,11 @@
     }
   }
 
-  async function runBulk(fn: () => Promise<void>) {
-    bulkBusy = true;
-    try {
-      await fn();
-    } catch (e) {
-      confirmState.alert({ title: "Action failed", message: errMessage(e) });
-    } finally {
-      bulkBusy = false;
-    }
-  }
-
-  function toggleExpandTool(toolName: string) {
-    const next = new Set(expandedTools);
-    if (next.has(toolName)) next.delete(toolName);
-    else next.add(toolName);
-    expandedTools = next;
-  }
-
   function grantStateFor(tool: Tool, key: string): "granted" | "denied" | "ungranted" {
     return tool.grants.find((g) => g.permissionKey === key)?.state ?? "ungranted";
   }
 
-  async function handleGrantChange(
-    tool: Tool,
-    permKey: string,
-    nextState: "granted" | "denied",
-  ) {
+  async function handleGrantChange(tool: Tool, permKey: string, nextState: "granted" | "denied") {
     const merged: Array<{ key: string; state: Grant["state"] }> = [];
     for (const g of tool.grants) {
       if (g.permissionKey !== permKey) merged.push({ key: g.permissionKey, state: g.state });
@@ -76,36 +57,54 @@
     );
   }
 
-  function permissionSummary(decl: Tool["requiredPermissions"][number]): string {
+  // Required permissions first, optional ones after; original order within each
+  // group is preserved (stable sort).
+  function sortedPermissions(tool: Tool): Tool["requiredPermissions"] {
+    return [...tool.requiredPermissions].sort(
+      (a, b) => Number(a.optional ?? false) - Number(b.optional ?? false),
+    );
+  }
+
+  // Inline-code chip styling: mono on a light inset surface (bg-surface-inset),
+  // so arbitrary values (hosts, paths, env names, ...) read like inline code but
+  // stay legible against the settings panel.
+  const codeClass = "font-mono bg-surface-inset text-default-800 rounded-small px-1.5 py-0.5 break-all";
+
+  // A permission as a sentence with its arbitrary value split out so the template
+  // can render that value as an inline-code chip.
+  function permissionParts(
+    decl: Tool["requiredPermissions"][number],
+  ): { before: string; code?: string; after: string } {
     switch (decl.kind) {
       case "net":
-        return `net ${decl.host}:${decl.ports.map(String).join(",")}`;
+        return {
+          before: "Network access to ",
+          code: `${decl.host}:${decl.ports.map(String).join(",")}`,
+          after: "",
+        };
       case "read":
-        return `read ${decl.path}`;
+        return { before: "Read files at ", code: decl.path, after: "" };
       case "write":
-        return `write ${decl.path}`;
+        return { before: "Write files at ", code: decl.path, after: "" };
       case "run":
-        return `run ${decl.binary}`;
+        return { before: "Run the ", code: decl.binary, after: " command" };
       case "env":
-        return `env ${decl.key}`;
+        return { before: "Read the ", code: decl.key, after: " environment variable" };
       case "ffi":
-        return "ffi";
+        return { before: "Load native libraries (FFI)", after: "" };
       case "sys":
-        return `sys ${decl.flag}`;
+        return { before: "Read system info (", code: decl.flag, after: ")" };
     }
   }
 </script>
 
-<div class="flex flex-col gap-3">
-  {#if toolkit.lastError}
-    <div class="text-sm text-accent-red-600 break-words">{toolkit.lastError}</div>
-  {/if}
+<div class="flex flex-col">
   {#if toolsError}
-    <div class="text-sm text-accent-red-600 break-words">{toolsError}</div>
+    <div class="text-sm text-accent-red-600 break-words pb-2">{toolsError}</div>
   {/if}
 
   {#if drifted}
-    <div class="flex flex-col gap-1 p-3 bg-surface-inset rounded-large">
+    <div class="flex flex-col gap-1 p-3 mb-1 bg-surface-inset rounded-large">
       <span class="text-sm text-accent-red-600">Content changed since install</span>
       <span class="text-xs text-default-700 break-words">
         This toolkit's files changed on disk, so its tools were disabled. Review the change,
@@ -114,125 +113,78 @@
     </div>
   {/if}
 
-  {#if !toolkit.tools}
+  {#if loadingTools && !toolkit.tools}
     <div class="flex justify-center py-6 text-default-500">
       <i class="i-material-symbols-progress-activity animate-spin text-lg"></i>
     </div>
-  {:else if toolkit.tools.length === 0}
-    <div class="text-sm text-default-600 italic">No tools declared.</div>
-  {:else}
-    <div class="flex items-center gap-2">
-      <Button
-        size="sm"
-        variant="secondary"
-        disabled={bulkBusy || drifted}
-        onclick={() => runBulk(() => toolkitsState.enableAllTools(toolkit.id))}
-      >
-        Enable all
-      </Button>
-      <Button
-        size="sm"
-        variant="secondary"
-        disabled={bulkBusy || drifted}
-        onclick={() => runBulk(() => toolkitsState.disableAllTools(toolkit.id))}
-      >
-        Disable all
-      </Button>
-    </div>
-    <div class="flex flex-col gap-2">
-      {#each toolkit.tools as tool (tool.id)}
-        {@const expanded = expandedTools.has(tool.name)}
-        {@const missing = tool.missingRequired.length}
-        <div class="flex flex-col gap-2 p-3 bg-surface-inset rounded-large">
-          <div class="flex items-start justify-between gap-2">
-            <div class="flex flex-col gap-0.5 min-w-0">
-              <span class="font-mono text-sm text-default-800 break-all">{tool.name}</span>
-              {#if tool.description}
-                <span class="text-xs text-default-700 break-words">{tool.description}</span>
-              {/if}
-              {#if missing > 0}
-                {#if tool.enabled}
-                  <span class="text-xs text-accent-yellow-600">
-                    Enabled, not exposed: needs {missing} permission grant{missing > 1 ? "s" : ""}
-                  </span>
-                {:else}
-                  <span class="text-xs text-default-600">
-                    Needs {missing} permission grant{missing > 1 ? "s" : ""} to be used by the assistant
-                  </span>
-                {/if}
-              {/if}
-            </div>
-            <Button
-              size="sm"
-              variant={tool.enabled ? "secondary" : "primary"}
-              disabled={busyId === tool.name || drifted}
-              onclick={() =>
-                runToolAction(tool.name, () =>
-                  tool.enabled
-                    ? toolkitsState.disableTool(toolkit.id, tool.name)
-                    : toolkitsState.enableTool(toolkit.id, tool.name),
-                )}
-            >
-              {tool.enabled ? "Disable" : "Enable"}
-            </Button>
+  {:else if toolkit.tools && toolkit.tools.length === 0}
+    <div class="text-sm text-default-600 italic py-2">No tools declared.</div>
+  {:else if toolkit.tools}
+    {#each toolkit.tools as tool (tool.id)}
+      {@const missing = tool.missingRequired.length}
+      <div class="flex flex-col gap-2 py-3 border-t border-surface first:border-t-0">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex flex-col gap-1 min-w-0">
+            <code class="{codeClass} text-sm self-start">{tool.name}</code>
+            {#if tool.description}
+              <span class="text-xs text-default-600 break-words">{tool.description}</span>
+            {/if}
+            {#if tool.enabled && missing > 0}
+              <span class="text-xs text-accent-yellow-600">
+                Enabled, but not active until its required permissions are allowed.
+              </span>
+            {/if}
           </div>
-
-          {#if tool.requiredPermissions.length > 0}
-            <button
-              type="button"
-              class="text-xs text-default-600 hover:text-default-800 text-left hover:cursor-pointer"
-              onclick={() => toggleExpandTool(tool.name)}
-            >
-              {expanded ? "Hide" : "Show"} permissions ({tool.requiredPermissions.length})
-            </button>
-          {/if}
-
-          {#if expanded}
-            <div class="flex flex-col gap-1">
-              {#each tool.requiredPermissions as decl (permissionKey(decl))}
-                {@const key = permissionKey(decl)}
-                {@const state = grantStateFor(tool, key)}
-                <div class="flex flex-col gap-1 p-2 bg-surface-inset-strong rounded-medium">
-                  <div class="flex flex-col gap-0.5">
-                    <span class="font-mono text-xs text-default-800 break-all">
-                      {permissionSummary(decl)}
-                    </span>
-                    <span class="text-xs text-default-700 break-words">{decl.reason}</span>
-                    {#if decl.optional}
-                      <span class="text-xs text-default-600 italic">optional</span>
-                    {/if}
-                  </div>
-                  <div class="flex items-center gap-3 text-xs">
-                    <label class="flex items-center gap-1 hover:cursor-pointer">
-                      <input
-                        type="radio"
-                        name={`${tool.name}::${key}`}
-                        checked={state === "granted"}
-                        disabled={busyId === `${tool.name}::${key}`}
-                        onchange={() => handleGrantChange(tool, key, "granted")}
-                      />
-                      <span class="text-default-800">Grant</span>
-                    </label>
-                    <label class="flex items-center gap-1 hover:cursor-pointer">
-                      <input
-                        type="radio"
-                        name={`${tool.name}::${key}`}
-                        checked={state === "denied"}
-                        disabled={busyId === `${tool.name}::${key}`}
-                        onchange={() => handleGrantChange(tool, key, "denied")}
-                      />
-                      <span class="text-default-800">Deny</span>
-                    </label>
-                    {#if state === "ungranted"}
-                      <span class="text-accent-yellow-600">Unset</span>
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-          {/if}
+          <div class="w-36 shrink-0">
+            <Toggle
+              compact
+              labels={{ on: "ENABLED", off: "DISABLED" }}
+              checked={tool.enabled}
+              disabled={busyId === tool.name || drifted}
+              ariaLabel={`Enable ${tool.name}`}
+              onchange={(v) =>
+                runToolAction(tool.name, () =>
+                  v
+                    ? toolkitsState.enableTool(toolkit.id, tool.name)
+                    : toolkitsState.disableTool(toolkit.id, tool.name),
+                )}
+            />
+          </div>
         </div>
-      {/each}
-    </div>
+
+        {#if tool.requiredPermissions.length > 0}
+          <div class="flex flex-col gap-1.5 pl-3">
+            <div class="text-default-400 text-[10px] uppercase tracking-wider select-none">
+              Permissions
+            </div>
+            {#each sortedPermissions(tool) as decl (permissionKey(decl))}
+              {@const key = permissionKey(decl)}
+              {@const state = grantStateFor(tool, key)}
+              {@const parts = permissionParts(decl)}
+              <div class="flex items-start justify-between gap-3">
+                <div class="flex flex-col gap-0.5 min-w-0">
+                  <span class="text-xs text-default-800 break-words">
+                    {parts.before}{#if parts.code}<code class={codeClass}>{parts.code}</code>{/if}{parts.after}{#if !decl.optional}<span
+                        class="text-default-500 ml-1.5">(required)</span
+                      >{/if}
+                  </span>
+                  <span class="text-xs text-default-600 break-words">{decl.reason}</span>
+                </div>
+                <div class="w-36 shrink-0">
+                  <Toggle
+                    compact
+                    labels={{ on: "ALLOWED", off: "DENIED" }}
+                    checked={state === "granted"}
+                    disabled={busyId === `${tool.name}::${key}`}
+                    ariaLabel={`${parts.before}${parts.code ?? ""}${parts.after}`}
+                    onchange={(v) => handleGrantChange(tool, key, v ? "granted" : "denied")}
+                  />
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/each}
   {/if}
 </div>

@@ -4,6 +4,9 @@ export const shortcutsGroup: SettingGroup = {
   id: "shortcuts",
   destination: "client",
   name: "Shortcuts",
+  description:
+    "Keyboard shortcuts for common actions. Click a field, press the keys you want, and clear it to disable.",
+  descriptionTier: "ondemand",
   icon: "i-material-symbols-keyboard-rounded",
   iconInactive: "i-material-symbols-keyboard-outline-rounded",
   sections: [
@@ -12,7 +15,7 @@ export const shortcutsGroup: SettingGroup = {
         {
           id: "shortcuts.toggleWindow",
           name: "Show / Hide Window",
-          description: "Click the field and press a key combination to set it. Clear to disable.",
+          description: "Bring the app to the front or hide it, from anywhere.",
           type: "shortcut",
           defaultValue: "super+ctrl+shift+z",
           optional: true,
@@ -21,8 +24,7 @@ export const shortcutsGroup: SettingGroup = {
         {
           id: "shortcuts.attachFile",
           name: "Attach File",
-          description:
-            "Open the file picker to attach a file to the next message.\nOnly active while the chat input is focused.",
+          description: "Attach a file to your next message. Only works in chat mode.",
           type: "shortcut",
           defaultValue: "super+ctrl+shift+a",
           optional: true,
@@ -30,9 +32,8 @@ export const shortcutsGroup: SettingGroup = {
         },
         {
           id: "shortcuts.captureScreen",
-          name: "Capture Full Screen",
-          description:
-            "Capture the primary monitor as an image attachment.\nOnly active while the chat input is focused.",
+          name: "Capture Screen",
+          description: "Attach a screenshot of your whole screen. Only works in chat mode.",
           type: "shortcut",
           defaultValue: "super+ctrl+shift+s",
           optional: true,
@@ -41,8 +42,7 @@ export const shortcutsGroup: SettingGroup = {
         {
           id: "shortcuts.captureRegion",
           name: "Capture Screen Area",
-          description:
-            "Open the region-capture overlay so you can drag-select a rectangle to attach.\nOnly active while the chat input is focused.",
+          description: "Drag to select part of your screen and attach it. Only works in chat mode.",
           type: "shortcut",
           defaultValue: "super+ctrl+shift+x",
           optional: true,

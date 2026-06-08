@@ -7,6 +7,8 @@ export const serverGroup: SettingGroup = {
   id: "server",
   destination: "core",
   name: "Server",
+  description: "How the core is reachable on the network and how it updates itself.",
+  descriptionTier: "ondemand",
   icon: "i-material-symbols-host-rounded",
   iconInactive: "i-material-symbols-host-outline-rounded",
   sections: [
@@ -14,9 +16,9 @@ export const serverGroup: SettingGroup = {
       fields: [
         {
           id: "server.bindHost",
-          name: "Network Interface",
+          name: "Network Access",
           description:
-            "Which network interface the core's HTTP server listens on. Leave as 127.0.0.1 to accept connections from this computer only (the default). Set a specific LAN IP to accept connections on just that interface, or 0.0.0.0 to accept on every interface so other devices can pair.\nThe API is served over self-signed TLS that paired clients pin during pairing, so traffic is encrypted and authenticated regardless of interface; widening this only increases who can reach the listener. Requires a core restart to take effect.",
+            "Who can reach this core. 127.0.0.1 is this computer only; a LAN address or 0.0.0.0 lets other devices pair. Traffic is always encrypted. Restart the core to apply.",
           type: "string",
           defaultValue: "127.0.0.1",
           placeholder: "127.0.0.1",
@@ -24,9 +26,9 @@ export const serverGroup: SettingGroup = {
         },
         {
           id: "updates.allowDowngrade",
-          name: "Allow Version Downgrade",
+          name: "Allow Downgrades",
           description:
-            "Permit the auto-updater to install a manifest version older than the running core. Off by default: a signed manifest is normally only meant to roll forward, and accepting a downgrade re-introduces any fixed vulnerabilities. Turn on only for an intentional rollback.",
+            "Let updates install an older version than you're running. Off is safer; turn on only for a deliberate rollback.",
           type: "boolean",
           defaultValue: false,
           descriptionTier: "ondemand",

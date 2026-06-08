@@ -50,6 +50,10 @@ Deno.test("upsertToolkit + status transitions: downloaded -> installed -> drift"
     r.markInstalled("example-toolkit", "cafebabe");
     assertEquals(r.get("example-toolkit")?.status, "installed");
     assertEquals(r.get("example-toolkit")?.contentHash, "cafebabe");
+    // Uninstall reverts to 'downloaded' and unpins the hash.
+    r.markDownloaded("example-toolkit");
+    assertEquals(r.get("example-toolkit")?.status, "downloaded");
+    assertEquals(r.get("example-toolkit")?.contentHash, "");
     // A re-download resets to 'downloaded' + clears the pin (re-install needed).
     r.upsertToolkit(tk({ version: "1.0.1", contentHash: "" }));
     assertEquals(r.get("example-toolkit")?.status, "downloaded");
@@ -123,22 +127,42 @@ Deno.test("replaceTools: preserves grants when required perms unchanged, drops w
   }
 });
 
-Deno.test("enableAllTools / disableAllTools: flip every tool in a toolkit", async () => {
+Deno.test("disableAllTools: clears every tool's enabled flag (drift auto-disable)", async () => {
   const env = await setupTestEnv();
   try {
     const r = toolkitsRegistry();
     r.upsertToolkit(tk());
     r.replaceTools("example-toolkit", [tool({ name: "a" }), tool({ name: "b" })]);
-    r.enableAllTools("example-toolkit");
-    assertEquals(
-      r.listTools("example-toolkit").every((t) => t.enabled),
-      true,
-    );
+    r.setToolEnabled("example-toolkit", "a", true);
+    r.setToolEnabled("example-toolkit", "b", true);
     r.disableAllTools("example-toolkit");
     assertEquals(
       r.listTools("example-toolkit").every((t) => !t.enabled),
       true,
     );
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("list/get project tool counts: total + enabled", async () => {
+  const env = await setupTestEnv();
+  try {
+    const r = toolkitsRegistry();
+    r.upsertToolkit(tk());
+    r.replaceTools("example-toolkit", [
+      tool({ name: "a" }),
+      tool({ name: "b" }),
+      tool({ name: "c" }),
+    ]);
+    r.setToolEnabled("example-toolkit", "a", true);
+    r.setToolEnabled("example-toolkit", "b", true);
+    const got = r.get("example-toolkit");
+    assertEquals(got?.toolCount, 3);
+    assertEquals(got?.enabledToolCount, 2);
+    const listed = r.list().find((t) => t.id === "example-toolkit");
+    assertEquals(listed?.toolCount, 3);
+    assertEquals(listed?.enabledToolCount, 2);
   } finally {
     await env.teardown();
   }

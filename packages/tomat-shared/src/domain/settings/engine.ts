@@ -27,8 +27,7 @@ import { promptsGroup } from "./groups/prompts.ts";
 import { snippetsGroup } from "./groups/snippets.ts";
 import { toolkitsGroup, toolsGroup } from "./groups/toolkits.ts";
 import { dualModelGroup } from "./groups/dual-model.ts";
-import { sttInputGroup } from "./groups/stt-input.ts";
-import { sttEngineGroup } from "./groups/stt-engine.ts";
+import { sttGroup } from "./groups/stt.ts";
 import { ttsGroup } from "./groups/tts.ts";
 import { usageGroup } from "./groups/usage.ts";
 import { coresGroup } from "./groups/cores.ts";
@@ -98,8 +97,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   toolkitsGroup,
   toolsGroup,
   dualModelGroup,
-  sttInputGroup,
-  sttEngineGroup,
+  sttGroup,
   ttsGroup,
   usageGroup,
   serverGroup,

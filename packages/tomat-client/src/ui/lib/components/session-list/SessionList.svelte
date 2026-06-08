@@ -6,9 +6,9 @@
   // the active core via cores().select()).
 
   import { onMount } from "svelte";
-  import Bubble from "./ui/Bubble.svelte";
-  import IconButton from "./ui/IconButton.svelte";
-  import Select from "./ui/Select.svelte";
+  import Bubble from "../ui/Bubble.svelte";
+  import IconButton from "../ui/IconButton.svelte";
+  import Select from "../ui/Select.svelte";
   import { sessionsState, settingsState, viewState } from "$lib/state";
   import { cores, type PairedCoreEntry } from "$lib/core";
   import { getLogger } from "$lib/shared/log";

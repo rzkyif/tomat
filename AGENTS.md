@@ -81,6 +81,14 @@ through `npm:` specifiers from `deno task`.
   `main.ts`. Every line runs through `scrubSecrets` (same module) which masks
   tokens before they reach `core.log` or stderr.
 - **Library reuse.** Prefer maintained npm/JSR packages over hand-rolled code.
+- **Terminology.** Use one term per concept in user-facing copy (settings,
+  labels, messages): **Thinking** (a model's internal reasoning, never
+  "reasoning"); **Provider** with **Local** / **External**; **Context Window**;
+  **CPU Threads**; **Toolkit** (a bundle) and **Tool** (one function);
+  **Session** (a conversation); **Bubble** (a chat bubble); **Speech-to-Text**
+  for the engine and **Voice Input** for the capture UX; **Snippet**; **Core**
+  (the service) and **Client** (the app). Phrase settings the model only honors,
+  not enforces, as requests ("the language the agent **should** reply in").
 
 ## Key Decisions
 

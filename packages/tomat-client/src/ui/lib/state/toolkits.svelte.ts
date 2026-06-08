@@ -72,6 +72,8 @@ class ToolkitsState {
   private unsubscribeWs: (() => void) | null = null;
   private unsubscribeConn: (() => void) | null = null;
   private hydrated = false;
+  /** Resolvers awaiting a job's terminal state, keyed by job id (see awaitJob). */
+  private jobWaiters = new Map<string, (job: InstallJob) => void>();
 
   /** Subscribe to the active core's WS feed and seed the installed list.
    *  Called from `+page.svelte` onMount (the spec talks about `attach()`).
@@ -135,14 +137,18 @@ class ToolkitsState {
       case "toolkit.install_done": {
         const job = this.installJobs[frame.jobId];
         if (job) {
-          this.installJobs = {
-            ...this.installJobs,
-            [frame.jobId]: {
-              ...job,
-              status: frame.ok ? "done" : "failed",
-              toolkitId: frame.id || job.toolkitId,
-            },
+          const updated: InstallJob = {
+            ...job,
+            status: frame.ok ? "done" : "failed",
+            toolkitId: frame.id || job.toolkitId,
           };
+          this.installJobs = { ...this.installJobs, [frame.jobId]: updated };
+          // Wake anyone awaiting this job (loading state + transient failure UI).
+          const waiter = this.jobWaiters.get(frame.jobId);
+          if (waiter) {
+            this.jobWaiters.delete(frame.jobId);
+            waiter(updated);
+          }
         }
         // A successful (re)install clears any stale update flag for that id so
         // the "Update available" badge/action disappears.
@@ -168,7 +174,11 @@ class ToolkitsState {
   /** Pull the latest toolkit list from the core. */
   async refresh(): Promise<void> {
     const list = await cores().api().toolkits.list();
-    this.installed = list;
+    // The list endpoint never embeds tools (they're lazy-loaded per toolkit), so
+    // carry over any tools already loaded. Otherwise a snapshot/refresh while a
+    // detail view is open would blank its tool list and leave it spinning.
+    const prev = new Map(this.installed.map((t) => [t.id, t.tools]));
+    this.installed = list.map((t) => (t.tools ? t : { ...t, tools: prev.get(t.id) }));
   }
 
   /** npm-registry search; results land in `searchResults`. Empty query
@@ -215,9 +225,36 @@ class ToolkitsState {
     };
   }
 
-  async uninstall(id: string): Promise<void> {
+  /** Resolve once a download/install/update job reaches a terminal state
+   *  (resolves immediately if it already has). Lets the UI hold a loading state
+   *  for the whole async job and surface its failure (the job's stderr) once. */
+  awaitJob(jobId: string): Promise<InstallJob> {
+    const job = this.installJobs[jobId];
+    if (job && job.status !== "running") return Promise.resolve(job);
+    return new Promise((resolve) => this.jobWaiters.set(jobId, resolve));
+  }
+
+  /** True while a download/install/update job for this toolkit id is running.
+   *  Drives the detail-view action loading state. */
+  isJobRunning(toolkitId: string): boolean {
+    return Object.values(this.installJobs).some(
+      (j) => j.status === "running" && j.toolkitId === toolkitId,
+    );
+  }
+
+  /** Remove a toolkit entirely (files + rows). */
+  async deleteToolkit(id: string): Promise<void> {
     await cores().api().toolkits.delete(id);
     await this.refresh();
+  }
+
+  /** Revert an installed toolkit to 'downloaded' (drop its installed deps); the
+   *  source stays so it can be re-installed. Refresh so the status + tools
+   *  reflect the change in an open detail view. */
+  async uninstall(id: string): Promise<void> {
+    await cores().api().toolkits.uninstall(id);
+    await this.refresh();
+    await this.refreshTools(id);
   }
 
   /** Download the built-in toolkit from the CDN (codebase in dev). */
@@ -226,9 +263,13 @@ class ToolkitsState {
   }
 
   /** Update a toolkit to its latest version (npm registry or built-in CDN
-   *  manifest). The core streams progress + a `toolkit.install_done` frame. */
-  async updateToolkit(id: string): Promise<void> {
-    await cores().api().toolkits.update(id);
+   *  manifest). The core streams progress + a `toolkit.install_done` frame.
+   *  Registers a job (like installDeps) so the caller can await + show loading. */
+  async updateToolkit(id: string): Promise<string> {
+    const label = this.installed.find((t) => t.id === id)?.displayName || id;
+    const res = await cores().api().toolkits.update(id);
+    this.registerJob(res.jobId, res.toolkitId, label);
+    return res.jobId;
   }
 
   /** Check installed toolkits for newer versions and store the result so the UI
@@ -264,16 +305,6 @@ class ToolkitsState {
     await this.refreshTools(toolkitId);
   }
 
-  async enableAllTools(toolkitId: string): Promise<void> {
-    await cores().api().toolkits.enableAllTools(toolkitId);
-    await this.refreshTools(toolkitId);
-  }
-
-  async disableAllTools(toolkitId: string): Promise<void> {
-    await cores().api().toolkits.disableAllTools(toolkitId);
-    await this.refreshTools(toolkitId);
-  }
-
   /** Re-pin the current on-disk content + clear the drift warning. Refresh so
    *  the toolkit returns to 'installed' with its (now disabled) tools shown. */
   async confirmReenable(toolkitId: string): Promise<void> {
@@ -301,14 +332,25 @@ class ToolkitsState {
   private async refreshTools(toolkitId: string): Promise<void> {
     try {
       const { tools } = await cores().api().toolkits.listTools(toolkitId);
-      const idx = this.installed.findIndex((t) => t.id === toolkitId);
-      if (idx >= 0) {
-        this.installed[idx] = { ...this.installed[idx], tools };
-        this.installed = [...this.installed];
-      }
+      this.spliceTools(toolkitId, tools);
     } catch (err) {
       log.warn(`tools refresh for ${toolkitId} failed:`, err);
     }
+  }
+
+  /** Splice a fresh tool list into the matching installed row AND recompute the
+   *  tool counts from it, so the "N enabled" badge tracks a per-tool toggle
+   *  immediately (the counts otherwise only update on a full list refresh). */
+  private spliceTools(toolkitId: string, tools: Tool[]): void {
+    const idx = this.installed.findIndex((t) => t.id === toolkitId);
+    if (idx < 0) return;
+    this.installed[idx] = {
+      ...this.installed[idx],
+      tools,
+      toolCount: tools.length,
+      enabledToolCount: tools.filter((t) => t.enabled).length,
+    };
+    this.installed = [...this.installed];
   }
 
   /** Load the full tool list for a toolkit so the per-tool UI can render.
@@ -316,11 +358,7 @@ class ToolkitsState {
    *  a toolkit row. */
   async loadTools(toolkitId: string): Promise<Tool[]> {
     const { tools } = await cores().api().toolkits.listTools(toolkitId);
-    const idx = this.installed.findIndex((t) => t.id === toolkitId);
-    if (idx >= 0) {
-      this.installed[idx] = { ...this.installed[idx], tools };
-      this.installed = [...this.installed];
-    }
+    this.spliceTools(toolkitId, tools);
     return tools;
   }
 

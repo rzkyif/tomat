@@ -7,16 +7,20 @@ export const usageGroup: SettingGroup = {
   id: "usage",
   destination: ["client", "core"],
   name: "Usage",
+  description:
+    "What tomat is using right now: memory, CPU, and disk on this device and on the core.",
+  descriptionTier: "ondemand",
   icon: "i-material-symbols-analytics-rounded",
   iconInactive: "i-material-symbols-analytics-outline-rounded",
   sections: [
     {
-      label: "Client",
+      label: "On This Device",
+      destination: "client",
       fields: [
         {
           id: "usage.clientServices",
           name: "Services",
-          description: "Live memory and CPU usage for the desktop app.",
+          description: "Live memory and CPU use of the app.",
           type: "services",
           scope: "client",
           defaultValue: "",
@@ -26,7 +30,7 @@ export const usageGroup: SettingGroup = {
           id: "usage.clientStorage",
           name: "Storage",
           description:
-            "App data stored on this device (settings, logs). Clear logs or reset client settings to defaults.",
+            "App data on this device, like settings and logs. Clear logs or reset settings here.",
           type: "storage",
           scope: "client",
           defaultValue: "",
@@ -35,12 +39,13 @@ export const usageGroup: SettingGroup = {
       ],
     },
     {
-      label: "Core",
+      label: "On the Core",
+      destination: "core",
       fields: [
         {
           id: "usage.coreServices",
           name: "Services",
-          description: "Live memory and CPU usage for the core service and its local sidecars.",
+          description: "Live memory and CPU use of the core and its helpers.",
           type: "services",
           scope: "core",
           defaultValue: "",
@@ -50,7 +55,7 @@ export const usageGroup: SettingGroup = {
           id: "usage.coreStorage",
           name: "Storage",
           description:
-            "Everything the core keeps on disk, by category. Select items and press Delete (or ⌘⌫), or use Clear per category. Items in use are protected; clearing Settings resets everything to defaults.",
+            "Everything the core stores on disk, by type. Select items to delete, or clear a whole category.",
           type: "storage",
           scope: "core",
           defaultValue: "",

@@ -7,6 +7,7 @@
     disabled = false,
     variant = "labels",
     labels = { on: "on", off: "off" },
+    compact = false,
     ariaLabel,
     class: extraClass = "",
   }: {
@@ -20,6 +21,9 @@
     variant?: Variant;
     /** Only used when variant === "labels". */
     labels?: { on: string; off: string };
+    /** Slightly smaller, tighter label text for the `labels` variant, so longer
+     *  words (ENABLED/DISABLED, ALLOWED/DENIED) fit a narrow control. */
+    compact?: boolean;
     ariaLabel?: string;
     class?: string;
   } = $props();
@@ -58,9 +62,9 @@
   {:else}
     <span class="relative w-full h-8 rounded-medium bg-surface-inset">
       <span
-        class="absolute top-1 bottom-1 left-1 w-[calc(50%-0.25rem)] flex items-center justify-center rounded-medium bg-default-inverted-300 text-default-inverted-900 text-xs uppercase tracking-wide transition-transform {checked
-          ? 'translate-x-full'
-          : ''}"
+        class="absolute top-1 bottom-1 left-1 w-[calc(50%-0.25rem)] flex items-center justify-center rounded-medium bg-default-inverted-300 text-default-inverted-900 uppercase transition-transform {compact
+          ? 'text-[0.625rem]'
+          : 'text-xs tracking-wide'} {checked ? 'translate-x-full' : ''}"
       >
         {checked ? labels.on : labels.off}
       </span>

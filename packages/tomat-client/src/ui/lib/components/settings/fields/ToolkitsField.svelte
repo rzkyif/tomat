@@ -7,6 +7,7 @@
     type ToolkitSearchResult,
   } from "@tomat/shared";
   import { confirmState, toolkitsState } from "$lib/state";
+  import type { InstallJob } from "$lib/state/toolkits.svelte";
   import { cores } from "$lib/core";
   import type { ParsedQuery } from "$lib/shared/object-query";
   import { type MenuRow, showFilterSortMenu, showObjectActionMenu } from "$lib/shared/object-menu";
@@ -14,6 +15,7 @@
   import ObjectManager from "$lib/components/ui/ObjectManager.svelte";
   import ObjectCard from "$lib/components/ui/ObjectCard.svelte";
   import ObjectDetailHeader from "$lib/components/ui/ObjectDetailHeader.svelte";
+  import ObjectDetailScroll from "$lib/components/ui/ObjectDetailScroll.svelte";
   import ToolkitDetail from "./ToolkitDetail.svelte";
 
   // A list row is either an installed toolkit or an npm search result. A single
@@ -27,6 +29,10 @@
   let reloadKey = $state(0);
   // True while "Check for Updates" runs; swaps the triple-dot for a spinner.
   let checking = $state(false);
+  // Non-job detail action in flight (currently just "uninstall"); drives that
+  // button's loading state. Download/install/update loading is derived from the
+  // streamed job instead (toolkitsState.isJobRunning).
+  let busyAction = $state<string | null>(null);
 
   onMount(() => void toolkitsState.ensureConnected());
 
@@ -34,15 +40,17 @@
     return toolkitsState.updateStatus[tk.id]?.updateAvailable ?? false;
   }
 
+  // The toolkit lifecycle as a single badge: drift / update / downloaded /
+  // installed. Failures are NOT a toolkit state (they surface transiently via
+  // confirmState.alert), so there is no "Error" badge.
   function statusBadge(tk: Toolkit): Badge {
     if (tk.status === "drift") {
       return {
         label: "Content changed",
         accent: "red",
-        title: tk.lastError ?? "Files changed on disk since install; review and re-enable.",
+        title: "Files changed on disk since install; review and re-enable.",
       };
     }
-    if (tk.lastError) return { label: "Error", accent: "red", title: tk.lastError };
     if (isUpdatable(tk)) {
       const latest = toolkitsState.updateStatus[tk.id]?.latestVersion;
       return { label: "Update available", accent: "yellow", title: latest ? `v${latest}` : undefined };
@@ -51,18 +59,44 @@
     return { label: "Installed", accent: "green" };
   }
 
+  // An installed toolkit also shows how many of its tools are enabled.
+  function toolkitBadges(tk: Toolkit): Badge[] {
+    const badges = [statusBadge(tk)];
+    if (tk.status === "installed") badges.push({ label: `${tk.enabledToolCount} enabled` });
+    return badges;
+  }
+
+  // Tail of an install job's stderr, used as the failure message so the real
+  // deno error is shown instead of a bare exit code.
+  function stderrTail(job: InstallJob): string {
+    return job.lines
+      .filter((l) => l.line.trim())
+      .slice(-12)
+      .map((l) => l.line)
+      .join("\n");
+  }
+
+  // Start a streamed job (download/install/update), wait for it to finish, and
+  // surface a failure transiently with the real stderr. Sync REST errors (e.g. a
+  // 404/409) are caught the same way.
+  async function runJob(title: string, start: () => Promise<string>): Promise<void> {
+    try {
+      const jobId = await start();
+      const job = await toolkitsState.awaitJob(jobId);
+      if (job.status === "failed") {
+        confirmState.alert({ title, message: stderrTail(job) || "Failed. See logs for details." });
+      }
+    } catch (e) {
+      confirmState.alert({ title, message: errMessage(e) });
+    }
+  }
+
   function updateRow(tk: Toolkit): MenuRow {
     const latest = toolkitsState.updateStatus[tk.id]?.latestVersion;
     return {
       id: "update",
       label: latest ? `Update to v${latest}` : "Update",
-      onSelect: async () => {
-        try {
-          await toolkitsState.updateToolkit(tk.id);
-        } catch (e) {
-          confirmState.alert({ title: "Update failed", message: errMessage(e) });
-        }
-      },
+      onSelect: () => runJob("Update failed", () => toolkitsState.updateToolkit(tk.id)),
     };
   }
 
@@ -83,13 +117,7 @@
     return {
       id: "install",
       label: "Install",
-      onSelect: async () => {
-        try {
-          await toolkitsState.installDeps(tk.id);
-        } catch (e) {
-          confirmState.alert({ title: "Install failed", message: errMessage(e) });
-        }
-      },
+      onSelect: () => runJob("Install failed", () => toolkitsState.installDeps(tk.id)),
     };
   }
 
@@ -119,19 +147,55 @@
     });
   }
 
-  function uninstall(tk: Toolkit, after?: () => void) {
+  // Uninstall reverts an installed, deps-bearing toolkit to 'downloaded'. A
+  // no-dep toolkit (installed on download) has nothing to uninstall, so it is
+  // delete-only; an already-downloaded/drifted toolkit is delete-only too.
+  function canUninstall(tk: Toolkit): boolean {
+    return tk.status === "installed" && tk.hasDeps;
+  }
+
+  // Uninstall: drop installed deps, revert to 'downloaded'. The toolkit stays
+  // (re-installable), so the detail view is left open.
+  function uninstallToolkit(tk: Toolkit) {
     confirmState.request({
       title: "Uninstall toolkit",
       message:
-        `Remove "${tk.displayName || tk.id}" v${tk.version}? Its grants and installed files will be deleted.`,
+        `Uninstall "${tk.displayName || tk.id}"? Its installed dependencies are removed and ` +
+        `its tools are disabled until you Install again. The toolkit stays so you can re-install.`,
       destructive: true,
       confirmLabel: "Uninstall",
       onConfirm: async () => {
+        busyAction = "remove";
         try {
           await toolkitsState.uninstall(tk.id);
-          after?.();
         } catch (e) {
           confirmState.alert({ title: "Uninstall failed", message: errMessage(e) });
+        } finally {
+          busyAction = null;
+        }
+      },
+    });
+  }
+
+  // Delete: remove the toolkit's grants + files entirely. Exits the detail view
+  // and reloads the list so the deleted toolkit disappears.
+  function deleteToolkit(tk: Toolkit, after?: () => void) {
+    confirmState.request({
+      title: "Delete toolkit",
+      message:
+        `Delete "${tk.displayName || tk.id}" v${tk.version}? Its grants and installed files will be removed.`,
+      destructive: true,
+      confirmLabel: "Delete",
+      onConfirm: async () => {
+        busyAction = "remove";
+        try {
+          await toolkitsState.deleteToolkit(tk.id);
+          after?.();
+          reloadKey++;
+        } catch (e) {
+          confirmState.alert({ title: "Delete failed", message: errMessage(e) });
+        } finally {
+          busyAction = null;
         }
       },
     });
@@ -144,7 +208,11 @@
       if (tk.status === "downloaded") rows.push(installRow(tk));
       if (tk.status === "drift") rows.push(reenableRow(tk));
       if (isUpdatable(tk)) rows.push(updateRow(tk));
-      rows.push({ id: "uninstall", label: "Uninstall", onSelect: () => uninstall(tk) });
+      rows.push(
+        canUninstall(tk)
+          ? { id: "uninstall", label: "Uninstall", onSelect: () => uninstallToolkit(tk) }
+          : { id: "delete", label: "Delete", onSelect: () => deleteToolkit(tk) },
+      );
       return rows;
     }
     if (item.installed || isInstalling(item.result.name)) return [];
@@ -152,13 +220,10 @@
       {
         id: "download",
         label: "Download",
-        onSelect: async () => {
-          try {
-            await toolkitsState.download({ source: "npm", name: item.result.name });
-          } catch (e) {
-            confirmState.alert({ title: "Download failed", message: errMessage(e) });
-          }
-        },
+        onSelect: () =>
+          runJob("Download failed", () =>
+            toolkitsState.download({ source: "npm", name: item.result.name }),
+          ),
       },
     ];
   }
@@ -177,7 +242,7 @@
   function npmBadges(result: ToolkitSearchResult, installed: boolean): Badge[] {
     if (installed) return [{ label: "Installed", accent: "green" }];
     if (isInstalling(result.name)) return [{ label: "Installing", accent: "yellow" }];
-    return [];
+    return [{ label: "Downloadable" }];
   }
 
   async function load({ query: q, offset, limit }: {
@@ -220,11 +285,18 @@
   }
 
   function detailActions(tk: Toolkit, close: () => void) {
+    // Download/install/update run as streamed jobs; their button shows a spinner
+    // for the whole job. Uninstall is a direct call tracked by busyAction. While
+    // any action is in flight the others are disabled.
+    const jobRunning = toolkitsState.isJobRunning(tk.id);
+    const anyBusy = jobRunning || busyAction !== null;
     const actions = [];
     if (tk.status === "downloaded") {
       actions.push({
         label: "Install",
         icon: "i-material-symbols-download-rounded",
+        loading: jobRunning,
+        disabled: anyBusy && !jobRunning,
         onSelect: () => installRow(tk).onSelect(),
       });
     }
@@ -232,6 +304,7 @@
       actions.push({
         label: "Review & re-enable",
         icon: "i-material-symbols-warning-outline-rounded",
+        disabled: anyBusy,
         onSelect: () => confirmReenable(tk, close),
       });
     }
@@ -240,15 +313,31 @@
       actions.push({
         label: latest ? `Update to v${latest}` : "Update",
         icon: "i-material-symbols-upgrade-rounded",
+        loading: jobRunning,
+        disabled: anyBusy && !jobRunning,
         onSelect: () => updateRow(tk).onSelect(),
       });
     }
-    actions.push({
-      label: "Uninstall",
-      icon: "i-material-symbols-delete-outline-rounded",
-      variant: "danger" as const,
-      onSelect: () => uninstall(tk, close),
-    });
+    // Removal: an installed, deps-bearing toolkit is Uninstalled (revert); every
+    // other state is delete-only.
+    if (canUninstall(tk)) {
+      actions.push({
+        label: "Uninstall",
+        icon: "i-material-symbols-package-2-outline-rounded",
+        loading: busyAction === "remove",
+        disabled: anyBusy && busyAction !== "remove",
+        onSelect: () => uninstallToolkit(tk),
+      });
+    } else {
+      actions.push({
+        label: "Delete",
+        icon: "i-material-symbols-delete-outline-rounded",
+        variant: "danger" as const,
+        loading: busyAction === "remove",
+        disabled: anyBusy && busyAction !== "remove",
+        onSelect: () => deleteToolkit(tk, close),
+      });
+    }
     return actions;
   }
 </script>
@@ -308,13 +397,7 @@
       rows.push({
         id: "download-builtin",
         label: "Download built-in toolkit",
-        onSelect: async () => {
-          try {
-            await toolkitsState.downloadBuiltin();
-          } catch (e) {
-            confirmState.alert({ title: "Download failed", message: errMessage(e) });
-          }
-        },
+        onSelect: () => runJob("Download failed", () => toolkitsState.downloadBuiltin()),
       });
     }
     rows.push({
@@ -342,7 +425,7 @@
         label={item.toolkit.displayName || item.toolkit.id}
         description={item.toolkit.description}
         meta={`v${item.toolkit.version}`}
-        badges={[statusBadge(item.toolkit)]}
+        badges={toolkitBadges(item.toolkit)}
         menuRows={cardMenuRows(item)}
         onOpen={open}
       />
@@ -362,12 +445,12 @@
       <ObjectDetailHeader
         title={tk.displayName || tk.id}
         subtitle={`v${tk.version} · ${tk.source}`}
-        badges={[statusBadge(tk)]}
+        badges={toolkitBadges(tk)}
         actions={detailActions(tk, close)}
       />
-      <div class="tomat-scroll flex-1 min-h-0 overflow-y-auto">
+      <ObjectDetailScroll description={tk.description}>
         <ToolkitDetail toolkit={tk} />
-      </div>
+      </ObjectDetailScroll>
     {/if}
   {/snippet}
   {#snippet empty()}

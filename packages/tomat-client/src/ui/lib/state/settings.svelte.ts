@@ -45,10 +45,13 @@ type SettingChangeListener = (key: string, prev: unknown, next: unknown) => void
 const KEY_DESTINATION = (() => {
   const map = new Map<string, "client" | "core">();
   for (const group of SETTINGS_SCHEMA) {
-    // A multi-destination group (e.g. usage) is render-only, so its fields never
-    // persist; routing uses the first listed destination as a harmless default.
-    const dest = groupDestinations(group)[0];
+    // Default to the group's first listed destination. A hybrid group (e.g.
+    // stt) spans both client and core and routes per section, so a section may
+    // override with its own `destination`; render-only multi-destination groups
+    // (usage) never persist, so the default is harmless there.
+    const groupDest = groupDestinations(group)[0];
     for (const section of group.sections) {
+      const dest = section.destination ?? groupDest;
       for (const field of section.fields) {
         map.set(field.id, dest);
       }

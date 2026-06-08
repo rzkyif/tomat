@@ -48,6 +48,12 @@ export class ToolkitsApi {
     return this.client.del(`/api/v1/toolkits/${encodeURIComponent(id)}`) as Promise<void>;
   }
 
+  // Revert an installed, deps-bearing toolkit to 'downloaded' (drop its installed
+  // deps). The source files stay so it can be re-installed.
+  uninstall(id: string): Promise<ToolkitActionResponse> {
+    return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/uninstall`, {});
+  }
+
   update(id: string, version?: string): Promise<ToolkitJobResponse> {
     return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/update`, { version });
   }
@@ -59,14 +65,6 @@ export class ToolkitsApi {
 
   listTools(id: string): Promise<ListToolkitToolsResponse> {
     return this.client.get(`/api/v1/toolkits/${encodeURIComponent(id)}/tools`);
-  }
-
-  enableAllTools(id: string): Promise<ToolkitActionResponse> {
-    return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/tools/enable-all`, {});
-  }
-
-  disableAllTools(id: string): Promise<ToolkitActionResponse> {
-    return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/tools/disable-all`, {});
   }
 
   // Re-pin the current on-disk content + clear the drift warning.

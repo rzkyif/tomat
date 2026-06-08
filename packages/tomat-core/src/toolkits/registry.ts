@@ -21,11 +21,6 @@ import { errMessage, permissionKey } from "@tomat/shared";
 import { hashToolkit, statSignature } from "./hash.ts";
 import { getLogger } from "../shared/log.ts";
 
-// Human-readable last_error set when the content hash cannot even be computed
-// at verify time (a real I/O error, distinct from the `drift` status which a
-// plain content mismatch sets on its own).
-const HASH_FAILED_PREFIX = "content hash failed";
-
 export interface ToolkitInsertInput {
   id: string;
   source: ToolkitSource;
@@ -38,6 +33,8 @@ export interface ToolkitInsertInput {
   contentHash: string;
   // Defaults to "downloaded" when omitted (the download path never installs).
   status?: ToolkitStatus;
+  // Whether the toolkit declares dependencies. Defaults to false.
+  hasDeps?: boolean;
 }
 
 export interface ToolInsertInput {
@@ -65,7 +62,10 @@ export class ToolkitsRegistry {
     const rows = db()
       .prepare(`
       SELECT id, source, display_name, description, version, installed_path,
-             tools_json_hash, content_hash, status, last_error,
+             tools_json_hash, content_hash, status, has_deps,
+             (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id) AS tool_count,
+             (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id AND enabled = 1)
+               AS enabled_tool_count,
              installed_at_ms, updated_at_ms
       FROM toolkits
       ORDER BY display_name COLLATE NOCASE ASC
@@ -78,7 +78,10 @@ export class ToolkitsRegistry {
     const row = db()
       .prepare(`
       SELECT id, source, display_name, description, version, installed_path,
-             tools_json_hash, content_hash, status, last_error,
+             tools_json_hash, content_hash, status, has_deps,
+             (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id) AS tool_count,
+             (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id AND enabled = 1)
+               AS enabled_tool_count,
              installed_at_ms, updated_at_ms
       FROM toolkits WHERE id = ?
     `)
@@ -101,7 +104,7 @@ export class ToolkitsRegistry {
         UPDATE toolkits
            SET source = ?, display_name = ?, description = ?, version = ?,
                installed_path = ?, tools_json_hash = ?, content_hash = ?,
-               status = ?, last_error = NULL, updated_at_ms = ?
+               status = ?, has_deps = ?, updated_at_ms = ?
          WHERE id = ?
       `)
         .run(
@@ -113,6 +116,7 @@ export class ToolkitsRegistry {
           input.toolsJsonHash,
           input.contentHash,
           input.status ?? "downloaded",
+          input.hasDeps ? 1 : 0,
           now,
           input.id,
         );
@@ -121,9 +125,9 @@ export class ToolkitsRegistry {
         .prepare(`
         INSERT INTO toolkits
           (id, source, display_name, description, version, installed_path,
-           tools_json_hash, content_hash, status, last_error,
+           tools_json_hash, content_hash, status, has_deps,
            installed_at_ms, updated_at_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
         .run(
           input.id,
@@ -135,6 +139,7 @@ export class ToolkitsRegistry {
           input.toolsJsonHash,
           input.contentHash,
           input.status ?? "downloaded",
+          input.hasDeps ? 1 : 0,
           now,
           now,
         );
@@ -147,13 +152,13 @@ export class ToolkitsRegistry {
       .run(status, Date.now(), id);
   }
 
-  // Install (deps done): pin the content hash, flip to 'installed', clear any
-  // prior error. Invalidates the per-call hash skip-cache so the next verify
-  // compares against the freshly pinned hash.
+  // Install (deps done): pin the content hash, flip to 'installed'. Invalidates
+  // the per-call hash skip-cache so the next verify compares against the freshly
+  // pinned hash.
   markInstalled(id: string, contentHash: string): void {
     db()
       .prepare(
-        `UPDATE toolkits SET status = 'installed', content_hash = ?, last_error = NULL, updated_at_ms = ? WHERE id = ?`,
+        `UPDATE toolkits SET status = 'installed', content_hash = ?, updated_at_ms = ? WHERE id = ?`,
       )
       .run(contentHash, Date.now(), id);
     this.hashVerifiedCache.delete(id);
@@ -170,21 +175,27 @@ export class ToolkitsRegistry {
   }
 
   // Confirm-reenable: re-pin the CURRENT on-disk content as trusted, clear the
-  // drift state + any error, return to 'installed'. The user re-enables tools
-  // afterward (they were disabled when drift was flagged).
+  // drift state, return to 'installed'. The user re-enables tools afterward
+  // (they were disabled when drift was flagged).
   repinAndClear(id: string, contentHash: string): void {
     db()
       .prepare(
-        `UPDATE toolkits SET status = 'installed', content_hash = ?, last_error = NULL, updated_at_ms = ? WHERE id = ?`,
+        `UPDATE toolkits SET status = 'installed', content_hash = ?, updated_at_ms = ? WHERE id = ?`,
       )
       .run(contentHash, Date.now(), id);
     this.hashVerifiedCache.delete(id);
   }
 
-  setLastError(id: string, error: string | null): void {
+  // Uninstall (revert): drop an installed toolkit back to 'downloaded' and unpin
+  // the hash, so its tools stop being exposed and the user must re-Install. Tool
+  // enabled flags are kept so a later re-Install restores the prior selection.
+  markDownloaded(id: string): void {
     db()
-      .prepare(`UPDATE toolkits SET last_error = ?, updated_at_ms = ? WHERE id = ?`)
-      .run(error, Date.now(), id);
+      .prepare(
+        `UPDATE toolkits SET status = 'downloaded', content_hash = '', updated_at_ms = ? WHERE id = ?`,
+      )
+      .run(Date.now(), id);
+    this.hashVerifiedCache.delete(id);
   }
 
   // Boot-time integrity check. Walks every INSTALLED toolkit, recomputes its
@@ -209,7 +220,6 @@ export class ToolkitsRegistry {
         log.warn(`[${tk.id}] hash failed: ${msg}; flagging drift`);
         this.markDrift(tk.id);
         this.disableAllTools(tk.id);
-        this.setLastError(tk.id, `${HASH_FAILED_PREFIX}: ${msg}`);
         drifted.push(tk.id);
         continue;
       }
@@ -254,7 +264,6 @@ export class ToolkitsRegistry {
     } catch (err) {
       this.markDrift(toolkitId);
       this.disableAllTools(toolkitId);
-      this.setLastError(toolkitId, `${HASH_FAILED_PREFIX}: ${errMessage(err)}`);
       throw new AppError(
         "toolkit_hash_drift",
         `toolkit ${toolkitId} hash failed: ${errMessage(err)}`,
@@ -380,12 +389,8 @@ export class ToolkitsRegistry {
   }
 
   // Bulk toggles backing the "Enable all / Disable all" toolkit-detail action.
-  // Enabling does not grant permissions: a tool with ungranted required perms
-  // ends up enabled-but-not-exposed (the chat layer is the final gate).
-  enableAllTools(toolkitId: string): void {
-    db().prepare(`UPDATE tools SET enabled = 1 WHERE toolkit_id = ?`).run(toolkitId);
-  }
-
+  // Used by drift handling (verifyAllOnBoot / verifyHashFresh) to take a
+  // tampered toolkit's tools out of LLM exposure in one statement.
   disableAllTools(toolkitId: string): void {
     db().prepare(`UPDATE tools SET enabled = 0 WHERE toolkit_id = ?`).run(toolkitId);
   }
@@ -554,7 +559,9 @@ function rowToToolkit(row: Record<string, unknown>): Toolkit {
     toolsJsonHash: String(row.tools_json_hash),
     contentHash: String(row.content_hash),
     status: String(row.status) as ToolkitStatus,
-    lastError: row.last_error == null ? undefined : String(row.last_error),
+    hasDeps: Number(row.has_deps) === 1,
+    toolCount: Number(row.tool_count),
+    enabledToolCount: Number(row.enabled_tool_count),
     installedAtMs: Number(row.installed_at_ms),
     updatedAtMs: Number(row.updated_at_ms),
   };

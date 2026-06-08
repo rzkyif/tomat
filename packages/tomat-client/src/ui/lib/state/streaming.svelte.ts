@@ -48,6 +48,7 @@ class StreamingState {
   private reasoningStartTime: number | null = null;
   private interruptListeners: InterruptListener[] = [];
   private unsubscribeWs: (() => void) | null = null;
+  private unsubscribeConn: (() => void) | null = null;
 
   onInterrupt(fn: InterruptListener): () => void {
     this.interruptListeners.push(fn);
@@ -60,12 +61,31 @@ class StreamingState {
   attach(): void {
     if (this.unsubscribeWs) return;
     this.unsubscribeWs = cores().subscribeWs((f) => this.onFrame(f));
+    // A core hot-reload (or any disconnect) silently stops the frame stream:
+    // no terminal chat.done/chat.error arrives, so isActive (and the spinner)
+    // would hang forever. On disconnect, abort the in-flight stream and flip any
+    // running tool call to interrupted so the UI unwedges on its own.
+    this.unsubscribeConn = cores().subscribeConnectionState((state) => {
+      if (state !== "disconnected") return;
+      if (this.isActive) {
+        log.info("stream aborted: core disconnected");
+        this.abortForDisconnect();
+      }
+      const interrupted = messagesState.interruptActiveToolCalls();
+      if (interrupted > 0) {
+        log.info(`interrupted ${interrupted} in-flight tool call(s): core disconnected`);
+      }
+    });
   }
 
   detach(): void {
     if (this.unsubscribeWs) {
       this.unsubscribeWs();
       this.unsubscribeWs = null;
+    }
+    if (this.unsubscribeConn) {
+      this.unsubscribeConn();
+      this.unsubscribeConn = null;
     }
   }
 
@@ -372,6 +392,31 @@ class StreamingState {
     this.messageId = null;
     this.streamId = null;
     this.turnAnchorId = null;
+  }
+
+  /** Abort an in-flight stream because the core connection dropped (e.g. a dev
+   *  hot-reload restart). Mirrors cancel() but with disconnect wording and no
+   *  chat.interrupt frame: the socket is down, so there's nothing to tell the
+   *  server (its stream tears down on the closed socket). The note keeps the
+   *  partial reply visible until a reconnect reload (sessionsState) resyncs from
+   *  the server's truth. */
+  abortForDisconnect(): void {
+    if (!this.isActive) return;
+    const idx = this.getActiveIndex();
+    this.resetTTSPlayback();
+    this.quiesceStream();
+    this.firstChunkReceived = false;
+    this.turnAnchorId = null;
+    if (idx >= 0) {
+      const current = messagesState.messages[idx]?.content;
+      messagesState.messages[idx] = {
+        ...messagesState.messages[idx],
+        content:
+          typeof current === "string" && current.length > 0
+            ? current + "\n\n> _Disconnected from core; reply interrupted._"
+            : "> _Disconnected from core; reply interrupted._",
+      };
+    }
   }
 
   abortSilently(): void {

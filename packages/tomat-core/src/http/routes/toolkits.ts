@@ -12,7 +12,7 @@ import {
 import { toolkitsRegistry } from "../../toolkits/registry.ts";
 import { hashToolkit } from "../../toolkits/hash.ts";
 import { workerPool } from "../../toolkits/worker-pool.ts";
-import { uninstallToolkit } from "../../toolkits/uninstall.ts";
+import { deleteToolkit, uninstallToolkit } from "../../toolkits/uninstall.ts";
 import { paths } from "../../paths.ts";
 import {
   resolveLatestVersion,
@@ -115,10 +115,23 @@ export function toolkitsRoutes(): Hono {
   // the client.
   r.post("/rescan", async (c) => c.json(await rescanToolkits()));
 
+  // Delete: remove the toolkit's files + rows entirely. Allowed once a toolkit is
+  // "uninstalled" (status 'downloaded'), in a 'drift' state, or for a no-dep
+  // toolkit (which is delete-only). The snapshot repaints the client list.
   r.delete("/:id", async (c) => {
     const id = c.req.param("id");
-    await uninstallToolkit(id);
+    await deleteToolkit(id);
+    wsHub().broadcastAll({ kind: "toolkit.snapshot" });
     return c.body(null, 204);
+  });
+
+  // Uninstall: revert an installed, deps-bearing toolkit to 'downloaded' (drop
+  // node_modules + deno.lock, unpin the hash). Source files stay for a re-Install.
+  r.post("/:id/uninstall", async (c) => {
+    const id = c.req.param("id");
+    await uninstallToolkit(id);
+    wsHub().broadcastAll({ kind: "toolkit.snapshot" });
+    return c.json({ id });
   });
 
   r.post("/:id/update", async (c) => {
@@ -163,6 +176,8 @@ export function toolkitsRoutes(): Hono {
     // exposure gate is the authority on what the model actually sees.
     toolkitsRegistry().setToolEnabled(id, name, true);
     await workerPool().refreshPermissions(id);
+    // Repaint the list so the "N enabled" badge reflects the change.
+    wsHub().broadcastAll({ kind: "toolkit.snapshot" });
     return c.json({ ok: true });
   });
 
@@ -171,30 +186,9 @@ export function toolkitsRoutes(): Hono {
     const name = c.req.param("tool");
     toolkitsRegistry().setToolEnabled(id, name, false);
     await workerPool().refreshPermissions(id);
+    // Repaint the list so the "N enabled" badge reflects the change.
+    wsHub().broadcastAll({ kind: "toolkit.snapshot" });
     return c.json({ ok: true });
-  });
-
-  // Bulk toggles backing "Enable all / Disable all" in the toolkit detail view.
-  // These only flip the per-tool enabled flag; permission grants are untouched
-  // (granted one by one for safety), so enabling-all may leave some tools in the
-  // not-yet-granted warning state.
-  r.post("/:id/tools/enable-all", async (c) => {
-    const id = c.req.param("id");
-    const tk = toolkitsRegistry().getOrThrow(id);
-    if (tk.status === "drift") {
-      throw new AppError("toolkit_hash_drift", `${id} content drift; confirm re-enable first`);
-    }
-    toolkitsRegistry().enableAllTools(id);
-    await workerPool().refreshPermissions(id);
-    return c.json({ id });
-  });
-
-  r.post("/:id/tools/disable-all", async (c) => {
-    const id = c.req.param("id");
-    toolkitsRegistry().getOrThrow(id);
-    toolkitsRegistry().disableAllTools(id);
-    await workerPool().refreshPermissions(id);
-    return c.json({ id });
   });
 
   // Confirm-reenable: the user reviewed an out-of-band content change and trusts

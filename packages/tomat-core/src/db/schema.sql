@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS toolkits (
   tools_json_hash TEXT NOT NULL,
   content_hash    TEXT NOT NULL DEFAULT '',   -- '' until pinned at install; the trust anchor
   status          TEXT NOT NULL DEFAULT 'downloaded',  -- 'downloaded' | 'installed' | 'drift'
-  last_error      TEXT,
+  has_deps        INTEGER NOT NULL DEFAULT 0,  -- 1 when deno.json/package.json declares deps
   installed_at_ms INTEGER NOT NULL,
   updated_at_ms   INTEGER NOT NULL
 );

@@ -1,6 +1,6 @@
 /**
- * Bottom-fade tracking + a layout-shift "anchor pin" helper for the Settings
- * panel's scroll container.
+ * Top/bottom scroll-fade tracking + a layout-shift "anchor pin" helper for the
+ * Settings panel's scroll container.
  *
  * Anchor pinning (`withAnchor`): a single tick-and-scroll isn't enough because
  * the sidebar's slide transition keeps shifting offsets for ~200 ms after our
@@ -16,11 +16,13 @@ type AnchorEntry = { selector: string; offset: number };
 
 export class SettingsScroll {
   scrollEl: HTMLDivElement | undefined = $state();
+  showTopFade = $state(false);
   showBottomFade = $state(true);
 
   updateFades(): void {
     if (!this.scrollEl) return;
     const { scrollTop, scrollHeight, clientHeight } = this.scrollEl;
+    this.showTopFade = scrollTop > 1;
     this.showBottomFade = scrollTop + clientHeight < scrollHeight - 1;
   }
 

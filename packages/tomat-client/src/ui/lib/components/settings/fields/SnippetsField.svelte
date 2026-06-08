@@ -7,6 +7,7 @@
   import ObjectManager from "$lib/components/ui/ObjectManager.svelte";
   import ObjectCard from "$lib/components/ui/ObjectCard.svelte";
   import ObjectDetailHeader from "$lib/components/ui/ObjectDetailHeader.svelte";
+  import ObjectDetailScroll from "$lib/components/ui/ObjectDetailScroll.svelte";
   import SnippetDetail from "./SnippetDetail.svelte";
 
   let query = $state("");
@@ -115,9 +116,9 @@
   {/snippet}
   {#snippet detail(item)}
     <ObjectDetailHeader title={item.name || "Untitled snippet"} subtitle={item.trigger} />
-    <div class="tomat-scroll flex-1 min-h-0 overflow-y-auto">
+    <ObjectDetailScroll>
       <SnippetDetail {item} reload={() => reloadKey++} />
-    </div>
+    </ObjectDetailScroll>
   {/snippet}
   {#snippet empty()}
     <div class="flex flex-col items-center justify-center gap-1 py-12 text-center">

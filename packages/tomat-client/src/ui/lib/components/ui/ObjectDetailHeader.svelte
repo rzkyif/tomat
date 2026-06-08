@@ -12,6 +12,7 @@
     icon?: string;
     variant?: "default" | "danger";
     disabled?: boolean;
+    loading?: boolean;
     title?: string;
     onSelect: () => void;
   }
@@ -49,6 +50,7 @@
           variant={action.variant === "danger" ? "destructive" : "secondary"}
           icon={action.icon}
           disabled={action.disabled}
+          loading={action.loading}
           title={action.title}
           onclick={action.onSelect}
         >

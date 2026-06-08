@@ -2,7 +2,7 @@
 // the network (marker-already-set and already-installed); the actual CDN/codebase
 // install path is exercised by the installer tests + manual verification.
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertExists } from "@std/assert";
 import { BUILTIN_TOOLKIT_ID } from "@tomat/shared";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { BUILTIN_SEEDED_KEY, seedBuiltinToolkitIfNeeded } from "./builtin-seed.ts";
@@ -28,7 +28,7 @@ Deno.test("seedBuiltinToolkitIfNeeded: no-ops when the marker is already set", a
   }
 });
 
-Deno.test("seedBuiltinToolkitIfNeeded: marks seeded when the built-in is already present", async () => {
+Deno.test("seedBuiltinToolkitIfNeeded: adopts an existing built-in and marks seeded", async () => {
   const env = await setupTestEnv();
   try {
     toolkitsRegistry().upsertToolkit({
@@ -41,7 +41,9 @@ Deno.test("seedBuiltinToolkitIfNeeded: marks seeded when the built-in is already
       contentHash: "c",
     });
     await seedBuiltinToolkitIfNeeded(NOOP_SINK);
+    // An already-present built-in just records the seed marker (no re-download).
     assertEquals((await loadCoreSettings())[BUILTIN_SEEDED_KEY], true);
+    assertExists(toolkitsRegistry().get(BUILTIN_TOOLKIT_ID));
   } finally {
     await env.teardown();
   }

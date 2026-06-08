@@ -185,3 +185,41 @@ describe("CoreClient WebSocket dispatch", () => {
     expect(received).toEqual([]);
   });
 });
+
+describe("CoreClient reconnect", () => {
+  let sockets: FakeNetSocket[] = [];
+  beforeEach(() => {
+    sockets = [];
+    setPlatform({
+      net: {
+        fetch: vi.fn(),
+        connectWebSocket: (_url: string) => {
+          const s = new FakeNetSocket();
+          sockets.push(s);
+          return Promise.resolve(s);
+        },
+      },
+    } as unknown as Platform);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  // Recovery must not depend on the transport delivering an onClose after an
+  // onError: an error alone has to schedule the backoff reconnect (see the
+  // onError handler in openSocket).
+  it("onError alone (no following onClose) still schedules a reconnect", async () => {
+    vi.useFakeTimers();
+    const c = new CoreClient(ENDPOINT);
+    c.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(0); // resolve the connectWebSocket microtask
+    expect(sockets.length).toBe(1);
+    sockets[0].opened?.();
+
+    // Error with NO onClose follow-up. The remote-core backoff starts at 500ms.
+    sockets[0].errored?.();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(sockets.length).toBe(2);
+  });
+});

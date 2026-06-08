@@ -1,8 +1,8 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import Bubble from "../ui/Bubble.svelte";
-  import Expandable from "../ui/Expandable.svelte";
-  import { settingsState } from "../../state";
+  import Bubble from "../../ui/Bubble.svelte";
+  import Expandable from "../../ui/Expandable.svelte";
+  import { settingsState } from "../../../state";
   import { expansionState } from "$lib/state/expansion.svelte";
   import { hasAlpha } from "$lib/shared/color";
 

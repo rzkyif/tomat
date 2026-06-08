@@ -1,10 +1,10 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { settingsState } from "../../state";
+  import { settingsState } from "../../../state";
   import { ttsState } from "$lib/state/tts.svelte";
   import { expansionState } from "$lib/state/expansion.svelte";
   import { getTextContent, type MessageContent } from "$lib/shared/types";
-  import Bubble from "../ui/Bubble.svelte";
+  import Bubble from "../../ui/Bubble.svelte";
   import MessageMarkdown from "./MessageMarkdown.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
   import {

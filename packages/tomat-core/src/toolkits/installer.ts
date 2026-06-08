@@ -17,7 +17,6 @@ import { dirname, join } from "@std/path";
 import { UntarStream } from "@std/tar/untar-stream";
 import { encodeBase64 } from "@std/encoding/base64";
 import { errMessage, parseToolsJson, type ToolsJson } from "@tomat/shared";
-import { binPath } from "../paths.ts";
 import { channel, paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { isWithin } from "../shared/fs-safety.ts";
@@ -28,7 +27,7 @@ import { getLogger } from "../shared/log.ts";
 export { isWithin };
 import { sha256Hex, toHex } from "../shared/hash.ts";
 import { newJobId } from "../shared/ids.ts";
-import { binaryName } from "../binaries/versions.ts";
+import { requireWorkerDeno } from "../sidecars/worker-deno.ts";
 import { hashToolkit } from "./hash.ts";
 import { toolkitInstallPath, toolkitsRegistry } from "./registry.ts";
 import { resolveVersion } from "./npm-registry.ts";
@@ -108,7 +107,6 @@ export function startInstallDeps(
     .then(() => sink.done(jobId, toolkitId, true, 0))
     .catch((err) => {
       log.error(`install ${toolkitId} failed: ${errMessage(err)}`);
-      toolkitsRegistry().setLastError(toolkitId, `install failed: ${errMessage(err)}`);
       sink.done(jobId, toolkitId, false, 1);
     });
   return { jobId, toolkitId };
@@ -181,8 +179,9 @@ async function runDownload(
     const toolsJsonHash = await sha256Hex(toolsJsonText);
 
     await swapIntoPlace(stagingPath, installPath, toolkitId);
-    registerDownloaded(toolkitId, spec.source, version, installPath, parsed, toolsJsonHash);
     log.info(`downloaded ${toolkitId}@${version}`);
+    // Register rows; a no-dep toolkit also finishes at 'installed' here.
+    await finishRegister(toolkitId, spec.source, version, installPath, parsed, toolsJsonHash);
   } catch (err) {
     await rmrf(stagingPath);
     throw err;
@@ -214,9 +213,33 @@ async function runInstallDeps(
   log.info(`installed ${toolkitId}`);
 }
 
-// Register a locally dropped-in folder (already under the toolkits dir) as
-// 'downloaded' WITHOUT copying or installing: validate its tools.json, upsert
-// the row + tools. Used by Rescan. Never writes into the folder.
+// Register a freshly-acquired toolkit's rows (status 'downloaded', hash unpinned)
+// and, when it declares NO dependencies, immediately pin its hash + flip it to
+// 'installed' (there is nothing to install). Toolkits WITH deps stay 'downloaded'
+// until the explicit Install step runs deno install. Shared by the download +
+// rescan paths so the no-dep -> installed rule holds everywhere. Never writes
+// into the folder beyond the (hash-excluded) artifacts deno install would add.
+async function finishRegister(
+  toolkitId: string,
+  source: InstallSource["source"],
+  version: string,
+  installPath: string,
+  parsed: ToolsJson,
+  toolsJsonHash: string,
+): Promise<void> {
+  const deps = await hasDeclaredDeps(installPath);
+  registerDownloaded(toolkitId, source, version, installPath, parsed, toolsJsonHash, deps);
+  if (!deps) {
+    const contentHash = await hashToolkit(installPath);
+    toolkitsRegistry().markInstalled(toolkitId, contentHash);
+    log.info(`installed ${toolkitId} (no deps)`);
+  }
+}
+
+// Register a locally dropped-in folder (already under the toolkits dir): validate
+// its tools.json, upsert the row + tools (no copy). Used by Rescan. A no-dep
+// folder lands 'installed'; a deps-bearing one 'downloaded'. Never writes into
+// the folder.
 export async function registerLocalDownloaded(toolkitId: string): Promise<void> {
   const installPath = toolkitInstallPath(toolkitId);
   const toolsJsonText = await readOptional(join(installPath, "tools.json"));
@@ -225,7 +248,7 @@ export async function registerLocalDownloaded(toolkitId: string): Promise<void> 
   }
   const parsed = parseToolsJsonOrThrow(toolsJsonText);
   const toolsJsonHash = await sha256Hex(toolsJsonText);
-  registerDownloaded(toolkitId, "local", "local", installPath, parsed, toolsJsonHash);
+  await finishRegister(toolkitId, "local", "local", installPath, parsed, toolsJsonHash);
 }
 
 function parseToolsJsonOrThrow(text: string): ToolsJson {
@@ -248,6 +271,7 @@ function registerDownloaded(
   installPath: string,
   parsed: ToolsJson,
   toolsJsonHash: string,
+  hasDeps: boolean,
 ): void {
   const registry = toolkitsRegistry();
   registry.upsertToolkit({
@@ -261,6 +285,7 @@ function registerDownloaded(
     // Not pinned until install; download leaves the row in 'downloaded'.
     contentHash: "",
     status: "downloaded",
+    hasDeps,
   });
   registry.replaceTools(
     toolkitId,
@@ -563,27 +588,41 @@ async function runDenoInstall(
   toolkitId: string,
   sink: InstallEventSink,
 ): Promise<void> {
-  const denoBin = binPath(binaryName("deno"));
+  // Resolve the deno worker runtime, surfacing a clean "download required files
+  // from Settings" error if it isn't installed yet (instead of a raw spawn
+  // ENOENT). Only toolkits that declare deps reach here.
+  const denoBin = await requireWorkerDeno();
   // --node-modules-dir=auto lands node_modules in the toolkit folder without us
   // editing the shipped deno.json; DENO_DIR keeps the package cache under
-  // ~/.tomat. --allow-scripts=false blocks npm postinstall hooks.
+  // ~/.tomat. We omit --allow-scripts so npm lifecycle scripts are denied by
+  // default (deno rejects the flag when its value isn't an npm: specifier).
   const proc = new Deno.Command(denoBin, {
-    args: ["install", "--allow-scripts=false", "--node-modules-dir=auto", "--quiet"],
+    args: ["install", "--node-modules-dir=auto", "--quiet"],
     cwd,
     env: { DENO_DIR: paths().denoCacheDir },
     stdout: "piped",
     stderr: "piped",
   }).spawn();
 
+  // Mirror stderr into the thrown error so a failed install is debuggable from
+  // core.log too (the client also receives each line via install_log frames).
+  const stderr: string[] = [];
   await Promise.all([
     pumpLines(proc.stdout, (line) => sink.log(jobId, toolkitId, "stdout", line)),
-    pumpLines(proc.stderr, (line) => sink.log(jobId, toolkitId, "stderr", line)),
+    pumpLines(proc.stderr, (line) => {
+      stderr.push(line);
+      sink.log(jobId, toolkitId, "stderr", line);
+    }),
   ]);
   const status = await proc.status;
   if (!status.success) {
+    const tail = stderr
+      .filter((l) => l.trim())
+      .slice(-12)
+      .join("\n");
     throw new AppError(
       "deps_install_failed",
-      `deno install exited ${status.code} for ${toolkitId}`,
+      `deno install exited ${status.code} for ${toolkitId}${tail ? `:\n${tail}` : ""}`,
     );
   }
 }

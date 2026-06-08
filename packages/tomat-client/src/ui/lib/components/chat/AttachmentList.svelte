@@ -2,7 +2,7 @@
   import type { MessagePart } from "$lib/shared/types";
   import { readSessionAttachment } from "$lib/shared/attachments";
   import { getLogger } from "$lib/shared/log";
-  import IconButton from "./ui/IconButton.svelte";
+  import IconButton from "../ui/IconButton.svelte";
 
   const log = getLogger("attachments");
 

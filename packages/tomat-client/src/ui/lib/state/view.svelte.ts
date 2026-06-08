@@ -10,7 +10,7 @@
  * itself stays DOM-free. The panel element it animates lives in +page.svelte.
  */
 
-export type AppMode = "coreManagement" | "quickSetup" | "chat" | "sessionList" | "settings";
+export type AppMode = "newCore" | "quickSetup" | "chat" | "sessionList" | "settings";
 
 class ViewState {
   /** The mode currently rendered. Written only by `commit()` (at the slide's
@@ -18,15 +18,17 @@ class ViewState {
   mode = $state<AppMode>("chat");
   /** The requested mode. +page.svelte's $effect drives the slide toward it. */
   pendingMode = $state<AppMode>("chat");
-  /** True while no core is paired: navigation away from coreManagement is
-   *  blocked so the rest of the UI (which would call `cores().api()`) can't
-   *  be reached. */
+  /** True while no core is paired: navigation away from newCore is blocked so
+   *  the rest of the UI (which would call `cores().api()`) can't be reached. */
   locked = $state(false);
+  /** A settings group id Settings should open on its next mount, then clear.
+   *  Lets the add-core flow return the user to the Cores manager. */
+  pendingSettingsGroup = $state<string | null>(null);
 
   /** Request a transition to `next`. No-ops while locked (unless the target
-   *  is coreManagement) or when that mode is already pending. */
+   *  is newCore) or when that mode is already pending. */
   navigate(next: AppMode): void {
-    if (this.locked && next !== "coreManagement") return;
+    if (this.locked && next !== "newCore") return;
     if (this.pendingMode === next) return;
     this.pendingMode = next;
   }
@@ -45,6 +47,12 @@ class ViewState {
 
   setLocked(value: boolean): void {
     this.locked = value;
+    // Entering the locked state means no usable core remains, so force the
+    // only reachable mode. Otherwise removing the last core from a core-backed
+    // mode (e.g. Settings) would strand the UI there with no selected core,
+    // and every cores().api() call would throw. navigate() no-ops when
+    // newCore is already pending (the boot path is already there).
+    if (value) this.navigate("newCore");
   }
 }
 

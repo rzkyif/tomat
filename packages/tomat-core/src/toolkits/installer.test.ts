@@ -1,7 +1,8 @@
-// toolkit installer: local download/install path (no network, no npm tarball
-// fetch). Drives the full path from source dir -> registry rows via the real
-// `startDownload` + `startInstallDeps`. The npm tarball path is covered by
-// integration in real installs; isolating it would require a fixture server.
+// toolkit installer: local download path (no network, no npm tarball fetch).
+// Drives the path from source dir -> registry rows via the real `startDownload`
+// (a no-dep toolkit finishes at 'installed'; a deps-bearing one stops at
+// 'downloaded'). The npm tarball + `deno install` paths are covered by
+// integration in real installs; isolating them would require a fixture server.
 
 import { assertEquals, assertExists, assertRejects, assertThrows } from "@std/assert";
 import { join } from "@std/path";
@@ -16,7 +17,6 @@ import {
   type InstallEventSink,
   isWithin,
   startDownload,
-  startInstallDeps,
   verifyTarball,
 } from "./installer.ts";
 import { AppError } from "../shared/errors.ts";
@@ -183,10 +183,10 @@ function makeRecordingSink() {
   return sink;
 }
 
-Deno.test("download -> install lifecycle (local): downloaded then installed, hash pinned", async () => {
+Deno.test("startDownload(local, no deps): finishes the lifecycle at 'installed', hash pinned", async () => {
   const env = await setupTestEnv();
   try {
-    // Synthesize a "local" toolkit on disk with tools.json + index.ts.
+    // Synthesize a "local" toolkit on disk with tools.json + index.ts (no deps).
     const srcDir = await Deno.makeTempDir({ prefix: "tomat-tk-src-" });
     await Deno.writeTextFile(join(srcDir, "tools.json"), MIN_TOOLS_JSON);
     await Deno.writeTextFile(
@@ -194,18 +194,20 @@ Deno.test("download -> install lifecycle (local): downloaded then installed, has
       `export async function noop() { return null; }\n`,
     );
 
-    // Phase 1: download registers the row as 'downloaded' with no pinned hash.
     const sink = makeRecordingSink();
     const { toolkitId } = startDownload({ source: "local", path: srcDir, slug: "mini-test" }, sink);
     assertEquals(toolkitId, "mini-test");
     assertEquals((await awaitDone(sink)).ok, true);
 
+    // No declared deps -> the download itself pins the hash and flips the row to
+    // 'installed' (no separate Install step needed).
     const tk = toolkitsRegistry().get("mini-test");
     assertExists(tk);
     assertEquals(tk?.displayName, "mini");
     assertEquals(tk?.version, "local");
-    assertEquals(tk?.status, "downloaded");
-    assertEquals(tk?.contentHash, "");
+    assertEquals(tk?.status, "installed");
+    assertEquals(tk?.hasDeps, false);
+    assertEquals((tk?.contentHash ?? "").length > 0, true);
     const tools = toolkitsRegistry().listTools("mini-test");
     assertEquals(tools.length, 1);
     assertEquals(tools[0].name, "noop");
@@ -214,15 +216,36 @@ Deno.test("download -> install lifecycle (local): downloaded then installed, has
     const installed = join(paths().toolkitsDir, "mini-test");
     assertEquals(await Deno.readTextFile(join(installed, "tools.json")), MIN_TOOLS_JSON);
     await assertRejects(() => Deno.stat(join(installed, "deno.json")));
+  } finally {
+    await env.teardown();
+  }
+});
 
-    // Phase 2: install. No declared deps -> no deno install runs, but the hash
-    // is pinned and the row flips to 'installed'.
-    const sink2 = makeRecordingSink();
-    startInstallDeps("mini-test", sink2);
-    assertEquals((await awaitDone(sink2)).ok, true);
-    const tk2 = toolkitsRegistry().get("mini-test");
-    assertEquals(tk2?.status, "installed");
-    assertEquals((tk2?.contentHash ?? "").length > 0, true);
+Deno.test("startDownload(local, declared deps): stays 'downloaded' until install", async () => {
+  const env = await setupTestEnv();
+  try {
+    const srcDir = await Deno.makeTempDir({ prefix: "tomat-tk-deps-" });
+    await Deno.writeTextFile(join(srcDir, "tools.json"), MIN_TOOLS_JSON);
+    await Deno.writeTextFile(
+      join(srcDir, "index.ts"),
+      `export async function noop() { return null; }\n`,
+    );
+    // A deno.json with an npm: import means deps must be installed first, so the
+    // download stops at 'downloaded' (the explicit Install step runs deno install).
+    await Deno.writeTextFile(
+      join(srcDir, "deno.json"),
+      JSON.stringify({ imports: { "mime-types": "npm:mime-types@^3.0.0" } }),
+    );
+
+    const sink = makeRecordingSink();
+    startDownload({ source: "local", path: srcDir, slug: "deps-test" }, sink);
+    assertEquals((await awaitDone(sink)).ok, true);
+
+    const tk = toolkitsRegistry().get("deps-test");
+    assertExists(tk);
+    assertEquals(tk?.status, "downloaded");
+    assertEquals(tk?.hasDeps, true);
+    assertEquals(tk?.contentHash, "");
   } finally {
     await env.teardown();
   }

@@ -246,6 +246,13 @@ export interface SettingSection {
    *  must come first, above any labeled (collapsible) ones; never place an
    *  inline section below a collapsible one. */
   label?: string;
+  /** Persistence destination for this section's fields, overriding the group's.
+   *  Only meaningful in a hybrid group (one whose `destination` is an array
+   *  spanning client and core): there, every section MUST be labeled and MUST
+   *  set this, so each field routes correctly and the section header can show a
+   *  Client/Core badge. Single-destination groups leave this unset and inherit
+   *  the group destination. */
+  destination?: SettingDestination;
   visibleWhen?: FieldCondition;
   expandWhen?: FieldCondition;
   fields: SettingField[];
@@ -333,7 +340,7 @@ export const CLIENT_GROUP_IDS = [
   "snippets",
   "cores",
   "usage",
-  "stt_input",
+  "stt",
   "tts",
   "general",
 ] as const;
@@ -345,7 +352,7 @@ export const CORE_GROUP_IDS = [
   "dualModel",
   "toolkits",
   "tools",
-  "stt_engine",
+  "stt",
   "server",
   "usage",
 ] as const;

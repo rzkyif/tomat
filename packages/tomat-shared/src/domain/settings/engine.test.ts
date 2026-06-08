@@ -36,6 +36,27 @@ Deno.test("group-id registry stays in sync with schema destinations (no drift)",
   }
 });
 
+Deno.test("hybrid groups label every section and give it a destination", () => {
+  // A group spanning both client and core routes per section, so each section
+  // must be labeled (to carry a Client/Core badge) and declare its own
+  // destination (so its fields persist to the right place).
+  for (const group of SETTINGS_SCHEMA) {
+    if (!Array.isArray(group.destination)) continue;
+    for (const section of group.sections) {
+      assertEquals(
+        typeof section.label === "string" && section.label.length > 0,
+        true,
+        `hybrid group "${group.id}" has an unlabeled section`,
+      );
+      assertEquals(
+        section.destination === "client" || section.destination === "core",
+        true,
+        `section "${section.label}" in hybrid group "${group.id}" needs a destination`,
+      );
+    }
+  }
+});
+
 function firstFieldOfType(type: string): string | undefined {
   for (const group of SETTINGS_SCHEMA) {
     for (const section of group.sections) {

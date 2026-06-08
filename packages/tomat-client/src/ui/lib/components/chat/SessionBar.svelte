@@ -1,15 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import Bubble from "./ui/Bubble.svelte";
-  import Chip from "./ui/Chip.svelte";
-  import ButtonGroup from "./ui/ButtonGroup.svelte";
-  import IconButton from "./ui/IconButton.svelte";
+  import Bubble from "../ui/Bubble.svelte";
+  import Chip from "../ui/Chip.svelte";
+  import ButtonGroup from "../ui/ButtonGroup.svelte";
+  import IconButton from "../ui/IconButton.svelte";
   import {
     messagesState,
     sessionsState,
     settingsState,
     viewState,
-  } from "../state";
+  } from "../../state";
   import { cores } from "$lib/core";
   import { hasAlpha } from "$lib/shared/color";
 

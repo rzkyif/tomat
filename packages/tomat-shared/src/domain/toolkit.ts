@@ -99,7 +99,14 @@ export interface Toolkit {
   // The pinned trust anchor. Empty string until the toolkit is installed.
   contentHash: string;
   status: ToolkitStatus;
-  lastError?: string;
+  // Whether the toolkit declares dependencies (deno.json/package.json). Drives
+  // the Uninstall vs Delete choice: a no-dep toolkit is installed on download
+  // and can only be deleted (there is nothing to uninstall).
+  hasDeps: boolean;
+  // Tool counts from the list/get projection, so a card can show "N enabled"
+  // without lazy-loading the full tool list.
+  toolCount: number;
+  enabledToolCount: number;
   installedAtMs: number;
   updatedAtMs: number;
   // Convenience embedding of tools when fetched via /toolkits/:id/tools.

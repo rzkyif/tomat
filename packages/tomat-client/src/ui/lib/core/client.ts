@@ -70,6 +70,13 @@ export class CoreClient {
   // failure), surfaced with the "disconnected" transition so the UI banner can
   // show why. Cleared on a successful open.
   private lastWsError: string | null = null;
+  // When the current disconnect gap began (first close after a connected/initial
+  // state), or null while connected. Drives the "connected after <ms>ms down"
+  // log and gates the one-per-gap "disconnected" line. Reset on a successful open.
+  private disconnectedAtMs: number | null = null;
+  // Connect attempts in the current gap, for the "connecting (attempt N)" log.
+  // Reset on a successful open.
+  private connectAttempt = 0;
 
   constructor(public readonly endpoint: CoreEndpoint) {
     // A loopback core (dev hot-reload, on-demand local spawn) restarts in well
@@ -275,6 +282,7 @@ export class CoreClient {
     const wsUrl =
       this.endpoint.baseUrl.replace(/^http/, "ws") +
       `/ws/v1?token=${encodeURIComponent(this.endpoint.token)}`;
+    log.debug(`connecting to ${this.endpoint.baseUrl} (attempt ${++this.connectAttempt})`);
     this.setConnState("connecting");
     this.armConnectWatchdog();
     void this.openSocket(wsUrl, gen);
@@ -331,6 +339,10 @@ export class CoreClient {
       this.wsConnected = true;
       this.wsBackoffMs = this.wsBackoffInitialMs;
       this.lastWsError = null;
+      const downMs = this.disconnectedAtMs !== null ? Date.now() - this.disconnectedAtMs : null;
+      log.info(downMs !== null ? `connected after ${downMs}ms down` : "connected");
+      this.disconnectedAtMs = null;
+      this.connectAttempt = 0;
       this.setConnState("connected");
     });
     sock.onMessage((data) => {
@@ -349,6 +361,12 @@ export class CoreClient {
       } catch {
         /* */
       }
+      // Drive recovery from the error itself rather than waiting for a following
+      // onClose: an error always means this socket is done, so schedule the
+      // reconnect now. A later onClose for the same socket re-enters
+      // handleWsClosed but no-ops on the reconnect-timer / state guards (and the
+      // generation is unchanged), so this can't double-schedule.
+      this.handleWsClosed();
     });
   }
 
@@ -436,11 +454,20 @@ export class CoreClient {
     this.wsConnected = false;
     this.wsConnecting = false;
     this.ws = null;
+    // Log "disconnected" once per gap (the first close); the per-attempt
+    // reconnect churn shows at debug below, so repeating it on every retry's
+    // close would just be noise.
+    const firstCloseOfGap = this.disconnectedAtMs === null;
+    if (firstCloseOfGap) {
+      this.disconnectedAtMs = Date.now();
+      log.info(this.lastWsError ? `disconnected: ${this.lastWsError}` : "disconnected");
+    }
     this.setConnState("disconnected", this.lastWsError ?? undefined);
     if (this.wsClosing || this.listeners.size === 0) return;
     if (this.wsReconnectTimer !== null) return; // a reconnect is already scheduled
     const delay = this.wsBackoffMs;
     this.wsBackoffMs = Math.min(this.wsBackoffMs * 2, this.wsBackoffCapMs);
+    log.debug(`reconnect in ${delay}ms`);
     this.wsReconnectTimer = setTimeout(() => {
       this.wsReconnectTimer = null;
       this.connectWs();

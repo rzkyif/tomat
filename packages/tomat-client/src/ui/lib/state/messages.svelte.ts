@@ -101,6 +101,35 @@ class MessagesState {
     this.tokenUsage = tokenUsage;
   }
 
+  /** Flip every in-flight tool call to failed/interrupted. Called when the core
+   *  connection drops mid-call (e.g. a dev hot-reload): without it `running`
+   *  bubbles spin until the session is reloaded. Uses the same wording as the
+   *  on-load fixup in sessionsState.backfillMessageIds. Returns the count
+   *  changed so the caller can decide whether to log. */
+  interruptActiveToolCalls(): number {
+    let changed = 0;
+    for (let i = 0; i < this.messages.length; i++) {
+      const m = this.messages[i];
+      if (
+        m.toolCall &&
+        m.toolCall.status !== "complete" &&
+        m.toolCall.status !== "failed" &&
+        m.toolCall.status !== "cancelled"
+      ) {
+        this.messages[i] = {
+          ...m,
+          toolCall: {
+            ...m.toolCall,
+            status: "failed",
+            error: m.toolCall.error ?? "interrupted: core was disconnected mid-call",
+          },
+        };
+        changed++;
+      }
+    }
+    return changed;
+  }
+
   addMessage(message: Message) {
     if (!message.id) message.id = makeMessageId();
     this.messages.unshift(message);

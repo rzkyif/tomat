@@ -5,6 +5,7 @@
   import { evalCondition } from "@tomat/shared";
   import SettingsField from "./SettingsField.svelte";
   import SectionHeader from "../ui/SectionHeader.svelte";
+  import DestinationChip from "../ui/DestinationChip.svelte";
 
   let {
     section,
@@ -64,7 +65,15 @@
           {collapsible}
           expanded={isExpanded}
           onToggle={() => onToggle(sectionKey)}
-        />
+        >
+          {#snippet badge()}
+            <!-- In a hybrid group, each section declares its own destination;
+                 show a Client/Core chip so the split is visible per section. -->
+            {#if section.destination}
+              <DestinationChip dest={section.destination} />
+            {/if}
+          {/snippet}
+        </SectionHeader>
       </div>
     {/if}
     {#if !collapsible || isExpanded}

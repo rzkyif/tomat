@@ -1,14 +1,15 @@
 <script lang="ts">
-  // Core management mode: pair / switch / unpair cores. This is the only
-  // reachable mode while no core is paired (viewState.locked) and the first
-  // screen on first launch. Also openable from Settings.
+  // Add-a-core wizard. It is the only reachable mode while no core is paired
+  // (viewState.locked: first launch, or after the last core is removed), and is
+  // also launched from the Cores settings manager to add an additional core.
+  // When adding an additional core and a local core is already paired, the
+  // local/remote chooser is skipped (a second local install is unsupported).
 
   import { onMount } from "svelte";
-import { errMessage } from "@tomat/shared";
+  import { errMessage } from "@tomat/shared";
   import Bubble from "../ui/Bubble.svelte";
   import Alert from "../ui/Alert.svelte";
   import Button from "../ui/Button.svelte";
-  import Chip from "../ui/Chip.svelte";
   import FormField from "../ui/FormField.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import Input from "../ui/Input.svelte";
@@ -33,14 +34,11 @@ import { errMessage } from "@tomat/shared";
 
   let alignment = $derived(settingsState.getAlignment());
 
-  let pairedCores = $state<PairedCoreEntry[]>([]);
-  let currentId = $state<string | null>(null);
   let busy = $state<null | "installing" | "claiming" | "checking">(null);
   let error = $state("");
   let remoteUrl = $state("");
   let remoteName = $state("");
   let remoteCode = $state("");
-  let confirmingUnpair = $state<string | null>(null);
   let connectionStatus = $state<
     | { kind: "idle" }
     | { kind: "ok"; version: string; checkedUrl: string }
@@ -51,60 +49,66 @@ import { errMessage } from "@tomat/shared";
   // host portion of the address we just connected to.
   let defaultRemoteName = $derived(hostFromUrl(normalizedRemoteUrl()));
 
-  // Sub-views. First-time users (no cores paired) start in `chooseDestination`
-  // with a default of "this computer"; from there they either land on the
-  // local-install confirmation page or the remote-address form. Returning
-  // users (a core already paired) start in `list`.
+  // Wizard steps. Onboarding (locked) and "no local core paired yet" start at
+  // `chooseDestination` (default "this computer"); from there the user lands on
+  // the local-install confirmation page or the remote-address form. Adding an
+  // additional core while a local core is already paired skips the chooser and
+  // starts at `remoteAddress`.
   type View =
-    | "list"
     | "chooseDestination"
     | "localConfirm"
     | "remoteAddress"
     | "remotePair";
-  let view = $state<View>("list");
+  let view = $state<View>("chooseDestination");
   let destination = $state<"local" | "remote">("local");
   let installServiceChoice = $state(true);
   let installNetworkChoice = $state(false);
   let localAlreadyInstalled = $state(false);
+  // True when the chooser was skipped (a local core is already paired), so the
+  // back arrow on the first step cancels the flow instead of revealing a chooser
+  // the user was never meant to see.
+  let chooserSkipped = $state(false);
 
   // Placeholder docs URL. The page does not exist yet (tomat is not live).
   const CORE_SETUP_DOCS_URL = "https://au.tomat.ing/docs/core-setup";
 
-  async function refresh(): Promise<void> {
-    try {
-      pairedCores = await cores().list();
-      currentId = cores().currentEntry()?.id ?? null;
-    } catch {
-      /* settings not readable yet */
-    }
-  }
+  const isLoopback = (u: string) =>
+    u.includes("127.0.0.1") || u.includes("localhost");
 
-  // Pick the right initial view: returning users with a paired core land on
-  // `list`; first-time users (locked) land on the destination chooser.
+  // Pick the first step. Adding an additional core when a local core is already
+  // paired skips straight to the remote-address form; everyone else starts at
+  // the destination chooser.
   async function decideInitialView(): Promise<void> {
-    await refresh();
-    if (pairedCores.length === 0) {
-      view = "chooseDestination";
-      // Prefill the remote fields from launch arguments (--core-url /
-      // --pairing-code), as supplied by a shareable setup command or by what
-      // `deno task dev` passes. A supplied core URL also pre-selects the remote
-      // flow so the fields are ready. Only fills empty fields, never clobbers
-      // typed input.
-      try {
-        const pre = await platform().pairing.launchPrefill();
-        if (pre?.coreUrl) {
-          destination = "remote";
-          if (!remoteUrl.trim()) remoteUrl = pre.coreUrl;
-          if (!remoteCode.trim() && pre.pairingCode) {
-            remoteCode = pre.pairingCode;
-          }
-        }
-      } catch {
-        /* no launch prefill available */
-      }
+    const list = await cores().list();
+    const firstEver = list.length === 0;
+    const localCorePaired = list.some((c) => isLoopback(c.baseUrl));
+
+    if (!firstEver && localCorePaired) {
+      destination = "remote";
+      chooserSkipped = true;
+      view = "remoteAddress";
     } else {
-      view = "list";
+      view = "chooseDestination";
     }
+
+    // Prefill the remote fields from launch arguments (--core-url /
+    // --pairing-code), as supplied by a shareable setup command or by what
+    // `deno task dev` passes. A supplied core URL also pre-selects the remote
+    // flow so the fields are ready. Only fills empty fields, never clobbers
+    // typed input.
+    try {
+      const pre = await platform().pairing.launchPrefill();
+      if (pre?.coreUrl) {
+        destination = "remote";
+        if (!remoteUrl.trim()) remoteUrl = pre.coreUrl;
+        if (!remoteCode.trim() && pre.pairingCode) {
+          remoteCode = pre.pairingCode;
+        }
+      }
+    } catch {
+      /* no launch prefill available */
+    }
+
     if (isTauri()) {
       try {
         localAlreadyInstalled = await platform().pairing.isLocalCoreInstalled();
@@ -122,21 +126,6 @@ import { errMessage } from "@tomat/shared";
         localBaseUrl = url;
       })
       .catch((e) => log.warn("localCoreBaseUrl failed", e));
-    const unsub = cores().subscribe(() => void refresh());
-    return () => unsub();
-  });
-
-  // Unpair-from-list-view drains pairedCores → the destination chooser is
-  // the right place to land next so the user can pair again. Skip while
-  // any non-list view is active (the user is mid-flow).
-  $effect(() => {
-    if (
-      pairedCores.length === 0 &&
-      view === "list" &&
-      viewState.locked
-    ) {
-      view = "chooseDestination";
-    }
   });
 
   function hostFromUrl(url: string): string {
@@ -165,19 +154,21 @@ import { errMessage } from "@tomat/shared";
     await cores().addPaired(entry, res.token);
     await cores().select(entry.id);
     busy = null;
-    await refresh();
     if (firstEver) {
       // First core ever paired: unlock the UI and run the new-user quick setup.
       viewState.setLocked(false);
       viewState.navigate("quickSetup");
     } else {
-      viewState.navigate("chat");
+      // Adding an additional core: return to the Cores manager in Settings.
+      viewState.pendingSettingsGroup = "cores";
+      viewState.navigate("settings");
     }
   }
 
-  // Single back affordance that walks the setup flow back one step at a time:
-  // remote pairing → remote address → destination chooser. The local-confirm
-  // branch has no intermediate step, so it returns straight to the chooser.
+  // Step-back within the wizard, one step at a time: remote pairing → remote
+  // address → destination chooser; local-confirm → chooser. Only wired to the
+  // back arrow, which is hidden when no previous step exists (the chooser, or a
+  // skipped-chooser remote root), so it never needs to handle the root case.
   function goBack(): void {
     if (busy !== null) return;
     error = "";
@@ -186,6 +177,14 @@ import { errMessage } from "@tomat/shared";
       return;
     }
     view = "chooseDestination";
+  }
+
+  // Explicit exit out of the whole wizard, bound to the close button shown on
+  // every step while not locked. Returns to the Cores manager it was launched
+  // from. Never reachable while locked (onboarding has nowhere to go).
+  function exitFlow(): void {
+    viewState.pendingSettingsGroup = "cores";
+    viewState.navigate("settings");
   }
 
   // From the destination chooser: route to the right next step. If the user
@@ -230,7 +229,6 @@ import { errMessage } from "@tomat/shared";
       if (!code) throw new Error("response missing pairing code");
       busy = "claiming";
       await claimAndAdd(localBaseUrl, code, "Local Core");
-      view = "list";
     } catch (e) {
       error = errMessage(e);
       busy = null;
@@ -247,7 +245,6 @@ import { errMessage } from "@tomat/shared";
       });
       busy = "claiming";
       await claimAndAdd(localBaseUrl, code, "Local Core");
-      view = "list";
     } catch (e) {
       error = errMessage(e);
       busy = null;
@@ -325,49 +322,15 @@ import { errMessage } from "@tomat/shared";
       busy = null;
     }
   }
-
-  async function switchTo(id: string): Promise<void> {
-    error = "";
-    confirmingUnpair = null;
-    try {
-      await cores().select(id);
-    } catch (e) {
-      error = errMessage(e);
-    }
-    await refresh();
-  }
-
-  async function unpair(id: string): Promise<void> {
-    if (confirmingUnpair !== id) {
-      confirmingUnpair = id;
-      return;
-    }
-    confirmingUnpair = null;
-    error = "";
-    try {
-      await cores().removePaired(id);
-      const remaining = await cores().list();
-      if (remaining.length === 0) {
-        // Last core gone: lock the UI back to this screen.
-        viewState.setLocked(true);
-      } else if (!cores().currentEntry()) {
-        // removePaired dropped the active core: activate another so the
-        // rest of the app has a usable core again.
-        await cores().select(remaining[0].id);
-      }
-    } catch (e) {
-      error = errMessage(e);
-    }
-    await refresh();
-  }
 </script>
 
 <Bubble
   selectedAlignment={alignment}
   extraClass="flex flex-col gap-4 w-[22.5rem] max-w-full"
 >
-  {#if view === "chooseDestination"}
-    <!-- Welcome header: centered logo + title -->
+  {#if view === "chooseDestination" && viewState.locked}
+    <!-- Onboarding welcome: centered logo + title, no exit (locked in until a
+         core is paired). -->
     <div class="flex flex-col items-center gap-3 pt-2">
       <span
         class="w-14 h-14 bg-default-800 shrink-0"
@@ -377,11 +340,15 @@ import { errMessage } from "@tomat/shared";
       <h1 class="text-lg font-medium text-default-800">Welcome to tomat</h1>
     </div>
   {:else}
-    <!-- Header -->
+    <!-- Header: an optional left back arrow (intra-wizard step-back, hidden when
+         no previous step exists), a centered title, and an optional right close
+         (explicit exit, shown whenever a core is already connected). A spacer
+         balances whichever side control is absent so the title stays centered. -->
+    {@const showBack =
+      view === "remotePair" ||
+      ((view === "remoteAddress" || view === "localConfirm") && !chooserSkipped)}
     <div class="flex items-center gap-2">
-      {#if view === "localConfirm" || view === "remoteAddress" || view === "remotePair"}
-        <!-- Back lives on the left and walks the flow back one step. The title
-             is centered, balanced by a spacer matching the back button. -->
+      {#if showBack}
         <IconButton
           icon="i-material-symbols-arrow-back-rounded"
           title="Back"
@@ -391,35 +358,30 @@ import { errMessage } from "@tomat/shared";
           disabled={busy !== null}
           onclick={goBack}
         />
-        <h1 class="text-lg font-medium text-default-800 flex-1 text-center">
-          {#if view === "localConfirm"}
-            Set up a core on this computer
-          {:else}
-            Connect to a Remote Core
-          {/if}
-        </h1>
-        <div class="w-9 shrink-0" aria-hidden="true"></div>
       {:else}
-        <i
-          class="flex i-material-symbols-hub-rounded text-2xl text-default-700"
-        ></i>
-        <h1 class="text-lg font-medium text-default-800 flex-1">
-          {#if viewState.locked}
-            Welcome to tomat
-          {:else}
-            Cores
-          {/if}
-        </h1>
-        {#if view === "list" && !viewState.locked}
-          <IconButton
-            icon="i-material-symbols-close-rounded"
-            title="Back to Chat"
-            size="lg"
-            variant="subtle"
-            surface="circle"
-            onclick={() => viewState.navigate("chat")}
-          />
+        <div class="w-9 shrink-0" aria-hidden="true"></div>
+      {/if}
+      <h1 class="text-lg font-medium text-default-800 flex-1 text-center">
+        {#if view === "chooseDestination"}
+          Add a Core
+        {:else if view === "localConfirm"}
+          Set up a core on this computer
+        {:else}
+          Connect to a Remote Core
         {/if}
+      </h1>
+      {#if !viewState.locked}
+        <IconButton
+          icon="i-material-symbols-close-rounded"
+          title="Close"
+          size="lg"
+          variant="subtle"
+          surface="circle"
+          disabled={busy !== null}
+          onclick={exitFlow}
+        />
+      {:else}
+        <div class="w-9 shrink-0" aria-hidden="true"></div>
       {/if}
     </div>
   {/if}
@@ -715,49 +677,6 @@ import { errMessage } from "@tomat/shared";
         Install and Pair
       {/if}
     </Button>
-  {:else}
-    <!-- view === "list": returning users; show current core + emergency
-         unpair. Multi-core pairing is intentionally hidden per the
-         "single core only for now" scope; unpairing returns to the
-         destination chooser. -->
-    {#if pairedCores.length > 0}
-      <div class="flex flex-col gap-2">
-        {#each pairedCores as core (core.id)}
-          <div
-            class="flex items-center gap-2 bg-surface-inset rounded-large px-3 py-2"
-          >
-            <i
-              class="flex i-material-symbols-hub-rounded text-lg text-default-600 shrink-0"
-            ></i>
-            <div class="flex flex-col min-w-0 flex-1">
-              <span class="text-sm text-default-800 truncate">{core.name}</span>
-              <span class="text-xs text-default-500 truncate"
-                >{core.baseUrl}</span
-              >
-            </div>
-            {#if core.id === currentId}
-              <Chip label="Active" size="xs" variant="accent" accent="green" />
-            {/if}
-            <Button
-              variant={confirmingUnpair === core.id
-                ? "destructive"
-                : "secondary"}
-              size="sm"
-              class={confirmingUnpair === core.id
-                ? "shrink-0"
-                : "bg-surface-inset-strong hover:bg-default-400 shrink-0"}
-              onclick={() => unpair(core.id)}
-            >
-              {confirmingUnpair === core.id ? "Confirm" : "Unpair"}
-            </Button>
-          </div>
-        {/each}
-      </div>
-      <p class="text-xs text-default-500">
-        Unpairing returns you to the setup screen so you can pair a different
-        core.
-      </p>
-    {/if}
   {/if}
 
   {#if error}

@@ -83,7 +83,7 @@ import { errMessage } from "@tomat/shared";
   import { shortcutHandler } from "$lib/state/shortcut.svelte";
   import { useBlink } from "$lib/composables/use-blink.svelte";
   import type { ActivationMode } from "@tomat/shared";
-  import AttachmentList from "../AttachmentList.svelte";
+  import AttachmentList from "./AttachmentList.svelte";
   import Bubble from "../ui/Bubble.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import Alert from "../ui/Alert.svelte";

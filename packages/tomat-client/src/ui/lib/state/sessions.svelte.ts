@@ -65,6 +65,11 @@ class SessionsState {
   epoch = $state(0);
 
   private unsubscribeWs: (() => void) | null = null;
+  private unsubscribeConn: (() => void) | null = null;
+  // Reconnect-resync bookkeeping: only reload after a real gap (a drop following
+  // a prior connect), never on the very first connect of the session.
+  private hasConnected = false;
+  private droppedSinceConnected = false;
 
   get storageEnabled(): boolean {
     // Sessions are server-owned now; the toggle remains as a client-side
@@ -97,6 +102,23 @@ class SessionsState {
         messagesState.removeById(frame.payload.messageId);
       }
     });
+    // During a disconnect gap the session.updated/message_added frames above are
+    // lost, so server-side changes (e.g. a finished turn) are missed. Reload the
+    // active session on reconnect to resync; load() also re-runs the in-flight
+    // fixups in backfillMessageIds. Only after a real gap, never on first connect.
+    this.unsubscribeConn = cores().subscribeConnectionState((state) => {
+      if (state === "connected") {
+        if (this.droppedSinceConnected && this.id) {
+          log.info("reconnected; reloading active session");
+          void this.load(this.id);
+        }
+        this.hasConnected = true;
+        this.droppedSinceConnected = false;
+      } else if (this.hasConnected) {
+        // Disconnected/connecting after a prior connect: a real gap to resync.
+        this.droppedSinceConnected = true;
+      }
+    });
   }
 
   detach(): void {
@@ -104,6 +126,12 @@ class SessionsState {
       this.unsubscribeWs();
       this.unsubscribeWs = null;
     }
+    if (this.unsubscribeConn) {
+      this.unsubscribeConn();
+      this.unsubscribeConn = null;
+    }
+    this.hasConnected = false;
+    this.droppedSinceConnected = false;
   }
 
   async loadList(): Promise<void> {

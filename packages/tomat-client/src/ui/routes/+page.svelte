@@ -1,19 +1,19 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
-  import AgentMessage from "$lib/components/messages/AgentMessage.svelte";
-  import ErrorMessage from "$lib/components/messages/ErrorMessage.svelte";
-  import SystemMessage from "$lib/components/messages/SystemMessage.svelte";
-  import ToolCall from "$lib/components/messages/ToolCall.svelte";
-  import RelevantTools from "$lib/components/messages/RelevantTools.svelte";
-  import UserInput from "$lib/components/input/UserInput.svelte";
-  import UserMessage from "$lib/components/messages/UserMessage.svelte";
-  import SessionBar from "$lib/components/SessionBar.svelte";
+  import AgentMessage from "$lib/components/chat/messages/AgentMessage.svelte";
+  import ErrorMessage from "$lib/components/chat/messages/ErrorMessage.svelte";
+  import SystemMessage from "$lib/components/chat/messages/SystemMessage.svelte";
+  import ToolCall from "$lib/components/chat/messages/ToolCall.svelte";
+  import RelevantTools from "$lib/components/chat/messages/RelevantTools.svelte";
+  import UserInput from "$lib/components/chat/UserInput.svelte";
+  import UserMessage from "$lib/components/chat/messages/UserMessage.svelte";
+  import SessionBar from "$lib/components/chat/SessionBar.svelte";
   import Settings from "$lib/components/settings/Settings.svelte";
-  import CoreManagement from "$lib/components/core/CoreManagement.svelte";
-  import QuickSetup from "$lib/components/core/QuickSetup.svelte";
-  import SessionList from "$lib/components/SessionList.svelte";
+  import NewCore from "$lib/components/new-core/NewCore.svelte";
+  import QuickSetup from "$lib/components/quick-setup/QuickSetup.svelte";
+  import SessionList from "$lib/components/session-list/SessionList.svelte";
   import Bubble from "$lib/components/ui/Bubble.svelte";
-  import MessageStackGroup from "$lib/components/MessageStackGroup.svelte";
+  import MessageStackGroup from "$lib/components/chat/MessageStackGroup.svelte";
   import { getTextContent, type Message } from "$lib/shared/types";
   import {
     downloadsState,
@@ -41,7 +41,7 @@
     enableMessageAnimations,
     getDuration,
   } from "$lib/shared/animations";
-  import MessageEnter from "$lib/components/MessageEnter.svelte";
+  import MessageEnter from "$lib/components/chat/MessageEnter.svelte";
 
   // Sidecar lifecycle is server-side; the client only attaches WS-driven
   // state subscribers so status frames reach the UI.
@@ -379,7 +379,7 @@
       if (paired) {
         viewState.setImmediate("chat");
       } else {
-        viewState.setImmediate("coreManagement");
+        viewState.setImmediate("newCore");
         viewState.setLocked(true);
       }
       applyAllAppearance();
@@ -1007,8 +1007,8 @@
           class:mr-auto={settingsState.getAlignment() === "left"}
           class:mx-auto={settingsState.getAlignment() === "center"}
         >
-          {#if viewState.mode === "coreManagement"}
-            <CoreManagement />
+          {#if viewState.mode === "newCore"}
+            <NewCore />
           {:else if viewState.mode === "quickSetup"}
             <QuickSetup />
           {:else if viewState.mode === "sessionList"}

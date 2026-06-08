@@ -4,6 +4,8 @@ export const ttsGroup: SettingGroup = {
   id: "tts",
   destination: "client",
   name: "Text-to-Speech",
+  description: "Have the agent read its replies aloud.",
+  descriptionTier: "ondemand",
   icon: "i-material-symbols-volume-up-rounded",
   iconInactive: "i-material-symbols-volume-up-outline-rounded",
   sections: [
@@ -12,17 +14,15 @@ export const ttsGroup: SettingGroup = {
         {
           id: "tts.enabled",
           name: "Enable Text-to-Speech",
-          description:
-            "Read assistant responses aloud as they stream.\nKeeps the voice model loaded in memory while enabled and frees it on disable.",
+          description: "Read the agent's replies aloud as they arrive.",
           type: "boolean",
           defaultValue: false,
           descriptionTier: "ondemand",
         },
         {
           id: "tts.spellOutEmojis",
-          name: "Spell Out Emojis",
-          description:
-            "Pass emojis through to the voice model so it pronounces them.\nWhen disabled (default), emojis are stripped before synthesis.",
+          name: "Read Emojis Aloud",
+          description: "Pronounce emojis instead of skipping them.",
           type: "boolean",
           defaultValue: false,
           visibleWhen: { field: "tts.enabled", eq: true },
@@ -36,9 +36,8 @@ export const ttsGroup: SettingGroup = {
       fields: [
         {
           id: "tts.voice",
-          name: "Voice Model",
-          description:
-            "Voice model used for speech synthesis.\nSelecting a voice downloads its file the first time it is used.",
+          name: "Voice",
+          description: "The voice used to read replies. Downloads the first time you use it.",
           type: "select",
           defaultValue: "af_bella",
           descriptionTier: "ondemand",
@@ -101,9 +100,9 @@ export const ttsGroup: SettingGroup = {
         },
         {
           id: "tts.minChunkWords",
-          name: "Min Words Per Chunk",
+          name: "Words Per Chunk",
           description:
-            "Smallest number of words to buffer before sending a chunk to the voice model.\nHigher values produce smoother prosody at the cost of latency.",
+            "How many words to gather before speaking. Higher sounds smoother but starts later.",
           type: "number",
           defaultValue: 8,
           suffix: "words",
@@ -117,9 +116,8 @@ export const ttsGroup: SettingGroup = {
         },
         {
           id: "tts.synthesisSpeed",
-          name: "Speech Synthesis Speed",
-          description:
-            "Speed the voice model is asked to render speech at.\nAffects the prosody of the generated audio (lower = more relaxed pacing, higher = more clipped).\nAccepted range: 0.25 to 3.",
+          name: "Synthesis Speed",
+          description: "How fast the voice is generated. Affects pacing.",
           type: "float",
           defaultValue: 1,
           suffix: "x",
@@ -134,8 +132,7 @@ export const ttsGroup: SettingGroup = {
         {
           id: "tts.playbackSpeed",
           name: "Playback Speed",
-          description:
-            "Speed the synthesized audio is replayed at.\nApplied after synthesis, so pitch scales with the multiplier (higher = higher-pitched voice).\nAccepted range: 0.25 to 3.",
+          description: "How fast the audio plays back. Also shifts pitch.",
           type: "float",
           defaultValue: 1,
           suffix: "x",
@@ -150,14 +147,14 @@ export const ttsGroup: SettingGroup = {
         {
           id: "tts.volume",
           name: "Volume",
-          description: "Playback volume for synthesized speech.\nAccepted range: 0 to 100.",
+          description: "Playback volume.",
           type: "number_slider",
           defaultValue: 70,
           min: 0,
           max: 100,
           step: 1,
           suffix: "%",
-          descriptionTier: "none",
+          descriptionTier: "ondemand",
         },
       ],
     },

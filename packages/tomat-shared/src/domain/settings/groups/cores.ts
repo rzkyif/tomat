@@ -13,7 +13,7 @@ export const coresGroup: SettingGroup = {
   destination: "client",
   name: "Cores",
   description:
-    "Cores this client is paired with. Add or remove via the pairing flow; tokens live in the OS keychain.",
+    "The cores this app is paired with. Tokens stay in your device keychain; add or remove cores through pairing.",
   descriptionTier: "always",
   icon: "i-material-symbols-hub",
   iconInactive: "i-material-symbols-hub-outline",

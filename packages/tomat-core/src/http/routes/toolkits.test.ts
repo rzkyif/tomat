@@ -29,7 +29,7 @@ function postJson(token: string, path: string): Request {
 
 // Seed an INSTALLED toolkit (hash pinned, on-disk folder present) with one tool
 // that declares an ungranted net permission. Returns the temp install dir.
-async function seedInstalledToolkit(id: string): Promise<string> {
+async function seedInstalledToolkit(id: string, hasDeps = false): Promise<string> {
   const dir = await Deno.makeTempDir({ prefix: "tomat-tk-route-" });
   await Deno.writeTextFile(join(dir, "index.ts"), "export const x = 1;\n");
   const r = toolkitsRegistry();
@@ -43,6 +43,7 @@ async function seedInstalledToolkit(id: string): Promise<string> {
     toolsJsonHash: "x",
     contentHash: "pinned",
     status: "installed",
+    hasDeps,
   });
   r.replaceTools(id, [
     {
@@ -125,6 +126,68 @@ Deno.test("DELETE /api/v1/toolkits/:id: 404 with toolkit_not_found when id is un
   }
 });
 
+Deno.test("DELETE /api/v1/toolkits/:id: removes the toolkit row", async () => {
+  const env = await setupTestEnv();
+  try {
+    const { token } = await pairOne();
+    const id = "tk-del";
+    const dir = await seedInstalledToolkit(id);
+    try {
+      const app = buildApp();
+      const res = await app.fetch(
+        new Request(`http://x/api/v1/toolkits/${id}`, { method: "DELETE", headers: bearer(token) }),
+      );
+      assertEquals(res.status, 204);
+      assertEquals(toolkitsRegistry().get(id), undefined);
+    } finally {
+      await Deno.remove(dir, { recursive: true }).catch(() => {});
+    }
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("POST /:id/uninstall: reverts an installed deps toolkit to 'downloaded'", async () => {
+  const env = await setupTestEnv();
+  try {
+    const { token } = await pairOne();
+    const id = "tk-uninstall";
+    const dir = await seedInstalledToolkit(id, true);
+    try {
+      const app = buildApp();
+      const res = await app.fetch(postJson(token, `/api/v1/toolkits/${id}/uninstall`));
+      assertEquals(res.status, 200);
+      const tk = toolkitsRegistry().get(id);
+      assertEquals(tk?.status, "downloaded");
+      assertEquals(tk?.contentHash, "");
+    } finally {
+      await Deno.remove(dir, { recursive: true }).catch(() => {});
+    }
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("POST /:id/uninstall: 400 for a no-dep toolkit (delete-only)", async () => {
+  const env = await setupTestEnv();
+  try {
+    const { token } = await pairOne();
+    const id = "tk-nodep";
+    const dir = await seedInstalledToolkit(id, false);
+    try {
+      const app = buildApp();
+      const res = await app.fetch(postJson(token, `/api/v1/toolkits/${id}/uninstall`));
+      assertEquals(res.status, 400);
+      // Unchanged: still installed.
+      assertEquals(toolkitsRegistry().get(id)?.status, "installed");
+    } finally {
+      await Deno.remove(dir, { recursive: true }).catch(() => {});
+    }
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("POST /api/v1/toolkits/download: unknown source kind returns 400", async () => {
   const env = await setupTestEnv();
   try {
@@ -186,42 +249,6 @@ Deno.test("POST /:id/tools/:tool/enable: succeeds even with ungranted required p
       // Enabling is no longer permission-gated; the tool flips on (the
       // chat-exposure gate withholds it from the model until granted).
       assertEquals(toolkitsRegistry().listTools(id)[0].enabled, true);
-    } finally {
-      await Deno.remove(dir, { recursive: true });
-    }
-  } finally {
-    await env.teardown();
-  }
-});
-
-Deno.test("POST /:id/tools/enable-all + disable-all: bulk toggle every tool", async () => {
-  const env = await setupTestEnv();
-  try {
-    const { token } = await pairOne();
-    const id = "tk-bulk";
-    const dir = await seedInstalledToolkit(id);
-    try {
-      const app = buildApp();
-      assertEquals(
-        (await app.fetch(postJson(token, `/api/v1/toolkits/${id}/tools/enable-all`))).status,
-        200,
-      );
-      assertEquals(
-        toolkitsRegistry()
-          .listTools(id)
-          .every((t) => t.enabled),
-        true,
-      );
-      assertEquals(
-        (await app.fetch(postJson(token, `/api/v1/toolkits/${id}/tools/disable-all`))).status,
-        200,
-      );
-      assertEquals(
-        toolkitsRegistry()
-          .listTools(id)
-          .every((t) => !t.enabled),
-        true,
-      );
     } finally {
       await Deno.remove(dir, { recursive: true });
     }

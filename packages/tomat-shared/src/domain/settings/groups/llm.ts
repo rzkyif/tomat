@@ -5,6 +5,9 @@ export const llmGroup: SettingGroup = {
   id: "llm",
   destination: "core",
   name: "Language Model",
+  description:
+    "The model that powers your chats. Run one locally on this device, or connect to an external API.",
+  descriptionTier: "ondemand",
   icon: "i-material-symbols-psychology-rounded",
   iconInactive: "i-material-symbols-psychology-outline-rounded",
   sections: [
@@ -14,17 +17,16 @@ export const llmGroup: SettingGroup = {
         {
           id: "llm.supportImages",
           name: "Image Attachments",
-          description:
-            "Allow attaching images to messages.\nRequires a vision-capable model when running locally.",
+          description: "Let yourself attach images to messages. The model must support vision.",
           type: "boolean",
           defaultValue: true,
           descriptionTier: "ondemand",
         },
         {
           id: "llm.showReasoning",
-          name: "Show Thinking Process",
+          name: "Show Thinking",
           description:
-            "Display the model's reasoning in a collapsible section above each response.\nSaved with the session but never sent back to the model.",
+            "Show the model's thinking above each reply, when it thinks.\nSaved with the session but never sent back to the model.",
           type: "boolean",
           defaultValue: true,
           descriptionTier: "ondemand",
@@ -38,7 +40,7 @@ export const llmGroup: SettingGroup = {
           id: "llm.provider",
           name: "Provider",
           description:
-            "Where the language model runs.\n\nLocal: runs on this machine.\n\nExternal: sent to an OpenAI-compatible API.",
+            "Run the model on this device (private, no internet) or connect to an external API.",
           type: "select",
           defaultValue: "local",
           options: [
@@ -52,7 +54,7 @@ export const llmGroup: SettingGroup = {
           name: "Smart Preset",
           visibleWhen: { field: "llm.provider", eq: "local" },
           description:
-            'tomat picks the best model for your device in each tier. The model shown on each card is computed from your hardware and the latest catalog; use "Check for Newer Models" to re-evaluate.',
+            "Three ready-made sizes (Smallest, Balanced, Smartest), each filled with the best-fitting model for your hardware. Pick one, or choose Custom to set the model and tuning yourself.",
           type: "model_preset",
           defaultValue: "smallest",
           presetConfig: {
@@ -78,22 +80,21 @@ export const llmGroup: SettingGroup = {
                 id: "smallest",
                 label: "Smallest",
                 title: "Smallest",
-                description:
-                  "The lightest model that still works well with tomat. Minimal memory use, runs on anything.",
+                description: "The lightest capable model. Runs on almost anything.",
               },
               {
                 id: "half",
                 label: "Half",
                 title: "Balanced",
                 description:
-                  "The smartest model that uses around half of your device's memory. A comfortable everyday default.",
+                  "A capable model that uses about half your memory. A good everyday default.",
               },
               {
                 id: "full",
                 label: "Full",
                 title: "Smartest",
                 description:
-                  "The smartest model your device can run without crashing. Unloads itself when idle to free memory.",
+                  "The largest model your device can handle. Unloads itself after 5 minutes idle to free memory.",
               },
             ],
             secondaryOptions: [
@@ -116,7 +117,7 @@ export const llmGroup: SettingGroup = {
       ],
     },
     {
-      label: "Llama Server Configuration",
+      label: "Model Server Configuration",
       visibleWhen: {
         allOf: [
           { field: "llm.provider", eq: "local" },
@@ -126,16 +127,16 @@ export const llmGroup: SettingGroup = {
       fields: [
         {
           id: "llm.modelPath",
-          name: "Model Path",
-          description: "Path to the GGUF model file.",
+          name: "Model File",
+          description: "Path to the model file to load, e.g. @user/repo/branch/model.gguf.",
           type: "string",
           defaultValue: "@unsloth/Qwen3.5-0.8B-GGUF/main/Qwen3.5-0.8B-Q4_K_M.gguf",
           descriptionTier: "ondemand",
         },
         {
           id: "llm.mmprojPath",
-          name: "Vision Module Path",
-          description: "Path to the mmproj GGUF file used for vision support.",
+          name: "Vision File",
+          description: "Path to the vision add-on file for image support.",
           type: "string",
           defaultValue: "@unsloth/Qwen3.5-0.8B-GGUF/main/mmproj-F16.gguf",
           placeholder: "@user/repo/branch/mmproj-f16.gguf",
@@ -145,16 +146,17 @@ export const llmGroup: SettingGroup = {
         },
         {
           id: "llm.contextSize",
-          name: "Context Window Size",
-          description: "Maximum context window length in tokens.",
+          name: "Context Window",
+          description:
+            "How much text the model can consider at once, in tokens. Larger uses more memory.",
           type: "number",
           defaultValue: 4096,
           descriptionTier: "ondemand",
         },
         {
           id: "llm.threads",
-          name: "Processor Cores",
-          description: "Number of CPU threads used for inference.",
+          name: "CPU Threads",
+          description: "How many CPU threads to use.",
           type: "number",
           defaultValue: 4,
           descriptionTier: "ondemand",
@@ -163,7 +165,7 @@ export const llmGroup: SettingGroup = {
           id: "llm.gpuLayers",
           name: "GPU Layers",
           description:
-            "How many model layers to offload to the GPU.\n\n0 runs entirely on the CPU; a large value such as 999 offloads every layer. Leave blank to let llama.cpp decide.",
+            "How much of the model to run on the GPU. Higher is faster if it fits; blank lets tomat decide.",
           type: "number",
           defaultValue: "",
           optional: true,
@@ -173,17 +175,16 @@ export const llmGroup: SettingGroup = {
         {
           id: "llm.flashAttn",
           name: "Flash Attention",
-          description:
-            "Use flash attention for faster, more memory-efficient attention. Recommended on supported hardware.",
+          description: "Faster, lighter processing on supported hardware.",
           type: "boolean",
           defaultValue: false,
           descriptionTier: "ondemand",
         },
         {
           id: "llm.idleUnloadSeconds",
-          name: "Idle Unload",
+          name: "Unload When Idle",
           description:
-            "Stop the local model after this many seconds with no activity, freeing its memory; it reloads automatically on the next message.\n\n0 keeps it loaded. The Full preset enables this automatically.",
+            "Free memory by unloading the model after this long unused. It reloads on your next message; 0 keeps it loaded.",
           type: "number",
           defaultValue: 0,
           suffix: "s",
@@ -191,8 +192,9 @@ export const llmGroup: SettingGroup = {
         },
         {
           id: "llm.reasoning",
-          name: "Reasoning Mode",
-          description: "Whether the model should produce a reasoning trace before its answer.",
+          name: "Thinking",
+          description:
+            "Whether the model should think before answering. The model may still skip it for simple prompts.",
           type: "select",
           defaultValue: "off",
           options: [
@@ -205,8 +207,8 @@ export const llmGroup: SettingGroup = {
         },
         {
           id: "llm.reasoningBudget",
-          name: "Max Thinking Tokens",
-          description: "Number of tokens reserved for the reasoning trace.",
+          name: "Thinking Budget",
+          description: "How many tokens the model may spend thinking.",
           type: "number",
           defaultValue: "",
           visibleWhen: { field: "llm.reasoning", neq: "off" },
@@ -218,15 +220,15 @@ export const llmGroup: SettingGroup = {
           id: "llm.mmap",
           name: "Memory-Mapped Loading",
           description:
-            "Use memory-mapped I/O when loading the model.\n\nFaster startup and lower RAM usage in most cases. Disable if you see stability issues on unusual filesystems.",
+            "Load the model straight from disk for faster startup and lower memory. Turn off only if you hit stability issues.",
           type: "boolean",
           defaultValue: true,
-          descriptionTier: "always",
+          descriptionTier: "ondemand",
         },
         {
           id: "llm.host",
           name: "Host",
-          description: "Server bind address.",
+          description: "Address the local model server binds to.",
           type: "string",
           defaultValue: "127.0.0.1",
           regex: [
@@ -236,12 +238,12 @@ export const llmGroup: SettingGroup = {
               errorMessage: "Must be a valid IPv4 address",
             },
           ],
-          descriptionTier: "always",
+          descriptionTier: "ondemand",
         },
         {
           id: "llm.port",
           name: "Port",
-          description: "Server listen port.",
+          description: "Port the local model server listens on.",
           type: "string",
           defaultValue: "7701",
           regex: [
@@ -249,15 +251,15 @@ export const llmGroup: SettingGroup = {
             {
               regex:
                 "^(?:[1-9]\\d{0,4}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])$",
-              errorMessage: "Port must be 1–65535",
+              errorMessage: "Port must be 1-65535",
             },
           ],
-          descriptionTier: "always",
+          descriptionTier: "ondemand",
         },
         {
           id: "llm.webui",
-          name: "Built-in Web UI",
-          description: "Enable the llama.cpp built-in web interface.",
+          name: "llama.cpp Web UI",
+          description: "Enable llama.cpp's built-in web interface.",
           type: "boolean",
           defaultValue: false,
           descriptionTier: "ondemand",
@@ -280,7 +282,7 @@ export const llmGroup: SettingGroup = {
           id: "llm.external.baseUrl",
           name: "Base URL",
           description:
-            "API endpoint URL. Must use HTTPS for remote hosts; HTTP is only allowed for localhost.",
+            "Your provider's API endpoint. Must be HTTPS (HTTP allowed only for localhost).",
           type: "string",
           defaultValue: "",
           placeholder: "https://api.example.com/v1",
@@ -290,25 +292,25 @@ export const llmGroup: SettingGroup = {
         {
           id: "llm.external.apiKey",
           name: "API Key",
-          description: "Authentication key.",
+          description: "Your provider API key. Stored securely in your device keychain.",
           type: "password",
           defaultValue: "",
           placeholder: "sk-...",
-          descriptionTier: "none",
+          descriptionTier: "ondemand",
         },
         {
           id: "llm.external.model",
           name: "Model",
-          description: "Model identifier to use.",
+          description: "The model name to use, e.g. gpt-4o-mini.",
           type: "string",
           defaultValue: "",
           placeholder: "gpt-4o-mini",
-          descriptionTier: "none",
+          descriptionTier: "ondemand",
         },
         {
           id: "llm.external.contextSize",
-          name: "Context Window Size",
-          description: "Maximum context window length in tokens. Used for usage tracking.",
+          name: "Context Window",
+          description: "The model's context window, in tokens. Used to track usage.",
           type: "number",
           defaultValue: 128000,
           descriptionTier: "ondemand",

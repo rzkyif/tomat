@@ -17,6 +17,7 @@
     /* no-op: handled server-side */
   }
   import Bubble from "../ui/Bubble.svelte";
+  import DestinationChip from "../ui/DestinationChip.svelte";
   import HelpText from "../ui/HelpText.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import SearchInput from "../ui/SearchInput.svelte";
@@ -170,6 +171,12 @@
   $effect(() => layout.observe());
 
   onMount(async () => {
+    // Open on a specific group when an external flow requested one (e.g. the
+    // add-core wizard returning to the Cores manager), then clear the request.
+    if (viewState.pendingSettingsGroup) {
+      selectedGroupId = viewState.pendingSettingsGroup;
+      viewState.pendingSettingsGroup = null;
+    }
     // Seed collapse state: every labeled section starts expanded except those
     // flagged `defaultCollapsed`.
     expandedSections = defaultExpandedSections();
@@ -628,20 +635,11 @@
                     <SectionHeader label={selectedGroup.name} level="group">
                       {#snippet badge()}
                         <!-- Destination chip(s): whether a setting lives on the
-                             paired core, the local client, or (for the usage
-                             group) both. One chip per destination. Sized to the
-                             header text height; painted with the input-field
-                             surface (bg-surface-inset). -->
+                             paired core, the local client, or (for hybrid
+                             groups) both. One chip per destination. -->
                         <span class="inline-flex items-center gap-1">
                           {#each groupDestinations(selectedGroup) as dest (dest)}
-                            <span
-                              class="text-[10px] font-medium uppercase tracking-wider px-1.5 inline-flex items-center h-4 leading-none rounded-medium bg-surface-inset text-default-700"
-                              title={dest === "core"
-                                ? "Stored on the paired core (~/.tomat/core/settings.json)"
-                                : "Stored on this device (~/.tomat/client/settings.json)"}
-                            >
-                              {dest === "core" ? "Core" : "Client"}
-                            </span>
+                            <DestinationChip {dest} />
                           {/each}
                         </span>
                       {/snippet}
@@ -740,6 +738,15 @@
             </div>
           </div>
         </div>
+        <!-- Top fade is search-only: the normal group view has a sticky section
+             header at the top, so a fade there would just wash it out. -->
+        <div
+          class="absolute left-0 right-0 top-0 h-6 pointer-events-none z-1 bg-gradient-to-b from-default-50 to-transparent transition-opacity duration-100 {scroll.showTopFade &&
+          search.mode &&
+          search.query.trim()
+            ? 'opacity-100'
+            : 'opacity-0'}"
+        ></div>
         <div
           class="absolute left-0 right-0 bottom-0 h-6 pointer-events-none z-1 bg-gradient-to-t from-default-50 to-transparent transition-opacity duration-100 {scroll.showBottomFade
             ? 'opacity-100'
