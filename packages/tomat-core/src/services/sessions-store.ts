@@ -21,6 +21,7 @@ import {
   type MessageContent,
   type Session,
   type SessionListEntry,
+  type SummaryPart,
 } from "@tomat/shared";
 import { join } from "@std/path";
 import { paths, sessionAttachmentsDir, sessionDir } from "../paths.ts";
@@ -86,7 +87,7 @@ export class SessionsRepo {
       createdAtMs: d.createdAtMs,
       updatedAtMs: d.updatedAtMs,
       messageCount: d.messages.length,
-      summary: summarizeFirstUserMessage(d.messages),
+      summary: summarizeConversation(d.messages),
     }));
   }
 
@@ -137,6 +138,54 @@ export class SessionsRepo {
     doc.updatedAtMs = Date.now();
     writeDoc(doc);
     return { id, ord };
+  }
+
+  /** Insert a message directly after `afterId` in chronological order, so a
+   *  regenerated mid-history turn lands in its slot instead of at the tail.
+   *  `afterId: null` (or an id that no longer exists) appends at the tail.
+   *  `ord` is renumbered to the array index across the whole doc on every
+   *  insert; nothing outside this store relies on specific ord values. */
+  insertMessageAfter(
+    sessionId: string,
+    message: Message,
+    afterId: string | null,
+  ): { id: string; ord: number } {
+    const doc = this.requireExists(sessionId);
+    const id = message.id || newMessageId();
+    const stored: Message = {
+      ...message,
+      id,
+      createdAtMs: message.createdAtMs || Date.now(),
+    } as Message;
+    const anchorIdx = afterId === null ? -1 : doc.messages.findIndex((m) => m.id === afterId);
+    if (anchorIdx === -1) doc.messages.push(stored);
+    else doc.messages.splice(anchorIdx + 1, 0, stored);
+    doc.messages.forEach((m, i) => {
+      m.ord = i;
+    });
+    doc.updatedAtMs = Date.now();
+    writeDoc(doc);
+    return { id, ord: stored.ord };
+  }
+
+  /** Remove every message strictly between the anchor and the next-newer
+   *  `role: "user"` message (i.e. the old contents of the anchor's turn).
+   *  Returns the removed ids so the caller can broadcast deletions. Unknown
+   *  anchor = no-op. */
+  deleteTurn(sessionId: string, anchorMessageId: string): string[] {
+    const doc = this.requireExists(sessionId);
+    const anchorIdx = doc.messages.findIndex((m) => m.id === anchorMessageId);
+    if (anchorIdx === -1) return [];
+    let end = anchorIdx + 1;
+    while (end < doc.messages.length && doc.messages[end].role !== "user") end++;
+    if (end === anchorIdx + 1) return [];
+    const removed = doc.messages.splice(anchorIdx + 1, end - anchorIdx - 1);
+    doc.messages.forEach((m, i) => {
+      m.ord = i;
+    });
+    doc.updatedAtMs = Date.now();
+    writeDoc(doc);
+    return removed.map((m) => m.id);
   }
 
   getMessage(sessionId: string, messageId: string): Message {
@@ -378,15 +427,29 @@ function dirSize(path: string): number {
   return total;
 }
 
-const SUMMARY_MAX_CHARS = 120;
+const SUMMARY_MAX_CHARS = 160;
+const SUMMARY_SNIPPET_MAX_CHARS = 60;
 
-/** Plain-text snippet of the first user message, for the session list. Empty
- *  when the session has no user message yet. */
-function summarizeFirstUserMessage(messages: Message[]): string {
-  const first = messages.find((m) => m.role === "user");
-  if (!first) return "";
-  const text = contentToText((first as { content?: unknown }).content as MessageContent)
-    .trim()
-    .replace(/\s+/g, " ");
-  return text.length > SUMMARY_MAX_CHARS ? text.slice(0, SUMMARY_MAX_CHARS) + "…" : text;
+/** Conversation snippets for the session list: the opening user/assistant
+ *  exchange, as many turns as fit the budget (the UI truncates to one line
+ *  anyway). Labels are left to the client, which knows the configured agent
+ *  name. Empty when the session has no user or assistant messages yet. */
+function summarizeConversation(messages: Message[]): SummaryPart[] {
+  const parts: SummaryPart[] = [];
+  let total = 0;
+  for (const m of messages) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const text = contentToText((m as { content?: unknown }).content as MessageContent)
+      .trim()
+      .replace(/\s+/g, " ");
+    if (!text) continue;
+    const snippet =
+      text.length > SUMMARY_SNIPPET_MAX_CHARS
+        ? text.slice(0, SUMMARY_SNIPPET_MAX_CHARS) + "…"
+        : text;
+    if (parts.length > 0 && total + snippet.length > SUMMARY_MAX_CHARS) break;
+    parts.push({ role: m.role === "user" ? "user" : "agent", text: snippet });
+    total += snippet.length;
+  }
+  return parts;
 }

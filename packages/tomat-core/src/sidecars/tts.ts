@@ -3,10 +3,11 @@
 // stdin, and parses NDJSON responses from stdout into Promises.
 //
 // Spawn flags:
-//   deno run --allow-read=<models-dir> --allow-env=ORT_LOG_LEVEL
+//   deno run --allow-read=<models-dir>,<deno-cache>[,<node_modules>]
+//            --allow-env --allow-ffi
 //            <core>/workers/tts-worker.ts <models-dir>
 
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { errMessage } from "@tomat/shared";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
@@ -144,7 +145,9 @@ export class TtsController {
   ): Promise<{ sampleRate: number; pcm: Uint8Array }> {
     await this.ensureLoaded();
     const id = `s${++this.synthCounter}`;
-    return new Promise<{ sampleRate: number; pcm: Uint8Array }>((resolve, reject) => {
+    const startedAt = Date.now();
+    log.info(`synthesis ${id} starting (${text.length} chars, voice ${voice ?? "default"})`);
+    const result = await new Promise<{ sampleRate: number; pcm: Uint8Array }>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.synthsInFlight.delete(id);
         reject(
@@ -157,6 +160,15 @@ export class TtsController {
       this.synthsInFlight.set(id, { resolve, reject, timer });
       this.send({ kind: "synthesize", id, text, voice, speed });
     });
+    const elapsedMs = Date.now() - startedAt;
+    // 16-bit mono PCM: 2 bytes per sample.
+    const audioSecs = result.pcm.length / 2 / result.sampleRate;
+    const rate = elapsedMs > 0 ? ((text.length / elapsedMs) * 1000).toFixed(0) : "?";
+    log.info(
+      `synthesis ${id} done in ${elapsedMs}ms ` +
+        `(${text.length} chars to ${audioSecs.toFixed(1)}s audio, ${rate} chars/s)`,
+    );
+    return result;
   }
 
   status(): { loaded: boolean; loading: boolean } {
@@ -176,14 +188,31 @@ export class TtsController {
     const entry = this.workerEntry();
     const modelsRoot = paths().modelsDir;
 
+    // kokoro-js reads its bundled voice tensors (voices/*.bin) and phonemizer
+    // its data files via plain fs from their npm package directories. In
+    // production those live under DENO_DIR (= denoCacheDir, granted below);
+    // in a dev checkout the repo's `nodeModulesDir: "auto"` materializes them
+    // under the repo's node_modules instead, so grant that too when present.
+    const readRoots = [modelsRoot, paths().denoCacheDir];
+    const nodeModules = nearestNodeModules(dirname(entry));
+    if (nodeModules) readRoots.push(nodeModules);
+
     const proc = new Deno.Command(denoBin, {
       args: [
         "run",
         "--no-prompt",
         "--no-check",
         "--quiet",
-        `--allow-read=${modelsRoot},${paths().denoCacheDir}`,
-        "--allow-env=ORT_LOG_LEVEL",
+        `--allow-read=${readRoots.join(",")}`,
+        // onnxruntime-node loads a native .node binding at import time, which
+        // needs FFI. Unscoped: once any native module loads it runs outside
+        // the sandbox anyway, so path-scoping FFI buys nothing.
+        "--allow-ffi",
+        // transformers' dep tree (sharp, onnxruntime) probes many env keys at
+        // import; with --no-prompt an unlisted key is a fatal NotCapable, so
+        // enumerating keys is a losing game. Env reads are also already
+        // exposed to native code via FFI.
+        "--allow-env",
         entry,
         modelsRoot,
       ],
@@ -333,6 +362,23 @@ export class TtsController {
       p.reject(err);
     }
     this.synthsInFlight.clear();
+  }
+}
+
+/** Nearest `node_modules` directory walking up from `start`, or null. Dev
+ *  checkouts resolve the worker's npm deps there (see spawn). */
+function nearestNodeModules(start: string): string | null {
+  let dir = start;
+  while (true) {
+    const candidate = join(dir, "node_modules");
+    try {
+      if (Deno.statSync(candidate).isDirectory) return candidate;
+    } catch {
+      /* not here; keep walking up */
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
   }
 }
 

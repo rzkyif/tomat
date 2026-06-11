@@ -6,12 +6,20 @@ import type { CoreClient } from "./client";
 export class ChatApi {
   constructor(private readonly client: CoreClient) {}
 
-  start(streamId: string, sessionId: string, route: "default" | "secondary" = "default"): void {
+  start(
+    streamId: string,
+    sessionId: string,
+    route: "default" | "secondary" = "default",
+    opts?: { systemPrompt?: string; toolsHint?: string; anchorMessageId?: string },
+  ): void {
     this.client.sendWs({
       kind: "chat.start",
       streamId,
       sessionId,
       route,
+      ...(opts?.systemPrompt !== undefined ? { systemPrompt: opts.systemPrompt } : {}),
+      ...(opts?.toolsHint ? { toolsHint: opts.toolsHint } : {}),
+      ...(opts?.anchorMessageId ? { anchorMessageId: opts.anchorMessageId } : {}),
     });
   }
 

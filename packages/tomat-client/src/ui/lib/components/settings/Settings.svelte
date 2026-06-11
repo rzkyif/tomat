@@ -2,8 +2,8 @@
   import { onMount } from "svelte";
   import { platform } from "$lib/platform";
   import { isTauri } from "$lib/shared/env";
-  import { errMessage, groupDestinations, SETTINGS_SCHEMA } from "@tomat/shared";
-  import type { PresetOption, SettingField, SettingGroup } from "@tomat/shared";
+  import { groupDestinations, SETTINGS_SCHEMA } from "@tomat/shared";
+  import type { SettingField, SettingGroup } from "@tomat/shared";
   import type { Monitor } from "$lib/shared/types";
   import { hasAlpha } from "$lib/shared/color";
   import { getLogger } from "$lib/shared/log";
@@ -27,15 +27,12 @@
   import { connectionState } from "$lib/state/connection.svelte";
   import {
     evalCondition,
-    findField,
-    getValidationError,
-    getPresetFieldIds,
-    getConditionDeps,
     isGroupVisible,
     isSectionVisible,
     defaultExpandedSections,
     searchFields,
   } from "@tomat/shared";
+  import { useSettingsForm } from "$lib/composables/use-settings-form.svelte";
   import { useSettingsSearch } from "$lib/composables/use-settings-search.svelte";
   import { useSettingsScroll } from "$lib/composables/use-settings-scroll.svelte";
   import { useResponsiveLayout } from "$lib/composables/use-responsive-layout.svelte";
@@ -82,11 +79,18 @@
       log.warn("select core failed:", e);
     }
   }
-  let validationErrors = $state<Record<string, string>>({});
-
   const search = useSettingsSearch();
   const scroll = useSettingsScroll();
   const layout = useResponsiveLayout();
+  // Shared field-change engine (validation / optimistic apply / preset flip).
+  // Its hook reacts to section `expandWhen` deps by mutating this panel's
+  // expanded-sections set.
+  const form = useSettingsForm((sectionKey, expand) => {
+    const next = new Set(expandedSections);
+    if (expand) next.add(sectionKey);
+    else next.delete(sectionKey);
+    expandedSections = next;
+  });
 
   // The single group whose sections are shown on the right. Switching it plays
   // the layer slide (see selectGroup); the sidebar reflects it as active.
@@ -202,7 +206,7 @@
         log.error("Failed to load fonts:", e);
       }
     }
-    validateAllFields();
+    form.validateAllFields();
     search.inputEl?.focus();
     scroll.updateFades();
   });
@@ -249,181 +253,6 @@
       onCancel: () => (dismissedSignature = sig),
     });
   });
-
-  function validateAllFields() {
-    for (const group of SETTINGS_SCHEMA) {
-      for (const section of group.sections) {
-        for (const field of section.fields) {
-          if (
-            field.type === "command_preview" ||
-            field.type === "services" ||
-            field.type === "storage" ||
-            field.type === "object_management"
-          )
-            continue;
-          const value = settingsState.currentSettings[field.id];
-          validateField(field.id, value);
-        }
-      }
-    }
-  }
-
-  // Apply optimistically. The core recomputes the required-files snapshot and
-  // re-broadcasts it; the pending-downloads popup ($effect above) reacts with
-  // the full updated list. No pre-download probe / revert here.
-  async function handleChange(key: string, value: any) {
-    validateField(key, value);
-    if (validationErrors[key]) return;
-    await tryApply(key, value);
-  }
-
-  async function tryApply(key: string, value: any) {
-    try {
-      await applyFieldChange(key, value);
-    } catch (e) {
-      validationErrors = {
-        ...validationErrors,
-        [key]: errMessage(e),
-      };
-    }
-  }
-
-  async function applyFieldChange(key: string, value: any) {
-    if (
-      key.startsWith("llm.") &&
-      key !== "llm.preset" &&
-      !key.startsWith("llm.external.") &&
-      getPresetFieldIds("llm").has(key)
-    ) {
-      if (settingsState.currentSettings["llm.preset"] !== "custom") {
-        await settingsState.updateSetting("llm.preset", "custom");
-      }
-    }
-    if (
-      key.startsWith("stt.") &&
-      key !== "stt.preset" &&
-      !key.startsWith("stt.external.") &&
-      getPresetFieldIds("stt").has(key)
-    ) {
-      if (settingsState.currentSettings["stt.preset"] !== "custom") {
-        await settingsState.updateSetting("stt.preset", "custom");
-      }
-    }
-    if (
-      key.startsWith("prompts.") &&
-      key !== "prompts.defaultSystemPrompt.preset" &&
-      getPresetFieldIds("prompts").has(key)
-    ) {
-      if (
-        settingsState.currentSettings["prompts.defaultSystemPrompt.preset"] !==
-        "custom"
-      ) {
-        await settingsState.updateSetting(
-          "prompts.defaultSystemPrompt.preset",
-          "custom",
-        );
-      }
-    }
-    await settingsState.updateSetting(key, value);
-    reEvaluateDeps(key);
-  }
-
-  function validateField(fieldId: string, value: any) {
-    const field = findField(fieldId);
-    if (!field) return;
-
-    const isOptional = field.optionalWhen
-      ? evalCondition(field.optionalWhen, settingsState.currentSettings)
-      : !!field.optional;
-
-    if (
-      !isOptional &&
-      (value === undefined || value === null || value === "")
-    ) {
-      validationErrors = {
-        ...validationErrors,
-        [fieldId]: "This field is required",
-      };
-      return;
-    }
-
-    if (
-      validationErrors[field.id] === "This field is required" &&
-      (isOptional || (value !== "" && value !== undefined && value !== null))
-    ) {
-      const { [fieldId]: _, ...rest } = validationErrors;
-      validationErrors = rest;
-    }
-
-    const regex = "regex" in field ? field.regex : undefined;
-    if (!regex) return;
-
-    const error = getValidationError(regex, value);
-    if (error) {
-      validationErrors = { ...validationErrors, [fieldId]: error };
-    } else {
-      const { [fieldId]: _, ...rest } = validationErrors;
-      validationErrors = rest;
-    }
-  }
-
-  function resetToDefault(fieldId: string) {
-    const field = findField(fieldId);
-    if (field) {
-      handleChange(fieldId, field.defaultValue);
-    }
-  }
-
-  // Apply optimistically (like handleChange); the requirements popup reacts to
-  // whatever the core then reports as missing.
-  async function handlePresetSelect(fieldId: string, option: PresetOption) {
-    const updates: Record<string, any> = { [fieldId]: option.id };
-    if (option.defaults) Object.assign(updates, option.defaults);
-    await applyPresetUpdates(updates);
-  }
-
-  async function applyPresetUpdates(updates: Record<string, any>) {
-    await settingsState.updateSettings(updates);
-    validateAllFields();
-    reEvaluateDeps(...Object.keys(updates));
-  }
-
-  function reEvaluateDeps(...keys: string[]) {
-    const deps = getConditionDeps();
-    const next = new Set(expandedSections);
-    let expandChanged = false;
-
-    for (const key of keys) {
-      const entries = deps.get(key);
-      if (!entries) continue;
-
-      for (const dep of entries) {
-        if (dep.kind === "field" && dep.condition === "optionalWhen") {
-          validateField(
-            dep.fieldId,
-            settingsState.currentSettings[dep.fieldId],
-          );
-        } else if (dep.kind === "section" && dep.condition === "expandWhen") {
-          const sectionKey = `${dep.groupId}-${dep.sectionIndex}`;
-          const group = SETTINGS_SCHEMA.find((g) => g.id === dep.groupId);
-          const section = group?.sections[dep.sectionIndex];
-          if (
-            section &&
-            evalCondition(section.expandWhen, settingsState.currentSettings)
-          ) {
-            next.add(sectionKey);
-          } else {
-            next.delete(sectionKey);
-          }
-          expandChanged = true;
-        }
-      }
-    }
-
-    if (expandChanged) {
-      expandedSections = next;
-    }
-  }
 
   function toggleSection(key: string) {
     const next = new Set(expandedSections);
@@ -515,11 +344,11 @@
       />
       <IconButton
         icon="i-material-symbols-bolt-rounded"
-        title="Quick Setup"
+        title="Quick Settings"
         size="lg"
         variant="subtle"
         surface="circle"
-        onclick={() => viewState.navigate("quickSetup")}
+        onclick={() => viewState.navigate("quickSettings")}
       />
       <!-- Hub icon (Core Management) is intentionally hidden for now: the
            spec says "management only done at the start and no option to
@@ -594,11 +423,11 @@
                           {field}
                           {monitors}
                           {fonts}
-                          error={validationErrors[field.id] ?? null}
+                          error={form.validationErrors[field.id] ?? null}
                           horizontal={layout.horizontal}
-                          onChange={handleChange}
-                          onReset={resetToDefault}
-                          onPresetSelect={handlePresetSelect}
+                          onChange={form.handleChange}
+                          onReset={form.resetToDefault}
+                          onPresetSelect={form.handlePresetSelect}
                         />
                       {/each}
                     </div>
@@ -697,11 +526,11 @@
                         field={omField}
                         {monitors}
                         {fonts}
-                        error={validationErrors[omField.id] ?? null}
+                        error={form.validationErrors[omField.id] ?? null}
                         horizontal={layout.horizontal}
-                        onChange={handleChange}
-                        onReset={resetToDefault}
-                        onPresetSelect={handlePresetSelect}
+                        onChange={form.handleChange}
+                        onReset={form.resetToDefault}
+                        onPresetSelect={form.handlePresetSelect}
                       />
                     </div>
                   {:else}
@@ -722,12 +551,12 @@
                             )}
                             {monitors}
                             {fonts}
-                            {validationErrors}
+                            validationErrors={form.validationErrors}
                             horizontal={layout.horizontal}
                             onToggle={toggleSection}
-                            onChange={handleChange}
-                            onReset={resetToDefault}
-                            onPresetSelect={handlePresetSelect}
+                            onChange={form.handleChange}
+                            onReset={form.resetToDefault}
+                            onPresetSelect={form.handlePresetSelect}
                           />
                         {/if}
                       {/each}

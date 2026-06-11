@@ -33,6 +33,10 @@ import { errMessage } from "@tomat/shared";
     streamingState.start();
   }
 
+  // Edit / reprocess flows in messagesState regenerate a turn by calling
+  // back into this dispatch (see the handler note in messages.svelte.ts).
+  messagesState.setLLMHandlers(sendMessages);
+
   async function transcribeAudio(
     audio: Blob | string,
     language?: string,
@@ -174,8 +178,20 @@ import { errMessage } from "@tomat/shared";
   let captureMonitors = $state<CaptureMonitorInfo[]>([]);
   let capturing = $state(false);
 
-  let sttError = $state<string | null>(null);
-  let sttErrorTimeout: ReturnType<typeof setTimeout> | null = null;
+  // Transient status notice shown through the textarea placeholder. Chat
+  // mode has no room for banners or badges: short, plain-language messages
+  // ("Transcription failed! Please try again.") surface where the user is
+  // already looking, then clear on their own. Details go to the logs.
+  let inputNotice = $state<string | null>(null);
+  let inputNoticeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function showInputNotice(message: string, ms = 5000) {
+    inputNotice = message;
+    if (inputNoticeTimeout) clearTimeout(inputNoticeTimeout);
+    inputNoticeTimeout = setTimeout(() => {
+      inputNotice = null;
+    }, ms);
+  }
 
   let llmStatus = $derived(serversState.serverStatuses.llama.status);
 
@@ -198,13 +214,23 @@ import { errMessage } from "@tomat/shared";
   // so tool calls can be aborted the same way streams are.
   let hasActiveWork = $derived(streamingState.hasActiveWork);
   let hasContent = $derived(text.trim().length > 0 || attachments.length > 0);
+  // True while a captured speech segment is in the transcribe -> autocorrect
+  // -> merge pipeline. The mic is already off by then (VAD one-shots on
+  // segment end), so without this the placeholder would fall back to the
+  // idle prompt while work is still happening.
+  let sttProcessing = $state(false);
+
   let placeholderText = $derived(
-    connectionState.reconnecting
+    inputNotice
+      ? inputNotice
+      : connectionState.reconnecting
       ? "Reconnecting to core..."
       : downloadsState.hasPending
       ? "Pending download, open settings!"
       : downloadsState.loading
         ? "Connecting to core..."
+        : sttProcessing
+        ? "Transcribing..."
         : vadManager.enabled && vadManager.listening
         ? "Listening..."
         : vadManager.enabled
@@ -447,7 +473,7 @@ import { errMessage } from "@tomat/shared";
 
     // Async setup: monitors, VAD, shortcut listeners, persistent-mode restore.
     // Monitors are best-effort (benign on failure); VAD and shortcut setup
-    // failures surface via the sttError banner because DevTools aren't
+    // failures surface via the placeholder notice because DevTools aren't
     // available in the packaged app.
     void (async () => {
       try {
@@ -476,12 +502,7 @@ import { errMessage } from "@tomat/shared";
         }
       } catch (err) {
         log.error("init failed:", err);
-        const detail = errMessage(err);
-        sttError = `Voice input setup failed: ${detail}`;
-        if (sttErrorTimeout) clearTimeout(sttErrorTimeout);
-        sttErrorTimeout = setTimeout(() => {
-          sttError = null;
-        }, 8000);
+        showInputNotice("Voice input setup failed! Check the logs.", 8000);
       }
     })();
 
@@ -492,9 +513,9 @@ import { errMessage } from "@tomat/shared";
 
   onDestroy(() => {
     vadManager.detach();
-    if (sttErrorTimeout) {
-      clearTimeout(sttErrorTimeout);
-      sttErrorTimeout = null;
+    if (inputNoticeTimeout) {
+      clearTimeout(inputNoticeTimeout);
+      inputNoticeTimeout = null;
     }
   });
 
@@ -616,70 +637,79 @@ import { errMessage } from "@tomat/shared";
     showAutocorrectDiff = false;
     originalTranscription = null;
 
-    const wavBlob = float32ToWav(audio, 16000);
-    const base64 = await blobToBase64(wavBlob);
+    sttProcessing = true;
+    try {
+      const wavBlob = float32ToWav(audio, 16000);
+      const base64 = await blobToBase64(wavBlob);
 
-    const result = await transcribeAudio(base64);
-    if (result.error) {
-      if (sttErrorTimeout) clearTimeout(sttErrorTimeout);
-      sttError = result.error;
-      sttErrorTimeout = setTimeout(() => {
-        sttError = null;
-      }, 5000);
-      return;
-    }
-    if (!result.text) return;
-
-    const transcription = result.text.trim();
-    if (!transcription) return;
-
-    const existing = text;
-    let raw = transcription;
-    let corrected: string | null = null;
-
-    if (settingsState.currentSettings["stt.llmAutocorrect"]) {
-      try {
-        const result = await autocorrectTranscription(raw);
-        if (result) corrected = result;
-      } catch (e) {
-        sttLog.warn("Autocorrect failed:", e);
+      sttLog.info(`transcribing ${Math.round((audio.length / 16000) * 1000)}ms of audio`);
+      let startedAt = performance.now();
+      const result = await transcribeAudio(base64);
+      if (result.error) {
+        sttLog.error("Transcription failed:", result.error);
+        showInputNotice("Transcription failed! Please try again.");
+        return;
       }
-    }
+      sttLog.info(`transcription done in ${Math.round(performance.now() - startedAt)}ms`);
+      if (!result.text) return;
 
-    const chainEnabled =
-      settingsState.currentSettings["stt.llmChainTranscription"] &&
-      existing.trim().length > 0;
+      const transcription = result.text.trim();
+      if (!transcription) return;
 
-    if (chainEnabled) {
-      try {
-        const mergedRaw = await mergeTranscription(existing, raw);
-        if (mergedRaw) raw = mergedRaw;
-        if (corrected) {
-          const mergedCorrected = await mergeTranscription(existing, corrected);
-          if (mergedCorrected) corrected = mergedCorrected;
+      const existing = text;
+      let raw = transcription;
+      let corrected: string | null = null;
+
+      if (settingsState.currentSettings["stt.llmAutocorrect"]) {
+        try {
+          startedAt = performance.now();
+          const result = await autocorrectTranscription(raw);
+          if (result) corrected = result;
+          sttLog.info(`autocorrect done in ${Math.round(performance.now() - startedAt)}ms`);
+        } catch (e) {
+          sttLog.warn("Autocorrect failed:", e);
         }
-      } catch (e) {
-        sttLog.warn("Merge transcription failed:", e);
       }
-    }
 
-    if (corrected) {
-      text = corrected;
-      const changed = corrected.trim() !== raw.trim();
-      originalTranscription = changed ? raw : null;
-      showAutocorrectDiff = changed;
-    } else {
-      text = raw;
-      originalTranscription = null;
-      showAutocorrectDiff = false;
-    }
-    textareaElement?.focus();
+      const chainEnabled =
+        settingsState.currentSettings["stt.llmChainTranscription"] &&
+        existing.trim().length > 0;
 
-    if (settingsState.currentSettings["stt.autoSend"]) {
-      if (streamingState.hasActiveWork) {
-        await streamingState.interruptStreaming();
+      if (chainEnabled) {
+        try {
+          startedAt = performance.now();
+          const mergedRaw = await mergeTranscription(existing, raw);
+          if (mergedRaw) raw = mergedRaw;
+          if (corrected) {
+            const mergedCorrected = await mergeTranscription(existing, corrected);
+            if (mergedCorrected) corrected = mergedCorrected;
+          }
+          sttLog.info(`merge done in ${Math.round(performance.now() - startedAt)}ms`);
+        } catch (e) {
+          sttLog.warn("Merge transcription failed:", e);
+        }
       }
-      await handleSend();
+
+      if (corrected) {
+        text = corrected;
+        const changed = corrected.trim() !== raw.trim();
+        originalTranscription = changed ? raw : null;
+        showAutocorrectDiff = changed;
+      } else {
+        text = raw;
+        originalTranscription = null;
+        showAutocorrectDiff = false;
+      }
+      textareaElement?.focus();
+
+      if (settingsState.currentSettings["stt.autoSend"]) {
+        if (streamingState.hasActiveWork) {
+          await streamingState.interruptStreaming();
+        }
+        await handleSend();
+      }
+    } finally {
+      sttProcessing = false;
     }
   }
 
@@ -946,13 +976,6 @@ import { errMessage } from "@tomat/shared";
   extraClass="flex flex-col gap-4 min-w-0 overflow-hidden transition-all"
   onclick={handleBubbleClick}
 >
-  <!-- STT error banner -->
-  {#if sttError}
-    <Alert variant="info" icon="i-material-symbols-mic-off-rounded">
-      {sttError}
-    </Alert>
-  {/if}
-
   <!-- LLM autocorrect before -->
   {#if showAutocorrectDiff && originalTranscription !== null}
     <Alert

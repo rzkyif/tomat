@@ -1,15 +1,24 @@
+// Text-to-Speech: one hybrid group spanning client and core. The enable
+// toggle lives on the core because the synthesis engine does: core computes
+// the Kokoro files into its required-downloads snapshot from `tts.enabled`,
+// so a client-side value would leave requirements (and the pending-downloads
+// gate) blind to it. Playback and batching settings stay on the client.
+
 import type { SettingGroup } from "../types.ts";
 
 export const ttsGroup: SettingGroup = {
   id: "tts",
-  destination: "client",
+  destination: ["client", "core"],
   name: "Text-to-Speech",
-  description: "Have the agent read its replies aloud.",
+  description:
+    "Have the agent read its replies aloud. Playback runs on this device; the speech model runs on the core.",
   descriptionTier: "ondemand",
   icon: "i-material-symbols-volume-up-rounded",
   iconInactive: "i-material-symbols-volume-up-outline-rounded",
   sections: [
     {
+      label: "General",
+      destination: "core",
       fields: [
         {
           id: "tts.enabled",
@@ -19,21 +28,21 @@ export const ttsGroup: SettingGroup = {
           defaultValue: false,
           descriptionTier: "ondemand",
         },
+      ],
+    },
+    {
+      label: "Voice",
+      destination: "client",
+      visibleWhen: { field: "tts.enabled", eq: true },
+      fields: [
         {
           id: "tts.spellOutEmojis",
           name: "Read Emojis Aloud",
           description: "Pronounce emojis instead of skipping them.",
           type: "boolean",
           defaultValue: false,
-          visibleWhen: { field: "tts.enabled", eq: true },
           descriptionTier: "ondemand",
         },
-      ],
-    },
-    {
-      label: "Voice",
-      visibleWhen: { field: "tts.enabled", eq: true },
-      fields: [
         {
           id: "tts.voice",
           name: "Voice",

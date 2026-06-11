@@ -147,7 +147,7 @@ describe("CoreClient WebSocket dispatch", () => {
     await flush();
     const ws = getLast();
     ws.opened?.();
-    const frame = { kind: "chat.chunk", streamId: "s1", contentDelta: "hi" };
+    const frame = { kind: "chat.delta", streamId: "s1", messageId: "m1", delta: "hi" };
     ws.messaged?.(JSON.stringify(frame));
     expect(received).toEqual([frame]);
   });

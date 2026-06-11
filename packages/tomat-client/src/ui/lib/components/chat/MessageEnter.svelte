@@ -1,36 +1,34 @@
 <script lang="ts">
   import { onMount, type Snippet } from "svelte";
   import { runMessageEnter } from "$lib/shared/animations";
-  import { settingsState } from "$lib/state";
   import type { Alignment } from "$lib/shared/types";
 
   let {
     alignment,
     msgId,
+    delayMs = 0,
     class: className = "",
     children,
   }: {
     alignment: Alignment;
     msgId?: string;
+    /** Hold the entry animation for this long; see runMessageEnter. */
+    delayMs?: number;
     class?: string;
     children: Snippet;
   } = $props();
 
   let el: HTMLElement | undefined = $state();
 
-  const animationsEnabled = $derived(
-    !!settingsState.currentSettings["appearance.animationsEnabled"],
-  );
-
   onMount(() => {
-    if (el) runMessageEnter(el, alignment, msgId);
+    if (el) runMessageEnter(el, alignment, msgId, delayMs);
   });
 </script>
 
-<div
-  bind:this={el}
-  class={className}
-  class:will-change-transform={animationsEnabled}
->
+<!-- No permanent will-change here: a persistent will-change-transform makes
+     every message row its own stacking context, which lets one bubble's drop
+     shadow paint over neighboring bubbles. runMessageEnter sets the hint
+     inline for the duration of the entry animation only. -->
+<div bind:this={el} class={className}>
   {@render children()}
 </div>

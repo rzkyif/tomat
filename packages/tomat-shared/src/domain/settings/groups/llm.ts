@@ -196,7 +196,7 @@ export const llmGroup: SettingGroup = {
           description:
             "Whether the model should think before answering. The model may still skip it for simple prompts.",
           type: "select",
-          defaultValue: "off",
+          defaultValue: "on",
           options: [
             { value: "off", label: "Off" },
             { value: "on", label: "On" },

@@ -1,5 +1,6 @@
 import type {
   AppliedModelSettings,
+  AppliedSttSettings,
   CatalogModelView,
   DownloadModelsRequest,
   DownloadModelsResponse,
@@ -8,6 +9,8 @@ import type {
   PresetBucket,
   ProbeModelsResponse,
   RecommendationSet,
+  SttCatalogModel,
+  SttPresetView,
 } from "@tomat/shared";
 import type { CoreClient } from "./client";
 
@@ -18,6 +21,16 @@ export interface CatalogResponse {
 
 export interface SelectModelResponse {
   applied: { preset: string; settings: AppliedModelSettings };
+}
+
+export interface SttCatalogResponse {
+  generatedAt: string;
+  models: SttCatalogModel[];
+  presets: SttPresetView[];
+}
+
+export interface SelectSttModelResponse {
+  applied: { preset: string; settings: AppliedSttSettings };
 }
 
 export class ModelsApi {
@@ -78,5 +91,20 @@ export class ModelsApi {
     sel: { bucket: PresetBucket } | { modelId: string } | { modelSpec: string },
   ): Promise<SelectModelResponse> {
     return this.client.post("/api/v1/models/select", sel);
+  }
+
+  // --- Speech-to-Text catalog picker --------------------------------------
+
+  /** The whisper model lineup plus the resolved curated cards. */
+  sttCatalog(): Promise<SttCatalogResponse> {
+    return this.client.get("/api/v1/models/stt/catalog");
+  }
+
+  /** Apply a curated card, a catalog model (its default quant), or a specific
+   *  quant by its modelSpec: writes stt.* settings. */
+  sttSelect(
+    sel: { presetId: string } | { modelId: string } | { modelSpec: string },
+  ): Promise<SelectSttModelResponse> {
+    return this.client.post("/api/v1/models/stt/select", sel);
   }
 }

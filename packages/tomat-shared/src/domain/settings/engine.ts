@@ -312,8 +312,12 @@ export function getPresetFieldIds(groupId: string): Set<string> {
   if (!group) return ids;
   for (const section of group.sections) {
     for (const field of section.fields) {
-      if ((field.type !== "preset" && field.type !== "model_preset") || !field.presetConfig)
+      if (
+        (field.type !== "preset" && field.type !== "model_preset" && field.type !== "stt_preset") ||
+        !field.presetConfig
+      ) {
         continue;
+      }
       const allOptions = [
         ...field.presetConfig.options,
         ...(field.presetConfig.secondaryOptions || []),
@@ -396,7 +400,7 @@ function fieldMatchesQuery(field: SettingField, q: string): boolean {
     }
   }
 
-  if (field.type === "preset" || field.type === "model_preset") {
+  if (field.type === "preset" || field.type === "model_preset" || field.type === "stt_preset") {
     for (const opt of field.presetConfig.options) {
       if (opt.label.toLowerCase().includes(q)) return true;
     }
@@ -433,6 +437,7 @@ function settingValueTypeOk(field: SettingField, value: unknown): boolean {
     case "shortcut":
     case "preset":
     case "model_preset":
+    case "stt_preset":
       return typeof value === "string";
     case "services":
     case "storage":

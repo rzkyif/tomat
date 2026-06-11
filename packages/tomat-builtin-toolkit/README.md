@@ -3,6 +3,11 @@
 Reference tomat toolkit bundling three sample tools. Installed by default on
 fresh setups; doubles as a worked example for third-party toolkit authors.
 
+The `tools.json` format is an open standard: any host that understands
+`tools.json` can load toolkits. The core discovers toolkits by searching npm
+for the `tools-available` keyword. Each tool declares the OS-level permissions
+it needs, and the user grants them per tool (see Permissions below).
+
 | Tool           | Function | What it does                                                                   |
 | -------------- | -------- | ------------------------------------------------------------------------------ |
 | `download_url` | download | Download a file from an http(s) URL into the user's Downloads folder.          |
@@ -25,9 +30,10 @@ fresh setups; doubles as a worked example for third-party toolkit authors.
 
 ## Permissions
 
-Each tool declares the minimum set of Deno permissions it needs in `tools.json`.
-The tomat worker pool reads them on spawn and turns them into `--allow-*` flags.
-Specifically:
+Each tool declares the minimum set of Deno permissions it needs in `tools.json`
+(network hosts, filesystem paths, executables, env vars, FFI, sys flags). The
+worker pool reads the user's per-tool grants on spawn and gives the worker
+subprocess exactly the matching `--allow-*` flags. Specifically:
 
 - `download_url` needs **net** (any http(s) host), **write** to `$downloads`,
   and **env** access for `XDG_DOWNLOAD_DIR` / `HOME` / `USERPROFILE`.
@@ -102,3 +108,11 @@ What to assert:
 
 Tests are co-located as `*.test.ts` with no tier suffix; `*.tmp.test.ts` is the
 gitignored scratch variant for quick experimentation.
+
+## Run, build, test
+
+This package's tests run with the repo suite: `deno task test`, or
+`deno task test:deno` for just the Deno packages (this one included).
+`deno task release:toolkit:stable` / `:beta` publishes the toolkit manifest +
+tarball; see [`../tomat-website/README.md`](../tomat-website/README.md) for the
+release pipeline.

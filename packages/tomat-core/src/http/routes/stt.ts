@@ -12,8 +12,11 @@ import { sidecarManager } from "../../sidecars/manager.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
 import { getSecret } from "../../services/secrets.ts";
 import { AppError } from "../../shared/errors.ts";
+import { getLogger } from "../../shared/log.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 import { sttPort } from "../../paths.ts";
+
+const log = getLogger("stt");
 
 // Upper bound on a single local transcription. whisper-server inference is
 // synchronous and unbounded; without this a wedged-but-listening sidecar would
@@ -50,20 +53,29 @@ export function sttRoutes(): Hono {
       // redacts them from GET).
       const settingsKey = strSetting(settings, "stt.external.apiKey", "");
       const apiKey = (await getSecret("stt.external.apiKey")) || settingsKey || "";
+      // Keep the SDK's default timeout (10 minutes). Never pass `timeout: 0`:
+      // the SDK treats it as a literal 0ms deadline and aborts every request
+      // instantly with "Request timed out".
       const client = new OpenAI({
         baseURL: baseUrl,
         apiKey: apiKey || "sk-stt",
         maxRetries: 0,
-        timeout: 0,
       });
       try {
+        const startedAt = Date.now();
+        log.info(`external transcription starting (audio ${audio.size} bytes, model ${model})`);
         const res = await client.audio.transcriptions.create({
           model,
           file: audio,
           ...(languageStr ? { language: languageStr } : {}),
           response_format: "json",
         });
-        return c.json({ text: (res as { text?: string }).text ?? "" });
+        const text = (res as { text?: string }).text ?? "";
+        log.info(
+          `external transcription done in ${Date.now() - startedAt}ms ` +
+            `(audio ${audio.size} bytes, out ${text.length} chars)`,
+        );
+        return c.json({ text });
       } catch (err) {
         throw new AppError("provider_error", `external STT failed: ${errMessage(err)}`);
       }
@@ -81,6 +93,8 @@ export function sttRoutes(): Hono {
     // mid-decode, so neither a wedged sidecar nor an abandoned request keeps the
     // handler (and the whisper inference) running indefinitely.
     const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(STT_LOCAL_TIMEOUT_MS)]);
+    const startedAt = Date.now();
+    log.info(`local transcription starting (audio ${audio.size} bytes)`);
     let res: Response;
     try {
       res = await fetch(upstream, { method: "POST", body: upstreamForm, signal });
@@ -94,7 +108,12 @@ export function sttRoutes(): Hono {
       throw new AppError("provider_error", `whisper-server HTTP ${res.status}`);
     }
     const body = (await res.json()) as { text?: string };
-    return c.json({ text: body.text ?? "" });
+    const text = body.text ?? "";
+    log.info(
+      `local transcription done in ${Date.now() - startedAt}ms ` +
+        `(audio ${audio.size} bytes, out ${text.length} chars)`,
+    );
+    return c.json({ text });
   });
 
   r.get("/status", (c) => {

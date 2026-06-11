@@ -127,6 +127,27 @@
     return n.toString();
   }
 
+  // Prev/next session targets. The list is newest-first, so "previous"
+  // walks toward older sessions (higher index) and "next" toward newer
+  // ones. currentIndex is -1 for a brand-new session not yet in the list;
+  // treat that as sitting before the newest entry, so "previous" lands on
+  // the newest stored session and "next" has nowhere to go.
+  let prevSession = $derived(
+    sessionsState.currentIndex === -1
+      ? (sessionsState.list[0] ?? null)
+      : (sessionsState.list[sessionsState.currentIndex + 1] ?? null),
+  );
+  let nextSession = $derived(
+    sessionsState.currentIndex > 0
+      ? (sessionsState.list[sessionsState.currentIndex - 1] ?? null)
+      : null,
+  );
+
+  function goToSession(id: string) {
+    confirmingDelete = false;
+    void sessionsState.load(id);
+  }
+
   let defaultTitle = $derived(sessionsState.defaultTitle);
   let isNewSession = $derived(messagesState.messages.length === 0);
   let storageEnabled = $derived(
@@ -221,6 +242,20 @@
             confirmingDelete = false;
             viewState.navigate("sessionList");
           }}
+        />
+        <IconButton
+          icon="i-material-symbols-chevron-left-rounded"
+          title="Previous Session"
+          size="sm"
+          disabled={!prevSession}
+          onclick={() => prevSession && goToSession(prevSession.id)}
+        />
+        <IconButton
+          icon="i-material-symbols-chevron-right-rounded"
+          title="Next Session"
+          size="sm"
+          disabled={!nextSession}
+          onclick={() => nextSession && goToSession(nextSession.id)}
         />
         {#if !isNewSession}
           <IconButton

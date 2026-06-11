@@ -5,6 +5,7 @@
 // the SidecarManager needs to spawn `llama-server`. Caller is responsible
 // for resolving the model path; this module assumes the file exists.
 
+import { getDefaultSettings } from "@tomat/shared";
 import { binPath, llmPort, paths } from "../paths.ts";
 import { libDirFor, platformExe } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
@@ -33,10 +34,16 @@ export function llamaStartArgsFromSettings(
 ): LlamaStartArgs | null {
   const provider = strSetting(settings, "llm.provider", "local");
   if (provider !== "local") return null;
-  const modelSpec = strSetting(settings, "llm.modelPath", "");
+  // Settings arrive sparse (only user-changed keys are persisted), so
+  // untouched model paths must fall back to the schema defaults, not "".
+  // Ports keep their channel-aware fallbacks instead: the schema's port
+  // defaults are stable-channel values.
+  const modelSpec = strSetting(settings, "llm.modelPath", schemaDefault("llm.modelPath"));
   if (!modelSpec) return null;
   const supportImages = boolSetting(settings, "llm.supportImages", true);
-  const mmprojSpec = supportImages ? strSetting(settings, "llm.mmprojPath", "") : "";
+  const mmprojSpec = supportImages
+    ? strSetting(settings, "llm.mmprojPath", schemaDefault("llm.mmprojPath"))
+    : "";
   return {
     modelPath: resolveHfPath(modelSpec),
     mmprojPath: mmprojSpec ? resolveHfPath(mmprojSpec) : undefined,
@@ -44,7 +51,7 @@ export function llamaStartArgsFromSettings(
     port: strSetting(settings, "llm.port", String(llmPort())),
     threads: numSetting(settings, "llm.threads", 4),
     contextSize: numSetting(settings, "llm.contextSize", 4096),
-    reasoning: strSetting(settings, "llm.reasoning", "off") as "off" | "on" | "auto",
+    reasoning: strSetting(settings, "llm.reasoning", "on") as "off" | "on" | "auto",
     reasoningBudget: optionalNumSetting(settings, "llm.reasoningBudget"),
     mmap: boolSetting(settings, "llm.mmap", true),
     webui: boolSetting(settings, "llm.webui", false),
@@ -101,6 +108,11 @@ export function buildLlamaStartOptions(args: LlamaStartArgs): StartOptions {
     libraryDir: libDirFor(paths().binDir, "llama-server"),
     startupTimeoutMs: 60_000,
   };
+}
+
+function schemaDefault(key: string): string {
+  const v = getDefaultSettings()[key];
+  return typeof v === "string" ? v : "";
 }
 
 function strSetting(s: Record<string, unknown>, k: string, def: string): string {

@@ -137,6 +137,115 @@ Deno.test("SessionsRepo.appendMessage + listMessages: round-trips message in ord
   }
 });
 
+Deno.test("SessionsRepo.insertMessageAfter: splices mid-history and renumbers ord", async () => {
+  const env = await setupTestEnv();
+  try {
+    const repo = sessionsRepo();
+    const owner = createTestClient("owner");
+    const s = repo.create({ ownerClientId: owner });
+    const first = repo.appendMessage(s.id, userMessage("first"));
+    repo.appendMessage(s.id, userMessage("third"));
+    repo.insertMessageAfter(s.id, userMessage("second"), first.id);
+    const msgs = repo.listMessages(s.id);
+    assertEquals(
+      msgs.map((m) => (m as { content: string }).content),
+      ["first", "second", "third"],
+    );
+    assertEquals(
+      msgs.map((m) => m.ord),
+      [0, 1, 2],
+    );
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("SessionsRepo.insertMessageAfter: null or unknown afterId appends at the tail", async () => {
+  const env = await setupTestEnv();
+  try {
+    const repo = sessionsRepo();
+    const owner = createTestClient("owner");
+    const s = repo.create({ ownerClientId: owner });
+    repo.appendMessage(s.id, userMessage("first"));
+    repo.insertMessageAfter(s.id, userMessage("second"), null);
+    repo.insertMessageAfter(s.id, userMessage("third"), "missing-id");
+    const msgs = repo.listMessages(s.id);
+    assertEquals(
+      msgs.map((m) => (m as { content: string }).content),
+      ["first", "second", "third"],
+    );
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("SessionsRepo.deleteTurn: removes between anchor and next user message", async () => {
+  const env = await setupTestEnv();
+  try {
+    const repo = sessionsRepo();
+    const owner = createTestClient("owner");
+    const s = repo.create({ ownerClientId: owner });
+    const anchor = repo.appendMessage(s.id, userMessage("turn one"));
+    const reply = repo.appendMessage(s.id, {
+      id: newMessageId(),
+      ord: 0,
+      role: "assistant",
+      content: "reply one",
+      createdAtMs: Date.now(),
+    });
+    repo.appendMessage(s.id, userMessage("turn two"));
+    repo.appendMessage(s.id, {
+      id: newMessageId(),
+      ord: 0,
+      role: "assistant",
+      content: "reply two",
+      createdAtMs: Date.now(),
+    });
+
+    const removed = repo.deleteTurn(s.id, anchor.id);
+    assertEquals(removed, [reply.id]);
+    const msgs = repo.listMessages(s.id);
+    assertEquals(
+      msgs.map((m) => (m as { content: string }).content),
+      ["turn one", "turn two", "reply two"],
+    );
+    assertEquals(
+      msgs.map((m) => m.ord),
+      [0, 1, 2],
+    );
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("SessionsRepo.deleteTurn: newest turn, empty turn, and unknown anchor", async () => {
+  const env = await setupTestEnv();
+  try {
+    const repo = sessionsRepo();
+    const owner = createTestClient("owner");
+    const s = repo.create({ ownerClientId: owner });
+    repo.appendMessage(s.id, userMessage("turn one"));
+    const anchor = repo.appendMessage(s.id, userMessage("turn two"));
+    const reply = repo.appendMessage(s.id, {
+      id: newMessageId(),
+      ord: 0,
+      role: "assistant",
+      content: "reply",
+      createdAtMs: Date.now(),
+    });
+
+    // Newest turn: removes through the tail.
+    assertEquals(repo.deleteTurn(s.id, anchor.id), [reply.id]);
+    // Now the anchor's turn is empty: no-op.
+    assertEquals(repo.deleteTurn(s.id, anchor.id), []);
+    // Unknown anchor: no-op.
+    assertEquals(repo.deleteTurn(s.id, "missing-id"), []);
+    assertEquals(repo.listMessages(s.id).length, 2);
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("SessionsRepo: deleting a session removes its messages", async () => {
   const env = await setupTestEnv();
   try {

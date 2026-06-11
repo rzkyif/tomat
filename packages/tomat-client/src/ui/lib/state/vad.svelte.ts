@@ -105,6 +105,29 @@ class VadManager {
     await this.disableNow();
   }
 
+  /** Decide whether voice input stays on after a speech segment (or misfire).
+   *  Dictation is one-shot: a segment ends the session for manual mode and
+   *  for a push-to-talk session started from the mic button. It stays on
+   *  for sticky mode, while the push-to-talk shortcut is still held (pauses
+   *  mid-dictation must not cut it off; release queues its own disable via
+   *  `pendingDisable`), and while chain transcription wants more segments. */
+  private async afterSegment(): Promise<void> {
+    if (this.pendingDisable) {
+      await this.disableNow();
+      return;
+    }
+    const mode = settingsState.currentSettings["stt.activation"];
+    if (mode === "sticky") return;
+    if (settingsState.currentSettings["stt.llmChainTranscription"]) return;
+    if (mode === "push-to-talk") {
+      // Dynamic import: shortcut.svelte statically imports this module, so a
+      // static import back would be a cycle.
+      const { shortcutHandler } = await import("./shortcut.svelte");
+      if (shortcutHandler.pttHolding) return;
+    }
+    await this.disableNow();
+  }
+
   private async disableNow(): Promise<void> {
     if (this.instance) {
       this.instance.destroy();
@@ -144,24 +167,16 @@ class VadManager {
         },
         onSpeechEnd: async (audio: Float32Array) => {
           this.listening = false;
+          // Disable BEFORE handing the segment off: the audio is already
+          // captured, and transcription + autocorrect can take a while, so
+          // the mic (and its beep/icon) should reflect "done listening"
+          // immediately instead of after the whole pipeline.
+          await this.afterSegment();
           if (this.onSpeech) await this.onSpeech(audio);
-          if (this.pendingDisable) await this.disableNow();
-          else if (
-            settingsState.currentSettings["stt.activation"] === "manual" &&
-            !settingsState.currentSettings["stt.llmChainTranscription"]
-          ) {
-            await this.disableNow();
-          }
         },
         onVADMisfire: () => {
           this.listening = false;
-          if (this.pendingDisable) void this.disableNow();
-          else if (
-            settingsState.currentSettings["stt.activation"] === "manual" &&
-            !settingsState.currentSettings["stt.llmChainTranscription"]
-          ) {
-            void this.disableNow();
-          }
+          void this.afterSegment();
         },
       });
 

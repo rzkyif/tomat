@@ -1,9 +1,9 @@
 // Speech-to-Text: one hybrid group spanning client and core. The voice-capture
 // UX (microphone mode, push-to-talk, transcription post-processing) is stored
-// on the client; the recognition engine (provider, whisper-server config,
-// external API) is stored on the core. Each section declares its own
-// `destination` so fields route correctly and the header shows a Client/Core
-// badge per section.
+// on the client; the enable toggle and the recognition engine (provider,
+// whisper-server config, external API) are stored on the core. Each section
+// declares its own `destination` so fields route correctly and the header
+// shows a Client/Core badge per section.
 
 import type { SettingGroup } from "../types.ts";
 import { SECURE_URL_VALIDATION } from "../types.ts";
@@ -19,8 +19,11 @@ export const sttGroup: SettingGroup = {
   iconInactive: "i-material-symbols-mic-outline-rounded",
   sections: [
     {
-      label: "Voice Input",
-      destination: "client",
+      // The enable toggle is core-persisted: core gates the whisper-server
+      // sidecar and the required-downloads snapshot on it, so a client-side
+      // value would leave both running off the schema default.
+      label: "General",
+      destination: "core",
       fields: [
         {
           id: "stt.enabled",
@@ -30,6 +33,12 @@ export const sttGroup: SettingGroup = {
           defaultValue: true,
           descriptionTier: "ondemand",
         },
+      ],
+    },
+    {
+      label: "Voice Input",
+      destination: "client",
+      fields: [
         {
           id: "stt.activation",
           name: "Push-to-Talk Mode",
@@ -155,49 +164,37 @@ export const sttGroup: SettingGroup = {
           name: "Preset",
           visibleWhen: { field: "stt.provider", eq: "local" },
           description:
-            "A starter speech recognition model. Editing the settings below switches this to Custom.",
-          type: "preset",
-          defaultValue: "small",
+            "Curated speech recognition models. Editing the settings below switches this to Custom.",
+          type: "stt_preset",
+          defaultValue: "light-multilingual",
           presetConfig: {
+            // Each card's model and threads resolve from the signed model
+            // catalog at runtime (no static `defaults`), so list the keys they
+            // manage here: editing either flips the preset to Custom.
+            managedKeys: ["stt.modelPath", "stt.threads"],
+            // The client fills each card's badges (model name, size, language)
+            // from GET /api/v1/models/stt/catalog; selecting a card calls
+            // POST /api/v1/models/stt/select { presetId }.
             options: [
               {
-                id: "distil-small-en",
-                label: "Distil Small",
-                title: "Distil-Whisper Small (English)",
+                id: "light-english",
+                label: "Light (English)",
+                title: "Light (English)",
                 description:
-                  "Distilled English-only model. Very fast with low memory use, great for live dictation.",
-                defaults: {
-                  "stt.modelPath": "@distil-whisper/distil-small.en/main/ggml-distil-small.en.bin",
-                  "stt.threads": 4,
-                  "stt.host": "127.0.0.1",
-                  "stt.port": "7702",
-                },
+                  "English-only and fast with low memory use. Slightly more accurate than the multilingual model of the same size when you only dictate in English.",
               },
               {
-                id: "small",
-                label: "Small",
-                title: "Whisper Small",
-                description:
-                  "Solid all-round transcription for clear speech. Runs well on most hardware.",
-                defaults: {
-                  "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-small.bin",
-                  "stt.threads": 4,
-                  "stt.host": "127.0.0.1",
-                  "stt.port": "7702",
-                },
+                id: "light-multilingual",
+                label: "Light (Multilingual)",
+                title: "Light (Multilingual)",
+                description: "Solid transcription in about 100 languages with low memory use.",
               },
               {
-                id: "medium",
-                label: "Medium",
-                title: "Whisper Medium",
+                id: "accurate",
+                label: "Accurate",
+                title: "Accurate",
                 description:
-                  "More accurate with accents or background noise. A good default on modern machines.",
-                defaults: {
-                  "stt.modelPath": "@ggerganov/whisper.cpp/main/ggml-medium.bin",
-                  "stt.threads": 6,
-                  "stt.host": "127.0.0.1",
-                  "stt.port": "7702",
-                },
+                  "The most accurate option for every language, including English. Uses about three times the memory of the light models.",
               },
             ],
             secondaryOptions: [
@@ -205,7 +202,8 @@ export const sttGroup: SettingGroup = {
                 id: "custom",
                 label: "Custom",
                 title: "Custom",
-                description: "Configure model path, threads, and ports yourself.",
+                description:
+                  "Pick any model and quantization from the catalog, or configure the model path, threads, and ports yourself.",
               },
             ],
           },
@@ -229,7 +227,7 @@ export const sttGroup: SettingGroup = {
           description:
             "Path to the speech recognition model file, e.g. @user/repo/branch/model.bin.",
           type: "string",
-          defaultValue: "@ggerganov/whisper.cpp/main/ggml-small.bin",
+          defaultValue: "@ggerganov/whisper.cpp/main/ggml-small-q8_0.bin",
           descriptionTier: "ondemand",
         },
         {

@@ -117,13 +117,21 @@ body {
   color: var(--agent2-bubble-text-dark);
 }
 
-/* Centered drop shadow painted on the bubble body. `box-shadow` renders
-   outside the border box, so the body's own `overflow-hidden` does not clip
-   it. 0 0 = no directional offset; blur = the distance; spread 0. */
-.bubble-body {
+/* Centered drop shadow, painted on a dedicated layer behind the bubble
+   (Bubble.svelte renders it at z-0 under the z-10 body, with no stacking
+   context on the bubble wrapper). All shadows therefore resolve below all
+   bubble bodies in the surrounding stacking context: a bubble's shadow can
+   never cover a neighboring bubble. The per-side radius vars (set by
+   Bubble.svelte from alignment + stack neighbors) keep the shadow's corners
+   congruent with the body's flattened screen-edge side. 0 0 = no directional
+   offset; blur = the distance; spread 0. */
+.bubble-shadow {
+  border-radius: var(--bubble-radius-left, var(--rounded-large))
+    var(--bubble-radius-right, var(--rounded-large))
+    var(--bubble-radius-right, var(--rounded-large)) var(--bubble-radius-left, var(--rounded-large));
   box-shadow: 0 0 var(--bubble-shadow-distance) 0 var(--bubble-shadow-color-light);
 }
-.dark .bubble-body {
+.dark .bubble-shadow {
   box-shadow: 0 0 var(--bubble-shadow-distance) 0 var(--bubble-shadow-color-dark);
 }
 
@@ -136,14 +144,17 @@ body {
    auto-clipped to each layer's border-radius, so the falloff is correct on all
    sides and corners for any aspect ratio. */
 .bubble-halo {
+  --halo-grow: calc(var(--bubble-shadow-distance) * (1 - var(--ring-index) / var(--ring-count)));
   position: absolute;
   pointer-events: none;
   z-index: 0;
-  inset: calc(-1 * var(--bubble-shadow-distance) * (1 - var(--ring-index) / var(--ring-count)));
-  border-radius: calc(
-    var(--rounded-large) + var(--bubble-shadow-distance) *
-      (1 - var(--ring-index) / var(--ring-count))
-  );
+  inset: calc(-1 * var(--halo-grow));
+  /* Per-side radii follow the body's alignment/neighbor corner flattening
+     (same vars as .bubble-shadow), grown by this ring's outset. */
+  border-radius: calc(var(--bubble-radius-left, var(--rounded-large)) + var(--halo-grow))
+    calc(var(--bubble-radius-right, var(--rounded-large)) + var(--halo-grow))
+    calc(var(--bubble-radius-right, var(--rounded-large)) + var(--halo-grow))
+    calc(var(--bubble-radius-left, var(--rounded-large)) + var(--halo-grow));
   -webkit-backdrop-filter: blur(
     calc(var(--bubble-shadow-distance) * (var(--ring-index) + 1) / var(--ring-count) * 0.8)
   );
@@ -475,6 +486,13 @@ input[type="range"]::-moz-range-thumb {
 }
 .tomat-scroll-dark::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
+}
+
+/* One-frame cursor cache buster applied by clickthrough.ts when the window
+   resumes capturing mouse events; see forceCursorRefresh there. */
+.cursor-refresh,
+.cursor-refresh * {
+  cursor: default !important;
 }
 
 /* Checkerboard backdrop used behind partially-transparent color swatches

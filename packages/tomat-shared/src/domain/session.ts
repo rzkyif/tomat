@@ -109,19 +109,15 @@ export interface UserMessage extends MessageBase {
 export interface AssistantMessage extends MessageBase {
   role: "assistant";
   content: string;
-  // True while the assistant message is still being streamed; false once
-  // the stream completes (or is interrupted). Client uses this to render
-  // a typing indicator.
-  streaming?: boolean;
   toolCalls?: ToolCall[];
-  // Tool calls the model emitted in its final chunk but whose results
-  // haven't been resolved yet. Used by edit-and-resend to re-materialize
-  // the pending `role: "tool"` rows.
-  pendingToolCalls?: ToolCall[];
   // Which model role produced this turn: "default" for the primary local /
   // external endpoint, "secondary" when dual-model routing kicked in.
   // Drives the model-name chip the UI renders next to the bubble.
   modelUsed?: "default" | "secondary";
+  // True when the stream was aborted (user interrupt or provider error)
+  // before the model finished; the persisted content is the partial text
+  // streamed up to that point.
+  interrupted?: boolean;
 }
 
 export interface SystemMessage extends MessageBase {
@@ -134,16 +130,26 @@ export interface ToolMessage extends MessageBase {
   callId: string;
   toolkitId: string;
   toolName: string;
+  /** JSON string of arguments as the model emitted them. Persisted so the
+   *  reloaded bubble keeps the call's inputs. */
+  arguments: string;
   result?: unknown;
   error?: string;
   status: ToolCallStatus;
+  /** 0..1 completion fraction from the last `tool.progress` event. */
+  progress?: number;
+  /** Last `tool.progress` label/description the tool emitted, persisted so
+   *  the reloaded bubble keeps the tool's own wording (e.g. "Opening
+   *  YouTube") instead of falling back to the generic tool-name phrase. */
+  label?: string;
+  description?: string;
 }
 
 export interface ReasoningMessage extends MessageBase {
   role: "reasoning";
   content: string;
-  // Streamed reasoning bubble may still be growing.
-  streaming?: boolean;
+  // True when the stream was aborted before the model finished thinking.
+  interrupted?: boolean;
   // ms between the first reasoning chunk and the first content chunk (or
   // stream end if the model never emitted content). Lets the UI render
   // "Thought for Xs" without recomputing from timestamps.
@@ -180,6 +186,12 @@ export interface ToolFilterMessage extends MessageBase {
   // Tools whose toolkit declares `alwaysAvailable: true`; included
   // regardless of filtering when the bypass setting is on.
   alwaysAvailable?: ToolFilterEntryPersisted[];
+  /** Number of tools actually exposed to the model this turn (post-filter,
+   *  post-grant-gating). The phase arrays can't stand in for this: with
+   *  filtering disabled they're empty while tools are still sent. The
+   *  client uses it to mirror the tools hint into the system bubble only
+   *  when core really appended it. */
+  toolsSent?: number;
   errorMessage?: string;
 }
 
@@ -209,13 +221,21 @@ export interface Session {
   tokenUsage?: TokenUsage;
 }
 
+/** One labelled snippet in a session-list summary. The role is symbolic so
+ *  the client can render its own labels (e.g. the configured agent name). */
+export interface SummaryPart {
+  role: "user" | "agent";
+  text: string;
+}
+
 export interface SessionListEntry {
   id: string;
   title: string;
   createdAtMs: number;
   updatedAtMs: number;
   messageCount: number;
-  /** Length-limited plain-text snippet of the first user message, computed
-   *  server-side. Empty string when the session has no user message yet. */
-  summary: string;
+  /** Length-limited snippets of the opening user/agent exchange, computed
+   *  server-side. Empty when the session has no user or assistant messages
+   *  yet. */
+  summary: SummaryPart[];
 }

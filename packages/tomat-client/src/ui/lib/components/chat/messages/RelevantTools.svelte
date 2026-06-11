@@ -1,9 +1,9 @@
 <script lang="ts">
   import type {
-    RelevantToolPhase1Entry,
-    RelevantToolPhase2Entry,
-    RelevantToolsState,
-  } from "$lib/shared/types";
+    ToolFilterEntryPersisted,
+    ToolFilterPhase1Persisted,
+  } from "@tomat/shared";
+  import type { Message } from "$lib/shared/types";
   import Bubble from "../../ui/Bubble.svelte";
   import Expandable from "../../ui/Expandable.svelte";
   import { settingsState } from "../../../state";
@@ -22,42 +22,42 @@
 
   let {
     id,
-    relevantTools,
+    msg,
     neighborLeft = false,
     neighborRight = false,
   }: {
     id?: string;
-    relevantTools: RelevantToolsState;
+    msg: Message;
     neighborLeft?: boolean;
     neighborRight?: boolean;
   } = $props();
+
+  // The flat wire fields: an absent phase means it didn't run, an empty
+  // array means it ran and produced nothing.
+  let status = $derived(msg.status ?? "complete");
 
   // Active sections, in the order they ran. The "Phase N" label in the UI
   // is derived from this array's index. It represents execution order, not
   // a fixed mapping to method. Skipped methods (filter off, secondPass off,
   // no always-available tools) drop out of the array entirely so the
   // remaining sections renumber 1..N seamlessly.
-  type ScoredPhase = { kind: "embedding"; entries: RelevantToolPhase1Entry[] };
+  type ScoredPhase = { kind: "embedding"; entries: ToolFilterPhase1Persisted[] };
   type PlainPhase = {
     kind: "llm" | "always";
-    entries: RelevantToolPhase2Entry[];
+    entries: ToolFilterEntryPersisted[];
   };
   type Phase = ScoredPhase | PlainPhase;
 
   let phases = $derived.by<Phase[]>(() => {
     const out: Phase[] = [];
-    if (relevantTools.phase1 !== null) {
-      out.push({ kind: "embedding", entries: relevantTools.phase1 });
+    if (msg.phase1 !== undefined) {
+      out.push({ kind: "embedding", entries: msg.phase1 });
     }
-    if (relevantTools.phase2 !== null) {
-      out.push({ kind: "llm", entries: relevantTools.phase2 });
+    if (msg.phase2 !== undefined) {
+      out.push({ kind: "llm", entries: msg.phase2 });
     }
-    if (
-      relevantTools.alwaysAvailable !== null &&
-      relevantTools.alwaysAvailable !== undefined &&
-      relevantTools.alwaysAvailable.length > 0
-    ) {
-      out.push({ kind: "always", entries: relevantTools.alwaysAvailable });
+    if (msg.alwaysAvailable !== undefined && msg.alwaysAvailable.length > 0) {
+      out.push({ kind: "always", entries: msg.alwaysAvailable });
     }
     return out;
   });
@@ -77,25 +77,25 @@
   // Headline count = tools actually sent to the model. The filter pipeline's
   // contribution is whichever filter phase ran last (phase 2 if present, else
   // phase 1, else 0); always-available tools are appended on top.
-  let bypassCount = $derived(relevantTools.alwaysAvailable?.length ?? 0);
+  let bypassCount = $derived(msg.alwaysAvailable?.length ?? 0);
   let baseCount = $derived(
-    relevantTools.phase2 !== null
-      ? relevantTools.phase2.length
-      : (relevantTools.phase1?.length ?? 0),
+    msg.phase2 !== undefined
+      ? msg.phase2.length
+      : (msg.phase1?.length ?? 0),
   );
   let count = $derived(baseCount + bypassCount);
 
   let titleText = $derived.by(() => {
-    if (relevantTools.status === "filtering")
+    if (status === "filtering")
       return "Finding relevant tools...";
-    if (relevantTools.status === "error")
+    if (status === "error")
       return "Failed to find relevant tools";
-    if (count === 0) return "No relevant tools";
+    if (baseCount === 0) return "No relevant tools";
     const noun = `relevant tool${count === 1 ? "" : "s"}`;
     return `Found ${count} ${noun}`;
   });
 
-  let isLoading = $derived(relevantTools.status === "filtering");
+  let isLoading = $derived(status === "filtering");
 
   let expanded = $state(
     untrack(() =>
@@ -144,11 +144,11 @@
            body (phase summary blocks, error message) stays alignment-
            independent while the header label keeps following alignment. -->
       <div class="flex flex-col gap-2 text-xs text-left">
-        {#if relevantTools.errorMessage}
+        {#if msg.errorMessage}
           <div class="flex flex-col gap-1">
             <div class="text-accent-red-700 font-bold">Filter Error</div>
             <pre
-              class="tomat-scroll-inset font-mono text-accent-red-900 bg-accent-red-100 border border-accent-red-300 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre-wrap break-words">{relevantTools.errorMessage}</pre>
+              class="tomat-scroll-inset font-mono text-accent-red-900 bg-accent-red-100 border border-accent-red-300 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre-wrap break-words">{msg.errorMessage}</pre>
             <div class="text-accent-red-700">
               Phase-1 candidates are kept as a fallback so the main model still
               sees tools.

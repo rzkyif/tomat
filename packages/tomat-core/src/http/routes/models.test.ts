@@ -34,6 +34,34 @@ Deno.test("GET /api/v1/models: requires bearer (401)", async () => {
   }
 });
 
+Deno.test("GET /api/v1/models/stt/catalog: requires bearer (401)", async () => {
+  const env = await setupTestEnv();
+  try {
+    const app = buildApp();
+    const res = await app.fetch(new Request("http://x/api/v1/models/stt/catalog"));
+    assertEquals(res.status, 401);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("POST /api/v1/models/stt/select: requires bearer (401)", async () => {
+  const env = await setupTestEnv();
+  try {
+    const app = buildApp();
+    const res = await app.fetch(
+      new Request("http://x/api/v1/models/stt/select", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ presetId: "accurate" }),
+      }),
+    );
+    assertEquals(res.status, 401);
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("GET /api/v1/models: returns empty array on a fresh tempdir", async () => {
   const env = await setupTestEnv();
   try {

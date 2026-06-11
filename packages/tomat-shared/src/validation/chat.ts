@@ -36,6 +36,16 @@ export const chatStartWsSchema = z
     streamId: z.string().min(1),
     sessionId: z.string().min(1),
     route: z.enum(["default", "secondary"]).default("default"),
+    // Per-turn effective system prompt composed client-side; see the frame
+    // type in api/ws.ts. Empty string is meaningful ("send no system
+    // prompt"), absent means "fall back to prompts.defaultSystemPrompt".
+    systemPrompt: z.string().optional(),
+    // Rendered tools-availability hint, appended by core iff the turn
+    // exposes tools to the model; see the frame type in api/ws.ts.
+    toolsHint: z.string().optional(),
+    // User message anchoring this turn (regenerate / edit-and-resend);
+    // see the frame type in api/ws.ts.
+    anchorMessageId: z.string().min(1).optional(),
     contextOverride: z.array(messageOverrideSchema).optional(),
   })
   .strict();

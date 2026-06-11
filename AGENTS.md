@@ -117,14 +117,21 @@ through `npm:` specifiers from `deno task`.
 
 For anything beyond the above, the canonical docs are:
 
-- Build / run / test commands, channels, beta releases:
+- Build / run / test commands, channels:
   [DEVELOPMENT.md](DEVELOPMENT.md)
+- Per-package overview (layout, run/build/test, internals): the
+  `packages/<name>/README.md` of the package in question. Subsystem deep
+  dives are nested next to the code:
+  `packages/tomat-core/src/{sidecars,toolkits,update}/README.md` and
+  `packages/tomat-client/src/ui/lib/core/README.md`.
 - Test-suite guide (layout, helpers, fixtures, scratch tests, CI):
   [tests/README.md](tests/README.md)
-- Release + deploy, Cloudflare + R2 setup:
+- Release + deploy, beta releases, Cloudflare + R2 setup:
   [packages/tomat-website/README.md](packages/tomat-website/README.md)
 - Toolkit author API:
   [packages/tomat-builtin-toolkit/README.md](packages/tomat-builtin-toolkit/README.md)
+- Settings system + copy and terminology guidelines:
+  [packages/tomat-shared/src/domain/settings/README.md](packages/tomat-shared/src/domain/settings/README.md)
 
 Tests are co-located with source as `*.test.ts`; scratch tests are
 `*.tmp.test.ts` (gitignored anywhere). After a change, run `deno task check`,

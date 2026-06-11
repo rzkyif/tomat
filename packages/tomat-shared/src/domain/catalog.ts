@@ -96,6 +96,40 @@ export const modelFamilySchema = z
   .strict();
 export type ModelFamily = z.infer<typeof modelFamilySchema>;
 
+/** One Speech-to-Text (whisper.cpp GGML) model. Flat: whisper has no variants
+ *  and needs no fit math; English-only vs multilingual is the load-bearing
+ *  axis, since the `.en` files match their multilingual siblings in size but
+ *  transcribe English slightly better. */
+export const sttCatalogModelSchema = z
+  .object({
+    id: z.string(), // "whisper-small.en"
+    name: z.string(), // "Whisper Small (English)"
+    english: z.boolean(), // true = English-only; false = multilingual
+    quants: z.array(catalogQuantSchema).min(1), // best quality first ("F16" for plain bins)
+  })
+  .strict();
+export type SttCatalogModel = z.infer<typeof sttCatalogModelSchema>;
+
+/** Binds one curated Speech-to-Text card (an stt.preset option id) to a
+ *  model+quant, so a catalog re-release can repoint a card without a core or
+ *  client release. Card copy lives in the settings schema. */
+export const sttPresetSchema = z
+  .object({
+    id: z.string(), // "light-multilingual"
+    modelId: z.string(),
+    quant: z.string(),
+  })
+  .strict();
+export type SttPreset = z.infer<typeof sttPresetSchema>;
+
+export const sttCatalogSchema = z
+  .object({
+    models: z.array(sttCatalogModelSchema).min(1),
+    presets: z.array(sttPresetSchema).min(1),
+  })
+  .strict();
+export type SttCatalog = z.infer<typeof sttCatalogSchema>;
+
 /** Selects which ModelScore ranks "smartness". Swapping the score provider is a
  *  data change here, not a code change. */
 export const scoreSelectorSchema = z.object({ source: z.string(), metric: z.string() }).strict();
@@ -128,6 +162,7 @@ export const catalogPayloadSchema = z
     generatedAt: z.string(), // ISO 8601
     families: z.array(modelFamilySchema).min(1),
     fit: fitConfigSchema,
+    stt: sttCatalogSchema,
   })
   .strict();
 export type CatalogPayload = z.infer<typeof catalogPayloadSchema>;

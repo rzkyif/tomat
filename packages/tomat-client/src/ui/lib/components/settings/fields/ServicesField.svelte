@@ -74,12 +74,17 @@
   }
 
   function statusFor(key: ServiceKey): string {
+    // tts isn't supervised by the sidecar manager, so no sidecar.status WS
+    // frames ever reach serversState for it. The polled metrics snapshot
+    // (which the status route synthesizes while the tts worker is up) is
+    // the authority instead.
+    if (key === "tts") return sidecarMetric(key)?.status ?? "Disabled";
     return serversState.serverStatuses[key]?.status ?? "Disabled";
   }
 
   function sidecarMetric(
     key: ServiceKey,
-  ): { rssMb?: number; cpuPct?: number } | undefined {
+  ): { status?: string; rssMb?: number; cpuPct?: number } | undefined {
     return metrics?.sidecars.find((s) => s.kind === key);
   }
 

@@ -42,6 +42,21 @@ deno run -A scripts/catalog/probe.ts unsloth/Qwen3.5-2B-GGUF [...repos]
 Scores (3) come from <https://artificialanalysis.ai>; enter them by hand and
 re-verify them on each curation pass.
 
+## How the core consumes it
+
+On-device, the core fetches `catalog.json` from
+`get.au.tomat.ing/manifests/<channel>/catalog.json`, verifies its Ed25519
+signature against the committed public key, caches it, and runs the LLM fit
+engine (Smallest / Half / Full per device) locally. The Speech-to-Text catalog
+skips fit entirely: whisper models fit everywhere. A dev-channel core builds the
+payload directly from this in-repo source (no fetch, no signature), so catalog
+edits show up in `deno task dev` immediately.
+
+Because cards and model lists are data, re-pointing a preset or adding a model
+is a catalog re-release: a new curation pass reaches users without a core or
+client release. The reverse also holds: a core that changes the catalog schema
+needs the catalog re-released with (or before) it.
+
 ## Build + release
 
 - `deno task catalog:build` - validate the families and write an unsigned
@@ -49,6 +64,3 @@ re-verify them on each curation pass.
 - `deno task release:catalog:stable` / `:beta` - compile, Ed25519-sign (same
   trust root as `core.json` / `binaries.json`), and upload `catalog.json` to R2.
   Also runs as part of `deno task release:<channel>`.
-
-The core fetches + verifies `catalog.json` and runs the fit engine on-device, so
-a new curation pass reaches users without a tomat release.

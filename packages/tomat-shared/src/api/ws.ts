@@ -2,7 +2,7 @@
 // Multiplexed: every frame carries the discriminator it needs
 // (streamId / callId / jobId) for the client to route it.
 
-import type { AttachmentRef, TokenUsage, ToolCall } from "../domain/session.ts";
+import type { AttachmentRef, Message, TokenUsage } from "../domain/session.ts";
 import type { DownloadEntry, RequiredFile, SidecarSnapshot } from "../domain/model.ts";
 import type { ErrorCode } from "./errors.ts";
 
@@ -18,6 +18,23 @@ export type ClientToServerFrame =
       streamId: string;
       sessionId: string;
       route?: "default" | "secondary";
+      /** Effective system prompt for this turn, composed client-side (base
+       *  prompt + context block + snippet overrides). The client owns the
+       *  context fields (local date/time, OS, ...), so the final string is
+       *  sent per turn; when absent, core falls back to its
+       *  `prompts.defaultSystemPrompt` setting. */
+      systemPrompt?: string;
+      /** Rendered `[toolsAvailable:...]` segment of the context template.
+       *  Sent separately from `systemPrompt` because only core knows whether
+       *  tools survive the relevance filter: it appends this to the prompt
+       *  iff the turn actually exposes tools to the model. */
+      toolsHint?: string;
+      /** User message anchoring this turn. When set, core deletes every
+       *  message strictly between the anchor and the next-newer user
+       *  message, truncates the LLM transcript at the anchor (inclusive),
+       *  and inserts the new turn's messages into that slot. Absent means
+       *  a fresh tail turn anchored on the newest user message. */
+      anchorMessageId?: string;
       contextOverride?: Array<{ role: string; content: string }>;
     }
   | { kind: "chat.interrupt"; streamId: string }
@@ -31,13 +48,6 @@ export type ClientToServerFrame =
 
 // --- Server → Client -------------------------------------------------------
 
-export interface PendingToolCall {
-  callId: string;
-  toolkitId: string;
-  toolName: string;
-  arguments: string;
-}
-
 export interface AskUserQuestion {
   question: string;
   options?: Array<{ label: string; value: string; description?: string }>;
@@ -45,53 +55,37 @@ export interface AskUserQuestion {
   allowFreeformInput?: boolean;
 }
 
-/** Entry shown in the "relevant tools" bubble for phase-1 (RAG). */
-export interface ToolFilterPhase1Entry {
-  toolId: string;
-  name: string;
-  description: string;
-  /** Cosine similarity from the embedding pass (-1..1, higher is better). */
-  score: number;
-}
-
-/** Entry shown in the "relevant tools" bubble for phase-2 (LLM) and the
- *  always-available bypass. The score is absent because phase-2 picks
- *  candidates by relevance heuristic, not similarity. */
-export interface ToolFilterEntry {
-  toolId: string;
-  name: string;
-  description: string;
-}
-
 export type ServerToClientFrame =
   | { kind: "pong" }
   // Server heartbeat ping; the client must reply with a "pong" frame or the WS
   // hub drops the connection after the pong timeout (see armHeartbeat).
   | { kind: "ping" }
-  // Chat stream events
+  // Chat stream events. The server owns message identity and order: every
+  // chat-born message (assistant, reasoning, tool, tool_filter) is announced
+  // with a `chat.message` snapshot before any delta touches it, and the same
+  // frame kind later carries its persisted terminal form.
   | {
-      kind: "chat.toolfilter";
+      kind: "chat.message";
       streamId: string;
-      status: "filtering" | "complete" | "error";
-      phase1?: ToolFilterPhase1Entry[];
-      phase2?: ToolFilterEntry[];
-      alwaysAvailable?: ToolFilterEntry[];
-      errorMessage?: string;
+      sessionId: string;
+      /** Full snapshot of one message. The first emission for an id is the
+       *  birth; later emissions with the same id replace the message in
+       *  place. */
+      message: Message;
+      /** Chronological insert-after position. Only meaningful on the first
+       *  emission for an id; null = insert at the turn anchor (after the
+       *  anchoring user message). */
+      afterId: string | null;
+      /** True when this snapshot is the persisted, terminal form. */
+      final: boolean;
     }
-  | {
-      kind: "chat.chunk";
-      streamId: string;
-      contentDelta?: string;
-      reasoningDelta?: string;
-      finishReason?: string;
-    }
-  | {
-      kind: "chat.toolcall_requested";
-      streamId: string;
-      calls: PendingToolCall[];
-    }
+  | { kind: "chat.delta"; streamId: string; messageId: string; delta: string }
   | { kind: "chat.usage"; streamId: string; tokenUsage: TokenUsage }
-  | { kind: "chat.done"; streamId: string; reason: string }
+  | {
+      kind: "chat.done";
+      streamId: string;
+      reason: "stop" | "interrupted" | "hop_limit";
+    }
   | { kind: "chat.error"; streamId: string; code: ErrorCode; message: string }
   // Tool-call events
   | {
@@ -149,7 +143,9 @@ export type ServerToClientFrame =
       // sidecar has no observable progress (e.g. while running).
       progress?: number;
     }
-  // Session sync (e.g. title generated server-side, assistant message persisted)
+  // Session sync (title generated server-side, REST message edits, deletes).
+  // Streamed chat messages are NOT mirrored here; they arrive as
+  // `chat.message` frames instead.
   | {
       kind: "session.updated";
       sessionId: string;
@@ -158,7 +154,6 @@ export type ServerToClientFrame =
         title?: string;
         messageId?: string;
         message?: unknown;
-        toolCall?: ToolCall;
         attachments?: AttachmentRef[];
       };
     }

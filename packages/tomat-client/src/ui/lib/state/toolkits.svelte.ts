@@ -383,10 +383,9 @@ class ToolkitsState {
    *  calls in one shot. */
   cancelAllActiveCalls(): void {
     for (const m of messagesState.messages) {
-      const tc = m.toolCall;
-      if (!tc) continue;
-      if (tc.status === "pending" || tc.status === "running" || tc.status === "awaiting_user") {
-        this.cancelToolCall(tc.callId);
+      if (m.role !== "tool" || !m.callId) continue;
+      if (m.status === "pending" || m.status === "running" || m.status === "awaiting_user") {
+        this.cancelToolCall(m.callId);
       }
     }
   }

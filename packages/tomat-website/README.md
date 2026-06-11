@@ -77,6 +77,27 @@ End state of a successful `release`:
 - `https://get.au.tomat.ing/manifests/catalog.json`: signed local-model catalog
 - `https://get.au.tomat.ing/<version>/<triple>/tomat-core`: binary
 
+## Channels and beta releases
+
+Build tasks keep a bare (stable) form; release tasks require an explicit
+`:stable` / `:beta` channel so a publish is never ambiguous:
+
+```sh
+deno task build:core:beta      # tomat-core-beta + updater + keychain
+deno task build:client:beta    # tomat-beta app bundle
+deno task release:beta         # umbrella: every sub-task, beta channel
+```
+
+Every channelled release task in the table above takes `:beta` the same way
+(`release:core:beta`, `release:toolkit:beta`, `release:client:beta`,
+`release:catalog:beta`).
+
+Beta publishes to `manifests/beta/...` on the CDN and, for the sidecar binaries
+(llama/whisper/deno), ships a resolver in `binaries.json`: the running core
+fetches the latest upstream GitHub release at install/update time (verified
+against GitHub's sha256 digest), so upstream updates reach beta users without a
+re-release. Stable stays pinned at release time.
+
 ## Local preview
 
 ```sh

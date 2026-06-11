@@ -40,9 +40,28 @@ function stopPolling() {
   }
 }
 
+// WebKit pushes an NSCursor only when the computed cursor differs from the
+// one it last set. While the window ignores mouse events macOS reverts the
+// visible cursor to the arrow, but WebKit (receiving no events) still caches
+// the cursor of the element hovered before the gap. Re-entering an element
+// that wants that same cursor (bubble -> gap -> bubble, both `pointer`)
+// computes an unchanged value, so WebKit never re-asserts it and the arrow
+// sticks. Forcing every element to `default` for a frame makes the next
+// hover recompute a CHANGED value, which re-asserts the real cursor; since
+// `default` is the arrow the OS is already showing, the override itself is
+// invisible.
+function forceCursorRefresh() {
+  const root = document.documentElement;
+  root.classList.add("cursor-refresh");
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => root.classList.remove("cursor-refresh"));
+  });
+}
+
 async function switchToCapture() {
   await platform().cursor.setClickthrough(false);
   setIgnored(false);
+  forceCursorRefresh();
   if (document.hasFocus()) {
     // Window is focused - use mousemove for responsive exit detection
     stopPolling();

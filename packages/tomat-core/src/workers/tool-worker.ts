@@ -13,7 +13,12 @@ import type {
   PoolToWorkerFrame,
   WorkerToPoolFrame,
 } from "../toolkits/worker-protocol.ts";
-import { errMessage } from "@tomat/shared";
+
+// Inlined from @tomat/shared: there is no import map next to the installed
+// worker to resolve workspace aliases.
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 type ToolContext = {
   setProgress(progress: number, label?: string, description?: string): void;

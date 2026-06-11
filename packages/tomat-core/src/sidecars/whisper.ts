@@ -3,6 +3,7 @@
 // Mirrors llama.ts but for the STT sidecar. Only kicks in when the user
 // has stt.enabled=true and stt.provider="local".
 
+import { getDefaultSettings } from "@tomat/shared";
 import { binPath, paths, sttPort } from "../paths.ts";
 import { libDirFor, platformExe } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
@@ -20,7 +21,11 @@ export function whisperStartArgsFromSettings(
 ): WhisperStartArgs | null {
   if (!boolSetting(settings, "stt.enabled", true)) return null;
   if (strSetting(settings, "stt.provider", "local") !== "local") return null;
-  const modelSpec = strSetting(settings, "stt.modelPath", "");
+  // Settings arrive sparse (only user-changed keys are persisted), so an
+  // untouched model path must fall back to the schema default, not "".
+  // Ports keep their channel-aware fallbacks instead: the schema's port
+  // defaults are stable-channel values.
+  const modelSpec = strSetting(settings, "stt.modelPath", schemaDefault("stt.modelPath"));
   if (!modelSpec) return null;
   return {
     modelPath: resolveHfPath(modelSpec),
@@ -51,6 +56,11 @@ export function buildWhisperStartOptions(args: WhisperStartArgs): StartOptions {
     libraryDir: libDirFor(paths().binDir, "whisper-server"),
     startupTimeoutMs: 60_000,
   };
+}
+
+function schemaDefault(key: string): string {
+  const v = getDefaultSettings()[key];
+  return typeof v === "string" ? v : "";
 }
 
 function strSetting(s: Record<string, unknown>, k: string, def: string): string {

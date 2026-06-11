@@ -9,6 +9,7 @@
   import NumberSliderField from "./fields/NumberSliderField.svelte";
   import PresetField from "./fields/PresetField.svelte";
   import ModelPresetField from "./fields/ModelPresetField.svelte";
+  import SttPresetField from "./fields/SttPresetField.svelte";
   import ServicesField from "./fields/ServicesField.svelte";
   import ShortcutField from "./fields/ShortcutField.svelte";
   import SnippetsField from "./fields/SnippetsField.svelte";
@@ -34,6 +35,8 @@
 {#if visible}
   {#if field.type === "model_preset"}
     <ModelPresetField {field} {onPresetSelect} />
+  {:else if field.type === "stt_preset"}
+    <SttPresetField {field} {onPresetSelect} />
   {:else if field.type === "preset"}
     <PresetField {field} {onPresetSelect} />
   {:else if field.type === "command_preview"}

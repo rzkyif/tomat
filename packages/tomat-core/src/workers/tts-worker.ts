@@ -1,6 +1,9 @@
 // TTS subprocess: hosts kokoro-js, reads NDJSON frames from stdin, writes
 // NDJSON frames to stdout. Spawned by sidecars/tts.ts with minimal Deno
-// permissions (--allow-read=<models-dir>, --allow-env=ORT_LOG_LEVEL).
+// permissions (--allow-read=<models-dir>,<deno-cache>[,<node_modules>],
+// --allow-env, --allow-ffi). No net access: the model loads from
+// <models-dir> (see configureEnv) and kokoro-js's voice tensors load from
+// its own package directory.
 //
 // Frame protocol:
 //   in  -> { kind: "load" }
@@ -16,11 +19,23 @@
 
 // Full `npm:` specifiers (not the workspace import-map aliases) so this
 // file can run standalone from ~/.tomat/core/workers/ after install, with
-// no deno.json nearby. Keep versions pinned in lockstep with tomat-core's
-// own deno.json import map.
-import { env } from "npm:@huggingface/transformers@^4.2.0";
-import { errMessage } from "@tomat/shared";
+// no deno.json nearby.
+//
+// The transformers range MUST match kokoro-js's own dependency range (not
+// core's import map, which pins v4 for the embedding worker): kokoro-js
+// loads the model through ITS transformers instance, so `configureEnv`
+// below only takes effect if both specifiers dedupe to the same package.
+// A mismatched copy leaves kokoro-js's env at defaults, which tries the
+// package-relative models dir and then huggingface.co - both denied by the
+// sandbox.
+import { env } from "npm:@huggingface/transformers@^3.5.1";
 import { KokoroTTS } from "npm:kokoro-js@^1.2.1";
+
+// Inlined from @tomat/shared: there is no import map next to the installed
+// worker to resolve workspace aliases.
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 

@@ -78,22 +78,35 @@
       ? 0
       : ((settingsState.currentSettings["appearance.bubbleBlurRings"] as number) ?? 3),
   );
+
+  // Per-side corner radius, exported to CSS so the shadow layer and the halo
+  // rings track the body's alignment/neighbor corner flattening.
+  let leftSmall = $derived(selectedAlignment === "left" || neighborLeft);
+  let rightSmall = $derived(selectedAlignment === "right" || neighborRight);
 </script>
 
 <!-- Positioning + halo-containment wrapper. The body below clips its own
-     overflow, so the blur halo (which extends beyond the bubble) lives out
-     here as sibling layers behind the body. Alignment margins live on the
-     wrapper so it stays the laid-out element in the parent flex column.
-     `isolate` makes the bubble its own stacking context so the halo (z-0) ->
-     body (z-10) order is resolved WITHIN the bubble rather than against sibling
-     bubbles / ancestor layers. Without it WebKit intermittently mis-samples the
-     halo's backdrop-filter and blurs the body that should sit on top of it. -->
+     overflow, so the drop shadow and the blur halo (which extend beyond the
+     bubble) live out here as sibling layers behind the body. Alignment
+     margins live on the wrapper so it stays the laid-out element in the
+     parent flex column.
+
+     Deliberately NOT `isolate`: the shadow/halo layers sit at z-0 and the
+     body at z-10 in the SURROUNDING stacking context, so every bubble's
+     shadow paints below every bubble's body and can never cover a
+     neighboring bubble. (WebKit's backdrop-filter mis-sampling under a
+     transformed ancestor is handled by `bubble-body-promote`, which keeps
+     the body on its own compositing layer.) -->
 <div
-  class="relative isolate w-fit pointer-events-none"
+  class="relative w-fit pointer-events-none"
   class:mr-auto={selectedAlignment === "left"}
   class:ml-auto={selectedAlignment === "right"}
   class:mx-auto={selectedAlignment === "center"}
+  style="--bubble-radius-left: var({leftSmall ? '--rounded-small' : '--rounded-large'}); --bubble-radius-right: var({rightSmall
+    ? '--rounded-small'
+    : '--rounded-large'})"
 >
+  <div class="bubble-shadow absolute inset-0 z-0" aria-hidden="true"></div>
   {#each Array(ringCount) as _, i (i)}
     <div
       class="bubble-halo"

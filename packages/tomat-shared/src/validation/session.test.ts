@@ -26,6 +26,7 @@ Deno.test("messageInputSchema: parses each of the 7 roles", () => {
       callId: "c1",
       toolkitId: "t1",
       toolName: "do",
+      arguments: "{}",
       status: "completed",
     },
     { role: "reasoning", content: "think" },
@@ -93,6 +94,7 @@ Deno.test("toolMessageInputSchema: requires status from the documented enum", ()
       callId: "c",
       toolkitId: "t",
       toolName: "n",
+      arguments: "{}",
       status: "not-a-state",
     }).success,
     false,
@@ -118,7 +120,7 @@ Deno.test("messagePatchSchemaByRole: rejects cross-role fields per role", () => 
 
 Deno.test("messagePatchSchemaByRole: accepts a partial of fields valid for the role", () => {
   assertEquals(messagePatchSchemaByRole.assistant.safeParse({ content: "edited" }).success, true);
-  assertEquals(messagePatchSchemaByRole.assistant.safeParse({ streaming: false }).success, true);
+  assertEquals(messagePatchSchemaByRole.assistant.safeParse({ interrupted: true }).success, true);
 });
 
 Deno.test("reasoning + tool_filter + error: each parses its minimum body", () => {

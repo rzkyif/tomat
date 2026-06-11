@@ -23,16 +23,12 @@ import {
   type Message,
   type MessageContent,
   type MessagePart,
-  type RelevantToolsState,
   type TokenUsage,
   type ToolCallLogLine,
-  type ToolCallState,
-  type ToolCallStatus,
 } from "$lib/shared/types";
 import { cores } from "$lib/core";
 import { getLogger } from "$lib/shared/log";
 import { sessionsState } from "./sessions.svelte";
-import { settingsState } from "./settings.svelte";
 import { snippetsState } from "./snippets.svelte";
 import { streamingState } from "./streaming.svelte";
 import {
@@ -63,10 +59,8 @@ class MessagesState {
   hasActiveToolCall = $derived(
     this.messages.some(
       (m) =>
-        !!m.toolCall &&
-        (m.toolCall.status === "pending" ||
-          m.toolCall.status === "running" ||
-          m.toolCall.status === "awaiting_user"),
+        m.role === "tool" &&
+        (m.status === "pending" || m.status === "running" || m.status === "awaiting_user"),
     ),
   );
 
@@ -104,25 +98,22 @@ class MessagesState {
   /** Flip every in-flight tool call to failed/interrupted. Called when the core
    *  connection drops mid-call (e.g. a dev hot-reload): without it `running`
    *  bubbles spin until the session is reloaded. Uses the same wording as the
-   *  on-load fixup in sessionsState.backfillMessageIds. Returns the count
+   *  on-load fixup in sessionsState.fixupLoadedMessages. Returns the count
    *  changed so the caller can decide whether to log. */
   interruptActiveToolCalls(): number {
     let changed = 0;
     for (let i = 0; i < this.messages.length; i++) {
       const m = this.messages[i];
       if (
-        m.toolCall &&
-        m.toolCall.status !== "complete" &&
-        m.toolCall.status !== "failed" &&
-        m.toolCall.status !== "cancelled"
+        m.role === "tool" &&
+        m.status !== "completed" &&
+        m.status !== "failed" &&
+        m.status !== "cancelled"
       ) {
         this.messages[i] = {
           ...m,
-          toolCall: {
-            ...m.toolCall,
-            status: "failed",
-            error: m.toolCall.error ?? "interrupted: core was disconnected mid-call",
-          },
+          status: "failed",
+          error: m.error ?? "interrupted: core was disconnected mid-call",
         };
         changed++;
       }
@@ -135,47 +126,18 @@ class MessagesState {
     this.messages.unshift(message);
   }
 
-  /** Insert a message at the newest position WITHIN the current turn.
-   *
-   *  No anchor (fresh tail-of-history submission): unshift to index 0,
-   *  matching the historic behavior.
-   *
-   *  Anchor set (mid-history regenerate): place the new bubble immediately
-   *  after the next-newer user message (lower index = newer), which keeps
-   *  it inside the anchor's turn and below every bubble belonging to a
-   *  newer turn. If no next-newer user exists, this still degenerates to
-   *  index 0 (unshift). The bubble lands at the top of the anchor's turn,
-   *  pushing any prior in-turn bubbles to higher (older) indices. */
-  insertAtTurnAnchor(message: Message): void {
-    if (!message.id) message.id = makeMessageId();
-    const anchorId = streamingState.turnAnchorId;
-    if (anchorId === null) {
-      this.messages.unshift(message);
-
-      return;
-    }
-    const anchorIdx = this.messages.findIndex((m) => m.id === anchorId);
-    if (anchorIdx < 0) {
-      this.messages.unshift(message);
-
-      return;
-    }
-    let nextNewerUserIdx = -1;
-    for (let i = anchorIdx - 1; i >= 0; i--) {
-      if (this.messages[i].role === "user") {
-        nextNewerUserIdx = i;
-        break;
-      }
-    }
-    this.messages.splice(nextNewerUserIdx + 1, 0, message);
-  }
-
   /** Splice every non-user bubble between `anchorUserId` and the next-newer
-   *  user message. Returns the number of bubbles removed. Used by
-   *  `regenerateTurn` (edit / reprocess) and `deleteUserMessage` to clear a
-   *  whole multi-bubble turn atomically; both edges are preserved (the
-   *  anchor user and the next user message stay put). */
-  private spliceTurnAfter(anchorUserId: string): string[] {
+   *  user message. Returns the removed ids. Used by `regenerateTurn` (edit /
+   *  reprocess) and `deleteUserMessage` to clear a whole multi-bubble turn
+   *  atomically; both edges are preserved (the anchor user and the next user
+   *  message stay put).
+   *
+   *  `serverDelete` controls whether the removals are propagated over REST.
+   *  Regenerate paths pass false: the chat.start they trigger carries the
+   *  anchor and the server deletes the turn itself (its message_deleted
+   *  frames reconcile via removeById, which is idempotent against this
+   *  local splice). Plain deletes pass true. */
+  private spliceTurnAfter(anchorUserId: string, serverDelete: boolean): string[] {
     const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === anchorUserId);
     if (userIdx < 0) return [];
     // newest-first: walk from userIdx-1 down toward 0, stop at the first
@@ -195,9 +157,7 @@ class MessagesState {
       const removed = this.messages.splice(startIdx, count);
       for (const m of removed) if (m.id) removedIds.push(m.id);
     }
-    // Propagate the deletions to the server so chat.start doesn't replay
-    // stale assistant / tool / reasoning bubbles. Fire-and-forget.
-    void this.serverDeleteMessages(removedIds);
+    if (serverDelete) void this.serverDeleteMessages(removedIds);
     return removedIds;
   }
 
@@ -240,10 +200,15 @@ class MessagesState {
       try {
         const created = await cores().api().sessions.create();
         sessionsState.id = created.id;
+        sessionsState.createdAtMs = created.createdAtMs ?? null;
         sessionsState.title = sessionsState.title || sessionsState.defaultTitle;
+        // The new session must show up in the list right away: SessionBar
+        // renders its buttons only while the list is non-empty.
+        void sessionsState.loadList();
       } catch (e) {
         log.warn("session create failed; using local id:", e);
         sessionsState.id = payload.timestamp.toString();
+        sessionsState.createdAtMs = payload.timestamp;
         sessionsState.title = sessionsState.title || sessionsState.defaultTitle;
       }
     }
@@ -302,78 +267,8 @@ class MessagesState {
     }
     this.messages.unshift(userMsg);
     this.upsertSystemMessage(payload.effectiveSystemPrompt ?? buildSystemPrompt());
-    if (settingsState.currentSettings["tools.enabled"]) {
-      this.upsertToolFilterMessage(userMsg.id!, {
-        status: "filtering",
-        phase1: null,
-        phase2: null,
-        alwaysAvailable: null,
-      });
-    }
     // Persist server-side so chat.start sees the message in history.
     await this.persistUserMessage(userMsg);
-  }
-
-  /** Stable id convention: every tool_filter message is paired 1:1 with a
-   *  user message via this suffix. Lets the lifecycle hooks (reprocess, edit,
-   *  delete) find the right bubble without walking neighbouring indices. */
-  private toolFilterIdFor(userMessageId: string): string {
-    return `${userMessageId}-filter`;
-  }
-
-  /**
-   * Create or update the tool_filter bubble paired with a user message.
-   * Inserted just newer than the paired user message (one slot below in the
-   * newest-first array) so it visually sits between the user message and the
-   * assistant response, even when the paired user message is mid-history
-   * (during an edit / reprocess regenerate).
-   */
-  upsertToolFilterMessage(userMessageId: string, state: RelevantToolsState): void {
-    const id = this.toolFilterIdFor(userMessageId);
-    const existingIdx = this.messages.findIndex((m) => m.role === "tool_filter" && m.id === id);
-    if (existingIdx >= 0) {
-      this.messages[existingIdx] = {
-        ...this.messages[existingIdx],
-        relevantTools: state,
-      };
-    } else {
-      const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === userMessageId);
-      const bubble: Message = {
-        id,
-        role: "tool_filter",
-        content: "",
-        relevantTools: state,
-      };
-      if (userIdx < 0) {
-        this.messages.unshift(bubble);
-      } else {
-        this.messages.splice(userIdx, 0, bubble);
-      }
-    }
-  }
-
-  /** Patch the tool_filter bubble paired with `userMessageId`. No-op if the
-   *  bubble doesn't exist (e.g. tool use was disabled when the user message
-   *  was added). */
-  updateRelevantTools(userMessageId: string, patch: Partial<RelevantToolsState>): void {
-    const id = this.toolFilterIdFor(userMessageId);
-    const idx = this.messages.findIndex((m) => m.role === "tool_filter" && m.id === id);
-    if (idx < 0) return;
-    const existing = this.messages[idx].relevantTools;
-    if (!existing) return;
-    this.messages[idx] = {
-      ...this.messages[idx],
-      relevantTools: { ...existing, ...patch },
-    };
-  }
-
-  /** Remove the tool_filter bubble paired with `userMessageId`. Used when the
-   *  paired user message is deleted. */
-  removeToolFilterMessage(userMessageId: string): void {
-    const id = this.toolFilterIdFor(userMessageId);
-    const idx = this.messages.findIndex((m) => m.role === "tool_filter" && m.id === id);
-    if (idx < 0) return;
-    this.messages.splice(idx, 1);
   }
 
   /**
@@ -407,100 +302,65 @@ class MessagesState {
     }
   }
 
-  /** Push a new role:"tool" message representing an active tool invocation.
-   *  Returns the message id so callers can update the same slot later. */
-  appendToolCall(tc: ToolCallState): string {
-    const id = makeMessageId();
-    this.insertAtTurnAnchor({
-      id,
-      role: "tool",
-      content: "",
-      toolCall: tc,
-    });
-    return id;
-  }
-
-  /** Immutably merge `patch` into the ToolCallState of the message whose
-   *  toolCall.callId matches. No-op when the call is missing (e.g. the user
-   *  deleted the bubble). */
-  updateToolCall(callId: string, patch: Partial<ToolCallState>): void {
-    const idx = this.messages.findIndex((m) => m.toolCall?.callId === callId);
-    if (idx < 0) return;
-    const existing = this.messages[idx].toolCall;
-    if (!existing) return;
-    this.messages[idx] = {
-      ...this.messages[idx],
-      toolCall: { ...existing, ...patch },
-    };
-  }
-
-  /** Mark a tool call terminated with either a result or an error. Sets the
-   *  status too so callers don't have to duplicate that. */
-  resolveToolCall(
-    callId: string,
-    payload: { result?: unknown; error?: string; cancelled?: boolean },
-  ): void {
-    const idx = this.messages.findIndex((m) => m.toolCall?.callId === callId);
-    if (idx < 0) return;
-    const existing = this.messages[idx].toolCall;
-    if (!existing) return;
-    let status: ToolCallStatus;
-    if (payload.cancelled) {
-      status = "cancelled";
-    } else if (payload.error !== undefined) {
-      status = "failed";
-    } else {
-      status = "complete";
+  /** Mirror the tools hint core appended to this turn's system prompt into
+   *  the system bubble (see the tool_filter final-snapshot handler in
+   *  streaming state). Idempotent: re-sent frames or a hint already present
+   *  leave the bubble unchanged. */
+  appendSystemToolsHint(hint: string): void {
+    if (!hint) return;
+    const idx = this.messages.findIndex((m) => m.role === "system");
+    if (idx < 0) {
+      this.upsertSystemMessage(hint);
+      return;
     }
+    const content = this.messages[idx].content;
+    if (typeof content !== "string" || content.includes(hint)) return;
     this.messages[idx] = {
       ...this.messages[idx],
-      toolCall: {
-        ...existing,
-        status,
-        result: payload.result,
-        error: payload.error,
-      },
+      content: content ? `${content}\n\n${hint}` : hint,
     };
+  }
+
+  private toolIdx(callId: string): number {
+    return this.messages.findIndex((m) => m.role === "tool" && m.callId === callId);
   }
 
   /** Record an askUser request on the bubble so the form renders. */
   setToolCallAskUser(callId: string, requestId: string, questions: AskUserQuestion[]): void {
-    this.updateToolCall(callId, {
+    const idx = this.toolIdx(callId);
+    if (idx < 0) return;
+    const m = this.messages[idx];
+    this.messages[idx] = {
+      ...m,
       status: "awaiting_user",
-      askUser: { requestId, questions, answers: null },
-    });
+      ephemera: { ...m.ephemera, askUser: { requestId, questions, answers: null } },
+    };
   }
 
   /** Stash the user's answers on the bubble after submit. The WS layer
    *  forwards them back to the worker; this keeps the UI in the right state
    *  while we wait for the next progress / result event. */
   recordToolCallAskUserAnswers(callId: string, answers: AskUserAnswer[]): void {
-    const idx = this.messages.findIndex((m) => m.toolCall?.callId === callId);
+    const idx = this.toolIdx(callId);
     if (idx < 0) return;
-    const existing = this.messages[idx].toolCall;
-    if (!existing?.askUser) return;
+    const m = this.messages[idx];
+    if (!m.ephemera?.askUser) return;
     this.messages[idx] = {
-      ...this.messages[idx],
-      toolCall: {
-        ...existing,
-        status: "running",
-        askUser: { ...existing.askUser, answers },
-      },
+      ...m,
+      status: "running",
+      ephemera: { ...m.ephemera, askUser: { ...m.ephemera.askUser, answers } },
     };
   }
 
   /** Append a log line visible in the bubble's details disclosure. */
   appendToolCallLog(callId: string, line: ToolCallLogLine): void {
-    const idx = this.messages.findIndex((m) => m.toolCall?.callId === callId);
+    const idx = this.toolIdx(callId);
     if (idx < 0) return;
-    const existing = this.messages[idx].toolCall;
-    if (!existing) return;
-    const logs = existing.logs.length >= 200 ? existing.logs.slice(-199) : existing.logs.slice();
+    const m = this.messages[idx];
+    const prior = m.ephemera?.logs ?? [];
+    const logs = prior.length >= 200 ? prior.slice(-199) : prior.slice();
     logs.push(line);
-    this.messages[idx] = {
-      ...this.messages[idx],
-      toolCall: { ...existing, logs },
-    };
+    this.messages[idx] = { ...m, ephemera: { ...m.ephemera, logs } };
   }
 
   /** Clear every non-user bubble between `anchorUserId` and the next-newer
@@ -511,19 +371,10 @@ class MessagesState {
    *  than the anchor and bubbles at or newer than the next user message
    *  stay untouched. */
   private async regenerateTurn(anchorUserId: string): Promise<void> {
-    this.spliceTurnAfter(anchorUserId);
-    // Re-seed the tool_filter bubble in "filtering" state so the spinner
-    // shows during regen instead of leaving a gap until the model emits
-    // its first chunk.
-    if (settingsState.currentSettings["tools.enabled"]) {
-      this.upsertToolFilterMessage(anchorUserId, {
-        status: "filtering",
-        phase1: null,
-        phase2: null,
-        alwaysAvailable: null,
-      });
-    }
-
+    // Local-only splice for instant feedback; the chat.start this triggers
+    // carries the anchor, the server deletes the old turn itself, and its
+    // message_deleted frames reconcile (removeById is idempotent).
+    this.spliceTurnAfter(anchorUserId, false);
     await this.sendMessagesHandler?.(anchorUserId);
   }
 
@@ -593,17 +444,20 @@ class MessagesState {
     this.messages[userIdx] = updatedMsg;
 
     // Propagate the edit to the server so the next chat.start sees the new
-    // content (otherwise edit-and-resend regenerates against the old text).
+    // content. Awaited: the regenerate below makes the server rebuild the
+    // turn from its persisted history, so the patch must land first or the
+    // resend conditions on the old text.
     if (userMsgId && sessionsState.id) {
-      void cores()
-        .api()
-        .sessions.patchMessage(sessionsState.id, userMsgId, {
-          content: expandedContent,
-          systemPromptOverride,
-        } as unknown as Partial<ServerMessage>)
-        .catch((e) => {
-          log.warn(`server patch ${userMsgId} failed:`, e);
-        });
+      try {
+        await cores()
+          .api()
+          .sessions.patchMessage(sessionsState.id, userMsgId, {
+            content: expandedContent,
+            systemPromptOverride,
+          } as unknown as Partial<ServerMessage>);
+      } catch (e) {
+        log.warn(`server patch ${userMsgId} failed:`, e);
+      }
     }
 
     const isFirstMessage = this.messages.filter((m) => m.role === "user").length === 1;
@@ -644,7 +498,7 @@ class MessagesState {
     // the next user message). Then refind the user message's index (it may
     // have shifted) and splice it too. spliceTurnAfter handles the server
     // delete of the turn; we delete the user message separately.
-    this.spliceTurnAfter(messageId);
+    this.spliceTurnAfter(messageId, true);
     const refreshedUserIdx = this.messages.findIndex(
       (m) => m.role === "user" && m.id === messageId,
     );
@@ -730,7 +584,7 @@ class MessagesState {
     }
 
     if (userMsgId) {
-      this.spliceTurnAfter(userMsgId);
+      this.spliceTurnAfter(userMsgId, true);
     } else {
       // Orphaned bubble: nothing to anchor a turn-splice on, so just remove
       // the bubble and any paired reasoning in place.
@@ -754,27 +608,41 @@ class MessagesState {
     }
   }
 
-  // --- new helpers wired to the server-side persistence + WS frames -------
+  // --- server-driven message lifecycle (chat.message / chat.delta) --------
 
-  /** Apply an in-memory upsert from a server `session.updated` frame.
-   *  The server is the source of truth for assistant/tool/reasoning messages
-   *  it persists during chat streaming; this handler keeps the client mirror
-   *  honest for cases where a chunk-by-chunk delta path missed the bubble. */
-  upsertFromServer(msg: ServerMessage): void {
-    const idx = this.messages.findIndex((m) => m.id === msg.id);
-    // Round-trip the server's shape into the client's richer Message type.
-    // The server stores content_json verbatim, so for messages first authored
-    // client-side the round-trip is lossless. For messages first authored
-    // server-side (assistant chunks, tool results), the relevant fields
-    // (content, callId, status, result, error) map 1:1.
+  /** Apply a server message snapshot. The id is server-minted and stable from
+   *  birth, so this is a plain upsert: replace in place when the id is known
+   *  (preserving the client-only `ephemera` overlay), otherwise insert at the
+   *  chronological slot right after `afterId` (newest-first array: just
+   *  before the anchor's index). `afterId: null` inserts at the newest
+   *  position. */
+  applyServerMessage(msg: ServerMessage, afterId: string | null): void {
     const local = msg as unknown as Message;
+    const idx = this.messages.findIndex((m) => m.id === local.id);
     if (idx >= 0) {
-      this.messages[idx] = { ...this.messages[idx], ...local };
-    } else {
-      // Insert preserving newest-first ordering. Server assigns a monotonic
-      // `ord`; we don't store ord on Message, so we just unshift.
-      this.messages.unshift(local);
+      this.messages[idx] = { ...local, ephemera: this.messages[idx].ephemera };
+      return;
     }
+    if (afterId !== null) {
+      const anchorIdx = this.messages.findIndex((m) => m.id === afterId);
+      if (anchorIdx >= 0) {
+        this.messages.splice(anchorIdx, 0, local);
+        return;
+      }
+    }
+    this.messages.unshift(local);
+  }
+
+  /** Append a streamed delta to the message's content. Returns the full text
+   *  after the append (so the caller can feed TTS) or null when the id is
+   *  unknown. */
+  appendDelta(messageId: string, delta: string): string | null {
+    const idx = this.messages.findIndex((m) => m.id === messageId);
+    if (idx < 0) return null;
+    const cur = this.messages[idx].content;
+    const next = (typeof cur === "string" ? cur : "") + delta;
+    this.messages[idx] = { ...this.messages[idx], content: next };
+    return next;
   }
 
   /** Remove a message by id (server-initiated delete). */
@@ -798,19 +666,15 @@ class MessagesState {
       }
     >,
   ): void {
-    const idx = this.messages.findIndex((m) => m.toolCall?.callId === frame.callId);
+    const idx = this.toolIdx(frame.callId);
     if (idx < 0) return;
-    const existing = this.messages[idx].toolCall;
-    if (!existing) return;
+    const m = this.messages[idx];
     if (frame.kind === "tool.progress") {
       this.messages[idx] = {
-        ...this.messages[idx],
-        toolCall: {
-          ...existing,
-          progress: frame.progress,
-          label: frame.label,
-          description: frame.description,
-        },
+        ...m,
+        progress: frame.progress,
+        label: frame.label,
+        description: frame.description,
       };
     } else if (frame.kind === "tool.askuser_request") {
       this.setToolCallAskUser(frame.callId, frame.requestId, frame.questions);
@@ -821,22 +685,12 @@ class MessagesState {
         ts: Date.now(),
       });
     } else if (frame.kind === "tool.result") {
-      this.resolveToolCall(frame.callId, { result: frame.result });
+      this.messages[idx] = { ...m, status: "completed", result: frame.result };
     } else if (frame.kind === "tool.error") {
-      this.resolveToolCall(frame.callId, { error: frame.error });
+      this.messages[idx] = { ...m, status: "failed", error: frame.error };
     } else if (frame.kind === "tool.cancelled") {
-      this.resolveToolCall(frame.callId, { cancelled: true });
+      this.messages[idx] = { ...m, status: "cancelled" };
     }
-  }
-
-  /** Upsert a tool_filter bubble paired with the most-recent user message
-   *  from a `chat.toolfilter` WS frame. */
-  upsertToolFilter(state: RelevantToolsState): void {
-    const userIdx = this.messages.findIndex((m) => m.role === "user");
-    if (userIdx < 0) return;
-    const userId = this.messages[userIdx].id;
-    if (!userId) return;
-    this.upsertToolFilterMessage(userId, state);
   }
 
   /** POST a freshly-added user message to the core so chat.start sees it

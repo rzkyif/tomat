@@ -24,31 +24,33 @@ const log = getLogger("sessions");
 
 export type SessionInfo = SessionListEntry;
 
-/** Defensive snapshot fixups applied on disk → memory load. The server's
- *  Message shape and the client's are similar but not identical; cast
- *  through unknown at the boundary. */
-function backfillMessageIds(messages: ServerMessage[]): Message[] {
+/** Defensive snapshot fixups applied on disk → memory load. The persisted
+ *  shape IS the render shape now, so this only repairs in-flight state a
+ *  crash or disconnect froze mid-turn: ids missing from pre-id files, tool
+ *  calls stuck non-terminal, tool filters stuck "filtering". */
+export function fixupLoadedMessages(messages: ServerMessage[]): Message[] {
   let counter = 0;
   const out = messages as unknown as Message[];
-  for (const m of out) {
+  for (let i = 0; i < out.length; i++) {
+    const m = out[i];
     if (!m.id) m.id = `load-${Date.now()}-${counter++}`;
     if (
-      m.toolCall &&
-      m.toolCall.status !== "complete" &&
-      m.toolCall.status !== "failed" &&
-      m.toolCall.status !== "cancelled"
+      m.role === "tool" &&
+      m.status !== "completed" &&
+      m.status !== "failed" &&
+      m.status !== "cancelled"
     ) {
-      m.toolCall = {
-        ...m.toolCall,
+      out[i] = {
+        ...m,
         status: "failed",
-        error: m.toolCall.error ?? "interrupted: core was disconnected mid-call",
+        error: m.error ?? "interrupted: core was disconnected mid-call",
       };
     }
-    if (m.relevantTools && m.relevantTools.status === "filtering") {
-      m.relevantTools = {
-        ...m.relevantTools,
+    if (m.role === "tool_filter" && m.status === "filtering") {
+      out[i] = {
+        ...m,
         status: "error",
-        errorMessage: m.relevantTools.errorMessage ?? "interrupted: session was reloaded",
+        errorMessage: m.errorMessage ?? "interrupted: session was reloaded",
       };
     }
   }
@@ -59,6 +61,9 @@ class SessionsState {
   list = $state<SessionInfo[]>([]);
   id = $state<string | null>(null);
   title = $state<string>("");
+  /** Creation timestamp of the active session, from the server's session
+   *  doc. Drives `defaultTitle`; session ids are opaque ULIDs. */
+  createdAtMs = $state<number | null>(null);
   currentIndex = $state<number>(-1);
   /** Bumps on every session-boundary transition. Consumers use it as a
    *  `{#key}` to force a clean DOM teardown of the message subtree. */
@@ -66,6 +71,9 @@ class SessionsState {
 
   private unsubscribeWs: (() => void) | null = null;
   private unsubscribeConn: (() => void) | null = null;
+  // True while recoverFromFailedLoad runs, so a failing recovery target
+  // doesn't recurse into another recovery.
+  private recovering = false;
   // Reconnect-resync bookkeeping: only reload after a real gap (a drop following
   // a prior connect), never on the very first connect of the session.
   private hasConnected = false;
@@ -77,10 +85,13 @@ class SessionsState {
     return settingsState.currentSettings["general.session.storeSessions"] !== false;
   }
 
+  /** Formatted creation datetime of the active session. Shown as the title
+   *  placeholder and filled in whenever the user clears the title. */
   get defaultTitle(): string {
-    if (!this.id) return "";
-    // Server now mints ULIDs (not timestamps); fall back to id-as-label.
-    return this.id;
+    if (this.createdAtMs == null) return "";
+    const d = new Date(this.createdAtMs);
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
   /** Wire up to session.updated frames so title changes / server-side
@@ -94,10 +105,13 @@ class SessionsState {
         this.title = frame.payload.title;
         const idx = this.list.findIndex((s) => s.id === this.id);
         if (idx >= 0) this.list[idx] = { ...this.list[idx], title: frame.payload.title };
-      } else if (frame.op === "message_added" && frame.payload?.message) {
-        messagesState.upsertFromServer(frame.payload.message as ServerMessage);
-      } else if (frame.op === "message_updated" && frame.payload?.message) {
-        messagesState.upsertFromServer(frame.payload.message as ServerMessage);
+      } else if (
+        (frame.op === "message_added" || frame.op === "message_updated") &&
+        frame.payload?.message
+      ) {
+        // REST-driven changes (another paired client's message or edit).
+        // Streamed chat messages arrive via chat.message instead.
+        messagesState.applyServerMessage(frame.payload.message as ServerMessage, null);
       } else if (frame.op === "message_deleted" && frame.payload?.messageId) {
         messagesState.removeById(frame.payload.messageId);
       }
@@ -167,6 +181,7 @@ class SessionsState {
     streamingState.resetForSession();
     this.id = null;
     this.title = "";
+    this.createdAtMs = null;
     this.epoch++;
   }
 
@@ -188,12 +203,37 @@ class SessionsState {
     try {
       const full = await cores().api().sessions.get(sessionId);
       this.resetAll();
-      messagesState.hydrate(backfillMessageIds(full.messages), full.tokenUsage ?? null);
+      // The server stores messages oldest-first (ascending ord); the
+      // transcript array is newest-first.
+      messagesState.hydrate(fixupLoadedMessages(full.messages).reverse(), full.tokenUsage ?? null);
       this.id = full.id;
+      this.createdAtMs = full.createdAtMs ?? null;
       this.title = full.title || this.defaultTitle;
       this.currentIndex = this.list.findIndex((s) => s.id === sessionId);
     } catch (e) {
       log.error("Failed to load session:", e);
+      await this.recoverFromFailedLoad(sessionId);
+    }
+  }
+
+  /** A session fetch can fail because the requested id is stale: the session
+   *  was deleted by another client, from the Settings storage view, or
+   *  between a disconnect and the reconnect resync. Instead of wedging on
+   *  the dead id (an unloadable session with a hidden session bar), drop the
+   *  local state tied to it, refresh the list from the server, and open the
+   *  newest remaining session. */
+  private async recoverFromFailedLoad(sessionId: string): Promise<void> {
+    if (this.recovering) return;
+    this.recovering = true;
+    try {
+      if (this.id === sessionId) this.resetAll();
+      await this.loadList();
+      const next = this.list[0];
+      if (next && next.id !== sessionId) await this.load(next.id);
+    } catch (e) {
+      log.warn("session recovery failed:", e);
+    } finally {
+      this.recovering = false;
     }
   }
 
@@ -250,6 +290,7 @@ class SessionsState {
       const session = await cores().api().sessions.create();
       this.resetAll();
       this.id = session.id;
+      this.createdAtMs = session.createdAtMs ?? null;
       this.title = session.title || this.defaultTitle;
       await this.loadList();
       this.currentIndex = this.list.findIndex((s) => s.id === session.id);

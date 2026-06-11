@@ -133,8 +133,11 @@ export function buildContextBlock(): string {
 /** Extract the `[toolsAvailable:body]` segment from the context template and
  *  render its body using the current context vars. The conditional itself is
  *  evaluated empty by `buildContextBlock` (because no `toolsAvailable` var is
- *  passed there), keeping the hint out of the steady-state context. */
-function buildToolsHint(): string {
+ *  passed there), keeping the hint out of the steady-state context. The
+ *  rendered hint travels separately on chat.start (`toolsHint`): only core
+ *  knows whether tools survive the relevance filter, so it appends the hint
+ *  to the system prompt iff the turn actually exposes tools to the model. */
+export function buildToolsHint(): string {
   const s = settingsState.currentSettings;
   const template = (s["prompts.contextTemplate"] as string) || DEFAULT_CONTEXT_TEMPLATE;
   const match = template.match(/\[toolsAvailable:([\s\S]*?)\]/);
@@ -156,25 +159,6 @@ export function buildSystemPrompt(): string | null {
   const context = buildContextBlock();
   if (!base && !context) return null;
   return [base, context].filter((s) => s).join("\n\n");
-}
-
-/** Compose the final system prompt for a specific turn. When `toolsHint` is
- *  true, appends the tool-use nudge to whatever prompt/override we'd normally
- *  send. The nudge text comes from the `[toolsAvailable:...]` segment of the
- *  context template so users can customize or remove it. Returns null when
- *  there is nothing at all to send. */
-export function buildSystemPromptForTurn(opts: {
-  base: string | null;
-  toolsHint: boolean;
-}): string | null {
-  const parts: string[] = [];
-  if (opts.base) parts.push(opts.base);
-  if (opts.toolsHint) {
-    const hint = buildToolsHint();
-    if (hint) parts.push(hint);
-  }
-  if (parts.length === 0) return null;
-  return parts.join("\n\n");
 }
 
 /**

@@ -166,6 +166,8 @@ class Sidecar {
       return;
     }
 
+    log.info(`${this.kind}: starting (pid ${proc.pid}): ${options.binary}`);
+
     const abort = new AbortController();
     const active: Active = {
       startId: myStartId,
@@ -205,6 +207,7 @@ class Sidecar {
     }
 
     if (!this.isCurrent(myStartId)) return;
+    log.info(`${this.kind}: running (pid ${active.pid})`);
     this.emit({ kind: this.kind, status: "Running", pid: active.pid });
   }
 
@@ -218,6 +221,7 @@ class Sidecar {
     this.active = null;
     this.startId += 1;
     await this.terminateActive(active);
+    log.info(`${this.kind}: stopped`);
     this.emit({ kind: this.kind, status: "Disabled" });
   }
 
@@ -251,6 +255,9 @@ class Sidecar {
             if (active.recentLogs.length > RECENT_LOG_LINES) {
               active.recentLogs.shift();
             }
+            // DEBUG on a dependency-gated scope (see DEPENDENCY_SCOPE_LEVELS
+            // in shared/log.ts): the binaries' chatter stays out of the logs;
+            // crash context still surfaces via the recentLogs ring above.
             log.debug(`[${this.kind}/${tag}] ${trimmed}`);
             if (marker && trimmed.includes(marker)) {
               (active as Active & { _markerSeen?: boolean })._markerSeen = true;

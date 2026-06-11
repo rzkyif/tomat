@@ -73,7 +73,10 @@ export async function main(): Promise<void> {
   step("Compiling + validating catalog");
   const payload = buildCatalogPayload(new Date().toISOString());
   const modelCount = payload.families.reduce((n, f) => n + f.models.length, 0);
-  ok(`${payload.families.length} families, ${modelCount} models`);
+  ok(
+    `${payload.families.length} families, ${modelCount} models, ` +
+      `${payload.stt.models.length} stt models`,
+  );
 
   step("Signing catalog.json");
   const catalog: ModelCatalog = {

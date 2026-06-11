@@ -70,9 +70,10 @@ export function buildClient(endpoint: LlmEndpointConfig): OpenAI {
   return new OpenAI({
     baseURL: endpoint.baseUrl,
     apiKey: endpoint.apiKey || "sk-local",
-    // Disable the SDK's default 60-second client-side timeout: our streams
-    // can legitimately run longer for big completions.
-    timeout: 0,
+    // Keep the SDK's default timeout (10 minutes). It only bounds the time to
+    // response headers, not the streamed body, so long completions are fine.
+    // Never pass `timeout: 0`: the SDK treats it as a literal 0ms deadline and
+    // aborts every request instantly with "Request timed out".
     maxRetries: 0,
     // The SDK's `Fetch` type ultimately resolves through DOM's RequestInit;
     // Deno's RequestInit body differs at the ReadableStream<.read(view)>
@@ -94,23 +95,20 @@ export async function* streamChatCompletion(req: LlmRequest): AsyncIterable<LlmD
   const maxTokens = req.overrides?.maxTokens ?? req.endpoint.maxTokens;
 
   const extra: Record<string, unknown> = {};
-  if (req.endpoint.reasoning && req.endpoint.reasoning !== "off") {
+  if (req.endpoint.reasoning) {
     const isLocal = isLocalEndpoint(req.endpoint.baseUrl);
     if (isLocal) {
       // llama.cpp accepts `chat_template_kwargs.enable_thinking` (per its
-      // server docs). We're inside the `!== "off"` branch, so thinking is
-      // always on when emitted; "auto" lets the model decide whether to
-      // actually produce a trace.
-      extra.chat_template_kwargs = { enable_thinking: true };
-    } else {
-      // OpenAI-compatible servers accept `reasoning_effort`. Map our
-      // tri-state to the effort levels: on→high, auto→low, off→minimal.
-      extra.reasoning_effort =
-        req.endpoint.reasoning === "on"
-          ? "high"
-          : req.endpoint.reasoning === "auto"
-            ? "low"
-            : "minimal";
+      // server docs). Thinking-by-default models (e.g. Qwen3) keep thinking
+      // unless the template is explicitly told `false`, so "off" must send
+      // the flag rather than omit it. "auto" lets the model decide whether
+      // to actually produce a trace.
+      extra.chat_template_kwargs = { enable_thinking: req.endpoint.reasoning !== "off" };
+    } else if (req.endpoint.reasoning !== "off") {
+      // OpenAI-compatible servers accept `reasoning_effort`: on→high,
+      // auto→low. "off" sends nothing: non-reasoning models reject the
+      // parameter.
+      extra.reasoning_effort = req.endpoint.reasoning === "on" ? "high" : "low";
     }
   }
 

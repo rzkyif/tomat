@@ -1,7 +1,7 @@
 // Embedding subprocess: hosts @huggingface/transformers, reads NDJSON
 // frames from stdin, writes NDJSON frames to stdout. Spawned by
 // sidecars/embedding.ts with minimal Deno permissions
-// (--allow-read=<models-dir>, --allow-env=ORT_LOG_LEVEL).
+// (--allow-read=<models-dir>,<deno-cache>, --allow-env, --allow-ffi).
 //
 // The model (Xenova/all-MiniLM-L6-v2, 384-dim, L2-normalized) is loaded
 // lazily on first embed call and stays warm for the worker's lifetime.
@@ -22,7 +22,12 @@
 // deno.json nearby. Keep the version pinned in lockstep with tomat-core's
 // own deno.json import.
 import { env, pipeline } from "npm:@huggingface/transformers@^4.2.0";
-import { errMessage } from "@tomat/shared";
+
+// Inlined from @tomat/shared: there is no import map next to the installed
+// worker to resolve workspace aliases.
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 const REPO = "Xenova/all-MiniLM-L6-v2";
 

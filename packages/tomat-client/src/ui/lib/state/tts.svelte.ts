@@ -81,6 +81,30 @@ function splitAtMaxWords(
   return { head, tail, headWords, tailWords };
 }
 
+/** A short clip of 16-bit mono PCM silence wrapped in a WAV header. Used by
+ *  the playback warm-up (see setEnabled) - it has to be a real playable
+ *  source, but it must not make any noise. */
+function makeSilentWav(durationMs: number): ArrayBuffer {
+  const sampleRate = 24000;
+  const dataSize = Math.round((sampleRate * durationMs) / 1000) * 2;
+  const buf = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buf);
+  view.setUint32(0, 0x52494646, false); // "RIFF"
+  view.setUint32(4, 36 + dataSize, true);
+  view.setUint32(8, 0x57415645, false); // "WAVE"
+  view.setUint32(12, 0x666d7420, false); // "fmt "
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  view.setUint32(36, 0x64617461, false); // "data"
+  view.setUint32(40, dataSize, true);
+  return buf;
+}
+
 // Smart-batching parameters. Kokoro is most efficient at ~100-200 tokens
 // per request, which is roughly 25-50 words. We try to grow each chunk
 // (after the first) up to MAX_WORDS, but never let a gap form between
@@ -153,6 +177,8 @@ class TTSState {
     if (enabled) {
       if (this.loaded || this.loading) return;
       this.loading = true;
+      const t0 = performance.now();
+      log.info("loading TTS model...");
       try {
         // Don't download here: flipping `tts.enabled` makes the core add the
         // Kokoro files to its required-files snapshot, which the single
@@ -167,6 +193,12 @@ class TTSState {
         // the currently selected voice loads the right tensor into the
         // module's voice cache. Failure is non-fatal - we still mark
         // loaded so the user can use TTS.
+        // Warm the playback side in parallel: the very first audio playback
+        // of the process pays a one-time output-pipeline spin-up (WebKit
+        // audio rendering + OS output device), during which the element's
+        // clock advances while nothing is audible - the start of the first
+        // real reply gets clipped. Absorb that cost with a silent clip now.
+        const playbackWarm = this.warmPlayback();
         try {
           const settings = settingsState.currentSettings;
           const voice = (settings["tts.voice"] as string) || "af_bella";
@@ -178,7 +210,9 @@ class TTSState {
         } catch (e) {
           log.warn("pre-warm failed (non-fatal):", e);
         }
+        await playbackWarm;
         this.loaded = true;
+        log.info(`TTS ready in ${Math.round(performance.now() - t0)}ms`);
       } catch (e) {
         log.error("load failed:", e);
         this.loaded = false;
@@ -195,6 +229,27 @@ class TTSState {
       } catch (e) {
         log.warn("unload failed:", e);
       }
+    }
+  }
+
+  /** Play a short silent WAV at zero volume to spin up the audio output
+   *  pipeline before the first real chunk needs it. Non-fatal on failure. */
+  private async warmPlayback(): Promise<void> {
+    const url = URL.createObjectURL(new Blob([makeSilentWav(300)], { type: "audio/wav" }));
+    try {
+      const audio = new Audio();
+      audio.preload = "auto";
+      audio.src = url;
+      audio.volume = 0;
+      await audio.play();
+      await new Promise<void>((resolve) => {
+        audio.onended = () => resolve();
+        audio.onerror = () => resolve();
+      });
+    } catch (e) {
+      log.warn("playback warm-up failed (non-fatal):", e);
+    } finally {
+      URL.revokeObjectURL(url);
     }
   }
 
@@ -229,7 +284,15 @@ class TTSState {
 
   /** Hand a completed (or near-completed on finalize) sentence to the batcher. */
   feedSentence(text: string): void {
-    if (!this.enabled || !this.loaded) return;
+    if (!this.enabled) return;
+    if (!this.loaded) {
+      // A boot-time load may have failed because the model files weren't
+      // downloaded yet. Retry in the background (setEnabled no-ops while a
+      // load is in flight) so TTS picks up on a later message without a
+      // restart; the current sentence is dropped either way.
+      if (!this.loading) void this.setEnabled(true);
+      return;
+    }
     const trimmed = text.trim();
     if (!trimmed) return;
     this.pending += this.pending ? " " + trimmed : trimmed;
@@ -363,6 +426,7 @@ class TTSState {
         // Update the learned synth cost. Slight bias toward the latest
         // observation so the estimate tracks model warm-up / cool-down.
         const synthMs = performance.now() - t0;
+        log.debug(`synthesized ${words} words in ${Math.round(synthMs)}ms`);
         const observed = synthMs / Math.max(1, words);
         this.msPerWord = this.msPerWord === null ? observed : this.msPerWord * 0.4 + observed * 0.6;
 

@@ -138,6 +138,9 @@ export async function initSidecarBoot(): Promise<void> {
 export async function applyLlama(settings: Record<string, unknown>): Promise<void> {
   const args = llamaStartArgsFromSettings(settings);
   if (!args) {
+    log.info(
+      "llama-server gated off by settings (external provider or no model path); not running",
+    );
     await sidecarManager().stop("llama");
     return;
   }
@@ -178,6 +181,9 @@ export async function applyLlama(settings: Record<string, unknown>): Promise<voi
 async function applyWhisper(settings: Record<string, unknown>): Promise<void> {
   const args = whisperStartArgsFromSettings(settings);
   if (!args) {
+    log.info(
+      "whisper-server gated off by settings (stt disabled, external provider, or no model path); not running",
+    );
     await sidecarManager().stop("whisper");
     return;
   }

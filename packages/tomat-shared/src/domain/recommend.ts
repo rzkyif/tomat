@@ -69,6 +69,25 @@ export interface RecommendationSet {
   applied: { preset?: string; modelPath?: string };
 }
 
+/** The concrete `stt.*` values a Speech-to-Text selection applies (host/port
+ *  are never touched). */
+export interface AppliedSttSettings {
+  modelPath: string; // HF spec "@org/repo/branch/file.bin"
+  threads: number;
+}
+
+/** One curated Speech-to-Text card resolved against the catalog, the wire shape
+ *  of GET /api/v1/models/stt/catalog presets (badges for the client). */
+export interface SttPresetView {
+  id: string;
+  modelId: string;
+  name: string;
+  english: boolean;
+  quant: string;
+  modelSpec: string;
+  fileSizeBytes: number;
+}
+
 /** One selectable quantization of a model, with how it lands on this device. */
 export interface QuantOption {
   /** Unique HF spec "@provider/repo/branch/file.gguf" (identifies the quant). */

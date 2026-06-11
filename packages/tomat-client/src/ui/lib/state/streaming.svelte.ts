@@ -1,54 +1,61 @@
 /**
  * Live LLM-stream layer. The actual LLM call + tool-call orchestration runs
- * server-side in tomat-core; this client-side module:
- *   - sends chat.start / chat.interrupt / tool.cancel / tool.askuser_response
- *     WS frames
- *   - mutates messagesState as chat.chunk / chat.toolfilter / etc. frames arrive
+ * server-side in tomat-core, and the server owns message identity and order:
+ * every chat-born message arrives as a `chat.message` snapshot (birth, then
+ * a final persisted form) and its text streams in via `chat.delta` frames
+ * keyed by the server-minted message id. This module:
+ *   - sends chat.start / chat.interrupt WS frames
+ *   - reduces chat.message / chat.delta / tool.* frames into messagesState
  *   - drives the TTS feed cursor from the streaming assistant text
- *   - exposes the same `isActive`/`hasActiveWork`/`messageId` surface
- *     legacy components already read.
+ *   - exposes the `isActive`/`hasActiveWork`/`isLive` surface components read.
  */
 
-import type { ErrorCode, PendingToolCall, ServerToClientFrame } from "@tomat/shared";
-import { type LLMErrorType, makeMessageId } from "$lib/shared/types";
+import type { ErrorCode, Message as ServerMessage, ServerToClientFrame } from "@tomat/shared";
+import { type LLMErrorType, makeMessageId, type Message } from "$lib/shared/types";
 import { stripEmojisForTTS, stripMarkdownForTTS } from "$lib/shared/text";
+import { buildToolsHint } from "$lib/shared/system-prompt";
 import { cores } from "$lib/core";
 import { getLogger } from "$lib/shared/log";
 import { messagesState } from "./messages.svelte";
 import { sessionsState } from "./sessions.svelte";
 import { settingsState } from "./settings.svelte";
 import { ttsState } from "./tts.svelte";
+import { viewState } from "./view.svelte";
 
 const log = getLogger("streaming");
-
-const STREAM_FLUSH_MS = 30;
 
 type InterruptListener = () => void | Promise<void>;
 
 class StreamingState {
   isActive = $state(false);
-  firstChunkReceived = $state(false);
-  messageId = $state<string | null>(null);
+  /** True between sending chat.start (or a tool final mid-turn) and the next
+   *  reasoning/assistant birth. Drives the loading-sentinel spinner, covering
+   *  both the pre-first-token gap and the between-hops prompt processing on
+   *  slow local models. */
+  awaitingFirstDelta = $state(false);
   turnAnchorId = $state<string | null>(null);
-  reasoningId = $state<string | null>(null);
   streamId = $state<string | null>(null);
+  /** Ids of messages born in the in-flight turn that haven't received their
+   *  final snapshot yet. Drives per-bubble streaming affordances. */
+  liveIds = $state<ReadonlySet<string>>(new Set());
 
   hasActiveWork = $derived(this.isActive || messagesState.hasActiveToolCall);
 
-  private streamBuffer = "";
-  private streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  // TTS feed target + cursor into its stripped text. Ids are server-minted
+  // and never change, so no handoff rewrites are needed; a new assistant
+  // bubble claims the feed only when playback is idle.
+  private ttsTargetId: string | null = null;
   private ttsCursor = 0;
-  // Cached array positions of the active assistant + reasoning messages so the
-  // hot streaming path doesn't findIndex() over the whole transcript on every
-  // flushed chunk. The id check below makes a stale cache self-correcting: if
-  // the array shifted, the fast path misses and we re-scan, so this can never
-  // return a wrong index.
-  private cachedActiveIdx = -1;
-  private cachedReasoningIdx = -1;
-  private reasoningStartTime: number | null = null;
+  // Whether this turn has seen an assistant birth yet: the first one starts
+  // the TTS stream outright, later hops only claim it when idle.
+  private turnHadAssistant = false;
   private interruptListeners: InterruptListener[] = [];
   private unsubscribeWs: (() => void) | null = null;
   private unsubscribeConn: (() => void) | null = null;
+
+  isLive(id: string | undefined): boolean {
+    return id !== undefined && this.liveIds.has(id);
+  }
 
   onInterrupt(fn: InterruptListener): () => void {
     this.interruptListeners.push(fn);
@@ -93,34 +100,6 @@ class StreamingState {
     ttsState.reset();
   }
 
-  private getActiveIndex(): number {
-    if (this.messageId === null) return -1;
-    const msgs = messagesState.messages;
-    if (
-      this.cachedActiveIdx >= 0 &&
-      this.cachedActiveIdx < msgs.length &&
-      msgs[this.cachedActiveIdx]?.id === this.messageId
-    ) {
-      return this.cachedActiveIdx;
-    }
-    this.cachedActiveIdx = msgs.findIndex((m) => m.id === this.messageId);
-    return this.cachedActiveIdx;
-  }
-
-  private getReasoningIndex(): number {
-    if (this.reasoningId === null) return -1;
-    const msgs = messagesState.messages;
-    if (
-      this.cachedReasoningIdx >= 0 &&
-      this.cachedReasoningIdx < msgs.length &&
-      msgs[this.cachedReasoningIdx]?.id === this.reasoningId
-    ) {
-      return this.cachedReasoningIdx;
-    }
-    this.cachedReasoningIdx = msgs.findIndex((m) => m.id === this.reasoningId);
-    return this.cachedReasoningIdx;
-  }
-
   beginTurn(anchorUserId: string | null): void {
     this.turnAnchorId = anchorUserId;
   }
@@ -132,34 +111,42 @@ class StreamingState {
       return;
     }
     this.isActive = true;
-    this.firstChunkReceived = false;
-    this.reasoningStartTime = null;
-    this.reasoningId = null;
+    this.awaitingFirstDelta = true;
+    this.turnHadAssistant = false;
+    this.liveIds = new Set();
+    this.ttsTargetId = null;
     this.ttsCursor = 0;
-    this.cachedActiveIdx = -1;
-    this.cachedReasoningIdx = -1;
-    const assistantId = makeMessageId();
     const streamId = makeMessageId();
-    this.messageId = assistantId;
     this.streamId = streamId;
-    ttsState.startStream(assistantId);
-    messagesState.insertAtTurnAnchor({
-      id: assistantId,
-      role: "assistant",
-      content: "",
-      modelUsed,
-    });
-    cores().api().chat.start(streamId, sessionId, modelUsed);
+    // The system bubble holds the effective prompt for this turn (base +
+    // context block + snippet overrides), kept current by addUserMessage and
+    // the edit flows. Sending its exact content keeps the bubble truthful:
+    // what the UI shows as "the system prompt" is what the model receives.
+    // The tools hint rides along separately; core appends it iff tools
+    // survive the filter, and mirrors that on the tool_filter message's
+    // `toolsSent` so onFrame can append the same hint to the bubble.
+    const systemMsg = messagesState.messages.find((m) => m.role === "system");
+    const systemPrompt = typeof systemMsg?.content === "string" ? systemMsg.content : undefined;
+    const toolsHint = buildToolsHint() || undefined;
+    cores()
+      .api()
+      .chat.start(streamId, sessionId, modelUsed, {
+        systemPrompt,
+        toolsHint,
+        anchorMessageId: this.turnAnchorId ?? undefined,
+      });
   }
 
   private onFrame(frame: ServerToClientFrame): void {
-    if (frame.kind === "chat.chunk" && frame.streamId === this.streamId) {
-      if (frame.contentDelta) this.appendContent(frame.contentDelta);
-      if (frame.reasoningDelta) this.appendReasoning(frame.reasoningDelta);
+    if (frame.kind === "chat.message" && frame.streamId === this.streamId) {
+      this.onChatMessage(frame.message as ServerMessage, frame.afterId, frame.final);
       return;
     }
-    if (frame.kind === "chat.toolcall_requested" && frame.streamId === this.streamId) {
-      this.setPendingToolCalls(frame.calls);
+    if (frame.kind === "chat.delta" && frame.streamId === this.streamId) {
+      const full = messagesState.appendDelta(frame.messageId, frame.delta);
+      if (full !== null && frame.messageId === this.ttsTargetId) {
+        this.feedTTS(full, false);
+      }
       return;
     }
     if (frame.kind === "chat.usage" && frame.streamId === this.streamId) {
@@ -167,21 +154,11 @@ class StreamingState {
       return;
     }
     if (frame.kind === "chat.done" && frame.streamId === this.streamId) {
-      void this.finish();
+      this.finish();
       return;
     }
     if (frame.kind === "chat.error" && frame.streamId === this.streamId) {
       this.recordError(frame.code as LLMErrorType, frame.message);
-      return;
-    }
-    if (frame.kind === "chat.toolfilter" && frame.streamId === this.streamId) {
-      messagesState.upsertToolFilter({
-        status: frame.status,
-        phase1: frame.phase1 ?? null,
-        phase2: frame.phase2 ?? null,
-        alwaysAvailable: frame.alwaysAvailable ?? null,
-        errorMessage: frame.errorMessage,
-      });
       return;
     }
     if (
@@ -196,99 +173,81 @@ class StreamingState {
     }
   }
 
-  appendContent(content: string): void {
-    const idx = this.getActiveIndex();
-    if (idx < 0) return;
-    if (!this.firstChunkReceived) {
-      this.firstChunkReceived = true;
-      this.finalizeReasoningDuration();
-      messagesState.messages[idx] = { ...messagesState.messages[idx], content: "" };
-      this.streamBuffer = "";
+  private onChatMessage(msg: ServerMessage, afterId: string | null, final: boolean): void {
+    messagesState.applyServerMessage(msg, afterId);
+    const local = msg as unknown as Message;
+    if (local.role === "assistant" || local.role === "reasoning") {
+      this.awaitingFirstDelta = false;
     }
-    this.streamBuffer += content;
-    if (!this.streamFlushTimer) {
-      this.streamFlushTimer = setTimeout(() => this.flushStreamBuffer(), STREAM_FLUSH_MS);
+    if (!final) {
+      const next = new Set(this.liveIds);
+      next.add(msg.id);
+      this.liveIds = next;
+      if (local.role === "assistant") this.claimTTS(msg.id);
+      return;
+    }
+    // Final snapshot.
+    if (this.liveIds.has(msg.id)) {
+      const next = new Set(this.liveIds);
+      next.delete(msg.id);
+      this.liveIds = next;
+    }
+    if (local.role === "assistant" && msg.id === this.ttsTargetId) {
+      const text = typeof local.content === "string" ? local.content : "";
+      this.feedTTS(text, true);
+    }
+    // A finished tool call means the next hop's prompt is processing; bring
+    // the spinner back until that hop's first reasoning/assistant birth.
+    if (local.role === "tool" && this.isActive) {
+      this.awaitingFirstDelta = true;
+    }
+    // Core appended the tools hint to this turn's system prompt; mirror it
+    // into the system bubble so it keeps showing exactly what the model
+    // received.
+    if (local.role === "tool_filter" && local.status === "complete" && (local.toolsSent ?? 0) > 0) {
+      messagesState.appendSystemToolsHint(buildToolsHint());
     }
   }
 
-  appendReasoning(delta: string): void {
-    if (!delta) return;
-    if (this.messageId === null) return;
-    if (this.firstChunkReceived) return;
-    if (this.reasoningId === null) {
-      const contentIdx = this.getActiveIndex();
-      if (contentIdx < 0) return;
-      const contentMsg = messagesState.messages[contentIdx];
-      const reasoningId = makeMessageId();
-      this.reasoningId = reasoningId;
-      this.reasoningStartTime = Date.now();
-      messagesState.messages.splice(contentIdx + 1, 0, {
-        id: reasoningId,
-        role: "reasoning",
-        content: delta,
-        modelUsed: contentMsg.modelUsed,
-        pairedAssistantId: contentMsg.id,
-      });
-      // The reasoning row sits right after the content row; seed its cache.
-      this.cachedReasoningIdx = contentIdx + 1;
+  /** Point the TTS feed at an assistant message. The turn's first assistant
+   *  bubble starts the stream outright; later hops only claim the feed when
+   *  playback is idle, so hop-1 speech is never cut mid-sentence. */
+  private claimTTS(messageId: string): void {
+    if (!this.turnHadAssistant) {
+      this.turnHadAssistant = true;
+      ttsState.startStream(messageId);
+      this.ttsTargetId = messageId;
+      this.ttsCursor = 0;
       return;
     }
-    const idx = this.getReasoningIndex();
-    if (idx < 0) return;
-    const cur = (messagesState.messages[idx].content as string) || "";
-    messagesState.messages[idx] = { ...messagesState.messages[idx], content: cur + delta };
-  }
-
-  private finalizeReasoningDuration(): void {
-    if (this.reasoningId === null) {
-      this.reasoningStartTime = null;
-      return;
+    if (ttsState.liveSourceCount === 0 && !ttsState.synthInflight) {
+      ttsState.currentMessageId = messageId;
+      this.ttsTargetId = messageId;
+      this.ttsCursor = 0;
     }
-    const idx = this.getReasoningIndex();
-    if (idx < 0) {
-      this.reasoningId = null;
-      this.reasoningStartTime = null;
-      return;
-    }
-    if (this.reasoningStartTime !== null) {
-      const duration = Date.now() - this.reasoningStartTime;
-      messagesState.messages[idx] = {
-        ...messagesState.messages[idx],
-        reasoningDurationMs: duration,
-      };
-    }
-    this.reasoningId = null;
-    this.reasoningStartTime = null;
-  }
-
-  private flushStreamBuffer(): void {
-    this.streamFlushTimer = null;
-    if (!this.streamBuffer) return;
-    const idx = this.getActiveIndex();
-    if (idx < 0) {
-      this.streamBuffer = "";
-      return;
-    }
-    const cur = (messagesState.messages[idx]?.content as string) || "";
-    const next = cur + this.streamBuffer;
-    messagesState.messages[idx] = { ...messagesState.messages[idx], content: next };
-    this.streamBuffer = "";
-    void this.feedTTS(next, false);
   }
 
   private feedTTS(fullText: string, final: boolean): void {
     const settings = settingsState.currentSettings;
     if (!settings["tts.enabled"]) return;
     if (!ttsState.loaded) return;
-    const activeId = this.messageId;
     if (
       ttsState.currentMessageId !== null &&
-      activeId !== null &&
-      ttsState.currentMessageId !== activeId
+      this.ttsTargetId !== null &&
+      ttsState.currentMessageId !== this.ttsTargetId
     )
       return;
     let stripped = stripMarkdownForTTS(fullText);
     if (!settings["tts.spellOutEmojis"]) stripped = stripEmojisForTTS(stripped);
+    // Speech belongs to the chat view: navigating away resets playback (see
+    // viewState.navigate), and this guard keeps a still-running stream from
+    // re-arming it at the next sentence boundary. The cursor skips what
+    // streamed while away, so returning mid-stream resumes with new
+    // sentences only.
+    if (viewState.pendingMode !== "chat") {
+      this.ttsCursor = stripped.length;
+      return;
+    }
     const remaining = stripped.slice(this.ttsCursor);
     if (!remaining) {
       if (final) ttsState.finalize();
@@ -308,129 +267,50 @@ class StreamingState {
     if (final) ttsState.finalize();
   }
 
-  private cancelStreamBuffer(): void {
-    if (this.streamFlushTimer) {
-      clearTimeout(this.streamFlushTimer);
-      this.streamFlushTimer = null;
-    }
-    this.flushStreamBuffer();
-  }
-
-  private quiesceStream(): void {
-    this.cancelStreamBuffer();
-    this.finalizeReasoningDuration();
+  private finish(): void {
     this.isActive = false;
-    this.messageId = null;
+    this.awaitingFirstDelta = false;
     this.streamId = null;
-  }
-
-  async finish(): Promise<void> {
-    const idx = this.getActiveIndex();
-    this.quiesceStream();
     this.turnAnchorId = null;
-    const finalText = idx >= 0 ? (messagesState.messages[idx]?.content as string) || "" : "";
-    void this.feedTTS(finalText, true);
-  }
-
-  setPendingToolCalls(calls: PendingToolCall[]): void {
-    const idx = this.getActiveIndex();
-    if (idx < 0) return;
-    messagesState.messages[idx] = {
-      ...messagesState.messages[idx],
-      pendingToolCalls: calls,
-    };
-  }
-
-  pauseForToolCalls(): void {
-    this.quiesceStream();
-    this.resetTTSPlayback();
+    this.liveIds = new Set();
   }
 
   recordError(errorType: LLMErrorType | ErrorCode, detail?: string): void {
-    const idx = this.getActiveIndex();
-    this.quiesceStream();
-    this.turnAnchorId = null;
+    // Partial streamed content was already finalized server-side (flagged
+    // interrupted), so the error gets its own bubble instead of replacing
+    // anything.
     const content = detail ? `${errorType}\n${detail}` : String(errorType);
-    if (idx >= 0) {
-      const existing = messagesState.messages[idx];
-      // Build the replacement as a typed Message. The Message union
-      // already carries `role: "error"` as a valid variant, so no cast
-      // is needed.
-      const replacement: (typeof messagesState.messages)[number] = {
-        ...(existing.id ? { id: existing.id } : {}),
-        role: "error",
-        content,
-      };
-      messagesState.messages[idx] = replacement;
-    }
+    messagesState.addMessage({ role: "error", content });
+    this.finish();
   }
 
+  /** Stop the turn from the user's side. The UI unlocks immediately;
+   *  streamId stays set so the server's interrupted final snapshots (and the
+   *  chat.done that follows) still land on the bubbles. */
   cancel(): void {
     if (!this.isActive) return;
-    this.cancelStreamBuffer();
     this.resetTTSPlayback();
-    this.finalizeReasoningDuration();
-    const idx = this.getActiveIndex();
-    if (idx >= 0) {
-      if (this.firstChunkReceived) {
-        const current = messagesState.messages[idx].content;
-        if (typeof current === "string") {
-          messagesState.messages[idx] = {
-            ...messagesState.messages[idx],
-            content: current + "\n\n> _User interrupted._",
-          };
-        }
-      } else {
-        messagesState.messages[idx] = {
-          ...messagesState.messages[idx],
-          content: "> _User interrupted._",
-        };
-      }
-    }
     this.isActive = false;
-    this.firstChunkReceived = false;
-    this.messageId = null;
-    this.streamId = null;
-    this.turnAnchorId = null;
+    this.awaitingFirstDelta = false;
   }
 
-  /** Abort an in-flight stream because the core connection dropped (e.g. a dev
-   *  hot-reload restart). Mirrors cancel() but with disconnect wording and no
-   *  chat.interrupt frame: the socket is down, so there's nothing to tell the
-   *  server (its stream tears down on the closed socket). The note keeps the
-   *  partial reply visible until a reconnect reload (sessionsState) resyncs from
-   *  the server's truth. */
+  /** Abort an in-flight stream because the core connection dropped (e.g. a
+   *  dev hot-reload restart). No chat.interrupt frame: the socket is down, so
+   *  there's nothing to tell the server. Bubbles that never got their final
+   *  snapshot were never persisted; the reconnect reload in sessionsState
+   *  resyncs to the server's truth. */
   abortForDisconnect(): void {
     if (!this.isActive) return;
-    const idx = this.getActiveIndex();
     this.resetTTSPlayback();
-    this.quiesceStream();
-    this.firstChunkReceived = false;
-    this.turnAnchorId = null;
-    if (idx >= 0) {
-      const current = messagesState.messages[idx]?.content;
-      messagesState.messages[idx] = {
-        ...messagesState.messages[idx],
-        content:
-          typeof current === "string" && current.length > 0
-            ? current + "\n\n> _Disconnected from core; reply interrupted._"
-            : "> _Disconnected from core; reply interrupted._",
-      };
-    }
+    this.finish();
   }
 
   abortSilently(): void {
     if (!this.isActive) return;
-    this.cancelStreamBuffer();
     this.resetTTSPlayback();
-    this.isActive = false;
-    this.firstChunkReceived = false;
-    this.reasoningStartTime = null;
-    this.messageId = null;
-    this.reasoningId = null;
-    this.turnAnchorId = null;
-    if (this.streamId) cores().api().chat.interrupt(this.streamId);
-    this.streamId = null;
+    const streamId = this.streamId;
+    this.finish();
+    if (streamId) cores().api().chat.interrupt(streamId);
   }
 
   async interruptStreaming(): Promise<void> {
@@ -443,20 +323,13 @@ class StreamingState {
 
   resetForSession(): void {
     this.isActive = false;
-    this.firstChunkReceived = false;
-    this.messageId = null;
-    this.reasoningId = null;
-    this.turnAnchorId = null;
+    this.awaitingFirstDelta = false;
     this.streamId = null;
-    this.streamBuffer = "";
+    this.turnAnchorId = null;
+    this.liveIds = new Set();
+    this.ttsTargetId = null;
     this.ttsCursor = 0;
-    this.cachedActiveIdx = -1;
-    this.cachedReasoningIdx = -1;
-    this.reasoningStartTime = null;
-    if (this.streamFlushTimer) {
-      clearTimeout(this.streamFlushTimer);
-      this.streamFlushTimer = null;
-    }
+    this.turnHadAssistant = false;
   }
 }
 

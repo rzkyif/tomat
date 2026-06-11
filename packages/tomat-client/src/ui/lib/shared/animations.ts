@@ -38,16 +38,35 @@ export function enableMessageAnimations() {
   messageAnimationsReady = true;
 }
 
+/** Whether the message's entry animation already ran (or was recorded while
+ *  gated). Lets the transcript compute stagger delays for only the bubbles
+ *  that are actually about to enter. */
+export function hasMessageAnimated(msgId: string): boolean {
+  return messagesSeen.has(msgId);
+}
+
 /**
- * Imperatively run the per-message entry animation: a two-phase rAF where
- * phase A grows max-height (so neighbours don't jump) and phase B slides +
- * fades the bubble in from the alignment-appropriate edge.
+ * Imperatively run the per-message entry animation: one eased rAF phase that
+ * simultaneously grows max-height (so neighbours don't jump) and slides the
+ * bubble in from the alignment-appropriate edge. No fade: the bubble is
+ * fully opaque the whole way. For the duration the node is pushed to
+ * z-index -1, so a bubble entering a stack row emerges from UNDER its
+ * neighbors instead of sweeping over them.
  *   - `msgId` is used to dedupe replays: a bubble that's already been
  *     animated stays animated even if its parent reshuffles (e.g. when
  *     MessageStackGroup regroups).
+ *   - `delayMs` holds the bubble offscreen (collapsed) before the motion
+ *     starts. Used to stagger bubbles that mount in the same flush as
+ *     another (the tool_filter created alongside its user message), so the
+ *     entrances read sequentially instead of racing.
  * No outro: there is no symmetric exit animation, removals are instant.
  */
-export function runMessageEnter(node: HTMLElement, alignment: Alignment, msgId?: string): void {
+export function runMessageEnter(
+  node: HTMLElement,
+  alignment: Alignment,
+  msgId?: string,
+  delayMs = 0,
+): void {
   if (msgId) {
     if (messagesSeen.has(msgId)) return;
     messagesSeen.add(msgId);
@@ -58,12 +77,18 @@ export function runMessageEnter(node: HTMLElement, alignment: Alignment, msgId?:
   if (dur <= 0) return;
 
   const height = node.offsetHeight;
-  const startTime = performance.now();
 
   const setOffscreen = () => {
+    // Scoped to the animation: left in place permanently, will-change makes
+    // the row a stacking context, which lets one bubble's shadow paint over
+    // its neighbors (see Bubble.svelte's shadow layering).
+    node.style.willChange = "transform";
+    // Below every settled sibling (bodies z-10, shadows z-0) while entering;
+    // needs position since the node is a plain block, not a flex item.
+    node.style.position = "relative";
+    node.style.zIndex = "-1";
     node.style.maxHeight = "0";
     node.style.overflow = "hidden";
-    node.style.opacity = "0";
     if (alignment === "left") node.style.transform = "translateX(-100%)";
     else if (alignment === "right") node.style.transform = "translateX(100%)";
     else node.style.transform = "translateY(100%)";
@@ -72,33 +97,33 @@ export function runMessageEnter(node: HTMLElement, alignment: Alignment, msgId?:
   setOffscreen();
   void node.offsetHeight;
 
+  let startTime = 0;
   const frame = (now: number) => {
+    if (startTime === 0) startTime = now;
     const t = Math.min(1, (now - startTime) / dur);
     if (t >= 1) {
+      node.style.willChange = "";
+      node.style.position = "";
+      node.style.zIndex = "";
       node.style.maxHeight = "";
       node.style.overflow = "";
-      node.style.opacity = "";
       node.style.transform = "";
       return;
     }
-    const phaseA = Math.min(1, t * 2);
-    const phaseB = Math.max(0, (t - 0.5) * 2);
-    const heightProgress = easeInOut(phaseA);
-    const slideProgress = easeInOut(phaseB);
-    const h = height * heightProgress;
-    const travel = 100 * (1 - slideProgress);
+    const p = easeInOut(t);
+    const travel = 100 * (1 - p);
     let transform: string;
     if (alignment === "left") transform = `translateX(${-travel}%)`;
     else if (alignment === "right") transform = `translateX(${travel}%)`;
     else transform = `translateY(${travel}%)`;
-    node.style.maxHeight = `${h}px`;
+    node.style.maxHeight = `${height * p}px`;
     node.style.overflow = "hidden";
-    node.style.opacity = `${slideProgress}`;
     node.style.transform = transform;
     requestAnimationFrame(frame);
   };
 
-  requestAnimationFrame(frame);
+  if (delayMs > 0) setTimeout(() => requestAnimationFrame(frame), delayMs);
+  else requestAnimationFrame(frame);
 }
 
 /**

@@ -10,7 +10,7 @@ Deno.test("resolveEndpoint: defaults to local llama-server when provider is unse
   assertEquals(cfg.baseUrl, "http://127.0.0.1:7701/v1");
   assertEquals(cfg.apiKey, "sk-local");
   assertEquals(cfg.model, "default");
-  assertEquals(cfg.reasoning, "off");
+  assertEquals(cfg.reasoning, "on");
 });
 
 Deno.test("resolveEndpoint: local provider honors llm.host and llm.port", async () => {

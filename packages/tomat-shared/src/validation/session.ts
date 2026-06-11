@@ -121,10 +121,9 @@ export const assistantMessageInputSchema = z
     ...baseShape,
     role: z.literal("assistant"),
     content: z.string(),
-    streaming: z.boolean().optional(),
     toolCalls: z.array(toolCallSchema).optional(),
-    pendingToolCalls: z.array(toolCallSchema).optional(),
     modelUsed: z.enum(["default", "secondary"]).optional(),
+    interrupted: z.boolean().optional(),
   })
   .strict();
 
@@ -143,9 +142,13 @@ export const toolMessageInputSchema = z
     callId: z.string(),
     toolkitId: z.string(),
     toolName: z.string(),
+    arguments: z.string(),
     result: z.unknown().optional(),
     error: z.string().optional(),
     status: toolCallStatusSchema,
+    progress: z.number().optional(),
+    label: z.string().optional(),
+    description: z.string().optional(),
   })
   .strict();
 
@@ -154,7 +157,7 @@ export const reasoningMessageInputSchema = z
     ...baseShape,
     role: z.literal("reasoning"),
     content: z.string(),
-    streaming: z.boolean().optional(),
+    interrupted: z.boolean().optional(),
     reasoningDurationMs: z.number().optional(),
     pairedAssistantId: z.string().optional(),
     modelUsed: z.enum(["default", "secondary"]).optional(),
@@ -169,6 +172,7 @@ export const toolFilterMessageInputSchema = z
     phase1: z.array(toolFilterPhase1Schema).optional(),
     phase2: z.array(toolFilterEntrySchema).optional(),
     alwaysAvailable: z.array(toolFilterEntrySchema).optional(),
+    toolsSent: z.number().int().min(0).optional(),
     errorMessage: z.string().optional(),
   })
   .strict();

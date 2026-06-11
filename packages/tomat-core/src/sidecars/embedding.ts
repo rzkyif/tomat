@@ -4,7 +4,7 @@
 // Promises.
 //
 // Spawn flags:
-//   deno run --allow-read=<models-dir> --allow-env=ORT_LOG_LEVEL
+//   deno run --allow-read=<models-dir>,<deno-cache> --allow-env --allow-ffi
 //            <core>/workers/embedding-worker.ts <models-dir>
 //
 // The transformers/onnxruntime dependency (~340 MB) lives only inside this
@@ -135,7 +135,15 @@ export class EmbeddingController {
         "--no-check",
         "--quiet",
         `--allow-read=${modelsRoot},${paths().denoCacheDir}`,
-        "--allow-env=ORT_LOG_LEVEL",
+        // onnxruntime-node loads a native .node binding at import time, which
+        // needs FFI. Unscoped: once any native module loads it runs outside
+        // the sandbox anyway, so path-scoping FFI buys nothing.
+        "--allow-ffi",
+        // transformers' dep tree (sharp, onnxruntime) probes many env keys at
+        // import; with --no-prompt an unlisted key is a fatal NotCapable, so
+        // enumerating keys is a losing game. Env reads are also already
+        // exposed to native code via FFI.
+        "--allow-env",
         entry,
         modelsRoot,
       ],

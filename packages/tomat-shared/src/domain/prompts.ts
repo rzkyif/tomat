@@ -121,7 +121,7 @@ Hidden instruction: only refer to these when they are related to the user's mess
 [os:- The user's operating system is {os}]
 </user_metadata>
 
-[toolsAvailable:Tools are available for this turn. Prefer calling a tool over speculating when a tool's description clearly fits the request.]`;
+[toolsAvailable:Tools are available for this turn. Use one only when the user's request actually needs it; for greetings or small talk, just reply normally without calling any tool.]`;
 
 export const DEFAULT_COMPLEXITY_DETECTION_PROMPT = `You are a router. Classify the user's request as either \`simple\` or \`complex\`.
 - \`simple\`: short factual questions, light chit-chat, trivial code edits, summarization of attached text, single-step tool invocations (e.g. set an alarm, start a timer, fetch the weather).

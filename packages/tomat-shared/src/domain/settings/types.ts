@@ -214,6 +214,15 @@ export type ModelPresetField = BaseField & {
   presetConfig: PresetConfig;
 };
 
+/** Like `model_preset` for Speech-to-Text: the cards bind to whisper models in
+ *  the signed catalog (no per-device fit). Rendered by SttPresetField;
+ *  otherwise handled identically to `preset`. */
+export type SttPresetField = BaseField & {
+  type: "stt_preset";
+  defaultValue: string;
+  presetConfig: PresetConfig;
+};
+
 export type CommandPreviewField = BaseField & {
   type: "command_preview";
   defaultValue: string | boolean;
@@ -235,6 +244,7 @@ export type SettingField =
   | SelectField
   | PresetField
   | ModelPresetField
+  | SttPresetField
   | CommandPreviewField;
 
 export type SettingType = SettingField["type"];
@@ -353,6 +363,7 @@ export const CORE_GROUP_IDS = [
   "toolkits",
   "tools",
   "stt",
+  "tts",
   "server",
   "usage",
 ] as const;

@@ -28,7 +28,7 @@
     size?: Size;
     /** `invert` (default) flips bg/text on select, used by settings preset
      *  pickers and tool-call options. `accent` uses a coloured border + tinted
-     *  bg on select, used by quick-setup model cards. */
+     *  bg on select, used by quick-settings model cards. */
     selectedStyle?: SelectedStyle;
     /** Accent hue when `selectedStyle === "accent"`. */
     accent?: Accent;

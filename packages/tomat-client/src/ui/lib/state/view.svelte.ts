@@ -10,7 +10,9 @@
  * itself stays DOM-free. The panel element it animates lives in +page.svelte.
  */
 
-export type AppMode = "newCore" | "quickSetup" | "chat" | "sessionList" | "settings";
+import { ttsState } from "./tts.svelte";
+
+export type AppMode = "newCore" | "quickSettings" | "chat" | "sessionList" | "settings";
 
 class ViewState {
   /** The mode currently rendered. Written only by `commit()` (at the slide's
@@ -30,6 +32,10 @@ class ViewState {
   navigate(next: AppMode): void {
     if (this.locked && next !== "newCore") return;
     if (this.pendingMode === next) return;
+    // Speech belongs to the chat view: cut any current/queued TTS when
+    // leaving it. streamingState.feedTTS holds new sentences back while
+    // pendingMode is non-chat, so a running stream can't re-arm it.
+    if (next !== "chat") ttsState.reset();
     this.pendingMode = next;
   }
 

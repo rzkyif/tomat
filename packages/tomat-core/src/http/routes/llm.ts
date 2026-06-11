@@ -17,7 +17,10 @@ import { loadCoreSettings } from "../../services/core-settings.ts";
 import { resolveEndpoint } from "../../services/endpoint-resolver.ts";
 import { singleShot } from "../../services/single-shot.ts";
 import { AppError } from "../../shared/errors.ts";
+import { getLogger } from "../../shared/log.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
+
+const log = getLogger("llm-utility");
 
 export function llmRoutes(): Hono {
   const r = new Hono();
@@ -32,12 +35,20 @@ export function llmRoutes(): Hono {
     const systemPrompt =
       strSetting(settings, "prompts.autocorrectPrompt", "") || DEFAULT_AUTOCORRECT_PROMPT;
     const endpoint = await resolveEndpoint(settings, "default");
+    // Autocorrect sits on the dictation hot path; reasoning would add
+    // seconds of `<think>` latency for zero quality gain. Force it off.
+    endpoint.reasoning = "off";
+    const startedAt = Date.now();
+    log.info(`autocorrect starting (in ${body.text.length} chars, model ${endpoint.model})`);
     const text = await singleShot({
       systemPrompt,
       userMessage: body.text,
       endpoint,
       overrides: { temperature: 0.2 },
     });
+    log.info(
+      `autocorrect done in ${Date.now() - startedAt}ms (in ${body.text.length} chars, out ${text.length} chars)`,
+    );
     return c.json({ text });
   });
 
@@ -55,13 +66,20 @@ export function llmRoutes(): Hono {
       strSetting(settings, "prompts.mergeTranscriptionPrompt", "") ||
       DEFAULT_MERGE_TRANSCRIPTION_PROMPT;
     const endpoint = await resolveEndpoint(settings, "default");
+    // Same hot path as autocorrect: never let the model think.
+    endpoint.reasoning = "off";
     const userMessage = `<existing>\n${body.existing}\n</existing>\n<new>\n${body.next}\n</new>`;
+    const startedAt = Date.now();
+    log.info(`merge starting (in ${userMessage.length} chars, model ${endpoint.model})`);
     const text = await singleShot({
       systemPrompt,
       userMessage,
       endpoint,
       overrides: { temperature: 0.2 },
     });
+    log.info(
+      `merge done in ${Date.now() - startedAt}ms (in ${userMessage.length} chars, out ${text.length} chars)`,
+    );
     return c.json({ text });
   });
 

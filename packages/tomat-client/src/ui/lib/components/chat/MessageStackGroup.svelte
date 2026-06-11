@@ -185,21 +185,27 @@
   class:ml-auto={alignment === "right"}
   class:mx-auto={alignment === "center"}
 >
-  {#each segments as seg (seg.key)}
-    {#if seg.kind === "stack"}
-      <MessageStack
-        messages={seg.messages}
-        baseIdx={seg.baseIdx}
-        {alignment}
-        {item}
-      />
-    {:else}
-      {@render item({
-        msg: seg.message,
-        idx: seg.idx,
-        neighborLeft: false,
-        neighborRight: false,
-      })}
-    {/if}
+  {#each segments as seg, si (seg.key)}
+    <!-- Ascending z down the column so a visually lower segment paints over
+         the one above it (shadow included), matching the transcript-wide
+         stacking order set in +page.svelte. This column is top→down, so
+         later DOM = lower on screen = higher z. -->
+    <div class="relative pointer-events-none" style:z-index={si + 1}>
+      {#if seg.kind === "stack"}
+        <MessageStack
+          messages={seg.messages}
+          baseIdx={seg.baseIdx}
+          {alignment}
+          {item}
+        />
+      {:else}
+        {@render item({
+          msg: seg.message,
+          idx: seg.idx,
+          neighborLeft: false,
+          neighborRight: false,
+        })}
+      {/if}
+    </div>
   {/each}
 </div>

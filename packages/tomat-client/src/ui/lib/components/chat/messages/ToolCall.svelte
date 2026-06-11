@@ -2,7 +2,8 @@
   import type {
     AskUserAnswer,
     AskUserQuestion,
-    ToolCallState,
+    Message,
+    ToolCallStatus,
   } from "$lib/shared/types";
   import Bubble from "../../ui/Bubble.svelte";
   import Expandable from "../../ui/Expandable.svelte";
@@ -23,17 +24,32 @@
 
   let {
     id,
-    toolCall,
+    msg,
     onAnswer,
     neighborLeft = false,
     neighborRight = false,
   } = $props<{
     id?: string;
-    toolCall: ToolCallState;
+    msg: Message;
     onAnswer: (requestId: string, answers: AskUserAnswer[]) => void;
     neighborLeft?: boolean;
     neighborRight?: boolean;
   }>();
+
+  // Flat wire fields + the ephemera overlay, read once into locals so the
+  // rest of the component stays concise. The status union narrows to
+  // ToolCallStatus here ("filtering"/"completed"/"error" belong to
+  // tool_filter rows, which render elsewhere).
+  let tcStatus = $derived((msg.status ?? "completed") as ToolCallStatus);
+  let tcAskUser = $derived(msg.ephemera?.askUser);
+  let tcLogs = $derived(msg.ephemera?.logs ?? []);
+  let tcArgs = $derived.by<Record<string, unknown>>(() => {
+    try {
+      return msg.arguments ? (JSON.parse(msg.arguments) as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  });
 
   // Expansion state: shared with MessageStackGroup so the group can split
   // its substacks around this bubble when it opens. Read once via untrack
@@ -68,17 +84,17 @@
   // failed / cancelled), but ONLY if it actually went through awaiting_user
   // earlier. `wasAwaiting` flips on entry and is cleared on the terminal
   // transition; this prevents non-interactive tool calls (e.g. a tool that
-  // ran straight to "complete" without ever asking the user) from being
+  // ran straight to "completed" without ever asking the user) from being
   // forcibly collapsed against a manual expansion the user might have made.
   let wasAwaiting = $state(false);
   $effect(() => {
-    const status = toolCall.status;
+    const status = tcStatus;
     if (status === "awaiting_user") {
       expanded = true;
       wasAwaiting = true;
     } else if (
       wasAwaiting &&
-      (status === "complete" || status === "failed" || status === "cancelled")
+      (status === "completed" || status === "failed" || status === "cancelled")
     ) {
       expanded = false;
       wasAwaiting = false;
@@ -117,8 +133,8 @@
   }
 
   $effect(() => {
-    if (toolCall.askUser && toolCall.status === "awaiting_user") {
-      ensureDrafts(toolCall.askUser.questions, toolCall.askUser.requestId);
+    if (tcAskUser && tcStatus === "awaiting_user") {
+      ensureDrafts(tcAskUser.questions, tcAskUser.requestId);
     }
   });
 
@@ -146,7 +162,7 @@
   function setText(idx: number, text: string) {
     const d = drafts[idx] ?? blankDraft();
     const active = text.trim().length > 0;
-    const multi = !!toolCall.askUser?.questions[idx]?.multiselect;
+    const multi = !!tcAskUser?.questions[idx]?.multiselect;
     drafts[idx] = {
       ...d,
       text,
@@ -162,7 +178,7 @@
     if (d.text.trim().length === 0) return;
     // Multiselect: picks and freestyle coexist; freestyleActive is kept in
     // sync with the text by setText, so focusing doesn't need to promote.
-    if (toolCall.askUser?.questions[idx]?.multiselect) return;
+    if (tcAskUser?.questions[idx]?.multiselect) return;
     if (d.freestyleActive && d.picks.length === 0) return;
     drafts[idx] = { ...d, picks: [], freestyleActive: true };
   }
@@ -193,10 +209,10 @@
   let lastSubmittedRequestId: string | null = $state(null);
 
   function submit() {
-    if (!toolCall.askUser) return;
-    const requestId = toolCall.askUser.requestId;
+    if (!tcAskUser) return;
+    const requestId = tcAskUser.requestId;
     if (lastSubmittedRequestId === requestId) return;
-    const qs = toolCall.askUser.questions;
+    const qs = tcAskUser.questions;
     const answers: AskUserAnswer[] = [];
     for (let i = 0; i < qs.length; i++) {
       const q = qs[i];
@@ -228,8 +244,8 @@
   // freeform input is "engaged" (focused, or has typed text); otherwise the
   // expected interaction is "click an option → auto-submit".
   let requiresSubmit = $derived.by(() => {
-    if (!toolCall.askUser) return false;
-    const qs = toolCall.askUser.questions;
+    if (!tcAskUser) return false;
+    const qs = tcAskUser.questions;
     for (let i = 0; i < qs.length; i++) {
       const q = qs[i];
       if (!q.options) return true;
@@ -244,9 +260,9 @@
   });
 
   $effect(() => {
-    if (!toolCall.askUser || toolCall.status !== "awaiting_user") return;
+    if (!tcAskUser || tcStatus !== "awaiting_user") return;
     if (requiresSubmit) return;
-    if (!readyToSubmit(toolCall.askUser.questions)) return;
+    if (!readyToSubmit(tcAskUser.questions)) return;
     submit();
   });
 
@@ -269,7 +285,7 @@
   // Pointer movement re-enables hover.
   let keyboardNav = $state(false);
   function onContainerKeydown(e: KeyboardEvent) {
-    if (!toolCall.askUser) return;
+    if (!tcAskUser) return;
     const target = e.target as HTMLElement | null;
     const container = e.currentTarget as HTMLElement;
     if (!target || !container) return;
@@ -314,7 +330,7 @@
         if (target.tagName === "BUTTON") {
           (target as HTMLButtonElement).click();
         }
-        if (readyToSubmit(toolCall.askUser.questions)) submit();
+        if (readyToSubmit(tcAskUser.questions)) submit();
         return;
     }
   }
@@ -336,7 +352,7 @@
   }
 
   // Wrapper text around the tool name, keyed by status. The name renders as
-  // inline code in the middle; when `toolCall.label` is set the whole sentence
+  // inline code in the middle; when `msg.label` is set the whole sentence
   // is replaced by that label (label is a freeform override from the tool).
   let statusPhrase = $derived.by(() => {
     const configured = (
@@ -344,10 +360,10 @@
       ""
     ).trim();
     const agent = configured || "Agent";
-    switch (toolCall.status) {
+    switch (tcStatus) {
       case "awaiting_user":
         return { pre: `${agent} awaiting input for `, post: " tool:" };
-      case "complete":
+      case "completed":
         return { pre: `${agent} used `, post: " tool." };
       case "failed":
         return { pre: `${agent} failed to use `, post: " tool." };
@@ -364,48 +380,48 @@
   // call is active (pending/running) but no number has been reported yet, we
   // render an indeterminate bar instead.
   let percent = $derived(
-    typeof toolCall.progress === "number"
-      ? Math.round(toolCall.progress * 100)
+    typeof msg.progress === "number"
+      ? Math.round(msg.progress * 100)
       : null,
   );
   let isActive = $derived(
-    toolCall.status === "pending" || toolCall.status === "running",
+    tcStatus === "pending" || tcStatus === "running",
   );
   let showProgress = $derived(isActive);
 
   let resultText = $derived.by(() => {
-    if (toolCall.result === undefined) return "";
+    if (msg.result === undefined) return "";
     try {
-      return JSON.stringify(toolCall.result, null, 2);
+      return JSON.stringify(msg.result, null, 2);
     } catch {
-      return String(toolCall.result);
+      return String(msg.result);
     }
   });
 
   let argsText = $derived.by(() => {
     try {
-      return JSON.stringify(toolCall.arguments ?? {}, null, 2);
+      return JSON.stringify(tcArgs ?? {}, null, 2);
     } catch {
       return "";
     }
   });
 
   let hasArgs = $derived(
-    !!toolCall.arguments && Object.keys(toolCall.arguments).length > 0,
+    !!tcArgs && Object.keys(tcArgs).length > 0,
   );
-  let hasLogs = $derived(toolCall.logs.length > 0);
+  let hasLogs = $derived(tcLogs.length > 0);
   let hasResult = $derived(
-    toolCall.status === "complete" && toolCall.result !== undefined,
+    tcStatus === "completed" && msg.result !== undefined,
   );
-  let hasError = $derived(toolCall.status === "failed" && !!toolCall.error);
+  let hasError = $derived(tcStatus === "failed" && !!msg.error);
   let hasCancelledError = $derived(
-    toolCall.status === "cancelled" && !!toolCall.error,
+    tcStatus === "cancelled" && !!msg.error,
   );
   let hasAskUser = $derived(
-    toolCall.status === "awaiting_user" && !!toolCall.askUser,
+    tcStatus === "awaiting_user" && !!tcAskUser,
   );
   let hasBody = $derived(
-    !!toolCall.description ||
+    !!msg.description ||
       hasArgs ||
       hasLogs ||
       hasResult ||
@@ -422,14 +438,14 @@
   // animates between 0 and 8px on status transitions; otherwise the color
   // pops in at the wrong instant and the growth looks choppy.
   let borderColorClass = $derived(
-    toolCall.status === "failed"
+    tcStatus === "failed"
       ? "border-accent-red-400"
-      : toolCall.status === "awaiting_user"
+      : tcStatus === "awaiting_user"
         ? "border-amber-400"
         : "border-default-400",
   );
   let borderActive = $derived(
-    toolCall.status === "failed" || toolCall.status === "awaiting_user",
+    tcStatus === "failed" || tcStatus === "awaiting_user",
   );
 
   let alignment = $derived(settingsState.getAlignment());
@@ -461,8 +477,8 @@
   let askUserContainer: HTMLDivElement | undefined = $state();
   let autoFocusedRequestId: string | null = $state(null);
   $effect(() => {
-    if (!toolCall.askUser || toolCall.status !== "awaiting_user") return;
-    const requestId = toolCall.askUser.requestId;
+    if (!tcAskUser || tcStatus !== "awaiting_user") return;
+    const requestId = tcAskUser.requestId;
     if (autoFocusedRequestId === requestId) return;
     if (!askUserContainer) return;
     const first = askUserContainer.querySelector<HTMLElement>("[data-tc-nav]");
@@ -486,15 +502,15 @@
   <Expandable bind:expanded {alignment} disabled={!hasBody}>
     {#snippet title()}
       <span>
-        {#if toolCall.label}
-          {toolCall.label}
+        {#if msg.label}
+          {msg.label}
         {:else}
-          {statusPhrase.pre}<code class="tc-inline">{toolCall.toolName}</code
+          {statusPhrase.pre}<code class="tc-inline">{msg.toolName}</code
           >{statusPhrase.post}
         {/if}
       </span>
-      {#if toolCall.description && !expanded}
-        <span class="text-default-600 truncate">{toolCall.description}</span>
+      {#if msg.description && !expanded}
+        <span class="text-default-600 truncate">{msg.description}</span>
       {/if}
     {/snippet}
     {#snippet children()}
@@ -504,17 +520,17 @@
            error/log blocks always read left-to-right. The title/header
            above still follows screen alignment. -->
       <div class="flex flex-col gap-2 text-left">
-        {#if toolCall.description}
+        {#if msg.description}
           <div
             class="text-xs text-default-600 {alignment === 'right'
               ? 'text-right'
               : ''}"
           >
-            {toolCall.description}
+            {msg.description}
           </div>
         {/if}
 
-        {#if hasAskUser && toolCall.askUser}
+        {#if hasAskUser && tcAskUser}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             bind:this={askUserContainer}
@@ -522,7 +538,7 @@
             onkeydown={onContainerKeydown}
             onpointermove={onContainerPointerMove}
           >
-            {#each toolCall.askUser.questions as q, qi (qi)}
+            {#each tcAskUser.questions as q, qi (qi)}
               <div class="flex flex-col gap-2">
                 <div class="text-sm">{q.question}</div>
                 {#if q.options}
@@ -577,7 +593,7 @@
                  itself keeps its natural padding; max-height + opacity
                  animate from 0 and the rate honours animation settings. -->
             <Expand
-              open={requiresSubmit && readyToSubmit(toolCall.askUser.questions)}
+              open={requiresSubmit && readyToSubmit(tcAskUser.questions)}
               class="self-end"
             >
               <button
@@ -594,7 +610,7 @@
 
         {#if hasCancelledError}
           <pre
-            class="tomat-scroll-inset text-xs font-mono text-default-700 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{toolCall.error}</pre>
+            class="tomat-scroll-inset text-xs font-mono text-default-700 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{msg.error}</pre>
         {/if}
 
         <div class="flex flex-col gap-1 text-xs">
@@ -611,14 +627,14 @@
           {#if hasError}
             <div class="text-default-600">Error</div>
             <pre
-              class="tomat-scroll-inset font-mono text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{toolCall.error}</pre>
+              class="tomat-scroll-inset font-mono text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{msg.error}</pre>
           {/if}
           {#if hasLogs}
             <div class="text-default-600">Logs</div>
             <div
               class="tomat-scroll-inset bg-surface-inset rounded-small px-2 py-1 max-h-32 overflow-auto flex flex-col gap-0.5 whitespace-pre"
             >
-              {#each toolCall.logs as log, i (i)}
+              {#each tcLogs as log, i (i)}
                 <div class="text-default-700">
                   <span class="text-default-500">[{log.level}]</span>
                   {log.message}

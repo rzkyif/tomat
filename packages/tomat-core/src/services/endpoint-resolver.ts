@@ -38,7 +38,9 @@ export async function resolveEndpoint(
     };
   }
   const provider = strSetting(settings, "llm.provider", "local") as "local" | "external";
-  const reasoning = strSetting(settings, "llm.reasoning", "off") as "off" | "on" | "auto";
+  // Default mirrors the shared schema (settings.json is sparse): thinking is
+  // on unless the user turns it off.
+  const reasoning = strSetting(settings, "llm.reasoning", "on") as "off" | "on" | "auto";
   if (provider === "external") {
     const settingsKey = strSetting(settings, "llm.external.apiKey", "");
     const apiKey = (await getSecret("llm.external.apiKey")) || settingsKey || "";

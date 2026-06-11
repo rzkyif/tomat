@@ -155,9 +155,10 @@
     await cores().select(entry.id);
     busy = null;
     if (firstEver) {
-      // First core ever paired: unlock the UI and run the new-user quick setup.
+      // First core ever paired: unlock the UI and open the new-user quick
+      // settings.
       viewState.setLocked(false);
-      viewState.navigate("quickSetup");
+      viewState.navigate("quickSettings");
     } else {
       // Adding an additional core: return to the Cores manager in Settings.
       viewState.pendingSettingsGroup = "cores";

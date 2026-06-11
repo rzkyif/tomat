@@ -296,7 +296,7 @@ export async function warnIfVaultUnreadable(): Promise<void> {
     `secrets.enc exists but no master key was found (OS keychain empty and no ` +
       `${masterKeyPath()}). Stored secrets can't be decrypted; restore the ` +
       `master key or re-enter your secrets in Settings. In dev, preserve ` +
-      `${masterKeyPath()} across rebuilds (see DEVELOPMENT.md).`,
+      `${masterKeyPath()} across rebuilds (see packages/tomat-core/README.md).`,
   );
 }
 

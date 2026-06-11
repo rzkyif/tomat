@@ -10,11 +10,11 @@
   import SessionBar from "$lib/components/chat/SessionBar.svelte";
   import Settings from "$lib/components/settings/Settings.svelte";
   import NewCore from "$lib/components/new-core/NewCore.svelte";
-  import QuickSetup from "$lib/components/quick-setup/QuickSetup.svelte";
+  import QuickSettings from "$lib/components/quick-settings/QuickSettings.svelte";
   import SessionList from "$lib/components/session-list/SessionList.svelte";
   import Bubble from "$lib/components/ui/Bubble.svelte";
   import MessageStackGroup from "$lib/components/chat/MessageStackGroup.svelte";
-  import { getTextContent, type Message } from "$lib/shared/types";
+  import { getTextContent, type Message, type MessageContent } from "$lib/shared/types";
   import {
     downloadsState,
     messagesState,
@@ -28,6 +28,7 @@
     viewState,
   } from "$lib/state";
   import { connectionState } from "$lib/state/connection.svelte";
+  import { ttsState } from "$lib/state/tts.svelte";
   import { cores } from "$lib/core";
   import { platform } from "$lib/platform";
   import { withTimeout } from "$lib/shared/async";
@@ -38,8 +39,10 @@
     windowTransition,
   } from "$lib/state/shortcut.svelte";
   import {
+    BASE_MS,
     enableMessageAnimations,
     getDuration,
+    hasMessageAnimated,
   } from "$lib/shared/animations";
   import MessageEnter from "$lib/components/chat/MessageEnter.svelte";
 
@@ -57,9 +60,25 @@
     pauseClickThrough,
     resumeClickThrough,
   } from "$lib/shared/clickthrough";
+  import {
+    startBlurKeepalive,
+    stopBlurKeepalive,
+  } from "$lib/shared/blur-keepalive";
 
   const log = getLogger("boot");
   const windowLog = getLogger("window");
+
+  // The keepalive runs exactly while halo rings exist (same condition as
+  // Bubble.svelte's ringCount); without rings there's no backdrop to keep
+  // fresh.
+  const blurActive = $derived(
+    settingsState.currentSettings["appearance.bubbleBlurEnabled"] !== false &&
+      ((settingsState.currentSettings["appearance.bubbleBlurRings"] as number) ?? 3) > 0,
+  );
+  $effect(() => {
+    if (blurActive) startBlurKeepalive();
+    else stopBlurKeepalive();
+  });
 
   // Visual preferences applied directly to documentElement: theme class for
   // dark mode, root font size for the rem-based scale. SSR is off (see
@@ -357,12 +376,12 @@
   const CORE_SETTINGS_TIMEOUT_MS = 12_000;
 
   // Redirect out of the two core-backed transient modes while reconnecting:
-  // quick setup falls back to settings (which shows its own disabled state) and
-  // the session list (which reads/loads sessions from the core) falls back to
-  // chat, the safe resting mode.
+  // quick settings falls back to settings (which shows its own disabled state)
+  // and the session list (which reads/loads sessions from the core) falls back
+  // to chat, the safe resting mode.
   $effect(() => {
     if (!connectionState.reconnecting) return;
-    if (viewState.mode === "quickSetup") viewState.navigate("settings");
+    if (viewState.mode === "quickSettings") viewState.navigate("settings");
     else if (viewState.mode === "sessionList") viewState.navigate("chat");
   });
 
@@ -512,6 +531,14 @@
       } catch (e) {
         log.error("core settings merge failed:", e);
       }
+      // TTS is event-driven after boot (settings-effects reacts to the
+      // tts.enabled toggle), so an already-enabled setting needs this boot
+      // kick or the player never arms: feeds and the Read Aloud menu both
+      // no-op until ttsState.setEnabled runs. Fire-and-forget; model load +
+      // pre-warm can take seconds and must not block first paint.
+      if (settingsState.currentSettings["tts.enabled"]) {
+        void ttsState.setEnabled(true);
+      }
       // Pull the required-files snapshot now that a core may be selected, and
       // re-pull on later core switches (downloadsState also keeps it live via
       // the requirements.snapshot WS frame).
@@ -542,6 +569,7 @@
   onDestroy(() => {
     document.removeEventListener("click", linkHandler);
     stopClickThrough();
+    stopBlurKeepalive();
     shortcutHandler.detach();
     unlistenVisibility?.();
     unlistenMonitor?.();
@@ -716,10 +744,7 @@
   // first-token arrival. As soon as either reasoning or content fires, this
   // turns false and the corresponding real bubble takes over.
   let showStreamingLoadingBubble = $derived(
-    streamingState.isActive &&
-      streamingState.messageId !== null &&
-      streamingState.reasoningId === null &&
-      !streamingState.firstChunkReceived,
+    streamingState.isActive && streamingState.awaitingFirstDelta,
   );
 
   // A "small bubble" message is one rendered as a `size="small"` Bubble
@@ -735,8 +760,8 @@
     if (msg.role === "system") return true;
     if (msg.role === "reasoning") return true;
     if (msg.role === "loading") return true;
-    if (msg.role === "tool" && msg.toolCall) return true;
-    if (msg.role === "tool_filter" && msg.relevantTools) return true;
+    if (msg.role === "tool") return true;
+    if (msg.role === "tool_filter") return true;
     return false;
   }
 
@@ -795,7 +820,17 @@
   });
 
   function msgKey(msg: Message, fallback: string): string {
-    return msg.id ?? msg.toolCall?.callId ?? fallback;
+    return msg.id ?? msg.callId ?? fallback;
+  }
+
+  // Assistant bubble text, with the interrupted note appended at render
+  // time: the persisted content stays the clean partial text, the note is
+  // presentation only.
+  function assistantContent(msg: Message): MessageContent {
+    const base = msg.content ?? "";
+    if (!msg.interrupted) return base;
+    const text = getTextContent(base);
+    return text ? `${text}\n\n> _Interrupted._` : "> _Interrupted._";
   }
 
   let messageGroups = $derived.by<RenderGroup[]>(() => {
@@ -835,6 +870,40 @@
     flushStack();
     return groups;
   });
+
+  // Entry-animation stagger, in vertical order: bubbles that mount in the
+  // same flush (e.g. the system prompt + the first user message + the
+  // loading sentinel) slide in top-to-bottom, each waiting one BASE_MS slot
+  // per not-yet-animated bubble above it. Bubbles that already animated
+  // (hasMessageAnimated) are settled and don't occupy a slot; their own
+  // delay value is moot because runMessageEnter dedupes by msgId.
+  function enterDelayKey(msg: Message): string | null {
+    if (msg.role === "loading") return LOADING_MSG_ID;
+    return msg.id ?? msg.callId ?? null;
+  }
+  // Bulk mounts (switching to a session whose bubbles haven't animated this
+  // run) keep the everything-at-once entrance; the stagger is only for the
+  // small batches a single turn produces.
+  const MAX_STAGGER_COHORT = 4;
+  let enterDelays = $derived.by<Map<string, number>>(() => {
+    // displayedMessages is newest-first; collect oldest-first (top of screen
+    // first) so delays grow downward.
+    const entering: string[] = [];
+    for (let i = displayedMessages.length - 1; i >= 0; i--) {
+      const msg = displayedMessages[i];
+      const key = enterDelayKey(msg);
+      if (!key) continue;
+      // The loading sentinel re-animates on every appearance (its msgId is
+      // withheld from the dedupe), so it always counts as entering.
+      if (msg.role !== "loading" && hasMessageAnimated(key)) continue;
+      entering.push(key);
+    }
+    const delays = new Map<string, number>();
+    if (entering.length > MAX_STAGGER_COHORT) return delays;
+    const slot = getDuration(BASE_MS);
+    entering.forEach((key, i) => delays.set(key, i * slot));
+    return delays;
+  });
 </script>
 
 {#if loaded}
@@ -860,16 +929,25 @@
           class:mr-auto={settingsState.getAlignment() === "left"}
           class:mx-auto={settingsState.getAlignment() === "center"}
         >
-          <div class="relative pointer-events-none z-30">
+          <!-- Explicit visual stacking: a row that sits LOWER on screen paints
+               over the rows above it (shadow included), like cards fanned
+               upward. The column is flex-col-reverse (first DOM child at the
+               bottom, which keeps the scroll anchor for autoscroll), so tree
+               order paints bottom rows first; these descending z-indexes
+               invert that. Each wrapper is its own stacking context, so
+               within a row the bubble's z-0 shadow still sits under its z-10
+               body. Pop-out UI (Modal, SnippetAutocomplete) carries its own
+               z-50. -->
+          <div class="relative pointer-events-none" style:z-index={messageGroups.length + 3}>
             <SessionBar />
           </div>
 
-          <div class="relative pointer-events-none z-20">
+          <div class="relative pointer-events-none" style:z-index={messageGroups.length + 2}>
             <UserInput />
           </div>
 
           {#if sessionLoading}
-            <div class="relative pointer-events-none z-10">
+            <div class="relative pointer-events-none" style:z-index={messageGroups.length + 1}>
               <Bubble
                 selectedAlignment={settingsState.getAlignment()}
                 borderColorClass="border-default-400"
@@ -890,7 +968,10 @@
                delete-with-active-tool-call. The key bumps inside
                `sessionsState.resetAllSessionState`. -->
           {#key sessionsState.epoch}
-            {#each messageGroups as group (group.key)}
+            {#each messageGroups as group, gi (group.key)}
+              <!-- Descending z down the transcript (gi 0 = newest = bottom):
+                   see the stacking comment on the SessionBar wrapper above. -->
+              <div class="relative pointer-events-none" style:z-index={messageGroups.length - gi}>
               {#if group.kind === "stack"}
                 <MessageStackGroup messages={group.messages}>
                   {#snippet item({ msg, idx, neighborLeft, neighborRight })}
@@ -899,6 +980,7 @@
                       msgId={msg.role === "loading"
                         ? undefined
                         : msgKey(msg, `g-${idx}`)}
+                      delayMs={enterDelays.get(enterDelayKey(msg) ?? "") ?? 0}
                       class="pointer-events-none"
                     >
                       {#if msg.role === "loading"}
@@ -915,11 +997,10 @@
                         <AgentMessage
                           kind="reasoning"
                           id={msg.id}
-                          content={msg.content}
+                          content={msg.content ?? ""}
                           modelUsed={msg.modelUsed}
                           reasoningDurationMs={msg.reasoningDurationMs}
-                          isStreaming={streamingState.isActive &&
-                            streamingState.reasoningId === msg.id}
+                          isStreaming={streamingState.isLive(msg.id)}
                           {neighborLeft}
                           {neighborRight}
                         />
@@ -930,23 +1011,23 @@
                           {neighborLeft}
                           {neighborRight}
                         />
-                      {:else if msg.role === "tool" && msg.toolCall}
+                      {:else if msg.role === "tool"}
                         <ToolCall
                           id={msg.id}
-                          toolCall={msg.toolCall}
+                          {msg}
                           onAnswer={(requestId, answers) =>
                             toolkitsState.answerAskUser(
-                              msg.toolCall!.callId,
+                              msg.callId!,
                               requestId,
                               answers,
                             )}
                           {neighborLeft}
                           {neighborRight}
                         />
-                      {:else if msg.role === "tool_filter" && msg.relevantTools}
+                      {:else if msg.role === "tool_filter"}
                         <RelevantTools
                           id={msg.id}
-                          relevantTools={msg.relevantTools}
+                          {msg}
                           {neighborLeft}
                           {neighborRight}
                         />
@@ -959,11 +1040,12 @@
                 <MessageEnter
                   alignment={settingsState.getAlignment()}
                   msgId={msgKey(msg, group.key)}
+                  delayMs={enterDelays.get(enterDelayKey(msg) ?? "") ?? 0}
                   class="relative pointer-events-none"
                 >
                   {#if msg.role === "user"}
                     <UserMessage
-                      content={msg.content}
+                      content={msg.content ?? ""}
                       editing={msg.id != null && msg.id === editingUserMsgId}
                       onStartEdit={() =>
                         (editingUserMsgId = msg.id ?? null)}
@@ -978,15 +1060,14 @@
                         : undefined}
                     />
                   {:else if msg.role === "error"}
-                    <ErrorMessage content={msg.content} />
+                    <ErrorMessage content={msg.content ?? ""} />
                   {:else if msg.role === "assistant"}
                     <AgentMessage
                       kind="content"
                       id={msg.id}
-                      content={msg.content}
+                      content={assistantContent(msg)}
                       modelUsed={msg.modelUsed}
-                      isStreaming={streamingState.isActive &&
-                        streamingState.messageId === msg.id}
+                      isStreaming={streamingState.isLive(msg.id)}
                       onReprocess={msg.id
                         ? () => messagesState.reprocessAgentMessage(msg.id!)
                         : undefined}
@@ -997,6 +1078,7 @@
                   {/if}
                 </MessageEnter>
               {/if}
+              </div>
             {/each}
           {/key}
         </div>
@@ -1009,8 +1091,8 @@
         >
           {#if viewState.mode === "newCore"}
             <NewCore />
-          {:else if viewState.mode === "quickSetup"}
-            <QuickSetup />
+          {:else if viewState.mode === "quickSettings"}
+            <QuickSettings />
           {:else if viewState.mode === "sessionList"}
             <SessionList />
           {:else}

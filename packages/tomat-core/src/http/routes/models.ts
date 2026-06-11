@@ -10,6 +10,7 @@ import {
   buildCatalogViews,
   computeRecommendations,
 } from "../../models/fit.ts";
+import { buildSttPresetViews, resolveSttSelection } from "../../models/stt.ts";
 import { loadCoreSettings, patchCoreSettings } from "../../services/core-settings.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
@@ -133,6 +134,40 @@ export function modelsRoutes(): Hono {
     const apply = await resolveSelection(body);
     await patchCoreSettings(applyToPatch(apply.settings, apply.preset));
     return c.json({ applied: apply });
+  });
+
+  // --- Speech-to-Text catalog picker ----------------------------------------
+
+  // The whole whisper lineup plus the resolved curated cards. No fit engine:
+  // whisper models are 31 MB to 3.1 GB, so everything fits everywhere.
+  r.get("/stt/catalog", async (c) => {
+    const catalog = await loadModelCatalog();
+    return c.json({
+      generatedAt: catalog.generatedAt,
+      models: catalog.stt.models,
+      presets: buildSttPresetViews(catalog),
+    });
+  });
+
+  // Apply a curated card or a specific model/quant: write the stt.* settings
+  // (which makes sidecar-boot restart whisper-server). Like the LLM select,
+  // never downloads; the settings write surfaces any missing model file in the
+  // client's pending-downloads confirm modal.
+  r.post("/stt/select", async (c) => {
+    const body = (await readJson(c)) as {
+      presetId?: string;
+      modelId?: string;
+      modelSpec?: string;
+    };
+    const [catalog, hw] = await Promise.all([loadModelCatalog(), detectHardware()]);
+    const applied = resolveSttSelection(catalog, hw, body);
+    await patchCoreSettings({
+      "stt.provider": "local",
+      "stt.preset": applied.preset,
+      "stt.modelPath": applied.settings.modelPath,
+      "stt.threads": applied.settings.threads,
+    });
+    return c.json({ applied });
   });
 
   // Delete a model file by its path. Registered last: the `{.+}` catch-all

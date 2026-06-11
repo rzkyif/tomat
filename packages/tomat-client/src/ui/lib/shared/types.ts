@@ -12,17 +12,15 @@
 // request. The import + re-export form is needed because plain
 // `export type {} from "..."` doesn't bring the name into the local scope
 // for use in interfaces below.
-import type { MessageContent, MessagePart } from "@tomat/shared";
-export type { MessageContent, MessagePart };
-
-/** Lifecycle of a single tool invocation as seen by the UI. */
-export type ToolCallStatus =
-  | "pending"
-  | "running"
-  | "awaiting_user"
-  | "complete"
-  | "failed"
-  | "cancelled";
+import type {
+  MessageContent,
+  MessagePart,
+  ToolCall,
+  ToolCallStatus,
+  ToolFilterEntryPersisted,
+  ToolFilterPhase1Persisted,
+} from "@tomat/shared";
+export type { MessageContent, MessagePart, ToolCallStatus };
 
 export type AskUserQuestion = {
   question: string;
@@ -47,76 +45,26 @@ export type ToolCallLogLine = {
   ts: number;
 };
 
-export type ToolCallState = {
-  /** Server-generated unique id for this invocation. Routes WS events. */
-  callId: string;
-  /** OpenAI tool_call_id echoed back when the tool result is sent to the LLM. */
-  toolCallId: string;
-  toolkitId: string;
-  toolName: string;
-  /** Parsed arguments object (may be {} if the model produced invalid JSON). */
-  arguments: Record<string, unknown>;
-  status: ToolCallStatus;
-  progress?: number;
-  label?: string;
-  description?: string;
+/** Never-persisted UI overlay on a `role: "tool"` message: the live log
+ *  lines and the in-flight askUser form state the tool.* frames deliver.
+ *  Kept outside the wire fields so a server snapshot replace can never
+ *  wipe it (applyServerMessage merges it back). */
+export type UiEphemera = {
+  logs?: ToolCallLogLine[];
   askUser?: ToolCallAskUserState;
-  result?: unknown;
-  error?: string;
-  logs: ToolCallLogLine[];
 };
 
-// Mirrors the on-the-wire shape from `@tomat/shared`'s `PendingToolCall`
-// frame field. Re-exported from this module so callers in `lib/state/`
-// can keep the existing import path while the field names stay aligned
-// with the wire format (saving a cast at the streaming dispatcher).
-import type { PendingToolCall as WirePendingToolCall } from "@tomat/shared";
-export type PendingToolCall = WirePendingToolCall;
-
-/** A single phase-1 (embedding similarity) candidate, snapshot for the
- *  bubble. Field names mirror the on-the-wire `ToolFilterPhase1Entry`
- *  frame shape so the streaming dispatcher can assign without remapping. */
-export type RelevantToolPhase1Entry = {
-  toolId: string;
-  name: string;
-  description: string;
-  score: number;
-};
-
-/** A single phase-2 (LLM filter) survivor. No score: phase 2 is binary
- *  keep/drop. Mirrors the `ToolFilterEntry` frame shape (carrying
- *  `toolId` so the bubble can key its `{#each}` reliably). */
-export type RelevantToolPhase2Entry = {
-  toolId: string;
-  name: string;
-  description: string;
-};
-
-export type RelevantToolsState = {
-  status: "filtering" | "complete" | "error";
-  /** null = phase 1 (embedding similarity) didn't run for this turn. Happens
-   *  when the user's filtering toggle is off or the threshold-bypass kicks
-   *  in. Empty array means "ran but produced nothing". */
-  phase1: RelevantToolPhase1Entry[] | null;
-  /** null = phase 2 (LLM filter) didn't run. Empty array means "ran but
-   *  produced nothing". */
-  phase2: RelevantToolPhase2Entry[] | null;
-  /** null = always-available bypass didn't run (toggle off OR no qualifying
-   *  tools exist). Empty array means "ran but no tools were appended"
-   *  (rare: every alwaysAvailable tool was already in phase2). When phase1
-   *  + phase2 are both null and this is a non-empty list, the bubble shows
-   *  only this section (filter pipeline was bypassed; all enabled tools are
-   *  surfaced here). */
-  alwaysAvailable: RelevantToolPhase2Entry[] | null;
-  /** Populated when the filter LLM call failed; phase2 falls back to phase1 in
-   *  that case so tools still reach the main model. */
-  errorMessage?: string;
-};
-
+/** Client-side message. One bag type holding the union of every wire role's
+ *  fields (see `Message` in @tomat/shared) plus the client-only `loading`
+ *  role and the `ephemera` overlay. Server `chat.message` snapshots are
+ *  applied directly, so live streaming and a session reload share one shape
+ *  by construction; components narrow by `role`. */
 export type Message = {
-  /** Stable client-generated id used for TTS replay controls. Backfilled on
-   *  load for messages persisted before this field existed. */
+  /** Server-minted for every chat-born message; client-minted only for
+   *  user messages, the system bubble, and the loading sentinel. */
   id?: string;
+  ord?: number;
+  createdAtMs?: number;
   role:
     | "user"
     | "assistant"
@@ -132,28 +80,52 @@ export type Message = {
      *  tool_filter / system bubbles. Never persisted, never added to
      *  messagesState.messages, never sent to the LLM. */
     | "loading";
-  content: MessageContent;
+  /** Absent on the wire for tool / tool_filter rows. */
+  content?: MessageContent;
   modelUsed?: "default" | "secondary";
+  /** Set when the stream was aborted (user interrupt or provider error)
+   *  before the model finished; content is the partial text. */
+  interrupted?: boolean;
   /** Only populated on user messages. Holds the resolved system prompt that
    *  was sent to the LLM for that turn, including any snippet-triggered
    *  transformations. Used by sendMessages() on edit-and-resend. */
   systemPromptOverride?: string;
   /** Only populated on `role: "reasoning"` messages. Elapsed time (ms) from
    *  the first reasoning chunk to the first content chunk (or stream finish
-   *  if no content). Captured once per turn so historic messages can still
-   *  render "Thought for Xs". */
+   *  if no content). */
   reasoningDurationMs?: number;
   /** Only populated on `role: "reasoning"` messages. Points back at the
-   *  assistant content message produced in the same turn. Used to delete /
-   *  reprocess the pair atomically. */
+   *  assistant content message produced in the same turn. */
   pairedAssistantId?: string;
-  /** Set on a `role: "tool"` message. Drives the ToolCall bubble. */
-  toolCall?: ToolCallState;
-  /** Set on a `role: "tool_filter"` message. Drives the RelevantTools bubble. */
-  relevantTools?: RelevantToolsState;
-  /** Set on an assistant message that produced tool_calls in its final chunk.
-   *  Used to re-materialize `role: "tool"` messages on edit-and-resend. */
-  pendingToolCalls?: PendingToolCall[];
+  /** Assistant transcript-replay data: the tool calls the model emitted. */
+  toolCalls?: ToolCall[];
+  // role: "tool" flat fields (ToolMessage on the wire).
+  callId?: string;
+  toolkitId?: string;
+  toolName?: string;
+  /** JSON string of arguments as the model emitted them. */
+  arguments?: string;
+  /** ToolCallStatus for tool rows; "filtering" | "complete" | "error" for
+   *  tool_filter rows. */
+  status?: ToolCallStatus | "filtering" | "complete" | "error";
+  progress?: number;
+  label?: string;
+  description?: string;
+  result?: unknown;
+  error?: string;
+  // role: "tool_filter" flat fields (ToolFilterMessage on the wire). An
+  // absent phase means it didn't run; an empty array means it ran and
+  // produced nothing.
+  phase1?: ToolFilterPhase1Persisted[];
+  phase2?: ToolFilterEntryPersisted[];
+  alwaysAvailable?: ToolFilterEntryPersisted[];
+  toolsSent?: number;
+  errorMessage?: string;
+  // role: "error" extras.
+  code?: string;
+  details?: Record<string, unknown>;
+  /** Never-persisted UI overlay (tool logs, askUser form state). */
+  ephemera?: UiEphemera;
 };
 
 /** Generate a message id. User message ids are set separately from their
@@ -240,7 +212,8 @@ export type Attachment = {
 };
 
 /** Extract plain text from MessageContent, regardless of format */
-export function getTextContent(content: MessageContent): string {
+export function getTextContent(content: MessageContent | undefined): string {
+  if (content === undefined) return "";
   if (typeof content === "string") return content;
   return content
     .filter((p): p is Extract<MessagePart, { type: "text" }> => p.type === "text")

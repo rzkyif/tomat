@@ -99,6 +99,17 @@ function consoleFormatter(rec: log.LogRecord): string {
   return head + scrubSecrets(rec.msg).replace(/\n/g, `\n${head}`);
 }
 
+// @std/log's file handlers buffer writes (4 KB) and only flush when the buffer
+// fills, on CRITICAL records, or at process end, so core.log trails reality by
+// however long it takes to produce 4 KB of lines (and a killed process loses
+// the tail entirely). Core's log volume is tiny; flush every record.
+class EagerRotatingFileHandler extends log.RotatingFileHandler {
+  override log(msg: string): void {
+    super.log(msg);
+    this.flush();
+  }
+}
+
 export async function initLogger(): Promise<void> {
   if (initialized) return;
 
@@ -112,7 +123,7 @@ export async function initLogger(): Promise<void> {
         formatter: consoleFormatter,
         useColors: false,
       }),
-      file: new log.RotatingFileHandler("INFO", {
+      file: new EagerRotatingFileHandler("INFO", {
         filename: paths().logFile,
         maxBytes: 10 * 1024 * 1024,
         maxBackupCount: 5,
@@ -124,6 +135,11 @@ export async function initLogger(): Promise<void> {
     },
   });
 
+  // Scoped loggers handed out before setup() were created handler-less (and
+  // setup() wipes std's registry anyway), so wire every one of them to the
+  // default logger's handlers now.
+  for (const logger of scopedLoggers.values()) wireToDefault(logger);
+
   // Set AFTER setup so a setup() failure leaves the flag false and the
   // boot-failure catch can fall back to console.error.
   initialized = true;
@@ -133,9 +149,39 @@ export function isLoggerReady(): boolean {
   return initialized;
 }
 
+// Our own registry of scoped loggers. @std/log's named-logger registry is
+// useless here: getLogger(name) on an unconfigured name returns a cached
+// handler-less Logger (every line silently dropped), and setup() clears the
+// registry while modules keep their stale import-time references. So we
+// construct Logger instances ourselves and attach the default handlers,
+// immediately when already initialized or from initLogger() otherwise.
+const scopedLoggers = new Map<string, log.Logger>();
+
+// Dependency scopes: loggers that relay third-party output (the sidecar
+// binaries' stdout/stderr). Mirrors the Rust-side convention of gating
+// dependency crates at info: their DEBUG chatter is dropped, INFO and above
+// pass, and every scope of our own logs at DEBUG.
+const DEPENDENCY_SCOPE_LEVELS: Record<string, log.LevelName> = {
+  sidecars: "INFO",
+};
+
+function wireToDefault(logger: log.Logger): void {
+  const def = log.getLogger();
+  const dependencyLevel = DEPENDENCY_SCOPE_LEVELS[logger.loggerName];
+  if (dependencyLevel) logger.levelName = dependencyLevel;
+  else logger.level = def.level;
+  // Shared array reference on purpose: a future handler swap on the default
+  // logger propagates to every scope.
+  logger.handlers = def.handlers;
+}
+
 export function getLogger(scope?: string): log.Logger {
   if (!scope) return log.getLogger();
-  // @std/log registers child loggers lazily; just ask by name and configure
-  // them on first use.
-  return log.getLogger(scope);
+  let logger = scopedLoggers.get(scope);
+  if (!logger) {
+    logger = new log.Logger(scope, "DEBUG", { handlers: [] });
+    scopedLoggers.set(scope, logger);
+    if (initialized) wireToDefault(logger);
+  }
+  return logger;
 }

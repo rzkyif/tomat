@@ -9,35 +9,7 @@
 
 import { z } from "zod";
 
-// --- Tool-filter entries ---------------------------------------------------
-
-export const toolFilterPhase1EntrySchema = z
-  .object({
-    toolId: z.string().min(1),
-    name: z.string(),
-    description: z.string(),
-    score: z.number(),
-  })
-  .passthrough();
-
-export const toolFilterEntrySchema = z
-  .object({
-    toolId: z.string().min(1),
-    name: z.string(),
-    description: z.string(),
-  })
-  .passthrough();
-
-// --- Pending tool call + askuser shapes -----------------------------------
-
-export const pendingToolCallSchema = z
-  .object({
-    callId: z.string().min(1),
-    toolkitId: z.string().min(1),
-    toolName: z.string().min(1),
-    arguments: z.string(),
-  })
-  .passthrough();
+// --- Askuser shapes --------------------------------------------------------
 
 export const askUserQuestionSchema = z
   .object({
@@ -75,33 +47,26 @@ const pingFrameSchema = z
   })
   .passthrough();
 
-const chatToolfilterFrameSchema = z
+// Message is a large domain shape; like downloads.snapshot the payload stays
+// loose (z.unknown()) so the envelope passes without copying every nested
+// field. The messages store assigns it onto its domain-typed state.
+const chatMessageFrameSchema = z
   .object({
-    kind: z.literal("chat.toolfilter"),
+    kind: z.literal("chat.message"),
     streamId: z.string().min(1),
-    status: z.enum(["filtering", "complete", "error"]),
-    phase1: z.array(toolFilterPhase1EntrySchema).optional(),
-    phase2: z.array(toolFilterEntrySchema).optional(),
-    alwaysAvailable: z.array(toolFilterEntrySchema).optional(),
-    errorMessage: z.string().optional(),
+    sessionId: z.string().min(1),
+    message: z.unknown(),
+    afterId: z.string().nullable(),
+    final: z.boolean(),
   })
   .passthrough();
 
-const chatChunkFrameSchema = z
+const chatDeltaFrameSchema = z
   .object({
-    kind: z.literal("chat.chunk"),
+    kind: z.literal("chat.delta"),
     streamId: z.string().min(1),
-    contentDelta: z.string().optional(),
-    reasoningDelta: z.string().optional(),
-    finishReason: z.string().optional(),
-  })
-  .passthrough();
-
-const chatToolcallRequestedFrameSchema = z
-  .object({
-    kind: z.literal("chat.toolcall_requested"),
-    streamId: z.string().min(1),
-    calls: z.array(pendingToolCallSchema),
+    messageId: z.string().min(1),
+    delta: z.string(),
   })
   .passthrough();
 
@@ -125,7 +90,7 @@ const chatDoneFrameSchema = z
   .object({
     kind: z.literal("chat.done"),
     streamId: z.string().min(1),
-    reason: z.string(),
+    reason: z.enum(["stop", "interrupted", "hop_limit"]),
   })
   .passthrough();
 
@@ -261,7 +226,6 @@ const sessionUpdatedFrameSchema = z
         title: z.string().optional(),
         messageId: z.string().optional(),
         message: z.unknown().optional(),
-        toolCall: z.unknown().optional(),
         attachments: z.array(z.unknown()).optional(),
       })
       .passthrough()
@@ -291,9 +255,8 @@ const updateErrorFrameSchema = z
 export const serverToClientFrameSchema = z.discriminatedUnion("kind", [
   pongSchema,
   pingFrameSchema,
-  chatToolfilterFrameSchema,
-  chatChunkFrameSchema,
-  chatToolcallRequestedFrameSchema,
+  chatMessageFrameSchema,
+  chatDeltaFrameSchema,
   chatUsageFrameSchema,
   chatDoneFrameSchema,
   chatErrorFrameSchema,
