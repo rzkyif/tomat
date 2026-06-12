@@ -88,6 +88,7 @@
     "npm:vitest@2": "2.1.9_@types+node@25.7.0_jsdom@29.1.1__@noble+hashes@2.2.0",
     "npm:vitest@4": "4.1.8_@types+node@25.7.0_@vitest+coverage-v8@4.1.8_jsdom@29.1.1__@noble+hashes@2.2.0_vite@8.0.16__@types+node@25.7.0__sass-embedded@1.100.0",
     "npm:vitest@^4.1.8": "4.1.8_@types+node@25.7.0_@vitest+coverage-v8@4.1.8_jsdom@29.1.1__@noble+hashes@2.2.0_vite@8.0.16__@types+node@25.7.0__sass-embedded@1.100.0",
+    "npm:vitest@latest": "4.1.8_@types+node@25.7.0_@vitest+coverage-v8@4.1.8_jsdom@29.1.1__@noble+hashes@2.2.0_vite@8.0.16__@types+node@25.7.0__sass-embedded@1.100.0",
     "npm:wrangler@4": "4.93.0",
     "npm:zod@^4.4.3": "4.4.3"
   },

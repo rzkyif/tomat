@@ -17,6 +17,7 @@ import { buildToolsHint } from "$lib/shared/system-prompt";
 import { cores } from "$lib/core";
 import { getLogger } from "$lib/shared/log";
 import { messagesState } from "./messages.svelte";
+import { permissionState } from "./permissions.svelte";
 import { sessionsState } from "./sessions.svelte";
 import { settingsState } from "./settings.svelte";
 import { ttsState } from "./tts.svelte";
@@ -164,11 +165,26 @@ class StreamingState {
     if (
       frame.kind === "tool.progress" ||
       frame.kind === "tool.askuser_request" ||
+      frame.kind === "tool.permission_request" ||
       frame.kind === "tool.log" ||
       frame.kind === "tool.result" ||
       frame.kind === "tool.error" ||
       frame.kind === "tool.cancelled"
     ) {
+      if (frame.kind === "tool.permission_request") {
+        // Drives UserInput's permission mode globally (the bubble state
+        // alone can't: UserInput isn't per-message).
+        permissionState.set(frame);
+      } else if (
+        frame.kind === "tool.result" ||
+        frame.kind === "tool.error" ||
+        frame.kind === "tool.cancelled"
+      ) {
+        // The call ended some other way (timeout, cancel, worker death)
+        // while a request was still pending; drop it so the input returns
+        // to normal.
+        permissionState.clearForCall(frame.callId);
+      }
       messagesState.applyToolEvent(frame);
     }
   }

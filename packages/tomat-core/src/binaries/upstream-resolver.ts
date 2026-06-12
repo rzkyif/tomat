@@ -1,12 +1,16 @@
-// Runtime resolution of "latest upstream" sidecar binaries.
+// Runtime resolution of upstream sidecar binaries.
 //
 // On the BETA channel, binaries.json carries resolver entries (an upstream
 // GitHub repo + per-triple asset-name patterns) instead of pinned URLs, so a
-// beta core always installs the LATEST upstream release without us having to
-// re-publish the manifest. The signed manifest commits to the repo + patterns;
-// the concrete download is verified against GitHub's own published sha256
-// digest. We REFUSE to install an asset that lacks a sha256 digest. There'd
-// be no verifiable anchor for the bytes we're about to execute.
+// beta core installs upstream releases without us having to re-publish the
+// manifest. A resolver without `pinnedTag` tracks the LATEST release; with
+// `pinnedTag` it resolves that exact release (deno is pinned this way on
+// every channel, because the permission prompt parsing in
+// toolkits/prompt-parser.ts depends on the prompt wording of the pinned
+// version). The signed manifest commits to the repo + patterns; the concrete
+// download is verified against GitHub's own published sha256 digest. We
+// REFUSE to install an asset that lacks a sha256 digest. There'd be no
+// verifiable anchor for the bytes we're about to execute.
 //
 // On the STABLE channel, manifest entries are pinned at release time and this
 // module isn't involved.
@@ -50,12 +54,19 @@ export function __resetResolverCacheForTesting(): void {
   releaseCache.clear();
 }
 
-async function fetchLatestRelease(repo: string, signal?: AbortSignal): Promise<GitHubRelease> {
-  const cached = releaseCache.get(repo);
+async function fetchRelease(
+  repo: string,
+  pinnedTag: string | undefined,
+  signal?: AbortSignal,
+): Promise<GitHubRelease> {
+  const cacheKey = pinnedTag ? `${repo}@${pinnedTag}` : repo;
+  const cached = releaseCache.get(cacheKey);
   if (cached && Date.now() - cached.atMs < RELEASE_CACHE_TTL_MS) {
     return cached.release;
   }
-  const url = `https://api.github.com/repos/${repo}/releases/latest`;
+  const url = pinnedTag
+    ? `https://api.github.com/repos/${repo}/releases/tags/${pinnedTag}`
+    : `https://api.github.com/repos/${repo}/releases/latest`;
   const headers: Record<string, string> = {
     accept: "application/vnd.github+json",
     "user-agent": "tomat-core",
@@ -78,7 +89,7 @@ async function fetchLatestRelease(repo: string, signal?: AbortSignal): Promise<G
     );
   }
   const release = (await res.json()) as GitHubRelease;
-  releaseCache.set(repo, { release, atMs: Date.now() });
+  releaseCache.set(cacheKey, { release, atMs: Date.now() });
   return release;
 }
 
@@ -93,7 +104,7 @@ export async function resolveUpstream(
 ): Promise<ResolvedBinary | null> {
   const pattern = resolver.assets[triple];
   if (!pattern) return null;
-  const release = await fetchLatestRelease(resolver.repo, signal);
+  const release = await fetchRelease(resolver.repo, resolver.pinnedTag, signal);
   const assetName = pattern.replace(/\{tag\}/g, release.tag_name);
   const asset = release.assets.find((a) => a.name === assetName);
   if (!asset) {

@@ -46,6 +46,19 @@ flowchart TD
 - [`packages/tomat-core-hwinfo/`](packages/tomat-core-hwinfo/README.md):
   native Rust helper that reports RAM, physical cores, and GPU/VRAM for the
   on-device model fit engine.
+- [`packages/tomat-core-ptyhost/`](packages/tomat-core-ptyhost/README.md):
+  native Rust helper that runs a tool worker under a pseudo-terminal so Deno's
+  runtime permission prompts can pause the tool and be answered from chat
+  (unix only for now; Windows falls back to `--no-prompt` workers).
+
+These four helper binaries (updater, keychain, hwinfo, ptyhost) ship in the
+signed release manifest and are placed in the bin dir at install time. Core
+verifies they are present at boot and **refuses to start** if any are missing,
+rather than silently degrading (file-backed secrets, guessed hardware, tool
+workers without permission prompts). `deno task dev` builds them from source and
+links them into the dev bin dir before core boots, so dev matches a real
+install; a build failure surfaces in the dev log and core declines to start.
+
 - [`packages/tomat-client/`](packages/tomat-client/README.md): Tauri 2 +
   Svelte 5 + Vite + UnoCSS desktop UI.
 - [`packages/tomat-model-catalog/`](packages/tomat-model-catalog/README.md):

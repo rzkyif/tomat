@@ -24,6 +24,8 @@
     | { kind: "installed"; toolkit: Toolkit }
     | { kind: "npm"; result: ToolkitSearchResult; installed: boolean };
 
+  let { horizontal = false }: { horizontal?: boolean } = $props();
+
   let query = $state("");
   let selectedItem = $state<ToolkitItem | null>(null);
   let reloadKey = $state(0);
@@ -323,7 +325,7 @@
     if (canUninstall(tk)) {
       actions.push({
         label: "Uninstall",
-        icon: "i-material-symbols-package-2-outline-rounded",
+        icon: "i-material-symbols-package-2-outline",
         loading: busyAction === "remove",
         disabled: anyBusy && busyAction !== "remove",
         onSelect: () => uninstallToolkit(tk),
@@ -449,7 +451,7 @@
         actions={detailActions(tk, close)}
       />
       <ObjectDetailScroll description={tk.description}>
-        <ToolkitDetail toolkit={tk} />
+        <ToolkitDetail toolkit={tk} {horizontal} />
       </ObjectDetailScroll>
     {/if}
   {/snippet}

@@ -58,6 +58,7 @@ jobs:
             packages/tomat-client/src/tauri
             packages/tomat-core-keychain
             packages/tomat-core-updater
+            packages/tomat-core-ptyhost
 
       # Cache Deno's module + npm cache between runs.
       - uses: actions/cache@v4
@@ -73,10 +74,18 @@ jobs:
       - run: deno task fmt:check
       - run: deno task lint
 
+      # The permission-prompt live probe (toolkits/prompt-live-probe.test.ts)
+      # needs the real ptyhost binary; build it first and force the test to
+      # FAIL rather than skip if the binary is somehow absent, since it is
+      # the drift tripwire for deno version bumps.
+      - run: cargo build -p tomat-core-ptyhost
+
       # In-source tests via `deno task test` (deno + vitest one-shot + cargo).
       # E2E (WebdriverIO + tauri-driver under tests/e2e/) is intentionally not
       # run in CI. See tests/e2e/README.md.
       - run: deno task test
+        env:
+          TOMAT_REQUIRE_PTYHOST: "1"
 
   # Cross-platform Rust checks. Linux already runs inside `deno task check`
   # above; this matrix covers macOS + Windows so the Rust crates (the Tauri
@@ -102,6 +111,7 @@ jobs:
             packages/tomat-client/src/tauri
             packages/tomat-core-keychain
             packages/tomat-core-updater
+            packages/tomat-core-ptyhost
       # --locked fails if any Cargo.lock would change, so a drifted lock can't
       # pass CI (the signed helper binaries are built from these locks).
       - run: cargo clippy --locked --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings
@@ -113,3 +123,6 @@ jobs:
       - run: cargo clippy --locked --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets -- -D warnings
       - run: cargo check --locked --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets
       - run: cargo test --locked --manifest-path packages/tomat-core-updater/Cargo.toml
+      - run: cargo clippy --locked --manifest-path packages/tomat-core-ptyhost/Cargo.toml --all-targets -- -D warnings
+      - run: cargo check --locked --manifest-path packages/tomat-core-ptyhost/Cargo.toml --all-targets
+      - run: cargo test --locked --manifest-path packages/tomat-core-ptyhost/Cargo.toml

@@ -67,6 +67,44 @@ frames are capped at 16 MB and stderr lines at 1 MB so a runaway tool cannot
 exhaust core's memory. The worker env is cleared and rebuilt from a small
 operational allowlist plus explicitly granted env keys.
 
+## Runtime permission prompts
+
+Grants are three-state (`granted` | `ask` | `denied`; no row behaves as
+`ask`). Only `granted` permissions become `--allow-*` spawn flags. Everything
+else relies on Deno's interactive permission prompt at the moment of access:
+when the [`tomat-core-ptyhost`](../../../tomat-core-ptyhost/README.md) helper
+binary is present, [`worker-handle.ts`](worker-handle.ts) spawns the worker
+under it with stdin + stderr on a pseudo-terminal and WITHOUT `--no-prompt`,
+so an uncovered access pauses the op mid-call instead of throwing.
+
+[`prompt-parser.ts`](prompt-parser.ts) (pure state machine, fixture-tested)
+extracts the permission kind, resource, and API name from the prompt text on
+the PTY; [`prompt-matcher.ts`](prompt-matcher.ts) decides: declared
+permission with state `ask` (or no row) forwards to the user in chat over
+the `tool.permission_request` / `tool.permission_response` WS frames (the
+pool pauses the call-timeout budget exactly like `askUser`); declared +
+`denied` and policy-denied undeclared accesses are auto-answered `n`;
+undeclared accesses follow the toolkit's `undeclared_policy` column
+(`deny` default, `ask` forwards flagged as undeclared). Unrecognized prompt
+kinds fail closed.
+
+Answer timing matters: Deno flushes stdin until it has been quiescent for
+~100 ms before reading the answer, so the handle writes `y\n`/`n\n` no
+sooner than 300 ms after the prompt appears and retries every 600 ms until
+the `Granted`/`Denied` confirmation line settles (give-up after 10 s kills
+the worker; the call then settles via the pool timeout). Accepts are scoped
+to the current tool call: Deno caches verdicts per resource for the process
+lifetime, so any worker whose prompt was user-answered is retired at call
+end instead of returning to the warm pool.
+
+The prompt wording is not a stable Deno API. The bundled deno is therefore
+pinned on every channel (`pinnedTag` in `UPSTREAM_BINARIES`), and
+[`prompt-live-probe.test.ts`](prompt-live-probe.test.ts) drives real prompts
+through the real ptyhost + parser as the drift tripwire for deno bumps.
+Without the helper (Windows, or a from-source dev setup that has not built
+it), workers fall back to the legacy `--no-prompt` spawn and ask-state
+permissions surface to the tool as `NotCapable`.
+
 ## Built-in toolkit seeding
 
 The built-in toolkit is CDN-distributed (never on npm) behind an Ed25519-signed

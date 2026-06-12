@@ -4,6 +4,7 @@
 
 import type { AttachmentRef, Message, TokenUsage } from "../domain/session.ts";
 import type { DownloadEntry, RequiredFile, SidecarSnapshot } from "../domain/model.ts";
+import type { PermissionKind } from "../domain/toolkit.ts";
 import type { ErrorCode } from "./errors.ts";
 
 // --- Client → Server -------------------------------------------------------
@@ -43,6 +44,12 @@ export type ClientToServerFrame =
       callId: string;
       requestId: string;
       answers: Array<string | string[]>;
+    }
+  | {
+      kind: "tool.permission_response";
+      callId: string;
+      requestId: string;
+      allow: boolean;
     }
   | { kind: "tool.cancel"; callId: string };
 
@@ -101,6 +108,26 @@ export type ServerToClientFrame =
       requestId: string;
       questions: AskUserQuestion[];
     }
+  // A running tool hit a permission its grants do not cover; the call is
+  // paused on Deno's prompt until the user allows or rejects in chat.
+  | {
+      kind: "tool.permission_request";
+      callId: string;
+      requestId: string;
+      permissionKind: PermissionKind;
+      /** What the tool is trying to touch, as reported by Deno (host:port,
+       *  path, env key, binary, sys flag; empty for ffi-without-path). */
+      resource: string;
+      /** The Deno API that triggered the check (e.g. `fetch()`), when known. */
+      apiName?: string;
+      /** False when the access matches none of the tool's declared
+       *  permissions and the toolkit's undeclared policy is `ask`. */
+      declared: boolean;
+      /** The declared permission's reason, when declared. */
+      reason?: string;
+      toolkitId: string;
+      toolName: string;
+    }
   | {
       kind: "tool.log";
       callId: string;
@@ -132,6 +159,19 @@ export type ServerToClientFrame =
       kind: "requirements.snapshot";
       required: RequiredFile[];
       missing: RequiredFile[];
+    }
+  // Core settings sync. Broadcast on every core-settings change so all
+  // connected clients converge without polling (a client's own PATCH echoes
+  // back; value-diffing on the client makes the echo a no-op).
+  | {
+      kind: "settings.updated";
+      // Changed entries of the core's sparse settings store (non-default
+      // values). Never contains secret-typed keys.
+      values: Record<string, unknown>;
+      // Keys deleted from the sparse store (reverted to schema default).
+      deleted: string[];
+      // Configured secret names; present only when the secret set changed.
+      secretNames?: string[];
     }
   | {
       kind: "sidecar.status";

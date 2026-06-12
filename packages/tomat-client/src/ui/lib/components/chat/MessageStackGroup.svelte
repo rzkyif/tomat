@@ -177,7 +177,7 @@
      messages). The parent chat container already reverses group order so
      groups themselves still stack newest-on-top across the screen. -->
 <div
-  class="flex flex-col gap-1 w-fit max-w-[calc(100vw-5rem)]"
+  class="flex flex-col gap-2 w-fit max-w-[calc(100vw-5rem)]"
   class:items-start={alignment === "left"}
   class:items-end={alignment === "right"}
   class:items-center={alignment === "center"}

@@ -1,27 +1,40 @@
 /**
- * Reactive store for user settings. Routes reads/writes by group destination:
+ * Reactive store for user settings, layered for the core/client split:
  *
- *   - "client" groups → ~/.tomat/client/settings.json via the platform's
- *     clientSettings.read/write (Tauri file write on desktop, localStorage
- *     in the browser stub).
- *   - "core" groups → currently-selected paired core via
- *     `cores().api().settings.{load,patch}`. Secret-typed fields go to
- *     the secrets vault via `setSecret`/`deleteSecret`.
+ *   merged view  = schema defaults + clientSparse + coreSparse
+ *   clientSparse = non-default client-destination keys, persisted to
+ *                  ~/.tomat/<channel>/client/settings.json (this store is the
+ *                  file's only owner; cores.json and snippets/ are separate).
+ *   coreSparse   = non-default core-destination keys, persisted to the
+ *                  currently-selected core via PATCH /settings and kept live
+ *                  by the core's settings.updated WS broadcasts.
  *
- * Loaded settings are merged onto the schema defaults; saves are sparse
- * (only non-default values are persisted). External code subscribes via
- * `onChange` to react to specific keys (settings-effects.ts).
+ * Every mutation, whatever its origin (a user edit, a file load, a core
+ * baseline GET, a WS delta from another client, a core-switch reset), flows
+ * through one pipeline (`applyChanges`) that updates the layers, mutates the
+ * merged record per key, and notifies `onChange` listeners for keys whose
+ * effective value actually changed. Value-diffing makes WS echoes of our own
+ * PATCHes, repeated loads, and listener writebacks converge to no-ops.
+ *
+ * Listeners therefore fire at APPLY time (optimistically for user edits), and
+ * a failed persist fires the reverse transition when the batch rolls back.
+ * Persist failures are isolated per destination: a core PATCH failure rolls
+ * back only core keys, a file-write failure only client keys.
+ *
+ * Core-destination edits made before the core baseline has loaded (e.g. in
+ * quick settings right after pairing) are queued, not dropped: the baseline
+ * skips locally-edited keys and the queued delta is PATCHed right after it
+ * lands. Secret-typed fields never enter the layers or the wire: only names
+ * the user actually edited are written, straight to the secrets vault.
  */
 
 import { browser, dev } from "$app/environment";
 import {
   getDefaultSettings,
-  groupDestinations,
   isClientGroup,
   isCoreGroup,
-  isValidSettingKey,
   SECRET_KEYS,
-  SETTINGS_SCHEMA,
+  settingKeyDestination,
   type SettingGroupId,
 } from "@tomat/shared";
 import { platform } from "$lib/platform";
@@ -31,39 +44,28 @@ import type { Alignment } from "$lib/shared/types";
 
 const log = getLogger("settings");
 
-function warnIfUnknownKey(key: string): void {
-  if (dev && !isValidSettingKey(key)) {
-    log.warn(`writing unknown setting key: "${key}"`);
-  }
-}
+export type SettingsChangeOrigin = "user" | "load" | "remote";
 
-type SettingChangeListener = (key: string, prev: unknown, next: unknown) => void | Promise<void>;
-
-// Per-key destination lookup: settings.ts loads the schema once and
-// pre-computes which destination each known key belongs to so the per-key
-// save path doesn't have to walk the schema every time.
-const KEY_DESTINATION = (() => {
-  const map = new Map<string, "client" | "core">();
-  for (const group of SETTINGS_SCHEMA) {
-    // Default to the group's first listed destination. A hybrid group (e.g.
-    // stt) spans both client and core and routes per section, so a section may
-    // override with its own `destination`; render-only multi-destination groups
-    // (usage) never persist, so the default is harmless there.
-    const groupDest = groupDestinations(group)[0];
-    for (const section of group.sections) {
-      const dest = section.destination ?? groupDest;
-      for (const field of section.fields) {
-        map.set(field.id, dest);
-      }
-    }
-  }
-  return map;
-})();
+type SettingChangeListener = (
+  key: string,
+  prev: unknown,
+  next: unknown,
+  origin: SettingsChangeOrigin,
+) => void | Promise<void>;
 
 const SECRET_KEY_SET = new Set<string>(SECRET_KEYS);
 
+// Schema defaults, captured once: every value is a scalar, so sharing one
+// frozen copy for lookups is safe. The merged $state record gets its own
+// mutable copy in the constructor.
+const DEFAULTS: Readonly<Record<string, unknown>> = getDefaultSettings();
+
 function destinationFor(key: string): "client" | "core" {
-  return KEY_DESTINATION.get(key) ?? "client";
+  return settingKeyDestination(key) ?? "client";
+}
+
+function isCoreKey(key: string): boolean {
+  return key in DEFAULTS && !SECRET_KEY_SET.has(key) && destinationFor(key) === "core";
 }
 
 // Debounce window for coalescing rapid edits into a single round-trip.
@@ -72,7 +74,16 @@ function destinationFor(key: string): "client" | "core" {
 // into one PATCH instead of one PATCH per character.
 const FLUSH_DEBOUNCE_MS = 200;
 
+interface Transition {
+  key: string;
+  prev: unknown;
+  next: unknown;
+}
+
 class SettingsState {
+  // The merged view every reader consumes. Mutated PER KEY (never replaced
+  // wholesale) so Svelte's fine-grained reactivity invalidates only the keys
+  // that changed.
   // deno-lint-ignore no-explicit-any -- consumers treat values as untyped
   // and the schema-defaults loader builds a heterogeneous record.
   currentSettings = $state<Record<string, any>>(getDefaultSettings());
@@ -80,14 +91,26 @@ class SettingsState {
   // Names of secret-typed settings (API keys) the core reports as configured.
   // Core never returns secret VALUES, so the field stays empty in the UI; this
   // set lets password fields render a "saved" placeholder. Loaded from
-  // GET /settings/secrets.
+  // GET /settings/secrets and kept live by settings.updated secretNames.
   configuredSecrets = $state<Set<string>>(new Set());
 
-  // True once the paired core's settings have been merged into currentSettings
-  // (loadCoreSettings). Until then the boot path holds only client-local +
-  // default values, so save() must not PATCH core-destination keys. Doing so
-  // would overwrite the core's real value with a stale default. See save().
+  // True once the selected core's baseline has been merged. Until then core
+  // PATCHes are held (edits queue in pendingCoreEdits) because a diff against
+  // an unknown baseline could overwrite the core's real values.
   coreLoaded = $state(false);
+
+  // Sparse layers. Plain objects (not $state): the merged record is the
+  // reactive surface; these are persistence bookkeeping.
+  private clientSparse: Record<string, unknown> = {};
+  private coreSparse: Record<string, unknown> = {};
+  // The core-confirmed sparse state. Each flush PATCHes
+  // diff(syncedCoreSparse, coreSparse): changed keys as values, removed keys
+  // as the null reset sentinel, so reverted keys are deleted core-side.
+  private syncedCoreSparse: Record<string, unknown> = {};
+  // Core-destination keys edited before the baseline loaded; flushed as one
+  // PATCH right after it lands. The baseline skips these so a queued edit is
+  // never clobbered.
+  private pendingCoreEdits = new Set<string>();
 
   // Secret keys the user actually edited this session. Only these are written
   // on save. A loaded-but-untouched secret field is empty (we never receive
@@ -95,25 +118,12 @@ class SettingsState {
   // configured vault entry.
   private dirtySecrets = new Set<string>();
 
-  // Mirrors the core's sparse settings file: the non-default core-destination
-  // keys it currently persists. save() diffs the current sparse delta against
-  // this to send explicit nulls for keys that reverted to default, since the
-  // core PATCH merges and would otherwise keep the stale value (e.g. switching
-  // back to the default model preset must drop llm.modelPath so requirements
-  // recompute). Repopulated by loadCoreSettings() and after each save.
-  private coreSparseKeys = new Set<string>();
-
   private listeners = new Set<SettingChangeListener>();
-
-  /** True if the core reports a value stored for this secret-typed setting. */
-  isSecretConfigured(key: string): boolean {
-    return this.configuredSecrets.has(key);
-  }
 
   // Coalesced flush state: `pendingPrev` records the *first* observed prev
   // value per key across a debounce window so a failed flush can roll the
-  // UI back to where it started. Resolvers are notified per individual
-  // updateSettings() call.
+  // affected destination back to where it started. Resolvers are notified per
+  // individual updateSettings() call.
   private pendingPrev = new Map<string, unknown>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingResolvers: Array<{
@@ -122,15 +132,68 @@ class SettingsState {
   }> = [];
   private flushInFlight: Promise<void> | null = null;
 
+  // attach() wiring guards: one-shot registration, plus the selected-core id
+  // so registry notifications (which also fire on rename) only reset core
+  // state on a real switch. baselineGen discards stale baseline GETs that
+  // resolve after a newer load or a core switch started.
+  private attached = false;
+  private lastCoreId: string | null = null;
+  private baselineGen = 0;
+
+  /** True if the core reports a value stored for this secret-typed setting. */
+  isSecretConfigured(key: string): boolean {
+    return this.configuredSecrets.has(key);
+  }
+
   onChange(fn: SettingChangeListener): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
 
-  private notifyListeners(key: string, prev: unknown, next: unknown): void {
+  // --- the pipeline --------------------------------------------------------
+
+  /** The one funnel every mutation goes through. A `null`/`undefined` value
+   *  means "revert to schema default". Updates the owning sparse layer,
+   *  mutates the merged record per key, and notifies listeners for keys whose
+   *  effective value actually changed. Returns those transitions. */
+  private applyChanges(
+    changes: Record<string, unknown>,
+    origin: SettingsChangeOrigin,
+  ): Transition[] {
+    const transitions: Transition[] = [];
+    for (const [key, raw] of Object.entries(changes)) {
+      if (!(key in DEFAULTS)) {
+        // Render-only fields and junk keys hold no persistable value.
+        if (dev) log.warn(`ignoring unknown setting key: "${key}"`);
+        continue;
+      }
+      const next = raw === null || raw === undefined ? DEFAULTS[key] : raw;
+      if (!SECRET_KEY_SET.has(key)) {
+        // Secrets never enter the layers (their values live in the vault and
+        // their UI value is session-local); everything else lands in its
+        // destination's sparse layer, kept sparse against the defaults.
+        const layer = destinationFor(key) === "core" ? this.coreSparse : this.clientSparse;
+        if (Object.is(next, DEFAULTS[key])) delete layer[key];
+        else layer[key] = next;
+      }
+      const prev = this.currentSettings[key];
+      if (Object.is(prev, next)) continue;
+      this.currentSettings[key] = next;
+      transitions.push({ key, prev, next });
+    }
+    for (const t of transitions) this.notifyListeners(t.key, t.prev, t.next, origin);
+    return transitions;
+  }
+
+  private notifyListeners(
+    key: string,
+    prev: unknown,
+    next: unknown,
+    origin: SettingsChangeOrigin,
+  ): void {
     for (const fn of this.listeners) {
       try {
-        void Promise.resolve(fn(key, prev, next)).catch((e) =>
+        void Promise.resolve(fn(key, prev, next, origin)).catch((e) =>
           log.warn(`onChange listener for "${key}" failed:`, e),
         );
       } catch (e) {
@@ -139,26 +202,139 @@ class SettingsState {
     }
   }
 
+  /** Replace the core layer with `sparse`: new/changed entries apply as
+   *  values, entries no longer present revert to default. `skipKeys` protects
+   *  locally-pending edits from being clobbered by a baseline. */
+  private replaceCoreLayer(
+    sparse: Record<string, unknown>,
+    origin: SettingsChangeOrigin,
+    skipKeys?: ReadonlySet<string>,
+  ): void {
+    const changes: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(sparse)) {
+      if (!skipKeys?.has(k)) changes[k] = v;
+    }
+    for (const k of Object.keys(this.coreSparse)) {
+      if (!(k in sparse) && !skipKeys?.has(k)) changes[k] = null;
+    }
+    this.applyChanges(changes, origin);
+  }
+
+  /** Client-layer counterpart of replaceCoreLayer (no skip set: the client
+   *  file is read only at boot, before any edit can be pending). */
+  private replaceClientLayer(sparse: Record<string, unknown>, origin: SettingsChangeOrigin): void {
+    const changes: Record<string, unknown> = { ...sparse };
+    for (const k of Object.keys(this.clientSparse)) {
+      if (!(k in sparse)) changes[k] = null;
+    }
+    this.applyChanges(changes, origin);
+  }
+
+  // --- wiring ---------------------------------------------------------------
+
+  /** One-shot wiring of the live-sync hooks. Called once from the deferred
+   *  boot phase; everything afterwards (pairing, core switch, reconnect,
+   *  remote settings changes) flows through these subscriptions instead of
+   *  per-call-site loads. */
+  attach(): void {
+    if (this.attached) return;
+    this.attached = true;
+    this.lastCoreId = cores().currentEntry()?.id ?? null;
+
+    // Selection changes: the registry notifies on select/remove/rename with
+    // no payload, so compare ids to act only on a real switch. Resetting the
+    // core layer fires real transitions (a switched-away core's tts.enabled
+    // true reverts to false, disarming TTS) before the new baseline loads.
+    cores().subscribe(() => {
+      const id = cores().currentEntry()?.id ?? null;
+      if (id === this.lastCoreId) return;
+      this.lastCoreId = id;
+      this.resetCoreState();
+      if (id) {
+        this.loadCoreSettings().catch((e) =>
+          log.warn("core settings load after core switch failed:", e),
+        );
+      }
+    });
+
+    // Remote deltas: another client's PATCH (or a core-side change like a
+    // preset apply) lands here; our own PATCH echoes back and value-diffs to
+    // a no-op.
+    cores().subscribeWs((frame) => {
+      if (frame.kind !== "settings.updated") return;
+      this.applyRemote(frame.values, frame.deleted, frame.secretNames);
+    });
+
+    // Reconnects: frames sent while disconnected are gone, so re-baseline on
+    // every connected edge (first connect, post-pairing, core restart).
+    cores().subscribeConnectionState((s) => {
+      if (s !== "connected") return;
+      this.loadCoreSettings().catch((e) => log.warn("core settings load on reconnect failed:", e));
+    });
+
+    // A core may already be selected (and even connected) by the time the
+    // deferred boot phase attaches; load its baseline explicitly.
+    if (cores().currentEntry()) {
+      this.loadCoreSettings().catch((e) => log.warn("core settings baseline load failed:", e));
+    }
+  }
+
+  private resetCoreState(): void {
+    this.coreLoaded = false;
+    this.pendingCoreEdits.clear();
+    this.dirtySecrets.clear();
+    this.configuredSecrets = new Set();
+    this.syncedCoreSparse = {};
+    this.baselineGen++;
+    this.replaceCoreLayer({}, "load");
+  }
+
+  private applyRemote(
+    values: Record<string, unknown>,
+    deleted: string[],
+    secretNames?: string[],
+  ): void {
+    const changes: Record<string, unknown> = {};
+    const pending = (k: string) => this.pendingCoreEdits.has(k) || this.pendingPrev.has(k);
+    for (const [k, v] of Object.entries(values)) {
+      if (!isCoreKey(k)) continue;
+      // The core's authoritative state moved either way; a key with a local
+      // edit in flight keeps its optimistic merged value, and the next flush
+      // diff re-asserts it against this new synced state.
+      this.syncedCoreSparse[k] = v;
+      if (!pending(k)) changes[k] = v;
+    }
+    for (const k of deleted) {
+      if (!isCoreKey(k)) continue;
+      delete this.syncedCoreSparse[k];
+      if (!pending(k)) changes[k] = null;
+    }
+    this.applyChanges(changes, "remote");
+    if (secretNames) this.configuredSecrets = new Set(secretNames);
+  }
+
+  // --- loads ----------------------------------------------------------------
+
   /** Local-only load: defaults + the client settings file. Fast, no network.
    *  This is all the boot path needs before it can position, theme, and show
-   *  the window. Resets the core-derived state so a stale core's values don't
-   *  linger; loadCoreSettings() re-populates it. */
+   *  the window. Core state is untouched; the attach() hooks own it. */
   async loadClientSettings(): Promise<void> {
     if (!browser) return;
-    // deno-lint-ignore no-explicit-any
-    let merged: Record<string, any> = { ...getDefaultSettings() };
+    let stored: Record<string, unknown> = {};
     try {
-      const clientStored = await platform().clientSettings.read();
-      merged = { ...merged, ...clientStored };
+      stored = await platform().clientFiles.read("settings");
     } catch (e) {
       log.warn("Failed to load client settings, using defaults:", e);
     }
-    this.currentSettings = merged;
-    // A fresh load discards any in-memory secret edits and core-derived state.
-    this.dirtySecrets.clear();
-    this.configuredSecrets = new Set();
-    this.coreSparseKeys = new Set();
-    this.coreLoaded = false;
+    const sparse: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(stored)) {
+      if (k in DEFAULTS && !SECRET_KEY_SET.has(k) && destinationFor(k) === "client") {
+        sparse[k] = v;
+      } else if (dev) {
+        log.warn(`dropping non-client key from settings.json: "${k}"`);
+      }
+    }
+    this.replaceClientLayer(sparse, "load");
 
     // Push the persisted shortcut so Rust overrides the startup default. Local
     // Rust call; boot must not abort if the shortcut is taken. Log it and let
@@ -168,28 +344,49 @@ class SettingsState {
     );
   }
 
-  /** Merge the paired core's settings (and configured-secret names) over the
-   *  already-loaded local settings. Networked: runs in the deferred boot phase
-   *  after the window is visible. No-op when no core is paired. Lets failures
-   *  propagate so the caller can surface them (console.error on the boot path).
-   *  Appearance/layout keys are client-local, so this never changes the window. */
+  /** Fetch the selected core's settings baseline (and configured-secret
+   *  names) and merge it through the pipeline. No-op when no core is
+   *  selected; stale responses (a newer load started, or the core switched)
+   *  are discarded. Public for callers that change core state server-side and
+   *  want the merged view refreshed deterministically (model preset applies);
+   *  the WS echo of such changes value-diffs to a no-op afterwards. */
   async loadCoreSettings(): Promise<void> {
-    if (!browser || !cores().currentEntry()) return;
-    const coreStored = await cores().api().settings.load();
-    this.currentSettings = { ...this.currentSettings, ...coreStored };
-    // The core returns its sparse file (non-default core keys only). Remember
-    // it so save() knows which keys to delete when they revert to default.
-    this.coreSparseKeys = new Set(Object.keys(coreStored));
-    // Learn which secret-typed settings have a value stored in the vault so
-    // password fields can show a "saved" placeholder (the value is never
-    // returned).
-    const names = await cores().api().settings.listSecrets();
+    if (!browser) return;
+    const entry = cores().currentEntry();
+    if (!entry) return;
+    const gen = ++this.baselineGen;
+    const api = cores().api().settings;
+    const [coreStored, names] = await Promise.all([api.load(), api.listSecrets()]);
+    if (gen !== this.baselineGen || cores().currentEntry()?.id !== entry.id) return;
+
+    const baseline: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(coreStored)) {
+      if (isCoreKey(k)) baseline[k] = v;
+    }
+    // Keys with local edits in flight keep their optimistic value; the synced
+    // state below still records the core's truth, so the queued flush diff
+    // re-asserts the local value (and a failed flush rolls back to the core's
+    // real value, which pendingPrev is re-pointed at here).
+    const skip = new Set<string>(this.pendingCoreEdits);
+    for (const k of this.pendingPrev.keys()) {
+      if (isCoreKey(k)) skip.add(k);
+    }
+    this.replaceCoreLayer(baseline, "load", skip);
+    this.syncedCoreSparse = { ...baseline };
+    for (const k of skip) {
+      if (this.pendingPrev.has(k)) {
+        this.pendingPrev.set(k, k in baseline ? baseline[k] : undefined);
+      }
+    }
     this.configuredSecrets = new Set(names);
     this.coreLoaded = true;
+    if (this.pendingCoreEdits.size > 0) {
+      this.scheduleFlush().catch((e) => log.warn("queued core settings flush failed:", e));
+    }
   }
 
-  /** Back-compat: local load then core merge. Prefer the split methods on the
-   *  boot path so the window can show before the core round-trip. */
+  /** Local load then core baseline. Used after a storage-level settings
+   *  reset; boot uses the split methods + attach() instead. */
   async loadSettings(): Promise<void> {
     await this.loadClientSettings();
     try {
@@ -204,64 +401,49 @@ class SettingsState {
     await platform().shortcuts.setBinding(accelerator);
   }
 
+  // --- edits ----------------------------------------------------------------
+
   async updateSetting(key: string, value: unknown): Promise<void> {
     return await this.updateSettings({ [key]: value });
   }
 
   async updateSettings(updates: Record<string, unknown>): Promise<void> {
-    const prevValues: Record<string, unknown> = {};
-    const prevShortcut = this.currentSettings["shortcuts.toggleWindow"];
-    let toggleShortcutChanged = false;
-    let nonToggleShortcutToValidate: { key: string; value: string } | undefined;
+    // Shortcut bindings are validated against the OS BEFORE anything is
+    // applied, so a taken combo throws without touching state.
+    if ("shortcuts.toggleWindow" in updates) {
+      await this.applyToggleWindowShortcut(updates["shortcuts.toggleWindow"]);
+    }
+    for (const key of [
+      "shortcuts.attachFile",
+      "shortcuts.captureScreen",
+      "shortcuts.captureRegion",
+    ]) {
+      const value = updates[key];
+      if (typeof value === "string" && value.trim().length > 0) {
+        // Probe-validate the combo before persisting. Re-registration happens
+        // when UserInput remounts; this just surfaces "already taken" so the
+        // bad value doesn't get saved.
+        await platform().shortcuts.validate(value);
+      }
+    }
 
-    for (const [key, value] of Object.entries(updates)) {
-      warnIfUnknownKey(key);
-      prevValues[key] = this.currentSettings[key];
-      this.currentSettings[key] = value;
+    const transitions = this.applyChanges(updates, "user");
+
+    for (const t of transitions) {
+      // First observed prev per key inside the debounce window, so rapid
+      // A→B→C edits roll back to A on failure.
+      if (!this.pendingPrev.has(t.key)) this.pendingPrev.set(t.key, t.prev);
+      // Core edits before the baseline (mid-pairing, core unreachable) queue
+      // rather than drop; loadCoreSettings flushes the queue once the
+      // baseline lands. Only real transitions queue: a no-op write must not
+      // shadow the key from the incoming baseline.
+      if (isCoreKey(t.key) && !this.coreLoaded) this.pendingCoreEdits.add(t.key);
+    }
+    for (const key of Object.keys(updates)) {
       // Record explicit user edits to secret fields so save() writes only the
       // ones actually touched (an untouched secret field is empty because its
       // value is never returned, and must not clobber the vault entry).
-      if (SECRET_KEY_SET.has(key)) this.dirtySecrets.add(key);
-      if (key === "shortcuts.toggleWindow") toggleShortcutChanged = true;
-      if (
-        (key === "shortcuts.attachFile" ||
-          key === "shortcuts.captureScreen" ||
-          key === "shortcuts.captureRegion") &&
-        typeof value === "string" &&
-        value.trim().length > 0
-      ) {
-        nonToggleShortcutToValidate = { key, value };
-      }
-    }
-
-    if (toggleShortcutChanged) {
-      try {
-        await this.applyToggleWindowShortcut(this.currentSettings["shortcuts.toggleWindow"]);
-      } catch (e) {
-        this.currentSettings["shortcuts.toggleWindow"] = prevShortcut;
-        throw e;
-      }
-    }
-    if (nonToggleShortcutToValidate) {
-      // Probe-validate the combo before persisting. Re-registration happens
-      // when UserInput remounts; this just surfaces "already taken" so the
-      // bad value doesn't get saved.
-      try {
-        await platform().shortcuts.validate(nonToggleShortcutToValidate.value);
-      } catch (e) {
-        const k = nonToggleShortcutToValidate.key;
-        this.currentSettings[k] = prevValues[k];
-        throw e;
-      }
-    }
-
-    // Record prev-values for rollback. Only set the FIRST observed prev per
-    // key inside the debounce window so rapid edits coalesce correctly: if
-    // the user toggles A→B→C in 50ms, a failed flush rolls back to A.
-    for (const key of Object.keys(updates)) {
-      if (!this.pendingPrev.has(key)) {
-        this.pendingPrev.set(key, prevValues[key]);
-      }
+      if (key in DEFAULTS && SECRET_KEY_SET.has(key)) this.dirtySecrets.add(key);
     }
 
     return await this.scheduleFlush();
@@ -293,22 +475,21 @@ class SettingsState {
     this.pendingPrev.clear();
 
     const run = (async () => {
-      try {
-        await this.save();
-        // Notify listeners only AFTER a successful persist so they can't
-        // observe optimistically-set state that the core later rejects.
-        for (const [key, prev] of prevSnapshot) {
-          this.notifyListeners(key, prev, this.currentSettings[key]);
-        }
+      const { errors, rollbackKeys } = await this.save();
+      if (errors.length === 0) {
         for (const r of resolvers) r.resolve();
-      } catch (e) {
-        // Roll back EVERY key in the batch. Partial rollback (e.g. only
-        // shortcuts) leaves the UI lying about what core thinks.
-        for (const [key, prev] of prevSnapshot) {
-          this.currentSettings[key] = prev;
-        }
-        for (const r of resolvers) r.reject(e);
+        return;
       }
+      // Per-destination rollback: only the keys whose destination failed
+      // revert (firing reverse transitions through the pipeline); the
+      // destinations that persisted keep their values.
+      const rollback: Record<string, unknown> = {};
+      for (const [key, prev] of prevSnapshot) {
+        if (rollbackKeys.has(key)) rollback[key] = prev;
+      }
+      this.applyChanges(rollback, "user");
+      const error = new AggregateError(errors, "settings save failed");
+      for (const r of resolvers) r.reject(error);
     })();
     this.flushInFlight = run;
     try {
@@ -318,91 +499,65 @@ class SettingsState {
     }
   }
 
-  /** Writes the current sparse-delta to every destination. Throws an
-   *  AggregateError if any destination fails. Callers (flush()) treat
-   *  any failure as a full-batch rollback signal. */
-  async save(): Promise<void> {
-    if (!browser) return;
-    const defaults = getDefaultSettings();
-    // deno-lint-ignore no-explicit-any
-    const current = $state.snapshot(this.currentSettings) as Record<string, any>;
-    // Split sparse non-default values by destination + secret-vault.
-    const clientDelta: Record<string, unknown> = {};
-    const coreDelta: Record<string, unknown> = {};
-    const secrets: Record<string, string> = {};
-    for (const [key, value] of Object.entries(current)) {
-      // Secrets are handled separately below: only fields the user actually
-      // edited this session are written, so an unrelated save can't wipe a
-      // configured (but empty-in-UI) vault entry.
-      if (SECRET_KEY_SET.has(key)) continue;
-      if (Object.is(value, defaults[key])) continue;
-      const dest = destinationFor(key);
-      if (dest === "core") coreDelta[key] = value;
-      else clientDelta[key] = value;
-    }
-    // Touched secrets only: a non-empty value sets the vault entry; an emptied
-    // one clears it (the user explicitly deleted it).
-    for (const key of this.dirtySecrets) {
-      const value = current[key];
-      secrets[key] = typeof value === "string" ? value : "";
-    }
-    // The core PATCH merges, so a core key that reverted to its default is
-    // absent from coreDelta above and would linger on disk. Send null (the
-    // core's reset sentinel) for every previously-persisted core key no longer
-    // in the delta so the core deletes it and requirements recompute.
-    for (const key of this.coreSparseKeys) {
-      if (!(key in coreDelta)) coreDelta[key] = null;
-    }
-
-    // Try every destination; collect errors so the caller can roll back
-    // optimistic UI state. Order: client → core PATCH → secrets, mirroring
-    // the legacy save chain.
+  /** Persist each destination's sparse state. Failures are collected (never
+   *  thrown) together with the set of keys the caller should roll back. */
+  private async save(): Promise<{ errors: unknown[]; rollbackKeys: Set<string> }> {
     const errors: unknown[] = [];
+    const rollbackKeys = new Set<string>();
+    if (!browser) return { errors, rollbackKeys };
+
+    // Client file: this store is its single owner, so a full write of the
+    // sparse layer IS the file.
     try {
-      // The client settings file is also where `cores().*` persists the paired
-      // cores list + selected core id. `clientSettings.write` is a full
-      // overwrite, so writing only this save's schema delta would wipe those
-      // keys (booting the app back into the welcome flow). Read-modify-write:
-      // strip the client-schema keys this save owns, keep everything else
-      // (cores, currentCoreId, ...), then overlay the fresh sparse delta.
-      const ownedKeys = new Set(Object.keys(defaults).filter((k) => destinationFor(k) !== "core"));
-      const existing = await platform().clientSettings.read();
-      const preserved: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(existing)) {
-        if (!ownedKeys.has(k)) preserved[k] = v;
-      }
-      await platform().clientSettings.write({ ...preserved, ...clientDelta });
+      await platform().clientFiles.write("settings", { ...this.clientSparse });
     } catch (e) {
       log.warn("Failed to save client settings:", e);
       errors.push(e);
+      for (const key of Object.keys(DEFAULTS)) {
+        if (!SECRET_KEY_SET.has(key) && destinationFor(key) === "client") rollbackKeys.add(key);
+      }
     }
+
     if (cores().currentEntry()) {
       const api = cores().api().settings;
-      // Don't PATCH core keys until loadCoreSettings() has merged the core's
-      // real values: before that a non-default key still holds a client/default
-      // value, and patching it would overwrite the core's value. Client +
-      // secrets saves below are unaffected. The window between show and merge is
-      // sub-second, so this only bites a save made in that gap (or while the
-      // core is unreachable, where the PATCH would fail anyway).
-      if (Object.keys(coreDelta).length > 0 && !this.coreLoaded) {
-        log.warn("skipping core save before core settings loaded:", Object.keys(coreDelta));
-      } else {
-        try {
-          await api.patch(coreDelta);
-          // Track what the core now persists (non-default keys) so the next
-          // save knows which reverted keys to delete. Only update on success;
-          // a failed patch leaves the last-known core state intact.
-          this.coreSparseKeys = new Set(
-            Object.keys(coreDelta).filter((k) => coreDelta[k] !== null),
-          );
-        } catch (e) {
-          log.warn("Failed to save core settings:", e);
-          errors.push(e);
+      // Core PATCH: the diff against the last core-confirmed state, with the
+      // null reset sentinel for keys that reverted to default. Held while the
+      // baseline is unknown (edits stay queued in pendingCoreEdits).
+      if (this.coreLoaded) {
+        const corePatch: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(this.coreSparse)) {
+          if (!(k in this.syncedCoreSparse) || !Object.is(this.syncedCoreSparse[k], v)) {
+            corePatch[k] = v;
+          }
+        }
+        for (const k of Object.keys(this.syncedCoreSparse)) {
+          if (!(k in this.coreSparse)) corePatch[k] = null;
+        }
+        if (Object.keys(corePatch).length > 0) {
+          try {
+            // The response body is ignored: the WS echo carries the same
+            // delta and value-diffs to a no-op.
+            await api.patch(corePatch);
+            this.syncedCoreSparse = { ...this.coreSparse };
+            this.pendingCoreEdits.clear();
+          } catch (e) {
+            log.warn("Failed to save core settings:", e);
+            errors.push(e);
+            for (const k of Object.keys(corePatch)) rollbackKeys.add(k);
+            // The synced state may have drifted (e.g. a remote delta skipped
+            // for a then-pending key); one re-baseline heals it.
+            this.loadCoreSettings().catch(() => {});
+          }
         }
       }
+
+      // Touched secrets only: a non-empty value sets the vault entry; an
+      // emptied one clears it (the user explicitly deleted it).
       const nextConfigured = new Set(this.configuredSecrets);
       const persisted: string[] = [];
-      for (const [name, value] of Object.entries(secrets)) {
+      for (const name of this.dirtySecrets) {
+        const raw = this.currentSettings[name];
+        const value = typeof raw === "string" ? raw : "";
         try {
           if (value === "") {
             await api.deleteSecret(name);
@@ -415,15 +570,15 @@ class SettingsState {
         } catch (e) {
           log.warn(`Failed to update secret "${name}":`, e);
           errors.push(e);
+          rollbackKeys.add(name);
         }
       }
       // Reassign for Svelte reactivity, and forget the edits we committed.
       this.configuredSecrets = nextConfigured;
       for (const name of persisted) this.dirtySecrets.delete(name);
     }
-    if (errors.length > 0) {
-      throw new AggregateError(errors, "settings save failed");
-    }
+
+    return { errors, rollbackKeys };
   }
 
   getAlignment(): Alignment {

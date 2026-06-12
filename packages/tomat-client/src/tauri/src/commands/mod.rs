@@ -9,11 +9,12 @@
 //! - [`capture`]: monitor enumeration, full-monitor capture, region-capture overlay.
 //! - [`fonts`]: installed system font enumeration.
 //! - [`pairing`]: read on-disk admin token, install local core (CDN-dependent).
-//! - [`client_settings`]: read/write ~/.tomat/client/settings.json.
+//! - [`client_files`]: per-concern JSON stores under ~/.tomat/<channel>/client/
+//!   (settings.json, cores.json, snippets/).
 //! - [`keychain`]: per-core bearer token storage via the OS keychain.
 
 pub mod capture;
-pub mod client_settings;
+pub mod client_files;
 pub mod client_storage;
 pub mod fonts;
 pub mod keychain;
@@ -27,7 +28,10 @@ pub use capture::{
     hide_region_capture_overlay, list_capture_monitors, set_region_capture_target,
     show_region_capture_overlay,
 };
-pub use client_settings::{read_client_settings, write_client_settings};
+pub use client_files::{
+    delete_client_snippet, read_client_file, read_client_snippets, write_client_file,
+    write_client_snippet,
+};
 pub use client_storage::{get_client_storage, truncate_client_log};
 pub use fonts::list_system_fonts;
 pub use keychain::{

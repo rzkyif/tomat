@@ -39,6 +39,18 @@ export type ToolCallAskUserState = {
   answers: AskUserAnswer[] | null;
 };
 
+/** A runtime permission request raised by a running tool (Deno prompt
+ *  paused on the worker's PTY). Mirrors the `tool.permission_request` WS
+ *  frame; the decision UI lives in UserInput's permission mode. */
+export type ToolCallPermissionState = {
+  requestId: string;
+  permissionKind: "net" | "read" | "write" | "run" | "env" | "ffi" | "sys";
+  resource: string;
+  apiName?: string;
+  declared: boolean;
+  reason?: string;
+};
+
 export type ToolCallLogLine = {
   level: "debug" | "info" | "warn" | "error";
   message: string;
@@ -52,6 +64,7 @@ export type ToolCallLogLine = {
 export type UiEphemera = {
   logs?: ToolCallLogLine[];
   askUser?: ToolCallAskUserState;
+  permissionRequest?: ToolCallPermissionState;
 };
 
 /** Client-side message. One bag type holding the union of every wire role's

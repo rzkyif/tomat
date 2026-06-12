@@ -28,7 +28,7 @@ class FakeNetSocket implements NetSocket {
   opened?: () => void;
   messaged?: (d: string) => void;
   closed?: () => void;
-  errored?: () => void;
+  errored?: (reason?: string) => void;
   sent: string[] = [];
   send(d: string): void {
     this.sent.push(d);
@@ -43,7 +43,7 @@ class FakeNetSocket implements NetSocket {
   onClose(cb: () => void): void {
     this.closed = cb;
   }
-  onError(cb: () => void): void {
+  onError(cb: (reason?: string) => void): void {
     this.errored = cb;
   }
 }
@@ -221,5 +221,29 @@ describe("CoreClient reconnect", () => {
     sockets[0].errored?.();
     await vi.advanceTimersByTimeAsync(600);
     expect(sockets.length).toBe(2);
+  });
+
+  // A 401/403 handshake rejection (core reset its DB, revoked this client, ...)
+  // is terminal: stop the reconnect loop and report "unauthorized" instead of
+  // hammering the core with a token that will never be accepted again.
+  it("halts the reconnect loop on an auth-rejection handshake error", async () => {
+    vi.useFakeTimers();
+    const c = new CoreClient(ENDPOINT);
+    const states: string[] = [];
+    c.onConnectionState((s) => states.push(s));
+    c.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sockets.length).toBe(1);
+
+    sockets[0].errored?.("server rejected connection: HTTP 401");
+    // No reconnect is scheduled, however long we wait.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sockets.length).toBe(1);
+    expect(states.at(-1)).toBe("unauthorized");
+
+    // A fresh subscriber must not revive the dead token either.
+    c.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sockets.length).toBe(1);
   });
 });

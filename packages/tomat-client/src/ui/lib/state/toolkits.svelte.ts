@@ -24,6 +24,7 @@ import {
   type Tool,
   type Toolkit,
   type ToolkitSearchResult,
+  type UndeclaredPolicy,
 } from "@tomat/shared";
 import type { AskUserAnswer } from "$lib/shared/types";
 import { cores } from "$lib/core";
@@ -323,6 +324,15 @@ class ToolkitsState {
   ): Promise<void> {
     await cores().api().toolkits.setGrants(toolkitId, toolName, grants);
     await this.refreshTools(toolkitId);
+  }
+
+  /** Set the toolkit-level policy for undeclared runtime permission requests
+   *  and splice the returned toolkit row in place. */
+  async setUndeclaredPolicy(toolkitId: string, policy: UndeclaredPolicy): Promise<void> {
+    const updated = await cores().api().toolkits.setUndeclaredPolicy(toolkitId, policy);
+    this.installed = this.installed.map((tk) =>
+      tk.id === toolkitId ? { ...tk, undeclaredPolicy: updated.undeclaredPolicy } : tk,
+    );
   }
 
   /** Refresh the tools embedded inside a single toolkit row. The /toolkits

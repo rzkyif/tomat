@@ -18,8 +18,11 @@ import {
   chatInterruptWsSchema,
   chatStartWsSchema,
   errMessage,
+  isSecretSettingKey,
+  isValidSettingKey,
   toolAskUserResponseSchema,
   toolCancelSchema,
+  toolPermissionResponseSchema,
   wsFrameEnvelopeSchema,
 } from "@tomat/shared";
 import { authService } from "../services/auth.ts";
@@ -30,6 +33,7 @@ import { sidecarManager } from "../sidecars/manager.ts";
 import { subscribeUpdate } from "../update/self-updater.ts";
 import { onRequirementsChanged, notifyRequirementsChanged } from "../services/requirements.ts";
 import { subscribeCoreSettings } from "../services/core-settings.ts";
+import { subscribeSecretsChanged } from "../services/secrets.ts";
 import { onBinaryInstalled } from "../binaries/manager.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
@@ -229,6 +233,20 @@ class WsHub {
       );
       return;
     }
+    if (kind === "tool.permission_response") {
+      const parsed = toolPermissionResponseSchema.safeParse(raw);
+      if (!parsed.success) {
+        log.warn(`bad tool.permission_response: ${parsed.error.message}`);
+        return;
+      }
+      chatService().forwardPermissionResponse(
+        parsed.data.callId,
+        parsed.data.requestId,
+        parsed.data.allow,
+        conn.clientId,
+      );
+      return;
+    }
     if (kind === "tool.cancel") {
       const parsed = toolCancelSchema.safeParse(raw);
       if (!parsed.success) {
@@ -286,7 +304,33 @@ class WsHub {
         missing: snap.missing,
       });
     });
-    subscribeCoreSettings(() => void notifyRequirementsChanged());
+    // Settings sync: every store change (client PATCH, preset apply, factory
+    // reset) is broadcast as a sparse delta so all connected clients converge
+    // without polling. Defense in depth: never let secret values or
+    // non-schema keys cross the wire, whatever ended up in the store.
+    subscribeCoreSettings((settings, changed) => {
+      void notifyRequirementsChanged();
+      const values: Record<string, unknown> = {};
+      const deleted: string[] = [];
+      for (const key of changed) {
+        if (!isValidSettingKey(key) || isSecretSettingKey(key)) continue;
+        if (key in settings) values[key] = settings[key];
+        else deleted.push(key);
+      }
+      if (Object.keys(values).length > 0 || deleted.length > 0) {
+        this.broadcastAll({ kind: "settings.updated", values, deleted });
+      }
+    });
+    // Vault changes ride the same frame as a names-only field so the
+    // configured-secret placeholders stay fresh on every client.
+    subscribeSecretsChanged((names) => {
+      this.broadcastAll({
+        kind: "settings.updated",
+        values: {},
+        deleted: [],
+        secretNames: names,
+      });
+    });
     onBinaryInstalled(() => void notifyRequirementsChanged());
 
     // Track per-download status so a recompute fires only on edges that can

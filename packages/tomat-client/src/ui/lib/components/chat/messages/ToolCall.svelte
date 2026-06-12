@@ -363,6 +363,8 @@
     switch (tcStatus) {
       case "awaiting_user":
         return { pre: `${agent} awaiting input for `, post: " tool:" };
+      case "awaiting_permission":
+        return { pre: `${agent} awaiting permission for `, post: " tool." };
       case "completed":
         return { pre: `${agent} used `, post: " tool." };
       case "failed":
@@ -440,12 +442,13 @@
   let borderColorClass = $derived(
     tcStatus === "failed"
       ? "border-accent-red-400"
-      : tcStatus === "awaiting_user"
+      : tcStatus === "awaiting_user" || tcStatus === "awaiting_permission"
         ? "border-amber-400"
         : "border-default-400",
   );
   let borderActive = $derived(
-    tcStatus === "failed" || tcStatus === "awaiting_user",
+    tcStatus === "failed" || tcStatus === "awaiting_user" ||
+      tcStatus === "awaiting_permission",
   );
 
   let alignment = $derived(settingsState.getAlignment());

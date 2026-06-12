@@ -67,12 +67,13 @@ const ALL_TRIPLES: Triple[] = [
 const WORKER_FILES = ["embedding-worker.ts", "tool-worker.ts", "tts-worker.ts"] as const;
 
 const HELPER_CRATES: Array<{
-  name: "tomat-core-keychain" | "tomat-core-updater" | "tomat-core-hwinfo";
+  name: "tomat-core-keychain" | "tomat-core-updater" | "tomat-core-hwinfo" | "tomat-core-ptyhost";
   crateDir: string;
 }> = [
   { name: "tomat-core-keychain", crateDir: "packages/tomat-core-keychain" },
   { name: "tomat-core-updater", crateDir: "packages/tomat-core-updater" },
   { name: "tomat-core-hwinfo", crateDir: "packages/tomat-core-hwinfo" },
+  { name: "tomat-core-ptyhost", crateDir: "packages/tomat-core-ptyhost" },
 ];
 
 const MANIFEST_CACHE_CONTROL = "public, max-age=300";
@@ -421,8 +422,10 @@ interface GitHubRelease {
   assets: GitHubReleaseAsset[];
 }
 
-async function fetchLatestRelease(repo: string): Promise<GitHubRelease> {
-  const url = `https://api.github.com/repos/${repo}/releases/latest`;
+async function fetchRelease(repo: string, pinnedTag?: string): Promise<GitHubRelease> {
+  const url = pinnedTag
+    ? `https://api.github.com/repos/${repo}/releases/tags/${pinnedTag}`
+    : `https://api.github.com/repos/${repo}/releases/latest`;
   const headers: Record<string, string> = {
     accept: "application/vnd.github+json",
     "user-agent": "tomat-release",
@@ -473,25 +476,28 @@ async function composeBinaryManifest(
   for (const kind of BINARY_KINDS) {
     const resolver = UPSTREAM_BINARIES[kind];
 
-    // Beta: ship the resolver itself (repo + asset patterns) so the core
-    // resolves the LATEST upstream release at runtime. No GitHub call here:
-    // the signed manifest commits to the repo/patterns, not a pinned version.
+    // Beta: ship the resolver itself (repo + asset patterns + optional
+    // pinned tag) so the core resolves it at runtime. No GitHub call here:
+    // the signed manifest commits to the repo/patterns (and the pin, when
+    // one is declared, e.g. deno).
     if (channel === "beta") {
       info(`beta resolver entry for ${kind} → ${resolver.repo}`);
       binaries[kind] = {
         resolver: {
           repo: resolver.repo,
           assets: resolver.assets as Record<Triple, string>,
+          ...(resolver.pinnedTag ? { pinnedTag: resolver.pinnedTag } : {}),
         },
       };
       continue;
     }
 
-    // Stable: pin the current latest at release time (URL + sha256).
-    info(`resolving latest ${kind} from ${resolver.repo}`);
-    const release = await fetchLatestRelease(resolver.repo);
+    // Stable: pin URL + sha256 at release time, from the declared pinned tag
+    // when one exists (deno) or the current latest otherwise.
+    info(`resolving ${resolver.pinnedTag ?? "latest"} ${kind} from ${resolver.repo}`);
+    const release = await fetchRelease(resolver.repo, resolver.pinnedTag);
     const tag = release.tag_name;
-    info(`  latest tag: ${tag}`);
+    info(`  tag: ${tag}`);
 
     const platforms = {} as BinaryManifestPinnedEntry["platforms"];
     for (const [triple, pattern] of Object.entries(resolver.assets)) {

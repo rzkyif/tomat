@@ -61,6 +61,7 @@ export type ToolCallStatus =
   | "pending"
   | "running"
   | "awaiting_user"
+  | "awaiting_permission"
   | "completed"
   | "failed"
   | "cancelled";

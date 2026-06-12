@@ -11,6 +11,8 @@ import { errMessage } from "@tomat/shared";
   import {
     downloadsState,
     messagesState,
+    type PendingPermission,
+    permissionState,
     serversState,
     settingsState,
     snippetsState,
@@ -213,6 +215,39 @@ import { errMessage } from "@tomat/shared";
   // or an active tool call (running or awaiting input). Drives the stop button
   // so tool calls can be aborted the same way streams are.
   let hasActiveWork = $derived(streamingState.hasActiveWork);
+
+  // Permission mode: a running tool is paused on a permission it was not
+  // always-allowed. The text input area shows the request instead of the
+  // textarea; attach/voice/send controls hide; X and check buttons to the
+  // right of the settings group decide. The accept applies to this tool
+  // call only ("always allow" lives in the Toolkit detail view).
+  let permissionRequest = $derived(permissionState.pending);
+
+  // The request as a plain-language action ("run a program") plus the concrete
+  // target (the command, path, host, ...) shown on its own in a mono card, so
+  // the sentence reads cleanly and the exact value is easy to scan.
+  function permissionParts(p: PendingPermission): { action: string; detail?: string } {
+    switch (p.permissionKind) {
+      case "net":
+        return { action: "connect to a server", detail: p.resource };
+      case "read":
+        return { action: "read a file", detail: p.resource };
+      case "write":
+        return { action: "write to a file", detail: p.resource };
+      case "run":
+        return { action: "run a program", detail: p.resource };
+      case "env":
+        return p.resource
+          ? { action: "read an environment variable", detail: p.resource }
+          : { action: "read all environment variables" };
+      case "ffi":
+        return p.resource
+          ? { action: "load a native library", detail: p.resource }
+          : { action: "load native libraries" };
+      case "sys":
+        return { action: "read system information", detail: p.resource || undefined };
+    }
+  }
   let hasContent = $derived(text.trim().length > 0 || attachments.length > 0);
   // True while a captured speech segment is in the transcribe -> autocorrect
   // -> merge pipeline. The mic is already off by then (VAD one-shots on
@@ -1002,6 +1037,30 @@ import { errMessage } from "@tomat/shared";
     </Alert>
   {/if}
 
+  {#if permissionRequest}
+    {@const p = permissionRequest}
+    {@const parts = permissionParts(p)}
+    <div class="flex flex-col gap-2 min-w-0 max-w-[calc(100vw-135px)] text-sm">
+      <div class="flex items-center gap-2 text-default-800 font-medium">
+        <i class="flex i-material-symbols-shield-question-outline-rounded text-amber-500 text-base shrink-0"></i>
+        <span class="break-words">
+          The <code class="font-mono bg-surface-inset rounded-small px-1.5 py-0.5">{p.toolName}</code>
+          tool wants to {parts.action}.
+        </span>
+      </div>
+      {#if parts.detail}
+        <div class="font-mono text-xs bg-surface-inset text-default-800 rounded-medium px-2.5 py-2 break-all">
+          {parts.detail}
+        </div>
+      {/if}
+      {#if !p.declared}
+        <span class="text-accent-yellow-600 break-words">
+          This access was not declared by the Toolkit. Only allow it if you trust this Toolkit and
+          the request makes sense for what you asked.
+        </span>
+      {/if}
+    </div>
+  {:else}
   <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
     <!-- Hidden span for the typed text to dynamically expand width and height. Safely renders newlines.
          Doubles as a layout mirror for caret measurement (see measureCaretAt). -->
@@ -1034,6 +1093,7 @@ import { errMessage } from "@tomat/shared";
         (llmStatus !== "Running" && llmStatus !== "Disabled")}
     ></textarea>
   </div>
+  {/if}
 
   <!-- Attachment previews -->
   <AttachmentList
@@ -1046,6 +1106,7 @@ import { errMessage } from "@tomat/shared";
   <div
     class="flex items-end justify-between gap-2 text-2xl text-default-700 w-full"
   >
+    {#if !permissionRequest}
     <div class="flex items-center bg-surface-inset rounded-large p-1">
       <IconButton
         icon="i-material-symbols-attach-file-rounded"
@@ -1088,6 +1149,7 @@ import { errMessage } from "@tomat/shared";
         onclick={handleCaptureRegionFromMenu}
       />
     </div>
+    {/if}
 
     <div class="flex items-center bg-surface-inset rounded-large p-1">
       <div
@@ -1130,6 +1192,29 @@ import { errMessage } from "@tomat/shared";
     </div>
 
     <div class="flex gap-2">
+      {#if permissionRequest}
+        <!-- Icon + text on the filled inset surface (rounded-large), neutral
+             text like the other UserInput buttons, and the h-9 height of the
+             monitor/alignment/settings pill beside them. -->
+        <button
+          type="button"
+          title="Reject this permission request"
+          class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
+          onclick={() => permissionState.respond(false)}
+        >
+          <i class="flex i-material-symbols-close-rounded text-lg shrink-0"></i>
+          Deny
+        </button>
+        <button
+          type="button"
+          title="Allow for this tool call"
+          class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
+          onclick={() => permissionState.respond(true)}
+        >
+          <i class="flex i-material-symbols-check-rounded text-lg shrink-0"></i>
+          Allow
+        </button>
+      {:else}
       {#if settingsState.currentSettings["stt.enabled"]}
         {@const sttIdle =
           sttStatus === "Running" || sttStatus === "Disabled"}
@@ -1213,6 +1298,7 @@ import { errMessage } from "@tomat/shared";
             ? handleInterruptAndSend
             : handleSend}
       />
+      {/if}
     </div>
   </div>
 </Bubble>

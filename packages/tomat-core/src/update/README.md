@@ -10,7 +10,7 @@ update, [`rollback.ts`](rollback.ts) decides on boot whether to keep it.
    key committed in `data/signing-keys.json`. The signed payload is the whole
    manifest minus the `signature` field, canonicalized, so the `workers[]` and
    `helpers[]` entries (downloaded and executed) are covered too. Downgrades are
-   refused unless the `updates.allowDowngrade` core setting is set.
+   always refused.
 2. Pick the entry for the current platform triple, download it to `staging/`,
    and verify its sha256. Worker `.ts` files and per-triple helper binaries are
    downloaded and verified into staging first, then renamed into the live

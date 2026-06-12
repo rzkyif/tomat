@@ -21,6 +21,11 @@ class ConnectionStateStore {
   // adaptive reconnecting UI across chat / settings / quick-settings modes.
   reconnecting = $state(false);
 
+  // True when the core rejected our bearer token (its DB was reset, this
+  // client was revoked, ...). Terminal: the underlying client stops retrying,
+  // so the UI shows a re-pair prompt rather than a "reconnecting" spinner.
+  unauthorized = $state(false);
+
   // Last connect-failure reason from CoreClient (e.g. "Connection refused"),
   // shown in the banner. Retained across the connecting/disconnected churn of
   // the reconnect loop; cleared once connected.
@@ -38,7 +43,15 @@ class ConnectionStateStore {
         this.disconnectedSinceMs = null;
         this.clearBannerTimer();
         this.reconnecting = false;
+        this.unauthorized = false;
         this.reason = null;
+      } else if (s === "unauthorized") {
+        // Terminal: the client has stopped retrying. Drop the reconnect spinner
+        // and show the re-pair prompt; keep the reason for the message.
+        this.clearBannerTimer();
+        this.reconnecting = false;
+        this.unauthorized = true;
+        if (r) this.reason = r;
       } else if (s === "disconnected" || s === "connecting") {
         // Keep the last known reason through the connecting/disconnected churn.
         if (r) this.reason = r;
@@ -64,6 +77,7 @@ class ConnectionStateStore {
     this.state = "connecting";
     this.disconnectedSinceMs = null;
     this.reconnecting = false;
+    this.unauthorized = false;
     this.reason = null;
   }
 

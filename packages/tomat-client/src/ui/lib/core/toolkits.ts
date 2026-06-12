@@ -10,9 +10,11 @@ import type {
   SetGrantsResponse,
   ToolFilterRequest,
   ToolFilterResponse,
+  Toolkit,
   ToolkitActionResponse,
   ToolkitJobResponse,
   ToolSchemasResponse,
+  UndeclaredPolicy,
 } from "@tomat/shared";
 import type { CoreClient } from "./client";
 
@@ -95,6 +97,12 @@ export class ToolkitsApi {
       `/api/v1/toolkits/${encodeURIComponent(id)}/tools/${encodeURIComponent(tool)}/grants`,
       { grants },
     );
+  }
+
+  setUndeclaredPolicy(id: string, policy: UndeclaredPolicy): Promise<Toolkit> {
+    return this.client.post(`/api/v1/toolkits/${encodeURIComponent(id)}/undeclared-policy`, {
+      policy,
+    });
   }
 
   reindex(): Promise<{ embedded: number }> {

@@ -17,6 +17,24 @@ Deno.test("serverToClientFrameSchema: accepts requirements.snapshot", () => {
   assertEquals(serverToClientFrameSchema.safeParse(frame).success, true);
 });
 
+Deno.test("serverToClientFrameSchema: accepts settings.updated (with and without secretNames)", () => {
+  const frame = {
+    kind: "settings.updated",
+    values: { "tts.enabled": true },
+    deleted: ["llm.modelPath"],
+  };
+  assertEquals(serverToClientFrameSchema.safeParse(frame).success, true);
+  assertEquals(
+    serverToClientFrameSchema.safeParse({
+      kind: "settings.updated",
+      values: {},
+      deleted: [],
+      secretNames: ["llm.external.apiKey"],
+    }).success,
+    true,
+  );
+});
+
 Deno.test("serverToClientFrameSchema: every server->client kind has a variant", () => {
   // Mirrors the ServerToClientFrame union in ../api/ws.ts. Add a kind here when
   // you add one there; the assertion below then forces a matching Zod variant
@@ -31,6 +49,7 @@ Deno.test("serverToClientFrameSchema: every server->client kind has a variant", 
     "chat.error",
     "tool.progress",
     "tool.askuser_request",
+    "tool.permission_request",
     "tool.log",
     "tool.result",
     "tool.error",
@@ -40,6 +59,7 @@ Deno.test("serverToClientFrameSchema: every server->client kind has a variant", 
     "toolkit.snapshot",
     "downloads.snapshot",
     "requirements.snapshot",
+    "settings.updated",
     "sidecar.status",
     "session.updated",
     "update.staged",

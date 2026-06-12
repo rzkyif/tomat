@@ -2,6 +2,7 @@
 // Boots: paths → logger → DB → HTTP + WS server.
 
 import { ensureDirs, paths } from "./paths.ts";
+import { ensureHelperBinaries } from "./binaries/helpers.ts";
 import { errMessage } from "@tomat/shared";
 import { loadBootConfig } from "./config.ts";
 import { getLogger, initLogger, isLoggerReady, scrubSecrets } from "./shared/log.ts";
@@ -28,10 +29,13 @@ async function main(): Promise<void> {
   await initLogger();
   const log = getLogger();
 
-  // `server.bindHost` (persisted core setting) chooses the interface the HTTP
-  // listener binds to: 127.0.0.1 (default, this machine only), a specific LAN
-  // IP, or 0.0.0.0 (all interfaces, so other devices can pair). The
-  // TOMAT_CORE_HOST env var still wins when set.
+  // `server.bindHost` chooses the interface the HTTP listener binds to:
+  // 127.0.0.1 (default, this machine only), a specific LAN IP, or 0.0.0.0
+  // (all interfaces, so other devices can pair). Deliberately NOT a schema
+  // setting: a paired client must never be able to widen network exposure
+  // over the API. It is read raw from the local settings.json, so the only
+  // ways to change it are editing that file by hand or the TOMAT_CORE_HOST
+  // env var (which wins when set).
   const hostFromEnv = Deno.env.get("TOMAT_CORE_HOST");
   let bindHost = cfg.host;
   if (!hostFromEnv) {
@@ -63,6 +67,11 @@ async function main(): Promise<void> {
   // (now-restored) previous binary.
   const rolledBack = await handleUpdateMarkerOnBoot();
   if (rolledBack) Deno.exit(0);
+
+  // Fail loud if a native helper binary is missing rather than silently
+  // degrading (file-backed secrets, guessed hardware, no permission prompts).
+  // Helpers are install-time artifacts, so a gap means a broken install.
+  ensureHelperBinaries();
 
   openDb();
   migrate();

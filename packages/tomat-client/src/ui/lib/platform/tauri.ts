@@ -292,9 +292,14 @@ const impl: Platform = {
       };
     },
   },
-  clientSettings: {
-    read: () => invoke("read_client_settings"),
-    write: (settings) => invoke("write_client_settings", { settings }),
+  clientFiles: {
+    read: (file) => invoke("read_client_file", { file }),
+    write: (file, data) => invoke("write_client_file", { file, data }),
+  },
+  snippetFiles: {
+    readAll: () => invoke("read_client_snippets"),
+    write: (name, data) => invoke("write_client_snippet", { name, data }),
+    delete: (name) => invoke("delete_client_snippet", { name }),
   },
   keychain: {
     set: (coreId, token) => invoke("keychain_set_token", { coreId, token }),

@@ -28,10 +28,8 @@
     viewState,
   } from "$lib/state";
   import { connectionState } from "$lib/state/connection.svelte";
-  import { ttsState } from "$lib/state/tts.svelte";
   import { cores } from "$lib/core";
   import { platform } from "$lib/platform";
-  import { withTimeout } from "$lib/shared/async";
   import { darkFromLight } from "$lib/shared/color";
   import { getLogger } from "$lib/shared/log";
   import {
@@ -370,11 +368,6 @@
     );
   }
 
-  // Bound the deferred core-settings fetch so a wedged core fails fast (and
-  // loud) rather than leaving the merge pending. Just above net_fetch's 10s
-  // connect timeout so the HTTP layer surfaces the real error first.
-  const CORE_SETTINGS_TIMEOUT_MS = 12_000;
-
   // Redirect out of the two core-backed transient modes while reconnecting:
   // quick settings falls back to settings (which shows its own disabled state)
   // and the session list (which reads/loads sessions from the core) falls back
@@ -384,6 +377,64 @@
     if (viewState.mode === "quickSettings") viewState.navigate("settings");
     else if (viewState.mode === "sessionList") viewState.navigate("chat");
   });
+
+  // The core rejected our bearer token (e.g. its DB was reset, so it no longer
+  // knows this client). The stored token is permanently dead, so silently drop
+  // the core and fall back to onboarding instead of stranding the user. Mirrors
+  // the manual unpair flow in CoresField. currentEntry() guards re-entry: it's
+  // null once removed, so the effect can't act twice.
+  $effect(() => {
+    if (!connectionState.unauthorized) return;
+    const dead = cores().currentEntry();
+    if (!dead) return;
+    void (async () => {
+      try {
+        await cores().removePaired(dead.id);
+        const remaining = await cores().list();
+        if (remaining.length === 0) viewState.setLocked(true);
+        else if (!cores().currentEntry()) await cores().select(remaining[0].id);
+      } catch (e) {
+        log.error("auto-unpair after auth rejection failed:", e);
+      }
+    })();
+  });
+
+  // Boot counterpart of the auth-rejection effect above. restoreSelected can
+  // leave no core active when a paired entry's token is gone from the keychain
+  // (e.g. after a dev reset): select() throws "no token" before any connection,
+  // so connectionState never reaches "unauthorized" and the effect never fires.
+  // Drop those tokenless cores and fall back to onboarding instead of hanging in
+  // "Connecting to core...". A keychain *error* (get throws) is left alone so a
+  // transient glitch can't unpair a still-valid core.
+  async function dropTokenlessCoresAndMaybeOnboard(): Promise<void> {
+    if (cores().currentEntry()) return; // a core selected fine; nothing to do
+    for (const c of await cores().list()) {
+      let token: string | null = null;
+      try {
+        token = await platform().keychain.get(c.id);
+      } catch (e) {
+        log.error(`keychain check failed for core "${c.name}"; leaving it paired:`, e);
+        continue;
+      }
+      if (!token) {
+        log.warn(`core "${c.name}" has no stored token; unpairing`);
+        try {
+          await cores().removePaired(c.id);
+        } catch (e) {
+          log.error("auto-unpair of tokenless core failed:", e);
+        }
+      }
+    }
+    const remaining = await cores().list();
+    if (remaining.length === 0) viewState.setLocked(true);
+    else if (!cores().currentEntry()) {
+      try {
+        await cores().select(remaining[0].id);
+      } catch (e) {
+        log.error("select after tokenless cleanup failed:", e);
+      }
+    }
+  }
 
   onMount(async () => {
     // Local critical path: do ONLY the local work needed to position + theme
@@ -504,6 +555,9 @@
       } catch (e) {
         log.error("core restore failed:", e);
       }
+      // If nothing got selected because a paired core's token is gone, unpair it
+      // and return to onboarding rather than hanging in "Connecting to core...".
+      await dropTokenlessCoresAndMaybeOnboard();
       // Reload the active core's sessions on every later core switch. Registered
       // after restoreSelected so boot's own select() doesn't double-trigger it.
       cores().subscribe(() => void sessionsState.loadLatest());
@@ -513,32 +567,18 @@
       // synchronously and persist across core switches (cores().subscribeWs
       // re-binds on select()), so one attach is enough even before a core is
       // selected. This also kicks off the WS connect, whose failures now surface
-      // in the reconnect banner.
+      // in the reconnect banner. settingsState.attach() owns the core settings
+      // baseline + live sync from here on: it loads on selection changes and
+      // connected edges, and side effects (TTS arming etc.) fire through
+      // settings-effects on every merged transition, so boot needs no explicit
+      // core-settings fetch or per-module kick.
+      settingsState.attach();
       toolkitsState.ensureConnected();
       streamingState.attach();
       serversState.attach();
       sessionsState.attach();
       downloadsState.attach();
       updateState.attach();
-      // Merge the core's settings over the local ones (appearance is local, so
-      // this is non-visual). Bounded so a wedged core fails fast and loud.
-      try {
-        await withTimeout(
-          settingsState.loadCoreSettings(),
-          CORE_SETTINGS_TIMEOUT_MS,
-          "core settings",
-        );
-      } catch (e) {
-        log.error("core settings merge failed:", e);
-      }
-      // TTS is event-driven after boot (settings-effects reacts to the
-      // tts.enabled toggle), so an already-enabled setting needs this boot
-      // kick or the player never arms: feeds and the Read Aloud menu both
-      // no-op until ttsState.setEnabled runs. Fire-and-forget; model load +
-      // pre-warm can take seconds and must not block first paint.
-      if (settingsState.currentSettings["tts.enabled"]) {
-        void ttsState.setEnabled(true);
-      }
       // Pull the required-files snapshot now that a core may be selected, and
       // re-pull on later core switches (downloadsState also keeps it live via
       // the requirements.snapshot WS frame).

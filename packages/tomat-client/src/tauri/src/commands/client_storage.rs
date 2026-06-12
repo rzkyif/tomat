@@ -1,8 +1,9 @@
 //! On-disk storage view for the local client (the "Client → Storage" usage
 //! field). Enumerates what the desktop app keeps under
-//! `~/.tomat/<channel>/client/`: its settings file and rotated logs, with sizes.
+//! `~/.tomat/<channel>/client/`: the settings file, rotated logs, and the
+//! non-clearable app data (paired-cores registry + snippet files), with sizes.
 //! Backup deletes and the settings reset are done frontend-side
-//! (platform.fs.remove + clientSettings); the one write here is
+//! (platform.fs.remove + clientFiles); the one write here is
 //! `truncate_client_log`, which empties the active log without stopping logging.
 
 use crate::error::{AppError, AppResult};
@@ -45,14 +46,14 @@ fn file_size(path: &Path) -> u64 {
     std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
-/// The client's on-disk storage tree (settings + logs), with sizes.
+/// The client's on-disk storage tree (settings + app data + logs), with sizes.
 #[tauri::command]
 pub fn get_client_storage() -> AppResult<StorageTree> {
     let root = client_root()?;
 
-    // Settings: the single client settings.json. Cleared via a reset, not a file
-    // delete (the frontend preserves paired cores + snippets), so it's never
-    // locked but also not individually selectable in the UI.
+    // Settings: the single client settings.json. Cleared via an empty write,
+    // not a file delete; the registry and snippets live in their own files so
+    // a settings reset can't touch them.
     let settings_path = root.join("settings.json");
     let settings_size = file_size(&settings_path);
     let settings = StorageCategory {
@@ -67,6 +68,47 @@ pub fn get_client_storage() -> AppResult<StorageTree> {
             size: settings_size,
             lock_reason: None,
         }],
+    };
+
+    // App data: the paired-cores registry and per-snippet files. Visible for
+    // size transparency but locked against this surface's delete/clear:
+    // deleting cores.json forces a re-pair, and snippets have their own
+    // manager. The lock_reason drives the existing locked-row rendering and
+    // keeps the rows unselectable.
+    let mut data_nodes: Vec<StorageNode> = Vec::new();
+    let cores_path = root.join("cores.json");
+    if cores_path.is_file() {
+        data_nodes.push(StorageNode {
+            kind: "file",
+            size: file_size(&cores_path),
+            name: "cores.json".to_string(),
+            path: cores_path.to_string_lossy().to_string(),
+            lock_reason: Some("Holds your paired cores; manage them in Settings".to_string()),
+        });
+    }
+    if let Ok(entries) = std::fs::read_dir(root.join("snippets")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            data_nodes.push(StorageNode {
+                kind: "file",
+                size: file_size(&path),
+                name: format!("snippets/{}", entry.file_name().to_string_lossy()),
+                path: path.to_string_lossy().to_string(),
+                lock_reason: Some("Managed in Settings under Snippets".to_string()),
+            });
+        }
+    }
+    data_nodes.sort_by(|a, b| a.name.cmp(&b.name));
+    let data_size = data_nodes.iter().map(|n| n.size).sum();
+    let data = StorageCategory {
+        id: "data",
+        label: "App Data",
+        deletable: false,
+        size: data_size,
+        nodes: data_nodes,
     };
 
     // Logs: every file under client/logs. All are clearable - the active
@@ -99,9 +141,9 @@ pub fn get_client_storage() -> AppResult<StorageTree> {
         nodes: log_nodes,
     };
 
-    let total_size = settings_size + logs_size;
+    let total_size = settings_size + data_size + logs_size;
     Ok(StorageTree {
-        categories: vec![settings, logs],
+        categories: vec![settings, data, logs],
         total_size,
         root_path: root.to_string_lossy().to_string(),
     })

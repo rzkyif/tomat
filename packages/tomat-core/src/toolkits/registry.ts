@@ -13,6 +13,7 @@ import type {
   Toolkit,
   ToolkitSource,
   ToolkitStatus,
+  UndeclaredPolicy,
 } from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import { paths } from "../paths.ts";
@@ -62,7 +63,7 @@ export class ToolkitsRegistry {
     const rows = db()
       .prepare(`
       SELECT id, source, display_name, description, version, installed_path,
-             tools_json_hash, content_hash, status, has_deps,
+             tools_json_hash, content_hash, status, has_deps, undeclared_policy,
              (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id) AS tool_count,
              (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id AND enabled = 1)
                AS enabled_tool_count,
@@ -78,7 +79,7 @@ export class ToolkitsRegistry {
     const row = db()
       .prepare(`
       SELECT id, source, display_name, description, version, installed_path,
-             tools_json_hash, content_hash, status, has_deps,
+             tools_json_hash, content_hash, status, has_deps, undeclared_policy,
              (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id) AS tool_count,
              (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id AND enabled = 1)
                AS enabled_tool_count,
@@ -150,6 +151,12 @@ export class ToolkitsRegistry {
     db()
       .prepare(`UPDATE toolkits SET status = ?, updated_at_ms = ? WHERE id = ?`)
       .run(status, Date.now(), id);
+  }
+
+  setUndeclaredPolicy(id: string, policy: UndeclaredPolicy): void {
+    db()
+      .prepare(`UPDATE toolkits SET undeclared_policy = ?, updated_at_ms = ? WHERE id = ?`)
+      .run(policy, Date.now(), id);
   }
 
   // Install (deps done): pin the content hash, flip to 'installed'. Invalidates
@@ -560,6 +567,7 @@ function rowToToolkit(row: Record<string, unknown>): Toolkit {
     contentHash: String(row.content_hash),
     status: String(row.status) as ToolkitStatus,
     hasDeps: Number(row.has_deps) === 1,
+    undeclaredPolicy: String(row.undeclared_policy) as UndeclaredPolicy,
     toolCount: Number(row.tool_count),
     enabledToolCount: Number(row.enabled_tool_count),
     installedAtMs: Number(row.installed_at_ms),

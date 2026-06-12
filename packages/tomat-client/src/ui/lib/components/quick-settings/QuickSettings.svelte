@@ -31,10 +31,8 @@
 
   onMount(() => form.validateAllFields());
 
-  // Single-open accordion. The language model starts open: picking a model
-  // preset is the one decision that matters right after the first core is
-  // paired (this view's auto-open moment).
-  let openId = $state<string | null>("llm");
+  // Single-open accordion. The general section starts open.
+  let openId = $state<string | null>("general");
 
   function isEnabled(section: QuickSettingsSectionDef): boolean {
     return !section.enabledField ||

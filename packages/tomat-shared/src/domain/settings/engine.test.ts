@@ -5,6 +5,7 @@ import { assertEquals } from "@std/assert";
 import {
   isSecretSettingKey,
   SECRET_KEYS,
+  settingKeyDestination,
   SETTINGS_SCHEMA,
   validateSettingsPatch,
 } from "./engine.ts";
@@ -57,27 +58,13 @@ Deno.test("hybrid groups label every section and give it a destination", () => {
   }
 });
 
-function firstFieldOfType(type: string): string | undefined {
-  for (const group of SETTINGS_SCHEMA) {
-    for (const section of group.sections) {
-      for (const field of section.fields) {
-        if (field.type === type) return field.id;
-      }
-    }
-  }
-  return undefined;
-}
-
-Deno.test("validateSettingsPatch: accepts a well-typed boolean value", () => {
-  const id = firstFieldOfType("boolean");
-  if (!id) return; // schema has no boolean field (unexpected, but don't fail)
-  assertEquals(validateSettingsPatch({ [id]: true }), []);
+Deno.test("validateSettingsPatch: accepts a well-typed core-destination value", () => {
+  // tts.enabled lives in the tts group's core section (hybrid group).
+  assertEquals(validateSettingsPatch({ "tts.enabled": true }), []);
 });
 
 Deno.test("validateSettingsPatch: rejects a wrong-typed known value", () => {
-  const id = firstFieldOfType("boolean");
-  if (!id) return;
-  assertEquals(validateSettingsPatch({ [id]: "not-a-boolean" }).length > 0, true);
+  assertEquals(validateSettingsPatch({ "tts.enabled": "not-a-boolean" }).length > 0, true);
 });
 
 Deno.test("validateSettingsPatch: rejects secret-typed keys (vault only)", () => {
@@ -86,10 +73,28 @@ Deno.test("validateSettingsPatch: rejects secret-typed keys (vault only)", () =>
   assertEquals(validateSettingsPatch({ [secret]: "sk-leak" }).length > 0, true);
 });
 
-Deno.test("validateSettingsPatch: allows unknown keys and deletions", () => {
-  // Unknown keys are not errors (forward-compat); null/undefined are resets.
-  assertEquals(validateSettingsPatch({ "totally.unknown.key": "x" }), []);
-  assertEquals(validateSettingsPatch({ "some.key": null }), []);
+Deno.test("validateSettingsPatch: rejects unknown keys, allows deletions on core keys", () => {
+  // The core store holds only known core-destination keys; null is a reset.
+  assertEquals(validateSettingsPatch({ "totally.unknown.key": "x" }).length > 0, true);
+  assertEquals(validateSettingsPatch({ "totally.unknown.key": null }).length > 0, true);
+  assertEquals(validateSettingsPatch({ "llm.modelPath": null }), []);
+});
+
+Deno.test("validateSettingsPatch: rejects client-destination keys", () => {
+  assertEquals(validateSettingsPatch({ "appearance.theme": "dark" }).length > 0, true);
+  // The client section of a hybrid group routes to the client store too.
+  assertEquals(validateSettingsPatch({ "tts.voice": "bf_emma" }).length > 0, true);
+});
+
+Deno.test("settingKeyDestination: honors group defaults and section overrides", () => {
+  assertEquals(settingKeyDestination("llm.modelPath"), "core");
+  // Hybrid tts group: core section vs client section.
+  assertEquals(settingKeyDestination("tts.enabled"), "core");
+  assertEquals(settingKeyDestination("tts.voice"), "client");
+  // Client section override inside the otherwise core toolkits group.
+  assertEquals(settingKeyDestination("toolkits.skipRiskyGrantWarning"), "client");
+  assertEquals(settingKeyDestination("appearance.theme"), "client");
+  assertEquals(settingKeyDestination("totally.unknown.key"), undefined);
 });
 
 Deno.test("isSecretSettingKey: true for password fields, false otherwise", () => {

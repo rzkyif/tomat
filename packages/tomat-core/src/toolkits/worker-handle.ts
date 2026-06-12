@@ -1,13 +1,32 @@
 // One running tool-worker subprocess + NDJSON channel.
+//
+// Two spawn modes:
+//
+//  - PTY mode (default when the tomat-core-ptyhost helper is present and the
+//    platform is unix): the worker runs under the helper with stdin + stderr
+//    on a pseudo-terminal, WITHOUT --no-prompt, so Deno pauses on permission
+//    prompts for anything outside the granted spawn flags. The handle parses
+//    prompt text off the PTY (prompt-parser.ts), consults the grant policy
+//    (prompt-matcher.ts), and either auto-answers or surfaces a synthesized
+//    `permission_prompt` frame for the pool to forward to the user. Worker
+//    stdout is inherited through the helper, so the protocol stream is
+//    identical in both modes.
+//
+//  - Pipe mode (helper missing, Windows, or no prompt context): today's
+//    direct spawn with --no-prompt; ask-state permissions surface to the
+//    tool as NotCapable.
 
 import { join } from "@std/path";
+import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
 import { errMessage } from "@tomat/shared";
 import { binPath } from "../paths.ts";
 import { paths } from "../paths.ts";
-import { binaryName } from "../binaries/versions.ts";
+import { binaryName, coreBinaryName } from "../binaries/versions.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import type { PoolToWorkerFrame, WorkerToPoolFrame } from "./worker-protocol.ts";
+import { PromptParser, type PromptParserEvent } from "./prompt-parser.ts";
+import { decidePrompt, type PromptContext } from "./prompt-matcher.ts";
 
 const log = getLogger("toolworker");
 
@@ -17,6 +36,16 @@ const log = getLogger("toolworker");
 // tool result. stderr is just log lines, so a 1 MB cap is plenty.
 const MAX_STDOUT_FRAME_BYTES = 16_000_000;
 const MAX_STDERR_LINE_BYTES = 1_000_000;
+
+// Prompt answer timing. Deno's prompter flushes stdin until it has been
+// quiescent for ~100 ms before reading the answer (clear_stdin in
+// prompter.rs), so an immediate write gets eaten: write no sooner than
+// 300 ms after the prompt appeared and retry until the Granted/Denied
+// confirmation shows. If it never does (format drift, wedged terminal),
+// give up and kill the worker; the call then settles via the pool timeout.
+const ANSWER_INITIAL_DELAY_MS = 300;
+const ANSWER_RETRY_MS = 600;
+const ANSWER_GIVEUP_MS = 10_000;
 
 // Non-secret operational env a tool worker may legitimately need (PATH so a
 // `run`-granted tool can resolve binaries, HOME/temp/locale). Everything else
@@ -47,9 +76,43 @@ export interface SpawnSpec {
   entryPath: string; // absolute path to the toolkit's entry .ts/.js
   toolkitFolder: string; // absolute path; passed to --allow-read + --config
   flags: string[]; // computed --allow-* set (no --allow-read for the folder; we add it)
+  // Declared permissions + grants + undeclared policy for runtime prompt
+  // decisions. Absent (e.g. pool tests) forces pipe mode.
+  promptContext?: PromptContext;
 }
 
 export type WorkerListener = (frame: WorkerToPoolFrame) => void;
+
+// Control frames understood by the tomat-core-ptyhost helper (see its
+// src/main.rs header).
+type PtyhostControlFrame =
+  | {
+      kind: "spawn";
+      cmd: string;
+      args: string[];
+      env: Record<string, string>;
+      cwd?: string;
+    }
+  | { kind: "write"; dataB64: string }
+  | { kind: "kill" };
+
+type PtyhostEvent =
+  | { kind: "pty"; dataB64: string }
+  | { kind: "exit"; code: number }
+  | { kind: "fatal"; error: string };
+
+export function ptyhostPath(): string {
+  return binPath(coreBinaryName("tomat-core-ptyhost"));
+}
+
+function ptyhostAvailableSync(): boolean {
+  if (Deno.build.os === "windows") return false;
+  try {
+    return Deno.statSync(ptyhostPath()).isFile;
+  } catch {
+    return false;
+  }
+}
 
 export class WorkerHandle {
   private proc: Deno.ChildProcess;
@@ -63,6 +126,24 @@ export class WorkerHandle {
   readonly spawnedAt = Date.now();
   inFlightCalls = 0;
   lastActivityAt = Date.now();
+
+  // --- PTY mode state ------------------------------------------------------
+  private readonly ptyMode: boolean;
+  private readonly promptContext: PromptContext | undefined;
+  private promptParser: PromptParser | undefined;
+  // Frames queued while a prompt is pending: Deno's clear_stdin would flush
+  // them off the PTY before reading the answer.
+  private sendQueue: PoolToWorkerFrame[] = [];
+  private promptPending = false;
+  private promptSeenAt = 0;
+  private promptRequestId: string | null = null;
+  private promptForwarded = false;
+  private answerTimer: ReturnType<typeof setTimeout> | undefined;
+  /** True once a user-forwarded prompt settled (either way) during this
+   *  worker's lifetime. Deno caches the verdict per resource for the process
+   *  lifetime and accepts are scoped to one call, so the pool must retire
+   *  the worker instead of returning it to the warm set. */
+  promptAnsweredByUser = false;
 
   static spawn(spec: SpawnSpec): WorkerHandle {
     const denoBin = binPath(binaryName("deno"));
@@ -97,9 +178,12 @@ export class WorkerHandle {
       p.dbFile + "-shm",
       p.dbFile + "-journal", // non-WAL fallback journal
     ].join(",");
+    const ptyMode = spec.promptContext !== undefined && ptyhostAvailableSync();
     const args = [
       "run",
-      "--no-prompt",
+      // In PTY mode prompts are the whole point; in pipe mode they would
+      // block forever on a non-terminal, so they stay disabled.
+      ...(ptyMode ? [] : ["--no-prompt"]),
       "--no-check",
       "--quiet",
       // node_modules was created in the folder by `deno install --node-modules-dir=auto`;
@@ -131,6 +215,26 @@ export class WorkerHandle {
         if (v !== undefined) env[key] = v;
       }
     }
+    if (ptyMode) {
+      // The helper gets an empty env on purpose: the child's env is carried
+      // entirely by the spawn control frame (helper applies env_clear).
+      const proc = new Deno.Command(ptyhostPath(), {
+        args: [],
+        clearEnv: true,
+        env: {},
+        stdin: "piped",
+        stdout: "piped",
+        stderr: "piped",
+      }).spawn();
+      const handle = new WorkerHandle(proc, spec.toolkitId, true, spec.promptContext);
+      handle.writeControl({ kind: "spawn", cmd: denoBin, args, env });
+      return handle;
+    }
+    if (spec.promptContext !== undefined) {
+      log.warn(
+        `[${spec.toolkitId}] tomat-core-ptyhost unavailable; runtime permission prompts disabled (ask-state permissions fail as NotCapable)`,
+      );
+    }
     const proc = new Deno.Command(denoBin, {
       args,
       clearEnv: true,
@@ -139,18 +243,34 @@ export class WorkerHandle {
       stdout: "piped",
       stderr: "piped",
     }).spawn();
-    return new WorkerHandle(proc, spec.toolkitId);
+    return new WorkerHandle(proc, spec.toolkitId, false, undefined);
   }
 
-  private constructor(proc: Deno.ChildProcess, toolkitId: string) {
+  private constructor(
+    proc: Deno.ChildProcess,
+    toolkitId: string,
+    ptyMode: boolean,
+    promptContext: PromptContext | undefined,
+  ) {
     this.proc = proc;
     this.writer = proc.stdin.getWriter();
     this.toolkitId = toolkitId;
+    this.ptyMode = ptyMode;
+    this.promptContext = promptContext;
     void this.pumpStdout(proc.stdout);
-    void this.pumpStderr(proc.stderr);
+    if (ptyMode) {
+      this.promptParser = new PromptParser((e) => this.onPromptEvent(e));
+      void this.pumpPtyhostEvents(proc.stderr);
+    } else {
+      void this.pumpStderr(proc.stderr);
+    }
     void proc.status.then((s) => {
       log.warn(`[${this.toolkitId}] worker exited (code=${s.code})`);
       this.failBoot(new AppError("internal_error", "worker exited"));
+      // Settle any started call still waiting on this worker. Pre-boot calls
+      // are handled by the failBoot rejection above; started calls listen for
+      // this frame (no callId, so it reaches every in-flight call's listener).
+      this.emit({ kind: "worker_exited", code: s.code });
     });
   }
 
@@ -178,6 +298,18 @@ export class WorkerHandle {
 
   send(frame: PoolToWorkerFrame): void {
     this.lastActivityAt = Date.now();
+    if (this.ptyMode) {
+      // While a prompt is pending, Deno's clear_stdin would flush anything
+      // written to the PTY before reading the answer; hold frames until the
+      // prompt settles. (A cancel racing a prompt is covered by the pool's
+      // force-kill fallback.)
+      if (this.promptPending) {
+        this.sendQueue.push(frame);
+        return;
+      }
+      this.writeWorkerFrame(frame);
+      return;
+    }
     try {
       this.writer.write(new TextEncoder().encode(JSON.stringify(frame) + "\n")).catch(() => {});
     } catch {
@@ -185,9 +317,24 @@ export class WorkerHandle {
     }
   }
 
+  /** Answer a forwarded permission prompt. No-op unless `requestId` is the
+   *  currently pending prompt (stale responses after a settle are dropped). */
+  answerPrompt(requestId: string, allow: boolean): void {
+    if (!this.promptPending || this.promptRequestId !== requestId) return;
+    this.startAnswer(allow);
+  }
+
   async terminate(drainTimeoutMs = 2_000): Promise<void> {
+    // Stop any in-progress answer-retry loop so it can't keep firing (and
+    // re-issuing a kill) for up to ANSWER_GIVEUP_MS after the worker is gone.
+    this.promptPending = false;
+    this.stopAnswerTimer();
     try {
-      this.send({ kind: "shutdown" });
+      if (this.ptyMode) {
+        this.writeWorkerFrame({ kind: "shutdown" });
+      } else {
+        this.send({ kind: "shutdown" });
+      }
     } catch {
       /* ignore */
     }
@@ -197,6 +344,15 @@ export class WorkerHandle {
     ]);
     if (!dead) {
       try {
+        if (this.ptyMode) {
+          // Ask the helper to SIGKILL the worker; it then exits itself.
+          this.writeControl({ kind: "kill" });
+          const killed = await Promise.race([
+            this.proc.status.then(() => true),
+            new Promise<boolean>((r) => setTimeout(() => r(false), 500)),
+          ]);
+          if (killed) return;
+        }
         this.proc.kill("SIGKILL");
       } catch {
         /* ignore */
@@ -208,6 +364,154 @@ export class WorkerHandle {
       /* ignore */
     }
   }
+
+  // --- PTY plumbing --------------------------------------------------------
+
+  private writeControl(frame: PtyhostControlFrame): void {
+    try {
+      this.writer.write(new TextEncoder().encode(JSON.stringify(frame) + "\n")).catch(() => {});
+    } catch {
+      // writer closed; ignore (helper is dying)
+    }
+  }
+
+  private writeWorkerFrame(frame: PoolToWorkerFrame): void {
+    this.writeControl({
+      kind: "write",
+      dataB64: encodeBase64(new TextEncoder().encode(JSON.stringify(frame) + "\n")),
+    });
+  }
+
+  private async pumpPtyhostEvents(stream: ReadableStream<Uint8Array>): Promise<void> {
+    const decoder = new TextDecoder();
+    let buf = "";
+    for await (const chunk of stream) {
+      buf += decoder.decode(chunk, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let event: PtyhostEvent;
+        try {
+          event = JSON.parse(line) as PtyhostEvent;
+        } catch {
+          log.warn(`[${this.toolkitId}] bad ptyhost event: ${line.slice(0, 200)}`);
+          continue;
+        }
+        if (event.kind === "pty") {
+          try {
+            this.promptParser?.feed(this.decoder.decode(decodeBase64(event.dataB64)));
+          } catch {
+            log.warn(`[${this.toolkitId}] undecodable pty event`);
+          }
+        } else if (event.kind === "fatal") {
+          log.warn(`[${this.toolkitId}] ptyhost fatal: ${event.error}`);
+        }
+        // exit events need no handling: the helper mirrors the worker's exit
+        // code, so proc.status covers it.
+      }
+    }
+  }
+
+  private onPromptEvent(event: PromptParserEvent): void {
+    if (event.kind === "stderr_line") {
+      if (event.line.length > MAX_STDERR_LINE_BYTES) {
+        this.emit({
+          kind: "stderr_log",
+          line: event.line.slice(0, MAX_STDERR_LINE_BYTES) + " …[truncated]",
+        });
+        return;
+      }
+      this.emit({ kind: "stderr_log", line: event.line });
+      return;
+    }
+    if (event.kind === "prompt") {
+      this.promptPending = true;
+      this.promptSeenAt = Date.now();
+      this.promptRequestId = `perm-${crypto.randomUUID()}`;
+      this.promptForwarded = false;
+      const ctx = this.promptContext;
+      const decision = ctx ? decidePrompt(event, ctx) : null;
+      if (decision === null || decision.action === "deny") {
+        const why = decision === null ? "unrecognized permission kind" : "permission policy";
+        this.emit({
+          kind: "stderr_log",
+          line: `auto-denied ${event.permission} access to ${event.resource || "(all)"} (${why})`,
+        });
+        this.startAnswer(false);
+        return;
+      }
+      // A Deno prompt blocks the worker's whole isolate, so when more than one
+      // call shares this worker (warm workers are reused across sessions) we
+      // can't attribute the prompt to a single call: the synthesized frame
+      // carries no callId and would fan out to every in-flight call's listener.
+      // Fail closed rather than forward an ambiguous prompt; the affected call
+      // sees NotCapable, exactly as in pipe mode.
+      if (this.inFlightCalls > 1) {
+        this.emit({
+          kind: "stderr_log",
+          line: `auto-denied ${event.permission} access to ${
+            event.resource || "(all)"
+          } (concurrent calls share this worker; cannot attribute the prompt)`,
+        });
+        this.startAnswer(false);
+        return;
+      }
+      this.promptForwarded = true;
+      this.emit({
+        kind: "permission_prompt",
+        requestId: this.promptRequestId,
+        permission: decision.permissionKind,
+        resource: event.resource,
+        apiName: event.apiName,
+        declared: decision.declared,
+        reason: decision.reason,
+      });
+      return;
+    }
+    // settled
+    if (this.promptForwarded) this.promptAnsweredByUser = true;
+    this.promptPending = false;
+    this.promptRequestId = null;
+    this.promptForwarded = false;
+    this.stopAnswerTimer();
+    const queued = this.sendQueue;
+    this.sendQueue = [];
+    for (const frame of queued) this.writeWorkerFrame(frame);
+  }
+
+  private startAnswer(allow: boolean): void {
+    this.stopAnswerTimer();
+    const startedAt = Date.now();
+    const payload = encodeBase64(new TextEncoder().encode(allow ? "y\n" : "n\n"));
+    const tick = () => {
+      if (!this.promptPending) return;
+      if (Date.now() - startedAt > ANSWER_GIVEUP_MS) {
+        // The confirmation never came (prompt format drift or a wedged
+        // terminal). Fail closed: kill the worker; the in-flight call then
+        // settles via the pool's timeout/kill machinery.
+        this.emit({
+          kind: "stderr_log",
+          line: "permission prompt answer was not accepted; killing worker",
+        });
+        this.writeControl({ kind: "kill" });
+        return;
+      }
+      this.writeControl({ kind: "write", dataB64: payload });
+      this.answerTimer = setTimeout(tick, ANSWER_RETRY_MS);
+    };
+    const initialDelay = Math.max(0, ANSWER_INITIAL_DELAY_MS - (Date.now() - this.promptSeenAt));
+    this.answerTimer = setTimeout(tick, initialDelay);
+  }
+
+  private stopAnswerTimer(): void {
+    if (this.answerTimer !== undefined) {
+      clearTimeout(this.answerTimer);
+      this.answerTimer = undefined;
+    }
+  }
+
+  // --- shared plumbing -----------------------------------------------------
 
   private async pumpStdout(stream: ReadableStream<Uint8Array>): Promise<void> {
     for await (const chunk of stream) {

@@ -242,3 +242,140 @@ Deno.test({
     }
   },
 });
+
+// --- settings.updated broadcasts --------------------------------------------
+// A settings change also recomputes requirements (its own broadcast), so the
+// helper filters by kind instead of assuming order. Like the broadcastAll
+// test above, the listener MUST be registered before the triggering call:
+// the frame can arrive while the trigger's await is still settling.
+
+function waitForFrame(ws: WebSocket, kind: string): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const onMsg = (ev: MessageEvent) => {
+      if (typeof ev.data !== "string") return;
+      const frame = JSON.parse(ev.data) as Record<string, unknown>;
+      if (frame.kind !== kind) return;
+      ws.removeEventListener("message", onMsg);
+      resolve(frame);
+    };
+    ws.addEventListener("message", onMsg);
+    ws.addEventListener("error", (e) => reject(e), { once: true });
+  });
+}
+
+function patchSettings(port: number, token: string, body: Record<string, unknown>) {
+  return fetch(`http://127.0.0.1:${port}/api/v1/settings`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+Deno.test({
+  name: "WS /ws/v1: settings PATCH broadcasts settings.updated (value, then deletion)",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const env = await setupTestEnv();
+    const server = startServer();
+    try {
+      const token = await pair();
+      const ws = dial(server.port, token);
+      await once(ws, "open");
+
+      const valueFramePromise = waitForFrame(ws, "settings.updated");
+      const set = await patchSettings(server.port, token, { "llm.host": "0.0.0.0" });
+      assertEquals(set.status, 200);
+      await set.body?.cancel();
+      const valueFrame = await valueFramePromise;
+      assertEquals((valueFrame.values as Record<string, unknown>)["llm.host"], "0.0.0.0");
+      assertEquals(valueFrame.deleted, []);
+
+      const deletedFramePromise = waitForFrame(ws, "settings.updated");
+      const del = await patchSettings(server.port, token, { "llm.host": null });
+      assertEquals(del.status, 200);
+      await del.body?.cancel();
+      const deletedFrame = await deletedFramePromise;
+      assertEquals(deletedFrame.deleted, ["llm.host"]);
+      assertEquals(deletedFrame.values, {});
+
+      ws.close();
+    } finally {
+      await server.stop();
+      await env.teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "WS /ws/v1: secret changes broadcast names only, never the value",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const env = await setupTestEnv();
+    const server = startServer();
+    try {
+      const token = await pair();
+      const ws = dial(server.port, token);
+      await once(ws, "open");
+
+      const framePromise = waitForFrame(ws, "settings.updated");
+      const put = await fetch(
+        `http://127.0.0.1:${server.port}/api/v1/settings/secrets/llm.external.apiKey`,
+        {
+          method: "PUT",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ value: "sk-never-on-the-wire" }),
+        },
+      );
+      assertEquals(put.status, 204);
+      await put.body?.cancel();
+
+      const frame = await framePromise;
+      assertEquals(frame.values, {});
+      assertEquals(frame.deleted, []);
+      assertEquals(frame.secretNames, ["llm.external.apiKey"]);
+      assertEquals(JSON.stringify(frame).includes("sk-never-on-the-wire"), false);
+
+      ws.close();
+    } finally {
+      await server.stop();
+      await env.teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "WS /ws/v1: secret-typed settings keys never appear in settings.updated",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const env = await setupTestEnv();
+    const server = startServer();
+    try {
+      const token = await pair();
+      const ws = dial(server.port, token);
+      await once(ws, "open");
+
+      // Write a secret-typed key through the service directly (the route guard
+      // would reject it), then a benign key. The next settings.updated must
+      // carry only the benign key: the hub filter drops the secret even though
+      // the store changed.
+      const framePromise = waitForFrame(ws, "settings.updated");
+      const { patchCoreSettings } = await import("../services/core-settings.ts");
+      await patchCoreSettings({ "llm.external.apiKey": "sk-store-leak" });
+      await patchCoreSettings({ "llm.host": "0.0.0.0" });
+
+      const frame = await framePromise;
+      const values = frame.values as Record<string, unknown>;
+      assertEquals(values["llm.host"], "0.0.0.0");
+      assertEquals("llm.external.apiKey" in values, false);
+      assertEquals(JSON.stringify(frame).includes("sk-store-leak"), false);
+
+      ws.close();
+    } finally {
+      await server.stop();
+      await env.teardown();
+    }
+  },
+});

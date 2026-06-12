@@ -1,18 +1,15 @@
 // Client-side storage provider for the "Client → Storage" usage field. Mirrors
 // the core StorageApi shape (get / deletePaths / clearCategory) so StorageField
 // can drive either side. The tree comes from a Tauri command; deletes use
-// platform.fs.remove; the settings "clear" is a reset that preserves the
-// things the user shouldn't lose to a settings reset (paired cores + snippets).
+// platform.fs.remove. The settings "clear" only empties settings.json: the
+// paired-cores registry (cores.json) and snippets (snippets/) are separate
+// files, so a settings reset can never cost the user a pairing or a snippet.
 
 import type { StorageTree } from "@tomat/shared";
 import { platform } from "$lib/platform";
 import { getLogger } from "$lib/shared/log";
 
 const log = getLogger("client-storage");
-
-// Keys in client settings.json that a "reset" must keep: paired cores (losing
-// them forces a re-pair) and saved snippets.
-const PRESERVE_KEYS = ["cores", "snippets"];
 
 // The live log file: it's held open by the logger, so it's cleared by
 // truncation (logging continues) rather than deletion. Rotated backups
@@ -48,11 +45,9 @@ export const clientStorageProvider = {
 
   async clearCategory(id: string): Promise<void> {
     if (id === "settings") {
-      // Reset to defaults, preserving paired cores + snippets.
-      const cur = await platform().clientSettings.read();
-      const preserved: Record<string, unknown> = {};
-      for (const k of PRESERVE_KEYS) if (k in cur) preserved[k] = cur[k];
-      await platform().clientSettings.write(preserved);
+      // The file is sparse (only non-defaults persisted), so an empty write
+      // IS the reset to defaults.
+      await platform().clientFiles.write("settings", {});
       return;
     }
     if (id === "logs") {

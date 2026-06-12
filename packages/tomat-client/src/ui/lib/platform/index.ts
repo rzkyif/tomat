@@ -27,6 +27,12 @@ export interface MonitorInfo {
   height: number;
 }
 
+// --- Client files ----------------------------------------------------------
+
+// The fixed-name JSON stores under ~/.tomat/<channel>/client/. Values must
+// match the Rust ClientFile serde variants (lowercase) exactly.
+export type ClientFileName = "settings" | "cores";
+
 // --- Context menu --------------------------------------------------------
 
 export type ContextMenuItem =
@@ -207,7 +213,7 @@ export interface Platform {
   };
   // The local client's on-disk storage tree (settings + logs) for the
   // "Client → Storage" usage field. Read-only; deletes/clears are done by the
-  // caller via fs.remove + clientSettings.
+  // caller via fs.remove + clientFiles.
   clientStorage: {
     tree(): Promise<StorageTree>;
     /** Empty the active client.log in place (logging continues). Rotated
@@ -216,10 +222,22 @@ export interface Platform {
   };
   // Global / input shortcuts.
   shortcuts: ShortcutBindings;
-  // Client-only settings file at ~/.tomat/client/settings.json.
-  clientSettings: {
-    read(): Promise<Record<string, unknown>>;
-    write(settings: Record<string, unknown>): Promise<void>;
+  // Per-concern client JSON stores under ~/.tomat/<channel>/client/:
+  // settings.json (sparse settings, owned by settingsState) and cores.json
+  // (paired-cores registry, owned by lib/core/cores.ts). One owner per file,
+  // so no cross-module read-modify-write.
+  clientFiles: {
+    read(file: ClientFileName): Promise<Record<string, unknown>>;
+    write(file: ClientFileName, data: Record<string, unknown>): Promise<void>;
+  };
+  // Per-snippet JSON files under ~/.tomat/<channel>/client/snippets/. The
+  // directory listing is the registry (no index file), so a snippet can be
+  // shared by copying its file into the folder and rescanning.
+  snippetFiles: {
+    /** Every parseable snippet file, keyed by filename stem. */
+    readAll(): Promise<Record<string, Record<string, unknown>>>;
+    write(name: string, data: Record<string, unknown>): Promise<void>;
+    delete(name: string): Promise<void>;
   };
   // OS keychain for paired-core bearer tokens.
   keychain: {
@@ -235,7 +253,9 @@ export interface Platform {
      *  task so the core boots on login; `false` skips that and expects the
      *  client to spawn the core on demand. `bindAll: true` seeds the new
      *  core's settings.json with `server.bindHost: "0.0.0.0"` so it listens on
-     *  all interfaces from the very first boot (changeable later in Settings). */
+     *  all interfaces from the very first boot. The bind host is not part of
+     *  the settings schema (a paired client must not widen network exposure
+     *  over the API); changing it later means editing that file by hand. */
     installLocalCore(opts?: { service?: boolean; bindAll?: boolean }): Promise<string>;
     /** Whether ~/.tomat/core/bin/tomat-core exists. Used at boot to decide
      *  whether we should attempt to spawn the local core for on-demand mode. */

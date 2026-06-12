@@ -93,13 +93,12 @@
 
     // Prefill the remote fields from launch arguments (--core-url /
     // --pairing-code), as supplied by a shareable setup command or by what
-    // `deno task dev` passes. A supplied core URL also pre-selects the remote
-    // flow so the fields are ready. Only fills empty fields, never clobbers
-    // typed input.
+    // `deno task dev` passes. The chooser still defaults to "this computer";
+    // the fields are simply ready if the user picks the remote flow. Only
+    // fills empty fields, never clobbers typed input.
     try {
       const pre = await platform().pairing.launchPrefill();
       if (pre?.coreUrl) {
-        destination = "remote";
         if (!remoteUrl.trim()) remoteUrl = pre.coreUrl;
         if (!remoteCode.trim() && pre.pairingCode) {
           remoteCode = pre.pairingCode;
@@ -152,6 +151,9 @@
       addedAtMs: Date.now(),
     };
     await cores().addPaired(entry, res.token);
+    // select() notifies the registry, which makes settingsState load the new
+    // core's settings baseline (and live-sync from there); nothing to fetch
+    // here. Edits made before the baseline lands are queued, not dropped.
     await cores().select(entry.id);
     busy = null;
     if (firstEver) {
@@ -656,7 +658,9 @@
           so other clients in your LAN can connect. When off (default), only
           this device can reach it via <code
             class="bg-surface-inset-strong px-1 rounded-small">127.0.0.1</code
-          >. Toggleable later in Settings → Server.
+          >. Changeable later by editing the core's <code
+            class="bg-surface-inset-strong px-1 rounded-small">settings.json</code
+          >.
         </span>
       </div>
     </button>

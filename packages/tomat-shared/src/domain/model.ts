@@ -76,6 +76,10 @@ export interface BinaryManifestPinnedEntry {
 export interface UpstreamResolver {
   repo: string;
   assets: Partial<Record<Triple, string>>;
+  /** When set, resolve this exact release tag instead of the latest. Pins a
+   *  binary on EVERY channel (beta/dev resolve at runtime, stable pins from
+   *  the same tag at release time), so bumping it is a deliberate edit. */
+  pinnedTag?: string;
 }
 
 export interface BinaryManifestResolverEntry {
@@ -123,6 +127,11 @@ export const UPSTREAM_BINARIES: Record<BinaryKind, UpstreamResolver> = {
   },
   deno: {
     repo: "denoland/deno",
+    // Pinned on every channel: tool-worker permission prompts are parsed
+    // from this version's prompt wording (tomat-core/src/toolkits/
+    // prompt-parser.ts). Bump deliberately and re-run the live-probe test
+    // (prompt-live-probe.test.ts) against the new release first.
+    pinnedTag: "v2.8.2",
     assets: {
       "aarch64-apple-darwin": "deno-aarch64-apple-darwin.zip",
       "x86_64-apple-darwin": "deno-x86_64-apple-darwin.zip",

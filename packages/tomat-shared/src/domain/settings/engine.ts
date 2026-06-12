@@ -13,10 +13,12 @@ import type {
   FieldCondition,
   RegexValidation,
   SearchResultGroup,
+  SettingDestination,
   SettingField,
   SettingGroup,
   SettingSection,
 } from "./types.ts";
+import { groupDestinations } from "./types.ts";
 import type { RequiredModelRef } from "../model.ts";
 
 import { generalGroup } from "./groups/general.ts";
@@ -31,7 +33,6 @@ import { sttGroup } from "./groups/stt.ts";
 import { ttsGroup } from "./groups/tts.ts";
 import { usageGroup } from "./groups/usage.ts";
 import { coresGroup } from "./groups/cores.ts";
-import { serverGroup } from "./groups/server.ts";
 
 // Kokoro TTS assets are fetched into ~/.tomat/models/<repo>/... by the
 // core downloader. transformers.js's `dtype: "q8"` expects an ONNX file
@@ -100,7 +101,6 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   sttGroup,
   ttsGroup,
   usageGroup,
-  serverGroup,
   coresGroup,
 ];
 
@@ -142,6 +142,33 @@ const SETTING_ID_SET: ReadonlySet<string> = new Set(SETTING_IDS);
 /** True if `key` matches a field id in `SETTINGS_SCHEMA`. */
 export function isValidSettingKey(key: string): boolean {
   return SETTING_ID_SET.has(key);
+}
+
+// Per-field persistence destination, honoring hybrid groups: a section's
+// `destination` overrides its group's first listed destination (see
+// groupDestinations). Built lazily once; the schema is immutable after import.
+let _keyDestinations: Map<string, SettingDestination> | null = null;
+
+function keyDestinations(): Map<string, SettingDestination> {
+  if (_keyDestinations) return _keyDestinations;
+  const map = new Map<string, SettingDestination>();
+  for (const group of SETTINGS_SCHEMA) {
+    const groupDest = groupDestinations(group)[0];
+    for (const section of group.sections) {
+      const dest = section.destination ?? groupDest;
+      for (const field of section.fields) map.set(field.id, dest);
+    }
+  }
+  _keyDestinations = map;
+  return map;
+}
+
+/** Persistence destination ("client" or "core") for a schema field id,
+ *  honoring per-section overrides in hybrid groups. Undefined for unknown
+ *  keys. The single routing truth for both the client save path and core's
+ *  PATCH validation. */
+export function settingKeyDestination(key: string): SettingDestination | undefined {
+  return keyDestinations().get(key);
 }
 
 export function getDefaultSettings(): Record<string, unknown> {
@@ -447,29 +474,48 @@ function settingValueTypeOk(field: SettingField, value: unknown): boolean {
 }
 
 /**
- * Validate a PATCH body destined for a settings store (core's
- * `PATCH /api/v1/settings`). Returns a list of human-readable errors; an empty
- * list means the patch is acceptable. Rules:
- *   - `null`/`undefined` values are deletions (reset to default) and always OK.
+ * Validate a PATCH body destined for the core settings store
+ * (`PATCH /api/v1/settings`). Returns a list of human-readable errors; an
+ * empty list means the patch is acceptable. Rules:
+ *   - every key must be a known schema key with a core destination: the core
+ *     store never holds client-side or unknown keys.
  *   - secret-typed keys (password fields) are rejected: their values belong in
  *     the encrypted vault via the secrets endpoint, never in settings.json.
- *   - known keys are type-checked (and regex-checked for text fields) so a
+ *   - render-only fields (command preview, services, storage, object
+ *     management) hold no persistable scalar and are rejected.
+ *   - `null`/`undefined` values are deletions (reset to default) and are OK on
+ *     any accepted key.
+ *   - values are type-checked (and regex-checked for text fields) so a
  *     malformed value can't be persisted.
- *   - unknown keys are NOT errors here (forward-compat with a newer client);
- *     callers should drop them rather than persist them.
  */
 export function validateSettingsPatch(patch: Record<string, unknown>): string[] {
   const errors: string[] = [];
   const secretSet = new Set<string>(SECRET_KEYS);
   for (const [key, value] of Object.entries(patch)) {
-    if (value === null || value === undefined) continue;
+    if (!isValidSettingKey(key)) {
+      errors.push(`"${key}" is not a known setting`);
+      continue;
+    }
     if (secretSet.has(key)) {
       errors.push(`"${key}" is a secret and must be set via the secrets endpoint, not settings`);
       continue;
     }
-    if (!isValidSettingKey(key)) continue;
+    if (settingKeyDestination(key) !== "core") {
+      errors.push(`"${key}" is not a core-destination setting`);
+      continue;
+    }
     const field = findField(key);
     if (!field) continue;
+    if (
+      field.type === "command_preview" ||
+      field.type === "services" ||
+      field.type === "storage" ||
+      field.type === "object_management"
+    ) {
+      errors.push(`"${key}" is a render-only field and holds no persisted value`);
+      continue;
+    }
+    if (value === null || value === undefined) continue;
     if (!settingValueTypeOk(field, value)) {
       errors.push(`"${key}" has the wrong type for a "${field.type}" setting`);
       continue;

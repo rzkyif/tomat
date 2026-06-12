@@ -72,6 +72,17 @@ export const toolAskUserResponseSchema = z
 
 export type ToolAskUserResponseFrame = z.infer<typeof toolAskUserResponseSchema>;
 
+export const toolPermissionResponseSchema = z
+  .object({
+    kind: z.literal("tool.permission_response"),
+    callId: z.string().min(1),
+    requestId: z.string().min(1),
+    allow: z.boolean(),
+  })
+  .strict();
+
+export type ToolPermissionResponseFrame = z.infer<typeof toolPermissionResponseSchema>;
+
 export const toolCancelSchema = z
   .object({
     kind: z.literal("tool.cancel"),

@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS toolkits (
   content_hash    TEXT NOT NULL DEFAULT '',   -- '' until pinned at install; the trust anchor
   status          TEXT NOT NULL DEFAULT 'downloaded',  -- 'downloaded' | 'installed' | 'drift'
   has_deps        INTEGER NOT NULL DEFAULT 0,  -- 1 when deno.json/package.json declares deps
+  undeclared_policy TEXT NOT NULL DEFAULT 'deny',  -- 'deny' | 'ask': runtime prompts outside declared perms
   installed_at_ms INTEGER NOT NULL,
   updated_at_ms   INTEGER NOT NULL
 );
@@ -76,15 +77,16 @@ CREATE TABLE IF NOT EXISTS tool_embeddings (
   source_hash TEXT NOT NULL
 );
 
--- Per-tool granular permission grants. A tool is runnable iff every
--- non-optional permission its tools.json declares has a row here with
--- state='granted'. The worker flag set is the union of grants across the
--- toolkit's currently-enabled tools.
+-- Per-tool granular permission decisions. 'granted' (Always Allow) is baked
+-- into the worker's --allow-* spawn flags; 'ask' (also the behavior when no
+-- row exists) leaves the permission out so Deno prompts at the moment of
+-- access; 'denied' auto-rejects the prompt. A tool is LLM-exposed iff no
+-- non-optional declared permission has state='denied'.
 CREATE TABLE IF NOT EXISTS grants (
   tool_id         TEXT NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
   permission_key  TEXT NOT NULL,              -- e.g. 'net:api.example.com:443'
   permission_kind TEXT NOT NULL,              -- 'net'|'read'|'write'|'run'|'env'|'ffi'|'sys'
-  state           TEXT NOT NULL DEFAULT 'granted',  -- granted|denied
+  state           TEXT NOT NULL DEFAULT 'ask',  -- granted|ask|denied
   granted_at_ms   INTEGER NOT NULL,
   PRIMARY KEY (tool_id, permission_key)
 );

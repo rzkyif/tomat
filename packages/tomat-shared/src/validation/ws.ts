@@ -122,6 +122,21 @@ const toolAskuserRequestFrameSchema = z
   })
   .passthrough();
 
+const toolPermissionRequestFrameSchema = z
+  .object({
+    kind: z.literal("tool.permission_request"),
+    callId: z.string().min(1),
+    requestId: z.string().min(1),
+    permissionKind: z.enum(["net", "read", "write", "run", "env", "ffi", "sys"]),
+    resource: z.string(),
+    apiName: z.string().optional(),
+    declared: z.boolean(),
+    reason: z.string().optional(),
+    toolkitId: z.string().min(1),
+    toolName: z.string().min(1),
+  })
+  .passthrough();
+
 const toolLogFrameSchema = z
   .object({
     kind: z.literal("tool.log"),
@@ -206,6 +221,15 @@ const requirementsSnapshotFrameSchema = z
   })
   .passthrough();
 
+const settingsUpdatedFrameSchema = z
+  .object({
+    kind: z.literal("settings.updated"),
+    values: z.record(z.string(), z.unknown()),
+    deleted: z.array(z.string()),
+    secretNames: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
 const sidecarStatusFrameSchema = z
   .object({
     kind: z.literal("sidecar.status"),
@@ -262,6 +286,7 @@ export const serverToClientFrameSchema = z.discriminatedUnion("kind", [
   chatErrorFrameSchema,
   toolProgressFrameSchema,
   toolAskuserRequestFrameSchema,
+  toolPermissionRequestFrameSchema,
   toolLogFrameSchema,
   toolResultFrameSchema,
   toolErrorFrameSchema,
@@ -271,6 +296,7 @@ export const serverToClientFrameSchema = z.discriminatedUnion("kind", [
   toolkitSnapshotFrameSchema,
   downloadsSnapshotFrameSchema,
   requirementsSnapshotFrameSchema,
+  settingsUpdatedFrameSchema,
   sidecarStatusFrameSchema,
   sessionUpdatedFrameSchema,
   updateStagedFrameSchema,

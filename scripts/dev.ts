@@ -85,10 +85,12 @@ async function startDevToolkitManifest(): Promise<void> {
     }
   })();
 }
-// The dev client persists its paired-cores list here; deleting it sends the
-// next boot back through core management (see the boot gate in
-// packages/tomat-client/src/ui/routes/+page.svelte).
-const CLIENT_SETTINGS_FILE = join(homeDir(), ".tomat", "dev", "client", "settings.json");
+// The dev client's per-concern stores: cores.json holds the paired-cores
+// registry (deleting it sends the next boot back through core management,
+// see the boot gate in packages/tomat-client/src/ui/routes/+page.svelte),
+// settings.json the sparse settings, and snippets/ one file per snippet.
+const DEV_CLIENT_DIR = join(homeDir(), ".tomat", "dev", "client");
+const CLIENT_RESET_TARGETS = ["settings.json", "cores.json", "snippets"];
 
 // CLI flags, wired to the deno tasks in deno.json:
 //  --reset          delete the dev client's settings.json before launch so the
@@ -370,19 +372,19 @@ async function mintPairingCode(token: string): Promise<string | null> {
   }
 }
 
-// Delete the dev client's settings.json so the next boot lands on core
-// management instead of going straight to chat. Best-effort: an absent file is
-// already "reset".
+// Delete the dev client's stores (settings, paired cores, snippets) so the
+// next boot lands on core management instead of going straight to chat.
+// Best-effort: an absent file is already "reset".
 async function resetClientSettings(): Promise<void> {
-  try {
-    await Deno.remove(CLIENT_SETTINGS_FILE);
-    devLog(`--reset: deleted ${CLIENT_SETTINGS_FILE}`);
-  } catch (err) {
-    if (err instanceof Deno.errors.NotFound) {
-      devLog("--reset: no client settings to delete (already clean)");
-      return;
+  for (const name of CLIENT_RESET_TARGETS) {
+    const target = join(DEV_CLIENT_DIR, name);
+    try {
+      await Deno.remove(target, { recursive: true });
+      devLog(`--reset: deleted ${target}`);
+    } catch (err) {
+      if (err instanceof Deno.errors.NotFound) continue;
+      devLog(`--reset: could not delete ${target}: ${err}`);
     }
-    devLog(`--reset: could not delete client settings: ${err}`);
   }
 }
 
@@ -524,12 +526,66 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
   }
 }
 
+// Build the native helper binaries from source and link them into the dev
+// core's bin dir. Production downloads these via the signed manifest at install
+// time; dev has no such download, so without this they are absent and core
+// fails its boot-time helper check (see ensureHelperBinaries in main.ts). The
+// crate name is also the on-disk base name; core looks them up channel-suffixed
+// ("-dev"). ptyhost is unix-only for now; the rest build + run everywhere.
+const HELPER_CRATES = [
+  "tomat-core-keychain",
+  "tomat-core-updater",
+  "tomat-core-hwinfo",
+  "tomat-core-ptyhost",
+];
+
+async function provisionHelpers(): Promise<void> {
+  const exe = Deno.build.os === "windows" ? ".exe" : "";
+  const crates = HELPER_CRATES.filter(
+    (c) => !(c === "tomat-core-ptyhost" && Deno.build.os === "windows"),
+  );
+  try {
+    const out = await new Deno.Command("cargo", {
+      args: ["build", ...crates.flatMap((c) => ["-p", c])],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    if (!out.success) {
+      const tail = new TextDecoder().decode(out.stderr).trim().split("\n").at(-1) ?? "";
+      devLog(`helper build failed (${tail}); core will refuse to boot until it succeeds`);
+      return;
+    }
+    await ensureDir(join(DEV_CORE_DIR, "bin"));
+    for (const crate of crates) {
+      const dest = join(DEV_CORE_DIR, "bin", `${crate}-dev${exe}`);
+      const built = join(ROOT, "target", "debug", `${crate}${exe}`);
+      try {
+        await Deno.remove(dest);
+      } catch {
+        /* not present yet */
+      }
+      // Symlink on unix so a later `cargo build` is picked up with no relink;
+      // copy on Windows where symlinks need elevation.
+      if (Deno.build.os === "windows") await Deno.copyFile(built, dest);
+      else await Deno.symlink(built, dest);
+    }
+    devLog(`linked ${crates.length} helper binaries into the dev bin dir`);
+  } catch (err) {
+    devLog(`could not provision helper binaries (${err instanceof Error ? err.message : err})`);
+  }
+}
+
 const adminToken = await ensureAdminToken();
 
 // Generate the dev built-in toolkit manifest before core boots so first-boot
 // seeding can resolve a version, and keep it fresh as the codebase toolkit is
 // edited.
 await startDevToolkitManifest();
+
+// Link the native helper binaries into the dev bin dir before core boots, so
+// its boot-time helper check passes and the first tool call can spawn in
+// prompt-capable mode.
+await provisionHelpers();
 
 children.push(
   spawn(

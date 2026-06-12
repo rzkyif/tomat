@@ -26,7 +26,6 @@ import { binPath, channelBinName } from "../paths.ts";
 import { coreBinaryName, hostTriple, platformExe } from "../binaries/versions.ts";
 import signingKeys from "../../data/signing-keys.json" with { type: "json" };
 import { writeUpdateMarker } from "./rollback.ts";
-import { loadCoreSettings } from "../services/core-settings.ts";
 
 const log = getLogger("update");
 
@@ -96,25 +95,15 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
       `manifest version ${manifest.version} does not match requested ${targetVersion}`,
     );
   }
-  // Refuse downgrades unless the operator has explicitly opted in via the
-  // `updates.allowDowngrade` core setting. The manifest is signed
-  // (verified upstream of this call) but a compromised signing key OR a
-  // roll-back of the published manifest is still possible. Without this
-  // guard, a downgrade could re-introduce a fixed vulnerability.
+  // Refuse downgrades. The manifest is signed (verified upstream of this
+  // call) but a compromised signing key OR a roll-back of the published
+  // manifest is still possible, and a downgrade could re-introduce a fixed
+  // vulnerability.
   if (compareSemver(manifest.version, CORE_VERSION) < 0) {
-    const settings = await loadCoreSettings();
-    const allowDowngrade = settings["updates.allowDowngrade"] === true;
-    if (!allowDowngrade) {
-      throw new AppError(
-        "update_failed",
-        `refusing downgrade: manifest v${manifest.version} is older than ` +
-          `running v${CORE_VERSION}. ` +
-          `Set "updates.allowDowngrade": true in core settings to override.`,
-      );
-    }
-    log.warn(
-      `installing downgrade v${CORE_VERSION} → v${manifest.version} ` +
-        `(allowed via updates.allowDowngrade setting)`,
+    throw new AppError(
+      "update_failed",
+      `refusing downgrade: manifest v${manifest.version} is older than ` +
+        `running v${CORE_VERSION}`,
     );
   }
   const triple = hostTriple();

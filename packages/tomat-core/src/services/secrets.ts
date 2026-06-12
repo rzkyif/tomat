@@ -2,25 +2,29 @@
 //
 // File layout (under paths().root):
 //   .master-key   : 32 random bytes, base64; chmod 600 on POSIX.
-//                   ONLY written when the OS keychain is unavailable
-//                   (helper binary missing or libsecret unavailable on
-//                   headless Linux). Otherwise the key lives in the
-//                   keychain and this file is absent.
+//                   ONLY written when the OS keychain is not used: the dev
+//                   channel (always file-based), a missing helper binary,
+//                   libsecret unavailable on headless Linux, or a keychain
+//                   that silently drops writes. Otherwise the key lives in
+//                   the keychain and this file is absent.
 //   secrets.enc   : AES-GCM ciphertext of the JSON secrets bag.
 //
 // The master key is sealed in the OS keychain via the `tomat-core-keychain`
 // helper binary (macOS Keychain, Linux libsecret, Windows Credential
 // Manager). On headless Linux without libsecret we fall back to the
-// `chmod 600` file so the daemon can still run unattended.
+// `chmod 600` file so the daemon can still run unattended. The dev channel
+// never uses the OS keychain for the master key: see useOsKeychain.
 //
 // First-run order, when generating a new master key:
-//   1. Try keychainSet; it succeeds on macOS/Windows + Linux with libsecret.
+//   1. Try keychainSet and verify the value reads back identically; a
+//      silently-failing keychain (the write reports success but a read
+//      finds nothing) counts as unavailable. See sealInKeychainVerified.
 //   2. If that fails, write the file with chmod 600 and a loud warning.
 //
 // Subsequent reads:
 //   1. Try keychainGet.
 //   2. If that returns null AND the file exists, read the file and try to
-//      migrate it into the keychain (best-effort, deletes file on success).
+//      migrate it into the keychain (verified; deletes file on success).
 //   3. If neither has it, generate a new key (loops back to first-run).
 //
 // Wire-format of secrets.enc: a single JSON object whose keys are secret
@@ -30,7 +34,7 @@
 //
 // Encryption: AES-GCM-256. Stored bytes are 12-byte nonce ‖ ciphertext.
 
-import { channelKeychainSuffix, paths } from "../paths.ts";
+import { channel, channelKeychainSuffix, paths } from "../paths.ts";
 import { errMessage } from "@tomat/shared";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
@@ -42,18 +46,41 @@ const NONCE_LEN = 12;
 const KEY_LEN = 32;
 // Namespaced per install channel so a dev/beta core can't read or clobber a
 // stable core's master key. Stable keeps the bare "au.tomat.core" service so
-// existing keychain entries keep resolving. (In dev the keychain helper
-// binary is usually absent and the .master-key file fallback, already under
-// the channel-isolated paths().root, is used instead.)
+// existing keychain entries keep resolving. (Dev never reads or writes this
+// service: see useOsKeychain.)
 const KEYCHAIN_SERVICE = `au.tomat.core${channelKeychainSuffix()}`;
 const KEYCHAIN_ACCOUNT = "master-key";
 
 let cachedKey: CryptoKey | null = null;
 
+type SecretsListener = (names: string[]) => void;
+const secretsListeners = new Set<SecretsListener>();
+
+/** Subscribe to vault content changes. Fires with the sorted secret-name list
+ *  after every successful set / delete / clear (names only, never values), so
+ *  the ws hub can tell clients which secrets are configured. Same pattern as
+ *  subscribeCoreSettings: sync registration, fire-and-forget listeners. */
+export function subscribeSecretsChanged(fn: SecretsListener): () => void {
+  secretsListeners.add(fn);
+  return () => secretsListeners.delete(fn);
+}
+
+function notifySecretsChanged(names: string[]): void {
+  for (const fn of secretsListeners) {
+    try {
+      fn(names);
+    } catch (err) {
+      log.warn(`secrets listener failed: ${errMessage(err)}`);
+    }
+  }
+}
+
 // Test-only: drops the cached master key so the next call rebuilds it
-// from disk / keychain. Use between tests that swap TOMAT_CORE_HOME.
+// from disk / keychain, and detaches every change listener. Use between
+// tests that swap TOMAT_CORE_HOME.
 export function __resetForTesting(): void {
   cachedKey = null;
+  secretsListeners.clear();
 }
 
 function masterKeyPath(): string {
@@ -92,12 +119,42 @@ async function writeMasterKeyFile(raw: Uint8Array): Promise<void> {
   }
 }
 
+/** Whether this channel trusts the OS keychain for the master key. The dev
+ *  channel does not: its helper is an unsigned, rebuilt-at-will binary, and
+ *  macOS ties keychain entries to the binary's code signature, so a key
+ *  sealed today silently reads back empty after the next rebuild. Dev keeps
+ *  the chmod-600 file under the channel-isolated root instead, mirroring the
+ *  client's dev file-backed token store. */
+function useOsKeychain(): boolean {
+  return channel() !== "dev";
+}
+
+/** Seal the master key in the OS keychain and verify it reads back
+ *  identically. An unsigned or oddly-entitled binary can get a successful
+ *  write that never lands (macOS reports OK but stores nothing readable);
+ *  trusting it would strand the key in a write-only keychain and lose the
+ *  vault on the next boot. Any mismatch counts as "keychain unavailable" so
+ *  callers keep the file-based fallback. */
+async function sealInKeychainVerified(encoded: string): Promise<boolean> {
+  if (!(await keychainSet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, encoded))) return false;
+  const readBack = await keychainGet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+  if (readBack === encoded) return true;
+  log.warn(
+    `OS keychain accepted the master key but read-back ` +
+      `${readBack === null ? "found no entry" : "returned a different value"}; ` +
+      `treating the keychain as unavailable and using the .master-key file`,
+  );
+  return false;
+}
+
 async function loadOrCreateMasterKey(): Promise<CryptoKey> {
   if (cachedKey) return cachedKey;
 
   // 1. Try the keychain first.
   let raw: Uint8Array | null = null;
-  const fromKeychain = await keychainGet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+  const fromKeychain = useOsKeychain()
+    ? await keychainGet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+    : null;
   if (fromKeychain) {
     const bytes = decodeBase64(fromKeychain);
     if (bytes.length === KEY_LEN) {
@@ -116,7 +173,7 @@ async function loadOrCreateMasterKey(): Promise<CryptoKey> {
     const fromFile = await readMasterKeyFile();
     if (fromFile) {
       raw = fromFile;
-      const migrated = await keychainSet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, encodeBase64(raw));
+      const migrated = useOsKeychain() ? await sealInKeychainVerified(encodeBase64(raw)) : false;
       if (migrated) {
         try {
           await Deno.remove(masterKeyPath());
@@ -131,19 +188,22 @@ async function loadOrCreateMasterKey(): Promise<CryptoKey> {
   // 3. Neither: generate a fresh key. Prefer keychain; fall back to file.
   if (!raw) {
     raw = crypto.getRandomValues(new Uint8Array(KEY_LEN));
-    const sealed = await keychainSet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, encodeBase64(raw));
+    const sealed = useOsKeychain() ? await sealInKeychainVerified(encodeBase64(raw)) : false;
     if (sealed) {
       log.info(
         `generated new master key, sealed in OS keychain ` +
           `(service=${KEYCHAIN_SERVICE} account=${KEYCHAIN_ACCOUNT})`,
       );
+    } else if (!useOsKeychain()) {
+      await writeMasterKeyFile(raw);
+      log.info(`generated new master key at ${masterKeyPath()} (dev keeps it file-based)`);
     } else {
       await writeMasterKeyFile(raw);
       log.warn(
         `generated new master key at ${masterKeyPath()}. OS keychain ` +
-          `unavailable (no helper binary, or libsecret missing on headless ` +
-          `Linux). Back up this file or all stored secrets are lost on a ` +
-          `reinstall.`,
+          `unavailable (no helper binary, libsecret missing on headless ` +
+          `Linux, or the keychain silently dropped the write). Back up this ` +
+          `file or all stored secrets are lost on a reinstall.`,
       );
     }
   }
@@ -244,6 +304,7 @@ export async function setSecret(name: string, value: string): Promise<void> {
   const bag = await readEncrypted();
   bag[name] = value;
   await writeEncrypted(bag);
+  notifySecretsChanged(Object.keys(bag).sort());
 }
 
 export async function deleteSecret(name: string): Promise<boolean> {
@@ -251,6 +312,7 @@ export async function deleteSecret(name: string): Promise<boolean> {
   if (!(name in bag)) return false;
   delete bag[name];
   await writeEncrypted(bag);
+  notifySecretsChanged(Object.keys(bag).sort());
   return true;
 }
 
@@ -272,6 +334,7 @@ export async function clearAllSecrets(): Promise<void> {
     }
   }
   cachedKey = null;
+  notifySecretsChanged([]);
 }
 
 /** Boot-time integrity check (NON-mutating: never generates a key). If a sealed
@@ -288,7 +351,11 @@ export async function warnIfVaultUnreadable(): Promise<void> {
     return; // no vault
   }
   if (blob.byteLength <= NONCE_LEN) return; // empty vault, nothing sealed
-  const inKeychain = await keychainGet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).catch(() => null);
+  // Mirror loadOrCreateMasterKey: dev only ever reads the file, so a key
+  // that happens to sit in the OS keychain doesn't make the vault readable.
+  const inKeychain = useOsKeychain()
+    ? await keychainGet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).catch(() => null)
+    : null;
   if (inKeychain) return;
   const onDisk = await readMasterKeyFile().catch(() => null);
   if (onDisk) return;

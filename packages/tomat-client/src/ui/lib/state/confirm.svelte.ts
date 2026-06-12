@@ -14,7 +14,9 @@ type ConfirmRequest = {
   /** Label for the dismiss button. Defaults to "Cancel". */
   cancelLabel?: string;
   destructive?: boolean;
-  onConfirm: () => void | Promise<void>;
+  /** `dontShowAgain` is set only when `dontShowAgainLabel` rendered a
+   *  checkbox; it carries the checkbox value at confirm time. */
+  onConfirm: (dontShowAgain?: boolean) => void | Promise<void>;
   onCancel?: () => void;
   /** When true, render as a one-button notice (no Cancel). The `onConfirm`
    *  callback is optional in this mode. */
@@ -22,6 +24,8 @@ type ConfirmRequest = {
   /** When set, render the list of files to download with a size total
    *  alongside the message. */
   downloads?: DownloadPlan[];
+  /** When set, render a checkbox with this label above the button row. */
+  dontShowAgainLabel?: string;
 };
 
 class ConfirmState {
@@ -48,10 +52,10 @@ class ConfirmState {
     p?.onCancel?.();
   }
 
-  async confirm() {
+  async confirm(dontShowAgain?: boolean) {
     const p = this.pending;
     this.pending = null;
-    if (p) await p.onConfirm();
+    if (p) await p.onConfirm(dontShowAgain);
   }
 }
 

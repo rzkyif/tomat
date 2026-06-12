@@ -219,9 +219,12 @@ pub fn run() {
             local_sidecar_ports,
             start_local_core,
             read_launch_prefill,
-            // Client settings + keychain
-            read_client_settings,
-            write_client_settings,
+            // Client files (settings / cores / snippets) + keychain
+            read_client_file,
+            write_client_file,
+            read_client_snippets,
+            write_client_snippet,
+            delete_client_snippet,
             keychain_set_token,
             keychain_get_token,
             keychain_delete_token,

@@ -1,12 +1,11 @@
 // First-boot seeding of the built-in toolkit. On a fresh install the core
 // install script places the toolkit files under the toolkits dir; this registers
-// + activates them (or falls back to the CDN, or the codebase in dev). A sparse
-// marker setting records a successful seed so that after a user deletes the
-// built-in it does NOT come back on the next boot.
+// + activates them (or falls back to the CDN, or the codebase in dev). A marker
+// file records a successful seed so that after a user deletes the built-in it
+// does NOT come back on the next boot.
 
 import { join } from "@std/path";
 import { errMessage } from "@tomat/shared";
-import { loadCoreSettings, patchCoreSettings } from "../services/core-settings.ts";
 import { paths } from "../paths.ts";
 import { getLogger } from "../shared/log.ts";
 import { type InstallEventSink, startDownload } from "./installer.ts";
@@ -15,17 +14,29 @@ import { toolkitsRegistry } from "./registry.ts";
 
 const log = getLogger("builtin-seed");
 
-/** Sparse, internal core setting (NOT in the shared settings schema/UI): true
- *  once the built-in has been seeded at least once. */
-export const BUILTIN_SEEDED_KEY = "toolkits.builtinSeeded";
+async function isSeeded(): Promise<boolean> {
+  try {
+    await Deno.stat(paths().builtinSeededMarkerFile);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function recordSeeded(): Promise<void> {
+  try {
+    await Deno.writeTextFile(paths().builtinSeededMarkerFile, "");
+  } catch (err) {
+    log.warn(`failed to write seed marker: ${errMessage(err)}`);
+  }
+}
 
 export async function seedBuiltinToolkitIfNeeded(sink: InstallEventSink): Promise<void> {
-  const settings = await loadCoreSettings();
-  if (settings[BUILTIN_SEEDED_KEY] === true) return; // already seeded / deleted by the user
+  if (await isSeeded()) return; // already seeded / deleted by the user
   if (toolkitsRegistry().get(BUILTIN_TOOLKIT_ID)) {
     // Present already (downloaded by a prior boot, or installed manually): just
     // record the seed so a later user delete isn't undone on the next boot.
-    await patchCoreSettings({ [BUILTIN_SEEDED_KEY]: true });
+    await recordSeeded();
     return;
   }
 
@@ -39,11 +50,7 @@ export async function seedBuiltinToolkitIfNeeded(sink: InstallEventSink): Promis
     log: (jobId, id, stream, line) => sink.log(jobId, id, stream, line),
     done: (jobId, id, ok, code) => {
       sink.done(jobId, id, ok, code);
-      if (ok) {
-        void patchCoreSettings({ [BUILTIN_SEEDED_KEY]: true }).catch((err) =>
-          log.warn(`failed to set seed marker: ${errMessage(err)}`),
-        );
-      }
+      if (ok) void recordSeeded();
     },
   };
 

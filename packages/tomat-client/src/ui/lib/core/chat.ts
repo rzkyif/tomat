@@ -36,6 +36,15 @@ export class ChatApi {
     });
   }
 
+  respondPermission(callId: string, requestId: string, allow: boolean): void {
+    this.client.sendWs({
+      kind: "tool.permission_response",
+      callId,
+      requestId,
+      allow,
+    });
+  }
+
   cancelTool(callId: string): void {
     this.client.sendWs({ kind: "tool.cancel", callId });
   }

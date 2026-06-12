@@ -219,3 +219,40 @@ Deno.test("delete: cascades to tools and grants", async () => {
     await env.teardown();
   }
 });
+
+Deno.test("setGrants: round-trips the ask state", async () => {
+  const env = await setupTestEnv();
+  try {
+    const r = toolkitsRegistry();
+    r.upsertToolkit(tk());
+    const net: PermissionDecl = { kind: "net", host: "api.example.com", ports: [443], reason: "x" };
+    r.replaceTools("example-toolkit", [tool({ requiredPermissions: [net] })]);
+    const toolId = r.listTools("example-toolkit")[0].id;
+    const key = permissionKey(net);
+    r.setGrants(toolId, [{ key, kind: "net", state: "ask" }]);
+    assertEquals(r.listGrantsForTool(toolId)[0].state, "ask");
+    // ask -> granted upserts in place.
+    r.setGrants(toolId, [{ key, kind: "net", state: "granted" }]);
+    const grants = r.listGrantsForTool(toolId);
+    assertEquals(grants.length, 1);
+    assertEquals(grants[0].state, "granted");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("undeclared policy: defaults to deny, settable, survives re-download", async () => {
+  const env = await setupTestEnv();
+  try {
+    const r = toolkitsRegistry();
+    r.upsertToolkit(tk());
+    assertEquals(r.get("example-toolkit")?.undeclaredPolicy, "deny");
+    r.setUndeclaredPolicy("example-toolkit", "ask");
+    assertEquals(r.get("example-toolkit")?.undeclaredPolicy, "ask");
+    // A toolkit update (re-download upsert) must not reset the user's choice.
+    r.upsertToolkit(tk({ version: "1.0.1" }));
+    assertEquals(r.get("example-toolkit")?.undeclaredPolicy, "ask");
+  } finally {
+    await env.teardown();
+  }
+});

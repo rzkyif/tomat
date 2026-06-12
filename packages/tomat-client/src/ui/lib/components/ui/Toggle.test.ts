@@ -39,4 +39,36 @@ describe("Toggle", () => {
     const input = container.querySelector<HTMLInputElement>("input[type=checkbox]");
     expect(input?.disabled).toBe(true);
   });
+
+  it("slides the knob clip to the selected side", async () => {
+    const { container, rerender } = render(Toggle, { props: { checked: false } });
+    const knob = container.querySelector<HTMLElement>("[aria-hidden=true]")!;
+    const offClip = knob.style.clipPath;
+    expect(offClip).toContain("inset(");
+    expect(knob.style.transition).toContain("clip-path");
+    await rerender({ checked: true });
+    expect(knob.style.clipPath).not.toBe(offClip);
+  });
+
+  it("renders a radiogroup and reports the picked value in segmented mode", async () => {
+    const onselect = vi.fn();
+    const { container, getByRole } = render(Toggle, {
+      props: {
+        value: "ask",
+        options: [
+          { value: "denied", label: "Deny" },
+          { value: "ask", label: "Ask" },
+          { value: "granted", label: "Allow" },
+        ],
+        onselect,
+      },
+    });
+    expect(container.querySelector("[role=radiogroup]")).toBeTruthy();
+    // The selected option is the checked radio.
+    const ask = container.querySelector<HTMLButtonElement>("[role=radio][aria-checked=true]");
+    expect(ask?.textContent?.trim()).toBe("Ask");
+    // getByRole skips the aria-hidden knob overlay, which repeats each label.
+    await fireEvent.click(getByRole("radio", { name: "Allow" }));
+    expect(onselect).toHaveBeenCalledWith("granted");
+  });
 });

@@ -55,6 +55,18 @@ export type CallEvent =
       requestId: string;
       questions: AskUserQuestion[];
     }
+  // The running tool hit a Deno permission prompt that needs the user's
+  // decision (declared ask-state permission, or undeclared with policy
+  // `ask`). The call is paused on the prompt; answer via respondPermission.
+  | {
+      kind: "permission_request";
+      requestId: string;
+      permission: import("@tomat/shared").PermissionKind;
+      resource: string;
+      apiName?: string;
+      declared: boolean;
+      reason?: string;
+    }
   | { kind: "log"; level: "debug" | "info" | "warn" | "error"; message: string }
   | { kind: "stderr_log"; line: string }
   // Emitted synchronously when cancel() is invoked so the UI's ToolCall
@@ -70,6 +82,8 @@ export interface CallController {
   cancel(): void;
   // Forward the user's answer back to the worker.
   respondAskUser(requestId: string, answers: AskUserAnswer[]): void;
+  // Allow or reject a pending runtime permission prompt.
+  respondPermission(requestId: string, allow: boolean): void;
   // Settle when the worker emits tool_result / tool_error.
   done: Promise<unknown>;
 }
@@ -99,7 +113,9 @@ export class WorkerPool {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let cancelled = false;
     let settled = false;
+    let callStarted = false;
     let askUserPending = false;
+    let permissionPending = false;
     // Tracks how much of the callTimeoutMs budget is still available so
     // askUser can pause + resume the timer (instead of resetting it).
     let timeoutBudgetMs = this.config.callTimeoutMs;
@@ -139,6 +155,23 @@ export class WorkerPool {
               questions: frame.questions,
             });
             return;
+          case "permission_prompt":
+            permissionPending = true;
+            // Same budget pause as askUser: waiting on the user's decision
+            // must not consume the tool's time budget. (Auto-denied prompts
+            // never reach here; they settle inside the WorkerHandle within
+            // about a second, against the running budget.)
+            pauseTimeout();
+            onEvent({
+              kind: "permission_request",
+              requestId: frame.requestId,
+              permission: frame.permission,
+              resource: frame.resource,
+              apiName: frame.apiName,
+              declared: frame.declared,
+              reason: frame.reason,
+            });
+            return;
           case "log":
             onEvent({
               kind: "log",
@@ -149,12 +182,30 @@ export class WorkerPool {
           case "stderr_log":
             onEvent({ kind: "stderr_log", line: frame.line });
             return;
+          case "worker_exited":
+            // The process died with a started call still open (crash, OOM, the
+            // answer give-up kill, or a refreshPermissions teardown). Settle it
+            // now instead of waiting for the call timeout. Pre-boot exits are
+            // handled by the waitForBoot rejection below, so ignore those.
+            if (settled || !callStarted) return;
+            off();
+            disarm();
+            settled = true;
+            worker.inFlightCalls = Math.max(0, worker.inFlightCalls - 1);
+            this.killWorker(key, worker);
+            reject(
+              new AppError(
+                "internal_error",
+                cancelled ? "tool call cancelled" : "tool worker exited",
+              ),
+            );
+            return;
           case "tool_result":
             off();
             disarm();
             settled = true;
             worker.inFlightCalls--;
-            this.bumpIdleTimer(key);
+            this.retireOrIdle(key, worker);
             resolve(frame.result);
             return;
           case "tool_error":
@@ -162,7 +213,7 @@ export class WorkerPool {
             disarm();
             settled = true;
             worker.inFlightCalls--;
-            this.bumpIdleTimer(key);
+            this.retireOrIdle(key, worker);
             // If we already emitted tool_cancelled, the consumer has moved
             // on; the worker's late tool_error is just bookkeeping. Reject
             // with the same "cancelled" message so callers waiting on
@@ -186,6 +237,7 @@ export class WorkerPool {
             return;
           }
           worker.inFlightCalls++;
+          callStarted = true;
           this.clearIdleTimer(key);
           worker.send({
             kind: "call",
@@ -228,7 +280,7 @@ export class WorkerPool {
       if (timeoutBudgetMs <= 0 || cancelled) return;
       timeoutArmedAt = Date.now();
       timeout = setTimeout(() => {
-        if (askUserPending) return;
+        if (askUserPending || permissionPending) return;
         // Bookkeeping must run even if the worker is already dead. Otherwise the
         // listener leaks and `done` hangs.
         offHandler();
@@ -299,6 +351,17 @@ export class WorkerPool {
         // Resume the timer with the REMAINING budget instead of a fresh
         // callTimeoutMs window. Slow user answers shouldn't extend the
         // tool's effective time budget.
+        if (timeout === undefined && !cancelled) {
+          armTimeout();
+        }
+      },
+      respondPermission: (requestId, allow) => {
+        permissionPending = false;
+        worker.answerPrompt(requestId, allow);
+        // Same remaining-budget resume as askUser. The re-armed timer also
+        // backstops the rare case where Deno never confirms the answer: the
+        // handle kills the worker after its give-up window and the call
+        // settles here via timeout.
         if (timeout === undefined && !cancelled) {
           armTimeout();
         }
@@ -422,10 +485,33 @@ export class WorkerPool {
       entryPath: resolveEntryPath(toolkit.installedPath),
       toolkitFolder: toolkit.installedPath,
       flags,
+      // Runtime prompt policy: ask-state (or undeclared, per toolkit policy)
+      // accesses pause on Deno's prompt and route through prompt-matcher.ts.
+      promptContext: tool
+        ? {
+            required: tool.requiredPermissions,
+            grants: tool.grants,
+            undeclaredPolicy: toolkit.undeclaredPolicy,
+            templates,
+          }
+        : undefined,
     });
     this.workers.set(key, w);
     this.touchLru(key);
     return w;
+  }
+
+  // Normal call-settle path: return the worker to the warm set, UNLESS a
+  // user-answered permission prompt happened during its lifetime. Deno caches
+  // the per-resource verdict for the process lifetime and prompt answers are
+  // scoped to a single call, so such a worker must not serve another call.
+  private retireOrIdle(key: string, worker: WorkerHandle): void {
+    if (worker.promptAnsweredByUser) {
+      log.info(`retiring worker after user-answered permission prompt (${key.split("\u0000")[0]})`);
+      this.killWorker(key, worker);
+      return;
+    }
+    this.bumpIdleTimer(key);
   }
 
   // Force-kill a specific worker and drop it from the pool. Used when a call

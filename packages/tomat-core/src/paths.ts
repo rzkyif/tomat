@@ -123,6 +123,10 @@ export interface CorePaths {
   // startup to detect post-update first boot vs. crash-loop after a failed
   // update (→ rollback). See update/rollback.ts.
   updateMarkerFile: string;
+  // Exists once the built-in toolkit has been seeded at least once, so a
+  // user-deleted built-in is not re-seeded on the next boot. Core-internal
+  // state, deliberately not a settings key. See toolkits/builtin-seed.ts.
+  builtinSeededMarkerFile: string;
 }
 
 export function paths(): CorePaths {
@@ -162,6 +166,7 @@ export function paths(): CorePaths {
     logsDir: logs,
     logFile: join(logs, "core.log"),
     updateMarkerFile: join(root, "update.pending.json"),
+    builtinSeededMarkerFile: join(root, "builtin-seeded"),
   };
 }
 

@@ -61,7 +61,15 @@ export function permissionKey(decl: PermissionDecl): string {
   }
 }
 
-export type GrantState = "granted" | "denied";
+// Per-permission decision. `granted` (Always Allow) bakes the permission into
+// the worker's --allow-* spawn flags; `ask` leaves it out so Deno prompts at
+// the moment of access and the user decides in chat; `denied` auto-rejects the
+// prompt. A permission with no grant row behaves as `ask`.
+export type GrantState = "granted" | "ask" | "denied";
+
+// Toolkit-level policy for runtime permission prompts that match none of the
+// tool's declared permissions: auto-reject or forward to the user.
+export type UndeclaredPolicy = "deny" | "ask";
 
 export interface Grant {
   toolId: string;
@@ -82,8 +90,8 @@ export interface Tool {
   alwaysAvailable: boolean;
   enabled: boolean;
   requiredPermissions: PermissionDecl[];
-  // Indices into `requiredPermissions` that are still missing a granted/denied
-  // row in `grants`. A tool is enable-able iff `missingRequired.length === 0`.
+  // Indices into `requiredPermissions` that have no grant row yet. Purely
+  // informational for the UI: an absent row behaves as `ask`.
   missingRequired: number[];
   grants: Grant[];
 }
@@ -103,6 +111,7 @@ export interface Toolkit {
   // the Uninstall vs Delete choice: a no-dep toolkit is installed on download
   // and can only be deleted (there is nothing to uninstall).
   hasDeps: boolean;
+  undeclaredPolicy: UndeclaredPolicy;
   // Tool counts from the list/get projection, so a card can show "N enabled"
   // without lazy-loading the full tool list.
   toolCount: number;

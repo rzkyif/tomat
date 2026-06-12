@@ -10,8 +10,10 @@
 
 import { assertEquals, assertNotEquals, assertRejects } from "@std/assert";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import { paths } from "../paths.ts";
+import { binPath, paths } from "../paths.ts";
+import { coreBinaryName } from "../binaries/versions.ts";
 import {
+  __resetForTesting,
   deleteSecret,
   getSecret,
   listSecretNames,
@@ -129,6 +131,44 @@ Deno.test("secrets.enc: tampered ciphertext is rejected as decryption failure", 
   } finally {
     await env.teardown();
   }
+});
+
+// The macOS silent-failure mode: an unsigned or ad-hoc helper build can
+// report success for a keychain write that is never readable back. The
+// master key must then fall back to the .master-key file, and later boots
+// that retry the keychain must keep that file, or the vault is lost.
+Deno.test({
+  name: "master key: silently failing OS keychain falls back to the file and keeps it",
+  ignore: Deno.build.os === "windows",
+  fn: async () => {
+    const env = await setupTestEnv();
+    try {
+      const helper = binPath(coreBinaryName("tomat-core-keychain"));
+      await Deno.writeTextFile(
+        helper,
+        '#!/bin/sh\ncase "$1" in\n  set) cat > /dev/null; exit 0 ;;\n  get) exit 1 ;;\nesac\nexit 0\n',
+      );
+      await Deno.chmod(helper, 0o755);
+
+      await setSecret("k", "v1");
+      const keyPath = paths().root + "/.master-key";
+      // The write claimed success but the read-back found nothing, so the
+      // key must have been written to the file fallback.
+      assertEquals((await Deno.stat(keyPath)).isFile, true);
+
+      // Next boot: the key loads from the file; the retried (still lying)
+      // keychain migration must not delete it.
+      __resetForTesting();
+      assertEquals(await getSecret("k"), "v1");
+      assertEquals((await Deno.stat(keyPath)).isFile, true);
+
+      // And the boot after that still decrypts.
+      __resetForTesting();
+      assertEquals(await getSecret("k"), "v1");
+    } finally {
+      await env.teardown();
+    }
+  },
 });
 
 Deno.test("secrets.enc: nonce changes between writes (non-deterministic encryption)", async () => {

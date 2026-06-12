@@ -41,6 +41,26 @@ export type WorkerToPoolFrame =
   | { kind: "ready" }
   | { kind: "booted"; toolkitId: string }
   | { kind: "boot_failed"; toolkitId: string; error: string }
+  // Synthesized by WorkerHandle (not the worker process) when a Deno
+  // permission prompt on the worker's PTY needs the user's decision; the
+  // pool forwards it to chat and answers via WorkerHandle.answerPrompt().
+  // No callId: a prompt blocks the worker's whole JS thread. WorkerHandle
+  // only emits this when exactly one call is in flight (it fails the prompt
+  // closed otherwise), so the pool can attribute it to that call.
+  | {
+      kind: "permission_prompt";
+      requestId: string;
+      permission: import("@tomat/shared").PermissionKind;
+      resource: string;
+      apiName?: string;
+      declared: boolean;
+      reason?: string;
+    }
+  // Synthesized by WorkerHandle when the worker process exits. No callId: it
+  // settles every in-flight call on the dead worker (crash, OOM, give-up kill,
+  // or a refreshPermissions teardown) instead of leaving them to hang until
+  // the pool's call timeout fires.
+  | { kind: "worker_exited"; code: number }
   | {
       kind: "progress";
       callId: string;

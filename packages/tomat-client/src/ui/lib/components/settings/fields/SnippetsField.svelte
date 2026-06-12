@@ -20,13 +20,6 @@
     return SNIPPET_PLACEMENT_OPTIONS.find((o) => o.value === p)?.label ?? p;
   }
 
-  function generateId(): string {
-    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-      return crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-    }
-    return `${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
-  }
-
   function makeUniqueTrigger(): string {
     const existing = new Set(snippetsState.snippets.map((s) => s.trigger.toLowerCase()));
     let i = 1;
@@ -65,17 +58,14 @@
   }
 
   async function newSnippet() {
-    const id = generateId();
-    await snippetsState.save({
-      id,
+    const created = await snippetsState.create({
       name: "New snippet",
       trigger: makeUniqueTrigger(),
       placement: "append-system",
       text: "",
     });
     reloadKey++;
-    const created = snippetsState.snippets.find((s) => s.id === id);
-    if (created) selectedItem = created;
+    selectedItem = created;
   }
 </script>
 
@@ -102,6 +92,16 @@
   onMenu={() =>
     showObjectActionMenu([
       { id: "new", label: "New Snippet", onSelect: () => void newSnippet() },
+      {
+        id: "rescan",
+        label: "Rescan Snippets",
+        onSelect: async () => {
+          // Re-read the snippets directory so files copied in by hand show
+          // up without a restart.
+          await snippetsState.load();
+          reloadKey++;
+        },
+      },
     ])}
 >
   {#snippet card(item, open)}

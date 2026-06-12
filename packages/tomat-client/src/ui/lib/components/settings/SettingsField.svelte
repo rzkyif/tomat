@@ -53,7 +53,7 @@
     {#if field.objectType === "snippets"}
       <SnippetsField />
     {:else if field.objectType === "toolkits"}
-      <ToolkitsField />
+      <ToolkitsField {horizontal} />
     {:else if field.objectType === "cores"}
       <CoresField />
     {/if}

@@ -40,12 +40,71 @@ Deno.test("PATCH /api/v1/settings: persists keys and returns the merged object",
       new Request("http://x/api/v1/settings", {
         method: "PATCH",
         headers: { ...bearer(token), "content-type": "application/json" },
-        body: JSON.stringify({ "ui.theme": "dark" }),
+        body: JSON.stringify({ "llm.host": "0.0.0.0" }),
       }),
     );
     assertEquals(res.status, 200);
     const body = await res.json();
-    assertEquals(body["ui.theme"], "dark");
+    assertEquals(body["llm.host"], "0.0.0.0");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("PATCH /api/v1/settings: rejects an unknown key with 400", async () => {
+  const env = await setupTestEnv();
+  try {
+    const token = await pairOne();
+    const app = buildApp();
+    const res = await app.fetch(
+      new Request("http://x/api/v1/settings", {
+        method: "PATCH",
+        headers: { ...bearer(token), "content-type": "application/json" },
+        body: JSON.stringify({ "ui.theme": "dark" }),
+      }),
+    );
+    assertEquals(res.status, 400);
+    assertEquals((await res.json()).error.code, "validation_error");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("PATCH /api/v1/settings: rejects a client-destination key with 400", async () => {
+  const env = await setupTestEnv();
+  try {
+    const token = await pairOne();
+    const app = buildApp();
+    const res = await app.fetch(
+      new Request("http://x/api/v1/settings", {
+        method: "PATCH",
+        headers: { ...bearer(token), "content-type": "application/json" },
+        body: JSON.stringify({ "appearance.theme": "dark" }),
+      }),
+    );
+    assertEquals(res.status, 400);
+    assertEquals((await res.json()).error.code, "validation_error");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("GET /api/v1/settings: drops non-schema keys from the response", async () => {
+  const env = await setupTestEnv();
+  try {
+    const token = await pairOne();
+    const app = buildApp();
+    // Simulate a stray key sitting in settings.json by writing through the
+    // settings service directly (the route guard would reject it).
+    const { patchCoreSettings } = await import("../../services/core-settings.ts");
+    await patchCoreSettings({ "internal.junk": 1, "llm.host": "0.0.0.0" });
+    const res = await app.fetch(
+      new Request("http://x/api/v1/settings", { headers: bearer(token) }),
+    );
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals("internal.junk" in body, false);
+    assertEquals(body["llm.host"], "0.0.0.0");
   } finally {
     await env.teardown();
   }

@@ -25,6 +25,7 @@ import {
   type MessagePart,
   type TokenUsage,
   type ToolCallLogLine,
+  type ToolCallPermissionState,
 } from "$lib/shared/types";
 import { cores } from "$lib/core";
 import { getLogger } from "$lib/shared/log";
@@ -334,6 +335,33 @@ class MessagesState {
       ...m,
       status: "awaiting_user",
       ephemera: { ...m.ephemera, askUser: { requestId, questions, answers: null } },
+    };
+  }
+
+  /** Flip the bubble to its waiting-for-permission state; the decision UI
+   *  itself lives in UserInput's permission mode, not the bubble. */
+  setToolCallPermissionRequest(callId: string, request: ToolCallPermissionState): void {
+    const idx = this.toolIdx(callId);
+    if (idx < 0) return;
+    const m = this.messages[idx];
+    this.messages[idx] = {
+      ...m,
+      status: "awaiting_permission",
+      ephemera: { ...m.ephemera, permissionRequest: request },
+    };
+  }
+
+  /** Return the bubble to running after the user decided (the verdict's
+   *  effect arrives via the normal progress/result/error frames). */
+  clearToolCallPermissionRequest(callId: string): void {
+    const idx = this.toolIdx(callId);
+    if (idx < 0) return;
+    const m = this.messages[idx];
+    if (m.status !== "awaiting_permission") return;
+    this.messages[idx] = {
+      ...m,
+      status: "running",
+      ephemera: { ...m.ephemera, permissionRequest: undefined },
     };
   }
 
@@ -659,6 +687,7 @@ class MessagesState {
         kind:
           | "tool.progress"
           | "tool.askuser_request"
+          | "tool.permission_request"
           | "tool.log"
           | "tool.result"
           | "tool.error"
@@ -678,6 +707,15 @@ class MessagesState {
       };
     } else if (frame.kind === "tool.askuser_request") {
       this.setToolCallAskUser(frame.callId, frame.requestId, frame.questions);
+    } else if (frame.kind === "tool.permission_request") {
+      this.setToolCallPermissionRequest(frame.callId, {
+        requestId: frame.requestId,
+        permissionKind: frame.permissionKind,
+        resource: frame.resource,
+        apiName: frame.apiName,
+        declared: frame.declared,
+        reason: frame.reason,
+      });
     } else if (frame.kind === "tool.log") {
       this.appendToolCallLog(frame.callId, {
         level: frame.level,

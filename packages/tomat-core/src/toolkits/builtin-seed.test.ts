@@ -5,9 +5,9 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { BUILTIN_TOOLKIT_ID } from "@tomat/shared";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import { BUILTIN_SEEDED_KEY, seedBuiltinToolkitIfNeeded } from "./builtin-seed.ts";
+import { seedBuiltinToolkitIfNeeded } from "./builtin-seed.ts";
 import { toolkitsRegistry } from "./registry.ts";
-import { loadCoreSettings, patchCoreSettings } from "../services/core-settings.ts";
+import { paths } from "../paths.ts";
 import type { InstallEventSink } from "./installer.ts";
 
 const NOOP_SINK: InstallEventSink = {
@@ -15,14 +15,23 @@ const NOOP_SINK: InstallEventSink = {
   done() {},
 };
 
+async function markerExists(): Promise<boolean> {
+  try {
+    await Deno.stat(paths().builtinSeededMarkerFile);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 Deno.test("seedBuiltinToolkitIfNeeded: no-ops when the marker is already set", async () => {
   const env = await setupTestEnv();
   try {
-    await patchCoreSettings({ [BUILTIN_SEEDED_KEY]: true });
+    await Deno.writeTextFile(paths().builtinSeededMarkerFile, "");
     await seedBuiltinToolkitIfNeeded(NOOP_SINK);
     // Respects a prior delete: nothing is (re)installed and the marker stays set.
     assertEquals(toolkitsRegistry().list().length, 0);
-    assertEquals((await loadCoreSettings())[BUILTIN_SEEDED_KEY], true);
+    assertEquals(await markerExists(), true);
   } finally {
     await env.teardown();
   }
@@ -42,7 +51,7 @@ Deno.test("seedBuiltinToolkitIfNeeded: adopts an existing built-in and marks see
     });
     await seedBuiltinToolkitIfNeeded(NOOP_SINK);
     // An already-present built-in just records the seed marker (no re-download).
-    assertEquals((await loadCoreSettings())[BUILTIN_SEEDED_KEY], true);
+    assertEquals(await markerExists(), true);
     assertExists(toolkitsRegistry().get(BUILTIN_TOOLKIT_ID));
   } finally {
     await env.teardown();

@@ -270,10 +270,21 @@ pub async fn net_ws_open(
         let stream = match connect_async_tls_with_config(&url, None, false, Some(connector)).await {
             Ok((s, _)) => s,
             Err(e) => {
-                // Surface the connect failure reason (e.g. "Connection refused
-                // (os error 61)", TLS/pin errors) so the client can show it in
-                // the reconnect banner instead of a generic message.
-                let _ = app.emit(&ev(&ws_id, "error"), e.to_string());
+                // Surface the connect failure reason so the client can show it in
+                // the reconnect banner instead of a generic message. For an HTTP
+                // handshake rejection (e.g. 401 when the core no longer recognizes
+                // our bearer token) include the status code: the client uses it to
+                // halt the otherwise-futile reconnect loop and prompt a re-pair.
+                let reason = match &e {
+                    tokio_tungstenite::tungstenite::Error::Http(resp) => {
+                        format!(
+                            "server rejected connection: HTTP {}",
+                            resp.status().as_u16()
+                        )
+                    }
+                    other => other.to_string(),
+                };
+                let _ = app.emit(&ev(&ws_id, "error"), reason);
                 let _ = app.emit(&ev(&ws_id, "close"), ());
                 remove_handle(&ws_id);
                 return;

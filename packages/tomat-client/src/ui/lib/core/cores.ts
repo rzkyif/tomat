@@ -1,6 +1,8 @@
-// Paired-cores registry. Backed by client settings (the {id, name, baseUrl}
-// triples) + OS keychain (the bearer tokens). Owns the currently-selected
-// core and rebuilds the CoreClient + its per-domain APIs on switch.
+// Paired-cores registry. Backed by its own cores.json (the {id, name, baseUrl,
+// tlsPin, addedAtMs} entries plus the currentCoreId pointer) + OS keychain
+// (the bearer tokens). Owns the currently-selected core and rebuilds the
+// CoreClient + its per-domain APIs on switch. This module is the file's only
+// writer; settings live in their own settings.json (see lib/platform).
 
 import { platform } from "../platform/index.ts";
 import { getLogger } from "$lib/shared/log";
@@ -66,9 +68,7 @@ class CoresRegistry {
   // --- list / select -----------------------------------------------------
 
   async list(): Promise<PairedCoreEntry[]> {
-    const s = await platform().clientSettings.read();
-    const cores = (s.cores ?? []) as PairedCoreEntry[];
-    return Array.isArray(cores) ? cores : [];
+    return (await this.readRegistry()).cores;
   }
 
   async addPaired(entry: PairedCoreEntry, token: string): Promise<void> {
@@ -99,11 +99,12 @@ class CoresRegistry {
   /** Rename a paired core in place. Preserves the current-core pointer and
    *  keeps the in-memory active entry's name in sync. */
   async rename(id: string, name: string): Promise<void> {
-    const s = await platform().clientSettings.read();
-    const list = (Array.isArray(s.cores) ? s.cores : []) as PairedCoreEntry[];
-    if (!list.some((c) => c.id === id)) return;
-    s.cores = list.map((c) => (c.id === id ? { ...c, name } : c));
-    await platform().clientSettings.write(s);
+    const { cores, currentCoreId } = await this.readRegistry();
+    if (!cores.some((c) => c.id === id)) return;
+    await this.writeCores(
+      cores.map((c) => (c.id === id ? { ...c, name } : c)),
+      currentCoreId,
+    );
     if (this.current?.entry.id === id) {
       this.current = { ...this.current, entry: { ...this.current.entry, name } };
     }
@@ -159,18 +160,24 @@ class CoresRegistry {
   }
 
   async restoreSelected(): Promise<void> {
-    const s = await platform().clientSettings.read();
-    const currentId = typeof s[CURRENT_KEY] === "string" ? (s[CURRENT_KEY] as string) : undefined;
-    const cores = await this.list();
-    const pick = currentId ? (cores.find((c) => c.id === currentId) ?? cores[0]) : cores[0];
-    if (pick) {
+    const { cores, currentCoreId: currentId } = await this.readRegistry();
+    if (cores.length === 0) return;
+    // Try the persisted current first, then the rest, and stop at the first that
+    // selects. A single broken pairing (missing token after a reset) must not
+    // strand a usable sibling. If none select, the caller (boot) recovers: see
+    // the tokenless-core cleanup in +page.svelte.
+    const ordered = [
+      ...cores.filter((c) => c.id === currentId),
+      ...cores.filter((c) => c.id !== currentId),
+    ];
+    for (const entry of ordered) {
       try {
-        await this.select(pick.id);
+        await this.select(entry.id);
+        return;
       } catch (e) {
-        // Don't abort boot. The window is already up and the chat view renders
-        // with the reconnect banner. But make the failure visible (keychain
-        // miss, missing token, etc.) instead of swallowing it silently.
-        log.error("restoreSelected: select failed:", e);
+        // Don't abort boot. The window is already up. Surface the failure
+        // (keychain miss, missing token, ...) instead of swallowing it.
+        log.error(`restoreSelected: core ${entry.id} not usable:`, e);
       }
     }
   }
@@ -231,23 +238,31 @@ class CoresRegistry {
 
   // --- internals ---------------------------------------------------------
 
+  private async readRegistry(): Promise<{
+    cores: PairedCoreEntry[];
+    currentCoreId?: string;
+  }> {
+    const raw = await platform().clientFiles.read("cores");
+    const cores = Array.isArray(raw.cores) ? (raw.cores as PairedCoreEntry[]) : [];
+    const currentCoreId =
+      typeof raw[CURRENT_KEY] === "string" ? (raw[CURRENT_KEY] as string) : undefined;
+    return { cores, currentCoreId };
+  }
+
   private async writeCores(cores: PairedCoreEntry[], current?: string): Promise<void> {
-    const s = await platform().clientSettings.read();
-    s.cores = cores;
-    if (current) {
-      s[CURRENT_KEY] = current;
-    } else {
-      // Last core removed (or transition through no-current): drop the key so
-      // the next restoreSelected() doesn't search for a ghost id.
-      delete s[CURRENT_KEY];
-    }
-    await platform().clientSettings.write(s);
+    // This registry is cores.json's single owner, so a full write is safe.
+    // An absent currentCoreId (last core removed, or transition through
+    // no-current) is simply omitted so the next restoreSelected() doesn't
+    // search for a ghost id.
+    await platform().clientFiles.write("cores", {
+      cores,
+      ...(current ? { [CURRENT_KEY]: current } : {}),
+    });
   }
 
   private async writeCurrent(id: string): Promise<void> {
-    const s = await platform().clientSettings.read();
-    s[CURRENT_KEY] = id;
-    await platform().clientSettings.write(s);
+    const { cores } = await this.readRegistry();
+    await this.writeCores(cores, id);
   }
 
   private notify(): void {

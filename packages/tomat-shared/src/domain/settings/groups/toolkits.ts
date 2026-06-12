@@ -26,6 +26,22 @@ export const toolkitsGroup: SettingGroup = {
         },
       ],
     },
+    {
+      destination: "client",
+      fields: [
+        // Hidden persisted flag: set from the risky-permission confirm
+        // dialog's "do not show again" checkbox in the toolkit detail view.
+        {
+          id: "toolkits.skipRiskyGrantWarning",
+          name: "Skip Risky Permission Warning",
+          description: "",
+          type: "boolean",
+          defaultValue: false,
+          visibleWhen: { field: "toolkits.list", eq: "__never__" },
+          descriptionTier: "none",
+        },
+      ],
+    },
   ],
 };
 

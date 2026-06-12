@@ -154,6 +154,17 @@ export class ChatService {
     entry.ctl.respondAskUser(requestId, answers);
   }
 
+  forwardPermissionResponse(
+    callId: string,
+    requestId: string,
+    allow: boolean,
+    clientId: string,
+  ): void {
+    const entry = inFlightControllers.get(callId);
+    if (!entry || entry.clientId !== clientId) return;
+    entry.ctl.respondPermission(requestId, allow);
+  }
+
   forwardCancel(callId: string, clientId: string): void {
     const entry = inFlightControllers.get(callId);
     if (!entry || entry.clientId !== clientId) return;
@@ -338,7 +349,7 @@ export class ChatService {
           // Final exposure gate: the relevance filter's candidate set is not
           // grant-aware, so re-apply enabled + fully-granted here (status is
           // already gated upstream) so an ungranted tool never reaches the model.
-          .filter((t) => t.enabled && toolFullyGranted(t))
+          .filter((t) => t.enabled && toolExposable(t))
           .map((t) => ({
             type: "function" as const,
             function: {
@@ -897,6 +908,19 @@ export class ChatService {
             requestId: event.requestId,
             questions: event.questions,
           });
+        } else if (event.kind === "permission_request") {
+          this.send(stream.clientId, {
+            kind: "tool.permission_request",
+            callId: pending.callId,
+            requestId: event.requestId,
+            permissionKind: event.permission,
+            resource: event.resource,
+            apiName: event.apiName,
+            declared: event.declared,
+            reason: event.reason,
+            toolkitId: pending.toolkitId,
+            toolName: pending.toolName,
+          });
         } else if (event.kind === "log") {
           this.send(stream.clientId, {
             kind: "tool.log",
@@ -1203,14 +1227,13 @@ async function readAttachmentAsText(
 }
 
 // LLM-exposure gate: a tool reaches the model only when its toolkit is
-// 'installed' (not 'downloaded'/'drift'), the tool is enabled, AND every
-// non-optional required permission is granted. An enabled-but-ungranted tool is
-// in the UI "warning" state and is intentionally withheld here.
-function toolFullyGranted(t: Tool): boolean {
-  const granted = new Set(
-    t.grants.filter((g) => g.state === "granted").map((g) => g.permissionKey),
-  );
-  return t.requiredPermissions.every((d) => d.optional || granted.has(permissionKey(d)));
+// 'installed' (not 'downloaded'/'drift'), the tool is enabled, AND no
+// non-optional required permission is denied. A permission without a grant
+// row behaves as 'ask': the tool runs and Deno prompts at the moment of
+// access, so only an explicit denial withholds the tool here.
+function toolExposable(t: Tool): boolean {
+  const denied = new Set(t.grants.filter((g) => g.state === "denied").map((g) => g.permissionKey));
+  return t.requiredPermissions.every((d) => d.optional || !denied.has(permissionKey(d)));
 }
 
 function enabledToolsByName(): Map<string, { toolkitId: string; toolId: string }> {
@@ -1218,7 +1241,7 @@ function enabledToolsByName(): Map<string, { toolkitId: string; toolId: string }
   for (const tk of toolkitsRegistry().list()) {
     if (tk.status !== "installed") continue;
     for (const t of toolkitsRegistry().listTools(tk.id)) {
-      if (t.enabled && toolFullyGranted(t)) out.set(t.name, { toolkitId: tk.id, toolId: t.id });
+      if (t.enabled && toolExposable(t)) out.set(t.name, { toolkitId: tk.id, toolId: t.id });
     }
   }
   return out;
@@ -1229,7 +1252,7 @@ function listEnabledTools(): Tool[] {
   for (const tk of toolkitsRegistry().list()) {
     if (tk.status !== "installed") continue;
     for (const t of toolkitsRegistry().listTools(tk.id)) {
-      if (t.enabled && toolFullyGranted(t)) out.push(t);
+      if (t.enabled && toolExposable(t)) out.push(t);
     }
   }
   return out;

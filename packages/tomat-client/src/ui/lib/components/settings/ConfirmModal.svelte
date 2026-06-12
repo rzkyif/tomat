@@ -24,6 +24,13 @@
     }
     return d.source;
   }
+
+  // Checkbox value for the optional "do not show again" row. Reset whenever a
+  // new request arrives so one dialog's choice can't leak into the next.
+  let dontShowAgain = $state(false);
+  $effect(() => {
+    if (confirmState.pending) dontShowAgain = false;
+  });
 </script>
 
 {#if confirmState.pending}
@@ -66,6 +73,12 @@
         {/each}
       </div>
     {/if}
+    {#if p.dontShowAgainLabel}
+      <label class="flex items-center gap-2 text-default-600 text-sm select-none hover:cursor-pointer">
+        <input type="checkbox" bind:checked={dontShowAgain} class="accent-default-700" />
+        {p.dontShowAgainLabel}
+      </label>
+    {/if}
     <div class="flex items-center justify-end gap-2">
       {#if downloads.length > 0 && total > 0}
         <span class="text-default-500 text-sm mr-auto">
@@ -79,7 +92,7 @@
       {/if}
       <Button
         variant={p.destructive ? "destructive" : "primary"}
-        onclick={() => confirmState.confirm()}
+        onclick={() => confirmState.confirm(p.dontShowAgainLabel ? dontShowAgain : undefined)}
       >
         {p.confirmLabel ?? "Confirm"}
       </Button>

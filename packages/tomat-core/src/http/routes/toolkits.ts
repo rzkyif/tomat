@@ -224,11 +224,26 @@ export function toolkitsRoutes(): Hono {
           `grant key ${g.key} not in this tool's required permissions`,
         );
       }
+      if (g.state !== "granted" && g.state !== "ask" && g.state !== "denied") {
+        throw new AppError("validation_error", `invalid grant state ${g.state}`);
+      }
       return { key: g.key, kind: decl.kind, state: g.state };
     });
     const next = toolkitsRegistry().setGrants(tool.id, decoded);
     await workerPool().refreshPermissions(id);
     return c.json({ grants: next });
+  });
+
+  r.post("/:id/undeclared-policy", async (c) => {
+    const id = c.req.param("id");
+    toolkitsRegistry().getOrThrow(id);
+    const body = (await readJson(c)) as { policy?: string };
+    if (body.policy !== "deny" && body.policy !== "ask") {
+      throw new AppError("validation_error", "policy must be 'deny' or 'ask'");
+    }
+    toolkitsRegistry().setUndeclaredPolicy(id, body.policy);
+    await workerPool().refreshPermissions(id);
+    return c.json(toolkitsRegistry().getOrThrow(id));
   });
 
   r.post("/reindex", async (c) => {
@@ -442,13 +457,13 @@ async function attachRequiredPermissions(tool: Tool): Promise<Tool> {
       return { ...tool, requiredPermissions: [], missingRequired: [] };
     }
     const required = flattenPermissions(def.permissions);
-    const grantedKeys = new Set(
-      tool.grants.filter((g) => g.state === "granted").map((g) => g.permissionKey),
-    );
+    // Informational only: indices with no explicit decision yet (no grant
+    // row in any state). An absent row behaves as 'ask' at runtime.
+    const decidedKeys = new Set(tool.grants.map((g) => g.permissionKey));
     const missing: number[] = [];
     for (let i = 0; i < required.length; i++) {
       if (required[i].optional) continue;
-      if (!grantedKeys.has(permissionKey(required[i]))) missing.push(i);
+      if (!decidedKeys.has(permissionKey(required[i]))) missing.push(i);
     }
     return { ...tool, requiredPermissions: required, missingRequired: missing };
   } catch (err) {

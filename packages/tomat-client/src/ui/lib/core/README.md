@@ -19,11 +19,15 @@ a loopback core than a remote one), and a coarse `ConnectionState` (`connecting`
 ## Paired cores ([`cores.ts`](cores.ts))
 
 `cores` is the paired-cores registry: the `{id, name, baseUrl, tlsPin}` entries
-live in client settings, the bearer tokens in the OS keychain. It owns the
-currently-selected core and rebuilds the `CoreClient` plus all per-domain APIs
-on switch. WS and connection-state listeners are persistent: they survive core
-switches because `select()` re-binds every registered listener onto the
-freshly-built client.
+plus the current-core pointer live in their own `cores.json` (this module is
+the file's single owner; settings live separately), the bearer tokens in the
+OS keychain. It owns the currently-selected core and rebuilds the `CoreClient`
+plus all per-domain APIs on switch. WS and connection-state listeners are
+persistent: they survive core switches because `select()` re-binds every
+registered listener onto the freshly-built client. The settings store hooks
+these notifications to load the selected core's settings baseline and follow
+`settings.updated` broadcasts, so selection, pairing, and reconnects all
+converge without per-call-site fetches.
 
 ## Pairing ([`pairing.ts`](pairing.ts))
 
@@ -38,27 +42,28 @@ already-paired core (mint a code, list/revoke/rotate clients) through the pinned
 
 ## Per-domain APIs
 
-| Module                               | Covers                                           |
-| ------------------------------------ | ------------------------------------------------ |
-| [`sessions.ts`](sessions.ts)         | Session CRUD, message append/patch.              |
-| [`chat.ts`](chat.ts)                 | Stream control: start, interrupt, tool response. |
-| [`models.ts`](models.ts)             | Model catalog, downloads, presets.               |
-| [`binaries.ts`](binaries.ts)         | Binary manifest, check/install/update.           |
-| [`requirements.ts`](requirements.ts) | Required files, download missing.                |
-| [`toolkits.ts`](toolkits.ts)         | Toolkit search/download/grants, filtering.       |
-| [`settings.ts`](settings.ts)         | Sparse core settings load/patch.                 |
-| [`sidecars.ts`](sidecars.ts)         | Sidecar snapshots plus CPU/RSS sampling.         |
-| [`llm.ts`](llm.ts)                   | Autocorrect, transcription merge.                |
-| [`stt.ts`](stt.ts)                   | Speech-to-Text transcription and status.         |
-| [`tts.ts`](tts.ts)                   | TTS load/unload, synthesize, voices.             |
-| [`update.ts`](update.ts)             | Core self-update check and apply.                |
-| [`storage.ts`](storage.ts)           | Core on-disk storage tree, clear/delete.         |
+| Module                               | Covers                                                                             |
+| ------------------------------------ | ---------------------------------------------------------------------------------- |
+| [`sessions.ts`](sessions.ts)         | Session CRUD, message append/patch.                                                |
+| [`chat.ts`](chat.ts)                 | Stream control: start, interrupt, tool response.                                   |
+| [`models.ts`](models.ts)             | Model catalog, downloads, presets.                                                 |
+| [`binaries.ts`](binaries.ts)         | Binary manifest, check/install/update.                                             |
+| [`requirements.ts`](requirements.ts) | Required files, download missing.                                                  |
+| [`toolkits.ts`](toolkits.ts)         | Toolkit search/download/grants, filtering.                                         |
+| [`settings.ts`](settings.ts)         | Sparse core settings load/patch (live-synced via the `settings.updated` WS frame). |
+| [`sidecars.ts`](sidecars.ts)         | Sidecar snapshots plus CPU/RSS sampling.                                           |
+| [`llm.ts`](llm.ts)                   | Autocorrect, transcription merge.                                                  |
+| [`stt.ts`](stt.ts)                   | Speech-to-Text transcription and status.                                           |
+| [`tts.ts`](tts.ts)                   | TTS load/unload, synthesize, voices.                                               |
+| [`update.ts`](update.ts)             | Core self-update check and apply.                                                  |
+| [`storage.ts`](storage.ts)           | Core on-disk storage tree, clear/delete.                                           |
 
 ## Client-side storage ([`client-storage.ts`](client-storage.ts))
 
 Mirrors the core `StorageApi` shape (get / deletePaths / clearCategory) so the
 StorageField component can drive either side. The tree comes from a Tauri
-command; deletes go through the platform layer. The settings "clear" is a reset
-that preserves what a user should not lose: paired cores and snippets. The
-active `client.log` is truncated (it is held open by the logger) while rotated
-backups are removed outright.
+command; deletes go through the platform layer. The settings "clear" only
+empties `settings.json`: the paired-cores registry (`cores.json`) and snippets
+(`snippets/`) are separate files, so a settings reset can never cost a pairing
+or a snippet. The active `client.log` is truncated (it is held open by the
+logger) while rotated backups are removed outright.

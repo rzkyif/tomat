@@ -24,7 +24,11 @@ export type WsListener = (frame: ServerToClientFrame) => void;
 
 // Coarse connection state for UI banners. "connecting" is the initial state
 // before the first open, plus during reconnect attempts after a close.
-export type ConnectionState = "connecting" | "connected" | "disconnected";
+// "unauthorized" is terminal: the core rejected our bearer token during the
+// WS handshake (e.g. its DB was reset and no longer has this client), so the
+// same token will never connect. We stop the reconnect loop and surface this
+// so the UI can prompt a re-pair, instead of hammering the core forever.
+export type ConnectionState = "connecting" | "connected" | "disconnected" | "unauthorized";
 
 export type ConnectionListener = (state: ConnectionState, reason?: string) => void;
 
@@ -274,6 +278,10 @@ export class CoreClient {
 
   private connectWs(): void {
     if (this.wsClosing) return;
+    // The core definitively rejected our credentials; retrying with the same
+    // dead token would just spam it. Recovery is a re-pair, which builds a
+    // fresh CoreClient, so this one stays parked.
+    if (this.connState === "unauthorized") return;
     // Already connected, a connect is in flight, or a reconnect is scheduled:
     // don't open a competing socket.
     if (this.ws || this.wsConnecting || this.wsReconnectTimer !== null) return;
@@ -454,6 +462,17 @@ export class CoreClient {
     this.wsConnected = false;
     this.wsConnecting = false;
     this.ws = null;
+    // A handshake the core rejected for bad credentials (401/403) is terminal:
+    // the token won't start working again, so stop here instead of scheduling
+    // another doomed attempt. The UI surfaces "unauthorized" as a re-pair prompt.
+    if (isAuthRejection(this.lastWsError)) {
+      this.disconnectedAtMs = null;
+      log.warn(
+        `core rejected credentials (${this.lastWsError}); halting reconnect, re-pair required`,
+      );
+      this.setConnState("unauthorized", this.lastWsError ?? undefined);
+      return;
+    }
     // Log "disconnected" once per gap (the first close); the per-attempt
     // reconnect churn shows at debug below, so repeating it on every retry's
     // close would just be noise.
@@ -478,6 +497,15 @@ export class CoreClient {
 // True for a 2xx NetResponse.
 function isOk(res: NetResponse): boolean {
   return res.status >= 200 && res.status < 300;
+}
+
+// Whether a WS connect-failure reason is the core rejecting our credentials.
+// The desktop net layer reports the handshake status as "HTTP 401"/"HTTP 403"
+// (see commands/net.rs); a dead bearer token never recovers, so this gates the
+// terminal "unauthorized" state. The browser WS transport hides the handshake
+// status, so on web this never matches and the normal retry path is unchanged.
+function isAuthRejection(reason: string | null | undefined): boolean {
+  return !!reason && /\bHTTP (?:401|403)\b/.test(reason);
 }
 
 // Decode a NetResponse body (UTF-8 bytes) to text for JSON parsing.

@@ -12,7 +12,8 @@ const NOOP = async (): Promise<void> => {
   /* noop */
 };
 const STORAGE_PREFIX = "tomat:keychain:";
-const CLIENT_SETTINGS_KEY = "tomat:client-settings";
+const CLIENT_FILE_PREFIX = "tomat:client:";
+const SNIPPET_PREFIX = "tomat:snippet:";
 
 const impl: Platform = {
   net: {
@@ -119,17 +120,39 @@ const impl: Platform = {
       /* never fires in web mode */
     },
   },
-  clientSettings: {
-    async read() {
+  clientFiles: {
+    async read(file) {
       try {
-        const raw = localStorage.getItem(CLIENT_SETTINGS_KEY);
+        const raw = localStorage.getItem(CLIENT_FILE_PREFIX + file);
         return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
       } catch {
         return {};
       }
     },
-    async write(settings) {
-      localStorage.setItem(CLIENT_SETTINGS_KEY, JSON.stringify(settings));
+    async write(file, data) {
+      localStorage.setItem(CLIENT_FILE_PREFIX + file, JSON.stringify(data));
+    },
+  },
+  snippetFiles: {
+    async readAll() {
+      const out: Record<string, Record<string, unknown>> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith(SNIPPET_PREFIX)) continue;
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) out[key.slice(SNIPPET_PREFIX.length)] = JSON.parse(raw);
+        } catch {
+          // Unparseable entries are skipped, mirroring the desktop behavior.
+        }
+      }
+      return out;
+    },
+    async write(name, data) {
+      localStorage.setItem(SNIPPET_PREFIX + name, JSON.stringify(data));
+    },
+    async delete(name) {
+      localStorage.removeItem(SNIPPET_PREFIX + name);
     },
   },
   keychain: {
