@@ -1,6 +1,23 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:best-practices"],
+  "schedule": ["before 9am on monday"],
+  "separateMajorMinor": false,
+  "lockFileMaintenance": { "enabled": false },
+  "packageRules": [
+    {
+      "description": "The deno manager extracts npm: specifiers from deno.json tasks but refuses to update them because it cannot touch deno.lock for task deps, which only emits a warning. Disable that depType here and track the same specifiers via the customManager below, which bumps the version string without a lockfile update (deno re-resolves it into deno.lock on the next task run).",
+      "matchManagers": ["deno"],
+      "matchDepTypes": ["tasks"],
+      "enabled": false
+    },
+    {
+      "description": "Combine every dependency update (including majors) into a single weekly PR.",
+      "matchPackageNames": ["*"],
+      "groupName": "all dependencies",
+      "groupSlug": "all"
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
@@ -8,6 +25,15 @@
       "managerFilePatterns": ["/^packages/tomat-core/src/workers/.*\\.ts$/", "/^scripts/.*\\.ts$/"],
       "matchStrings": [
         "\"npm:(?<depName>@[^@\"/]+/[^@\"]+|[^@\":/][^@\"]*)@(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "description": "npm: specifiers run from deno.json task commands (oxlint, oxfmt). The deno manager picks these up but cannot update them alongside deno.lock, so it is disabled for tasks above and they are tracked here instead. Anchored to `deno run` so the version-pinned allowScripts entries are left alone.",
+      "managerFilePatterns": ["/(^|/)deno\\.jsonc?$/"],
+      "matchStrings": [
+        "deno run [^\"]*?npm:(?<depName>@[^@\\s\"/]+/[^@\\s\"]+|[^@\\s\":/][^@\\s\"]*)@(?<currentValue>[^\\s\"]+)"
       ],
       "datasourceTemplate": "npm"
     }
