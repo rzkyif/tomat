@@ -184,6 +184,14 @@ export interface Platform {
      *  change, monitor plugged/unplugged). Returns a detach. */
     subscribeMonitorChanged(cb: () => void): Promise<() => void>;
   };
+  // OS login entry ("start tomat when I log in").
+  autostart: {
+    isEnabled(): Promise<boolean>;
+    setEnabled(enabled: boolean): Promise<void>;
+    /** True when this app run was launched by the login entry rather than
+     *  the user. Drives the greeting trigger's `launch` report. */
+    wasAutostarted(): Promise<boolean>;
+  };
   // Screen capture. Region capture goes through `showRegionOverlay` + a Rust
   // event (the overlay window draws the selection and emits the cropped PNG);
   // there is no direct "capture a region" platform call.
@@ -264,12 +272,12 @@ export interface Platform {
      *  already responding. Returns `true` when a new process was started. */
     startLocalCore(): Promise<boolean>;
     /** Loopback base URL of this channel's local core, with the channel-aware
-     *  port (stable 7800, beta 7810, …). Used by the "on this computer"
-     *  pair/install flow so a beta client targets the beta core. */
+     *  port (stable 7800, latest 7810, …). Used by the "on this computer"
+     *  pair/install flow so a latest client targets the latest core. */
     localCoreBaseUrl(): Promise<string>;
     /** This channel's default local sidecar ports (llama / whisper). Used as
      *  fallbacks when the paired core hasn't overridden llm.port / stt.port so
-     *  a beta client talks to the beta sidecars (7711/7712), not stable's. */
+     *  a latest client talks to the latest sidecars (7711/7712), not stable's. */
     localSidecarPorts(): Promise<{ llm: number; stt: number }>;
     /** Optional `--core-url` / `--pairing-code` launch arguments, used to
      *  prefill the "On another computer" onboarding fields. Doubles as a

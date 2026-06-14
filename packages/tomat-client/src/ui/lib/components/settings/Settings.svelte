@@ -389,8 +389,8 @@
         {selectedGroupId}
         onSelect={selectGroup}
         llmStatus={serversState.serverStatuses.llama}
-        sttStatus={serversState.serverStatuses.whisper}
-        ttsStatus={serversState.serverStatuses.tts}
+        sttStatus={serversState.serverStatuses.speech}
+        ttsStatus={serversState.serverStatuses.speech}
         {withScrollAnchor}
       />
 

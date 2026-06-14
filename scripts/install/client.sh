@@ -383,24 +383,24 @@ ui_die() {
 
 STORAGE="${TOMAT_STORAGE:-https://get.au.tomat.ing}"
 
-# Install channel: selectable via TOMAT_CHANNEL env or --channel <c> / --beta
-# (the arg wins). A beta client is a distinct app (tomat-beta.app, identifier
-# au.tomat.ing.beta) that coexists with stable and updates from the beta
+# Install channel: selectable via TOMAT_CHANNEL env or --channel <c> / --latest
+# (the arg wins). A latest client is a distinct app (tomat-latest.app, identifier
+# au.tomat.ing.latest) that coexists with stable and updates from the latest
 # manifest. Stable stays bare for back-compat.
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --channel) TOMAT_CHANNEL="${2:-}"; shift 2 ;;
     --channel=*) TOMAT_CHANNEL="${1#*=}"; shift ;;
-    --beta) TOMAT_CHANNEL="beta"; shift ;;
+    --latest) TOMAT_CHANNEL="latest"; shift ;;
     --stable) TOMAT_CHANNEL="stable"; shift ;;
     *) shift ;;
   esac
 done
 TOMAT_CHANNEL="${TOMAT_CHANNEL:-stable}"
 case "$TOMAT_CHANNEL" in
-  stable | dev | beta) ;;
+  stable | dev | latest) ;;
   *)
-    printf 'error: invalid TOMAT_CHANNEL: %s (expected stable, dev, or beta)\n' \
+    printf 'error: invalid TOMAT_CHANNEL: %s (expected stable, dev, or latest)\n' \
       "$TOMAT_CHANNEL" >&2
     exit 1
     ;;
@@ -413,7 +413,7 @@ else
   CHANNEL_SUFFIX="-$TOMAT_CHANNEL"
   MANIFEST_DIR="manifests/$TOMAT_CHANNEL"
   case "$TOMAT_CHANNEL" in
-    beta) DISPLAY_NAME="tomat beta" ;;
+    latest) DISPLAY_NAME="tomat latest" ;;
     dev) DISPLAY_NAME="tomat dev" ;;
   esac
 fi

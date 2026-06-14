@@ -38,7 +38,7 @@ All commands run from the repo root:
 - `deno task dev`: run core and client together; see
   [DEVELOPMENT.md](../../DEVELOPMENT.md) for connecting the client to the dev
   core.
-- `deno task build:client` / `deno task build:client:beta`: build the desktop
+- `deno task build:client` / `deno task build:client:stable`: build the desktop
   bundle for the given channel.
 - `deno task test:ui`: vitest suite for the Svelte UI.
 - `deno task test:rs`: Rust tests, including the Tauri shell.

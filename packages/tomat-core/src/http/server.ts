@@ -10,10 +10,13 @@ import { CORE_VERSION } from "../config.ts";
 import { corsMiddleware } from "./middleware/cors.ts";
 import { sendError } from "./middleware/errors.ts";
 import { binariesRoutes } from "./routes/binaries.ts";
+import { documentsRoutes } from "./routes/documents.ts";
+import { greetingsRoutes } from "./routes/greetings.ts";
 import { llmRoutes } from "./routes/llm.ts";
 import { modelsRoutes } from "./routes/models.ts";
 import { pairingRoutes } from "./routes/pairing.ts";
 import { requirementsRoutes } from "./routes/requirements.ts";
+import { scheduledPromptsRoutes } from "./routes/scheduled-prompts.ts";
 import { sessionsRoutes } from "./routes/sessions.ts";
 import { settingsRoutes } from "./routes/settings.ts";
 import { sidecarsRoutes } from "./routes/sidecars.ts";
@@ -76,6 +79,9 @@ export function buildApp(): Hono {
   app.route("/api/v1/llm", llmRoutes());
   app.route("/api/v1/sidecars", sidecarsRoutes());
   app.route("/api/v1/storage", storageRoutes());
+  app.route("/api/v1/documents", documentsRoutes());
+  app.route("/api/v1/scheduled-prompts", scheduledPromptsRoutes());
+  app.route("/api/v1/greetings", greetingsRoutes());
   app.route("/api/v1/update", updateRoutes());
 
   return app;

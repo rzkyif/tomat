@@ -15,10 +15,12 @@ import type {
 } from "@tomat/shared";
 import type { Message } from "$lib/shared/types";
 import { cores } from "$lib/core";
+import { platform } from "$lib/platform";
 import { getLogger } from "$lib/shared/log";
 import { messagesState } from "./messages.svelte";
 import { settingsState } from "./settings.svelte";
 import { streamingState } from "./streaming.svelte";
+import { viewState } from "./view.svelte";
 
 const log = getLogger("sessions");
 
@@ -30,7 +32,9 @@ export type SessionInfo = SessionListEntry;
  *  calls stuck non-terminal, tool filters stuck "filtering". */
 export function fixupLoadedMessages(messages: ServerMessage[]): Message[] {
   let counter = 0;
-  const out = messages as unknown as Message[];
+  // Each wire message widens into the client bag (every wire field is an
+  // optional bag field); copy per element rather than reinterpreting the array.
+  const out: Message[] = messages.map((m) => ({ ...m }));
   for (let i = 0; i < out.length; i++) {
     const m = out[i];
     if (!m.id) m.id = `load-${Date.now()}-${counter++}`;
@@ -71,6 +75,9 @@ class SessionsState {
 
   private unsubscribeWs: (() => void) | null = null;
   private unsubscribeConn: (() => void) | null = null;
+  // Session whose finished stream should pop the window (a greeting with
+  // focus "show_when_done").
+  private showWhenDoneId: string | null = null;
   // True while recoverFromFailedLoad runs, so a failing recovery target
   // doesn't recurse into another recovery.
   private recovering = false;
@@ -99,6 +106,10 @@ class SessionsState {
   attach(): void {
     if (this.unsubscribeWs) return;
     this.unsubscribeWs = cores().subscribeWs((frame: ServerToClientFrame) => {
+      if (frame.kind === "session.created") {
+        void this.onSessionCreated(frame);
+        return;
+      }
       if (frame.kind !== "session.updated") return;
       if (frame.sessionId !== this.id) return;
       if (frame.op === "title_changed" && frame.payload?.title !== undefined) {
@@ -133,6 +144,41 @@ class SessionsState {
         this.droppedSinceConnected = true;
       }
     });
+  }
+
+  /** Core created a session on its own (a scheduled prompt or greeting
+   *  fired). Surface it per the frame's focus: "show" pops the window now,
+   *  "show_when_done" pops it when the session's stream finishes.
+   *
+   *  The window-reveal contract is established BEFORE the awaits below: a
+   *  fast (or fast-failing) stream can reach chat.done/chat.error, which
+   *  calls notifyStreamDone, before loadList resolves, and it must find the
+   *  latch already armed. It is also independent of the user's in-flight
+   *  work: an automated background stream counts as active work but leaves
+   *  the window hidden, so a "show" must still reveal it. Only navigation is
+   *  skipped while the user is busy, since load() would interrupt them; the
+   *  session still appears in the refreshed list. */
+  private async onSessionCreated(
+    frame: Extract<ServerToClientFrame, { kind: "session.created" }>,
+  ): Promise<void> {
+    if (frame.focus === "show") {
+      void platform().windowing.show();
+    } else {
+      this.showWhenDoneId = frame.session.id;
+    }
+    await this.loadList();
+    if (streamingState.hasActiveWork) return;
+    await this.load(frame.session.id);
+    viewState.navigate("chat");
+  }
+
+  /** Called by streaming when a stream's chat.done lands; pops the window
+   *  for a session created with focus "show_when_done". */
+  notifyStreamDone(sessionId: string | null): void {
+    if (sessionId !== null && this.showWhenDoneId === sessionId) {
+      this.showWhenDoneId = null;
+      void platform().windowing.show();
+    }
   }
 
   detach(): void {

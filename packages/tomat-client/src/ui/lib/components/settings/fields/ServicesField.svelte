@@ -3,7 +3,6 @@
   import { onMount } from "svelte";
   import { cores } from "$lib/core";
   import { serversState, settingsState } from "../../../state";
-  import { ttsState } from "$lib/state/tts.svelte";
   import { platform } from "$lib/platform";
   import { formatBytes } from "$lib/shared/format";
   import { getLogger } from "$lib/shared/log";
@@ -21,8 +20,8 @@
     horizontal?: boolean;
   }>();
 
-  type ServiceKey = "llama" | "whisper" | "tts" | "tool";
-  const SERVICES: ServiceKey[] = ["llama", "whisper", "tts", "tool"];
+  type ServiceKey = "llama" | "speech" | "tool";
+  const SERVICES: ServiceKey[] = ["llama", "speech", "tool"];
 
   // Core-scope metrics (core process + sidecars); client-scope metrics (the
   // desktop app process). Each polled only while the field is on-screen.
@@ -38,16 +37,14 @@
     switch (key) {
       case "llama":
         return "Language Model";
-      case "whisper":
-        return "Speech-to-Text";
-      case "tts":
-        return ttsState.enabled ? "Text-to-Speech" : "Text-to-Speech (off)";
+      case "speech":
+        return "Speech";
       case "tool":
         return "Tools";
     }
   }
 
-  // Channel-aware default sidecar ports (beta → 7711/7712), resolved from the
+  // Channel-aware default sidecar ports (latest → 7711/7712), resolved from the
   // platform on mount. Until then, show the stable defaults.
   let defaultLlmPort = $state("7701");
   let defaultSttPort = $state("7702");
@@ -67,18 +64,14 @@
     if (key === "llama") {
       return `${s["llm.host"] || "127.0.0.1"}:${s["llm.port"] || defaultLlmPort}`;
     }
-    if (key === "whisper") {
-      return `${s["stt.host"] || "127.0.0.1"}:${s["stt.port"] || defaultSttPort}`;
+    if (key === "speech") {
+      // The speech sidecar binds a fixed loopback port (no user host/port knob).
+      return `127.0.0.1:${defaultSttPort}`;
     }
     return null;
   }
 
   function statusFor(key: ServiceKey): string {
-    // tts isn't supervised by the sidecar manager, so no sidecar.status WS
-    // frames ever reach serversState for it. The polled metrics snapshot
-    // (which the status route synthesizes while the tts worker is up) is
-    // the authority instead.
-    if (key === "tts") return sidecarMetric(key)?.status ?? "Disabled";
     return serversState.serverStatuses[key]?.status ?? "Disabled";
   }
 
@@ -111,12 +104,11 @@
       });
     }
     for (const key of SERVICES) {
-      const m = sidecarMetric(key);
-      // tts is only running while loaded; tool is an ephemeral per-call worker
-      // with no persistent process to measure.
+      // tool is an ephemeral per-call worker with no persistent process.
       if (key === "tool") continue;
       const status = statusFor(key);
-      if (key === "tts" ? !m : status === "Disabled") continue;
+      if (status === "Disabled") continue;
+      const m = sidecarMetric(key);
       const endpoint = endpointFor(key);
       out.push({
         label: labelFor(key),

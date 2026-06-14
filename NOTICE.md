@@ -9,12 +9,20 @@ please consult the upstream project for its full license text.
 `tomat-core` fetches these compiled binaries from the tomat CDN on first use.
 They are not part of this repository.
 
-| Component                                              | Upstream                                  | License |
-| ------------------------------------------------------ | ----------------------------------------- | ------- |
-| llama.cpp (`llama-server`)                             | <https://github.com/ggml-org/llama.cpp>   | MIT     |
-| whisper.cpp (`whisper-server`)                         | <https://github.com/ggml-org/whisper.cpp> | MIT     |
-| ggml (shared libraries shipped with the servers above) | <https://github.com/ggml-org/ggml>        | MIT     |
-| Deno runtime (`deno`)                                  | <https://github.com/denoland/deno>        | MIT     |
+| Component                                           | Upstream                                   | License          |
+| --------------------------------------------------- | ------------------------------------------ | ---------------- |
+| llama.cpp (`llama-server`)                          | <https://github.com/ggml-org/llama.cpp>    | MIT              |
+| ggml (shared libraries shipped with `llama-server`) | <https://github.com/ggml-org/ggml>         | MIT              |
+| sherpa-onnx (`tomat-core-speech`)                   | <https://github.com/k2-fsa/sherpa-onnx>    | Apache-2.0       |
+| ONNX Runtime (statically linked into the above)     | <https://github.com/microsoft/onnxruntime> | MIT              |
+| espeak-ng + data (bundled with `tomat-core-speech`) | <https://github.com/espeak-ng/espeak-ng>   | GPL-3.0-or-later |
+| Deno runtime (`deno`)                               | <https://github.com/denoland/deno>         | MIT              |
+
+The `tomat-core-speech` binary statically links espeak-ng, which is licensed
+under GPL-3.0-or-later. As required by that license, the corresponding source
+for espeak-ng is available at <https://github.com/espeak-ng/espeak-ng>, at the
+revision bundled by sherpa-onnx 1.13.2 (the version tomat builds against). tomat
+does not modify espeak-ng.
 
 LLM, speech-to-text, and text-to-speech model weights are also downloaded at
 runtime from Hugging Face. Each model carries its own license, shown at download
@@ -42,8 +50,6 @@ significant are:
 | Hono                         | MIT                   |
 | Zod                          | MIT                   |
 | OpenAI SDK (`openai`)        | Apache-2.0            |
-| `kokoro-js` (text-to-speech) | Apache-2.0            |
-| `@huggingface/transformers`  | Apache-2.0            |
 | Svelte / SvelteKit / Vite    | MIT                   |
 | UnoCSS                       | MIT                   |
 | Tauri (and official plugins) | MIT OR Apache-2.0     |

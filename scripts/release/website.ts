@@ -1,122 +1,55 @@
-#!/usr/bin/env -S deno run -A
-// release:website: builds the Astro site and deploys the Worker.
-//
-// Idempotent: hashes the website source tree and compares against a cursor
-// served from the Worker itself (https://${websiteDomain}/release-state.json).
-// When the source is unchanged, skips both astro build and wrangler deploy.
-// The cursor is generated into packages/tomat-website/public/release-state.json
-// at deploy time, picked up by `astro build`, and published with the rest
-// of the Astro output.
-//
-// Flags:
-//   --dry-run   probe + build only; skip wrangler deploy
-//   --force     skip the source-hash idempotency probe
-//   --help
+// Release item: the Astro landing page + its Cloudflare Worker. Channel-
+// independent (one site serves every channel). sourceHash() hashes the website
+// source tree; apply() builds Astro and deploys via wrangler. Idempotency is
+// handled upstream by the release-state cursor, so there is no longer a
+// self-served release-state.json.
 
-import { parseArgs } from "@std/cli/parse-args";
-import { ensureDir } from "@std/fs/ensure-dir";
-import { dirname, join } from "@std/path";
+import { join } from "@std/path";
 import {
+  type ApplyOpts,
   astroBuild,
   colors,
-  fail,
-  fetchHttpsJson,
+  type DeployEnv,
   hashWebsiteSource,
   info,
-  loadOrSeedEnv,
   ok,
+  readVersionField,
+  type ReleaseChannel,
+  type ReleaseItem,
   step,
   WEBSITE_DIR,
-  WEBSITE_STATE_REL,
   wranglerDeploy,
 } from "./lib.ts";
 
-const STATE_FILE = join(WEBSITE_DIR, WEBSITE_STATE_REL);
+export const websiteItem: ReleaseItem = {
+  id: "website",
+  label: "landing page",
+  scope: "shared",
+  bumpHint: "packages/tomat-website/deno.json (version)",
 
-interface Flags {
-  dryRun: boolean;
-  force: boolean;
-}
+  version: () => readVersionField(join(WEBSITE_DIR, "deno.json")),
 
-function parseFlags(): Flags {
-  // Strip the bare `--` token that `deno task <name> -- ...` passes through.
-  const args = parseArgs(
-    Deno.args.filter((a) => a !== "--"),
-    {
-      boolean: ["dry-run", "force", "help"],
-      default: { "dry-run": false, force: false, help: false },
-    },
-  );
-  if (args.help) {
-    console.log(`Usage: deno task release:website [flags]
+  sourceHash(_channel: ReleaseChannel): Promise<string> {
+    return hashWebsiteSource();
+  },
 
-Flags:
-  --dry-run   build Astro locally; skip wrangler deploy
-  --force     skip the source-hash idempotency probe
-  --help`);
-    Deno.exit(0);
-  }
-  return { dryRun: args["dry-run"], force: args.force };
-}
+  // The Astro output dir that `deno task build:website` produces. The unified
+  // build hash-checks it so a wiped/swapped site rebuilds.
+  buildOutputs(_channel: ReleaseChannel): Promise<string[]> {
+    return Promise.resolve([join(WEBSITE_DIR, "dist")]);
+  },
 
-export async function main(): Promise<void> {
-  const flags = parseFlags();
+  async apply(env: DeployEnv, _channel: ReleaseChannel, opts: ApplyOpts): Promise<void> {
+    step("Building Astro site");
+    await astroBuild();
 
-  step("Loading deploy environment");
-  const env = await loadOrSeedEnv();
-
-  const localHash = await hashWebsiteSource();
-  info(`source hash: ${localHash.slice(0, 12)}…`);
-
-  if (!flags.force) {
-    const stored = await fetchHttpsJson<{ hash?: string }>(
-      `https://${env.websiteDomain}/release-state.json`,
-    );
-    if (stored?.hash === localHash) {
-      ok(`landing-page source unchanged; nothing to do`);
+    if (opts.dryRun) {
+      info(colors.yellow("dry-run: skipping wrangler deploy"));
       return;
     }
-    if (stored?.hash) {
-      info(`live hash: ${stored.hash.slice(0, 12)}…  → deploying`);
-    } else {
-      info(`no live cursor yet; first website release`);
-    }
-  }
 
-  step("Writing public/release-state.json cursor");
-  await ensureDir(dirname(STATE_FILE));
-  await Deno.writeTextFile(
-    STATE_FILE,
-    JSON.stringify({ hash: localHash, timestamp: new Date().toISOString() }, null, 2) + "\n",
-  );
-  ok(`cursor → ${WEBSITE_STATE_REL}`);
-
-  step("Building Astro site");
-  await astroBuild();
-
-  if (flags.dryRun) {
-    info(colors.yellow("dry-run: skipping wrangler deploy"));
-    return;
-  }
-
-  step("Deploying Worker via wrangler");
-  await wranglerDeploy();
-
-  console.log(
-    "\n" +
-      colors.green(colors.bold("✓ release:website complete")) +
-      "\n" +
-      colors.dim("  ") +
-      `https://${env.websiteDomain}/\n` +
-      colors.dim("  ") +
-      `https://${env.websiteDomain}/release-state.json\n`,
-  );
-}
-
-if (import.meta.main) {
-  try {
-    await main();
-  } catch (err) {
-    fail(err instanceof Error ? err.message : String(err));
-  }
-}
+    step("Deploying Worker via wrangler");
+    await wranglerDeploy();
+    ok(`https://${env.websiteDomain}/`);
+  },
+};

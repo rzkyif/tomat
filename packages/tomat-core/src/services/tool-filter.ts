@@ -16,6 +16,7 @@ import type { Tool, ToolDescriptor } from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import { toolkitsRegistry } from "../toolkits/registry.ts";
 import { type LlmEndpointConfig, type LlmRequest, streamChatCompletion } from "./llm-provider.ts";
+import { cosineNormalized, embedSourceHash, toolEmbedText } from "./relevance.ts";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("toolFilter");
@@ -52,6 +53,11 @@ export class ToolFilter {
       }
       const emb = embeddings.get(tool.id);
       if (!emb) continue;
+      // Skip vectors embedded by a different model: a stale source hash means
+      // the stored vector isn't comparable to the current-model query vector,
+      // so scoring it would silently mis-rank. It reads as "not embedded" until
+      // /toolkits/reindex backfills it.
+      if (emb.sourceHash !== embedSourceHash(toolEmbedText(tool))) continue;
       const score = cosineNormalized(queryVector, emb.vector);
       scored.push({ tool, score });
     }
@@ -178,13 +184,4 @@ function toDescriptor(tool: Tool): ToolDescriptor {
     name: tool.name,
     description: tool.description,
   };
-}
-
-// Both inputs are assumed L2-normalized (transformers.js normalize:true).
-// Cosine reduces to dot product in that case.
-function cosineNormalized(a: Float32Array, b: Float32Array): number {
-  const n = Math.min(a.length, b.length);
-  let sum = 0;
-  for (let i = 0; i < n; i++) sum += a[i] * b[i];
-  return sum;
 }

@@ -28,6 +28,21 @@ function makeMockCtx(answers: AskUserAnswer[][]): MockCtx {
       return Promise.resolve(next);
     },
     log() {},
+    display: { markdown() {}, image() {}, table() {}, diff() {} },
+    documents: {
+      list: () => Promise.resolve([]),
+      get: () => Promise.reject(new Error("not scripted")),
+      write: () => Promise.reject(new Error("not scripted")),
+      edit: () => Promise.reject(new Error("not scripted")),
+    },
+    db: {
+      query: () => Promise.reject(new Error("not scripted")),
+      execute: () => Promise.reject(new Error("not scripted")),
+    },
+    llm: { complete: () => Promise.reject(new Error("not scripted")) },
+    tts: { speak: () => Promise.reject(new Error("not scripted")) },
+    stt: { transcribe: () => Promise.reject(new Error("not scripted")) },
+    schedulePrompt: () => Promise.reject(new Error("not scripted")),
     signal: new AbortController().signal,
     getChatContext() {
       return { userMessage: "demo me", sessionId: null };
@@ -57,10 +72,15 @@ Deno.test("demo: askUser is called once per question with the expected option sh
   const ctx = makeMockCtx([[""], [""], [[]]]);
   await demo({}, ctx);
   assertEquals(ctx.asked.length, 3);
-  // Second question has options array; third is multiselect.
-  assertEquals(ctx.asked[1][0].options?.[0].value, "red");
-  assertEquals(ctx.asked[2][0].multiselect, true);
-  assertEquals(ctx.asked[2][0].allowFreeformInput, true);
+  // Second question has options array; third is multiselect. Both are
+  // choice questions (no kind), narrowed from the kind-discriminated union.
+  const color = ctx.asked[1][0];
+  const prefs = ctx.asked[2][0];
+  if (color.kind !== undefined && color.kind !== "choice") throw new Error("expected choice");
+  if (prefs.kind !== undefined && prefs.kind !== "choice") throw new Error("expected choice");
+  assertEquals(color.options?.[0].value, "red");
+  assertEquals(prefs.multiselect, true);
+  assertEquals(prefs.allowFreeformInput, true);
 });
 
 Deno.test("demo: tolerates empty / non-string answers without crashing", async () => {

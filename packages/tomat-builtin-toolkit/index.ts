@@ -4,3 +4,11 @@
 export { download } from "./src/download.ts";
 export { open } from "./src/open.ts";
 export { demo } from "./src/demo.ts";
+export { editDocument, readDocument, showDocument, writeDocument } from "./src/documents.ts";
+export { schedulePrompt } from "./src/schedule.ts";
+export { getDatetime } from "./src/datetime.ts";
+export { calculator } from "./src/calculator.ts";
+export { fetchWebpage } from "./src/webpage.ts";
+export { webSearch } from "./src/search.ts";
+export { organizeDownloads } from "./src/organize.ts";
+export { collectTable } from "./src/collect.ts";

@@ -5,26 +5,10 @@
 import { assertEquals } from "@std/assert";
 import {
   chatInterruptWsSchema,
-  chatRequestSchema,
   chatStartWsSchema,
   toolAskUserResponseSchema,
   toolCancelSchema,
 } from "./chat.ts";
-
-Deno.test("chatRequestSchema: route defaults to 'default' when omitted", () => {
-  const r = chatRequestSchema.parse({});
-  assertEquals(r.route, "default");
-});
-
-Deno.test("chatRequestSchema: rejects out-of-range temperature/topP", () => {
-  assertEquals(chatRequestSchema.safeParse({ overrides: { temperature: -0.1 } }).success, false);
-  assertEquals(chatRequestSchema.safeParse({ overrides: { temperature: 2.1 } }).success, false);
-  assertEquals(chatRequestSchema.safeParse({ overrides: { topP: 1.1 } }).success, false);
-});
-
-Deno.test("chatRequestSchema: rejects unknown top-level fields (strict)", () => {
-  assertEquals(chatRequestSchema.safeParse({ unknown: true }).success, false);
-});
 
 Deno.test("chatStartWsSchema: requires kind, streamId, sessionId", () => {
   assertEquals(
@@ -81,6 +65,34 @@ Deno.test("toolAskUserResponseSchema: accepts string OR string[] entries in answ
       callId: "c1",
       requestId: "r1",
       answers: [42],
+    }).success,
+    false,
+  );
+});
+
+Deno.test("toolAskUserResponseSchema: accepts table-edit answers (array of string records)", () => {
+  assertEquals(
+    toolAskUserResponseSchema.safeParse({
+      kind: "tool.askuser_response",
+      callId: "c1",
+      requestId: "r1",
+      // One table question's answer: the edited rows, each a column-keyed record.
+      answers: [
+        [
+          { item: "coffee", amount: "4.50" },
+          { item: "lunch", amount: "12.00" },
+        ],
+      ],
+    }).success,
+    true,
+  );
+  // Record values must be strings, not numbers.
+  assertEquals(
+    toolAskUserResponseSchema.safeParse({
+      kind: "tool.askuser_response",
+      callId: "c1",
+      requestId: "r1",
+      answers: [[{ item: "coffee", amount: 4.5 }]],
     }).success,
     false,
   );

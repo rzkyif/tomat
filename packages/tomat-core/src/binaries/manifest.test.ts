@@ -24,14 +24,14 @@ async function signBinaries(binaries: unknown, priv: Uint8Array): Promise<string
 }
 
 Deno.test("verifyBinariesSignature: accepts a correctly signed binaries body", async () => {
-  const priv = ed.utils.randomPrivateKey();
+  const priv = ed.utils.randomSecretKey();
   const pub = await ed.getPublicKeyAsync(priv);
   const sig = await signBinaries(SAMPLE_BINARIES, priv);
   assertEquals(await verifyBinariesSignature(SAMPLE_BINARIES, sig, pub), true);
 });
 
 Deno.test("verifyBinariesSignature: rejects a tampered binaries body", async () => {
-  const priv = ed.utils.randomPrivateKey();
+  const priv = ed.utils.randomSecretKey();
   const pub = await ed.getPublicKeyAsync(priv);
   const sig = await signBinaries(SAMPLE_BINARIES, priv);
   // Attacker swaps the download URL/sha after signing.
@@ -45,8 +45,8 @@ Deno.test("verifyBinariesSignature: rejects a tampered binaries body", async () 
 });
 
 Deno.test("verifyBinariesSignature: rejects a signature made with a different key", async () => {
-  const priv = ed.utils.randomPrivateKey();
-  const otherPub = await ed.getPublicKeyAsync(ed.utils.randomPrivateKey());
+  const priv = ed.utils.randomSecretKey();
+  const otherPub = await ed.getPublicKeyAsync(ed.utils.randomSecretKey());
   const sig = await signBinaries(SAMPLE_BINARIES, priv);
   assertEquals(await verifyBinariesSignature(SAMPLE_BINARIES, sig, otherPub), false);
 });

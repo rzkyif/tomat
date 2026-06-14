@@ -137,10 +137,11 @@ symlink/hardlink entries; `deno install` runs with `--allow-scripts=false` so
 npm lifecycle scripts never execute; tools install default-disabled and
 ungranted; and worker stdout/stderr are size-capped.
 
-**Sidecars.** `llama-server`, `whisper-server`, and the TTS worker are spawned
-without a shell and inherit only an allowlist of OS-essential environment
-variables (not the core's full environment, which can carry operator secrets
-like `GITHUB_TOKEN`). The llama.cpp web UI is only enabled when the server binds
+**Sidecars.** `llama-server` (chat plus a second instance for embeddings) and
+`tomat-core-speech` (Speech-to-Text + Text-to-Speech) are spawned without a
+shell and inherit only an allowlist of OS-essential environment variables (not
+the core's full environment, which can carry operator secrets like
+`GITHUB_TOKEN`). The llama.cpp web UI is only enabled when the server binds
 loopback, so it is never exposed on the network.
 
 **Tauri client.** The webview loads only the bundled frontend (no remote-domain
@@ -181,11 +182,11 @@ gitignored `.env`; only public keys are committed.
   on TLS to the R2 origin. Once installed, the running core enforces the
   signature on every subsequent update. The client bundle is minisign-verified
   by the Tauri updater for in-app updates.
-- **Beta channel sidecar provenance.** On the beta channel, sidecar binaries
+- **Latest channel sidecar provenance.** On the latest channel, sidecar binaries
   resolve to the latest upstream GitHub release at runtime and are verified
   against GitHub's published sha256 over TLS, which is outside our Ed25519
-  signature. Trust for beta sidecars shifts partly to GitHub and TLS. Stable
-  pins URLs and hashes at release time.
+  signature. Trust for latest-channel sidecars shifts partly to GitHub and TLS.
+  Stable pins URLs and hashes at release time.
 - **Toolkits run third-party code.** A toolkit you install runs with the Deno
   permissions you grant it. Grant narrowly: a broad `read`/`write`/`run`/`ffi`
   grant is real capability (the vault is always denied, but a granted `$home`
@@ -230,7 +231,7 @@ In-scope:
 
 Out of scope:
 
-- Vulnerabilities in upstream `llama.cpp`, `whisper.cpp`, or `deno` binaries
+- Vulnerabilities in upstream `llama.cpp`, `sherpa-onnx`, or `deno` binaries
   themselves. Report those upstream. (Their provenance and verification are
   in-scope.)
 - Attacks that require an already-compromised local user account or OS keychain

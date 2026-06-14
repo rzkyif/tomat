@@ -1,5 +1,5 @@
 // permissionKey is security-relevant: grants are looked up by this key,
-// so the function must be deterministic and unambiguous across all 7
+// so the function must be deterministic and unambiguous across all 11
 // permission kinds.
 
 import { assertEquals } from "@std/assert";
@@ -40,6 +40,17 @@ Deno.test("permissionKey: ffi is the bare 'ffi' constant", () => {
 
 Deno.test("permissionKey: sys carries the flag", () => {
   assertEquals(permissionKey({ kind: "sys", flag: "hostname", reason: "x" }), "sys:hostname");
+});
+
+Deno.test("permissionKey: module kinds key by access (documents) or bare kind", () => {
+  assertEquals(permissionKey({ kind: "documents", access: "read", reason: "x" }), "documents:read");
+  assertEquals(
+    permissionKey({ kind: "documents", access: "write", reason: "x" }),
+    "documents:write",
+  );
+  assertEquals(permissionKey({ kind: "llm", reason: "x" }), "llm");
+  assertEquals(permissionKey({ kind: "tts", reason: "x" }), "tts");
+  assertEquals(permissionKey({ kind: "stt", reason: "x" }), "stt");
 });
 
 Deno.test("permissionKey: identical decls produce identical keys (determinism)", () => {

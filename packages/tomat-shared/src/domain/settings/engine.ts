@@ -27,6 +27,9 @@ import { appearanceGroup } from "./groups/appearance.ts";
 import { llmGroup } from "./groups/llm.ts";
 import { promptsGroup } from "./groups/prompts.ts";
 import { snippetsGroup } from "./groups/snippets.ts";
+import { documentsGroup } from "./groups/documents.ts";
+import { scheduledPromptsGroup } from "./groups/scheduled-prompts.ts";
+import { greetingsGroup } from "./groups/greetings.ts";
 import { toolkitsGroup, toolsGroup } from "./groups/toolkits.ts";
 import { dualModelGroup } from "./groups/dual-model.ts";
 import { sttGroup } from "./groups/stt.ts";
@@ -34,31 +37,50 @@ import { ttsGroup } from "./groups/tts.ts";
 import { usageGroup } from "./groups/usage.ts";
 import { coresGroup } from "./groups/cores.ts";
 
-// Kokoro TTS assets are fetched into ~/.tomat/models/<repo>/... by the
-// core downloader. transformers.js's `dtype: "q8"` expects an ONNX file
-// named `model_quantized.onnx` (see DEFAULT_DTYPE_SUFFIX_MAPPING in
-// dtypes.js); the repo ships that variant, so we download it rather than
-// `model_q8f16.onnx`.
-export const TTS_REPO = "@onnx-community/Kokoro-82M-v1.0-ONNX/main";
-export const TTS_BASE_FILES: readonly string[] = [
-  `${TTS_REPO}/config.json`,
-  `${TTS_REPO}/tokenizer.json`,
-  `${TTS_REPO}/tokenizer_config.json`,
-  `${TTS_REPO}/onnx/model_quantized.onnx`,
-];
+// Kokoro TTS assets (sherpa-onnx bundle) fetched into ~/.tomat/models/<repo>/...
+// by the core downloader and served by the tomat-core-speech sidecar. The
+// quantized model + the speaker-embedding pack (voices.bin) + the token table
+// are the only downloads; espeak-ng-data (the phonemizer) ships inside the
+// speech binary's archive. The 53 speaker ids in voices.bin line up with the
+// tts.voice enum (packages/tomat-core-speech/src/voices.rs owns name -> sid).
+export const TTS_REPO = "@csukuangfj/kokoro-int8-multi-lang-v1_0/main";
+export const TTS_MODEL_FILE = `${TTS_REPO}/model.int8.onnx`;
+export const TTS_VOICES_FILE = `${TTS_REPO}/voices.bin`;
+export const TTS_TOKENS_FILE = `${TTS_REPO}/tokens.txt`;
+export const TTS_FILES: readonly string[] = [TTS_MODEL_FILE, TTS_VOICES_FILE, TTS_TOKENS_FILE];
 
-// Embedding model for toolkit tool-relevance RAG. Fetched into
-// ~/.tomat/models/Xenova/all-MiniLM-L6-v2/... so transformers.js can
-// resolve it via env.localModelPath without ever hitting the network at
-// runtime. dtype "q8" is used at load time to pick the
-// `model_quantized.onnx` variant (same convention as Kokoro).
-export const EMBED_REPO = "@Xenova/all-MiniLM-L6-v2/main";
-export const EMBED_BASE_FILES: readonly string[] = [
-  `${EMBED_REPO}/config.json`,
-  `${EMBED_REPO}/tokenizer.json`,
-  `${EMBED_REPO}/tokenizer_config.json`,
-  `${EMBED_REPO}/onnx/model_quantized.onnx`,
-];
+// A sherpa Whisper model is a 3-file bundle (encoder + decoder + tokens). The
+// curated catalog and the stt.modelPath setting carry the ENCODER spec; the
+// decoder + tokens are derived from sherpa's fixed naming convention
+// (`<m>-encoder[.int8].onnx` -> `<m>-decoder[.int8].onnx` / `<m>-tokens.txt`),
+// so one setting stays the source of truth while the download/requirements flow
+// expands it to all three files.
+export interface SttBundle {
+  encoder: string;
+  decoder: string;
+  tokens: string;
+}
+export function sttBundleFiles(encoderSpec: string): SttBundle {
+  return {
+    encoder: encoderSpec,
+    // Anchor to the filename suffix so a repo/branch segment that happens to
+    // contain "-encoder" isn't rewritten (only the trailing model file is).
+    decoder: encoderSpec.replace(/-encoder(\.int8)?\.onnx$/, "-decoder$1.onnx"),
+    tokens: encoderSpec.replace(/-encoder(\.int8)?\.onnx$/, "-tokens.txt"),
+  };
+}
+
+// Embedding model for toolkit tool-relevance RAG: an all-MiniLM-L6-v2 GGUF
+// served by the llama-embed sidecar (a second llama-server instance) over
+// /v1/embeddings, 384-dim and L2-normalized with `--pooling mean`. EMBED_REPO is
+// also folded into the stored-vector staleness hash (services/relevance.ts), so
+// changing it transparently forces a re-embed of every cached vector.
+export const EMBED_REPO = "@second-state/All-MiniLM-L6-v2-Embedding-GGUF/main";
+export const EMBED_MODEL_FILE = `${EMBED_REPO}/all-MiniLM-L6-v2-Q8_0.gguf`;
+// all-MiniLM-L6-v2 emits 384-dim vectors. embedding.ts rejects any other width
+// so a model swap can't silently store vectors incomparable with the existing
+// store (which assumes a fixed dimension).
+export const EMBED_DIM = 384;
 
 function isHfSpec(v: unknown): v is string {
   return typeof v === "string" && v.startsWith("@") && v.length > 1;
@@ -67,8 +89,9 @@ function isHfSpec(v: unknown): v is string {
 /** Model files (HF specs) the current settings require, tagged with their
  *  requirement group. The single source of truth consumed by both the core
  *  (`sourcesForKind` / requirements) and the client. llm local → modelPath
- *  (+ mmproj if image support); stt enabled+local → modelPath; tts (when
- *  enabled) → base files; embed → base files (always, for tool-relevance RAG). */
+ *  (+ mmproj if image support); stt enabled+local → the whisper bundle's three
+ *  files; tts (when enabled) → the kokoro bundle's three files; embed → the
+ *  MiniLM GGUF (always, for tool-relevance). */
 export function requiredModelRefs(s: Record<string, unknown>): RequiredModelRef[] {
   const out: RequiredModelRef[] = [];
   const llmLocal = s["llm.provider"] !== "external";
@@ -80,11 +103,16 @@ export function requiredModelRefs(s: Record<string, unknown>): RequiredModelRef[
   const mmproj = s["llm.mmprojPath"];
   if (llmLocal && imagesOn && isHfSpec(mmproj)) out.push({ source: mmproj, group: "llm" });
   const sttModel = s["stt.modelPath"];
-  if (sttActive && isHfSpec(sttModel)) out.push({ source: sttModel, group: "stt" });
-  if (s["tts.enabled"]) {
-    for (const f of TTS_BASE_FILES) out.push({ source: f, group: "tts" });
+  if (sttActive && isHfSpec(sttModel)) {
+    const bundle = sttBundleFiles(sttModel);
+    out.push({ source: bundle.encoder, group: "stt" });
+    out.push({ source: bundle.decoder, group: "stt" });
+    out.push({ source: bundle.tokens, group: "stt" });
   }
-  for (const f of EMBED_BASE_FILES) out.push({ source: f, group: "embed" });
+  if (s["tts.enabled"]) {
+    for (const f of TTS_FILES) out.push({ source: f, group: "tts" });
+  }
+  out.push({ source: EMBED_MODEL_FILE, group: "embed" });
   return out;
 }
 
@@ -95,6 +123,9 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   llmGroup,
   promptsGroup,
   snippetsGroup,
+  documentsGroup,
+  scheduledPromptsGroup,
+  greetingsGroup,
   toolkitsGroup,
   toolsGroup,
   dualModelGroup,

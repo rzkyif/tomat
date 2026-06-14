@@ -1,7 +1,7 @@
 #!/usr/bin/env -S deno run -A
-// catalog:build: validate the hand-authored @tomat/model-catalog families and
+// build:catalog: validate the hand-authored @tomat/model-catalog families and
 // write an UNSIGNED catalog.json to dist/ for local inspection. No keys, no
-// upload. Use `deno task release:catalog:<channel>` to sign + publish.
+// upload. Use `deno task release` to sign + publish.
 
 import { join } from "@std/path";
 import { ensureDir } from "@std/fs/ensure-dir";

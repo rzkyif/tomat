@@ -575,6 +575,79 @@ async function provisionHelpers(): Promise<void> {
   }
 }
 
+// The Kokoro phonemizer data. Production bakes it into the speech binary's
+// archive (consent-gated with the binary download); dev fetches the standalone
+// bundle once. bzip2, so shell out to system tar - Deno has gzip but not bzip2.
+const ESPEAK_DATA_URL =
+  "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/espeak-ng-data.tar.bz2";
+
+// Build + stage the tomat-core-speech sidecar (Whisper STT + Kokoro TTS) into
+// the dev bin dir. Production downloads it from the signed binaries manifest and
+// extracts espeak-ng-data alongside; dev has no such download (it is self-hosted,
+// so devManifest skips it). Unlike the small helper crates, this one statically
+// links the sherpa-onnx ONNX runtime (a heavy build), so we build it ONCE rather
+// than on every dev start - on unix the symlink follows a later manual
+// `cargo build -p tomat-core-speech`; delete the staged binary to force a rebuild
+// here. Sidecar binaries are NOT channel-suffixed (binaryName() = the bare name).
+async function provisionSpeechSidecar(): Promise<void> {
+  const exe = Deno.build.os === "windows" ? ".exe" : "";
+  const binDir = join(DEV_CORE_DIR, "bin");
+  const dest = join(binDir, `tomat-core-speech${exe}`);
+  try {
+    let staged = false;
+    try {
+      await Deno.lstat(dest);
+      staged = true;
+    } catch {
+      /* not staged yet */
+    }
+    if (!staged) {
+      const out = await new Deno.Command("cargo", {
+        args: ["build", "-p", "tomat-core-speech"],
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+      if (!out.success) {
+        const tail = new TextDecoder().decode(out.stderr).trim().split("\n").at(-1) ?? "";
+        devLog(`speech sidecar build failed (${tail}); STT/TTS will stay Disabled in dev`);
+        return;
+      }
+      await ensureDir(binDir);
+      const built = join(ROOT, "target", "debug", `tomat-core-speech${exe}`);
+      if (Deno.build.os === "windows") await Deno.copyFile(built, dest);
+      else await Deno.symlink(built, dest);
+      devLog("built + linked tomat-core-speech sidecar into the dev bin dir");
+    }
+    await ensureEspeakData(join(binDir, "lib", "tomat-core-speech"));
+  } catch (err) {
+    devLog(`could not provision speech sidecar (${err instanceof Error ? err.message : err})`);
+  }
+}
+
+// Fetch + unpack espeak-ng-data into <libDir>/espeak-ng-data once, mirroring
+// where the binaries manager extracts it in production.
+async function ensureEspeakData(libDir: string): Promise<void> {
+  const dataDir = join(libDir, "espeak-ng-data");
+  try {
+    if ((await Deno.stat(dataDir)).isDirectory) return; // already staged
+  } catch {
+    /* not staged yet */
+  }
+  await ensureDir(libDir);
+  const tmp = join(libDir, "espeak-ng-data.tar.bz2");
+  const res = await fetch(ESPEAK_DATA_URL);
+  if (!res.ok) throw new Error(`espeak-ng-data fetch HTTP ${res.status}`);
+  await Deno.writeFile(tmp, new Uint8Array(await res.arrayBuffer()));
+  const out = await new Deno.Command("tar", {
+    args: ["-xjf", tmp, "-C", libDir],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  await Deno.remove(tmp).catch(() => {});
+  if (!out.success) throw new Error("tar -xjf espeak-ng-data failed");
+  devLog("fetched espeak-ng-data for the dev speech sidecar");
+}
+
 const adminToken = await ensureAdminToken();
 
 // Generate the dev built-in toolkit manifest before core boots so first-boot
@@ -586,6 +659,7 @@ await startDevToolkitManifest();
 // its boot-time helper check passes and the first tool call can spawn in
 // prompt-capable mode.
 await provisionHelpers();
+await provisionSpeechSidecar();
 
 children.push(
   spawn(

@@ -104,6 +104,13 @@ function declMatches(decl: PermissionDecl, resource: string, ctx: PromptContext)
       return decl.flag === resource;
     case "ffi":
       return true;
+    case "documents":
+    case "llm":
+    case "tts":
+    case "stt":
+      // Module-broker permissions never originate from Deno runtime
+      // prompts (and KNOWN_KINDS excludes them), so they match nothing.
+      return false;
   }
 }
 

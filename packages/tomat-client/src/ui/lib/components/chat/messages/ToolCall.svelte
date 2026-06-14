@@ -1,6 +1,7 @@
 <script lang="ts">
   import type {
     AskUserAnswer,
+    AskUserChoiceQuestion,
     AskUserQuestion,
     Message,
     ToolCallStatus,
@@ -8,6 +9,8 @@
   import Bubble from "../../ui/Bubble.svelte";
   import Expandable from "../../ui/Expandable.svelte";
   import Expand from "../../ui/Expand.svelte";
+  import DiffView from "../DiffView.svelte";
+  import MessageMarkdown from "./MessageMarkdown.svelte";
   import { settingsState } from "../../../state";
   import { expansionState } from "$lib/state/expansion.svelte";
   import { untrack } from "svelte";
@@ -102,15 +105,18 @@
   });
 
   // Working copy of in-flight askUser answers. Indexed by question number.
-  // `picks` holds option values; `freestyleActive` means the freeform text
-  // currently counts as an answer. Single-select treats picks and freestyle
-  // as mutually exclusive (clicking an option demotes freestyle, typing
-  // demotes picks); multiselect treats them as additive: picks and the
-  // freestyle entry coexist and both contribute to the final answer array.
+  // `picks` holds option values (also the diff verdict, file paths, and the
+  // image action); `freestyleActive` means the freeform text currently
+  // counts as an answer; `rows` is the editable grid of a table question.
+  // Single-select treats picks and freestyle as mutually exclusive
+  // (clicking an option demotes freestyle, typing demotes picks);
+  // multiselect treats them as additive: picks and the freestyle entry
+  // coexist and both contribute to the final answer array.
   type DraftAnswer = {
     text: string;
     picks: string[];
     freestyleActive: boolean;
+    rows: string[][];
   };
   let drafts: Record<number, DraftAnswer> = $state({});
   // Tracks which freeform inputs currently have focus. A single-select
@@ -125,11 +131,23 @@
     if (lastSeenRequestId === requestId) return;
     const next: Record<number, DraftAnswer> = {};
     for (let i = 0; i < questions.length; i++) {
-      next[i] = { text: "", picks: [], freestyleActive: false };
+      const q = questions[i];
+      next[i] = {
+        ...blankDraft(),
+        // Table grids start from the tool's proposed rows.
+        rows: q.kind === "table" ? q.rows.map((r) => [...r]) : [],
+      };
     }
     drafts = next;
     freeformFocused = {};
     lastSeenRequestId = requestId;
+  }
+
+  // Frames that predate the kind discriminator carry no kind and mean
+  // "choice"; everything in the script below that touches options /
+  // multiselect / freeform narrows through here.
+  function isChoice(q: AskUserQuestion): q is AskUserChoiceQuestion {
+    return q.kind === undefined || q.kind === "choice";
   }
 
   $effect(() => {
@@ -139,7 +157,7 @@
   });
 
   function blankDraft(): DraftAnswer {
-    return { text: "", picks: [], freestyleActive: false };
+    return { text: "", picks: [], freestyleActive: false, rows: [] };
   }
 
   function togglePick(idx: number, value: string, multi: boolean) {
@@ -162,7 +180,8 @@
   function setText(idx: number, text: string) {
     const d = drafts[idx] ?? blankDraft();
     const active = text.trim().length > 0;
-    const multi = !!tcAskUser?.questions[idx]?.multiselect;
+    const q = tcAskUser?.questions[idx];
+    const multi = !!(q && isChoice(q) && q.multiselect);
     drafts[idx] = {
       ...d,
       text,
@@ -178,25 +197,56 @@
     if (d.text.trim().length === 0) return;
     // Multiselect: picks and freestyle coexist; freestyleActive is kept in
     // sync with the text by setText, so focusing doesn't need to promote.
-    if (tcAskUser?.questions[idx]?.multiselect) return;
+    const q = tcAskUser?.questions[idx];
+    if (q && isChoice(q) && q.multiselect) return;
     if (d.freestyleActive && d.picks.length === 0) return;
     drafts[idx] = { ...d, picks: [], freestyleActive: true };
+  }
+
+  // Table-grid editing. Rows are replaced immutably so the $state proxy
+  // sees every change; `addRow` appends an empty row, `removeRow` drops one
+  // (an empty grid is a valid answer: "none of these").
+  function setCell(idx: number, row: number, col: number, value: string) {
+    const d = drafts[idx] ?? blankDraft();
+    if (!d.rows[row]) return;
+    const rows = d.rows.map((r) => [...r]);
+    rows[row][col] = value;
+    drafts[idx] = { ...d, rows };
+  }
+
+  function addRow(idx: number, columns: number) {
+    const d = drafts[idx] ?? blankDraft();
+    drafts[idx] = {
+      ...d,
+      rows: [...d.rows, Array.from({ length: columns }, () => "")],
+    };
+  }
+
+  function removeRow(idx: number, row: number) {
+    const d = drafts[idx] ?? blankDraft();
+    drafts[idx] = { ...d, rows: d.rows.filter((_, i) => i !== row) };
   }
 
   function readyToSubmit(questions: AskUserQuestion[]): boolean {
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
       const d = drafts[i] ?? blankDraft();
+      // diff / image / single-file resolve from one pick; a table's
+      // pre-filled rows and a multiselect file list are valid answers as-is
+      // (an empty grid or empty selection both mean "none of these"), so
+      // those are always ready.
+      if (!isChoice(q)) {
+        if (q.kind === "table") continue;
+        if (q.kind === "files" && q.multiselect) continue;
+        if (d.picks.length === 0) return false;
+        continue;
+      }
       if (!q.options) {
         if (!d.text.trim()) return false;
         continue;
       }
       const hasFreestyle =
         !!q.allowFreeformInput && d.freestyleActive && !!d.text.trim();
-      if (q.multiselect) {
-        if (d.picks.length === 0 && !hasFreestyle) return false;
-        continue;
-      }
       if (d.picks.length === 0 && !hasFreestyle) return false;
     }
     return true;
@@ -208,6 +258,29 @@
   // the same answer would post twice.
   let lastSubmittedRequestId: string | null = $state(null);
 
+  function answerFor(q: AskUserQuestion, d: DraftAnswer): AskUserAnswer {
+    if (q.kind === "diff" || q.kind === "image") return d.picks[0] ?? "";
+    if (q.kind === "files") return q.multiselect ? d.picks : (d.picks[0] ?? "");
+    if (q.kind === "table") {
+      // Edited rows become column-keyed records, in column order.
+      return d.rows.map((row) =>
+        Object.fromEntries(q.columns.map((c, i) => [c, row[i] ?? ""])),
+      );
+    }
+    if (!q.options) return d.text.trim();
+    const text = d.text.trim();
+    if (q.multiselect) {
+      // Multiselect: picks and freestyle text coexist as separate
+      // contributions to the answer array.
+      const all = [...d.picks];
+      if (q.allowFreeformInput && text.length > 0) all.push(text);
+      return all;
+    }
+    const useFreestyle =
+      !!q.allowFreeformInput && d.freestyleActive && text.length > 0;
+    return useFreestyle ? text : (d.picks[0] ?? "");
+  }
+
   function submit() {
     if (!tcAskUser) return;
     const requestId = tcAskUser.requestId;
@@ -215,39 +288,30 @@
     const qs = tcAskUser.questions;
     const answers: AskUserAnswer[] = [];
     for (let i = 0; i < qs.length; i++) {
-      const q = qs[i];
-      const d = drafts[i] ?? blankDraft();
-      if (!q.options) {
-        answers.push(d.text.trim());
-        continue;
-      }
-      const text = d.text.trim();
-      if (q.multiselect) {
-        // Multiselect: picks and freestyle text coexist as separate
-        // contributions to the answer array.
-        const all = [...d.picks];
-        if (q.allowFreeformInput && text.length > 0) all.push(text);
-        answers.push(all);
-      } else {
-        const useFreestyle =
-          !!q.allowFreeformInput && d.freestyleActive && text.length > 0;
-        answers.push(useFreestyle ? text : (d.picks[0] ?? ""));
-      }
+      answers.push(answerFor(qs[i], drafts[i] ?? blankDraft()));
     }
     lastSubmittedRequestId = requestId;
     onAnswer(requestId, answers);
   }
 
   // A session needs an explicit submit button when *any* question can't
-  // resolve from a single click. Plain-text and multiselect always count.
-  // For single-select-with-freeform, the question only counts while the
-  // freeform input is "engaged" (focused, or has typed text); otherwise the
-  // expected interaction is "click an option → auto-submit".
+  // resolve from a single click. Plain-text, multiselect (choice or files),
+  // and table questions always count; diff, image, and single-select files
+  // resolve from one click. For single-select-with-freeform, the question
+  // only counts while the freeform input is "engaged" (focused, or has
+  // typed text); otherwise the expected interaction is "click an option →
+  // auto-submit".
   let requiresSubmit = $derived.by(() => {
     if (!tcAskUser) return false;
     const qs = tcAskUser.questions;
     for (let i = 0; i < qs.length; i++) {
       const q = qs[i];
+      if (q.kind === "diff" || q.kind === "image") continue;
+      if (q.kind === "files") {
+        if (q.multiselect) return true;
+        continue;
+      }
+      if (q.kind === "table") return true;
       if (!q.options) return true;
       if (q.multiselect) return true;
       if (q.allowFreeformInput) {
@@ -329,6 +393,9 @@
         e.preventDefault();
         if (target.tagName === "BUTTON") {
           (target as HTMLButtonElement).click();
+          // Aux buttons (table row add/remove) only mutate the draft; they
+          // must never double as a submit (a table is always "ready").
+          if (target.hasAttribute("data-tc-aux")) return;
         }
         if (readyToSubmit(tcAskUser.questions)) submit();
         return;
@@ -390,6 +457,37 @@
     tcStatus === "pending" || tcStatus === "running",
   );
   let showProgress = $derived(isActive);
+
+  // Well-known result kinds get a dedicated renderer instead of raw JSON:
+  // the document tools return `document_diff` (before/after) and
+  // `document_content` (full markdown).
+  let documentDiff = $derived.by<{ title: string; before: string; after: string } | null>(() => {
+    const r = msg.result as Record<string, unknown> | undefined;
+    if (
+      !r || typeof r !== "object" || r.kind !== "document_diff" ||
+      typeof r.before !== "string" || typeof r.after !== "string"
+    ) {
+      return null;
+    }
+    return {
+      title: typeof r.title === "string" ? r.title : "",
+      before: r.before,
+      after: r.after,
+    };
+  });
+  let documentContent = $derived.by<{ title: string; content: string } | null>(() => {
+    const r = msg.result as Record<string, unknown> | undefined;
+    if (
+      !r || typeof r !== "object" || r.kind !== "document_content" ||
+      typeof r.content !== "string"
+    ) {
+      return null;
+    }
+    return {
+      title: typeof r.title === "string" ? r.title : "",
+      content: r.content,
+    };
+  });
 
   let resultText = $derived.by(() => {
     if (msg.result === undefined) return "";
@@ -544,9 +642,142 @@
             {#each tcAskUser.questions as q, qi (qi)}
               <div class="flex flex-col gap-2">
                 <div class="text-sm">{q.question}</div>
-                {#if q.options}
+                {#if q.kind === "diff"}
+                  {#if q.title}
+                    <div class="text-xs text-default-600">{q.title}</div>
+                  {/if}
+                  <div class="max-h-48 overflow-auto">
+                    <DiffView before={q.before} after={q.after} />
+                  </div>
+                  <div class="flex gap-1">
+                    {#each [{ label: "Accept", value: "accept" }, { label: "Reject", value: "reject" }] as verdict (verdict.value)}
+                      <button
+                        type="button"
+                        data-tc-nav
+                        class="text-xs px-3 py-1 h-8 rounded cursor-pointer outline-none transition-colors duration-100 {drafts[
+                          qi
+                        ]?.picks[0] === verdict.value
+                          ? selectedClasses
+                          : unselectedClasses}"
+                        onclick={() => togglePick(qi, verdict.value, false)}
+                      >
+                        {verdict.label}
+                      </button>
+                    {/each}
+                  </div>
+                {:else if q.kind === "files"}
                   <div class="flex flex-col gap-1">
-                    {#each q.options as opt (opt.value)}
+                    <!-- Keyed by index: entry paths are tool-supplied and may
+                         collide, which would crash a keyed each; the list is
+                         static for the prompt's lifetime so index is stable. -->
+                    {#each q.entries as entry, ei (ei)}
+                      <button
+                        type="button"
+                        data-tc-nav
+                        class="text-xs px-2 py-1 min-h-8 rounded cursor-pointer text-left outline-none transition-colors duration-100 {drafts[
+                          qi
+                        ]?.picks.includes(entry.path)
+                          ? selectedClasses
+                          : unselectedClasses}"
+                        title={entry.path}
+                        onclick={() =>
+                          togglePick(qi, entry.path, !!q.multiselect)}
+                      >
+                        {entry.label ?? entry.path}
+                        {#if entry.description}
+                          <span class="opacity-60 ml-1">{entry.description}</span>
+                        {/if}
+                      </button>
+                    {/each}
+                  </div>
+                {:else if q.kind === "image"}
+                  <img
+                    src={`data:${q.mime};base64,${q.dataB64}`}
+                    alt={q.question}
+                    class="max-h-64 max-w-full self-start rounded-small"
+                  />
+                  <div class="flex flex-wrap gap-1">
+                    {#each q.actions as action (action.value)}
+                      <button
+                        type="button"
+                        data-tc-nav
+                        class="text-xs px-3 py-1 h-8 rounded cursor-pointer outline-none transition-colors duration-100 {drafts[
+                          qi
+                        ]?.picks[0] === action.value
+                          ? selectedClasses
+                          : unselectedClasses}"
+                        onclick={() => togglePick(qi, action.value, false)}
+                      >
+                        {action.label}
+                      </button>
+                    {/each}
+                  </div>
+                {:else if q.kind === "table"}
+                  <div class="overflow-x-auto">
+                    <table class="text-xs border-separate border-spacing-1 -m-1">
+                      <thead>
+                        <tr>
+                          {#each q.columns as col (col)}
+                            <th class="text-left font-semibold text-default-600 px-2">
+                              {col}
+                            </th>
+                          {/each}
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {#each drafts[qi]?.rows ?? [] as row, ri (ri)}
+                          <tr>
+                            {#each q.columns as _col, ci (ci)}
+                              <td>
+                                <input
+                                  type="text"
+                                  data-tc-nav
+                                  class="bg-surface-inset text-default-800 rounded block w-full min-w-20 h-7 px-2 outline-none text-xs"
+                                  value={row[ci] ?? ""}
+                                  oninput={(e) =>
+                                    setCell(
+                                      qi,
+                                      ri,
+                                      ci,
+                                      (e.target as HTMLInputElement).value,
+                                    )}
+                                />
+                              </td>
+                            {/each}
+                            <td>
+                              <button
+                                type="button"
+                                data-tc-nav
+                                data-tc-aux
+                                class="flex items-center justify-center h-7 w-7 rounded cursor-pointer outline-none transition-colors duration-100 {unselectedClasses}"
+                                title="Remove row"
+                                onclick={() => removeRow(qi, ri)}
+                              >
+                                <i class="i-material-symbols-close-rounded"></i>
+                              </button>
+                            </td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  </div>
+                  <button
+                    type="button"
+                    data-tc-nav
+                    data-tc-aux
+                    class="self-start flex items-center gap-1 text-xs px-2 py-1 h-7 rounded cursor-pointer outline-none transition-colors duration-100 {unselectedClasses}"
+                    onclick={() => addRow(qi, q.columns.length)}
+                  >
+                    <i class="i-material-symbols-add-rounded"></i>
+                    Add Row
+                  </button>
+                {:else if q.options}
+                  <div class="flex flex-col gap-1">
+                    <!-- Keyed by index: option values are tool-supplied and may
+                         collide, which would crash a keyed each; the list is
+                         static for the prompt's lifetime so index is stable. -->
+                    {#each q.options as opt, oi (oi)}
                       <button
                         type="button"
                         data-tc-nav
@@ -623,9 +854,27 @@
               class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-32 overflow-auto whitespace-pre">{argsText}</pre>
           {/if}
           {#if hasResult}
-            <div class="text-default-600">Result</div>
-            <pre
-              class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{resultText}</pre>
+            {#if documentDiff}
+              <div class="text-default-600">
+                Changes{documentDiff.title ? ` to "${documentDiff.title}"` : ""}
+              </div>
+              <div class="max-h-48 overflow-auto">
+                <DiffView before={documentDiff.before} after={documentDiff.after} />
+              </div>
+            {:else if documentContent}
+              <div class="text-default-600">
+                {documentContent.title || "Document"}
+              </div>
+              <div
+                class="tomat-scroll-inset bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto"
+              >
+                <MessageMarkdown content={documentContent.content} />
+              </div>
+            {:else}
+              <div class="text-default-600">Result</div>
+              <pre
+                class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{resultText}</pre>
+            {/if}
           {/if}
           {#if hasError}
             <div class="text-default-600">Error</div>

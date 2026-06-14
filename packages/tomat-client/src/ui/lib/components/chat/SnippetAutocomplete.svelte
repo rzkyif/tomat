@@ -1,12 +1,15 @@
 <script lang="ts">
-  import type { Snippet } from "$lib/shared/snippets";
   import ListItem from "../ui/ListItem.svelte";
 
+  // Anything with a name + @trigger can be offered: snippets and documents
+  // share this dropdown.
+  type TriggerOption = { id: string; name: string; trigger: string };
+
   let { options, selectedIndex, anchor, onSelect } = $props<{
-    options: Snippet[];
+    options: TriggerOption[];
     selectedIndex: number;
     anchor: { top: number; left: number };
-    onSelect: (snippet: Snippet) => void;
+    onSelect: (option: TriggerOption) => void;
   }>();
 </script>
 

@@ -17,9 +17,9 @@ export const CORE_VERSION = "0.1.0";
 export const WEBSITE_BASE_URL = "https://au.tomat.ing";
 export const STORAGE_BASE_URL = "https://get.au.tomat.ing";
 
-// Manifests live under a per-channel path segment so beta/dev publish + fetch
+// Manifests live under a per-channel path segment so latest/dev publish + fetch
 // their own signed manifests without touching stable's. Stable stays bare
-// (manifests/core.json) for back-compat; dev/beta nest (manifests/beta/...).
+// (manifests/core.json) for back-compat; dev/latest nest (manifests/latest/...).
 function manifestDir(): string {
   const ch = channel();
   return ch === "stable" ? "manifests" : `manifests/${ch}`;
@@ -40,7 +40,7 @@ export function builtinToolkitManifestUrl(): string {
 }
 
 // Signed model catalog (hand-authored in @tomat/model-catalog, compiled +
-// published by `deno task release:catalog`). The core fetches + verifies it and
+// published by `deno task release`). The core fetches + verifies it and
 // runs the on-device fit engine against it. Nested per channel like the others.
 export function modelsCatalogUrl(): string {
   return `${STORAGE_BASE_URL}/${manifestDir()}/catalog.json`;
@@ -51,7 +51,7 @@ export const SCHEMAS_BASE_URL = `${STORAGE_BASE_URL}/schemas`;
 
 // Default HTTP bind. Override via TOMAT_CORE_HOST / TOMAT_CORE_PORT env.
 // DEFAULT_PORT is the stable base; loadBootConfig() applies the per-channel
-// offset via corePort() so beta/dev cores bind a distinct port by default.
+// offset via corePort() so latest/dev cores bind a distinct port by default.
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 7800;
 

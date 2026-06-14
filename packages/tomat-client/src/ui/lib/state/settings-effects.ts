@@ -6,9 +6,13 @@
  * client only needs to handle the UI-side effects (VAD + TTS).
  */
 
+import { platform } from "$lib/platform";
+import { getLogger } from "$lib/shared/log";
 import { settingsState } from "./settings.svelte";
 import { ttsState } from "./tts.svelte";
 import { vadManager } from "./vad.svelte";
+
+const log = getLogger("settings-effects");
 
 settingsState.onChange((key, prev, next) => {
   if (key.startsWith("stt.")) {
@@ -27,5 +31,10 @@ settingsState.onChange((key, prev, next) => {
     }
   } else if (key === "tts.enabled" && !!prev !== !!next) {
     ttsState.setEnabled(!!next);
+  } else if (key === "general.launch.autostart" && !!prev !== !!next) {
+    // Mirror the toggle into the OS login entry.
+    void platform()
+      .autostart.setEnabled(!!next)
+      .catch((e) => log.error("autostart update failed:", e));
   }
 });

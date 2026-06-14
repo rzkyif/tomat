@@ -24,7 +24,11 @@ import { paths } from "../paths.ts";
 import { binaryName, coreBinaryName } from "../binaries/versions.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
-import type { PoolToWorkerFrame, WorkerToPoolFrame } from "./worker-protocol.ts";
+import {
+  parseWorkerFrame,
+  type PoolToWorkerFrame,
+  type WorkerToPoolFrame,
+} from "./worker-protocol.ts";
 import { PromptParser, type PromptParserEvent } from "./prompt-parser.ts";
 import { decidePrompt, type PromptContext } from "./prompt-matcher.ts";
 
@@ -131,9 +135,9 @@ export class WorkerHandle {
   private readonly ptyMode: boolean;
   private readonly promptContext: PromptContext | undefined;
   private promptParser: PromptParser | undefined;
-  // Frames queued while a prompt is pending: Deno's clear_stdin would flush
-  // them off the PTY before reading the answer.
-  private sendQueue: PoolToWorkerFrame[] = [];
+  // Serialized frames queued while a prompt is pending: Deno's clear_stdin
+  // would flush them off the PTY before reading the answer.
+  private sendQueue: string[] = [];
   private promptPending = false;
   private promptSeenAt = 0;
   private promptRequestId: string | null = null;
@@ -147,8 +151,9 @@ export class WorkerHandle {
 
   static spawn(spec: SpawnSpec): WorkerHandle {
     const denoBin = binPath(binaryName("deno"));
-    // Runtime-resolved path keeps the worker .ts out of deno-compile's
-    // static graph; see sidecars/embedding.ts header.
+    // Runtime-resolved path (not new URL(..., import.meta.url)) keeps the
+    // worker .ts out of deno-compile's static import graph; see the workersDir
+    // comment in paths.ts.
     const entry = join(paths().workersDir, "tool-worker.ts");
     // The shipped deno.json is the toolkit's runtime config (imports incl. npm:
     // deps). Pass it via --config when present; npm-only toolkits (no deno.json)
@@ -298,20 +303,24 @@ export class WorkerHandle {
 
   send(frame: PoolToWorkerFrame): void {
     this.lastActivityAt = Date.now();
+    // Serialize before any queueing or write decision: an unserializable
+    // frame (e.g. a module result carrying a non-JSON value) must throw to
+    // the caller, not die inside a swallowed write or an unawaited PTY path.
+    const line = JSON.stringify(frame) + "\n";
     if (this.ptyMode) {
       // While a prompt is pending, Deno's clear_stdin would flush anything
       // written to the PTY before reading the answer; hold frames until the
       // prompt settles. (A cancel racing a prompt is covered by the pool's
       // force-kill fallback.)
       if (this.promptPending) {
-        this.sendQueue.push(frame);
+        this.sendQueue.push(line);
         return;
       }
-      this.writeWorkerFrame(frame);
+      this.writeLine(line);
       return;
     }
     try {
-      this.writer.write(new TextEncoder().encode(JSON.stringify(frame) + "\n")).catch(() => {});
+      this.writer.write(new TextEncoder().encode(line)).catch(() => {});
     } catch {
       // writer closed; ignore (worker is dying)
     }
@@ -376,9 +385,13 @@ export class WorkerHandle {
   }
 
   private writeWorkerFrame(frame: PoolToWorkerFrame): void {
+    this.writeLine(JSON.stringify(frame) + "\n");
+  }
+
+  private writeLine(line: string): void {
     this.writeControl({
       kind: "write",
-      dataB64: encodeBase64(new TextEncoder().encode(JSON.stringify(frame) + "\n")),
+      dataB64: encodeBase64(new TextEncoder().encode(line)),
     });
   }
 
@@ -477,7 +490,7 @@ export class WorkerHandle {
     this.stopAnswerTimer();
     const queued = this.sendQueue;
     this.sendQueue = [];
-    for (const frame of queued) this.writeWorkerFrame(frame);
+    for (const line of queued) this.writeLine(line);
   }
 
   private startAnswer(allow: boolean): void {
@@ -528,10 +541,18 @@ export class WorkerHandle {
       for (const line of lines) {
         if (!line.trim()) continue;
         try {
-          const frame = JSON.parse(line) as WorkerToPoolFrame;
+          // The worker process is sandboxed but untrusted: screen every frame
+          // structurally and reject the kinds only this handle may synthesize
+          // (permission_prompt, worker_exited, stderr_log), so a toolkit
+          // cannot forge a permission prompt or a fake exit by printing JSON.
+          const frame = parseWorkerFrame(JSON.parse(line));
+          if (!frame) {
+            log.warn(`[${this.toolkitId}] dropping invalid frame: ${line.slice(0, 200)}`);
+            continue;
+          }
           this.handle(frame);
         } catch {
-          log.warn(`[${this.toolkitId}] bad frame: ${line}`);
+          log.warn(`[${this.toolkitId}] bad frame: ${line.slice(0, 200)}`);
         }
       }
     }

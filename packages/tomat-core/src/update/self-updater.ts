@@ -250,6 +250,10 @@ async function downloadAndVerify(url: string, outPath: string, sha256: string): 
   if (!res.ok || !res.body) {
     throw new AppError("update_failed", `download HTTP ${res.status} for ${url}`);
   }
+  // Core artifacts (binary, workers, helpers) ship gzip-compressed; the manifest
+  // sha256 is over the DECOMPRESSED file, so decompress the stream before
+  // writing + hashing.
+  const body = res.body.pipeThrough(new DecompressionStream("gzip"));
   const tmp = outPath + ".tmp";
   const file = await Deno.open(tmp, {
     create: true,
@@ -258,7 +262,7 @@ async function downloadAndVerify(url: string, outPath: string, sha256: string): 
   });
   const chunks: Uint8Array[] = [];
   try {
-    for await (const chunk of res.body) {
+    for await (const chunk of body) {
       chunks.push(chunk);
       await file.write(chunk);
     }

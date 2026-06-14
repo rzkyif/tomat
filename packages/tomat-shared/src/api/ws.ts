@@ -2,9 +2,10 @@
 // Multiplexed: every frame carries the discriminator it needs
 // (streamId / callId / jobId) for the client to route it.
 
-import type { AttachmentRef, Message, TokenUsage } from "../domain/session.ts";
+import type { AttachmentRef, Message, Session, TokenUsage } from "../domain/session.ts";
 import type { DownloadEntry, RequiredFile, SidecarSnapshot } from "../domain/model.ts";
 import type { PermissionKind } from "../domain/toolkit.ts";
+import type { ScheduledPromptDraft } from "../domain/scheduled-prompt.ts";
 import type { ErrorCode } from "./errors.ts";
 
 // --- Client → Server -------------------------------------------------------
@@ -36,14 +37,13 @@ export type ClientToServerFrame =
        *  and inserts the new turn's messages into that slot. Absent means
        *  a fresh tail turn anchored on the newest user message. */
       anchorMessageId?: string;
-      contextOverride?: Array<{ role: string; content: string }>;
     }
   | { kind: "chat.interrupt"; streamId: string }
   | {
       kind: "tool.askuser_response";
       callId: string;
       requestId: string;
-      answers: Array<string | string[]>;
+      answers: AskUserAnswer[];
     }
   | {
       kind: "tool.permission_response";
@@ -51,16 +51,71 @@ export type ClientToServerFrame =
       requestId: string;
       allow: boolean;
     }
-  | { kind: "tool.cancel"; callId: string };
+  | { kind: "tool.cancel"; callId: string }
+  // Reply to a schedule.confirm_request. `draft` carries the user's edits
+  // when accepted; absent on rejection.
+  | {
+      kind: "schedule.confirm_response";
+      callId: string;
+      requestId: string;
+      accepted: boolean;
+      draft?: ScheduledPromptDraft;
+    };
 
 // --- Server → Client -------------------------------------------------------
 
-export interface AskUserQuestion {
+// One question in a tool's askUser request. Discriminated by `kind`;
+// frames that predate the discriminator carry no kind and mean "choice".
+// Per-kind answer shapes (one entry per question in the response frame):
+// choice = chosen value (string[] when multiselect), diff = "accept" |
+// "reject", files = chosen path(s), image = chosen action value, table =
+// the edited rows as column-keyed records.
+export interface AskUserChoiceQuestion {
+  kind?: "choice";
   question: string;
   options?: Array<{ label: string; value: string; description?: string }>;
   multiselect?: boolean;
   allowFreeformInput?: boolean;
 }
+
+export interface AskUserDiffQuestion {
+  kind: "diff";
+  question: string;
+  before: string;
+  after: string;
+  title?: string;
+}
+
+export interface AskUserFilesQuestion {
+  kind: "files";
+  question: string;
+  entries: Array<{ path: string; label?: string; description?: string }>;
+  multiselect?: boolean;
+}
+
+export interface AskUserImageQuestion {
+  kind: "image";
+  question: string;
+  dataB64: string;
+  mime: string;
+  actions: Array<{ label: string; value: string }>;
+}
+
+export interface AskUserTableQuestion {
+  kind: "table";
+  question: string;
+  columns: string[];
+  rows: string[][];
+}
+
+export type AskUserQuestion =
+  | AskUserChoiceQuestion
+  | AskUserDiffQuestion
+  | AskUserFilesQuestion
+  | AskUserImageQuestion
+  | AskUserTableQuestion;
+
+export type AskUserAnswer = string | string[] | Array<Record<string, string>>;
 
 export type ServerToClientFrame =
   | { kind: "pong" }
@@ -196,6 +251,27 @@ export type ServerToClientFrame =
         message?: unknown;
         attachments?: AttachmentRef[];
       };
+    }
+  // Core created a session itself (a scheduled prompt or greeting fired).
+  // Broadcast to the owner client so it can refresh its session list and
+  // surface the window.
+  | {
+      kind: "session.created";
+      session: Session;
+      reason: "schedule" | "greeting";
+      scheduledPromptId?: string;
+      /** "show": navigate to the session and show the window now;
+       *  "show_when_done": navigate silently, show the window when the
+       *  session's stream finishes. */
+      focus: "show" | "show_when_done";
+    }
+  // A running tool proposed a scheduled prompt; the call is paused until
+  // the user accepts (possibly after editing the draft) or rejects in chat.
+  | {
+      kind: "schedule.confirm_request";
+      callId: string;
+      requestId: string;
+      draft: ScheduledPromptDraft;
     }
   // Self-update
   | { kind: "update.staged"; version: string }

@@ -13,25 +13,27 @@
 // `export type {} from "..."` doesn't bring the name into the local scope
 // for use in interfaces below.
 import type {
+  AskUserAnswer,
+  AskUserChoiceQuestion,
+  AskUserQuestion,
+  DisplayContent,
   MessageContent,
   MessagePart,
+  PermissionKind,
   ToolCall,
   ToolCallStatus,
   ToolFilterEntryPersisted,
   ToolFilterPhase1Persisted,
 } from "@tomat/shared";
-export type { MessageContent, MessagePart, ToolCallStatus };
-
-export type AskUserQuestion = {
-  question: string;
-  options?: { label: string; description?: string; value: string }[];
-  multiselect?: boolean;
-  allowFreeformInput?: boolean;
+export type {
+  AskUserAnswer,
+  AskUserChoiceQuestion,
+  AskUserQuestion,
+  DisplayContent,
+  MessageContent,
+  MessagePart,
+  ToolCallStatus,
 };
-
-/** Answer shape: string for text/freeform, chosen option `value` for
- *  single-select, string[] for multiselect. */
-export type AskUserAnswer = string | string[];
 
 export type ToolCallAskUserState = {
   requestId: string;
@@ -44,7 +46,7 @@ export type ToolCallAskUserState = {
  *  frame; the decision UI lives in UserInput's permission mode. */
 export type ToolCallPermissionState = {
   requestId: string;
-  permissionKind: "net" | "read" | "write" | "run" | "env" | "ffi" | "sys";
+  permissionKind: PermissionKind;
   resource: string;
   apiName?: string;
   declared: boolean;
@@ -86,6 +88,8 @@ export type Message = {
     | "system"
     | "tool"
     | "tool_filter"
+    /** Tool-pushed display content (ctx.display.* / show_document). */
+    | "display"
     /** Synthetic, render-only role. The +page rendering pipeline injects a
      *  single `role: "loading"` Message into its derived display list while
      *  awaiting the first response chunk so a transient spinner bubble flows
@@ -93,8 +97,15 @@ export type Message = {
      *  tool_filter / system bubbles. Never persisted, never added to
      *  messagesState.messages, never sent to the LLM. */
     | "loading";
-  /** Absent on the wire for tool / tool_filter rows. */
-  content?: MessageContent;
+  /** Absent on the wire for tool / tool_filter rows. `role: "display"`
+   *  rows carry a DisplayContent payload here (the wire field is also
+   *  `content`); every other role carries MessageContent. Narrow with
+   *  asMessageContent / displayContentOf. */
+  content?: MessageContent | DisplayContent;
+  /** Only populated on user messages. True when core authored the message
+   *  itself (a scheduled prompt or greeting); rendered as a collapsed
+   *  "Automated Prompt" bubble. */
+  automated?: boolean;
   modelUsed?: "default" | "secondary";
   /** Set when the stream was aborted (user interrupt or provider error)
    *  before the model finished; content is the partial text. */
@@ -156,8 +167,8 @@ export type Alignment = "left" | "center" | "right";
 export type ServerStatus = "Disabled" | "Error" | "Loading" | "Running";
 
 export interface ServerStatusUpdate {
-  // After the rework the sidecar kinds are "llama"/"whisper"/"tts"/"tool"
-  // (per @tomat/shared) but legacy components still read "llm"/"stt"/"bun".
+  // The sidecar kinds are "llama"/"llama-embed"/"speech"/"tool" (per
+  // @tomat/shared) but legacy components still read "llm"/"stt"/"bun".
   // Keep this string-typed for compatibility; convert at the read site if
   // strict matching is ever required.
   server: string;
@@ -224,12 +235,29 @@ export type Attachment = {
   mime?: string;
 };
 
-/** Extract plain text from MessageContent, regardless of format */
-export function getTextContent(content: MessageContent | undefined): string {
-  if (content === undefined) return "";
+/** Extract plain text from MessageContent, regardless of format. Display
+ *  payloads carry no chat text and yield "". */
+export function getTextContent(content: Message["content"]): string {
+  if (content === undefined || content === null) return "";
   if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
   return content
     .filter((p): p is Extract<MessagePart, { type: "text" }> => p.type === "text")
     .map((p) => p.text)
     .join("\n");
+}
+
+/** Narrow a bag content value to MessageContent ("" for display payloads). */
+export function asMessageContent(content: Message["content"]): MessageContent {
+  if (content === undefined || content === null) return "";
+  if (typeof content === "string" || Array.isArray(content)) return content;
+  return "";
+}
+
+/** The DisplayContent of a `role: "display"` row, null otherwise. */
+export function displayContentOf(msg: Message): DisplayContent | null {
+  if (msg.role !== "display") return null;
+  const c = msg.content;
+  if (c && typeof c === "object" && !Array.isArray(c) && "type" in c) return c;
+  return null;
 }

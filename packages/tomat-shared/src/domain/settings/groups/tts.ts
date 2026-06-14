@@ -94,7 +94,6 @@ export const ttsGroup: SettingGroup = {
             { value: "zm_yunyang", label: "Mandarin • Male • Yunyang" },
             { value: "ef_dora", label: "Spanish • Female • Dora" },
             { value: "em_alex", label: "Spanish • Male • Alex" },
-            { value: "em_santa", label: "Spanish • Male • Santa" },
             { value: "ff_siwis", label: "French • Female • Siwis" },
             { value: "hf_alpha", label: "Hindi • Female • Alpha" },
             { value: "hf_beta", label: "Hindi • Female • Beta" },

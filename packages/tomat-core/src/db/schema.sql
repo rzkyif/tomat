@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS toolkits (
   content_hash    TEXT NOT NULL DEFAULT '',   -- '' until pinned at install; the trust anchor
   status          TEXT NOT NULL DEFAULT 'downloaded',  -- 'downloaded' | 'installed' | 'drift'
   has_deps        INTEGER NOT NULL DEFAULT 0,  -- 1 when deno.json/package.json declares deps
+  has_database    INTEGER NOT NULL DEFAULT 0,  -- 1 when tools.json declares "database": true
   undeclared_policy TEXT NOT NULL DEFAULT 'deny',  -- 'deny' | 'ask': runtime prompts outside declared perms
   installed_at_ms INTEGER NOT NULL,
   updated_at_ms   INTEGER NOT NULL
@@ -85,10 +86,46 @@ CREATE TABLE IF NOT EXISTS tool_embeddings (
 CREATE TABLE IF NOT EXISTS grants (
   tool_id         TEXT NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
   permission_key  TEXT NOT NULL,              -- e.g. 'net:api.example.com:443'
-  permission_kind TEXT NOT NULL,              -- 'net'|'read'|'write'|'run'|'env'|'ffi'|'sys'
+  permission_kind TEXT NOT NULL,              -- 'net'|'read'|'write'|'run'|'env'|'ffi'|'sys'|'documents'|'llm'|'tts'|'stt'
   state           TEXT NOT NULL DEFAULT 'ask',  -- granted|ask|denied
   granted_at_ms   INTEGER NOT NULL,
   PRIMARY KEY (tool_id, permission_key)
+);
+
+-- Documents: agent-readable/writable markdown notes. The .md files under
+-- core/documents/ are the source of truth (content_hash detects drift on
+-- rescan); this table carries the metadata plus the background-generated
+-- summary + embedding, each pinned to the content hash it was derived from
+-- so the indexer can tell when they are stale.
+CREATE TABLE IF NOT EXISTS documents (
+  id                    TEXT PRIMARY KEY,
+  title                 TEXT NOT NULL UNIQUE,
+  filename              TEXT NOT NULL UNIQUE,   -- relative to core/documents/
+  content_hash          TEXT NOT NULL,
+  summary               TEXT,
+  summary_source_hash   TEXT,
+  embedding             BLOB,
+  embedding_dim         INTEGER,
+  embedding_source_hash TEXT,
+  created_at_ms         INTEGER NOT NULL,
+  updated_at_ms         INTEGER NOT NULL
+);
+
+-- Scheduled prompts: agent- or user-created schedules that fire automated
+-- sessions. `schedule_json` holds the ScheduleSpec; `next_run_at_ms` is the
+-- armed occurrence (NULL once a 'once' schedule has fired or while disabled).
+CREATE TABLE IF NOT EXISTS scheduled_prompts (
+  id               TEXT PRIMARY KEY,
+  owner_client_id  TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  title            TEXT NOT NULL,
+  instruction      TEXT NOT NULL,
+  schedule_json    TEXT NOT NULL,
+  run_missed       INTEGER NOT NULL DEFAULT 0,
+  enabled          INTEGER NOT NULL DEFAULT 1,
+  last_run_at_ms   INTEGER,
+  next_run_at_ms   INTEGER,
+  created_at_ms    INTEGER NOT NULL,
+  updated_at_ms    INTEGER NOT NULL
 );
 
 -- Downloads (ported from the existing Rust download manager)

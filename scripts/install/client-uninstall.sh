@@ -381,22 +381,22 @@ ui_die() {
 # --- configuration --------------------------------------------------------
 
 PURGE=0
-# Channel selectable via TOMAT_CHANNEL env or --channel <c> / --beta (arg wins).
+# Channel selectable via TOMAT_CHANNEL env or --channel <c> / --latest (arg wins).
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --purge) PURGE=1; shift ;;
     --channel) TOMAT_CHANNEL="${2:-}"; shift 2 ;;
     --channel=*) TOMAT_CHANNEL="${1#*=}"; shift ;;
-    --beta) TOMAT_CHANNEL="beta"; shift ;;
+    --latest) TOMAT_CHANNEL="latest"; shift ;;
     --stable) TOMAT_CHANNEL="stable"; shift ;;
     *) printf 'warn: unknown arg: %s\n' "$1" >&2; shift ;;
   esac
 done
 TOMAT_CHANNEL="${TOMAT_CHANNEL:-stable}"
 case "$TOMAT_CHANNEL" in
-  stable | dev | beta) ;;
+  stable | dev | latest) ;;
   *)
-    printf 'error: invalid TOMAT_CHANNEL: %s (expected stable, dev, or beta)\n' \
+    printf 'error: invalid TOMAT_CHANNEL: %s (expected stable, dev, or latest)\n' \
       "$TOMAT_CHANNEL" >&2
     exit 1
     ;;
@@ -440,7 +440,7 @@ fi
 
 if [ "$uname_os" = "Darwin" ]; then
   # Case-insensitive lookup of this channel's bundle (tomat.app /
-  # tomat-beta.app, matching the Tauri productName). Older installs may have
+  # tomat-latest.app, matching the Tauri productName). Older installs may have
   # used a capitalized form, which -iname still matches.
   FOUND_APP="$(find /Applications -maxdepth 1 -iname "tomat$CHANNEL_SUFFIX.app" -print -quit 2>/dev/null || true)"
 

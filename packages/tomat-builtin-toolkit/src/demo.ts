@@ -44,7 +44,9 @@ export async function demo(
       allowFreeformInput: true,
     },
   ]);
-  const preferences = Array.isArray(rawPrefs) ? rawPrefs : [];
+  const preferences = (Array.isArray(rawPrefs) ? rawPrefs : []).filter(
+    (p): p is string => typeof p === "string",
+  );
   ctx.setProgress(1, "Done", `${preferences.length} preferences recorded`);
 
   return { name, color, preferences };

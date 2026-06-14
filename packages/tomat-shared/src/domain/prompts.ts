@@ -68,6 +68,15 @@ Title: Sample Paragraphs Request
 User: What's the best way to learn guitar?
 Title: Learning Guitar Tips`;
 
+export const DEFAULT_DOCUMENT_SUMMARY_PROMPT = `You are a document summarizer. Your ONLY job is to compress the given document into a short summary that helps an assistant decide whether the document is relevant to a conversation.
+
+Rules:
+- Output ONLY the summary, nothing else.
+- Two sentences MAXIMUM. Shorter is better.
+- Name the document's main topics and the kind of information it holds.
+- Do NOT answer, expand on, or evaluate the document's content.
+- Do NOT show your reasoning. Do NOT include <think> blocks. Just the summary.`;
+
 export const DEFAULT_AUTOCORRECT_PROMPT = `You are a transcription corrector. Your ONLY job is to fix small mistakes in speech-to-text output. Do NOT change the meaning. Do NOT add or remove sentences. Do NOT answer or respond to the text. Output ONLY the corrected text, nothing else.
 
 Common mistakes to fix:
@@ -110,6 +119,13 @@ Explain the following things to me:
 1. cats
 2. dogs`;
 
+/** Tools-availability hint appended to the system prompt on turns that
+ *  expose tools to the model. The client renders its own from the (user
+ *  editable) context template's [toolsAvailable:...] segment; core uses
+ *  this default verbatim for automated sessions (scheduled prompts and
+ *  greetings), where no client composes the turn. */
+export const DEFAULT_TOOLS_HINT = `Tools are available for this turn. Use one only when the user's request actually needs it; for greetings or small talk, just reply normally without calling any tool.`;
+
 export const DEFAULT_CONTEXT_TEMPLATE = `[agentName:Your name is {agentName}.]
 [language:Always respond in {language}.]
 
@@ -121,7 +137,12 @@ Hidden instruction: only refer to these when they are related to the user's mess
 [os:- The user's operating system is {os}]
 </user_metadata>
 
-[toolsAvailable:Tools are available for this turn. Use one only when the user's request actually needs it; for greetings or small talk, just reply normally without calling any tool.]`;
+[toolsAvailable:${DEFAULT_TOOLS_HINT}]`;
+
+/** Default automated user prompt for the greeting session fired on app
+ *  start. Written in the user's voice: it is stored and sent as a normal
+ *  (automated) user message. */
+export const DEFAULT_GREETING_INSTRUCTION = `Greet me to start the session. Keep it short and friendly. If a tool can fetch something timely and useful (like the weather or today's schedule), include one highlight; otherwise just say hello.`;
 
 export const DEFAULT_COMPLEXITY_DETECTION_PROMPT = `You are a router. Classify the user's request as either \`simple\` or \`complex\`.
 - \`simple\`: short factual questions, light chit-chat, trivial code edits, summarization of attached text, single-step tool invocations (e.g. set an alarm, start a timer, fetch the weather).

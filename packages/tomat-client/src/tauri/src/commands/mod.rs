@@ -42,7 +42,7 @@ pub use pairing::{
     install_local_core, local_core_base_url, local_core_installed, local_sidecar_ports,
     read_admin_token, read_launch_prefill, start_local_core,
 };
-pub use process::get_self_metrics;
+pub use process::{get_self_metrics, was_autostarted};
 pub use window::{
     hide_main_window, position_window, request_hide_main_window, set_global_shortcut,
     set_input_shortcuts, show_main_window, toggle_main_window, validate_shortcut,

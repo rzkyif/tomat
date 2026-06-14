@@ -37,3 +37,11 @@ pub fn get_self_metrics() -> AppResult<SelfMetrics> {
         cpu_pct,
     })
 }
+
+/// True when this process was launched by the OS login entry: the autostart
+/// plugin registers that entry with an `--autostart` argument. Drives the
+/// `launch` value the frontend reports to the greeting trigger.
+#[tauri::command]
+pub fn was_autostarted() -> bool {
+    std::env::args().any(|a| a == "--autostart")
+}

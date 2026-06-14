@@ -249,15 +249,15 @@ function Ui-Die($Reason, $Detail, $Hint) {
 # --- configuration --------------------------------------------------------
 
 # Channel via TOMAT_CHANNEL env. Selects the channel's client state dir + the
-# uninstall-registry DisplayName to match (tomat vs tomat-beta).
+# uninstall-registry DisplayName to match (tomat vs tomat-latest).
 $Channel = if ($env:TOMAT_CHANNEL) { $env:TOMAT_CHANNEL } else { "stable" }
-if ($Channel -notin @("stable", "dev", "beta")) {
-  Write-Error "invalid TOMAT_CHANNEL: $Channel (expected stable, dev, or beta)"
+if ($Channel -notin @("stable", "dev", "latest")) {
+  Write-Error "invalid TOMAT_CHANNEL: $Channel (expected stable, dev, or latest)"
   exit 1
 }
 $ClientDir = Join-Path $HOME ".tomat\$Channel\client"
 # Match this channel's product only. Stable is bare "tomat" (followed by a
-# space or end, but NOT "tomat-beta"); non-stable matches "tomat-<channel>".
+# space or end, but NOT "tomat-latest"); non-stable matches "tomat-<channel>".
 if ($Channel -eq "stable") {
   $ProductPattern = "^[Tt]omat($| )"
 } else {
@@ -286,8 +286,8 @@ try {
   Ui-ActionStart $IdxLocate "Locating tomat in Windows uninstall registry"
 
   # Case-insensitive match on DisplayName, scoped to this channel's product
-  # (tomat 0.1.0 / tomat-beta 0.1.0). $ProductPattern excludes other channels
-  # so uninstalling stable never removes the beta app and vice versa.
+  # (tomat 0.1.0 / tomat-latest 0.1.0). $ProductPattern excludes other channels
+  # so uninstalling stable never removes the latest app and vice versa.
   $product = $null
   foreach ($key in $UninstallKeys) {
     $product = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue |

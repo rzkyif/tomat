@@ -12,7 +12,7 @@
 //   - Broadcast SidecarSnapshot to subscribers (the ws hub forwards over WS).
 //
 // Out of scope here (handled by sibling modules per the rework plan):
-//   - Per-kind arg construction (sidecars/{llama,whisper,tts}.ts).
+//   - Per-kind arg construction (sidecars/{llama,llama-embed,speech}.ts).
 //   - Windows Job Object sidecar tracking (sidecars/jobctl.ts).
 //   - Binary path resolution (binaries/manager.ts).
 
@@ -32,8 +32,8 @@ import {
 
 const log = getLogger("sidecars");
 
-// Environment variables that third-party sidecar binaries (llama-server,
-// whisper-server, tts) legitimately need. We deliberately do NOT inherit the
+// Environment variables that the sidecar binaries (llama-server,
+// tomat-core-speech) legitimately need. We deliberately do NOT inherit the
 // core's full environment, which can carry operator secrets (e.g. GITHUB_TOKEN
 // used by the upstream resolver) that these binaries have no business seeing.
 // The dynamic-library path is added separately via libraryEnvFor().

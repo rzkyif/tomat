@@ -2,7 +2,6 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:best-practices"],
   "schedule": ["before 9am on monday"],
-  "separateMajorMinor": false,
   "lockFileMaintenance": { "enabled": false },
   "packageRules": [
     {
@@ -12,17 +11,28 @@
       "enabled": false
     },
     {
-      "description": "Combine every dependency update (including majors) into a single weekly PR.",
+      "description": "Combine every dependency update into a single weekly PR titled `fix: update dependencies`. groupName implicitly groups majors in too, so the rule below peels them back out.",
       "matchPackageNames": ["*"],
-      "groupName": "all dependencies",
-      "groupSlug": "all"
+      "groupName": "dependencies",
+      "groupSlug": "all",
+      "semanticCommitType": "fix",
+      "semanticCommitScope": null,
+      "commitMessageAction": "update",
+      "commitMessageExtra": ""
+    },
+    {
+      "description": "Major updates are riskier to batch with routine ones, so route them to their own weekly PR (`fix: update dependencies (major)`) instead of the combined one above.",
+      "matchPackageNames": ["*"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "dependencies (major)",
+      "groupSlug": "major"
     }
   ],
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Workers ship as raw .ts and run standalone (no deno.json), and some scripts pass npm: specifiers as subprocess args. Both are in-source, which the deno manager ignores, so track them here.",
-      "managerFilePatterns": ["/^packages/tomat-core/src/workers/.*\\.ts$/", "/^scripts/.*\\.ts$/"],
+      "description": "Some scripts pass npm: specifiers as subprocess args. These are in-source, which the deno manager ignores, so track them here.",
+      "managerFilePatterns": ["/^scripts/.*\\.ts$/"],
       "matchStrings": [
         "\"npm:(?<depName>@[^@\"/]+/[^@\"]+|[^@\":/][^@\"]*)@(?<currentValue>[^\"]+)\""
       ],

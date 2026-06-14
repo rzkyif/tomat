@@ -10,7 +10,10 @@ import { Subscribers } from "../shared/subscribers.ts";
 import { BinariesApi } from "./binaries";
 import { ChatApi } from "./chat";
 import { CoreClient, type ConnectionListener, type WsListener } from "./client";
+import { DocumentsApi } from "./documents";
+import { GreetingsApi } from "./greetings";
 import { LlmApi } from "./llm";
+import { ScheduledPromptsApi } from "./scheduled-prompts";
 import { ModelsApi } from "./models";
 import { RequirementsApi } from "./requirements";
 import { SidecarsApi } from "./sidecars";
@@ -57,6 +60,9 @@ class CoresRegistry {
     sidecars: SidecarsApi;
     storage: StorageApi;
     toolkits: ToolkitsApi;
+    documents: DocumentsApi;
+    scheduledPrompts: ScheduledPromptsApi;
+    greetings: GreetingsApi;
     stt: SttApi;
     tts: TtsApi;
     llm: LlmApi;
@@ -133,6 +139,9 @@ class CoresRegistry {
       sidecars: new SidecarsApi(client),
       storage: new StorageApi(client),
       toolkits: new ToolkitsApi(client),
+      documents: new DocumentsApi(client),
+      scheduledPrompts: new ScheduledPromptsApi(client),
+      greetings: new GreetingsApi(client),
       stt: new SttApi(client),
       tts: new TtsApi(client),
       llm: new LlmApi(client),
@@ -199,6 +208,9 @@ class CoresRegistry {
     sidecars: SidecarsApi;
     storage: StorageApi;
     toolkits: ToolkitsApi;
+    documents: DocumentsApi;
+    scheduledPrompts: ScheduledPromptsApi;
+    greetings: GreetingsApi;
     stt: SttApi;
     tts: TtsApi;
     llm: LlmApi;

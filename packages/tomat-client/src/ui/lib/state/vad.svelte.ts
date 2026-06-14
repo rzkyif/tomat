@@ -96,7 +96,7 @@ class VadManager {
 
   /** Force-disable immediately (no-op if not enabled). Unlike `toggle()`,
    *  doesn't defer for an in-progress speech segment. Used when STT is
-   *  globally disabled. The whisper-server is going away, so any segment
+   *  globally disabled. The speech sidecar may be stopped, so any segment
    *  still in the pipeline would just hit a dead endpoint. The visibility
    *  listener and speech handler stay attached so a later re-enable doesn't
    *  need a full UserInput remount. */

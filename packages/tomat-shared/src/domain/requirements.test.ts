@@ -68,23 +68,46 @@ Deno.test("requiredModelRefs: tts base files only when tts.enabled; embed always
   );
 });
 
-Deno.test("requiredBinaryKinds: deno always; llama/whisper gated", () => {
-  assertEquals(requiredBinaryKinds({ "llm.provider": "external" }), ["deno"]);
+Deno.test("requiredBinaryKinds: deno + llama-server always; speech gated on local STT or TTS", () => {
+  assertEquals(requiredBinaryKinds({ "llm.provider": "external" }).sort(), [
+    "deno",
+    "llama-server",
+  ]);
   assertEquals(requiredBinaryKinds({ "llm.provider": "local" }).sort(), ["deno", "llama-server"]);
+  // Local STT pulls in the combined speech binary.
   assertEquals(
     requiredBinaryKinds({
       "llm.provider": "local",
       "stt.enabled": true,
       "stt.provider": "local",
     }).sort(),
-    ["deno", "llama-server", "whisper-server"],
+    ["deno", "llama-server", "tomat-core-speech"],
   );
+  // TTS alone also pulls it in (STT off).
+  assertEquals(requiredBinaryKinds({ "stt.enabled": false, "tts.enabled": true }).sort(), [
+    "deno",
+    "llama-server",
+    "tomat-core-speech",
+  ]);
+  // External STT with TTS off needs no local speech binary.
+  assertEquals(requiredBinaryKinds({ "stt.enabled": true, "stt.provider": "external" }).sort(), [
+    "deno",
+    "llama-server",
+  ]);
 });
 
-Deno.test("binaryUnavailableOnTriple: every sidecar binary is available on all triples", () => {
+Deno.test("binaryUnavailableOnTriple: resolver-backed binaries available on all triples", () => {
   for (const triple of TRIPLES) {
     assertEquals(binaryUnavailableOnTriple("llama-server", triple), false);
-    assertEquals(binaryUnavailableOnTriple("whisper-server", triple), false);
     assertEquals(binaryUnavailableOnTriple("deno", triple), false);
+  }
+});
+
+Deno.test("binaryUnavailableOnTriple: self-hosted speech available except windows-arm64", () => {
+  for (const triple of TRIPLES) {
+    assertEquals(
+      binaryUnavailableOnTriple("tomat-core-speech", triple),
+      triple === "aarch64-pc-windows-msvc",
+    );
   }
 });

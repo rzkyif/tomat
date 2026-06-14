@@ -2,7 +2,9 @@
   import { onDestroy, onMount, tick } from "svelte";
   import AgentMessage from "$lib/components/chat/messages/AgentMessage.svelte";
   import ErrorMessage from "$lib/components/chat/messages/ErrorMessage.svelte";
+  import AutomatedPrompt from "$lib/components/chat/messages/AutomatedPrompt.svelte";
   import SystemMessage from "$lib/components/chat/messages/SystemMessage.svelte";
+  import DisplayBubble from "$lib/components/chat/messages/DisplayBubble.svelte";
   import ToolCall from "$lib/components/chat/messages/ToolCall.svelte";
   import RelevantTools from "$lib/components/chat/messages/RelevantTools.svelte";
   import UserInput from "$lib/components/chat/UserInput.svelte";
@@ -14,8 +16,15 @@
   import SessionList from "$lib/components/session-list/SessionList.svelte";
   import Bubble from "$lib/components/ui/Bubble.svelte";
   import MessageStackGroup from "$lib/components/chat/MessageStackGroup.svelte";
-  import { getTextContent, type Message, type MessageContent } from "$lib/shared/types";
   import {
+    asMessageContent,
+    displayContentOf,
+    getTextContent,
+    type Message,
+    type MessageContent,
+  } from "$lib/shared/types";
+  import {
+    documentsState,
     downloadsState,
     messagesState,
     serversState,
@@ -30,7 +39,7 @@
   import { connectionState } from "$lib/state/connection.svelte";
   import { cores } from "$lib/core";
   import { platform } from "$lib/platform";
-  import { darkFromLight } from "$lib/shared/color";
+  import { useTheme } from "$lib/composables/use-theme.svelte";
   import { getLogger } from "$lib/shared/log";
   import {
     shortcutHandler,
@@ -78,72 +87,10 @@
     else stopBlurKeepalive();
   });
 
-  // Visual preferences applied directly to documentElement: theme class for
-  // dark mode, root font size for the rem-based scale. SSR is off (see
-  // +layout.ts) so it's safe to touch `window` and `document` at module
-  // evaluation time.
-  const themeMql = window.matchMedia("(prefers-color-scheme: dark)");
-
-  function applyTheme(theme: string) {
-    const isDark = theme === "dark" || (theme === "auto" && themeMql.matches);
-    document.documentElement.classList.toggle("dark", isDark);
-  }
-
-  function applyTextSize(size: number) {
-    document.documentElement.style.fontSize = `${size}px`;
-  }
-
-  function applyBubbleColor(cssVar: string, hex: string | undefined) {
-    if (typeof hex !== "string" || hex.length === 0) return;
-    document.documentElement.style.setProperty(cssVar, hex);
-  }
-
-  function applyCssVarPx(cssVar: string, value: number | undefined) {
-    if (typeof value !== "number" || !Number.isFinite(value)) return;
-    document.documentElement.style.setProperty(cssVar, `${value}px`);
-  }
-
-  // Theme-adaptive color: write the stored light-mode hex to `lightVar` and its
-  // theme inversion (color.ts `darkFromLight`, the reversible stepping curve) to
-  // `darkVar`, so the `.dark` rules render the flipped color. The same curve
-  // backs the picker round-trip, so what's stored, previewed, and rendered agree.
-  function setThemeColor(
-    lightVar: string,
-    darkVar: string,
-    hex: string | undefined,
-  ) {
-    if (typeof hex !== "string" || hex.length === 0) return;
-    document.documentElement.style.setProperty(lightVar, hex);
-    document.documentElement.style.setProperty(darkVar, darkFromLight(hex));
-  }
-
-  // Fallback stacks appended after the user's chosen family so a missing
-  // glyph (or a typo'd / uninstalled face) gracefully degrades to the
-  // platform-native stack rather than the browser default.
-  const FONT_DEFAULT_FALLBACK =
-    `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif`;
-  const FONT_MONO_FALLBACK =
-    `ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`;
-
-  function applyFont(cssVar: "--font-default" | "--font-mono", value: unknown) {
-    const family = typeof value === "string" ? value : "";
-    if (!family || family === "default") {
-      document.documentElement.style.removeProperty(cssVar);
-      return;
-    }
-    const fallback =
-      cssVar === "--font-mono" ? FONT_MONO_FALLBACK : FONT_DEFAULT_FALLBACK;
-    const escaped = family.replace(/"/g, '\\"');
-    document.documentElement.style.setProperty(
-      cssVar,
-      `"${escaped}", ${fallback}`,
-    );
-  }
-
-  function listenSystemTheme(callback: () => void): () => void {
-    themeMql.addEventListener("change", callback);
-    return () => themeMql.removeEventListener("change", callback);
-  }
+  // Appearance/layout settings applied to documentElement live in the theme
+  // composable; the consumer owns the boot apply + the per-key $effects below.
+  // SSR is off (see +layout.ts) so it's safe to touch `window`/`document`.
+  const theme = useTheme();
 
   let loaded = $state(false);
   let sessionLoading = $state(true);
@@ -269,6 +216,13 @@
   let unlistenHideRequested: (() => void) | null = null;
   let cleanupSystemTheme: (() => void) | null = null;
 
+  // Autostart (login) launches stay hidden until something reveals the window:
+  // a greeting completing, the core reporting no greeting ran, or this
+  // last-resort watchdog firing when the core never connects at all. Module
+  // scope so onDestroy can clear it.
+  let connectWatchdog: ReturnType<typeof setTimeout> | null = null;
+  const AUTOSTART_REVEAL_FALLBACK_MS = 10_000;
+
   // On-demand mode: when the selected core points at loopback and the binary
   // is installed locally, spawn it ourselves if no service has it running.
   // Idempotent: start_local_core probes the port first and exits cleanly if
@@ -290,82 +244,6 @@
     } catch (e) {
       log.error("ensureLocalCoreUpIfNeeded:", e);
     }
-  }
-
-  // Apply every appearance/layout DOM setting from the (client-local) settings.
-  // Runs on the boot critical path before show so the window paints correctly
-  // themed; the per-key $effects below re-apply on any later change.
-  function applyAllAppearance(): void {
-    applyTheme(settingsState.currentSettings["appearance.theme"] ?? "auto");
-    applyTextSize(settingsState.currentSettings["appearance.textSize"] ?? 16);
-    setThemeColor(
-      "--user-bubble-bg-light",
-      "--user-bubble-bg-dark",
-      settingsState.currentSettings["appearance.userBubbleColor"],
-    );
-    setThemeColor(
-      "--agent-bubble-bg-light",
-      "--agent-bubble-bg-dark",
-      settingsState.currentSettings["appearance.agentBubbleColor"],
-    );
-    setThemeColor(
-      "--agent2-bubble-bg-light",
-      "--agent2-bubble-bg-dark",
-      settingsState.currentSettings["appearance.secondaryAgentBubbleColor"],
-    );
-    applyBubbleColor(
-      "--default-base",
-      settingsState.currentSettings["appearance.defaultColor"],
-    );
-    applyBubbleColor(
-      "--accent-red-base",
-      settingsState.currentSettings["appearance.accentRed"],
-    );
-    applyBubbleColor(
-      "--accent-blue-base",
-      settingsState.currentSettings["appearance.accentBlue"],
-    );
-    applyBubbleColor(
-      "--accent-purple-base",
-      settingsState.currentSettings["appearance.accentPurple"],
-    );
-    applyBubbleColor(
-      "--accent-green-base",
-      settingsState.currentSettings["appearance.accentGreen"],
-    );
-    applyBubbleColor(
-      "--accent-yellow-base",
-      settingsState.currentSettings["appearance.accentYellow"],
-    );
-    applyCssVarPx(
-      "--rounded-small",
-      settingsState.currentSettings["appearance.roundedSmall"] as number,
-    );
-    applyCssVarPx(
-      "--rounded-medium",
-      settingsState.currentSettings["appearance.roundedMedium"] as number,
-    );
-    applyCssVarPx(
-      "--rounded-large",
-      settingsState.currentSettings["appearance.roundedLarge"] as number,
-    );
-    applyFont(
-      "--font-default",
-      settingsState.currentSettings["appearance.defaultFont"],
-    );
-    applyFont(
-      "--font-mono",
-      settingsState.currentSettings["appearance.monoFont"],
-    );
-    setThemeColor(
-      "--bubble-shadow-color-light",
-      "--bubble-shadow-color-dark",
-      settingsState.currentSettings["appearance.bubbleShadowColor"],
-    );
-    applyCssVarPx(
-      "--bubble-shadow-distance",
-      settingsState.currentSettings["appearance.bubbleShadowDistance"] as number,
-    );
   }
 
   // Redirect out of the two core-backed transient modes while reconnecting:
@@ -441,7 +319,12 @@
     // the window, then show it. Everything that touches the core / network /
     // keychain is deferred to after the window is visible (the deferred phase
     // below), so a slow or unreachable core can never keep the window hidden.
+    // Whether this was a login/autostart launch decides whether we show the
+    // window now or stay hidden until a greeting (or the watchdog) reveals it.
+    // It is a local Tauri call (reads launch args); default to a manual launch.
+    let autostarted = false;
     try {
+      autostarted = await platform().autostart.wasAutostarted().catch(() => false);
       await settingsState.loadClientSettings();
       // Decide the initial mode from LOCAL data only: whether a core is paired
       // is the client-settings `cores` list, with no select()/keychain/network.
@@ -452,7 +335,9 @@
         viewState.setImmediate("newCore");
         viewState.setLocked(true);
       }
-      applyAllAppearance();
+      // Apply every appearance/layout DOM setting on the boot critical path so
+      // the window paints correctly themed; the per-key $effects re-apply later.
+      theme.applyAll(settingsState.currentSettings);
       // Only show the "Loading latest session…" placeholder when we're actually
       // about to load one: a core must be paired, and "always start new" mode
       // has nothing to load so the placeholder would mislead.
@@ -465,7 +350,19 @@
     } finally {
       loaded = true;
       await tick();
-      if (getDuration() > 0) {
+      if (autostarted) {
+        // Autostart (login) launch: park the content offscreen (no transition,
+        // window still hidden) but do NOT show it, so the app starts quietly in
+        // the background and a later reveal slides in cleanly. The reveal comes
+        // from a greeting finishing (session.created show_when_done), the
+        // deferred phase seeing the core report no greeting ran, or the
+        // connectWatchdog firing when the core never connects, so an autostarted
+        // app can never stay invisible.
+        applyWindowState("offscreen", false);
+        connectWatchdog = setTimeout(() => {
+          void platform().windowing.show();
+        }, AUTOSTART_REVEAL_FALLBACK_MS);
+      } else if (getDuration() > 0) {
         // Park the content offscreen (no transition), reveal the window while
         // it is still clear of the viewport, then slide it in after a settle
         // beat. `windowTransition` spans the whole reveal so an early shortcut
@@ -486,9 +383,9 @@
     // Post-paint work. Fire-and-forget; the window is already visible.
     document.addEventListener("click", linkHandler);
 
-    cleanupSystemTheme = listenSystemTheme(() => {
+    cleanupSystemTheme = theme.listenSystemTheme(() => {
       if (settingsState.currentSettings["appearance.theme"] === "auto") {
-        applyTheme("auto");
+        theme.applyTheme("auto");
       }
     });
 
@@ -574,11 +471,54 @@
       // core-settings fetch or per-module kick.
       settingsState.attach();
       toolkitsState.ensureConnected();
+      documentsState.attach();
       streamingState.attach();
       serversState.attach();
       sessionsState.attach();
       downloadsState.attach();
       updateState.attach();
+      // Report this app start to the greeting trigger once a core is
+      // reachable (once per app run); core decides from the greetings.*
+      // settings whether to open an automated greeting session.
+      let greetingReported = false;
+      let unsubGreeting: (() => void) | null = null;
+      unsubGreeting = cores().subscribeConnectionState((state) => {
+        if (state !== "connected" || greetingReported) return;
+        greetingReported = true;
+        // One-shot: later connected edges must not re-trigger, so drop the
+        // subscription instead of leaking it for the app's lifetime. (Null
+        // only if this fires synchronously during subscribe; the flag above
+        // already guards re-entry then.)
+        unsubGreeting?.();
+        // Connected: the no-connection watchdog is moot now.
+        if (connectWatchdog !== null) {
+          clearTimeout(connectWatchdog);
+          connectWatchdog = null;
+        }
+        void (async () => {
+          // The route answers immediately (the greeting itself starts in the
+          // background once the model is loaded), so a slow response means
+          // something is wrong; don't let an autostart window stay hidden
+          // behind a hung request.
+          const res = await Promise.race([
+            cores()
+              .api()
+              .greetings.run(autostarted ? "autostart" : "manual"),
+            new Promise<never>((_resolve, reject) =>
+              setTimeout(() => reject(new Error("greeting trigger timed out")), 10_000),
+            ),
+          ]);
+          // Safety net for an autostart launch that stayed hidden: if the core
+          // ran no greeting (greetings off, or runOn gated this launch out),
+          // reveal the window now. When a greeting DID run, its session reveals
+          // the window on completion via the show_when_done focus path.
+          if (autostarted && !res.ran) await platform().windowing.show();
+        })().catch((e) => {
+          log.warn("greeting trigger failed:", e);
+          // On failure during an autostart launch, reveal rather than strand.
+          if (autostarted) void platform().windowing.show();
+        });
+      });
       // Pull the required-files snapshot now that a core may be selected, and
       // re-pull on later core switches (downloadsState also keeps it live via
       // the requirements.snapshot WS frame).
@@ -615,6 +555,7 @@
     unlistenMonitor?.();
     unlistenHideRequested?.();
     cleanupSystemTheme?.();
+    if (connectWatchdog !== null) clearTimeout(connectWatchdog);
   });
 
   // Drive the panel slide whenever a navigation is requested. viewState holds
@@ -672,84 +613,84 @@
   });
 
   $effect(() => {
-    const theme = settingsState.currentSettings["appearance.theme"];
-    if (loaded && theme) applyTheme(theme);
+    const mode = settingsState.currentSettings["appearance.theme"];
+    if (loaded && mode) theme.applyTheme(mode);
   });
 
   $effect(() => {
     const size = settingsState.currentSettings["appearance.textSize"];
-    if (loaded && size) applyTextSize(size as number);
+    if (loaded && size) theme.applyTextSize(size as number);
   });
 
   $effect(() => {
     const v = settingsState.currentSettings["appearance.userBubbleColor"];
-    if (loaded) setThemeColor("--user-bubble-bg-light", "--user-bubble-bg-dark", v);
+    if (loaded) theme.setThemeColor("--user-bubble-bg-light", "--user-bubble-bg-dark", v);
   });
 
   $effect(() => {
     const v = settingsState.currentSettings["appearance.agentBubbleColor"];
-    if (loaded) setThemeColor("--agent-bubble-bg-light", "--agent-bubble-bg-dark", v);
+    if (loaded) theme.setThemeColor("--agent-bubble-bg-light", "--agent-bubble-bg-dark", v);
   });
 
   $effect(() => {
     const v =
       settingsState.currentSettings["appearance.secondaryAgentBubbleColor"];
-    if (loaded) setThemeColor("--agent2-bubble-bg-light", "--agent2-bubble-bg-dark", v);
+    if (loaded) theme.setThemeColor("--agent2-bubble-bg-light", "--agent2-bubble-bg-dark", v);
   });
 
   $effect(() => {
     const v = settingsState.currentSettings["appearance.defaultColor"];
-    if (loaded) applyBubbleColor("--default-base", v);
+    if (loaded) theme.applyBubbleColor("--default-base", v);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.accentRed"];
-    if (loaded) applyBubbleColor("--accent-red-base", v);
+    if (loaded) theme.applyBubbleColor("--accent-red-base", v);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.accentBlue"];
-    if (loaded) applyBubbleColor("--accent-blue-base", v);
+    if (loaded) theme.applyBubbleColor("--accent-blue-base", v);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.accentPurple"];
-    if (loaded) applyBubbleColor("--accent-purple-base", v);
+    if (loaded) theme.applyBubbleColor("--accent-purple-base", v);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.accentGreen"];
-    if (loaded) applyBubbleColor("--accent-green-base", v);
+    if (loaded) theme.applyBubbleColor("--accent-green-base", v);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.accentYellow"];
-    if (loaded) applyBubbleColor("--accent-yellow-base", v);
+    if (loaded) theme.applyBubbleColor("--accent-yellow-base", v);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.roundedSmall"];
-    if (loaded) applyCssVarPx("--rounded-small", v as number);
+    if (loaded) theme.applyCssVarPx("--rounded-small", v as number);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.roundedMedium"];
-    if (loaded) applyCssVarPx("--rounded-medium", v as number);
+    if (loaded) theme.applyCssVarPx("--rounded-medium", v as number);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.roundedLarge"];
-    if (loaded) applyCssVarPx("--rounded-large", v as number);
+    if (loaded) theme.applyCssVarPx("--rounded-large", v as number);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.defaultFont"];
-    if (loaded) applyFont("--font-default", v);
+    if (loaded) theme.applyFont("--font-default", v);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.monoFont"];
-    if (loaded) applyFont("--font-mono", v);
+    if (loaded) theme.applyFont("--font-mono", v);
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.bubbleShadowColor"];
     if (loaded) {
-      setThemeColor("--bubble-shadow-color-light", "--bubble-shadow-color-dark", v);
+      theme.setThemeColor("--bubble-shadow-color-light", "--bubble-shadow-color-dark", v);
     }
   });
   $effect(() => {
     const v = settingsState.currentSettings["appearance.bubbleShadowDistance"];
-    if (loaded) applyCssVarPx("--bubble-shadow-distance", v as number);
+    if (loaded) theme.applyCssVarPx("--bubble-shadow-distance", v as number);
   });
   // bubbleBlurEnabled / bubbleBlurRings drive the halo layer count directly in
   // Bubble.svelte (reactive read of settingsState), so no DOM apply here.
@@ -802,6 +743,10 @@
     if (msg.role === "loading") return true;
     if (msg.role === "tool") return true;
     if (msg.role === "tool_filter") return true;
+    if (msg.role === "display") return true;
+    // Core-authored prompt of an automated session: a collapsed
+    // "Automated Prompt" bubble instead of a full user bubble.
+    if (msg.role === "user" && msg.automated) return true;
     return false;
   }
 
@@ -867,7 +812,7 @@
   // time: the persisted content stays the clean partial text, the note is
   // presentation only.
   function assistantContent(msg: Message): MessageContent {
-    const base = msg.content ?? "";
+    const base = asMessageContent(msg.content);
     if (!msg.interrupted) return base;
     const text = getTextContent(base);
     return text ? `${text}\n\n> _Interrupted._` : "> _Interrupted._";
@@ -1037,7 +982,7 @@
                         <AgentMessage
                           kind="reasoning"
                           id={msg.id}
-                          content={msg.content ?? ""}
+                          content={asMessageContent(msg.content)}
                           modelUsed={msg.modelUsed}
                           reasoningDurationMs={msg.reasoningDurationMs}
                           isStreaming={streamingState.isLive(msg.id)}
@@ -1048,6 +993,13 @@
                         <SystemMessage
                           id={msg.id}
                           content={msg.content as string}
+                          {neighborLeft}
+                          {neighborRight}
+                        />
+                      {:else if msg.role === "user"}
+                        <AutomatedPrompt
+                          id={msg.id}
+                          content={getTextContent(asMessageContent(msg.content))}
                           {neighborLeft}
                           {neighborRight}
                         />
@@ -1071,6 +1023,16 @@
                           {neighborLeft}
                           {neighborRight}
                         />
+                      {:else if msg.role === "display"}
+                        {@const display = displayContentOf(msg)}
+                        {#if display}
+                          <DisplayBubble
+                            id={msg.id}
+                            content={display}
+                            {neighborLeft}
+                            {neighborRight}
+                          />
+                        {/if}
                       {/if}
                     </MessageEnter>
                   {/snippet}
@@ -1085,7 +1047,7 @@
                 >
                   {#if msg.role === "user"}
                     <UserMessage
-                      content={msg.content ?? ""}
+                      content={asMessageContent(msg.content)}
                       editing={msg.id != null && msg.id === editingUserMsgId}
                       onStartEdit={() =>
                         (editingUserMsgId = msg.id ?? null)}
@@ -1100,7 +1062,7 @@
                         : undefined}
                     />
                   {:else if msg.role === "error"}
-                    <ErrorMessage content={msg.content ?? ""} />
+                    <ErrorMessage content={asMessageContent(msg.content)} />
                   {:else if msg.role === "assistant"}
                     <AgentMessage
                       kind="content"

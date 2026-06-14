@@ -1,93 +1,33 @@
-// Builds the three binaries that make up a tomat-core install for the
-// requested host triple:
+// Builds the tomat-core binary + the four native helper crates (updater,
+// keychain, hwinfo, ptyhost) for one triple, into dist/<triple>/ with
+// channel-suffixed names.
 //
-//   tomat-core           (Deno compile): the long-running service
-//   tomat-core-updater   (Cargo build):  performs the swap during self-update
-//   tomat-core-keychain  (Cargo build):  wraps the platform keychain
+// Thin wrapper over the same buildAll / buildHelpers the release uses, so there
+// is a single core-build implementation: the lean compile workspace (a ~94 MB
+// binary instead of ~2.2 GB) and all four helpers, identical to what ships.
 //
-// Default target is the current host. Pass `--target=<triple>` to override.
-// Cargo cross-compilation for non-host triples requires the matching Rust
-// target installed (`rustup target add <triple>`); plain `cargo build`
-// outputs only host artifacts.
+// Default target is the current host. Pass `--target=<triple>` to override;
+// cargo cross-compilation for non-host triples needs the matching Rust target
+// installed (`rustup target add <triple>`).
+//
+// Flags:
+//   --channel=stable|latest   channel suffix on our binary names (default stable)
+//   --target=<triple>         triple to build (default host)
 
 import { parseArgs } from "@std/cli/parse-args";
+import type { Triple } from "../packages/tomat-shared/src/domain/model.ts";
+import { ALL_TRIPLES, buildAll, buildHelpers } from "./release/core.ts";
+import { channelBinSuffix, fail, parseChannelFlag } from "./release/lib.ts";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const args = parseArgs(Deno.args, { string: ["target", "channel"] });
+const channel = parseChannelFlag(args.channel);
+const suffix = channelBinSuffix(channel);
 
-const args = parseArgs(Deno.args, {
-  string: ["target", "out", "channel"],
-  default: { out: "dist", channel: "stable" },
-});
-
-const target = args.target ?? Deno.build.target;
-const outDir = `${ROOT}${args.out}/${target}`;
-
-// Channel suffix on OUR binary names so a beta build (tomat-core-beta) can be
-// installed alongside stable (tomat-core). Stable stays bare. Mirrors
-// paths.ts channelSuffix() + channel.rs channel_suffix().
-const channel = args.channel;
-if (!["stable", "dev", "beta"].includes(channel)) {
-  console.error(`invalid --channel: ${channel} (expected stable, dev, or beta)`);
-  Deno.exit(1);
-}
-const suffix = channel === "stable" ? "" : `-${channel}`;
-
-await Deno.mkdir(outDir, { recursive: true });
-
-const isWindows = target.includes("windows");
-const exe = isWindows ? ".exe" : "";
-
-async function denoCompile(name: string, entry: string): Promise<void> {
-  const outPath = `${outDir}/${name}${exe}`;
-  console.log(`compiling ${name} -> ${outPath}`);
-  const cmd = new Deno.Command("deno", {
-    args: ["compile", "--allow-all", "--target", target, "--output", outPath, entry],
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const { code } = await cmd.output();
-  if (code !== 0) {
-    console.error(`compile ${name} failed (exit ${code})`);
-    Deno.exit(code);
-  }
+const triple = (args.target ?? Deno.build.target) as Triple;
+if (!(ALL_TRIPLES as readonly string[]).includes(triple)) {
+  fail(`unknown --target "${triple}". Valid: ${ALL_TRIPLES.join(", ")}`);
 }
 
-async function cargoBuild(crateDir: string, builtName: string, outName: string): Promise<void> {
-  console.log(`cargo build ${builtName} (release) -> ${outDir}/${outName}${exe}`);
-  const cargoArgs = [
-    "build",
-    "--release",
-    "--manifest-path",
-    `${ROOT}${crateDir}/Cargo.toml`,
-    "--target",
-    target,
-  ];
-  const cmd = new Deno.Command("cargo", {
-    args: cargoArgs,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const { code } = await cmd.output();
-  if (code !== 0) {
-    console.error(`cargo build ${builtName} failed (exit ${code})`);
-    Deno.exit(code);
-  }
-  const builtPath = `${ROOT}target/${target}/release/${builtName}${exe}`;
-  const dstPath = `${outDir}/${outName}${exe}`;
-  await Deno.copyFile(builtPath, dstPath);
-}
-
-await denoCompile(`tomat-core${suffix}`, `${ROOT}packages/tomat-core/src/main.ts`);
-await cargoBuild(
-  "packages/tomat-core-updater",
-  "tomat-core-updater",
-  `tomat-core-updater${suffix}`,
-);
-await cargoBuild(
-  "packages/tomat-core-keychain",
-  "tomat-core-keychain",
-  `tomat-core-keychain${suffix}`,
-);
-await cargoBuild("packages/tomat-core-hwinfo", "tomat-core-hwinfo", `tomat-core-hwinfo${suffix}`);
-
-console.log(`done. artifacts at ${outDir}`);
+await buildAll([triple], suffix);
+await buildHelpers([triple], suffix);
+console.log(`done. artifacts at dist/${triple}`);

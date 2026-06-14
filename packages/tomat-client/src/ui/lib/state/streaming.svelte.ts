@@ -18,6 +18,7 @@ import { cores } from "$lib/core";
 import { getLogger } from "$lib/shared/log";
 import { messagesState } from "./messages.svelte";
 import { permissionState } from "./permissions.svelte";
+import { scheduleConfirmState } from "./schedule-confirm.svelte";
 import { sessionsState } from "./sessions.svelte";
 import { settingsState } from "./settings.svelte";
 import { ttsState } from "./tts.svelte";
@@ -53,6 +54,11 @@ class StreamingState {
   private interruptListeners: InterruptListener[] = [];
   private unsubscribeWs: (() => void) | null = null;
   private unsubscribeConn: (() => void) | null = null;
+  // Streams this client started and then abandoned (interrupt / disconnect).
+  // The server keeps emitting frames until our interrupt lands, so without
+  // this the idle-adoption path below would re-latch onto our own dying
+  // stream and resurrect its bubble. Bounded so it can't grow unbounded.
+  private abandonedStreamIds: string[] = [];
 
   isLive(id: string | undefined): boolean {
     return id !== undefined && this.liveIds.has(id);
@@ -83,6 +89,12 @@ class StreamingState {
       if (interrupted > 0) {
         log.info(`interrupted ${interrupted} in-flight tool call(s): core disconnected`);
       }
+      // A pending permission / schedule-confirm prompt belongs to a now-dead
+      // tool call: its response would post into a dropped socket, leaving
+      // UserInput stuck in that input mode. Clear both so the textarea
+      // returns; the call is already flipped to interrupted above.
+      permissionState.clear();
+      scheduleConfirmState.clear();
     });
   }
 
@@ -139,8 +151,24 @@ class StreamingState {
   }
 
   private onFrame(frame: ServerToClientFrame): void {
-    if (frame.kind === "chat.message" && frame.streamId === this.streamId) {
-      this.onChatMessage(frame.message as ServerMessage, frame.afterId, frame.final);
+    if (frame.kind === "chat.message") {
+      if (
+        this.streamId === null &&
+        !this.isActive &&
+        frame.sessionId === sessionsState.id &&
+        !this.abandonedStreamIds.includes(frame.streamId)
+      ) {
+        // Core-initiated stream (a scheduled prompt or greeting fired) on
+        // the session we're viewing: latch on at its first chat.message,
+        // the only chat frame that carries sessionId. Deltas and the rest
+        // then reduce through the normal paths below. A stream we just
+        // abandoned is excluded so a late frame can't resurrect our own
+        // interrupted bubble.
+        this.adoptForeignStream(frame.streamId);
+      }
+      if (frame.streamId === this.streamId) {
+        this.onChatMessage(frame.message as ServerMessage, frame.afterId, frame.final);
+      }
       return;
     }
     if (frame.kind === "chat.delta" && frame.streamId === this.streamId) {
@@ -156,10 +184,23 @@ class StreamingState {
     }
     if (frame.kind === "chat.done" && frame.streamId === this.streamId) {
       this.finish();
+      // Pops the window when this session was created with focus
+      // "show_when_done" (no-op otherwise).
+      sessionsState.notifyStreamDone(sessionsState.id);
       return;
     }
     if (frame.kind === "chat.error" && frame.streamId === this.streamId) {
       this.recordError(frame.code as LLMErrorType, frame.message);
+      // A core-initiated turn that errors is still terminal: reveal a
+      // "show_when_done" window now, exactly as chat.done does, so a failing
+      // greeting on an autostart launch can't strand the app hidden forever.
+      sessionsState.notifyStreamDone(sessionsState.id);
+      return;
+    }
+    if (frame.kind === "schedule.confirm_request") {
+      // Drives UserInput's schedule-confirm mode globally, same mechanism
+      // as the permission mode below.
+      scheduleConfirmState.set(frame);
       return;
     }
     if (
@@ -184,6 +225,7 @@ class StreamingState {
         // while a request was still pending; drop it so the input returns
         // to normal.
         permissionState.clearForCall(frame.callId);
+        scheduleConfirmState.clearForCall(frame.callId);
       }
       messagesState.applyToolEvent(frame);
     }
@@ -191,7 +233,9 @@ class StreamingState {
 
   private onChatMessage(msg: ServerMessage, afterId: string | null, final: boolean): void {
     messagesState.applyServerMessage(msg, afterId);
-    const local = msg as unknown as Message;
+    // The wire union widens into the client bag (every wire field is an
+    // optional bag field); spread so the role-narrowed reads below are typed.
+    const local: Message = { ...msg };
     if (local.role === "assistant" || local.role === "reasoning") {
       this.awaitingFirstDelta = false;
     }
@@ -223,6 +267,19 @@ class StreamingState {
     if (local.role === "tool_filter" && local.status === "complete" && (local.toolsSent ?? 0) > 0) {
       messagesState.appendSystemToolsHint(buildToolsHint());
     }
+  }
+
+  /** Latch onto a stream this client did not start. Mirrors start()'s state
+   *  reset, minus the chat.start frame (core already runs the turn). */
+  private adoptForeignStream(streamId: string): void {
+    this.isActive = true;
+    this.awaitingFirstDelta = false;
+    this.turnHadAssistant = false;
+    this.liveIds = new Set();
+    this.ttsTargetId = null;
+    this.ttsCursor = 0;
+    this.turnAnchorId = null;
+    this.streamId = streamId;
   }
 
   /** Point the TTS feed at an assistant message. The turn's first assistant
@@ -291,6 +348,13 @@ class StreamingState {
     this.liveIds = new Set();
   }
 
+  /** Record a streamId we are walking away from so the adoption path won't
+   *  re-latch onto its trailing frames. Bounded ring of recent ids. */
+  private markAbandoned(streamId: string | null): void {
+    if (!streamId) return;
+    this.abandonedStreamIds = [...this.abandonedStreamIds, streamId].slice(-32);
+  }
+
   recordError(errorType: LLMErrorType | ErrorCode, detail?: string): void {
     // Partial streamed content was already finalized server-side (flagged
     // interrupted), so the error gets its own bubble instead of replacing
@@ -318,6 +382,7 @@ class StreamingState {
   abortForDisconnect(): void {
     if (!this.isActive) return;
     this.resetTTSPlayback();
+    this.markAbandoned(this.streamId);
     this.finish();
   }
 
@@ -325,6 +390,7 @@ class StreamingState {
     if (!this.isActive) return;
     this.resetTTSPlayback();
     const streamId = this.streamId;
+    this.markAbandoned(streamId);
     this.finish();
     if (streamId) cores().api().chat.interrupt(streamId);
   }
@@ -332,6 +398,7 @@ class StreamingState {
   async interruptStreaming(): Promise<void> {
     if (!this.isActive && !messagesState.hasActiveToolCall) return;
     const streamId = this.streamId;
+    this.markAbandoned(streamId);
     this.cancel();
     await Promise.all(this.interruptListeners.map((fn) => fn()));
     if (streamId) cores().api().chat.interrupt(streamId);

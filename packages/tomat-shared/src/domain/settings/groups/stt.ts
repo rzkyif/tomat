@@ -1,9 +1,9 @@
 // Speech-to-Text: one hybrid group spanning client and core. The voice-capture
 // UX (microphone mode, push-to-talk, transcription post-processing) is stored
-// on the client; the enable toggle and the recognition engine (provider,
-// whisper-server config, external API) are stored on the core. Each section
-// declares its own `destination` so fields route correctly and the header
-// shows a Client/Core badge per section.
+// on the client; the enable toggle and the recognition engine (provider, speech
+// sidecar model, external API) are stored on the core. Each section declares its
+// own `destination` so fields route correctly and the header shows a Client/Core
+// badge per section.
 
 import type { SettingGroup } from "../types.ts";
 import { SECURE_URL_VALIDATION } from "../types.ts";
@@ -19,9 +19,9 @@ export const sttGroup: SettingGroup = {
   iconInactive: "i-material-symbols-mic-outline-rounded",
   sections: [
     {
-      // The enable toggle is core-persisted: core gates the whisper-server
-      // sidecar and the required-downloads snapshot on it, so a client-side
-      // value would leave both running off the schema default.
+      // The enable toggle is core-persisted: core gates the speech sidecar
+      // and the required-downloads snapshot on it, so a client-side value
+      // would leave both running off the schema default.
       label: "General",
       destination: "core",
       fields: [
@@ -225,9 +225,9 @@ export const sttGroup: SettingGroup = {
           id: "stt.modelPath",
           name: "Model File",
           description:
-            "Path to the speech recognition model file, e.g. @user/repo/branch/model.bin.",
+            "Path to the Whisper encoder ONNX file, e.g. @user/repo/branch/model-encoder.int8.onnx. The matching decoder and tokens files are found automatically.",
           type: "string",
-          defaultValue: "@ggerganov/whisper.cpp/main/ggml-small-q8_0.bin",
+          defaultValue: "@csukuangfj/sherpa-onnx-whisper-small/main/small-encoder.int8.onnx",
           descriptionTier: "ondemand",
         },
         {
@@ -237,45 +237,6 @@ export const sttGroup: SettingGroup = {
           type: "number",
           defaultValue: 4,
           descriptionTier: "ondemand",
-        },
-        {
-          id: "stt.host",
-          name: "Host",
-          description: "Address the speech recognition server binds to.",
-          type: "string",
-          defaultValue: "127.0.0.1",
-          regex: [
-            {
-              regex:
-                "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$",
-              errorMessage: "Must be a valid IPv4 address",
-            },
-          ],
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "stt.port",
-          name: "Port",
-          description: "Port the speech recognition server listens on.",
-          type: "string",
-          defaultValue: "7702",
-          regex: [
-            { regex: "^\\d+$", errorMessage: "Port must be a number" },
-            {
-              regex:
-                "^(?:[1-9]\\d{0,4}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])$",
-              errorMessage: "Port must be 1-65535",
-            },
-          ],
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "stt.commandPreview",
-          name: "Command Preview",
-          description: "",
-          type: "command_preview",
-          defaultValue: "",
-          commandType: "stt",
         },
       ],
     },

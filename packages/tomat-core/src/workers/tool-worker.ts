@@ -10,9 +10,11 @@
 import type {
   AskUserAnswer,
   AskUserQuestion,
+  ModuleName,
   PoolToWorkerFrame,
   WorkerToPoolFrame,
 } from "../toolkits/worker-protocol.ts";
+import type { DisplayContent, ScheduledPromptDraft } from "@tomat/shared";
 
 // Inlined from @tomat/shared: there is no import map next to the installed
 // worker to resolve workspace aliases.
@@ -20,10 +22,76 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+type DocumentListing = { title: string; summary?: string; updatedAtMs: number };
+
 type ToolContext = {
   setProgress(progress: number, label?: string, description?: string): void;
   askUser(questions: AskUserQuestion[]): Promise<AskUserAnswer[]>;
   log(level: "debug" | "info" | "warn" | "error", message: string): void;
+  // One-way display pushes: each renders a standalone bubble in the chat.
+  display: {
+    markdown(markdown: string): void;
+    image(dataB64: string, mime: string, alt?: string): void;
+    table(columns: string[], rows: string[][]): void;
+    diff(before: string, after: string, title?: string): void;
+  };
+  // Awaited host-module calls, gated by the core's module broker (a first
+  // use may pause on a user permission prompt).
+  documents: {
+    list(): Promise<DocumentListing[]>;
+    get(title: string): Promise<{ title: string; content: string }>;
+    write(
+      title: string,
+      content: string,
+    ): Promise<{ title: string; before: string; after: string; created: boolean }>;
+    edit(
+      title: string,
+      find: string,
+      replace: string,
+    ): Promise<{ title: string; before: string; after: string }>;
+  };
+  /** Per-toolkit private SQLite, proxied to the core. Requires the
+   *  toolkit's tools.json to declare "database": true; deleted with the
+   *  toolkit on uninstall. */
+  db: {
+    query(
+      sql: string,
+      params?: Array<string | number | boolean | null>,
+    ): Promise<Record<string, unknown>[]>;
+    execute(
+      sql: string,
+      params?: Array<string | number | boolean | null>,
+    ): Promise<{ changes: number; lastInsertRowId: number }>;
+  };
+  /** Single-shot completion against the user's configured model. Output is
+   *  capped host-side; gated by the llm permission. */
+  llm: {
+    complete(opts: {
+      prompt: string;
+      systemPrompt?: string;
+      maxTokens?: number;
+    }): Promise<{ text: string }>;
+  };
+  /** Synthesize speech from text (WAV, base64). Gated by the tts permission
+   *  and the host's Text-to-Speech enable setting. */
+  tts: {
+    speak(text: string): Promise<{ dataB64: string; mime: string; sampleRate: number }>;
+  };
+  /** Transcribe audio to text. Gated by the stt permission and the host's
+   *  Speech-to-Text enable setting. */
+  stt: {
+    transcribe(opts: {
+      dataB64: string;
+      mime?: string;
+      language?: string;
+    }): Promise<{ text: string }>;
+  };
+  // Awaited scheduled-prompt proposal: the user confirms (possibly after
+  // editing the draft) or rejects it in chat. The confirm form is the
+  // consent gate, so no permission grant is involved.
+  schedulePrompt(
+    draft: ScheduledPromptDraft,
+  ): Promise<{ accepted: boolean; draft?: ScheduledPromptDraft }>;
   signal: AbortSignal;
   getChatContext(): {
     userMessage: string;
@@ -45,6 +113,24 @@ interface CallState {
     string,
     {
       resolve: (a: AskUserAnswer[]) => void;
+      reject: (e: Error) => void;
+    }
+  >;
+  // Awaited module_request calls (documents, db, llm, tts, stt) waiting on
+  // the pool's module_response.
+  pendingModule: Map<
+    string,
+    {
+      resolve: (result: unknown) => void;
+      reject: (e: Error) => void;
+    }
+  >;
+  // Awaited schedule_request calls waiting on the pool's
+  // schedule_confirm_response.
+  pendingSchedule: Map<
+    string,
+    {
+      resolve: (outcome: { accepted: boolean; draft?: ScheduledPromptDraft }) => void;
       reject: (e: Error) => void;
     }
   >;
@@ -108,8 +194,31 @@ async function handleCall(frame: Extract<PoolToWorkerFrame, { kind: "call" }>): 
     abort: new AbortController(),
     chatContext: frame.chatContext,
     pendingAskUser: new Map(),
+    pendingModule: new Map(),
+    pendingSchedule: new Map(),
   };
   calls.set(frame.callId, state);
+
+  // Awaited call into a core module; the pool gates access (permission
+  // prompts may pause here) and replies with module_response.
+  function moduleRequest(module: ModuleName, op: string, args: unknown): Promise<unknown> {
+    const requestId = crypto.randomUUID();
+    send({
+      kind: "module_request",
+      callId: frame.callId,
+      requestId,
+      module,
+      op,
+      args,
+    });
+    return new Promise<unknown>((resolve, reject) => {
+      state.pendingModule.set(requestId, { resolve, reject });
+    });
+  }
+
+  function sendDisplay(content: DisplayContent): void {
+    send({ kind: "display", callId: frame.callId, content });
+  }
 
   const ctx: ToolContext = {
     setProgress(progress, label, description) {
@@ -135,6 +244,90 @@ async function handleCall(frame: Extract<PoolToWorkerFrame, { kind: "call" }>): 
     },
     log(level, message) {
       send({ kind: "log", callId: frame.callId, level, message });
+    },
+    display: {
+      markdown(markdown) {
+        sendDisplay({ type: "markdown", markdown });
+      },
+      image(dataB64, mime, alt) {
+        sendDisplay({ type: "image", dataB64, mime, alt });
+      },
+      table(columns, rows) {
+        sendDisplay({ type: "table", columns, rows });
+      },
+      diff(before, after, title) {
+        sendDisplay({ type: "diff", before, after, title });
+      },
+    },
+    documents: {
+      list() {
+        return moduleRequest("documents", "list", {}) as Promise<DocumentListing[]>;
+      },
+      get(title) {
+        return moduleRequest("documents", "get", { title }) as Promise<{
+          title: string;
+          content: string;
+        }>;
+      },
+      write(title, content) {
+        return moduleRequest("documents", "write", { title, content }) as Promise<{
+          title: string;
+          before: string;
+          after: string;
+          created: boolean;
+        }>;
+      },
+      edit(title, find, replace) {
+        return moduleRequest("documents", "edit", { title, find, replace }) as Promise<{
+          title: string;
+          before: string;
+          after: string;
+        }>;
+      },
+    },
+    db: {
+      query(sql, params) {
+        return moduleRequest("db", "query", { sql, params: params ?? [] }) as Promise<
+          Record<string, unknown>[]
+        >;
+      },
+      execute(sql, params) {
+        return moduleRequest("db", "execute", { sql, params: params ?? [] }) as Promise<{
+          changes: number;
+          lastInsertRowId: number;
+        }>;
+      },
+    },
+    llm: {
+      complete(opts) {
+        return moduleRequest("llm", "complete", opts) as Promise<{ text: string }>;
+      },
+    },
+    tts: {
+      speak(text) {
+        return moduleRequest("tts", "speak", { text }) as Promise<{
+          dataB64: string;
+          mime: string;
+          sampleRate: number;
+        }>;
+      },
+    },
+    stt: {
+      transcribe(opts) {
+        return moduleRequest("stt", "transcribe", opts) as Promise<{ text: string }>;
+      },
+    },
+    schedulePrompt(draft) {
+      const requestId = crypto.randomUUID();
+      send({
+        kind: "schedule_request",
+        callId: frame.callId,
+        requestId,
+        draft,
+      });
+      return new Promise((resolve, reject) => {
+        state.pendingSchedule.set(requestId, { resolve, reject });
+      });
     },
     signal: state.abort.signal,
     getChatContext() {
@@ -164,6 +357,37 @@ function handleCancel(callId: string): void {
     p.reject(new Error("User interrupted"));
   }
   state.pendingAskUser.clear();
+  for (const p of state.pendingModule.values()) {
+    p.reject(new Error("User interrupted"));
+  }
+  state.pendingModule.clear();
+  for (const p of state.pendingSchedule.values()) {
+    p.reject(new Error("User interrupted"));
+  }
+  state.pendingSchedule.clear();
+}
+
+function handleModuleResponse(
+  frame: Extract<PoolToWorkerFrame, { kind: "module_response" }>,
+): void {
+  const state = calls.get(frame.callId);
+  if (!state) return;
+  const p = state.pendingModule.get(frame.requestId);
+  if (!p) return;
+  state.pendingModule.delete(frame.requestId);
+  if (frame.ok) p.resolve(frame.result);
+  else p.reject(new Error(frame.error ?? "module request failed"));
+}
+
+function handleScheduleConfirmResponse(
+  frame: Extract<PoolToWorkerFrame, { kind: "schedule_confirm_response" }>,
+): void {
+  const state = calls.get(frame.callId);
+  if (!state) return;
+  const p = state.pendingSchedule.get(frame.requestId);
+  if (!p) return;
+  state.pendingSchedule.delete(frame.requestId);
+  p.resolve({ accepted: frame.accepted, draft: frame.draft });
 }
 
 function handleAskUserResponse(callId: string, requestId: string, answers: AskUserAnswer[]): void {
@@ -219,6 +443,10 @@ async function main(): Promise<void> {
       else if (frame.kind === "cancel") handleCancel(frame.callId);
       else if (frame.kind === "ask_user_response") {
         handleAskUserResponse(frame.callId, frame.requestId, frame.answers);
+      } else if (frame.kind === "module_response") {
+        handleModuleResponse(frame);
+      } else if (frame.kind === "schedule_confirm_response") {
+        handleScheduleConfirmResponse(frame);
       } else if (frame.kind === "shutdown") {
         Deno.exit(0);
       } else if (frame.kind === "boot") {

@@ -51,6 +51,20 @@ const sysPermission = z.object({
   optional: z.boolean().optional(),
 });
 
+// Host-module permissions (documents store, LLM, TTS, STT) enforced by the
+// host's module broker rather than the sandbox runtime. All-or-nothing keys
+// except documents, which splits into read/write access.
+const documentsPermission = z.object({
+  access: z.enum(["read", "write"]),
+  reason: reasonField,
+  optional: z.boolean().optional(),
+});
+
+const modulePermission = z.object({
+  reason: reasonField,
+  optional: z.boolean().optional(),
+});
+
 export const toolPermissionsSchema = z
   .object({
     net: z.array(netPermission).default([]),
@@ -60,6 +74,10 @@ export const toolPermissionsSchema = z
     env: z.array(envPermission).default([]),
     ffi: z.array(ffiPermission).default([]),
     sys: z.array(sysPermission).default([]),
+    documents: z.array(documentsPermission).default([]),
+    llm: z.array(modulePermission).default([]),
+    tts: z.array(modulePermission).default([]),
+    stt: z.array(modulePermission).default([]),
   })
   .strict();
 
@@ -85,6 +103,10 @@ export const toolSchema = z
       env: [],
       ffi: [],
       sys: [],
+      documents: [],
+      llm: [],
+      tts: [],
+      stt: [],
     }),
   })
   .strict();
@@ -98,6 +120,9 @@ export const toolsJsonSchema = z
     description: z.string().min(1),
     license: z.string().optional(),
     homepage: z.string().url().optional(),
+    // Whether the host should provision a private database for this toolkit
+    // (exposed to tools as `ctx.db`). Storage is host-defined.
+    database: z.boolean().default(false),
     tools: z.array(toolSchema).min(1),
   })
   .strict()

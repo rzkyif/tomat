@@ -38,6 +38,19 @@ function tool(overrides: Partial<ToolInsertInput> = {}): ToolInsertInput {
   };
 }
 
+Deno.test("upsertToolkit: persists the database declaration as hasDatabase", async () => {
+  const env = await setupTestEnv();
+  try {
+    const r = toolkitsRegistry();
+    r.upsertToolkit(tk({ id: "with-db", hasDatabase: true }));
+    r.upsertToolkit(tk({ id: "no-db" }));
+    assertEquals(r.getOrThrow("with-db").hasDatabase, true);
+    assertEquals(r.getOrThrow("no-db").hasDatabase, false);
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("upsertToolkit + status transitions: downloaded -> installed -> drift", async () => {
   const env = await setupTestEnv();
   try {

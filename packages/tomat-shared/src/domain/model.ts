@@ -13,7 +13,7 @@ export const TRIPLES = [
 
 export type Triple = (typeof TRIPLES)[number];
 
-export const BINARY_KINDS = ["llama-server", "whisper-server", "deno"] as const;
+export const BINARY_KINDS = ["llama-server", "tomat-core-speech", "deno"] as const;
 
 export type BinaryKind = (typeof BINARY_KINDS)[number];
 
@@ -61,9 +61,9 @@ export interface DownloadPlan {
 //
 //  - Pinned (stable channel): exact per-triple URLs + sha256, resolved at
 //    release time. The signed manifest commits to the exact bytes.
-//  - Resolver (beta channel): an upstream GitHub repo + per-triple asset name
+//  - Resolver (latest channel): an upstream GitHub repo + per-triple asset name
 //    patterns. The core resolves the LATEST release at runtime, so upstream
-//    updates reach beta users without us re-releasing. The signed manifest
+//    updates reach latest users without us re-releasing. The signed manifest
 //    commits to the repo + patterns (not the version); the download is
 //    verified against GitHub's published sha256 digest.
 export interface BinaryManifestPinnedEntry {
@@ -77,7 +77,7 @@ export interface UpstreamResolver {
   repo: string;
   assets: Partial<Record<Triple, string>>;
   /** When set, resolve this exact release tag instead of the latest. Pins a
-   *  binary on EVERY channel (beta/dev resolve at runtime, stable pins from
+   *  binary on EVERY channel (latest/dev resolve at runtime, stable pins from
    *  the same tag at release time), so bumping it is a deliberate edit. */
   pinnedTag?: string;
 }
@@ -90,15 +90,15 @@ export interface BinaryManifestResolverEntry {
 // the GitHub repo + per-triple asset-name pattern ("{tag}" expands to the
 // release's tag_name). Consumed by:
 //  - the release script: STABLE pins the current latest (URL + sha256) at
-//    release time; BETA embeds the resolver verbatim so the core resolves the
+//    release time; LATEST embeds the resolver verbatim so the core resolves the
 //    latest release at runtime.
 //  - a DEV core: builds resolver entries from this in-code (dev has no
 //    published manifest), so a from-source build pulls the latest upstream
-//    sidecar release exactly like beta.
-// whisper-server is sourced from a personal repo (rzkyif/whisper-server-binaries)
-// that builds whisper.cpp for every triple, since upstream ships only Windows.
-// Verified against upstream releases on 2026-05-25.
-export const UPSTREAM_BINARIES: Record<BinaryKind, UpstreamResolver> = {
+//    sidecar release exactly like latest.
+// Partial: self-hosted kinds (tomat-core-speech) have no upstream resolver. The
+// release builds and pins them directly into binaries.json (scripts/release/
+// core.ts composeBinaryManifest), so they are absent from this map.
+export const UPSTREAM_BINARIES: Partial<Record<BinaryKind, UpstreamResolver>> = {
   "llama-server": {
     repo: "ggml-org/llama.cpp",
     assets: {
@@ -108,21 +108,6 @@ export const UPSTREAM_BINARIES: Record<BinaryKind, UpstreamResolver> = {
       "x86_64-unknown-linux-gnu": "llama-{tag}-bin-ubuntu-x64.tar.gz",
       "x86_64-pc-windows-msvc": "llama-{tag}-bin-win-cpu-x64.zip",
       "aarch64-pc-windows-msvc": "llama-{tag}-bin-win-cpu-arm64.zip",
-    },
-  },
-  "whisper-server": {
-    // Personal repo building whisper.cpp for every triple (upstream ships only
-    // Windows). Asset names embed the release tag ("{tag}" expands to e.g.
-    // v1.8.4). Archives are .zip (see the binaries manager's zip-extraction
-    // path). Verified against the v1.8.4 release on 2026-06-03.
-    repo: "rzkyif/whisper-server-binaries",
-    assets: {
-      "aarch64-apple-darwin": "whisper-server-{tag}-macos-arm64.zip",
-      "x86_64-apple-darwin": "whisper-server-{tag}-macos-x86_64.zip",
-      "aarch64-unknown-linux-gnu": "whisper-server-{tag}-linux-arm64.zip",
-      "x86_64-unknown-linux-gnu": "whisper-server-{tag}-linux-x86_64.zip",
-      "x86_64-pc-windows-msvc": "whisper-server-{tag}-windows-x64.zip",
-      "aarch64-pc-windows-msvc": "whisper-server-{tag}-windows-arm64.zip",
     },
   },
   deno: {
@@ -165,7 +150,7 @@ export interface BinaryStatus {
 // Resolved download metadata for a not-yet-installed binary, surfaced in the
 // startup download confirmation. `version` is the resolved release (or
 // "unknown" when it couldn't be resolved); `sizeBytes` is the download size
-// when known (GitHub asset size on beta, HEAD Content-Length on stable).
+// when known (GitHub asset size on latest, HEAD Content-Length on stable).
 export interface BinaryProbeResult {
   kind: BinaryKind;
   version: string;
@@ -221,30 +206,43 @@ export interface RequiredModelRef {
   group: RequirementGroup;
 }
 
-/** Sidecar binary kinds the settings require: `deno` always (runs workers);
- *  `llama-server` iff the LLM provider is local; `whisper-server` iff STT is
- *  enabled with a local provider. */
+/** Sidecar binary kinds the settings require: `deno` always (runs the tool
+ *  worker); `llama-server` always (local chat when the LLM provider is local,
+ *  plus embeddings for tool-relevance, which always run on a second llama-server
+ *  instance); `tomat-core-speech` iff local STT or TTS is enabled (one binary
+ *  serves both Whisper STT and Kokoro TTS). */
 export function requiredBinaryKinds(s: Record<string, unknown>): BinaryKind[] {
-  const out: BinaryKind[] = ["deno"];
-  if (s["llm.provider"] !== "external") out.push("llama-server");
-  if (!!s["stt.enabled"] && s["stt.provider"] !== "external") out.push("whisper-server");
+  const out: BinaryKind[] = ["deno", "llama-server"];
+  const sttLocal = !!s["stt.enabled"] && s["stt.provider"] !== "external";
+  if (sttLocal || !!s["tts.enabled"]) out.push("tomat-core-speech");
   return out;
 }
 
-/** True when the upstream resolver config has no asset for `kind` on `triple`
- *  (so it can never be installed there). Used to mark a required binary
- *  `unavailable` rather than perpetually `missing`. */
+/** Triples a self-hosted (no upstream resolver) binary cannot run on.
+ *  tomat-core-speech statically links the sherpa-onnx native runtime, which has
+ *  no windows-aarch64 prebuilt, so the speech binary can't be produced there. */
+const SELF_HOSTED_UNSUPPORTED: Partial<Record<BinaryKind, ReadonlySet<Triple>>> = {
+  "tomat-core-speech": new Set<Triple>(["aarch64-pc-windows-msvc"]),
+};
+
+/** True when `kind` can never be installed on `triple` (so it's marked
+ *  `unavailable` rather than perpetually `missing`). Resolver-backed kinds have
+ *  no upstream asset for the triple; self-hosted kinds (pinned directly into
+ *  binaries.json) are available everywhere except their statically-known
+ *  unsupported triples. */
 export function binaryUnavailableOnTriple(kind: BinaryKind, triple: Triple): boolean {
-  return UPSTREAM_BINARIES[kind].assets[triple] === undefined;
+  const resolver = UPSTREAM_BINARIES[kind];
+  if (resolver) return resolver.assets[triple] === undefined;
+  return SELF_HOSTED_UNSUPPORTED[kind]?.has(triple) ?? false;
 }
 
 // Core update manifest (separate from binaries).
 //
 // `binaries` carries the per-triple tomat-core executables. `workers` carries
-// the platform-independent .ts files (embeddingWorker, ttsWorker, toolWorker)
-// that are spawned at runtime by the core; shipping them separately keeps the
-// compiled core binary lean (their transformers/onnxruntime deps would
-// otherwise add ~1.5 GB). `helpers` carries per-triple binaries that ship next
+// the platform-independent .ts file(s) (just toolWorker now) spawned at runtime
+// by the core; shipping them separately from the compiled binary keeps
+// deno-compile's embedded-dependency set scoped to the core's own graph rather
+// than the whole workspace. `helpers` carries per-triple binaries that ship next
 // to core in ~/.tomat/<channel>/core/bin/ and are installed (and swapped on
 // self-update) by the same code path: tomat-core-keychain (Rust crate) and
 // tomat-core-updater (Rust crate; the binary that performs the swap). They
@@ -273,7 +271,7 @@ export interface BuiltinToolkitManifest {
   signature: string;
 }
 
-export type SidecarKind = "llama" | "whisper" | "tts" | "tool";
+export type SidecarKind = "llama" | "llama-embed" | "speech" | "tool";
 
 export type SidecarStatus = "Disabled" | "Loading" | "Running" | "Error";
 

@@ -696,10 +696,10 @@ mod tests {
         // <core>/bin/<name> -> <core>/logs/updater.log
         assert_eq!(
             resolve_log_path(
-                Path::new("/home/u/.tomat/beta/core/bin/tomat-core-beta"),
+                Path::new("/home/u/.tomat/latest/core/bin/tomat-core-latest"),
                 &env
             ),
-            Some(PathBuf::from("/home/u/.tomat/beta/core/logs/updater.log"))
+            Some(PathBuf::from("/home/u/.tomat/latest/core/logs/updater.log"))
         );
     }
 

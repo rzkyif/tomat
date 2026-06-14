@@ -76,6 +76,11 @@ const impl: Platform = {
       /* no Rust event source in browser */
     },
   },
+  autostart: {
+    isEnabled: async () => false,
+    setEnabled: () => Promise.resolve(),
+    wasAutostarted: async () => false,
+  },
   capture: {
     monitors: async () => [],
     captureMonitor: () => Promise.reject(new Error("capture not available in browser")),

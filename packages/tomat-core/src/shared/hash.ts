@@ -2,9 +2,20 @@
 // digest patterns that were previously copied across downloads, toolkits,
 // auth, tls, and the self-updater.
 
+import { createHash } from "node:crypto";
+
 /** Lowercase hex encoding of a byte array. */
 export function toHex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Synchronous SHA-256 (node:crypto), hex-encoded lowercase. For call sites
+ *  whose read-modify-write must not interleave with other callers across an
+ *  await (e.g. the documents store). */
+export function sha256HexSync(input: string | Uint8Array): string {
+  const hash = createHash("sha256");
+  hash.update(input);
+  return hash.digest("hex");
 }
 
 /** SHA-256 of a string or byte buffer, hex-encoded lowercase. */

@@ -1,34 +1,7 @@
 // Zod schemas for chat-related request bodies.
 
 import { z } from "zod";
-
-const messageOverrideSchema = z.object({
-  // Trimmed message shape the client may pass to override the persisted
-  // transcript for a one-shot completion. Role + content are required;
-  // everything else is optional.
-  role: z.enum(["user", "assistant", "system", "tool", "reasoning"]),
-  content: z.string(),
-  toolCallId: z.string().optional(),
-  name: z.string().optional(),
-});
-
-export const chatRequestSchema = z
-  .object({
-    // When absent, core uses the persisted session messages.
-    messages: z.array(messageOverrideSchema).optional(),
-    route: z.enum(["default", "secondary"]).default("default"),
-    // Optional per-request overrides for LLM params.
-    overrides: z
-      .object({
-        temperature: z.number().min(0).max(2).optional(),
-        topP: z.number().min(0).max(1).optional(),
-        maxTokens: z.number().int().min(1).optional(),
-      })
-      .optional(),
-  })
-  .strict();
-
-export type ChatRequest = z.infer<typeof chatRequestSchema>;
+import { scheduledPromptDraftSchema } from "./scheduled-prompt.ts";
 
 export const chatStartWsSchema = z
   .object({
@@ -46,7 +19,6 @@ export const chatStartWsSchema = z
     // User message anchoring this turn (regenerate / edit-and-resend);
     // see the frame type in api/ws.ts.
     anchorMessageId: z.string().min(1).optional(),
-    contextOverride: z.array(messageOverrideSchema).optional(),
   })
   .strict();
 
@@ -66,11 +38,37 @@ export const toolAskUserResponseSchema = z
     kind: z.literal("tool.askuser_response"),
     callId: z.string().min(1),
     requestId: z.string().min(1),
-    answers: z.array(z.union([z.string(), z.array(z.string())])),
+    // Per-question answer: choice/files/image are strings (string[] when
+    // multiselect), table is the edited rows as column-keyed records.
+    answers: z.array(
+      z.union([z.string(), z.array(z.string()), z.array(z.record(z.string(), z.string()))]),
+    ),
   })
   .strict();
 
 export type ToolAskUserResponseFrame = z.infer<typeof toolAskUserResponseSchema>;
+
+export const scheduleConfirmResponseSchema = z
+  .object({
+    kind: z.literal("schedule.confirm_response"),
+    callId: z.string().min(1),
+    requestId: z.string().min(1),
+    accepted: z.boolean(),
+    // The (possibly user-edited) draft; required when accepted.
+    draft: scheduledPromptDraftSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.accepted && !value.draft) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["draft"],
+        message: "draft is required when accepted",
+      });
+    }
+  });
+
+export type ScheduleConfirmResponseFrame = z.infer<typeof scheduleConfirmResponseSchema>;
 
 export const toolPermissionResponseSchema = z
   .object({

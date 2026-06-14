@@ -17,15 +17,13 @@ Svelte+Tauri app that talks to one or more paired cores over an HTTP+WS API.
 flowchart TD
     client["tomat-client (Tauri+Svelte): window, capture, audio, VAD, global shortcuts, paired-cores UI"]
     core["tomat-core (Deno service): sessions, chat, tools, TTS/STT, model/binary mgmt, pairing"]
-    llama["llama-server"]
-    whisper["whisper-server"]
-    tts["tts worker (Deno)"]
+    llama["llama-server (chat + a 2nd instance for embeddings)"]
+    speech["tomat-core-speech (Speech-to-Text + Text-to-Speech)"]
     workers["tool workers (Deno): one per toolkit, permission-flagged"]
 
     client -->|HTTP+WS bearer| core
     core --> llama
-    core --> whisper
-    core --> tts
+    core --> speech
     core --> workers
 ```
 
@@ -123,25 +121,39 @@ dev restarts. **Do not** click "On this computer" in dev. That path runs the
 production installer (it looks for a compiled core binary, which dev never
 builds) and would install a stable core over your dev session.
 
+### Building
+
+```bash
+deno task build         # build everything that changed (core/client/catalog/website) for the latest channel
+deno task build:stable  # ... for the stable channel
+```
+
+`deno task build` compiles each artifact whose source changed since the last
+build and skips the rest (tracked by a `dist/.build-state.json` cursor). Run
+`deno task clean` or pass `--force` to rebuild from scratch. The granular
+`build:core` / `build:client` tasks force-build a single component. Releasing
+the built artifacts is covered in
+[packages/tomat-website/README.md](packages/tomat-website/README.md).
+
 ### Cleaning build artifacts
 
 ```bash
 deno task clean               # dist, target, build, .svelte-kit, .astro, .wrangler
 deno task clean --deep        # also node_modules + the Deno cache (re-run deno install)
-deno task clean --dev-state   # also ~/.tomat/dev (the isolated dev channel)
-deno task clean --beta-state  # also ~/.tomat/beta (the isolated beta channel)
+deno task clean --dev-state    # also ~/.tomat/dev (the isolated dev channel)
+deno task clean --latest-state # also ~/.tomat/latest (the isolated latest channel)
 ```
 
 ## Channels
 
-State is namespaced by install channel via `TOMAT_CHANNEL`, so a dev or beta
+State is namespaced by install channel via `TOMAT_CHANNEL`, so a dev or latest
 build never collides with a stable install:
 
-| `TOMAT_CHANNEL`  | data under         | keychain            |
-| ---------------- | ------------------ | ------------------- |
-| unset / `stable` | `~/.tomat/stable/` | `tomat-client`      |
-| `dev`            | `~/.tomat/dev/`    | `tomat-client-dev`  |
-| `beta`           | `~/.tomat/beta/`   | `tomat-client-beta` |
+| `TOMAT_CHANNEL`  | data under         | keychain              |
+| ---------------- | ------------------ | --------------------- |
+| unset / `stable` | `~/.tomat/stable/` | `tomat-client`        |
+| `dev`            | `~/.tomat/dev/`    | `tomat-client-dev`    |
+| `latest`         | `~/.tomat/latest/` | `tomat-client-latest` |
 
 `deno task dev` sets `dev` automatically. Models are the one exception: they
 stay shared at `~/.tomat/models` so multi-GB weights aren't re-downloaded per
@@ -151,19 +163,19 @@ secrets in dev (and how not to lose them) is covered in
 [packages/tomat-core/README.md](packages/tomat-core/README.md).
 
 Channels are built to **coexist and run at the same time**, not just isolate
-data: binaries get a channel suffix (`tomat-core` → `tomat-core-beta`), the
+data: binaries get a channel suffix (`tomat-core` → `tomat-core-latest`), the
 desktop app is a distinct bundle, service labels are suffixed, and default
 ports are offset so two cores can bind at once:
 
-| channel | core | llama (`llm.port`) | whisper (`stt.port`) |
-| ------- | ---- | ------------------ | -------------------- |
-| stable  | 7800 | 7701               | 7702                 |
-| beta    | 7810 | 7711               | 7712                 |
-| dev     | 7820 | 7721               | 7722                 |
+| channel | core | llama (`llm.port`) | speech | embed |
+| ------- | ---- | ------------------ | ------ | ----- |
+| stable  | 7800 | 7701               | 7702   | 7703  |
+| latest  | 7810 | 7711               | 7712   | 7713  |
+| dev     | 7820 | 7721               | 7722   | 7723  |
 
 (Explicit settings still win; only the defaults shift.)
 
-Building and releasing a beta (or stable) is covered in
+Building and releasing (to the latest or stable channel) is covered in
 [packages/tomat-website/README.md](packages/tomat-website/README.md), the
 release + deploy doc.
 

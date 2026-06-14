@@ -34,16 +34,19 @@ import { notifyRequirementsChanged } from "./requirements.ts";
 
 const log = getLogger("storage");
 
-// Extensions that count as model / support files: gguf (llama.cpp), bin
-// (whisper.cpp + some ORT tensors), onnx + json (Kokoro / transformers.js),
-// pt (PyTorch voice tensors).
-const MODEL_FILE_EXTS = new Set(["gguf", "bin", "onnx", "json", "pt"]);
+// Extensions that count as model / support files: gguf (llama.cpp), onnx (sherpa
+// Whisper + Kokoro), txt (sherpa tokens + the Kokoro voices token table), bin
+// (Kokoro voices pack + GGUF siblings), json + pt (legacy support files).
+const MODEL_FILE_EXTS = new Set(["gguf", "bin", "onnx", "json", "txt", "pt"]);
 
 // Running sidecar kind -> the binary it runs. deno is always required (it runs
-// the tts / tool / embedding workers), so it's covered by requiredBinaryKinds.
+// the tool worker), so it's covered by requiredBinaryKinds. llama-embed runs a
+// second llama-server instance (embeddings), so it locks the same binary; speech
+// runs tomat-core-speech (Whisper STT + Kokoro TTS).
 const SIDECAR_BINARY: Partial<Record<string, BinaryKind>> = {
   llama: "llama-server",
-  whisper: "whisper-server",
+  "llama-embed": "llama-server",
+  speech: "tomat-core-speech",
 };
 
 // --- lock context ----------------------------------------------------------

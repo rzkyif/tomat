@@ -94,7 +94,7 @@ through `npm:` specifiers from `deno task`.
 
 - **Channels and persistence.** All state lives under `~/.tomat/<channel>/`,
   where
-  the channel (`stable` default, `dev`, `beta`) is selected by `TOMAT_CHANNEL`
+  the channel (`stable` default, `dev`, `latest`) is selected by `TOMAT_CHANNEL`
   and resolved identically in core, client, and the install scripts. The one
   exception is `models/`, shared across channels at `~/.tomat/models` so
   multi-GB weights are not re-downloaded per channel. Keychain entries, default
@@ -126,7 +126,7 @@ For anything beyond the above, the canonical docs are:
   `packages/tomat-client/src/ui/lib/core/README.md`.
 - Test-suite guide (layout, helpers, fixtures, scratch tests, CI):
   [tests/README.md](tests/README.md)
-- Release + deploy, beta releases, Cloudflare + R2 setup:
+- Release + deploy, channels, Cloudflare + R2 setup:
   [packages/tomat-website/README.md](packages/tomat-website/README.md)
 - Toolkit author API:
   [packages/tomat-builtin-toolkit/README.md](packages/tomat-builtin-toolkit/README.md)

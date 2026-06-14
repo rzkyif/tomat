@@ -7,10 +7,11 @@
 // src/bun/toolkits/worker/pool.ts to Deno subprocesses.
 
 import type { AskUserAnswer, AskUserQuestion, ChatContext } from "./worker-protocol.ts";
-import { errMessage } from "@tomat/shared";
-import type { Tool } from "@tomat/shared";
+import { askUserQuestionSchema, errMessage, scheduledPromptDraftSchema } from "@tomat/shared";
+import type { DisplayContent, ScheduledPromptDraft, Tool } from "@tomat/shared";
+import { handleModuleRequest, type ModulePrompt } from "../services/module-broker.ts";
 import { newCallId } from "../shared/ids.ts";
-import { getLogger } from "../shared/log.ts";
+import { getLogger, scrubSecrets } from "../shared/log.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { emptyFlagSet, flagSetToArgs, type PathTemplates, unionFlags } from "./permissions.ts";
@@ -67,8 +68,19 @@ export type CallEvent =
       declared: boolean;
       reason?: string;
     }
+  // The running tool proposed a scheduled prompt (ctx.schedulePrompt). The
+  // call is paused until the user confirms (possibly after editing the
+  // draft) or rejects in chat; answer via respondSchedule.
+  | {
+      kind: "schedule_request";
+      requestId: string;
+      draft: ScheduledPromptDraft;
+    }
   | { kind: "log"; level: "debug" | "info" | "warn" | "error"; message: string }
   | { kind: "stderr_log"; line: string }
+  // One-way display push from the tool (ctx.display.*). Chat persists it as
+  // a DisplayMessage; no response flows back to the worker.
+  | { kind: "display"; content: DisplayContent }
   // Emitted synchronously when cancel() is invoked so the UI's ToolCall
   // bubble can transition to the "cancelled" terminal state. The promise
   // returned by startCall still rejects with AppError("tool call cancelled")
@@ -84,6 +96,14 @@ export interface CallController {
   respondAskUser(requestId: string, answers: AskUserAnswer[]): void;
   // Allow or reject a pending runtime permission prompt.
   respondPermission(requestId: string, allow: boolean): void;
+  // Settle a pending schedule confirm; `draft` carries the user's edits
+  // when accepted.
+  respondSchedule(requestId: string, accepted: boolean, draft?: ScheduledPromptDraft): void;
+  // True while `requestId` is an unanswered schedule confirm for this call.
+  // Callers with side effects keyed to the confirm (chat persists the draft)
+  // must check this first: a stale or replayed response is otherwise
+  // indistinguishable from the real one.
+  hasPendingSchedule(requestId: string): boolean;
   // Settle when the worker emits tool_result / tool_error.
   done: Promise<unknown>;
 }
@@ -114,16 +134,55 @@ export class WorkerPool {
     let cancelled = false;
     let settled = false;
     let callStarted = false;
-    let askUserPending = false;
-    let permissionPending = false;
+    // Count of prompts (askUser, permission, schedule confirm) currently
+    // waiting on the user. The timeout budget pauses while any wait is open
+    // and resumes only when the last one settles; a flag per prompt kind
+    // would re-arm the timer while a sibling prompt is still pending.
+    let pendingUserWaits = 0;
     // Tracks how much of the callTimeoutMs budget is still available so
     // askUser can pause + resume the timer (instead of resetting it).
     let timeoutBudgetMs = this.config.callTimeoutMs;
     let timeoutArmedAt: number | undefined;
+    const beginUserWait = () => {
+      pendingUserWaits++;
+      pauseTimeout();
+    };
+    const endUserWait = () => {
+      pendingUserWaits = Math.max(0, pendingUserWaits - 1);
+      if (pendingUserWaits === 0 && timeout === undefined && !cancelled) armTimeout();
+    };
 
     // Outer closures so cancel/respondAskUser can drive them.
     let rejectDone: (err: Error) => void = () => {};
     let offHandler: () => void = () => {};
+
+    // Pending module-broker permission prompts for this call, keyed by
+    // requestId. respondPermission answers either one of these or a PTY
+    // prompt (worker.answerPrompt); cancel resolves them all as rejected.
+    const brokerPrompts = new Map<string, (allow: boolean) => void>();
+    // Open requestIds per prompt kind. A respond* with an unknown requestId
+    // (stale, replayed, or forged) is dropped whole: forwarding it would
+    // resume the timeout budget while the real prompt is still open.
+    const pendingAskRequests = new Set<string>();
+    const pendingScheduleRequests = new Set<string>();
+    const pendingPermRequests = new Set<string>();
+    const promptUser = (prompt: ModulePrompt): Promise<boolean> => {
+      // Same budget pause as a PTY prompt: waiting on the user's decision
+      // must not consume the tool's time budget.
+      beginUserWait();
+      const requestId = `mod-${crypto.randomUUID()}`;
+      return new Promise<boolean>((resolve) => {
+        brokerPrompts.set(requestId, resolve);
+        onEvent({
+          kind: "permission_request",
+          requestId,
+          permission: prompt.permission,
+          resource: prompt.resource,
+          declared: prompt.declared,
+          reason: prompt.reason,
+        });
+      });
+    };
 
     const done = new Promise<unknown>((resolve, reject) => {
       rejectDone = reject;
@@ -144,24 +203,81 @@ export class WorkerPool {
               description: frame.description,
             });
             return;
-          case "ask_user_request":
-            askUserPending = true;
+          case "ask_user_request": {
+            // The frame passed the structural screen, but the question shapes
+            // are toolkit-supplied: a question the client's Zod would reject
+            // must not pause the call on a form that never renders. Answer
+            // empty instead so the tool's await unwinds.
+            const questionsValid =
+              Array.isArray(frame.questions) &&
+              frame.questions.length > 0 &&
+              frame.questions.every((q) => askUserQuestionSchema.safeParse(q).success);
+            if (!questionsValid) {
+              log.warn(
+                `invalid ask_user_request from ${spec.toolkitId}/${spec.tool.name}; answering empty`,
+              );
+              onEvent({
+                kind: "log",
+                level: "warn",
+                message: "askUser request had invalid questions; answered empty",
+              });
+              worker.send({
+                kind: "ask_user_response",
+                callId,
+                requestId: frame.requestId,
+                answers: [],
+              });
+              return;
+            }
             // Pause the budget: subtract the time we've already consumed,
             // then disarm so the timer can be re-armed on response.
-            pauseTimeout();
+            beginUserWait();
+            pendingAskRequests.add(frame.requestId);
             onEvent({
               kind: "ask_user_request",
               requestId: frame.requestId,
               questions: frame.questions,
             });
             return;
+          }
+          case "schedule_request": {
+            // Same reasoning as askUser: a draft the client (or the insert
+            // path) would reject must unblock the tool, not strand the call.
+            const parsedDraft = scheduledPromptDraftSchema.safeParse(frame.draft);
+            if (!parsedDraft.success) {
+              log.warn(
+                `invalid schedule_request draft from ${spec.toolkitId}/${spec.tool.name}; rejecting`,
+              );
+              onEvent({
+                kind: "log",
+                level: "warn",
+                message: "schedule proposal had an invalid draft; rejected",
+              });
+              worker.send({
+                kind: "schedule_confirm_response",
+                callId,
+                requestId: frame.requestId,
+                accepted: false,
+              });
+              return;
+            }
+            // Same budget pause as askUser: the confirm form waits on the user.
+            beginUserWait();
+            pendingScheduleRequests.add(frame.requestId);
+            onEvent({
+              kind: "schedule_request",
+              requestId: frame.requestId,
+              draft: parsedDraft.data,
+            });
+            return;
+          }
           case "permission_prompt":
-            permissionPending = true;
             // Same budget pause as askUser: waiting on the user's decision
             // must not consume the tool's time budget. (Auto-denied prompts
             // never reach here; they settle inside the WorkerHandle within
             // about a second, against the running budget.)
-            pauseTimeout();
+            beginUserWait();
+            pendingPermRequests.add(frame.requestId);
             onEvent({
               kind: "permission_request",
               requestId: frame.requestId,
@@ -179,6 +295,56 @@ export class WorkerPool {
               message: frame.message,
             });
             return;
+          case "display": {
+            const bounded = boundDisplayContent(frame.content);
+            if ("error" in bounded) {
+              log.warn(
+                `dropping display from ${spec.toolkitId}/${spec.tool.name}: ${bounded.error}`,
+              );
+              onEvent({ kind: "log", level: "warn", message: `display dropped: ${bounded.error}` });
+              return;
+            }
+            onEvent({ kind: "display", content: bounded.content });
+            return;
+          }
+          case "module_request": {
+            const requestId = frame.requestId;
+            const respondError = (error: string) =>
+              worker.send({ kind: "module_response", callId, requestId, ok: false, error });
+            void handleModuleRequest({
+              toolkitId: spec.toolkitId,
+              toolName: spec.tool.name,
+              callId,
+              module: frame.module,
+              op: frame.op,
+              args: frame.args,
+              promptUser,
+            })
+              .then(
+                (result) => {
+                  try {
+                    worker.send({ kind: "module_response", callId, requestId, ok: true, result });
+                  } catch (err) {
+                    // The result slipped a non-JSON value (send serializes
+                    // before writing); fail the module call instead of
+                    // letting the worker's await hang.
+                    log.warn(
+                      `module_response for ${spec.toolkitId}/${spec.tool.name} not serializable: ${errMessage(
+                        err,
+                      )}`,
+                    );
+                    respondError("module result was not JSON-serializable");
+                  }
+                },
+                // Module errors flow back into toolkit code; scrub them like
+                // log lines so a provider error can't leak a credential.
+                (err) => respondError(scrubSecrets(errMessage(err))),
+              )
+              .catch((err) => {
+                log.warn(`module_response delivery failed: ${errMessage(err)}`);
+              });
+            return;
+          }
           case "stderr_log":
             onEvent({ kind: "stderr_log", line: frame.line });
             return;
@@ -191,6 +357,11 @@ export class WorkerPool {
             off();
             disarm();
             settled = true;
+            // Settle broker prompts still waiting on the user: their module
+            // request can never complete on a dead worker, and an unanswered
+            // promptUser promise would leak.
+            for (const resolve of brokerPrompts.values()) resolve(false);
+            brokerPrompts.clear();
             worker.inFlightCalls = Math.max(0, worker.inFlightCalls - 1);
             this.killWorker(key, worker);
             reject(
@@ -280,7 +451,14 @@ export class WorkerPool {
       if (timeoutBudgetMs <= 0 || cancelled) return;
       timeoutArmedAt = Date.now();
       timeout = setTimeout(() => {
-        if (askUserPending || permissionPending) return;
+        if (pendingUserWaits > 0) {
+          // Defensive: with the wait refcount the timer should never fire
+          // while a prompt is open. Clear the spent handle so endUserWait
+          // can re-arm with the remaining budget.
+          timeout = undefined;
+          timeoutArmedAt = undefined;
+          return;
+        }
         // Bookkeeping must run even if the worker is already dead. Otherwise the
         // listener leaks and `done` hangs.
         offHandler();
@@ -326,6 +504,10 @@ export class WorkerPool {
         } catch {
           /* listener errors are non-fatal here */
         }
+        // Settle any broker prompt still waiting on the user as rejected so
+        // the module request resolves and the worker's await can unwind.
+        for (const resolve of brokerPrompts.values()) resolve(false);
+        brokerPrompts.clear();
         worker.send({ kind: "cancel", callId });
         disarm();
         // If the worker doesn't ack the cancel within a short grace window
@@ -341,7 +523,7 @@ export class WorkerPool {
         }, this.config.drainTimeoutMs);
       },
       respondAskUser: (requestId, answers) => {
-        askUserPending = false;
+        if (!pendingAskRequests.delete(requestId)) return;
         worker.send({
           kind: "ask_user_response",
           callId,
@@ -349,23 +531,39 @@ export class WorkerPool {
           answers,
         });
         // Resume the timer with the REMAINING budget instead of a fresh
-        // callTimeoutMs window. Slow user answers shouldn't extend the
-        // tool's effective time budget.
-        if (timeout === undefined && !cancelled) {
-          armTimeout();
-        }
+        // callTimeoutMs window (once no sibling prompt is still open). Slow
+        // user answers shouldn't extend the tool's effective time budget.
+        endUserWait();
       },
       respondPermission: (requestId, allow) => {
-        permissionPending = false;
-        worker.answerPrompt(requestId, allow);
+        const brokerResolve = brokerPrompts.get(requestId);
+        if (brokerResolve) {
+          brokerPrompts.delete(requestId);
+          brokerResolve(allow);
+        } else if (pendingPermRequests.delete(requestId)) {
+          worker.answerPrompt(requestId, allow);
+        } else {
+          return;
+        }
         // Same remaining-budget resume as askUser. The re-armed timer also
         // backstops the rare case where Deno never confirms the answer: the
         // handle kills the worker after its give-up window and the call
         // settles here via timeout.
-        if (timeout === undefined && !cancelled) {
-          armTimeout();
-        }
+        endUserWait();
       },
+      respondSchedule: (requestId, accepted, draft) => {
+        if (!pendingScheduleRequests.delete(requestId)) return;
+        worker.send({
+          kind: "schedule_confirm_response",
+          callId,
+          requestId,
+          accepted,
+          draft,
+        });
+        // Same remaining-budget resume as askUser.
+        endUserWait();
+      },
+      hasPendingSchedule: (requestId) => pendingScheduleRequests.has(requestId),
       done,
     };
   }
@@ -622,6 +820,61 @@ function resolveEntryPath(toolkitFolder: string): string {
     /* no package.json */
   }
   return `${toolkitFolder}/index.ts`;
+}
+
+// Bounds for tool display payloads: accepted content is persisted into the
+// session file (rewritten on every later message) and broadcast to every
+// client, so oversize markdown is truncated and the kinds that cannot be
+// truncated without changing their meaning are dropped.
+const DISPLAY_TEXT_MAX_CHARS = 256_000;
+const DISPLAY_IMAGE_MAX_B64_CHARS = 8_000_000;
+const DISPLAY_TABLE_MAX_ROWS = 1_000;
+const DISPLAY_TABLE_MAX_COLUMNS = 64;
+const DISPLAY_TABLE_MAX_CELL_CHARS = 4_096;
+
+function boundDisplayContent(
+  content: DisplayContent,
+): { content: DisplayContent } | { error: string } {
+  switch (content.type) {
+    case "markdown":
+      if (content.markdown.length > DISPLAY_TEXT_MAX_CHARS) {
+        return {
+          content: {
+            type: "markdown",
+            markdown: content.markdown.slice(0, DISPLAY_TEXT_MAX_CHARS) + "\n\n[truncated]",
+          },
+        };
+      }
+      return { content };
+    case "image":
+      if (content.dataB64.length > DISPLAY_IMAGE_MAX_B64_CHARS) {
+        return { error: `image exceeds ${DISPLAY_IMAGE_MAX_B64_CHARS} base64 characters` };
+      }
+      return { content };
+    case "table": {
+      if (content.columns.length > DISPLAY_TABLE_MAX_COLUMNS) {
+        return { error: `table exceeds ${DISPLAY_TABLE_MAX_COLUMNS} columns` };
+      }
+      if (content.rows.length > DISPLAY_TABLE_MAX_ROWS) {
+        return { error: `table exceeds ${DISPLAY_TABLE_MAX_ROWS} rows` };
+      }
+      const oversizeCell =
+        content.columns.some((c) => c.length > DISPLAY_TABLE_MAX_CELL_CHARS) ||
+        content.rows.some((r) => r.some((c) => c.length > DISPLAY_TABLE_MAX_CELL_CHARS));
+      if (oversizeCell) {
+        return { error: `table cell exceeds ${DISPLAY_TABLE_MAX_CELL_CHARS} characters` };
+      }
+      return { content };
+    }
+    case "diff":
+      if (
+        content.before.length > DISPLAY_TEXT_MAX_CHARS ||
+        content.after.length > DISPLAY_TEXT_MAX_CHARS
+      ) {
+        return { error: `diff side exceeds ${DISPLAY_TEXT_MAX_CHARS} characters` };
+      }
+      return { content };
+  }
 }
 
 function defaultDownloadsDir(): string {

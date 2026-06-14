@@ -96,9 +96,9 @@ export const modelFamilySchema = z
   .strict();
 export type ModelFamily = z.infer<typeof modelFamilySchema>;
 
-/** One Speech-to-Text (whisper.cpp GGML) model. Flat: whisper has no variants
+/** One Speech-to-Text (sherpa-onnx Whisper) model. Flat: whisper has no variants
  *  and needs no fit math; English-only vs multilingual is the load-bearing
- *  axis, since the `.en` files match their multilingual siblings in size but
+ *  axis, since the `.en` bundles match their multilingual siblings in size but
  *  transcribe English slightly better. */
 export const sttCatalogModelSchema = z
   .object({

@@ -21,6 +21,7 @@ import {
 } from "../../toolkits/npm-registry.ts";
 import { loadBuiltinToolkitManifest } from "../../toolkits/builtin-manifest.ts";
 import { embed, isEmbeddingModelReady } from "../../services/embedding.ts";
+import { embedWithHash, toolEmbedText } from "../../services/relevance.ts";
 import { toolFilter } from "../../services/tool-filter.ts";
 import { sha256Hex } from "../../shared/hash.ts";
 import { AppError } from "../../shared/errors.ts";
@@ -256,10 +257,10 @@ export function toolkitsRoutes(): Hono {
     let count = 0;
     const tools = allEnabledTools();
     for (const t of tools) {
-      const text = `${t.description}\n${(t.triggers ?? []).join("\n")}`;
-      const [v] = await embed([text]);
-      if (v) {
-        toolkitsRegistry().storeEmbedding(t.id, v, await sha256Hex(text));
+      const text = toolEmbedText(t);
+      const result = await embedWithHash(text);
+      if (result) {
+        toolkitsRegistry().storeEmbedding(t.id, result.vector, result.sourceHash);
         count++;
       }
     }

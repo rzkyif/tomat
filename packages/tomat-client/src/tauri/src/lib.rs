@@ -90,6 +90,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ))
         .on_window_event(move |window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 let _ = window.hide();
@@ -209,6 +213,7 @@ pub fn run() {
             resolve_path,
             convert_file_to_markdown,
             get_self_metrics,
+            was_autostarted,
             get_client_storage,
             truncate_client_log,
             // Pairing / admin

@@ -20,6 +20,7 @@ import {
   errMessage,
   isSecretSettingKey,
   isValidSettingKey,
+  scheduleConfirmResponseSchema,
   toolAskUserResponseSchema,
   toolCancelSchema,
   toolPermissionResponseSchema,
@@ -243,6 +244,21 @@ class WsHub {
         parsed.data.callId,
         parsed.data.requestId,
         parsed.data.allow,
+        conn.clientId,
+      );
+      return;
+    }
+    if (kind === "schedule.confirm_response") {
+      const parsed = scheduleConfirmResponseSchema.safeParse(raw);
+      if (!parsed.success) {
+        log.warn(`bad schedule.confirm_response: ${parsed.error.message}`);
+        return;
+      }
+      chatService().forwardScheduleResponse(
+        parsed.data.callId,
+        parsed.data.requestId,
+        parsed.data.accepted,
+        parsed.data.draft,
         conn.clientId,
       );
       return;

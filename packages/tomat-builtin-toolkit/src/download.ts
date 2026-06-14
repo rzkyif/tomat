@@ -3,8 +3,8 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import mime from "mime-types";
+import { assertSafePublicUrl, safeFetch } from "./net.ts";
 import type { ToolContext } from "./types.ts";
 
 export async function download(
@@ -12,12 +12,12 @@ export async function download(
   ctx: ToolContext,
 ): Promise<{ path: string; bytes: number }> {
   const url = typeof args?.url === "string" ? args.url.trim() : "";
-  if (!/^https?:\/\//i.test(url)) {
-    throw new Error("only http(s) URLs are allowed");
-  }
+  // Validates scheme and blocks loopback/private targets (safeFetch re-checks
+  // each redirect hop below).
+  assertSafePublicUrl(url);
 
   ctx.setProgress(0, "Starting download", url);
-  const res = await fetch(url, { signal: ctx.signal });
+  const res = await safeFetch(url, { signal: ctx.signal });
   if (!res.ok) throw new Error(`server returned ${res.status}`);
 
   const total = Number(res.headers.get("content-length")) || 0;
@@ -79,25 +79,61 @@ export async function download(
   return { path: destPath, bytes: written };
 }
 
-function pickDownloadsDir(): string {
+export function pickDownloadsDir(): string {
   // Cross-platform heuristic: honor XDG_DOWNLOAD_DIR when set, otherwise
-  // fall back to ~/Downloads. Works for the three desktop platforms tomat
-  // supports.
-  const xdg = Deno.env.get("XDG_DOWNLOAD_DIR");
+  // fall back to ~/Downloads. Home comes from the declared HOME / USERPROFILE
+  // env grants, not os.homedir(), which would need an undeclared
+  // --allow-sys=homedir and throw on the default path. Each env read is
+  // guarded: Deno.env.get throws (not returns undefined) when a key isn't
+  // granted, so an ungranted XDG var must not abort the whole tool.
+  const xdg = tryEnv("XDG_DOWNLOAD_DIR");
   if (xdg && fs.existsSync(xdg)) return xdg;
-  return path.join(os.homedir(), "Downloads");
+  const home = tryEnv("HOME") ?? tryEnv("USERPROFILE");
+  if (!home) {
+    throw new Error("cannot locate the home directory (HOME / USERPROFILE not set or granted)");
+  }
+  return path.join(home, "Downloads");
+}
+
+function tryEnv(key: string): string | undefined {
+  try {
+    const v = Deno.env.get(key);
+    return v && v.length > 0 ? v : undefined;
+  } catch {
+    return undefined; // permission not granted for this key
+  }
 }
 
 function deriveFilename(url: string, override: string | undefined): string {
-  if (override) return override;
+  if (override) return sanitizeFilename(override);
   try {
     const u = new URL(url);
     const last = u.pathname.split("/").filter(Boolean).pop();
-    if (last) return decodeURIComponent(last);
+    if (last) return sanitizeFilename(decodeURIComponent(last));
   } catch {
     /* fall through */
   }
   return "download";
+}
+
+// Reduce an arbitrary string (URL path segment or model-supplied override) to
+// a safe basename: no directory separators, no traversal, no control chars,
+// bounded length. Without this a name like "../../etc/passwd" or "a/b" would
+// escape the Downloads folder. Filtered by codepoint rather than a regex so
+// no control characters appear in source (the linter rejects those).
+function sanitizeFilename(name: string): string {
+  let cleaned = "";
+  for (const ch of name) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) continue; // C0 controls + DEL
+    if (ch === "/" || ch === "\\") {
+      cleaned += "_";
+      continue;
+    }
+    cleaned += ch;
+  }
+  const base = cleaned.replace(/^\.+/, "").trim().slice(0, 200);
+  return base.length > 0 ? base : "download";
 }
 
 function ensureExtension(name: string, contentType: string): string {
@@ -107,7 +143,7 @@ function ensureExtension(name: string, contentType: string): string {
   return ext ? `${name}.${ext}` : name;
 }
 
-function uniquePath(dir: string, filename: string): string {
+export function uniquePath(dir: string, filename: string): string {
   let candidate = path.join(dir, filename);
   if (!fs.existsSync(candidate)) return candidate;
   const ext = path.extname(filename);

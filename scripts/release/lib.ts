@@ -10,7 +10,7 @@ import { encodeHex } from "@std/encoding/hex";
 import { copy } from "@std/fs/copy";
 import { ensureDir } from "@std/fs/ensure-dir";
 import { walk } from "@std/fs/walk";
-import { dirname, fromFileUrl, join, relative, resolve } from "@std/path";
+import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import { load as loadDotenv } from "@std/dotenv";
 import * as ed from "@noble/ed25519";
 import { canonicalize } from "../../packages/tomat-shared/src/crypto/canonical.ts";
@@ -125,8 +125,8 @@ export interface DeployEnv {
   storageDomain: string;
   r2Bucket: string;
   /** Raw text of the Tauri updater keys (minisign format). Empty when the
-   *  user hasn't set up client updates yet. release:client skips itself
-   *  with a yellow warning when missing. */
+   *  user hasn't set up client updates yet. The release orchestrator skips the
+   *  client item with a yellow warning when these are missing. */
   tauriUpdaterPublicKey: string;
   tauriUpdaterPrivateKey: string;
   tauriUpdaterPassword: string;
@@ -149,7 +149,7 @@ export async function loadOrSeedEnv(): Promise<DeployEnv> {
 
   if (!privB64 && !pubB64) {
     info(`generating new Ed25519 signing keypair`);
-    const sk = ed.utils.randomPrivateKey();
+    const sk = ed.utils.randomSecretKey();
     const pk = await ed.getPublicKeyAsync(sk);
     privB64 = encodeBase64(sk);
     pubB64 = encodeBase64(pk);
@@ -221,13 +221,21 @@ export async function writeSigningKeys(publicKeyB64: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// core version
+// item versions
 
 export async function readCoreVersion(): Promise<string> {
   const text = await Deno.readTextFile(CONFIG_PATH);
   const match = text.match(/export\s+const\s+CORE_VERSION\s*=\s*"([^"]+)"/);
   if (!match) fail(`could not parse CORE_VERSION from ${rel(CONFIG_PATH)}`);
   return match[1];
+}
+
+/** Read the top-level `version` field from a JSON file (deno.json, the schema,
+ *  scripts/install/version.json, …). Used by the versioned release items. */
+export async function readVersionField(path: string): Promise<string> {
+  const cfg = JSON.parse(await Deno.readTextFile(path)) as { version?: string };
+  if (!cfg.version) fail(`no "version" field in ${rel(path)}`);
+  return cfg.version;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,33 +262,33 @@ export function detectHostTriple(): Triple {
 // ---------------------------------------------------------------------------
 // release channels
 //
-// stable + beta are the only *published* channels (dev is local-only). The
+// stable + latest are the only *published* channels (dev is local-only). The
 // conventions mirror the runtime side (core paths.ts channelSuffix +
 // config.ts manifestDir, client channel.rs): stable stays bare for
-// back-compat; beta suffixes our binary names and nests manifests + artifacts
-// under a /beta path segment.
+// back-compat; latest suffixes our binary names and nests manifests + artifacts
+// under a /latest path segment.
 
-export type ReleaseChannel = "stable" | "beta";
+export type ReleaseChannel = "stable" | "latest";
 
 export function parseChannelFlag(value: string | undefined): ReleaseChannel {
   const ch = (value ?? "stable").trim() || "stable";
-  if (ch !== "stable" && ch !== "beta") {
-    fail(`invalid --channel: ${ch} (expected "stable" or "beta")`);
+  if (ch !== "stable" && ch !== "latest") {
+    fail(`invalid --channel: ${ch} (expected "stable" or "latest")`);
   }
   return ch;
 }
 
-/** Suffix on tomat's own binary names: "" for stable, "-beta" otherwise. */
+/** Suffix on tomat's own binary names: "" for stable, "-latest" otherwise. */
 export function channelBinSuffix(channel: ReleaseChannel): string {
   return channel === "stable" ? "" : `-${channel}`;
 }
 
-/** R2 manifest dir for this channel: "manifests" | "manifests/beta". */
+/** R2 manifest dir for this channel: "manifests" | "manifests/latest". */
 export function channelManifestDir(channel: ReleaseChannel): string {
   return channel === "stable" ? "manifests" : `manifests/${channel}`;
 }
 
-/** R2 artifact key prefix before "<version>/<triple>/…": "" | "beta/". */
+/** R2 artifact key prefix before "<version>/<triple>/…": "" | "latest/". */
 export function channelStoragePrefix(channel: ReleaseChannel): string {
   return channel === "stable" ? "" : `${channel}/`;
 }
@@ -443,35 +451,158 @@ export async function fetchR2Bytes(env: DeployEnv, r2Key: string): Promise<Uint8
 }
 
 // ---------------------------------------------------------------------------
-// website source hashing (for release:website idempotency)
+// source hashing
+//
+// A release item's "is it different from production?" signal is a deterministic
+// hash of its source inputs (files + directories), independent of any build
+// artifact. The unified release records these per item in the release-state
+// cursor (below) and diffs the local hash against the recorded one.
 
-const WEBSITE_HASH_INPUTS = ["src", "public", "astro.config.mjs", "wrangler.toml"];
+export interface HashInput {
+  /** Absolute path to a file or directory to fold into the hash. */
+  path: string;
+  /** Skip files whose repo-relative path matches (e.g. tests, build output). */
+  exclude?: (relPath: string) => boolean;
+}
 
-/** Path (relative to packages/tomat-website/) of the release-state cursor
- *  itself. Excluded from the hash so it doesn't feed back into the hash it
- *  records. */
-export const WEBSITE_STATE_REL = "public/release-state.json";
-
-export async function hashWebsiteSource(): Promise<string> {
-  const root = WEBSITE_DIR;
+/** Stable sha256 over the sorted (repo-relative-path, file-sha256) pairs of
+ *  every file reachable from `inputs`. Missing paths are skipped. */
+export async function hashPaths(inputs: HashInput[]): Promise<string> {
   const entries: { path: string; sha: string }[] = [];
-  for (const input of WEBSITE_HASH_INPUTS) {
-    const fullPath = join(root, input);
-    if (!(await exists(fullPath))) continue;
-    const stat = await Deno.stat(fullPath);
+  for (const input of inputs) {
+    if (!(await exists(input.path))) continue;
+    const stat = await Deno.stat(input.path);
     if (stat.isFile) {
-      const r = relative(root, fullPath);
-      entries.push({ path: r, sha: (await sha256File(fullPath)).sha256 });
+      const r = rel(input.path);
+      if (input.exclude?.(r)) continue;
+      entries.push({ path: r, sha: (await sha256File(input.path)).sha256 });
     } else if (stat.isDirectory) {
-      for await (const e of walk(fullPath, { includeDirs: false })) {
-        const r = relative(root, e.path);
-        if (r === WEBSITE_STATE_REL) continue;
+      for await (const e of walk(input.path, { includeDirs: false })) {
+        const r = rel(e.path);
+        if (input.exclude?.(r)) continue;
         entries.push({ path: r, sha: (await sha256File(e.path)).sha256 });
       }
     }
   }
   entries.sort((a, b) => a.path.localeCompare(b.path));
   return await sha256String(entries.map((e) => `${e.path}\t${e.sha}`).join("\n"));
+}
+
+const WEBSITE_HASH_INPUTS = ["src", "public", "astro.config.mjs", "wrangler.toml"];
+
+export async function hashWebsiteSource(): Promise<string> {
+  return await hashPaths(
+    WEBSITE_HASH_INPUTS.map((p) => ({
+      path: join(WEBSITE_DIR, p),
+      // A stale release-state.json from an older website build must not feed
+      // back into the hash; the cursor lives on R2 now, not in public/.
+      exclude: (r) => r.endsWith("release-state.json"),
+    })),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// semver compare (version-bump gate)
+
+function parseSemver(v: string): [number, number, number] {
+  const core = v.split("+")[0].split("-")[0];
+  const parts = core.split(".").map((n) => parseInt(n, 10) || 0);
+  return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+}
+
+/** True when `a` is a strictly higher version than `b` (major.minor.patch;
+ *  pre-release/build metadata ignored). */
+export function semverGt(a: string, b: string): boolean {
+  const pa = parseSemver(a);
+  const pb = parseSemver(b);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return pa[i] > pb[i];
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// release-state cursor
+//
+// One tooling-only JSON on R2 recording each item's {version?, sourceHash} as
+// of its last successful release. NEVER fetched or verified by core/client, so
+// it carries no signature and has no Zod schema. Channel-specific items
+// (core/toolkit/catalog/client) nest under channels.<channel>; the
+// channel-independent items (scripts/schemas/website) live under `shared`.
+
+export const RELEASE_STATE_KEY = "manifests/release-state.json";
+
+export interface ItemState {
+  version?: string;
+  sourceHash: string;
+}
+
+export interface ReleaseCursor {
+  schemaVersion: 1;
+  channels: Record<string, Record<string, ItemState>>;
+  shared: Record<string, ItemState>;
+}
+
+export async function readReleaseCursor(env: DeployEnv): Promise<ReleaseCursor> {
+  const live = await fetchLiveJson<ReleaseCursor>(env, RELEASE_STATE_KEY);
+  if (live && live.channels && live.shared) return live;
+  return { schemaVersion: 1, channels: {}, shared: {} };
+}
+
+export async function writeReleaseCursor(env: DeployEnv, cursor: ReleaseCursor): Promise<void> {
+  await r2PutInline(
+    env,
+    RELEASE_STATE_KEY,
+    JSON.stringify(cursor, null, 2),
+    "application/json",
+    "public, max-age=60",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// y/N confirmation
+
+/** Reads a single y/N answer from the TTY. Returns true only on y / yes. */
+export function promptYesNo(message: string): boolean {
+  const ans = prompt(`${message} (y/N)`);
+  return ans !== null && /^y(es)?$/i.test(ans.trim());
+}
+
+// ---------------------------------------------------------------------------
+// release item contract
+//
+// Each module under scripts/release/ exports one ReleaseItem. The orchestrator
+// (main.ts) computes sourceHash() to decide what changed, enforces the
+// version-bump gate via version()/bumpHint, and calls apply() for changed
+// items after confirmation.
+
+export interface ApplyOpts {
+  /** Triples to build (core/client). Other items ignore this. */
+  triples: Triple[];
+  /** Build + sign locally but skip every R2 upload. */
+  dryRun: boolean;
+}
+
+export interface ReleaseItem {
+  id: string;
+  label: string;
+  /** channel-specific items publish per channel; shared items publish once. */
+  scope: "channel" | "shared";
+  /** Where to bump the version when this item changed without a bump. */
+  bumpHint?: string;
+  /** Deterministic hash of this item's source inputs (no compiling). */
+  sourceHash(channel: ReleaseChannel): Promise<string>;
+  /** Current local version. */
+  version(): Promise<string>;
+  /** Extra "changed" signal beyond a source-hash diff (e.g. a client platform
+   *  not yet published at the current version). Never gates a version bump. */
+  extraChanged?(env: DeployEnv, channel: ReleaseChannel): Promise<boolean>;
+  /** Absolute paths (files or dirs) this item compiles to. The unified
+   *  `deno task build` hashes them so a wiped or swapped artifact forces a
+   *  rebuild even when source is unchanged. Buildable items only. */
+  buildOutputs?(channel: ReleaseChannel): Promise<string[]>;
+  /** Build + sign + upload. Runs only for changed items, only after confirm. */
+  apply(env: DeployEnv, channel: ReleaseChannel, opts: ApplyOpts): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

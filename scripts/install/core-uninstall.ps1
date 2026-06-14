@@ -11,7 +11,7 @@
 #   -KeepData  do not remove the core directory (only stop / unregister services).
 #
 # Env overrides:
-#   $env:TOMAT_CHANNEL  channel to uninstall: stable (default) | dev | beta.
+#   $env:TOMAT_CHANNEL  channel to uninstall: stable (default) | dev | latest.
 #
 # UI:
 #   Each phase appears as one row. Pending rows show [ ], the active row
@@ -252,8 +252,8 @@ function Ui-Die($Reason, $Detail, $Hint) {
 # --- configuration --------------------------------------------------------
 
 $Channel = if ($env:TOMAT_CHANNEL) { $env:TOMAT_CHANNEL } else { "stable" }
-if ($Channel -notin @("stable", "dev", "beta")) {
-  Write-Error "invalid TOMAT_CHANNEL: $Channel (expected stable, dev, or beta)"
+if ($Channel -notin @("stable", "dev", "latest")) {
+  Write-Error "invalid TOMAT_CHANNEL: $Channel (expected stable, dev, or latest)"
   exit 1
 }
 $HomeDir = if ($env:TOMAT_CORE_HOME) { $env:TOMAT_CORE_HOME } else { Join-Path $HOME ".tomat\$Channel\core" }

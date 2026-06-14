@@ -34,6 +34,25 @@ export async function ask(_args, ctx) {
   const answer = await ctx.askUser([{ question: "pick one", options: [{ label: "a", value: "a" }] }]);
   return { picked: answer[0] };
 }
+
+export async function useDb(_args, ctx) {
+  const rows = await ctx.db.query("SELECT 1 AS n", []);
+  return { rows };
+}
+
+export async function showThing(_args, ctx) {
+  ctx.display.markdown("# hi");
+  return { shown: true };
+}
+
+export async function proposeSchedule(_args, ctx) {
+  return await ctx.schedulePrompt({
+    title: "t",
+    instruction: "do it",
+    schedule: { kind: "interval", everyMinutes: 60 },
+    runMissed: false,
+  });
+}
 `.trim();
 
 interface WorkerSession {
@@ -272,6 +291,127 @@ Deno.test("toolWorker: ask_user round-trip resolves the tool with the user's ans
 
     const result = await nextOfKind(session.frames, "tool_result");
     assertEquals(result.result, { picked: "picked-value" });
+  } finally {
+    await session.shutdown();
+    await Deno.remove(dir, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("toolWorker: module_request round-trips a db query through the pool", async () => {
+  const { dir, entry } = await setupToolkit();
+  const session = startWorker(entry);
+  try {
+    await nextOfKind(session.frames, "ready");
+    await nextOfKind(session.frames, "booted");
+
+    await session.writer.write(
+      encode({
+        kind: "call",
+        callId: "c5",
+        toolName: "useDb",
+        fnExport: "useDb",
+        arguments: "{}",
+        chatContext: { userMessage: "", sessionId: null },
+      }),
+    );
+
+    const req = await nextOfKind(session.frames, "module_request");
+    assertEquals(req.callId, "c5");
+    assertEquals(req.module, "db");
+    assertEquals(req.op, "query");
+    assertEquals(req.args, { sql: "SELECT 1 AS n", params: [] });
+
+    await session.writer.write(
+      encode({
+        kind: "module_response",
+        callId: "c5",
+        requestId: req.requestId,
+        ok: true,
+        result: [{ n: 1 }],
+      }),
+    );
+
+    const result = await nextOfKind(session.frames, "tool_result");
+    assertEquals(result.result, { rows: [{ n: 1 }] });
+  } finally {
+    await session.shutdown();
+    await Deno.remove(dir, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("toolWorker: display is a one-way frame that precedes the result", async () => {
+  const { dir, entry } = await setupToolkit();
+  const session = startWorker(entry);
+  try {
+    await nextOfKind(session.frames, "ready");
+    await nextOfKind(session.frames, "booted");
+
+    await session.writer.write(
+      encode({
+        kind: "call",
+        callId: "c6",
+        toolName: "showThing",
+        fnExport: "showThing",
+        arguments: "{}",
+        chatContext: { userMessage: "", sessionId: null },
+      }),
+    );
+
+    // No response is sent: display is fire-and-forget, so the tool returns
+    // without us answering anything.
+    const display = await nextOfKind(session.frames, "display");
+    assertEquals(display.callId, "c6");
+    assertEquals(display.content, { type: "markdown", markdown: "# hi" });
+
+    const result = await nextOfKind(session.frames, "tool_result");
+    assertEquals(result.result, { shown: true });
+  } finally {
+    await session.shutdown();
+    await Deno.remove(dir, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("toolWorker: schedule_request round-trips and resolves with the confirmation", async () => {
+  const { dir, entry } = await setupToolkit();
+  const session = startWorker(entry);
+  try {
+    await nextOfKind(session.frames, "ready");
+    await nextOfKind(session.frames, "booted");
+
+    await session.writer.write(
+      encode({
+        kind: "call",
+        callId: "c7",
+        toolName: "proposeSchedule",
+        fnExport: "proposeSchedule",
+        arguments: "{}",
+        chatContext: { userMessage: "", sessionId: null },
+      }),
+    );
+
+    const req = await nextOfKind(session.frames, "schedule_request");
+    assertEquals(req.callId, "c7");
+    assertEquals(req.draft.title, "t");
+
+    // The pool replies with the user's (possibly edited) draft.
+    const editedDraft = {
+      title: "edited",
+      instruction: "do it",
+      schedule: { kind: "interval", everyMinutes: 30 },
+      runMissed: true,
+    } as const;
+    await session.writer.write(
+      encode({
+        kind: "schedule_confirm_response",
+        callId: "c7",
+        requestId: req.requestId,
+        accepted: true,
+        draft: editedDraft,
+      }),
+    );
+
+    const result = await nextOfKind(session.frames, "tool_result");
+    assertEquals(result.result, { accepted: true, draft: editedDraft });
   } finally {
     await session.shutdown();
     await Deno.remove(dir, { recursive: true }).catch(() => {});

@@ -1,0 +1,119 @@
+// Document context injected into a chat turn's prompt: the "relevant documents"
+// summary block (embedding-scored against the turn's query) and the per-message
+// `@token` document expansions. Both read the documents store; a turn shares its
+// query embedding with relevantDocumentsPrompt so it embeds at most once.
+import { documentsStore } from "./documents-store.ts";
+import { embed, isEmbeddingModelReady } from "./embedding.ts";
+import { topKBySimilarity } from "./relevance.ts";
+
+// Cosine floor below which a document is considered unrelated to the query.
+// Embeddings are L2-normalized MiniLM vectors, where unrelated text pairs
+// commonly land near 0.1 to 0.2.
+const DOCUMENT_SIMILARITY_FLOOR = 0.25;
+
+/** "Relevant documents" system-prompt block for this turn's query, or null
+ *  when nothing scores above the floor (or nothing is indexed yet).
+ *  Exported for tests; chat turns call it with the filter's query vector. */
+export async function relevantDocumentsPrompt(
+  queryText: string | undefined,
+  queryVector: Float32Array | undefined,
+  maxRelevant: number,
+): Promise<string | null> {
+  if (!queryText) return null;
+  const embeddings = documentsStore().loadAllEmbeddings();
+  if (embeddings.size === 0) return null;
+  if (!queryVector) {
+    if (!(await isEmbeddingModelReady())) return null;
+    [queryVector] = await embed([queryText]);
+  }
+  if (!queryVector) return null;
+  const scored = topKBySimilarity(
+    queryVector,
+    [...embeddings].map(([id, vector]) => ({ item: id, vector })),
+    maxRelevant,
+  ).filter((s) => s.score >= DOCUMENT_SIMILARITY_FLOOR);
+  if (scored.length === 0) return null;
+  const byId = new Map(
+    documentsStore()
+      .list()
+      .map((m) => [m.id, m]),
+  );
+  const lines: string[] = [];
+  for (const { item } of scored) {
+    const meta = byId.get(item);
+    if (!meta) continue;
+    lines.push(`- ${meta.title}: ${meta.summary ?? "(not summarized yet)"}`);
+  }
+  if (lines.length === 0) return null;
+  return `Documents possibly relevant to the user's request (read the full content with the read_document tool):\n${lines.join(
+    "\n",
+  )}`;
+}
+
+// Bound the injected document content: a multi-MB document, or the same
+// document mentioned across many history messages, must not multiply into
+// every request. The budget is request-scoped: the first mention carries the
+// (capped) content, later mentions carry a one-line reference.
+const DOCUMENT_TOKEN_MAX_CHARS = 64_000;
+const DOCUMENT_TOKENS_TOTAL_MAX_CHARS = 256_000;
+
+export interface DocumentTokenBudget {
+  expanded: Set<string>;
+  remainingChars: number;
+}
+
+export function newDocumentTokenBudget(): DocumentTokenBudget {
+  return { expanded: new Set(), remainingChars: DOCUMENT_TOKENS_TOTAL_MAX_CHARS };
+}
+
+/** Expanded contents for every `@token` in a user message that names a
+ *  document (token = filename stem), deduped; null when none match.
+ *  Exported for tests; the OpenAI message mapping calls it per user message
+ *  with one shared budget per request. */
+export function documentTokenBlocks(
+  text: string,
+  budget: DocumentTokenBudget = newDocumentTokenBudget(),
+): string | null {
+  if (!text.includes("@")) return null;
+  let store;
+  try {
+    store = documentsStore();
+  } catch {
+    return null;
+  }
+  const docs = store.list();
+  if (docs.length === 0) return null;
+  const byStem = new Map(docs.map((d) => [d.filename.replace(/\.md$/, "").toLowerCase(), d]));
+  const seen = new Set<string>();
+  const blocks: string[] = [];
+  // Bare `@slug` (group 2) or quoted `@"name with spaces"` (group 1). The
+  // quoted form lets a hand-placed file with spaces still be referenced; both
+  // resolve against the lowercased filename stem.
+  for (const match of text.matchAll(/(?:^|[^\w@])@(?:"([^"]+)"|([A-Za-z0-9_-]+))/g)) {
+    const raw = match[1] ?? match[2];
+    const stem = raw.toLowerCase();
+    const token = match[1] !== undefined ? `@"${raw}"` : `@${raw}`;
+    if (seen.has(stem)) continue;
+    const meta = byStem.get(stem);
+    if (!meta) continue;
+    seen.add(stem);
+    if (budget.expanded.has(stem)) {
+      blocks.push(`[Document ${token} "${meta.title}" is included earlier in this conversation]`);
+      continue;
+    }
+    if (budget.remainingChars <= 0) {
+      blocks.push(
+        `[Document ${token} "${meta.title}" omitted: too much referenced document content in this conversation]`,
+      );
+      continue;
+    }
+    budget.expanded.add(stem);
+    const doc = store.get(meta.id);
+    const cap = Math.min(DOCUMENT_TOKEN_MAX_CHARS, budget.remainingChars);
+    const content =
+      doc.content.length > cap ? doc.content.slice(0, cap) + "\n[document truncated]" : doc.content;
+    budget.remainingChars -= content.length;
+    blocks.push(`[Document ${token} "${doc.title}"]\n${content}`);
+  }
+  return blocks.length > 0 ? blocks.join("\n\n") : null;
+}

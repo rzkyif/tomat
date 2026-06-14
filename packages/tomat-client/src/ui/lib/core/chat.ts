@@ -1,6 +1,7 @@
 // Chat-stream control via WS frames. Streaming is server-driven; this module
 // just sends start/interrupt/tool-response frames to the connected core.
 
+import type { AskUserAnswer, ScheduledPromptDraft } from "@tomat/shared";
 import type { CoreClient } from "./client";
 
 export class ChatApi {
@@ -27,7 +28,7 @@ export class ChatApi {
     this.client.sendWs({ kind: "chat.interrupt", streamId });
   }
 
-  respondAskUser(callId: string, requestId: string, answers: Array<string | string[]>): void {
+  respondAskUser(callId: string, requestId: string, answers: AskUserAnswer[]): void {
     this.client.sendWs({
       kind: "tool.askuser_response",
       callId,
@@ -42,6 +43,23 @@ export class ChatApi {
       callId,
       requestId,
       allow,
+    });
+  }
+
+  /** Settle a schedule confirm form; `draft` carries the user's (possibly
+   *  edited) version and must be present when accepted. */
+  respondScheduleConfirm(
+    callId: string,
+    requestId: string,
+    accepted: boolean,
+    draft?: ScheduledPromptDraft,
+  ): void {
+    this.client.sendWs({
+      kind: "schedule.confirm_response",
+      callId,
+      requestId,
+      accepted,
+      ...(draft ? { draft } : {}),
     });
   }
 

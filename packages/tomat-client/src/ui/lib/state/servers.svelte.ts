@@ -4,22 +4,27 @@
  * to render running / loading / error / disabled indicators.
  */
 
-import type { ServerToClientFrame, SidecarStatus } from "@tomat/shared";
+import type { ServerToClientFrame, SidecarKind, SidecarStatus } from "@tomat/shared";
 import { cores } from "$lib/core";
 
 export type ServerStatusUpdate = {
-  server: string;
+  server: SidecarKind;
   status: SidecarStatus;
   message?: string;
   progress?: number;
 };
 
-const KINDS = ["llama", "whisper", "tts", "tool"] as const;
-
 class ServersState {
-  serverStatuses = $state<Record<string, ServerStatusUpdate>>(
-    Object.fromEntries(KINDS.map((k) => [k, { server: k, status: "Disabled" as SidecarStatus }])),
-  );
+  // Seeded with every sidecar kind so a render that reads a status (e.g. the
+  // chat input's STT chip) never hits an undefined entry before the first WS
+  // frame arrives. Keyed by SidecarKind so a stale key (the old "whisper" /
+  // "tts") is a compile error here rather than a runtime crash.
+  serverStatuses = $state<Record<SidecarKind, ServerStatusUpdate>>({
+    llama: { server: "llama", status: "Disabled" },
+    "llama-embed": { server: "llama-embed", status: "Disabled" },
+    speech: { server: "speech", status: "Disabled" },
+    tool: { server: "tool", status: "Disabled" },
+  });
 
   private unsubscribe: (() => void) | null = null;
 

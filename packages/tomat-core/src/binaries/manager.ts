@@ -2,19 +2,20 @@
 // archive for each binary kind referenced by the runtime-fetched manifest.
 //
 // Two archive shapes are supported, picked by the asset's extension:
-//   .tar.gz  (llama.cpp upstream): strict layout - the executable named
-//            `<kind>(.exe)` at the root, plus `lib/*` entries. Other entries
-//            are rejected to keep the on-disk layout predictable.
-//   .zip     (whisper-server personal repo, Windows llama): lenient layout -
+//   .tar.gz  (llama.cpp upstream; tomat-core-speech): the executable named
+//            `<kind>(.exe)` plus any shared libraries (.so/.dylib), located by
+//            basename wherever they sit. tomat-core-speech additionally carries
+//            an `espeak-ng-data/` tree, preserved verbatim under bin/lib/<kind>/.
+//   .zip     (deno, Windows llama): lenient layout -
 //            the executable (`<kind>(.exe)`) and any shared libraries
 //            (.so/.dylib/.dll) are located wherever they sit in the archive.
 //
 // Either way the executable lands at bin/<kind>(.exe) and shared libs at
-// bin/lib/* (the dir each sidecar is launched with as its library path).
+// bin/lib/<kind>/ (the dir each sidecar is launched with as its library path).
 
 import { UntarStream } from "@std/tar/untar-stream";
 import { configure, Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import type {
   BinaryKind,
   BinaryManifest,
@@ -100,7 +101,7 @@ export class BinariesManager {
       const path = join(paths().binDir, binaryName(kind));
       const installed = await fileExists(path);
       const entry = manifest?.binaries[kind];
-      // Don't hit GitHub for a plain list: resolver (beta) entries report the
+      // Don't hit GitHub for a plain list: resolver (latest) entries report the
       // installed version (or "latest" if not yet installed); pinned (stable)
       // entries report their published version.
       const version = entry
@@ -129,7 +130,7 @@ export class BinariesManager {
       const path = join(paths().binDir, binaryName(kind));
       const installed = await fileExists(path);
       const installedVersion = versions[kind] ?? null;
-      // Resolve the latest available version for this host. For beta resolver
+      // Resolve the latest available version for this host. For latest resolver
       // entries this hits GitHub; a per-kind failure (missing asset/digest)
       // degrades to "no update" rather than failing the whole check.
       let latestVersion = "unknown";
@@ -186,7 +187,7 @@ export class BinariesManager {
           continue;
         }
         // Pinned (stable) entries don't carry a size; fall back to a HEAD on
-        // the resolved URL. Resolver (beta) entries already know it.
+        // the resolved URL. Resolver (latest) entries already know it.
         const sizeBytes = resolved.sizeBytes ?? (await headContentLength(resolved.url));
         out.push({ kind, version: resolved.version, sizeBytes });
       } catch (err) {
@@ -241,7 +242,7 @@ export class BinariesManager {
       throw new AppError("binary_not_found", `kind ${kind} not in manifest`);
     }
     // Resolve to a concrete URL+hash+version. For pinned (stable) entries this
-    // is the stored data; for resolver (beta) entries it hits GitHub for the
+    // is the stored data; for resolver (latest) entries it hits GitHub for the
     // latest release and verifies via its published sha256 digest.
     const resolved = await resolveBinaryEntry(entry, triple);
     if (!resolved) {
@@ -339,7 +340,8 @@ async function extractTarGz(
 
   let exeFound = false;
   for await (const entry of entries) {
-    const base = entry.path.split("/").pop() ?? entry.path;
+    const path = entry.path.replace(/^\.\//, "");
+    const base = path.split("/").pop() ?? path;
     const flag = entry.header.typeflag;
     if (flag === "5" /* directory */) {
       await entry.readable?.cancel();
@@ -361,6 +363,12 @@ async function extractTarGz(
       exeFound = true;
     } else if (isSharedLib(base)) {
       await writeStreamTo(entry.readable, join(libDir, base), 0o644);
+    } else if (path === "espeak-ng-data" || path.startsWith("espeak-ng-data/")) {
+      // tomat-core-speech ships its espeak-ng-data phonemizer tree; preserve the
+      // nested layout under bin/lib/<kind>/ (writeStreamTo won't mkdir parents).
+      const dest = join(libDir, path);
+      await Deno.mkdir(dirname(dest), { recursive: true });
+      await writeStreamTo(entry.readable, dest, 0o644);
     } else {
       await entry.readable?.cancel(); // other binaries, licenses, READMEs
     }

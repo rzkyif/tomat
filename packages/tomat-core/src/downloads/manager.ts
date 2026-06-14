@@ -336,7 +336,7 @@ export class DownloadManager {
     // wins; otherwise, for HuggingFace LFS weights we verify against HF's
     // published sha256 (the `x-linked-etag` on the resolve redirect) so a
     // tampered CDN response is rejected (trust = HF + TLS, same posture as the
-    // beta binary resolver). Small non-LFS files (config.json etc.) carry a git
+    // latest binary resolver). Small non-LFS files (config.json etc.) carry a git
     // blob sha1 instead, which is not a content hash, so they stay unverified.
     const expectedSha = spec.sha256 ?? (await resolveHfSha256(url, signal));
     const sha = expectedSha ? new Sha256Stream() : null;

@@ -8,12 +8,18 @@
 // the WS hub (warn-and-drop on envelope mismatch only) still applies.
 
 import { z } from "zod";
+import { scheduledPromptDraftSchema } from "./scheduled-prompt.ts";
 
 // --- Askuser shapes --------------------------------------------------------
 
+// One loose shape covering every question kind (the TS union lives in
+// api/ws.ts). A discriminated union cannot apply here because legacy
+// frames omit `kind`; per-kind field presence is the renderer's concern.
 export const askUserQuestionSchema = z
   .object({
     question: z.string(),
+    kind: z.enum(["choice", "diff", "files", "image", "table"]).optional(),
+    // choice
     options: z
       .array(
         z
@@ -27,6 +33,29 @@ export const askUserQuestionSchema = z
       .optional(),
     multiselect: z.boolean().optional(),
     allowFreeformInput: z.boolean().optional(),
+    // diff
+    before: z.string().optional(),
+    after: z.string().optional(),
+    title: z.string().optional(),
+    // files
+    entries: z
+      .array(
+        z
+          .object({
+            path: z.string(),
+            label: z.string().optional(),
+            description: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+    // image
+    dataB64: z.string().optional(),
+    mime: z.string().optional(),
+    actions: z.array(z.object({ label: z.string(), value: z.string() }).passthrough()).optional(),
+    // table
+    columns: z.array(z.string()).optional(),
+    rows: z.array(z.array(z.string())).optional(),
   })
   .passthrough();
 
@@ -127,7 +156,19 @@ const toolPermissionRequestFrameSchema = z
     kind: z.literal("tool.permission_request"),
     callId: z.string().min(1),
     requestId: z.string().min(1),
-    permissionKind: z.enum(["net", "read", "write", "run", "env", "ffi", "sys"]),
+    permissionKind: z.enum([
+      "net",
+      "read",
+      "write",
+      "run",
+      "env",
+      "ffi",
+      "sys",
+      "documents",
+      "llm",
+      "tts",
+      "stt",
+    ]),
     resource: z.string(),
     apiName: z.string().optional(),
     declared: z.boolean(),
@@ -257,6 +298,27 @@ const sessionUpdatedFrameSchema = z
   })
   .passthrough();
 
+// Session is a domain shape; like downloads.snapshot the payload stays
+// loose so the envelope passes without copying every nested field.
+const sessionCreatedFrameSchema = z
+  .object({
+    kind: z.literal("session.created"),
+    session: z.unknown(),
+    reason: z.enum(["schedule", "greeting"]),
+    scheduledPromptId: z.string().optional(),
+    focus: z.enum(["show", "show_when_done"]),
+  })
+  .passthrough();
+
+const scheduleConfirmRequestFrameSchema = z
+  .object({
+    kind: z.literal("schedule.confirm_request"),
+    callId: z.string().min(1),
+    requestId: z.string().min(1),
+    draft: scheduledPromptDraftSchema,
+  })
+  .passthrough();
+
 const updateStagedFrameSchema = z
   .object({
     kind: z.literal("update.staged"),
@@ -299,6 +361,8 @@ export const serverToClientFrameSchema = z.discriminatedUnion("kind", [
   settingsUpdatedFrameSchema,
   sidecarStatusFrameSchema,
   sessionUpdatedFrameSchema,
+  sessionCreatedFrameSchema,
+  scheduleConfirmRequestFrameSchema,
   updateStagedFrameSchema,
   updateErrorFrameSchema,
 ]);

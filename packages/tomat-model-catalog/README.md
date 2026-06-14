@@ -59,8 +59,10 @@ needs the catalog re-released with (or before) it.
 
 ## Build + release
 
-- `deno task catalog:build` - validate the families and write an unsigned
+- `deno task build:catalog` - validate the families and write an unsigned
   `dist/catalog.unsigned.json` for inspection. No keys, no upload.
-- `deno task release:catalog:stable` / `:beta` - compile, Ed25519-sign (same
-  trust root as `core.json` / `binaries.json`), and upload `catalog.json` to R2.
-  Also runs as part of `deno task release:<channel>`.
+- `deno task release` (or `release:stable`) - compiles, Ed25519-signs (same
+  trust root as `core.json` / `binaries.json`), and uploads `catalog.json` to R2
+  as part of the unified release whenever the catalog content changed. Bump the
+  `version` in this package's `deno.json` when you change the families, or the
+  release is rejected.

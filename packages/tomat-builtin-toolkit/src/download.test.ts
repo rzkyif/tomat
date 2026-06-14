@@ -25,6 +25,21 @@ function makeCtx(signal?: AbortSignal): RecordedCtx {
     log(level, message) {
       logs.push({ level, message });
     },
+    display: { markdown() {}, image() {}, table() {}, diff() {} },
+    documents: {
+      list: () => Promise.resolve([]),
+      get: () => Promise.reject(new Error("not scripted")),
+      write: () => Promise.reject(new Error("not scripted")),
+      edit: () => Promise.reject(new Error("not scripted")),
+    },
+    db: {
+      query: () => Promise.reject(new Error("not scripted")),
+      execute: () => Promise.reject(new Error("not scripted")),
+    },
+    llm: { complete: () => Promise.reject(new Error("not scripted")) },
+    tts: { speak: () => Promise.reject(new Error("not scripted")) },
+    stt: { transcribe: () => Promise.reject(new Error("not scripted")) },
+    schedulePrompt: () => Promise.reject(new Error("not scripted")),
     signal: signal ?? new AbortController().signal,
     getChatContext: () => ({ userMessage: "", sessionId: null }),
   };

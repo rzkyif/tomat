@@ -6,7 +6,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { dirname } from "@std/path";
 import type { RequirementsSnapshot } from "@tomat/shared";
-import { EMBED_BASE_FILES } from "@tomat/shared";
+import { EMBED_MODEL_FILE } from "@tomat/shared";
 import { buildApp } from "../server.ts";
 import { pairClient } from "../../../tests/helpers/pairing.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
@@ -141,27 +141,28 @@ Deno.test("DELETE /api/v1/models/:relPath recomputes requirements so the file fl
   const unsub = onRequirementsChanged((snap) => resolveSnap(snap));
   try {
     const { token } = await pairOne();
-    // Minimize required models to the embed base files (external LLM, STT/TTS
-    // off), and put them all on disk so they read as present first.
+    // Minimize required models to the embed GGUF (external LLM, STT/TTS off),
+    // and put it on disk so it reads as present first.
     await patchCoreSettings({
       "llm.provider": "external",
       "stt.enabled": false,
       "tts.enabled": false,
     });
-    const target = EMBED_BASE_FILES[0]; // "@Xenova/all-MiniLM-L6-v2/main/config.json"
-    for (const f of EMBED_BASE_FILES) {
-      const abs = resolveHfPath(f);
-      await Deno.mkdir(dirname(abs), { recursive: true });
-      await Deno.writeTextFile(abs, "stub");
-    }
+    const target = EMBED_MODEL_FILE;
+    const abs = resolveHfPath(target);
+    await Deno.mkdir(dirname(abs), { recursive: true });
+    await Deno.writeTextFile(abs, "stub");
 
     const app = buildApp();
     // relPath under the models root (HF branch dropped on disk).
     const res = await app.fetch(
-      new Request("http://x/api/v1/models/Xenova/all-MiniLM-L6-v2/config.json", {
-        method: "DELETE",
-        headers: bearer(token),
-      }),
+      new Request(
+        "http://x/api/v1/models/second-state/All-MiniLM-L6-v2-Embedding-GGUF/all-MiniLM-L6-v2-Q8_0.gguf",
+        {
+          method: "DELETE",
+          headers: bearer(token),
+        },
+      ),
     );
     assertEquals(res.status, 204);
 

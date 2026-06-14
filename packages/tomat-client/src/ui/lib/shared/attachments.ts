@@ -11,7 +11,8 @@
 
 import { cores } from "$lib/core";
 import { platform } from "$lib/platform";
-import type { MessageContent, MessagePart } from "./types";
+import { blobToBase64 } from "./audio";
+import type { Attachment, MessageContent, MessagePart } from "./types";
 
 export type WrittenAttachment = { path: string; filename: string };
 
@@ -138,6 +139,106 @@ export function toPreviewParts(content: MessageContent): MessagePart[] {
       p.type === "document_file" ||
       p.type === "image_file",
   );
+}
+
+// Ingest: classifying picked/pasted files and turning their bytes into the
+// in-memory Attachment shape the input area appends. The file-type tables and
+// `classifyAttachment` are pure (unit-tested); the `ingest*` helpers touch the
+// platform() seam (FileConvert / base64) and are exercised by the running app.
+
+/** Document file types we accept for markdown conversion. */
+export const DOC_EXTENSIONS = [
+  "pdf",
+  "docx",
+  "pptx",
+  "xlsx",
+  "xls",
+  "csv",
+  "html",
+  "htm",
+  "txt",
+  "md",
+  "json",
+  "xml",
+  "rst",
+  "log",
+  "toml",
+  "yaml",
+  "ini",
+  "py",
+  "rs",
+  "js",
+  "ts",
+  "c",
+  "cpp",
+  "go",
+  "java",
+];
+
+/** Image file types we accept (only when the model supports images). */
+export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
+
+/** Extension -> MIME used when a picked/pasted image carries no own type. */
+export const MIME_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  svg: "image/svg+xml",
+};
+
+/**
+ * Decide how a file should be ingested from its name + reported type. Images
+ * are only eligible when the model supports them; otherwise a known document
+ * extension wins, and anything else is rejected (`null`). The returned `ext`
+ * for images is normalized to a known image extension (falling back to `png`)
+ * so a synthesized filename gets a sensible suffix.
+ */
+export function classifyAttachment(
+  filename: string,
+  fileType: string,
+  supportImages: boolean,
+): { kind: "image"; ext: string } | { kind: "document" } | null {
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
+  const isImage =
+    supportImages && (IMAGE_EXTENSIONS.includes(ext) || fileType.startsWith("image/"));
+  if (isImage) {
+    return { kind: "image", ext: IMAGE_EXTENSIONS.includes(ext) ? ext : "png" };
+  }
+  if (DOC_EXTENSIONS.includes(ext)) return { kind: "document" };
+  return null;
+}
+
+/** Encode an image blob into the in-memory image Attachment. */
+export async function ingestImageBlob(
+  blob: Blob,
+  filename: string,
+  ext: string,
+): Promise<Attachment> {
+  const mime = blob.type || MIME_BY_EXT[ext] || "image/png";
+  const pendingData = await blobToBase64(new Blob([blob], { type: mime }));
+  return { type: "image", filename, pendingData, mime };
+}
+
+/** Convert a document blob to markdown and wrap it as a document Attachment. */
+export async function ingestDocumentBlob(blob: Blob, filename: string): Promise<Attachment> {
+  // platform().fileConvert.toMarkdown handles the temp-file dance (write,
+  // convert, cleanup) internally for any File. Construct a File so the
+  // filename survives the round-trip.
+  const file = new File([blob], filename, { type: blob.type });
+  const pendingData = await platform().fileConvert.toMarkdown(file);
+  return { type: "document", filename, pendingData };
+}
+
+/** Convert an on-disk document straight to markdown (file-picker path). */
+export async function ingestDocumentFromPath(
+  filePath: string,
+  filename: string,
+): Promise<Attachment> {
+  const pendingData = await platform().fileConvert.toMarkdownFromPath(filePath);
+  return { type: "document", filename, pendingData };
 }
 
 function base64ToBlob(b64: string, mime: string): Blob {

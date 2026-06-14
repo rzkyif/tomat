@@ -1,14 +1,23 @@
-// Sidecar boot orchestrator. Starts llama-server and whisper-server based
-// on the current settings, then re-evaluates on every settings PATCH and
-// (re)starts / stops the affected sidecar.
+// Sidecar boot orchestrator. Starts the llama, llama-embed, and speech sidecars
+// based on the current settings, then re-evaluates on every settings PATCH and
+// (re)starts / stops / reconfigures the affected sidecar.
 //
 // This is the only place that decides whether a sidecar should be running.
 // `sidecarManager()` is a generic supervisor; the kind-specific gates
 // (provider, enabled toggle, model file existence) live here.
 
 import { buildLlamaStartOptions, llamaStartArgsFromSettings } from "../sidecars/llama.ts";
+import {
+  buildLlamaEmbedStartOptions,
+  llamaEmbedStartArgsFromSettings,
+} from "../sidecars/llama-embed.ts";
 import { errMessage } from "@tomat/shared";
-import { buildWhisperStartOptions, whisperStartArgsFromSettings } from "../sidecars/whisper.ts";
+import {
+  buildSpeechStartOptions,
+  configureSpeech,
+  type SpeechState,
+  speechDesiredState,
+} from "../sidecars/speech.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
 import { llmScheduler } from "./llm-scheduler.ts";
 import { llmIdle } from "./llm-idle.ts";
@@ -40,14 +49,19 @@ const LLAMA_KEYS = new Set([
   "llm.flashAttn",
 ]);
 
-const WHISPER_KEYS = new Set([
+// Keys that, when changed, reconcile the speech sidecar. STT and TTS share one
+// process: stt.threads drives the process thread count and the rest gate which
+// engines load, so tts.enabled lives here too.
+const SPEECH_KEYS = new Set([
   "stt.enabled",
   "stt.provider",
   "stt.modelPath",
-  "stt.host",
-  "stt.port",
   "stt.threads",
+  "tts.enabled",
 ]);
+
+// The embed sidecar only reads the shared CPU-thread knob; its model is fixed.
+const EMBED_KEYS = new Set(["llm.threads"]);
 
 let initialized = false;
 
@@ -80,7 +94,8 @@ export async function initSidecarBoot(): Promise<void> {
   const settings = await loadCoreSettings();
   llmIdle().configure(settings);
   await applyLlama(settings).catch(logErr("llama"));
-  await applyWhisper(settings).catch(logErr("whisper"));
+  await applyLlamaEmbed(settings).catch(logErr("llama-embed"));
+  await applySpeech(settings).catch(logErr("speech"));
   subscribeCoreSettings((next, changed) => {
     if (changed.has("llm.idleUnloadSeconds")) llmIdle().configure(next);
     // Fire-and-forget the restarts: a sidecar relaunch loads a multi-GB model
@@ -90,8 +105,11 @@ export async function initSidecarBoot(): Promise<void> {
     if (anyOverlap(changed, LLAMA_KEYS)) {
       void applyLlama(next).catch(logErr("llama"));
     }
-    if (anyOverlap(changed, WHISPER_KEYS)) {
-      void applyWhisper(next).catch(logErr("whisper"));
+    if (anyOverlap(changed, EMBED_KEYS)) {
+      void applyLlamaEmbed(next).catch(logErr("llama-embed"));
+    }
+    if (anyOverlap(changed, SPEECH_KEYS)) {
+      void applySpeech(next).catch(logErr("speech"));
     }
   });
   // When an llm/stt model file finishes downloading, retry the affected
@@ -113,8 +131,11 @@ export async function initSidecarBoot(): Promise<void> {
       if (justCompleted.has("llm")) {
         await applyLlama(s).catch(logErr("llama"));
       }
-      if (justCompleted.has("stt")) {
-        await applyWhisper(s).catch(logErr("whisper"));
+      if (justCompleted.has("embed")) {
+        await applyLlamaEmbed(s).catch(logErr("llama-embed"));
+      }
+      if (justCompleted.has("stt") || justCompleted.has("tts")) {
+        await applySpeech(s).catch(logErr("speech"));
       }
     })();
   });
@@ -127,8 +148,11 @@ export async function initSidecarBoot(): Promise<void> {
   onBinaryInstalled((kind) => {
     void (async () => {
       const s = await loadCoreSettings();
-      if (kind === "llama-server") await applyLlama(s).catch(logErr("llama"));
-      if (kind === "whisper-server") await applyWhisper(s).catch(logErr("whisper"));
+      if (kind === "llama-server") {
+        await applyLlama(s).catch(logErr("llama"));
+        await applyLlamaEmbed(s).catch(logErr("llama-embed"));
+      }
+      if (kind === "tomat-core-speech") await applySpeech(s).catch(logErr("speech"));
     })();
   });
 }
@@ -178,34 +202,80 @@ export async function applyLlama(settings: Record<string, unknown>): Promise<voi
   await sidecarManager().restart("llama", buildLlamaStartOptions(args));
 }
 
-async function applyWhisper(settings: Record<string, unknown>): Promise<void> {
-  const args = whisperStartArgsFromSettings(settings);
-  if (!args) {
-    log.info(
-      "whisper-server gated off by settings (stt disabled, external provider, or no model path); not running",
-    );
-    await sidecarManager().stop("whisper");
-    return;
-  }
+// Embeddings are always-on infrastructure (no enable toggle): run llama-embed
+// whenever its model + the llama-server binary are on disk. Mirrors applyLlama's
+// disk gates (but no provider/mmproj gate) so it stays Disabled until the MiniLM
+// GGUF + binary land, then the download/binary hooks re-apply.
+export async function applyLlamaEmbed(settings: Record<string, unknown>): Promise<void> {
+  const args = llamaEmbedStartArgsFromSettings(settings);
   if (!(await fileExists(args.modelPath))) {
     log.warn(
-      `whisper-server model not on disk: ${args.modelPath}; sidecar stays ` +
+      `llama-embed model not on disk: ${args.modelPath}; sidecar stays ` +
         `Disabled until the user downloads it (requirements flow). The ` +
         `download-completion hook re-applies once the file lands`,
     );
-    await sidecarManager().stop("whisper");
+    await sidecarManager().stop("llama-embed");
     return;
   }
-  if (!(await fileExists(binPath(binaryName("whisper-server"))))) {
+  if (!(await fileExists(binPath(binaryName("llama-server"))))) {
     log.warn(
-      `whisper-server binary not installed; sidecar stays Disabled until it ` +
+      `llama-embed binary (llama-server) not installed; sidecar stays Disabled ` +
+        `until it is downloaded`,
+    );
+    await sidecarManager().stop("llama-embed");
+    return;
+  }
+  await sidecarManager().restart("llama-embed", buildLlamaEmbedStartOptions(args));
+}
+
+// Tracks the process identity (host/port/threads) the speech sidecar was last
+// (re)started with. Changing which engines are loaded, or the STT model, is
+// applied via POST /configure on the RUNNING process (no restart) so dropping
+// one engine frees only its model's memory; a restart is forced only when the
+// identity changes (thread count) or the process isn't up yet.
+let speechProcKey: string | null = null;
+
+function speechProcKeyOf(state: SpeechState): string {
+  return `${state.host}:${state.port}:${state.threads}`;
+}
+
+// The combined speech sidecar (Whisper STT + Kokoro TTS). Runs whenever at
+// least one engine is wanted AND its model is on disk; the binary must be
+// installed first. Mirrors applyLlamaEmbed's disk gating, but reconfigures the
+// running process in place when only the engine selection changed.
+export async function applySpeech(settings: Record<string, unknown>): Promise<void> {
+  const state = await speechDesiredState(settings);
+  if (!state.stt && !state.tts) {
+    log.info(
+      "speech sidecar gated off (STT disabled/external and TTS disabled, or models not on disk); not running",
+    );
+    await sidecarManager().stop("speech");
+    speechProcKey = null;
+    return;
+  }
+  if (!(await fileExists(binPath(binaryName("tomat-core-speech"))))) {
+    log.warn(
+      `tomat-core-speech binary not installed; sidecar stays Disabled until it ` +
         `is downloaded (the client re-prompts the pending download on the ` +
         `next settings change)`,
     );
-    await sidecarManager().stop("whisper");
+    await sidecarManager().stop("speech");
+    speechProcKey = null;
     return;
   }
-  await sidecarManager().restart("whisper", buildWhisperStartOptions(args));
+  const procKey = speechProcKeyOf(state);
+  if (sidecarManager().status("speech").status === "Running" && procKey === speechProcKey) {
+    // Process already up with the right host/port/threads: reconfigure engines
+    // in place so a now-disabled module frees only its own model's memory.
+    try {
+      await configureSpeech(state);
+      return;
+    } catch (err) {
+      log.error(`speech reconfigure failed: ${errMessage(err)}; restarting`);
+    }
+  }
+  await sidecarManager().restart("speech", buildSpeechStartOptions(state));
+  speechProcKey = procKey;
 }
 
 async function fileExists(path: string): Promise<boolean> {

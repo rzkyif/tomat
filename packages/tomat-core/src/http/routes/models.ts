@@ -150,7 +150,7 @@ export function modelsRoutes(): Hono {
   });
 
   // Apply a curated card or a specific model/quant: write the stt.* settings
-  // (which makes sidecar-boot restart whisper-server). Like the LLM select,
+  // (which makes sidecar-boot reconfigure the speech sidecar). Like the LLM select,
   // never downloads; the settings write surfaces any missing model file in the
   // client's pending-downloads confirm modal.
   r.post("/stt/select", async (c) => {

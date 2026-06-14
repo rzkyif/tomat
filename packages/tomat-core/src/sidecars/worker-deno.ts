@@ -1,9 +1,9 @@
-// The TTS and embedding workers run as sandboxed `deno run` subprocesses using
-// the bundled `deno` sidecar binary. That binary is a downloadable requirement
-// (see requiredBinaryKinds): until the user installs it, spawning would throw a
-// raw `NotFound` that is easy to leak as an uncaught rejection and kill the
-// core. Resolve + existence-check it here so callers get a clean, handleable
-// error instead.
+// The sandboxed tool workers and the npm-based toolkit installer run as
+// `deno run` subprocesses using the bundled `deno` sidecar binary. That binary
+// is a downloadable requirement (see requiredBinaryKinds): until the user
+// installs it, spawning would throw a raw `NotFound` that is easy to leak as an
+// uncaught rejection and kill the core. Resolve + existence-check it here so
+// callers get a clean, handleable error instead.
 
 import { binPath } from "../paths.ts";
 import { binaryName } from "../binaries/versions.ts";

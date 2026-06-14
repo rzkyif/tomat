@@ -12,7 +12,7 @@
 #
 # Env overrides:
 #   TOMAT_STORAGE          override storage base URL (default: https://get.au.tomat.ing)
-#   TOMAT_CHANNEL          install channel: stable (default) | dev | beta. Selects
+#   TOMAT_CHANNEL          install channel: stable (default) | dev | latest. Selects
 #                          the ~/.tomat/<channel>/core subtree and is baked into the
 #                          service environment so the daemon uses the same channel.
 #   TOMAT_CORE_HOME        override install root (default: ~/.tomat/<channel>/core)
@@ -392,29 +392,29 @@ ui_die() {
 
 STORAGE="${TOMAT_STORAGE:-https://get.au.tomat.ing}"
 # Install channel. Every channel lives under ~/.tomat/<channel>/ so dev /
-# beta installs never collide with stable. Selectable via the TOMAT_CHANNEL
-# env var or a `--channel <c>` / `--beta` argument (the arg wins). Validate up
+# latest installs never collide with stable. Selectable via the TOMAT_CHANNEL
+# env var or a `--channel <c>` / `--latest` argument (the arg wins). Validate up
 # front; an unknown value would mis-place state and confuse the client's
 # channel resolver.
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --channel) TOMAT_CHANNEL="${2:-}"; shift 2 ;;
     --channel=*) TOMAT_CHANNEL="${1#*=}"; shift ;;
-    --beta) TOMAT_CHANNEL="beta"; shift ;;
+    --latest) TOMAT_CHANNEL="latest"; shift ;;
     --stable) TOMAT_CHANNEL="stable"; shift ;;
     *) shift ;;
   esac
 done
 TOMAT_CHANNEL="${TOMAT_CHANNEL:-stable}"
 case "$TOMAT_CHANNEL" in
-  stable | dev | beta) ;;
+  stable | dev | latest) ;;
   *)
-    printf 'error: invalid TOMAT_CHANNEL: %s (expected stable, dev, or beta)\n' \
+    printf 'error: invalid TOMAT_CHANNEL: %s (expected stable, dev, or latest)\n' \
       "$TOMAT_CHANNEL" >&2
     exit 1
     ;;
 esac
-# Per-channel naming + port. Stable stays bare (back-compat); dev/beta get a
+# Per-channel naming + port. Stable stays bare (back-compat); dev/latest get a
 # suffix on binary + service names, a /<channel> manifest path segment, and a
 # port offset so both channels can run as services at once. Mirrors the
 # runtime side (core paths.ts channelSuffix/corePort + config.ts manifestDir).
@@ -426,7 +426,7 @@ else
   CHANNEL_SUFFIX="-$TOMAT_CHANNEL"
   MANIFEST_DIR="manifests/$TOMAT_CHANNEL"
   case "$TOMAT_CHANNEL" in
-    beta) PORT_OFFSET=10 ;;
+    latest) PORT_OFFSET=10 ;;
     dev) PORT_OFFSET=20 ;;
   esac
 fi
@@ -461,7 +461,9 @@ fi
 
 # --- prerequisites (pre-UI; if these fail we can't even draw the UI) ------
 
-for cmd in curl jq; do
+# gzip is load-bearing: core binary, workers, and helpers ship gzip-compressed
+# and are decompressed before sha256 verification.
+for cmd in curl jq gzip; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     printf 'error: missing required command: %s\n' "$cmd" >&2
     printf 'hint:  install %s and re-run the installer\n' "$cmd" >&2
@@ -510,7 +512,7 @@ IDX_MANIFEST=$(ui_action_add "Fetching manifest from get.au.tomat.ing")
 IDX_BIN=$(ui_action_add "Installing core binary to $INSTALLED_BIN")
 IDX_WORKERS=$(ui_action_add "Installing workers to $WORKERS_DIR/")
 IDX_HELPERS=$(ui_action_add "Installing helpers to $BIN_DIR/")
-# Built-in toolkit is CDN-distributed for stable/beta; dev sources it from the
+# Built-in toolkit is CDN-distributed for stable/latest; dev sources it from the
 # codebase at runtime, so there's nothing to fetch here.
 IDX_TOOLKIT=-1
 if [ "$TOMAT_CHANNEL" != "dev" ]; then
@@ -639,14 +641,24 @@ else
 
   BIN_TMP="$STAGING_DIR/tomat-core-$VERSION-$$"
   _ui_track_staging "$BIN_TMP"
+  _ui_track_staging "$BIN_TMP.gz"
 
   BIN_CURL_RC=0
-  curl -fsSL -o "$BIN_TMP" "$URL" 2>/dev/null || BIN_CURL_RC=$?
+  curl -fsSL -o "$BIN_TMP.gz" "$URL" 2>/dev/null || BIN_CURL_RC=$?
   if [ "$BIN_CURL_RC" -ne 0 ]; then
     ui_die "Download interrupted" \
       "curl exit $BIN_CURL_RC fetching $URL" \
       "re-run; partial files were cleaned up"
   fi
+
+  # The artifact ships gzip-compressed; sha256 is over the decompressed binary.
+  ui_action_update "$IDX_BIN" "(decompressing)"
+  if ! gzip -dc "$BIN_TMP.gz" > "$BIN_TMP" 2>/dev/null; then
+    ui_die "Could not decompress core binary" \
+      "gzip -d failed on $BIN_TMP.gz" \
+      "network corruption is the usual cause; re-run"
+  fi
+  rm -f "$BIN_TMP.gz"
 
   ui_action_update "$IDX_BIN" "(verifying)"
   GOT="$($SHA_CMD "$BIN_TMP" | awk '{print $1}')"
@@ -732,13 +744,20 @@ else
 
     if [ "$W_NEED" = "1" ]; then
       _ui_track_staging "$W_TMP"
+      _ui_track_staging "$W_TMP.gz"
       W_CURL_RC=0
-      curl -fsSL -o "$W_TMP" "$W_URL" 2>/dev/null || W_CURL_RC=$?
+      curl -fsSL -o "$W_TMP.gz" "$W_URL" 2>/dev/null || W_CURL_RC=$?
       if [ "$W_CURL_RC" -ne 0 ]; then
         ui_die "Download interrupted" \
           "curl exit $W_CURL_RC fetching worker $W_NAME" \
           "re-run; partial files were cleaned up"
       fi
+      if ! gzip -dc "$W_TMP.gz" > "$W_TMP" 2>/dev/null; then
+        ui_die "Could not decompress worker $W_NAME" \
+          "gzip -d failed on $W_TMP.gz" \
+          "network corruption is the usual cause; re-run"
+      fi
+      rm -f "$W_TMP.gz"
       W_GOT="$($SHA_CMD "$W_TMP" | awk '{print $1}')"
       if [ "$W_GOT" != "$W_SHA" ]; then
         ui_die "sha256 mismatch on worker $W_NAME" \
@@ -826,13 +845,20 @@ else
 
       if [ "$H_NEED" = "1" ]; then
         _ui_track_staging "$H_TMP"
+        _ui_track_staging "$H_TMP.gz"
         H_CURL_RC=0
-        curl -fsSL -o "$H_TMP" "$H_URL" 2>/dev/null || H_CURL_RC=$?
+        curl -fsSL -o "$H_TMP.gz" "$H_URL" 2>/dev/null || H_CURL_RC=$?
         if [ "$H_CURL_RC" -ne 0 ]; then
           ui_die "Download interrupted" \
             "curl exit $H_CURL_RC fetching helper $H_NAME" \
             "re-run; partial files were cleaned up"
         fi
+        if ! gzip -dc "$H_TMP.gz" > "$H_TMP" 2>/dev/null; then
+          ui_die "Could not decompress helper $H_NAME" \
+            "gzip -d failed on $H_TMP.gz" \
+            "network corruption is the usual cause; re-run"
+        fi
+        rm -f "$H_TMP.gz"
         H_GOT="$($SHA_CMD "$H_TMP" | awk '{print $1}')"
         if [ "$H_GOT" != "$H_SHA" ]; then
           ui_die "sha256 mismatch on helper $H_NAME" \

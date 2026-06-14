@@ -1,17 +1,9 @@
-#!/usr/bin/env -S deno run -A
-// release:core: builds tomat-core, tomat-core-updater, tomat-core-keychain
-// for each requested triple, hashes the worker .ts files, composes + signs
-// core.json and binaries.json, and uploads everything to R2.
-//
-// Flags:
-//   --triples=all                        cross-compile for every supported triple
-//   --triples=aarch64-apple-darwin,...   comma-separated subset
-//   --skip-build                         reuse dist/<triple>/ from a prior run
-//   --dry-run                            do everything locally; skip R2 uploads
-//   --force                              skip the version-equality probe
-//   --help
+// Release item: tomat-core (deno-compiled) + the four native helper crates
+// (updater, keychain, hwinfo, ptyhost) + the worker .ts files, composed into
+// signed core.json and binaries.json and uploaded to R2. Versioned via
+// CORE_VERSION in packages/tomat-core/src/config.ts.
 
-import { parseArgs } from "@std/cli/parse-args";
+import { copy } from "@std/fs/copy";
 import { ensureDir } from "@std/fs/ensure-dir";
 import { join } from "@std/path";
 import type {
@@ -24,30 +16,30 @@ import type {
 } from "../../packages/tomat-shared/src/domain/model.ts";
 import { BINARY_KINDS, UPSTREAM_BINARIES } from "../../packages/tomat-shared/src/domain/model.ts";
 import {
+  type ApplyOpts,
   channelBinSuffix,
   channelManifestDir,
   channelStoragePrefix,
   colors,
   CORE_DIR,
+  type DeployEnv,
+  detectHostTriple,
   DIST_DIR,
   fail,
-  fetchLiveJson,
+  hashPaths,
   humanBytes,
   info,
-  loadOrSeedEnv,
   ok,
-  parseChannelFlag,
   r2Put,
   readCoreVersion,
   rel,
   type ReleaseChannel,
+  type ReleaseItem,
   REPO_ROOT,
   sha256File,
   signEd25519,
   step,
-  writeSigningKeys,
 } from "./lib.ts";
-import { encodeBase64 } from "@std/encoding/base64";
 
 // ---------------------------------------------------------------------------
 // constants
@@ -64,7 +56,7 @@ const ALL_TRIPLES: Triple[] = [
 // Worker .ts files shipped alongside the binary (platform-independent).
 // These are NOT bundled into the core binary. At runtime, the core spawns
 // them as Deno subprocesses from ~/.tomat/core/workers/.
-const WORKER_FILES = ["embedding-worker.ts", "tool-worker.ts", "tts-worker.ts"] as const;
+const WORKER_FILES = ["tool-worker.ts"] as const;
 
 const HELPER_CRATES: Array<{
   name: "tomat-core-keychain" | "tomat-core-updater" | "tomat-core-hwinfo" | "tomat-core-ptyhost";
@@ -76,6 +68,20 @@ const HELPER_CRATES: Array<{
   { name: "tomat-core-ptyhost", crateDir: "packages/tomat-core-ptyhost" },
 ];
 
+// tomat-core-speech is OURS but, unlike the eager helpers, it's consent-gated +
+// on-demand: built host-only here, packaged with its espeak-ng-data, and pinned
+// into binaries.json (not core.json) so it downloads only when STT/TTS is on.
+const SPEECH_CRATE = {
+  name: "tomat-core-speech",
+  crateDir: "packages/tomat-core-speech",
+} as const;
+
+// Canonical standalone espeak-ng-data (the Kokoro phonemizer data the sherpa
+// static lib needs at runtime but doesn't bundle). bzip2, so unpacked via the
+// system `tar`, then repacked into the speech binary's gzip archive.
+const ESPEAK_DATA_URL =
+  "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/espeak-ng-data.tar.bz2";
+
 const MANIFEST_CACHE_CONTROL = "public, max-age=300";
 
 // ---------------------------------------------------------------------------
@@ -83,9 +89,6 @@ const MANIFEST_CACHE_CONTROL = "public, max-age=300";
 
 interface BuildArtifact {
   triple: Triple;
-  // Base name, channel-independent. Only tomat-core is deno-compiled now (the
-  // updater is a Rust helper crate built by buildHelpers). The on-disk +
-  // uploaded filename (with channel suffix + .exe) is `filename`.
   name: "tomat-core";
   filename: string;
   path: string;
@@ -102,8 +105,6 @@ interface WorkerArtifact {
 
 interface HelperArtifact {
   triple: Triple;
-  // Channel-suffixed manifest entry name (no .exe), e.g. tomat-core-keychain
-  // or tomat-core-keychain-beta. `filename` adds .exe on Windows.
   entryName: string;
   filename: string;
   path: string;
@@ -111,117 +112,70 @@ interface HelperArtifact {
   size: number;
 }
 
-interface Flags {
-  triples: Triple[];
-  skipBuild: boolean;
-  dryRun: boolean;
-  force: boolean;
-  channel: ReleaseChannel;
-}
-
-// ---------------------------------------------------------------------------
-// flags
-
-function parseFlags(): Flags {
-  // Strip the bare `--` token that `deno task <name> -- ...` passes through
-  // literally. @std/cli's parseArgs otherwise treats it as end-of-options
-  // and silently drops the trailing flags.
-  const args = parseArgs(
-    Deno.args.filter((a) => a !== "--"),
-    {
-      string: ["triples", "channel"],
-      boolean: ["skip-build", "dry-run", "force", "help"],
-      default: {
-        "skip-build": false,
-        "dry-run": false,
-        force: false,
-        help: false,
-      },
-    },
-  );
-  if (args.help) {
-    printHelp();
-    Deno.exit(0);
-  }
-  const channel = parseChannelFlag(args.channel);
-  let triples: Triple[];
-  if (!args.triples || args.triples === "host") {
-    triples = [Deno.build.target as Triple];
-  } else if (args.triples === "all") {
-    triples = ALL_TRIPLES;
-  } else {
-    const requested = args.triples.split(",").map((t) => t.trim());
-    for (const t of requested) {
-      if (!(ALL_TRIPLES as readonly string[]).includes(t)) {
-        fail(`unknown triple "${t}". Valid: ${ALL_TRIPLES.join(", ")}`);
-      }
-    }
-    triples = requested as Triple[];
-  }
-  return {
-    triples,
-    skipBuild: args["skip-build"],
-    dryRun: args["dry-run"],
-    force: args.force,
-    channel,
-  };
-}
-
-function printHelp(): void {
-  console.log(`Usage: deno task release:core:<channel> [flags]
-
-Flags:
-  --triples=<list>   comma-separated triples to build. Special values:
-                       "host" (default): current machine only
-                       "all"            : every supported triple
-                                          (${ALL_TRIPLES.join(", ")})
-                     Cross-compiling pulls native modules from the host's
-                     node_modules into binaries for other platforms, which
-                     Deno warns about and which will misbehave at runtime.
-                     Build each platform on its own machine for releases.
-  --channel=<c>      stable (default) | beta. Beta suffixes our binary names
-                     (tomat-core-beta), nests manifests + artifacts under a
-                     /beta path segment, and publishes binaries.json with
-                     upstream RESOLVER entries (latest-at-runtime) instead of
-                     release-time-pinned URLs.
-  --skip-build       reuse binaries in dist/ from a prior run
-  --dry-run          skip R2 upload
-  --force            skip the version-equality idempotency probe
-  --help`);
+interface SpeechArtifact {
+  triple: Triple;
+  // `<name><suffix>.tar.gz`. The sha256 is over this ARCHIVE (verified before
+  // extraction), unlike the single-file `.gz` artifacts whose sha is over the
+  // decompressed file.
+  filename: string;
+  path: string;
+  sha256: string;
+  size: number;
 }
 
 // ---------------------------------------------------------------------------
 // build
 
-/** Compiling from the live workspace bundles the whole shared
- *  node_modules / npm cache into the output (~2 GB). We sidestep that by
- *  creating a temp directory with symlinks to just `tomat-core` and
- *  `tomat-shared`, plus a minimal root `deno.json` that has no
- *  `nodeModulesDir` and no workspace siblings. Final binary size drops from
- *  ~2.2 GB to ~94 MB. */
+// Packages in the core's module graph; only these are copied into the compile
+// workspace. `tomat-core` imports `@tomat/shared` and `@tomat/model-catalog`
+// via relative paths, so all three must be present for resolution to stay
+// inside the temp tree.
+const COMPILE_WORKSPACE_PACKAGES = ["tomat-shared", "tomat-core", "tomat-model-catalog"];
+
+/** Isolated workspace for `deno compile`. `deno compile` embeds every npm dep
+ *  recorded in the deno.lock plus every entry in the compiled package's import
+ *  map -- not only what the entry actually imports. The repo's lock and import
+ *  maps span the whole workspace (client + website deps), so compiling against
+ *  them bakes hundreds of MB of unused packages (workerd, onnxruntime-web, ...)
+ *  into the binary.
+ *
+ *  To avoid that we COPY (not symlink, so resolution cannot escape back to the
+ *  repo root and its workspace-wide lock + node_modules) only the packages in
+ *  the core's graph, then generate a lock scoped to just those packages. The
+ *  result embeds only the core's own graph (~100 MB). Worker ML deps stay out
+ *  of `tomat-core`'s import map -- the workers carry their own `npm:` specifiers
+ *  -- so they are never pulled into this scope. */
 async function setupCompileWorkspace(): Promise<string> {
   const dir = await Deno.makeTempDir({ prefix: "tomat-compile-" });
-  await Deno.mkdir(join(dir, "packages"));
-  await Deno.symlink(join(REPO_ROOT, "packages/tomat-shared"), join(dir, "packages/tomat-shared"));
-  await Deno.symlink(join(REPO_ROOT, "packages/tomat-core"), join(dir, "packages/tomat-core"));
+  await ensureDir(join(dir, "packages"));
+  for (const pkg of COMPILE_WORKSPACE_PACKAGES) {
+    await copy(join(REPO_ROOT, "packages", pkg), join(dir, "packages", pkg));
+    // A stray per-package node_modules would be embedded wholesale; drop it.
+    await Deno.remove(join(dir, "packages", pkg, "node_modules"), {
+      recursive: true,
+    }).catch(() => {});
+  }
   await Deno.writeTextFile(
     join(dir, "deno.json"),
     JSON.stringify(
       {
-        workspace: ["./packages/tomat-shared", "./packages/tomat-core"],
+        workspace: COMPILE_WORKSPACE_PACKAGES.map((p) => `./packages/${p}`),
         unstable: ["raw-imports"],
       },
       null,
       2,
     ),
   );
-  // Seed the committed lockfile so the signed binary is built from the exact
-  // locked dependency graph rather than a fresh (drift-prone) resolution. We
-  // can't pass `--frozen` here because this is a SUBSET workspace (core+shared
-  // only), so deno would want to drop the client/website lock entries; instead
-  // the lock pins resolution (the temp lock it rewrites is discarded with the
-  // dir), and CI's `deno install --frozen` gate keeps the committed lock honest.
-  await Deno.copyFile(join(REPO_ROOT, "deno.lock"), join(dir, "deno.lock"));
+  // Generate a lock scoped to just these packages' deps (resolved from the
+  // build cache) so the per-triple compiles embed only the core's graph rather
+  // than the whole-workspace dependency set.
+  const { code } = await new Deno.Command("deno", {
+    args: ["install"],
+    cwd: dir,
+    stdout: "inherit",
+    stderr: "inherit",
+  }).output();
+  if (code !== 0) fail(`deno install in compile workspace exited ${code}`);
   return dir;
 }
 
@@ -247,11 +201,7 @@ async function compileFor(
   return outPath;
 }
 
-async function buildAll(
-  triples: Triple[],
-  skipBuild: boolean,
-  suffix: string,
-): Promise<BuildArtifact[]> {
+export async function buildAll(triples: Triple[], suffix: string): Promise<BuildArtifact[]> {
   let compileWorkspace: string | null = null;
   try {
     const artifacts: BuildArtifact[] = [];
@@ -261,20 +211,14 @@ async function buildAll(
       for (const [name, entryRelative] of [
         ["tomat-core", "packages/tomat-core/src/main.ts"],
       ] as const) {
-        // Channel-suffixed filename so beta's tomat-core-beta coexists with
-        // stable's tomat-core both on disk and at the download URL.
         const filename = `${name}${suffix}${exe}`;
         const outPath = join(DIST_DIR, triple, filename);
-        if (skipBuild && (await fileExists(outPath))) {
-          info(`reusing ${rel(outPath)}`);
-        } else {
-          if (!compileWorkspace) {
-            compileWorkspace = await setupCompileWorkspace();
-            info(`compile workspace at ${compileWorkspace}`);
-          }
-          info(`compiling ${name}${suffix} for ${triple}`);
-          await compileFor(triple, `${name}${suffix}`, entryRelative, compileWorkspace);
+        if (!compileWorkspace) {
+          compileWorkspace = await setupCompileWorkspace();
+          info(`compile workspace at ${compileWorkspace}`);
         }
+        info(`compiling ${name}${suffix} for ${triple}`);
+        await compileFor(triple, `${name}${suffix}`, entryRelative, compileWorkspace);
         const { sha256, size } = await sha256File(outPath);
         artifacts.push({ triple, name, filename, path: outPath, sha256, size });
       }
@@ -287,49 +231,115 @@ async function buildAll(
   }
 }
 
-async function buildHelpers(
-  triples: Triple[],
-  skipBuild: boolean,
-  suffix: string,
-): Promise<HelperArtifact[]> {
+export async function buildHelpers(triples: Triple[], suffix: string): Promise<HelperArtifact[]> {
   const out: HelperArtifact[] = [];
   for (const triple of triples) {
     const isWin = triple.includes("windows");
     const exe = isWin ? ".exe" : "";
     for (const { name, crateDir } of HELPER_CRATES) {
       // Cargo always builds the bare crate name; we copy it out under the
-      // channel-suffixed name so beta's tomat-core-keychain-beta coexists.
+      // channel-suffixed name so latest's tomat-core-keychain-latest coexists.
       const entryName = `${name}${suffix}`;
       const filename = `${entryName}${exe}`;
       const outDir = join(DIST_DIR, triple);
       await ensureDir(outDir);
       const outPath = join(outDir, filename);
-      if (skipBuild && (await fileExists(outPath))) {
-        info(`reusing ${rel(outPath)}`);
-      } else {
-        info(`cargo build ${name} for ${triple}`);
-        const cmd = new Deno.Command("cargo", {
-          args: [
-            "build",
-            "--release",
-            "--manifest-path",
-            join(REPO_ROOT, crateDir, "Cargo.toml"),
-            "--target",
-            triple,
-          ],
-          stdout: "inherit",
-          stderr: "inherit",
-        });
-        const { code } = await cmd.output();
-        if (code !== 0) {
-          fail(`cargo build ${name} for ${triple} exited ${code}`);
-        }
-        const builtPath = join(REPO_ROOT, "target", triple, "release", `${name}${exe}`);
-        await Deno.copyFile(builtPath, outPath);
-      }
+      info(`cargo build ${name} for ${triple}`);
+      const cmd = new Deno.Command("cargo", {
+        args: [
+          "build",
+          "--release",
+          "--manifest-path",
+          join(REPO_ROOT, crateDir, "Cargo.toml"),
+          "--target",
+          triple,
+        ],
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      const { code } = await cmd.output();
+      if (code !== 0) fail(`cargo build ${name} for ${triple} exited ${code}`);
+      const builtPath = join(REPO_ROOT, "target", triple, "release", `${name}${exe}`);
+      await Deno.copyFile(builtPath, outPath);
       const { sha256, size } = await sha256File(outPath);
       out.push({ triple, entryName, filename, path: outPath, sha256, size });
     }
+  }
+  return out;
+}
+
+/** Download + unpack espeak-ng-data once per release run; returns the path to
+ *  the extracted `espeak-ng-data/` dir. bzip2 isn't available in Deno, so unpack
+ *  via the system `tar` (present on every release host). */
+async function ensureEspeakData(): Promise<string> {
+  const tmp = await Deno.makeTempDir({ prefix: "tomat-espeak-" });
+  const archive = join(tmp, "espeak-ng-data.tar.bz2");
+  info(`fetching espeak-ng-data`);
+  const res = await fetch(ESPEAK_DATA_URL);
+  if (!res.ok || !res.body) {
+    fail(`espeak-ng-data fetch failed: ${res.status} ${res.statusText}`);
+  }
+  await Deno.writeFile(archive, res.body);
+  const { code } = await new Deno.Command("tar", {
+    args: ["-xjf", archive, "-C", tmp],
+    stdout: "inherit",
+    stderr: "inherit",
+  }).output();
+  if (code !== 0) fail(`tar -xjf espeak-ng-data exited ${code}`);
+  const dataDir = join(tmp, "espeak-ng-data");
+  const st = await Deno.stat(dataDir).catch(() => null);
+  if (!st?.isDirectory) {
+    fail(`espeak-ng-data/ not found after unpacking ${ESPEAK_DATA_URL}`);
+  }
+  return dataDir;
+}
+
+/** Build tomat-core-speech for each (host) triple and package it as a `.tar.gz`
+ *  of {exe, espeak-ng-data/}. The exe inside the archive keeps the bare kind
+ *  name the binaries manager's extractor looks for; the archive file carries the
+ *  channel suffix. sha256 is over the archive (verified before extraction). */
+async function buildSpeech(triples: Triple[], suffix: string): Promise<SpeechArtifact[]> {
+  const out: SpeechArtifact[] = [];
+  const espeakData = await ensureEspeakData();
+  for (const triple of triples) {
+    const isWin = triple.includes("windows");
+    const exe = isWin ? ".exe" : "";
+    info(`cargo build ${SPEECH_CRATE.name} for ${triple}`);
+    const { code } = await new Deno.Command("cargo", {
+      args: [
+        "build",
+        "--release",
+        "--manifest-path",
+        join(REPO_ROOT, SPEECH_CRATE.crateDir, "Cargo.toml"),
+        "--target",
+        triple,
+      ],
+      stdout: "inherit",
+      stderr: "inherit",
+    }).output();
+    if (code !== 0) fail(`cargo build ${SPEECH_CRATE.name} for ${triple} exited ${code}`);
+
+    // Stage {exe, espeak-ng-data/} and pack a gzip tarball. The in-archive exe
+    // must be the bare `<kind>(.exe)` the extractor matches, with no suffix.
+    const exeIn = `${SPEECH_CRATE.name}${exe}`;
+    const staging = await Deno.makeTempDir({ prefix: "tomat-speech-" });
+    await Deno.copyFile(join(REPO_ROOT, "target", triple, "release", exeIn), join(staging, exeIn));
+    await copy(espeakData, join(staging, "espeak-ng-data"));
+
+    const filename = `${SPEECH_CRATE.name}${suffix}.tar.gz`;
+    const outDir = join(DIST_DIR, triple);
+    await ensureDir(outDir);
+    const outPath = join(outDir, filename);
+    const { code: tarCode } = await new Deno.Command("tar", {
+      args: ["-czf", outPath, "-C", staging, exeIn, "espeak-ng-data"],
+      stdout: "inherit",
+      stderr: "inherit",
+    }).output();
+    if (tarCode !== 0) fail(`tar -czf ${filename} exited ${tarCode}`);
+    await Deno.remove(staging, { recursive: true }).catch(() => {});
+
+    const { sha256, size } = await sha256File(outPath);
+    out.push({ triple, filename, path: outPath, sha256, size });
   }
   return out;
 }
@@ -345,15 +355,6 @@ async function hashWorkers(): Promise<WorkerArtifact[]> {
   return out;
 }
 
-async function fileExists(p: string): Promise<boolean> {
-  try {
-    await Deno.stat(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // manifest assembly
 
@@ -366,40 +367,35 @@ async function composeCoreManifest(
   storagePrefix: string,
   privateKey: Uint8Array,
 ): Promise<CoreManifest> {
+  // URLs point at the gzip-compressed artifacts (`.gz`); `sha256` is over the
+  // DECOMPRESSED file, so consumers (install scripts + self-updater) gunzip the
+  // download then verify the same hash against the real binary/script.
   const binaries = artifacts
     .filter((a) => a.name === "tomat-core")
     .map((a) => ({
       triple: a.triple,
-      url: `https://${storageDomain}/${storagePrefix}${version}/${a.triple}/${a.filename}`,
+      url: `https://${storageDomain}/${storagePrefix}${version}/${a.triple}/${a.filename}.gz`,
       sha256: a.sha256,
     }));
 
   const workerEntries = workers.map((w) => ({
     name: w.name,
-    url: `https://${storageDomain}/${storagePrefix}${version}/workers/${w.name}`,
+    url: `https://${storageDomain}/${storagePrefix}${version}/workers/${w.name}.gz`,
     sha256: w.sha256,
   }));
 
-  // helpers[] carries the per-triple sidecar binaries that ship next to core
-  // and are installed (and swapped on self-update) by the same code path:
-  // tomat-core-keychain AND tomat-core-updater. Both are Rust helper crates
-  // built by buildHelpers (cargo), so they flow through `helpers` identically.
-  // Manifest helper names carry no .exe. Installers/self-updater append
-  // platformExe() at runtime; h.entryName is suffixed without .exe, while
-  // h.filename adds .exe on Windows for the download URL.
   const helperEntries = helpers.map((h) => ({
     name: h.entryName,
     triple: h.triple,
-    url: `https://${storageDomain}/${storagePrefix}${version}/${h.triple}/${h.filename}`,
+    url: `https://${storageDomain}/${storagePrefix}${version}/${h.triple}/${h.filename}.gz`,
     sha256: h.sha256,
   }));
 
   // Sign the WHOLE manifest minus the `signature` field. The runtime verifier
   // (packages/tomat-core/src/update/self-updater.ts) reconstructs the same
-  // payload by stripping `signature`, so signer and verifier stay in lockstep
-  // and every executed field (binaries, workers, helpers) is authenticated.
-  // Do NOT shrink this back to {version,binaries}: that would leave workers[] /
-  // helpers[] unsigned and a tampered manifest could inject attacker code.
+  // payload by stripping `signature`, so every executed field (binaries,
+  // workers, helpers) is authenticated. Do NOT shrink this back to
+  // {version,binaries}: that would leave workers[] / helpers[] unsigned.
   const manifest: Omit<CoreManifest, "signature"> = {
     schemaVersion: 1,
     version,
@@ -468,20 +464,42 @@ async function sha256OfUrl(url: string): Promise<string> {
   return hex;
 }
 
+/** Build the pinned binaries.json entry for the self-hosted speech binary from
+ *  the artifacts this release uploaded. URL points straight at the `.tar.gz`
+ *  (already the transport form); sha256 is over that archive. */
+function composeSpeechEntry(
+  artifacts: SpeechArtifact[],
+  version: string,
+  storageDomain: string,
+  storagePrefix: string,
+): BinaryManifestPinnedEntry {
+  const platforms = {} as BinaryManifestPinnedEntry["platforms"];
+  for (const a of artifacts) {
+    platforms[a.triple] = {
+      url: `https://${storageDomain}/${storagePrefix}${version}/${a.triple}/${a.filename}`,
+      sha256: a.sha256,
+    };
+  }
+  return { version, platforms };
+}
+
 async function composeBinaryManifest(
   privateKey: Uint8Array,
   channel: ReleaseChannel,
+  speech: BinaryManifestPinnedEntry,
 ): Promise<BinaryManifest> {
   const binaries = {} as Record<BinaryKind, BinaryManifestEntry>;
   for (const kind of BINARY_KINDS) {
     const resolver = UPSTREAM_BINARIES[kind];
+    // Self-hosted kinds (tomat-core-speech) have no upstream resolver; pinned
+    // from this release's own artifacts after the loop.
+    if (!resolver) continue;
 
-    // Beta: ship the resolver itself (repo + asset patterns + optional
-    // pinned tag) so the core resolves it at runtime. No GitHub call here:
-    // the signed manifest commits to the repo/patterns (and the pin, when
-    // one is declared, e.g. deno).
-    if (channel === "beta") {
-      info(`beta resolver entry for ${kind} → ${resolver.repo}`);
+    // Latest: ship the resolver itself (repo + asset patterns + optional pinned
+    // tag) so the core resolves it at runtime. No GitHub call here: the signed
+    // manifest commits to the repo/patterns (and the pin, when declared).
+    if (channel === "latest") {
+      info(`latest resolver entry for ${kind} → ${resolver.repo}`);
       binaries[kind] = {
         resolver: {
           repo: resolver.repo,
@@ -529,12 +547,33 @@ async function composeBinaryManifest(
     binaries[kind] = { version: tag, platforms };
   }
 
+  // Pin self-hosted binaries (built host-only + uploaded by apply()) on every
+  // channel; ours, so there's no upstream release to resolve.
+  binaries["tomat-core-speech"] = speech;
+
   const signature = await signEd25519(privateKey, binaries);
   return { schemaVersion: 1, binaries, signature };
 }
 
-// ---------------------------------------------------------------------------
-// dist/manifests/ output
+/** Gzip a file to `<srcPath>.gz` for transport. The core's single-file
+ *  artifacts (binary, helpers, worker .ts) ship gzip-compressed; the manifest
+ *  sha256 stays over the DECOMPRESSED file, so consumers gunzip then verify the
+ *  same hash. Mirrors toolkit.ts's `CompressionStream("gzip")` packing. */
+async function gzipFile(srcPath: string): Promise<{ path: string; size: number }> {
+  const gzPath = `${srcPath}.gz`;
+  const out = await Deno.open(gzPath, {
+    create: true,
+    write: true,
+    truncate: true,
+  });
+  await (
+    await Deno.open(srcPath)
+  ).readable
+    .pipeThrough(new CompressionStream("gzip"))
+    .pipeTo(out.writable);
+  const { size } = await Deno.stat(gzPath);
+  return { path: gzPath, size };
+}
 
 async function writeManifestFile(
   manifestDir: string,
@@ -549,146 +588,169 @@ async function writeManifestFile(
 }
 
 // ---------------------------------------------------------------------------
-// main
+// release item
 
-export async function main(): Promise<void> {
-  const flags = parseFlags();
-  const suffix = channelBinSuffix(flags.channel);
-  const prefix = channelStoragePrefix(flags.channel);
-  const manifestDir = channelManifestDir(flags.channel);
+// Source inputs that determine the compiled core. Lockfiles are intentionally
+// excluded (a client-only dep bump touches the root lock but not core);
+// declared deps live in each deno.json / Cargo.toml, which ARE hashed.
+const CORE_HASH_INPUTS = [
+  "packages/tomat-core/src",
+  "packages/tomat-core/deno.json",
+  "packages/tomat-shared/src",
+  "packages/tomat-shared/deno.json",
+  ...HELPER_CRATES.map((h) => `${h.crateDir}/src`),
+  ...HELPER_CRATES.map((h) => `${h.crateDir}/Cargo.toml`),
+  `${SPEECH_CRATE.crateDir}/src`,
+  `${SPEECH_CRATE.crateDir}/Cargo.toml`,
+];
 
-  step(`Releasing core for the "${flags.channel}" channel`);
-  step("Loading deploy environment");
-  const env = await loadOrSeedEnv();
+// The dist/<host>/ binaries buildAll + buildHelpers emit for this channel:
+// tomat-core plus the four helpers, each with the channel suffix. The unified
+// build hash-checks these so a wiped or swapped artifact forces a rebuild.
+export function coreOutputs(channel: ReleaseChannel): string[] {
+  const triple = detectHostTriple();
+  const exe = triple.includes("windows") ? ".exe" : "";
+  const suffix = channelBinSuffix(channel);
+  const names = ["tomat-core", ...HELPER_CRATES.map((h) => h.name)];
+  return names.map((n) => join(DIST_DIR, triple, `${n}${suffix}${exe}`));
+}
 
-  step("Updating packages/tomat-core/data/signing-keys.json");
-  await writeSigningKeys(encodeBase64(env.signingPublicKey));
+export const coreItem: ReleaseItem = {
+  id: "core",
+  label: "core + helpers",
+  scope: "channel",
+  bumpHint: "packages/tomat-core/src/config.ts (CORE_VERSION)",
 
-  step("Reading CORE_VERSION");
-  const version = await readCoreVersion();
-  ok(`version ${version}`);
+  version: readCoreVersion,
 
-  if (!flags.force) {
-    step("Probing release state");
-    const live = await fetchLiveJson<{ version?: string }>(env, `${manifestDir}/core.json`);
-    if (live?.version === version) {
-      ok(`${manifestDir}/core.json already at version ${version}; nothing to do`);
+  sourceHash(_channel: ReleaseChannel): Promise<string> {
+    return hashPaths(
+      CORE_HASH_INPUTS.map((p) => ({
+        path: join(REPO_ROOT, p),
+        exclude: (r) => r.endsWith(".test.ts"),
+      })),
+    );
+  },
+
+  buildOutputs(channel: ReleaseChannel): Promise<string[]> {
+    return Promise.resolve(coreOutputs(channel));
+  },
+
+  async apply(env: DeployEnv, channel: ReleaseChannel, opts: ApplyOpts): Promise<void> {
+    const suffix = channelBinSuffix(channel);
+    const prefix = channelStoragePrefix(channel);
+    const manifestDir = channelManifestDir(channel);
+    const version = await readCoreVersion();
+
+    step(`Building Deno binaries (${opts.triples.length} triples)`);
+    const artifacts = await buildAll(opts.triples, suffix);
+    for (const a of artifacts) {
+      ok(`${a.triple}/${a.filename}  ${humanBytes(a.size)}  ${a.sha256.slice(0, 12)}…`);
+    }
+
+    step(`Building native helpers (${opts.triples.length} triples)`);
+    const helpers = await buildHelpers(opts.triples, suffix);
+    for (const h of helpers) {
+      ok(`${h.triple}/${h.filename}  ${humanBytes(h.size)}  ${h.sha256.slice(0, 12)}…`);
+    }
+
+    step(`Building speech binary (${opts.triples.length} triples)`);
+    const speech = await buildSpeech(opts.triples, suffix);
+    for (const s of speech) {
+      ok(`${s.triple}/${s.filename}  ${humanBytes(s.size)}  ${s.sha256.slice(0, 12)}…`);
+    }
+
+    step("Hashing worker scripts");
+    const workers = await hashWorkers();
+    for (const w of workers) {
+      ok(`workers/${w.name}  ${humanBytes(w.size)}  ${w.sha256.slice(0, 12)}…`);
+    }
+
+    step("Composing + signing core.json");
+    const coreManifest = await composeCoreManifest(
+      version,
+      artifacts,
+      workers,
+      helpers,
+      env.storageDomain,
+      prefix,
+      env.signingPrivateKey,
+    );
+    const coreJsonPath = await writeManifestFile(manifestDir, "core.json", coreManifest);
+    ok(`signed core.json → ${rel(coreJsonPath)}`);
+
+    step("Composing + signing binaries.json");
+    const binaryManifest = await composeBinaryManifest(
+      env.signingPrivateKey,
+      channel,
+      composeSpeechEntry(speech, version, env.storageDomain, prefix),
+    );
+    const binJsonPath = await writeManifestFile(manifestDir, "binaries.json", binaryManifest);
+    ok(`signed binaries.json → ${rel(binJsonPath)}`);
+
+    if (opts.dryRun) {
+      info(
+        colors.yellow(`dry-run: manifests under ${rel(join(DIST_DIR, manifestDir))}, no upload`),
+      );
       return;
     }
-    if (live) {
-      info(`live core.json at version ${live.version}; releasing ${version}`);
-    } else {
-      info(`no live core.json yet; first ${flags.channel} release`);
+
+    // Single-file artifacts ship gzip-compressed (see gzipFile); the manifest
+    // URLs end in `.gz` and consumers verify sha256 over the decompressed file.
+    step(`Uploading binaries to R2 bucket "${env.r2Bucket}"`);
+    for (const a of artifacts) {
+      const gz = await gzipFile(a.path);
+      const key = `${prefix}${version}/${a.triple}/${a.filename}.gz`;
+      info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(a.size)})`);
+      await r2Put(env, key, gz.path, "application/gzip");
     }
-  }
+    ok(`uploaded ${artifacts.length} binaries`);
 
-  step(`Building Deno binaries (${flags.triples.length} triples)`);
-  const artifacts = await buildAll(flags.triples, flags.skipBuild, suffix);
-  for (const a of artifacts) {
-    ok(`${a.triple}/${a.filename}  ${humanBytes(a.size)}  ${a.sha256.slice(0, 12)}…`);
-  }
+    step(`Uploading helpers to R2 bucket "${env.r2Bucket}"`);
+    for (const h of helpers) {
+      const gz = await gzipFile(h.path);
+      const key = `${prefix}${version}/${h.triple}/${h.filename}.gz`;
+      info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(h.size)})`);
+      await r2Put(env, key, gz.path, "application/gzip");
+    }
+    ok(`uploaded ${helpers.length} helpers`);
 
-  step(`Building native helpers (${flags.triples.length} triples)`);
-  const helpers = await buildHelpers(flags.triples, flags.skipBuild, suffix);
-  for (const h of helpers) {
-    ok(`${h.triple}/${h.filename}  ${humanBytes(h.size)}  ${h.sha256.slice(0, 12)}…`);
-  }
+    step(`Uploading speech binary to R2 bucket "${env.r2Bucket}"`);
+    for (const s of speech) {
+      // Already a .tar.gz (its own transport form); upload as-is, no extra gzip.
+      const key = `${prefix}${version}/${s.triple}/${s.filename}`;
+      info(`uploading ${key}  (${humanBytes(s.size)})`);
+      await r2Put(env, key, s.path, "application/gzip");
+    }
+    ok(`uploaded ${speech.length} speech binaries`);
 
-  step("Hashing worker scripts");
-  const workers = await hashWorkers();
-  for (const w of workers) {
-    ok(`workers/${w.name}  ${humanBytes(w.size)}  ${w.sha256.slice(0, 12)}…`);
-  }
+    step(`Uploading workers to R2 bucket "${env.r2Bucket}"`);
+    for (const w of workers) {
+      const gz = await gzipFile(w.path);
+      const key = `${prefix}${version}/workers/${w.name}.gz`;
+      info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(w.size)})`);
+      await r2Put(env, key, gz.path, "application/gzip");
+    }
+    ok(`uploaded ${workers.length} workers`);
 
-  step("Composing + signing core.json");
-  const coreManifest = await composeCoreManifest(
-    version,
-    artifacts,
-    workers,
-    helpers,
-    env.storageDomain,
-    prefix,
-    env.signingPrivateKey,
-  );
-  const coreJsonPath = await writeManifestFile(manifestDir, "core.json", coreManifest);
-  ok(`signed core.json → ${rel(coreJsonPath)}`);
-
-  step("Composing + signing binaries.json");
-  const binaryManifest = await composeBinaryManifest(env.signingPrivateKey, flags.channel);
-  const binJsonPath = await writeManifestFile(manifestDir, "binaries.json", binaryManifest);
-  ok(`signed binaries.json → ${rel(binJsonPath)}`);
-
-  if (flags.dryRun) {
-    step("Dry-run: skipping R2 uploads");
-    console.log(
-      colors.yellow(
-        `\nManifests under ${rel(
-          join(DIST_DIR, manifestDir),
-        )}. Re-run without --dry-run to publish.`,
-      ),
+    step(`Uploading manifests to R2 bucket "${env.r2Bucket}"`);
+    await r2Put(
+      env,
+      `${manifestDir}/core.json`,
+      coreJsonPath,
+      "application/json",
+      MANIFEST_CACHE_CONTROL,
     );
-    return;
-  }
+    ok(`uploaded ${manifestDir}/core.json`);
+    await r2Put(
+      env,
+      `${manifestDir}/binaries.json`,
+      binJsonPath,
+      "application/json",
+      MANIFEST_CACHE_CONTROL,
+    );
+    ok(`uploaded ${manifestDir}/binaries.json`);
+  },
+};
 
-  step(`Uploading binaries to R2 bucket "${env.r2Bucket}"`);
-  for (const a of artifacts) {
-    const key = `${prefix}${version}/${a.triple}/${a.filename}`;
-    info(`uploading ${key}  (${humanBytes(a.size)})`);
-    await r2Put(env, key, a.path, "application/octet-stream");
-  }
-  ok(`uploaded ${artifacts.length} binaries`);
-
-  step(`Uploading helpers to R2 bucket "${env.r2Bucket}"`);
-  for (const h of helpers) {
-    const key = `${prefix}${version}/${h.triple}/${h.filename}`;
-    info(`uploading ${key}  (${humanBytes(h.size)})`);
-    await r2Put(env, key, h.path, "application/octet-stream");
-  }
-  ok(`uploaded ${helpers.length} helpers`);
-
-  step(`Uploading workers to R2 bucket "${env.r2Bucket}"`);
-  for (const w of workers) {
-    const key = `${prefix}${version}/workers/${w.name}`;
-    info(`uploading ${key}  (${humanBytes(w.size)})`);
-    await r2Put(env, key, w.path, "application/typescript");
-  }
-  ok(`uploaded ${workers.length} workers`);
-
-  step(`Uploading manifests to R2 bucket "${env.r2Bucket}"`);
-  await r2Put(
-    env,
-    `${manifestDir}/core.json`,
-    coreJsonPath,
-    "application/json",
-    MANIFEST_CACHE_CONTROL,
-  );
-  ok(`uploaded ${manifestDir}/core.json`);
-  await r2Put(
-    env,
-    `${manifestDir}/binaries.json`,
-    binJsonPath,
-    "application/json",
-    MANIFEST_CACHE_CONTROL,
-  );
-  ok(`uploaded ${manifestDir}/binaries.json`);
-
-  console.log(
-    "\n" +
-      colors.green(colors.bold(`✓ release:core complete (${flags.channel})`)) +
-      "\n" +
-      colors.dim("  ") +
-      `https://${env.storageDomain}/${manifestDir}/core.json\n` +
-      colors.dim("  ") +
-      `https://${env.storageDomain}/${manifestDir}/binaries.json\n` +
-      colors.dim("  ") +
-      `https://${env.storageDomain}/${prefix}${version}/<triple>/tomat-core${suffix}\n`,
-  );
-}
-
-if (import.meta.main) {
-  try {
-    await main();
-  } catch (err) {
-    fail(err instanceof Error ? err.message : String(err));
-  }
-}
+export { ALL_TRIPLES };

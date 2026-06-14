@@ -9,7 +9,7 @@ import { errMessage } from "@tomat/shared";
 import { paths } from "../paths.ts";
 import { getLogger } from "../shared/log.ts";
 import { type InstallEventSink, startDownload } from "./installer.ts";
-import { BUILTIN_TOOLKIT_ID } from "./builtin-manifest.ts";
+import { BUILTIN_TOOLKIT_ID, loadBuiltinToolkitManifest } from "./builtin-manifest.ts";
 import { toolkitsRegistry } from "./registry.ts";
 
 const log = getLogger("builtin-seed");
@@ -32,7 +32,13 @@ async function recordSeeded(): Promise<void> {
 }
 
 export async function seedBuiltinToolkitIfNeeded(sink: InstallEventSink): Promise<void> {
-  if (await isSeeded()) return; // already seeded / deleted by the user
+  if (await isSeeded()) {
+    // Already seeded (or the user deleted it). Refresh the files when a newer
+    // built-in version shipped, so an existing install isn't silently stuck
+    // on the old toolset after an app update adds tools.
+    await refreshBuiltinIfOutdated(sink);
+    return;
+  }
   if (toolkitsRegistry().get(BUILTIN_TOOLKIT_ID)) {
     // Present already (downloaded by a prior boot, or installed manually): just
     // record the seed so a later user delete isn't undone on the next boot.
@@ -58,4 +64,32 @@ export async function seedBuiltinToolkitIfNeeded(sink: InstallEventSink): Promis
     { source: "builtin", preferLocalDir: join(paths().toolkitsDir, BUILTIN_TOOLKIT_ID) },
     wrapped,
   );
+}
+
+/** Re-download the built-in when the available version differs from the
+ *  installed one. registerDownloaded writes the new version + tools at
+ *  download time and leaves the row at 'downloaded', so the refresh is
+ *  idempotent (next boot sees matching versions) and the update surfaces as
+ *  a normal re-install prompt rather than silently swapping a running
+ *  toolkit. A deleted built-in (no registry row) is left alone. */
+async function refreshBuiltinIfOutdated(sink: InstallEventSink): Promise<void> {
+  const installed = toolkitsRegistry().get(BUILTIN_TOOLKIT_ID);
+  if (!installed) return; // user deleted it; don't resurrect
+  let available: string;
+  try {
+    // force so a new release is detected past the cached manifest; in dev
+    // this is ignored and resolves from the codebase.
+    available = (await loadBuiltinToolkitManifest({ force: true })).version;
+  } catch (err) {
+    log.warn(`built-in version check failed; leaving install as-is: ${errMessage(err)}`);
+    return;
+  }
+  if (available === installed.version) return;
+  log.info(
+    `built-in toolkit ${installed.version} -> ${available}; refreshing files (re-install to enable)`,
+  );
+  // No preferLocalDir: in a release channel that dir holds the version
+  // shipped with the app (the old one), so fetch the new tarball; dev copies
+  // from the codebase regardless of the flag.
+  startDownload({ source: "builtin" }, sink);
 }

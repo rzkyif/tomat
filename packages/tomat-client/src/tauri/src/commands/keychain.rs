@@ -1,12 +1,12 @@
 // OS-keychain wrapper for paired-core bearer tokens.
 //
 // Service: channel-namespaced ("tomat-client" on stable, "tomat-client-dev" /
-// "tomat-client-beta" otherwise, see `crate::channel`), so a dev/beta build's
+// "tomat-client-latest" otherwise, see `crate::channel`), so a dev/latest build's
 // tokens never collide with a stable install's. Account format: "core:<coreId>",
 // where <coreId> is the ULID assigned by the core during pairing-claim.
 //
 // Backing store, chosen per channel by `store()`:
-//   - stable / beta (signed bundles): the real OS keychain via keyring-core
+//   - stable / latest (signed bundles): the real OS keychain via keyring-core
 //     and the platform credential store (`RealKeychain`).
 //   - dev (`deno task dev`, an unsigned `tauri dev` binary): a file under the
 //     channel-isolated client dir (`DevFileKeychain`). The macOS keychain
@@ -138,7 +138,7 @@ fn keychain_file_path() -> AppResult<PathBuf> {
 
 /// Pick the keychain backing for the active channel. The unsigned `dev` build
 /// can't use the macOS keychain (writes report success but never persist), so
-/// it stores tokens in a file; the signed stable/beta bundles use the real OS
+/// it stores tokens in a file; the signed stable/latest bundles use the real OS
 /// keychain.
 fn store() -> AppResult<Box<dyn KeychainStore>> {
     if channel() == "dev" {

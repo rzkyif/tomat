@@ -75,23 +75,30 @@ Deno.test("stt: presetId selection keeps the preset id", () => {
   assertEquals(applied.preset, "accurate");
   assertEquals(
     applied.settings.modelPath,
-    "@ggerganov/whisper.cpp/main/ggml-large-v3-turbo-q8_0.bin",
+    "@csukuangfj/sherpa-onnx-whisper-turbo/main/turbo-encoder.int8.onnx",
   );
 });
 
-Deno.test("stt: modelId selection applies the default quant (Q8_0)", () => {
-  const applied = resolveSttSelection(catalog, hw(4), { modelId: "whisper-medium" });
+Deno.test("stt: modelId selection applies the default quant (int8)", () => {
+  const applied = resolveSttSelection(catalog, hw(4), { modelId: "whisper-medium.en" });
   assertEquals(applied.preset, "custom");
-  assertEquals(applied.settings.modelPath, "@ggerganov/whisper.cpp/main/ggml-medium-q8_0.bin");
+  assertEquals(
+    applied.settings.modelPath,
+    "@csukuangfj/sherpa-onnx-whisper-medium.en/main/medium.en-encoder.int8.onnx",
+  );
 });
 
-Deno.test("stt: modelId selection falls back to F16 when no Q8_0 exists (large-v3)", () => {
-  const applied = resolveSttSelection(catalog, hw(4), { modelId: "whisper-large-v3" });
-  assertEquals(applied.settings.modelPath, "@ggerganov/whisper.cpp/main/ggml-large-v3.bin");
+Deno.test("stt: modelId selection resolves a model's int8 bundle (tiny)", () => {
+  const applied = resolveSttSelection(catalog, hw(4), { modelId: "whisper-tiny" });
+  assertEquals(applied.preset, "custom");
+  assertEquals(
+    applied.settings.modelPath,
+    "@csukuangfj/sherpa-onnx-whisper-tiny/main/tiny-encoder.int8.onnx",
+  );
 });
 
 Deno.test("stt: modelSpec selection picks the exact quant as custom", () => {
-  const spec = "@ggerganov/whisper.cpp/main/ggml-tiny-q5_1.bin";
+  const spec = "@csukuangfj/sherpa-onnx-whisper-base/main/base-encoder.int8.onnx";
   const applied = resolveSttSelection(catalog, hw(4), { modelSpec: spec });
   assertEquals(applied.preset, "custom");
   assertEquals(applied.settings.modelPath, spec);

@@ -1,8 +1,8 @@
 // Runtime resolution of upstream sidecar binaries.
 //
-// On the BETA channel, binaries.json carries resolver entries (an upstream
+// On the LATEST channel, binaries.json carries resolver entries (an upstream
 // GitHub repo + per-triple asset-name patterns) instead of pinned URLs, so a
-// beta core installs upstream releases without us having to re-publish the
+// latest core installs upstream releases without us having to re-publish the
 // manifest. A resolver without `pinnedTag` tracks the LATEST release; with
 // `pinnedTag` it resolves that exact release (deno is pinned this way on
 // every channel, because the permission prompt parsing in
@@ -37,11 +37,11 @@ export interface ResolvedBinary {
   url: string;
   sha256: string;
   /** Download size in bytes when the source publishes it (GitHub asset size on
-   *  beta resolver entries). Pinned entries leave this unset. */
+   *  latest resolver entries). Pinned entries leave this unset. */
   sizeBytes?: number;
 }
 
-// Short-lived per-repo cache of the latest-release lookup. A beta update check
+// Short-lived per-repo cache of the latest-release lookup. A latest update check
 // resolves every sidecar kind, and the UI may poll "check for updates"
 // repeatedly; unauthenticated GitHub is rate-limited (~60/hr), so we dedupe
 // rapid re-resolves. The signed manifest's resolver config is the trust
@@ -94,8 +94,8 @@ async function fetchRelease(
 }
 
 /** Resolve an upstream resolver to the latest binary for `triple`. Returns
- *  null when upstream doesn't publish this triple at all (e.g. whisper.cpp
- *  ships only Windows assets, so mac/linux beta has no whisper, same as stable).
+ *  null when upstream doesn't publish this triple at all (the resolver's
+ *  `assets` map omits it), so it is marked unavailable rather than missing.
  *  Throws when the expected asset or its sha256 digest is missing. */
 export async function resolveUpstream(
   resolver: UpstreamResolver,
@@ -117,7 +117,7 @@ export async function resolveUpstream(
     throw new AppError(
       "checksum_mismatch",
       `upstream asset "${assetName}" has no sha256 digest; refusing to install ` +
-        `an unverifiable binary on the beta channel`,
+        `an unverifiable binary on the latest channel`,
     );
   }
   return {

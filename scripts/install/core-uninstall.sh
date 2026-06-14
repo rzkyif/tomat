@@ -15,7 +15,7 @@
 #   --keep-data  do not remove the channel's core dir (only stop / unregister services).
 #
 # Env overrides:
-#   TOMAT_CHANNEL      channel to uninstall: stable (default) | dev | beta.
+#   TOMAT_CHANNEL      channel to uninstall: stable (default) | dev | latest.
 #   TOMAT_CORE_HOME    override install root (default: ~/.tomat/<channel>/core)
 #
 # UI:
@@ -385,22 +385,22 @@ ui_die() {
 
 KEEP_DATA=0
 
-# Channel selectable via TOMAT_CHANNEL env or --channel <c> / --beta (arg wins).
+# Channel selectable via TOMAT_CHANNEL env or --channel <c> / --latest (arg wins).
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --keep-data) KEEP_DATA=1; shift ;;
     --channel) TOMAT_CHANNEL="${2:-}"; shift 2 ;;
     --channel=*) TOMAT_CHANNEL="${1#*=}"; shift ;;
-    --beta) TOMAT_CHANNEL="beta"; shift ;;
+    --latest) TOMAT_CHANNEL="latest"; shift ;;
     --stable) TOMAT_CHANNEL="stable"; shift ;;
     *) printf 'warn: unknown arg: %s\n' "$1" >&2; shift ;;
   esac
 done
 TOMAT_CHANNEL="${TOMAT_CHANNEL:-stable}"
 case "$TOMAT_CHANNEL" in
-  stable | dev | beta) ;;
+  stable | dev | latest) ;;
   *)
-    printf 'error: invalid TOMAT_CHANNEL: %s (expected stable, dev, or beta)\n' \
+    printf 'error: invalid TOMAT_CHANNEL: %s (expected stable, dev, or latest)\n' \
       "$TOMAT_CHANNEL" >&2
     exit 1
     ;;

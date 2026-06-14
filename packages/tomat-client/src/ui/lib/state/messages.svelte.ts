@@ -17,6 +17,7 @@ import type { Message as ServerMessage, ServerToClientFrame } from "@tomat/share
 import {
   type AskUserAnswer,
   type AskUserQuestion,
+  asMessageContent,
   type Attachment,
   getTextContent,
   makeMessageId,
@@ -351,6 +352,25 @@ class MessagesState {
     };
   }
 
+  /** Flip the bubble to awaiting_user while a schedule confirm form is
+   *  pending; the editable form lives in UserInput's schedule-confirm
+   *  mode, not the bubble. */
+  setToolCallAwaitingSchedule(callId: string): void {
+    const idx = this.toolIdx(callId);
+    if (idx < 0) return;
+    this.messages[idx] = { ...this.messages[idx], status: "awaiting_user" };
+  }
+
+  /** Return the bubble to running after the user decided on the schedule
+   *  confirm form. */
+  clearToolCallAwaitingSchedule(callId: string): void {
+    const idx = this.toolIdx(callId);
+    if (idx < 0) return;
+    const m = this.messages[idx];
+    if (m.status !== "awaiting_user") return;
+    this.messages[idx] = { ...m, status: "running" };
+  }
+
   /** Return the bubble to running after the user decided (the verdict's
    *  effect arrives via the normal progress/result/error frames). */
   clearToolCallPermissionRequest(callId: string): void {
@@ -477,12 +497,11 @@ class MessagesState {
     // resend conditions on the old text.
     if (userMsgId && sessionsState.id) {
       try {
-        await cores()
-          .api()
-          .sessions.patchMessage(sessionsState.id, userMsgId, {
-            content: expandedContent,
-            systemPromptOverride,
-          } as unknown as Partial<ServerMessage>);
+        const patch: Partial<ServerMessage> = {
+          content: expandedContent,
+          systemPromptOverride,
+        };
+        await cores().api().sessions.patchMessage(sessionsState.id, userMsgId, patch);
       } catch (e) {
         log.warn(`server patch ${userMsgId} failed:`, e);
       }
@@ -645,7 +664,9 @@ class MessagesState {
    *  before the anchor's index). `afterId: null` inserts at the newest
    *  position. */
   applyServerMessage(msg: ServerMessage, afterId: string | null): void {
-    const local = msg as unknown as Message;
+    // The client bag Message is a superset of every wire role's fields, so a
+    // spread is the truthful widening (same conversion onChatMessage uses).
+    const local: Message = { ...msg };
     const idx = this.messages.findIndex((m) => m.id === local.id);
     if (idx >= 0) {
       this.messages[idx] = { ...local, ephemera: this.messages[idx].ephemera };
@@ -736,10 +757,22 @@ class MessagesState {
   private async persistUserMessage(msg: Message): Promise<void> {
     const sessionId = sessionsState.id;
     if (!sessionId) return;
+    const content = asMessageContent(msg.content);
+    if (msg.role !== "user" || content === null) return;
+    // Build the wire user message from the bag's user fields rather than
+    // asserting the superset bag IS the union. ord/createdAtMs are
+    // server-assigned on append, so they ride as zero placeholders.
+    const wire: ServerMessage = {
+      role: "user",
+      content,
+      id: msg.id ?? makeMessageId(),
+      ord: msg.ord ?? 0,
+      createdAtMs: msg.createdAtMs ?? Date.now(),
+      ...(msg.systemPromptOverride ? { systemPromptOverride: msg.systemPromptOverride } : {}),
+      ...(msg.automated ? { automated: true } : {}),
+    };
     try {
-      await cores()
-        .api()
-        .sessions.appendMessage(sessionId, msg as unknown as ServerMessage);
+      await cores().api().sessions.appendMessage(sessionId, wire);
     } catch (e) {
       log.warn("persist failed:", e);
     }

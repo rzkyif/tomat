@@ -36,3 +36,11 @@ export function newRequestId(): string {
   // ask-user request id; short-lived per-call; uuid is fine.
   return crypto.randomUUID();
 }
+
+export function newDocumentId(): string {
+  return ulid();
+}
+
+export function newScheduledPromptId(): string {
+  return ulid();
+}

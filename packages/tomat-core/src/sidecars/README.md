@@ -1,13 +1,12 @@
 # Sidecars
 
-Supervision for every subprocess core spawns: `llama-server` (LLM),
-`whisper-server` (Speech-to-Text), the TTS worker, and the embedding worker.
-[`manager.ts`](manager.ts) is the generic supervisor for server-style sidecars;
-[`tts.ts`](tts.ts) and [`embedding.ts`](embedding.ts) are host-side controllers
-that spawn their Deno workers directly and talk NDJSON over stdin/stdout.
-Per-kind argument construction lives in [`llama.ts`](llama.ts),
-[`whisper.ts`](whisper.ts), and [`tts.ts`](tts.ts); binary path resolution does
-NOT live here (see `src/binaries/`).
+Supervision for every server-style subprocess core spawns: `llama-server` (LLM
+chat, plus a second instance for embeddings) and `tomat-core-speech`
+(Speech-to-Text + Text-to-Speech). [`manager.ts`](manager.ts) is the generic
+supervisor; per-kind argument construction lives in [`llama.ts`](llama.ts),
+[`llama-embed.ts`](llama-embed.ts), and [`speech.ts`](speech.ts). Binary path
+resolution does NOT live here (see `src/binaries/`). The deno tool workers are
+supervised separately (see `src/toolkits/`).
 
 ## Lifecycle and supersession ([`manager.ts`](manager.ts))
 
@@ -68,8 +67,8 @@ probed.
 
 ## The worker deno binary ([`worker-deno.ts`](worker-deno.ts))
 
-The TTS and embedding workers run as sandboxed `deno run` subprocesses using a
-bundled `deno` sidecar binary, which is a downloadable requirement.
-`requireWorkerDeno()` resolves and existence-checks it so callers get a clean
-`binary_not_found` error instead of a raw `NotFound` when it is not installed
-yet.
+The sandboxed tool workers and the npm-based toolkit installer run as
+`deno run` subprocesses using a bundled `deno` sidecar binary, which is a
+downloadable requirement. `requireWorkerDeno()` resolves and existence-checks it
+so callers get a clean `binary_not_found` error instead of a raw `NotFound` when
+it is not installed yet.

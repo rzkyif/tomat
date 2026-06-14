@@ -117,6 +117,13 @@ function applyDecl(flags: FlagSet, decl: PermissionDecl, templates: PathTemplate
     case "sys":
       flags.sys.add(decl.flag);
       break;
+    case "documents":
+    case "llm":
+    case "tts":
+    case "stt":
+      // Module-broker permissions carry no Deno sandbox flags; they are
+      // enforced by the module broker at request time.
+      break;
   }
 }
 
@@ -136,6 +143,14 @@ function declKey(decl: PermissionDecl): string {
       return `ffi`;
     case "sys":
       return `sys:${decl.flag}`;
+    case "documents":
+      return `documents:${decl.access}`;
+    case "llm":
+      return `llm`;
+    case "tts":
+      return `tts`;
+    case "stt":
+      return `stt`;
   }
 }
 

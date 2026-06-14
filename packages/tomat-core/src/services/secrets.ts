@@ -44,7 +44,7 @@ const log = getLogger("secrets");
 
 const NONCE_LEN = 12;
 const KEY_LEN = 32;
-// Namespaced per install channel so a dev/beta core can't read or clobber a
+// Namespaced per install channel so a dev/latest core can't read or clobber a
 // stable core's master key. Stable keeps the bare "au.tomat.core" service so
 // existing keychain entries keep resolving. (Dev never reads or writes this
 // service: see useOsKeychain.)

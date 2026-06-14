@@ -36,6 +36,8 @@ export interface ToolkitInsertInput {
   status?: ToolkitStatus;
   // Whether the toolkit declares dependencies. Defaults to false.
   hasDeps?: boolean;
+  // Whether tools.json declares `database: true`. Defaults to false.
+  hasDatabase?: boolean;
 }
 
 export interface ToolInsertInput {
@@ -63,7 +65,8 @@ export class ToolkitsRegistry {
     const rows = db()
       .prepare(`
       SELECT id, source, display_name, description, version, installed_path,
-             tools_json_hash, content_hash, status, has_deps, undeclared_policy,
+             tools_json_hash, content_hash, status, has_deps, has_database,
+             undeclared_policy,
              (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id) AS tool_count,
              (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id AND enabled = 1)
                AS enabled_tool_count,
@@ -79,7 +82,8 @@ export class ToolkitsRegistry {
     const row = db()
       .prepare(`
       SELECT id, source, display_name, description, version, installed_path,
-             tools_json_hash, content_hash, status, has_deps, undeclared_policy,
+             tools_json_hash, content_hash, status, has_deps, has_database,
+             undeclared_policy,
              (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id) AS tool_count,
              (SELECT COUNT(*) FROM tools WHERE toolkit_id = toolkits.id AND enabled = 1)
                AS enabled_tool_count,
@@ -105,7 +109,7 @@ export class ToolkitsRegistry {
         UPDATE toolkits
            SET source = ?, display_name = ?, description = ?, version = ?,
                installed_path = ?, tools_json_hash = ?, content_hash = ?,
-               status = ?, has_deps = ?, updated_at_ms = ?
+               status = ?, has_deps = ?, has_database = ?, updated_at_ms = ?
          WHERE id = ?
       `)
         .run(
@@ -118,6 +122,7 @@ export class ToolkitsRegistry {
           input.contentHash,
           input.status ?? "downloaded",
           input.hasDeps ? 1 : 0,
+          input.hasDatabase ? 1 : 0,
           now,
           input.id,
         );
@@ -126,9 +131,9 @@ export class ToolkitsRegistry {
         .prepare(`
         INSERT INTO toolkits
           (id, source, display_name, description, version, installed_path,
-           tools_json_hash, content_hash, status, has_deps,
+           tools_json_hash, content_hash, status, has_deps, has_database,
            installed_at_ms, updated_at_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
         .run(
           input.id,
@@ -141,6 +146,7 @@ export class ToolkitsRegistry {
           input.contentHash,
           input.status ?? "downloaded",
           input.hasDeps ? 1 : 0,
+          input.hasDatabase ? 1 : 0,
           now,
           now,
         );
@@ -567,6 +573,7 @@ function rowToToolkit(row: Record<string, unknown>): Toolkit {
     contentHash: String(row.content_hash),
     status: String(row.status) as ToolkitStatus,
     hasDeps: Number(row.has_deps) === 1,
+    hasDatabase: Number(row.has_database) === 1,
     undeclaredPolicy: String(row.undeclared_policy) as UndeclaredPolicy,
     toolCount: Number(row.tool_count),
     enabledToolCount: Number(row.enabled_tool_count),

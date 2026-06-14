@@ -8,6 +8,7 @@ export type MessageRole =
   | "tool"
   | "reasoning"
   | "tool_filter"
+  | "display"
   | "error";
 
 export interface AttachmentRef {
@@ -105,6 +106,10 @@ export interface UserMessage extends MessageBase {
   // snippet overrode the user's default system prompt; absent otherwise.
   // Used by edit-and-resend to replay the same prompt context.
   systemPromptOverride?: string;
+  // True when core authored this message itself (a scheduled prompt or
+  // greeting), not the user. The client renders it as a collapsed
+  // "Automated Prompt" bubble instead of a user bubble.
+  automated?: boolean;
 }
 
 export interface AssistantMessage extends MessageBase {
@@ -196,6 +201,23 @@ export interface ToolFilterMessage extends MessageBase {
   errorMessage?: string;
 }
 
+// Content payload a tool pushes to the chat via the one-way display API
+// (`ctx.display.*`) or the `show_document` builtin. Rendered by the client
+// as a standalone display bubble; never sent to the LLM.
+export type DisplayContent =
+  | { type: "markdown"; markdown: string }
+  | { type: "image"; dataB64: string; mime: string; alt?: string }
+  | { type: "table"; columns: string[]; rows: string[][] }
+  | { type: "diff"; before: string; after: string; title?: string };
+
+export interface DisplayMessage extends MessageBase {
+  role: "display";
+  // Tool call that produced this display, when one did. Lets the UI group
+  // the bubble near its originating call.
+  callId?: string;
+  content: DisplayContent;
+}
+
 export interface ErrorMessage extends MessageBase {
   role: "error";
   content: string;
@@ -211,6 +233,7 @@ export type Message =
   | ToolMessage
   | ReasoningMessage
   | ToolFilterMessage
+  | DisplayMessage
   | ErrorMessage;
 
 export interface Session {

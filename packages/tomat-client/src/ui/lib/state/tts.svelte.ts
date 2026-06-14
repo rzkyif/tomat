@@ -186,13 +186,11 @@ class TTSState {
         // if the files / `deno` worker aren't present yet, this fails
         // gracefully and TTS loads lazily on the next synth once they land.
         await loadTtsModel();
-        // Pre-warm: kokoro-js lazy-loads the per-voice tensor on the first
-        // generate() call (and ORT does its JIT pass then too). Without this
-        // the user's first synth chunk pays the cold-start cost, which
-        // shows up as a noticeable gap before chunk 2 lands. Warming with
-        // the currently selected voice loads the right tensor into the
-        // module's voice cache. Failure is non-fatal - we still mark
-        // loaded so the user can use TTS.
+        // Pre-warm: the first /speak pays a one-time cost (the speech sidecar
+        // loads the per-voice style vector and ORT does its JIT pass). Without
+        // this the user's first synth chunk pays that cold-start, which shows
+        // up as a noticeable gap before chunk 2 lands. Failure is non-fatal -
+        // we still mark loaded so the user can use TTS.
         // Warm the playback side in parallel: the very first audio playback
         // of the process pays a one-time output-pipeline spin-up (WebKit
         // audio rendering + OS output device), during which the element's
@@ -222,8 +220,8 @@ class TTSState {
     } else {
       this.reset();
       this.loaded = false;
-      // Tell core to unload the TTS subprocess so ORT releases its native
-      // sessions. Core will respawn on the next /tts/load call.
+      // The speech sidecar owns TTS lifecycle (gated on tts.enabled), so this
+      // is best-effort; disabling TTS in settings is what frees its model.
       try {
         await cores().api().tts.unload();
       } catch (e) {

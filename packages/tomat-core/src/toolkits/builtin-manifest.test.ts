@@ -23,13 +23,13 @@ async function sign(version: string, sk: Uint8Array): Promise<BuiltinToolkitMani
 }
 
 Deno.test("verifyBuiltinManifestSignature: round-trips a valid signature", async () => {
-  const sk = ed.utils.randomPrivateKey();
+  const sk = ed.utils.randomSecretKey();
   const pk = await ed.getPublicKeyAsync(sk);
   assertEquals(await verifyBuiltinManifestSignature(await sign("1.2.3", sk), pk), true);
 });
 
 Deno.test("verifyBuiltinManifestSignature: rejects a tampered manifest", async () => {
-  const sk = ed.utils.randomPrivateKey();
+  const sk = ed.utils.randomSecretKey();
   const pk = await ed.getPublicKeyAsync(sk);
   const m = await sign("1.2.3", sk);
   m.version = "9.9.9"; // tamper after signing
@@ -37,8 +37,8 @@ Deno.test("verifyBuiltinManifestSignature: rejects a tampered manifest", async (
 });
 
 Deno.test("verifyBuiltinManifestSignature: rejects a different signer's key", async () => {
-  const sk = ed.utils.randomPrivateKey();
-  const otherPk = await ed.getPublicKeyAsync(ed.utils.randomPrivateKey());
+  const sk = ed.utils.randomSecretKey();
+  const otherPk = await ed.getPublicKeyAsync(ed.utils.randomSecretKey());
   assertEquals(await verifyBuiltinManifestSignature(await sign("1.0.0", sk), otherPk), false);
 });
 

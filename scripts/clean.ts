@@ -4,12 +4,12 @@
 //   deno task clean                build outputs (dist, target, .svelte-kit, …)
 //   deno task clean --deep         also node_modules + the Deno cache
 //   deno task clean --dev-state    also ~/.tomat/dev (isolated dev channel only)
-//   deno task clean --beta-state   also ~/.tomat/beta (isolated beta channel only)
+//   deno task clean --latest-state   also ~/.tomat/latest (isolated latest channel only)
 //
-// `--dev-state` / `--beta-state` only ever touch that channel's ~/.tomat/<ch>
+// `--dev-state` / `--latest-state` only ever touch that channel's ~/.tomat/<ch>
 // subtree; a stable install (~/.tomat/stable) and the shared ~/.tomat/models
 // are never removed. Channel state nests our binaries by suffix
-// (tomat-core-beta), so build outputs in dist/ never need a per-channel clean.
+// (tomat-core-latest), so build outputs in dist/ never need a per-channel clean.
 
 import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
@@ -56,7 +56,7 @@ async function rm(absPath: string, label: string): Promise<void> {
 }
 
 const args = parseArgs(Deno.args, {
-  boolean: ["deep", "dev-state", "beta-state"],
+  boolean: ["deep", "dev-state", "latest-state"],
 });
 
 const targets: Array<{ path: string; label: string }> = ARTIFACTS.map((p) => ({
@@ -73,9 +73,9 @@ if (args["dev-state"]) {
   targets.push({ path: devDir, label: "~/.tomat/dev" });
 }
 
-if (args["beta-state"]) {
-  const betaDir = join(homeDir(), ".tomat", "beta");
-  targets.push({ path: betaDir, label: "~/.tomat/beta" });
+if (args["latest-state"]) {
+  const latestDir = join(homeDir(), ".tomat", "latest");
+  targets.push({ path: latestDir, label: "~/.tomat/latest" });
 }
 
 for (const { path, label } of targets) {

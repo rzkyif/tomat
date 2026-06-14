@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-import { errMessage } from "@tomat/shared";
   import type {
     Alignment,
     Monitor,
@@ -11,20 +10,20 @@ import { errMessage } from "@tomat/shared";
   import {
     downloadsState,
     messagesState,
-    type PendingPermission,
     permissionState,
+    scheduleConfirmState,
+    documentsState,
     serversState,
     settingsState,
     snippetsState,
     streamingState,
     viewState,
   } from "../../state";
-  import { cores } from "$lib/core";
+  import type { ScheduledPromptDraft } from "@tomat/shared";
   import { connectionState } from "$lib/state/connection.svelte";
   import { getLogger } from "$lib/shared/log";
 
   const log = getLogger("user-input");
-  const sttLog = getLogger("stt");
   const attachLog = getLogger("attach");
   const uiLog = getLogger("ui");
 
@@ -39,36 +38,23 @@ import { errMessage } from "@tomat/shared";
   // back into this dispatch (see the handler note in messages.svelte.ts).
   messagesState.setLLMHandlers(sendMessages);
 
-  async function transcribeAudio(
-    audio: Blob | string,
-    language?: string,
-  ): Promise<{ text: string; error?: string }> {
-    try {
-      // The legacy call site sometimes passes a base64 string; rehydrate to
-      // a Blob for the multipart upload.
-      const blob = typeof audio === "string"
-        ? new Blob([Uint8Array.from(atob(audio), (c) => c.charCodeAt(0))], { type: "audio/wav" })
-        : audio;
-      const res = await cores().api().stt.transcribe(blob, language);
-      return { text: res.text };
-    } catch (e) {
-      return { text: "", error: errMessage(e) };
-    }
-  }
-
-  async function autocorrectTranscription(text: string): Promise<string> {
-    return cores().api().llm.autocorrect(text);
-  }
-
-  async function mergeTranscription(prior: string, next: string): Promise<string> {
-    return cores().api().llm.merge(prior, next);
-  }
-  import { float32ToWav, blobToBase64 } from "$lib/shared/audio";
   import {
-    applySnippets,
-    TRIGGER_BEFORE_CARET,
-    type Snippet,
-  } from "$lib/shared/snippets";
+    classifyAttachment,
+    DOC_EXTENSIONS,
+    IMAGE_EXTENSIONS,
+    ingestDocumentBlob,
+    ingestDocumentFromPath,
+    ingestImageBlob,
+    MIME_BY_EXT,
+  } from "$lib/shared/attachments";
+  import { applySnippets } from "$lib/shared/snippets";
+  import {
+    type AutocompleteOption,
+    collectExistingTriggers,
+    useAutocomplete,
+  } from "$lib/composables/use-autocomplete.svelte";
+  import { useStt } from "$lib/composables/use-stt-input.svelte";
+  import { documentTrigger } from "$lib/state/documents.svelte";
   import {
     applySystemPromptOverride,
     buildContextBlock,
@@ -90,11 +76,12 @@ import { errMessage } from "@tomat/shared";
   import { useBlink } from "$lib/composables/use-blink.svelte";
   import type { ActivationMode } from "@tomat/shared";
   import AttachmentList from "./AttachmentList.svelte";
+  import AutocorrectAlert from "./userinput/AutocorrectAlert.svelte";
+  import PermissionRequest from "./userinput/PermissionRequest.svelte";
+  import ScheduleConfirmForm from "./userinput/ScheduleConfirmForm.svelte";
   import Bubble from "../ui/Bubble.svelte";
   import IconButton from "../ui/IconButton.svelte";
-  import Alert from "../ui/Alert.svelte";
   import Modal from "../ui/Modal.svelte";
-  import Select from "../ui/Select.svelte";
   import { hasAlpha } from "$lib/shared/color";
 
   const themeOverride = $derived(
@@ -111,70 +98,64 @@ import { errMessage } from "@tomat/shared";
   let textareaElement: HTMLTextAreaElement | undefined = $state();
   let mirrorSpan: HTMLSpanElement | undefined = $state();
   let attachments = $state<Attachment[]>([]);
-  let originalTranscription = $state<string | null>(null);
-  let showAutocorrectDiff = $state(false);
 
-  let autocompleteOpen = $state(false);
-  let autocompletePrefix = $state("");
-  let autocompleteIndex = $state(0);
-  let autocompleteAnchor = $state({ top: 0, left: 0 });
-  let autocompleteTriggerStart = $state(-1);
-  let autocompleteTriggerEnd = $state(-1);
-  let imeComposing = $state(false);
+  // The `@trigger` autocomplete dropdown and the speech-to-text pipeline are
+  // each their own stateful unit; this component owns the lifecycle wiring (see
+  // onMount / the effects below) and the option list, which spans two stores.
+  const ac = useAutocomplete();
+  ac.bind(() => textareaElement, () => mirrorSpan);
+  const stt = useStt();
 
-  /** Collects every `@trigger` token already present in `text`, excluding the
-   *  token currently being typed (so the one you're filtering on doesn't
-   *  filter itself out). Used to hide already-applied single-shot snippets
-   *  from autocomplete suggestions. */
-  function collectExistingTriggers(
-    source: string,
-    excludeStart: number,
-    excludeEnd: number,
-  ): Set<string> {
-    const found = new Set<string>();
-    const re = /(^|[^\w@])(@[A-Za-z0-9_-]+)/g;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(source)) !== null) {
-      const tokenStart = match.index + match[1].length;
-      const tokenEnd = tokenStart + match[2].length;
-      if (tokenEnd <= excludeStart || tokenStart >= excludeEnd) {
-        found.add(match[2].toLowerCase());
-      }
-    }
-    return found;
-  }
-
-  let autocompleteOptions = $derived.by<Snippet[]>(() => {
-    if (!autocompleteOpen) return [];
-    const prefix = autocompletePrefix.toLowerCase();
+  let autocompleteOptions = $derived.by<AutocompleteOption[]>(() => {
+    if (!ac.open) return [];
+    const prefix = ac.prefix.toLowerCase();
     const existing = collectExistingTriggers(
       text,
-      autocompleteTriggerStart,
-      autocompleteTriggerEnd,
+      ac.triggerStart,
+      ac.triggerEnd,
     );
-    return snippetsState.snippets.filter((s) => {
-      if (!s.trigger.toLowerCase().startsWith(prefix)) return false;
-      // insert-user snippets are explicitly designed to be dropped inline
-      // multiple times, so don't filter them out even if already present.
-      if (
-        s.placement !== "insert-user" &&
-        existing.has(s.trigger.toLowerCase())
-      ) {
-        return false;
-      }
-      return true;
-    });
+    const snippets = snippetsState.snippets
+      .filter((s) => {
+        if (!s.trigger.toLowerCase().startsWith(prefix)) return false;
+        // insert-user snippets are explicitly designed to be dropped inline
+        // multiple times, so don't filter them out even if already present.
+        if (
+          s.placement !== "insert-user" &&
+          existing.has(s.trigger.toLowerCase())
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .map<AutocompleteOption>((s) => ({
+        id: `snippet:${s.id}`,
+        name: s.name,
+        trigger: s.trigger,
+        source: "snippet",
+      }));
+    const snippetTriggers = new Set(
+      snippetsState.snippets.map((s) => s.trigger.toLowerCase()),
+    );
+    const documents = documentsState.documents
+      .map((d) => ({ doc: d, trigger: documentTrigger(d) }))
+      .filter(
+        ({ trigger }) =>
+          trigger.toLowerCase().startsWith(prefix) &&
+          !existing.has(trigger.toLowerCase()) &&
+          !snippetTriggers.has(trigger.toLowerCase()),
+      )
+      .sort((a, b) => a.trigger.localeCompare(b.trigger))
+      .map<AutocompleteOption>(({ doc, trigger }) => ({
+        id: `document:${doc.id}`,
+        name: doc.title,
+        trigger,
+        source: "document",
+      }));
+    return [...snippets, ...documents];
   });
 
   $effect(() => {
-    if (!autocompleteOpen) return;
-    if (autocompleteOptions.length === 0) {
-      autocompleteOpen = false;
-      return;
-    }
-    if (autocompleteIndex >= autocompleteOptions.length) {
-      autocompleteIndex = 0;
-    }
+    ac.clampIndex(autocompleteOptions.length);
   });
 
   let captureMonitors = $state<CaptureMonitorInfo[]>([]);
@@ -223,37 +204,35 @@ import { errMessage } from "@tomat/shared";
   // call only ("always allow" lives in the Toolkit detail view).
   let permissionRequest = $derived(permissionState.pending);
 
-  // The request as a plain-language action ("run a program") plus the concrete
-  // target (the command, path, host, ...) shown on its own in a mono card, so
-  // the sentence reads cleanly and the exact value is easy to scan.
-  function permissionParts(p: PendingPermission): { action: string; detail?: string } {
-    switch (p.permissionKind) {
-      case "net":
-        return { action: "connect to a server", detail: p.resource };
-      case "read":
-        return { action: "read a file", detail: p.resource };
-      case "write":
-        return { action: "write to a file", detail: p.resource };
-      case "run":
-        return { action: "run a program", detail: p.resource };
-      case "env":
-        return p.resource
-          ? { action: "read an environment variable", detail: p.resource }
-          : { action: "read all environment variables" };
-      case "ffi":
-        return p.resource
-          ? { action: "load a native library", detail: p.resource }
-          : { action: "load native libraries" };
-      case "sys":
-        return { action: "read system information", detail: p.resource || undefined };
-    }
+  // Schedule-confirm mode: a running tool proposed a scheduled prompt and is
+  // paused on this editable form. Mirrors the permission mode: the textarea
+  // is replaced by the form, attach/voice/send controls hide, X and check
+  // buttons decide. The user's edits ride back on the accept.
+  let scheduleConfirm = $derived(scheduleConfirmState.pending);
+  let scheduleDraft = $state<ScheduledPromptDraft | null>(null);
+  $effect(() => {
+    // The pending frame is reactive deep state, so its draft is a Proxy;
+    // structuredClone would throw DataCloneError on it. $state.snapshot
+    // returns a plain editable clone (the same call the accept path uses).
+    scheduleDraft = scheduleConfirm ? $state.snapshot(scheduleConfirm.draft) : null;
+  });
+  let scheduleDraftReady = $derived.by(() => {
+    const d = scheduleDraft;
+    if (!d) return false;
+    if (!d.title.trim() || !d.instruction.trim()) return false;
+    // A "once" in the past would never fire; make the user pick a future time.
+    if (d.schedule.kind === "once" && d.schedule.atMs <= Date.now()) return false;
+    return true;
+  });
+  function respondScheduleConfirm(accepted: boolean): void {
+    const draft = scheduleDraft;
+    scheduleConfirmState.respond(
+      accepted,
+      accepted && draft ? $state.snapshot(draft) : undefined,
+    );
   }
+
   let hasContent = $derived(text.trim().length > 0 || attachments.length > 0);
-  // True while a captured speech segment is in the transcribe -> autocorrect
-  // -> merge pipeline. The mic is already off by then (VAD one-shots on
-  // segment end), so without this the placeholder would fall back to the
-  // idle prompt while work is still happening.
-  let sttProcessing = $state(false);
 
   let placeholderText = $derived(
     inputNotice
@@ -264,7 +243,7 @@ import { errMessage } from "@tomat/shared";
       ? "Pending download, open settings!"
       : downloadsState.loading
         ? "Connecting to core..."
-        : sttProcessing
+        : stt.processing
         ? "Transcribing..."
         : vadManager.enabled && vadManager.listening
         ? "Listening..."
@@ -276,7 +255,7 @@ import { errMessage } from "@tomat/shared";
               ? "Waiting for LLM server..."
               : "Enter your instructions...",
   );
-  let sttStatus = $derived(serversState.serverStatuses.whisper.status);
+  let sttStatus = $derived(serversState.serverStatuses.speech.status);
 
   let attachmentParts = $derived(
     attachments.map((att): MessagePart => {
@@ -306,95 +285,34 @@ import { errMessage } from "@tomat/shared";
     previewImageUrl = null;
   }
 
-  // Anchors the autocomplete dropdown under the caret by measuring a Range on
-  // the sibling sizing span. It shares the textarea's grid cell and wraps
-  // identically, so we can read the caret position directly without cloning
-  // styles into a hidden mirror.
-  function measureCaretAt(index: number): { top: number; left: number } {
-    if (!mirrorSpan || !textareaElement) return { top: 0, left: 0 };
-    const textNode = mirrorSpan.firstChild;
-    if (!textNode) return { top: 0, left: 0 };
-    const range = document.createRange();
-    const safeIndex = Math.min(index, textNode.textContent?.length ?? 0);
-    range.setStart(textNode, safeIndex);
-    range.setEnd(textNode, safeIndex);
-    const rect = range.getBoundingClientRect();
-    const cs = window.getComputedStyle(textareaElement);
-    const lineHeight =
-      parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
-    return { top: rect.top + lineHeight + 4, left: rect.left };
-  }
-
-  function updateAutocompleteFromInput() {
-    if (imeComposing || !textareaElement) {
-      autocompleteOpen = false;
-      return;
-    }
+  function applySnippetTrigger(option: { trigger: string }) {
     const ta = textareaElement;
-    const caret = ta.selectionStart ?? text.length;
-    const before = text.slice(0, caret);
-    const match = before.match(TRIGGER_BEFORE_CARET);
-    if (!match) {
-      autocompleteOpen = false;
-      return;
-    }
-    const token = match[1];
-    // Only reset the selected index when the filter prefix actually changed
-    // (or we're freshly opening). Otherwise arrow-key presses, which fire
-    // onkeyup -> here, would bounce the highlight back to the first option.
-    const prefixChanged = !autocompleteOpen || token !== autocompletePrefix;
-    autocompletePrefix = token;
-    autocompleteTriggerStart = caret - token.length;
-    autocompleteTriggerEnd = caret;
-    if (prefixChanged) {
-      autocompleteIndex = 0;
-    }
-    autocompleteAnchor = measureCaretAt(autocompleteTriggerStart);
-    autocompleteOpen = true;
-  }
-
-  function applySnippetTrigger(snippet: Snippet) {
-    if (!textareaElement) return;
-    const ta = textareaElement;
-    const start = autocompleteTriggerStart;
-    const end = autocompleteTriggerEnd;
-    if (start < 0 || end < 0) {
-      autocompleteOpen = false;
-      return;
-    }
-    const before = text.slice(0, start);
-    const after = text.slice(end);
-    const replacement = `${snippet.trigger} `;
-    text = `${before}${replacement}${after}`;
-    autocompleteOpen = false;
-    const newCaret = start + replacement.length;
+    const result = ac.applyTrigger(text, option.trigger);
+    if (!result) return;
+    text = result.text;
+    const caret = result.caret;
     // Restore caret position after Svelte updates the DOM value.
     queueMicrotask(() => {
-      ta.focus();
-      ta.setSelectionRange(newCaret, newCaret);
+      ta?.focus();
+      ta?.setSelectionRange(caret, caret);
     });
   }
 
   function handleCompositionStart() {
-    imeComposing = true;
-    autocompleteOpen = false;
+    ac.onCompositionStart();
   }
 
   function handleCompositionEnd() {
-    imeComposing = false;
-    updateAutocompleteFromInput();
+    ac.onCompositionEnd(text);
   }
 
   function handleTextInput() {
-    if (showAutocorrectDiff) {
-      showAutocorrectDiff = false;
-      originalTranscription = null;
-    }
-    updateAutocompleteFromInput();
+    if (stt.showDiff) stt.clearDiff();
+    ac.updateFromInput(text);
   }
 
   function handleSelectionChange() {
-    if (autocompleteOpen) updateAutocompleteFromInput();
+    if (ac.open) ac.updateFromInput(text);
   }
 
   function focusTextarea() {
@@ -586,8 +504,7 @@ import { errMessage } from "@tomat/shared";
     const trimmedText = text.trim();
     if (!trimmedText && attachments.length === 0) return;
 
-    showAutocorrectDiff = false;
-    originalTranscription = null;
+    stt.clearDiff();
 
     // Expand snippet triggers before the message leaves the input. The
     // resolved user text is what gets persisted + sent to the LLM; the
@@ -618,7 +535,7 @@ import { errMessage } from "@tomat/shared";
 
     text = "";
     attachments = [];
-    autocompleteOpen = false;
+    ac.open = false;
 
     try {
       await messagesState.addUserMessage({
@@ -635,32 +552,7 @@ import { errMessage } from "@tomat/shared";
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (autocompleteOpen && autocompleteOptions.length > 0) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        autocompleteIndex =
-          (autocompleteIndex + 1) % autocompleteOptions.length;
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        autocompleteIndex =
-          (autocompleteIndex - 1 + autocompleteOptions.length) %
-          autocompleteOptions.length;
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        const selected = autocompleteOptions[autocompleteIndex];
-        if (selected) applySnippetTrigger(selected);
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        autocompleteOpen = false;
-        return;
-      }
-    }
+    if (ac.handleKey(e, autocompleteOptions, applySnippetTrigger)) return;
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -669,170 +561,46 @@ import { errMessage } from "@tomat/shared";
   }
 
   async function handleVadAudio(audio: Float32Array) {
-    showAutocorrectDiff = false;
-    originalTranscription = null;
-
-    sttProcessing = true;
-    try {
-      const wavBlob = float32ToWav(audio, 16000);
-      const base64 = await blobToBase64(wavBlob);
-
-      sttLog.info(`transcribing ${Math.round((audio.length / 16000) * 1000)}ms of audio`);
-      let startedAt = performance.now();
-      const result = await transcribeAudio(base64);
-      if (result.error) {
-        sttLog.error("Transcription failed:", result.error);
-        showInputNotice("Transcription failed! Please try again.");
-        return;
-      }
-      sttLog.info(`transcription done in ${Math.round(performance.now() - startedAt)}ms`);
-      if (!result.text) return;
-
-      const transcription = result.text.trim();
-      if (!transcription) return;
-
-      const existing = text;
-      let raw = transcription;
-      let corrected: string | null = null;
-
-      if (settingsState.currentSettings["stt.llmAutocorrect"]) {
-        try {
-          startedAt = performance.now();
-          const result = await autocorrectTranscription(raw);
-          if (result) corrected = result;
-          sttLog.info(`autocorrect done in ${Math.round(performance.now() - startedAt)}ms`);
-        } catch (e) {
-          sttLog.warn("Autocorrect failed:", e);
-        }
-      }
-
-      const chainEnabled =
-        settingsState.currentSettings["stt.llmChainTranscription"] &&
-        existing.trim().length > 0;
-
-      if (chainEnabled) {
-        try {
-          startedAt = performance.now();
-          const mergedRaw = await mergeTranscription(existing, raw);
-          if (mergedRaw) raw = mergedRaw;
-          if (corrected) {
-            const mergedCorrected = await mergeTranscription(existing, corrected);
-            if (mergedCorrected) corrected = mergedCorrected;
-          }
-          sttLog.info(`merge done in ${Math.round(performance.now() - startedAt)}ms`);
-        } catch (e) {
-          sttLog.warn("Merge transcription failed:", e);
-        }
-      }
-
-      if (corrected) {
-        text = corrected;
-        const changed = corrected.trim() !== raw.trim();
-        originalTranscription = changed ? raw : null;
-        showAutocorrectDiff = changed;
-      } else {
-        text = raw;
-        originalTranscription = null;
-        showAutocorrectDiff = false;
-      }
-      textareaElement?.focus();
-
-      if (settingsState.currentSettings["stt.autoSend"]) {
+    await stt.handleVadAudio(audio, {
+      getText: () => text,
+      setText: (t) => {
+        text = t;
+      },
+      focus: () => textareaElement?.focus(),
+      // Auto-send interrupts any in-flight work first, mirroring the
+      // interrupt-and-send button.
+      onAutoSend: async () => {
         if (streamingState.hasActiveWork) {
           await streamingState.interruptStreaming();
         }
         await handleSend();
-      }
-    } finally {
-      sttProcessing = false;
-    }
-  }
-
-  const DOC_EXTENSIONS = [
-    "pdf",
-    "docx",
-    "pptx",
-    "xlsx",
-    "xls",
-    "csv",
-    "html",
-    "htm",
-    "txt",
-    "md",
-    "json",
-    "xml",
-    "rst",
-    "log",
-    "toml",
-    "yaml",
-    "ini",
-    "py",
-    "rs",
-    "js",
-    "ts",
-    "c",
-    "cpp",
-    "go",
-    "java",
-  ];
-
-  const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
-
-  const MIME_BY_EXT: Record<string, string> = {
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    bmp: "image/bmp",
-    svg: "image/svg+xml",
-  };
-
-  async function ingestImageBlob(blob: Blob, filename: string, ext: string) {
-    const mime = blob.type || MIME_BY_EXT[ext] || "image/png";
-    const base64 = await blobToBase64(new Blob([blob], { type: mime }));
-    attachments = [
-      ...attachments,
-      { type: "image", filename, pendingData: base64, mime },
-    ];
-  }
-
-  async function ingestDocumentBlob(blob: Blob, filename: string) {
-    // platform().fileConvert.toMarkdown handles the temp-file dance (write,
-    // convert, cleanup) internally for any File. Construct a File so the
-    // filename survives the round-trip.
-    const file = new File([blob], filename, { type: blob.type });
-    const markdown = await platform().fileConvert.toMarkdown(file);
-    attachments = [
-      ...attachments,
-      { type: "document", filename, pendingData: markdown },
-    ];
+      },
+      notice: (message) => showInputNotice(message),
+    });
   }
 
   async function handlePaste(e: ClipboardEvent) {
     const files = Array.from(e.clipboardData?.files || []);
     if (files.length === 0) return;
 
-    const supportsImages = settingsState.currentSettings["llm.supportImages"];
+    const supportsImages = !!settingsState.currentSettings["llm.supportImages"];
     let handledAny = false;
 
     for (const file of files) {
       const name = file.name || "pasted";
-      const ext = name.split(".").pop()?.toLowerCase() || "";
-      const isImage =
-        supportsImages &&
-        (IMAGE_EXTENSIONS.includes(ext) || file.type.startsWith("image/"));
-      const isDoc = DOC_EXTENSIONS.includes(ext);
-      if (!isImage && !isDoc) continue;
+      const kind = classifyAttachment(name, file.type, supportsImages);
+      if (!kind) continue;
 
       handledAny = true;
       try {
-        if (isImage) {
-          const imgExt = IMAGE_EXTENSIONS.includes(ext) ? ext : "png";
-          const baseName = name.includes(".") ? name : `${name}.${imgExt}`;
-          await ingestImageBlob(file, baseName, imgExt);
+        if (kind.kind === "image") {
+          const baseName = name.includes(".") ? name : `${name}.${kind.ext}`;
+          attachments = [
+            ...attachments,
+            await ingestImageBlob(file, baseName, kind.ext),
+          ];
         } else {
-          await ingestDocumentBlob(file, name);
+          attachments = [...attachments, await ingestDocumentBlob(file, name)];
         }
       } catch (err) {
         attachLog.error("Paste ingestion failed:", err);
@@ -846,20 +614,17 @@ import { errMessage } from "@tomat/shared";
     try {
       const supportsImages = settingsState.currentSettings["llm.supportImages"];
 
-      const docExtensions = DOC_EXTENSIONS;
-      const imageExtensions = IMAGE_EXTENSIONS;
-
       const filters = [
         {
           name: "Documents",
-          extensions: docExtensions,
+          extensions: DOC_EXTENSIONS,
         },
       ];
 
       if (supportsImages) {
         filters.push({
           name: "Images",
-          extensions: imageExtensions,
+          extensions: IMAGE_EXTENSIONS,
         });
       }
 
@@ -895,24 +660,17 @@ import { errMessage } from "@tomat/shared";
         filePath.split("/").pop() || filePath.split("\\").pop() || "file";
       const ext = fileName.split(".").pop()?.toLowerCase() || "";
 
-      const isImage = imageExtensions.includes(ext);
-
-      if (isImage) {
+      if (IMAGE_EXTENSIONS.includes(ext)) {
         const data = await platform().fs.readFile(filePath);
         const mime = MIME_BY_EXT[ext] || "image/png";
         // .slice() returns a Uint8Array backed by a fresh non-shared
         // ArrayBuffer, which Blob's `BlobPart` signature requires.
         const blob = new Blob([data.slice().buffer], { type: mime });
-        const base64 = await blobToBase64(blob);
-        attachments = [
-          ...attachments,
-          { type: "image", filename: fileName, pendingData: base64, mime },
-        ];
+        attachments = [...attachments, await ingestImageBlob(blob, fileName, ext)];
       } else {
-        const markdown = await platform().fileConvert.toMarkdownFromPath(filePath);
         attachments = [
           ...attachments,
-          { type: "document", filename: fileName, pendingData: markdown },
+          await ingestDocumentFromPath(filePath, fileName),
         ];
       }
       focusInput();
@@ -1012,58 +770,28 @@ import { errMessage } from "@tomat/shared";
   onclick={handleBubbleClick}
 >
   <!-- LLM autocorrect before -->
-  {#if showAutocorrectDiff && originalTranscription !== null}
-    <Alert
-      variant="info"
-      icon={false}
-      align="start"
-      action={{
-        icon: "i-material-symbols-refresh-rounded",
-        title: "Reject autocorrect",
-        onclick: () => {
-          if (originalTranscription !== null) text = originalTranscription;
-          showAutocorrectDiff = false;
-          originalTranscription = null;
-          textareaElement?.focus();
-        },
+  {#if stt.showDiff && stt.original !== null}
+    <AutocorrectAlert
+      original={stt.original}
+      onReject={() => {
+        if (stt.original !== null) text = stt.original;
+        stt.clearDiff();
+        textareaElement?.focus();
       }}
-    >
-      <div class="flex items-start gap-2">
-        <span class="shrink-0 font-medium">Before Autocorrect:</span>
-        <span class="whitespace-pre-wrap break-words flex-1">
-          {originalTranscription}
-        </span>
-      </div>
-    </Alert>
+    />
   {/if}
 
   {#if permissionRequest}
-    {@const p = permissionRequest}
-    {@const parts = permissionParts(p)}
-    <div class="flex flex-col gap-2 min-w-0 max-w-[calc(100vw-135px)] text-sm">
-      <div class="flex items-center gap-2 text-default-800 font-medium">
-        <i class="flex i-material-symbols-shield-question-outline-rounded text-amber-500 text-base shrink-0"></i>
-        <span class="break-words">
-          The <code class="font-mono bg-surface-inset rounded-small px-1.5 py-0.5">{p.toolName}</code>
-          tool wants to {parts.action}.
-        </span>
-      </div>
-      {#if parts.detail}
-        <div class="font-mono text-xs bg-surface-inset text-default-800 rounded-medium px-2.5 py-2 break-all">
-          {parts.detail}
-        </div>
-      {/if}
-      {#if !p.declared}
-        <span class="text-accent-yellow-600 break-words">
-          This access was not declared by the Toolkit. Only allow it if you trust this Toolkit and
-          the request makes sense for what you asked.
-        </span>
-      {/if}
-    </div>
+    <PermissionRequest request={permissionRequest} />
+  {:else if scheduleConfirm && scheduleDraft}
+    <ScheduleConfirmForm
+      draft={scheduleDraft}
+      onChange={(next) => (scheduleDraft = next)}
+    />
   {:else}
   <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
     <!-- Hidden span for the typed text to dynamically expand width and height. Safely renders newlines.
-         Doubles as a layout mirror for caret measurement (see measureCaretAt). -->
+         Doubles as a layout mirror for the autocomplete caret measurement. -->
     <span
       bind:this={mirrorSpan}
       class="invisible whitespace-pre-wrap break-words wrap-break-word col-start-1 row-start-1 pointer-events-none"
@@ -1079,7 +807,7 @@ import { errMessage } from "@tomat/shared";
       onclick={handleSelectionChange}
       oncompositionstart={handleCompositionStart}
       oncompositionend={handleCompositionEnd}
-      onblur={() => (autocompleteOpen = false)}
+      onblur={() => (ac.open = false)}
       onpaste={handlePaste}
       autocapitalize="on"
       autocomplete="off"
@@ -1106,7 +834,7 @@ import { errMessage } from "@tomat/shared";
   <div
     class="flex items-end justify-between gap-2 text-2xl text-default-700 w-full"
   >
-    {#if !permissionRequest}
+    {#if !permissionRequest && !scheduleConfirm}
     <div class="flex items-center bg-surface-inset rounded-large p-1">
       <IconButton
         icon="i-material-symbols-attach-file-rounded"
@@ -1214,6 +942,26 @@ import { errMessage } from "@tomat/shared";
           <i class="flex i-material-symbols-check-rounded text-lg shrink-0"></i>
           Allow
         </button>
+      {:else if scheduleConfirm}
+        <button
+          type="button"
+          title="Decline this scheduled prompt"
+          class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
+          onclick={() => respondScheduleConfirm(false)}
+        >
+          <i class="flex i-material-symbols-close-rounded text-lg shrink-0"></i>
+          Decline
+        </button>
+        <button
+          type="button"
+          title="Save the scheduled prompt"
+          disabled={!scheduleDraftReady}
+          class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          onclick={() => respondScheduleConfirm(true)}
+        >
+          <i class="flex i-material-symbols-check-rounded text-lg shrink-0"></i>
+          Save
+        </button>
       {:else}
       {#if settingsState.currentSettings["stt.enabled"]}
         {@const sttIdle =
@@ -1306,12 +1054,12 @@ import { errMessage } from "@tomat/shared";
 
 <svelte:window onblur={closeImagePreview} />
 
-{#if autocompleteOpen}
+{#if ac.open}
   <div style:display="contents" style:--default-base={themeOverrideHex}>
     <SnippetAutocomplete
       options={autocompleteOptions}
-      selectedIndex={autocompleteIndex}
-      anchor={autocompleteAnchor}
+      selectedIndex={ac.index}
+      anchor={ac.anchor}
       onSelect={applySnippetTrigger}
     />
   </div>

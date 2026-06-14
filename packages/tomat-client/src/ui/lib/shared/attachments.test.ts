@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   base64ToUtf8,
+  classifyAttachment,
   collectAttachmentPaths,
   diffRemovedAttachmentPaths,
   ensureMarkdownExtension,
@@ -93,6 +94,46 @@ describe("diffRemovedAttachmentPaths", () => {
       { type: "image_file", path: "/x", filename: "x", mime: "image/png" },
     ];
     expect(diffRemovedAttachmentPaths(same, same)).toEqual([]);
+  });
+});
+
+describe("classifyAttachment", () => {
+  it("classifies an image by extension when images are supported", () => {
+    expect(classifyAttachment("photo.png", "", true)).toEqual({
+      kind: "image",
+      ext: "png",
+    });
+  });
+
+  it("classifies an image by MIME when the extension is unknown", () => {
+    // No image extension, but an image/* type: normalize ext to png.
+    expect(classifyAttachment("clip", "image/jpeg", true)).toEqual({
+      kind: "image",
+      ext: "png",
+    });
+  });
+
+  it("treats an image as a document when images are unsupported", () => {
+    // png is not in DOC_EXTENSIONS, so it is rejected rather than imported.
+    expect(classifyAttachment("photo.png", "image/png", false)).toBeNull();
+  });
+
+  it("classifies a known document extension", () => {
+    expect(classifyAttachment("notes.md", "", true)).toEqual({ kind: "document" });
+    expect(classifyAttachment("data.csv", "text/csv", false)).toEqual({
+      kind: "document",
+    });
+  });
+
+  it("returns null for an unknown type", () => {
+    expect(classifyAttachment("archive.zip", "application/zip", true)).toBeNull();
+  });
+
+  it("is case-insensitive on the extension", () => {
+    expect(classifyAttachment("PHOTO.PNG", "", true)).toEqual({
+      kind: "image",
+      ext: "png",
+    });
   });
 });
 

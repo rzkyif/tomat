@@ -213,21 +213,21 @@ Deno.test("handleUpdateMarkerOnBoot: a leftover <bin>.broken from a prior attemp
   }
 });
 
-Deno.test("handleUpdateMarkerOnBoot: beta rolls back the channel-suffixed binary (tomat-core-beta)", async () => {
+Deno.test("handleUpdateMarkerOnBoot: latest rolls back the channel-suffixed binary (tomat-core-latest)", async () => {
   const priorChannel = Deno.env.get("TOMAT_CHANNEL");
-  Deno.env.set("TOMAT_CHANNEL", "beta");
+  Deno.env.set("TOMAT_CHANNEL", "latest");
   const env = await setupTestEnv();
   try {
     // The rollback anchor must follow the channel suffix, not the bare name.
     const currentBin = binPath(coreBinaryName("tomat-core"));
-    assertEquals(currentBin.endsWith("tomat-core-beta"), true);
+    assertEquals(currentBin.endsWith("tomat-core-latest"), true);
     const oldBin = currentBin + ".old";
-    await Deno.writeTextFile(currentBin, "BROKEN_BETA");
-    await Deno.writeTextFile(oldBin, "WORKING_BETA");
+    await Deno.writeTextFile(currentBin, "BROKEN_LATEST");
+    await Deno.writeTextFile(oldBin, "WORKING_LATEST");
     await writeMarkerWithAttempts(1);
 
     assertEquals(await handleUpdateMarkerOnBoot(), true);
-    assertEquals(await Deno.readTextFile(currentBin), "WORKING_BETA");
+    assertEquals(await Deno.readTextFile(currentBin), "WORKING_LATEST");
   } finally {
     await env.teardown();
     if (priorChannel === undefined) Deno.env.delete("TOMAT_CHANNEL");

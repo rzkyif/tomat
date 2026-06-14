@@ -19,7 +19,7 @@
     "@std/ulid": "jsr:@std/ulid@^1.0.0",
     "@std/log": "jsr:@std/log@^0.224.0",
     "@std/cli": "jsr:@std/cli@^1.0.0",
-    "@noble/ed25519": "jsr:@noble/ed25519@^2.1.0",
+    "@noble/ed25519": "jsr:@noble/ed25519@^3.0.0",
     "@peculiar/x509": "npm:@peculiar/x509@^2.0.0",
     "reflect-metadata": "npm:reflect-metadata@^0.2.2",
     "hono": "npm:hono@^4.12.23",
@@ -29,8 +29,6 @@
     "ndjson": "npm:ndjson@^2.0.0",
     "ignore": "npm:ignore@^7.0.5",
     "openai": "npm:openai@^6.42.0",
-    "kokoro-js": "npm:kokoro-js@^1.2.1",
-    "@huggingface/transformers": "npm:@huggingface/transformers@^4.2.0",
     "pidusage": "npm:pidusage@^4.0.1"
   }
 }

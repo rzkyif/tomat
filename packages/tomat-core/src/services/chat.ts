@@ -30,15 +30,20 @@
 //   tools.maxTools                     : number  (default 30, final cap)
 //   tools.secondPassEnabled            : boolean (default true)
 //   tools.alwaysAvailableEnabled       : boolean (default true)
+//   documents.enabled                  : boolean (default true, summary injection)
+//   documents.maxRelevant              : number  (default 3)
 
 import type OpenAI from "openai";
 import type {
+  AskUserAnswer,
   AssistantMessage,
+  DisplayMessage,
   ChatStartFrame,
   ErrorCode,
   Message,
   MessageContent,
   ReasoningMessage,
+  ScheduledPromptDraft,
   ServerToClientFrame,
   Tool,
   ToolCall,
@@ -54,6 +59,11 @@ import {
 } from "@tomat/shared";
 import { sessionsRepo } from "./sessions-store.ts";
 import { embed } from "./embedding.ts";
+import {
+  documentTokenBlocks,
+  newDocumentTokenBudget,
+  relevantDocumentsPrompt,
+} from "./document-injection.ts";
 import { llmScheduler } from "./llm-scheduler.ts";
 import {
   type LlmDelta,
@@ -66,6 +76,7 @@ import { maybeGenerateTitle } from "./title-gen.ts";
 import { resolveEndpoint } from "./endpoint-resolver.ts";
 import { loadCoreSettings } from "./core-settings.ts";
 import { llmIdle } from "./llm-idle.ts";
+import { promptScheduler } from "./prompt-scheduler.ts";
 import { toolkitsRegistry } from "../toolkits/registry.ts";
 import { validateAndNormalizeToolArgs } from "../toolkits/validate-args.ts";
 import { type CallController, workerPool } from "../toolkits/worker-pool.ts";
@@ -146,7 +157,7 @@ export class ChatService {
   forwardAskUserResponse(
     callId: string,
     requestId: string,
-    answers: Array<string | string[]>,
+    answers: AskUserAnswer[],
     clientId: string,
   ): void {
     const entry = inFlightControllers.get(callId);
@@ -163,6 +174,35 @@ export class ChatService {
     const entry = inFlightControllers.get(callId);
     if (!entry || entry.clientId !== clientId) return;
     entry.ctl.respondPermission(requestId, allow);
+  }
+
+  /** Settle a schedule confirm: on accept, persist the (possibly edited)
+   *  draft for the answering client before unblocking the tool, so the
+   *  tool's "scheduled" report is only ever sent for a stored schedule. */
+  forwardScheduleResponse(
+    callId: string,
+    requestId: string,
+    accepted: boolean,
+    draft: ScheduledPromptDraft | undefined,
+    clientId: string,
+  ): void {
+    const entry = inFlightControllers.get(callId);
+    if (!entry || entry.clientId !== clientId) return;
+    // A response whose requestId is not the open confirm (stale, replayed,
+    // or forged) must not persist anything: the insert below would otherwise
+    // run once per replay.
+    if (!entry.ctl.hasPendingSchedule(requestId)) return;
+    const confirmed = accepted && draft !== undefined;
+    if (confirmed) {
+      try {
+        promptScheduler().create(clientId, draft);
+      } catch (err) {
+        log.error(`schedule confirm: persisting the draft failed: ${errMessage(err)}`);
+        entry.ctl.respondSchedule(requestId, false);
+        return;
+      }
+    }
+    entry.ctl.respondSchedule(requestId, confirmed, confirmed ? draft : undefined);
   }
 
   forwardCancel(callId: string, clientId: string): void {
@@ -256,18 +296,6 @@ export class ChatService {
       const anchorIdx = history.findIndex((m) => m.id === anchorId);
       if (anchorIdx !== -1) history = history.slice(0, anchorIdx + 1);
     }
-    if (frame.contextOverride) {
-      history = frame.contextOverride.map(
-        (m, i) =>
-          ({
-            id: `override-${i}`,
-            ord: i,
-            role: m.role as Message["role"],
-            content: m.content,
-            createdAtMs: Date.now(),
-          }) as Message,
-      );
-    }
     const writer = new TurnWriter(stream, (c, f) => this.send(c, f), anchorId);
 
     // Tool path is gated on tools.enabled. If filtering is off, every
@@ -275,6 +303,9 @@ export class ChatService {
     // phase 2 (LLM relevance), then apply tools.maxTools as a final cap
     // and add always-available tools.
     let toolList: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
+    // Query embedding computed by the tool filter, reused by the document
+    // relevance injection below so the turn embeds the query at most once.
+    let queryVector: Float32Array | undefined;
     if (boolSetting(settings, "tools.enabled", false)) {
       // The filter bubble is born before the pipeline runs so the client can
       // show its "filtering" state, then finalized with the phases (or the
@@ -315,6 +346,7 @@ export class ChatService {
           }));
         } else {
           const [vector] = await embed([queryText]);
+          queryVector = vector;
           const result = toolFilter().phase1(vector, {
             topK: maxTools,
             includeAlwaysAvailable: alwaysAvailableEnabled,
@@ -394,6 +426,25 @@ export class ChatService {
     // turns where the model actually gets tools, which only core knows.
     if (toolList.length > 0 && frame.toolsHint) {
       systemPrompt = systemPrompt ? `${systemPrompt}\n\n${frame.toolsHint}` : frame.toolsHint;
+    }
+
+    // Relevant-document summaries: same embedding machinery as the tool
+    // filter (services/relevance.ts), appended to the system prompt when any
+    // indexed document scores above the floor for this turn's query.
+    if (boolSetting(settings, "documents.enabled", true)) {
+      try {
+        const docsBlock = await relevantDocumentsPrompt(
+          lastUserText(history),
+          queryVector,
+          numSetting(settings, "documents.maxRelevant", 3),
+        );
+        if (docsBlock) {
+          systemPrompt = systemPrompt ? `${systemPrompt}\n\n${docsBlock}` : docsBlock;
+        }
+      } catch (err) {
+        // Non-fatal: the turn just runs without document context.
+        log.warn(`stream ${stream.streamId}: document relevance failed: ${errMessage(err)}`);
+      }
     }
 
     // Reading + base64-encoding image attachments is the costly part of building
@@ -493,7 +544,7 @@ export class ChatService {
             `(${pending.callId}) starting`,
         );
         const startedAt = Date.now();
-        await this.executeToolCall(stream, pending, toolMsg);
+        await this.executeToolCall(stream, pending, toolMsg, writer);
         log.info(
           `stream ${stream.streamId}: tool call ${pending.toolkitId}/${pending.toolName} ` +
             `(${pending.callId}) ${toolMsg.status} in ${Date.now() - startedAt}ms` +
@@ -848,6 +899,7 @@ export class ChatService {
     stream: ActiveStream,
     pending: ResolvedPendingCall,
     msg: ToolMessage,
+    writer: TurnWriter,
   ): Promise<void> {
     if (pending.unknown) {
       msg.status = "failed";
@@ -908,6 +960,13 @@ export class ChatService {
             requestId: event.requestId,
             questions: event.questions,
           });
+        } else if (event.kind === "schedule_request") {
+          this.send(stream.clientId, {
+            kind: "schedule.confirm_request",
+            callId: pending.callId,
+            requestId: event.requestId,
+            draft: event.draft,
+          });
         } else if (event.kind === "permission_request") {
           this.send(stream.clientId, {
             kind: "tool.permission_request",
@@ -928,6 +987,20 @@ export class ChatService {
             level: event.level,
             message: event.message,
           });
+        } else if (event.kind === "display") {
+          // One-way push: a display bubble is born and persisted in one
+          // step. It lands before the (still-running) tool message in the
+          // durable order, which matches the live order the client saw.
+          const displayMsg: DisplayMessage = {
+            id: newMessageId(),
+            ord: -1,
+            role: "display",
+            callId: pending.callId,
+            content: event.content,
+            createdAtMs: Date.now(),
+          };
+          writer.born(displayMsg);
+          writer.finalize(displayMsg);
         } else if (event.kind === "tool_cancelled") {
           this.send(stream.clientId, {
             kind: "tool.cancelled",
@@ -1070,12 +1143,20 @@ async function toOpenAiMessages(
 ): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam[]> {
   const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
   if (systemPrompt) out.push({ role: "system", content: systemPrompt });
+  const docTokenBudget = newDocumentTokenBudget();
   for (const m of history) {
     if (m.role === "user") {
-      out.push({
-        role: "user",
-        content: await userContentToOpenAi(m.content, sessionId, attachmentCache),
-      });
+      let content = await userContentToOpenAi(m.content, sessionId, attachmentCache);
+      // `@token` document references: the stored message keeps only the
+      // token; the CURRENT content is appended at request-build time, so a
+      // later edit of the document flows into the next turn automatically.
+      // The budget dedupes repeat mentions across the whole request.
+      const docBlocks = documentTokenBlocks(contentToText(m.content), docTokenBudget);
+      if (docBlocks) {
+        if (typeof content === "string") content = `${content}\n\n${docBlocks}`;
+        else content.push({ type: "text", text: docBlocks });
+      }
+      out.push({ role: "user", content });
     } else if (m.role === "assistant") {
       // Assistant content is always a plain string in this codebase (no
       // multipart support needed at the model boundary). Tool calls the
@@ -1110,7 +1191,7 @@ async function toOpenAiMessages(
     } else if (m.role === "reasoning") {
       // Reasoning trace is not part of the OpenAI message protocol; omit.
     }
-    // tool_filter / error messages are not sent to the LLM.
+    // tool_filter / display / error messages are not sent to the LLM.
   }
   return out;
 }

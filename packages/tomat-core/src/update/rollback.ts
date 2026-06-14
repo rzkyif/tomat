@@ -84,7 +84,7 @@ async function bumpAttempts(m: UpdateMarker): Promise<void> {
 function oldBinaryPath(): string {
   // Use the platform's actual binary name + .old suffix. On Windows the
   // updater used `.exe.old`; on Unix it's `<name>.old`. Channel-suffixed so
-  // beta rolls back tomat-core-beta, not tomat-core.
+  // latest rolls back tomat-core-latest, not tomat-core.
   return binPath(coreBinaryName("tomat-core")) + ".old";
 }
 

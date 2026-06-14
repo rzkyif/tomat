@@ -1,45 +1,84 @@
 # tomat-builtin-toolkit
 
-Reference tomat toolkit bundling three sample tools. Installed by default on
-fresh setups; doubles as a worked example for third-party toolkit authors.
+Reference tomat toolkit, installed by default on fresh setups and doubling as
+the worked example for third-party toolkit authors. It bundles a spread of
+everyday tools (web search and page reading, a calculator, date and time,
+downloads, documents, scheduled prompts, and a private database) chosen to
+exercise the whole `tools.json` surface, not just the simple cases.
 
 The `tools.json` format is an open standard: any host that understands
 `tools.json` can load toolkits. The core discovers toolkits by searching npm
 for the `tools-available` keyword. Each tool declares the OS-level permissions
-it needs, and the user grants them per tool (see Permissions below).
+it needs, and the user grants them per tool (see Permissions below). The toolkit
+also declares `"database": true`, which provisions a private SQLite database its
+tools reach through `ctx.db`.
 
-| Tool           | Function | What it does                                                                   |
-| -------------- | -------- | ------------------------------------------------------------------------------ |
-| `download_url` | download | Download a file from an http(s) URL into the user's Downloads folder.          |
-| `open_website` | open     | Open a URL in the default browser (macOS `open`, Linux `xdg-open`, Win `cmd`). |
-| `askuser_demo` | demo     | Walk through every variant of the askUser flow (text / select / multiselect).  |
+| Tool                 | Function          | What it does                                                                        |
+| -------------------- | ----------------- | ----------------------------------------------------------------------------------- |
+| `web_search`         | webSearch         | Search DuckDuckGo and return the top results as title, URL, and snippet.            |
+| `fetch_webpage`      | fetchWebpage      | Fetch a URL and return its readable text content.                                   |
+| `calculator`         | calculator        | Evaluate a math expression (arithmetic, comparisons, functions like `sqrt`).        |
+| `get_datetime`       | getDatetime       | Report the current local date, time, weekday, and UTC offset.                       |
+| `download_url`       | download          | Download a file from an http(s) URL into the user's Downloads folder.               |
+| `organize_downloads` | organizeDownloads | Pick loose Downloads files, review a plan, move them into category folders.         |
+| `open_website`       | open              | Open a URL in the default browser (macOS `open`, Linux `xdg-open`, Win `rundll32`). |
+| `read_document`      | readDocument      | Read a document's full content by title.                                            |
+| `show_document`      | showDocument      | Render a document as markdown in the chat (one-way display).                        |
+| `write_document`     | writeDocument     | Create a document, or replace an existing document's content.                       |
+| `edit_document`      | editDocument      | Replace one exact text occurrence in a document.                                    |
+| `schedule_prompt`    | schedulePrompt    | Propose a scheduled prompt the user reviews and edits in chat before saving.        |
+| `collect_table`      | collectTable      | Save user-reviewed rows into the toolkit's private database.                        |
+| `askuser_demo`       | demo              | Walk through the askUser kinds (text, single-select, multiselect).                  |
 
 ## Layout
 
 ```
 .
-├── tools.json     # tomat manifest: names, parameters, triggers, permissions
-├── deno.json      # exports (entry) + imports (incl. the npm:mime-types dep)
-├── index.ts       # entry point: re-exports the three tool functions
+├── tools.json     # tomat manifest: names, parameters, triggers, permissions, database flag
+├── deno.json      # exports (entry) + imports (mime-types, expr-eval, @mozilla/readability, linkedom)
+├── index.ts       # entry point: re-exports every tool function
 └── src/
-    ├── download.ts
-    ├── open.ts
-    ├── demo.ts
-    └── types.ts   # local copy of the ToolContext shape the worker injects
+    ├── download.ts    # download_url
+    ├── open.ts        # open_website
+    ├── demo.ts        # askuser_demo
+    ├── documents.ts   # read / show / write / edit_document
+    ├── schedule.ts    # schedule_prompt
+    ├── datetime.ts    # get_datetime
+    ├── calculator.ts  # calculator
+    ├── web.ts         # shared size-capped fetch helper (not a tool)
+    ├── webpage.ts     # fetch_webpage
+    ├── search.ts      # web_search
+    ├── organize.ts    # organize_downloads
+    ├── collect.ts     # collect_table
+    └── types.ts       # local copy of the ToolContext shape the worker injects
 ```
 
 ## Permissions
 
-Each tool declares the minimum set of Deno permissions it needs in `tools.json`
-(network hosts, filesystem paths, executables, env vars, FFI, sys flags). The
-worker pool reads the user's per-tool grants on spawn and gives the worker
-subprocess exactly the matching `--allow-*` flags. Specifically:
+Each tool declares the minimum set of permissions it needs in `tools.json`
+(network hosts, filesystem paths, executables, env vars, plus the tomat module
+kinds `documents`, `llm`, `tts`, `stt`). The worker pool reads the user's
+per-tool grants on spawn and gives the worker subprocess exactly the matching
+`--allow-*` flags; module access (documents, the private database, ...) is
+brokered by the core rather than handed to the worker. Specifically:
 
-- `download_url` needs **net** (any http(s) host), **write** to `$downloads`,
-  and **env** access for `XDG_DOWNLOAD_DIR` / `HOME` / `USERPROFILE`.
-- `open_website` needs **run** access for `open`, `xdg-open`, and `cmd` (one per
-  host OS).
-- `askuser_demo` needs nothing: it's pure conversational.
+- `download_url` and `organize_downloads` need **read** and **write** on
+  `$downloads` (download reads it to pick a non-clobbering filename; organize
+  reads to list and writes to move), plus **env** for `XDG_DOWNLOAD_DIR` /
+  `HOME` / `USERPROFILE` (all optional; the tool resolves the folder from
+  whichever is granted). The web-facing tools refuse loopback and private-range
+  hosts and re-check every redirect hop.
+- `fetch_webpage` needs **net** to any http(s) host; `web_search` needs **net**
+  to `html.duckduckgo.com` only.
+- `open_website` needs **run** access for `open`, `xdg-open`, and `rundll32`
+  (one per host OS).
+- `read_document` and `show_document` need **documents:read**; `write_document`
+  and `edit_document` need **documents:write** (which also covers reads).
+- `collect_table` needs no per-tool grant: it writes to the toolkit's private
+  database, gated by the top-level `"database": true` the user saw at install
+  time.
+- `get_datetime`, `calculator`, `schedule_prompt`, and `askuser_demo` need
+  nothing. `schedule_prompt`'s in-chat confirmation form is its consent gate.
 
 ## Author guide
 
@@ -47,12 +86,21 @@ Use this toolkit as a template for your own. The shape every toolkit must
 respect:
 
 1. A `tools.json` at the package root, validated against the tomat `tools-v1`
-   schema (`https://au.tomat.ing/schemas/tools-v1.json`).
+   schema (`https://au.tomat.ing/schemas/tools-v1.json`). Set `"database": true`
+   at the top level if any tool uses `ctx.db`.
 2. Dependencies declared in `deno.json` `imports` (use `npm:` / `jsr:`
    specifiers). The host installs them with `deno install` and never edits your
    `deno.json`. A deno-native toolkit like this built-in needs no `package.json`.
 3. Named async exports matching each tool's `"function"` field in `tools.json`.
    They're called as `fn(args, ctx)`.
+
+The `ctx` the worker injects gives a tool more than `setProgress` / `log`:
+`ctx.askUser` drives the in-chat forms (plain text, single-select, multiselect,
+and the richer `diff` / `files` / `image` / `table` kinds), `ctx.display.*`
+pushes one-way markdown / image / table / diff bubbles, `ctx.documents` reads
+and writes the user's documents, `ctx.schedulePrompt` proposes a scheduled
+prompt, and `ctx.db` reaches the toolkit's private SQLite database (only when
+`"database": true` is declared). `src/types.ts` is the full shape.
 
 To distribute via npm, add a `package.json` with a name starting `tomat-toolkit-`
 (convention, not enforced) and `"keywords": ["tools-available"]` so users can
@@ -67,10 +115,15 @@ They mock the `ToolContext` directly (no real worker bridge) so they run
 wherever `deno test` does:
 
 - `src/demo.test.ts`: exercises `askUser` (questions, progress, answer shapes).
-- `src/open.test.ts`: exercises URL validation; skips the actual subprocess
-  spawn (which would open a real browser).
+- `src/calculator.test.ts` / `src/datetime.test.ts`: pure-logic tools, asserted
+  without touching ctx beyond the stub.
+- `src/organize.test.ts` / `src/collect.test.ts`: scripted `askUser` answers and
+  a recording `ctx.db`, run against a tempdir.
+- `src/open.test.ts`: URL validation; skips the actual subprocess spawn (which
+  would open a real browser).
 
-The pattern, reduced to the minimum:
+The pattern, reduced to the minimum (stub the ctx fields your tool actually
+touches; the rest reject so an accidental call is loud):
 
 ```ts
 import { assertEquals } from "jsr:@std/assert@^1";
@@ -84,6 +137,21 @@ function mockCtx(): ToolContext & { progress: number[] } {
     setProgress: (p) => progress.push(p),
     askUser: () => Promise.resolve([]),
     log() {},
+    display: { markdown() {}, image() {}, table() {}, diff() {} },
+    documents: {
+      list: () => Promise.resolve([]),
+      get: () => Promise.reject(new Error("not stubbed")),
+      write: () => Promise.reject(new Error("not stubbed")),
+      edit: () => Promise.reject(new Error("not stubbed")),
+    },
+    db: {
+      query: () => Promise.reject(new Error("not stubbed")),
+      execute: () => Promise.reject(new Error("not stubbed")),
+    },
+    llm: { complete: () => Promise.reject(new Error("not stubbed")) },
+    tts: { speak: () => Promise.reject(new Error("not stubbed")) },
+    stt: { transcribe: () => Promise.reject(new Error("not stubbed")) },
+    schedulePrompt: () => Promise.reject(new Error("not stubbed")),
     signal: new AbortController().signal,
     getChatContext: () => ({ userMessage: "", sessionId: null }),
   };
@@ -113,6 +181,7 @@ gitignored scratch variant for quick experimentation.
 
 This package's tests run with the repo suite: `deno task test`, or
 `deno task test:deno` for just the Deno packages (this one included).
-`deno task release:toolkit:stable` / `:beta` publishes the toolkit manifest +
-tarball; see [`../tomat-website/README.md`](../tomat-website/README.md) for the
-release pipeline.
+`deno task release` (or `release:stable`) publishes the toolkit manifest +
+tarball when its content changed, after a version bump in this package's
+`deno.json`; see [`../tomat-website/README.md`](../tomat-website/README.md) for
+the release pipeline.

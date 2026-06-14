@@ -23,7 +23,7 @@ export interface QuickSettingsFieldRef {
 }
 
 export interface QuickSettingsSectionDef {
-  id: "general" | "stt" | "llm" | "tts" | "tools";
+  id: "general" | "stt" | "llm" | "tts" | "tools" | "greetings";
   title: string;
   /** Boolean schema field rendered as the on/off toggle in the section
    *  header. While off, the section is collapsed and not expandable. */
@@ -82,5 +82,11 @@ export const QUICK_SETTINGS_SECTIONS: QuickSettingsSectionDef[] = [
     title: "Tools",
     enabledField: "tools.enabled",
     fields: [{ id: "tools.filteringEnabled" }, { id: "tools.maxHops" }],
+  },
+  {
+    id: "greetings",
+    title: "Greetings",
+    enabledField: "greetings.enabled",
+    fields: [{ id: "greetings.runOn" }],
   },
 ];

@@ -62,6 +62,8 @@ Deno.test("serverToClientFrameSchema: every server->client kind has a variant", 
     "settings.updated",
     "sidecar.status",
     "session.updated",
+    "session.created",
+    "schedule.confirm_request",
     "update.staged",
     "update.error",
   ]);

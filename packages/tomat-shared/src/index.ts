@@ -13,12 +13,15 @@ export * from "./domain/recommend.ts";
 export * from "./domain/storage.ts";
 export * from "./domain/settings/index.ts";
 export * from "./domain/prompts.ts";
+export * from "./domain/scheduled-prompt.ts";
+export * from "./domain/document.ts";
 
 export * from "./validation/tools-json.ts";
 export * from "./validation/pairing.ts";
 export * from "./validation/chat.ts";
 export * from "./validation/session.ts";
 export * from "./validation/ws.ts";
+export * from "./validation/scheduled-prompt.ts";
 
 export * from "./crypto/pake.ts";
 export * from "./crypto/canonical.ts";

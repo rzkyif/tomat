@@ -1,13 +1,12 @@
 /**
- * Builds the command-line arguments used to launch the LLM and STT
- * sidecars from the user's current settings. The same definition is used
- * to generate the actual args passed to the process and the preview
- * shown in the settings screen.
+ * Builds the command-line arguments used to launch the LLM sidecar from the
+ * user's current settings. The same definition is used to generate the actual
+ * args passed to the process and the preview shown in the settings screen.
  */
 
 import { platform } from "$lib/platform";
 
-export type CommandType = "llm" | "stt";
+export type CommandType = "llm";
 
 export interface CommandArg {
   flag: string;
@@ -75,21 +74,6 @@ export const COMMANDS: Record<CommandType, CommandDefinition> = {
         isMmprojPath: true,
         enabledBy: "llm.supportImages",
       },
-    ],
-  },
-  stt: {
-    binary: "tomat-whisper-server",
-    args: [
-      {
-        flag: "-m",
-        settingId: "stt.modelPath",
-        argType: "quoted",
-        omitEmpty: true,
-        isModelPath: true,
-      },
-      { flag: "-t", settingId: "stt.threads", argType: "value" },
-      { flag: "--host", settingId: "stt.host", argType: "value" },
-      { flag: "--port", settingId: "stt.port", argType: "value" },
     ],
   },
 };

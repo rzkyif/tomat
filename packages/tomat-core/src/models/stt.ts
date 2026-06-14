@@ -1,6 +1,6 @@
 // Speech-to-Text catalog resolution.
 //
-// The whisper picker has no fit engine: models span 31 MB to 3.1 GB, so
+// The whisper picker has no fit engine: int8 bundles span ~100 MB to ~1 GB, so
 // everything "fits" and selection is a direct lookup. This module resolves the
 // curated cards and turns a selection into the stt.* settings to apply,
 // mirroring the role fit.ts plays for the LLM picker.
@@ -17,8 +17,8 @@ import { AppError } from "../shared/errors.ts";
 
 const MAX_THREADS = 8;
 
-/** Threads for whisper-server: one per physical core, capped (same policy as
- *  the LLM fit engine). */
+/** Threads for the speech sidecar's Whisper engine: one per physical core,
+ *  capped (same policy as the LLM fit engine). */
 export function sttThreads(hw: HardwareInfo): number {
   return Math.max(1, Math.min(hw.cpuCoresPhysical || 4, MAX_THREADS));
 }
@@ -45,10 +45,10 @@ export function buildSttPresetViews(catalog: CatalogPayload): SttPresetView[] {
   return views;
 }
 
-/** Default quant when a model is picked without one: Q8_0 (effectively lossless
- *  at half the F16 size), else the first (best-quality) quant. */
+/** Default quant when a model is picked without one: int8 (near-lossless for
+ *  whisper, the only quant the catalog ships), else the first quant. */
 function defaultQuant(model: SttCatalogModel): CatalogQuant {
-  return model.quants.find((q) => q.quant === "Q8_0") ?? model.quants[0];
+  return model.quants.find((q) => q.quant === "int8") ?? model.quants[0];
 }
 
 /** Resolve a {presetId|modelId|modelSpec} selection into the stt.* settings to

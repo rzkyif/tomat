@@ -181,7 +181,7 @@ fn run_installer(url: &str, service: bool, bind_all: bool) -> AppResult<String> 
     let out = Command::new("bash")
         .arg("-c")
         .arg(&pipeline)
-        // Install into THIS client's channel so a beta client installs a beta
+        // Install into THIS client's channel so a latest client installs a latest
         // core (not stable). The installer bakes it into the service env.
         .env("TOMAT_CHANNEL", crate::channel::channel())
         .env("TOMAT_INSTALL_SERVICE", install_service_flag(service))
@@ -202,7 +202,7 @@ fn run_installer(url: &str, service: bool, bind_all: bool) -> AppResult<String> 
     let ps = format!("iwr -useb '{}' | iex", url);
     let out = Command::new("powershell")
         .args(["-ExecutionPolicy", "Bypass", "-Command", &ps])
-        // Install into THIS client's channel so a beta client installs a beta
+        // Install into THIS client's channel so a latest client installs a latest
         // core (not stable). The installer bakes it into the service env.
         .env("TOMAT_CHANNEL", crate::channel::channel())
         .env("TOMAT_INSTALL_SERVICE", install_service_flag(service))
@@ -293,7 +293,7 @@ fn admin_token_path() -> AppResult<PathBuf> {
 fn local_core_binary() -> AppResult<PathBuf> {
     let home = std::env::home_dir()
         .ok_or_else(|| AppError::external("could not determine home directory"))?;
-    // Channel-suffixed: beta's core lives at .../bin/tomat-core-beta(.exe).
+    // Channel-suffixed: latest's core lives at .../bin/tomat-core-latest(.exe).
     Ok(crate::channel::channel_root(&home)
         .join("core")
         .join("bin")
@@ -315,16 +315,16 @@ pub fn local_core_installed() -> AppResult<bool> {
 }
 
 /// Loopback base URL of THIS channel's local core, with the channel-aware port
-/// (stable 7800, beta 7810, …). The UI uses it for the "on this computer"
-/// install/pair flow so a beta client targets the beta core.
+/// (stable 7800, latest 7810, …). The UI uses it for the "on this computer"
+/// install/pair flow so a latest client targets the latest core.
 #[tauri::command]
 pub fn local_core_base_url() -> String {
     format!("https://127.0.0.1:{}", crate::channel::core_port())
 }
 
-/// This channel's default local sidecar ports (llama / whisper). The UI uses
+/// This channel's default local sidecar ports (llama / speech). The UI uses
 /// them as fallbacks when the paired core hasn't overridden llm.port/stt.port,
-/// so a beta client talks to the beta sidecars (7711/7712), not stable's.
+/// so a latest client talks to the latest sidecars (7711/7712), not stable's.
 #[tauri::command]
 pub fn local_sidecar_ports() -> std::collections::HashMap<String, u16> {
     let mut m = std::collections::HashMap::new();

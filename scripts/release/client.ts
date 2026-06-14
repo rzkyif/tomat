@@ -1,22 +1,14 @@
-#!/usr/bin/env -S deno run -A
-// release:client builds the Tauri client bundle for the host platform,
-// signs it with the Tauri updater key, uploads the bundle to R2, and merges
-// the host-platform entry into manifests/client.json on R2.
-//
-// Tauri can't cross-compile across OSes for signing reasons, so this is
-// inherently host-only. CI runs `release:client` on each platform; the
-// merge step preserves entries from prior runs at the same version.
-//
-// Flags:
-//   --dry-run                            do everything locally; skip R2 uploads
-//   --force                              skip the version+platform probe
-//   --help
+// Release item: the Tauri client bundle for the host platform, signed with the
+// Tauri updater key, uploaded to R2, and merged into client.json. Tauri can't
+// cross-compile across OSes for signing reasons, so this is host-only: each
+// platform publishes its own bundle and the merge preserves the others at the
+// same version. Versioned via packages/tomat-client/src/tauri/tauri.conf.json.
 
-import { parseArgs } from "@std/cli/parse-args";
 import { ensureDir } from "@std/fs/ensure-dir";
 import { join } from "@std/path";
 import type { Triple } from "../../packages/tomat-shared/src/domain/model.ts";
 import {
+  type ApplyOpts,
   channelManifestDir,
   channelStoragePrefix,
   colors,
@@ -26,20 +18,17 @@ import {
   exists,
   fail,
   fetchLiveJson,
+  hashPaths,
   humanBytes,
   info,
-  loadOrSeedEnv,
   ok,
-  parseChannelFlag,
-  r2Put,
-  readCoreVersion,
-  rel,
   type ReleaseChannel,
+  type ReleaseItem,
+  rel,
   REPO_ROOT,
+  r2Put,
   step,
-  writeSigningKeys,
 } from "./lib.ts";
-import { encodeBase64 } from "@std/encoding/base64";
 
 // ---------------------------------------------------------------------------
 // paths
@@ -70,41 +59,13 @@ interface ClientManifest {
   platforms: Record<string, { signature: string; url: string }>;
 }
 
-interface Flags {
-  dryRun: boolean;
-  force: boolean;
-  channel: ReleaseChannel;
-}
-
-// ---------------------------------------------------------------------------
-// flags
-
-function parseFlags(): Flags {
-  // Strip the bare `--` token that `deno task <name> -- ...` passes through.
-  const args = parseArgs(
-    Deno.args.filter((a) => a !== "--"),
-    {
-      string: ["channel"],
-      boolean: ["dry-run", "force", "help"],
-      default: { "dry-run": false, force: false, help: false },
-    },
-  );
-  if (args.help) {
-    console.log(`Usage: deno task release:client:<channel> [flags]
-
-Flags:
-  --channel=<c>  stable (default) | beta. Beta builds a distinctly-named app
-                 (tomat-beta) and publishes to manifests/beta/client.json.
-  --dry-run      skip R2 upload + manifest publish
-  --force        skip the version+platform idempotency probe
-  --help`);
-    Deno.exit(0);
-  }
-  return {
-    dryRun: args["dry-run"],
-    force: args.force,
-    channel: parseChannelFlag(args.channel),
-  };
+/** The client's published version is the one baked into the app bundle by Tauri
+ *  (tauri.conf.json), which is exactly what Tauri's updater compares against
+ *  client.json. Sourcing it from anywhere else risks an update loop. */
+async function readClientVersion(): Promise<string> {
+  const conf = JSON.parse(await Deno.readTextFile(TAURI_CONF_PATH)) as { version?: string };
+  if (!conf.version) fail(`no version in ${rel(TAURI_CONF_PATH)}`);
+  return conf.version;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,18 +132,12 @@ async function buildClient(env: DeployEnv, channel: ReleaseChannel): Promise<voi
 async function findClientBundle(triple: Triple): Promise<ClientBundle> {
   const candidates: { dir: string; ext: string }[] = [];
   if (triple.endsWith("apple-darwin")) {
-    candidates.push({
-      dir: join(TAURI_BUNDLE_OUT, "macos"),
-      ext: ".app.tar.gz",
-    });
+    candidates.push({ dir: join(TAURI_BUNDLE_OUT, "macos"), ext: ".app.tar.gz" });
   } else if (triple.endsWith("pc-windows-msvc")) {
     candidates.push({ dir: join(TAURI_BUNDLE_OUT, "msi"), ext: ".msi" });
     candidates.push({ dir: join(TAURI_BUNDLE_OUT, "nsis"), ext: ".exe" });
   } else if (triple.endsWith("unknown-linux-gnu")) {
-    candidates.push({
-      dir: join(TAURI_BUNDLE_OUT, "appimage"),
-      ext: ".AppImage",
-    });
+    candidates.push({ dir: join(TAURI_BUNDLE_OUT, "appimage"), ext: ".AppImage" });
   }
   for (const c of candidates) {
     if (!(await exists(c.dir))) continue;
@@ -193,13 +148,7 @@ async function findClientBundle(triple: Triple): Promise<ClientBundle> {
       if (!(await exists(sigPath))) continue;
       const bundlePath = join(c.dir, entry.name);
       const stat = await Deno.stat(bundlePath);
-      return {
-        triple,
-        bundlePath,
-        sigPath,
-        filename: entry.name,
-        size: stat.size,
-      };
+      return { triple, bundlePath, sigPath, filename: entry.name, size: stat.size };
     }
   }
   fail(
@@ -208,16 +157,29 @@ async function findClientBundle(triple: Triple): Promise<ClientBundle> {
   );
 }
 
-async function uploadClientBundle(
-  env: DeployEnv,
-  version: string,
-  bundle: ClientBundle,
-  storagePrefix: string,
-): Promise<string> {
-  const key = `${storagePrefix}${version}/${bundle.triple}/${bundle.filename}`;
-  info(`uploading ${key}  (${humanBytes(bundle.size)})`);
-  await r2Put(env, key, bundle.bundlePath, "application/octet-stream");
-  return `https://${env.storageDomain}/${key}`;
+// The primary installable a plain `deno task build:client` emits for the host
+// platform (no updater .tar.gz/.sig, which a keyless build skips). The unified
+// build hashes these so a wiped or swapped bundle forces a rebuild. macOS
+// returns the .app directory (hashPaths walks it); others the installer file.
+export async function clientBuildOutputs(): Promise<string[]> {
+  const triple = detectHostTriple();
+  const checks: { dir: string; ext: string }[] = [];
+  if (triple.endsWith("apple-darwin")) {
+    checks.push({ dir: join(TAURI_BUNDLE_OUT, "macos"), ext: ".app" });
+  } else if (triple.endsWith("pc-windows-msvc")) {
+    checks.push({ dir: join(TAURI_BUNDLE_OUT, "msi"), ext: ".msi" });
+    checks.push({ dir: join(TAURI_BUNDLE_OUT, "nsis"), ext: ".exe" });
+  } else if (triple.endsWith("unknown-linux-gnu")) {
+    checks.push({ dir: join(TAURI_BUNDLE_OUT, "appimage"), ext: ".AppImage" });
+  }
+  const found: string[] = [];
+  for (const c of checks) {
+    if (!(await exists(c.dir))) continue;
+    for await (const entry of Deno.readDir(c.dir)) {
+      if (entry.name.endsWith(c.ext)) found.push(join(c.dir, entry.name));
+    }
+  }
+  return found;
 }
 
 function composeClientManifest(
@@ -228,17 +190,13 @@ function composeClientManifest(
   live: ClientManifest | null,
 ): ClientManifest {
   // Carry forward platform entries from the prior manifest only if it's the
-  // same version. A version bump invalidates platforms that haven't been
-  // re-published yet.
+  // same version. A version bump invalidates platforms not yet re-published.
   const carryover = live?.version === version ? live.platforms : {};
   return {
     version,
     notes: `tomat ${version}`,
     pub_date: new Date().toISOString(),
-    platforms: {
-      ...carryover,
-      [hostKey]: { signature, url },
-    },
+    platforms: { ...carryover, [hostKey]: { signature, url } },
   };
 }
 
@@ -255,113 +213,98 @@ async function writeManifestFile(
 }
 
 // ---------------------------------------------------------------------------
-// main
+// release item
 
-export async function main(): Promise<void> {
-  const flags = parseFlags();
-  const manifestDir = channelManifestDir(flags.channel);
-  const storagePrefix = channelStoragePrefix(flags.channel);
+const CLIENT_HASH_INPUTS = [
+  "packages/tomat-client/src",
+  "packages/tomat-client/deno.json",
+  "packages/tomat-shared/src",
+  "packages/tomat-shared/deno.json",
+];
 
-  step(`Releasing client for the "${flags.channel}" channel`);
-  step("Loading deploy environment");
-  const env = await loadOrSeedEnv();
+export const clientItem: ReleaseItem = {
+  id: "client",
+  label: "desktop client",
+  scope: "channel",
+  bumpHint: "packages/tomat-client/src/tauri/tauri.conf.json (version)",
 
-  if (!env.tauriUpdaterPublicKey || !env.tauriUpdaterPrivateKey) {
-    info(
-      colors.yellow(
-        `Tauri updater keys not set in .env. Skipping release:client. ` +
-          `Generate with \`cargo tauri signer generate -w .env\` to enable.`,
-      ),
+  version: readClientVersion,
+
+  sourceHash(_channel: ReleaseChannel): Promise<string> {
+    return hashPaths(
+      CLIENT_HASH_INPUTS.map((p) => ({
+        path: join(REPO_ROOT, p),
+        exclude: (r) => r.endsWith(".test.ts") || r.includes("/target/"),
+      })),
     );
-    return;
-  }
+  },
 
-  step("Updating packages/tomat-core/data/signing-keys.json");
-  await writeSigningKeys(encodeBase64(env.signingPublicKey));
+  buildOutputs(_channel: ReleaseChannel): Promise<string[]> {
+    return clientBuildOutputs();
+  },
 
-  step("Reading CORE_VERSION");
-  const version = await readCoreVersion();
-  ok(`version ${version}`);
+  // Beyond a source change, the host platform may simply not be published yet
+  // at the current version (another machine released a different platform).
+  // That makes the item "changed" but needs no version bump.
+  async extraChanged(env: DeployEnv, channel: ReleaseChannel): Promise<boolean> {
+    const version = await readClientVersion();
+    const manifestDir = channelManifestDir(channel);
+    const live = await fetchLiveJson<ClientManifest>(env, `${manifestDir}/client.json`);
+    const hostKey = tauriPlatformKey(detectHostTriple());
+    return !(live && live.version === version && live.platforms[hostKey]);
+  },
 
-  const hostTriple = detectHostTriple();
-  const hostKey = tauriPlatformKey(hostTriple);
-  info(`host triple: ${hostTriple} (tauri key: ${hostKey})`);
+  async apply(env: DeployEnv, channel: ReleaseChannel, opts: ApplyOpts): Promise<void> {
+    const manifestDir = channelManifestDir(channel);
+    const storagePrefix = channelStoragePrefix(channel);
+    const version = await readClientVersion();
 
-  const live = await fetchLiveJson<ClientManifest>(env, `${manifestDir}/client.json`);
+    const hostTriple = detectHostTriple();
+    const hostKey = tauriPlatformKey(hostTriple);
+    info(`host triple: ${hostTriple} (tauri key: ${hostKey}), version ${version}`);
 
-  if (!flags.force) {
-    if (live?.version === version && live.platforms[hostKey]) {
-      ok(`client.json already at version ${version} for ${hostKey}. Nothing to do`);
-      return;
-    }
-    if (live) {
-      info(
-        `live client.json at version ${live.version}; ${
-          live.platforms[hostKey] ? "re-publishing" : "adding"
-        } ${hostKey} for ${version}`,
-      );
-    } else {
-      info(`no live client.json yet; first client release`);
-    }
-  }
+    const live = await fetchLiveJson<ClientManifest>(env, `${manifestDir}/client.json`);
 
-  step("Building Tauri client bundle (host-only)");
-  const restore = await injectTauriPubkey(env.tauriUpdaterPublicKey);
-  try {
-    await buildClient(env, flags.channel);
-    const bundle = await findClientBundle(hostTriple);
-    ok(`${hostTriple}/${bundle.filename}  ${humanBytes(bundle.size)}  → ${rel(bundle.sigPath)}`);
+    // The bundle's download URL is deterministic (it's where we'll upload it),
+    // so the signed manifest can be composed before the upload.
+    step("Building Tauri client bundle (host-only)");
+    const restore = await injectTauriPubkey(env.tauriUpdaterPublicKey);
+    try {
+      await buildClient(env, channel);
+      const bundle = await findClientBundle(hostTriple);
+      ok(`${hostTriple}/${bundle.filename}  ${humanBytes(bundle.size)}  → ${rel(bundle.sigPath)}`);
 
-    let bundleUrl: string;
-    if (flags.dryRun) {
-      bundleUrl = `https://${env.storageDomain}/${storagePrefix}${version}/${bundle.triple}/${bundle.filename}`;
-    } else {
+      const bundleKey = `${storagePrefix}${version}/${bundle.triple}/${bundle.filename}`;
+      const bundleUrl = `https://${env.storageDomain}/${bundleKey}`;
+
+      step("Composing client.json (Tauri updater manifest)");
+      const signature = (await Deno.readTextFile(bundle.sigPath)).trim();
+      const manifest = composeClientManifest(version, hostKey, bundleUrl, signature, live);
+      const clientJsonPath = await writeManifestFile(manifestDir, "client.json", manifest);
+      ok(`client.json → ${rel(clientJsonPath)}`);
+
+      if (opts.dryRun) {
+        info(
+          colors.yellow(`dry-run: skipping upload of client bundle + ${manifestDir}/client.json`),
+        );
+        return;
+      }
+
       step(`Uploading client bundle to R2 bucket "${env.r2Bucket}"`);
-      bundleUrl = await uploadClientBundle(env, version, bundle, storagePrefix);
-    }
+      info(`uploading ${bundleKey}  (${humanBytes(bundle.size)})`);
+      await r2Put(env, bundleKey, bundle.bundlePath, "application/octet-stream");
 
-    step("Composing client.json (Tauri updater manifest)");
-    const signature = (await Deno.readTextFile(bundle.sigPath)).trim();
-    const manifest = composeClientManifest(version, hostKey, bundleUrl, signature, live);
-    const clientJsonPath = await writeManifestFile(manifestDir, "client.json", manifest);
-    ok(`client.json → ${rel(clientJsonPath)}`);
-
-    if (flags.dryRun) {
-      step("Dry-run: skipping manifest upload");
-      console.log(
-        colors.yellow(
-          `\nManifest under ${rel(clientJsonPath)}. Re-run without --dry-run to publish.`,
-        ),
+      step(`Uploading ${manifestDir}/client.json to R2`);
+      await r2Put(
+        env,
+        `${manifestDir}/client.json`,
+        clientJsonPath,
+        "application/json",
+        MANIFEST_CACHE_CONTROL,
       );
-      return;
+      ok(`https://${env.storageDomain}/${manifestDir}/client.json`);
+    } finally {
+      await restore();
     }
-
-    step(`Uploading ${manifestDir}/client.json to R2`);
-    await r2Put(
-      env,
-      `${manifestDir}/client.json`,
-      clientJsonPath,
-      "application/json",
-      MANIFEST_CACHE_CONTROL,
-    );
-    ok(`uploaded ${manifestDir}/client.json`);
-  } finally {
-    await restore();
-  }
-
-  console.log(
-    "\n" +
-      colors.green(colors.bold(`✓ release:client complete (${flags.channel})`)) +
-      "\n" +
-      colors.dim("  ") +
-      `https://${env.storageDomain}/${manifestDir}/client.json\n`,
-  );
-}
-
-if (import.meta.main) {
-  try {
-    await main();
-  } catch (err) {
-    fail(err instanceof Error ? err.message : String(err));
-  }
-}
+  },
+};

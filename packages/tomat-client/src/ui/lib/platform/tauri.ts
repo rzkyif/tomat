@@ -23,6 +23,11 @@ import {
   remove,
   writeFile as tauriWriteFile,
 } from "@tauri-apps/plugin-fs";
+import {
+  disable as autostartDisable,
+  enable as autostartEnable,
+  isEnabled as autostartIsEnabled,
+} from "@tauri-apps/plugin-autostart";
 import { check as tauriUpdaterCheck, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import {
@@ -221,6 +226,14 @@ const impl: Platform = {
       const unlisten = await listen("monitor-changed", () => cb());
       return () => unlisten();
     },
+  },
+  autostart: {
+    isEnabled: () => autostartIsEnabled(),
+    async setEnabled(enabled) {
+      if (enabled) await autostartEnable();
+      else await autostartDisable();
+    },
+    wasAutostarted: () => invoke("was_autostarted"),
   },
   capture: {
     monitors: () => invoke("list_capture_monitors"),

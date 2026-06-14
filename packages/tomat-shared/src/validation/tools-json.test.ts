@@ -128,5 +128,47 @@ Deno.test("toolsJsonSchema: defaults populate empty permission arrays", () => {
   if (result.success) {
     assertEquals(result.data.tools[0].permissions.read, []);
     assertEquals(result.data.tools[0].permissions.run, []);
+    assertEquals(result.data.tools[0].permissions.documents, []);
+    assertEquals(result.data.tools[0].permissions.llm, []);
+    assertEquals(result.data.database, false);
   }
+});
+
+Deno.test("parseToolsJson: module permissions and the database flag", () => {
+  const result = parseToolsJson({
+    ...minimalToolsJson,
+    database: true,
+    tools: [
+      {
+        ...minimalTool,
+        permissions: {
+          documents: [{ access: "write", reason: "save notes" }],
+          llm: [{ reason: "summarize pages" }],
+          tts: [{ reason: "speak results" }],
+          stt: [{ reason: "transcribe clips" }],
+        },
+      },
+    ],
+  });
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.value.database, true);
+    assertEquals(result.value.tools[0].permissions.documents, [
+      { access: "write", reason: "save notes" },
+    ]);
+    assertEquals(result.value.tools[0].permissions.stt, [{ reason: "transcribe clips" }]);
+  }
+});
+
+Deno.test("parseToolsJson: documents permission requires a valid access", () => {
+  const result = parseToolsJson({
+    ...minimalToolsJson,
+    tools: [
+      {
+        ...minimalTool,
+        permissions: { documents: [{ access: "admin", reason: "nope" }] },
+      },
+    ],
+  });
+  assertEquals(result.ok, false);
 });

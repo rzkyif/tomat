@@ -13,19 +13,19 @@ Deno.test("extractArchive(.zip): places exe at root and libs under lib/<kind>/, 
   try {
     // Build a zip with the exe + a shared lib in nested dirs, plus a stray file.
     const zw = new ZipWriter(new BlobWriter("application/zip"));
-    await zw.add("bin/whisper-server", new TextReader("EXE-BYTES"));
-    await zw.add("nested/lib/libwhisper.dylib", new TextReader("LIB-BYTES"));
+    await zw.add("bin/llama-server", new TextReader("EXE-BYTES"));
+    await zw.add("nested/lib/libllama.dylib", new TextReader("LIB-BYTES"));
     await zw.add("README.md", new TextReader("ignore me"));
     const blob = await zw.close();
-    const zipPath = join(tmp, "whisper.zip");
+    const zipPath = join(tmp, "llama.zip");
     await Deno.writeFile(zipPath, new Uint8Array(await blob.arrayBuffer()));
 
     const target = join(tmp, "bin");
-    await extractArchive(zipPath, target, "whisper-server");
+    await extractArchive(zipPath, target, "llama-server");
 
-    assertEquals(await Deno.readTextFile(join(target, "whisper-server")), "EXE-BYTES");
+    assertEquals(await Deno.readTextFile(join(target, "llama-server")), "EXE-BYTES");
     assertEquals(
-      await Deno.readTextFile(join(target, "lib", "whisper-server", "libwhisper.dylib")),
+      await Deno.readTextFile(join(target, "lib", "llama-server", "libllama.dylib")),
       "LIB-BYTES",
     );
     // The stray file is not copied anywhere.
@@ -40,11 +40,12 @@ Deno.test("extractArchive: per-kind lib dirs keep two sidecars' same-named libs 
   const tmp = await Deno.makeTempDir();
   try {
     const target = join(tmp, "bin");
-    // llama and whisper both ship a `ggml-cpu.dll`, but with different bytes.
-    // Without per-kind lib dirs the second install would clobber the first.
+    // Two sidecars can ship a same-named lib (e.g. `ggml-cpu.dll`) with
+    // different bytes. Without per-kind lib dirs the second install would
+    // clobber the first.
     const cases = [
       ["llama-server", "LLAMA-GGML"],
-      ["whisper-server", "WHISPER-GGML"],
+      ["tomat-core-speech", "SPEECH-GGML"],
     ] as const;
     for (const [kind, body] of cases) {
       const zw = new ZipWriter(new BlobWriter("application/zip"));
@@ -60,8 +61,8 @@ Deno.test("extractArchive: per-kind lib dirs keep two sidecars' same-named libs 
       "LLAMA-GGML",
     );
     assertEquals(
-      await Deno.readTextFile(join(target, "lib", "whisper-server", "ggml-cpu.dll")),
-      "WHISPER-GGML",
+      await Deno.readTextFile(join(target, "lib", "tomat-core-speech", "ggml-cpu.dll")),
+      "SPEECH-GGML",
     );
   } finally {
     await Deno.remove(tmp, { recursive: true });

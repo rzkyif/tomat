@@ -7,7 +7,7 @@ import {
   coreRoot,
   llmPort,
   paths,
-  sttPort,
+  speechPort,
 } from "./paths.ts";
 
 // paths.ts reads HOME / TOMAT_CHANNEL / TOMAT_CORE_HOME at call time. Snapshot
@@ -42,19 +42,19 @@ Deno.test("stable channel nests core/client under ~/.tomat/stable", () => {
   });
 });
 
-Deno.test("dev and beta channels each get their own subtree", () => {
+Deno.test("dev and latest channels each get their own subtree", () => {
   withEnv({ HOME, TOMAT_CHANNEL: "dev", TOMAT_CORE_HOME: undefined }, () => {
     assertEquals(coreRoot(), "/fake/home/.tomat/dev/core");
     assertEquals(clientRoot(), "/fake/home/.tomat/dev/client");
   });
-  withEnv({ HOME, TOMAT_CHANNEL: "beta", TOMAT_CORE_HOME: undefined }, () => {
-    assertEquals(coreRoot(), "/fake/home/.tomat/beta/core");
-    assertEquals(clientRoot(), "/fake/home/.tomat/beta/client");
+  withEnv({ HOME, TOMAT_CHANNEL: "latest", TOMAT_CORE_HOME: undefined }, () => {
+    assertEquals(coreRoot(), "/fake/home/.tomat/latest/core");
+    assertEquals(clientRoot(), "/fake/home/.tomat/latest/client");
   });
 });
 
 Deno.test("models dir is shared across channels at ~/.tomat/models", () => {
-  for (const ch of [undefined, "dev", "beta"]) {
+  for (const ch of [undefined, "dev", "latest"]) {
     withEnv({ HOME, TOMAT_CHANNEL: ch, TOMAT_CORE_HOME: undefined }, () => {
       assertEquals(paths().modelsDir, "/fake/home/.tomat/models");
     });
@@ -78,7 +78,7 @@ Deno.test("channelSuffix is bare on stable and suffixed otherwise", () => {
   withEnv({ HOME, TOMAT_CHANNEL: undefined }, () => {
     assertEquals(channelSuffix(), "");
   });
-  withEnv({ HOME, TOMAT_CHANNEL: "beta" }, () => assertEquals(channelSuffix(), "-beta"));
+  withEnv({ HOME, TOMAT_CHANNEL: "latest" }, () => assertEquals(channelSuffix(), "-latest"));
   withEnv({ HOME, TOMAT_CHANNEL: "dev" }, () => assertEquals(channelSuffix(), "-dev"));
 });
 
@@ -86,9 +86,9 @@ Deno.test("channelBinName suffixes tomat's own binaries per channel", () => {
   withEnv({ HOME, TOMAT_CHANNEL: undefined }, () => {
     assertEquals(channelBinName("tomat-core"), "tomat-core");
   });
-  withEnv({ HOME, TOMAT_CHANNEL: "beta" }, () => {
-    assertEquals(channelBinName("tomat-core"), "tomat-core-beta");
-    assertEquals(channelBinName("tomat-core-updater"), "tomat-core-updater-beta");
+  withEnv({ HOME, TOMAT_CHANNEL: "latest" }, () => {
+    assertEquals(channelBinName("tomat-core"), "tomat-core-latest");
+    assertEquals(channelBinName("tomat-core-updater"), "tomat-core-updater-latest");
   });
 });
 
@@ -96,16 +96,16 @@ Deno.test("default ports are offset per channel so channels coexist", () => {
   withEnv({ HOME, TOMAT_CHANNEL: undefined }, () => {
     assertEquals(corePort(), 7800);
     assertEquals(llmPort(), 7701);
-    assertEquals(sttPort(), 7702);
+    assertEquals(speechPort(), 7702);
   });
-  withEnv({ HOME, TOMAT_CHANNEL: "beta" }, () => {
+  withEnv({ HOME, TOMAT_CHANNEL: "latest" }, () => {
     assertEquals(corePort(), 7810);
     assertEquals(llmPort(), 7711);
-    assertEquals(sttPort(), 7712);
+    assertEquals(speechPort(), 7712);
   });
   withEnv({ HOME, TOMAT_CHANNEL: "dev" }, () => {
     assertEquals(corePort(), 7820);
     assertEquals(llmPort(), 7721);
-    assertEquals(sttPort(), 7722);
+    assertEquals(speechPort(), 7722);
   });
 });

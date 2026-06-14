@@ -260,14 +260,14 @@ function Ui-Die($Reason, $Detail, $Hint) {
 # --- configuration --------------------------------------------------------
 
 $Storage = if ($env:TOMAT_STORAGE) { $env:TOMAT_STORAGE } else { "https://get.au.tomat.ing" }
-# Install channel via TOMAT_CHANNEL env. A beta client is a distinct app
-# (tomat-beta, identifier au.tomat.ing.beta) that coexists with stable and
-# updates from the beta manifest. The MSI itself controls the install dir +
+# Install channel via TOMAT_CHANNEL env. A latest client is a distinct app
+# (tomat-latest, identifier au.tomat.ing.latest) that coexists with stable and
+# updates from the latest manifest. The MSI itself controls the install dir +
 # product name (baked by build-client.ts); this script just picks the channel
 # manifest + display strings.
 $Channel = if ($env:TOMAT_CHANNEL) { $env:TOMAT_CHANNEL } else { "stable" }
-if ($Channel -notin @("stable", "dev", "beta")) {
-  Write-Error "invalid TOMAT_CHANNEL: $Channel (expected stable, dev, or beta)"
+if ($Channel -notin @("stable", "dev", "latest")) {
+  Write-Error "invalid TOMAT_CHANNEL: $Channel (expected stable, dev, or latest)"
   exit 1
 }
 if ($Channel -eq "stable") {
@@ -276,7 +276,7 @@ if ($Channel -eq "stable") {
   $InstallDirName = "tomat"
 } else {
   $ManifestDir = "manifests/$Channel"
-  $DisplayName = if ($Channel -eq "beta") { "tomat beta" } else { "tomat dev" }
+  $DisplayName = if ($Channel -eq "latest") { "tomat latest" } else { "tomat dev" }
   $InstallDirName = "tomat-$Channel"
 }
 $ManifestUrl = "$Storage/$ManifestDir/client.json"

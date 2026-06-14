@@ -6,6 +6,7 @@ members = [
   "packages/tomat-core-updater",
   "packages/tomat-core-hwinfo",
   "packages/tomat-core-ptyhost",
+  "packages/tomat-core-speech",
 ]
 # `reference/` is a local-only, git-ignored area (e.g. old app versions kept for
 # reference); keep anything inside it out of the workspace.

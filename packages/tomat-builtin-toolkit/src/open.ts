@@ -1,5 +1,9 @@
 // Open a URL in the user's default browser. Uses macOS's `open`, Linux's
-// `xdg-open`, or Windows's `cmd /c start` depending on the host.
+// `xdg-open`, or Windows's `rundll32 url.dll,FileProtocolHandler` depending
+// on the host. (Windows deliberately avoids `cmd /c start`: cmd re-parses
+// its command line, so a URL containing `&`/`|`/`^` could chain a second
+// command. rundll32 receives the URL as a single CreateProcess argument with
+// no shell in between.)
 
 import type { ToolContext } from "./types.ts";
 
@@ -32,9 +36,10 @@ function pickOpenCmd(): string[] {
     case "darwin":
       return ["open"];
     case "windows":
-      // `start` is a cmd builtin; the empty quoted arg is the window title
-      // (otherwise cmd would treat the URL as the title).
-      return ["cmd", "/c", "start", ""];
+      // rundll32 hands the URL straight to the default protocol handler with
+      // no shell parsing it; the prefix args precede the URL appended by the
+      // caller.
+      return ["rundll32", "url.dll,FileProtocolHandler"];
     default:
       return ["xdg-open"];
   }

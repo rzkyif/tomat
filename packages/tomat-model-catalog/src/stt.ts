@@ -1,124 +1,69 @@
-// Speech-to-Text catalog: every whisper.cpp GGML model tomat offers.
+// Speech-to-Text catalog: the sherpa-onnx Whisper ONNX bundles tomat offers,
+// served by the tomat-core-speech sidecar.
 //
-// Sources (verified against the HuggingFace API on 2026-06-11):
-//  - Files + exact sizes: ggerganov/whisper.cpp on HuggingFace.
+// Sources (verified against the HuggingFace API on 2026-06-14):
+//  - Files + exact sizes: the csukuangfj/sherpa-onnx-whisper-<m> mirrors.
+//
+// Each model is a 3-file bundle (encoder + decoder + tokens). The catalog
+// carries the int8 ENCODER spec as `modelSpec` and the whole-bundle download
+// size as `fileSizeBytes`; the decoder + tokens are derived from sherpa's fixed
+// naming convention at the use sites (sttBundleFiles in settings/engine.ts).
 //
 // Curation stances:
-//  - Quants are ordered best quality first. Q8_0 is effectively lossless for
-//    whisper at about half the F16 size, so the curated cards prefer it. Quant
-//    naming follows upstream: tiny/base/small ship q5_1, medium/large q5_0,
-//    and large-v3 has no q8_0 build.
-//  - large-v1 is omitted: superseded by large-v2 at identical size, no quants.
-//    large-v2 stays as the lower-hallucination fallback to large-v3.
-//  - Distil-Whisper is omitted: whisper.cpp flags its support as sub-optimal
-//    (sequential decoding only) and short-utterance dictation is encoder-bound,
-//    so large-v3-turbo dominates it on this stack.
+//  - Only the self-contained int8 bundles are offered: int8 is near-lossless
+//    for Whisper at a fraction of the fp32 size, and the fp32 turbo/large-v3
+//    builds split their weights into external `.weights` files (no longer a
+//    clean 3-file bundle). One quant per model keeps the picker simple.
+//  - English-only (`.en`) models match their multilingual siblings in size but
+//    transcribe English slightly better, so both are listed up to small.
+//  - large-v3 is omitted: turbo matches it for dictation at ~half the size, so
+//    turbo is the single "accurate" option for every language including English.
 
-import type { CatalogQuant, SttCatalog } from "@tomat/shared";
+import type { SttCatalog, SttCatalogModel } from "@tomat/shared";
 
-const spec = (file: string) => `@ggerganov/whisper.cpp/main/${file}`;
+const REPO = "csukuangfj/sherpa-onnx-whisper";
 
-/** Quant ladder for one whisper model: F16, Q8_0, then the q5 build. `q5quant`
- *  is "Q5_1" for tiny/base/small and "Q5_0" for medium/large (upstream naming).
- *  Pass 0 for a missing build (large-v3 has no q8). */
-function quants(
-  base: string,
-  sizes: { f16: number; q8: number; q5: number },
-  q5quant: string,
-): CatalogQuant[] {
-  const out: CatalogQuant[] = [
-    { quant: "F16", modelSpec: spec(`ggml-${base}.bin`), fileSizeBytes: sizes.f16 },
-  ];
-  if (sizes.q8 > 0) {
-    out.push({
-      quant: "Q8_0",
-      modelSpec: spec(`ggml-${base}-q8_0.bin`),
-      fileSizeBytes: sizes.q8,
-    });
-  }
-  out.push({
-    quant: q5quant,
-    modelSpec: spec(`ggml-${base}-${q5quant.toLowerCase()}.bin`),
-    fileSizeBytes: sizes.q5,
-  });
-  return out;
+/** One int8 bundle. `m` is the sherpa file prefix, which also names the repo
+ *  (e.g. "small.en" -> repo `${REPO}-small.en`, files `small.en-*`).
+ *  `bundleBytes` is the summed download size of encoder.int8 + decoder.int8 +
+ *  tokens, shown on the preset/model card. */
+function model(
+  id: string,
+  name: string,
+  english: boolean,
+  m: string,
+  bundleBytes: number,
+): SttCatalogModel {
+  return {
+    id,
+    name,
+    english,
+    quants: [
+      {
+        quant: "int8",
+        modelSpec: `@${REPO}-${m}/main/${m}-encoder.int8.onnx`,
+        fileSizeBytes: bundleBytes,
+      },
+    ],
+  };
 }
 
 export const STT_CATALOG: SttCatalog = {
   models: [
-    {
-      id: "whisper-tiny",
-      name: "Whisper Tiny",
-      english: false,
-      quants: quants("tiny", { f16: 77691713, q8: 43537433, q5: 32152673 }, "Q5_1"),
-    },
-    {
-      id: "whisper-tiny.en",
-      name: "Whisper Tiny (English)",
-      english: true,
-      quants: quants("tiny.en", { f16: 77704715, q8: 43550795, q5: 32166155 }, "Q5_1"),
-    },
-    {
-      id: "whisper-base",
-      name: "Whisper Base",
-      english: false,
-      quants: quants("base", { f16: 147951465, q8: 81768585, q5: 59707625 }, "Q5_1"),
-    },
-    {
-      id: "whisper-base.en",
-      name: "Whisper Base (English)",
-      english: true,
-      quants: quants("base.en", { f16: 147964211, q8: 81781811, q5: 59721011 }, "Q5_1"),
-    },
-    {
-      id: "whisper-small",
-      name: "Whisper Small",
-      english: false,
-      quants: quants("small", { f16: 487601967, q8: 264464607, q5: 190085487 }, "Q5_1"),
-    },
-    {
-      id: "whisper-small.en",
-      name: "Whisper Small (English)",
-      english: true,
-      quants: quants("small.en", { f16: 487614201, q8: 264477561, q5: 190098681 }, "Q5_1"),
-    },
-    {
-      id: "whisper-medium",
-      name: "Whisper Medium",
-      english: false,
-      quants: quants("medium", { f16: 1533763059, q8: 823369779, q5: 539212467 }, "Q5_0"),
-    },
-    {
-      id: "whisper-medium.en",
-      name: "Whisper Medium (English)",
-      english: true,
-      quants: quants("medium.en", { f16: 1533774781, q8: 823382461, q5: 539225533 }, "Q5_0"),
-    },
-    {
-      id: "whisper-large-v2",
-      name: "Whisper Large v2",
-      english: false,
-      quants: quants("large-v2", { f16: 3094623691, q8: 1656129691, q5: 1080732091 }, "Q5_0"),
-    },
-    {
-      id: "whisper-large-v3",
-      name: "Whisper Large v3",
-      english: false,
-      quants: quants("large-v3", { f16: 3095033483, q8: 0, q5: 1081140203 }, "Q5_0"),
-    },
-    {
-      id: "whisper-large-v3-turbo",
-      name: "Whisper Large v3 Turbo",
-      english: false,
-      quants: quants("large-v3-turbo", { f16: 1624555275, q8: 874188075, q5: 574041195 }, "Q5_0"),
-    },
+    model("whisper-tiny.en", "Whisper Tiny (English)", true, "tiny.en", 103_627_191),
+    model("whisper-tiny", "Whisper Tiny", false, "tiny", 103_609_903),
+    model("whisper-base.en", "Whisper Base (English)", true, "base.en", 160_626_066),
+    model("whisper-base", "Whisper Base", false, "base", 160_609_290),
+    model("whisper-small.en", "Whisper Small (English)", true, "small.en", 375_501_079),
+    model("whisper-small", "Whisper Small", false, "small", 375_485_327),
+    model("whisper-medium.en", "Whisper Medium (English)", true, "medium.en", 946_086_998),
+    model("whisper-turbo", "Whisper Large v3 Turbo", false, "turbo", 1_036_613_791),
   ],
-  // Three cards, not four: there is no English-only model above the light tier
-  // worth a card (medium.en loses to large-v3-turbo on English), so turbo is
-  // the single accurate option for every language including English.
+  // Three cards: light English-only, light multilingual, and the accurate
+  // turbo model that covers every language including English.
   presets: [
-    { id: "light-english", modelId: "whisper-small.en", quant: "Q8_0" }, // 264 MB
-    { id: "light-multilingual", modelId: "whisper-small", quant: "Q8_0" }, // 264 MB
-    { id: "accurate", modelId: "whisper-large-v3-turbo", quant: "Q8_0" }, // 874 MB
+    { id: "light-english", modelId: "whisper-small.en", quant: "int8" }, // ~375 MB
+    { id: "light-multilingual", modelId: "whisper-small", quant: "int8" }, // ~375 MB
+    { id: "accurate", modelId: "whisper-turbo", quant: "int8" }, // ~1.04 GB
   ],
 };

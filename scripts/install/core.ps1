@@ -31,7 +31,7 @@
 #
 # Env overrides:
 #   $env:TOMAT_STORAGE          override storage base URL (default: https://get.au.tomat.ing)
-#   $env:TOMAT_CHANNEL          install channel: stable (default) | dev | beta. Selects
+#   $env:TOMAT_CHANNEL          install channel: stable (default) | dev | latest. Selects
 #                               the %USERPROFILE%\.tomat\<channel>\core subtree and is
 #                               baked into the scheduled task so the daemon matches.
 #   $env:TOMAT_CORE_HOME        override install root (default: %USERPROFILE%\.tomat\<channel>\core)
@@ -275,14 +275,28 @@ function Ui-Die($Reason, $Detail, $Hint) {
 
 # ===== UI helpers end =====
 
+# Decompress a gzip file ($Src) to ($Dst). Core artifacts (binary, workers,
+# helpers) ship gzip-compressed; the manifest sha256 is over the decompressed
+# file, which the caller verifies. Uses the BCL GZipStream (no external tool).
+function Expand-GzipFile($Src, $Dst) {
+  $in = [System.IO.File]::OpenRead($Src)
+  try {
+    $gz = New-Object System.IO.Compression.GZipStream($in, [System.IO.Compression.CompressionMode]::Decompress)
+    try {
+      $out = [System.IO.File]::Create($Dst)
+      try { $gz.CopyTo($out) } finally { $out.Dispose() }
+    } finally { $gz.Dispose() }
+  } finally { $in.Dispose() }
+}
+
 # --- configuration --------------------------------------------------------
 
 $Storage = if ($env:TOMAT_STORAGE) { $env:TOMAT_STORAGE } else { "https://get.au.tomat.ing" }
 # Install channel. Every channel lives under %USERPROFILE%\.tomat\<channel>\
-# so dev / beta installs never collide with stable. Validate up front.
+# so dev / latest installs never collide with stable. Validate up front.
 $Channel = if ($env:TOMAT_CHANNEL) { $env:TOMAT_CHANNEL } else { "stable" }
-if ($Channel -notin @("stable", "dev", "beta")) {
-  Write-Error "invalid TOMAT_CHANNEL: $Channel (expected stable, dev, or beta)"
+if ($Channel -notin @("stable", "dev", "latest")) {
+  Write-Error "invalid TOMAT_CHANNEL: $Channel (expected stable, dev, or latest)"
   exit 1
 }
 # Per-channel naming + port (stable stays bare). Mirrors core.sh + the runtime
@@ -294,7 +308,7 @@ if ($Channel -eq "stable") {
 } else {
   $ChannelSuffix = "-$Channel"
   $ManifestDir = "manifests/$Channel"
-  $PortOffset = if ($Channel -eq "beta") { 10 } else { 20 }
+  $PortOffset = if ($Channel -eq "latest") { 10 } else { 20 }
 }
 $CorePort = 7800 + $PortOffset
 $HomeDir = if ($env:TOMAT_CORE_HOME) { $env:TOMAT_CORE_HOME } else { Join-Path $HOME ".tomat\$Channel\core" }
@@ -339,7 +353,7 @@ try {
   $IdxBin      = Ui-ActionAdd "Installing core binary to $Installed"
   $IdxWorkers  = Ui-ActionAdd "Installing workers to $WorkersDir\"
   $IdxHelpers  = Ui-ActionAdd "Installing helpers to $BinDir\"
-  # Built-in toolkit is CDN-distributed for stable/beta; dev sources it from the
+  # Built-in toolkit is CDN-distributed for stable/latest; dev sources it from the
   # codebase at runtime, so there's nothing to fetch here.
   $IdxToolkit  = -1
   if ($Channel -ne "dev") {
@@ -443,15 +457,28 @@ try {
     Ui-ActionStart $IdxBin "Installing core binary to $Installed" "(downloading)"
 
     $BinTmp = Join-Path $StagingDir "tomat-core-$($manifest.version)-$([System.IO.Path]::GetRandomFileName()).exe"
+    $BinGz = "$BinTmp.gz"
     _Ui-TrackStaging $BinTmp
+    _Ui-TrackStaging $BinGz
 
     try {
-      Invoke-WebRequest -Uri $entry.url -OutFile $BinTmp -UseBasicParsing
+      Invoke-WebRequest -Uri $entry.url -OutFile $BinGz -UseBasicParsing
     } catch {
       Ui-Die "Download interrupted" `
         "Invoke-WebRequest failed for $($entry.url): $($_.Exception.Message)" `
         "re-run; partial files were cleaned up"
     }
+
+    # The artifact ships gzip-compressed; sha256 is over the decompressed binary.
+    Ui-ActionUpdate $IdxBin "(decompressing)"
+    try {
+      Expand-GzipFile $BinGz $BinTmp
+    } catch {
+      Ui-Die "Could not decompress core binary" `
+        "gzip decompress failed: $($_.Exception.Message)" `
+        "network corruption is the usual cause; re-run"
+    }
+    Remove-Item -Force $BinGz -ErrorAction SilentlyContinue
 
     Ui-ActionUpdate $IdxBin "(verifying)"
     $got = (Get-FileHash -Algorithm SHA256 -Path $BinTmp).Hash.ToLowerInvariant()
@@ -522,15 +549,26 @@ try {
 
       if ($wNeed) {
         $wTmp = Join-Path $StagingDir "$($w.name)-$($manifest.version)-$([System.IO.Path]::GetRandomFileName())"
+        $wGz = "$wTmp.gz"
         _Ui-TrackStaging $wTmp
+        _Ui-TrackStaging $wGz
 
         try {
-          Invoke-WebRequest -Uri $w.url -OutFile $wTmp -UseBasicParsing
+          Invoke-WebRequest -Uri $w.url -OutFile $wGz -UseBasicParsing
         } catch {
           Ui-Die "Download interrupted" `
             "fetching worker $($w.name): $($_.Exception.Message)" `
             "re-run; partial files were cleaned up"
         }
+
+        try {
+          Expand-GzipFile $wGz $wTmp
+        } catch {
+          Ui-Die "Could not decompress worker $($w.name)" `
+            "gzip decompress failed: $($_.Exception.Message)" `
+            "network corruption is the usual cause; re-run"
+        }
+        Remove-Item -Force $wGz -ErrorAction SilentlyContinue
 
         $wGot = (Get-FileHash -Algorithm SHA256 -Path $wTmp).Hash.ToLowerInvariant()
         if ($wGot -ne $w.sha256.ToLowerInvariant()) {
@@ -598,15 +636,26 @@ try {
 
         if ($hNeed) {
           $hTmp = Join-Path $StagingDir "$hFilename-$($manifest.version)-$([System.IO.Path]::GetRandomFileName())"
+          $hGz = "$hTmp.gz"
           _Ui-TrackStaging $hTmp
+          _Ui-TrackStaging $hGz
 
           try {
-            Invoke-WebRequest -Uri $h.url -OutFile $hTmp -UseBasicParsing
+            Invoke-WebRequest -Uri $h.url -OutFile $hGz -UseBasicParsing
           } catch {
             Ui-Die "Download interrupted" `
               "fetching helper $hFilename: $($_.Exception.Message)" `
               "re-run; partial files were cleaned up"
           }
+
+          try {
+            Expand-GzipFile $hGz $hTmp
+          } catch {
+            Ui-Die "Could not decompress helper $hFilename" `
+              "gzip decompress failed: $($_.Exception.Message)" `
+              "network corruption is the usual cause; re-run"
+          }
+          Remove-Item -Force $hGz -ErrorAction SilentlyContinue
 
           $hGot = (Get-FileHash -Algorithm SHA256 -Path $hTmp).Hash.ToLowerInvariant()
           if ($hGot -ne $h.sha256.ToLowerInvariant()) {

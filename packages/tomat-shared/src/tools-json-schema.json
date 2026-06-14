@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://get.au.tomat.ing/schemas/tools-v1.json",
+  "version": "0.1.0",
   "title": "tools.json",
   "description": "Open standard for declaring AI tools that an LLM host can execute on behalf of a user. Place at the root of a folder (or as the root of an npm package).",
   "type": "object",
@@ -12,6 +13,11 @@
     "description": { "type": "string", "minLength": 1 },
     "license": { "type": "string" },
     "homepage": { "type": "string", "format": "uri" },
+    "database": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the host should provision a private database for this toolkit, exposed to tools as ctx.db. Storage is host-defined."
+    },
     "tools": {
       "type": "array",
       "minItems": 1,
@@ -84,6 +90,26 @@
             "sys": {
               "type": "array",
               "items": { "$ref": "#/$defs/sysPermission" },
+              "default": []
+            },
+            "documents": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/documentsPermission" },
+              "default": []
+            },
+            "llm": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/modulePermission" },
+              "default": []
+            },
+            "tts": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/modulePermission" },
+              "default": []
+            },
+            "stt": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/modulePermission" },
               "default": []
             }
           }
@@ -166,6 +192,29 @@
       "required": ["flag", "reason"],
       "properties": {
         "flag": { "type": "string", "minLength": 1 },
+        "reason": { "$ref": "#/$defs/permissionReason" },
+        "optional": { "type": "boolean", "default": false }
+      }
+    },
+    "documentsPermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["access", "reason"],
+      "properties": {
+        "access": {
+          "enum": ["read", "write"],
+          "description": "Whether the tool reads the host's document store or also writes to it."
+        },
+        "reason": { "$ref": "#/$defs/permissionReason" },
+        "optional": { "type": "boolean", "default": false }
+      }
+    },
+    "modulePermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "description": "All-or-nothing access to a host module (llm, tts, stt).",
+      "properties": {
         "reason": { "$ref": "#/$defs/permissionReason" },
         "optional": { "type": "boolean", "default": false }
       }

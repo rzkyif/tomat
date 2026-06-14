@@ -18,11 +18,24 @@ export type ToolkitStatus = "downloaded" | "installed" | "drift";
 // flattening is applied.
 export const BUILTIN_TOOLKIT_ID = "tomat-builtin-toolkit";
 
-export type PermissionKind = "net" | "read" | "write" | "run" | "env" | "ffi" | "sys";
+export type PermissionKind =
+  | "net"
+  | "read"
+  | "write"
+  | "run"
+  | "env"
+  | "ffi"
+  | "sys"
+  | "documents"
+  | "llm"
+  | "tts"
+  | "stt";
 
 // Wire shape mirroring tools.json permission entries. Cardinality varies by
 // kind: net entries declare host/ports; read/write declare paths; run declares
 // binaries; env declares variable names. ffi/sys are all-or-nothing keys.
+// documents/llm/tts/stt are core-module permissions enforced by the module
+// broker (not Deno flags); documents splits into read/write access.
 export type PermissionDecl =
   | {
       kind: "net";
@@ -36,7 +49,11 @@ export type PermissionDecl =
   | { kind: "run"; binary: string; reason: string; optional?: boolean }
   | { kind: "env"; key: string; reason: string; optional?: boolean }
   | { kind: "ffi"; reason: string; optional?: boolean }
-  | { kind: "sys"; flag: string; reason: string; optional?: boolean };
+  | { kind: "sys"; flag: string; reason: string; optional?: boolean }
+  | { kind: "documents"; access: "read" | "write"; reason: string; optional?: boolean }
+  | { kind: "llm"; reason: string; optional?: boolean }
+  | { kind: "tts"; reason: string; optional?: boolean }
+  | { kind: "stt"; reason: string; optional?: boolean };
 
 // Stable string key derived from a permission decl, used as the primary key
 // in the grants table. See plan §7 for the format per kind.
@@ -58,6 +75,14 @@ export function permissionKey(decl: PermissionDecl): string {
       return `ffi`;
     case "sys":
       return `sys:${decl.flag}`;
+    case "documents":
+      return `documents:${decl.access}`;
+    case "llm":
+      return `llm`;
+    case "tts":
+      return `tts`;
+    case "stt":
+      return `stt`;
   }
 }
 
@@ -111,6 +136,9 @@ export interface Toolkit {
   // the Uninstall vs Delete choice: a no-dep toolkit is installed on download
   // and can only be deleted (there is nothing to uninstall).
   hasDeps: boolean;
+  // Whether tools.json declares `database: true`: the core provisions a
+  // private per-toolkit SQLite database its tools reach via ctx.db.
+  hasDatabase: boolean;
   undeclaredPolicy: UndeclaredPolicy;
   // Tool counts from the list/get projection, so a card can show "N enabled"
   // without lazy-loading the full tool list.

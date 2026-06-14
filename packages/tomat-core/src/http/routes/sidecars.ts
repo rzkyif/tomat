@@ -11,13 +11,12 @@ import type { SidecarKind, SidecarSnapshot, SidecarsStatusResponse } from "@toma
 import { sidecarManager } from "../../sidecars/manager.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
 import { buildLlamaStartOptions, llamaStartArgsFromSettings } from "../../sidecars/llama.ts";
-import { buildWhisperStartOptions, whisperStartArgsFromSettings } from "../../sidecars/whisper.ts";
-import { ttsController } from "../../sidecars/tts.ts";
+import { buildSpeechStartOptions, speechDesiredState } from "../../sidecars/speech.ts";
 import { sampleProcessMetrics } from "../../sidecars/process-metrics.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
-const SUPERVISED: ReadonlySet<SidecarKind> = new Set(["llama", "whisper", "tts"]);
+const SUPERVISED: ReadonlySet<SidecarKind> = new Set(["llama", "speech"]);
 
 export function sidecarsRoutes(): Hono {
   const r = new Hono();
@@ -25,16 +24,9 @@ export function sidecarsRoutes(): Hono {
 
   // Live status + resource usage for the core process and its sidecars. The
   // set of sampled PIDs is fixed by this route (manager-tracked sidecars + the
-  // tts worker + the core process); no PID is ever taken from the request.
+  // core process); no PID is ever taken from the request.
   r.get("/status", async (c) => {
-    // Manager sidecars (llama/whisper) carry `pid` on their Running snapshot;
-    // tts is a separate controller, synthesized here when its worker is up.
     const sidecars: SidecarSnapshot[] = sidecarManager().getStatuses();
-    const ttsPid = ttsController().pid();
-    if (ttsPid !== null) {
-      sidecars.push({ kind: "tts", status: "Running", pid: ttsPid });
-    }
-
     const pids = [Deno.pid, ...sidecars.flatMap((s) => (s.pid !== undefined ? [s.pid] : []))];
     const samples = await sampleProcessMetrics(pids);
 
@@ -57,11 +49,7 @@ export function sidecarsRoutes(): Hono {
   r.post("/:kind/stop", async (c) => {
     const kind = c.req.param("kind") as SidecarKind;
     assertSupervised(kind);
-    if (kind === "tts") {
-      await ttsController().unload();
-    } else {
-      await sidecarManager().stop(kind);
-    }
+    await sidecarManager().stop(kind);
     return c.body(null, 204);
   });
 
@@ -71,10 +59,6 @@ export function sidecarsRoutes(): Hono {
     r.post(`/:kind/${op}`, async (c) => {
       const kind = c.req.param("kind") as SidecarKind;
       assertSupervised(kind);
-      if (kind === "tts") {
-        await ttsController().ensureLoaded();
-        return c.body(null, 204);
-      }
       const settings = await loadCoreSettings();
       if (kind === "llama") {
         const args = llamaStartArgsFromSettings(settings);
@@ -85,15 +69,15 @@ export function sidecarsRoutes(): Hono {
           );
         }
         await sidecarManager().restart("llama", buildLlamaStartOptions(args));
-      } else if (kind === "whisper") {
-        const args = whisperStartArgsFromSettings(settings);
-        if (!args) {
+      } else if (kind === "speech") {
+        const state = await speechDesiredState(settings);
+        if (!state.stt && !state.tts) {
           throw new AppError(
             "validation_error",
-            "whisper-server cannot start: stt is disabled or external",
+            "speech sidecar cannot start: STT is disabled/external and TTS is disabled (or its models are not on disk)",
           );
         }
-        await sidecarManager().restart("whisper", buildWhisperStartOptions(args));
+        await sidecarManager().restart("speech", buildSpeechStartOptions(state));
       }
       return c.body(null, 204);
     });

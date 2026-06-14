@@ -12,6 +12,7 @@
 // Both are idempotent on the filesystem side (a missing path is fine).
 
 import { join } from "@std/path";
+import { deleteToolkitData } from "../services/module-broker.ts";
 import { AppError } from "../shared/errors.ts";
 import { toolkitsRegistry } from "./registry.ts";
 import { workerPool } from "./worker-pool.ts";
@@ -22,6 +23,8 @@ export async function deleteToolkit(id: string): Promise<void> {
   // toolkit's grants before its rows vanish.
   await workerPool().refreshPermissions(id);
   toolkitsRegistry().delete(id);
+  // Drop the toolkit's private data (its broker-proxied SQLite) with it.
+  deleteToolkitData(id);
   try {
     await Deno.remove(toolkit.installedPath, { recursive: true });
   } catch {

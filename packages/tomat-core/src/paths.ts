@@ -1,7 +1,7 @@
 // Canonical filesystem layout for tomat-core.
 // Per-channel state derives from a single channel root
 // (~/.tomat/<channel>/core, default channel "stable"). The base dir
-// (~/.tomat) is selected by TOMAT_CHANNEL so dev / beta installs isolate
+// (~/.tomat) is selected by TOMAT_CHANNEL so dev / latest installs isolate
 // their state from a stable install. Models are the one exception: they
 // live at the shared ~/.tomat/models so multi-GB weights aren't
 // re-downloaded per channel. TOMAT_CORE_HOME overrides the core root
@@ -17,7 +17,7 @@ function homeDir(): string {
   return home;
 }
 
-const CHANNELS = ["stable", "dev", "beta"] as const;
+const CHANNELS = ["stable", "dev", "latest"] as const;
 
 // The install channel, from TOMAT_CHANNEL (default "stable"). Selects the
 // ~/.tomat/<channel>/ subtree for all per-channel state. Throws on an
@@ -44,7 +44,7 @@ function channelRoot(): string {
 
 // Suffix that namespaces per-channel resources (binary filenames, keychain
 // service names, OS service labels) away from stable. Stable → "" (bare
-// name); dev/beta → "-dev" / "-beta". Mirrors the install scripts + channel.rs.
+// name); dev/latest → "-dev" / "-latest". Mirrors the install scripts + channel.rs.
 export function channelSuffix(): string {
   const ch = channel();
   return ch === "stable" ? "" : `-${ch}`;
@@ -56,7 +56,7 @@ export function channelKeychainSuffix(): string {
 }
 
 // On-disk filename for one of tomat's own binaries, namespaced per channel so
-// a beta install's tomat-core-beta never collides with stable's tomat-core.
+// a latest install's tomat-core-latest never collides with stable's tomat-core.
 // The .exe suffix (Windows) is added by callers via platformExe(). Upstream
 // sidecars (llama-server, …) keep their original names. They're isolated by
 // the per-channel bin dir, and renaming third-party archives is pointless.
@@ -64,13 +64,13 @@ export function channelBinName(base: string): string {
   return `${base}${channelSuffix()}`;
 }
 
-// Default service ports, offset per channel so stable + beta cores (and their
+// Default service ports, offset per channel so stable + latest cores (and their
 // sidecars) can run simultaneously. Stable keeps the historical ports; dev /
-// beta shift by a fixed offset. An explicit value in settings.json still wins;
-// only the default moves. Bases: core 7800, llama 7701, whisper 7702.
+// latest shift by a fixed offset. An explicit value in settings.json still wins;
+// only the default moves. Bases: core 7800, llama 7701, speech 7702, embed 7703.
 const CHANNEL_PORT_OFFSET: Record<string, number> = {
   stable: 0,
-  beta: 10,
+  latest: 10,
   dev: 20,
 };
 
@@ -86,8 +86,14 @@ export function llmPort(): number {
   return 7701 + channelPortOffset();
 }
 
-export function sttPort(): number {
+// The combined speech sidecar (tomat-core-speech: Whisper STT + Kokoro TTS)
+// binds here (the loopback port for local speech).
+export function speechPort(): number {
   return 7702 + channelPortOffset();
+}
+
+export function embedPort(): number {
+  return 7703 + channelPortOffset();
 }
 
 export function coreRoot(): string {
@@ -113,6 +119,7 @@ export interface CorePaths {
   denoCacheDir: string;
   stagingDir: string;
   sessionsDir: string;
+  documentsDir: string;
   modelsDir: string;
   toolkitsDir: string;
   workersDir: string;
@@ -134,12 +141,12 @@ export function paths(): CorePaths {
   const bin = join(root, "bin");
   const cache = join(root, "cache");
   const logs = join(root, "logs");
-  // Worker .ts files are shipped separately from the compiled binary and
+  // The tool worker .ts is shipped separately from the compiled binary and
   // installed under ~/.tomat/core/workers/. Computing this path here
   // (instead of `new URL("../workers/...", import.meta.url)` at every
-  // spawn site) keeps the worker files OUT of `deno compile`'s static
-  // import graph. Otherwise the workers' npm deps (~1.6 GB of ONNX +
-  // transformers + kokoro) get baked into every core binary.
+  // spawn site) keeps the worker file OUT of `deno compile`'s static
+  // import graph, so a future worker dependency can't get baked into
+  // every core binary.
   //
   // Dev override: scripts/dev.ts sets TOMAT_WORKERS_DIR to the in-repo
   // source path so editing a worker .ts has immediate effect.
@@ -157,8 +164,9 @@ export function paths(): CorePaths {
     denoCacheDir: join(root, "deno-cache"),
     stagingDir: join(root, "staging"),
     sessionsDir: join(root, "sessions"),
+    documentsDir: join(root, "documents"),
     // Shared across channels: ~/.tomat/models (not under the channel root),
-    // so dev / beta reuse the same downloaded weights as stable.
+    // so dev / latest reuse the same downloaded weights as stable.
     modelsDir: join(tomatBase(), "models"),
     toolkitsDir: join(root, "toolkits"),
     workersDir,
@@ -184,6 +192,14 @@ export function toolkitDir(toolkitId: string): string {
   return join(paths().toolkitsDir, toolkitId);
 }
 
+/** Per-toolkit private data dir (the module broker's `db` SQLite lives
+ *  here). Separate from the toolkit install dir so reinstalls and content
+ *  hashing never touch user data; created on first use, deleted on
+ *  uninstall. */
+export function toolkitDataDir(toolkitId: string): string {
+  return join(paths().root, "toolkit-data", toolkitId);
+}
+
 export function modelPath(relPath: string): string {
   return join(paths().modelsDir, relPath);
 }
@@ -202,6 +218,7 @@ export async function ensureDirs(): Promise<void> {
     p.denoCacheDir,
     p.stagingDir,
     p.sessionsDir,
+    p.documentsDir,
     p.modelsDir,
     p.toolkitsDir,
     p.workersDir,

@@ -1,28 +1,16 @@
-// STT routes. Local mode posts the audio to the whisper-server sidecar;
-// external mode posts to a configured OpenAI-compatible transcription
-// endpoint (stt.external.{baseUrl, apiKey, model}).
+// STT routes. Transcription provider branching (local speech sidecar vs
+// external OpenAI-compatible endpoint) lives in services/stt-transcribe.ts,
+// shared with the module broker's stt.transcribe op.
 //
-// The sidecar manager owns whether whisper-server is actually running
+// The sidecar manager owns whether the speech sidecar is actually running
 // (boot wiring lives in services/sidecar-boot.ts).
 
 import { Hono } from "hono";
-import { errMessage } from "@tomat/shared";
-import OpenAI from "openai";
 import { sidecarManager } from "../../sidecars/manager.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
-import { getSecret } from "../../services/secrets.ts";
+import { transcribeAudio } from "../../services/stt-transcribe.ts";
 import { AppError } from "../../shared/errors.ts";
-import { getLogger } from "../../shared/log.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
-import { sttPort } from "../../paths.ts";
-
-const log = getLogger("stt");
-
-// Upper bound on a single local transcription. whisper-server inference is
-// synchronous and unbounded; without this a wedged-but-listening sidecar would
-// pin this HTTP handler forever on a single cheap POST. Generous enough for a
-// long voice clip on CPU.
-const STT_LOCAL_TIMEOUT_MS = 120_000;
 
 export function sttRoutes(): Hono {
   const r = new Hono();
@@ -37,87 +25,14 @@ export function sttRoutes(): Hono {
     const language = form.get("language");
     const languageStr = typeof language === "string" && language.length > 0 ? language : undefined;
     const settings = await loadCoreSettings();
-    const provider = strSetting(settings, "stt.provider", "local") as "local" | "external";
-
-    if (provider === "external") {
-      const baseUrl = strSetting(settings, "stt.external.baseUrl", "");
-      const model = strSetting(settings, "stt.external.model", "");
-      if (!baseUrl || !model) {
-        throw new AppError(
-          "validation_error",
-          "external STT requires stt.external.baseUrl and stt.external.model",
-        );
-      }
-      // Vault is authoritative; a plaintext value in settings.json is a
-      // lower-precedence fallback (client routes keys to the vault, and core
-      // redacts them from GET).
-      const settingsKey = strSetting(settings, "stt.external.apiKey", "");
-      const apiKey = (await getSecret("stt.external.apiKey")) || settingsKey || "";
-      // Keep the SDK's default timeout (10 minutes). Never pass `timeout: 0`:
-      // the SDK treats it as a literal 0ms deadline and aborts every request
-      // instantly with "Request timed out".
-      const client = new OpenAI({
-        baseURL: baseUrl,
-        apiKey: apiKey || "sk-stt",
-        maxRetries: 0,
-      });
-      try {
-        const startedAt = Date.now();
-        log.info(`external transcription starting (audio ${audio.size} bytes, model ${model})`);
-        const res = await client.audio.transcriptions.create({
-          model,
-          file: audio,
-          ...(languageStr ? { language: languageStr } : {}),
-          response_format: "json",
-        });
-        const text = (res as { text?: string }).text ?? "";
-        log.info(
-          `external transcription done in ${Date.now() - startedAt}ms ` +
-            `(audio ${audio.size} bytes, out ${text.length} chars)`,
-        );
-        return c.json({ text });
-      } catch (err) {
-        throw new AppError("provider_error", `external STT failed: ${errMessage(err)}`);
-      }
-    }
-
-    // Local mode: hit the whisper-server sidecar.
-    const host = strSetting(settings, "stt.host", "127.0.0.1");
-    const port = strSetting(settings, "stt.port", String(sttPort()));
-    const upstream = `http://${host}:${port}/inference`;
-    const upstreamForm = new FormData();
-    upstreamForm.set("file", audio);
-    if (languageStr) upstreamForm.set("language", languageStr);
-    upstreamForm.set("response-format", "json");
-    // Bound the upstream call and also cancel it if the client disconnects
-    // mid-decode, so neither a wedged sidecar nor an abandoned request keeps the
-    // handler (and the whisper inference) running indefinitely.
-    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(STT_LOCAL_TIMEOUT_MS)]);
-    const startedAt = Date.now();
-    log.info(`local transcription starting (audio ${audio.size} bytes)`);
-    let res: Response;
-    try {
-      res = await fetch(upstream, { method: "POST", body: upstreamForm, signal });
-    } catch (err) {
-      throw new AppError(
-        "server_unavailable",
-        `whisper-server not reachable at ${upstream}: ${errMessage(err)}`,
-      );
-    }
-    if (!res.ok) {
-      throw new AppError("provider_error", `whisper-server HTTP ${res.status}`);
-    }
-    const body = (await res.json()) as { text?: string };
-    const text = body.text ?? "";
-    log.info(
-      `local transcription done in ${Date.now() - startedAt}ms ` +
-        `(audio ${audio.size} bytes, out ${text.length} chars)`,
-    );
+    // The request-abort signal cancels the upstream inference if the client
+    // disconnects mid-decode.
+    const text = await transcribeAudio(settings, audio, languageStr, c.req.raw.signal);
     return c.json({ text });
   });
 
   r.get("/status", (c) => {
-    const snap = sidecarManager().status("whisper");
+    const snap = sidecarManager().status("speech");
     return c.json({
       provider: "local",
       running: snap.status === "Running",
@@ -125,9 +40,4 @@ export function sttRoutes(): Hono {
   });
 
   return r;
-}
-
-function strSetting(s: Record<string, unknown>, k: string, def: string): string {
-  const v = s[k];
-  return typeof v === "string" ? v : def;
 }

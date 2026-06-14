@@ -28,10 +28,11 @@ import { __resetForTesting as resetToolkitsRegistry } from "../../src/toolkits/r
 import { __resetForTesting as resetWorkerPool } from "../../src/toolkits/worker-pool.ts";
 import { __resetForTesting as resetModelsManager } from "../../src/models/manager.ts";
 import { __resetForTesting as resetBinariesManager } from "../../src/binaries/manager.ts";
-import { __resetForTesting as resetEmbedding } from "../../src/sidecars/embedding.ts";
-import { __resetForTesting as resetTts } from "../../src/sidecars/tts.ts";
 import { __resetForTesting as resetDownloads } from "../../src/downloads/manager.ts";
 import { __resetForTesting as resetCoreSettings } from "../../src/services/core-settings.ts";
+import { __resetForTesting as resetBackgroundQueue } from "../../src/services/background-queue.ts";
+import { __resetForTesting as resetDocumentsStore } from "../../src/services/documents-store.ts";
+import { __resetForTesting as resetPromptScheduler } from "../../src/services/prompt-scheduler.ts";
 import * as log from "@std/log";
 
 export interface TestEnv {
@@ -96,6 +97,7 @@ export async function setupTestEnv(): Promise<TestEnv> {
     coreHome,
     async teardown() {
       resetWsHub();
+      resetPromptScheduler();
       closeDb();
       resetAuth();
       resetSessionsRepo();
@@ -109,10 +111,10 @@ export async function setupTestEnv(): Promise<TestEnv> {
       resetWorkerPool();
       resetModelsManager();
       resetBinariesManager();
-      resetEmbedding();
-      resetTts();
       resetDownloads();
       resetCoreSettings();
+      resetBackgroundQueue();
+      resetDocumentsStore();
       if (snapshot.prior === undefined) Deno.env.delete(snapshot.key);
       else Deno.env.set(snapshot.key, snapshot.prior);
       await Deno.remove(coreHome, { recursive: true }).catch(() => {});

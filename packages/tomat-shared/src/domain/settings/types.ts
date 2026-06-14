@@ -7,7 +7,7 @@
 
 // Pulled inline so this file has zero non-type dependencies. Mirrors the
 // client-side command builder's accepted command kinds.
-export type CommandType = "llm" | "stt";
+export type CommandType = "llm";
 
 export type OptionsSource = "monitors" | "fonts";
 
@@ -160,10 +160,15 @@ export type RenderOnlyField = BaseField & {
  *  loading, actions, and detail rendering live in the per-type field component
  *  (`components/settings/fields/{Snippets,Toolkits,Cores}Field.svelte`), which
  *  `SettingsField.svelte` dispatches to on this value. */
-export type ObjectManagementType = "snippets" | "toolkits" | "cores";
+export type ObjectManagementType =
+  | "snippets"
+  | "toolkits"
+  | "cores"
+  | "documents"
+  | "scheduled_prompts";
 
 /** A scrollable, searchable manager for a list of objects (snippets, toolkits,
- *  paired cores, and later notes / scheduled tasks). Render-only as far as the
+ *  paired cores, documents, scheduled prompts). Render-only as far as the
  *  settings store is concerned: the managed objects live in their own stores
  *  (client settings, core REST, keychain), never in this field's value. The
  *  `objectType` discriminator picks the client provider from the registry. */
@@ -361,6 +366,9 @@ export type ClientGroupId = (typeof CLIENT_GROUP_IDS)[number];
 export const CORE_GROUP_IDS = [
   "llm",
   "prompts",
+  "documents",
+  "scheduledPrompts",
+  "greetings",
   "dualModel",
   "toolkits",
   "tools",

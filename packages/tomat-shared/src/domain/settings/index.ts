@@ -9,10 +9,13 @@ export * from "./engine.ts";
 // SETTINGS_SCHEMA.
 export { appearanceGroup } from "./groups/appearance.ts";
 export { coresGroup } from "./groups/cores.ts";
+export { documentsGroup } from "./groups/documents.ts";
 export { dualModelGroup } from "./groups/dual-model.ts";
 export { generalGroup } from "./groups/general.ts";
+export { greetingsGroup } from "./groups/greetings.ts";
 export { llmGroup } from "./groups/llm.ts";
 export { promptsGroup } from "./groups/prompts.ts";
+export { scheduledPromptsGroup } from "./groups/scheduled-prompts.ts";
 export { shortcutsGroup } from "./groups/shortcuts.ts";
 export { snippetsGroup } from "./groups/snippets.ts";
 export { sttGroup } from "./groups/stt.ts";

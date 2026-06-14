@@ -79,6 +79,19 @@ export const generalGroup: SettingGroup = {
       ],
     },
     {
+      label: "Launch",
+      fields: [
+        {
+          id: "general.launch.autostart",
+          name: "Start at Login",
+          description: "Start tomat automatically when you log in to your computer.",
+          type: "boolean",
+          defaultValue: false,
+          descriptionTier: "ondemand",
+        },
+      ],
+    },
+    {
       label: "Sessions",
       fields: [
         {

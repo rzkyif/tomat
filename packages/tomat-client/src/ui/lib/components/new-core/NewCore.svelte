@@ -27,7 +27,7 @@
 
   const log = getLogger("cores");
   const CLIENT_NAME = "tomat client";
-  // Resolved from the platform on mount so a beta client targets the beta
+  // Resolved from the platform on mount so a latest client targets the latest
   // core's port (7810) rather than the stable 7800. Falls back to the stable
   // default until resolved (and on the web stub).
   let localBaseUrl = $state("https://127.0.0.1:7800");

@@ -16,7 +16,7 @@ as an auto-start service and serves one or more paired clients over HTTPS/WSS.
 - `src/paths.ts`: canonical filesystem layout. Per-channel state under
   `~/.tomat/<channel>/core`; models are shared at `~/.tomat/models`.
 - `src/binaries/`: download, extract, and install platform binaries
-  (llama.cpp, whisper.cpp, helper binaries) from the signed runtime manifest.
+  (llama.cpp, tomat-core-speech, helper binaries) from the signed runtime manifest.
 - `src/db/`: single SQLite connection (WAL), `schema.sql`, and migrations.
 - `src/downloads/`: centralized download manager. One active download at a
   time, persisted to the `downloads` table, resumable across restarts.
@@ -28,8 +28,8 @@ as an auto-start service and serves one or more paired clients over HTTPS/WSS.
   LLM provider + scheduler, endpoint resolution, secrets vault, keychain
   wrapper, auth, TLS, embedding, tool filtering, title generation.
 - `src/shared/`: logging, errors, hashing, IDs, filesystem safety.
-- `src/sidecars/`: subprocess supervision for llama-server, whisper-server,
-  TTS, and the embedding worker.
+- `src/sidecars/`: subprocess supervision for llama-server (chat + a second
+  instance for embeddings) and the tomat-core-speech speech sidecar (STT + TTS).
 - `src/toolkits/`: toolkit install, registry, permission grants, content-hash
   verification, and the sandboxed tool worker pool.
 - `src/update/`: self-update download/verify/stage and boot-time rollback.
@@ -60,15 +60,15 @@ curl -fsSL https://get.au.tomat.ing/install/core.sh | bash
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://get.au.tomat.ing/install/core.ps1 | iex"
 ```
 
-To install the beta channel alongside stable, pass `--beta` (or
-`TOMAT_CHANNEL=beta`); it installs `tomat-core-beta`, a `tomat-core-beta`
+To install the latest channel alongside stable, pass `--latest` (or
+`TOMAT_CHANNEL=latest`); it installs `tomat-core-latest`, a `tomat-core-latest`
 service, and binds port 7810:
 
 ```bash
 # macOS / Linux
-curl -fsSL https://get.au.tomat.ing/install/core.sh | bash -s -- --beta
+curl -fsSL https://get.au.tomat.ing/install/core.sh | bash -s -- --latest
 # Windows (PowerShell)
-powershell -ExecutionPolicy Bypass -Command "& { $env:TOMAT_CHANNEL='beta'; iwr -useb https://get.au.tomat.ing/install/core.ps1 | iex }"
+powershell -ExecutionPolicy Bypass -Command "& { $env:TOMAT_CHANNEL='latest'; iwr -useb https://get.au.tomat.ing/install/core.ps1 | iex }"
 ```
 
 The installer downloads the signed core manifest, verifies the binary's
@@ -98,7 +98,7 @@ it is unaffected.
 All commands run from the repo root:
 
 - `deno task dev`: run core from source with `--watch` on the dev channel.
-- `deno task build:core` / `deno task build:core:beta`: compile the `tomat-core`
+- `deno task build:core` / `deno task build:core:stable`: compile the `tomat-core`
   binary; also compiles the `tomat-core-updater`, `tomat-core-keychain`, and
   `tomat-core-hwinfo` helper binaries.
 - `deno task test:core`: run this package's tests.

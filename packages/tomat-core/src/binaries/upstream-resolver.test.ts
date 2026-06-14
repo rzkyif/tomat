@@ -67,7 +67,7 @@ Deno.test("resolveBinaryEntry returns null for a triple the entry doesn't cover"
 });
 
 Deno.test("resolveUpstream returns null (no GitHub call) when the triple has no asset", async () => {
-  // whisper.cpp ships only Windows assets, so mac/linux beta must degrade to
+  // whisper.cpp ships only Windows assets, so mac/linux latest must degrade to
   // null, not throw, and must not hit the network.
   const resolver = {
     repo: "ggml-org/whisper.cpp",

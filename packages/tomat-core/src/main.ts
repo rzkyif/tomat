@@ -17,6 +17,10 @@ import { seedBuiltinToolkitIfNeeded } from "./toolkits/builtin-seed.ts";
 import { BROADCAST_SINK } from "./http/routes/toolkits.ts";
 import { initSidecarBoot } from "./services/sidecar-boot.ts";
 import { llmIdle } from "./services/llm-idle.ts";
+import { backgroundQueue } from "./services/background-queue.ts";
+import { documentsStore } from "./services/documents-store.ts";
+import { scheduleDocumentIndexing } from "./services/documents-indexer.ts";
+import { promptScheduler } from "./services/prompt-scheduler.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
 import { shutdownJobctl } from "./sidecars/jobctl.ts";
 import { loadCoreSettings } from "./services/core-settings.ts";
@@ -112,6 +116,19 @@ async function main(): Promise<void> {
     log.warn(`secrets vault check failed: ${errMessage(err)}`);
   });
 
+  // Reconcile the document store with the files on disk, then queue summary /
+  // embedding refreshes for anything stale (idle-gated, background).
+  try {
+    documentsStore().rescan();
+    scheduleDocumentIndexing();
+  } catch (err) {
+    log.warn(`document rescan failed: ${errMessage(err)}`);
+  }
+
+  // Arm the scheduled-prompt timer. Overdue rows (core was off at fire
+  // time) tick immediately; the scheduler defers while llama is loading.
+  promptScheduler().start();
+
   // Kick off llama / whisper sidecar boot based on the persisted settings.
   // Runs in the background. `chat.start` and `/stt/transcribe` against a
   // sidecar that hasn't bound its port yet return a clear error; the
@@ -172,6 +189,11 @@ async function main(): Promise<void> {
     // alive; under dev `--watch` a pending timer stalls the restart for up to
     // `llm.idleUnloadSeconds`.
     llmIdle().dispose();
+    // Drop queued background jobs and their pending timer (same event-loop
+    // concern); jobs are re-derived from source hashes on the next boot.
+    backgroundQueue().dispose();
+    // Same for the scheduled-prompt timer; it re-arms from SQLite on boot.
+    promptScheduler().dispose();
     // Tear down sidecars + jobctl in the background, NOT awaited before the
     // server close below: reaping the llama child can take up to the 5s graceful
     // window, and serializing the server behind it would leave the HTTP listener
