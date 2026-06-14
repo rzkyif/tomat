@@ -20,6 +20,16 @@ const config = {
     alias: {
       "@tomat/shared": "../tomat-shared/src/index.ts",
       "@tomat/shared/*": "../tomat-shared/src/*",
+      // Svelte / runes side lives at the top of src/ui (not under lib, which
+      // is reserved for pure-TS domain libraries). `$state` is avoided as an
+      // alias because it collides with the Svelte 5 `$state` rune, so the
+      // state folder is aliased as `$stores`.
+      $components: "src/ui/components",
+      "$components/*": "src/ui/components/*",
+      $composables: "src/ui/composables",
+      "$composables/*": "src/ui/composables/*",
+      $stores: "src/ui/state",
+      "$stores/*": "src/ui/state/*",
     },
   },
 };

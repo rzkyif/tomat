@@ -7,7 +7,7 @@
 
 import type { StorageTree } from "@tomat/shared";
 import { platform } from "$lib/platform";
-import { getLogger } from "$lib/shared/log";
+import { getLogger } from "$lib/util/log";
 
 const log = getLogger("client-storage");
 

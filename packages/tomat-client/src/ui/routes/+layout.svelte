@@ -5,7 +5,7 @@
   import { onMount } from "svelte"
   import { browser } from "$app/environment"
   import { installTauriPlatform } from "$lib/platform/tauri"
-  import { connectionState } from "$lib/state/connection.svelte"
+  import { connectionState } from "$stores/connection.svelte"
 
   // Install the platform singleton during the layout's script init, NOT in
   // onMount: in SvelteKit the child +page.svelte's onMount fires before the

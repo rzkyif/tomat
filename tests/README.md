@@ -172,7 +172,7 @@ Gotchas:
   `flushSync()` from `svelte` if your assertion depends on an effect.
 - Mock the platform seam by stubbing `lib/platform/index.ts`. Don't bring Tauri
   into the test environment.
-- The global test setup (`src/ui/test-setup.ts`) stubs `IntersectionObserver`,
+- The global test setup (`src/ui/test/setup.ts`) stubs `IntersectionObserver`,
   `ResizeObserver`, and `matchMedia` because jsdom doesn't ship them. If a test
   needs real DOM observer behavior, switch the environment to `happy-dom` or
   `vitest-browser-svelte`, but commit to one across the package.

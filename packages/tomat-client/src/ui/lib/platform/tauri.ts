@@ -37,7 +37,7 @@ import {
   type Platform,
   type UpdateHandle,
 } from "./index";
-import { getLogger } from "$lib/shared/log";
+import { getLogger } from "$lib/util/log";
 
 const log = getLogger("platform");
 

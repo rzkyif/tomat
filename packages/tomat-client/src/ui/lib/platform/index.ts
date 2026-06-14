@@ -13,7 +13,7 @@
 import type { StorageTree } from "@tomat/shared";
 
 // Mirrors the Rust `list_capture_monitors` return shape so the
-// `lib/shared/capture.ts` flow can cast without information loss. Physical
+// `lib/capture/capture.ts` flow can cast without information loss. Physical
 // pixel bounds (x, y, width, height) let the region-capture flow match the
 // active monitor against Tauri's `currentMonitor()` position without
 // relying on names matching.
@@ -138,7 +138,7 @@ export interface NetSocket {
   onError(cb: (reason?: string) => void): void;
 }
 
-/** Severity levels for the client logger (lib/shared/log.ts). */
+/** Severity levels for the client logger (lib/util/log.ts). */
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface Platform {
@@ -330,7 +330,7 @@ export interface Platform {
     }): Promise<string[]>;
   };
   // Cursor introspection + click-through toggling for the floating window.
-  // Used by lib/shared/clickthrough.ts to make the transparent regions of
+  // Used by lib/window/window.ts to make the transparent regions of
   // the bubble window pass mouse events to whatever's behind.
   cursor: {
     /** Current cursor position in physical pixels relative to the primary
@@ -358,7 +358,7 @@ export interface Platform {
   };
   // Structured logging routed to the Rust backend so lines reach the dev
   // terminal and the persisted client.log (WARN/ERROR only). Callers use
-  // getLogger(scope) from lib/shared/log.ts, not this directly.
+  // getLogger(scope) from lib/util/log.ts, not this directly.
   logging: {
     /** Fire-and-forget. `message` is already fully formatted; `scope` is passed
      *  separately so the backend can render it as the module column. */

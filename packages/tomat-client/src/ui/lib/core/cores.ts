@@ -5,8 +5,8 @@
 // writer; settings live in their own settings.json (see lib/platform).
 
 import { platform } from "../platform/index.ts";
-import { getLogger } from "$lib/shared/log";
-import { Subscribers } from "../shared/subscribers.ts";
+import { getLogger } from "$lib/util/log";
+import { Subscribers } from "../util/subscribers.ts";
 import { BinariesApi } from "./binaries";
 import { ChatApi } from "./chat";
 import { CoreClient, type ConnectionListener, type WsListener } from "./client";

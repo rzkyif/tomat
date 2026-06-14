@@ -1,28 +1,28 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
-  import AgentMessage from "$lib/components/chat/messages/AgentMessage.svelte";
-  import ErrorMessage from "$lib/components/chat/messages/ErrorMessage.svelte";
-  import AutomatedPrompt from "$lib/components/chat/messages/AutomatedPrompt.svelte";
-  import SystemMessage from "$lib/components/chat/messages/SystemMessage.svelte";
-  import DisplayBubble from "$lib/components/chat/messages/DisplayBubble.svelte";
-  import ToolCall from "$lib/components/chat/messages/ToolCall.svelte";
-  import RelevantTools from "$lib/components/chat/messages/RelevantTools.svelte";
-  import UserInput from "$lib/components/chat/UserInput.svelte";
-  import UserMessage from "$lib/components/chat/messages/UserMessage.svelte";
-  import SessionBar from "$lib/components/chat/SessionBar.svelte";
-  import Settings from "$lib/components/settings/Settings.svelte";
-  import NewCore from "$lib/components/new-core/NewCore.svelte";
-  import QuickSettings from "$lib/components/quick-settings/QuickSettings.svelte";
-  import SessionList from "$lib/components/session-list/SessionList.svelte";
-  import Bubble from "$lib/components/ui/Bubble.svelte";
-  import MessageStackGroup from "$lib/components/chat/MessageStackGroup.svelte";
+  import AgentMessage from "$components/chat/messages/AgentMessage.svelte";
+  import ErrorMessage from "$components/chat/messages/ErrorMessage.svelte";
+  import AutomatedPrompt from "$components/chat/messages/AutomatedPrompt.svelte";
+  import SystemMessage from "$components/chat/messages/SystemMessage.svelte";
+  import DisplayBubble from "$components/chat/messages/DisplayBubble.svelte";
+  import ToolCall from "$components/chat/messages/ToolCall.svelte";
+  import RelevantTools from "$components/chat/messages/RelevantTools.svelte";
+  import UserInput from "$components/chat/UserInput.svelte";
+  import UserMessage from "$components/chat/messages/UserMessage.svelte";
+  import SessionBar from "$components/chat/SessionBar.svelte";
+  import Settings from "$components/settings/Settings.svelte";
+  import NewCore from "$components/new-core/NewCore.svelte";
+  import QuickSettings from "$components/quick-settings/QuickSettings.svelte";
+  import SessionList from "$components/session-list/SessionList.svelte";
+  import Bubble from "$components/ui/Bubble.svelte";
+  import MessageStackGroup from "$components/chat/MessageStackGroup.svelte";
   import {
     asMessageContent,
     displayContentOf,
     getTextContent,
     type Message,
     type MessageContent,
-  } from "$lib/shared/types";
+  } from "$lib/util/types";
   import {
     documentsState,
     downloadsState,
@@ -35,23 +35,23 @@
     toolkitsState,
     updateState,
     viewState,
-  } from "$lib/state";
-  import { connectionState } from "$lib/state/connection.svelte";
+  } from "$stores";
+  import { connectionState } from "$stores/connection.svelte";
   import { cores } from "$lib/core";
   import { platform } from "$lib/platform";
-  import { useTheme } from "$lib/composables/use-theme.svelte";
-  import { getLogger } from "$lib/shared/log";
+  import { useTheme } from "$composables/use-theme.svelte";
+  import { getLogger } from "$lib/util/log";
   import {
     shortcutHandler,
     windowTransition,
-  } from "$lib/state/shortcut.svelte";
+  } from "$stores/shortcut.svelte";
   import {
     BASE_MS,
     enableMessageAnimations,
     getDuration,
     hasMessageAnimated,
-  } from "$lib/shared/animations";
-  import MessageEnter from "$lib/components/chat/MessageEnter.svelte";
+  } from "$lib/appearance/animations";
+  import MessageEnter from "$components/chat/MessageEnter.svelte";
 
   // Sidecar lifecycle is server-side; the client only attaches WS-driven
   // state subscribers so status frames reach the UI.
@@ -66,11 +66,11 @@
     stopClickThrough,
     pauseClickThrough,
     resumeClickThrough,
-  } from "$lib/shared/clickthrough";
+  } from "$lib/window/window";
   import {
     startBlurKeepalive,
     stopBlurKeepalive,
-  } from "$lib/shared/blur-keepalive";
+  } from "$lib/window/window";
 
   const log = getLogger("boot");
   const windowLog = getLogger("window");

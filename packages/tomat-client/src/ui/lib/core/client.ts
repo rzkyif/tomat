@@ -9,8 +9,8 @@
 import type { ApiErrorBody, ClientToServerFrame, ServerToClientFrame } from "@tomat/shared";
 import { serverToClientFrameSchema } from "@tomat/shared";
 import { type NetResponse, type NetSocket, platform } from "../platform/index.ts";
-import { getLogger } from "../shared/log.ts";
-import { Subscribers } from "../shared/subscribers.ts";
+import { getLogger } from "../util/log.ts";
+import { Subscribers } from "../util/subscribers.ts";
 
 const log = getLogger("ws");
 
