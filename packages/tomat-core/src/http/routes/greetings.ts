@@ -10,7 +10,7 @@
 // Settings read here (defaults mirror the shared schema):
 //   greetings.enabled      : boolean (default false)
 //   greetings.runOn        : "autostart" | "every_start" (default "autostart")
-//   greetings.sessionTitle : string (default "Greeting")
+//   greetings.sessionTitle : string (default "Greeting {datetime}")
 //   greetings.instruction  : string (default DEFAULT_GREETING_INSTRUCTION)
 
 import { Hono } from "hono";
@@ -69,7 +69,7 @@ export function greetingsRoutes(): Hono {
       DEFAULT_GREETING_INSTRUCTION;
     void runGreetingWhenReady(
       me.id,
-      strSetting(settings, "greetings.sessionTitle", "Greeting"),
+      strSetting(settings, "greetings.sessionTitle", "Greeting {datetime}"),
       instruction,
     );
     return c.json({ ran: true });

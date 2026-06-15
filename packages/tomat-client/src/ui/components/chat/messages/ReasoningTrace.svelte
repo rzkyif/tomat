@@ -76,10 +76,17 @@
       return `0.${Math.floor(safeMs / 100)}s`;
     }
     const totalSec = Math.floor(safeMs / 1000);
-    const minutes = Math.floor(totalSec / 60);
+    const hours = Math.floor(totalSec / 3600);
+    const minutes = Math.floor((totalSec % 3600) / 60);
     const seconds = totalSec % 60;
-    if (minutes > 0) return `${minutes}m ${seconds}s`;
-    return `${seconds}s`;
+    // Show every unit from the largest non-zero one down to seconds, so the
+    // full duration always reads in one place (e.g. "1h 2m 3s"), never just a
+    // bare seconds count that drops the higher units.
+    const parts: string[] = [];
+    if (hours > 0) parts.push(`${hours}h`);
+    if (hours > 0 || minutes > 0) parts.push(`${minutes}m`);
+    parts.push(`${seconds}s`);
+    return parts.join(" ");
   }
 
   let headerText = $derived.by(() => {

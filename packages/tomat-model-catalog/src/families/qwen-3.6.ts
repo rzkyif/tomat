@@ -17,6 +17,12 @@ const aa = (value: number) => [
   { source: "artificial-analysis", metric: "intelligence-index", value },
 ];
 
+// Qwen's recommended thinking-mode sampling, at the precise/reasoning end
+// (temperature 0.6 rather than the higher "general" 1.0) for agentic
+// reliability. The 27B and 35B-A3B differ only in presence_penalty, which tomat
+// does not expose, so one set covers both. Users can adjust in Model Behavior.
+const SAMPLING = { temperature: 0.6, topP: 0.95, topK: 20, minP: 0, repeatPenalty: 1.0 };
+
 export const qwen36: ModelFamily = {
   family: "Qwen 3.6",
   publisher: "Qwen",
@@ -29,6 +35,7 @@ export const qwen36: ModelFamily = {
       contextMax: 262144,
       arch: { blockCount: 64, embeddingLength: 5120, headCount: 24, headCountKv: 4, headDim: 256 },
       capabilities: { tools: true, vision: true, reasoning: true },
+      sampling: SAMPLING,
       variants: [
         {
           label: "standard",
@@ -69,6 +76,7 @@ export const qwen36: ModelFamily = {
       contextMax: 262144,
       arch: { blockCount: 40, embeddingLength: 2048, headCount: 16, headCountKv: 2, headDim: 256 },
       capabilities: { tools: true, vision: true, reasoning: true },
+      sampling: SAMPLING,
       variants: [
         {
           label: "standard",

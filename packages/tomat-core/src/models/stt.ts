@@ -8,11 +8,12 @@
 import type {
   AppliedSttSettings,
   CatalogPayload,
-  CatalogQuant,
   HardwareInfo,
+  SpeechQuant,
   SttCatalogModel,
   SttPresetView,
 } from "@tomat/shared";
+import { modelFilesObject, primaryFileSpec, STT_PRIMARY_ROLE } from "@tomat/shared";
 import { AppError } from "../shared/errors.ts";
 
 const MAX_THREADS = 8;
@@ -36,54 +37,66 @@ export function buildSttPresetViews(catalog: CatalogPayload): SttPresetView[] {
       id: preset.id,
       modelId: model.id,
       name: model.name,
+      family: model.family,
       english: model.english,
       quant: quant.quant,
-      modelSpec: quant.modelSpec,
+      modelSpec: primaryFileSpec(quant, STT_PRIMARY_ROLE[model.family]),
       fileSizeBytes: quant.fileSizeBytes,
     });
   }
   return views;
 }
 
-/** Default quant when a model is picked without one: int8 (near-lossless for
- *  whisper, the only quant the catalog ships), else the first quant. */
-function defaultQuant(model: SttCatalogModel): CatalogQuant {
+/** Default quant when a model is picked without one: int8 (near-lossless and the
+ *  only quant the catalog ships), else the first quant. */
+function defaultQuant(model: SttCatalogModel): SpeechQuant {
   return model.quants.find((q) => q.quant === "int8") ?? model.quants[0];
+}
+
+function appliedStt(
+  model: SttCatalogModel,
+  quant: SpeechQuant,
+  hw: HardwareInfo,
+): AppliedSttSettings {
+  return {
+    modelType: model.family,
+    modelPath: primaryFileSpec(quant, STT_PRIMARY_ROLE[model.family]),
+    modelFiles: JSON.stringify(modelFilesObject(quant)),
+    threads: sttThreads(hw),
+  };
 }
 
 /** Resolve a {presetId|modelId|modelSpec} selection into the stt.* settings to
  *  apply. presetId keeps its id as the preset; a manual model/quant pick is
- *  "custom". */
+ *  "custom". modelSpec matches a model's primary (identity) file. */
 export function resolveSttSelection(
   catalog: CatalogPayload,
   hw: HardwareInfo,
   body: { presetId?: string; modelId?: string; modelSpec?: string },
 ): { preset: string; settings: AppliedSttSettings } {
   const stt = catalog.stt;
-  const applied = (preset: string, quant: CatalogQuant) => ({
-    preset,
-    settings: { modelPath: quant.modelSpec, threads: sttThreads(hw) },
-  });
   if (body.presetId) {
     const preset = stt.presets.find((p) => p.id === body.presetId);
     const model = preset && stt.models.find((m) => m.id === preset.modelId);
     const quant = model?.quants.find((q) => q.quant === preset?.quant);
-    if (!preset || !quant) {
+    if (!preset || !model || !quant) {
       throw new AppError("not_found", `preset not in catalog: ${body.presetId}`);
     }
-    return applied(preset.id, quant);
+    return { preset: preset.id, settings: appliedStt(model, quant, hw) };
   }
   if (body.modelSpec) {
     for (const model of stt.models) {
-      const quant = model.quants.find((q) => q.modelSpec === body.modelSpec);
-      if (quant) return applied("custom", quant);
+      const quant = model.quants.find(
+        (q) => primaryFileSpec(q, STT_PRIMARY_ROLE[model.family]) === body.modelSpec,
+      );
+      if (quant) return { preset: "custom", settings: appliedStt(model, quant, hw) };
     }
-    throw new AppError("not_found", `quant not in catalog: ${body.modelSpec}`);
+    throw new AppError("not_found", `model not in catalog: ${body.modelSpec}`);
   }
   if (body.modelId) {
     const model = stt.models.find((m) => m.id === body.modelId);
     if (!model) throw new AppError("not_found", `model not in catalog: ${body.modelId}`);
-    return applied("custom", defaultQuant(model));
+    return { preset: "custom", settings: appliedStt(model, defaultQuant(model), hw) };
   }
   throw new AppError("validation_error", "presetId, modelId, or modelSpec required");
 }

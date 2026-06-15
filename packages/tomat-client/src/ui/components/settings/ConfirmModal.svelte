@@ -5,6 +5,7 @@
   import type { DownloadPlan } from "@tomat/shared";
   import Modal from "../ui/Modal.svelte";
   import Button from "../ui/Button.svelte";
+  import Checkbox from "../ui/Checkbox.svelte";
 
   // Friendly display of `binary:llama-server` etc. The raw synthetic
   // source string is ugly. HF paths still get the filename-extract
@@ -75,7 +76,7 @@
     {/if}
     {#if p.dontShowAgainLabel}
       <label class="flex items-center gap-2 text-default-600 text-sm select-none hover:cursor-pointer">
-        <input type="checkbox" bind:checked={dontShowAgain} class="accent-default-700" />
+        <Checkbox checked={dontShowAgain} onchange={(v) => (dontShowAgain = v)} />
         {p.dontShowAgainLabel}
       </label>
     {/if}

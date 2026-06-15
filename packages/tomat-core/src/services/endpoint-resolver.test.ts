@@ -3,6 +3,7 @@
 // up the encrypted vault for this).
 
 import { assertEquals } from "@std/assert";
+import { DEFAULT_SAMPLING } from "@tomat/shared";
 import { resolveContextSize, resolveEndpoint } from "./endpoint-resolver.ts";
 
 Deno.test("resolveEndpoint: defaults to local llama-server when provider is unset", async () => {
@@ -11,17 +12,31 @@ Deno.test("resolveEndpoint: defaults to local llama-server when provider is unse
   assertEquals(cfg.apiKey, "sk-local");
   assertEquals(cfg.model, "default");
   assertEquals(cfg.reasoning, "on");
+  // Sampling is always populated from the schema defaults (sparse store).
+  assertEquals(cfg.temperature, DEFAULT_SAMPLING.temperature);
+  assertEquals(cfg.topP, DEFAULT_SAMPLING.topP);
+  assertEquals(cfg.topK, DEFAULT_SAMPLING.topK);
+  assertEquals(cfg.minP, DEFAULT_SAMPLING.minP);
+  assertEquals(cfg.repeatPenalty, DEFAULT_SAMPLING.repeatPenalty);
+  // 0/unset budget = unrestricted, so it is omitted.
+  assertEquals(cfg.reasoningBudget, undefined);
 });
 
-Deno.test("resolveEndpoint: local provider honors llm.host and llm.port", async () => {
+Deno.test("resolveEndpoint: local honors host/port, custom sampling, legacy 'auto' -> 'on'", async () => {
   const cfg = await resolveEndpoint({
     "llm.provider": "local",
     "llm.host": "192.168.1.10",
     "llm.port": "8080",
     "llm.reasoning": "auto",
+    "llm.temperature": 0.3,
+    "llm.topK": 40,
+    "llm.reasoningBudget": 512,
   });
   assertEquals(cfg.baseUrl, "http://192.168.1.10:8080/v1");
-  assertEquals(cfg.reasoning, "auto");
+  assertEquals(cfg.reasoning, "on");
+  assertEquals(cfg.temperature, 0.3);
+  assertEquals(cfg.topK, 40);
+  assertEquals(cfg.reasoningBudget, 512);
 });
 
 Deno.test("resolveEndpoint: external provider routes to llm.external.* fields", async () => {
@@ -36,6 +51,27 @@ Deno.test("resolveEndpoint: external provider routes to llm.external.* fields", 
   assertEquals(cfg.apiKey, "sk-real");
   assertEquals(cfg.model, "gpt-4o-mini");
   assertEquals(cfg.reasoning, "on");
+  // OpenAI-style samplers carry over; llama.cpp-only ones and the token budget
+  // do not (the API rejects them).
+  assertEquals(cfg.temperature, DEFAULT_SAMPLING.temperature);
+  assertEquals(cfg.topP, DEFAULT_SAMPLING.topP);
+  assertEquals(cfg.topK, undefined);
+  assertEquals(cfg.minP, undefined);
+  assertEquals(cfg.repeatPenalty, undefined);
+  assertEquals(cfg.reasoningBudget, undefined);
+  // External reasoning carries an effort level, defaulting to "high".
+  assertEquals(cfg.reasoningEffort, "high");
+});
+
+Deno.test("resolveEndpoint: external provider forwards llm.reasoningEffort", async () => {
+  const cfg = await resolveEndpoint({
+    "llm.provider": "external",
+    "llm.external.baseUrl": "https://api.openai.com/v1",
+    "llm.external.model": "gpt-4o-mini",
+    "llm.reasoning": "on",
+    "llm.reasoningEffort": "low",
+  });
+  assertEquals(cfg.reasoningEffort, "low");
 });
 
 Deno.test("resolveEndpoint: route=secondary reads dualModel.* fields", async () => {
@@ -50,8 +86,11 @@ Deno.test("resolveEndpoint: route=secondary reads dualModel.* fields", async () 
   assertEquals(cfg.baseUrl, "https://api2.example.com/v1");
   assertEquals(cfg.model, "fast-model");
   assertEquals(cfg.apiKey, "sk-2");
-  // Secondary route never forwards reasoning.
+  // Secondary route never forwards reasoning or sampling.
   assertEquals(cfg.reasoning, "off");
+  assertEquals(cfg.temperature, undefined);
+  assertEquals(cfg.topP, undefined);
+  assertEquals(cfg.topK, undefined);
 });
 
 Deno.test("resolveContextSize: returns local default 4096 when nothing is set", () => {

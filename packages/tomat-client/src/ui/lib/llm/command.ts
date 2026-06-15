@@ -46,18 +46,6 @@ export const COMMANDS: Record<CommandType, CommandDefinition> = {
         omitEmpty: true,
       },
       { flag: "--flash-attn", settingId: "llm.flashAttn", argType: "boolean" },
-      {
-        flag: "--reasoning",
-        settingId: "llm.reasoning",
-        argType: "value",
-        omitEmpty: true,
-      },
-      {
-        flag: "--reasoning-budget",
-        settingId: "llm.reasoningBudget",
-        argType: "value",
-        omitEmpty: true,
-      },
       { flag: "--host", settingId: "llm.host", argType: "value" },
       { flag: "--port", settingId: "llm.port", argType: "value" },
       {

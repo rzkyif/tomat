@@ -12,6 +12,27 @@ async function collect(iter: AsyncIterable<LlmDelta>): Promise<LlmDelta[]> {
   return out;
 }
 
+// Wraps the SSE fixture fetch to capture the JSON request body the SDK sends,
+// so we can assert which sampling / thinking params went on the wire.
+function capturingFetch(fixtureName: string): {
+  fetch: typeof fetch;
+  body: () => Record<string, unknown>;
+} {
+  const inner = fakeOpenAIFetch(fixtureName);
+  let captured: Record<string, unknown> | null = null;
+  const capture = ((input: RequestInfo | URL, init?: RequestInit) => {
+    if (typeof init?.body === "string") captured = JSON.parse(init.body);
+    return inner(input, init);
+  }) as typeof fetch;
+  return {
+    fetch: capture,
+    body: () => {
+      if (!captured) throw new Error("no request body captured");
+      return captured;
+    },
+  };
+}
+
 Deno.test("streamChatCompletion: parses content deltas and finish + usage", async () => {
   const deltas = await collect(
     streamChatCompletion({
@@ -70,4 +91,104 @@ Deno.test("streamChatCompletion: assembles tool_calls index-by-index", async () 
   assertEquals(args, '{"x":42}');
   const finish = deltas.find((d) => d.finishReason);
   assertEquals(finish?.finishReason, "tool_calls");
+});
+
+Deno.test("streamChatCompletion: local request carries thinking budget + llama samplers", async () => {
+  const cap = capturingFetch("streaming-basic.sse");
+  await collect(
+    streamChatCompletion({
+      endpoint: {
+        baseUrl: "http://127.0.0.1:7701/v1",
+        apiKey: "sk-local",
+        model: "default",
+        reasoning: "on",
+        temperature: 0.5,
+        topP: 0.9,
+        topK: 20,
+        minP: 0.05,
+        repeatPenalty: 1.1,
+        reasoningBudget: 256,
+        fetch: cap.fetch,
+      },
+      messages: [{ role: "user", content: "hi" }],
+    }),
+  );
+  const body = cap.body();
+  assertEquals(body.temperature, 0.5);
+  assertEquals(body.top_p, 0.9);
+  assertEquals(body.top_k, 20);
+  assertEquals(body.min_p, 0.05);
+  assertEquals(body.repeat_penalty, 1.1);
+  assertEquals(body.reasoning_budget, 256);
+  assertEquals(body.chat_template_kwargs, { enable_thinking: true });
+});
+
+Deno.test("streamChatCompletion: external request uses reasoning_effort, drops llama samplers", async () => {
+  const cap = capturingFetch("streaming-basic.sse");
+  await collect(
+    streamChatCompletion({
+      endpoint: {
+        baseUrl: "https://stub.test/v1",
+        apiKey: "sk-real",
+        model: "gpt-4o-mini",
+        reasoning: "on",
+        temperature: 0.5,
+        topP: 0.9,
+        // Even if present, llama-only knobs must not reach an external endpoint.
+        topK: 20,
+        minP: 0.05,
+        repeatPenalty: 1.1,
+        fetch: cap.fetch,
+      },
+      messages: [{ role: "user", content: "hi" }],
+    }),
+  );
+  const body = cap.body();
+  assertEquals(body.temperature, 0.5);
+  assertEquals(body.top_p, 0.9);
+  assertEquals(body.reasoning_effort, "high");
+  assertEquals(body.top_k, undefined);
+  assertEquals(body.min_p, undefined);
+  assertEquals(body.repeat_penalty, undefined);
+  assertEquals(body.chat_template_kwargs, undefined);
+  assertEquals(body.reasoning_budget, undefined);
+});
+
+Deno.test("streamChatCompletion: external request forwards reasoningEffort level", async () => {
+  const cap = capturingFetch("streaming-basic.sse");
+  await collect(
+    streamChatCompletion({
+      endpoint: {
+        baseUrl: "https://stub.test/v1",
+        apiKey: "sk-real",
+        model: "gpt-4o-mini",
+        reasoning: "on",
+        reasoningEffort: "medium",
+        fetch: cap.fetch,
+      },
+      messages: [{ role: "user", content: "hi" }],
+    }),
+  );
+  assertEquals(cap.body().reasoning_effort, "medium");
+});
+
+Deno.test("streamChatCompletion: thinking off sends enable_thinking false (local)", async () => {
+  const cap = capturingFetch("streaming-basic.sse");
+  await collect(
+    streamChatCompletion({
+      endpoint: {
+        baseUrl: "http://127.0.0.1:7701/v1",
+        apiKey: "sk-local",
+        model: "default",
+        reasoning: "off",
+        reasoningBudget: 256,
+        fetch: cap.fetch,
+      },
+      messages: [{ role: "user", content: "hi" }],
+    }),
+  );
+  const body = cap.body();
+  assertEquals(body.chat_template_kwargs, { enable_thinking: false });
+  // No budget is sent when thinking is off.
+  assertEquals(body.reasoning_budget, undefined);
 });

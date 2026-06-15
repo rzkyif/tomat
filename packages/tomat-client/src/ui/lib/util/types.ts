@@ -17,6 +17,7 @@ import type {
   AskUserChoiceQuestion,
   AskUserQuestion,
   DisplayContent,
+  DocumentFilterEntryPersisted,
   MessageContent,
   MessagePart,
   PermissionKind,
@@ -88,6 +89,7 @@ export type Message = {
     | "system"
     | "tool"
     | "tool_filter"
+    | "document_filter"
     /** Tool-pushed display content (ctx.display.* / show_document). */
     | "display"
     /** Synthetic, render-only role. The +page rendering pipeline injects a
@@ -110,6 +112,9 @@ export type Message = {
   /** Set when the stream was aborted (user interrupt or provider error)
    *  before the model finished; content is the partial text. */
   interrupted?: boolean;
+  /** Set when the model hit the context window (finish_reason "length")
+   *  instead of stopping naturally; content may be partial or empty. */
+  truncated?: boolean;
   /** Only populated on user messages. Holds the resolved system prompt that
    *  was sent to the LLM for that turn, including any snippet-triggered
    *  transformations. Used by sendMessages() on edit-and-resend. */
@@ -129,9 +134,9 @@ export type Message = {
   toolName?: string;
   /** JSON string of arguments as the model emitted them. */
   arguments?: string;
-  /** ToolCallStatus for tool rows; "filtering" | "complete" | "error" for
-   *  tool_filter rows. */
-  status?: ToolCallStatus | "filtering" | "complete" | "error";
+  /** ToolCallStatus for tool rows; "complete" | "error" for tool_filter /
+   *  document_filter rows. */
+  status?: ToolCallStatus | "complete" | "error";
   progress?: number;
   label?: string;
   description?: string;
@@ -145,6 +150,9 @@ export type Message = {
   alwaysAvailable?: ToolFilterEntryPersisted[];
   toolsSent?: number;
   errorMessage?: string;
+  // role: "document_filter" flat fields (DocumentFilterMessage on the wire).
+  // Empty array means the filter ran and surfaced nothing.
+  relevant?: DocumentFilterEntryPersisted[];
   // role: "error" extras.
   code?: string;
   details?: Record<string, unknown>;

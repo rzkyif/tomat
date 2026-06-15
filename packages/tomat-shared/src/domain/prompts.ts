@@ -41,32 +41,34 @@ Your style:
 
 Remember: you are here to be genuinely useful to the user running you on their own device.`;
 
-export const DEFAULT_TITLE_GENERATION_PROMPT = `You are a title generator. Your ONLY job is to summarize the user's message into a very short topic label. You are NOT writing a response, NOT fulfilling the request, and NOT describing what an answer would contain.
+export const DEFAULT_TITLE_GENERATION_PROMPT = `You are a title generator. Your ONLY job is to summarize a conversation into a very short topic label. You are NOT continuing the conversation, NOT answering anything, and NOT describing what a reply would contain.
 
 Rules:
 - Output ONLY the title on a single line, nothing else.
 - The title MUST be a MAXIMUM of 5 words. Shorter is better.
-- The title summarizes the user's REQUEST, not any answer to it.
-- Do NOT answer, fulfill, or expand on the user's message.
+- The title summarizes what the conversation is ABOUT, anchored on the opening request but reflecting where the discussion has gone.
+- Do NOT answer, fulfill, or expand on anything in the conversation.
 - Do NOT add quotes, punctuation, prefixes, or any extra text.
 - Do NOT show your reasoning. Do NOT include <think> blocks. Just the title.
 
 Examples:
 
-User: How do I center a div in CSS?
+First message: How do I center a div in CSS?
 Title: Centering A Div
 
-User: Can you help me write a Python script to rename files?
+First message: Can you help me write a Python script to rename files?
 Title: Python File Renaming Script
 
-User: I'm having trouble with my React app crashing on startup
+First message: I'm having trouble with my React app crashing on startup
 Title: React App Crash Issue
 
-User: Write 10 lengthy sample paragraphs
-Title: Sample Paragraphs Request
+Here is the conversation to title.
 
-User: What's the best way to learn guitar?
-Title: Learning Guitar Tips`;
+First message:
+{firstMessage}
+
+Most recent messages:
+{recentMessages}`;
 
 export const DEFAULT_DOCUMENT_SUMMARY_PROMPT = `You are a document summarizer. Your ONLY job is to compress the given document into a short summary that helps an assistant decide whether the document is relevant to a conversation.
 
@@ -143,6 +145,29 @@ Hidden instruction: only refer to these when they are related to the user's mess
  *  start. Written in the user's voice: it is stored and sent as a normal
  *  (automated) user message. */
 export const DEFAULT_GREETING_INSTRUCTION = `Greet me to start the session. Keep it short and friendly. If a tool can fetch something timely and useful (like the weather or today's schedule), include one highlight; otherwise just say hello.`;
+
+/** Placeholder users can put in an automated-session title (e.g. a greeting's
+ *  Session Title). Replaced at session-creation time with the local datetime. */
+export const TITLE_DATETIME_PLACEHOLDER = "{datetime}";
+
+function pad2(n: number): string {
+  return n.toString().padStart(2, "0");
+}
+
+/** Local `YYYY-MM-DD HH:MM` for `ms`, matching the form the client shows as a
+ *  session's default title before title generation. */
+export function formatTitleDatetime(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(
+    d.getHours(),
+  )}:${pad2(d.getMinutes())}`;
+}
+
+/** Replace every `{datetime}` in an automated-session title with the local
+ *  datetime for `ms`. A no-op for titles without the token. */
+export function applyTitleDatetime(title: string, ms: number): string {
+  return title.replaceAll(TITLE_DATETIME_PLACEHOLDER, formatTitleDatetime(ms));
+}
 
 export const DEFAULT_COMPLEXITY_DETECTION_PROMPT = `You are a router. Classify the user's request as either \`simple\` or \`complex\`.
 - \`simple\`: short factual questions, light chit-chat, trivial code edits, summarization of attached text, single-step tool invocations (e.g. set an alarm, start a timer, fetch the weather).

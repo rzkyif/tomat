@@ -15,6 +15,7 @@ import type {
 } from "@tomat/shared";
 import type { Message } from "$lib/util/types";
 import { cores } from "$lib/core";
+import { formatSessionDefaultTitle } from "$lib/util/format";
 import { platform } from "$lib/platform";
 import { getLogger } from "$lib/util/log";
 import { messagesState } from "./messages.svelte";
@@ -29,7 +30,7 @@ export type SessionInfo = SessionListEntry;
 /** Defensive snapshot fixups applied on disk → memory load. The persisted
  *  shape IS the render shape now, so this only repairs in-flight state a
  *  crash or disconnect froze mid-turn: ids missing from pre-id files, tool
- *  calls stuck non-terminal, tool filters stuck "filtering". */
+ *  calls stuck non-terminal. */
 export function fixupLoadedMessages(messages: ServerMessage[]): Message[] {
   let counter = 0;
   // Each wire message widens into the client bag (every wire field is an
@@ -50,13 +51,6 @@ export function fixupLoadedMessages(messages: ServerMessage[]): Message[] {
         error: m.error ?? "interrupted: core was disconnected mid-call",
       };
     }
-    if (m.role === "tool_filter" && m.status === "filtering") {
-      out[i] = {
-        ...m,
-        status: "error",
-        errorMessage: m.errorMessage ?? "interrupted: session was reloaded",
-      };
-    }
   }
   return out;
 }
@@ -65,6 +59,9 @@ class SessionsState {
   list = $state<SessionInfo[]>([]);
   id = $state<string | null>(null);
   title = $state<string>("");
+  /** True while core is (re)generating this session's title. Driven by
+   *  `title_generating` frames; set optimistically on manual regenerate. */
+  generatingTitle = $state(false);
   /** Creation timestamp of the active session, from the server's session
    *  doc. Drives `defaultTitle`; session ids are opaque ULIDs. */
   createdAtMs = $state<number | null>(null);
@@ -96,9 +93,7 @@ class SessionsState {
    *  placeholder and filled in whenever the user clears the title. */
   get defaultTitle(): string {
     if (this.createdAtMs == null) return "";
-    const d = new Date(this.createdAtMs);
-    const pad = (n: number) => n.toString().padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return formatSessionDefaultTitle(this.createdAtMs);
   }
 
   /** Wire up to session.updated frames so title changes / server-side
@@ -112,10 +107,15 @@ class SessionsState {
       }
       if (frame.kind !== "session.updated") return;
       if (frame.sessionId !== this.id) return;
-      if (frame.op === "title_changed" && frame.payload?.title !== undefined) {
+      if (frame.op === "title_generating") {
+        this.generatingTitle = frame.payload?.generating ?? false;
+      } else if (frame.op === "title_changed" && frame.payload?.title !== undefined) {
         this.title = frame.payload.title;
+        this.generatingTitle = false;
         const idx = this.list.findIndex((s) => s.id === this.id);
-        if (idx >= 0) this.list[idx] = { ...this.list[idx], title: frame.payload.title };
+        if (idx >= 0) {
+          this.list[idx] = { ...this.list[idx], title: frame.payload.title };
+        }
       } else if (
         (frame.op === "message_added" || frame.op === "message_updated") &&
         frame.payload?.message
@@ -128,14 +128,21 @@ class SessionsState {
       }
     });
     // During a disconnect gap the session.updated/message_added frames above are
-    // lost, so server-side changes (e.g. a finished turn) are missed. Reload the
-    // active session on reconnect to resync; load() also re-runs the in-flight
-    // fixups in backfillMessageIds. Only after a real gap, never on first connect.
+    // lost, so server-side changes (e.g. a finished turn, a session created or
+    // deleted by another client) are missed. On reconnect, refetch the session
+    // list and reload the active session to resync; load() also re-runs the
+    // in-flight fixups in backfillMessageIds. Without the list refetch the chat
+    // bar's prev/next/list controls keep a stale (or empty) list and read as
+    // "no sessions". Only after a real gap, never on first connect.
     this.unsubscribeConn = cores().subscribeConnectionState((state) => {
       if (state === "connected") {
-        if (this.droppedSinceConnected && this.id) {
-          log.info("reconnected; reloading active session");
-          void this.load(this.id);
+        if (this.droppedSinceConnected) {
+          log.info("reconnected; reloading session list");
+          void this.loadList();
+          if (this.id) {
+            log.info("reconnected; reloading active session");
+            void this.load(this.id);
+          }
         }
         this.hasConnected = true;
         this.droppedSinceConnected = false;
@@ -221,12 +228,27 @@ class SessionsState {
     }
   }
 
+  /** Ask core to regenerate the active session's title. Core drives the
+   *  spinner via `title_generating` frames; we set it optimistically so the
+   *  click feels instant, and clear it on error since no frame will arrive. */
+  async regenerateTitle(): Promise<void> {
+    if (!this.id || !this.storageEnabled || this.generatingTitle) return;
+    this.generatingTitle = true;
+    try {
+      await cores().api().sessions.regenerateTitle(this.id);
+    } catch (e) {
+      log.error("Failed to regenerate session title:", e);
+      this.generatingTitle = false;
+    }
+  }
+
   /** Reset every in-memory field that's tied to a single session. */
   private resetAll(): void {
     messagesState.clear();
     streamingState.resetForSession();
     this.id = null;
     this.title = "";
+    this.generatingTitle = false;
     this.createdAtMs = null;
     this.epoch++;
   }

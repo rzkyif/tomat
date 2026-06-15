@@ -80,6 +80,7 @@ export class ToolFilter {
     query: string,
     candidates: ToolDescriptor[],
     endpoint: LlmEndpointConfig,
+    reasoningBudget: number,
     signal?: AbortSignal,
   ): Promise<ToolDescriptor[]> {
     if (candidates.length === 0) return [];
@@ -104,7 +105,9 @@ export class ToolFilter {
     const req: LlmRequest = {
       endpoint,
       messages,
-      overrides: { temperature: 0, maxTokens: 64 },
+      // Thinking off by default (Refinement Thinking Budget = 0); a positive
+      // budget opts in, added on top of the short answer allowance.
+      overrides: { temperature: 0, maxTokens: 64 + reasoningBudget, reasoningBudget },
       signal,
     };
 

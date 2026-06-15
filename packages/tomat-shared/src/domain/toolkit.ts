@@ -18,18 +18,24 @@ export type ToolkitStatus = "downloaded" | "installed" | "drift";
 // flattening is applied.
 export const BUILTIN_TOOLKIT_ID = "tomat-builtin-toolkit";
 
-export type PermissionKind =
-  | "net"
-  | "read"
-  | "write"
-  | "run"
-  | "env"
-  | "ffi"
-  | "sys"
-  | "documents"
-  | "llm"
-  | "tts"
-  | "stt";
+// Single source of truth for the permission kinds: the type is derived from
+// this tuple, and runtime validators (e.g. the WS permission-request schema)
+// reuse the same array via `z.enum(PERMISSION_KINDS)` so the two can't drift.
+export const PERMISSION_KINDS = [
+  "net",
+  "read",
+  "write",
+  "run",
+  "env",
+  "ffi",
+  "sys",
+  "documents",
+  "llm",
+  "tts",
+  "stt",
+] as const;
+
+export type PermissionKind = (typeof PERMISSION_KINDS)[number];
 
 // Wire shape mirroring tools.json permission entries. Cardinality varies by
 // kind: net entries declare host/ports; read/write declare paths; run declares
@@ -50,7 +56,12 @@ export type PermissionDecl =
   | { kind: "env"; key: string; reason: string; optional?: boolean }
   | { kind: "ffi"; reason: string; optional?: boolean }
   | { kind: "sys"; flag: string; reason: string; optional?: boolean }
-  | { kind: "documents"; access: "read" | "write"; reason: string; optional?: boolean }
+  | {
+      kind: "documents";
+      access: "read" | "write";
+      reason: string;
+      optional?: boolean;
+    }
   | { kind: "llm"; reason: string; optional?: boolean }
   | { kind: "tts"; reason: string; optional?: boolean }
   | { kind: "stt"; reason: string; optional?: boolean };

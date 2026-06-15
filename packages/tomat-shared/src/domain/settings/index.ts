@@ -19,6 +19,6 @@ export { scheduledPromptsGroup } from "./groups/scheduled-prompts.ts";
 export { shortcutsGroup } from "./groups/shortcuts.ts";
 export { snippetsGroup } from "./groups/snippets.ts";
 export { sttGroup } from "./groups/stt.ts";
-export { toolkitsGroup, toolsGroup } from "./groups/toolkits.ts";
+export { toolsGroup } from "./groups/toolkits.ts";
 export { ttsGroup } from "./groups/tts.ts";
 export { usageGroup } from "./groups/usage.ts";

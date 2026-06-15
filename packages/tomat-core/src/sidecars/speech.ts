@@ -1,24 +1,29 @@
 // tomat-core-speech sidecar: arg/readiness wiring plus the /configure, /speak,
 // and /transcribe HTTP clients for the one resident process that serves both
-// Whisper speech-to-text and Kokoro text-to-speech.
+// speech-to-text and text-to-speech across several sherpa-onnx model families.
 //
 // Which engines are loaded is the "desired state" derived from settings: local
-// STT (stt.enabled + local provider + the whisper bundle on disk) and/or TTS
-// (tts.enabled + the kokoro bundle on disk). espeak-ng-data (the Kokoro
-// phonemizer) is NOT a model download: it ships inside the binary's archive at
+// STT (stt.enabled + local provider + the model bundle on disk) and/or TTS
+// (tts.enabled + the model bundle on disk). A config is tagged by its `family`
+// and carries the resolved on-disk path for each sherpa role; the role names
+// (encoder, decoder, joiner, model, voices, acoustic_model, vocoder, tokens, ...)
+// match the binary's serde field names, so the bundle map serializes straight
+// across. espeak-ng-data (the phonemizer for kokoro/kitten/vits/matcha) is NOT a
+// model download: it ships inside the binary's archive at
 // bin/lib/tomat-core-speech/espeak-ng-data (see binaries/manager.ts) and is
-// passed to the binary by path.
+// passed as the `data_dir` role by path.
 //
-// Two ways to drive the binary, both used by sidecar-boot's applySpeech:
-//   - start flags (--stt-* / --tts-*): the freshly-spawned process loads those
-//     engines before it binds, so HTTP readiness == models loaded.
+// Two ways to drive the binary, both used by sidecar-boot's applySpeech and both
+// carrying the SAME JSON config object:
+//   - start flags (--stt-config / --tts-config <json>): the freshly-spawned
+//     process loads those engines before it binds, so HTTP readiness == models
+//     loaded.
 //   - POST /configure {stt, tts}: the running process (re)loads or drops each
 //     engine in place. Dropping one frees its model's memory while the other
 //     stays resident, with no restart - preserving per-module unload-on-disable.
 
 import { join } from "@std/path";
-import { errMessage, getDefaultSettings } from "@tomat/shared";
-import { sttBundleFiles, TTS_MODEL_FILE, TTS_TOKENS_FILE, TTS_VOICES_FILE } from "@tomat/shared";
+import { errMessage, getDefaultSettings, modelFilesMap } from "@tomat/shared";
 import { binPath, paths, speechPort } from "../paths.ts";
 import { binaryName, libDirFor } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
@@ -29,21 +34,16 @@ import type { StartOptions } from "./types.ts";
 // loading a multi-GB model) can't pin the caller forever.
 const SPEECH_CALL_TIMEOUT_MS = 120_000;
 
-/** Resolved on-disk paths for the Whisper engine (sherpa 3-file bundle). */
-export interface SpeechSttConfig {
-  encoder: string;
-  decoder: string;
-  tokens: string;
+/** A speech engine config: a `family` tag plus one resolved on-disk path per
+ *  sherpa role. The role keys match the binary's serde field names; TTS configs
+ *  also carry a `data_dir` role (the bundled espeak phonemizer dir, not a model
+ *  download). */
+export interface SpeechEngineConfig {
+  family: string;
+  [role: string]: string;
 }
-
-/** Resolved on-disk paths for the Kokoro engine. `espeakData` is the binary's
- *  bundled phonemizer dir, not a model download. */
-export interface SpeechTtsConfig {
-  model: string;
-  voices: string;
-  tokens: string;
-  espeakData: string;
-}
+export type SpeechSttConfig = SpeechEngineConfig;
+export type SpeechTtsConfig = SpeechEngineConfig;
 
 /** The full desired engine state of the speech process. A null engine means
  *  "not loaded" (disabled, or its files aren't on disk yet). */
@@ -74,47 +74,43 @@ export async function speechDesiredState(settings: Record<string, unknown>): Pro
     boolSetting(settings, "stt.enabled", true) &&
     strSetting(settings, "stt.provider", "local") === "local";
   if (sttLocal) {
-    const encoderSpec = strSetting(settings, "stt.modelPath", schemaDefault("stt.modelPath"));
-    if (encoderSpec) {
-      const bundle = sttBundleFiles(encoderSpec);
-      const cfg = {
-        encoder: resolveHfPath(bundle.encoder),
-        decoder: resolveHfPath(bundle.decoder),
-        tokens: resolveHfPath(bundle.tokens),
-      };
-      if (
-        (await fileExists(cfg.encoder)) &&
-        (await fileExists(cfg.decoder)) &&
-        (await fileExists(cfg.tokens))
-      ) {
-        stt = cfg;
-      }
-    }
+    const family = strSetting(settings, "stt.modelType", schemaDefault("stt.modelType"));
+    const roles = await resolveRoles(settings["stt.modelFiles"] ?? schemaDefault("stt.modelFiles"));
+    if (family && roles) stt = { family, ...roles };
   }
 
   let tts: SpeechTtsConfig | null = null;
   if (boolSetting(settings, "tts.enabled", false)) {
-    const cfg = {
-      model: resolveHfPath(TTS_MODEL_FILE),
-      voices: resolveHfPath(TTS_VOICES_FILE),
-      tokens: resolveHfPath(TTS_TOKENS_FILE),
-      espeakData: espeakDataDir(),
-    };
-    if (
-      (await fileExists(cfg.model)) &&
-      (await fileExists(cfg.voices)) &&
-      (await fileExists(cfg.tokens))
-    ) {
-      tts = cfg;
-    }
+    const family = strSetting(settings, "tts.modelType", schemaDefault("tts.modelType"));
+    const roles = await resolveRoles(settings["tts.modelFiles"] ?? schemaDefault("tts.modelFiles"));
+    // espeak phonemizer data ships with the binary, not as a download; pass it as
+    // the data_dir role for the families that phonemize through espeak-ng.
+    if (family && roles) tts = { family, ...roles, data_dir: espeakDataDir() };
   }
 
   return { stt, tts, host: "127.0.0.1", port: String(speechPort()), threads };
 }
 
-/** Build StartOptions whose `--stt-*`/`--tts-*` flags load exactly the desired
- *  engines before the process binds, so HTTP readiness implies models loaded.
- *  No libraryDir: the binary statically links sherpa-onnx (no shared libs). */
+/** Resolve a `*.modelFiles` map (role -> HF spec) to role -> on-disk path,
+ *  returning null if the value is malformed or any file is not yet downloaded
+ *  (so the engine resolves to "not loaded" and the download-completion hook can
+ *  re-apply once the files land). */
+async function resolveRoles(modelFiles: unknown): Promise<Record<string, string> | null> {
+  const map = modelFilesMap(modelFiles);
+  if (!map) return null;
+  const resolved: Record<string, string> = {};
+  for (const [role, spec] of Object.entries(map)) {
+    const path = resolveHfPath(spec);
+    if (!(await fileExists(path))) return null;
+    resolved[role] = path;
+  }
+  return resolved;
+}
+
+/** Build StartOptions whose `--stt-config`/`--tts-config <json>` flags load
+ *  exactly the desired engines before the process binds, so HTTP readiness
+ *  implies models loaded. The JSON is the same tagged config object POST
+ *  /configure accepts. No libraryDir: the binary statically links sherpa-onnx. */
 export function buildSpeechStartOptions(state: SpeechState): StartOptions {
   const argv: string[] = [
     "--host",
@@ -124,28 +120,8 @@ export function buildSpeechStartOptions(state: SpeechState): StartOptions {
     "--threads",
     String(state.threads),
   ];
-  if (state.stt) {
-    argv.push(
-      "--stt-encoder",
-      state.stt.encoder,
-      "--stt-decoder",
-      state.stt.decoder,
-      "--stt-tokens",
-      state.stt.tokens,
-    );
-  }
-  if (state.tts) {
-    argv.push(
-      "--tts-model",
-      state.tts.model,
-      "--tts-voices",
-      state.tts.voices,
-      "--tts-tokens",
-      state.tts.tokens,
-      "--tts-espeak-data",
-      state.tts.espeakData,
-    );
-  }
+  if (state.stt) argv.push("--stt-config", JSON.stringify(state.stt));
+  if (state.tts) argv.push("--tts-config", JSON.stringify(state.tts));
   return {
     binary: binPath(binaryName("tomat-core-speech")),
     args: argv,

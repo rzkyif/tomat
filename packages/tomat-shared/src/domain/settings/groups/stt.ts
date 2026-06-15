@@ -142,7 +142,7 @@ export const sttGroup: SettingGroup = {
       ],
     },
     {
-      label: "Speech Recognition",
+      label: "Model",
       destination: "core",
       visibleWhen: { field: "stt.enabled", eq: true },
       fields: [
@@ -170,8 +170,8 @@ export const sttGroup: SettingGroup = {
           presetConfig: {
             // Each card's model and threads resolve from the signed model
             // catalog at runtime (no static `defaults`), so list the keys they
-            // manage here: editing either flips the preset to Custom.
-            managedKeys: ["stt.modelPath", "stt.threads"],
+            // manage here: editing any flips the preset to Custom.
+            managedKeys: ["stt.modelType", "stt.modelPath", "stt.modelFiles", "stt.threads"],
             // The client fills each card's badges (model name, size, language)
             // from GET /api/v1/models/stt/catalog; selecting a card calls
             // POST /api/v1/models/stt/select { presetId }.
@@ -196,6 +196,13 @@ export const sttGroup: SettingGroup = {
                 description:
                   "The most accurate option for every language, including English. Uses about three times the memory of the light models.",
               },
+              {
+                id: "fast-multilingual",
+                label: "Fast (Multilingual)",
+                title: "Fast (Multilingual)",
+                description:
+                  "SenseVoice: very fast on CPU with low latency, covering Chinese, Cantonese, English, Japanese, and Korean.",
+              },
             ],
             secondaryOptions: [
               {
@@ -217,17 +224,48 @@ export const sttGroup: SettingGroup = {
         allOf: [
           { field: "stt.enabled", eq: true },
           { field: "stt.provider", eq: "local" },
-          { field: "stt.preset", eq: "custom" },
         ],
       },
       fields: [
         {
+          id: "stt.modelType",
+          name: "Model Type",
+          description:
+            "Which sherpa-onnx recognizer the model runs as. Picking a model in the catalog sets this for you; change it only when configuring files by hand.",
+          type: "select",
+          defaultValue: "whisper",
+          options: [
+            { value: "whisper", label: "Whisper" },
+            { value: "sense-voice", label: "SenseVoice" },
+            { value: "moonshine", label: "Moonshine" },
+            { value: "paraformer", label: "Paraformer" },
+            { value: "transducer", label: "Zipformer Transducer" },
+            { value: "nemo-ctc", label: "NeMo CTC" },
+            { value: "dolphin", label: "Dolphin" },
+            { value: "telespeech-ctc", label: "TeleSpeech CTC" },
+          ],
+          descriptionTier: "ondemand",
+        },
+        {
           id: "stt.modelPath",
           name: "Model File",
           description:
-            "Path to the Whisper encoder ONNX file, e.g. @user/repo/branch/model-encoder.int8.onnx. The matching decoder and tokens files are found automatically.",
+            "The model's main file, e.g. @user/repo/branch/model.int8.onnx. Picking a model in the catalog fills this and the bundle files below.",
           type: "string",
           defaultValue: "@csukuangfj/sherpa-onnx-whisper-small/main/small-encoder.int8.onnx",
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "stt.modelFiles",
+          name: "Bundle Files",
+          description:
+            "Advanced. The full set of files the model needs, as a JSON object mapping each sherpa role to an @user/repo/branch/file spec. Set automatically when you pick a model.",
+          type: "multiline",
+          defaultValue: JSON.stringify({
+            encoder: "@csukuangfj/sherpa-onnx-whisper-small/main/small-encoder.int8.onnx",
+            decoder: "@csukuangfj/sherpa-onnx-whisper-small/main/small-decoder.int8.onnx",
+            tokens: "@csukuangfj/sherpa-onnx-whisper-small/main/small-tokens.txt",
+          }),
           descriptionTier: "ondemand",
         },
         {

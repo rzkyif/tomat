@@ -1,60 +1,11 @@
 import { Hono } from "hono";
-import { ttsGroup } from "@tomat/shared";
 import { sidecarManager } from "../../sidecars/manager.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
+import { loadModelCatalog } from "../../models/catalog.ts";
+import { selectedTtsVoices } from "../../models/tts.ts";
 import { speechSpeak } from "../../sidecars/speech.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
-
-// Full Kokoro voice catalog, derived once from the shared settings schema
-// so the dropdown and the /voices REST endpoint stay in lock-step.
-const VOICE_CATALOG: Array<{ id: string; label: string; lang: string }> = (() => {
-  for (const section of ttsGroup.sections) {
-    for (const field of section.fields) {
-      if (
-        field.id === "tts.voice" &&
-        field.type === "select" &&
-        "options" in field &&
-        field.options
-      ) {
-        return field.options.map((o: { value: string | number; label: string }) => ({
-          id: String(o.value),
-          label: o.label,
-          lang: langFromVoiceId(String(o.value)),
-        }));
-      }
-    }
-  }
-  return [];
-})();
-
-// Voice IDs are `<region><gender>_<name>`, e.g. `af_bella` (American Female
-// Bella) or `jm_kumo` (Japanese Male Kumo). The first letter encodes the
-// language family.
-function langFromVoiceId(id: string): string {
-  switch (id[0]) {
-    case "a":
-      return "en-us";
-    case "b":
-      return "en-gb";
-    case "j":
-      return "ja";
-    case "z":
-      return "zh";
-    case "e":
-      return "es";
-    case "f":
-      return "fr";
-    case "h":
-      return "hi";
-    case "i":
-      return "it";
-    case "p":
-      return "pt";
-    default:
-      return "en";
-  }
-}
 
 export function ttsRoutes(): Hono {
   const r = new Hono();
@@ -82,7 +33,18 @@ export function ttsRoutes(): Hono {
     });
   });
 
-  r.get("/voices", (c) => c.json(VOICE_CATALOG));
+  // The voices of the currently-selected TTS model, so the client's voice
+  // dropdown matches the model in use. Reads tts.modelType + tts.modelPath
+  // against the signed catalog.
+  r.get("/voices", async (c) => {
+    const [catalog, settings] = await Promise.all([loadModelCatalog(), loadCoreSettings()]);
+    const voices = selectedTtsVoices(
+      catalog,
+      String(settings["tts.modelType"] ?? "kokoro"),
+      String(settings["tts.modelPath"] ?? ""),
+    );
+    return c.json(voices);
+  });
 
   // Map the speech sidecar's lifecycle onto the {loaded, loading} shape the
   // client polls: TTS is "loaded" once the sidecar is Running with tts enabled.

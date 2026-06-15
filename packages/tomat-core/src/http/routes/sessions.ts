@@ -15,6 +15,7 @@ import { AppError } from "../../shared/errors.ts";
 import { newAttachmentId, newMessageId } from "../../shared/ids.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
+import { regenerateTitle } from "../../services/title-gen.ts";
 import { resolveEndpoint } from "../../services/endpoint-resolver.ts";
 import { llmScheduler } from "../../services/llm-scheduler.ts";
 import { type LlmRequest } from "../../services/llm-provider.ts";
@@ -52,6 +53,16 @@ export function sessionsRoutes(): Hono {
     }
     sessionsRepo().patchTitle(me.id, c.req.param("id"), body.title);
     return c.json({ id: c.req.param("id"), title: body.title });
+  });
+
+  // Regenerate the session title on demand. Generation streams in the
+  // background; the client learns the start, the new title, and the end via
+  // `session.updated` frames, so this just kicks it off and returns.
+  r.post("/:id/regenerate-title", (c) => {
+    const me = requireClient(c);
+    const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
+    void regenerateTitle(session.id, me.id);
+    return c.body(null, 204);
   });
 
   r.delete("/:id", async (c) => {
@@ -225,7 +236,7 @@ export function sessionsRoutes(): Hono {
           for await (const delta of llmScheduler().schedule(req, {
             clientId: me.id,
             isLocal,
-            parallelSlots: numSetting(settings, "llm.local.parallelSlots", 4),
+            parallelSlots: numSetting(settings, "llm.local.parallelSlots", 1),
           })) {
             if (delta.contentDelta) {
               assistantText += delta.contentDelta;

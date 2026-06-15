@@ -30,44 +30,61 @@ import { snippetsGroup } from "./groups/snippets.ts";
 import { documentsGroup } from "./groups/documents.ts";
 import { scheduledPromptsGroup } from "./groups/scheduled-prompts.ts";
 import { greetingsGroup } from "./groups/greetings.ts";
-import { toolkitsGroup, toolsGroup } from "./groups/toolkits.ts";
+import { toolsGroup } from "./groups/toolkits.ts";
 import { dualModelGroup } from "./groups/dual-model.ts";
 import { sttGroup } from "./groups/stt.ts";
 import { ttsGroup } from "./groups/tts.ts";
 import { usageGroup } from "./groups/usage.ts";
 import { coresGroup } from "./groups/cores.ts";
 
-// Kokoro TTS assets (sherpa-onnx bundle) fetched into ~/.tomat/models/<repo>/...
-// by the core downloader and served by the tomat-core-speech sidecar. The
-// quantized model + the speaker-embedding pack (voices.bin) + the token table
-// are the only downloads; espeak-ng-data (the phonemizer) ships inside the
-// speech binary's archive. The 53 speaker ids in voices.bin line up with the
-// tts.voice enum (packages/tomat-core-speech/src/voices.rs owns name -> sid).
-export const TTS_REPO = "@csukuangfj/kokoro-int8-multi-lang-v1_0/main";
-export const TTS_MODEL_FILE = `${TTS_REPO}/model.int8.onnx`;
-export const TTS_VOICES_FILE = `${TTS_REPO}/voices.bin`;
-export const TTS_TOKENS_FILE = `${TTS_REPO}/tokens.txt`;
-export const TTS_FILES: readonly string[] = [TTS_MODEL_FILE, TTS_VOICES_FILE, TTS_TOKENS_FILE];
-
-// A sherpa Whisper model is a 3-file bundle (encoder + decoder + tokens). The
-// curated catalog and the stt.modelPath setting carry the ENCODER spec; the
-// decoder + tokens are derived from sherpa's fixed naming convention
-// (`<m>-encoder[.int8].onnx` -> `<m>-decoder[.int8].onnx` / `<m>-tokens.txt`),
-// so one setting stays the source of truth while the download/requirements flow
-// expands it to all three files.
-export interface SttBundle {
-  encoder: string;
-  decoder: string;
-  tokens: string;
+// A sherpa speech model (STT or TTS) is a bundle of role-tagged files, and the
+// roles differ by family (whisper: encoder/decoder/tokens; sense-voice:
+// model/tokens; kokoro: model/voices/tokens; ...). Rather than guess sibling
+// filenames from one spec, the curated catalog lists every file explicitly and
+// selection bakes the chosen bundle into `stt.modelFiles` / `tts.modelFiles` as
+// a JSON object mapping each sherpa role to its HF spec. The download flow and
+// the speech sidecar read that map; no naming convention is assumed. (espeak-ng
+// phonemizer data is NOT listed here: it ships inside the speech binary's
+// archive and is added by the sidecar for the kokoro/kitten families.)
+export function modelFilesMap(v: unknown): Record<string, string> | null {
+  if (typeof v !== "string" || v.trim() === "") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(v);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const out: Record<string, string> = {};
+  for (const [role, spec] of Object.entries(parsed)) {
+    if (typeof spec !== "string") return null;
+    out[role] = spec;
+  }
+  return out;
 }
-export function sttBundleFiles(encoderSpec: string): SttBundle {
-  return {
-    encoder: encoderSpec,
-    // Anchor to the filename suffix so a repo/branch segment that happens to
-    // contain "-encoder" isn't rewritten (only the trailing model file is).
-    decoder: encoderSpec.replace(/-encoder(\.int8)?\.onnx$/, "-decoder$1.onnx"),
-    tokens: encoderSpec.replace(/-encoder(\.int8)?\.onnx$/, "-tokens.txt"),
-  };
+
+/** The list of HF file specs a `*.modelFiles` setting references. Returns [] for
+ *  a missing or malformed value; `modelFilesError` is the loud-failure guard for
+ *  validating manual edits. */
+export function parseModelFiles(v: unknown): string[] {
+  const map = modelFilesMap(v);
+  return map ? Object.values(map).filter(isHfSpec) : [];
+}
+
+/** Human-readable error if a `*.modelFiles` value is present but not a JSON
+ *  object mapping each role to an `@user/repo/branch/file` spec. null when valid
+ *  or empty, so a malformed manual edit is rejected at PATCH time rather than
+ *  silently producing an empty bundle the sidecar can't load. */
+export function modelFilesError(v: unknown): string | null {
+  if (v === undefined || v === null || v === "") return null;
+  const map = modelFilesMap(v);
+  if (!map) {
+    return "must be a JSON object mapping each file role to an @user/repo/branch/file spec";
+  }
+  for (const [role, spec] of Object.entries(map)) {
+    if (!isHfSpec(spec)) return `role "${role}" must be an @user/repo/branch/file spec`;
+  }
+  return null;
 }
 
 // Embedding model for toolkit tool-relevance RAG: an all-MiniLM-L6-v2 GGUF
@@ -89,9 +106,11 @@ function isHfSpec(v: unknown): v is string {
 /** Model files (HF specs) the current settings require, tagged with their
  *  requirement group. The single source of truth consumed by both the core
  *  (`sourcesForKind` / requirements) and the client. llm local → modelPath
- *  (+ mmproj if image support); stt enabled+local → the whisper bundle's three
- *  files; tts (when enabled) → the kokoro bundle's three files; embed → the
- *  MiniLM GGUF (always, for tool-relevance). */
+ *  (+ mmproj if image support); stt enabled+local → every file in its bundle;
+ *  tts (when enabled) → every file in its bundle; embed → the MiniLM GGUF
+ *  (always, for tool-relevance). The stt/tts bundles are read from the
+ *  `*.modelFiles` map that selection baked from the catalog, so any family's
+ *  file set is covered without assuming filenames. */
 export function requiredModelRefs(s: Record<string, unknown>): RequiredModelRef[] {
   const out: RequiredModelRef[] = [];
   const llmLocal = s["llm.provider"] !== "external";
@@ -102,15 +121,13 @@ export function requiredModelRefs(s: Record<string, unknown>): RequiredModelRef[
   if (llmLocal && isHfSpec(llmModel)) out.push({ source: llmModel, group: "llm" });
   const mmproj = s["llm.mmprojPath"];
   if (llmLocal && imagesOn && isHfSpec(mmproj)) out.push({ source: mmproj, group: "llm" });
-  const sttModel = s["stt.modelPath"];
-  if (sttActive && isHfSpec(sttModel)) {
-    const bundle = sttBundleFiles(sttModel);
-    out.push({ source: bundle.encoder, group: "stt" });
-    out.push({ source: bundle.decoder, group: "stt" });
-    out.push({ source: bundle.tokens, group: "stt" });
+  if (sttActive) {
+    for (const spec of parseModelFiles(s["stt.modelFiles"]))
+      out.push({ source: spec, group: "stt" });
   }
   if (s["tts.enabled"]) {
-    for (const f of TTS_FILES) out.push({ source: f, group: "tts" });
+    for (const spec of parseModelFiles(s["tts.modelFiles"]))
+      out.push({ source: spec, group: "tts" });
   }
   out.push({ source: EMBED_MODEL_FILE, group: "embed" });
   return out;
@@ -126,7 +143,6 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   documentsGroup,
   scheduledPromptsGroup,
   greetingsGroup,
-  toolkitsGroup,
   toolsGroup,
   dualModelGroup,
   sttGroup,
@@ -371,7 +387,10 @@ export function getPresetFieldIds(groupId: string): Set<string> {
   for (const section of group.sections) {
     for (const field of section.fields) {
       if (
-        (field.type !== "preset" && field.type !== "model_preset" && field.type !== "stt_preset") ||
+        (field.type !== "preset" &&
+          field.type !== "model_preset" &&
+          field.type !== "stt_preset" &&
+          field.type !== "tts_preset") ||
         !field.presetConfig
       ) {
         continue;
@@ -458,7 +477,12 @@ function fieldMatchesQuery(field: SettingField, q: string): boolean {
     }
   }
 
-  if (field.type === "preset" || field.type === "model_preset" || field.type === "stt_preset") {
+  if (
+    field.type === "preset" ||
+    field.type === "model_preset" ||
+    field.type === "stt_preset" ||
+    field.type === "tts_preset"
+  ) {
     for (const opt of field.presetConfig.options) {
       if (opt.label.toLowerCase().includes(q)) return true;
     }
@@ -496,6 +520,7 @@ function settingValueTypeOk(field: SettingField, value: unknown): boolean {
     case "preset":
     case "model_preset":
     case "stt_preset":
+    case "tts_preset":
       return typeof value === "string";
     case "services":
     case "storage":
@@ -557,6 +582,10 @@ export function validateSettingsPatch(patch: Record<string, unknown>): string[] 
     ) {
       const re = getValidationError(field.regex, value);
       if (re) errors.push(`"${key}": ${re}`);
+    }
+    if (key === "stt.modelFiles" || key === "tts.modelFiles") {
+      const e = modelFilesError(value);
+      if (e) errors.push(`"${key}": ${e}`);
     }
   }
   return errors;

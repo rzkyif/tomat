@@ -15,8 +15,43 @@ import { settingsState } from "./settings.svelte";
 const log = getLogger("tts");
 
 // Local shims that replace the deleted $lib/sidecar/tts module.
+
+// How long to wait for the speech sidecar to come up before pre-warming, how
+// long to keep waiting if it never even starts loading, and the poll interval.
+const TTS_READY_TIMEOUT_MS = 20_000;
+const TTS_READY_GRACE_MS = 3_000;
+const TTS_READY_POLL_MS = 250;
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function loadTtsModel(): Promise<void> {
+  // `/load` is a no-op: the core-managed speech sidecar owns the TTS model
+  // lifecycle and spawns when tts.enabled flips on (services/sidecar-boot.ts).
+  // Wait for it to report ready before returning, so the caller's pre-warm
+  // synth lands on a loaded engine instead of racing the ~2 s sidecar spawn - a
+  // race that 503s, fails the pre-warm silently, and leaves the user's first
+  // real reply paying the cold-start cost.
   await cores().api().tts.load();
+  const start = performance.now();
+  let sawLoading = false;
+  while (performance.now() - start < TTS_READY_TIMEOUT_MS) {
+    let status: { loaded: boolean; loading: boolean } | null = null;
+    try {
+      status = await cores().api().tts.status();
+    } catch {
+      // Core momentarily unreachable (e.g. still booting); retry until the deadline.
+    }
+    if (status?.loaded) return;
+    if (status?.loading) {
+      sawLoading = true;
+    } else if (!sawLoading && performance.now() - start > TTS_READY_GRACE_MS) {
+      // Never began loading within the grace window: the sidecar isn't coming
+      // up (most likely the model files aren't downloaded yet). Don't block the
+      // full timeout; TTS loads lazily on the next synth once the files land.
+      return;
+    }
+    await delay(TTS_READY_POLL_MS);
+  }
 }
 
 async function synthesizeTts(text: string, voice?: string, speed?: number): Promise<Blob> {
@@ -572,3 +607,11 @@ class TTSState {
 }
 
 export const ttsState = new TTSState();
+
+if (import.meta.hot) {
+  // Dev-only. When HMR replaces this module the outgoing `ttsState` is orphaned
+  // mid-playback: its current audio element keeps playing and its recheck timer
+  // keeps firing maybeDispatch on a queue nothing feeds anymore. reset() stops
+  // the audio, clears the queue, and cancels the timer so the swap is silent.
+  import.meta.hot.dispose(() => ttsState.reset());
+}

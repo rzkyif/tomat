@@ -118,10 +118,20 @@ export const promptsGroup: SettingGroup = {
         {
           id: "prompts.titleGenerationPrompt",
           name: "Title Generation",
-          description: "Creates a short session title from your first message.",
+          description:
+            "Creates a short session title from the conversation. `{firstMessage}` inserts the opening message and `{recentMessages}` inserts the latest messages that fit the context window.",
           type: "multiline",
           defaultValue: DEFAULT_TITLE_GENERATION_PROMPT,
           regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "prompts.titleGenerationThinkingBudget",
+          name: "Title Thinking Budget",
+          description: "Tokens title generation may spend thinking. 0 turns thinking off.",
+          type: "number",
+          defaultValue: 128,
+          placeholder: "0",
           descriptionTier: "ondemand",
         },
         {
@@ -134,12 +144,31 @@ export const promptsGroup: SettingGroup = {
           descriptionTier: "ondemand",
         },
         {
+          id: "prompts.autocorrectThinkingBudget",
+          name: "Cleanup Thinking Budget",
+          description: "Tokens transcription cleanup may spend thinking. 0 turns thinking off.",
+          type: "number",
+          defaultValue: 0,
+          placeholder: "0",
+          descriptionTier: "ondemand",
+        },
+        {
           id: "prompts.documentSummaryPrompt",
           name: "Document Summary",
-          description: "Creates the short summary used to match and share each document.",
+          description:
+            "Creates the short summary used to match and surface each relevant document.",
           type: "multiline",
           defaultValue: DEFAULT_DOCUMENT_SUMMARY_PROMPT,
           regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "prompts.documentSummaryThinkingBudget",
+          name: "Summary Thinking Budget",
+          description: "Tokens the document summary may spend thinking. 0 turns thinking off.",
+          type: "number",
+          defaultValue: 256,
+          placeholder: "0",
           descriptionTier: "ondemand",
         },
         {
@@ -152,6 +181,15 @@ export const promptsGroup: SettingGroup = {
           descriptionTier: "ondemand",
         },
         {
+          id: "prompts.mergeTranscriptionThinkingBudget",
+          name: "Merge Thinking Budget",
+          description: "Tokens transcription merge may spend thinking. 0 turns thinking off.",
+          type: "number",
+          defaultValue: 0,
+          placeholder: "0",
+          descriptionTier: "ondemand",
+        },
+        {
           id: "prompts.complexityDetectionPrompt",
           name: "Complexity Check",
           description:
@@ -160,6 +198,15 @@ export const promptsGroup: SettingGroup = {
           defaultValue: DEFAULT_COMPLEXITY_DETECTION_PROMPT,
           regex: [{ regex: "\\S", errorMessage: "Prompt cannot be empty" }],
           descriptionTier: "always",
+        },
+        {
+          id: "prompts.complexityDetectionThinkingBudget",
+          name: "Complexity Thinking Budget",
+          description: "Tokens the complexity check may spend thinking. 0 turns thinking off.",
+          type: "number",
+          defaultValue: 0,
+          placeholder: "0",
+          descriptionTier: "ondemand",
         },
       ],
     },

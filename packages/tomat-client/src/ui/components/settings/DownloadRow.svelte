@@ -3,6 +3,7 @@
   import { SETTINGS_SCHEMA } from "@tomat/shared";
   import { downloadsState } from "../../state";
   import { formatBytes } from "$lib/util/format";
+  import { useBlink } from "$composables/use-blink.svelte";
   import IconButton from "../ui/IconButton.svelte";
 
   let { item } = $props<{ item: DownloadItem }>();
@@ -15,7 +16,13 @@
       "i-material-symbols-download-rounded",
   );
 
+  // Newly-finished rows draw attention with the shared "attention ping": a text
+  // brightness pulse driven by a 500ms blink (matching the transition duration)
+  // instead of a colored row fill. The flash clears itself after a short window
+  // (downloadsState.openModal), so the pulse fades back to the resting tone.
   const isFlashing = $derived(downloadsState.flashingIds.has(item.id));
+  const blink = useBlink();
+  $effect(() => blink.run(isFlashing));
 
   const progressPct = $derived(() => {
     if (item.sizeBytes && item.sizeBytes > 0) {
@@ -28,7 +35,6 @@
   // positioned fill div below so the row content (text + actions) sits on
   // top with no inversion (matches the user's "no text/bg inversion" ask).
   const rowBg = $derived(() => {
-    if (isFlashing) return "bg-accent-green-200";
     if (item.status === "Downloading" || item.status === "Pending")
       return "bg-default-200/40";
     return "";
@@ -36,6 +42,8 @@
 
   const textClass = $derived(() => {
     if (item.status === "Error") return "text-accent-red-400";
+    // While flashing, pulse the text between bright and dim default tones.
+    if (isFlashing) return blink.on ? "text-default-900" : "text-default-500";
     if (item.status === "Pending" || item.status === "Cancelled")
       return "text-default-500";
     return "text-default-800";
@@ -70,11 +78,14 @@
     ></div>
   {/if}
 
-  <i class="flex text-base shrink-0 relative z-10 {textClass()} {groupIcon}"
+  <i
+    class="flex text-base shrink-0 relative z-10 transition-colors duration-500 {textClass()} {groupIcon}"
   ></i>
 
   <div class="flex-1 min-w-0 relative z-10 flex items-center gap-2">
-    <span class="text-sm truncate {textClass()}">{item.filename}</span>
+    <span class="text-sm truncate transition-colors duration-500 {textClass()}">
+      {item.filename}
+    </span>
     {#if sizeText()}
       <span class="text-xs text-default-500 tabular-nums shrink-0">
         {sizeText()}

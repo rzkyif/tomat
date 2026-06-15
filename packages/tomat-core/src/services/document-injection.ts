@@ -1,7 +1,7 @@
 // Document context injected into a chat turn's prompt: the "relevant documents"
 // summary block (embedding-scored against the turn's query) and the per-message
 // `@token` document expansions. Both read the documents store; a turn shares its
-// query embedding with relevantDocumentsPrompt so it embeds at most once.
+// query embedding with relevantDocuments so it embeds at most once.
 import { documentsStore } from "./documents-store.ts";
 import { embed, isEmbeddingModelReady } from "./embedding.ts";
 import { topKBySimilarity } from "./relevance.ts";
@@ -11,43 +11,81 @@ import { topKBySimilarity } from "./relevance.ts";
 // commonly land near 0.1 to 0.2.
 const DOCUMENT_SIMILARITY_FLOOR = 0.25;
 
-/** "Relevant documents" system-prompt block for this turn's query, or null
- *  when nothing scores above the floor (or nothing is indexed yet).
- *  Exported for tests; chat turns call it with the filter's query vector. */
-export async function relevantDocumentsPrompt(
+/** Whether the user has any documents at all. Gates the document_filter bubble:
+ *  with no documents there is nothing to select, so a turn shows no bubble
+ *  rather than an (empty, hidden) one on every message. */
+export function hasDocuments(): boolean {
+  try {
+    return documentsStore().list().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** One indexed document scored against this turn's query. Mirrors the wire
+ *  shape (DocumentFilterEntryPersisted) the document_filter bubble carries. */
+export interface RelevantDocument {
+  documentId: string;
+  title: string;
+  summary: string;
+  score: number;
+}
+
+/** Documents whose summary scores above the relevance floor for this turn's
+ *  query, ranked by cosine. Empty when nothing qualifies (or nothing is
+ *  indexed / no query / the embedding model isn't ready). chat turns pass the
+ *  tool filter's query vector so the turn embeds at most once. */
+export async function relevantDocuments(
   queryText: string | undefined,
   queryVector: Float32Array | undefined,
   maxRelevant: number,
-): Promise<string | null> {
-  if (!queryText) return null;
+): Promise<RelevantDocument[]> {
+  if (!queryText) return [];
   const embeddings = documentsStore().loadAllEmbeddings();
-  if (embeddings.size === 0) return null;
+  if (embeddings.size === 0) return [];
   if (!queryVector) {
-    if (!(await isEmbeddingModelReady())) return null;
+    if (!(await isEmbeddingModelReady())) return [];
     [queryVector] = await embed([queryText]);
   }
-  if (!queryVector) return null;
+  if (!queryVector) return [];
   const scored = topKBySimilarity(
     queryVector,
     [...embeddings].map(([id, vector]) => ({ item: id, vector })),
     maxRelevant,
   ).filter((s) => s.score >= DOCUMENT_SIMILARITY_FLOOR);
-  if (scored.length === 0) return null;
+  if (scored.length === 0) return [];
   const byId = new Map(
     documentsStore()
       .list()
       .map((m) => [m.id, m]),
   );
-  const lines: string[] = [];
-  for (const { item } of scored) {
+  const out: RelevantDocument[] = [];
+  for (const { item, score } of scored) {
     const meta = byId.get(item);
     if (!meta) continue;
-    lines.push(`- ${meta.title}: ${meta.summary ?? "(not summarized yet)"}`);
+    out.push({ documentId: meta.id, title: meta.title, summary: meta.summary ?? "", score });
   }
-  if (lines.length === 0) return null;
+  return out;
+}
+
+/** The "relevant documents" system-prompt block built from already-scored
+ *  entries, or null when there are none. */
+export function relevantDocumentsBlock(docs: RelevantDocument[]): string | null {
+  if (docs.length === 0) return null;
+  const lines = docs.map((d) => `- ${d.title}: ${d.summary || "(not summarized yet)"}`);
   return `Documents possibly relevant to the user's request (read the full content with the read_document tool):\n${lines.join(
     "\n",
   )}`;
+}
+
+/** Score + format in one call. Exported for tests; chat turns call
+ *  `relevantDocuments` directly so they can also build the bubble. */
+export async function relevantDocumentsPrompt(
+  queryText: string | undefined,
+  queryVector: Float32Array | undefined,
+  maxRelevant: number,
+): Promise<string | null> {
+  return relevantDocumentsBlock(await relevantDocuments(queryText, queryVector, maxRelevant));
 }
 
 // Bound the injected document content: a multi-MB document, or the same

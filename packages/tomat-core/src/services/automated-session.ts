@@ -11,7 +11,7 @@
 // and the client catches up from the session list on its next connect.
 
 import type { Session, UserMessage } from "@tomat/shared";
-import { DEFAULT_TOOLS_HINT } from "@tomat/shared";
+import { applyTitleDatetime, DEFAULT_TOOLS_HINT } from "@tomat/shared";
 import { newMessageId, newStreamId } from "../shared/ids.ts";
 import { getLogger } from "../shared/log.ts";
 import { wsHub } from "../ws/hub.ts";
@@ -33,9 +33,12 @@ export interface AutomatedSessionInput {
 }
 
 export function runAutomatedSession(input: AutomatedSessionInput): Session {
+  // Stamp `{datetime}` in the title with the creation time, so a greeting (or
+  // scheduled prompt) titled "Greeting {datetime}" reads "Greeting 2026-06-15
+  // 14:30", matching the default-title form before LLM title generation.
   const session = sessionsRepo().create({
     ownerClientId: input.ownerClientId,
-    title: input.title,
+    title: applyTitleDatetime(input.title, Date.now()),
   });
   const message: UserMessage = {
     id: newMessageId(),

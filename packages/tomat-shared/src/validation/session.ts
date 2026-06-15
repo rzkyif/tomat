@@ -95,6 +95,17 @@ const toolFilterEntrySchema = z
   })
   .strict();
 
+// --- DocumentFilter inner shapes ----------------------------------------
+
+const documentFilterEntrySchema = z
+  .object({
+    documentId: z.string(),
+    title: z.string(),
+    summary: z.string(),
+    score: z.number(),
+  })
+  .strict();
+
 // --- Per-role full input schemas ----------------------------------------
 //
 // id / ord / createdAtMs are optional because the server fills them in
@@ -168,11 +179,21 @@ export const toolFilterMessageInputSchema = z
   .object({
     ...baseShape,
     role: z.literal("tool_filter"),
-    status: z.enum(["filtering", "complete", "error"]),
+    status: z.enum(["complete", "error"]),
     phase1: z.array(toolFilterPhase1Schema).optional(),
     phase2: z.array(toolFilterEntrySchema).optional(),
     alwaysAvailable: z.array(toolFilterEntrySchema).optional(),
     toolsSent: z.number().int().min(0).optional(),
+    errorMessage: z.string().optional(),
+  })
+  .strict();
+
+export const documentFilterMessageInputSchema = z
+  .object({
+    ...baseShape,
+    role: z.literal("document_filter"),
+    status: z.enum(["complete", "error"]),
+    relevant: z.array(documentFilterEntrySchema).optional(),
     errorMessage: z.string().optional(),
   })
   .strict();
@@ -194,6 +215,7 @@ export const messageInputSchema = z.discriminatedUnion("role", [
   toolMessageInputSchema,
   reasoningMessageInputSchema,
   toolFilterMessageInputSchema,
+  documentFilterMessageInputSchema,
   errorMessageInputSchema,
 ]);
 
@@ -212,6 +234,7 @@ export const messagePatchSchemaByRole = {
   tool: toolMessageInputSchema.omit({ role: true }).partial().strict(),
   reasoning: reasoningMessageInputSchema.omit({ role: true }).partial().strict(),
   tool_filter: toolFilterMessageInputSchema.omit({ role: true }).partial().strict(),
+  document_filter: documentFilterMessageInputSchema.omit({ role: true }).partial().strict(),
   error: errorMessageInputSchema.omit({ role: true }).partial().strict(),
 } as const;
 

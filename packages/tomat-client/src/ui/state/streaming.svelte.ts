@@ -417,3 +417,17 @@ class StreamingState {
 }
 
 export const streamingState = new StreamingState();
+
+if (import.meta.hot) {
+  // Dev-only. HMR re-evaluates this module and replaces `streamingState` with a
+  // fresh instance, but the prior instance's WS subscription lives in the
+  // cores() singleton (not re-evaluated here), so it stays bound to the live
+  // socket. Left attached, every hot-replaced instance keeps receiving frames;
+  // sitting at streamId=null/isActive=false it adopts the next user stream via
+  // the foreign-stream path and re-feeds the same assistant text into the
+  // shared TTS queue. Each accumulated instance adds one more pass, so a
+  // streamed sentence is synthesized and played once per instance (the
+  // "sentences/batches repeat 2-4x after a few saves" bug, dev only). Detach
+  // the outgoing instance before it's discarded so only the live one feeds TTS.
+  import.meta.hot.dispose(() => streamingState.detach());
+}

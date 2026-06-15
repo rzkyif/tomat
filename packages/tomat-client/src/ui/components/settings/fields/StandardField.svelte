@@ -3,6 +3,7 @@
   import { evalCondition } from "@tomat/shared";
   import type { Monitor } from "$lib/util/types";
   import { settingsState } from "../../../state";
+  import { cores } from "$lib/core";
   import FieldCard from "./FieldCard.svelte";
   import Input from "../../ui/Input.svelte";
   import Select from "../../ui/Select.svelte";
@@ -26,6 +27,26 @@
     onReset: (fieldId: string) => void;
   }>();
 
+  // Voices of the currently-selected TTS model (optionsSource "tts_voices"),
+  // fetched from the core and refreshed whenever the model changes.
+  let ttsVoices = $state<SettingOption[]>([]);
+  $effect(() => {
+    if (field.type !== "select" || field.optionsSource !== "tts_voices") return;
+    // Re-run when the selected model changes (a preset/model switch).
+    void settingsState.currentSettings["tts.modelType"];
+    void settingsState.currentSettings["tts.modelPath"];
+    void loadTtsVoices();
+  });
+  async function loadTtsVoices(): Promise<void> {
+    if (!cores().currentEntry()) return;
+    try {
+      const voices = await cores().api().tts.voices();
+      ttsVoices = voices.map((v) => ({ value: v.id, label: v.label }));
+    } catch {
+      ttsVoices = [];
+    }
+  }
+
   function resolveSelectOptions(): SettingOption[] {
     if (field.type !== "select") return [];
     if (field.optionsSource === "monitors") {
@@ -43,6 +64,7 @@
         ...fonts.map((f: string) => ({ value: f, label: f })),
       ];
     }
+    if (field.optionsSource === "tts_voices") return ttsVoices;
     return field.options ?? [];
   }
   const selectOptions = $derived(resolveSelectOptions());

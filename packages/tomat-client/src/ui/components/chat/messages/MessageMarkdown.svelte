@@ -343,6 +343,8 @@
       list-style-type: lower-alpha;
     }
 
+    /* Display-only task-list checkboxes. The interactive ui/Checkbox.svelte
+       component mirrors this look (box + check glyph); keep them in sync. */
     :global(li:has(input[type="checkbox"])) {
       list-style: none;
       margin-left: -2em;

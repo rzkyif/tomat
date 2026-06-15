@@ -145,8 +145,9 @@ describe("streamingState live == reload parity", () => {
       ({ kind: "chat.delta", streamId, messageId, delta: text }) as ServerToClientFrame;
 
     const script: ServerToClientFrame[] = [
-      birth("f1", "u1", { status: "filtering", phase1: undefined, toolsSent: undefined }),
-      final("f1"),
+      // The tool_filter bubble has no loading state: it emits only its terminal
+      // snapshot (first-emission finalize), positioned right after the user msg.
+      final("f1", "u1"),
       birth("r1", "f1", { content: "", reasoningDurationMs: undefined }),
       delta("r1", "Thinking."),
       birth("a1", "r1", { content: "" }),

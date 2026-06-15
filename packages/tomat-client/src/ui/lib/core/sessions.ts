@@ -19,7 +19,16 @@ export class SessionsApi {
   }
 
   patchTitle(id: string, title: string): Promise<{ id: string; title: string }> {
-    return this.client.patch(`/api/v1/sessions/${encodeURIComponent(id)}`, { title });
+    return this.client.patch(`/api/v1/sessions/${encodeURIComponent(id)}`, {
+      title,
+    });
+  }
+
+  regenerateTitle(id: string): Promise<void> {
+    return this.client.post(
+      `/api/v1/sessions/${encodeURIComponent(id)}/regenerate-title`,
+      {},
+    ) as Promise<void>;
   }
 
   delete(id: string): Promise<void> {

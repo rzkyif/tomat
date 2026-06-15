@@ -23,11 +23,20 @@ export interface LlmEndpointConfig {
   apiKey: string;
   model: string;
   // Optional reasoning hint (provider-specific encoding handled below).
-  reasoning?: "off" | "on" | "auto";
-  // OpenAI-style sampling overrides.
+  reasoning?: "off" | "on";
+  // OpenAI-style sampling (sent to both local and external endpoints).
   temperature?: number;
   topP?: number;
   maxTokens?: number;
+  // llama.cpp-only samplers (sent in the extra body for local; OpenAI-style
+  // endpoints reject them) and the per-turn thinking budget (local only).
+  topK?: number;
+  minP?: number;
+  repeatPenalty?: number;
+  reasoningBudget?: number;
+  // External-only: the OpenAI-style `reasoning_effort` level. Local endpoints
+  // use `reasoningBudget` instead.
+  reasoningEffort?: "minimal" | "low" | "medium" | "high";
   // Test seam: when present, the OpenAI SDK uses this fetch instead of the
   // global. Production callers leave this undefined. Typed to the SDK's
   // `Fetch` shape (single-signature `(input, init?) => Promise<Response>`)
@@ -48,6 +57,12 @@ export interface LlmRequest {
     temperature?: number;
     topP?: number;
     maxTokens?: number;
+    // Per-call thinking budget, in tokens. 0 turns thinking off; N>0 enables
+    // it and caps the `<think>` block at N tokens. When set, it overrides the
+    // endpoint's reasoning mode (used by single-shot utility calls, each of
+    // which has its own budget setting). Leave undefined for the chat path,
+    // which uses the endpoint reasoning mode + the server's boot budget.
+    reasoningBudget?: number;
   };
   signal?: AbortSignal;
 }
@@ -95,21 +110,47 @@ export async function* streamChatCompletion(req: LlmRequest): AsyncIterable<LlmD
   const maxTokens = req.overrides?.maxTokens ?? req.endpoint.maxTokens;
 
   const extra: Record<string, unknown> = {};
-  if (req.endpoint.reasoning) {
-    const isLocal = isLocalEndpoint(req.endpoint.baseUrl);
+  const isLocal = isLocalEndpoint(req.endpoint.baseUrl);
+  const perCallBudget = req.overrides?.reasoningBudget;
+  if (perCallBudget !== undefined) {
+    // A per-call thinking budget overrides the endpoint reasoning mode. 0
+    // turns thinking off; N>0 enables it and caps the `<think>` block. llama.cpp
+    // honors `reasoning_budget` per request (overriding the server boot budget).
+    const think = perCallBudget > 0;
     if (isLocal) {
-      // llama.cpp accepts `chat_template_kwargs.enable_thinking` (per its
-      // server docs). Thinking-by-default models (e.g. Qwen3) keep thinking
-      // unless the template is explicitly told `false`, so "off" must send
-      // the flag rather than omit it. "auto" lets the model decide whether
-      // to actually produce a trace.
-      extra.chat_template_kwargs = { enable_thinking: req.endpoint.reasoning !== "off" };
-    } else if (req.endpoint.reasoning !== "off") {
-      // OpenAI-compatible servers accept `reasoning_effort`: on→high,
-      // auto→low. "off" sends nothing: non-reasoning models reject the
-      // parameter.
-      extra.reasoning_effort = req.endpoint.reasoning === "on" ? "high" : "low";
+      extra.chat_template_kwargs = { enable_thinking: think };
+      if (think) extra.reasoning_budget = perCallBudget;
+    } else if (think) {
+      // OpenAI-compatible servers take no token budget; ask for thinking only.
+      extra.reasoning_effort = "high";
     }
+  } else if (req.endpoint.reasoning) {
+    if (isLocal) {
+      // llama.cpp accepts `chat_template_kwargs.enable_thinking` (per its server
+      // docs). Thinking-by-default models (e.g. Qwen3) keep thinking unless the
+      // template is told `false`, so "off" must send the flag, not omit it.
+      const think = req.endpoint.reasoning === "on";
+      extra.chat_template_kwargs = { enable_thinking: think };
+      // The boot `--reasoning-budget` is gone; carry the per-turn budget here so
+      // a capped `<think>` still applies on the chat path (overrides the server
+      // default per request).
+      if (think && req.endpoint.reasoningBudget) {
+        extra.reasoning_budget = req.endpoint.reasoningBudget;
+      }
+    } else if (req.endpoint.reasoning === "on") {
+      // OpenAI-compatible servers take no token budget; ask for an effort level.
+      // "off" sends nothing: non-reasoning models reject the parameter.
+      extra.reasoning_effort = req.endpoint.reasoningEffort ?? "high";
+    }
+  }
+  // Local-only samplers llama.cpp accepts in the extra body (OpenAI-style
+  // endpoints reject them). There is no per-call override channel, so single-shot
+  // utility calls receive these too; they pin a low temperature, where top_k /
+  // min_p are near-inert and a mild repeat penalty is harmless.
+  if (isLocal) {
+    if (req.endpoint.topK !== undefined) extra.top_k = req.endpoint.topK;
+    if (req.endpoint.minP !== undefined) extra.min_p = req.endpoint.minP;
+    if (req.endpoint.repeatPenalty !== undefined) extra.repeat_penalty = req.endpoint.repeatPenalty;
   }
 
   const stream = await client.chat.completions.create(

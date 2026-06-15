@@ -6,6 +6,7 @@
 import { assertEquals } from "@std/assert";
 import {
   assistantMessageInputSchema,
+  documentFilterMessageInputSchema,
   errorMessageInputSchema,
   messageInputSchema,
   messagePatchSchemaByRole,
@@ -16,7 +17,7 @@ import {
   userMessageInputSchema,
 } from "./session.ts";
 
-Deno.test("messageInputSchema: parses each of the 7 roles", () => {
+Deno.test("messageInputSchema: parses each of the 8 roles", () => {
   const cases = [
     { role: "user", content: "hi" },
     { role: "assistant", content: "hi" },
@@ -31,6 +32,7 @@ Deno.test("messageInputSchema: parses each of the 7 roles", () => {
     },
     { role: "reasoning", content: "think" },
     { role: "tool_filter", status: "complete" },
+    { role: "document_filter", status: "complete" },
     { role: "error", content: "boom" },
   ];
   for (const c of cases) {
@@ -123,14 +125,21 @@ Deno.test("messagePatchSchemaByRole: accepts a partial of fields valid for the r
   assertEquals(messagePatchSchemaByRole.assistant.safeParse({ interrupted: true }).success, true);
 });
 
-Deno.test("reasoning + tool_filter + error: each parses its minimum body", () => {
+Deno.test("reasoning + tool_filter + document_filter + error: each parses its minimum body", () => {
   for (const [schema, body] of [
     [reasoningMessageInputSchema, { role: "reasoning", content: "" }],
     [
       toolFilterMessageInputSchema,
       {
         role: "tool_filter",
-        status: "filtering",
+        status: "complete",
+      },
+    ],
+    [
+      documentFilterMessageInputSchema,
+      {
+        role: "document_filter",
+        status: "complete",
       },
     ],
     [errorMessageInputSchema, { role: "error", content: "boom" }],

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { PresetOption, SettingField, SttCatalogModel } from "@tomat/shared";
+  import { primaryFileSpec, STT_PRIMARY_ROLE } from "@tomat/shared";
   import { settingsState } from "../../../state";
   import { sttModelsState } from "../../../state/stt-models.svelte";
   import { cores } from "$lib/core";
@@ -70,7 +71,11 @@
   // to "Manual Configuration".
   const selectedModelView = $derived(
     (ss.catalog?.models ?? []).find((m: SttCatalogModel) =>
-      m.quants.some((q) => q.modelSpec === settingsState.currentSettings["stt.modelPath"])
+      m.quants.some(
+        (q) =>
+          primaryFileSpec(q, STT_PRIMARY_ROLE[m.family]) ===
+            settingsState.currentSettings["stt.modelPath"],
+      )
     ) ?? null,
   );
 
@@ -92,7 +97,7 @@
 
   const quantOptions = $derived(
     (selectedModelView?.quants ?? []).map((q) => ({
-      value: q.modelSpec,
+      value: selectedModelView ? primaryFileSpec(q, STT_PRIMARY_ROLE[selectedModelView.family]) : "",
       label: `${q.quant} · ${size(q.fileSizeBytes)}`,
     })),
   );

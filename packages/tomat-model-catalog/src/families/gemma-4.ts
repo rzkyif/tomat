@@ -20,6 +20,10 @@ const aa = (value: number) => [
   { source: "artificial-analysis", metric: "intelligence-index", value },
 ];
 
+// Google's recommended Gemma sampling. Uniform across the family; users can
+// adjust in Model Behavior.
+const SAMPLING = { temperature: 1.0, topP: 0.95, topK: 64, minP: 0, repeatPenalty: 1.0 };
+
 const E2B_MMPROJ = {
   mmprojSpec: spec("gemma-4-E2B-it-GGUF", "mmproj-F16.gguf"),
   mmprojSizeBytes: 985654080,
@@ -184,6 +188,7 @@ export const gemma4: ModelFamily = {
       contextMax: 131072,
       arch: { blockCount: 35, embeddingLength: 1536, headCount: 8, headCountKv: 1, headDim: 512 },
       capabilities: { tools: true, vision: true, reasoning: true },
+      sampling: SAMPLING,
       variants: [e2bStandard, e2bQat],
     },
     {
@@ -194,6 +199,7 @@ export const gemma4: ModelFamily = {
       contextMax: 131072,
       arch: { blockCount: 42, embeddingLength: 2560, headCount: 8, headCountKv: 2, headDim: 512 },
       capabilities: { tools: true, vision: true, reasoning: true },
+      sampling: SAMPLING,
       variants: [e4bStandard, e4bQat],
     },
     {
@@ -204,6 +210,7 @@ export const gemma4: ModelFamily = {
       contextMax: 262144,
       arch: { blockCount: 60, embeddingLength: 5376, headCount: 32, headCountKv: 16, headDim: 512 },
       capabilities: { tools: true, vision: true, reasoning: true },
+      sampling: SAMPLING,
       variants: [g31bStandard, g31bQat],
     },
   ],

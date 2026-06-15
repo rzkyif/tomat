@@ -8,6 +8,15 @@
 // the WS hub (warn-and-drop on envelope mismatch only) still applies.
 
 import { z } from "zod";
+import {
+  CHAT_DONE_REASONS,
+  SESSION_CREATED_FOCUSES,
+  SESSION_CREATED_REASONS,
+  SESSION_UPDATED_OPS,
+  TOOL_LOG_LEVELS,
+  TOOLKIT_INSTALL_STREAMS,
+} from "../api/ws.ts";
+import { PERMISSION_KINDS } from "../domain/toolkit.ts";
 import { scheduledPromptDraftSchema } from "./scheduled-prompt.ts";
 
 // --- Askuser shapes --------------------------------------------------------
@@ -119,7 +128,7 @@ const chatDoneFrameSchema = z
   .object({
     kind: z.literal("chat.done"),
     streamId: z.string().min(1),
-    reason: z.enum(["stop", "interrupted", "hop_limit"]),
+    reason: z.enum(CHAT_DONE_REASONS),
   })
   .passthrough();
 
@@ -156,19 +165,7 @@ const toolPermissionRequestFrameSchema = z
     kind: z.literal("tool.permission_request"),
     callId: z.string().min(1),
     requestId: z.string().min(1),
-    permissionKind: z.enum([
-      "net",
-      "read",
-      "write",
-      "run",
-      "env",
-      "ffi",
-      "sys",
-      "documents",
-      "llm",
-      "tts",
-      "stt",
-    ]),
+    permissionKind: z.enum(PERMISSION_KINDS),
     resource: z.string(),
     apiName: z.string().optional(),
     declared: z.boolean(),
@@ -182,7 +179,7 @@ const toolLogFrameSchema = z
   .object({
     kind: z.literal("tool.log"),
     callId: z.string().min(1),
-    level: z.enum(["debug", "info", "warn", "error"]),
+    level: z.enum(TOOL_LOG_LEVELS),
     message: z.string(),
   })
   .passthrough();
@@ -216,7 +213,7 @@ const toolkitInstallLogFrameSchema = z
     kind: z.literal("toolkit.install_log"),
     jobId: z.string().min(1),
     id: z.string().min(1),
-    stream: z.enum(["stdout", "stderr"]),
+    stream: z.enum(TOOLKIT_INSTALL_STREAMS),
     line: z.string(),
   })
   .passthrough();
@@ -285,10 +282,11 @@ const sessionUpdatedFrameSchema = z
   .object({
     kind: z.literal("session.updated"),
     sessionId: z.string().min(1),
-    op: z.enum(["title_changed", "message_added", "message_updated", "message_deleted"]),
+    op: z.enum(SESSION_UPDATED_OPS),
     payload: z
       .object({
         title: z.string().optional(),
+        generating: z.boolean().optional(),
         messageId: z.string().optional(),
         message: z.unknown().optional(),
         attachments: z.array(z.unknown()).optional(),
@@ -304,9 +302,9 @@ const sessionCreatedFrameSchema = z
   .object({
     kind: z.literal("session.created"),
     session: z.unknown(),
-    reason: z.enum(["schedule", "greeting"]),
+    reason: z.enum(SESSION_CREATED_REASONS),
     scheduledPromptId: z.string().optional(),
-    focus: z.enum(["show", "show_when_done"]),
+    focus: z.enum(SESSION_CREATED_FOCUSES),
   })
   .passthrough();
 

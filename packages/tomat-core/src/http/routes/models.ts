@@ -11,6 +11,7 @@ import {
   computeRecommendations,
 } from "../../models/fit.ts";
 import { buildSttPresetViews, resolveSttSelection } from "../../models/stt.ts";
+import { buildTtsPresetViews, resolveTtsSelection } from "../../models/tts.ts";
 import { loadCoreSettings, patchCoreSettings } from "../../services/core-settings.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
@@ -164,8 +165,47 @@ export function modelsRoutes(): Hono {
     await patchCoreSettings({
       "stt.provider": "local",
       "stt.preset": applied.preset,
+      "stt.modelType": applied.settings.modelType,
       "stt.modelPath": applied.settings.modelPath,
+      "stt.modelFiles": applied.settings.modelFiles,
       "stt.threads": applied.settings.threads,
+    });
+    return c.json({ applied });
+  });
+
+  // --- Text-to-Speech catalog picker ----------------------------------------
+
+  // The whole TTS lineup plus the resolved curated cards (with each model's
+  // voices, so the voice dropdown can populate from the selection). No fit
+  // engine: TTS bundles are small and all fit everywhere.
+  r.get("/tts/catalog", async (c) => {
+    const catalog = await loadModelCatalog();
+    return c.json({
+      generatedAt: catalog.generatedAt,
+      models: catalog.tts.models,
+      presets: buildTtsPresetViews(catalog),
+    });
+  });
+
+  // Apply a curated card or a specific model/quant: write the tts.* settings
+  // (which makes sidecar-boot reconfigure the speech sidecar). Like STT select,
+  // never downloads; the settings write surfaces any missing file in the
+  // client's pending-downloads confirm modal. Picking a model resets tts.voice
+  // to that model's default voice.
+  r.post("/tts/select", async (c) => {
+    const body = (await readJson(c)) as {
+      presetId?: string;
+      modelId?: string;
+      modelSpec?: string;
+    };
+    const catalog = await loadModelCatalog();
+    const applied = resolveTtsSelection(catalog, body);
+    await patchCoreSettings({
+      "tts.preset": applied.preset,
+      "tts.modelType": applied.settings.modelType,
+      "tts.modelPath": applied.settings.modelPath,
+      "tts.modelFiles": applied.settings.modelFiles,
+      "tts.voice": applied.settings.voice,
     });
     return c.json({ applied });
   });
@@ -232,6 +272,14 @@ function applyToPatch(a: AppliedModelSettings, preset: string): Record<string, u
     "llm.flashAttn": a.flashAttn,
     "llm.supportImages": a.supportImages,
     "llm.idleUnloadSeconds": a.idleUnloadSeconds,
+    "llm.reasoningBudget": a.reasoningBudget,
+    // Sampling is always written (even at the default), so switching models
+    // resets these to the new model's tuning rather than leaving stale values.
+    "llm.temperature": a.temperature,
+    "llm.topP": a.topP,
+    "llm.topK": a.topK,
+    "llm.minP": a.minP,
+    "llm.repeatPenalty": a.repeatPenalty,
   };
 }
 

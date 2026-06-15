@@ -86,16 +86,12 @@
   let count = $derived(baseCount + bypassCount);
 
   let titleText = $derived.by(() => {
-    if (status === "filtering")
-      return "Finding relevant tools...";
     if (status === "error")
       return "Failed to find relevant tools";
     if (baseCount === 0) return "No relevant tools";
     const noun = `relevant tool${count === 1 ? "" : "s"}`;
     return `Found ${count} ${noun}`;
   });
-
-  let isLoading = $derived(status === "filtering");
 
   let expanded = $state(
     untrack(() =>
@@ -131,7 +127,6 @@
 <Bubble
   selectedAlignment={settingsState.getAlignment()}
   size="small"
-  progress={isLoading ? null : undefined}
   {neighborLeft}
   {neighborRight}
 >

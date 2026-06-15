@@ -8,6 +8,7 @@ export type MessageRole =
   | "tool"
   | "reasoning"
   | "tool_filter"
+  | "document_filter"
   | "display"
   | "error";
 
@@ -124,6 +125,10 @@ export interface AssistantMessage extends MessageBase {
   // before the model finished; the persisted content is the partial text
   // streamed up to that point.
   interrupted?: boolean;
+  // True when the model stopped because it hit the context window
+  // (finish_reason "length"), not a natural stop. The reply may be partial or
+  // empty (all the room went to thinking); the UI renders a "cut off" note.
+  truncated?: boolean;
 }
 
 export interface SystemMessage extends MessageBase {
@@ -184,7 +189,7 @@ export interface ToolFilterEntryPersisted {
 
 export interface ToolFilterMessage extends MessageBase {
   role: "tool_filter";
-  status: "filtering" | "complete" | "error";
+  status: "complete" | "error";
   // Candidates ranked by embedding cosine (phase-1 RAG).
   phase1?: ToolFilterPhase1Persisted[];
   // Subset kept by the second-pass LLM filter, if enabled.
@@ -198,6 +203,25 @@ export interface ToolFilterMessage extends MessageBase {
    *  client uses it to mirror the tools hint into the system bubble only
    *  when core really appended it. */
   toolsSent?: number;
+  errorMessage?: string;
+}
+
+// Per-entry shape carried by the document_filter bubble: one indexed document
+// scored against the turn's query by embedding cosine similarity.
+export interface DocumentFilterEntryPersisted {
+  documentId: string;
+  title: string;
+  summary: string;
+  score: number;
+}
+
+export interface DocumentFilterMessage extends MessageBase {
+  role: "document_filter";
+  status: "complete" | "error";
+  // Documents whose summary scored above the relevance floor, ranked by
+  // cosine. Empty when nothing matched (the client hides the bubble unless the
+  // "show empty selections" toggle is on).
+  relevant?: DocumentFilterEntryPersisted[];
   errorMessage?: string;
 }
 
@@ -233,6 +257,7 @@ export type Message =
   | ToolMessage
   | ReasoningMessage
   | ToolFilterMessage
+  | DocumentFilterMessage
   | DisplayMessage
   | ErrorMessage;
 

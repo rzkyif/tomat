@@ -108,3 +108,16 @@ Deno.test("fit: CPU-only backend offloads no layers", () => {
   const rec = computeRecommendations(catalog, hw, {});
   assertEquals(rec.buckets.smallest!.apply.gpuLayers, 0);
 });
+
+Deno.test("fit: applies each model's catalog sampling", () => {
+  const views = buildCatalogViews(catalog, unified(32));
+  const qwen = views.find((m) => m.id === "Qwen/Qwen3.5-4B");
+  const gemma = views.find((m) => m.id === "google/gemma-4-31b-it");
+  assert(qwen && gemma, "both models should be in the catalog");
+  // Qwen ships temperature 0.6 / top_k 20; Gemma ships 1.0 / 64.
+  assertEquals(qwen!.apply.temperature, 0.6);
+  assertEquals(qwen!.apply.topK, 20);
+  assertEquals(qwen!.apply.repeatPenalty, 1.0);
+  assertEquals(gemma!.apply.temperature, 1.0);
+  assertEquals(gemma!.apply.topK, 64);
+});

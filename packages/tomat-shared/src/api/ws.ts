@@ -62,6 +62,30 @@ export type ClientToServerFrame =
       draft?: ScheduledPromptDraft;
     };
 
+// --- Wire enums ------------------------------------------------------------
+//
+// Single source of truth for the literal enums that appear in frames below.
+// The TS unions here derive from these tuples via `(typeof T)[number]`, and
+// the per-frame Zod validators in ../validation/ws.ts reuse the SAME tuples
+// via `z.enum(T)`. That is what keeps the type and the runtime validator from
+// drifting: a value added here flows to both sides at once. (Drift between the
+// two is exactly how a `session.updated` op and a `chat.done` reason were
+// silently dropped by the client before.) `permissionKind` follows the same
+// idea from its own home, `PERMISSION_KINDS` in ../domain/toolkit.ts.
+
+export const CHAT_DONE_REASONS = ["stop", "interrupted", "hop_limit", "length"] as const;
+export const TOOL_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
+export const TOOLKIT_INSTALL_STREAMS = ["stdout", "stderr"] as const;
+export const SESSION_UPDATED_OPS = [
+  "title_changed",
+  "title_generating",
+  "message_added",
+  "message_updated",
+  "message_deleted",
+] as const;
+export const SESSION_CREATED_REASONS = ["schedule", "greeting"] as const;
+export const SESSION_CREATED_FOCUSES = ["show", "show_when_done"] as const;
+
 // --- Server → Client -------------------------------------------------------
 
 // One question in a tool's askUser request. Discriminated by `kind`;
@@ -123,9 +147,9 @@ export type ServerToClientFrame =
   // hub drops the connection after the pong timeout (see armHeartbeat).
   | { kind: "ping" }
   // Chat stream events. The server owns message identity and order: every
-  // chat-born message (assistant, reasoning, tool, tool_filter) is announced
-  // with a `chat.message` snapshot before any delta touches it, and the same
-  // frame kind later carries its persisted terminal form.
+  // chat-born message (assistant, reasoning, tool, tool_filter, document_filter)
+  // is announced with a `chat.message` snapshot before any delta touches it, and
+  // the same frame kind later carries its persisted terminal form.
   | {
       kind: "chat.message";
       streamId: string;
@@ -146,7 +170,7 @@ export type ServerToClientFrame =
   | {
       kind: "chat.done";
       streamId: string;
-      reason: "stop" | "interrupted" | "hop_limit";
+      reason: (typeof CHAT_DONE_REASONS)[number];
     }
   | { kind: "chat.error"; streamId: string; code: ErrorCode; message: string }
   // Tool-call events
@@ -186,7 +210,7 @@ export type ServerToClientFrame =
   | {
       kind: "tool.log";
       callId: string;
-      level: "debug" | "info" | "warn" | "error";
+      level: (typeof TOOL_LOG_LEVELS)[number];
       message: string;
     }
   | { kind: "tool.result"; callId: string; result: unknown }
@@ -197,7 +221,7 @@ export type ServerToClientFrame =
       kind: "toolkit.install_log";
       jobId: string;
       id: string;
-      stream: "stdout" | "stderr";
+      stream: (typeof TOOLKIT_INSTALL_STREAMS)[number];
       line: string;
     }
   | {
@@ -244,9 +268,10 @@ export type ServerToClientFrame =
   | {
       kind: "session.updated";
       sessionId: string;
-      op: "title_changed" | "message_added" | "message_updated" | "message_deleted";
+      op: (typeof SESSION_UPDATED_OPS)[number];
       payload?: {
         title?: string;
+        generating?: boolean;
         messageId?: string;
         message?: unknown;
         attachments?: AttachmentRef[];
@@ -258,12 +283,12 @@ export type ServerToClientFrame =
   | {
       kind: "session.created";
       session: Session;
-      reason: "schedule" | "greeting";
+      reason: (typeof SESSION_CREATED_REASONS)[number];
       scheduledPromptId?: string;
       /** "show": navigate to the session and show the window now;
        *  "show_when_done": navigate silently, show the window when the
        *  session's stream finishes. */
-      focus: "show" | "show_when_done";
+      focus: (typeof SESSION_CREATED_FOCUSES)[number];
     }
   // A running tool proposed a scheduled prompt; the call is paused until
   // the user accepts (possibly after editing the draft) or rejects in chat.

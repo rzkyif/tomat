@@ -60,7 +60,7 @@ export const catalogItem: ReleaseItem = {
     const modelCount = payload.families.reduce((n, f) => n + f.models.length, 0);
     ok(
       `${payload.families.length} families, ${modelCount} models, ` +
-        `${payload.stt.models.length} stt models`,
+        `${payload.stt.models.length} stt models, ${payload.tts.models.length} tts models`,
     );
 
     step("Signing catalog.json");

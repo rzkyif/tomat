@@ -41,8 +41,8 @@
 
   // Flat wire fields + the ephemera overlay, read once into locals so the
   // rest of the component stays concise. The status union narrows to
-  // ToolCallStatus here ("filtering"/"completed"/"error" belong to
-  // tool_filter rows, which render elsewhere).
+  // ToolCallStatus here ("complete"/"error" belong to tool_filter /
+  // document_filter rows, which render elsewhere).
   let tcStatus = $derived((msg.status ?? "completed") as ToolCallStatus);
   let tcAskUser = $derived(msg.ephemera?.askUser);
   let tcLogs = $derived(msg.ephemera?.logs ?? []);

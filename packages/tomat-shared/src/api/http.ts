@@ -93,7 +93,7 @@ export interface TtsSynthesizeRequest {
 export interface TtsVoiceEntry {
   id: string;
   label: string;
-  lang: string;
+  lang?: string;
 }
 export type TtsVoicesResponse = TtsVoiceEntry[];
 

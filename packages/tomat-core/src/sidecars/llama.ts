@@ -1,7 +1,8 @@
 // llama-server arg builder + readiness wiring.
 //
 // Reads from the local `llm.*` settings (model path, host, port, threads,
-// context size, reasoning toggles, mmproj). Returns the `StartOptions`
+// context size, mmproj). Thinking and sampling are sent per request, not at
+// boot. Returns the `StartOptions`
 // the SidecarManager needs to spawn `llama-server`. Caller is responsible
 // for resolving the model path; this module assumes the file exists.
 
@@ -18,8 +19,6 @@ export interface LlamaStartArgs {
   port: string;
   threads: number;
   contextSize: number;
-  reasoning: "off" | "on" | "auto";
-  reasoningBudget?: number;
   mmap: boolean;
   webui: boolean;
   /** Layers to offload to the GPU. 0 = CPU only; a large value (e.g. 999) =
@@ -51,8 +50,6 @@ export function llamaStartArgsFromSettings(
     port: strSetting(settings, "llm.port", String(llmPort())),
     threads: numSetting(settings, "llm.threads", 4),
     contextSize: numSetting(settings, "llm.contextSize", 4096),
-    reasoning: strSetting(settings, "llm.reasoning", "on") as "off" | "on" | "auto",
-    reasoningBudget: optionalNumSetting(settings, "llm.reasoningBudget"),
     mmap: boolSetting(settings, "llm.mmap", true),
     webui: boolSetting(settings, "llm.webui", false),
     gpuLayers: presentNumSetting(settings, "llm.gpuLayers"),
@@ -74,21 +71,23 @@ export function buildLlamaStartOptions(args: LlamaStartArgs): StartOptions {
     args.host,
     "--port",
     args.port,
-    // Multi-stream chat needs `--parallel N --cont-batching`. Plan §3
-    // default is 4 slots.
+    // One serial slot: the whole context window goes to a single turn.
+    // `--parallel N` splits the context evenly across N slots (each turn gets
+    // ctx/N), which starves a thinking model and can cut it off mid-thought.
+    // Concurrent work (background single-shot calls, a second client) queues
+    // on the server instead; the scheduler also serializes ahead of it.
     "--parallel",
-    "4",
-    "--cont-batching",
+    "1",
+    // Thinking on/off and its token budget are sent per request now (so editing
+    // them needs no server restart). Pin the parse format so the server always
+    // extracts the model's thoughts into `reasoning_content`, which the stream
+    // reader keys on, regardless of the llama.cpp default.
+    "--reasoning-format",
+    "deepseek",
   ];
   if (args.mmap) argv.push("--mmap");
   if (typeof args.gpuLayers === "number") argv.push("--n-gpu-layers", String(args.gpuLayers));
   if (args.flashAttn) argv.push("--flash-attn", "on");
-  if (args.reasoning !== "off") {
-    argv.push("--reasoning", args.reasoning);
-    if (typeof args.reasoningBudget === "number" && args.reasoningBudget > 0) {
-      argv.push("--reasoning-budget", String(args.reasoningBudget));
-    }
-  }
   // The llama.cpp web UI is unauthenticated. Only ever enable it when the
   // server is bound to loopback (local debugging); if the sidecar is reachable
   // from the network (a non-loopback host), force it off so it can't be hit by
@@ -140,15 +139,6 @@ function presentNumSetting(s: Record<string, unknown>, k: string): number | unde
   if (typeof v === "string" && v !== "") {
     const n = Number(v);
     if (Number.isFinite(n)) return n;
-  }
-  return undefined;
-}
-function optionalNumSetting(s: Record<string, unknown>, k: string): number | undefined {
-  const v = s[k];
-  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
-  if (typeof v === "string" && v !== "") {
-    const n = Number(v);
-    if (Number.isFinite(n) && n > 0) return n;
   }
   return undefined;
 }

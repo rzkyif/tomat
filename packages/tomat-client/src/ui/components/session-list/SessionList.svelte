@@ -6,12 +6,13 @@
   // the active core via cores().select()).
 
   import { onMount } from "svelte";
-  import type { SummaryPart } from "@tomat/shared";
+  import type { SessionListEntry, SummaryPart } from "@tomat/shared";
   import Bubble from "../ui/Bubble.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import Select from "../ui/Select.svelte";
   import { sessionsState, settingsState, viewState } from "$stores";
   import { cores, type PairedCoreEntry } from "$lib/core";
+  import { formatSessionDefaultTitle } from "$lib/util/format";
   import { getLogger } from "$lib/util/log";
 
   const log = getLogger("sessions");
@@ -70,8 +71,10 @@
     }
   }
 
-  function sessionTitle(title: string): string {
-    return title.trim() || "Untitled session";
+  // Untitled sessions fall back to their creation datetime, matching the
+  // session bar's placeholder, so no session ever reads as "Untitled".
+  function sessionTitle(entry: SessionListEntry): string {
+    return entry.title.trim() || formatSessionDefaultTitle(entry.createdAtMs);
   }
 
   // Labels are rendered client-side so the configured agent name applies.
@@ -161,7 +164,7 @@
       >
         <div class="flex flex-col min-w-0 flex-1">
           <span class="text-sm text-default-800 truncate">
-            {sessionTitle(entry.title)}
+            {sessionTitle(entry)}
           </span>
           <span class="text-xs text-default-500 truncate">
             {entry.summary.length > 0 ? summaryText(entry.summary) : "No messages yet"}

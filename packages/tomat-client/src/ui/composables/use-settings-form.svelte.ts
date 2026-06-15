@@ -10,17 +10,22 @@
  * optional `onSectionExpand` hook instead of mutating view state directly.
  */
 
-import type { PresetOption } from "@tomat/shared";
+import type { AppliedModelSettings, PresetBucket, PresetOption } from "@tomat/shared";
 import {
+  detectLlmPreset,
   errMessage,
   evalCondition,
   findField,
   getConditionDeps,
   getPresetFieldIds,
   getValidationError,
+  localThinkingBudget,
+  PRESET_BUCKETS,
   SETTINGS_SCHEMA,
+  thinkingSelection,
 } from "@tomat/shared";
 import { settingsState } from "$stores/settings.svelte";
+import { modelRecommendState } from "$stores/model-recommend.svelte";
 
 export class SettingsForm {
   /** Field id -> human-readable error, rendered by the field's FormField. */
@@ -144,14 +149,29 @@ export class SettingsForm {
   }
 
   private async applyFieldChange(key: string, value: any): Promise<void> {
+    // Capture the active thinking level before a local context-size change: the
+    // budget is a fraction of the context window, so re-scale it afterward to
+    // keep the user on the same level (Low/Medium/High) as the window grows.
+    const isLocal = settingsState.currentSettings["llm.provider"] !== "external";
+    const prevThinkingLevel =
+      key === "llm.contextSize" && isLocal
+        ? thinkingSelection(settingsState.currentSettings, "local").value
+        : null;
+
     if (
       key.startsWith("llm.") &&
       key !== "llm.preset" &&
       !key.startsWith("llm.external.") &&
       getPresetFieldIds("llm").has(key)
     ) {
-      if (settingsState.currentSettings["llm.preset"] !== "custom") {
-        await settingsState.updateSetting("llm.preset", "custom");
+      // Don't blindly flip to Custom: if the edited config still matches a smart
+      // preset (e.g. the user set a value back to a preset's), restore that
+      // preset. detectLlmPreset returns "custom" when nothing matches (the UI
+      // then splits "custom preset" vs "custom -> manual" by the model path).
+      const next = { ...settingsState.currentSettings, [key]: value };
+      const detected = detectLlmPreset(next, bucketAppliedMap());
+      if (settingsState.currentSettings["llm.preset"] !== detected) {
+        await settingsState.updateSetting("llm.preset", detected);
       }
     }
     if (
@@ -174,6 +194,20 @@ export class SettingsForm {
       }
     }
     await settingsState.updateSetting(key, value);
+
+    if (
+      prevThinkingLevel === "low" ||
+      prevThinkingLevel === "medium" ||
+      prevThinkingLevel === "high"
+    ) {
+      const ctx = Number(value);
+      if (Number.isFinite(ctx) && ctx > 0) {
+        await settingsState.updateSetting(
+          "llm.reasoningBudget",
+          localThinkingBudget(prevThinkingLevel, ctx),
+        );
+      }
+    }
     this.reEvaluateDeps(key);
   }
 
@@ -182,6 +216,17 @@ export class SettingsForm {
     this.validateAllFields();
     this.reEvaluateDeps(...Object.keys(updates));
   }
+}
+
+/** The per-device applied config for each smart preset, from the loaded
+ *  recommendations. Empty when recommendations haven't loaded (detectLlmPreset
+ *  then falls back to "custom", preserving the old flip-to-Custom behavior). */
+function bucketAppliedMap(): Partial<Record<PresetBucket, AppliedModelSettings | null>> {
+  const rec = modelRecommendState.recommendations;
+  if (!rec) return {};
+  const out: Partial<Record<PresetBucket, AppliedModelSettings | null>> = {};
+  for (const bucket of PRESET_BUCKETS) out[bucket] = rec.buckets[bucket]?.apply ?? null;
+  return out;
 }
 
 export function useSettingsForm(

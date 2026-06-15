@@ -1,6 +1,7 @@
 import type {
   AppliedModelSettings,
   AppliedSttSettings,
+  AppliedTtsSettings,
   CatalogModelView,
   DownloadModelsRequest,
   DownloadModelsResponse,
@@ -11,6 +12,8 @@ import type {
   RecommendationSet,
   SttCatalogModel,
   SttPresetView,
+  TtsCatalogModel,
+  TtsPresetView,
 } from "@tomat/shared";
 import type { CoreClient } from "./client";
 
@@ -31,6 +34,16 @@ export interface SttCatalogResponse {
 
 export interface SelectSttModelResponse {
   applied: { preset: string; settings: AppliedSttSettings };
+}
+
+export interface TtsCatalogResponse {
+  generatedAt: string;
+  models: TtsCatalogModel[];
+  presets: TtsPresetView[];
+}
+
+export interface SelectTtsModelResponse {
+  applied: { preset: string; settings: AppliedTtsSettings };
 }
 
 export class ModelsApi {
@@ -106,5 +119,20 @@ export class ModelsApi {
     sel: { presetId: string } | { modelId: string } | { modelSpec: string },
   ): Promise<SelectSttModelResponse> {
     return this.client.post("/api/v1/models/stt/select", sel);
+  }
+
+  // --- Text-to-Speech catalog picker --------------------------------------
+
+  /** The TTS model lineup plus the resolved curated cards (with voices). */
+  ttsCatalog(): Promise<TtsCatalogResponse> {
+    return this.client.get("/api/v1/models/tts/catalog");
+  }
+
+  /** Apply a curated card, a catalog model (its default quant), or a specific
+   *  quant by its modelSpec: writes tts.* settings. */
+  ttsSelect(
+    sel: { presetId: string } | { modelId: string } | { modelSpec: string },
+  ): Promise<SelectTtsModelResponse> {
+    return this.client.post("/api/v1/models/tts/select", sel);
   }
 }

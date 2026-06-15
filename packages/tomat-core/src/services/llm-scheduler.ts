@@ -16,7 +16,10 @@ import { type LlmDelta, type LlmRequest, streamChatCompletion } from "./llm-prov
 
 const log = getLogger("llm-scheduler");
 
-const DEFAULT_PARALLEL_SLOTS = 4;
+// Serial by default: one in-flight local completion at a time, the rest queue.
+// Must match `--parallel` on the llama-server command line (sidecars/llama.ts),
+// which runs a single slot so each turn gets the whole context window.
+const DEFAULT_PARALLEL_SLOTS = 1;
 const QUEUE_DEPTH_MULTIPLIER = 4;
 
 // Per the plan §3 watchdog: "if a slot exceeds callTimeoutMs + 60 s, abort

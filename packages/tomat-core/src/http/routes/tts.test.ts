@@ -23,8 +23,13 @@ Deno.test("GET /api/v1/tts/voices: requires bearer (401)", async () => {
   }
 });
 
-Deno.test("GET /api/v1/tts/voices: derives catalog from the shared settings schema", async () => {
+Deno.test("GET /api/v1/tts/voices: returns the selected model's catalog voices", async () => {
   const env = await setupTestEnv();
+  // The route reads the signed catalog; on the dev channel it is compiled from
+  // the in-repo @tomat/model-catalog (no network), so the default model's voices
+  // (Kokoro) resolve here.
+  const priorChannel = Deno.env.get("TOMAT_CHANNEL");
+  Deno.env.set("TOMAT_CHANNEL", "dev");
   try {
     const { token } = await pair();
     const app = buildApp();
@@ -32,16 +37,17 @@ Deno.test("GET /api/v1/tts/voices: derives catalog from the shared settings sche
       new Request("http://x/api/v1/tts/voices", { headers: bearer(token) }),
     );
     assertEquals(res.status, 200);
-    const body = (await res.json()) as Array<{ id: string; label: string; lang: string }>;
+    const body = (await res.json()) as Array<{ id: string; label: string; lang?: string }>;
     assertEquals(Array.isArray(body), true);
     assertEquals(body.length > 0, true);
-    // Every voice has the three fields the UI reads.
+    // Every voice has the fields the UI reads.
     for (const v of body) {
       assertEquals(typeof v.id, "string");
       assertEquals(typeof v.label, "string");
-      assertEquals(typeof v.lang, "string");
     }
   } finally {
+    if (priorChannel === undefined) Deno.env.delete("TOMAT_CHANNEL");
+    else Deno.env.set("TOMAT_CHANNEL", priorChannel);
     await env.teardown();
   }
 });

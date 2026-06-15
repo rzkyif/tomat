@@ -1,63 +1,27 @@
 import type { SettingGroup } from "../types.ts";
 
-// Toolkit management lives in its own group with a single object_management
-// field, so the manager owns the full panel height (vertical scroll). The
-// tool-calling options that used to share this group moved to `toolsGroup`
-// below. The manager is intentionally NOT gated behind `tools.enabled`: you can
-// install and configure toolkits before turning tool use on.
-export const toolkitsGroup: SettingGroup = {
-  id: "toolkits",
-  destination: "core",
-  name: "Toolkits",
-  description:
-    "Toolkits give the agent tools it can use, like web search or file access. Installed toolkits show here; type @npm to search the npm registry for packages tagged `tools-available`.",
-  descriptionTier: "always",
-  icon: "i-material-symbols-extension-rounded",
-  iconInactive: "i-material-symbols-extension-outline-rounded",
-  sections: [
-    {
-      fields: [
-        {
-          id: "toolkits.list",
-          name: "Toolkits",
-          type: "object_management",
-          objectType: "toolkits",
-          defaultValue: "",
-        },
-      ],
-    },
-    {
-      destination: "client",
-      fields: [
-        // Hidden persisted flag: set from the risky-permission confirm
-        // dialog's "do not show again" checkbox in the toolkit detail view.
-        {
-          id: "toolkits.skipRiskyGrantWarning",
-          name: "Skip Risky Permission Warning",
-          description: "",
-          type: "boolean",
-          defaultValue: false,
-          visibleWhen: { field: "toolkits.list", eq: "__never__" },
-          descriptionTier: "none",
-        },
-      ],
-    },
-  ],
-};
-
-// Tool-calling runtime options, split out of the old combined Tools group so
-// toolkit management can be its own single-field group. `tools.enabled` gates
-// the rest, exactly as before.
+// Tools: one group with two tabs. "Management" (default) is the full-height
+// object_management toolkit manager; "Configuration" holds the tool-calling
+// runtime settings. Toolkit management is intentionally NOT gated behind
+// `tools.enabled`: you can install and configure toolkits before turning tool
+// use on. Setting ids keep their `tools.*` / `toolkits.*` prefixes (persisted
+// on disk and on the wire); only the grouping changed.
 export const toolsGroup: SettingGroup = {
   id: "tools",
   destination: "core",
-  name: "Tool Calling",
-  description: "Let the agent use tools from your installed toolkits during a chat.",
-  descriptionTier: "ondemand",
+  name: "Tools",
+  description:
+    "Let the agent use tools from your installed toolkits during a chat, like web search or file access. Install and remove toolkits under Management; turn tools on and tune how the agent chooses and runs them under Configuration.",
+  descriptionTier: "always",
   icon: "i-material-symbols-build-rounded",
   iconInactive: "i-material-symbols-build-outline-rounded",
+  tabs: [
+    { id: "manage", label: "Management" },
+    { id: "config", label: "Configuration" },
+  ],
   sections: [
     {
+      tab: "config",
       fields: [
         {
           id: "tools.enabled",
@@ -70,6 +34,7 @@ export const toolsGroup: SettingGroup = {
       ],
     },
     {
+      tab: "config",
       label: "Tool Selection",
       defaultCollapsed: true,
       visibleWhen: { field: "tools.enabled", eq: true },
@@ -130,38 +95,18 @@ export const toolsGroup: SettingGroup = {
           descriptionTier: "ondemand",
         },
         {
-          id: "tools.filterReasoning",
-          name: "Refinement Thinking",
-          description: "Whether the AI refinement step should think before deciding.",
-          type: "select",
-          defaultValue: "off",
-          options: [
-            { value: "off", label: "Off" },
-            { value: "on", label: "On" },
-            { value: "auto", label: "Auto" },
-          ],
+          id: "tools.filterThinkingBudget",
+          name: "Refinement Thinking Budget",
+          description: "Tokens the AI refinement step may spend thinking. 0 turns thinking off.",
+          type: "number",
+          defaultValue: 0,
+          placeholder: "0",
           visibleWhen: {
             allOf: [
               { field: "tools.filteringEnabled", eq: true },
               { field: "tools.secondPassEnabled", eq: true },
             ],
           },
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "tools.filterReasoningBudget",
-          name: "Refinement Thinking Budget",
-          description: "How many tokens the AI refinement step may spend thinking.",
-          type: "number",
-          defaultValue: "",
-          visibleWhen: {
-            allOf: [
-              { field: "tools.filteringEnabled", eq: true },
-              { field: "tools.filterReasoning", neq: "off" },
-            ],
-          },
-          optional: true,
-          placeholder: "optional",
           descriptionTier: "ondemand",
         },
         {
@@ -173,9 +118,19 @@ export const toolsGroup: SettingGroup = {
           regex: [{ regex: "^[1-9][0-9]?$", errorMessage: "Must be 1-99" }],
           descriptionTier: "ondemand",
         },
+        {
+          id: "tools.showEmptySelection",
+          name: "Show Empty Selections",
+          description:
+            "Keep the tool-selection bubble in the chat even when no tools were found relevant to your message. Off hides it; turning it on also reveals past empty ones.",
+          type: "boolean",
+          defaultValue: false,
+          descriptionTier: "ondemand",
+        },
       ],
     },
     {
+      tab: "config",
       label: "Tool Execution",
       defaultCollapsed: true,
       visibleWhen: { field: "tools.enabled", eq: true },
@@ -229,6 +184,38 @@ export const toolsGroup: SettingGroup = {
           type: "boolean",
           defaultValue: true,
           descriptionTier: "ondemand",
+        },
+      ],
+    },
+    {
+      tab: "manage",
+      fields: [
+        {
+          id: "toolkits.list",
+          name: "Toolkits",
+          type: "object_management",
+          objectType: "toolkits",
+          defaultValue: "",
+        },
+      ],
+    },
+    {
+      tab: "manage",
+      destination: "client",
+      fields: [
+        // Hidden persisted flag: set from the risky-permission confirm
+        // dialog's "do not show again" checkbox in the toolkit detail view.
+        // Never rendered (visibleWhen never matches); the object_management tab
+        // shows only its manager. Still registered for persistence + client
+        // routing via the flat-sections walk.
+        {
+          id: "toolkits.skipRiskyGrantWarning",
+          name: "Skip Risky Permission Warning",
+          description: "",
+          type: "boolean",
+          defaultValue: false,
+          visibleWhen: { field: "toolkits.list", eq: "__never__" },
+          descriptionTier: "none",
         },
       ],
     },

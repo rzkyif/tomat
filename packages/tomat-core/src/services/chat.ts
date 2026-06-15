@@ -3,11 +3,12 @@
 // when the model asks for them, and emit chat.* / tool.* frames over the
 // WS hub.
 //
-// The server owns message identity and order. Every chat-born message
-// (tool_filter, reasoning, assistant, tool) is announced to the client as a
-// `chat.message` birth snapshot before any `chat.delta` touches it, and the
-// same TurnWriter later persists it at the turn's insertion cursor and emits
-// the terminal snapshot (`final: true`). Live order and persisted order
+// The server owns message identity and order. A streamed chat-born message
+// (reasoning, assistant, tool) is announced to the client as a `chat.message`
+// birth snapshot before any `chat.delta` touches it; the filter bubbles
+// (tool_filter, document_filter) skip the birth and emit only once they reach
+// their end state. The same TurnWriter persists each at the turn's insertion
+// cursor and emits the terminal snapshot (`final: true`). Live order and persisted order
 // therefore converge by construction; the client never mints ids for these
 // messages.
 //
@@ -18,7 +19,8 @@
 //   llm.host, llm.port                 : local llama-server (endpointResolver)
 //   llm.external.baseUrl/apiKey/model  : external provider (endpointResolver)
 //   llm.contextSize, llm.external.contextSize : usage tracking
-//   llm.reasoning                      : "off" | "on" | "auto"
+//   llm.reasoning                      : "off" | "on" (endpointResolver)
+//   llm.temperature/topP/topK/minP/repeatPenalty : sampling (endpointResolver)
 //   dualModel.enabled                  : boolean (run complexity classifier)
 //   dualModel.external.*               : secondary endpoint (endpointResolver)
 //   prompts.defaultSystemPrompt        : string (default "")
@@ -38,6 +40,7 @@ import type {
   AskUserAnswer,
   AssistantMessage,
   DisplayMessage,
+  DocumentFilterMessage,
   ChatStartFrame,
   ErrorCode,
   Message,
@@ -61,8 +64,10 @@ import { sessionsRepo } from "./sessions-store.ts";
 import { embed } from "./embedding.ts";
 import {
   documentTokenBlocks,
+  hasDocuments,
   newDocumentTokenBudget,
-  relevantDocumentsPrompt,
+  relevantDocuments,
+  relevantDocumentsBlock,
 } from "./document-injection.ts";
 import { llmScheduler } from "./llm-scheduler.ts";
 import {
@@ -74,6 +79,7 @@ import {
 import { toolFilter } from "./tool-filter.ts";
 import { maybeGenerateTitle } from "./title-gen.ts";
 import { resolveEndpoint } from "./endpoint-resolver.ts";
+import { thinkingBudget } from "./thinking-budget.ts";
 import { loadCoreSettings } from "./core-settings.ts";
 import { llmIdle } from "./llm-idle.ts";
 import { promptScheduler } from "./prompt-scheduler.ts";
@@ -307,17 +313,16 @@ export class ChatService {
     // relevance injection below so the turn embeds the query at most once.
     let queryVector: Float32Array | undefined;
     if (boolSetting(settings, "tools.enabled", false)) {
-      // The filter bubble is born before the pipeline runs so the client can
-      // show its "filtering" state, then finalized with the phases (or the
-      // error) so a reload re-materializes the same bubble.
+      // The filter bubble is emitted only once the pipeline finishes (end
+      // state: complete or error). The in-flight period is covered by the
+      // synthetic loading bubble, which renders until the first model delta.
       const filterMsg: ToolFilterMessage = {
         id: newMessageId(),
         ord: -1,
         role: "tool_filter",
-        status: "filtering",
+        status: "complete",
         createdAtMs: Date.now(),
       };
-      writer.born(filterMsg);
       try {
         const queryText = lastUserText(history);
         const allEnabled = listEnabledTools();
@@ -356,7 +361,13 @@ export class ChatService {
           let candidates = result.candidates;
           if (secondPassEnabled && candidates.length > 0) {
             const phase2Endpoint = await resolveEndpoint(settings, route);
-            candidates = await toolFilter().phase2(queryText, candidates, phase2Endpoint);
+            const filterBudget = thinkingBudget(settings, "tools.filterThinkingBudget");
+            candidates = await toolFilter().phase2(
+              queryText,
+              candidates,
+              phase2Endpoint,
+              filterBudget,
+            );
             phase2Entries = candidates;
           }
           const final: Array<{ toolId: string }> = [];
@@ -391,7 +402,6 @@ export class ChatService {
             },
           }));
 
-        filterMsg.status = "complete";
         filterMsg.phase1 = phase1Entries.map((c) => ({
           toolId: c.toolId,
           name: c.name,
@@ -430,20 +440,43 @@ export class ChatService {
 
     // Relevant-document summaries: same embedding machinery as the tool
     // filter (services/relevance.ts), appended to the system prompt when any
-    // indexed document scores above the floor for this turn's query.
-    if (boolSetting(settings, "documents.enabled", true)) {
+    // indexed document scores above the floor for this turn's query. The
+    // selection is also surfaced as a document_filter bubble (end state only,
+    // like the tool filter); the client hides it when empty unless the user
+    // turns on "show empty selections".
+    // A bubble is only emitted when the user actually has documents; with none
+    // there is nothing to select and an empty bubble on every turn is noise.
+    if (boolSetting(settings, "documents.enabled", true) && hasDocuments()) {
+      const docFilterMsg: DocumentFilterMessage = {
+        id: newMessageId(),
+        ord: -1,
+        role: "document_filter",
+        status: "complete",
+        createdAtMs: Date.now(),
+      };
       try {
-        const docsBlock = await relevantDocumentsPrompt(
+        const docs = await relevantDocuments(
           lastUserText(history),
           queryVector,
           numSetting(settings, "documents.maxRelevant", 3),
         );
+        const docsBlock = relevantDocumentsBlock(docs);
         if (docsBlock) {
           systemPrompt = systemPrompt ? `${systemPrompt}\n\n${docsBlock}` : docsBlock;
         }
+        docFilterMsg.relevant = docs.map((d) => ({
+          documentId: d.documentId,
+          title: d.title,
+          summary: d.summary,
+          score: d.score,
+        }));
+        writer.finalize(docFilterMsg);
       } catch (err) {
         // Non-fatal: the turn just runs without document context.
         log.warn(`stream ${stream.streamId}: document relevance failed: ${errMessage(err)}`);
+        docFilterMsg.status = "error";
+        docFilterMsg.errorMessage = errMessage(err);
+        writer.finalize(docFilterMsg);
       }
     }
 
@@ -475,13 +508,8 @@ export class ChatService {
         signal: stream.abort.signal,
       };
 
-      const { assistant, reasoning, toolCalls, interrupted, error } = await this.runOneTurn(
-        stream,
-        endpoint,
-        req,
-        writer,
-        route,
-      );
+      const { assistant, reasoning, toolCalls, interrupted, truncated, error } =
+        await this.runOneTurn(stream, endpoint, req, writer, route);
       // Reasoning was already finalized inside runOneTurn (at the first
       // content delta, or on its exit path), keeping the TurnWriter
       // invariant that reasoning persists before the assistant; here it only
@@ -489,7 +517,12 @@ export class ChatService {
       // error are finalized too (flagged `interrupted`), so streamed text is
       // never silently lost.
       if (reasoning) history.push(reasoning);
-      if (assistant && (assistant.content.length > 0 || (assistant.toolCalls?.length ?? 0) > 0)) {
+      if (
+        assistant &&
+        (assistant.content.length > 0 ||
+          (assistant.toolCalls?.length ?? 0) > 0 ||
+          assistant.truncated)
+      ) {
         writer.finalize(assistant);
         history.push(assistant);
       }
@@ -511,11 +544,12 @@ export class ChatService {
         return;
       }
       if (toolCalls.length === 0) {
-        // Natural stop.
+        // Natural stop, or a context-window cutoff (the assistant bubble
+        // carries the "cut off" note in that case).
         this.send(stream.clientId, {
           kind: "chat.done",
           streamId: stream.streamId,
-          reason: "stop",
+          reason: truncated ? "length" : "stop",
         });
         // Async: generate a title from the first turn. The service
         // self-guards if a title already exists, so calling on every
@@ -574,6 +608,7 @@ export class ChatService {
     reasoning?: ReasoningMessage;
     toolCalls: ResolvedPendingCall[];
     interrupted?: boolean;
+    truncated?: boolean;
     error?: { code: ErrorCode; message: string };
   }> {
     const isLocal =
@@ -601,6 +636,10 @@ export class ChatService {
       }
     >();
     let usage: { prompt: number; completion: number; total: number } | undefined;
+    // Last finish_reason the provider reported. "length" means the model hit
+    // the context window rather than stopping naturally, so the reply is cut
+    // off (possibly empty, when all the room went to thinking).
+    let lastFinishReason: string | null = null;
 
     // Coalesce outgoing content/reasoning deltas over a short window instead of
     // one ws frame per token. A fast local model emits many small tokens; one
@@ -689,6 +728,7 @@ export class ChatService {
         clientId: stream.clientId,
         isLocal,
       })) {
+        if (delta.finishReason) lastFinishReason = delta.finishReason;
         this.handleDelta(stream, delta, {
           appendContent: (s) => {
             if (contentStartedAtMs === null) {
@@ -844,7 +884,25 @@ export class ChatService {
       }));
     }
     settleMessages(false);
-    log.info(llmDoneLine("done"));
+    // Truncation: the model hit the context window (finish_reason "length")
+    // on a non-tool turn. The reply is cut off; when thinking consumed the
+    // whole window there's no content at all, so synthesize an empty assistant
+    // to carry the "cut off" note. (Tool turns finish_reason "tool_calls".)
+    const truncated = lastFinishReason === "length" && resolved.length === 0;
+    if (truncated) {
+      if (!assistantMsg) {
+        assistantMsg = {
+          id: newMessageId(),
+          ord: -1,
+          role: "assistant",
+          content: "",
+          createdAtMs: Date.now(),
+          modelUsed: route,
+        };
+      }
+      assistantMsg.truncated = true;
+    }
+    log.info(llmDoneLine(truncated ? "truncated (context full)" : "done"));
     if (usage) {
       this.send(stream.clientId, {
         kind: "chat.usage",
@@ -858,6 +916,7 @@ export class ChatService {
       assistant: assistantMsg ?? undefined,
       reasoning: reasoningMsg ?? undefined,
       toolCalls: resolved,
+      truncated,
     };
   }
 
@@ -1191,7 +1250,7 @@ async function toOpenAiMessages(
     } else if (m.role === "reasoning") {
       // Reasoning trace is not part of the OpenAI message protocol; omit.
     }
-    // tool_filter / display / error messages are not sent to the LLM.
+    // tool_filter / document_filter / display / error messages are not sent to the LLM.
   }
   return out;
 }
@@ -1383,6 +1442,10 @@ async function classifyComplexity(
     DEFAULT_COMPLEXITY_DETECTION_PROMPT,
   );
   const endpoint = await resolveEndpoint(settings, "default");
+  // The classifier must emit one word ("simple"/"complex"), so thinking is off
+  // by default (Complexity Thinking Budget = 0); a positive budget opts in and
+  // is added on top of the one-word answer allowance.
+  const budget = thinkingBudget(settings, "prompts.complexityDetectionThinkingBudget");
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt },
     { role: "user", content: userMessage },
@@ -1391,7 +1454,7 @@ async function classifyComplexity(
   for await (const delta of streamChatCompletion({
     endpoint,
     messages,
-    overrides: { temperature: 0, maxTokens: 16 },
+    overrides: { temperature: 0, maxTokens: 16 + budget, reasoningBudget: budget },
   })) {
     if (delta.contentDelta) response += delta.contentDelta;
   }

@@ -191,6 +191,17 @@ class CoresRegistry {
     }
   }
 
+  /** Close the active client and drop all per-client state. Used by the HMR
+   *  dispose hook below so a hot-replaced module instance doesn't leave its
+   *  WS client reconnecting in the background. */
+  dispose(): void {
+    this.current?.client.close();
+    this.current = null;
+    this.apis = null;
+    this.wsBindings.clear();
+    this.connBindings.clear();
+  }
+
   currentEntry(): PairedCoreEntry | null {
     return this.current?.entry ?? null;
   }
@@ -286,4 +297,12 @@ let _instance: CoresRegistry | null = null;
 export function cores(): CoresRegistry {
   if (!_instance) _instance = new CoresRegistry();
   return _instance;
+}
+
+if (import.meta.hot) {
+  // HMR re-evaluates this module (e.g. an upstream @tomat/shared edit) and resets
+  // _instance, orphaning the prior registry's still-reconnecting WS client. Close
+  // it before the old instance is discarded so dev sockets don't pile up and
+  // reconnect in lockstep on every save.
+  import.meta.hot.dispose(() => _instance?.dispose());
 }

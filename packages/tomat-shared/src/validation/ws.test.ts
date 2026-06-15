@@ -11,10 +11,46 @@ import { serverToClientFrameSchema } from "./ws.ts";
 Deno.test("serverToClientFrameSchema: accepts requirements.snapshot", () => {
   const frame = {
     kind: "requirements.snapshot",
-    required: [{ source: "@unsloth/Qwen3.5-2B-GGUF/main/Qwen3.5-2B-Q4_K_M.gguf", type: "model" }],
-    missing: [{ source: "@unsloth/Qwen3.5-2B-GGUF/main/Qwen3.5-2B-Q4_K_M.gguf", type: "model" }],
+    required: [
+      {
+        source: "@unsloth/Qwen3.5-2B-GGUF/main/Qwen3.5-2B-Q4_K_M.gguf",
+        type: "model",
+      },
+    ],
+    missing: [
+      {
+        source: "@unsloth/Qwen3.5-2B-GGUF/main/Qwen3.5-2B-Q4_K_M.gguf",
+        type: "model",
+      },
+    ],
   };
   assertEquals(serverToClientFrameSchema.safeParse(frame).success, true);
+});
+
+// These two frames were silently dropped by the client because the Zod enum
+// drifted from the TS union. They now share one const tuple per enum (see the
+// "Wire enums" block in ../api/ws.ts), so these regressions can't recur.
+Deno.test("serverToClientFrameSchema: accepts session.updated title_generating", () => {
+  assertEquals(
+    serverToClientFrameSchema.safeParse({
+      kind: "session.updated",
+      sessionId: "s1",
+      op: "title_generating",
+      payload: { generating: true },
+    }).success,
+    true,
+  );
+});
+
+Deno.test("serverToClientFrameSchema: accepts chat.done with reason 'length'", () => {
+  assertEquals(
+    serverToClientFrameSchema.safeParse({
+      kind: "chat.done",
+      streamId: "s1",
+      reason: "length",
+    }).success,
+    true,
+  );
 });
 
 Deno.test("serverToClientFrameSchema: accepts settings.updated (with and without secretNames)", () => {

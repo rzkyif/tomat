@@ -150,12 +150,12 @@ unsure, costing no vertical space until then. Default to it generously.
 ### Group descriptions
 
 - Add a group `description` when the group's purpose is not obvious from its
-  name (Dual Model, Tool Calling), or when the group is a single
-  `object_management` field whose own label carries no explanation (Snippets,
-  Toolkits, Cores).
-- Tier them the same way. `always` only for the genuinely non-obvious concepts
-  (the four above: Snippets, Toolkits, Cores, Dual Model); `ondemand` otherwise;
-  omit entirely for self-evident groups (General, Appearance).
+  name (Dual Model, Tools), or when the group is a single `object_management`
+  field whose own label carries no explanation (Snippets, Cores).
+- Tier them the same way. `always` only for genuinely non-obvious concepts or
+  complex modules (Dual Model, Tools); `ondemand` otherwise; omit entirely for
+  self-evident groups (General, Appearance). Prefer `ondemand` unless you can
+  justify the permanent vertical cost.
 
 ### Section names
 

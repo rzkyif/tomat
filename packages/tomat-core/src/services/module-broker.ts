@@ -434,6 +434,10 @@ async function dispatchLlm(op: string, args: unknown): Promise<unknown> {
           : LLM_COMPLETE_DEFAULT_TOKENS,
         LLM_COMPLETE_MAX_TOKENS,
       ),
+      // Toolkit completions are short and expect a clean answer, so thinking is
+      // off (the model's `<think>` text would otherwise land in the returned
+      // string). The tool author bounds length via maxTokens.
+      reasoningBudget: 0,
     },
   });
   return { text };

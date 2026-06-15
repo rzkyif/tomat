@@ -31,7 +31,10 @@ import { getLogger } from "../shared/log.ts";
 const log = getLogger("sidecar-boot");
 
 // Keys that, when changed, should trigger a llama-server restart with the
-// new args (or a stop if the gating condition flipped off).
+// new args (or a stop if the gating condition flipped off). Thinking and the
+// sampling knobs (llm.reasoning, llm.reasoningBudget, llm.temperature, etc.) are
+// deliberately absent: they are sent per request, so editing them takes effect
+// on the next turn without a restart.
 const LLAMA_KEYS = new Set([
   "llm.provider",
   "llm.modelPath",
@@ -41,8 +44,6 @@ const LLAMA_KEYS = new Set([
   "llm.port",
   "llm.threads",
   "llm.contextSize",
-  "llm.reasoning",
-  "llm.reasoningBudget",
   "llm.mmap",
   "llm.webui",
   "llm.gpuLayers",

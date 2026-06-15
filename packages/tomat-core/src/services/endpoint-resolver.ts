@@ -7,7 +7,10 @@
 //   - llm.external.baseUrl/apiKey/model
 //   - llm.external.contextSize
 //   - llm.contextSize           : local context window
-//   - llm.reasoning             : "off" | "on" | "auto"
+//   - llm.reasoning             : "off" | "on"
+//   - llm.reasoningEffort       : "low" | "medium" | "high" (external only)
+//   - llm.temperature, llm.topP : sampling, sent to both providers
+//   - llm.topK, llm.minP, llm.repeatPenalty, llm.reasoningBudget : local only
 //   - dualModel.external.baseUrl/apiKey/model        (route="secondary")
 //   - dualModel.external.contextSize
 //
@@ -18,6 +21,7 @@
 // vault is the authoritative source.
 
 import type { LlmEndpointConfig } from "./llm-provider.ts";
+import { DEFAULT_SAMPLING } from "@tomat/shared";
 import { getSecret } from "./secrets.ts";
 import { llmPort } from "../paths.ts";
 
@@ -38,17 +42,31 @@ export async function resolveEndpoint(
     };
   }
   const provider = strSetting(settings, "llm.provider", "local") as "local" | "external";
-  // Default mirrors the shared schema (settings.json is sparse): thinking is
-  // on unless the user turns it off.
-  const reasoning = strSetting(settings, "llm.reasoning", "on") as "off" | "on" | "auto";
+  // Default mirrors the shared schema (settings.json is sparse): thinking is on
+  // unless the user turns it off. A legacy "auto" reads as "on" (the two are
+  // equivalent for thinking; "auto" was dropped from the toggle).
+  const reasoning = strSetting(settings, "llm.reasoning", "on") === "off" ? "off" : "on";
+  // OpenAI-style samplers apply to both providers; read with the schema defaults
+  // (sparse store) so a value is always sent.
+  const temperature = numSetting(settings, "llm.temperature", DEFAULT_SAMPLING.temperature);
+  const topP = numSetting(settings, "llm.topP", DEFAULT_SAMPLING.topP);
   if (provider === "external") {
     const settingsKey = strSetting(settings, "llm.external.apiKey", "");
     const apiKey = (await getSecret("llm.external.apiKey")) || settingsKey || "";
+    // OpenAI-style endpoints take an effort level rather than a token budget.
+    const reasoningEffort = strSetting(settings, "llm.reasoningEffort", "high") as
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high";
     return {
       baseUrl: strSetting(settings, "llm.external.baseUrl", ""),
       apiKey,
       model: strSetting(settings, "llm.external.model", ""),
       reasoning,
+      reasoningEffort,
+      temperature,
+      topP,
     };
   }
   const host = strSetting(settings, "llm.host", "127.0.0.1");
@@ -58,6 +76,14 @@ export async function resolveEndpoint(
     apiKey: "sk-local",
     model: "default",
     reasoning,
+    temperature,
+    topP,
+    // llama.cpp-only samplers, plus the per-turn thinking budget (0/unset =
+    // unrestricted, so omit it). Presets write all of these on model select.
+    topK: numSetting(settings, "llm.topK", DEFAULT_SAMPLING.topK),
+    minP: numSetting(settings, "llm.minP", DEFAULT_SAMPLING.minP),
+    repeatPenalty: numSetting(settings, "llm.repeatPenalty", DEFAULT_SAMPLING.repeatPenalty),
+    reasoningBudget: numSetting(settings, "llm.reasoningBudget", 0) || undefined,
   };
 }
 

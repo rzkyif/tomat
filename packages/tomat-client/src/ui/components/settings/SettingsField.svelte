@@ -10,6 +10,7 @@
   import PresetField from "./fields/PresetField.svelte";
   import ModelPresetField from "./fields/ModelPresetField.svelte";
   import SttPresetField from "./fields/SttPresetField.svelte";
+  import TtsPresetField from "./fields/TtsPresetField.svelte";
   import ServicesField from "./fields/ServicesField.svelte";
   import ShortcutField from "./fields/ShortcutField.svelte";
   import SnippetsField from "./fields/SnippetsField.svelte";
@@ -39,6 +40,8 @@
     <ModelPresetField {field} {onPresetSelect} />
   {:else if field.type === "stt_preset"}
     <SttPresetField {field} {onPresetSelect} />
+  {:else if field.type === "tts_preset"}
+    <TtsPresetField {field} {onPresetSelect} />
   {:else if field.type === "preset"}
     <PresetField {field} {onPresetSelect} />
   {:else if field.type === "command_preview"}

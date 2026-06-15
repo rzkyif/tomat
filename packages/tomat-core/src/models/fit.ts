@@ -24,6 +24,7 @@ import {
   type CatalogModelView,
   type AppliedModelSettings,
   type QuantOption,
+  DEFAULT_SAMPLING,
 } from "@tomat/shared";
 
 const BYTES_PER_KV_ELEM = 2; // fp16 K/V cache
@@ -39,6 +40,17 @@ const CTX_CEILING: Record<PresetBucket, number> = {
   full: 32768,
 };
 const CTX_LADDER = [32768, 16384, 8192, 4096];
+
+// Token budget for thinking, scaled to the context window. Bounding `<think>`
+// guarantees the model stops reasoning and answers instead of spending the
+// whole window thinking: llama-server injects the end-of-thinking tag once the
+// budget is hit. Tracks the context buckets (smallest 8192 -> 512, half 16384
+// -> 1024, full 32768 -> 2048).
+function reasoningBudgetFor(ctx: number): number {
+  if (ctx <= 8192) return 512;
+  if (ctx <= 16384) return 1024;
+  return 2048;
+}
 
 // Relative quality of a quant by bits-per-weight. QAT builds punch above their
 // bpw, so the engine adds a bonus (see configQuantRank).
@@ -244,6 +256,9 @@ function appliedSettings(
   idleUnloadSeconds: number,
 ): AppliedModelSettings {
   const vision = c.model.capabilities.vision && !!c.variant.mmprojSpec;
+  // The model's author-recommended sampling, or the universal default. Written
+  // to the llm.* sampling settings on select so each model gets its tuning.
+  const sampling = c.model.sampling ?? DEFAULT_SAMPLING;
   return {
     modelPath: c.quant.modelSpec,
     mmprojPath: vision ? c.variant.mmprojSpec : undefined,
@@ -253,6 +268,12 @@ function appliedSettings(
     flashAttn: true,
     supportImages: vision,
     idleUnloadSeconds,
+    reasoningBudget: reasoningBudgetFor(c.ctx),
+    temperature: sampling.temperature,
+    topP: sampling.topP,
+    topK: sampling.topK,
+    minP: sampling.minP,
+    repeatPenalty: sampling.repeatPenalty,
   };
 }
 

@@ -1,8 +1,11 @@
-// Text-to-Speech: one hybrid group spanning client and core. The enable
-// toggle lives on the core because the synthesis engine does: core computes
-// the Kokoro files into its required-downloads snapshot from `tts.enabled`,
-// so a client-side value would leave requirements (and the pending-downloads
-// gate) blind to it. Playback and batching settings stay on the client.
+// Text-to-Speech: one hybrid group spanning client and core. The enable toggle
+// and the synthesis model (type, model path, bundle files) live on the core
+// because the synthesis engine does: core computes the model files into its
+// required-downloads snapshot, so a client-side value would leave requirements
+// (and the pending-downloads gate) blind to it. Playback and batching settings
+// stay on the client. TTS is local-only for now (no external provider), so the
+// "Model" section holds the preset directly with no provider select; mirror the
+// Speech-to-Text structure otherwise.
 
 import type { SettingGroup } from "../types.ts";
 
@@ -31,6 +34,112 @@ export const ttsGroup: SettingGroup = {
       ],
     },
     {
+      label: "Model",
+      destination: "core",
+      visibleWhen: { field: "tts.enabled", eq: true },
+      fields: [
+        {
+          id: "tts.preset",
+          name: "Preset",
+          description:
+            "Curated text-to-speech models. Editing the settings below switches this to Custom.",
+          type: "tts_preset",
+          defaultValue: "kokoro",
+          presetConfig: {
+            // The model resolves from the signed catalog at runtime, so list the
+            // keys each card manages: editing any flips the preset to Custom.
+            // The chosen voice is not managed here (it is independent of which
+            // model is selected), though picking a model resets it to that
+            // model's default voice.
+            managedKeys: ["tts.modelType", "tts.modelPath", "tts.modelFiles"],
+            options: [
+              {
+                id: "kokoro",
+                label: "Kokoro",
+                title: "Kokoro",
+                description:
+                  "The highest-quality voices across eight languages, with 53 voices to choose from. Larger download.",
+              },
+              {
+                id: "kitten",
+                label: "Light (English)",
+                title: "Light (English)",
+                description:
+                  "A tiny English model with eight voices and a very small download, for low memory use.",
+              },
+              {
+                id: "piper",
+                label: "Piper",
+                title: "Piper",
+                description:
+                  "Fast, natural English voices. Pick other Piper voices from the Custom model browser.",
+              },
+              {
+                id: "matcha",
+                label: "Matcha",
+                title: "Matcha",
+                description:
+                  "A fast English voice with a separate vocoder, a lighter alternative to Kokoro.",
+              },
+            ],
+            secondaryOptions: [
+              {
+                id: "custom",
+                label: "Custom",
+                title: "Custom",
+                description:
+                  "Pick any model from the catalog, or configure the model type, path, and files yourself.",
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      label: "Model Server Configuration",
+      destination: "core",
+      visibleWhen: { field: "tts.enabled", eq: true },
+      fields: [
+        {
+          id: "tts.modelType",
+          name: "Model Type",
+          description:
+            "Which sherpa-onnx synthesizer the model runs as. Picking a model in the catalog sets this for you; change it only when configuring files by hand.",
+          type: "select",
+          defaultValue: "kokoro",
+          options: [
+            { value: "kokoro", label: "Kokoro" },
+            { value: "kitten", label: "Kitten" },
+            { value: "vits", label: "VITS / Piper" },
+            { value: "matcha", label: "Matcha" },
+          ],
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "tts.modelPath",
+          name: "Model File",
+          description:
+            "The model's main file, e.g. @user/repo/branch/model.int8.onnx. Picking a model in the catalog fills this and the bundle files below.",
+          type: "string",
+          defaultValue: "@csukuangfj/kokoro-int8-multi-lang-v1_0/main/model.int8.onnx",
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "tts.modelFiles",
+          name: "Bundle Files",
+          description:
+            "Advanced. The full set of files the model needs, as a JSON object mapping each sherpa role to an @user/repo/branch/file spec. Set automatically when you pick a model.",
+          type: "multiline",
+          defaultValue: JSON.stringify({
+            model: "@csukuangfj/kokoro-int8-multi-lang-v1_0/main/model.int8.onnx",
+            voices: "@csukuangfj/kokoro-int8-multi-lang-v1_0/main/voices.bin",
+            tokens: "@csukuangfj/kokoro-int8-multi-lang-v1_0/main/tokens.txt",
+          }),
+          descriptionTier: "ondemand",
+        },
+      ],
+    },
+    {
       label: "Voice",
       destination: "client",
       visibleWhen: { field: "tts.enabled", eq: true },
@@ -46,65 +155,12 @@ export const ttsGroup: SettingGroup = {
         {
           id: "tts.voice",
           name: "Voice",
-          description: "The voice used to read replies. Downloads the first time you use it.",
+          description:
+            "The voice used to read replies. The available voices depend on the selected model. Downloads the first time you use it.",
           type: "select",
+          optionsSource: "tts_voices",
           defaultValue: "af_bella",
           descriptionTier: "ondemand",
-          options: [
-            { value: "af_alloy", label: "American • Female • Alloy" },
-            { value: "af_aoede", label: "American • Female • Aoede" },
-            { value: "af_bella", label: "American • Female • Bella" },
-            { value: "af_heart", label: "American • Female • Heart" },
-            { value: "af_jessica", label: "American • Female • Jessica" },
-            { value: "af_kore", label: "American • Female • Kore" },
-            { value: "af_nicole", label: "American • Female • Nicole" },
-            { value: "af_nova", label: "American • Female • Nova" },
-            { value: "af_river", label: "American • Female • River" },
-            { value: "af_sarah", label: "American • Female • Sarah" },
-            { value: "af_sky", label: "American • Female • Sky" },
-            { value: "am_adam", label: "American • Male • Adam" },
-            { value: "am_echo", label: "American • Male • Echo" },
-            { value: "am_eric", label: "American • Male • Eric" },
-            { value: "am_fenrir", label: "American • Male • Fenrir" },
-            { value: "am_liam", label: "American • Male • Liam" },
-            { value: "am_michael", label: "American • Male • Michael" },
-            { value: "am_onyx", label: "American • Male • Onyx" },
-            { value: "am_puck", label: "American • Male • Puck" },
-            { value: "am_santa", label: "American • Male • Santa" },
-            { value: "bf_alice", label: "British • Female • Alice" },
-            { value: "bf_emma", label: "British • Female • Emma" },
-            { value: "bf_isabella", label: "British • Female • Isabella" },
-            { value: "bf_lily", label: "British • Female • Lily" },
-            { value: "bm_daniel", label: "British • Male • Daniel" },
-            { value: "bm_fable", label: "British • Male • Fable" },
-            { value: "bm_george", label: "British • Male • George" },
-            { value: "bm_lewis", label: "British • Male • Lewis" },
-            { value: "jf_alpha", label: "Japanese • Female • Alpha" },
-            { value: "jf_gongitsune", label: "Japanese • Female • Gongitsune" },
-            { value: "jf_nezumi", label: "Japanese • Female • Nezumi" },
-            { value: "jf_tebukuro", label: "Japanese • Female • Tebukuro" },
-            { value: "jm_kumo", label: "Japanese • Male • Kumo" },
-            { value: "zf_xiaobei", label: "Mandarin • Female • Xiaobei" },
-            { value: "zf_xiaoni", label: "Mandarin • Female • Xiaoni" },
-            { value: "zf_xiaoxiao", label: "Mandarin • Female • Xiaoxiao" },
-            { value: "zf_xiaoyi", label: "Mandarin • Female • Xiaoyi" },
-            { value: "zm_yunjian", label: "Mandarin • Male • Yunjian" },
-            { value: "zm_yunxi", label: "Mandarin • Male • Yunxi" },
-            { value: "zm_yunxia", label: "Mandarin • Male • Yunxia" },
-            { value: "zm_yunyang", label: "Mandarin • Male • Yunyang" },
-            { value: "ef_dora", label: "Spanish • Female • Dora" },
-            { value: "em_alex", label: "Spanish • Male • Alex" },
-            { value: "ff_siwis", label: "French • Female • Siwis" },
-            { value: "hf_alpha", label: "Hindi • Female • Alpha" },
-            { value: "hf_beta", label: "Hindi • Female • Beta" },
-            { value: "hm_omega", label: "Hindi • Male • Omega" },
-            { value: "hm_psi", label: "Hindi • Male • Psi" },
-            { value: "if_sara", label: "Italian • Female • Sara" },
-            { value: "im_nicola", label: "Italian • Male • Nicola" },
-            { value: "pf_dora", label: "Brazilian Portuguese • Female • Dora" },
-            { value: "pm_alex", label: "Brazilian Portuguese • Male • Alex" },
-            { value: "pm_santa", label: "Brazilian Portuguese • Male • Santa" },
-          ],
         },
         {
           id: "tts.minChunkWords",

@@ -30,8 +30,14 @@ Deno.test("requiredModelRefs: external llm contributes no llm model", () => {
   );
 });
 
-Deno.test("requiredModelRefs: stt model only when enabled + local", () => {
-  const base = { "stt.modelPath": "@u/r/main/w.bin" };
+Deno.test("requiredModelRefs: stt bundle files only when enabled + local", () => {
+  const base = {
+    "stt.modelFiles": JSON.stringify({
+      encoder: "@u/r/main/enc.onnx",
+      decoder: "@u/r/main/dec.onnx",
+      tokens: "@u/r/main/tokens.txt",
+    }),
+  };
   assertEquals(
     requiredModelRefs({ ...base, "stt.enabled": false }).some((r) => r.group === "stt"),
     false,
@@ -43,14 +49,14 @@ Deno.test("requiredModelRefs: stt model only when enabled + local", () => {
     false,
   );
   assertEquals(
-    requiredModelRefs({ ...base, "stt.enabled": true, "stt.provider": "local" }).some(
-      (r) => r.group === "stt",
-    ),
-    true,
+    requiredModelRefs({ ...base, "stt.enabled": true, "stt.provider": "local" })
+      .filter((r) => r.group === "stt")
+      .map((r) => r.source),
+    ["@u/r/main/enc.onnx", "@u/r/main/dec.onnx", "@u/r/main/tokens.txt"],
   );
 });
 
-Deno.test("requiredModelRefs: tts base files only when tts.enabled; embed always", () => {
+Deno.test("requiredModelRefs: tts bundle files only when tts.enabled; embed always", () => {
   const off = requiredModelRefs({});
   assertEquals(
     off.some((r) => r.group === "tts"),
@@ -61,10 +67,23 @@ Deno.test("requiredModelRefs: tts base files only when tts.enabled; embed always
     true,
   );
 
-  const on = requiredModelRefs({ "tts.enabled": true });
+  // tts.enabled without a bundle yields no tts refs (nothing to download yet).
   assertEquals(
-    on.some((r) => r.group === "tts"),
-    true,
+    requiredModelRefs({ "tts.enabled": true }).some((r) => r.group === "tts"),
+    false,
+  );
+
+  const on = requiredModelRefs({
+    "tts.enabled": true,
+    "tts.modelFiles": JSON.stringify({
+      model: "@u/r/main/model.onnx",
+      voices: "@u/r/main/voices.bin",
+      tokens: "@u/r/main/tokens.txt",
+    }),
+  });
+  assertEquals(
+    on.filter((r) => r.group === "tts").map((r) => r.source),
+    ["@u/r/main/model.onnx", "@u/r/main/voices.bin", "@u/r/main/tokens.txt"],
   );
 });
 

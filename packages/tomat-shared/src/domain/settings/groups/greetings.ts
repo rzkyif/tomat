@@ -36,9 +36,10 @@ export const greetingsGroup: SettingGroup = {
         {
           id: "greetings.sessionTitle",
           name: "Session Title",
-          description: "Title for the session a greeting opens.",
+          description:
+            'Title for the session a greeting opens. Use {datetime} to insert the start time, e.g. "Greeting 2026-06-15 14:30".',
           type: "string",
-          defaultValue: "Greeting",
+          defaultValue: "Greeting {datetime}",
           visibleWhen: { field: "greetings.enabled", eq: true },
           descriptionTier: "ondemand",
         },

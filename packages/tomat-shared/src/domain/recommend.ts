@@ -6,6 +6,8 @@
 // GET /api/v1/models/catalog (the model browser). The fit math itself lives in
 // core (packages/tomat-core/src/models/fit.ts); these are just the shared shapes.
 
+import type { SttFamily, TtsFamily } from "./catalog.ts";
+
 export type GpuBackend = "metal" | "cuda" | "rocm" | "cpu";
 
 export interface GpuInfo {
@@ -32,9 +34,32 @@ export type PresetBucket = "smallest" | "half" | "full";
 
 export const PRESET_BUCKETS: readonly PresetBucket[] = ["smallest", "half", "full"] as const;
 
+/** The sampling knobs a model runs with at inference time. The catalog carries
+ *  an optional per-model `sampling` tuned by its authors; DEFAULT_SAMPLING fills
+ *  in for anything without one (custom local models, external providers). */
+export interface Sampling {
+  temperature: number;
+  topP: number;
+  topK: number;
+  minP: number;
+  /** llama.cpp repetition penalty; 1.0 = disabled. */
+  repeatPenalty: number;
+}
+
+/** Fallback sampling for a model with no catalog-specific values, and the
+ *  default shown for the `llm.*` sampling fields. Conservative values that suit
+ *  a small instruct model. */
+export const DEFAULT_SAMPLING: Sampling = {
+  temperature: 0.7,
+  topP: 0.8,
+  topK: 20,
+  minP: 0,
+  repeatPenalty: 1.05,
+};
+
 /** The concrete `llm.*` values a recommendation or a manual pick applies. Mirrors
  *  the LlamaStartArgs-relevant settings the core writes on select. */
-export interface AppliedModelSettings {
+export interface AppliedModelSettings extends Sampling {
   modelPath: string; // HF spec "@provider/repo/branch/file.gguf"
   mmprojPath?: string;
   contextSize: number;
@@ -45,6 +70,9 @@ export interface AppliedModelSettings {
   supportImages: boolean;
   /** > 0 only for the Full bucket (aggressive idle-unload). */
   idleUnloadSeconds: number;
+  /** Token budget for the model's thinking, scaled to the context window. Caps
+   *  the `<think>` block so a turn always leaves room to reach its answer. */
+  reasoningBudget: number;
 }
 
 export interface BucketRecommendation {
@@ -70,9 +98,13 @@ export interface RecommendationSet {
 }
 
 /** The concrete `stt.*` values a Speech-to-Text selection applies (host/port
- *  are never touched). */
+ *  are never touched). `modelFiles` is the JSON role->spec bundle the sidecar
+ *  and download flow read; `modelPath` is the primary file's spec (the identity
+ *  used to match a custom pick and show which model is selected). */
 export interface AppliedSttSettings {
-  modelPath: string; // HF spec "@org/repo/branch/file.bin"
+  modelType: SttFamily;
+  modelPath: string; // primary file spec "@org/repo/branch/file.onnx"
+  modelFiles: string; // JSON `{ role: spec }`
   threads: number;
 }
 
@@ -82,10 +114,35 @@ export interface SttPresetView {
   id: string;
   modelId: string;
   name: string;
+  family: SttFamily;
   english: boolean;
   quant: string;
-  modelSpec: string;
+  modelSpec: string; // primary file spec (identity)
   fileSizeBytes: number;
+}
+
+/** The concrete `tts.*` values a Text-to-Speech selection applies. Mirrors
+ *  AppliedSttSettings; TTS is local-only and single-threaded so no `threads`. */
+export interface AppliedTtsSettings {
+  modelType: TtsFamily;
+  modelPath: string; // primary file spec
+  modelFiles: string; // JSON `{ role: spec }`
+  voice: string; // the model's default voice id
+}
+
+/** One curated Text-to-Speech card resolved against the catalog (badges for the
+ *  client). Carries the model's voices so the voice dropdown can populate from
+ *  the selection without a second round-trip. */
+export interface TtsPresetView {
+  id: string;
+  modelId: string;
+  name: string;
+  family: TtsFamily;
+  quant: string;
+  modelSpec: string; // primary file spec (identity)
+  fileSizeBytes: number;
+  voices: { id: string; label: string; lang?: string }[];
+  defaultVoice: string;
 }
 
 /** One selectable quantization of a model, with how it lands on this device. */

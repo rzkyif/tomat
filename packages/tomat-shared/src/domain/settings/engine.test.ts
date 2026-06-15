@@ -91,7 +91,7 @@ Deno.test("settingKeyDestination: honors group defaults and section overrides", 
   // Hybrid tts group: core section vs client section.
   assertEquals(settingKeyDestination("tts.enabled"), "core");
   assertEquals(settingKeyDestination("tts.voice"), "client");
-  // Client section override inside the otherwise core toolkits group.
+  // Client section override inside the otherwise core tools group.
   assertEquals(settingKeyDestination("toolkits.skipRiskyGrantWarning"), "client");
   assertEquals(settingKeyDestination("appearance.theme"), "client");
   assertEquals(settingKeyDestination("totally.unknown.key"), undefined);

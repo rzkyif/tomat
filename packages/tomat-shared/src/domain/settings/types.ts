@@ -9,7 +9,7 @@
 // client-side command builder's accepted command kinds.
 export type CommandType = "llm";
 
-export type OptionsSource = "monitors" | "fonts";
+export type OptionsSource = "monitors" | "fonts" | "tts_voices";
 
 export type ActivationMode = "manual" | "sticky" | "push-to-talk";
 
@@ -228,6 +228,15 @@ export type SttPresetField = BaseField & {
   presetConfig: PresetConfig;
 };
 
+/** Like `stt_preset` for Text-to-Speech: the cards bind to TTS models in the
+ *  signed catalog. Rendered by TtsPresetField; otherwise handled identically to
+ *  `preset`. */
+export type TtsPresetField = BaseField & {
+  type: "tts_preset";
+  defaultValue: string;
+  presetConfig: PresetConfig;
+};
+
 export type CommandPreviewField = BaseField & {
   type: "command_preview";
   defaultValue: string | boolean;
@@ -250,6 +259,7 @@ export type SettingField =
   | PresetField
   | ModelPresetField
   | SttPresetField
+  | TtsPresetField
   | CommandPreviewField;
 
 export type SettingType = SettingField["type"];
@@ -261,6 +271,11 @@ export interface SettingSection {
    *  must come first, above any labeled (collapsible) ones; never place an
    *  inline section below a collapsible one. */
   label?: string;
+  /** Which of the owning group's `tabs` this section belongs to. Required when
+   *  the group sets `tabs`; ignored otherwise. The section's index in
+   *  `group.sections` is still its identity (section keys, expand state), so
+   *  `sections` stays one flat list and only the renderer partitions by tab. */
+  tab?: string;
   /** Persistence destination for this section's fields, overriding the group's.
    *  In a hybrid group (one whose `destination` is an array spanning client and
    *  core), every section MUST be labeled and MUST set this, so each field
@@ -285,6 +300,17 @@ export interface SettingSection {
  *  currently-selected paired core via PATCH /api/v1/settings. The UI shows
  *  a chip in the group header so the user knows where their change lands. */
 export type SettingDestination = "client" | "core";
+
+/** One mode of a tabbed group. A tab partitions the group's sections (by
+ *  `section.tab`) behind a selector rendered below the group description. A tab
+ *  may hold a single object_management section (a full-height manager) or a
+ *  stack of config sections, never forcing the manager into its own group. The
+ *  group's single description still owns the explanatory copy; a tab is just a
+ *  label. */
+export interface SettingTab {
+  id: string;
+  label: string;
+}
 
 export interface SettingGroup {
   id: string;
@@ -313,6 +339,11 @@ export interface SettingGroup {
   /** Outline-variant icon class. Falls back to `icon` when the icon set has no
    *  outline equivalent (e.g. tune, call-split). */
   iconInactive?: string;
+  /** When set, the group renders a tab selector below its description and shows
+   *  only the sections whose `tab` matches the active tab. The first tab is the
+   *  default. Lets one group host both a config view and an object_management
+   *  manager, instead of splitting them across two groups. */
+  tabs?: SettingTab[];
   sections: SettingSection[];
 }
 
@@ -370,7 +401,6 @@ export const CORE_GROUP_IDS = [
   "scheduledPrompts",
   "greetings",
   "dualModel",
-  "toolkits",
   "tools",
   "stt",
   "tts",

@@ -1,22 +1,29 @@
-// Async title generation for new sessions.
+// Title generation for sessions.
 //
 // After a session's first turn completes (user message + first assistant
 // reply), we ask the configured LLM for a short title and PATCH it onto
 // the session. The client picks it up via the `session.updated` WS frame
-// with op="title_changed".
+// with op="title_changed". The user can also regenerate the title on demand
+// from the session bar, which routes here through `regenerateTitle`.
 //
-// Designed to be fire-and-forget. Failures are logged but never surface
-// to the user. The session keeps its empty title; another turn can retry.
+// The automatic path (`maybeGenerateTitle`) is fire-and-forget: failures are
+// logged but never surface. While a title is being generated we broadcast a
+// `session.updated` frame with op="title_generating" so the client can show a
+// spinner; the matching `generating: false` is always sent when we finish.
 //
-// The system prompt is the user-overridable `prompts.titleGenerationPrompt`
-// setting (default in @tomat/shared/domain/prompts.ts).
+// The prompt is the user-overridable `prompts.titleGenerationPrompt` setting
+// (default in @tomat/shared/domain/prompts.ts). It is a template with
+// `{firstMessage}` and `{recentMessages}` placeholders: we fill the first with
+// the opening message and the second with the latest messages that fit the
+// model's context window.
 
 import type OpenAI from "openai";
 import { DEFAULT_TITLE_GENERATION_PROMPT, errMessage } from "@tomat/shared";
 import { sessionsRepo } from "./sessions-store.ts";
 import { loadCoreSettings } from "./core-settings.ts";
 import { type LlmRequest, streamChatCompletion } from "./llm-provider.ts";
-import { resolveEndpoint } from "./endpoint-resolver.ts";
+import { resolveContextSize, resolveEndpoint } from "./endpoint-resolver.ts";
+import { thinkingBudget } from "./thinking-budget.ts";
 import { wsHub } from "../ws/hub.ts";
 import { getLogger } from "../shared/log.ts";
 
@@ -38,7 +45,32 @@ const MAX_TITLE_RAW_CHARS = 4096;
 // connection (and this fire-and-forget task) alive forever.
 const TITLE_GEN_TIMEOUT_MS = 30_000;
 
-export async function maybeGenerateTitle(sessionId: string, ownerClientId: string): Promise<void> {
+// Output allowance reserved for the title itself, on top of the thinking
+// budget, when deciding how many recent messages can fit the context window.
+const TITLE_OUTPUT_TOKENS = 32;
+
+// Slack left under the context window so a slightly-off character estimate
+// can't tip the request into an overflow error.
+const TITLE_SAFETY_MARGIN_TOKENS = 64;
+
+/** Run automatically after a session's first turn. No-op unless the session
+ *  has no title yet. */
+export function maybeGenerateTitle(sessionId: string, ownerClientId: string): Promise<void> {
+  return generateTitle(sessionId, ownerClientId, { force: false });
+}
+
+/** Run on explicit user request (the session bar's regenerate button).
+ *  Replaces any existing title. */
+export function regenerateTitle(sessionId: string, ownerClientId: string): Promise<void> {
+  return generateTitle(sessionId, ownerClientId, { force: true });
+}
+
+async function generateTitle(
+  sessionId: string,
+  ownerClientId: string,
+  opts: { force: boolean },
+): Promise<void> {
+  let signalledStart = false;
   try {
     let session;
     try {
@@ -46,7 +78,15 @@ export async function maybeGenerateTitle(sessionId: string, ownerClientId: strin
     } catch {
       return;
     }
-    if (session.title && session.title.trim() !== "") return;
+    // The automatic path only titles untitled sessions; the manual path
+    // always regenerates.
+    if (!opts.force && session.title && session.title.trim() !== "") return;
+
+    // Tell the client we're working now that we've committed to a run. The
+    // `finally` below always sends the matching `generating: false`, so an
+    // optimistic spinner can never get stuck.
+    broadcastGenerating(ownerClientId, sessionId, true);
+    signalledStart = true;
 
     const sessionMessages = sessionsRepo().listMessages(sessionId);
     const firstUser = sessionMessages.find((m) => m.role === "user");
@@ -54,26 +94,38 @@ export async function maybeGenerateTitle(sessionId: string, ownerClientId: strin
     if (!firstUser || !firstAssistant) return;
 
     const settings = await loadCoreSettings();
-    const systemPrompt = strSetting(
+    const template = strSetting(
       settings,
       "prompts.titleGenerationPrompt",
       DEFAULT_TITLE_GENERATION_PROMPT,
     );
     const endpoint = await resolveEndpoint(settings);
-    // Title-gen never benefits from reasoning; force it off so small models
-    // don't burn budget on `<think>` blocks.
-    endpoint.reasoning = "off";
+    // Thinking is off by default here (a title rarely benefits from it); the
+    // Title Thinking Budget setting can opt in. maxTokens carries the budget
+    // on top of the title's own allowance so thinking can't crowd it out.
+    const budget = thinkingBudget(settings, "prompts.titleGenerationThinkingBudget");
+    const contextSize = resolveContextSize(settings, "default");
+
+    const { firstMessage, recentMessages } = selectTitleContext(
+      sessionMessages,
+      template,
+      contextSize,
+      TITLE_OUTPUT_TOKENS + budget,
+    );
+    const systemPrompt = fillTemplate(template, firstMessage, recentMessages);
 
     const llmMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
-      { role: "user", content: extractText(firstUser) },
-      { role: "assistant", content: extractText(firstAssistant) },
       { role: "user", content: "Title:" },
     ];
     const req: LlmRequest = {
       endpoint,
       messages: llmMessages,
-      overrides: { temperature: 0.3, maxTokens: 32 },
+      overrides: {
+        temperature: 0.3,
+        maxTokens: TITLE_OUTPUT_TOKENS + budget,
+        reasoningBudget: budget,
+      },
       signal: AbortSignal.timeout(TITLE_GEN_TIMEOUT_MS),
     };
 
@@ -97,7 +149,92 @@ export async function maybeGenerateTitle(sessionId: string, ownerClientId: strin
     });
   } catch (err) {
     log.warn(`title gen failed for ${sessionId}: ${errMessage(err)}`);
+  } finally {
+    if (signalledStart) broadcastGenerating(ownerClientId, sessionId, false);
   }
+}
+
+function broadcastGenerating(ownerClientId: string, sessionId: string, generating: boolean): void {
+  wsHub().broadcastToClient(ownerClientId, {
+    kind: "session.updated",
+    sessionId,
+    op: "title_generating",
+    payload: { generating },
+  });
+}
+
+// Exported for testing. Picks the opening message plus the newest messages
+// that fit the title prompt within the model's context window.
+export function __selectTitleContextForTesting(
+  messages: { role: string; content?: unknown }[],
+  template: string,
+  contextSize: number,
+  outputAllowance: number,
+): { firstMessage: string; recentMessages: string } {
+  return selectTitleContext(messages, template, contextSize, outputAllowance);
+}
+
+function selectTitleContext(
+  messages: { role: string; content?: unknown }[],
+  template: string,
+  contextSize: number,
+  outputAllowance: number,
+): { firstMessage: string; recentMessages: string } {
+  // Title prompting only cares about the conversational turns; tool calls,
+  // reasoning traces, and empty messages carry no topic signal.
+  const turns: { role: string; text: string }[] = [];
+  for (const m of messages) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const text = extractText(m);
+    if (text) turns.push({ role: m.role, text });
+  }
+  if (turns.length === 0) return { firstMessage: "", recentMessages: "" };
+
+  const firstMessage = turns[0].text;
+
+  // Budget the recent transcript against the context window, leaving room for
+  // the template's fixed text, the title output, the thinking budget, and a
+  // safety margin. The opening message is always included.
+  const overhead = estimateTokens(
+    template.replaceAll("{firstMessage}", "").replaceAll("{recentMessages}", ""),
+  );
+  let budget =
+    contextSize -
+    overhead -
+    outputAllowance -
+    TITLE_SAFETY_MARGIN_TOKENS -
+    estimateTokens(firstMessage);
+
+  // Walk newest -> oldest, skipping the opening turn (shown separately), and
+  // keep what fits. Reverse so the transcript reads chronologically.
+  const picked: string[] = [];
+  for (let i = turns.length - 1; i >= 1; i--) {
+    const line = `${roleLabel(turns[i].role)}: ${turns[i].text}`;
+    const cost = estimateTokens(line) + 1; // +1 for the joining newline
+    if (budget - cost < 0) break;
+    budget -= cost;
+    picked.push(line);
+  }
+  picked.reverse();
+
+  return { firstMessage, recentMessages: picked.join("\n") };
+}
+
+function fillTemplate(template: string, firstMessage: string, recentMessages: string): string {
+  return template
+    .replaceAll("{firstMessage}", firstMessage)
+    .replaceAll("{recentMessages}", recentMessages || "(none)");
+}
+
+// Rough char-based token estimate (~4 chars/token). The codebase has no
+// tokenizer; this matches the character-budget convention used elsewhere and
+// only needs to be in the right ballpark for context fitting.
+function estimateTokens(s: string): number {
+  return Math.ceil(s.length / 4);
+}
+
+function roleLabel(role: string): string {
+  return role === "assistant" ? "Assistant" : "User";
 }
 
 // Exported for testing. `sanitize` is purely lexical: strips

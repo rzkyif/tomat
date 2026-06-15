@@ -7,6 +7,7 @@
   import DisplayBubble from "$components/chat/messages/DisplayBubble.svelte";
   import ToolCall from "$components/chat/messages/ToolCall.svelte";
   import RelevantTools from "$components/chat/messages/RelevantTools.svelte";
+  import RelevantDocuments from "$components/chat/messages/RelevantDocuments.svelte";
   import UserInput from "$components/chat/UserInput.svelte";
   import UserMessage from "$components/chat/messages/UserMessage.svelte";
   import SessionBar from "$components/chat/SessionBar.svelte";
@@ -27,6 +28,7 @@
     documentsState,
     downloadsState,
     messagesState,
+    scheduledPromptsState,
     serversState,
     sessionsState,
     settingsState,
@@ -472,6 +474,7 @@
       settingsState.attach();
       toolkitsState.ensureConnected();
       documentsState.attach();
+      scheduledPromptsState.attach();
       streamingState.attach();
       serversState.attach();
       sessionsState.attach();
@@ -743,6 +746,7 @@
     if (msg.role === "loading") return true;
     if (msg.role === "tool") return true;
     if (msg.role === "tool_filter") return true;
+    if (msg.role === "document_filter") return true;
     if (msg.role === "display") return true;
     // Core-authored prompt of an automated session: a collapsed
     // "Automated Prompt" bubble instead of a full user bubble.
@@ -777,7 +781,31 @@
       const isHiddenSystem =
         msg.role === "system" &&
         !settingsState.currentSettings["prompts.showSystemPrompt"];
-      return !isEmptyAssistant && !isHiddenReasoning && !isHiddenSystem;
+      // Empty filter bubbles (no relevant tools / documents found) are hidden
+      // unless the user opts to keep them. Errors always show. "No relevant
+      // tools" is the filter result, not toolsSent: always-available tools
+      // would otherwise keep the bubble on every turn.
+      const toolFilterBase =
+        msg.phase2 !== undefined
+          ? msg.phase2.length
+          : (msg.phase1?.length ?? 0);
+      const isHiddenEmptyToolFilter =
+        msg.role === "tool_filter" &&
+        msg.status !== "error" &&
+        toolFilterBase === 0 &&
+        !settingsState.currentSettings["tools.showEmptySelection"];
+      const isHiddenEmptyDocFilter =
+        msg.role === "document_filter" &&
+        msg.status !== "error" &&
+        (msg.relevant?.length ?? 0) === 0 &&
+        !settingsState.currentSettings["documents.showEmptySelection"];
+      return (
+        !isEmptyAssistant &&
+        !isHiddenReasoning &&
+        !isHiddenSystem &&
+        !isHiddenEmptyToolFilter &&
+        !isHiddenEmptyDocFilter
+      );
     });
     if (!showStreamingLoadingBubble) return real;
     const loadingMsg: Message = {
@@ -813,6 +841,11 @@
   // presentation only.
   function assistantContent(msg: Message): MessageContent {
     const base = asMessageContent(msg.content);
+    if (msg.truncated) {
+      const text = getTextContent(base);
+      const note = "> _Reply cut off: the context window is full._";
+      return text ? `${text}\n\n${note}` : note;
+    }
     if (!msg.interrupted) return base;
     const text = getTextContent(base);
     return text ? `${text}\n\n> _Interrupted._` : "> _Interrupted._";
@@ -1018,6 +1051,13 @@
                         />
                       {:else if msg.role === "tool_filter"}
                         <RelevantTools
+                          id={msg.id}
+                          {msg}
+                          {neighborLeft}
+                          {neighborRight}
+                        />
+                      {:else if msg.role === "document_filter"}
+                        <RelevantDocuments
                           id={msg.id}
                           {msg}
                           {neighborLeft}

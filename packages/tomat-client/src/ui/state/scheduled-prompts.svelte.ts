@@ -7,6 +7,9 @@
 import type { ScheduledPrompt, ScheduledPromptDraft, ScheduleSpec } from "@tomat/shared";
 import type { ScheduledPromptPatch } from "$lib/core/scheduled-prompts";
 import { cores } from "$lib/core";
+import { getLogger } from "$lib/util/log";
+
+const log = getLogger("scheduled-prompts");
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = [
@@ -76,6 +79,22 @@ export function lastRunText(p: ScheduledPrompt): string | null {
 
 class ScheduledPromptsState {
   prompts = $state<ScheduledPrompt[]>([]);
+
+  private unsubscribeConn: (() => void) | null = null;
+
+  /** Subscribe to the active core's connection state and (re)load the list on
+   *  every connected edge, so the manager opens onto fresh rows instead of an
+   *  empty store. Idempotent, mirroring documentsState.attach(). */
+  attach(): void {
+    if (this.unsubscribeConn) return;
+    this.unsubscribeConn = cores().subscribeConnectionState((state) => {
+      if (state === "connected") {
+        void this.load().catch((err) =>
+          log.warn("scheduled prompt load on ws connect failed:", err),
+        );
+      }
+    });
+  }
 
   async load(): Promise<void> {
     this.prompts = await cores().api().scheduledPrompts.list();

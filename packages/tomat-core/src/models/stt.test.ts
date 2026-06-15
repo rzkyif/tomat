@@ -5,6 +5,7 @@
 
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { SETTINGS_SCHEMA, type HardwareInfo, type SttPresetField } from "@tomat/shared";
+import { primaryFileSpec, STT_PRIMARY_ROLE } from "@tomat/shared";
 import { buildCatalogPayload } from "../../../tomat-model-catalog/src/index.ts";
 import { buildSttPresetViews, resolveSttSelection, sttThreads } from "./stt.ts";
 import { AppError } from "../shared/errors.ts";
@@ -45,7 +46,9 @@ Deno.test("stt: the stt.modelPath schema default is a catalog spec", () => {
     .flatMap((s) => s.fields)
     .find((f) => f.id === "stt.modelPath");
   assert(field, "stt.modelPath field should exist");
-  const specs = catalog.stt.models.flatMap((m) => m.quants.map((q) => q.modelSpec));
+  const specs = catalog.stt.models.flatMap((m) =>
+    m.quants.map((q) => primaryFileSpec(q, STT_PRIMARY_ROLE[m.family])),
+  );
   assert(
     specs.includes(field!.defaultValue as string),
     `stt.modelPath default not in catalog: ${field!.defaultValue}`,

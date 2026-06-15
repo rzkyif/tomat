@@ -47,7 +47,7 @@ const CANDIDATES = ["a", "b", "c"].map(descriptor);
 
 Deno.test("phase2: returns the picked subset for a comma-separated response", async () => {
   const filter = new ToolFilter();
-  const picked = await filter.phase2("query", CANDIDATES, endpoint("1, 3"));
+  const picked = await filter.phase2("query", CANDIDATES, endpoint("1, 3"), 0);
   assertEquals(
     picked.map((c) => c.name),
     ["a", "c"],
@@ -56,19 +56,19 @@ Deno.test("phase2: returns the picked subset for a comma-separated response", as
 
 Deno.test("phase2: 'none' returns an empty list", async () => {
   const filter = new ToolFilter();
-  const picked = await filter.phase2("query", CANDIDATES, endpoint("none"));
+  const picked = await filter.phase2("query", CANDIDATES, endpoint("none"), 0);
   assertEquals(picked, []);
 });
 
 Deno.test("phase2: empty response is treated as 'none'", async () => {
   const filter = new ToolFilter();
-  const picked = await filter.phase2("q", CANDIDATES, endpoint(""));
+  const picked = await filter.phase2("q", CANDIDATES, endpoint(""), 0);
   assertEquals(picked, []);
 });
 
 Deno.test("phase2: fails open with the candidate set on unparseable response", async () => {
   const filter = new ToolFilter();
-  const picked = await filter.phase2("q", CANDIDATES, endpoint("I think tool A is best"));
+  const picked = await filter.phase2("q", CANDIDATES, endpoint("I think tool A is best"), 0);
   assertEquals(
     picked.map((c) => c.name),
     ["a", "b", "c"],
@@ -77,7 +77,7 @@ Deno.test("phase2: fails open with the candidate set on unparseable response", a
 
 Deno.test("phase2: silently drops out-of-range numbers", async () => {
   const filter = new ToolFilter();
-  const picked = await filter.phase2("q", CANDIDATES, endpoint("1,99,2"));
+  const picked = await filter.phase2("q", CANDIDATES, endpoint("1,99,2"), 0);
   assertEquals(
     picked.map((c) => c.name),
     ["a", "b"],
@@ -86,6 +86,6 @@ Deno.test("phase2: silently drops out-of-range numbers", async () => {
 
 Deno.test("phase2: empty candidates short-circuits to []", async () => {
   const filter = new ToolFilter();
-  const picked = await filter.phase2("q", [], endpoint("1,2,3"));
+  const picked = await filter.phase2("q", [], endpoint("1,2,3"), 0);
   assertEquals(picked, []);
 });

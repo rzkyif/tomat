@@ -14,6 +14,7 @@ import { embedSourceHash, embedWithHash } from "./relevance.ts";
 import { loadCoreSettings } from "./core-settings.ts";
 import { resolveEndpoint } from "./endpoint-resolver.ts";
 import { singleShot } from "./single-shot.ts";
+import { thinkingBudget } from "./thinking-budget.ts";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("doc-indexer");
@@ -57,7 +58,9 @@ async function indexDocument(id: string): Promise<void> {
       // job is dropped, leaving the document permanently unsummarized.
       await llmIdle().ensureLoaded(settings);
       const endpoint = await resolveEndpoint(settings);
-      endpoint.reasoning = "off";
+      // Thinking off by default (Summary Thinking Budget = 0); a positive
+      // budget opts in, added on top of the summary's own token allowance.
+      const budget = thinkingBudget(settings, "prompts.documentSummaryThinkingBudget");
       const summary = await singleShot({
         systemPrompt: summaryPrompt(settings),
         userMessage: `Document title: ${doc.title}\n\n${doc.content.slice(
@@ -65,7 +68,7 @@ async function indexDocument(id: string): Promise<void> {
           SUMMARY_INPUT_MAX_CHARS,
         )}`,
         endpoint,
-        overrides: { temperature: 0, maxTokens: 160 },
+        overrides: { temperature: 0, maxTokens: 160 + budget, reasoningBudget: budget },
       });
       if (summary) store.setSummary(id, summary, state.contentHash);
     } catch (err) {

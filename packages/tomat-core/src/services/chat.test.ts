@@ -319,8 +319,10 @@ Deno.test({
         [a1],
       );
 
-      // The outbound transcript stopped at the anchor (inclusive).
-      const sent = requestBodies[requestBodies.length - 1];
+      // The outbound transcript stopped at the anchor (inclusive). Index 0 is
+      // the turn's completion request; the fire-and-forget title generation in
+      // onStop issues a later request that carries the full recent transcript.
+      const sent = requestBodies[0];
       assertEquals(sent.includes("turn one"), true);
       assertEquals(sent.includes("turn two"), false);
       assertEquals(sent.includes("reply two"), false);

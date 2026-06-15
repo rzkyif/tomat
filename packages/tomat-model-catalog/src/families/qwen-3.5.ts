@@ -31,6 +31,11 @@ const aa = (value: number) => [
   { source: "artificial-analysis", metric: "intelligence-index", value },
 ];
 
+// Qwen's recommended thinking-mode sampling, at the precise/reasoning end
+// (temperature 0.6 rather than the higher "general" 1.0) for agentic
+// reliability. Uniform across the family; users can adjust in Model Behavior.
+const SAMPLING = { temperature: 0.6, topP: 0.95, topK: 20, minP: 0, repeatPenalty: 1.0 };
+
 export const qwen35: ModelFamily = {
   family: "Qwen 3.5",
   publisher: "Qwen",
@@ -43,6 +48,7 @@ export const qwen35: ModelFamily = {
       contextMax: 262144,
       arch: { blockCount: 24, embeddingLength: 1024, headCount: 8, headCountKv: 2, headDim: 256 },
       capabilities: { tools: true, vision: true, reasoning: true },
+      sampling: SAMPLING,
       variants: [
         {
           label: "standard",
@@ -67,6 +73,7 @@ export const qwen35: ModelFamily = {
       contextMax: 262144,
       arch: { blockCount: 24, embeddingLength: 2048, headCount: 8, headCountKv: 2, headDim: 256 },
       capabilities: { tools: true, vision: true, reasoning: true },
+      sampling: SAMPLING,
       variants: [
         {
           label: "standard",
@@ -91,6 +98,7 @@ export const qwen35: ModelFamily = {
       contextMax: 262144,
       arch: { blockCount: 32, embeddingLength: 2560, headCount: 16, headCountKv: 4, headDim: 256 },
       capabilities: { tools: true, vision: true, reasoning: true },
+      sampling: SAMPLING,
       variants: [
         {
           label: "standard",
@@ -115,6 +123,7 @@ export const qwen35: ModelFamily = {
       contextMax: 262144,
       arch: { blockCount: 32, embeddingLength: 4096, headCount: 16, headCountKv: 4, headDim: 256 },
       capabilities: { tools: true, vision: true, reasoning: true },
+      sampling: SAMPLING,
       variants: [
         {
           label: "standard",

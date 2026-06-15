@@ -6,10 +6,12 @@ import { catalogPayloadSchema, type CatalogPayload, type ModelFamily } from "@to
 import { FAMILIES } from "./families/index.ts";
 import { FIT_CONFIG } from "./fit.ts";
 import { STT_CATALOG } from "./stt.ts";
+import { TTS_CATALOG } from "./tts.ts";
 
 export { FAMILIES } from "./families/index.ts";
 export { FIT_CONFIG } from "./fit.ts";
 export { STT_CATALOG } from "./stt.ts";
+export { TTS_CATALOG } from "./tts.ts";
 
 /** Assemble + validate the catalog payload (everything that gets signed).
  *  `generatedAt` is passed in (scripts stamp it) since the scripts environment
@@ -24,32 +26,39 @@ export function buildCatalogPayload(
     families,
     fit: FIT_CONFIG,
     stt: STT_CATALOG,
+    tts: TTS_CATALOG,
   };
   const parsed = catalogPayloadSchema.parse(payload);
-  checkSttReferences(parsed);
+  checkSpeechReferences("stt", parsed.stt.models, parsed.stt.presets);
+  checkSpeechReferences("tts", parsed.tts.models, parsed.tts.presets);
   return parsed;
 }
 
 /** Referential checks zod can't express without ZodEffects (which would break
- *  the `.extend()` building modelCatalogSchema): unique STT ids, and every STT
- *  preset pointing at an existing model+quant. */
-function checkSttReferences(payload: CatalogPayload): void {
+ *  the `.extend()` building modelCatalogSchema): unique model + preset ids, and
+ *  every preset pointing at an existing model+quant. Shared by stt and tts since
+ *  their model/preset shapes are identical here. */
+function checkSpeechReferences(
+  kind: "stt" | "tts",
+  models: { id: string; quants: { quant: string }[] }[],
+  presets: { id: string; modelId: string; quant: string }[],
+): void {
   const modelIds = new Set<string>();
-  for (const model of payload.stt.models) {
-    if (modelIds.has(model.id)) throw new Error(`duplicate stt model id: ${model.id}`);
+  for (const model of models) {
+    if (modelIds.has(model.id)) throw new Error(`duplicate ${kind} model id: ${model.id}`);
     modelIds.add(model.id);
   }
   const presetIds = new Set<string>();
-  for (const preset of payload.stt.presets) {
-    if (presetIds.has(preset.id)) throw new Error(`duplicate stt preset id: ${preset.id}`);
+  for (const preset of presets) {
+    if (presetIds.has(preset.id)) throw new Error(`duplicate ${kind} preset id: ${preset.id}`);
     presetIds.add(preset.id);
-    const model = payload.stt.models.find((m) => m.id === preset.modelId);
+    const model = models.find((m) => m.id === preset.modelId);
     if (!model) {
-      throw new Error(`stt preset "${preset.id}" references unknown model: ${preset.modelId}`);
+      throw new Error(`${kind} preset "${preset.id}" references unknown model: ${preset.modelId}`);
     }
     if (!model.quants.some((q) => q.quant === preset.quant)) {
       throw new Error(
-        `stt preset "${preset.id}" references unknown quant ${preset.quant} of ${preset.modelId}`,
+        `${kind} preset "${preset.id}" references unknown quant ${preset.quant} of ${preset.modelId}`,
       );
     }
   }

@@ -87,6 +87,10 @@ export const QUICK_SETTINGS_SECTIONS: QuickSettingsSectionDef[] = [
     id: "greetings",
     title: "Greetings",
     enabledField: "greetings.enabled",
-    fields: [{ id: "greetings.runOn" }],
+    fields: [
+      { id: "greetings.runOn" },
+      { id: "greetings.sessionTitle" },
+      { id: "greetings.instruction" },
+    ],
   },
 ];

@@ -61,10 +61,7 @@
     buildSystemPromptBase,
   } from "$lib/prompts/system-prompt";
   import SnippetAutocomplete from "./SnippetAutocomplete.svelte";
-  import {
-    pauseClickThrough,
-    resumeClickThrough,
-  } from "$lib/window/window";
+  import { pauseClickThrough, resumeClickThrough } from "$lib/window/window";
   import {
     listCaptureMonitors,
     captureMonitor,
@@ -76,6 +73,7 @@
   import { useBlink } from "$composables/use-blink.svelte";
   import type { ActivationMode } from "@tomat/shared";
   import AttachmentList from "./AttachmentList.svelte";
+  import QuickModelBar from "./userinput/QuickModelBar.svelte";
   import AutocorrectAlert from "./userinput/AutocorrectAlert.svelte";
   import PermissionRequest from "./userinput/PermissionRequest.svelte";
   import ScheduleConfirmForm from "./userinput/ScheduleConfirmForm.svelte";
@@ -85,9 +83,7 @@
   import { hasAlpha } from "$lib/appearance/color";
 
   const themeOverride = $derived(
-    settingsState.currentSettings[
-      "appearance.userInputDefaultColor"
-    ] as string,
+    settingsState.currentSettings["appearance.userInputDefaultColor"] as string,
   );
   const themeOverrideHex = $derived(
     hasAlpha(themeOverride) ? themeOverride : null,
@@ -103,7 +99,10 @@
   // each their own stateful unit; this component owns the lifecycle wiring (see
   // onMount / the effects below) and the option list, which spans two stores.
   const ac = useAutocomplete();
-  ac.bind(() => textareaElement, () => mirrorSpan);
+  ac.bind(
+    () => textareaElement,
+    () => mirrorSpan,
+  );
   const stt = useStt();
 
   let autocompleteOptions = $derived.by<AutocompleteOption[]>(() => {
@@ -214,14 +213,17 @@
     // The pending frame is reactive deep state, so its draft is a Proxy;
     // structuredClone would throw DataCloneError on it. $state.snapshot
     // returns a plain editable clone (the same call the accept path uses).
-    scheduleDraft = scheduleConfirm ? $state.snapshot(scheduleConfirm.draft) : null;
+    scheduleDraft = scheduleConfirm
+      ? $state.snapshot(scheduleConfirm.draft)
+      : null;
   });
   let scheduleDraftReady = $derived.by(() => {
     const d = scheduleDraft;
     if (!d) return false;
     if (!d.title.trim() || !d.instruction.trim()) return false;
     // A "once" in the past would never fire; make the user pick a future time.
-    if (d.schedule.kind === "once" && d.schedule.atMs <= Date.now()) return false;
+    if (d.schedule.kind === "once" && d.schedule.atMs <= Date.now())
+      return false;
     return true;
   });
   function respondScheduleConfirm(accepted: boolean): void {
@@ -238,22 +240,22 @@
     inputNotice
       ? inputNotice
       : connectionState.reconnecting
-      ? "Reconnecting to core..."
-      : downloadsState.hasPending
-      ? "Pending download, open settings!"
-      : downloadsState.loading
-        ? "Connecting to core..."
-        : stt.processing
-        ? "Transcribing..."
-        : vadManager.enabled && vadManager.listening
-        ? "Listening..."
-        : vadManager.enabled
-          ? "Waiting for speech..."
-          : llmStatus === "Error"
-            ? "Failed to start LLM server!!"
-            : llmStatus === "Loading"
-              ? "Waiting for LLM server..."
-              : "Enter your instructions...",
+        ? "Reconnecting to core..."
+        : downloadsState.hasPending
+          ? "Pending download, open settings!"
+          : downloadsState.loading
+            ? "Connecting to core..."
+            : stt.processing
+              ? "Transcribing..."
+              : vadManager.enabled && vadManager.listening
+                ? "Listening..."
+                : vadManager.enabled
+                  ? "Waiting for speech..."
+                  : llmStatus === "Error"
+                    ? "Failed to start LLM server!!"
+                    : llmStatus === "Loading"
+                      ? "Waiting for LLM server..."
+                      : "Enter your instructions...",
   );
   let sttStatus = $derived(serversState.serverStatuses.speech.status);
 
@@ -398,7 +400,8 @@
               monitors = await listCaptureMonitors();
               captureMonitors = monitors;
             }
-            const target = monitors.find((m) => m.isPrimary)?.id || monitors[0]?.id;
+            const target =
+              monitors.find((m) => m.isPrimary)?.id || monitors[0]?.id;
             if (target) await captureMonitorById(target);
           })();
         },
@@ -650,7 +653,10 @@
         });
       } finally {
         await win.setOuterPosition({ x: savedPos.x, y: savedPos.y });
-        await win.setOuterSize({ width: savedSize.width, height: savedSize.height });
+        await win.setOuterSize({
+          width: savedSize.width,
+          height: savedSize.height,
+        });
         await resumeClickThrough();
       }
 
@@ -666,7 +672,10 @@
         // .slice() returns a Uint8Array backed by a fresh non-shared
         // ArrayBuffer, which Blob's `BlobPart` signature requires.
         const blob = new Blob([data.slice().buffer], { type: mime });
-        attachments = [...attachments, await ingestImageBlob(blob, fileName, ext)];
+        attachments = [
+          ...attachments,
+          await ingestImageBlob(blob, fileName, ext),
+        ];
       } else {
         attachments = [
           ...attachments,
@@ -764,292 +773,298 @@
 </script>
 
 <div style:display="contents" style:--default-base={themeOverrideHex}>
-<Bubble
-  selectedAlignment={settingsState.getAlignment()}
-  extraClass="flex flex-col gap-4 min-w-0 overflow-hidden transition-all"
-  onclick={handleBubbleClick}
->
-  <!-- LLM autocorrect before -->
-  {#if stt.showDiff && stt.original !== null}
-    <AutocorrectAlert
-      original={stt.original}
-      onReject={() => {
-        if (stt.original !== null) text = stt.original;
-        stt.clearDiff();
-        textareaElement?.focus();
-      }}
-    />
-  {/if}
-
-  {#if permissionRequest}
-    <PermissionRequest request={permissionRequest} />
-  {:else if scheduleConfirm && scheduleDraft}
-    <ScheduleConfirmForm
-      draft={scheduleDraft}
-      onChange={(next) => (scheduleDraft = next)}
-    />
-  {:else}
-  <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
-    <!-- Hidden span for the typed text to dynamically expand width and height. Safely renders newlines.
-         Doubles as a layout mirror for the autocomplete caret measurement. -->
-    <span
-      bind:this={mirrorSpan}
-      class="invisible whitespace-pre-wrap break-words wrap-break-word col-start-1 row-start-1 pointer-events-none"
-      >{text ? text + "\u200b" : placeholderText}</span
-    >
-    <textarea
-      aria-label="Message input"
-      bind:this={textareaElement}
-      bind:value={text}
-      onkeydown={handleKeydown}
-      oninput={handleTextInput}
-      onkeyup={handleSelectionChange}
-      onclick={handleSelectionChange}
-      oncompositionstart={handleCompositionStart}
-      oncompositionend={handleCompositionEnd}
-      onblur={() => (ac.open = false)}
-      onpaste={handlePaste}
-      autocapitalize="on"
-      autocomplete="off"
-      rows="1"
-      cols="1"
-      class="col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-[calc(100vw-80px)] max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words"
-      placeholder={placeholderText}
-      disabled={downloadsState.hasPending ||
-        downloadsState.loading ||
-        connectionState.reconnecting ||
-        (llmStatus !== "Running" && llmStatus !== "Disabled")}
-    ></textarea>
-  </div>
-  {/if}
-
-  <!-- Attachment previews -->
-  <AttachmentList
-    parts={attachmentParts}
-    editable
-    onRemove={removeAttachment}
-    onImageClick={openImagePreview}
-  />
-
-  <div
-    class="flex items-end justify-between gap-2 text-2xl text-default-700 w-full"
+  <Bubble
+    selectedAlignment={settingsState.getAlignment()}
+    extraClass="flex flex-col gap-4 min-w-0 overflow-hidden transition-all"
+    onclick={handleBubbleClick}
   >
-    {#if !permissionRequest && !scheduleConfirm}
-    <div class="flex items-center bg-surface-inset rounded-large p-1">
-      <IconButton
-        icon="i-material-symbols-attach-file-rounded"
-        title="Attach File"
-        size="lg-tight"
-        onclick={handleAttachFileFromMenu}
+    <!-- LLM autocorrect before -->
+    {#if stt.showDiff && stt.original !== null}
+      <AutocorrectAlert
+        original={stt.original}
+        onReject={() => {
+          if (stt.original !== null) text = stt.original;
+          stt.clearDiff();
+          textareaElement?.focus();
+        }}
       />
-
-      <!-- Screen capture: an icon with an overlaid monitor <select>. A <select>
-           can't live inside a <button>, so this matches IconButton's lg-tight
-           sizing (p-1 text-xl) by hand instead of using the component. -->
-      <div
-        class="relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hover:text-default-900 rounded transition-colors"
-      >
-        <i class="flex i-material-symbols-screenshot-monitor-outline-rounded"
-        ></i>
-        <select
-          class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
-          title="Screen Capture"
-          aria-label="Screen Capture Monitor"
-          onchange={handleCaptureSelect}
-          disabled={capturing}
-          value=""
-        >
-          <option value="" disabled>Select Monitor</option>
-          {#each captureMonitors as mon}
-            <option value={mon.id}
-              >{mon.name}{mon.isPrimary ? " (Primary)" : ""}</option
-            >
-          {/each}
-        </select>
-      </div>
-
-      <IconButton
-        icon="i-material-symbols-crop-free-rounded"
-        title="Capture Region"
-        ariaLabel="Capture Screen Region"
-        size="lg-tight"
-        disabled={capturing}
-        onclick={handleCaptureRegionFromMenu}
-      />
-    </div>
     {/if}
 
-    <div class="flex items-center bg-surface-inset rounded-large p-1">
-      <div
-        class="relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hover:text-default-900 rounded transition-colors"
-      >
-        <i class="flex i-material-symbols-desktop-windows-outline-rounded"></i>
-        <select
-          class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
-          onchange={handleMonitorChange}
-          value={settingsState.getMonitor()}
-        >
-          <option value="primary">Primary Monitor</option>
-          {#each monitors as monitor}
-            <option value={monitor.id}>{monitor.name}</option>
-          {/each}
-        </select>
-      </div>
-
-      <div class="flex items-center">
-        {#each ALIGNMENTS as align}
-          <IconButton
-            icon={align.icon}
-            title={align.title}
-            size="lg-tight"
-            onclick={() => handleAlignment(align.value)}
-          />
-        {/each}
-      </div>
-
-      <IconButton
-        icon="i-material-symbols-settings-outline-rounded"
-        title={downloadsState.hasPending
-          ? "Pending downloads - open settings"
-          : "Settings"}
-        colorClass={gearTone}
-        size="lg-tight"
-        onclick={() => viewState.navigate("settings")}
-        class="transition-colors duration-500"
+    {#if permissionRequest}
+      <PermissionRequest request={permissionRequest} />
+    {:else if scheduleConfirm && scheduleDraft}
+      <ScheduleConfirmForm
+        draft={scheduleDraft}
+        onChange={(next) => (scheduleDraft = next)}
       />
-    </div>
+    {:else}
+      <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
+        <!-- Hidden span for the typed text to dynamically expand width and height. Safely renders newlines.
+         Doubles as a layout mirror for the autocomplete caret measurement. -->
+        <span
+          bind:this={mirrorSpan}
+          class="invisible whitespace-pre-wrap break-words wrap-break-word col-start-1 row-start-1 pointer-events-none"
+          >{text ? text + "\u200b" : placeholderText}</span
+        >
+        <textarea
+          aria-label="Message input"
+          bind:this={textareaElement}
+          bind:value={text}
+          onkeydown={handleKeydown}
+          oninput={handleTextInput}
+          onkeyup={handleSelectionChange}
+          onclick={handleSelectionChange}
+          oncompositionstart={handleCompositionStart}
+          oncompositionend={handleCompositionEnd}
+          onblur={() => (ac.open = false)}
+          onpaste={handlePaste}
+          autocapitalize="on"
+          autocomplete="off"
+          rows="1"
+          cols="1"
+          class="col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-[calc(100vw-80px)] max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words placeholder:text-default-400"
+          placeholder={placeholderText}
+          disabled={downloadsState.hasPending ||
+            downloadsState.loading ||
+            connectionState.reconnecting ||
+            (llmStatus !== "Running" && llmStatus !== "Disabled")}
+        ></textarea>
+      </div>
+      <QuickModelBar />
+    {/if}
 
-    <div class="flex gap-2">
-      {#if permissionRequest}
-        <!-- Icon + text on the filled inset surface (rounded-large), neutral
+    <!-- Attachment previews -->
+    <AttachmentList
+      parts={attachmentParts}
+      editable
+      onRemove={removeAttachment}
+      onImageClick={openImagePreview}
+    />
+
+    <div
+      class="flex items-end justify-between gap-2 text-2xl text-default-700 w-full"
+    >
+      {#if !permissionRequest && !scheduleConfirm}
+        <div class="flex items-center bg-surface-inset rounded-large p-1">
+          <IconButton
+            icon="i-material-symbols-attach-file-rounded"
+            title="Attach File"
+            size="lg-tight"
+            onclick={handleAttachFileFromMenu}
+          />
+
+          <!-- Screen capture: an icon with an overlaid monitor <select>. A <select>
+           can't live inside a <button>, so this matches IconButton's lg-tight
+           sizing (p-1 text-xl) by hand instead of using the component. -->
+          <div
+            class="relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hover:text-default-900 rounded transition-colors"
+          >
+            <i
+              class="flex i-material-symbols-screenshot-monitor-outline-rounded"
+            ></i>
+            <select
+              class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
+              title="Screen Capture"
+              aria-label="Screen Capture Monitor"
+              onchange={handleCaptureSelect}
+              disabled={capturing}
+              value=""
+            >
+              <option value="" disabled>Select Monitor</option>
+              {#each captureMonitors as mon}
+                <option value={mon.id}
+                  >{mon.name}{mon.isPrimary ? " (Primary)" : ""}</option
+                >
+              {/each}
+            </select>
+          </div>
+
+          <IconButton
+            icon="i-material-symbols-crop-free-rounded"
+            title="Capture Region"
+            ariaLabel="Capture Screen Region"
+            size="lg-tight"
+            disabled={capturing}
+            onclick={handleCaptureRegionFromMenu}
+          />
+        </div>
+      {/if}
+
+      <div class="flex items-center bg-surface-inset rounded-large p-1">
+        <div
+          class="relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hover:text-default-900 rounded transition-colors"
+        >
+          <i class="flex i-material-symbols-desktop-windows-outline-rounded"
+          ></i>
+          <select
+            class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
+            onchange={handleMonitorChange}
+            value={settingsState.getMonitor()}
+          >
+            <option value="primary">Primary Monitor</option>
+            {#each monitors as monitor}
+              <option value={monitor.id}>{monitor.name}</option>
+            {/each}
+          </select>
+        </div>
+
+        <div class="flex items-center">
+          {#each ALIGNMENTS as align}
+            <IconButton
+              icon={align.icon}
+              title={align.title}
+              size="lg-tight"
+              onclick={() => handleAlignment(align.value)}
+            />
+          {/each}
+        </div>
+
+        <IconButton
+          icon="i-material-symbols-settings-outline-rounded"
+          title={downloadsState.hasPending
+            ? "Pending downloads - open settings"
+            : "Settings"}
+          colorClass={gearTone}
+          size="lg-tight"
+          onclick={() => viewState.navigate("settings")}
+          class="transition-colors duration-500"
+        />
+      </div>
+
+      <div class="flex gap-2">
+        {#if permissionRequest}
+          <!-- Icon + text on the filled inset surface (rounded-large), neutral
              text like the other UserInput buttons, and the h-9 height of the
              monitor/alignment/settings pill beside them. -->
-        <button
-          type="button"
-          title="Reject this permission request"
-          class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
-          onclick={() => permissionState.respond(false)}
-        >
-          <i class="flex i-material-symbols-close-rounded text-lg shrink-0"></i>
-          Deny
-        </button>
-        <button
-          type="button"
-          title="Allow for this tool call"
-          class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
-          onclick={() => permissionState.respond(true)}
-        >
-          <i class="flex i-material-symbols-check-rounded text-lg shrink-0"></i>
-          Allow
-        </button>
-      {:else if scheduleConfirm}
-        <button
-          type="button"
-          title="Decline this scheduled prompt"
-          class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
-          onclick={() => respondScheduleConfirm(false)}
-        >
-          <i class="flex i-material-symbols-close-rounded text-lg shrink-0"></i>
-          Decline
-        </button>
-        <button
-          type="button"
-          title="Save the scheduled prompt"
-          disabled={!scheduleDraftReady}
-          class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          onclick={() => respondScheduleConfirm(true)}
-        >
-          <i class="flex i-material-symbols-check-rounded text-lg shrink-0"></i>
-          Save
-        </button>
-      {:else}
-      {#if settingsState.currentSettings["stt.enabled"]}
-        {@const sttIdle =
-          sttStatus === "Running" || sttStatus === "Disabled"}
-        <IconButton
-          size="lg"
-          surface="filled"
-          title={vadManager.enabled
-            ? vadManager.listening
-              ? "Listening..."
-              : "VAD Active (click to disable)"
-            : sttIdle
-              ? "Enable Voice Input"
-              : "Voice Input (Unavailable)"}
-          class="rounded-large {vadManager.enabled
-            ? vadManager.listening
-              ? 'text-green-500'
-              : 'text-blue-400'
-            : sttIdle
-              ? 'text-default-700 hover:text-default-900'
-              : 'cursor-not-allowed'}"
-          disabled={vadManager.loading ||
-            (!sttIdle && !vadManager.enabled)}
-          onclick={() => vadManager.toggle()}
-        >
-          {#snippet icon()}
-            {#if shortcutHandler.pttHolding}
-              <svg
-                class="ptt-ring flex w-[1em] h-[1em] text-default-700"
-                style="--ptt-duration: {shortcutHandler.pttHoldDuration}ms"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <circle
-                  cx="12"
-                  cy="12"
-                  r="9"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  pathLength="100"
-                  stroke-dasharray="100"
-                  stroke-dashoffset="100"
-                  transform="rotate(-90 12 12)"
-                />
-              </svg>
-            {:else}
-              <i
-                class="flex {vadManager.enabled
-                  ? vadManager.listening
-                    ? 'i-line-md:loading-twotone-loop'
-                    : 'i-material-symbols-mic-rounded'
-                  : sttIdle
-                    ? 'i-material-symbols-mic-outline-rounded'
-                    : 'i-material-symbols-mic-off-outline-rounded'}"
-              ></i>
-            {/if}
-          {/snippet}
-        </IconButton>
-      {/if}
-      <IconButton
-        icon={hasActiveWork && !hasContent
-          ? "i-material-symbols-stop-rounded"
-          : hasActiveWork && hasContent
-            ? "i-material-symbols-arrow-upward-rounded"
-            : "i-material-symbols-send-outline-rounded"}
-        size="lg"
-        surface="filled"
-        title={hasActiveWork && !hasContent
-          ? "Stop"
-          : hasActiveWork && hasContent
-            ? "Interrupt and Send"
-            : "Send"}
-        class="rounded-large {hasActiveWork && !hasContent
-          ? 'text-red-500 hover:text-red-400'
-          : ''}"
-        disabled={connectionState.reconnecting}
-        onclick={hasActiveWork && !hasContent
-          ? handleStop
-          : hasActiveWork && hasContent
-            ? handleInterruptAndSend
-            : handleSend}
-      />
-      {/if}
+          <button
+            type="button"
+            title="Reject this permission request"
+            class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
+            onclick={() => permissionState.respond(false)}
+          >
+            <i class="flex i-material-symbols-close-rounded text-lg shrink-0"
+            ></i>
+            Deny
+          </button>
+          <button
+            type="button"
+            title="Allow for this tool call"
+            class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
+            onclick={() => permissionState.respond(true)}
+          >
+            <i class="flex i-material-symbols-check-rounded text-lg shrink-0"
+            ></i>
+            Allow
+          </button>
+        {:else if scheduleConfirm}
+          <button
+            type="button"
+            title="Decline this scheduled prompt"
+            class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
+            onclick={() => respondScheduleConfirm(false)}
+          >
+            <i class="flex i-material-symbols-close-rounded text-lg shrink-0"
+            ></i>
+            Decline
+          </button>
+          <button
+            type="button"
+            title="Save the scheduled prompt"
+            disabled={!scheduleDraftReady}
+            class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            onclick={() => respondScheduleConfirm(true)}
+          >
+            <i class="flex i-material-symbols-check-rounded text-lg shrink-0"
+            ></i>
+            Save
+          </button>
+        {:else}
+          {#if settingsState.currentSettings["stt.enabled"]}
+            {@const sttIdle =
+              sttStatus === "Running" || sttStatus === "Disabled"}
+            <IconButton
+              size="lg"
+              surface="filled"
+              title={vadManager.enabled
+                ? vadManager.listening
+                  ? "Listening..."
+                  : "VAD Active (click to disable)"
+                : sttIdle
+                  ? "Enable Voice Input"
+                  : "Voice Input (Unavailable)"}
+              class="rounded-large {vadManager.enabled
+                ? vadManager.listening
+                  ? 'text-green-500'
+                  : 'text-blue-400'
+                : sttIdle
+                  ? 'text-default-700 hover:text-default-900'
+                  : 'cursor-not-allowed'}"
+              disabled={vadManager.loading || (!sttIdle && !vadManager.enabled)}
+              onclick={() => vadManager.toggle()}
+            >
+              {#snippet icon()}
+                {#if shortcutHandler.pttHolding}
+                  <svg
+                    class="ptt-ring flex w-[1em] h-[1em] text-default-700"
+                    style="--ptt-duration: {shortcutHandler.pttHoldDuration}ms"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="9"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      pathLength="100"
+                      stroke-dasharray="100"
+                      stroke-dashoffset="100"
+                      transform="rotate(-90 12 12)"
+                    />
+                  </svg>
+                {:else}
+                  <i
+                    class="flex {vadManager.enabled
+                      ? vadManager.listening
+                        ? 'i-line-md:loading-twotone-loop'
+                        : 'i-material-symbols-mic-rounded'
+                      : sttIdle
+                        ? 'i-material-symbols-mic-outline-rounded'
+                        : 'i-material-symbols-mic-off-outline-rounded'}"
+                  ></i>
+                {/if}
+              {/snippet}
+            </IconButton>
+          {/if}
+          <IconButton
+            icon={hasActiveWork && !hasContent
+              ? "i-material-symbols-stop-rounded"
+              : hasActiveWork && hasContent
+                ? "i-material-symbols-arrow-upward-rounded"
+                : "i-material-symbols-send-outline-rounded"}
+            size="lg"
+            surface="filled"
+            title={hasActiveWork && !hasContent
+              ? "Stop"
+              : hasActiveWork && hasContent
+                ? "Interrupt and Send"
+                : "Send"}
+            class="rounded-large {hasActiveWork && !hasContent
+              ? 'text-red-500 hover:text-red-400'
+              : ''}"
+            disabled={connectionState.reconnecting}
+            onclick={hasActiveWork && !hasContent
+              ? handleStop
+              : hasActiveWork && hasContent
+                ? handleInterruptAndSend
+                : handleSend}
+          />
+        {/if}
+      </div>
     </div>
-  </div>
-</Bubble>
+  </Bubble>
 </div>
 
 <svelte:window onblur={closeImagePreview} />
@@ -1096,5 +1111,4 @@
       stroke-dashoffset: 0;
     }
   }
-
 </style>

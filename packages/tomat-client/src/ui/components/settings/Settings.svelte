@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { platform } from "$lib/platform";
   import { isTauri } from "$lib/util/env";
+  import { CSS_EASING, getDuration } from "$lib/appearance/animations";
   import { groupDestinations, SETTINGS_SCHEMA } from "@tomat/shared";
-  import type { SettingField, SettingGroup } from "@tomat/shared";
+  import type { SettingField, SettingSection } from "@tomat/shared";
   import type { Monitor } from "$lib/util/types";
   import { hasAlpha } from "$lib/appearance/color";
   import { getLogger } from "$lib/util/log";
@@ -41,18 +42,29 @@
   import SettingsSidebar from "./SettingsSidebar.svelte";
   import SettingsSection from "./SettingsSection.svelte";
   import SettingsField from "./SettingsField.svelte";
+  import SettingsTabs from "./SettingsTabs.svelte";
   import ColorPickerModal from "./ColorPickerModal.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
   import DownloadsModal from "./DownloadsModal.svelte";
   import DeletionsModal from "./DeletionsModal.svelte";
+  import ShareModal from "./ShareModal.svelte";
 
   let monitors: Monitor[] = $state([]);
+  let shareOpen = $state(false);
   let fonts: string[] = $state([]);
   let expandedSections = $state<Set<string>>(new Set());
   // Group-description visibility, rendered under the group header. Starts at the
   // group's tier default ("always" => open, "ondemand" => collapsed) and resets
   // on group change (the effect below); the header's info button toggles it.
   let groupDescOpen = $state(false);
+  // Tabbed groups track two ids (empty for untabbed groups), both reset to the
+  // first tab on group switch (the effect below):
+  //  - activeTabId: the selected tab (knob + aria), updated immediately on click
+  //    so the knob slides across the whole animation.
+  //  - contentTabId: the tab whose body is shown, swapped mid-slide so the
+  //    outgoing content is still the old tab while it slides away.
+  let activeTabId = $state("");
+  let contentTabId = $state("");
 
   // Multi-core "editing settings for" picker: lists every paired core; when
   // changed, re-selects that core so cores().api() / core-side settings load
@@ -110,17 +122,84 @@
   $effect(() => {
     const g = selectedGroup;
     groupDescOpen = !!g?.description && (g.descriptionTier ?? "ondemand") === "always";
+    const first = g?.tabs?.[0]?.id ?? "";
+    activeTabId = first;
+    contentTabId = first;
   });
 
-  // An object_management group is a single section holding a single
+  // The sections the shown tab body holds. Untabbed groups expose all sections,
+  // exactly as before.
+  const activeSections = $derived(
+    selectedGroup
+      ? selectedGroup.tabs
+        ? selectedGroup.sections.filter((s) => s.tab === contentTabId)
+        : selectedGroup.sections
+      : [],
+  );
+
+  // Knob travels for the whole tab slide (out + in = two base units).
+  const tabSlideMs = $derived(getDuration() * 2);
+
+  // The tab content layer (just the body below the tab selector), slid
+  // horizontally on tab change. Mirrors the group-change vertical slide
+  // (use-settings-search slideSwap) on the X axis: the active tab leaves toward
+  // the side it sits on relative to the incoming one, the body swaps offscreen,
+  // then the new content slides in from the opposite side.
+  let tabLayerEl: HTMLDivElement | undefined = $state();
+  let tabTransitioning = false;
+
+  async function selectTab(id: string): Promise<void> {
+    if (id === activeTabId || tabTransitioning) return;
+    const tabs = selectedGroup?.tabs ?? [];
+    const toIdx = tabs.findIndex((t) => t.id === id);
+    const fromIdx = tabs.findIndex((t) => t.id === activeTabId);
+    const dur = getDuration();
+    // Move the knob (and the selection) now, so it slides the whole animation.
+    // The body swaps at the midpoint, while it's offscreen.
+    activeTabId = id;
+    const swap = () => {
+      contentTabId = id;
+      if (scroll.scrollEl) scroll.scrollEl.scrollTop = 0;
+    };
+    if (!tabLayerEl || dur <= 0) {
+      swap();
+      return;
+    }
+    tabTransitioning = true;
+    // Later tab -> current leaves left, new enters from the right; earlier tab
+    // reverses it.
+    const outSign = toIdx > fromIdx ? -1 : 1;
+    const trans = `transform ${dur}ms ${CSS_EASING}`;
+    tabLayerEl.style.transition = trans;
+    tabLayerEl.style.transform = `translateX(${100 * outSign}%)`;
+    await new Promise((r) => setTimeout(r, dur));
+
+    swap();
+    await tick();
+    tabLayerEl.style.transition = "none";
+    tabLayerEl.style.transform = `translateX(${100 * -outSign}%)`;
+    void tabLayerEl.offsetHeight;
+
+    tabLayerEl.style.transition = trans;
+    tabLayerEl.style.transform = "";
+    await new Promise((r) => setTimeout(r, dur));
+    tabLayerEl.style.transition = "";
+    tabTransitioning = false;
+  }
+
+  // An object_management view is a single section holding a single
   // object_management field. It owns the full panel height (its own internal
   // vertical scroll), so it bypasses the normal min-height section stack and
-  // renders in a definite-height flex child instead.
-  function objectManagementFieldOf(group: SettingGroup): SettingField | null {
-    if (group.sections.length !== 1) return null;
-    const fields = group.sections[0].fields;
-    if (fields.length !== 1) return null;
-    return fields[0].type === "object_management" ? fields[0] : null;
+  // renders in a definite-height flex child instead. Passed the active tab's
+  // sections (or the whole group's, untabbed); sibling hidden-only flag
+  // sections (e.g. toolkits.skipRiskyGrantWarning) are ignored here and render
+  // nothing, but stay registered for persistence via the flat-sections walk.
+  function objectManagementFieldOf(sections: SettingSection[]): SettingField | null {
+    const omSections = sections.filter((s) =>
+      s.fields.some((f) => f.type === "object_management")
+    );
+    if (omSections.length !== 1 || omSections[0].fields.length !== 1) return null;
+    return omSections[0].fields[0];
   }
 
   // Track the user's horizontal-mode threshold setting.
@@ -350,6 +429,14 @@
         surface="circle"
         onclick={() => viewState.navigate("quickSettings")}
       />
+      <IconButton
+        icon="i-material-symbols-ios-share-rounded"
+        title="Import / Export Settings"
+        size="lg"
+        variant="subtle"
+        surface="circle"
+        onclick={() => (shareOpen = true)}
+      />
       <!-- Hub icon (Core Management) is intentionally hidden for now: the
            spec says "management only done at the start and no option to
            change the core connection" until a dedicated cores UI lands.
@@ -440,8 +527,8 @@
                   {/each}
                 </div>
               {:else if selectedGroup}
-                {@const omField = objectManagementFieldOf(selectedGroup)}
-                {@const hasCollapsibleSections = selectedGroup.sections.some(
+                {@const omField = objectManagementFieldOf(activeSections)}
+                {@const hasCollapsibleSections = activeSections.some(
                   (s) =>
                     !!s.label &&
                     isSectionVisible(s) &&
@@ -513,54 +600,85 @@
                       <HelpText text={selectedGroup.description} />
                     </div>
                   {/if}
-                  {#if omField}
-                    <!-- Object-management groups own the full panel height and
-                         scroll internally, so the field renders in a definite-
-                         height flex child rather than the min-height section flow. -->
-                    <div
-                      class="flex-1 min-h-0 pt-1 transition-opacity"
-                      class:opacity-50={coreGroupLocked}
-                      inert={coreGroupLocked}
-                    >
-                      <SettingsField
-                        field={omField}
-                        {monitors}
-                        {fonts}
-                        error={form.validationErrors[omField.id] ?? null}
-                        horizontal={layout.horizontal}
-                        onChange={form.handleChange}
-                        onReset={form.resetToDefault}
-                        onPresetSelect={form.handlePresetSelect}
+                  {#snippet tabBody()}
+                    {#if omField}
+                      <!-- Object-management groups own the full panel height and
+                           scroll internally, so the field renders in a definite-
+                           height flex child rather than the min-height section
+                           flow. -->
+                      <div
+                        class="flex-1 min-h-0 pt-1 transition-opacity"
+                        class:opacity-50={coreGroupLocked}
+                        inert={coreGroupLocked}
+                      >
+                        <SettingsField
+                          field={omField}
+                          {monitors}
+                          {fonts}
+                          error={form.validationErrors[omField.id] ?? null}
+                          horizontal={layout.horizontal}
+                          onChange={form.handleChange}
+                          onReset={form.resetToDefault}
+                          onPresetSelect={form.handlePresetSelect}
+                        />
+                      </div>
+                    {:else}
+                      <!-- gap-3 separates sections so each (tight) section reads
+                           as a unit with clear space before the next one. -->
+                      <div
+                        class="flex flex-col gap-3 transition-opacity"
+                        class:opacity-50={coreGroupLocked}
+                        inert={coreGroupLocked}
+                      >
+                        {#each selectedGroup.sections as section, si}
+                          {#if isSectionVisible(section) && (!selectedGroup.tabs || section.tab === contentTabId)}
+                            <SettingsSection
+                              {section}
+                              sectionKey={`${selectedGroup.id}-${si}`}
+                              isExpanded={expandedSections.has(
+                                `${selectedGroup.id}-${si}`,
+                              )}
+                              {monitors}
+                              {fonts}
+                              validationErrors={form.validationErrors}
+                              horizontal={layout.horizontal}
+                              onToggle={toggleSection}
+                              onChange={form.handleChange}
+                              onReset={form.resetToDefault}
+                              onPresetSelect={form.handlePresetSelect}
+                            />
+                          {/if}
+                        {/each}
+                      </div>
+                    {/if}
+                  {/snippet}
+                  {#if selectedGroup.tabs}
+                    <!-- Tab selector, below the group description. shrink-0 so it
+                         stays put above the (scrolling or full-height) tab body. -->
+                    <div class="shrink-0 pt-2 pb-3">
+                      <SettingsTabs
+                        tabs={selectedGroup.tabs}
+                        active={activeTabId}
+                        onSelect={selectTab}
+                        slideMs={tabSlideMs}
                       />
                     </div>
-                  {:else}
-                    <!-- gap-3 separates sections so each (tight) section reads
-                         as a unit with clear space before the next one. -->
-                    <div
-                      class="flex flex-col gap-3 transition-opacity"
-                      class:opacity-50={coreGroupLocked}
-                      inert={coreGroupLocked}
-                    >
-                      {#each selectedGroup.sections as section, si}
-                        {#if isSectionVisible(section)}
-                          <SettingsSection
-                            {section}
-                            sectionKey={`${selectedGroup.id}-${si}`}
-                            isExpanded={expandedSections.has(
-                              `${selectedGroup.id}-${si}`,
-                            )}
-                            {monitors}
-                            {fonts}
-                            validationErrors={form.validationErrors}
-                            horizontal={layout.horizontal}
-                            onToggle={toggleSection}
-                            onChange={form.handleChange}
-                            onReset={form.resetToDefault}
-                            onPresetSelect={form.handlePresetSelect}
-                          />
-                        {/if}
-                      {/each}
+                    <!-- The tab body slides horizontally on tab change (selectTab).
+                         overflow-x clip contains the offscreen layer so the panel
+                         never grows a horizontal scrollbar mid-slide; the y axis
+                         stays visible so the manager / sections keep their normal
+                         vertical scroll. -->
+                    <div class="relative flex-1 min-h-0 flex flex-col" style:overflow-x="clip">
+                      <div
+                        bind:this={tabLayerEl}
+                        class="flex-1 min-h-0 flex flex-col"
+                        class:will-change-transform={animationsEnabled}
+                      >
+                        {@render tabBody()}
+                      </div>
                     </div>
+                  {:else}
+                    {@render tabBody()}
                   {/if}
                 </section>
               {/if}
@@ -587,6 +705,7 @@
     <ConfirmModal />
     <DownloadsModal />
     <DeletionsModal />
+    <ShareModal open={shareOpen} onClose={() => (shareOpen = false)} />
     <ColorPickerModal />
   </Bubble>
 </div>

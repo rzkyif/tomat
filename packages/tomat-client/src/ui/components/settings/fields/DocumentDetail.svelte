@@ -87,7 +87,7 @@
     <Textarea
       ariaLabel="Document content"
       autoResize="none"
-      class="max-h-96 min-h-48 overflow-y-auto resize-none font-mono"
+      class="min-h-48 overflow-y-auto resize-y font-mono"
       value={draftContent}
       placeholder={contentLoaded ? "" : "Loading..."}
       disabled={!contentLoaded}

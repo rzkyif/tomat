@@ -1,5 +1,6 @@
 import type { SettingGroup } from "../types.ts";
 import { SECURE_URL_VALIDATION } from "../types.ts";
+import { DEFAULT_SAMPLING } from "../../recommend.ts";
 
 export const llmGroup: SettingGroup = {
   id: "llm",
@@ -29,6 +30,17 @@ export const llmGroup: SettingGroup = {
             "Show the model's thinking above each reply, when it thinks.\nSaved with the session but never sent back to the model.",
           type: "boolean",
           defaultValue: true,
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.idleUnloadSeconds",
+          name: "Unload When Idle",
+          description:
+            "Free memory by unloading the model after this long unused. It reloads on your next message; 0 keeps it loaded.",
+          type: "number",
+          defaultValue: 0,
+          suffix: "s",
+          visibleWhen: { field: "llm.provider", eq: "local" },
           descriptionTier: "ondemand",
         },
       ],
@@ -70,6 +82,14 @@ export const llmGroup: SettingGroup = {
               "llm.flashAttn",
               "llm.supportImages",
               "llm.idleUnloadSeconds",
+              // Thinking budget and temperature are behavior preferences, not
+              // part of the model's identity: editing them (from the quick
+              // model controls or here) leaves the chosen preset intact. Only
+              // the model-defining tuning below flips the preset to Custom.
+              "llm.topP",
+              "llm.topK",
+              "llm.minP",
+              "llm.repeatPenalty",
             ],
             // These are placeholders: the client fills each card's title, badges,
             // and description from GET /api/v1/models/recommend, and selecting a
@@ -117,13 +137,112 @@ export const llmGroup: SettingGroup = {
       ],
     },
     {
+      label: "Model Behavior",
+      defaultCollapsed: true,
+      fields: [
+        {
+          id: "llm.reasoning",
+          name: "Thinking",
+          description:
+            "Whether the model should think before answering. The model may still skip it for simple prompts.",
+          type: "select",
+          defaultValue: "on",
+          options: [
+            { value: "off", label: "Off" },
+            { value: "on", label: "On" },
+          ],
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.reasoningBudget",
+          name: "Thinking Budget",
+          description: "How many tokens the model may spend thinking.",
+          type: "number",
+          defaultValue: "",
+          visibleWhen: {
+            allOf: [
+              { field: "llm.provider", eq: "local" },
+              { field: "llm.reasoning", neq: "off" },
+            ],
+          },
+          optional: true,
+          placeholder: "optional",
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.reasoningEffort",
+          name: "Thinking Effort",
+          description:
+            "How hard the model should think. External providers take an effort level rather than a token budget.",
+          type: "select",
+          defaultValue: "high",
+          // The OpenAI API's reasoning_effort levels, sent verbatim.
+          options: [
+            { value: "minimal", label: "Minimal" },
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High" },
+          ],
+          visibleWhen: {
+            allOf: [
+              { field: "llm.provider", eq: "external" },
+              { field: "llm.reasoning", neq: "off" },
+            ],
+          },
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.temperature",
+          name: "Temperature",
+          description:
+            "How varied the model's word choices are. Lower is more focused and predictable; higher is more creative.",
+          type: "float",
+          defaultValue: DEFAULT_SAMPLING.temperature,
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.topP",
+          name: "Top P",
+          description: "Narrows word choices to the most likely options. Lower is more focused.",
+          type: "float",
+          defaultValue: DEFAULT_SAMPLING.topP,
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.topK",
+          name: "Top K",
+          description:
+            "Narrows word choices to this many of the most likely options. 0 turns it off.",
+          type: "number",
+          defaultValue: DEFAULT_SAMPLING.topK,
+          visibleWhen: { field: "llm.provider", eq: "local" },
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.minP",
+          name: "Min P",
+          description: "Drops unlikely word choices. Higher is more focused; 0 turns it off.",
+          type: "float",
+          defaultValue: DEFAULT_SAMPLING.minP,
+          visibleWhen: { field: "llm.provider", eq: "local" },
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.repeatPenalty",
+          name: "Repeat Penalty",
+          description:
+            "How strongly to discourage the model repeating itself. 1 is off; higher reduces repetition.",
+          type: "float",
+          defaultValue: DEFAULT_SAMPLING.repeatPenalty,
+          visibleWhen: { field: "llm.provider", eq: "local" },
+          descriptionTier: "ondemand",
+        },
+      ],
+    },
+    {
       label: "Model Server Configuration",
-      visibleWhen: {
-        allOf: [
-          { field: "llm.provider", eq: "local" },
-          { field: "llm.preset", eq: "custom" },
-        ],
-      },
+      visibleWhen: { field: "llm.provider", eq: "local" },
+      defaultCollapsed: true,
       fields: [
         {
           id: "llm.modelPath",
@@ -178,42 +297,6 @@ export const llmGroup: SettingGroup = {
           description: "Faster, lighter processing on supported hardware.",
           type: "boolean",
           defaultValue: false,
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "llm.idleUnloadSeconds",
-          name: "Unload When Idle",
-          description:
-            "Free memory by unloading the model after this long unused. It reloads on your next message; 0 keeps it loaded.",
-          type: "number",
-          defaultValue: 0,
-          suffix: "s",
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "llm.reasoning",
-          name: "Thinking",
-          description:
-            "Whether the model should think before answering. The model may still skip it for simple prompts.",
-          type: "select",
-          defaultValue: "on",
-          options: [
-            { value: "off", label: "Off" },
-            { value: "on", label: "On" },
-            { value: "auto", label: "Auto" },
-          ],
-          optional: true,
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "llm.reasoningBudget",
-          name: "Thinking Budget",
-          description: "How many tokens the model may spend thinking.",
-          type: "number",
-          defaultValue: "",
-          visibleWhen: { field: "llm.reasoning", neq: "off" },
-          optional: true,
-          placeholder: "optional",
           descriptionTier: "ondemand",
         },
         {
