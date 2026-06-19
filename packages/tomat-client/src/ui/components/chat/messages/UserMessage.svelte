@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import AttachmentList from "../AttachmentList.svelte";
-  import Bubble from "../../ui/Bubble.svelte";
-  import { settingsState, streamingState } from "../../../state";
+  import UserMessageView from "@tomat/shared/ui/components/chat/messages/UserMessageView.svelte";
+  import { streamingState } from "../../../state";
   import {
     getTextContent,
     type MessageContent,
@@ -135,10 +135,9 @@
   }
 </script>
 
-<Bubble
-  selectedAlignment={settingsState.getAlignment()}
-  bgClass="bubble-user"
-  extraClass={"flex flex-col gap-4"}
+<UserMessageView
+  text={displayText}
+  editable={editing}
   active={editing}
   ondblclick={() => {
     if (!editing && onEdit) onStartEdit?.();
@@ -154,7 +153,7 @@
     });
   }}
 >
-  {#if editing}
+  {#snippet editBody()}
     <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
       <span
         class="invisible whitespace-pre-wrap break-words wrap-break-word col-start-1 row-start-1 pointer-events-none"
@@ -169,13 +168,12 @@
         cols="1"
       ></textarea>
     </div>
-  {:else}
-    <span class="whitespace-pre-wrap break-words">{displayText}</span>
-  {/if}
-
-  <AttachmentList
-    parts={editing ? editAttachments : attachments}
-    editable={editing}
-    onRemove={removeAttachment}
-  />
-</Bubble>
+  {/snippet}
+  {#snippet attachmentRow()}
+    <AttachmentList
+      parts={editing ? editAttachments : attachments}
+      editable={editing}
+      onRemove={removeAttachment}
+    />
+  {/snippet}
+</UserMessageView>

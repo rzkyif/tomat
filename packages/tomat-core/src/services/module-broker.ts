@@ -227,7 +227,11 @@ function toolkitDb(toolkitId: string): Database {
     db = new Database(join(dir, "data.sqlite"), { int64: true });
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec("PRAGMA foreign_keys = ON;");
-    db.exec("PRAGMA busy_timeout = 5000;");
+    // Shorter than core's 5s: toolkit queries run synchronously on core's event
+    // loop, so a contended lock blocks the whole loop for up to this long. A
+    // private per-toolkit db is rarely contended, so 1s fails a stuck write fast
+    // rather than freezing core for 5s.
+    db.exec("PRAGMA busy_timeout = 1000;");
     toolkitDbs.set(toolkitId, db);
   }
   return db;
@@ -384,7 +388,13 @@ function dispatchDb(toolkitId: string, toolName: string, op: string, args: unkno
       }
       case "execute": {
         const changes = db.prepare(sql).run(...params);
-        return jsonSafe({ changes, lastInsertRowId: db.lastInsertRowId });
+        // Read the rowid via SQL against the int64 connection so a value past
+        // 2^53 comes back as BigInt (jsonSafe handles it) rather than a
+        // precision-lost JS number from the db.lastInsertRowId accessor.
+        const idRow = db.prepare("SELECT last_insert_rowid() AS id").get() as {
+          id: number | bigint;
+        };
+        return jsonSafe({ changes, lastInsertRowId: idRow.id });
       }
       default:
         throw new AppError("validation_error", `unknown db op "${op}"`);

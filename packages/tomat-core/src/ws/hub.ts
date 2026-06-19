@@ -43,6 +43,10 @@ const log = getLogger("ws");
 
 const HEARTBEAT_MS = 25_000;
 const PONG_TIMEOUT_MS = 10_000;
+// Client frames are small control messages (chat.start, tool responses); reject
+// anything wildly larger before parsing so a hostile/buggy client can't make the
+// core JSON.parse an unbounded payload.
+const MAX_INBOUND_FRAME_CHARS = 1_000_000;
 
 interface Connection {
   ws: WebSocket;
@@ -163,9 +167,17 @@ class WsHub {
       this.armHeartbeat(conn);
     });
     ws.addEventListener("message", (ev) => {
+      if (typeof ev.data !== "string") {
+        log.warn(`rejected ws frame: non-string payload`);
+        return;
+      }
+      if (ev.data.length > MAX_INBOUND_FRAME_CHARS) {
+        log.warn(`rejected ws frame: ${ev.data.length} chars exceeds ${MAX_INBOUND_FRAME_CHARS}`);
+        return;
+      }
       let raw: unknown;
       try {
-        raw = JSON.parse(typeof ev.data === "string" ? ev.data : "");
+        raw = JSON.parse(ev.data);
       } catch (err) {
         log.warn(`rejected ws frame: invalid JSON (${errMessage(err)})`);
         return;

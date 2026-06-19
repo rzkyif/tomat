@@ -476,6 +476,28 @@ if [ -z "$SHA_CMD" ]; then
   exit 1
 fi
 
+# Committed Ed25519 signing public key (base64 raw key), kept in sync with
+# packages/tomat-core/data/signing-keys.json (a test guards the match). Used to
+# verify the manifest signature before trusting any download URL or hash.
+TOMAT_SIGNING_PUBKEY_B64="KghrHOIqu76Hpl/xX8RHUuDA2n1NGCOj9gD1Jrn5H+M="
+
+# Resolve an OpenSSL with Ed25519 raw-verify support (`pkeyutl -rawin`, added in
+# OpenSSL 3.0). macOS ships LibreSSL, which lacks it; Homebrew's openssl@3 has
+# it. Required: without signature verification a MITM of the storage origin
+# could serve attacker-chosen binaries.
+OPENSSL_CMD=""
+for _cand in openssl /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl /opt/homebrew/bin/openssl /usr/local/bin/openssl; do
+  if command -v "$_cand" >/dev/null 2>&1 && "$_cand" version 2>/dev/null | grep -qE '^OpenSSL [3-9]'; then
+    OPENSSL_CMD="$_cand"
+    break
+  fi
+done
+if [ -z "$OPENSSL_CMD" ]; then
+  printf 'error: OpenSSL 3.x is required to verify the release signature\n' >&2
+  printf 'hint:  install openssl (macOS: brew install openssl@3) and re-run\n' >&2
+  exit 1
+fi
+
 mkdir -p "$BIN_DIR" "$WORKERS_DIR" "$TOOLKITS_DIR" "$STAGING_DIR" "$LOGS_DIR"
 
 # --- helper: figure out the platform-specific service label for action 7 --
@@ -613,6 +635,25 @@ if [ -z "$VERSION" ]; then
     "the storage origin may be misconfigured"
 fi
 
+# Authenticate the manifest before trusting any URL/sha256 in it. The signature
+# covers canonicalize(manifest minus `signature`) (matching the core's own
+# verifier in packages/tomat-core/src/update/self-updater.ts), which `jq -Sjc`
+# reproduces byte-for-byte. Fail closed: a tampered or unsigned manifest aborts.
+SIG_PEM="$STAGING_DIR/tomat-pubkey-$$.pem"
+SIG_CANON="$STAGING_DIR/tomat-canon-$$.bin"
+SIG_RAW="$STAGING_DIR/tomat-sig-$$.bin"
+printf -- '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA%s\n-----END PUBLIC KEY-----\n' \
+  "$TOMAT_SIGNING_PUBKEY_B64" >"$SIG_PEM"
+printf '%s' "$MANIFEST_JSON" | jq -Sjc 'del(.signature)' >"$SIG_CANON" 2>/dev/null
+printf '%s' "$MANIFEST_JSON" | jq -r '.signature // empty' | "$OPENSSL_CMD" base64 -d -A >"$SIG_RAW" 2>/dev/null
+if ! "$OPENSSL_CMD" pkeyutl -verify -pubin -inkey "$SIG_PEM" -rawin -in "$SIG_CANON" -sigfile "$SIG_RAW" >/dev/null 2>&1; then
+  rm -f "$SIG_PEM" "$SIG_CANON" "$SIG_RAW"
+  ui_die "Manifest signature verification failed" \
+    "" \
+    "the manifest may have been tampered with in transit; aborting"
+fi
+rm -f "$SIG_PEM" "$SIG_CANON" "$SIG_RAW"
+
 URL="$(printf '%s' "$MANIFEST_JSON" | jq -r --arg t "$TRIPLE" '.binaries[] | select(.triple==$t) | .url' 2>/dev/null || true)"
 SHA256="$(printf '%s' "$MANIFEST_JSON" | jq -r --arg t "$TRIPLE" '.binaries[] | select(.triple==$t) | .sha256' 2>/dev/null || true)"
 if [ -z "$URL" ] || [ -z "$SHA256" ]; then
@@ -690,9 +731,11 @@ fi
 # --- action 4: install workers -------------------------------------------
 
 WORKERS_COUNT="$(printf '%s' "$MANIFEST_JSON" | jq -r '.workers // [] | length')"
-if [ "$WORKERS_COUNT" -lt 0 ]; then
-  WORKERS_COUNT=0
-fi
+# `jq length` is always a non-negative integer; guard against non-numeric jq
+# output (e.g. a malformed manifest) rather than the impossible negative case.
+case "$WORKERS_COUNT" in
+'' | *[!0-9]*) WORKERS_COUNT=0 ;;
+esac
 
 # Pre-check: are all workers already on disk and matching?
 WORKERS_ALL_OK=1
@@ -780,9 +823,11 @@ fi
 # --- action 5: install helpers -------------------------------------------
 
 HELPERS_COUNT="$(printf '%s' "$MANIFEST_JSON" | jq -r '.helpers // [] | length')"
-if [ "$HELPERS_COUNT" -lt 0 ]; then
-  HELPERS_COUNT=0
-fi
+# Guard against non-numeric jq output (malformed manifest), not the impossible
+# negative length.
+case "$HELPERS_COUNT" in
+'' | *[!0-9]*) HELPERS_COUNT=0 ;;
+esac
 
 # Count helpers matching our triple. Compute the indices of matching ones
 # (Bash 3.2 has no arrays we want to rely on, so we build a space-separated

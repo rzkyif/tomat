@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Alert from "../../ui/Alert.svelte";
+  import Alert from "@tomat/shared/ui/components/primitives/Alert.svelte";
 
   let { original, onReject }: { original: string; onReject: () => void } = $props();
 </script>

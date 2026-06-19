@@ -31,7 +31,7 @@
 //! written bytes do not echo back into the master stream.
 
 use std::io::{BufRead, Write};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
@@ -190,6 +190,19 @@ mod unix {
             Err(e) => emit_fatal(&format!("spawn failed: {e}")),
         };
         let child_pid = Pid::from_raw(child.id() as i32);
+        // Guard the child PID so a control-frame kill can't fire AFTER the waiter
+        // has reaped the child (whose PID the kernel may have recycled into an
+        // unrelated process). The waiter sets it to None on reap; every kill site
+        // takes the lock and skips when None.
+        let live_pid = Arc::new(Mutex::new(Some(child_pid)));
+        let waiter_pid = Arc::clone(&live_pid);
+        let kill_live = || {
+            if let Ok(guard) = live_pid.lock() {
+                if let Some(p) = *guard {
+                    let _ = kill(p, Signal::SIGKILL);
+                }
+            }
+        };
         // Drop our slave fd so the master read errors out (EIO) once the
         // child's copies close, ending the reader thread.
         drop(pty.slave);
@@ -227,6 +240,10 @@ mod unix {
                 }
                 Err(_) => 70,
             };
+            // Child reaped: forbid any further signal to its now-recyclable PID.
+            if let Ok(mut guard) = waiter_pid.lock() {
+                *guard = None;
+            }
             let _ = reader.join();
             emit_exit(code);
             std::process::exit(code);
@@ -252,14 +269,14 @@ mod unix {
                     }
                 }
                 Ok(ControlFrame::Kill) => {
-                    let _ = kill(child_pid, Signal::SIGKILL);
+                    kill_live();
                 }
                 Ok(ControlFrame::Spawn { .. }) => {
-                    // One child per ptyhost; a second spawn is a core bug.
-                    // Killing the child makes the waiter thread exit the
-                    // process with the child's code.
-                    let _ = kill(child_pid, Signal::SIGKILL);
-                    let _ = waiter.join();
+                    // One child per ptyhost; a second spawn is a core bug. SIGKILL
+                    // the child (the kernel delivers it even as we exit) and emit
+                    // the documented fatal frame. emit_fatal diverges, so the
+                    // waiter thread is abandoned as the process exits.
+                    kill_live();
                     emit_fatal("duplicate spawn frame");
                 }
                 Err(_) => continue, // tolerate garbage; the core logs its own errors
@@ -268,7 +285,7 @@ mod unix {
 
         // stdin EOF or read error: the core is gone, take the child with us.
         // The waiter thread exits the process once the child is reaped.
-        let _ = kill(child_pid, Signal::SIGKILL);
+        kill_live();
         let _ = waiter.join();
         std::process::exit(70);
     }

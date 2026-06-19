@@ -419,12 +419,20 @@ const impl: Platform = {
       );
       const menu = await Menu.new({ items: menuItems });
       await menu.popup();
-      // popup() resolves immediately on click OR on dismiss. We can't
-      // distinguish. So race the action-driven resolve with a microtask
-      // timeout that returns null if no item fired.
+      // popup() resolves when the menu CLOSES (click OR dismiss). A selected
+      // item's action arrives slightly later over an async IPC channel, so we
+      // can't conclude "dismissed" immediately: a 0ms timer reliably beats the
+      // action message and would report a real selection as a dismissal
+      // (silently no-oping destructive actions). Wait one comfortable IPC
+      // round-trip for the action to land first. On selection the action
+      // resolves `result` and this timer is a no-op; on a true dismiss we
+      // resolve null after the grace window (imperceptible, since a dismiss does
+      // nothing anyway). The Tauri JS API exposes no menu-closed event, so this
+      // bounded grace is the available signal.
+      const DISMISS_GRACE_MS = 150;
       const dismissTimer = setTimeout(() => {
         if (resolved) resolved(null);
-      }, 0);
+      }, DISMISS_GRACE_MS);
       try {
         return await result;
       } finally {

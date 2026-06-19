@@ -432,6 +432,28 @@ for cmd in curl jq; do
   fi
 done
 
+# Committed Ed25519 signing public key (base64 raw key), kept in sync with
+# packages/tomat-core/data/signing-keys.json (a test guards the match). Used to
+# verify the manifest's detached signature before trusting any download URL/hash.
+TOMAT_SIGNING_PUBKEY_B64="KghrHOIqu76Hpl/xX8RHUuDA2n1NGCOj9gD1Jrn5H+M="
+
+# Resolve an OpenSSL with Ed25519 raw-verify support (`pkeyutl -rawin`, added in
+# OpenSSL 3.0). macOS ships LibreSSL, which lacks it; Homebrew's openssl@3 has
+# it. Required: without signature verification a MITM of the storage origin
+# could serve an attacker-chosen bundle + matching hash.
+OPENSSL_CMD=""
+for _cand in openssl /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl /opt/homebrew/bin/openssl /usr/local/bin/openssl; do
+  if command -v "$_cand" >/dev/null 2>&1 && "$_cand" version 2>/dev/null | grep -qE '^OpenSSL [3-9]'; then
+    OPENSSL_CMD="$_cand"
+    break
+  fi
+done
+if [ -z "$OPENSSL_CMD" ]; then
+  printf 'error: OpenSSL 3.x is required to verify the release signature\n' >&2
+  printf 'hint:  install openssl (macOS: brew install openssl@3) and re-run\n' >&2
+  exit 1
+fi
+
 # --- helper: pick action 3 / 4 labels based on host ----------------------
 
 uname_os="$(uname -s 2>/dev/null || echo unknown)"
@@ -530,6 +552,32 @@ if [ ! -s "$MANIFEST_TMP" ]; then
     "transient outage at R2; try again in a few minutes"
 fi
 
+# Authenticate the manifest before trusting any URL/sha256 in it. client.json is
+# the Tauri updater endpoint, so its tomat signature is a detached sidecar
+# (client.json.sig = base64 Ed25519 over the exact client.json bytes) rather than
+# an embedded field. Verify the bytes as downloaded. Fail closed.
+SIG_URL="$STORAGE/$MANIFEST_DIR/client.json.sig"
+SIG_B64_TMP="$STAGING_DIR/client-manifest-sig-$$.b64"
+_ui_track_staging "$SIG_B64_TMP"
+if ! curl -fsSL -o "$SIG_B64_TMP" "$SIG_URL" 2>/dev/null || [ ! -s "$SIG_B64_TMP" ]; then
+  rm -f "$SIG_B64_TMP"
+  ui_die "Could not fetch manifest signature" \
+    "$SIG_URL" \
+    "the storage origin may be misconfigured"
+fi
+SIG_PEM="$STAGING_DIR/tomat-pubkey-$$.pem"
+SIG_RAW="$STAGING_DIR/tomat-sig-$$.bin"
+printf -- '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA%s\n-----END PUBLIC KEY-----\n' \
+  "$TOMAT_SIGNING_PUBKEY_B64" >"$SIG_PEM"
+"$OPENSSL_CMD" base64 -d -A <"$SIG_B64_TMP" >"$SIG_RAW" 2>/dev/null
+if ! "$OPENSSL_CMD" pkeyutl -verify -pubin -inkey "$SIG_PEM" -rawin -in "$MANIFEST_TMP" -sigfile "$SIG_RAW" >/dev/null 2>&1; then
+  rm -f "$SIG_PEM" "$SIG_RAW" "$SIG_B64_TMP"
+  ui_die "Manifest signature verification failed" \
+    "" \
+    "the manifest may have been tampered with in transit; aborting"
+fi
+rm -f "$SIG_PEM" "$SIG_RAW" "$SIG_B64_TMP"
+
 MANIFEST_JSON="$(cat "$MANIFEST_TMP")"
 rm -f "$MANIFEST_TMP"
 
@@ -550,8 +598,45 @@ if [ -z "$URL" ]; then
     "" \
     "your platform may not be supported yet"
 fi
-# Optional sha256 -- current manifests may omit this for the client.
+# Per-platform sha256: the integrity anchor for the downloaded bundle. The
+# bundle ships over TLS, but verifying this hash before install is what stops a
+# tampered/MITM'd artifact from being installed (and, on macOS, having Gatekeeper
+# stripped). The release script always publishes it; a missing hash means a
+# too-old or tampered manifest, so we fail closed at verification time.
 EXPECTED_SHA="$(printf '%s' "$MANIFEST_JSON" | jq -r --arg t "$TRIPLE" '.platforms[$t].sha256 // empty' 2>/dev/null || true)"
+
+# Resolve the sha-256 command once (sha256sum or shasum -a 256).
+SHA_CMD="sha256sum"
+if ! command -v sha256sum >/dev/null 2>&1; then
+  if command -v shasum >/dev/null 2>&1; then
+    SHA_CMD="shasum -a 256"
+  else
+    SHA_CMD=""
+  fi
+fi
+
+# Verify a freshly-downloaded artifact against the manifest sha256 BEFORE it is
+# installed. Fails closed if the manifest carries no hash or no sha tool exists.
+verify_sha256() {
+  _vfile="$1"
+  _vlabel="$2"
+  if [ -z "$EXPECTED_SHA" ]; then
+    ui_die "Manifest is missing an integrity hash for the $_vlabel" \
+      "no .platforms[$TRIPLE].sha256 in client.json" \
+      "the release is too old or has been tampered with; do not install"
+  fi
+  if [ -z "$SHA_CMD" ]; then
+    ui_die "Cannot verify the $_vlabel: no sha256 tool" \
+      "sha256sum or shasum is required" \
+      "install coreutils or perl (shasum) and re-run"
+  fi
+  _vgot="$($SHA_CMD "$_vfile" 2>/dev/null | awk '{print $1}')"
+  if [ "$_vgot" != "$EXPECTED_SHA" ]; then
+    ui_die "sha256 mismatch on the $_vlabel" \
+      "want $EXPECTED_SHA, got $_vgot" \
+      "network corruption or tampering; do not install, re-run"
+  fi
+}
 
 ui_action_done "$IDX_MANIFEST" "(v$VERSION)"
 
@@ -591,6 +676,9 @@ if [ "$uname_os" = "Darwin" ]; then
           ;;
       esac
     fi
+
+    ui_action_update "$IDX_INSTALL" "(verifying)"
+    verify_sha256 "$TARBALL" "client bundle"
 
     ui_action_update "$IDX_INSTALL" "(extracting)"
     EXTRACT_DIR="$STAGING_DIR/extracted-$$"
@@ -708,6 +796,9 @@ else
           ;;
       esac
     fi
+
+    ui_action_update "$IDX_INSTALL" "(verifying)"
+    verify_sha256 "$APPIMAGE_TMP" "AppImage"
 
     ui_action_update "$IDX_INSTALL" "(installing)"
     if ! mv -f "$APPIMAGE_TMP" "$APPIMAGE" 2>/dev/null; then

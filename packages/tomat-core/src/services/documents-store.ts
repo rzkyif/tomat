@@ -57,13 +57,25 @@ export class DocumentsStore {
     const filename = uniqueFilename(cleanTitle);
     const hash = sha256HexSync(content);
     const now = Date.now();
-    db()
-      .prepare(`
-      INSERT INTO documents (id, title, filename, content_hash, created_at_ms, updated_at_ms)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `)
-      .run(id, cleanTitle, filename, hash, now, now);
+    // Write the file BEFORE the row so a failed write can never leave a row
+    // pointing at a missing file. rescan() tolerates an orphan file, so if the
+    // INSERT then fails we remove the file to avoid a stray (best-effort).
     writeContent(filename, content);
+    try {
+      db()
+        .prepare(`
+        INSERT INTO documents (id, title, filename, content_hash, created_at_ms, updated_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
+        .run(id, cleanTitle, filename, hash, now, now);
+    } catch (err) {
+      try {
+        Deno.removeSync(join(paths().documentsDir, filename));
+      } catch {
+        /* best-effort; rescan would otherwise re-adopt the orphan file */
+      }
+      throw err;
+    }
     return this.get(id);
   }
 
@@ -151,31 +163,41 @@ export class DocumentsStore {
     let removed = 0;
     let changed = 0;
     const now = Date.now();
-    for (const row of this.list()) {
-      const content = onDisk.get(row.filename);
-      if (content === undefined) {
-        db().prepare(`DELETE FROM documents WHERE id = ?`).run(row.id);
-        removed++;
-        continue;
+    // One transaction so the table is reconciled atomically (the loops below run
+    // many statements); a mid-rescan failure rolls back rather than leaving the
+    // index half-updated. Mirrors registry.ts replaceTools().
+    db().exec("BEGIN");
+    try {
+      for (const row of this.list()) {
+        const content = onDisk.get(row.filename);
+        if (content === undefined) {
+          db().prepare(`DELETE FROM documents WHERE id = ?`).run(row.id);
+          removed++;
+          continue;
+        }
+        onDisk.delete(row.filename);
+        const hash = sha256HexSync(content);
+        if (hash !== row.contentHash) {
+          db()
+            .prepare(`UPDATE documents SET content_hash = ?, updated_at_ms = ? WHERE id = ?`)
+            .run(hash, now, row.id);
+          changed++;
+        }
       }
-      onDisk.delete(row.filename);
-      const hash = sha256HexSync(content);
-      if (hash !== row.contentHash) {
+      for (const [filename, content] of onDisk) {
+        const title = uniqueTitle(filename.replace(/\.md$/, ""));
         db()
-          .prepare(`UPDATE documents SET content_hash = ?, updated_at_ms = ? WHERE id = ?`)
-          .run(hash, now, row.id);
-        changed++;
+          .prepare(`
+          INSERT INTO documents (id, title, filename, content_hash, created_at_ms, updated_at_ms)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `)
+          .run(newDocumentId(), title, filename, sha256HexSync(content), now, now);
+        added++;
       }
-    }
-    for (const [filename, content] of onDisk) {
-      const title = uniqueTitle(filename.replace(/\.md$/, ""));
-      db()
-        .prepare(`
-        INSERT INTO documents (id, title, filename, content_hash, created_at_ms, updated_at_ms)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `)
-        .run(newDocumentId(), title, filename, sha256HexSync(content), now, now);
-      added++;
+      db().exec("COMMIT");
+    } catch (err) {
+      db().exec("ROLLBACK");
+      throw err;
     }
     if (added || removed || changed) {
       log.info(`rescan: ${added} added, ${removed} removed, ${changed} changed`);

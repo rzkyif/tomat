@@ -1,7 +1,7 @@
 <script lang="ts">
-  import IconButton from "./IconButton.svelte";
-  import ObjectBadge from "./ObjectBadge.svelte";
-  import type { Badge } from "./object-types.ts";
+  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
+  import ObjectBadge from "@tomat/shared/ui/components/objects/ObjectBadge.svelte";
+  import type { Badge } from "@tomat/shared/ui/components/objects/object-types.ts";
   import { type MenuRow, showObjectActionMenu } from "$lib/objects/menu";
 
   // A flush list row: left column (label / description / meta), right column

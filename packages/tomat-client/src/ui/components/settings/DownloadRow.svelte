@@ -4,7 +4,7 @@
   import { downloadsState } from "../../state";
   import { formatBytes } from "$lib/util/format";
   import { useBlink } from "$composables/use-blink.svelte";
-  import IconButton from "../ui/IconButton.svelte";
+  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
 
   let { item } = $props<{ item: DownloadItem }>();
 

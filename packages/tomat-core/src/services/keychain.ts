@@ -79,15 +79,10 @@ export async function keychainSet(
     await writer.close();
     const status = await child.status;
     if (status.success) return true;
-    const stderrBytes = await child.stderr
-      .getReader()
-      .read()
-      .then((r) => r.value ?? new Uint8Array())
-      .catch(() => new Uint8Array());
-    log.warn(
-      `keychain set(${service}/${account}) exited ${status.code}: ` +
-        new TextDecoder().decode(stderrBytes).trim(),
-    );
+    // Drain ALL of stderr (the previous single read() truncated a multi-chunk
+    // error to its first chunk, losing the actual failure detail).
+    const stderrText = await new Response(child.stderr).text().catch(() => "");
+    log.warn(`keychain set(${service}/${account}) exited ${status.code}: ${stderrText.trim()}`);
     return false;
   } catch (err) {
     log.warn(`keychain helper spawn failed: ${errMessage(err)}`);

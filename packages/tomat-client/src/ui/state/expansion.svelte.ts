@@ -10,7 +10,7 @@ import { SvelteMap } from "svelte/reactivity";
 
 export const expansionState = new SvelteMap<string, boolean>();
 
-export function isExpanded(id: string | undefined): boolean {
-  if (!id) return false;
-  return expansionState.get(id) ?? false;
+export function isExpanded(id: string | undefined, fallback = false): boolean {
+  if (!id) return fallback;
+  return expansionState.get(id) ?? fallback;
 }

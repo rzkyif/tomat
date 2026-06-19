@@ -11,12 +11,12 @@
   import { settingsState } from "../../state";
   import { CSS_EASING, getDuration } from "$lib/appearance/animations";
   import { getLogger } from "$lib/util/log";
-  import Modal from "../ui/Modal.svelte";
-  import Button from "../ui/Button.svelte";
-  import IconButton from "../ui/IconButton.svelte";
-  import Alert from "../ui/Alert.svelte";
-  import Textarea from "../ui/Textarea.svelte";
-  import SettingsTabs from "./SettingsTabs.svelte";
+  import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
+  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
+  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
+  import Alert from "@tomat/shared/ui/components/primitives/Alert.svelte";
+  import Textarea from "@tomat/shared/ui/components/primitives/Textarea.svelte";
+  import SettingsTabs from "@tomat/shared/ui/components/primitives/Tabs.svelte";
   import ShareTree from "./ShareTree.svelte";
   import {
     buildTree,

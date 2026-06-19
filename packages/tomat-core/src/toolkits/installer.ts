@@ -43,14 +43,26 @@ const NOOP_SINK: InstallEventSink = {
   },
 };
 
+// Per-toolkit in-flight guard. startDownload/startInstallDeps/startUpdate are
+// fire-and-forget and all derive identical `.new`/`.old` staging paths from the
+// toolkitId, so two concurrent jobs for the same id race: one job's rmrf of the
+// staging dir can wipe another's half-written extract, and two swaps interleave
+// and strand the old version. Refuse a second start while one is in flight.
+const inFlightToolkits = new Set<string>();
+
+function beginExclusive(toolkitId: string): void {
+  if (inFlightToolkits.has(toolkitId)) {
+    throw new AppError("conflict", `an install/update for "${toolkitId}" is already in progress`);
+  }
+  inFlightToolkits.add(toolkitId);
+}
+
 // A local-install slug becomes a filesystem path segment under the toolkits
 // dir; constrain it to a safe identifier charset so it can't contain `.`/`..`
 // or separators that would escape the dir.
 const SLUG_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
-// Phase 1: acquire a toolkit's files (fetch/extract npm, copy the built-in, copy
-// a local folder) WITHOUT installing deps or pinning the content hash. The row
-// lands in status='downloaded'. The caller then triggers startInstallDeps.
+// Phase 1 (download); see the module header. Caller then triggers startInstallDeps.
 export function startDownload(
   spec: InstallSource,
   sink: InstallEventSink = NOOP_SINK,
@@ -63,29 +75,31 @@ export function startDownload(
     );
   }
   const toolkitId = toolkitIdForSpec(spec);
+  beginExclusive(toolkitId);
   void runDownload(spec, toolkitId, jobId, sink)
     .then(() => sink.done(jobId, toolkitId, true, 0))
     .catch((err) => {
       log.error(`download ${toolkitId} failed: ${errMessage(err)}`);
       sink.done(jobId, toolkitId, false, 1);
-    });
+    })
+    .finally(() => inFlightToolkits.delete(toolkitId));
   return { jobId, toolkitId };
 }
 
-// Phase 2: install an already-downloaded toolkit's dependencies (deno install
-// for any declared deno.json/package.json deps), pin the content hash, and flip
-// the row to status='installed'.
+// Phase 2 (install deps + pin content hash); see the module header.
 export function startInstallDeps(
   toolkitId: string,
   sink: InstallEventSink = NOOP_SINK,
 ): InstallStarted {
   const jobId = newJobId();
+  beginExclusive(toolkitId);
   void runInstallDeps(toolkitId, jobId, sink)
     .then(() => sink.done(jobId, toolkitId, true, 0))
     .catch((err) => {
       log.error(`install ${toolkitId} failed: ${errMessage(err)}`);
       sink.done(jobId, toolkitId, false, 1);
-    });
+    })
+    .finally(() => inFlightToolkits.delete(toolkitId));
   return { jobId, toolkitId };
 }
 
@@ -98,13 +112,15 @@ export function startUpdate(
 ): InstallStarted {
   const jobId = newJobId();
   const toolkitId = toolkitIdForSpec(spec);
+  beginExclusive(toolkitId);
   void runDownload(spec, toolkitId, jobId, sink)
     .then(() => runInstallDeps(toolkitId, jobId, sink))
     .then(() => sink.done(jobId, toolkitId, true, 0))
     .catch((err) => {
       log.error(`update ${toolkitId} failed: ${errMessage(err)}`);
       sink.done(jobId, toolkitId, false, 1);
-    });
+    })
+    .finally(() => inFlightToolkits.delete(toolkitId));
   return { jobId, toolkitId };
 }
 

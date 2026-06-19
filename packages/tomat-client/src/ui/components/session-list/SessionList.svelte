@@ -7,9 +7,9 @@
 
   import { onMount } from "svelte";
   import type { SessionListEntry, SummaryPart } from "@tomat/shared";
-  import Bubble from "../ui/Bubble.svelte";
-  import IconButton from "../ui/IconButton.svelte";
-  import Select from "../ui/Select.svelte";
+  import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
+  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
+  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
   import { sessionsState, settingsState, viewState } from "$stores";
   import { cores, type PairedCoreEntry } from "$lib/core";
   import { formatSessionDefaultTitle } from "$lib/util/format";

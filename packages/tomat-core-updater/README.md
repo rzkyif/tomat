@@ -28,8 +28,11 @@ failed, 5 spawn of the new core failed. Logs to a per-channel
 
 ## Run, build, test
 
-From the repo root: compiled as part of `deno task build:core`; `deno task
-check` includes `cargo check`; tested by `deno task test:rs`.
+This crate exposes the standardized verbs as cargo wrappers (its `deno.json`):
+`deno task check:core-updater`, `lint:core-updater`, `test:core-updater`,
+`build:core-updater`, or `cd` in and run `deno task <verb>`. It is also compiled
+as part of `deno task build:core` and folded into the repo-wide
+`deno task check` / `lint` / `test`.
 
 Invoked by core's self-updater; see
 [`../tomat-core/src/update/README.md`](../tomat-core/src/update/README.md).

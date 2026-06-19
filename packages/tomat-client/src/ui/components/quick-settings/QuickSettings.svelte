@@ -7,9 +7,9 @@
   // also openable from Settings.
 
   import { onMount } from "svelte";
-  import Bubble from "../ui/Bubble.svelte";
-  import Button from "../ui/Button.svelte";
-  import IconButton from "../ui/IconButton.svelte";
+  import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
+  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
+  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
   import QuickSettingsSection from "./QuickSettingsSection.svelte";
   import { QUICK_SETTINGS_SECTIONS, type QuickSettingsSectionDef } from "./manifest";
   import { downloadsState, settingsState, viewState } from "$stores";

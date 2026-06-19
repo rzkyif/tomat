@@ -26,6 +26,9 @@ never fails the caller (worst case it prints `{}`). JSON fields are camelCase
 
 ## Run, build, test
 
-From the repo root: compiled as part of `deno task build:core`; `deno task
-check` includes `cargo check` and `deno task lint` includes `cargo clippy`.
-There is no test suite for this crate (it is not part of `deno task test:rs`).
+This crate exposes the standardized verbs as cargo wrappers (its `deno.json`):
+`deno task check:core-hwinfo`, `lint:core-hwinfo`, `build:core-hwinfo`, or `cd`
+in and run `deno task <verb>`. It is also compiled as part of
+`deno task build:core` and folded into the repo-wide `deno task check` / `lint`.
+There is no test suite for this crate, so `test:core-hwinfo` just runs `cargo
+test` and finds nothing.

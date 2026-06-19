@@ -34,6 +34,7 @@ export const catalogItem: ReleaseItem = {
   id: "catalog",
   label: "model catalog",
   scope: "channel",
+  packages: ["catalog"],
   bumpHint: "packages/tomat-model-catalog/deno.json (version)",
 
   version: () => readVersionField(join(REPO_ROOT, "packages/tomat-model-catalog/deno.json")),

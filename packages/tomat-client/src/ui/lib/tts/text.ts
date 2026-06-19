@@ -13,7 +13,10 @@ export function stripMarkdownForTTS(input: string): string {
   //    don't leak partial code content before the closing fence arrives.
   text = text.replace(/```[\s\S]*?```/g, " . ");
   text = text.replace(/~~~[\s\S]*?~~~/g, " . ");
-  const unterminatedFence = text.search(/```|~~~/);
+  // Only a fence at the START of a line opens a code block; an inline stray
+  // triple-backtick (e.g. "use ``` to fence code") must NOT truncate the rest
+  // of the text, which the old un-anchored search did.
+  const unterminatedFence = text.search(/^[ \t]*(?:```|~~~)/m);
   if (unterminatedFence !== -1) {
     text = text.slice(0, unterminatedFence);
   }

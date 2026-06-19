@@ -139,8 +139,12 @@ export class PromptScheduler {
   private disposed = false;
   private ticking = false;
 
-  // Test seam: tests stub the fire path so a due tick doesn't reach the LLM.
-  constructor(private readonly fire: FireFn = runAutomatedSession) {}
+  // Test seams: tests stub the fire path so a due tick doesn't reach the LLM,
+  // and stub the loading check to exercise the defer/refuse-while-loading paths.
+  constructor(
+    private readonly fire: FireFn = runAutomatedSession,
+    private readonly stillLoading: () => Promise<boolean> = llmStillLoading,
+  ) {}
 
   /** Arm the timer from the persisted rows. Overdue rows (core was off)
    *  make the first tick fire immediately, which is the boot catch-up. */
@@ -259,10 +263,19 @@ export class PromptScheduler {
 
   /** Fire a schedule immediately (the settings "Run Now" action). Leaves
    *  the armed occurrence untouched. */
-  runNow(ownerClientId: string, id: string): Session {
+  async runNow(ownerClientId: string, id: string): Promise<Session> {
     const prompt = this.get(ownerClientId, id);
     if (!prompt.enabled) {
       throw new AppError("validation_error", "scheduled prompt is disabled; enable it to run");
+    }
+    // The tick defers due rows while the local model loads (a turn fired then
+    // races the load and errors); a manual run must refuse for the same reason,
+    // loudly, so the user retries rather than getting a session that errors.
+    if (await this.stillLoading()) {
+      throw new AppError(
+        "validation_error",
+        "the local model is still loading; try again in a moment",
+      );
     }
     const session = this.fire({
       ownerClientId,
@@ -301,12 +314,25 @@ export class PromptScheduler {
       // While llama is mid-load (boot, or a settings change is restarting it)
       // ensureLoaded() in the chat path no-ops, so a turn fired now would race
       // the model load and error. Hold the due rows and retry shortly.
-      if (due.length > 0 && (await llmStillLoading())) {
+      if (due.length > 0 && (await this.stillLoading())) {
         log.debug(`local model still loading; deferring ${due.length} due schedule(s)`);
         rearmDelayMs = SIDECAR_RETRY_MS;
         return;
       }
-      for (const row of due) {
+      for (const snapshot of due) {
+        // The loading check awaited above is a window in which the row could
+        // have been edited, advanced by a concurrent runNow, disabled, or
+        // parked. Re-read the FULL row and act on the latest state, not the
+        // pre-await snapshot, so we never fire a stale instruction or clobber a
+        // freshly-advanced next_run_at_ms.
+        const row = db()
+          .prepare(`SELECT * FROM scheduled_prompts WHERE id = ?`)
+          .get(snapshot.id) as Row | undefined;
+        if (!row || row.enabled !== 1) continue;
+        if (row.next_run_at_ms === null || row.next_run_at_ms > now) {
+          // Advanced, parked, or rescheduled in the gap: no longer due.
+          continue;
+        }
         let prompt: ScheduledPrompt;
         try {
           prompt = rowToPrompt(row);
@@ -322,12 +348,6 @@ export class PromptScheduler {
             .run(row.id);
           continue;
         }
-        // The loading check awaited above: a row deleted or disabled in that
-        // gap must not fire.
-        const fresh = db()
-          .prepare(`SELECT enabled FROM scheduled_prompts WHERE id = ?`)
-          .get(prompt.id) as { enabled: number } | undefined;
-        if (!fresh || fresh.enabled !== 1) continue;
         const missed = now - (prompt.nextRunAtMs ?? now) > MISSED_GRACE_MS;
         const fires = !missed || prompt.runMissed;
         const next = nextOccurrence(prompt.schedule, now);

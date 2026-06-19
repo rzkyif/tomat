@@ -98,24 +98,46 @@ export function onRequirementsChanged(fn: RequirementsListener): () => void {
   return () => listeners.delete(fn);
 }
 
+let recomputeInFlight: Promise<void> | null = null;
+let recomputeQueued = false;
+
 /** Recompute and fan out to listeners. Called from the settings-change,
  *  download-completion, and binary-installed triggers. Fire-and-forget safe:
- *  a failed recompute logs and skips the broadcast rather than throwing. */
-export async function notifyRequirementsChanged(): Promise<void> {
-  let snap: RequirementsSnapshot;
-  try {
-    snap = await computeRequirements();
-  } catch (err) {
-    log.warn(`requirements recompute failed: ${err instanceof Error ? err.message : err}`);
-    return;
+ *  a failed recompute logs and skips the broadcast rather than throwing.
+ *
+ *  Concurrent calls coalesce: computeRequirements issues network HEAD probes, so
+ *  a burst of triggers (e.g. a settings batch) would otherwise probe once per
+ *  change. While a recompute runs, further calls flag a single trailing rerun
+ *  and share the in-flight promise, bounding a burst to at most two recomputes. */
+export function notifyRequirementsChanged(): Promise<void> {
+  if (recomputeInFlight) {
+    recomputeQueued = true;
+    return recomputeInFlight;
   }
-  for (const fn of listeners) {
+  recomputeInFlight = runRecompute().finally(() => {
+    recomputeInFlight = null;
+  });
+  return recomputeInFlight;
+}
+
+async function runRecompute(): Promise<void> {
+  do {
+    recomputeQueued = false;
+    let snap: RequirementsSnapshot;
     try {
-      fn(snap);
+      snap = await computeRequirements();
     } catch (err) {
-      log.warn(`requirements listener failed: ${err instanceof Error ? err.message : err}`);
+      log.warn(`requirements recompute failed: ${err instanceof Error ? err.message : err}`);
+      return;
     }
-  }
+    for (const fn of listeners) {
+      try {
+        fn(snap);
+      } catch (err) {
+        log.warn(`requirements listener failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+  } while (recomputeQueued);
 }
 
 export function __resetListenersForTesting(): void {

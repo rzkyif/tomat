@@ -7,8 +7,14 @@
 
 import { settingsState } from "$stores";
 import type { Alignment } from "$lib/util/types";
+import {
+  BASE_MS,
+  collapseLabel,
+  type ExpandHandle,
+  runExpand as runExpandShared,
+} from "@tomat/shared/ui/animations";
 
-export const BASE_MS = 267;
+export { BASE_MS, type ExpandHandle };
 
 export const CSS_EASING = "cubic-bezier(0.4, 0, 0.2, 1)";
 
@@ -135,139 +141,25 @@ export function runMessageEnter(
  * explicit width; this lets the same span handle dynamic content (e.g.
  * "Downloads" → "Downloading…") without caching a stale natural width.
  */
-// Sidebar labels share one expansion SPEED, not one duration: the transition
-// time scales with each label's pixel width, so every row sweeps open (and
-// closed) at the same px/ms regardless of text length. A single fixed duration
-// makes wide rows look faster than narrow ones, which reads as choppy and
-// inconsistent. No upper clamp (that is what made short labels lag); the small
-// floor only guards against a sub-frame duration for a near-empty label.
-const LABEL_REF_WIDTH = 96; // px that animate in exactly BASE_MS at the shared speed
-const LABEL_MIN_MS = 50;
-
-function labelCollapseDuration(width: number, instant: boolean): number {
-  if (instant) return 0;
-  const base = Math.max(LABEL_MIN_MS, (Math.max(0, width) / LABEL_REF_WIDTH) * BASE_MS);
-  return getDuration(base);
-}
-
+/**
+ * Animate a sidebar label's collapse/expand. The width-scaled speed and the DOM
+ * choreography live in the shared `collapseLabel`; here we only supply the app's
+ * duration policy: `instant` (first mount / animations off) skips it, otherwise
+ * the natural ms passes through `getDuration` (master switch + speed multiplier).
+ */
 export function applyLabelCollapse(el: HTMLElement, collapsed: boolean, instant: boolean): void {
-  if (collapsed) {
-    const w = el.scrollWidth || el.getBoundingClientRect().width;
-    const dur = labelCollapseDuration(w, instant);
-    if (dur === 0) {
-      el.style.transition = "";
-      el.style.width = "0px";
-      el.style.opacity = "0";
-      return;
-    }
-    const trans = `width ${dur}ms ${CSS_EASING}, opacity ${dur}ms ${CSS_EASING}`;
-    el.style.transition = "none";
-    el.style.width = `${w}px`;
-    el.style.opacity = "1";
-    void el.offsetHeight;
-    el.style.transition = trans;
-    el.style.width = "0px";
-    el.style.opacity = "0";
-  } else {
-    el.style.transition = "none";
-    el.style.width = "auto";
-    el.style.opacity = "1";
-    const w = el.scrollWidth;
-    const dur = labelCollapseDuration(w, instant);
-    if (dur === 0) {
-      el.style.width = "";
-      return;
-    }
-    const trans = `width ${dur}ms ${CSS_EASING}, opacity ${dur}ms ${CSS_EASING}`;
-    el.style.width = "0px";
-    el.style.opacity = "0";
-    void el.offsetHeight;
-    el.style.transition = trans;
-    el.style.width = `${w}px`;
-    el.style.opacity = "1";
-    // Drop the explicit width once the transition finishes so the span can
-    // resize naturally if its content later changes.
-    setTimeout(() => {
-      if (el.style.width === `${w}px`) {
-        el.style.transition = "";
-        el.style.width = "";
-      }
-    }, dur);
-  }
-}
-
-export interface ExpandHandle {
-  cancel(): void;
+  collapseLabel(el, collapsed, (baseMs) => (instant ? 0 : getDuration(baseMs)));
 }
 
 /**
- * Drive a per-frame max-height + opacity animation on `el`. Used by
- * <Expand>. Per-frame (rather than CSS transition to a baked-in scrollHeight)
- * so the target height tracks scrollHeight as it grows. Necessary for
- * content that renders asynchronously, e.g. MessageMarkdown in ReasoningTrace
- * shows a spinner first and only fills in the real HTML after `marked` +
- * DOMPurify complete.
- *   - direction "open":  t goes 0→1, ends with styles cleared (natural)
- *   - direction "close": t goes 1→0, ends fully hidden
- * `onComplete` fires after the target state is reached. The returned handle
- * lets callers cancel an in-flight animation.
+ * Per-frame expand/collapse. The motion lives in the shared `runExpand`; here we
+ * only resolve the app's settings-aware duration. Kept so existing client
+ * callers (`$lib/appearance/animations`) need no import change.
  */
 export function runExpand(
   el: HTMLElement,
   direction: "open" | "close",
   onComplete?: () => void,
 ): ExpandHandle {
-  const dur = getDuration();
-  if (dur <= 0) {
-    if (direction === "open") {
-      el.style.maxHeight = "";
-      el.style.overflow = "";
-      el.style.opacity = "";
-    } else {
-      el.style.maxHeight = "0";
-      el.style.overflow = "hidden";
-      el.style.opacity = "0";
-    }
-    onComplete?.();
-    return { cancel: () => {} };
-  }
-
-  let cancelled = false;
-  let rafId = 0;
-  const startTime = performance.now();
-
-  const frame = (now: number) => {
-    if (cancelled) return;
-    const elapsed = (now - startTime) / dur;
-    const t = direction === "open" ? Math.min(1, elapsed) : Math.max(0, 1 - elapsed);
-    const done = (direction === "open" && t >= 1) || (direction === "close" && t <= 0);
-    if (done) {
-      if (direction === "open") {
-        el.style.maxHeight = "";
-        el.style.overflow = "";
-        el.style.opacity = "";
-      } else {
-        el.style.maxHeight = "0";
-        el.style.overflow = "hidden";
-        el.style.opacity = "0";
-      }
-      onComplete?.();
-      return;
-    }
-    const p = easeInOut(t);
-    const height = el.scrollHeight;
-    el.style.maxHeight = `${height * p}px`;
-    el.style.overflow = "hidden";
-    el.style.opacity = `${p}`;
-    rafId = requestAnimationFrame(frame);
-  };
-
-  rafId = requestAnimationFrame(frame);
-
-  return {
-    cancel() {
-      cancelled = true;
-      cancelAnimationFrame(rafId);
-    },
-  };
+  return runExpandShared(el, direction, getDuration(), onComplete);
 }

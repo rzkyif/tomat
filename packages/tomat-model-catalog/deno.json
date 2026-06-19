@@ -1,6 +1,9 @@
 {
   "name": "@tomat/model-catalog",
   "version": "0.1.0",
+  "tasks": {
+    "check": "deno check src/index.ts"
+  },
   "exports": "./src/index.ts",
   "imports": {
     "@tomat/shared": "../tomat-shared/src/index.ts",

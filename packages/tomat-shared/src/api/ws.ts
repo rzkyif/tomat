@@ -68,10 +68,9 @@ export type ClientToServerFrame =
 // The TS unions here derive from these tuples via `(typeof T)[number]`, and
 // the per-frame Zod validators in ../validation/ws.ts reuse the SAME tuples
 // via `z.enum(T)`. That is what keeps the type and the runtime validator from
-// drifting: a value added here flows to both sides at once. (Drift between the
-// two is exactly how a `session.updated` op and a `chat.done` reason were
-// silently dropped by the client before.) `permissionKind` follows the same
-// idea from its own home, `PERMISSION_KINDS` in ../domain/toolkit.ts.
+// drifting: a value added here flows to both sides at once. `permissionKind`
+// follows the same idea from its own home, `PERMISSION_KINDS` in
+// ../domain/toolkit.ts.
 
 export const CHAT_DONE_REASONS = ["stop", "interrupted", "hop_limit", "length"] as const;
 export const TOOL_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;

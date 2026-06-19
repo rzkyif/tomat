@@ -11,13 +11,18 @@
  */
 
 import { tick } from "svelte";
-import { CSS_EASING, getDuration } from "$lib/appearance/animations";
+import { getDuration } from "$lib/appearance/animations";
+import { slideSwap } from "@tomat/shared/ui/animations";
 
 export class SettingsSearch {
   mode = $state(false);
   query = $state("");
   layerEl: HTMLDivElement | undefined = $state();
   inputEl: HTMLInputElement | undefined = $state();
+  /** When set, the slide is delegated to the owner (the shared
+   *  `SettingsShellView`, which owns the content layer); the local
+   *  `layerEl` slide path below is then only used by tests / standalone. */
+  onSlide: ((active: boolean) => Promise<void> | void) | undefined;
 
   private transitioning = false;
 
@@ -28,41 +33,30 @@ export class SettingsSearch {
    */
   async slideSwap(dir: "up" | "down", swap: () => void): Promise<void> {
     if (this.transitioning) return;
-
-    const dur = getDuration();
-
-    if (this.layerEl && dur > 0) {
-      this.transitioning = true;
-
-      const outSign = dir === "up" ? 1 : -1;
-      const inSign = -outSign;
-      // Slide only, no cross-fade: the layer is a single element, so a pure
-      // translate reads as one piece of content pushing the next in/out.
-      const trans = `transform ${dur}ms ${CSS_EASING}`;
-
-      this.layerEl.style.transition = trans;
-      this.layerEl.style.transform = `translateY(${100 * outSign}%)`;
-      await new Promise((r) => setTimeout(r, dur));
-
-      swap();
-      await tick();
-      this.layerEl.style.transition = "none";
-      this.layerEl.style.transform = `translateY(${100 * inSign}%)`;
-      void this.layerEl.offsetHeight;
-
-      this.layerEl.style.transition = trans;
-      this.layerEl.style.transform = "";
-      await new Promise((r) => setTimeout(r, dur));
-      this.layerEl.style.transition = "";
-
-      this.transitioning = false;
-    } else {
-      swap();
-    }
+    this.transitioning = true;
+    // Vertical slide; "up" means the current layer leaves upward (outSign 1).
+    // Await `tick()` inside the swap so the new content exists before the
+    // shared helper parks it offscreen for the entry phase.
+    await slideSwap(this.layerEl, {
+      axis: "y",
+      outSign: dir === "up" ? 1 : -1,
+      durationMs: getDuration(),
+      swap: async () => {
+        swap();
+        await tick();
+      },
+    });
+    this.transitioning = false;
   }
 
   async setMode(active: boolean): Promise<void> {
     if (this.mode === active) return;
+    if (this.onSlide) {
+      // The shell owns the slide; it also flips `mode` through its bound prop.
+      await this.onSlide(active);
+      this.mode = active;
+      return;
+    }
     await this.slideSwap(active ? "up" : "down", () => {
       this.mode = active;
     });

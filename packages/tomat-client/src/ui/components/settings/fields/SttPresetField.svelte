@@ -5,10 +5,10 @@
   import { sttModelsState } from "../../../state/stt-models.svelte";
   import { cores } from "$lib/core";
   import FieldCard from "./FieldCard.svelte";
-  import OptionCard from "../../ui/OptionCard.svelte";
-  import Select from "../../ui/Select.svelte";
-  import HelpText from "../../ui/HelpText.svelte";
-  import Alert from "../../ui/Alert.svelte";
+  import OptionCard from "@tomat/shared/ui/components/primitives/OptionCard.svelte";
+  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
+  import HelpText from "@tomat/shared/ui/components/primitives/HelpText.svelte";
+  import Alert from "@tomat/shared/ui/components/primitives/Alert.svelte";
 
   // The Speech-to-Text catalog picker. Like ModelPresetField, each card binds
   // to a catalog model and selecting one calls the select API; unlike it there

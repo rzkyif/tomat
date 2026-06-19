@@ -7,12 +7,12 @@
 
   import { onMount } from "svelte";
   import { errMessage } from "@tomat/shared";
-  import Bubble from "../ui/Bubble.svelte";
-  import Alert from "../ui/Alert.svelte";
-  import Button from "../ui/Button.svelte";
-  import FormField from "../ui/FormField.svelte";
-  import IconButton from "../ui/IconButton.svelte";
-  import Input from "../ui/Input.svelte";
+  import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
+  import Alert from "@tomat/shared/ui/components/primitives/Alert.svelte";
+  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
+  import FormField from "@tomat/shared/ui/components/primitives/FormField.svelte";
+  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
+  import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
   import {
     cores,
     mintCodeWithAdminToken,

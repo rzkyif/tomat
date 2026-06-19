@@ -576,8 +576,28 @@ export function validateSettingsPatch(patch: Record<string, unknown>): string[] 
       errors.push(`"${key}" has the wrong type for a "${field.type}" setting`);
       continue;
     }
+    // A select value must be one of the declared (static) options; a select
+    // backed by a runtime optionsSource can't be checked here and is skipped.
+    if (field.type === "select" && "options" in field && Array.isArray(field.options)) {
+      const allowed = field.options.map((o) => o.value);
+      if (!allowed.includes(value as string | number)) {
+        errors.push(`"${key}" must be one of: ${allowed.map((v) => String(v)).join(", ")}`);
+        continue;
+      }
+    }
+    // A slider value must fall inside its declared range.
+    if (field.type === "number_slider" && typeof value === "number") {
+      if (value < field.min || value > field.max) {
+        errors.push(`"${key}" must be between ${field.min} and ${field.max}`);
+        continue;
+      }
+    }
     if (
-      (field.type === "string" || field.type === "password" || field.type === "multiline") &&
+      (field.type === "string" ||
+        field.type === "password" ||
+        field.type === "multiline" ||
+        field.type === "number" ||
+        field.type === "float") &&
       field.regex
     ) {
       const re = getValidationError(field.regex, value);

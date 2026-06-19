@@ -3,7 +3,7 @@
   import type { SettingField } from "@tomat/shared";
   import { evalCondition } from "@tomat/shared";
   import { settingsState } from "../../../state";
-  import FormField from "../../ui/FormField.svelte";
+  import FormField from "@tomat/shared/ui/components/primitives/FormField.svelte";
 
   let {
     field,

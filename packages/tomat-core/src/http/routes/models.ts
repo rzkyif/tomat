@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import { modelsManager } from "../../models/manager.ts";
 import { downloadManager } from "../../downloads/manager.ts";
 import { ensureKindModels } from "../../services/model-ensure.ts";
@@ -19,6 +20,39 @@ import { type AppliedModelSettings, PRESET_BUCKETS, type PresetBucket } from "@t
 
 type ModelKind = "llm" | "stt" | "tts" | "embed";
 
+// Request-body schemas: strict objects with enums + bounded arrays so a
+// malformed or oversized body is rejected before it reaches the managers
+// (matches the zod-validated pattern in documents.ts / scheduled-prompts.ts).
+const groupEnum = z.enum(["llm", "stt", "tts", "embed"]);
+const downloadBodySchema = z
+  .object({
+    items: z
+      .array(z.object({ source: z.string().min(1), group: groupEnum.optional() }).strict())
+      .max(256),
+  })
+  .strict();
+const probeBodySchema = z.object({ sources: z.array(z.string().min(1)).max(256) }).strict();
+const modelSelectBodySchema = z
+  .object({
+    bucket: z.string().optional(),
+    modelId: z.string().optional(),
+    modelSpec: z.string().optional(),
+  })
+  .strict();
+const speechSelectBodySchema = z
+  .object({
+    presetId: z.string().optional(),
+    modelId: z.string().optional(),
+    modelSpec: z.string().optional(),
+  })
+  .strict();
+
+function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new AppError("validation_error", parsed.error.message);
+  return parsed.data;
+}
+
 export function modelsRoutes(): Hono {
   const r = new Hono();
   r.use("*", bearerMiddleware());
@@ -28,17 +62,9 @@ export function modelsRoutes(): Hono {
   });
 
   r.post("/download", async (c) => {
-    const body = (await readJson(c)) as {
-      items: Array<{ source: string; group?: string }>;
-    };
-    if (!Array.isArray(body.items)) {
-      throw new AppError("validation_error", "items array required");
-    }
+    const { items } = parseBody(downloadBodySchema, await readJson(c));
     const jobIds = modelsManager().download(
-      body.items.map((i) => ({
-        source: i.source,
-        group: i.group as "llm" | "stt" | "tts" | "embed" | undefined,
-      })),
+      items.map((i) => ({ source: i.source, group: i.group })),
     );
     return c.json({ jobIds });
   });
@@ -67,11 +93,8 @@ export function modelsRoutes(): Hono {
   });
 
   r.post("/probe", async (c) => {
-    const body = (await readJson(c)) as { sources: string[] };
-    if (!Array.isArray(body.sources)) {
-      throw new AppError("validation_error", "sources array required");
-    }
-    return c.json(await modelsManager().probe(body.sources));
+    const { sources } = parseBody(probeBodySchema, await readJson(c));
+    return c.json(await modelsManager().probe(sources));
   });
 
   // Bulk-ensure every model file the named sidecar kind needs given the
@@ -131,7 +154,7 @@ export function modelsRoutes(): Hono {
   // Downloading multi-GB weights is always the user's explicit choice, never a
   // side effect of selecting a preset.
   r.post("/select", async (c) => {
-    const body = (await readJson(c)) as { bucket?: string; modelId?: string; modelSpec?: string };
+    const body = parseBody(modelSelectBodySchema, await readJson(c));
     const apply = await resolveSelection(body);
     await patchCoreSettings(applyToPatch(apply.settings, apply.preset));
     return c.json({ applied: apply });
@@ -155,11 +178,7 @@ export function modelsRoutes(): Hono {
   // never downloads; the settings write surfaces any missing model file in the
   // client's pending-downloads confirm modal.
   r.post("/stt/select", async (c) => {
-    const body = (await readJson(c)) as {
-      presetId?: string;
-      modelId?: string;
-      modelSpec?: string;
-    };
+    const body = parseBody(speechSelectBodySchema, await readJson(c));
     const [catalog, hw] = await Promise.all([loadModelCatalog(), detectHardware()]);
     const applied = resolveSttSelection(catalog, hw, body);
     await patchCoreSettings({
@@ -193,11 +212,7 @@ export function modelsRoutes(): Hono {
   // client's pending-downloads confirm modal. Picking a model resets tts.voice
   // to that model's default voice.
   r.post("/tts/select", async (c) => {
-    const body = (await readJson(c)) as {
-      presetId?: string;
-      modelId?: string;
-      modelSpec?: string;
-    };
+    const body = parseBody(speechSelectBodySchema, await readJson(c));
     const catalog = await loadModelCatalog();
     const applied = resolveTtsSelection(catalog, body);
     await patchCoreSettings({

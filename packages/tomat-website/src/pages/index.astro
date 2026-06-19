@@ -1,31 +1,23 @@
 ---
-import "../styles/global.css";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import InstallCard from "../components/InstallCard.svelte";
+import Showcase from "../components/showcase/Showcase.svelte";
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="tomat" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <title>tomat</title>
-  </head>
-  <body>
-    <main>
-      <svg
-        class="logo"
-        viewBox="0 0 1024 1024"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-label="tomat logo"
-      >
-        <g transform="matrix(1.969231,0,0,1.969231,7.876923,7.876923)">
-          <path
-            d="M256,48C370.798,48 464,141.202 464,256C464,370.798 370.798,464 256,464C141.202,464 48,370.798 48,256C48,141.202 141.202,48 256,48ZM256,100C169.901,100 100,169.901 100,256C100,342.099 169.901,204 256,204C342.099,204 412,342.099 412,256C412,169.901 342.099,100 256,100Z"
-          ></path>
-        </g>
-      </svg>
-      <h1 class="wordmark">tomat</h1>
-    </main>
-  </body>
-</html>
+<BaseLayout title="tomat" description="A local-first AI client.">
+  {/* A single, non-scrolling viewport under the sticky navbar. The install
+      section (with its expandable "How to install") claims its height first; the
+      feature showcase scales its demo to the leftover space and hugs it, so the
+      whole column centers as one group. The showcase track is full-bleed (so
+      neighbouring stages can peek on wide screens) while the caption, indicator,
+      and install stay capped to the install-card width. `data-install` lets the
+      showcase measure this row's height when sizing the demo. The top padding is
+      the bar->install gap (gap-6/gap-10) minus the navbar's own 0.5rem padding
+      below its tab nav, so the navbar->showcase gap matches the other two. */}
+  <main class="h-[calc(100dvh-3.5rem)] flex flex-col justify-center gap-6 sm:gap-10 pt-4 sm:pt-8 pb-4 sm:pb-6 overflow-hidden">
+    <Showcase client:visible />
+    <div data-install class="shrink-0 w-full max-w-xl mx-auto px-4">
+      <InstallCard client:visible />
+    </div>
+  </main>
+</BaseLayout>

@@ -1,0 +1,290 @@
+<script lang="ts">
+  import type { Snippet } from "svelte";
+  import { SETTINGS_SCHEMA, evalCondition, searchFields } from "../../../domain/settings/engine.ts";
+  import { groupDestinations } from "../../../domain/settings/types.ts";
+  import type { SettingField, SettingGroup, SettingSection } from "../../../domain/settings/types.ts";
+  import HelpText from "../primitives/HelpText.svelte";
+  import IconButton from "../primitives/IconButton.svelte";
+  import SectionHeader from "../primitives/SectionHeader.svelte";
+  import SettingsFieldView from "./SettingsFieldView.svelte";
+  import Tabs from "../primitives/Tabs.svelte";
+  import { slideSwap } from "../../animations.ts";
+  import { useUiContext } from "../../context.ts";
+
+  // THE single settings content composition for both the client and the website
+  // (single-source rule, AGENTS.md): the sticky group header (name + Client/Core
+  // chips + expand/collapse actions), the optional description + tab selector, the
+  // real sections (sticky sub-headers, defaultCollapsed, visibleWhen) with their
+  // fields, and the search-results layout. Each field is rendered by the injected
+  // `field` snippet (the client passes its live `SettingsField`; the website
+  // passes none and a static `SettingsFieldView` is used with `values`), so the
+  // field markup is single-source too. Section-expand and tab state are external
+  // when handlers are given (client), otherwise managed internally (website).
+  const ui = useUiContext();
+
+  let {
+    groupId,
+    searchQuery,
+    values = {},
+    horizontal = true,
+    field,
+    expanded: expandedProp,
+    onToggleSection,
+    onExpandAll,
+    onCollapseAll,
+    activeTab: activeTabProp,
+    onSelectTab,
+    locked = false,
+    minHeightPx,
+  }: {
+    /** Render this group's header + sections. Ignored when `searchQuery` is set. */
+    groupId?: string;
+    /** Render search results for this query instead of a group. */
+    searchQuery?: string;
+    /** Setting id -> value, used by the default static field renderer. */
+    values?: Record<string, unknown>;
+    horizontal?: boolean;
+    /** Renders one field. When omitted, a static `SettingsFieldView` is used. */
+    field?: Snippet<[SettingField]>;
+    /** Controlled expanded-section keys (`${groupId}-${index}`); internal if omitted. */
+    expanded?: Set<string>;
+    onToggleSection?: (key: string) => void;
+    onExpandAll?: () => void;
+    onCollapseAll?: () => void;
+    /** Controlled active tab id; internal if omitted. */
+    activeTab?: string;
+    onSelectTab?: (id: string) => void;
+    /** Reconnecting: dim + block interaction (client). */
+    locked?: boolean;
+    /** Min height for the group-change slide to travel the whole panel (client). */
+    minHeightPx?: number;
+  } = $props();
+
+  const group = $derived<SettingGroup | undefined>(
+    groupId ? SETTINGS_SCHEMA.find((g) => g.id === groupId) : undefined,
+  );
+
+  // --- tab state (controlled or internal) ---
+  let activeTabInternal = $state("");
+  let contentTabId = $state("");
+  $effect(() => {
+    const first = group?.tabs?.[0]?.id ?? "";
+    activeTabInternal = activeTabProp ?? first;
+    contentTabId = activeTabProp ?? first;
+  });
+  const activeTab = $derived(activeTabProp ?? activeTabInternal);
+
+  let tabLayerEl = $state<HTMLDivElement>();
+  let tabTransitioning = false;
+  async function selectTab(id: string): Promise<void> {
+    if (onSelectTab) {
+      onSelectTab(id);
+      return;
+    }
+    if (id === activeTabInternal || tabTransitioning) return;
+    const tabs = group?.tabs ?? [];
+    const toIdx = tabs.findIndex((t) => t.id === id);
+    const fromIdx = tabs.findIndex((t) => t.id === activeTabInternal);
+    activeTabInternal = id;
+    tabTransitioning = true;
+    await slideSwap(tabLayerEl, {
+      axis: "x",
+      outSign: toIdx > fromIdx ? -1 : 1,
+      durationMs: ui.animationDurationMs(),
+      swap: () => {
+        contentTabId = id;
+      },
+    });
+    tabTransitioning = false;
+  }
+
+  function sectionVisible(s: SettingSection): boolean {
+    if (!evalCondition(s.visibleWhen, values)) return false;
+    if (group?.tabs && s.tab !== contentTabId) return false;
+    return s.fields.length > 0;
+  }
+
+  // --- expand state (controlled or internal) ---
+  const keyOf = (i: number): string => `${groupId}-${i}`;
+  let expandedInternal = $state(new Set<string>());
+  $effect(() => {
+    if (onToggleSection) return; // controlled
+    const next = new Set<string>();
+    (group?.sections ?? []).forEach((s, i) => {
+      if (s.label && !s.defaultCollapsed) next.add(keyOf(i));
+    });
+    expandedInternal = next;
+  });
+  const expanded = $derived(expandedProp ?? expandedInternal);
+  function toggle(key: string): void {
+    if (onToggleSection) {
+      onToggleSection(key);
+      return;
+    }
+    const next = new Set(expandedInternal);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    expandedInternal = next;
+  }
+  const labeledKeys = $derived(
+    (group?.sections ?? [])
+      .map((s, i) => ({ s, i }))
+      .filter((x) => !!x.s.label && sectionVisible(x.s))
+      .map((x) => keyOf(x.i)),
+  );
+  const hasCollapsibleSections = $derived(labeledKeys.length > 0);
+  function expandAll(): void {
+    if (onExpandAll) return onExpandAll();
+    expandedInternal = new Set(labeledKeys);
+  }
+  function collapseAll(): void {
+    if (onCollapseAll) return onCollapseAll();
+    expandedInternal = new Set();
+  }
+
+  const showGroupDesc = $derived(
+    !!group?.description && (group.descriptionTier ?? "ondemand") === "always",
+  );
+
+  // An object-management group is a single section holding a single
+  // object_management field; it owns the full panel height.
+  const omField = $derived.by<SettingField | null>(() => {
+    if (!group) return null;
+    const om = group.sections.filter((s) =>
+      sectionVisible(s) && s.fields.some((f) => f.type === "object_management")
+    );
+    if (om.length !== 1 || om[0].fields.length !== 1) return null;
+    return om[0].fields[0];
+  });
+
+  const search = $derived(searchQuery ? searchFields(searchQuery, values) : []);
+</script>
+
+{#snippet renderField(f: SettingField)}
+  {#if field}
+    {@render field(f)}
+  {:else}
+    <SettingsFieldView field={f} value={values[f.id] ?? ("defaultValue" in f ? f.defaultValue : "")} {horizontal} />
+  {/if}
+{/snippet}
+
+{#if searchQuery}
+  <div class="flex flex-col gap-4">
+    {#each search as rg (rg.sectionKey)}
+      <div class="flex flex-col gap-2">
+        <div class="text-base text-default-500 font-medium uppercase tracking-wide">
+          {rg.groupName}{rg.sectionLabel ? ` › ${rg.sectionLabel}` : ""}
+        </div>
+        {#each rg.fields as f (f.id)}
+          {@render renderField(f)}
+        {/each}
+      </div>
+    {:else}
+      <div class="bg-surface-inset rounded-large px-4 py-2 text-default-600 text-base">
+        No matching settings found.
+      </div>
+    {/each}
+  </div>
+{:else if group}
+  <!-- An object-management group owns the full panel height (definite height so
+       its manager scrolls internally); a sectioned group uses min-height so the
+       group-change slide travels the whole panel. -->
+  <section
+    class="flex flex-col"
+    style:height={omField && minHeightPx ? `${minHeightPx}px` : undefined}
+    style:min-height={!omField && minHeightPx ? `${minHeightPx}px` : undefined}
+  >
+    <!-- Group header: sticky at the very top (z above section headers at top-7). -->
+    <div class="sticky top-0 z-20">
+      <SectionHeader label={group.name} level="group">
+        {#snippet badge()}
+          <span class="inline-flex items-center gap-1">
+            {#each groupDestinations(group) as dest (dest)}
+              <span
+                class="text-[10px] font-medium uppercase tracking-wider px-1.5 inline-flex items-center h-4 leading-none rounded-medium bg-surface-inset text-default-700"
+              >
+                {dest === "core" ? "Core" : "Client"}
+              </span>
+            {/each}
+          </span>
+        {/snippet}
+        {#snippet actions()}
+          {#if hasCollapsibleSections}
+            <IconButton
+              icon="i-material-symbols-unfold-more-rounded"
+              title="Expand all sections"
+              size="sm"
+              variant="subtle"
+              onclick={expandAll}
+            />
+            <IconButton
+              icon="i-material-symbols-unfold-less-rounded"
+              title="Collapse all sections"
+              size="sm"
+              variant="subtle"
+              onclick={collapseAll}
+            />
+          {/if}
+        {/snippet}
+      </SectionHeader>
+    </div>
+
+    {#if showGroupDesc && group.description}
+      <div class="shrink-0 pt-1"><HelpText text={group.description} /></div>
+    {/if}
+
+    {#if group.tabs}
+      <div class="shrink-0 pt-2 pb-3">
+        <Tabs
+          tabs={group.tabs.map((t) => ({ id: t.id, label: t.label }))}
+          active={activeTab}
+          onSelect={selectTab}
+        />
+      </div>
+    {/if}
+
+    <div
+      bind:this={tabLayerEl}
+      class="flex flex-1 min-h-0 flex-col transition-opacity {locked ? 'opacity-50' : ''}"
+      inert={locked}
+    >
+      {#if omField}
+        <div class="flex-1 min-h-0 pt-1">
+          {@render renderField(omField)}
+        </div>
+      {:else}
+        <!-- gap-3 separates sections; each section is a tight (gap-1) unit. -->
+        <div class="flex flex-col gap-3">
+          {#each group.sections as section, i (i)}
+            {#if sectionVisible(section)}
+              {@const collapsible = !!section.label}
+              {@const isExpanded = !collapsible || expanded.has(keyOf(i))}
+              <div class="flex flex-col gap-1 {collapsible && !isExpanded ? '-mb-2' : ''}">
+                {#if section.label}
+                  <div class="sticky top-7 z-10 pt-1.5 bg-surface">
+                    <SectionHeader
+                      label={section.label}
+                      level="section"
+                      collapsible
+                      expanded={isExpanded}
+                      onToggle={() => toggle(keyOf(i))}
+                    />
+                  </div>
+                {/if}
+                {#if isExpanded}
+                  <div class="flex flex-col gap-1" class:pl-5={collapsible}>
+                    {#each section.fields as f (f.id)}
+                      {#if evalCondition(f.visibleWhen, values)}
+                        {@render renderField(f)}
+                      {/if}
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          {/each}
+        </div>
+      {/if}
+    </div>
+  </section>
+{/if}

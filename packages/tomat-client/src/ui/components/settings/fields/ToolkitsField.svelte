@@ -11,11 +11,11 @@
   import { cores } from "$lib/core";
   import type { ParsedQuery } from "$lib/objects/query";
   import { type MenuRow, showFilterSortMenu, showObjectActionMenu } from "$lib/objects/menu";
-  import type { Badge } from "$components/ui/object-types.ts";
+  import type { Badge } from "@tomat/shared/ui/components/objects/object-types.ts";
   import ObjectManager from "$components/ui/ObjectManager.svelte";
   import ObjectCard from "$components/ui/ObjectCard.svelte";
-  import ObjectDetailHeader from "$components/ui/ObjectDetailHeader.svelte";
-  import ObjectDetailScroll from "$components/ui/ObjectDetailScroll.svelte";
+  import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeader.svelte";
+  import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScroll.svelte";
   import ToolkitDetail from "./ToolkitDetail.svelte";
 
   // A list row is either an installed toolkit or an npm search result. A single

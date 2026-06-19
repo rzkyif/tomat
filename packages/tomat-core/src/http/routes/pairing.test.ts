@@ -158,6 +158,81 @@ Deno.test("GET /api/v1/pairing/clients: lists the paired client", async () => {
   }
 });
 
+Deno.test("DELETE /api/v1/pairing/clients/:id: a client can remove itself", async () => {
+  const env = await setupTestEnv();
+  try {
+    await seedAdminToken();
+    const app = buildApp();
+    const code = await mintCode(app);
+    const finish = await pakeViaApp(app, code, "self", await tlsCertFingerprint());
+    const { token, clientId } = await finish.json();
+    const del = await app.fetch(
+      new Request(`http://x/api/v1/pairing/clients/${clientId}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}` },
+      }),
+    );
+    assertEquals(del.status, 204);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("DELETE /api/v1/pairing/clients/:id: a plain client cannot revoke another (401)", async () => {
+  const env = await setupTestEnv();
+  try {
+    await seedAdminToken();
+    const app = buildApp();
+    const pin = await tlsCertFingerprint();
+    const finishA = await pakeViaApp(app, await mintCode(app), "A", pin);
+    const { clientId: idA } = await finishA.json();
+    const finishB = await pakeViaApp(app, await mintCode(app), "B", pin);
+    const { token: tokenB } = await finishB.json();
+    // B (an ordinary paired device) tries to wipe A: rejected without admin.
+    const del = await app.fetch(
+      new Request(`http://x/api/v1/pairing/clients/${idA}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${tokenB}` },
+      }),
+    );
+    assertEquals(del.status, 401);
+    // A is still paired (both clients remain).
+    const list = await app.fetch(
+      new Request("http://x/api/v1/pairing/clients", {
+        headers: { authorization: `Bearer ${tokenB}` },
+      }),
+    );
+    assertEquals((await list.json()).length, 2);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("DELETE /api/v1/pairing/clients/:id: admin token authorizes cross-device revoke; unknown id is 404", async () => {
+  const env = await setupTestEnv();
+  try {
+    await seedAdminToken();
+    const app = buildApp();
+    const pin = await tlsCertFingerprint();
+    const finishA = await pakeViaApp(app, await mintCode(app), "A", pin);
+    const { clientId: idA } = await finishA.json();
+    const finishB = await pakeViaApp(app, await mintCode(app), "B", pin);
+    const { token: tokenB } = await finishB.json();
+    const headers = { authorization: `Bearer ${tokenB}`, "x-admin-token": ADMIN_TOKEN };
+    const del = await app.fetch(
+      new Request(`http://x/api/v1/pairing/clients/${idA}`, { method: "DELETE", headers }),
+    );
+    assertEquals(del.status, 204);
+    // Revoking the now-unknown id again is a 404, not a silent 204.
+    const again = await app.fetch(
+      new Request(`http://x/api/v1/pairing/clients/${idA}`, { method: "DELETE", headers }),
+    );
+    assertEquals(again.status, 404);
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("POST /api/v1/pairing/rotate: returns a new bearer token", async () => {
   const env = await setupTestEnv();
   try {

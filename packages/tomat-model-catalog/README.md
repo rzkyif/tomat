@@ -42,6 +42,24 @@ deno run -A scripts/catalog/probe.ts unsloth/Qwen3.5-2B-GGUF [...repos]
 Scores (3) come from <https://artificialanalysis.ai>; enter them by hand and
 re-verify them on each curation pass.
 
+## Content hashes
+
+Every downloadable file is pinned to a content `sha256`, so a model download
+verifies its bytes against the signed catalog instead of trusting HuggingFace's
+`x-linked-etag` (which a proxy can strip or a non-HF mirror omit). The hashes
+live in the generated `src/hashes.generated.ts` (`modelSpec -> sha256`), which
+`buildCatalogPayload` stamps onto each quant / mmproj / speech file. After adding
+or repointing any model, regenerate them:
+
+```
+deno run -A scripts/catalog/gather-hashes.ts
+```
+
+It reads the git-LFS `oid` from the HF tree API for weights (no download) and
+hashes the few small non-LFS files (tokens, configs) directly. A spec left out
+of the map is downloaded with a fallback to HF's published hash, so a missing
+entry degrades gracefully rather than breaking the build.
+
 ## How the core consumes it
 
 On-device, the core fetches `catalog.json` from

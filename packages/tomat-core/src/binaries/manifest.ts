@@ -1,10 +1,11 @@
 // Binary-manifest fetch + signature verification.
 //
-// Manifest schema (see plan §8):
+// Manifest schema:
 //   {
 //     "schemaVersion": 1,
+//     "version": "<core release>",
 //     "binaries": { <kind>: { version, platforms: { <triple>: { url, sha256 } } } },
-//     "signature": base64-Ed25519(JSON.stringify(manifest.binaries))
+//     "signature": base64-Ed25519(canonicalize(manifest minus signature))
 //   }
 //
 // The Ed25519 public key is baked into the running core binary (see
@@ -12,18 +13,23 @@
 //
 // On first fetch we cache the parsed + verified manifest at
 // ~/.tomat/core/cache/binaries-manifest.json so subsequent boots can install
-// missing binaries offline (assuming the operator's prior fetch was good).
+// missing binaries offline (assuming the operator's prior fetch was good). On a
+// forced refresh a strictly-older signed `version` than the cached one is
+// refused (a replayed prior release could re-introduce a fixed vulnerability).
 
 import { verifyAsync } from "@noble/ed25519";
 import { canonicalize, decodeBase64, errMessage } from "@tomat/shared";
 import { join } from "@std/path";
-import { binaryManifestUrl } from "../config.ts";
+import { binaryManifestUrl, CORE_VERSION } from "../config.ts";
 import { channel, paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
+import { getLogger } from "../shared/log.ts";
+import { compareSemver } from "../shared/semver.ts";
 import signingKeys from "../../data/signing-keys.json" with { type: "json" };
 import type { BinaryKind, BinaryManifest, BinaryManifestEntry } from "@tomat/shared";
 import { BINARY_KINDS, UPSTREAM_BINARIES } from "@tomat/shared";
 
+const log = getLogger("binaries");
 const SIG_ALGO_LABEL = "ed25519-base64";
 
 export interface FetchOptions {
@@ -42,6 +48,15 @@ export async function loadBinaryManifest(opts: FetchOptions = {}): Promise<Binar
   const cached = await readCachedManifest();
   if (cached && !opts.force) return cached;
   const fetched = await fetchAndVerify(opts.signal);
+  // Refuse a strictly-older signed manifest than the one we already trust: a
+  // validly-signed prior release could be replayed to roll binaries back to a
+  // version with a fixed vulnerability. Keep the newer cached manifest.
+  if (cached && compareSemver(fetched.version, cached.version) < 0) {
+    log.warn(
+      `refusing older binary manifest v${fetched.version}; keeping cached v${cached.version}`,
+    );
+    return cached;
+  }
   await writeCachedManifest(fetched);
   return fetched;
 }
@@ -59,7 +74,7 @@ function devManifest(): BinaryManifest {
     if (!resolver) continue;
     binaries[kind] = { resolver };
   }
-  return { schemaVersion: 1, binaries, signature: "" };
+  return { schemaVersion: 1, version: CORE_VERSION, binaries, signature: "" };
 }
 
 async function fetchAndVerify(signal?: AbortSignal): Promise<BinaryManifest> {
@@ -101,6 +116,9 @@ export function assertManifestShape(value: unknown): asserts value is BinaryMani
       `unsupported schemaVersion: ${String(o.schemaVersion)}`,
     );
   }
+  if (typeof o.version !== "string" || o.version.length === 0) {
+    throw new AppError("manifest_fetch_failed", "manifest missing version");
+  }
   if (!o.binaries || typeof o.binaries !== "object") {
     throw new AppError("manifest_fetch_failed", "manifest missing binaries");
   }
@@ -109,22 +127,24 @@ export function assertManifestShape(value: unknown): asserts value is BinaryMani
   }
 }
 
-/** Verify a binaries-manifest signature: Ed25519 over canonicalize(binaries).
- *  Key-injectable + pure so it's unit-testable with a throwaway keypair; the
- *  production path passes the embedded signing key. Exported for testing. */
+/** Verify a binaries-manifest signature: Ed25519 over canonicalize(manifest
+ *  minus `signature`), so the signed `version` (and schemaVersion) is
+ *  authenticated alongside `binaries`. Key-injectable + pure so it's
+ *  unit-testable with a throwaway keypair; the production path passes the
+ *  embedded signing key. Exported for testing. */
 export async function verifyBinariesSignature(
-  binaries: unknown,
-  signatureB64: string,
+  manifest: BinaryManifest,
   publicKey: Uint8Array,
 ): Promise<boolean> {
-  const sig = decodeBase64(signatureB64);
-  const message = new TextEncoder().encode(canonicalize(binaries));
+  const { signature, ...unsigned } = manifest;
+  const sig = decodeBase64(signature);
+  const message = new TextEncoder().encode(canonicalize(unsigned));
   return await verifyAsync(sig, message, publicKey);
 }
 
 async function verifyManifestSignature(m: BinaryManifest): Promise<void> {
   const pk = decodeBase64(signingKeys.publicKey);
-  const ok = await verifyBinariesSignature(m.binaries, m.signature, pk);
+  const ok = await verifyBinariesSignature(m, pk);
   if (!ok) {
     throw new AppError(
       "signature_invalid",

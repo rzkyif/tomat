@@ -6,7 +6,7 @@
 // Expectations are built with the same `new Date(y, m, d, h, min)` local
 // constructor the implementation uses, so they hold in any timezone.
 
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import type { ScheduleSpec } from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import { AppError } from "../shared/errors.ts";
@@ -163,7 +163,9 @@ interface Harness {
   owner: string;
 }
 
-function makeScheduler(): Harness {
+function makeScheduler(
+  stillLoading: () => Promise<boolean> = () => Promise.resolve(false),
+): Harness {
   const fired: AutomatedSessionInput[] = [];
   const scheduler = new PromptScheduler((input) => {
     fired.push(input);
@@ -174,7 +176,7 @@ function makeScheduler(): Harness {
       createdAtMs: Date.now(),
       updatedAtMs: Date.now(),
     };
-  });
+  }, stillLoading);
   return { scheduler, fired, owner: createTestClient() };
 }
 
@@ -254,7 +256,7 @@ Deno.test("scheduler: runNow refuses a disabled schedule", async () => {
         runMissed: false,
       });
       scheduler.update(owner, created.id, { enabled: false });
-      assertThrows(() => scheduler.runNow(owner, created.id), AppError, "disabled");
+      await assertRejects(() => scheduler.runNow(owner, created.id), AppError, "disabled");
       assertEquals(fired.length, 0);
     } finally {
       scheduler.dispose();
@@ -386,7 +388,7 @@ Deno.test("scheduler: runNow fires immediately and keeps the armed run", async (
         schedule: weeklySpec,
         runMissed: false,
       });
-      const session = scheduler.runNow(owner, created.id);
+      const session = await scheduler.runNow(owner, created.id);
       assertEquals(fired.length, 1);
       assertEquals(fired[0].scheduledPromptId, created.id);
       assertEquals(fired[0].focus, "show");
@@ -394,6 +396,29 @@ Deno.test("scheduler: runNow fires immediately and keeps the armed run", async (
       const after = scheduler.get(owner, created.id);
       assertEquals(after.nextRunAtMs, created.nextRunAtMs);
       assert(after.lastRunAtMs !== undefined);
+    } finally {
+      scheduler.dispose();
+    }
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("scheduler: runNow refuses while the local model is loading", async () => {
+  const env = await setupTestEnv();
+  try {
+    const { scheduler, fired, owner } = makeScheduler(() => Promise.resolve(true));
+    try {
+      const created = scheduler.create(owner, {
+        title: "Weekly review",
+        instruction: "Summarize my week.",
+        schedule: weeklySpec,
+        runMissed: false,
+      });
+      await assertRejects(() => scheduler.runNow(owner, created.id), AppError, "still loading");
+      assertEquals(fired.length, 0);
+      // The armed occurrence is untouched, so the next tick can still fire it.
+      assertEquals(scheduler.get(owner, created.id).lastRunAtMs, undefined);
     } finally {
       scheduler.dispose();
     }

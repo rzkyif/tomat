@@ -120,11 +120,16 @@ Deno.test("verifyTarball: accepts a matching sha256 hex (built-in toolkit path)"
   );
 });
 
-Deno.test("verifyTarball: no integrity metadata installs unverified (does not throw)", async () => {
+Deno.test("verifyTarball: no integrity metadata fails closed (throws)", async () => {
   const bytes = new TextEncoder().encode("tarball-contents");
-  // The 'no metadata' branch logs a warning and returns rather than blocking.
-  await verifyTarball(bytes, "https://reg/x.tgz", undefined);
-  await verifyTarball(bytes, "https://reg/x.tgz", {});
+  // A supply-chain integrity check must not silently downgrade to "unverified"
+  // when the (untrusted) registry metadata omits both integrity and shasum.
+  await assertRejects(
+    () => verifyTarball(bytes, "https://reg/x.tgz", undefined),
+    AppError,
+    "unverified",
+  );
+  await assertRejects(() => verifyTarball(bytes, "https://reg/x.tgz", {}), AppError, "unverified");
 });
 
 Deno.test("startDownload(local): rejects a path-traversal slug before doing any work", () => {

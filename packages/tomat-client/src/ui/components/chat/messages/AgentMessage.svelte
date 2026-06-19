@@ -1,12 +1,9 @@
 <script lang="ts">
-  import { untrack } from "svelte";
-  import { settingsState } from "../../../state";
   import { ttsState } from "$stores/tts.svelte";
   import { expansionState } from "$stores/expansion.svelte";
   import { getTextContent, type MessageContent } from "$lib/util/types";
-  import Bubble from "../../ui/Bubble.svelte";
+  import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
   import MessageMarkdown from "./MessageMarkdown.svelte";
-  import ReasoningTrace from "./ReasoningTrace.svelte";
   import {
     showAgentMessageMenu,
     showReasoningMessageMenu,
@@ -44,33 +41,9 @@
 
   // Reasoning bubbles participate in the small-bubble stack chain, so their
   // expanded state lives in the shared map (read by +page.svelte to break
-  // chains around expanded bubbles). Content bubbles are large and never
-  // expandable, so they don't need this.
-  let reasoningExpanded = $state(
-    untrack(() =>
-      id !== undefined ? (expansionState.get(id) ?? false) : false,
-    ),
-  );
-  // Bidirectional sync with expansionState (only meaningful for reasoning
-  // kind; the content branch never reads `reasoningExpanded`). Cross-side
-  // reads are wrapped in `untrack` so each effect fires on its own side's
-  // changes only; otherwise a user toggle gets reverted by the
-  // external→local effect before local→external can write through.
-  $effect(() => {
-    if (kind !== "reasoning" || id === undefined) return;
-    const stored = expansionState.get(id) ?? false;
-    untrack(() => {
-      if (stored !== reasoningExpanded) reasoningExpanded = stored;
-    });
-  });
-  $effect(() => {
-    if (kind !== "reasoning" || id === undefined) return;
-    const local = reasoningExpanded;
-    untrack(() => {
-      const current = expansionState.get(id) ?? false;
-      if (current !== local) expansionState.set(id, local);
-    });
-  });
+  // chains around expanded bubbles), which is the single source of truth. The
+  // function binding below reads/writes it directly, no local mirror. Content
+  // bubbles are large and never expandable, so they don't read this.
 
   let displayText = $derived(getTextContent(content));
   let bgClass = $derived(
@@ -97,39 +70,27 @@
   );
 </script>
 
-{#if kind === "reasoning"}
-  <Bubble
-    selectedAlignment={settingsState.getAlignment()}
-    bgClass="bg-surface"
-    extraClass="markdown overflow-clip"
-    size="small"
-    {neighborLeft}
-    {neighborRight}
-    oncontextmenu={(e) => {
-      e.preventDefault();
-      void showReasoningMessageMenu({
-        reasoning: displayText,
-      });
-    }}
-  >
-    <ReasoningTrace
-      reasoning={displayText}
-      {isStreaming}
-      pillBgClass="bg-surface-inset"
-      {reasoningDurationMs}
-      bind:expanded={reasoningExpanded}
-    />
-  </Bubble>
-{:else}
-  <Bubble
-    selectedAlignment={settingsState.getAlignment()}
-    {bgClass}
-    extraClass="markdown overflow-clip flex flex-col gap-3"
-    active={ttsBusyThis}
-    pulse={ttsBusyThis && !isSpeakingThis}
-    oncontextmenu={(e) => {
+<AgentMessageView
+  {kind}
+  {bgClass}
+  {isStreaming}
+  {reasoningDurationMs}
+  bind:reasoningExpanded={
+    () => (id !== undefined ? (expansionState.get(id) ?? false) : false),
+    (v) => {
+      if (id !== undefined) expansionState.set(id, v);
+    }
+  }
+  active={ttsBusyThis}
+  pulse={ttsBusyThis && !isSpeakingThis}
+  {neighborLeft}
+  {neighborRight}
+  oncontextmenu={(e) => {
+    e.preventDefault();
+    if (kind === "reasoning") {
+      void showReasoningMessageMenu({ reasoning: displayText });
+    } else {
       if (!id) return;
-      e.preventDefault();
       void showAgentMessageMenu({
         messageId: id,
         isStreaming,
@@ -141,8 +102,13 @@
         onReprocess,
         onDelete,
       });
-    }}
-  >
+    }
+  }}
+>
+  {#snippet body()}
+    <!-- isStreaming drives MessageMarkdown's parse throttle; the reasoning trace
+         streams token-by-token too, so it must get it as well or it re-parses +
+         sanitizes the whole growing buffer on every delta. -->
     <MessageMarkdown content={displayText} {isStreaming} />
-  </Bubble>
-{/if}
+  {/snippet}
+</AgentMessageView>

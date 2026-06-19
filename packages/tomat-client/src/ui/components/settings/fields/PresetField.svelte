@@ -2,7 +2,7 @@
   import { settingsState } from "../../../state";
   import type { SettingField, PresetOption } from "@tomat/shared";
   import FieldCard from "./FieldCard.svelte";
-  import OptionCard from "../../ui/OptionCard.svelte";
+  import OptionCard from "@tomat/shared/ui/components/primitives/OptionCard.svelte";
 
   let { field, onPresetSelect } = $props<{
     field: SettingField;

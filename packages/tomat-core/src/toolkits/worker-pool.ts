@@ -14,6 +14,7 @@ import { newCallId } from "../shared/ids.ts";
 import { getLogger, scrubSecrets } from "../shared/log.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
+import { isWithin } from "../shared/fs-safety.ts";
 import { emptyFlagSet, flagSetToArgs, type PathTemplates, unionFlags } from "./permissions.ts";
 import { toolkitsRegistry } from "./registry.ts";
 import { WorkerHandle } from "./worker-handle.ts";
@@ -794,6 +795,22 @@ function workerKey(toolkitId: string, toolName: string): string {
 }
 
 function resolveEntryPath(toolkitFolder: string): string {
+  const entry = resolveEntryCandidate(toolkitFolder);
+  // The entry is imported and executed by the worker, so it MUST stay inside
+  // the toolkit folder. A malicious deno.json "exports" / package.json "main"
+  // like "../../evil.ts" would otherwise run code outside the install dir that
+  // the content hash verifies. (The same isWithin guard protects tarball
+  // extraction and the install path.)
+  if (!isWithin(toolkitFolder, entry)) {
+    throw new AppError(
+      "invalid_tools_json",
+      `toolkit entry point ${entry} escapes its folder ${toolkitFolder}`,
+    );
+  }
+  return entry;
+}
+
+function resolveEntryCandidate(toolkitFolder: string): string {
   // Resolution order: deno.json "exports" (string form) for deno-native
   // toolkits (e.g. the built-in, which ships no package.json), then
   // package.json "main" for npm-extracted toolkits, then the index.ts

@@ -81,8 +81,8 @@ export async function initSidecarBoot(): Promise<void> {
   // Wire the LLM scheduler watchdog so a wedged llama-server actually self-heals:
   // when a local slot stays held past callTimeoutMs + grace, the scheduler aborts
   // the upstream stream and calls this handler, which restarts the sidecar so
-  // subsequent requests hit a healthy server. Without this the documented
-  // self-healing never fires (the handler had zero callers).
+  // subsequent requests hit a healthy server. Wiring this handler is what makes
+  // the self-healing actually fire.
   llmScheduler().setWatchdogHandler(({ clientId, elapsedMs }) => {
     log.error(
       `llm watchdog: client ${clientId} slot wedged ${elapsedMs}ms; restarting llama-server`,

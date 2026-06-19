@@ -169,8 +169,8 @@ export class WorkerHandle {
     // contains ~/.tomat). Deno's --deny-* flags take precedence over any
     // --allow-*, so this holds regardless of the granted permission set. A
     // blanket deny of `root` isn't usable because sessions live under it (and a
-    // tool may be granted $sessions), so the secret + DB files are enumerated
-    // exhaustively, including the transient/legacy siblings.
+    // tool may be granted $sessions), so the sensitive subtrees and files are
+    // enumerated explicitly, including the transient/legacy siblings.
     const p = paths();
     const deniedPaths = [
       p.secretsEncFile,
@@ -182,6 +182,13 @@ export class WorkerHandle {
       p.dbFile + "-wal",
       p.dbFile + "-shm",
       p.dbFile + "-journal", // non-WAL fallback journal
+      // Every toolkit's private SQLite db and the documents store are reached
+      // ONLY through the core-side module broker (proxied over stdio), so a
+      // worker never needs fs access to them. Deny the whole subtrees so a tool
+      // granted a broad ancestor path (e.g. $home, which contains ~/.tomat)
+      // still can't read another toolkit's data or the documents store off disk.
+      join(p.root, "toolkit-data"),
+      p.documentsDir,
     ].join(",");
     const ptyMode = spec.promptContext !== undefined && ptyhostAvailableSync();
     const args = [

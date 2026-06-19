@@ -248,7 +248,12 @@ Deno.test({
       assertEquals(assistant1.content, "");
       assertEquals(assistant1.toolCalls.length, 1);
       assertEquals(assistant1.toolCalls[0].toolName, "do_thing");
-      assertEquals(tool.callId, "call_1");
+      // The correlation id is namespaced by streamId (and tool-call index) so
+      // concurrent turns reusing the model's "call_1" can't collide; the
+      // assistant tool_call and its tool result carry the SAME namespaced id so
+      // the model replay stays consistent.
+      assertEquals(tool.callId, "s-2:0:call_1");
+      assertEquals(assistant1.toolCalls[0].callId, tool.callId);
       assertEquals(tool.arguments, '{"x":42}');
       assertEquals(tool.status, "failed");
       assertEquals(assistant2.content, "Hello world");

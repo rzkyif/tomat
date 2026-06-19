@@ -22,12 +22,18 @@ toolkit, and a distribution website. The packages:
 - **`@tomat/client`**: Tauri + Svelte desktop UI, intentionally "dumb": it
   renders, captures input, plays audio, manages global shortcuts, and talks to
   one or more paired cores.
-- **`@tomat/shared`**: pure TypeScript types + Zod validators consumed by both
-  sides: API contract, domain shapes, `tools.json` schema, WS frame unions.
+- **`@tomat/shared`**: TypeScript types + Zod validators consumed by both
+  sides (API contract, domain shapes, `tools.json` schema, WS frame unions),
+  plus the shared UI layer under `./ui/*` (design tokens, UnoCSS preset, and the
+  presentational Svelte components the client and website both render). The
+  non-UI exports stay side-effect-free; only `./ui/*` pulls in `svelte`/`unocss`,
+  and core never imports it.
 - **`@tomat/builtin-toolkit`**: reference toolkit installed by default on a
   fresh core; doubles as the worked example for the `tools.json` format.
-- **`@tomat/website`**: Astro static site for the landing page at
-  `au.tomat.ing`.
+- **`@tomat/website`**: Astro static site at `au.tomat.ing`: the landing page,
+  the feature showcase, the user manual, and the changelog. Renders the shared
+  `@tomat/shared/ui` components so demos match the app, and is multi-page (link
+  navigation + view transitions, not an SPA) so navigation works without JS.
 
 **Tech stack:** Deno 2, Hono, and SQLite (`jsr:@db/sqlite`) for the core; Tauri
 2, Svelte 5, Vite, and UnoCSS for the client. Deno-first workspace: no
@@ -53,10 +59,32 @@ through `npm:` specifiers from `deno task`.
 - **Tauri boundary (absolute rule):** nothing under
   `packages/tomat-client/src/ui/` outside `lib/platform/tauri.ts` may import
   from `@tauri-apps/*`. Add a method to the `Platform` interface in
-  `lib/platform/index.ts`, implement it in `tauri.ts`, stub it in `web.ts`, then
-  call `platform().<namespace>.<method>()`. Enforced by the
-  `tomat/no-tauri-import` oxlint rule (`.ts`) and a `.svelte` grep pass, both in
-  `deno task lint`.
+  `lib/platform/index.ts`, implement it in `tauri.ts` (and a future `mobile.ts`
+  when the mobile build lands), cover it in the `src/ui/test/platform-stub.ts`
+  fixture, then call `platform().<namespace>.<method>()`. There is no web
+  client. Enforced by the `tomat/no-tauri-import` oxlint rule (`.ts`) and a
+  `.svelte` grep pass, both in `deno task lint`.
+- **Single-source UI (absolute rule):** every UI component the website renders
+  must be the EXACT SAME shared `@tomat/shared/ui` component the client renders,
+  at EVERY layer (primitive AND composition: a field control, a field row, a
+  section, a group header, a sidebar, a whole panel). "Shared" means BOTH sides
+  render it: the client wraps the shared component feeding live state; the
+  website wraps the same component feeding scripted/default state. A shared
+  component that ONLY the website uses is NOT allowed - it is a re-implementation
+  in disguise and WILL drift (this is exactly how the settings demo diverged from
+  the app). The fix for any represented-component mismatch is to push that layer
+  into `@tomat/shared/ui` and make the client consume it, NEVER to hand-mirror
+  the client's markup on the website. If extracting a layer breaks the client,
+  that breakage is the next task to fix (by making the client wrap the shared
+  component); it is never acceptable to leave a client-vs-website divergence
+  standing. Client-only behavior on a shared component (validation, pickers,
+  capture, live catalogs) is injected via props/callbacks/snippets, so the
+  rendered markup stays single-source. The mechanism is a four-tier component
+  taxonomy (A0 primitive / A `*View` / B thin client wrapper / C client shell)
+  recorded in `packages/tomat-client/src/ui/components/.tiers.json`, sample
+  bundles + a website gallery, and three lint walkers; the canonical reference is
+  [shared UI README](packages/tomat-shared/src/ui/README.md). See also
+  [website AGENTS.md](packages/tomat-website/AGENTS.md).
 - **File naming** follows each host language's idiom: TypeScript `kebab-case`,
   Svelte components `PascalCase`, Rust `snake_case`, folders `kebab-case`,
   `scripts/` `kebab-case`. A `*.test.ts` next to a `.svelte` component mirrors
@@ -119,6 +147,12 @@ For anything beyond the above, the canonical docs are:
 
 - Build / run / test commands, channels:
   [DEVELOPMENT.md](DEVELOPMENT.md)
+- Package vs release-item separation and the standardized per-package task
+  vocabulary (`<verb>` / `<verb>:<pkg>`, fanned out by `scripts/pkg.ts`):
+  [DEVELOPMENT.md](DEVELOPMENT.md). A package is a development unit (the root
+  `deno.json` `workspace` array is the source of truth, 6 Deno + 5 Rust crates);
+  a release item is a distribution unit that may span packages (`scripts/release/*.ts`,
+  each declaring its `packages`).
 - Per-package overview (layout, run/build/test, internals): the
   `packages/<name>/README.md` of the package in question. Subsystem deep
   dives are nested next to the code:
@@ -132,6 +166,8 @@ For anything beyond the above, the canonical docs are:
   [packages/tomat-builtin-toolkit/README.md](packages/tomat-builtin-toolkit/README.md)
 - Settings system + copy and terminology guidelines:
   [packages/tomat-shared/src/domain/settings/README.md](packages/tomat-shared/src/domain/settings/README.md)
+- External services we depend on (HuggingFace, GitHub releases, R2) and how to
+  fix breakage when they change: [EXTERNAL.md](EXTERNAL.md)
 
 Tests are co-located with source as `*.test.ts`; scratch tests are
 `*.tmp.test.ts` (gitignored anywhere). After a change, run `deno task check`,

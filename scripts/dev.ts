@@ -162,7 +162,7 @@ const BUILD_NOISE = [
   /^Updating\b/,
   /^Locking\b/,
   /^Info\b/, // tauri-cli "Info Watching ... for changes..." (our logs are lowercase)
-  /^Task\b/, // deno "Task dev:vite deno run ..."
+  /^Task\b/, // deno "Task <name> deno run ..."
 ];
 
 // Level SGR codes, matching core's @std/log + the client's fern coloring (see

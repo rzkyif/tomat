@@ -1,0 +1,41 @@
+---
+import { getCollection, render } from "astro:content";
+import ManualLayout from "../../layouts/ManualLayout.astro";
+import ChatDemo from "../../components/demos/ChatDemo.svelte";
+import InstallCard from "../../components/InstallCard.svelte";
+import { gitLastUpdated } from "../../lib/git-date";
+
+export async function getStaticPaths() {
+  const entries = await getCollection("manual");
+  return entries.map((entry) => ({
+    params: { slug: entry.id },
+    props: { entry, entries, lastUpdated: gitLastUpdated(entry.filePath) },
+  }));
+}
+
+const { entry, entries, lastUpdated } = Astro.props;
+const { Content } = await render(entry);
+---
+
+<ManualLayout title={entry.data.title} entries={entries} currentId={entry.id}>
+  <header class="mb-6">
+    <div class="text-xs font-semibold uppercase tracking-wide text-default-500">
+      {entry.data.section}
+    </div>
+    <h1 class="mt-1 text-3xl font-semibold text-default-900">{entry.data.title}</h1>
+    <div class="mt-1 text-xs text-default-500">Last updated {lastUpdated}</div>
+  </header>
+
+  {/* The first subsection of a relevant section embeds a real app component /
+      reused feature demo, declared via the `demo` frontmatter field. */}
+  {entry.data.demo === "chat" && (
+    <div class="mb-8"><ChatDemo client:visible /></div>
+  )}
+  {entry.data.demo === "install" && (
+    <div class="mb-8"><InstallCard client:visible /></div>
+  )}
+
+  <div class="prose dark:prose-invert max-w-none">
+    <Content />
+  </div>
+</ManualLayout>

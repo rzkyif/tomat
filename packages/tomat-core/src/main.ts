@@ -11,7 +11,7 @@ import { migrate } from "./db/migrate.ts";
 import { buildApp } from "./http/server.ts";
 import { wsHub } from "./ws/hub.ts";
 import { downloadManager } from "./downloads/manager.ts";
-import { handleUpdateMarkerOnBoot } from "./update/rollback.ts";
+import { commitUpdate, handleUpdateMarkerOnBoot } from "./update/rollback.ts";
 import { toolkitsRegistry } from "./toolkits/registry.ts";
 import { seedBuiltinToolkitIfNeeded } from "./toolkits/builtin-seed.ts";
 import { BROADCAST_SINK } from "./http/routes/toolkits.ts";
@@ -157,6 +157,12 @@ async function main(): Promise<void> {
       return await app.fetch(req, { remoteAddr: info.remoteAddr });
     },
   );
+
+  // Healthy checkpoint: the HTTP listener is bound (the DB is open and the TLS
+  // key is unsealed by now), so a pending self-update has proven it can run.
+  // Commit it (remove the marker + `<bin>.old` anchor) so a later ordinary
+  // restart can't roll back this working binary. No-op when no update is pending.
+  void commitUpdate().catch((err) => log.warn(`update commit failed: ${errMessage(err)}`));
 
   // Graceful shutdown. Register one handler per signal and have the first
   // signal remove BOTH: under dev `--watch` the runtime re-runs this module in

@@ -80,11 +80,21 @@ interface CodeRow {
   expires_at_ms: number;
 }
 
+// Hard cap on distinct source IPs tracked at once. Past this we sweep entries
+// whose window is fully expired so the map can't grow unbounded across many
+// distinct IPs (only reachable off-loopback, but a cheap belt-and-braces bound).
+const MAX_TRACKED_IPS = 10_000;
+
 class IpRateLimiter {
   private hits = new Map<string, number[]>();
 
   recordAndCheck(ip: string): boolean {
     const now = Date.now();
+    if (this.hits.size > MAX_TRACKED_IPS) {
+      for (const [k, ts] of this.hits) {
+        if (ts.every((t) => now - t >= CLAIMS_PER_IP_WINDOW_MS)) this.hits.delete(k);
+      }
+    }
     const prior = this.hits.get(ip);
     // Build the next array in one pass: drop expired entries, count remaining,
     // append `now` if under the cap. The Map.set is the only mutation, so a
@@ -351,15 +361,15 @@ export class AuthService {
   // via the sessions store. Returns the attachment abs_paths so the caller can
   // rm them off disk (the session dir, including attachments, is already
   // removed here; the paths are returned for symmetry with the old contract).
-  revokeClient(clientId: string): { attachmentPaths: string[] } {
+  revokeClient(clientId: string): { existed: boolean; attachmentPaths: string[] } {
     const attachmentPaths: string[] = [];
     for (const s of sessionsRepo().listAll()) {
       if (s.ownerClientId !== clientId) continue;
       const res = sessionsRepo().deleteById(s.id);
       if (res) attachmentPaths.push(...res.attachmentPaths);
     }
-    db().prepare(`DELETE FROM clients WHERE id = ?`).run(clientId);
-    return { attachmentPaths };
+    const changes = db().prepare(`DELETE FROM clients WHERE id = ?`).run(clientId);
+    return { existed: changes > 0, attachmentPaths };
   }
 
   async rotateToken(clientId: string): Promise<string> {

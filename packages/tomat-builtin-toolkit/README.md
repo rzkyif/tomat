@@ -180,7 +180,8 @@ gitignored scratch variant for quick experimentation.
 ## Run, build, test
 
 This package's tests run with the repo suite: `deno task test`, or
-`deno task test:deno` for just the Deno packages (this one included).
+`deno task test:toolkit` for just this package (`deno task check:toolkit` for
+its type-check).
 `deno task release` (or `release:stable`) publishes the toolkit manifest +
 tarball when its content changed, after a version bump in this package's
 `deno.json`; see [`../tomat-website/README.md`](../tomat-website/README.md) for

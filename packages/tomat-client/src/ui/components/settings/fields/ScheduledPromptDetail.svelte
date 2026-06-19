@@ -5,11 +5,11 @@
   import { lastRunText, nextRunText } from "$stores/scheduled-prompts.svelte";
   import { getLogger } from "$lib/util/log";
   import ScheduleEditor from "$components/chat/ScheduleEditor.svelte";
-  import Button from "$components/ui/Button.svelte";
-  import FormField from "$components/ui/FormField.svelte";
-  import Input from "$components/ui/Input.svelte";
-  import Textarea from "$components/ui/Textarea.svelte";
-  import Toggle from "$components/ui/Toggle.svelte";
+  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
+  import FormField from "@tomat/shared/ui/components/primitives/FormField.svelte";
+  import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
+  import Textarea from "@tomat/shared/ui/components/primitives/Textarea.svelte";
+  import Toggle from "@tomat/shared/ui/components/primitives/Toggle.svelte";
 
   const log = getLogger("scheduled-prompts");
 

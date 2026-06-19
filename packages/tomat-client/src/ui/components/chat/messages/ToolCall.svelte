@@ -6,10 +6,10 @@
     Message,
     ToolCallStatus,
   } from "$lib/util/types";
-  import Bubble from "../../ui/Bubble.svelte";
-  import Expandable from "../../ui/Expandable.svelte";
-  import Expand from "../../ui/Expand.svelte";
-  import DiffView from "../DiffView.svelte";
+  import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
+  import Expandable from "@tomat/shared/ui/components/primitives/Expandable.svelte";
+  import Expand from "@tomat/shared/ui/components/primitives/Expand.svelte";
+  import DiffView from "@tomat/shared/ui/components/chat/messages/DiffView.svelte";
   import MessageMarkdown from "./MessageMarkdown.svelte";
   import { settingsState } from "../../../state";
   import { expansionState } from "$stores/expansion.svelte";

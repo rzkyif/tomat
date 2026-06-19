@@ -1,0 +1,219 @@
+---
+import { getCollection } from "astro:content";
+import { activePageId, GITHUB_URL, knobClipPath, PAGES } from "../lib/site";
+import ThemeToggle from "./ThemeToggle.svelte";
+import ManualOutline from "./ManualOutline.astro";
+
+const active = activePageId(Astro.url.pathname);
+const activeIndex = Math.max(0, PAGES.findIndex((p) => p.id === active));
+const knob = knobClipPath(activeIndex, PAGES.length);
+const cell = "flex-1 min-w-0 flex items-center justify-center px-3 text-sm whitespace-nowrap";
+
+// The mobile sidebar self-contains the manual section/subsection tree (rather
+// than being fed by the layout), so it nests three levels everywhere: page >
+// section > subsection. It lives OUTSIDE the persisted <nav> so it re-renders
+// per page and its highlight/open state is always current.
+const manualEntries = (await getCollection("manual")).sort((a, b) => a.data.order - b.data.order);
+const path = Astro.url.pathname.replace(/\/$/, "");
+const currentManualId = path.startsWith("/manual/") ? path.slice("/manual/".length) : "";
+
+// SidebarItem-style rows (mirrors the app's settings sidebar): no icons, an
+// expand chevron where the icon would sit. A w-5 spacer keeps icon-less top
+// level rows' labels aligned with the chevron rows.
+const row = "flex items-center h-8 pl-1.5 pr-2.5 gap-1.5 rounded-medium transition-colors";
+const rowIdle = "text-default-500 hover:text-default-700 hover:bg-surface-inset";
+const rowActive = "bg-surface-inset text-default-900";
+---
+
+{/* transition:persist keeps the navbar bar mounted across view transitions, so
+    the knob can slide to the new page (updated by the script below) and the page
+    content slides under a fixed bar. The sidebar/scrim are intentionally NOT
+    inside this element, so they re-render per page with correct highlights. */}
+<nav transition:persist="navbar" class="sticky top-0 z-50 h-14 bg-surface">
+  <div class="relative mx-auto h-full w-full max-w-6xl px-4 flex items-center justify-between">
+    {/* Left: the tomat icon, painted as a theme-adaptive mask (same technique as
+        the app) so it flips with light/dark instead of staying a fixed color. */}
+    <a
+      href="/"
+      class="flex items-center justify-center shrink-0 p-2 text-xl text-default-700 hov:text-default-900 rounded hov:cursor-pointer transition-colors"
+      aria-label="tomat home"
+    >
+      <span
+        class="block w-5 h-5 bg-current"
+        style="mask:url(/logo.svg) center/contain no-repeat;-webkit-mask:url(/logo.svg) center/contain no-repeat;"
+        aria-hidden="true"
+      ></span>
+    </a>
+
+    {/* Center (desktop): the segmented tab selector, link-based so it works with
+        no JS. Absolutely centered on the row so it sits at the true center
+        regardless of the differing logo / GitHub+theme widths. */}
+    <div class="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+      <div
+        class="groove relative flex w-[22rem] h-10 rounded-large bg-surface-inset p-1"
+        role="tablist"
+        aria-label="Site"
+      >
+        {PAGES.map((p) => (
+          <a
+            href={p.href}
+            role="tab"
+            aria-selected={p.id === active}
+            class={`${cell} text-default-600 transition-colors hover:text-default-800`}
+          >
+            {p.label}
+          </a>
+        ))}
+        <span
+          aria-hidden="true"
+          data-nav-knob
+          class="nav-knob absolute inset-0 flex p-1 bg-surface-inset-strong text-default-900 pointer-events-none rounded-large"
+          style={`clip-path: ${knob}`}
+        >
+          {PAGES.map((p) => <span class={cell}>{p.label}</span>)}
+        </span>
+      </div>
+    </div>
+
+    {/* Right (desktop): GitHub + theme, both sized to the icon. */}
+    <div class="hidden md:flex items-center gap-1 shrink-0">
+      <a
+        href={GITHUB_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="tomat on GitHub"
+        aria-label="tomat on GitHub"
+        class="flex items-center justify-center shrink-0 p-2 text-xl text-default-700 hov:text-default-900 rounded hov:cursor-pointer transition-colors"
+      >
+        <i class="flex i-mdi-github"></i>
+      </a>
+      <ThemeToggle client:load />
+    </div>
+
+    {/* Right (mobile): burger that morphs to an X. Pure CSS via a hidden
+        checkbox so it works with no JS. */}
+    <input type="checkbox" id="nav-toggle" class="nav-toggle sr-only" aria-hidden="true" />
+    <label
+      for="nav-toggle"
+      class="burger md:hidden flex flex-col justify-center gap-1.5 w-10 h-10 p-2 shrink-0 hover:cursor-pointer"
+      aria-label="Open menu"
+    >
+      <span class="bar block h-0.5 w-full bg-default-800 rounded transition-transform"></span>
+      <span class="bar block h-0.5 w-full bg-default-800 rounded transition-opacity"></span>
+      <span class="bar block h-0.5 w-full bg-default-800 rounded transition-transform"></span>
+    </label>
+  </div>
+</nav>
+
+{/* Mobile sidebar + scrim. Outside the persisted <nav> so they re-render per
+    page (correct highlights), toggled by the persisted checkbox via :has. */}
+<label for="nav-toggle" class="scrim md:hidden" aria-hidden="true"></label>
+<aside
+  class="sidebar md:hidden fixed top-14 left-0 bottom-0 w-72 max-w-[80vw] z-50 bg-surface flex flex-col"
+>
+  <nav class="flex-1 overflow-y-auto p-3 flex flex-col gap-1" aria-label="Site">
+    <a
+      href="/"
+      class:list={[row, active === "home" ? rowActive : rowIdle]}
+      aria-current={active === "home" ? "page" : undefined}
+    >
+      <span class="w-5 shrink-0"></span>
+      Home
+    </a>
+
+    {/* User Manual: expandable, open on a manual page; subsections navigate. */}
+    <details class="expandable" open={active === "manual"}>
+      <summary class:list={[row, rowIdle, "hover:cursor-pointer select-none"]}>
+        <i class="expandable-chevron flex text-xl shrink-0 i-material-symbols-chevron-right-rounded"></i>
+        User Manual
+      </summary>
+      <div class="mt-1 pl-3.5">
+        <ManualOutline entries={manualEntries} currentId={currentManualId} />
+      </div>
+    </details>
+  </nav>
+
+  {/* Footer: GitHub, then the theme toggle below it. No border. */}
+  <div class="p-3 flex flex-col gap-1">
+    <a
+      href={GITHUB_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      class={`${row} ${rowIdle}`}
+    >
+      <i class="flex text-xl shrink-0 i-mdi-github"></i>
+      GitHub
+    </a>
+    <ThemeToggle client:load variant="row" />
+  </div>
+</aside>
+
+<style>
+  /* The burger/sidebar mechanism is a CSS-only checkbox toggle so the menu
+     opens, the icon morphs to an X, and the panel slides in without any JS. The
+     checkbox lives in the persisted nav and the sidebar outside it, so the
+     toggle is keyed off a common ancestor (body) via :has rather than a sibling
+     combinator. */
+  .nav-toggle {
+    position: absolute;
+  }
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .scrim {
+    position: fixed;
+    inset: 3.5rem 0 0 0;
+    background: rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 250ms ease;
+    z-index: 40;
+  }
+  :global(body):has(.nav-toggle:checked) .sidebar {
+    transform: translateX(0);
+  }
+  :global(body):has(.nav-toggle:checked) .scrim {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  /* Burger -> X morph (checkbox and burger are siblings inside the nav). */
+  nav:has(.nav-toggle:checked) .burger .bar:nth-child(1) {
+    transform: translateY(0.5rem) rotate(45deg);
+  }
+  nav:has(.nav-toggle:checked) .burger .bar:nth-child(2) {
+    opacity: 0;
+  }
+  nav:has(.nav-toggle:checked) .burger .bar:nth-child(3) {
+    transform: translateY(-0.5rem) rotate(-45deg);
+  }
+  /* The active-page knob slides to its new clip rect (set by the script on
+     navigation) instead of snapping. */
+  .nav-knob {
+    transition: clip-path 260ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nav-knob {
+      transition: none;
+    }
+  }
+</style>
+
+<script>
+  // The navbar bar is persisted across view transitions, so after each
+  // navigation the knob still sits over the previous page: recompute its clip
+  // rect from the new pathname (the CSS transition turns it into a slide). Also
+  // close the (persisted) burger menu after navigating.
+  import { activePageId, knobClipPath, PAGES } from "../lib/site";
+
+  function onLoad() {
+    const knob = document.querySelector<HTMLElement>("[data-nav-knob]");
+    if (knob) {
+      const index = Math.max(0, PAGES.findIndex((p) => p.id === activePageId(location.pathname)));
+      knob.style.clipPath = knobClipPath(index, PAGES.length);
+    }
+    const toggle = document.getElementById("nav-toggle") as HTMLInputElement | null;
+    if (toggle) toggle.checked = false;
+  }
+  document.addEventListener("astro:page-load", onLoad);
+</script>

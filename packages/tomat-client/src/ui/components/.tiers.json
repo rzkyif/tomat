@@ -1,0 +1,195 @@
+{
+  "//": "Component-tier manifest (see packages/tomat-shared/src/ui/README.md). tier: A0 shared primitive | A shared View | B thin client wrapper of one View (set wraps) | C client-owned shell. Seeded with current state; migration phases reclassify. The check-component-tiers walker asserts every client component appears here exactly once.",
+  "components": {
+    "chat/AttachmentList.svelte": {
+      "tier": "B",
+      "wraps": "AttachmentListView"
+    },
+    "chat/MessageEnter.svelte": {
+      "tier": "C"
+    },
+    "chat/MessageStack.svelte": {
+      "tier": "C"
+    },
+    "chat/MessageStackGroup.svelte": {
+      "tier": "C"
+    },
+    "chat/ScheduleEditor.svelte": {
+      "tier": "C"
+    },
+    "chat/SessionBar.svelte": {
+      "tier": "B",
+      "wraps": "SessionBarView"
+    },
+    "chat/SnippetAutocomplete.svelte": {
+      "tier": "B",
+      "wraps": "SnippetAutocompleteView"
+    },
+    "chat/UserInput.svelte": {
+      "tier": "C"
+    },
+    "chat/messages/AgentMessage.svelte": {
+      "tier": "B",
+      "wraps": "AgentMessageView"
+    },
+    "chat/messages/AutomatedPrompt.svelte": {
+      "tier": "B",
+      "wraps": "ExpandableMessageView"
+    },
+    "chat/messages/DisplayBubble.svelte": {
+      "tier": "B",
+      "wraps": "ExpandableMessageView"
+    },
+    "chat/messages/ErrorMessage.svelte": {
+      "tier": "B",
+      "wraps": "ErrorMessageView"
+    },
+    "chat/messages/MessageMarkdown.svelte": {
+      "tier": "C"
+    },
+    "chat/messages/RelevantDocuments.svelte": {
+      "tier": "B",
+      "wraps": "RelevantDocumentsView"
+    },
+    "chat/messages/RelevantTools.svelte": {
+      "tier": "B",
+      "wraps": "RelevantToolsView"
+    },
+    "chat/messages/SystemMessage.svelte": {
+      "tier": "B",
+      "wraps": "ExpandableMessageView"
+    },
+    "chat/messages/ToolCall.svelte": {
+      "tier": "C"
+    },
+    "chat/messages/UserMessage.svelte": {
+      "tier": "B",
+      "wraps": "UserMessageView"
+    },
+    "chat/userinput/AutocorrectAlert.svelte": {
+      "tier": "C"
+    },
+    "chat/userinput/PermissionRequest.svelte": {
+      "tier": "C"
+    },
+    "chat/userinput/QuickModelBar.svelte": {
+      "tier": "B",
+      "wraps": "QuickModelBarView"
+    },
+    "chat/userinput/ScheduleConfirmForm.svelte": {
+      "tier": "C"
+    },
+    "new-core/NewCore.svelte": {
+      "tier": "C"
+    },
+    "quick-settings/QuickSettings.svelte": {
+      "tier": "C"
+    },
+    "quick-settings/QuickSettingsSection.svelte": {
+      "tier": "C"
+    },
+    "session-list/SessionList.svelte": {
+      "tier": "C"
+    },
+    "settings/ColorPickerModal.svelte": {
+      "tier": "C"
+    },
+    "settings/ConfirmModal.svelte": {
+      "tier": "C"
+    },
+    "settings/DeletionsModal.svelte": {
+      "tier": "C"
+    },
+    "settings/DownloadRow.svelte": {
+      "tier": "C"
+    },
+    "settings/DownloadsButton.svelte": {
+      "tier": "C"
+    },
+    "settings/DownloadsModal.svelte": {
+      "tier": "C"
+    },
+    "settings/ServerStatusChip.svelte": {
+      "tier": "C"
+    },
+    "settings/Settings.svelte": {
+      "tier": "C"
+    },
+    "settings/SettingsField.svelte": {
+      "tier": "B",
+      "wraps": "SettingsFieldView"
+    },
+    "settings/ShareModal.svelte": {
+      "tier": "C"
+    },
+    "settings/ShareTree.svelte": {
+      "tier": "C"
+    },
+    "settings/UpdateButton.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/CommandPreviewField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/CoresField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/DocumentDetail.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/DocumentsField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/FieldCard.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/ModelPresetField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/MultilineField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/PresetField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/ScheduledPromptDetail.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/ScheduledPromptsField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/ServicesField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/ShortcutField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/SnippetDetail.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/SnippetsField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/StorageField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/SttPresetField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/ToolkitDetail.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/ToolkitsField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/TtsPresetField.svelte": {
+      "tier": "C"
+    },
+    "ui/ObjectCard.svelte": {
+      "tier": "C"
+    },
+    "ui/ObjectManager.svelte": {
+      "tier": "C"
+    }
+  }
+}

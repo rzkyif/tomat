@@ -9,10 +9,10 @@
   } from "$lib/snippets/snippets";
   import { snippetsState } from "$stores";
   import { getLogger } from "$lib/util/log";
-  import FormField from "$components/ui/FormField.svelte";
-  import Input from "$components/ui/Input.svelte";
-  import Select from "$components/ui/Select.svelte";
-  import Textarea from "$components/ui/Textarea.svelte";
+  import FormField from "@tomat/shared/ui/components/primitives/FormField.svelte";
+  import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
+  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
+  import Textarea from "@tomat/shared/ui/components/primitives/Textarea.svelte";
 
   const log = getLogger("snippets");
 

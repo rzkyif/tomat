@@ -136,8 +136,11 @@ export function isResolverEntry(e: BinaryManifestEntry): e is BinaryManifestReso
 
 export interface BinaryManifest {
   schemaVersion: 1;
+  // The core release version this manifest shipped with. Monotonic anchor the
+  // runtime uses to refuse a strictly-older (replayed) signed manifest.
+  version: string;
   binaries: Record<BinaryKind, BinaryManifestEntry>;
-  signature: string; // base64 Ed25519 over canonical JSON of binaries
+  signature: string; // base64 Ed25519 over canonical JSON of the manifest minus signature
 }
 
 export interface BinaryStatus {

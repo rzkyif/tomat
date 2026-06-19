@@ -3,7 +3,7 @@
   import { evalCondition } from "@tomat/shared";
   import { settingsState } from "../../../state";
   import FieldCard from "./FieldCard.svelte";
-  import Textarea from "../../ui/Textarea.svelte";
+  import Textarea from "@tomat/shared/ui/components/primitives/Textarea.svelte";
 
   let { field, error, onChange, onReset } = $props<{
     field: SettingField;

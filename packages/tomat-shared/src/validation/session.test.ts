@@ -17,28 +17,59 @@ import {
   userMessageInputSchema,
 } from "./session.ts";
 
-Deno.test("messageInputSchema: parses each of the 8 roles", () => {
-  const cases = [
-    { role: "user", content: "hi" },
-    { role: "assistant", content: "hi" },
-    { role: "system", content: "sys" },
-    {
-      role: "tool",
-      callId: "c1",
-      toolkitId: "t1",
-      toolName: "do",
-      arguments: "{}",
-      status: "completed",
-    },
-    { role: "reasoning", content: "think" },
-    { role: "tool_filter", status: "complete" },
-    { role: "document_filter", status: "complete" },
-    { role: "error", content: "boom" },
-  ];
-  for (const c of cases) {
+// One minimal valid body per MessageRole. Adding a role to the domain union
+// without adding it here (and to the schemas) makes the coverage test below
+// fail, which is the drift guard.
+const MINIMAL_BY_ROLE: Record<string, Record<string, unknown>> = {
+  user: { role: "user", content: "hi" },
+  assistant: { role: "assistant", content: "hi" },
+  system: { role: "system", content: "sys" },
+  tool: {
+    role: "tool",
+    callId: "c1",
+    toolkitId: "t1",
+    toolName: "do",
+    arguments: "{}",
+    status: "completed",
+  },
+  reasoning: { role: "reasoning", content: "think" },
+  tool_filter: { role: "tool_filter", status: "complete" },
+  document_filter: { role: "document_filter", status: "complete" },
+  display: { role: "display", content: { type: "markdown", markdown: "x" } },
+  error: { role: "error", content: "boom" },
+};
+
+Deno.test("messageInputSchema: parses each of the 9 roles", () => {
+  for (const c of Object.values(MINIMAL_BY_ROLE)) {
     const r = messageInputSchema.safeParse(c);
     assertEquals(r.success, true, `should parse role=${c.role}`);
   }
+});
+
+Deno.test("contract: union variants and PATCH schemas cover the SAME role set", () => {
+  // Every role with a PATCH schema must have a full-input union variant (its
+  // minimal body parses), and vice versa, so neither can silently lag the
+  // domain MessageRole union.
+  const patchRoles = Object.keys(messagePatchSchemaByRole).sort();
+  assertEquals(patchRoles, Object.keys(MINIMAL_BY_ROLE).sort());
+  for (const role of patchRoles) {
+    assertEquals(
+      messageInputSchema.safeParse(MINIMAL_BY_ROLE[role]).success,
+      true,
+      `role ${role} has a PATCH schema but no parseable union variant`,
+    );
+  }
+});
+
+Deno.test("messageInputSchema: accepts automated (user) and truncated (assistant)", () => {
+  assertEquals(
+    messageInputSchema.safeParse({ role: "user", content: "hi", automated: true }).success,
+    true,
+  );
+  assertEquals(
+    messageInputSchema.safeParse({ role: "assistant", content: "hi", truncated: true }).success,
+    true,
+  );
 });
 
 Deno.test("userMessageInputSchema: accepts string content and multipart array", () => {

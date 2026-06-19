@@ -9,7 +9,7 @@
     type Toolkit,
   } from "@tomat/shared";
   import { confirmState, settingsState, toolkitsState } from "$stores";
-  import Toggle from "$components/ui/Toggle.svelte";
+  import Toggle from "@tomat/shared/ui/components/primitives/Toggle.svelte";
 
   // `horizontal` mirrors the settings-panel layout flag: controls sit to the
   // right of their label when there is room, and stack below the label +

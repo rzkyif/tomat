@@ -101,7 +101,8 @@ All commands run from the repo root:
 - `deno task build:core` / `deno task build:core:stable`: compile the `tomat-core`
   binary; also compiles the `tomat-core-updater`, `tomat-core-keychain`, and
   `tomat-core-hwinfo` helper binaries.
-- `deno task test:core`: run this package's tests.
+- `deno task test:core` / `deno task check:core`: this package's tests / type-check.
+- `deno task dev:core`: run just core in isolation (`deno task dev` also starts the client).
 
 Channel and port tables live in [DEVELOPMENT.md](../../DEVELOPMENT.md).
 

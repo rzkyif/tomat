@@ -1,8 +1,8 @@
 <script lang="ts">
   import { deletionsState } from "../../state";
   import { formatBytes } from "$lib/util/format";
-  import Modal from "../ui/Modal.svelte";
-  import Button from "../ui/Button.svelte";
+  import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
+  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
 </script>
 
 {#if deletionsState.pending}

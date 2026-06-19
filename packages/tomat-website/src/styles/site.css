@@ -1,0 +1,132 @@
+/* Website-only styles layered on top of the shared design tokens (base.css).
+   The shared file owns the palette and component visuals; this owns
+   site-structural concerns (scroll-snap sections, the horizontal showcase, the
+   page-to-page slide, the expandable) that have no client equivalent. Keep
+   design-system values out of here. */
+
+html,
+body {
+  min-height: 100dvh;
+}
+
+/* Allow the native `<details>` open/close to animate its height by letting the
+   `auto` keyword interpolate (progressive: browsers without support snap). */
+:root {
+  interpolate-size: allow-keywords;
+}
+
+/* Smooth in-page anchor jumps, disabled for reduced motion. Deliberately NOT on
+   the vertical scroll-snap container: mandatory snap re-aligns on scroll-end on
+   its own, and a global smooth behavior only makes that settle look sluggish. */
+@media (prefers-reduced-motion: no-preference) {
+  :where(a[href^="#"]) {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Hide the scrollbar on a scroller that is still fully swipe/drag scrollable
+   (the horizontal feature track). */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Fade the left/right edges of a clipped strip into the page background, so the
+   feature selector is cut off cleanly at the page max-width rather than at a
+   hard arbitrary edge. The mask makes the strip transparent at the edges,
+   revealing the bg-surface section behind it (hence "equal to the page bg"). */
+.edge-fade {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 2.5rem,
+    #000 calc(100% - 2.5rem),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 2.5rem,
+    #000 calc(100% - 2.5rem),
+    transparent
+  );
+}
+
+/* Expandable (native <details>): a chevron that rotates from pointing right to
+   pointing down on open, and an open/close height animation, both pure CSS.
+   Mirrors the app's Expandable look (chevron + subtle body reveal). */
+.expandable > summary {
+  list-style: none;
+}
+.expandable > summary::-webkit-details-marker {
+  display: none;
+}
+.expandable-chevron {
+  transition: rotate 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+details[open] > summary .expandable-chevron {
+  rotate: 90deg;
+}
+.expandable::details-content {
+  block-size: 0;
+  overflow: hidden;
+  transition:
+    block-size 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    content-visibility 200ms allow-discrete;
+}
+.expandable[open]::details-content {
+  block-size: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .expandable-chevron,
+  .expandable::details-content {
+    transition: none;
+  }
+}
+
+/* Page-to-page slide. The direction is set on <html data-vt-dir> from the
+   pages' navbar order (forward = moving right along the navbar, back = left) by
+   the script in BaseLayout, so navigating reads as a horizontal slide. The
+   navbar is transition:persist'd, so only the page content slides. Falls back to
+   the default cross-fade with no JS or reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-vt-dir="forward"]::view-transition-old(root) {
+    animation: vt-out-left 260ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+  html[data-vt-dir="forward"]::view-transition-new(root) {
+    animation: vt-in-right 260ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+  html[data-vt-dir="back"]::view-transition-old(root) {
+    animation: vt-out-right 260ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+  html[data-vt-dir="back"]::view-transition-new(root) {
+    animation: vt-in-left 260ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+}
+@keyframes vt-out-left {
+  to {
+    transform: translateX(-3rem);
+    opacity: 0;
+  }
+}
+@keyframes vt-in-right {
+  from {
+    transform: translateX(3rem);
+    opacity: 0;
+  }
+}
+@keyframes vt-out-right {
+  to {
+    transform: translateX(3rem);
+    opacity: 0;
+  }
+}
+@keyframes vt-in-left {
+  from {
+    transform: translateX(-3rem);
+    opacity: 0;
+  }
+}

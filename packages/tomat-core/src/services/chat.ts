@@ -253,7 +253,7 @@ export class ChatService {
       const last = lastUserText(sessionsRepo().listMessages(stream.sessionId));
       if (last) {
         try {
-          route = await classifyComplexity(settings, last);
+          route = await classifyComplexity(settings, last, stream.abort.signal);
         } catch (err) {
           log.warn(`complexity classifier failed; defaulting to "default": ${errMessage(err)}`);
         }
@@ -346,9 +346,22 @@ export class ChatService {
         let alwaysEntries: ToolDescriptor[] = [];
 
         if (!shouldFilter || !queryText) {
-          chosenTools = allEnabled.slice(0, maxTools).map((t) => ({
+          const capped: Array<{ toolId: string }> = allEnabled.slice(0, maxTools).map((t) => ({
             toolId: t.id,
           }));
+          // maxTools can cut off always-available tools that sort past the cap;
+          // append them so their exposure doesn't depend on the filter toggle
+          // (the filtered branch below also always adds always-available tools).
+          if (alwaysAvailableEnabled) {
+            const seen = new Set(capped.map((c) => c.toolId));
+            for (const t of allEnabled) {
+              if (t.alwaysAvailable && !seen.has(t.id)) {
+                capped.push({ toolId: t.id });
+                seen.add(t.id);
+              }
+            }
+          }
+          chosenTools = capped;
         } else {
           const [vector] = await embed([queryText]);
           queryVector = vector;
@@ -367,6 +380,7 @@ export class ChatService {
               candidates,
               phase2Endpoint,
               filterBudget,
+              stream.abort.signal,
             );
             phase2Entries = candidates;
           }
@@ -838,13 +852,21 @@ export class ChatService {
     // Resolve tool names to (toolkitId, name) pairs.
     const allEnabled = enabledToolsByName();
     const resolved: ResolvedPendingCall[] = [];
-    for (const asm of toolAssemblers.values()) {
+    for (const [idx, asm] of toolAssemblers.entries()) {
+      // Namespace the controller/correlation id by streamId (and the tool-call
+      // index) so two concurrent turns whose models reuse an id like "call_1"
+      // can't collide in the shared inFlightControllers map: a collision there
+      // makes every askUser/permission/cancel forward fail the clientId guard
+      // and hang both prompts. The model only needs the assistant's
+      // tool_calls[].id and the tool result's tool_call_id to match each OTHER
+      // within a request, which they still do (both carry this same value).
+      const callId = `${stream.streamId}:${idx}:${asm.callId}`;
       const found = allEnabled.get(asm.toolName);
       if (!found) {
         // Tool not found / disabled / grants missing. Emit error msg for the
         // model on next hop.
         resolved.push({
-          callId: asm.callId,
+          callId,
           toolkitId: "unknown",
           toolName: asm.toolName,
           arguments: asm.argsBuffer || "{}",
@@ -853,7 +875,7 @@ export class ChatService {
         continue;
       }
       resolved.push({
-        callId: asm.callId,
+        callId,
         toolkitId: found.toolkitId,
         toolName: asm.toolName,
         arguments: asm.argsBuffer || "{}",
@@ -972,9 +994,16 @@ export class ChatService {
       return;
     }
     // Pre-flight before dispatch: (1) re-verify the toolkit's content hash so a
-    // toolkit tampered since boot can't execute; (2) validate the model-emitted
+    // toolkit tampered since boot can't execute (this runs on EVERY call, so a
+    // reused warm worker is re-checked too); (2) validate the model-emitted
     // arguments against the tool's declared schema and fill defaults, so the
     // worker receives normalized args (not raw model output).
+    //
+    // Residual TOCTOU: a tool granted write into its OWN installed code dir
+    // could alter that code in the window between this check and the worker's
+    // import. The content-hash gate therefore assumes a toolkit is not granted
+    // write to its own installedPath; never grant $toolkit write to an untrusted
+    // toolkit.
     let normalizedArgs: string;
     try {
       await toolkitsRegistry().verifyHashFresh(pending.toolkitId);
@@ -1431,6 +1460,7 @@ function classifyProviderError(err: unknown): { code: ErrorCode; message: string
 async function classifyComplexity(
   settings: Record<string, unknown>,
   userMessage: string,
+  signal?: AbortSignal,
 ): Promise<"default" | "secondary"> {
   // Single-shot LLM classifier. Asks the DEFAULT model to label the user's
   // request as "simple" or "complex"; routes complex requests to the
@@ -1455,6 +1485,7 @@ async function classifyComplexity(
     endpoint,
     messages,
     overrides: { temperature: 0, maxTokens: 16 + budget, reasoningBudget: budget },
+    signal,
   })) {
     if (delta.contentDelta) response += delta.contentDelta;
   }

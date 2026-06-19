@@ -1,8 +1,8 @@
 <script lang="ts" generics="T">
   import { onMount, type Snippet, untrack } from "svelte";
   import { errMessage } from "@tomat/shared";
-  import SearchInput from "./SearchInput.svelte";
-  import IconButton from "./IconButton.svelte";
+  import SearchInput from "@tomat/shared/ui/components/primitives/SearchInput.svelte";
+  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
   import { type ParsedQuery, parseQuery } from "$lib/objects/query";
 
   // Generic, presentational shell for the object-management settings UI:

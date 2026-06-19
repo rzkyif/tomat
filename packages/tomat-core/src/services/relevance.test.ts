@@ -2,18 +2,20 @@
 // through these (and through tool-filter.test.ts, which ranks via the same
 // helper).
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { cosineNormalized, topKBySimilarity } from "./relevance.ts";
 
 function vec(...xs: number[]): Float32Array {
   return new Float32Array(xs);
 }
 
-Deno.test("cosineNormalized: dot product over the shared prefix", () => {
+Deno.test("cosineNormalized: dot product of equal-length vectors", () => {
   assertEquals(cosineNormalized(vec(1, 0), vec(1, 0)), 1);
   assertEquals(cosineNormalized(vec(1, 0), vec(0, 1)), 0);
-  // Mismatched lengths use the shorter vector.
-  assertEquals(cosineNormalized(vec(1, 1, 1), vec(1)), 1);
+});
+
+Deno.test("cosineNormalized: throws on a length mismatch (stale index) instead of truncating", () => {
+  assertThrows(() => cosineNormalized(vec(1, 1, 1), vec(1)), Error, "length mismatch");
 });
 
 Deno.test("topKBySimilarity: ranks by descending cosine and caps at topK", () => {

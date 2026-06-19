@@ -14,9 +14,6 @@ import { type InstallEventSink, readOptional } from "./installer-shared.ts";
 
 const log = getLogger("toolkit-installer");
 
-// Phase 2: install an already-downloaded toolkit's dependencies (deno install
-// for any declared deno.json/package.json deps), pin the content hash, and flip
-// the row to status='installed'.
 export async function runInstallDeps(
   toolkitId: string,
   jobId: string,

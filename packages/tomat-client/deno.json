@@ -6,13 +6,15 @@
   },
   "tasks": {
     "dev": "deno run -A npm:@tauri-apps/cli@^2 dev",
-    "stage:vad": "deno run -A scripts/stage-vad.ts",
-    "dev:vite": "deno task stage:vad && deno run -A npm:vite@^8 dev",
     "build": "deno run -A npm:@tauri-apps/cli@^2 build",
-    "build:vite": "deno task stage:vad && deno run -A npm:vite@^8 build",
-    "preview": "deno run -A npm:vite@^8 preview",
+    "stage:vad": "deno run -A scripts/stage-vad.ts",
     "sync": "deno run -A npm:@sveltejs/kit@^2/svelte-kit sync",
-    "check": "deno task sync && deno run -A npm:svelte-check@^4 --tsconfig ./tsconfig.json"
+    "preview": "deno run -A npm:vite@^8 preview",
+    "check": "deno task sync && deno run -A npm:svelte-check@^4 --tsconfig ./tsconfig.json && cargo check --manifest-path src/tauri/Cargo.toml --all-targets",
+    "lint": "cargo clippy --manifest-path src/tauri/Cargo.toml --all-targets -- -D warnings",
+    "fmt": "cargo fmt --manifest-path src/tauri/Cargo.toml",
+    "fmt:check": "cargo fmt --manifest-path src/tauri/Cargo.toml --check",
+    "test": "deno run -A npm:vitest run && cargo test --manifest-path src/tauri/Cargo.toml --lib"
   },
   "imports": {
     "@tomat/shared": "../tomat-shared/src/index.ts",

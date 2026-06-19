@@ -1,12 +1,17 @@
 // handleUpdateMarkerOnBoot: decision branches around the update
 // marker file. Driven against tempdir-isolated paths().updateMarkerFile.
-// The 30s cleanup setTimeout is left scheduled by the "first boot" case;
-// we sanitizeOps:false on that test since we don't want to wait 30s.
+// The update commits at a healthy checkpoint (commitUpdate), not on a timer,
+// so an ordinary restart of a working binary can never trip a rollback.
 
 import { assertEquals } from "@std/assert";
 import { CORE_VERSION } from "../config.ts";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import { handleUpdateMarkerOnBoot, type UpdateMarker, writeUpdateMarker } from "./rollback.ts";
+import {
+  commitUpdate,
+  handleUpdateMarkerOnBoot,
+  type UpdateMarker,
+  writeUpdateMarker,
+} from "./rollback.ts";
 import { paths } from "../paths.ts";
 
 async function readRaw(): Promise<UpdateMarker | null> {
@@ -57,31 +62,56 @@ Deno.test("handleUpdateMarkerOnBoot: clears marker when running the rolled-back 
   }
 });
 
-Deno.test({
-  name: "handleUpdateMarkerOnBoot: first boot bumps attempts to 1 and schedules cleanup",
-  // scheduleMarkerCleanup uses setTimeout(30_000); we don't want to wait for it.
-  sanitizeOps: false,
-  sanitizeResources: false,
-  async fn() {
-    const env = await setupTestEnv();
-    try {
-      await writeUpdateMarker({
-        version: CORE_VERSION,
-        previousVersion: "0.0.1",
-      });
-      assertEquals(await handleUpdateMarkerOnBoot(), false);
-      const after = await readRaw();
-      assertEquals(after?.attempts, 1);
-      assertEquals(after?.version, CORE_VERSION);
-    } finally {
-      await env.teardown();
-    }
-  },
+Deno.test("handleUpdateMarkerOnBoot: first boot bumps attempts to 1 and continues", async () => {
+  const env = await setupTestEnv();
+  try {
+    await writeUpdateMarker({
+      version: CORE_VERSION,
+      previousVersion: "0.0.1",
+    });
+    assertEquals(await handleUpdateMarkerOnBoot(), false);
+    const after = await readRaw();
+    assertEquals(after?.attempts, 1);
+    assertEquals(after?.version, CORE_VERSION);
+  } finally {
+    await env.teardown();
+  }
 });
 
-Deno.test("writeUpdateMarker: persists attempts=0 + stagedAtMs at write time", async () => {
+Deno.test("commitUpdate: a first boot that commits clears the marker + anchor (no rollback on restart)", async () => {
   const env = await setupTestEnv();
-  const before = Date.now();
+  try {
+    const currentBin = binPath(coreBinaryName("tomat-core"));
+    const oldBin = currentBin + ".old";
+    await Deno.writeTextFile(currentBin, "WORKING_NEW");
+    await Deno.writeTextFile(oldBin, "PREVIOUS");
+    await writeUpdateMarker({ version: CORE_VERSION, previousVersion: "0.0.1" });
+
+    // First boot: records the attempt, keeps running.
+    assertEquals(await handleUpdateMarkerOnBoot(), false);
+    assertEquals((await readRaw())?.attempts, 1);
+
+    // Healthy checkpoint: commit. Marker + anchor are gone.
+    await commitUpdate();
+    assertEquals(await readRaw(), null);
+    let anchorThere = true;
+    try {
+      await Deno.stat(oldBin);
+    } catch {
+      anchorThere = false;
+    }
+    assertEquals(anchorThere, false);
+
+    // A later ordinary restart sees no marker and must NOT roll back.
+    assertEquals(await handleUpdateMarkerOnBoot(), false);
+    assertEquals(await Deno.readTextFile(currentBin), "WORKING_NEW");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("writeUpdateMarker: persists attempts=0", async () => {
+  const env = await setupTestEnv();
   try {
     await writeUpdateMarker({
       version: CORE_VERSION,
@@ -91,8 +121,6 @@ Deno.test("writeUpdateMarker: persists attempts=0 + stagedAtMs at write time", a
     assertEquals(m?.attempts, 0);
     assertEquals(m?.version, CORE_VERSION);
     assertEquals(m?.previousVersion, "0.0.1");
-    assertEquals(typeof m?.stagedAtMs, "number");
-    assertEquals((m?.stagedAtMs ?? 0) >= before, true);
   } finally {
     await env.teardown();
   }
@@ -110,7 +138,6 @@ async function writeMarkerWithAttempts(attempts: number): Promise<void> {
       version: CORE_VERSION,
       previousVersion: "0.0.1",
       attempts,
-      stagedAtMs: Date.now(),
     }),
   );
 }

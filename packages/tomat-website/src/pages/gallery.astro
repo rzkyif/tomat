@@ -1,0 +1,10 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Gallery from "../components/gallery/Gallery.svelte";
+---
+
+<BaseLayout title="tomat component gallery" description="Shared UI component gallery.">
+  <main class="min-h-[calc(100dvh-3.5rem)]">
+    <Gallery client:visible />
+  </main>
+</BaseLayout>

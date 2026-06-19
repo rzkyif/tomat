@@ -135,6 +135,41 @@ build and skips the rest (tracked by a `dist/.build-state.json` cursor). Run
 the built artifacts is covered in
 [packages/tomat-website/README.md](packages/tomat-website/README.md).
 
+### Working on one package
+
+The integrated `deno task dev` runs core + client together, but each package can
+also be developed in isolation. Every package exposes a standardized verb set in
+its own `deno.json` (`check`, `test`, and where they apply `dev` / `build`),
+reachable two ways:
+
+```bash
+deno task check:core            # run one package's verb from the repo root (<verb>:<pkg>)
+cd packages/tomat-core && deno task check   # or from inside the package
+```
+
+`dev:core`, `dev:client`, and `dev:website` start a single component's dev loop.
+The client's `dev` is the full Tauri shell; the Vite-only frontend server is an
+internal step of that (`beforeDevCommand`), not a separate task. The five Rust
+helper crates expose the same verbs as cargo wrappers, so
+`deno task check:core-keychain` and `cd packages/tomat-core-keychain && deno
+task lint` work identically to the Deno packages.
+
+## Packages and release items
+
+The repo separates two axes that used to be tangled in the root task list:
+
+- A **package** is a unit of development: a workspace member with the
+  standardized verbs above. The 11 packages are the `workspace` array in the
+  root `deno.json` (6 Deno + 5 Rust crates), the single source of truth for the
+  fan-out (`scripts/pkg.ts`).
+- A **release item** is a unit of distribution and may compose several packages.
+  `core` bundles `tomat-core`, `tomat-shared`, and the native helper crates;
+  `client` and `website` each pull `tomat-shared`. Release items live in
+  `scripts/release/*.ts`; each declares the `packages` it is built from, and the
+  ones whose source hash is "each package's src + manifest" derive that hash from
+  the package list so it cannot drift. Releasing is covered in
+  [packages/tomat-website/README.md](packages/tomat-website/README.md).
+
 ### Cleaning build artifacts
 
 ```bash
@@ -179,20 +214,35 @@ Building and releasing (to the latest or stable channel) is covered in
 [packages/tomat-website/README.md](packages/tomat-website/README.md), the
 release + deploy doc.
 
+## External dependencies
+
+The model catalog and the manifest / update / binary-download paths bet on
+third-party contracts (HuggingFace URLs and headers, GitHub release shapes and
+asset names, upstream archives) that can change under us. When a download or a
+release build breaks and you suspect a third party moved something, start at the
+break-glass reference [EXTERNAL.md](EXTERNAL.md): it maps each external touchpoint
+to the code that relies on it, the symptom, and the fix.
+
 ## Type-check + format + lint
 
 ```bash
-deno task check     # deno check + svelte-check + cargo check
-deno task fmt       # oxfmt (all TS/JS/JSON/MD) + cargo fmt
-deno task lint      # oxlint (all TS/JS, incl. no-tauri-import plugin) + .svelte tauri grep + cargo clippy
+deno task check     # deno check / svelte-check + cargo check, fanned across packages
+deno task fmt       # oxfmt (all TS/JS/JSON/MD) + cargo fmt per crate
+deno task lint      # oxlint (incl. no-tauri-import) + .svelte tauri grep + shared-UI walkers (purity / view-coverage / component-tiers) + cargo clippy
 ```
+
+Each aggregate fans the same-named verb out across the packages that define it
+(see [Packages and release items](#packages-and-release-items)). `fmt` and
+`lint` run oxfmt/oxlint once over the whole tree (they also cover root-level
+files) and add `cargo fmt`/`clippy` per Rust crate; `check` runs each package's
+own check.
 
 ## Tests
 
 ```bash
-deno task test          # Deno + vitest + cargo test
-deno task test:ui       # vitest against the Svelte UI
-deno task test:rs       # cargo test for the Rust crates
+deno task test          # every package's tests (deno test + vitest + cargo test)
+deno task test:client   # just the client (vitest + the Tauri crate's cargo test)
+deno task test:core     # just tomat-core
 deno task test:e2e      # WebdriverIO E2E (manual, opt-in)
 ```
 

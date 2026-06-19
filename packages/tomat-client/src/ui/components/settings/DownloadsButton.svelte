@@ -1,7 +1,7 @@
 <script lang="ts">
   import { downloadsState } from "../../state";
   import { useBlink } from "$composables/use-blink.svelte";
-  import SidebarItem from "../ui/SidebarItem.svelte";
+  import SidebarItem from "@tomat/shared/ui/components/primitives/SidebarItem.svelte";
 
   let { collapsed, disabled = false } = $props<{
     collapsed: boolean;

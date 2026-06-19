@@ -33,6 +33,14 @@ export const catalogQuantSchema = z
     quant: z.string(), // "Q4_K_M", "Q8_0", ...
     modelSpec: z.string(), // "@unsloth/repo/branch/file.gguf"
     fileSizeBytes: z.number().int().positive(),
+    // Pinned content sha256 (git-LFS oid). The download path verifies the bytes
+    // against this signed value instead of HF's x-linked-etag. Stamped by
+    // buildCatalogPayload from hashes.generated.ts; absent only for a file whose
+    // hash hasn't been gathered yet (then the download falls back to HF's hash).
+    sha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
   })
   .strict();
 export type CatalogQuant = z.infer<typeof catalogQuantSchema>;
@@ -46,6 +54,11 @@ export const catalogFileRoleSchema = z
     role: z.string(), // "encoder" | "decoder" | "tokens" | "model" | "voices" | ...
     modelSpec: z.string(), // "@user/repo/branch/file"
     fileSizeBytes: z.number().int().positive(),
+    // Pinned content sha256; see catalogQuantSchema.sha256.
+    sha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
   })
   .strict();
 export type CatalogFileRole = z.infer<typeof catalogFileRoleSchema>;
@@ -86,6 +99,10 @@ export const catalogVariantSchema = z
     provider: z.string(), // "unsloth" (also implied by modelSpec)
     mmprojSpec: z.string().optional(), // vision module GGUF, if any
     mmprojSizeBytes: z.number().int().positive().optional(),
+    mmprojSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(), // pinned, see catalogQuantSchema.sha256
     quants: z.array(catalogQuantSchema).min(1), // best quality first
   })
   .strict();

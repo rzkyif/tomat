@@ -64,6 +64,12 @@ export function greetingsRoutes(): Hono {
       return c.json({ ran: false, reason: "recent" });
     }
     lastGreetingAtByClient.set(me.id, Date.now());
+    // Prune entries past the dedup window so the map can't grow unbounded across
+    // distinct client ids (each entry only matters for GREETING_MIN_INTERVAL_MS).
+    const cutoff = Date.now() - GREETING_MIN_INTERVAL_MS;
+    for (const [id, t] of lastGreetingAtByClient) {
+      if (t < cutoff) lastGreetingAtByClient.delete(id);
+    }
     const instruction =
       strSetting(settings, "greetings.instruction", DEFAULT_GREETING_INSTRUCTION).trim() ||
       DEFAULT_GREETING_INSTRUCTION;

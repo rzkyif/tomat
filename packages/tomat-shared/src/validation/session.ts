@@ -47,6 +47,7 @@ const toolCallStatusSchema = z.enum([
   "pending",
   "running",
   "awaiting_user",
+  "awaiting_permission",
   "completed",
   "failed",
   "cancelled",
@@ -124,6 +125,7 @@ export const userMessageInputSchema = z
     role: z.literal("user"),
     content: messageContentSchema,
     systemPromptOverride: z.string().optional(),
+    automated: z.boolean().optional(),
   })
   .strict();
 
@@ -135,6 +137,7 @@ export const assistantMessageInputSchema = z
     toolCalls: z.array(toolCallSchema).optional(),
     modelUsed: z.enum(["default", "secondary"]).optional(),
     interrupted: z.boolean().optional(),
+    truncated: z.boolean().optional(),
   })
   .strict();
 
@@ -198,6 +201,44 @@ export const documentFilterMessageInputSchema = z
   })
   .strict();
 
+// Content payload a tool pushes via the one-way display API; mirrors the
+// DisplayContent domain union.
+const displayContentSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("markdown"), markdown: z.string() }).strict(),
+  z
+    .object({
+      type: z.literal("image"),
+      dataB64: z.string(),
+      mime: z.string(),
+      alt: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("table"),
+      columns: z.array(z.string()),
+      rows: z.array(z.array(z.string())),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("diff"),
+      before: z.string(),
+      after: z.string(),
+      title: z.string().optional(),
+    })
+    .strict(),
+]);
+
+export const displayMessageInputSchema = z
+  .object({
+    ...baseShape,
+    role: z.literal("display"),
+    callId: z.string().optional(),
+    content: displayContentSchema,
+  })
+  .strict();
+
 export const errorMessageInputSchema = z
   .object({
     ...baseShape,
@@ -216,6 +257,7 @@ export const messageInputSchema = z.discriminatedUnion("role", [
   reasoningMessageInputSchema,
   toolFilterMessageInputSchema,
   documentFilterMessageInputSchema,
+  displayMessageInputSchema,
   errorMessageInputSchema,
 ]);
 
@@ -235,6 +277,7 @@ export const messagePatchSchemaByRole = {
   reasoning: reasoningMessageInputSchema.omit({ role: true }).partial().strict(),
   tool_filter: toolFilterMessageInputSchema.omit({ role: true }).partial().strict(),
   document_filter: documentFilterMessageInputSchema.omit({ role: true }).partial().strict(),
+  display: displayMessageInputSchema.omit({ role: true }).partial().strict(),
   error: errorMessageInputSchema.omit({ role: true }).partial().strict(),
 } as const;
 

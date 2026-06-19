@@ -294,6 +294,22 @@ export async function getSecret(name: string): Promise<string | undefined> {
   return bag[name];
 }
 
+// Serialize every vault mutation. setSecret/deleteSecret/clearAllSecrets are
+// read-modify-write cycles over the single secrets.enc blob with an await
+// between read and rename, so without serialization two concurrent writers
+// (e.g. two paired clients saving secrets at once) both read the same bag and
+// the second rename clobbers the first - a silent lost update. Chaining each
+// mutation on one promise guarantees it reads the latest committed bag.
+let vaultWriteChain: Promise<unknown> = Promise.resolve();
+function withVaultLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = vaultWriteChain.then(fn, fn);
+  vaultWriteChain = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
 export async function setSecret(name: string, value: string): Promise<void> {
   if (!name || typeof name !== "string") {
     throw new AppError("validation_error", "secret name must be a non-empty string");
@@ -301,19 +317,23 @@ export async function setSecret(name: string, value: string): Promise<void> {
   if (typeof value !== "string") {
     throw new AppError("validation_error", "secret value must be a string");
   }
-  const bag = await readEncrypted();
-  bag[name] = value;
-  await writeEncrypted(bag);
-  notifySecretsChanged(Object.keys(bag).sort());
+  await withVaultLock(async () => {
+    const bag = await readEncrypted();
+    bag[name] = value;
+    await writeEncrypted(bag);
+    notifySecretsChanged(Object.keys(bag).sort());
+  });
 }
 
-export async function deleteSecret(name: string): Promise<boolean> {
-  const bag = await readEncrypted();
-  if (!(name in bag)) return false;
-  delete bag[name];
-  await writeEncrypted(bag);
-  notifySecretsChanged(Object.keys(bag).sort());
-  return true;
+export function deleteSecret(name: string): Promise<boolean> {
+  return withVaultLock(async () => {
+    const bag = await readEncrypted();
+    if (!(name in bag)) return false;
+    delete bag[name];
+    await writeEncrypted(bag);
+    notifySecretsChanged(Object.keys(bag).sort());
+    return true;
+  });
 }
 
 export async function listSecretNames(): Promise<string[]> {
@@ -325,16 +345,18 @@ export async function listSecretNames(): Promise<string[]> {
  *  view's "clear settings" factory reset. The master key in the OS keychain is
  *  harmless without ciphertext, so we just delete the file (and any stale tmp).
  *  NotFound-tolerant. */
-export async function clearAllSecrets(): Promise<void> {
-  for (const path of [paths().secretsEncFile, paths().secretsEncFile + ".tmp"]) {
-    try {
-      await Deno.remove(path);
-    } catch (err) {
-      if (!(err instanceof Deno.errors.NotFound)) throw err;
+export function clearAllSecrets(): Promise<void> {
+  return withVaultLock(async () => {
+    for (const path of [paths().secretsEncFile, paths().secretsEncFile + ".tmp"]) {
+      try {
+        await Deno.remove(path);
+      } catch (err) {
+        if (!(err instanceof Deno.errors.NotFound)) throw err;
+      }
     }
-  }
-  cachedKey = null;
-  notifySecretsChanged([]);
+    cachedKey = null;
+    notifySecretsChanged([]);
+  });
 }
 
 /** Boot-time integrity check (NON-mutating: never generates a key). If a sealed

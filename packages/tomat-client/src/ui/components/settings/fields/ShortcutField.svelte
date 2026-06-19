@@ -3,7 +3,7 @@
   import { evalCondition } from "@tomat/shared";
   import { settingsState } from "../../../state";
   import FieldCard from "./FieldCard.svelte";
-  import IconButton from "../../ui/IconButton.svelte";
+  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
 
   let {
     field,

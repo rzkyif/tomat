@@ -84,7 +84,19 @@ export function pairingRoutes(): Hono {
   r.delete("/clients/:id", bearerMiddleware(), async (c) => {
     const me = requireClient(c);
     const id = c.req.param("id") === "me" ? me.id : c.req.param("id");
-    const { attachmentPaths } = authService().revokeClient(id);
+    // A client may always remove ITSELF (the "leave" action). Revoking a
+    // DIFFERENT paired device is a privileged fleet action: without this gate
+    // any single paired device could wipe and lock out every other device. So
+    // cross-client revocation requires the admin token (the same guard that
+    // mints pairing codes), which only a client running on the host can read.
+    if (id !== me.id) {
+      await authService().verifyAdminToken(c.req.header("x-admin-token") ?? null);
+    }
+    const { existed, attachmentPaths } = authService().revokeClient(id);
+    if (!existed) {
+      throw new AppError("not_found", `no paired client with id ${id}`);
+    }
+    log.info(`client ${me.id} revoked client ${id}`);
     // Cut off any live WebSocket for the revoked client so revocation actually
     // removes access (the WS authenticates only once, at upgrade).
     wsHub().closeClient(id);

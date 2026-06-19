@@ -107,34 +107,47 @@ export class LlmScheduler {
       const wrappedReq: LlmRequest = { ...req, signal: combinedSignal };
       const startedAt = Date.now();
       const watchdogTimeoutMs = this.callTimeoutMs + WATCHDOG_GRACE_MS;
-      const watchdogTimer = setTimeout(() => {
-        log.error(
-          `watchdog: local slot held ${watchdogTimeoutMs}ms by client ` +
-            `${opts.clientId}; aborting upstream`,
-        );
-        try {
-          watchdogController.abort(
-            new AppError(
-              "internal_error",
-              `llm scheduler watchdog timeout after ${watchdogTimeoutMs}ms`,
-            ),
+      // Stall watchdog: fires only after watchdogTimeoutMs of NO progress (no
+      // delta), not on total duration. A legitimately long-but-progressing local
+      // completion (a big thinking model on CPU) is never aborted; only a truly
+      // wedged server (no first token, or no further tokens) trips it. We re-arm
+      // the timer on every yielded delta.
+      let watchdogTimer: ReturnType<typeof setTimeout> | undefined;
+      const armWatchdog = (): void => {
+        if (watchdogTimer !== undefined) clearTimeout(watchdogTimer);
+        watchdogTimer = setTimeout(() => {
+          log.error(
+            `watchdog: local slot made no progress for ${watchdogTimeoutMs}ms ` +
+              `(client ${opts.clientId}); aborting upstream`,
           );
-        } catch {
-          /* signal already aborted */
-        }
-        try {
-          this.watchdogHandler?.({
-            clientId: opts.clientId,
-            elapsedMs: Date.now() - startedAt,
-          });
-        } catch (err) {
-          log.warn(`watchdog handler threw: ${errMessage(err)}`);
-        }
-      }, watchdogTimeoutMs);
+          try {
+            watchdogController.abort(
+              new AppError(
+                "internal_error",
+                `llm scheduler watchdog stall after ${watchdogTimeoutMs}ms`,
+              ),
+            );
+          } catch {
+            /* signal already aborted */
+          }
+          try {
+            this.watchdogHandler?.({
+              clientId: opts.clientId,
+              elapsedMs: Date.now() - startedAt,
+            });
+          } catch (err) {
+            log.warn(`watchdog handler threw: ${errMessage(err)}`);
+          }
+        }, watchdogTimeoutMs);
+      };
       try {
-        yield* streamChatCompletion(wrappedReq);
+        armWatchdog(); // covers time-to-first-token (a server that never emits)
+        for await (const delta of streamChatCompletion(wrappedReq)) {
+          armWatchdog(); // progress: reset the stall timer
+          yield delta;
+        }
       } finally {
-        clearTimeout(watchdogTimer);
+        if (watchdogTimer !== undefined) clearTimeout(watchdogTimer);
         this.releaseLocal();
       }
       return;

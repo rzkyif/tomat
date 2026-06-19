@@ -14,7 +14,7 @@
   import { cores } from "$lib/core";
   import { confirmState, downloadsState } from "$stores";
   import type { BinaryKind, BinaryUpdateCheck } from "@tomat/shared";
-  import CollapsibleLabel from "../ui/CollapsibleLabel.svelte";
+  import CollapsibleLabel from "@tomat/shared/ui/components/primitives/CollapsibleLabel.svelte";
   import { useBlink } from "$composables/use-blink.svelte";
   import { getLogger } from "$lib/util/log";
 

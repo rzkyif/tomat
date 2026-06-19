@@ -1,0 +1,44 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+import ManualOutline from "../components/ManualOutline.astro";
+import type { ManualEntry } from "../lib/manual";
+
+interface Props {
+  title: string;
+  entries: ManualEntry[];
+  currentId: string;
+}
+const { title, entries, currentId } = Astro.props;
+---
+
+<BaseLayout title={`${title} - tomat manual`} description={title}>
+  <div class="mx-auto flex w-full max-w-6xl gap-8 px-4 py-8">
+    {/* Desktop: a left outline sidebar, sticky under the navbar. */}
+    <aside class="hidden md:block w-60 shrink-0">
+      <div class="sticky top-[4.5rem] max-h-[calc(100dvh-6rem)] overflow-y-auto pr-2">
+        <ManualOutline entries={entries} currentId={currentId} />
+      </div>
+    </aside>
+
+    <main class="min-w-0 flex-1">
+      <slot />
+    </main>
+  </div>
+</BaseLayout>
+
+<script>
+  // When the mobile burger menu opens, bring the current subsection in the
+  // injected outline into view. Optional enhancement: with no JS the outline is
+  // still fully scrollable by hand.
+  function wireOutlineAutoscroll() {
+    const toggle = document.getElementById("nav-toggle") as HTMLInputElement | null;
+    if (!toggle) return;
+    toggle.addEventListener("change", () => {
+      if (!toggle.checked) return;
+      const current = document.querySelector<HTMLElement>(".sidebar [data-outline-current]");
+      current?.scrollIntoView({ block: "center" });
+    });
+  }
+  wireOutlineAutoscroll();
+  document.addEventListener("astro:page-load", wireOutlineAutoscroll);
+</script>

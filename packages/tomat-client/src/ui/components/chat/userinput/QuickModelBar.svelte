@@ -20,7 +20,9 @@
   import { useSettingsForm } from "$composables/use-settings-form.svelte";
   import { cores } from "$lib/core";
   import { shortModelName, shortQuantName } from "$lib/util/format";
-  import FlushSelect from "./FlushSelect.svelte";
+  import QuickModelBarView, {
+    type QuickSelect,
+  } from "@tomat/shared/ui/components/chat/userinput/QuickModelBarView.svelte";
 
   // The chat input's quick model controls: a condensed, non-technical view over
   // the granular llm.* settings (which stay editable in full Settings). Every
@@ -214,59 +216,38 @@
       creativityTemperature(level as CreativityLevel),
     );
   }
+
+  // Map the derived selections onto the presentational view's slot descriptors.
+  // The left column is hidden for the external provider; in custom mode it
+  // becomes the model picker (+ a quantization picker once a catalog model is
+  // chosen).
+  const modelSlot = $derived<QuickSelect | undefined>(
+    provider !== "local"
+      ? undefined
+      : preset !== "custom"
+        ? {
+            value: preset as string,
+            options: presetOptions,
+            onchange: onPresetChange,
+            ariaLabel: "Smart preset",
+          }
+        : {
+            value: selectedModel,
+            options: modelOptions,
+            onchange: onModelSelect,
+            ariaLabel: "Model",
+          },
+  );
+  const quantSlot = $derived<QuickSelect | undefined>(
+    provider === "local" && preset === "custom" && !manualSelected && selectedModelView
+      ? { value: selectedQuant, options: quantOptions, onchange: onQuantSelect }
+      : undefined,
+  );
 </script>
 
-<div class="flex items-center justify-between gap-6 w-full min-w-0">
-  <div class="flex items-center gap-2 min-w-0">
-    {#if provider === "local"}
-      {#if preset !== "custom"}
-        <FlushSelect
-          icon="i-material-symbols-auto-awesome-outline-rounded"
-          value={preset as string}
-          options={presetOptions}
-          onchange={onPresetChange}
-          ariaLabel="Smart preset"
-          title="Model"
-        />
-      {:else}
-        <FlushSelect
-          icon="i-material-symbols-auto-awesome-outline-rounded"
-          value={selectedModel}
-          options={modelOptions}
-          onchange={onModelSelect}
-          ariaLabel="Model"
-          title="Model"
-        />
-        {#if !manualSelected && selectedModelView}
-          <FlushSelect
-            icon="i-material-symbols-bolt-outline-rounded"
-            value={selectedQuant}
-            options={quantOptions}
-            onchange={onQuantSelect}
-            ariaLabel="Quantization"
-            title="Quantization"
-          />
-        {/if}
-      {/if}
-    {/if}
-  </div>
-
-  <div class="flex items-center gap-2 shrink-0">
-    <FlushSelect
-      icon="i-material-symbols-psychology-outline-rounded"
-      value={thinking.value}
-      options={thinkingDropdown}
-      onchange={onThinkingChange}
-      ariaLabel="Thinking effort"
-      title="Thinking Effort"
-    />
-    <FlushSelect
-      icon="i-material-symbols-palette-outline"
-      value={creativity.value}
-      options={creativityDropdown}
-      onchange={onCreativityChange}
-      ariaLabel="Creativity"
-      title="Creativity"
-    />
-  </div>
-</div>
+<QuickModelBarView
+  model={modelSlot}
+  quant={quantSlot}
+  thinking={{ value: thinking.value, options: thinkingDropdown, onchange: onThinkingChange }}
+  creativity={{ value: creativity.value, options: creativityDropdown, onchange: onCreativityChange }}
+/>

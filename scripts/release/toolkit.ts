@@ -83,6 +83,7 @@ export const toolkitItem: ReleaseItem = {
   id: "toolkit",
   label: "built-in toolkit",
   scope: "channel",
+  packages: ["toolkit"],
   bumpHint: "packages/tomat-builtin-toolkit/deno.json (version)",
 
   version: readToolkitVersion,

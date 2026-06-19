@@ -251,12 +251,16 @@ export class BinariesManager {
     const jobId = newJobId();
     const ext = resolved.url.toLowerCase().endsWith(".zip") ? "zip" : "tar.gz";
     const relPath = `staging/${kind}-${jobId}.${ext}`;
-    const stagingPath = join(paths().stagingDir, `${kind}-${jobId}.${ext}`);
 
     // Run the download + extract in the background; the WS shows progress.
     void (async () => {
+      // The download manager resolves relPath under binDir (destination
+      // "binaries"), so the archive lands at binDir/staging/..., NOT
+      // paths().stagingDir. Track the actual path so the failure-path cleanup
+      // targets the real file instead of a non-existent stagingDir entry.
+      let downloadedPath: string | undefined;
       try {
-        const downloaded = await downloadManager().enqueue({
+        downloadedPath = await downloadManager().enqueue({
           source: resolved.url,
           url: resolved.url,
           relPath,
@@ -264,9 +268,10 @@ export class BinariesManager {
           groupId: `binary:${kind}`,
           sha256: resolved.sha256,
         });
-        log.info(`${kind}: downloaded to ${downloaded}`);
-        await extractArchive(downloaded, paths().binDir, kind);
-        await Deno.remove(downloaded);
+        log.info(`${kind}: downloaded to ${downloadedPath}`);
+        await extractArchive(downloadedPath, paths().binDir, kind);
+        await Deno.remove(downloadedPath);
+        downloadedPath = undefined; // removed; nothing left to clean up
         await writeInstalledVersion(kind, resolved.version);
         log.info(`${kind}: installed v${resolved.version}`);
         for (const fn of binaryInstalledListeners) {
@@ -279,10 +284,12 @@ export class BinariesManager {
       } catch (err) {
         log.error(`${kind}: install failed: ${errMessage(err)}`);
       } finally {
-        try {
-          await Deno.remove(stagingPath);
-        } catch {
-          /* fine */
+        if (downloadedPath) {
+          try {
+            await Deno.remove(downloadedPath);
+          } catch {
+            /* fine */
+          }
         }
       }
     })();
@@ -430,24 +437,30 @@ async function writeStreamTo(
   if (!stream) {
     throw new AppError("extract_failed", `null stream for ${outPath}`);
   }
-  const out = await Deno.open(outPath, {
+  // Stream to a temp path and rename into place only after the stream fully
+  // drains, so a mid-stream pipeTo error never leaves a partial (and, for an
+  // exe, launchable) file at the final path. pipeTo closes the file on both
+  // success and source-abort.
+  const tmpPath = outPath + ".part";
+  const out = await Deno.open(tmpPath, {
     create: true,
     write: true,
     truncate: true,
   });
   try {
     await stream.pipeTo(out.writable);
-  } finally {
+  } catch (err) {
     try {
-      // out.writable.pipeTo closes the writable side, which closes the file.
-      // Re-closing throws, so swallow it.
+      await Deno.remove(tmpPath);
     } catch {
       /* fine */
     }
+    throw err;
   }
   if (Deno.build.os !== "windows") {
-    await Deno.chmod(outPath, mode);
+    await Deno.chmod(tmpPath, mode);
   }
+  await Deno.rename(tmpPath, outPath);
 }
 
 async function fileExists(path: string): Promise<boolean> {

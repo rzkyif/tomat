@@ -3,9 +3,9 @@
   import { formatBytes } from "$lib/util/format";
   import { binarySourceToKind, isBinarySource } from "@tomat/shared";
   import type { DownloadPlan } from "@tomat/shared";
-  import Modal from "../ui/Modal.svelte";
-  import Button from "../ui/Button.svelte";
-  import Checkbox from "../ui/Checkbox.svelte";
+  import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
+  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
+  import Checkbox from "@tomat/shared/ui/components/primitives/Checkbox.svelte";
 
   // Friendly display of `binary:llama-server` etc. The raw synthetic
   // source string is ugly. HF paths still get the filename-extract

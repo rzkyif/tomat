@@ -12,6 +12,17 @@
     "astro": "npm:astro@^6.4.4",
     "astro/config": "npm:astro@^6.4.4/config",
     "@astrojs/check": "npm:@astrojs/check@^0.9.9",
+    "@astrojs/svelte": "npm:@astrojs/svelte@^7",
+    "svelte": "npm:svelte@^5.56.2",
+    "unocss": "npm:unocss@^66.7.0",
+    "@unocss/astro": "npm:@unocss/astro@^66.7.0",
+    "@unocss/extractor-svelte": "npm:@unocss/extractor-svelte@^66.7.0",
+    "@unocss/reset": "npm:@unocss/reset@^66.7.0",
+    "@iconify/json": "npm:@iconify/json@^2.2.483",
+    "@tomat/shared": "../tomat-shared/src/index.ts",
+    "@tomat/shared/": "../tomat-shared/src/",
+    "gsap": "npm:gsap@^3.13.0",
+    "diff": "npm:diff@^8.0.2",
     "zod": "npm:zod@^4.4.3"
   },
   "compilerOptions": {

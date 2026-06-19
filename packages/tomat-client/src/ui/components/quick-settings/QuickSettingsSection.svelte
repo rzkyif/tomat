@@ -9,8 +9,8 @@
   import { evalCondition, findField } from "@tomat/shared";
   import { settingsState } from "$stores";
   import SettingsField from "../settings/SettingsField.svelte";
-  import Expand from "../ui/Expand.svelte";
-  import Toggle from "../ui/Toggle.svelte";
+  import Expand from "@tomat/shared/ui/components/primitives/Expand.svelte";
+  import Toggle from "@tomat/shared/ui/components/primitives/Toggle.svelte";
   import type { QuickSettingsSectionDef } from "./manifest";
 
   let {

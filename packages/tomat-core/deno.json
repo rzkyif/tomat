@@ -5,7 +5,9 @@
     ".": "./src/main.ts"
   },
   "tasks": {
-    "dev": "deno run --watch --allow-all src/main.ts"
+    "dev": "deno run --watch --allow-all src/main.ts",
+    "check": "deno check src/main.ts",
+    "test": "deno test --allow-all --no-check --quiet"
   },
   "imports": {
     "@tomat/shared": "../tomat-shared/src/index.ts",

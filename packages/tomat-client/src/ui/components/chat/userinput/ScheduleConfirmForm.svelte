@@ -1,9 +1,9 @@
 <script lang="ts">
   import type { ScheduledPromptDraft } from "@tomat/shared";
   import ScheduleEditor from "../ScheduleEditor.svelte";
-  import Input from "../../ui/Input.svelte";
-  import Textarea from "../../ui/Textarea.svelte";
-  import Toggle from "../../ui/Toggle.svelte";
+  import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
+  import Textarea from "@tomat/shared/ui/components/primitives/Textarea.svelte";
+  import Toggle from "@tomat/shared/ui/components/primitives/Toggle.svelte";
 
   let {
     draft,

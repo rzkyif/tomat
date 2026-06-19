@@ -5,8 +5,8 @@
      may still want to check is a "once" date-time that is already past. -->
 <script lang="ts">
   import type { ScheduleSpec } from "@tomat/shared";
-  import Input from "../ui/Input.svelte";
-  import Select from "../ui/Select.svelte";
+  import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
+  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
 
   let {
     schedule,

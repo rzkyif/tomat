@@ -10,9 +10,14 @@ import { sha256HexSync } from "../shared/hash.ts";
 // Both inputs are assumed L2-normalized (the embedding sidecar + embedding.ts
 // return unit vectors). Cosine reduces to dot product in that case.
 export function cosineNormalized(a: Float32Array, b: Float32Array): number {
-  const n = Math.min(a.length, b.length);
+  // A length mismatch means vectors from different embedding models (a stale
+  // index) got compared. Silently truncating to the shorter one would return a
+  // plausible-but-meaningless score, so fail loudly instead.
+  if (a.length !== b.length) {
+    throw new Error(`cosine: vector length mismatch (${a.length} vs ${b.length}); reindex needed`);
+  }
   let sum = 0;
-  for (let i = 0; i < n; i++) sum += a[i] * b[i];
+  for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
   return sum;
 }
 

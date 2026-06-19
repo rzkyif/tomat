@@ -22,11 +22,14 @@ import {
   humanBytes,
   info,
   ok,
+  packagesHashInputs,
   type ReleaseChannel,
   type ReleaseItem,
   rel,
   REPO_ROOT,
   r2Put,
+  sha256File,
+  signEd25519Bytes,
   step,
 } from "./lib.ts";
 
@@ -56,7 +59,7 @@ interface ClientManifest {
   version: string;
   notes: string;
   pub_date: string;
-  platforms: Record<string, { signature: string; url: string }>;
+  platforms: Record<string, { signature: string; url: string; sha256: string }>;
 }
 
 /** The client's published version is the one baked into the app bundle by Tauri
@@ -187,6 +190,7 @@ function composeClientManifest(
   hostKey: string,
   url: string,
   signature: string,
+  sha256: string,
   live: ClientManifest | null,
 ): ClientManifest {
   // Carry forward platform entries from the prior manifest only if it's the
@@ -196,7 +200,7 @@ function composeClientManifest(
     version,
     notes: `tomat ${version}`,
     pub_date: new Date().toISOString(),
-    platforms: { ...carryover, [hostKey]: { signature, url } },
+    platforms: { ...carryover, [hostKey]: { signature, url, sha256 } },
   };
 }
 
@@ -215,17 +219,16 @@ async function writeManifestFile(
 // ---------------------------------------------------------------------------
 // release item
 
-const CLIENT_HASH_INPUTS = [
-  "packages/tomat-client/src",
-  "packages/tomat-client/deno.json",
-  "packages/tomat-shared/src",
-  "packages/tomat-shared/deno.json",
-];
+// The desktop client bundles the Tauri shell + the shared UI; its source hash
+// is derived from those two packages (src + manifest each).
+const CLIENT_PACKAGES = ["client", "shared"];
+const CLIENT_HASH_INPUTS = packagesHashInputs(CLIENT_PACKAGES);
 
 export const clientItem: ReleaseItem = {
   id: "client",
   label: "desktop client",
   scope: "channel",
+  packages: CLIENT_PACKAGES,
   bumpHint: "packages/tomat-client/src/tauri/tauri.conf.json (version)",
 
   version: readClientVersion,
@@ -279,9 +282,25 @@ export const clientItem: ReleaseItem = {
 
       step("Composing client.json (Tauri updater manifest)");
       const signature = (await Deno.readTextFile(bundle.sigPath)).trim();
-      const manifest = composeClientManifest(version, hostKey, bundleUrl, signature, live);
+      // sha256 over the exact bytes the installer downloads, so client.sh can
+      // verify integrity before install (mirrors core.json). The Tauri minisign
+      // signature protects in-app updates; this protects the FIRST install.
+      const { sha256 } = await sha256File(bundle.bundlePath);
+      const manifest = composeClientManifest(version, hostKey, bundleUrl, signature, sha256, live);
       const clientJsonPath = await writeManifestFile(manifestDir, "client.json", manifest);
       ok(`client.json → ${rel(clientJsonPath)}`);
+
+      // Detached Ed25519 signature over the exact client.json bytes, so client.sh
+      // authenticates the manifest (and thus the sha256 it trusts) before
+      // installing. client.json is the Tauri updater endpoint, so the signature
+      // is a sidecar file rather than an added field (Tauri never fetches it).
+      const clientJsonSig = await signEd25519Bytes(
+        env.signingPrivateKey,
+        await Deno.readFile(clientJsonPath),
+      );
+      const clientSigPath = join(DIST_DIR, manifestDir, "client.json.sig");
+      await Deno.writeTextFile(clientSigPath, clientJsonSig);
+      ok(`client.json.sig → ${rel(clientSigPath)}`);
 
       if (opts.dryRun) {
         info(
@@ -303,6 +322,16 @@ export const clientItem: ReleaseItem = {
         MANIFEST_CACHE_CONTROL,
       );
       ok(`https://${env.storageDomain}/${manifestDir}/client.json`);
+
+      step(`Uploading ${manifestDir}/client.json.sig to R2`);
+      await r2Put(
+        env,
+        `${manifestDir}/client.json.sig`,
+        clientSigPath,
+        "text/plain",
+        MANIFEST_CACHE_CONTROL,
+      );
+      ok(`https://${env.storageDomain}/${manifestDir}/client.json.sig`);
     } finally {
       await restore();
     }

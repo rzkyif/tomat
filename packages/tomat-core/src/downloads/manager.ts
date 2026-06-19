@@ -26,6 +26,7 @@ import { newJobId } from "../shared/ids.ts";
 import { getLogger } from "../shared/log.ts";
 import { Sha256Stream } from "../shared/hash.ts";
 import { paths } from "../paths.ts";
+import { modelCatalogSha256 } from "../models/catalog.ts";
 import { parseSource } from "./sources.ts";
 
 const log = getLogger("downloads");
@@ -103,32 +104,36 @@ export class DownloadManager {
 
     // Fast path: file already on disk.
     return new Promise<string>((resolve, reject) => {
-      this.alreadyOnDisk(absPath).then(async (on) => {
-        if (on) {
-          await this.upsertCompleted(id, spec, absPath);
+      this.alreadyOnDisk(absPath)
+        .then(async (on) => {
+          if (on) {
+            await this.upsertCompleted(id, spec, absPath);
+            this.broadcast();
+            resolve(absPath);
+            return;
+          }
+
+          const existing = this.inFlight.get(id);
+          if (existing) {
+            existing.resolvers.push({ resolve, reject });
+            return;
+          }
+
+          const ctrl = new AbortController();
+          const inFlight: InFlight = {
+            abort: ctrl,
+            resolvers: [{ resolve, reject }],
+          };
+          this.inFlight.set(id, inFlight);
+          this.upsertPending(id, spec, absPath);
           this.broadcast();
-          resolve(absPath);
-          return;
-        }
-
-        const existing = this.inFlight.get(id);
-        if (existing) {
-          existing.resolvers.push({ resolve, reject });
-          return;
-        }
-
-        const ctrl = new AbortController();
-        const inFlight: InFlight = {
-          abort: ctrl,
-          resolvers: [{ resolve, reject }],
-        };
-        this.inFlight.set(id, inFlight);
-        this.upsertPending(id, spec, absPath);
-        this.broadcast();
-        this.spawn(id, spec, absPath).catch((err) => {
-          log.warn(`spawn ${id}: ${errMessage(err)}`);
-        });
-      });
+          this.spawn(id, spec, absPath).catch((err) => {
+            log.warn(`spawn ${id}: ${errMessage(err)}`);
+          });
+        })
+        // Any synchronous failure in the fast path (DB upsert, broadcast) must
+        // reject the returned promise instead of leaving the caller hung.
+        .catch(reject);
     });
   }
 
@@ -249,8 +254,10 @@ export class DownloadManager {
 
   private async alreadyOnDisk(absPath: string): Promise<boolean> {
     try {
-      await Deno.stat(absPath);
-      return true;
+      const st = await Deno.stat(absPath);
+      // A zero-byte file is an incomplete/aborted prior download, not a usable
+      // artifact: treat it as absent so it re-downloads rather than completing.
+      return st.isFile && st.size > 0;
     } catch {
       return false;
     }
@@ -332,14 +339,25 @@ export class DownloadManager {
       truncate: true,
     });
 
-    // Verify downloaded bytes against a known sha256. An explicit spec hash
-    // wins; otherwise, for HuggingFace LFS weights we verify against HF's
-    // published sha256 (the `x-linked-etag` on the resolve redirect) so a
-    // tampered CDN response is rejected (trust = HF + TLS, same posture as the
-    // latest binary resolver). Small non-LFS files (config.json etc.) carry a git
-    // blob sha1 instead, which is not a content hash, so they stay unverified.
-    const expectedSha = spec.sha256 ?? (await resolveHfSha256(url, signal));
+    // Verify downloaded bytes against a known sha256, preferring the most
+    // trustworthy anchor: an explicit spec hash, then (for a catalog model file)
+    // the sha256 pinned in the SIGNED model catalog, then HF's published sha256
+    // (the `x-linked-etag` on the resolve redirect). The signed-catalog hash
+    // holds even if a proxy strips the etag or the file moves to a non-HF
+    // mirror. Small non-LFS files not in the catalog carry a git blob sha1
+    // instead, which is not a content hash, so they stay unverified.
+    const expectedSha =
+      spec.sha256 ??
+      (spec.destination === "models" ? await modelCatalogSha256(spec.source) : undefined) ??
+      (await resolveHfSha256(url, signal));
     const sha = expectedSha ? new Sha256Stream() : null;
+    if (!expectedSha) {
+      // No trustworthy content hash is available (no pinned sha256, and HF did
+      // not return an x-linked-etag for this file). The bytes are then accepted
+      // on TLS trust alone, so make that explicit instead of silently trusting a
+      // possibly mis-served file. Weights with an LFS sha256 still verify above.
+      log.warn(`downloading ${url} without integrity verification (no sha256 available)`);
+    }
     let downloaded = 0;
     let total: number | undefined = spec.sizeHint;
     let lastEmit = 0;
@@ -353,9 +371,13 @@ export class DownloadManager {
         );
       }
       const cl = res.headers.get("content-length");
+      let exactTotal: number | undefined;
       if (cl) {
         const n = Number(cl);
-        if (Number.isFinite(n)) total = n;
+        if (Number.isFinite(n)) {
+          total = n;
+          exactTotal = n;
+        }
       }
       if (total !== undefined && total !== spec.sizeHint) {
         this.updateSize(id, total);
@@ -367,6 +389,16 @@ export class DownloadManager {
       for await (const chunk of body) {
         if (signal.aborted) {
           throw new Error("cancelled");
+        }
+        // Guard against a wrong/hostile URL that streams far more than it
+        // declared (filling the disk). The ceiling is generous (2x + 64MB) so a
+        // transfer-encoding quirk never trips a legitimate download, but an
+        // unbounded stream is still cut off.
+        if (exactTotal !== undefined && downloaded > exactTotal * 2 + 64 * 1024 * 1024) {
+          throw new AppError(
+            "provider_error",
+            `download for ${url} far exceeded its declared size (${exactTotal}); aborting`,
+          );
         }
         await file.write(chunk);
         if (sha) sha.update(chunk);

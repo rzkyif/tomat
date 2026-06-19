@@ -2,9 +2,8 @@
  * Reactive mirror of the core's download queue. Fed by `downloads.snapshot`
  * WS broadcasts; mutations go through the core's REST endpoints.
  *
- * `seen` state is purely client-local now (the core doesn't track read
- * state); the rework spec said no migration crusts so a refresh resets
- * the seen-set.
+ * `seen` state is purely client-local (the core doesn't track read state),
+ * so a refresh resets the seen-set.
  */
 
 import type { DownloadEntry, RequiredFile, ServerToClientFrame } from "@tomat/shared";

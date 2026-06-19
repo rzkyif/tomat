@@ -37,6 +37,7 @@ export const scriptsItem: ReleaseItem = {
   id: "scripts",
   label: "install scripts",
   scope: "shared",
+  packages: [],
   bumpHint: "scripts/install/version.json (version)",
 
   // version.json is intentionally NOT in INSTALL_SCRIPTS, so it's neither hashed

@@ -131,6 +131,11 @@ pub enum SwapResult {
     /// Failed to install the staged binary (`staged` -> `current`). On Windows
     /// the aside was already reverted before returning.
     RenameFailed(std::io::Error),
+    /// Unix: neither the hard-link nor the copy could create the `<current>.old`
+    /// rollback anchor, so installing the staged binary would leave no
+    /// recoverable fallback if the new binary fails to spawn. Nothing was
+    /// changed on disk (we bail before the install rename).
+    AnchorFailed,
 }
 
 /// Append `.old` to a path at the byte level (NOT via extension replacement),
@@ -178,12 +183,17 @@ pub fn perform_swap(staged: &Path, current: &Path, is_windows: bool) -> SwapResu
     // Unix: preserve the old binary as `<current>.old` before the atomic rename.
     // A hard link keeps the old inode alive without a copy and without ever
     // leaving `current` missing. Fall back to a copy on filesystems that lack
-    // hard links; if even that fails, proceed without a rollback anchor rather
-    // than abort the update.
+    // hard links. The anchor is MANDATORY: if neither succeeds we bail BEFORE
+    // touching `current`, because installing the staged binary without a
+    // rollback anchor would leave no way to recover if the new binary fails to
+    // spawn (revert_swap renames `<current>.old` back over `current`).
     let old = old_path(current);
     let _ = std::fs::remove_file(&old);
     if std::fs::hard_link(current, &old).is_err() {
         let _ = std::fs::copy(current, &old);
+    }
+    if !old.exists() {
+        return SwapResult::AnchorFailed;
     }
     if let Err(e) = std::fs::rename(staged, current) {
         return SwapResult::RenameFailed(e);
@@ -395,6 +405,14 @@ fn run(args: &Args, is_windows: bool, settle: Duration) -> ExitCode {
                 &format!("failed to install staged binary: {}", e),
             );
             return ExitCode::from(4);
+        }
+        SwapResult::AnchorFailed => {
+            log.log(
+                Level::Error,
+                "could not create rollback anchor (<current>.old); refusing to install \
+                 without a recoverable fallback. Nothing changed; re-run the update.",
+            );
+            return ExitCode::from(6);
         }
     }
     log.log(Level::Info, "swap committed");

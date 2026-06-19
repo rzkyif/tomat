@@ -160,24 +160,34 @@
   function renderNow(text: string) {
     const gen = ++parseGen;
     lastParseAt = Date.now();
-    ensureRenderer().then((marked) => {
-      if (gen !== parseGen) return; // a newer parse superseded this one
-      renderedHtml = DOMPurify.sanitize(marked.parse(text) as string, {
-        ALLOWED_TAGS,
-        ALLOWED_ATTR,
-        ALLOW_DATA_ATTR: false,
-      });
-      tick().then(() => {
-        if (container) {
-          if (!linkHandlerAttached) {
-            container.addEventListener("click", handleLinkClick);
-            linkHandlerAttached = true;
+    ensureRenderer()
+      .then((marked) => {
+        if (gen !== parseGen) return; // a newer parse superseded this one
+        renderedHtml = DOMPurify.sanitize(marked.parse(text) as string, {
+          ALLOWED_TAGS,
+          ALLOWED_ATTR,
+          ALLOW_DATA_ATTR: false,
+        });
+        tick().then(() => {
+          if (container) {
+            if (!linkHandlerAttached) {
+              container.addEventListener("click", handleLinkClick);
+              linkHandlerAttached = true;
+            }
+            wrapTables(container);
+            wrapCodeBlocks(container);
           }
-          wrapTables(container);
-          wrapCodeBlocks(container);
-        }
+        });
+      })
+      .catch((err) => {
+        if (gen !== parseGen) return;
+        // The lazily-loaded markdown renderer (marked / highlight.js) failed to
+        // import. Don't leave a permanent loading spinner: fall back to escaped
+        // plain text, and reset the cached loader so a later message retries.
+        log.error("markdown renderer failed to load; showing plain text", err);
+        rendererReady = null;
+        renderedHtml = DOMPurify.sanitize(text, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
       });
-    });
   }
 
   $effect(() => {

@@ -36,7 +36,7 @@ export async function seedBuiltinToolkitIfNeeded(sink: InstallEventSink): Promis
     // Already seeded (or the user deleted it). Refresh the files when a newer
     // built-in version shipped, so an existing install isn't silently stuck
     // on the old toolset after an app update adds tools.
-    await refreshBuiltinIfOutdated(sink);
+    await refreshBuiltinIfOutdated();
     return;
   }
   if (toolkitsRegistry().get(BUILTIN_TOOLKIT_ID)) {
@@ -60,19 +60,25 @@ export async function seedBuiltinToolkitIfNeeded(sink: InstallEventSink): Promis
     },
   };
 
-  startDownload(
-    { source: "builtin", preferLocalDir: join(paths().toolkitsDir, BUILTIN_TOOLKIT_ID) },
-    wrapped,
-  );
+  try {
+    startDownload(
+      { source: "builtin", preferLocalDir: join(paths().toolkitsDir, BUILTIN_TOOLKIT_ID) },
+      wrapped,
+    );
+  } catch (err) {
+    // A user-triggered install/update for the built-in may already hold the
+    // per-toolkit lock; let that one win rather than failing boot seeding.
+    log.warn(`built-in seed skipped: ${errMessage(err)}`);
+  }
 }
 
-/** Re-download the built-in when the available version differs from the
- *  installed one. registerDownloaded writes the new version + tools at
- *  download time and leaves the row at 'downloaded', so the refresh is
- *  idempotent (next boot sees matching versions) and the update surfaces as
- *  a normal re-install prompt rather than silently swapping a running
- *  toolkit. A deleted built-in (no registry row) is left alone. */
-async function refreshBuiltinIfOutdated(sink: InstallEventSink): Promise<void> {
+/** Detect (but do NOT auto-download) a newer built-in version. The cheap,
+ *  signed manifest version check runs on boot; the tarball fetch is deferred to
+ *  an explicit user action, since a download is never a silent boot side effect.
+ *  The client's POST /toolkits/check-updates reports the available update and the
+ *  user triggers the download + install via the normal toolkit update flow. A
+ *  deleted built-in (no registry row) is left alone. */
+async function refreshBuiltinIfOutdated(): Promise<void> {
   const installed = toolkitsRegistry().get(BUILTIN_TOOLKIT_ID);
   if (!installed) return; // user deleted it; don't resurrect
   let available: string;
@@ -86,10 +92,7 @@ async function refreshBuiltinIfOutdated(sink: InstallEventSink): Promise<void> {
   }
   if (available === installed.version) return;
   log.info(
-    `built-in toolkit ${installed.version} -> ${available}; refreshing files (re-install to enable)`,
+    `built-in toolkit update available: ${installed.version} -> ${available} ` +
+      `(update via the toolkit update flow)`,
   );
-  // No preferLocalDir: in a release channel that dir holds the version
-  // shipped with the app (the old one), so fetch the new tarball; dev copies
-  // from the codebase regardless of the flag.
-  startDownload({ source: "builtin" }, sink);
 }

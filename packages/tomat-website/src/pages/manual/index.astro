@@ -1,0 +1,9 @@
+---
+// Bare /manual redirects to the first subsection (also where the navbar tab
+// points). In a static build Astro emits a meta-refresh redirect page.
+import { getCollection } from "astro:content";
+import { firstManualHref } from "../../lib/manual";
+
+const entries = await getCollection("manual");
+return Astro.redirect(firstManualHref(entries));
+---

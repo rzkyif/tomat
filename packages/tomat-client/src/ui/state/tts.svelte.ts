@@ -14,7 +14,7 @@ import { settingsState } from "./settings.svelte";
 
 const log = getLogger("tts");
 
-// Local shims that replace the deleted $lib/sidecar/tts module.
+// Speech-sidecar load + readiness shims used by the queue below.
 
 // How long to wait for the speech sidecar to come up before pre-warming, how
 // long to keep waiting if it never even starts loading, and the poll interval.
@@ -145,11 +145,9 @@ function makeSilentWav(durationMs: number): ArrayBuffer {
 // (after the first) up to MAX_WORDS, but never let a gap form between
 // playback segments.
 const MAX_WORDS = 50;
-// Safety margin so we don't dispatch right when audio ends and risk a tiny
-// gap from network/decode jitter. Sized to cover loadedmetadata wait,
-// browser play() latency, and the audio-output device's prefill on chunk
-// handoff - 250 ms was tight enough that the chain-1->2 transition could
-// audibly stall if synth came in just under estimate.
+// Safety margin so we don't dispatch right when audio ends and risk a tiny gap
+// from network/decode jitter. Covers the loadedmetadata wait, browser play()
+// latency, and the audio-output device's prefill on chunk handoff.
 const SAFETY_MS = 400;
 // Floor for the re-check timer so we don't spin.
 const MIN_RECHECK_MS = 75;

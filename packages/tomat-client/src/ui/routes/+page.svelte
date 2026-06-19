@@ -15,7 +15,7 @@
   import NewCore from "$components/new-core/NewCore.svelte";
   import QuickSettings from "$components/quick-settings/QuickSettings.svelte";
   import SessionList from "$components/session-list/SessionList.svelte";
-  import Bubble from "$components/ui/Bubble.svelte";
+  import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
   import MessageStackGroup from "$components/chat/MessageStackGroup.svelte";
   import {
     asMessageContent,

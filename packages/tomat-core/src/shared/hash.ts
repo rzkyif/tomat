@@ -30,22 +30,18 @@ export async function sha256Hex(input: string | Uint8Array): Promise<string> {
   return toHex(new Uint8Array(buf));
 }
 
-// Incremental SHA-256 over chunks. SubtleCrypto.digest is one-shot, so we
-// accumulate chunks and hash on finalize - fine in memory for the file /
-// folder sizes core hashes (tens of MB).
+// Incremental SHA-256 over chunks (node:crypto). Hashes each chunk as it
+// arrives so a multi-GB stream (e.g. a model GGUF or the core binary during
+// self-update) is verified with constant memory, instead of buffering the whole
+// artifact and a merged copy before a one-shot digest. hexDigest() finalizes and
+// may be called only once.
 export class Sha256Stream {
-  private chunks: Uint8Array[] = [];
+  private readonly hash = createHash("sha256");
   update(chunk: Uint8Array): void {
-    this.chunks.push(chunk);
+    this.hash.update(chunk);
   }
-  async hexDigest(): Promise<string> {
-    const total = this.chunks.reduce((a, c) => a + c.byteLength, 0);
-    const merged = new Uint8Array(total);
-    let off = 0;
-    for (const c of this.chunks) {
-      merged.set(c, off);
-      off += c.byteLength;
-    }
-    return await sha256Hex(merged);
+  // Async to preserve the call-site contract; the digest itself is synchronous.
+  hexDigest(): Promise<string> {
+    return Promise.resolve(this.hash.digest("hex"));
   }
 }

@@ -30,6 +30,7 @@ import {
   humanBytes,
   info,
   ok,
+  packagesHashInputs,
   r2Put,
   readCoreVersion,
   rel,
@@ -81,6 +82,12 @@ const SPEECH_CRATE = {
 // system `tar`, then repacked into the speech binary's gzip archive.
 const ESPEAK_DATA_URL =
   "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/espeak-ng-data.tar.bz2";
+
+// Pinned sha256 of the espeak-ng-data archive. The URL above is a MUTABLE rolling
+// tag, and these bytes get baked into the tomat-signed speech binary, so the
+// archive is verified against this hash before unpacking. If upstream legitimately
+// republishes the asset, recompute and update this constant in the same commit.
+const ESPEAK_DATA_SHA256 = "4135ccf82e1f40613491c0874d4945ae9e9c7840933d8e25a6f9e003d9ebf533";
 
 const MANIFEST_CACHE_CONTROL = "public, max-age=300";
 
@@ -249,6 +256,10 @@ export async function buildHelpers(triples: Triple[], suffix: string): Promise<H
         args: [
           "build",
           "--release",
+          // Build the signed helper from the committed, CI-verified Cargo.lock
+          // (never a re-resolved graph), so the artifact's dependency closure is
+          // exactly the one reviewed at this commit.
+          "--locked",
           "--manifest-path",
           join(REPO_ROOT, crateDir, "Cargo.toml"),
           "--target",
@@ -280,6 +291,31 @@ async function ensureEspeakData(): Promise<string> {
     fail(`espeak-ng-data fetch failed: ${res.status} ${res.statusText}`);
   }
   await Deno.writeFile(archive, res.body);
+  // Verify against the pinned sha256 BEFORE unpacking: an upstream asset swap or
+  // a release-host MITM must not silently propagate into the tomat-signed speech
+  // binary. A legitimate upstream bump updates ESPEAK_DATA_SHA256.
+  const { sha256 } = await sha256File(archive);
+  if (sha256 !== ESPEAK_DATA_SHA256) {
+    fail(
+      `espeak-ng-data sha256 mismatch: pinned ${ESPEAK_DATA_SHA256}, got ${sha256}. ` +
+        `If upstream legitimately changed the asset, recompute + update ESPEAK_DATA_SHA256.`,
+    );
+  }
+  // Defense for the release host: reject any archive entry that would escape the
+  // extraction dir (absolute path or `..` traversal) before extracting.
+  const list = await new Deno.Command("tar", {
+    args: ["-tjf", archive],
+    stdout: "piped",
+    stderr: "inherit",
+  }).output();
+  if (!list.success) fail(`tar -tjf espeak-ng-data failed`);
+  for (const entry of new TextDecoder().decode(list.stdout).split("\n")) {
+    const name = entry.trim();
+    if (!name) continue;
+    if (name.startsWith("/") || name.split("/").some((seg) => seg === "..")) {
+      fail(`espeak-ng-data archive contains an unsafe path entry: ${name}`);
+    }
+  }
   const { code } = await new Deno.Command("tar", {
     args: ["-xjf", archive, "-C", tmp],
     stdout: "inherit",
@@ -309,6 +345,8 @@ async function buildSpeech(triples: Triple[], suffix: string): Promise<SpeechArt
       args: [
         "build",
         "--release",
+        // Signed speech binary builds from the committed, CI-verified lock.
+        "--locked",
         "--manifest-path",
         join(REPO_ROOT, SPEECH_CRATE.crateDir, "Cargo.toml"),
         "--target",
@@ -486,6 +524,7 @@ function composeSpeechEntry(
 async function composeBinaryManifest(
   privateKey: Uint8Array,
   channel: ReleaseChannel,
+  version: string,
   speech: BinaryManifestPinnedEntry,
 ): Promise<BinaryManifest> {
   const binaries = {} as Record<BinaryKind, BinaryManifestEntry>;
@@ -551,8 +590,12 @@ async function composeBinaryManifest(
   // channel; ours, so there's no upstream release to resolve.
   binaries["tomat-core-speech"] = speech;
 
-  const signature = await signEd25519(privateKey, binaries);
-  return { schemaVersion: 1, binaries, signature };
+  // Sign the WHOLE manifest minus `signature` (matching core.json/toolkit.json),
+  // so the monotonic `version` the runtime uses for downgrade refusal is
+  // authenticated, not just `binaries`.
+  const unsigned: Omit<BinaryManifest, "signature"> = { schemaVersion: 1, version, binaries };
+  const signature = await signEd25519(privateKey, unsigned);
+  return { ...unsigned, signature };
 }
 
 /** Gzip a file to `<srcPath>.gz` for transport. The core's single-file
@@ -590,19 +633,22 @@ async function writeManifestFile(
 // ---------------------------------------------------------------------------
 // release item
 
-// Source inputs that determine the compiled core. Lockfiles are intentionally
-// excluded (a client-only dep bump touches the root lock but not core);
-// declared deps live in each deno.json / Cargo.toml, which ARE hashed.
-const CORE_HASH_INPUTS = [
-  "packages/tomat-core/src",
-  "packages/tomat-core/deno.json",
-  "packages/tomat-shared/src",
-  "packages/tomat-shared/deno.json",
-  ...HELPER_CRATES.map((h) => `${h.crateDir}/src`),
-  ...HELPER_CRATES.map((h) => `${h.crateDir}/Cargo.toml`),
-  `${SPEECH_CRATE.crateDir}/src`,
-  `${SPEECH_CRATE.crateDir}/Cargo.toml`,
+// Packages composed into the core release item: the Deno service, shared types,
+// the eager helper crates, and the on-demand speech crate. CORE_HASH_INPUTS is
+// derived from this list (src + manifest per package), so adding a helper crate
+// here cannot silently skip the source-hash gate. Lockfiles are intentionally
+// excluded (a client-only dep bump touches the root lock but not core); declared
+// deps live in each deno.json / Cargo.toml, which ARE hashed.
+const CORE_PACKAGES = [
+  "core",
+  "shared",
+  "core-keychain",
+  "core-updater",
+  "core-hwinfo",
+  "core-ptyhost",
+  "core-speech",
 ];
+const CORE_HASH_INPUTS = packagesHashInputs(CORE_PACKAGES);
 
 // The dist/<host>/ binaries buildAll + buildHelpers emit for this channel:
 // tomat-core plus the four helpers, each with the channel suffix. The unified
@@ -619,6 +665,7 @@ export const coreItem: ReleaseItem = {
   id: "core",
   label: "core + helpers",
   scope: "channel",
+  packages: CORE_PACKAGES,
   bumpHint: "packages/tomat-core/src/config.ts (CORE_VERSION)",
 
   version: readCoreVersion,
@@ -683,6 +730,7 @@ export const coreItem: ReleaseItem = {
     const binaryManifest = await composeBinaryManifest(
       env.signingPrivateKey,
       channel,
+      version,
       composeSpeechEntry(speech, version, env.storageDomain, prefix),
     );
     const binJsonPath = await writeManifestFile(manifestDir, "binaries.json", binaryManifest);

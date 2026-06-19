@@ -20,11 +20,14 @@ import { BUILTIN_TOOLKIT_ID } from "@tomat/shared";
 import { builtinToolkitManifestUrl } from "../config.ts";
 import { channel, paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
+import { getLogger } from "../shared/log.ts";
+import { compareSemver } from "../shared/semver.ts";
 import { hashToolkit } from "./hash.ts";
 import signingKeys from "../../data/signing-keys.json" with { type: "json" };
 
 export { BUILTIN_TOOLKIT_ID };
 
+const log = getLogger("builtin-manifest");
 const SIG_ALGO_LABEL = "ed25519-base64";
 
 export interface FetchOptions {
@@ -46,6 +49,15 @@ export async function loadBuiltinToolkitManifest(
   const cached = await readCachedManifest();
   if (cached && !opts.force) return cached;
   const fetched = await fetchAndVerify(opts.signal);
+  // Refuse a strictly-older signed manifest than the cached one: a validly-
+  // signed prior release could be replayed to roll the built-in toolkit back to
+  // a version with a fixed issue. `version` is inside the signature.
+  if (cached && compareSemver(fetched.version, cached.version) < 0) {
+    log.warn(
+      `refusing older built-in toolkit manifest v${fetched.version}; keeping cached v${cached.version}`,
+    );
+    return cached;
+  }
   await writeCachedManifest(fetched);
   return fetched;
 }

@@ -5,6 +5,7 @@
 import { catalogPayloadSchema, type CatalogPayload, type ModelFamily } from "@tomat/shared";
 import { FAMILIES } from "./families/index.ts";
 import { FIT_CONFIG } from "./fit.ts";
+import { FILE_HASHES } from "./hashes.generated.ts";
 import { STT_CATALOG } from "./stt.ts";
 import { TTS_CATALOG } from "./tts.ts";
 
@@ -29,9 +30,41 @@ export function buildCatalogPayload(
     tts: TTS_CATALOG,
   };
   const parsed = catalogPayloadSchema.parse(payload);
+  stampHashes(parsed);
   checkSpeechReferences("stt", parsed.stt.models, parsed.stt.presets);
   checkSpeechReferences("tts", parsed.tts.models, parsed.tts.presets);
   return parsed;
+}
+
+/** Stamp each downloadable file's pinned sha256 (from the generated
+ *  HuggingFace-gathered map) onto the parsed payload, so the signed catalog
+ *  commits to the exact bytes and the download path verifies against it. A spec
+ *  absent from the map is left unstamped (the download then falls back to HF's
+ *  published hash); `deno run -A scripts/catalog/gather-hashes.ts` refills the
+ *  map when a model is added. Mutates the freshly-parsed copy (not the imported
+ *  source constants). */
+function stampHashes(payload: CatalogPayload): void {
+  for (const fam of payload.families) {
+    for (const model of fam.models) {
+      for (const v of model.variants) {
+        if (v.mmprojSpec && FILE_HASHES[v.mmprojSpec]) v.mmprojSha256 = FILE_HASHES[v.mmprojSpec];
+        for (const q of v.quants) {
+          const h = FILE_HASHES[q.modelSpec];
+          if (h) q.sha256 = h;
+        }
+      }
+    }
+  }
+  for (const cat of [payload.stt, payload.tts]) {
+    for (const model of cat.models) {
+      for (const quant of model.quants) {
+        for (const f of quant.files) {
+          const h = FILE_HASHES[f.modelSpec];
+          if (h) f.sha256 = h;
+        }
+      }
+    }
+  }
 }
 
 /** Referential checks zod can't express without ZodEffects (which would break

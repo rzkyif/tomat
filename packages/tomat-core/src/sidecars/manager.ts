@@ -82,7 +82,18 @@ interface Active {
   pid: number;
   abort: AbortController; // aborted on supersede/stop
   recentLogs: string[];
+  // Set true once the stdout readiness marker is seen; runReadiness polls it.
+  markerSeen: boolean;
 }
+
+// Crash-after-ready flap guard. `RestartPolicy.maxAttempts` only bounds
+// CONSECUTIVE readiness failures within one restartWithBackoff loop; a sidecar
+// that boots healthy and THEN crashes starts a fresh loop each time, so without
+// this it would restart forever (reloading a multi-GB model every ~1s). We track
+// restart timestamps in a rolling window at the Sidecar level and give up if it
+// flaps too often; the window naturally ages out so an occasional crash recovers.
+const FLAP_WINDOW_MS = 60_000;
+const FLAP_MAX_RESTARTS = 5;
 
 class Sidecar {
   readonly kind: SidecarKind;
@@ -90,6 +101,8 @@ class Sidecar {
   private active: Active | null = null;
   private current: SidecarSnapshot;
   private pendingStop = false;
+  // Timestamps of recent unexpected-exit restarts (rolling FLAP_WINDOW_MS).
+  private restartTimes: number[] = [];
 
   constructor(
     kind: SidecarKind,
@@ -130,7 +143,19 @@ class Sidecar {
 
     // 2. Validate readiness URL before doing anything else.
     if (options.readiness?.kind === "http") {
-      validateHealthCheckUrl(options.readiness.url);
+      try {
+        validateHealthCheckUrl(options.readiness.url);
+      } catch (err) {
+        // A non-loopback readiness URL (e.g. a user-set non-loopback llm.host) is
+        // a configuration error, not a crash: surface it as an Error snapshot the
+        // UI can show, instead of throwing into the boot path's silent .catch.
+        this.emit({
+          kind: this.kind,
+          status: "Error",
+          message: `invalid readiness URL (must be loopback): ${errMessage(err)}`,
+        });
+        return;
+      }
     }
 
     this.emit({ kind: this.kind, status: "Loading", message: "Starting…" });
@@ -175,6 +200,7 @@ class Sidecar {
       pid: proc.pid,
       abort,
       recentLogs: [],
+      markerSeen: false,
     };
     this.active = active;
 
@@ -213,6 +239,9 @@ class Sidecar {
 
   async stop(): Promise<void> {
     this.pendingStop = true;
+    // Explicit disable is a clean slate: a later re-enable gets a fresh flap
+    // budget rather than inheriting crash history from before the stop.
+    this.restartTimes = [];
     if (!this.active) {
       this.emit({ kind: this.kind, status: "Disabled" });
       return;
@@ -260,7 +289,7 @@ class Sidecar {
             // crash context still surfaces via the recentLogs ring above.
             log.debug(`[${this.kind}/${tag}] ${trimmed}`);
             if (marker && trimmed.includes(marker)) {
-              (active as Active & { _markerSeen?: boolean })._markerSeen = true;
+              active.markerSeen = true;
             }
           }
         }
@@ -296,7 +325,7 @@ class Sidecar {
       const deadline = Date.now() + startupTimeoutMs;
       while (Date.now() < deadline) {
         if (active.abort.signal.aborted) return false;
-        if ((active as Active & { _markerSeen?: boolean })._markerSeen) {
+        if (active.markerSeen) {
           return true;
         }
         try {
@@ -331,6 +360,27 @@ class Sidecar {
     const policy =
       options.restartPolicy === "none" ? null : (options.restartPolicy ?? DEFAULT_RESTART_POLICY);
     if (!policy) return;
+
+    // Flap guard: a sidecar that keeps crashing shortly after becoming Running
+    // must not restart indefinitely. Count this restart in the rolling window
+    // and give up (terminal Error, no restart) if it exceeds the cap.
+    const now = Date.now();
+    this.restartTimes = this.restartTimes.filter((t) => now - t < FLAP_WINDOW_MS);
+    this.restartTimes.push(now);
+    if (this.restartTimes.length > FLAP_MAX_RESTARTS) {
+      log.error(
+        `${this.kind}: flapping (${this.restartTimes.length} crashes in ` +
+          `${FLAP_WINDOW_MS / 1000}s); giving up until re-enabled`,
+      );
+      this.emit({
+        kind: this.kind,
+        status: "Error",
+        message:
+          `gave up after repeated crashes ` +
+          `(${this.restartTimes.length} in ${FLAP_WINDOW_MS / 1000}s)`,
+      });
+      return;
+    }
     await this.restartWithBackoff(options, policy);
   }
 

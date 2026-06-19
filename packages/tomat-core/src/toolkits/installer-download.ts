@@ -30,9 +30,6 @@ import {
 
 const log = getLogger("toolkit-installer");
 
-// Phase 1: acquire a toolkit's files (fetch/extract npm, copy the built-in, copy
-// a local folder) WITHOUT installing deps or pinning the content hash. The row
-// lands in status='downloaded'. The caller then triggers startInstallDeps.
 export async function runDownload(
   spec: InstallSource,
   toolkitId: string,
@@ -275,8 +272,11 @@ export function extractableEntryType(typeflag: string): "file" | "dir" | null {
 
 /** Verify a fetched npm tarball against npm's published integrity before it is
  *  extracted. Prefers the SRI `dist.integrity` (sha512); falls back to the
- *  legacy `dist.shasum` (sha1). When neither is available the tarball is left
- *  unverified (logged) rather than blocking the install. Exported for testing. */
+ *  legacy `dist.shasum` (sha1). When neither is available the install fails
+ *  closed: a supply-chain integrity check that silently downgrades to "no
+ *  verification" when the (untrusted) registry metadata omits both fields would
+ *  let a poisoned mirror serve arbitrary bytes. npm always ships at least a
+ *  shasum, so this never blocks a legitimate install. Exported for testing. */
 export async function verifyTarball(
   bytes: Uint8Array,
   url: string,
@@ -313,7 +313,10 @@ export async function verifyTarball(
     }
     return;
   }
-  log.warn(`npm tarball ${url} has no integrity/shasum metadata; installing unverified`);
+  throw new AppError(
+    "checksum_mismatch",
+    `npm tarball ${url} has no integrity/shasum metadata; refusing to install unverified`,
+  );
 }
 
 async function copyTreeExcludingNodeModules(src: string, dst: string): Promise<void> {

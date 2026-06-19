@@ -1,9 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import Bubble from "../ui/Bubble.svelte";
-  import Chip from "../ui/Chip.svelte";
-  import ButtonGroup from "../ui/ButtonGroup.svelte";
-  import IconButton from "../ui/IconButton.svelte";
+  import SessionBarView from "@tomat/shared/ui/components/chat/SessionBarView.svelte";
   import {
     messagesState,
     sessionsState,
@@ -110,22 +107,9 @@
     }
   }
 
-  // Context progress
+  // Context progress (the gauge itself lives in SessionBarView).
   let contextMax = $derived(getContextSize());
   let contextUsed = $derived(messagesState.tokenUsage?.total || 0);
-  let contextRatio = $derived(contextMax > 0 ? contextUsed / contextMax : 0);
-  let contextColor = $derived(
-    contextRatio < 0.5
-      ? "bg-accent-green-200"
-      : contextRatio < 0.9
-        ? "bg-accent-yellow-200"
-        : "bg-accent-red-200",
-  );
-
-  function formatTokens(n: number): string {
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-    return n.toString();
-  }
 
   // Prev/next session targets. The list is newest-first, so "previous"
   // walks toward older sessions (higher index) and "next" toward newer
@@ -163,138 +147,40 @@
   let showBar = $derived(
     !!messagesState.tokenUsage || showTitle || showButtonGroup,
   );
-  let alignment = $derived(settingsState.getAlignment());
 </script>
 
 {#if showBar}
-  <div style:display="contents" style:--default-base={themeOverrideHex}>
-    <Bubble
-      selectedAlignment={alignment}
-      size="small"
-      extraClass={`flex items-center gap-2`}
-    >
-      {#if messagesState.tokenUsage}
-        <!-- Context progress bar with text inside -->
-        <div
-          class="relative w-12 h-8 bg-surface-inset rounded-large overflow-hidden shrink-0 border-0.25em border-default-200"
-          title="Context: {formatTokens(contextUsed)} / {formatTokens(
-            contextMax,
-          )}"
-        >
-          <div
-            class="{contextColor} w-full absolute bottom-0 transition-all duration-300"
-            style="height: {Math.min(contextRatio * 100, 100)}%"
-          ></div>
-          <span
-            class="absolute inset-0 flex items-center justify-center text-xs font-medium text-default-700 leading-none"
-          >
-            {Math.round(contextRatio * 100)}%
-          </span>
-        </div>
-      {/if}
-
-      <!-- Title (grid overlap technique for auto-sizing). The container is the
-         only `min-w-0` flex item in the bubble; the context bar and button
-         group are `shrink-0`, so it absorbs the squeeze when the bubble hits
-         its own max-width cap. The invisible sizing span gets clipped by
-         `overflow-hidden`, and the input shows an ellipsis when blurred so
-         the user can still tell the title is truncated. -->
-      {#if coreCount > 1}
-        <Chip
-          icon="i-material-symbols-hub-rounded"
-          label={coreName}
-          title="Sessions on this core"
-          truncate
-          labelMaxWidth="8rem"
-        />
-      {/if}
-
-      {#if showTitle}
-        <div
-          class="flex items-center min-w-0 h-8 overflow-hidden bg-surface-inset rounded-large text-sm"
-        >
-          <div class="grid items-center min-w-0 overflow-hidden">
-            <span
-              class="invisible row-start-1 col-start-1 whitespace-pre pl-3 pr-1 py-1"
-              aria-hidden="true">{titleText || defaultTitle}</span
-            >
-            <input
-              size="1"
-              aria-label="Session Title"
-              bind:this={titleInput}
-              bind:value={titleText}
-              onfocus={handleTitleFocus}
-              onblur={handleTitleBlur}
-              onkeydown={handleTitleKeydown}
-              placeholder={defaultTitle}
-              class="row-start-1 col-start-1 w-full min-h-full pl-3 pr-1 py-1 text-default-700 flex items-center text-ellipsis"
-            />
-          </div>
-          <!-- Regenerate title with the LLM; shows a spinner (and locks) while
-             core is generating, driven by `title_generating` frames. -->
-          <IconButton
-            icon={sessionsState.generatingTitle
-              ? "i-material-symbols-progress-activity animate-spin"
-              : "i-material-symbols-auto-awesome-rounded"}
-            title={sessionsState.generatingTitle
-              ? "Generating Title…"
-              : "Regenerate Title"}
-            size="sm"
-            disabled={sessionsState.generatingTitle}
-            class="mr-2"
-            onclick={() => sessionsState.regenerateTitle()}
-          />
-        </div>
-      {/if}
-
-      <!-- Session navigation -->
-      {#if showButtonGroup}
-        <ButtonGroup size="sm" class="shrink-0">
-          <IconButton
-            icon="i-material-symbols-format-list-bulleted-rounded"
-            title="Session List"
-            size="sm"
-            onclick={() => {
-              confirmingDelete = false;
-              viewState.navigate("sessionList");
-            }}
-          />
-          <IconButton
-            icon="i-material-symbols-chevron-left-rounded"
-            title="Previous Session"
-            size="sm"
-            disabled={!prevSession}
-            onclick={() => prevSession && goToSession(prevSession.id)}
-          />
-          <IconButton
-            icon="i-material-symbols-chevron-right-rounded"
-            title="Next Session"
-            size="sm"
-            disabled={!nextSession}
-            onclick={() => nextSession && goToSession(nextSession.id)}
-          />
-          {#if !isNewSession}
-            <IconButton
-              icon={confirmingDelete
-                ? "i-material-symbols-delete-forever-rounded"
-                : "i-material-symbols-delete-outline-rounded"}
-              title={confirmingDelete ? "Confirm Delete" : "Delete Session"}
-              size="sm"
-              onclick={handleDeleteClick}
-              data-delete-btn
-            />
-            <IconButton
-              icon="i-material-symbols-add-rounded"
-              title="New Session"
-              size="sm"
-              onclick={() => {
-                confirmingDelete = false;
-                sessionsState.create();
-              }}
-            />
-          {/if}
-        </ButtonGroup>
-      {/if}
-    </Bubble>
-  </div>
+  <SessionBarView
+    tokenUsage={messagesState.tokenUsage
+      ? { used: contextUsed, max: contextMax }
+      : null}
+    showChip={coreCount > 1}
+    {coreName}
+    {showTitle}
+    bind:titleText
+    {defaultTitle}
+    bind:titleInput
+    onTitleFocus={handleTitleFocus}
+    onTitleBlur={handleTitleBlur}
+    onTitleKeydown={handleTitleKeydown}
+    generatingTitle={sessionsState.generatingTitle}
+    onRegenerateTitle={() => sessionsState.regenerateTitle()}
+    {showButtonGroup}
+    prevDisabled={!prevSession}
+    nextDisabled={!nextSession}
+    {isNewSession}
+    {confirmingDelete}
+    onList={() => {
+      confirmingDelete = false;
+      viewState.navigate("sessionList");
+    }}
+    onPrev={() => prevSession && goToSession(prevSession.id)}
+    onNext={() => nextSession && goToSession(nextSession.id)}
+    onDelete={handleDeleteClick}
+    onNew={() => {
+      confirmingDelete = false;
+      sessionsState.create();
+    }}
+    baseColorOverride={themeOverrideHex}
+  />
 {/if}

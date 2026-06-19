@@ -32,6 +32,7 @@ function grantedFor(decl: PermissionDecl): Grant {
 
 Deno.test("emptyFlagSet: all sets empty, ffi false", () => {
   const f = emptyFlagSet();
+  assertEquals(f.netAll, false);
   assertEquals(f.net.size, 0);
   assertEquals(f.read.size, 0);
   assertEquals(f.write.size, 0);
@@ -71,6 +72,29 @@ Deno.test("unionFlags: net expands one entry per (host, port)", () => {
   const flags = unionFlags([{ required: [decl], grants: [grantedFor(decl)] }], templates);
   assertEquals(flags.net.has("api.example.com:80"), true);
   assertEquals(flags.net.has("api.example.com:443"), true);
+});
+
+Deno.test("unionFlags: wildcard port grants all ports of the host (bare host, valid Deno syntax)", () => {
+  const decl: PermissionDecl = { kind: "net", host: "api.example.com", ports: ["*"], reason: "x" };
+  const flags = unionFlags([{ required: [decl], grants: [grantedFor(decl)] }], templates);
+  // Deno spells "all ports of a host" as the bare host (no :port); `host:*` is
+  // rejected at parse time and would crash the worker at spawn.
+  assertEquals(flags.net.has("api.example.com"), true);
+  assertEquals(flagSetToArgs(flags).includes("--allow-net=api.example.com"), true);
+});
+
+Deno.test("unionFlags: wildcard host grants all hosts (bare --allow-net, valid Deno syntax)", () => {
+  const decl: PermissionDecl = { kind: "net", host: "*", ports: [80, 443], reason: "x" };
+  const flags = unionFlags([{ required: [decl], grants: [grantedFor(decl)] }], templates);
+  assertEquals(flags.netAll, true);
+  const args = flagSetToArgs(flags);
+  // The bare `--allow-net` (any host/port) supersedes any host:port entries;
+  // `*:80` would be rejected at parse time and crash the worker.
+  assertEquals(args.includes("--allow-net"), true);
+  assertEquals(
+    args.some((a) => a.startsWith("--allow-net=")),
+    false,
+  );
 });
 
 Deno.test("unionFlags: read/write apply path templates", () => {
@@ -131,11 +155,18 @@ Deno.test("expandPath: substitutes $home/$downloads/$models/$sessions/$toolkit",
   assertEquals(expandPath("$toolkit", templates), "/home/u/.tomat/core/toolkits/x");
 });
 
-Deno.test("expandPath: substitutes $env.VAR from process env", () => {
-  Deno.env.set("TOMAT_PERMISSIONS_T0_VAR", "value");
+Deno.test("expandPath: $env.VAR resolves only allowlisted path vars; off-list vars resolve empty", () => {
+  const priorTmp = Deno.env.get("TMPDIR");
+  Deno.env.set("TMPDIR", "/tmpx");
+  // Secret-shaped, non-path var present in the core env: must NOT leak into a
+  // granted path.
+  Deno.env.set("TOMAT_PERMISSIONS_SECRET", "leak");
   try {
-    assertEquals(expandPath("$env.TOMAT_PERMISSIONS_T0_VAR/x", templates), "value/x");
+    assertEquals(expandPath("$env.TMPDIR/x", templates), "/tmpx/x");
+    assertEquals(expandPath("$env.TOMAT_PERMISSIONS_SECRET/x", templates), "/x");
   } finally {
-    Deno.env.delete("TOMAT_PERMISSIONS_T0_VAR");
+    if (priorTmp === undefined) Deno.env.delete("TMPDIR");
+    else Deno.env.set("TMPDIR", priorTmp);
+    Deno.env.delete("TOMAT_PERMISSIONS_SECRET");
   }
 });

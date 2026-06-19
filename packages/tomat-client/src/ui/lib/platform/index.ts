@@ -1,14 +1,16 @@
 // Platform abstraction: every host-only feature the Svelte UI uses goes
-// through this interface so the same code can run under Tauri (desktop) or
-// in a browser (web/mobile build) with different implementations.
+// through this interface so the same code can run under each native shell
+// (Tauri desktop today, a Tauri-mobile build later) with its own impl.
 //
 // IMPORTANT: NOTHING under packages/tomat-client/src/ui/ outside of
 // `lib/platform/` may import `@tauri-apps/*`. For components, state stores,
 // and shared modules, all platform-specific calls go through `platform()`.
 // This is enforced by an oxlint rule (see .oxlintrc.json). To add a new
 // platform-specific feature: add the method to the `Platform` interface
-// below, implement it in `tauri.ts`, stub it in `web.ts`, then call
-// `platform().<namespace>.<method>()` from the consumer.
+// below, implement it in `tauri.ts` (and a future `mobile.ts` when mobile
+// lands), cover it in the `src/ui/test/platform-stub.ts` fixture, then call
+// `platform().<namespace>.<method>()` from the consumer. There is no web
+// client, so there is no browser implementation.
 
 import type { StorageTree } from "@tomat/shared";
 
@@ -98,13 +100,12 @@ export interface ShortcutBindings {
 // --- Networking ----------------------------------------------------------
 //
 // All traffic to a paired core goes through `platform().net`, which terminates
-// TLS with CERTIFICATE PINNING below the webview (browser fetch/WebSocket can't
+// TLS with CERTIFICATE PINNING below the webview (a plain webview fetch can't
 // pin a self-signed cert). The desktop impl does it in Rust (reqwest +
 // tokio-tungstenite + a custom rustls verifier on the SPKI pin); a future mobile
-// impl reuses the same Rust; the web stub falls back to browser fetch/WebSocket
-// (no pinning; relies on the browser's CA trust). `pin` is base64(SHA-256(SPKI));
-// `capturePin` is the pairing-time TOFU mode that records the presented cert's
-// pin instead of enforcing one.
+// impl reuses the same Rust. `pin` is base64(SHA-256(SPKI)); `capturePin` is the
+// pairing-time TOFU mode that records the presented cert's pin instead of
+// enforcing one.
 
 export interface NetRequest {
   url: string;
@@ -282,10 +283,10 @@ export interface Platform {
     /** Optional `--core-url` / `--pairing-code` launch arguments, used to
      *  prefill the "On another computer" onboarding fields. Doubles as a
      *  shareable setup command; `deno task dev` passes the dev core URL + code
-     *  this way. Returns null when neither flag was given (or on web). */
+     *  this way. Returns null when neither flag was given. */
     launchPrefill(): Promise<{ coreUrl?: string; pairingCode?: string } | null>;
   };
-  // File-to-markdown conversion (desktop uses Rust crates; web uses core fallback).
+  // File-to-markdown conversion (desktop uses Rust crates).
   fileConvert: {
     toMarkdown(file: File): Promise<string>;
     /** Convert a file already on disk by absolute path. Used by the paste
@@ -313,7 +314,7 @@ export interface Platform {
     relaunch(): Promise<void>;
   };
   // Filesystem ops needed by drag-drop / attachment flows. Async across the
-  // board to match Tauri's plugin shape and to keep the web stub uniform.
+  // board to match Tauri's plugin shape.
   fs: {
     readFile(path: string): Promise<Uint8Array>;
     writeFile(path: string, bytes: Uint8Array): Promise<void>;

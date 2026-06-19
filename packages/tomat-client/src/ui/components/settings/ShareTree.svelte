@@ -9,7 +9,7 @@
   // no-op) render dim with a disabled, indeterminate checkbox; a section/group
   // whose every field is disabled is itself shown disabled.
   import { type TreeField, type TreeGroup } from "$lib/settings/share";
-  import Checkbox from "../ui/Checkbox.svelte";
+  import Checkbox from "@tomat/shared/ui/components/primitives/Checkbox.svelte";
 
   let {
     nodes,

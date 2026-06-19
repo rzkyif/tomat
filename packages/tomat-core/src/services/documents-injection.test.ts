@@ -52,8 +52,10 @@ Deno.test("token expansion: matches filename stems, dedupes, ignores unknown", a
     const blocks = documentTokenBlocks(
       "see @meeting-notes and again @meeting-notes plus @unknown-token",
     );
-    assertStringIncludes(blocks ?? "", '[Document @meeting-notes "Meeting Notes"]');
+    assertStringIncludes(blocks ?? "", '[Document @meeting-notes "Meeting Notes"');
     assertStringIncludes(blocks ?? "", "agenda body");
+    // Injected content is fenced + flagged as untrusted data (prompt-injection guard).
+    assertStringIncludes(blocks ?? "", "--- BEGIN DOCUMENT ---");
     assertEquals((blocks?.match(/\[Document /g) ?? []).length, 1);
     assertEquals(blocks?.includes("unknown-token"), false);
 

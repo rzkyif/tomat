@@ -21,15 +21,14 @@ CI.
 
 ## Quick reference
 
-| Task                    | What it runs                                                                                        |
-| ----------------------- | --------------------------------------------------------------------------------------------------- |
-| `deno task test`        | All tests across the whole repo (Deno + vitest + cargo).                                            |
-| `deno task test:deno`   | Deno tests only (core, shared, builtin-toolkit).                                                    |
-| `deno task test:core`   | Just `tomat-core`.                                                                                  |
-| `deno task test:shared` | Just `tomat-shared`.                                                                                |
-| `deno task test:ui`     | Vitest against the Svelte 5 UI (`packages/tomat-client`).                                           |
-| `deno task test:rs`     | `cargo test` for the Rust crates (tauri shell, core-keychain, core-updater).                        |
-| `deno task test:e2e`    | WebdriverIO + tauri-driver. Manual only. See [tests/e2e/README.md](e2e/README.md) for opt-in setup. |
+| Task                     | What it runs                                                                                        |
+| ------------------------ | --------------------------------------------------------------------------------------------------- |
+| `deno task test`         | All tests across every package (Deno test + vitest + cargo test).                                   |
+| `deno task test:core`    | Just `tomat-core`.                                                                                  |
+| `deno task test:shared`  | Just `tomat-shared`.                                                                                |
+| `deno task test:client`  | Vitest against the Svelte 5 UI + the Tauri crate's `cargo test` (`packages/tomat-client`).          |
+| `deno task test:<crate>` | `cargo test` for one Rust crate, e.g. `test:core-keychain`, `test:core-updater`.                    |
+| `deno task test:e2e`     | WebdriverIO + tauri-driver. Manual only. See [tests/e2e/README.md](e2e/README.md) for opt-in setup. |
 
 ## Layout
 
@@ -195,8 +194,8 @@ crate's clippy config rejects `unwrap` in non-test code.
 
 `.github/workflows/ci.yml` runs the always-on suite:
 
-- The `deno` job runs `deno task test:deno`, `deno task test:ui`, and
-  `deno task test:rs` on Linux.
+- The `deno` job runs `deno task test` on Linux (every package's Deno + vitest +
+  cargo tests).
 - The `rs` matrix runs `cargo test` for the Rust crates (tauri shell,
   core-keychain, core-updater) on macOS and Windows.
 - E2E specs are never run in CI.

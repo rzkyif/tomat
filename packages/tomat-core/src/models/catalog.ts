@@ -9,7 +9,7 @@
 
 import { verifyAsync } from "@noble/ed25519";
 import { canonicalize, decodeBase64, errMessage, modelCatalogSchema } from "@tomat/shared";
-import type { ModelCatalog } from "@tomat/shared";
+import type { CatalogPayload, ModelCatalog } from "@tomat/shared";
 import { join } from "@std/path";
 import { modelsCatalogUrl } from "../config.ts";
 import { channel, paths } from "../paths.ts";
@@ -117,4 +117,39 @@ async function writeCachedCatalog(c: ModelCatalog): Promise<void> {
 
 function cachePath(): string {
   return join(paths().cacheDir, "model-catalog.json");
+}
+
+/** Index every downloadable file's modelSpec -> pinned sha256 from the catalog,
+ *  so a model download can verify its bytes against the signed catalog. */
+export function buildSha256Index(catalog: CatalogPayload): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const fam of catalog.families) {
+    for (const model of fam.models) {
+      for (const v of model.variants) {
+        if (v.mmprojSpec && v.mmprojSha256) out.set(v.mmprojSpec, v.mmprojSha256);
+        for (const q of v.quants) if (q.sha256) out.set(q.modelSpec, q.sha256);
+      }
+    }
+  }
+  for (const cat of [catalog.stt, catalog.tts]) {
+    for (const model of cat.models) {
+      for (const quant of model.quants) {
+        for (const f of quant.files) if (f.sha256) out.set(f.modelSpec, f.sha256);
+      }
+    }
+  }
+  return out;
+}
+
+/** Pinned sha256 for a model file's HF spec from the signed catalog, or
+ *  undefined when the catalog can't be loaded (offline first run) or the spec
+ *  isn't a catalog file (a custom user pick), so the caller falls back to HF's
+ *  published hash. */
+export async function modelCatalogSha256(modelSpec: string): Promise<string | undefined> {
+  try {
+    const catalog = await loadModelCatalog();
+    return buildSha256Index(catalog).get(modelSpec);
+  } catch {
+    return undefined;
+  }
 }

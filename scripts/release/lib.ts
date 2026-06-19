@@ -488,6 +488,46 @@ export async function hashPaths(inputs: HashInput[]): Promise<string> {
   return await sha256String(entries.map((e) => `${e.path}\t${e.sha}`).join("\n"));
 }
 
+// ---------------------------------------------------------------------------
+// packages
+//
+// A "package" is a unit of development (a workspace member). PACKAGES is the
+// release side's view of the same package list the root deno.json `workspace`
+// array owns: each package's source dir and its manifest kind. Release items
+// reference packages by id (their `packages` field) to declare what they are
+// built from, and items whose source hash is exactly "each package's src +
+// manifest" derive that hash here via packagesHashInputs.
+
+export type PackageKind = "deno" | "rust";
+
+export const PACKAGES: Record<string, { dir: string; kind: PackageKind }> = {
+  shared: { dir: "packages/tomat-shared", kind: "deno" },
+  core: { dir: "packages/tomat-core", kind: "deno" },
+  client: { dir: "packages/tomat-client", kind: "deno" },
+  website: { dir: "packages/tomat-website", kind: "deno" },
+  toolkit: { dir: "packages/tomat-builtin-toolkit", kind: "deno" },
+  catalog: { dir: "packages/tomat-model-catalog", kind: "deno" },
+  "core-updater": { dir: "packages/tomat-core-updater", kind: "rust" },
+  "core-keychain": { dir: "packages/tomat-core-keychain", kind: "rust" },
+  "core-hwinfo": { dir: "packages/tomat-core-hwinfo", kind: "rust" },
+  "core-ptyhost": { dir: "packages/tomat-core-ptyhost", kind: "rust" },
+  "core-speech": { dir: "packages/tomat-core-speech", kind: "rust" },
+};
+
+/** Source-hash inputs for one package: its source tree + its manifest. */
+export function pkgHashInputs(id: string): string[] {
+  const p = PACKAGES[id];
+  if (!p) throw new Error(`unknown package id: ${id}`);
+  const manifest = p.kind === "rust" ? "Cargo.toml" : "deno.json";
+  return [`${p.dir}/src`, `${p.dir}/${manifest}`];
+}
+
+/** Combined source-hash inputs for a set of packages. Order-independent: the
+ *  hash sorts paths globally, so [a, b] and [b, a] yield the same hash. */
+export function packagesHashInputs(ids: string[]): string[] {
+  return ids.flatMap(pkgHashInputs);
+}
+
 const WEBSITE_HASH_INPUTS = ["src", "public", "astro.config.mjs", "wrangler.toml"];
 
 export async function hashWebsiteSource(): Promise<string> {
@@ -588,6 +628,12 @@ export interface ReleaseItem {
   label: string;
   /** channel-specific items publish per channel; shared items publish once. */
   scope: "channel" | "shared";
+  /** Package ids (keys of PACKAGES) this item is built from. A release item is
+   *  a unit of distribution and may compose several packages (e.g. `core`).
+   *  This is the explicit package -> release-item mapping; for items whose
+   *  source hash is exactly "each package's src + manifest" it also derives the
+   *  hash (see packagesHashInputs), so the package list cannot drift. */
+  packages: string[];
   /** Where to bump the version when this item changed without a bump. */
   bumpHint?: string;
   /** Deterministic hash of this item's source inputs (no compiling). */
@@ -611,4 +657,11 @@ export interface ReleaseItem {
 export async function signEd25519(privateKey: Uint8Array, body: unknown): Promise<string> {
   const sig = await ed.signAsync(new TextEncoder().encode(canonicalize(body)), privateKey);
   return encodeBase64(sig);
+}
+
+/** Detached Ed25519 signature over raw bytes (no canonicalization), base64.
+ *  For a file an installer verifies exactly as downloaded (e.g. client.json.sig
+ *  over the client.json bytes), where no shared canonicalizer is available. */
+export async function signEd25519Bytes(privateKey: Uint8Array, bytes: Uint8Array): Promise<string> {
+  return encodeBase64(await ed.signAsync(bytes, privateKey));
 }

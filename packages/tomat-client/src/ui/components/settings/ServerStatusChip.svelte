@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ServerStatus, ServerStatusUpdate } from "$lib/util/types";
-  import Chip from "../ui/Chip.svelte";
+  import Chip from "@tomat/shared/ui/components/primitives/Chip.svelte";
 
   let { type, update } = $props<{
     type: "LLM" | "STT" | "TTS";

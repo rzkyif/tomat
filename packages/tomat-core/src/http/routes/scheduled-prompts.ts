@@ -48,9 +48,9 @@ export function scheduledPromptsRoutes(): Hono {
     return c.json({ ok: true });
   });
 
-  r.post("/:id/run", (c) => {
+  r.post("/:id/run", async (c) => {
     const me = requireClient(c);
-    const session = promptScheduler().runNow(me.id, c.req.param("id"));
+    const session = await promptScheduler().runNow(me.id, c.req.param("id"));
     return c.json({ sessionId: session.id });
   });
 

@@ -21,7 +21,8 @@ import { CORE_VERSION, coreManifestUrl } from "../config.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
-import { sha256Hex } from "../shared/hash.ts";
+import { compareSemver } from "../shared/semver.ts";
+import { Sha256Stream } from "../shared/hash.ts";
 import { binPath, channelBinName } from "../paths.ts";
 import { coreBinaryName, hostTriple, platformExe } from "../binaries/versions.ts";
 import signingKeys from "../../data/signing-keys.json" with { type: "json" };
@@ -111,6 +112,10 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
   if (!entry) {
     throw new AppError("update_failed", `no binary for triple ${triple} in manifest`);
   }
+  // Clear any artifacts a previously-failed/partial update left behind so
+  // staging only ever holds the set we are about to verify (it never
+  // accumulates). Safe: applyUpdateInner runs once then exits for the updater.
+  await Deno.remove(paths().stagingDir, { recursive: true }).catch(() => {});
   await Deno.mkdir(paths().stagingDir, { recursive: true });
   const stagedPath = join(
     paths().stagingDir,
@@ -229,10 +234,16 @@ async function fetchCoreManifest(): Promise<CoreManifest> {
     );
   }
   const raw = await res.text();
-  const parsed = JSON.parse(raw) as CoreManifest;
-  if (parsed.schemaVersion !== 1) {
-    throw new AppError("manifest_fetch_failed", `bad core manifest schemaVersion`);
+  let parsed: CoreManifest;
+  try {
+    parsed = JSON.parse(raw) as CoreManifest;
+  } catch (err) {
+    throw new AppError("manifest_fetch_failed", `invalid core manifest JSON: ${errMessage(err)}`);
   }
+  // Validate the shape before touching any field (mirrors the binary-manifest
+  // verifier), so a hostile/garbled response can't reach decodeBase64/verify
+  // with an undefined signature and throw unwrapped.
+  assertCoreManifestShape(parsed);
   const pk = decodeBase64(signingKeys.publicKey);
   const sig = decodeBase64(parsed.signature);
   const body = new TextEncoder().encode(
@@ -243,6 +254,33 @@ async function fetchCoreManifest(): Promise<CoreManifest> {
     throw new AppError("signature_invalid", "core manifest signature invalid");
   }
   return parsed;
+}
+
+/** Validate a fetched core manifest's shape before any field is read or the
+ *  signature is verified. Mirrors `assertManifestShape` in binaries/manifest.ts
+ *  so the three trust-root fetchers behave identically on a garbled response. */
+function assertCoreManifestShape(value: unknown): asserts value is CoreManifest {
+  if (!value || typeof value !== "object") {
+    throw new AppError("manifest_fetch_failed", "core manifest is not an object");
+  }
+  const o = value as Record<string, unknown>;
+  if (o.schemaVersion !== 1) {
+    throw new AppError("manifest_fetch_failed", "bad core manifest schemaVersion");
+  }
+  if (typeof o.signature !== "string" || o.signature.length === 0) {
+    throw new AppError("manifest_fetch_failed", "core manifest missing signature");
+  }
+  if (typeof o.version !== "string" || o.version.length === 0) {
+    throw new AppError("manifest_fetch_failed", "core manifest missing version");
+  }
+  if (!Array.isArray(o.binaries)) {
+    throw new AppError("manifest_fetch_failed", "core manifest binaries is not an array");
+  }
+  for (const key of ["workers", "helpers"] as const) {
+    if (o[key] !== undefined && !Array.isArray(o[key])) {
+      throw new AppError("manifest_fetch_failed", `core manifest ${key} is not an array`);
+    }
+  }
 }
 
 async function downloadAndVerify(url: string, outPath: string, sha256: string): Promise<void> {
@@ -260,17 +298,19 @@ async function downloadAndVerify(url: string, outPath: string, sha256: string): 
     write: true,
     truncate: true,
   });
-  const chunks: Uint8Array[] = [];
+  // Hash incrementally while streaming to disk: the artifact (the ~100MB core
+  // binary, model-sized helpers) is never held in memory, only one chunk at a
+  // time.
+  const sha = new Sha256Stream();
   try {
     for await (const chunk of body) {
-      chunks.push(chunk);
       await file.write(chunk);
+      sha.update(chunk);
     }
   } finally {
     file.close();
   }
-  const merged = mergeChunks(chunks);
-  const hex = await sha256Hex(merged);
+  const hex = await sha.hexDigest();
   if (hex !== sha256.toLowerCase()) {
     try {
       await Deno.remove(tmp);
@@ -289,22 +329,10 @@ function exeSuffix(): "" | ".exe" {
   return Deno.build.os === "windows" ? ".exe" : "";
 }
 
-function mergeChunks(chunks: Uint8Array[]): Uint8Array {
-  let total = 0;
-  for (const c of chunks) total += c.byteLength;
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) {
-    out.set(c, off);
-    off += c.byteLength;
-  }
-  return out;
-}
-
-// canonicalize + decodeBase64 are the signature-critical serializers, now
+// canonicalize + decodeBase64 are the signature-critical serializers,
 // single-sourced in @tomat/shared (imported above for use here) so the signer
-// and both verifiers can't drift. Re-exported because self-updater.test.ts (and
-// historical callers) import them from this module.
+// and both verifiers can't drift. Re-exported so self-updater.test.ts can
+// import them from this module.
 export { canonicalize, decodeBase64 };
 
 /** The exact bytes covered by the core-manifest signature: the whole manifest
@@ -318,26 +346,4 @@ export function signedManifestPayload(manifest: Record<string, unknown>): string
   const signed: Record<string, unknown> = { ...manifest };
   delete signed.signature;
   return canonicalize(signed);
-}
-
-/** Compare two semver strings (major.minor.patch). Returns -1 if a < b,
- *  0 if equal, 1 if a > b. Pre-release tags and build metadata are
- *  ignored. That is sufficient for downgrade detection where the manifest
- *  publishes release versions only. */
-export function compareSemver(a: string, b: string): number {
-  const parse = (v: string): [number, number, number] => {
-    const core = v.split(/[-+]/)[0]; // drop prerelease + build
-    const parts = core.split(".").map((p) => parseInt(p, 10));
-    return [
-      Number.isFinite(parts[0]) ? parts[0] : 0,
-      Number.isFinite(parts[1]) ? parts[1] : 0,
-      Number.isFinite(parts[2]) ? parts[2] : 0,
-    ];
-  };
-  const [aMaj, aMin, aPat] = parse(a);
-  const [bMaj, bMin, bPat] = parse(b);
-  if (aMaj !== bMaj) return aMaj < bMaj ? -1 : 1;
-  if (aMin !== bMin) return aMin < bMin ? -1 : 1;
-  if (aPat !== bPat) return aPat < bPat ? -1 : 1;
-  return 0;
 }

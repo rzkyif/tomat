@@ -1,9 +1,9 @@
 <script lang="ts">
   import { confirmState, downloadsState } from "../../state";
   import DownloadRow from "./DownloadRow.svelte";
-  import Modal from "../ui/Modal.svelte";
-  import Button from "../ui/Button.svelte";
-  import IconButton from "../ui/IconButton.svelte";
+  import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
+  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
+  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
 
   // Order: completed first (most recent at top), then active, then queued,
   // then cancelled, then errored. Within each bucket, oldest-added first.

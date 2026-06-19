@@ -4,18 +4,18 @@
 // re-evaluation through condition deps.
 //
 // settingsState is the real singleton: no core is paired under vitest, so
-// flushes only write the web-stub client settings (localStorage) and the
+// flushes only write the stub's client settings (localStorage) and the
 // core PATCH path is skipped entirely.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDefaultSettings } from "@tomat/shared";
-import { installWebPlatform } from "$lib/platform/web";
+import { installPlatformStub } from "../test/platform-stub.ts";
 import { settingsState } from "$stores/settings.svelte";
 import { useSettingsForm } from "./use-settings-form.svelte";
 
 // The app installs a platform at boot; flushes write client settings through
-// it, so give the tests the real web (localStorage) implementation.
-installWebPlatform();
+// it, so give the tests the localStorage-backed stub.
+installPlatformStub();
 
 beforeEach(() => {
   // deno-lint-ignore no-explicit-any

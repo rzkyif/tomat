@@ -23,6 +23,12 @@ import { getLogger, scrubSecrets } from "../../shared/log.ts";
 
 const log = getLogger("http.sessions");
 
+// Sessions with an in-flight SSE chat stream. The SSE /:id/chat path persists
+// the user message and runs a completion independently, so without this guard
+// two concurrent POSTs to one session would append two user messages and
+// interleave two completions, corrupting the persisted history order.
+const sseActiveSessions = new Set<string>();
+
 export function sessionsRoutes(): Hono {
   const r = new Hono();
   r.use("*", bearerMiddleware());
@@ -209,6 +215,13 @@ export function sessionsRoutes(): Hono {
       throw new AppError("validation_error", "body must be { content: string }");
     }
 
+    // Refuse a second concurrent stream on this session BEFORE persisting the
+    // user message, so two overlapping requests can't interleave their turns.
+    if (sseActiveSessions.has(session.id)) {
+      throw new AppError("conflict", "this session already has an in-flight chat stream");
+    }
+    sseActiveSessions.add(session.id);
+
     // Persist the user message so the SSE response can be replayed from
     // session history later if the client refreshes.
     const userMsg: Message = {
@@ -265,8 +278,13 @@ export function sessionsRoutes(): Hono {
             ),
           );
         } finally {
+          sseActiveSessions.delete(session.id);
           controller.close();
         }
+      },
+      cancel() {
+        // Client disconnected mid-stream: release the session guard.
+        sseActiveSessions.delete(session.id);
       },
     });
 

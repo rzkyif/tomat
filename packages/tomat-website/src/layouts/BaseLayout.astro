@@ -1,0 +1,81 @@
+---
+// The shared design tokens. The UnoCSS reset + generated utilities are injected
+// by the unocss/astro integration; this brings the color ladders, bubble
+// visuals, roundedness, and font variables that the shared components paint
+// from. One source of truth with the client (packages/tomat-shared/src/ui).
+import "@tomat/shared/ui/styles/base.css";
+import "../styles/site.css";
+import { ClientRouter } from "astro:transitions";
+import Navbar from "../components/Navbar.astro";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+const { title = "tomat", description = "tomat" } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <title>{title}</title>
+    {/* No-flash theme: set the .dark class before first paint from the saved
+        preference, falling back to the OS setting. is:inline keeps it out of
+        the bundle so it runs synchronously in <head>. Re-applied on
+        astro:after-swap because view transitions reset documentElement's class
+        list and inline style to the freshly-served page (which has neither
+        .dark nor the font vars), so without this the theme and fonts reset on
+        every navigation. Setting --font-default / --font-mono inline mirrors how
+        the client applies its font settings: an inline value always wins over a
+        :root declaration, so the design-system fonts hold even if a stylesheet
+        loads late or re-declares them (the source of the mono flicker). */}
+    <script is:inline>
+      (function () {
+        var SANS =
+          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif';
+        var MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
+        function apply() {
+          try {
+            var de = document.documentElement;
+            var saved = localStorage.getItem("tomat-theme");
+            var dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+            de.classList.toggle("dark", dark);
+            de.style.setProperty("--font-default", SANS);
+            de.style.setProperty("--font-mono", MONO);
+          } catch (_) {}
+        }
+        apply();
+        document.addEventListener("astro:after-swap", apply);
+      })();
+    </script>
+    {/* Direction-aware page slide: tag <html> with the travel direction along
+        the navbar's page order before each view transition, which the CSS in
+        site.css turns into a horizontal slide. */}
+    <script is:inline>
+      (function () {
+        function order(pathname) {
+          if (pathname.indexOf("/manual") === 0) return 1;
+          return 0;
+        }
+        document.addEventListener("astro:before-preparation", function (e) {
+          try {
+            var from = order(new URL(e.from).pathname);
+            var to = order(new URL(e.to).pathname);
+            document.documentElement.dataset.vtDir = to > from ? "forward" : to < from
+              ? "back"
+              : "none";
+          } catch (_) {}
+        });
+      })();
+    </script>
+    <ClientRouter />
+  </head>
+  <body class="bg-surface text-default-800 font-sans">
+    <Navbar />
+    <slot />
+  </body>
+</html>

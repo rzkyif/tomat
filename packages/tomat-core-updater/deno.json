@@ -1,0 +1,12 @@
+{
+  "name": "tomat-core-updater",
+  "exports": {},
+  "tasks": {
+    "build": "cargo build --release",
+    "check": "cargo check --all-targets",
+    "lint": "cargo clippy --all-targets -- -D warnings",
+    "fmt": "cargo fmt",
+    "fmt:check": "cargo fmt --check",
+    "test": "cargo test"
+  }
+}

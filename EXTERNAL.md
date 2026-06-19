@@ -1,0 +1,210 @@
+# External dependencies (break-glass reference)
+
+tomat's model catalog and its manifest / update / binary-download paths depend
+on third-party services and providers whose download URLs, API response shapes,
+HTTP headers, and asset names are outside our control. When one of them changes,
+a build or a user download breaks. This file is the map to fix it fast.
+
+**Reach for this file when:** a model or sidecar download started failing, a
+release build broke fetching an upstream asset, or `deno task test` flags a
+schema / hash / size mismatch and you suspect a third party changed something.
+
+Each entry is a pointer, not a re-explanation: it names the external contract we
+rely on, the code that relies on it, the symptom when it breaks, and the fix.
+The authoritative detail stays in the linked code and READMEs so this file
+cannot drift from them.
+
+Reading each row:
+
+- **Assumes** is the exact external contract (URL shape, JSON field, header,
+  asset name) we are betting will not change.
+- **Fails as** is what you will actually observe when it does.
+- **Fix** is the first move, plus the canonical doc to follow.
+
+## 1. Model catalog (HuggingFace + scoring)
+
+### HuggingFace resolve URL
+
+- **Used for:** every model weight / mmproj / speech-model download.
+- **Code:** [sources.ts:49](packages/tomat-core/src/downloads/sources.ts#L49)
+  builds the URL; [manager.ts](packages/tomat-core/src/downloads/manager.ts)
+  runs the download.
+- **Assumes:** `https://huggingface.co/{user}/{repo}/resolve/{branch}/{file}?download=true`
+  serves the file (after a 302 to a CDN).
+- **Fails as:** every catalog download 404s or returns HTML.
+- **Fix:** update the template in `parseSource`. Specs are stored catalog-side as
+  `@user/repo/branch/file`, so only the URL construction changes.
+
+### HuggingFace redirect headers
+
+- **Used for:** probing a download's size before fetching, and verifying its
+  sha256 against HF + TLS.
+- **Code:**
+  [sources.ts:66-122](packages/tomat-core/src/downloads/sources.ts#L66-L122)
+  reads `x-linked-size` (falling back to `content-length`);
+  [manager.ts:694-716](packages/tomat-core/src/downloads/manager.ts#L694-L716)
+  reads `x-linked-etag` (falling back to `etag`) for the LFS content sha256.
+- **Assumes:** the resolve endpoint 302-redirects and exposes `x-linked-size` /
+  `x-linked-etag` on the HEAD response.
+- **Fails as:** sizes show as 0 / unknown; the published-hash check silently
+  yields nothing (catalog-pinned hashes still protect the download, see below).
+- **Fix:** adjust the header names / redirect handling in those two spots.
+
+### HuggingFace tree API (curation time)
+
+- **Used for:** pinning each file's sha256 when curating the catalog.
+- **Code:** `scripts/catalog/gather-hashes.ts`, `scripts/catalog/probe.ts`.
+- **Assumes:** `https://huggingface.co/api/models/{repo}/tree/{branch}?recursive=true`
+  returns `[{ path, lfs?: { oid } }]` with `oid` = the 64-hex git-LFS sha256.
+- **Fails as:** `deno run -A scripts/catalog/gather-hashes.ts` errors or pins
+  wrong / missing hashes.
+- **Fix:** see the Content hashes section of the
+  [model-catalog README](packages/tomat-model-catalog/README.md); update the
+  fetch + shape in `gather-hashes.ts`.
+
+### GGUF header format (curation time)
+
+- **Used for:** reading model architecture (block/head counts, context length)
+  off the weights during curation.
+- **Code:** `scripts/catalog/probe.ts`.
+- **Assumes:** the `GGUF` magic and the `general.architecture` + `{arch}.*`
+  metadata-key naming.
+- **Fails as:** `probe.ts` throws "not a GGUF file" or reads `undefined`
+  architecture fields.
+- **Fix:** update the GGUF reader in `probe.ts` to the new metadata keys.
+
+### Unsloth GGUF repos + quant naming
+
+- **Used for:** which quants exist for each LLM family.
+- **Code:**
+  [packages/tomat-model-catalog/src/families/](packages/tomat-model-catalog/src/families/).
+- **Assumes:** `@unsloth/<repo>/main/<Model>-<QUANT>.gguf` and `mmproj-F16.gguf`
+  naming on the `main` branch.
+- **Fails as:** a download 404s, or the file is missing at curation time.
+- **Fix:** re-point the family file's specs, then regenerate hashes
+  (`deno run -A scripts/catalog/gather-hashes.ts`) and re-release the catalog.
+
+### csukuangfj sherpa-onnx STT/TTS repos + file roles
+
+- **Used for:** speech-to-text and text-to-speech model files.
+- **Code:** [stt.ts](packages/tomat-model-catalog/src/stt.ts),
+  [tts.ts](packages/tomat-model-catalog/src/tts.ts).
+- **Assumes:** per-family repo names and file roles (whisper:
+  encoder/decoder/tokens; kokoro: model/voices/tokens; etc.) and the int8 / fp16
+  / fp32 quant naming.
+- **Fails as:** a speech-model download 404s or a required role file is absent.
+- **Fix:** re-point the repo / file roles in `stt.ts` / `tts.ts`, regenerate
+  hashes, re-release.
+
+### Artificial Analysis intelligence-index scores
+
+- **Used for:** ranking models in the fit engine (Smallest / Half / Full).
+- **Code:** `packages/tomat-model-catalog/src/families/*` (hand-entered values),
+  `packages/tomat-model-catalog/src/fit.ts` (the `intelligence-index` selector).
+- **Assumes:** the `intelligence-index` metric keeps existing at
+  <https://artificialanalysis.ai>. Values are hand-entered, not fetched at
+  runtime, so nothing breaks live; the risk is stale or discontinued scores.
+- **Fails as:** rankings drift from reality (no crash).
+- **Fix:** re-verify scores on each curation pass; if the metric is renamed,
+  switch the selector source/metric in `fit.ts` and across the family files.
+
+## 2. Binaries / sidecars (GitHub releases)
+
+### llama.cpp releases
+
+- **Used for:** the `llama-server` sidecar (chat + embeddings).
+- **Code:**
+  [model.ts:101-129](packages/tomat-shared/src/domain/model.ts#L101-L129)
+  (`UPSTREAM_BINARIES`, the single source of truth for repo + per-triple asset
+  patterns),
+  [upstream-resolver.ts:100-129](packages/tomat-core/src/binaries/upstream-resolver.ts#L100-L129).
+- **Assumes:** `api.github.com/repos/ggml-org/llama.cpp/releases/latest` returns
+  `{ tag_name, assets[] }`, and the asset is named `llama-{tag}-bin-<platform>`
+  per the `assets` map.
+- **Fails as:** "upstream ... has no asset" on update / latest-channel resolve.
+- **Fix:** update the asset-name patterns in `UPSTREAM_BINARIES`.
+
+### deno (pinned v2.8.2)
+
+- **Used for:** running tool workers under a pinned runtime.
+- **Code:**
+  [model.ts:113-128](packages/tomat-shared/src/domain/model.ts#L113-L128).
+- **Assumes:** `releases/tags/v2.8.2` exists with `deno-{triple}.zip` assets.
+- **Fails as:** worker runtime download fails if the tag / assets vanish.
+- **Fix:** bump `pinnedTag` deliberately, then **re-run the live-probe test**
+  ([prompt-live-probe.test.ts](packages/tomat-core/src/toolkits/prompt-live-probe.test.ts))
+  because tool-permission prompts are parsed from this version's prompt wording
+  ([prompt-parser.ts](packages/tomat-core/src/toolkits/prompt-parser.ts)).
+
+### GitHub release JSON shape + rate-limiting
+
+- **Used for:** resolving every upstream sidecar (the two above).
+- **Code:**
+  [upstream-resolver.ts:22-94](packages/tomat-core/src/binaries/upstream-resolver.ts#L22-L94).
+- **Assumes:** the `GitHubRelease` / `GitHubReleaseAsset` shape, and that
+  `assets[].digest` is `sha256:...` (required to install on the latest channel).
+  Unauthenticated GitHub is rate-limited (~60/hr); `GITHUB_TOKEN` raises it and a
+  5-minute per-repo cache dampens polling.
+- **Fails as:** `manifest_fetch_failed` (rate limit / shape) or
+  `checksum_mismatch` (missing digest).
+- **Fix:** update the interfaces / digest handling in `upstream-resolver.ts`;
+  set `GITHUB_TOKEN` if rate-limited.
+
+### espeak-ng-data (mutable rolling tag)
+
+- **Used for:** the text-to-speech phonemizer data packed into
+  `tomat-core-speech` at release time.
+- **Code:** `scripts/release/core.ts` (`ESPEAK_DATA_SHA256`).
+- **Assumes:**
+  `github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/espeak-ng-data.tar.bz2`
+  stays reachable and matches the pinned sha256. The `tts-models` tag is
+  **mutable**, so the asset can legitimately be republished.
+- **Fails as:** the release build aborts on a sha256 mismatch (by design: no
+  silent propagation of a swapped asset).
+- **Fix:** verify the new upstream asset, then recompute and update
+  `ESPEAK_DATA_SHA256` in the same commit.
+
+### Archive formats
+
+- **Used for:** extracting downloaded sidecars.
+- **Code:** [binaries/manager.ts](packages/tomat-core/src/binaries/manager.ts).
+- **Assumes:** `.tar.gz` (llama.cpp, tomat-core-speech) and `.zip` (deno,
+  Windows llama) layouts with the executable + shared libs as documented in
+  [sidecars/README.md](packages/tomat-core/src/sidecars/README.md).
+- **Fails as:** extraction finds no executable / missing libs after a download.
+- **Fix:** adjust the extraction layout in `binaries/manager.ts`.
+
+## 3. tomat distribution (Cloudflare R2) + trust root
+
+These are ours, not third-party, but the hostname / path layout and the signing
+key are hard contracts between the release scripts and every installed core, so
+they belong on the same map.
+
+### R2 storage host + manifest paths
+
+- **Used for:** fetching every signed manifest and release artifact.
+- **Code:** [config.ts:17-47](packages/tomat-core/src/config.ts#L17-L47).
+- **Assumes:** `get.au.tomat.ing/{manifests/<channel>/}{core,binaries,toolkit,catalog}.json`
+  (stable is bare; latest/dev nest under the channel).
+- **Fails as:** all update / catalog / toolkit fetches fail.
+- **Fix:** all hardcoded hosts live in `config.ts`; changing them is a one-file
+  edit. R2 / Cloudflare setup is in the
+  [website README](packages/tomat-website/README.md).
+
+### Ed25519 trust root
+
+- **Used for:** verifying every signed manifest and the model catalog.
+- **Code:** public key in
+  [data/signing-keys.json](packages/tomat-core/data/signing-keys.json), verified
+  in [self-updater.ts](packages/tomat-core/src/update/self-updater.ts),
+  [binaries/manifest.ts](packages/tomat-core/src/binaries/manifest.ts),
+  [toolkits/builtin-manifest.ts](packages/tomat-core/src/toolkits/builtin-manifest.ts),
+  and [models/catalog.ts](packages/tomat-core/src/models/catalog.ts).
+- **Assumes:** the committed public key matches the private key that signs
+  releases; signatures cover the whole payload minus the `signature` field,
+  canonicalized.
+- **Fails as:** `signature_invalid` on update / catalog load across the board.
+- **Fix:** the signing flow and trust root are documented in the
+  [update README](packages/tomat-core/src/update/README.md) and the
+  [website README](packages/tomat-website/README.md). Listed here only so the
+  cross-cutting verification path is discoverable from one place.

@@ -36,6 +36,7 @@ export const schemasItem: ReleaseItem = {
   id: "schemas",
   label: "JSON schemas",
   scope: "shared",
+  packages: ["shared"],
   bumpHint: `${VERSION_SRC} (version)`,
 
   version: () => readVersionField(join(REPO_ROOT, VERSION_SRC)),

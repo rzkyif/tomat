@@ -1,0 +1,80 @@
+<script lang="ts">
+  import ExpandableMessageView from "./ExpandableMessageView.svelte";
+
+  // The "Found N relevant documents" bubble: the shared collapsed-message shell
+  // with a body listing each matched document and its score. The client wrapper
+  // maps the message's `relevant` array onto `docs`; this stays presentational.
+  export type RelevantDoc = {
+    documentId?: string;
+    title: string;
+    score: number;
+    summary?: string;
+  };
+
+  let {
+    id,
+    docs = [],
+    status = "complete",
+    errorMessage,
+    defaultExpanded = false,
+    neighborLeft = false,
+    neighborRight = false,
+  }: {
+    id?: string;
+    docs?: RelevantDoc[];
+    status?: string;
+    errorMessage?: string;
+    defaultExpanded?: boolean;
+    neighborLeft?: boolean;
+    neighborRight?: boolean;
+  } = $props();
+
+  const count = $derived(docs.length);
+  const titleText = $derived.by(() => {
+    if (status === "error") return "Failed to find relevant documents";
+    if (count === 0) return "No relevant documents";
+    return `Found ${count} relevant document${count === 1 ? "" : "s"}`;
+  });
+
+  const formatScore = (s: number): string => s.toFixed(2);
+</script>
+
+<ExpandableMessageView
+  {id}
+  title={titleText}
+  applyColorOverride
+  {defaultExpanded}
+  {neighborLeft}
+  {neighborRight}
+>
+  {#snippet body()}
+    <div class="flex flex-col gap-2 text-xs text-left">
+      {#if errorMessage}
+        <div class="flex flex-col gap-1">
+          <div class="text-accent-red-700 font-bold">Filter Error</div>
+          <pre
+            class="tomat-scroll-inset font-mono text-accent-red-900 bg-accent-red-100 border border-accent-red-300 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre-wrap break-words">{errorMessage}</pre>
+        </div>
+      {/if}
+
+      {#if count === 0}
+        <div class="text-default-500 italic px-3 py-2">No documents matched.</div>
+      {:else}
+        <div class="flex flex-col gap-1">
+          {#each docs as doc, di (doc.documentId ?? di)}
+            <div
+              class="bg-surface-inset rounded-large px-4 py-2 text-default-800 whitespace-pre-wrap break-words"
+            >
+              <span class="font-bold">{doc.title}</span><span
+                class="text-default-500 tabular-nums font-mono">&nbsp;({formatScore(doc.score)})</span
+              >
+              {#if doc.summary}
+                <div class="text-default-600">{doc.summary}</div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/snippet}
+</ExpandableMessageView>

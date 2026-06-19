@@ -8,7 +8,8 @@
 import type { Grant, PermissionDecl, PermissionKind } from "@tomat/shared";
 
 export interface FlagSet {
-  net: Set<string>; // host:port entries
+  netAll: boolean; // bare --allow-net (any host/port); set by a wildcard host grant
+  net: Set<string>; // host:port entries (or a bare host for all-ports)
   read: Set<string>;
   write: Set<string>;
   run: Set<string>;
@@ -19,6 +20,7 @@ export interface FlagSet {
 
 export function emptyFlagSet(): FlagSet {
   return {
+    netAll: false,
     net: new Set(),
     read: new Set(),
     write: new Set(),
@@ -63,7 +65,10 @@ export function flagSetToArgs(flags: FlagSet): string[] {
   if (flags.write.size > 0) {
     args.push(`--allow-write=${[...flags.write].join(",")}`);
   }
-  if (flags.net.size > 0) args.push(`--allow-net=${[...flags.net].join(",")}`);
+  // A wildcard-host grant means "any host" (Deno can't express "any host, only
+  // these ports"), which is the bare `--allow-net` and supersedes any entries.
+  if (flags.netAll) args.push("--allow-net");
+  else if (flags.net.size > 0) args.push(`--allow-net=${[...flags.net].join(",")}`);
   if (flags.env.size > 0) args.push(`--allow-env=${[...flags.env].join(",")}`);
   if (flags.run.size > 0) args.push(`--allow-run=${[...flags.run].join(",")}`);
   if (flags.ffi) args.push("--allow-ffi");
@@ -81,6 +86,25 @@ export interface PathTemplates {
   toolkit: string;
 }
 
+// `$env.VAR` in a path template resolves ONLY against this allowlist of
+// path-shaped, non-secret variables. Resolving against the full core
+// environment would let a declared path reference a core-only secret-bearing
+// variable (e.g. an operator's API key) and smuggle its value into a granted
+// read/write path. A non-path secret never belongs in a path anyway, so any
+// off-list key resolves to "" (same as an unset var).
+const PATH_ENV_ALLOWLIST = new Set([
+  "HOME",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_CACHE_HOME",
+]);
+
 export function expandPath(template: string, templates: PathTemplates): string {
   return template
     .replaceAll("$home", templates.home)
@@ -88,14 +112,25 @@ export function expandPath(template: string, templates: PathTemplates): string {
     .replaceAll("$models", templates.models)
     .replaceAll("$sessions", templates.sessions)
     .replaceAll("$toolkit", templates.toolkit)
-    .replace(/\$env\.([A-Z_][A-Z0-9_]*)/g, (_, key) => Deno.env.get(key) ?? "");
+    .replace(/\$env\.([A-Z_][A-Z0-9_]*)/g, (_, key) =>
+      PATH_ENV_ALLOWLIST.has(key) ? (Deno.env.get(key) ?? "") : "",
+    );
 }
 
 function applyDecl(flags: FlagSet, decl: PermissionDecl, templates: PathTemplates): void {
   switch (decl.kind) {
     case "net": {
+      // Deno has no literal "*" token for a host or port. A wildcard host means
+      // all hosts -> bare `--allow-net` (the built-in download/fetch tools rely
+      // on this). A wildcard port means all ports of that host -> the bare host
+      // with no `:port`. Emitting "*" verbatim produces a flag Deno rejects at
+      // parse time, which crashes the worker at spawn.
+      if (decl.host === "*") {
+        flags.netAll = true;
+        break;
+      }
       for (const port of decl.ports) {
-        flags.net.add(`${decl.host}:${port}`);
+        flags.net.add(port === "*" ? decl.host : `${decl.host}:${port}`);
       }
       break;
     }

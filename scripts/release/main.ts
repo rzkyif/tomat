@@ -24,6 +24,7 @@ import {
   info,
   loadOrSeedEnv,
   ok,
+  PACKAGES,
   parseChannelFlag,
   promptYesNo,
   readReleaseCursor,
@@ -55,6 +56,17 @@ const ITEMS: ReleaseItem[] = [
   schemasItem,
   websiteItem,
 ];
+
+// Drift guard: every package a release item claims to be built from must exist
+// in the package table. Catches a release item referencing a renamed or removed
+// package (the derived-hash items also throw, this covers the documented ones).
+for (const item of ITEMS) {
+  for (const id of item.packages) {
+    if (!(id in PACKAGES)) {
+      throw new Error(`release item "${item.id}" references unknown package "${id}"`);
+    }
+  }
+}
 
 interface Flags {
   channel: ReleaseChannel;

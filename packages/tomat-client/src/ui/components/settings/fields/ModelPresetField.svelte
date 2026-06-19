@@ -4,10 +4,10 @@
   import { modelRecommendState } from "../../../state/model-recommend.svelte";
   import { cores } from "$lib/core";
   import FieldCard from "./FieldCard.svelte";
-  import OptionCard from "../../ui/OptionCard.svelte";
-  import Select from "../../ui/Select.svelte";
-  import HelpText from "../../ui/HelpText.svelte";
-  import Alert from "../../ui/Alert.svelte";
+  import OptionCard from "@tomat/shared/ui/components/primitives/OptionCard.svelte";
+  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
+  import HelpText from "@tomat/shared/ui/components/primitives/HelpText.svelte";
+  import Alert from "@tomat/shared/ui/components/primitives/Alert.svelte";
 
   // The adaptive LLM preset picker. Unlike the generic PresetField, each card's
   // model + tuning is computed by the core for this device; selecting a card

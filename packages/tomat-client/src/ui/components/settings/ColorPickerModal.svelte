@@ -1,8 +1,8 @@
 <script lang="ts">
   import { colorPickerState } from "../../state";
   import { formatOklch, parseColor } from "$lib/appearance/color";
-  import Popover from "../ui/Popover.svelte";
-  import Button from "../ui/Button.svelte";
+  import Popover from "@tomat/shared/ui/components/primitives/Popover.svelte";
+  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
 
   // Working OKLCHa state. Re-seeded each time a new request opens so
   // re-opening the same field doesn't carry leftover slider values.

@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/svelte";
-import Toggle from "./Toggle.svelte";
+import Toggle from "@tomat/shared/ui/components/primitives/Toggle.svelte";
 
 describe("Toggle", () => {
   it("renders with the initial checked state", () => {

@@ -1,14 +1,47 @@
 import { defineConfig } from "astro/config";
+import svelte from "@astrojs/svelte";
+import UnoCSS from "@unocss/astro";
+import { fileURLToPath } from "node:url";
 
-// Pure-static site. No SSR adapter needed. Wrangler's static-assets
-// feature (configured in wrangler.toml) serves `./dist/` directly when
-// deployed to Cloudflare Workers. If we ever add SSR endpoints, install
-// @astrojs/cloudflare and pass `adapter: cloudflare()` here.
+// Absolute path to the shared package source, so both `@tomat/shared` (barrel)
+// and `@tomat/shared/ui/...` subpaths resolve in Vite/Astro the same way the
+// client's svelte.config alias maps them. Prefix replacement: an import of
+// `@tomat/shared/ui/components/Bubble.svelte` resolves under this dir.
+const sharedSrc = fileURLToPath(new URL("../tomat-shared/src", import.meta.url));
+
+// The repo root. The shared design system (base.css, the extracted Svelte
+// components) and the hoisted node_modules both live above this package, so the
+// dev server must be allowed to serve files from there, not just the website
+// dir. Without this Vite blocks @astrojs/svelte's client runtime and the shared
+// base.css as "outside the serving allow list".
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+
+// Pure-static, multi-page site (no SPA): link navigation works without JS and
+// Astro's <ClientRouter /> layers view transitions on top when JS is present.
+// Wrangler's static-assets feature (wrangler.toml) serves `./dist/` directly.
 export default defineConfig({
   site: "https://au.tomat.ing",
   output: "static",
   trailingSlash: "ignore",
   build: {
     assets: "_astro",
+    // Emit every stylesheet as an external file rather than inlining per-page
+    // <style> blocks. Page-specific inlined styles (e.g. the home showcase's
+    // UnoCSS icon utilities) are not reliably restored by <ClientRouter /> on
+    // return navigation, so icons would vanish after manual -> home. External
+    // stylesheets are persisted and deduped by href across view transitions.
+    inlineStylesheets: "never",
+  },
+  integrations: [svelte(), UnoCSS({ injectReset: "@unocss/reset/tailwind-v4.css" })],
+  vite: {
+    resolve: {
+      alias: [
+        { find: /^@tomat\/shared$/, replacement: `${sharedSrc}/index.ts` },
+        { find: /^@tomat\/shared\//, replacement: `${sharedSrc}/` },
+      ],
+    },
+    server: {
+      fs: { allow: [repoRoot] },
+    },
   },
 });

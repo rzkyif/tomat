@@ -20,6 +20,10 @@ export default defineConfig({
   plugins: [svelte(), svelteTesting({ autoCleanup: false })],
   resolve: {
     alias: {
+      // Subpath exports (`@tomat/shared/ui/...`) must be aliased to the source
+      // dir BEFORE the bare alias, which only maps the package root to index.ts.
+      // Mirrors the `@tomat/shared/*` mapping in svelte.config.js.
+      "@tomat/shared/ui": new URL("../tomat-shared/src/ui", import.meta.url).pathname,
       "@tomat/shared": new URL("../tomat-shared/src/index.ts", import.meta.url).pathname,
       // SvelteKit's `$lib` alias is supplied here for vitest since we don't
       // load the SvelteKit plugin (see top-of-file comment).

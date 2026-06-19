@@ -28,3 +28,11 @@ inherited, so the core<->worker NDJSON stream passes through untouched;
 ptyhost never writes to its own stdout. The PTY slave runs in raw mode: no
 echo back into the master stream, no canonical-mode line limit (protocol
 frames can exceed it), no output post-processing.
+
+## Run, build, test
+
+This crate exposes the standardized verbs as cargo wrappers (its `deno.json`):
+`deno task check:core-ptyhost`, `lint:core-ptyhost`, `test:core-ptyhost`,
+`build:core-ptyhost`, or `cd` in and run `deno task <verb>`. It is also compiled
+as part of `deno task build:core` and folded into the repo-wide
+`deno task check` / `lint` / `test`.

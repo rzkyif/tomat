@@ -20,8 +20,7 @@ import { watch } from "node:fs";
 // `patchKitTdzRace` is the actual fix - it closes the race. The other two
 // plugins/config knobs (restartOnRustChange below; optimizeDeps.include and
 // the .svelte-kit/generated watch ignore in vite.config.ts) only shrink the
-// race window and predate the root-cause finding; they are kept because they
-// remain real dev wins on their own.
+// race window; they are kept because they remain real dev wins on their own.
 //
 // The fix patches @sveltejs/kit's client `load_node`: after awaiting the node
 // loader it touches `.component`; if that throws the transient TDZ it yields a
