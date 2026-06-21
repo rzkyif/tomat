@@ -16,6 +16,7 @@
   import QuickSettings from "$components/quick-settings/QuickSettings.svelte";
   import SessionList from "$components/session-list/SessionList.svelte";
   import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
+  import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
   import MessageStackGroup from "$components/chat/MessageStackGroup.svelte";
   import {
     asMessageContent,
@@ -76,6 +77,7 @@
 
   const log = getLogger("boot");
   const windowLog = getLogger("window");
+  const ui = useUiContext();
 
   // The keepalive runs exactly while halo rings exist (same condition as
   // Bubble.svelte's ringCount); without rings there's no backdrop to keep
@@ -894,7 +896,7 @@
   // loading sentinel) slide in top-to-bottom, each waiting one BASE_MS slot
   // per not-yet-animated bubble above it. Bubbles that already animated
   // (hasMessageAnimated) are settled and don't occupy a slot; their own
-  // delay value is moot because runMessageEnter dedupes by msgId.
+  // delay value is moot because claimMessageEnter dedupes by msgId.
   function enterDelayKey(msg: Message): string | null {
     if (msg.role === "loading") return LOADING_MSG_ID;
     return msg.id ?? msg.callId ?? null;
@@ -941,8 +943,17 @@
     >
     <div bind:this={contentEl} class="flex flex-col-reverse gap-2 my-auto">
       {#if viewState.mode === "chat"}
+        <!-- reading-flow: flex-visual makes keyboard focus traverse the column
+             in VISUAL order (top oldest -> bottom newest -> input -> session
+             bar) instead of DOM order. The DOM is newest-first so flex-col-
+             reverse can put the newest row at the bottom and keep the scroll
+             anchored there for free autoscroll; without reading-flow that makes
+             Tab walk bottom-to-top. Honored by Chromium webviews (WebView2);
+             where unsupported it's ignored and order falls back to DOM. -->
         <div
-          class="w-fit flex flex-col-reverse gap-2 pointer-events-none"
+          class="w-fit flex flex-col-reverse pointer-events-none"
+          style:gap={bubbleGap(ui)}
+          style:reading-flow="flex-visual"
           class:ml-auto={settingsState.getAlignment() === "right"}
           class:mr-auto={settingsState.getAlignment() === "left"}
           class:mx-auto={settingsState.getAlignment() === "center"}

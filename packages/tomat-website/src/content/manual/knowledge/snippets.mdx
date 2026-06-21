@@ -1,0 +1,50 @@
+---
+title: Snippets
+section: Knowledge
+order: 2
+---
+
+import SnippetAutocompleteDemo from "../../../components/demos/SnippetAutocompleteDemo.svelte";
+import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelte";
+
+A **snippet** is a reusable piece of text you trigger by name, so you stop
+retyping the same instruction or boilerplate every time. Where a
+[document](/manual/knowledge/documents) is a note the agent can find on its own, a
+snippet is text you reach for deliberately: a standing instruction, a template, a
+chunk of context you paste often. If you find yourself typing the same thing into
+the bar again and again, it should be a snippet.
+
+## Using a snippet
+
+Type `@` in the input bar and start typing a snippet's trigger. tomat suggests
+matches as you go, so you do not have to remember the exact name; pick one to drop
+its text in.
+
+<SnippetAutocompleteDemo />
+
+That is the whole interaction, and it is the same `@` mention you use to pull in a
+document, so there is one gesture to learn for both. It keeps your hands on the
+keyboard, which is the point: a snippet is only a shortcut if reaching for it is
+faster than retyping.
+
+## What a snippet can do
+
+A snippet is not always just inserted text. Depending on how you define it, it can
+add its text to your message, replace the message entirely, or feed into the
+[system prompt](/manual/tuning-replies/system-prompt) for the turn. That last form
+is powerful: a snippet can reshape how the agent behaves for one message without
+changing your standing system prompt.
+
+## Managing snippets
+
+Create and edit snippets under **Snippets** in Settings. Unlike a
+[document](/manual/knowledge/documents), which lives on the core, a snippet is kept
+by the client, so your snippets travel with this app to whichever core it pairs
+with. Each is stored as a file, which has a practical upside: sharing a snippet is
+as simple as copying its file to someone else, and your snippets are plain files
+you can back up or version like anything else.
+
+<SettingsPanelDemo group="snippets" />
+
+With your knowledge in place, the next chapter is about tomat acting on its own
+schedule: [Scheduled Prompts](/manual/automation/scheduled-prompts).

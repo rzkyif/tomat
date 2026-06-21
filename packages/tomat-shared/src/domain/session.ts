@@ -87,6 +87,59 @@ export interface ToolCall {
   }>;
 }
 
+// One question in a tool's askUser request. Discriminated by `kind`;
+// frames that predate the discriminator carry no kind and mean "choice".
+// Per-kind answer shapes (one entry per question in the response frame):
+// choice = chosen value (string[] when multiselect), diff = "accept" |
+// "reject", files = chosen path(s), image = chosen action value, table =
+// the edited rows as column-keyed records.
+export interface AskUserChoiceQuestion {
+  kind?: "choice";
+  question: string;
+  options?: Array<{ label: string; value: string; description?: string }>;
+  multiselect?: boolean;
+  allowFreeformInput?: boolean;
+}
+
+export interface AskUserDiffQuestion {
+  kind: "diff";
+  question: string;
+  before: string;
+  after: string;
+  title?: string;
+}
+
+export interface AskUserFilesQuestion {
+  kind: "files";
+  question: string;
+  entries: Array<{ path: string; label?: string; description?: string }>;
+  multiselect?: boolean;
+}
+
+export interface AskUserImageQuestion {
+  kind: "image";
+  question: string;
+  dataB64: string;
+  mime: string;
+  actions: Array<{ label: string; value: string }>;
+}
+
+export interface AskUserTableQuestion {
+  kind: "table";
+  question: string;
+  columns: string[];
+  rows: string[][];
+}
+
+export type AskUserQuestion =
+  | AskUserChoiceQuestion
+  | AskUserDiffQuestion
+  | AskUserFilesQuestion
+  | AskUserImageQuestion
+  | AskUserTableQuestion;
+
+export type AskUserAnswer = string | string[] | Array<Record<string, string>>;
+
 // Base fields every message carries. Concrete shapes are role-specific below.
 interface MessageBase {
   id: string;

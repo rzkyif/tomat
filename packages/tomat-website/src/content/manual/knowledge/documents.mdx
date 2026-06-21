@@ -1,0 +1,49 @@
+---
+title: Documents
+section: Knowledge
+order: 1
+---
+
+import RelevantDocumentsDemo from "../../../components/demos/RelevantDocumentsDemo.svelte";
+import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelte";
+
+**Documents** are notes you keep in tomat for the agent to draw on. Unlike an
+attachment, which belongs to a single message, a document lives on your core and
+stays available across every session, so a reference you add once is there for
+every future conversation. They are how you give the agent lasting context about
+your work, your projects, or yourself.
+
+## Relevant documents
+
+You do not have to remember which note matters for a given question. As you write
+a message, tomat finds the documents most related to it, lets the agent see their
+summaries, and lets it read the full text on demand. The note surfaces itself when
+it is relevant, and stays out of the way when it is not.
+
+<RelevantDocumentsDemo />
+
+The conversation shows which documents were surfaced, so a reply that leans on a
+note tells you which one. When nothing matches, tomat can either stay quiet or show
+that it looked and found nothing, whichever you prefer, so silence is never
+ambiguous.
+
+## Referencing a document
+
+When you know exactly which document you want, you do not have to wait for it to be
+ranked in. Type `@` and the document's name in the input bar to drop its full
+content straight into your message, the same mention you use for snippets. That is
+the difference between the two paths: retrieval is tomat finding a note for you,
+while a mention is you naming one outright.
+
+## Settings
+
+Turn relevant documents on or off, and cap how many tomat offers at once, under
+**Documents** in Settings. The cap is the main dial worth knowing: a higher one
+surfaces more notes per message at the cost of more of the
+[context window](/manual/core-concepts/sessions-and-context), while a lower one
+keeps replies lean.
+
+<SettingsPanelDemo group="documents" />
+
+For shorter pieces of reusable text you trigger by name rather than notes the
+agent retrieves, see [Snippets](/manual/knowledge/snippets).

@@ -184,7 +184,7 @@
         size="sm"
         variant="subtle"
         onclick={clearShortcut}
-        class="hover:text-red-500"
+        colorClass="text-default-400 hov:text-accent-red-500"
       />
     {/if}
   </div>

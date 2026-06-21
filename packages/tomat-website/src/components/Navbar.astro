@@ -3,67 +3,93 @@ import { getCollection } from "astro:content";
 import { activePageId, GITHUB_URL, knobClipPath, PAGES } from "../lib/site";
 import ThemeToggle from "./ThemeToggle.svelte";
 import ManualOutline from "./ManualOutline.astro";
+import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
 
 const active = activePageId(Astro.url.pathname);
-const activeIndex = Math.max(0, PAGES.findIndex((p) => p.id === active));
+const activeIndex = Math.max(
+  0,
+  PAGES.findIndex((p) => p.id === active),
+);
 const knob = knobClipPath(activeIndex, PAGES.length);
-const cell = "flex-1 min-w-0 flex items-center justify-center px-3 text-sm whitespace-nowrap";
+const cell =
+  "flex-1 min-w-0 flex items-center justify-center px-3 text-sm whitespace-nowrap";
 
 // The mobile sidebar self-contains the manual section/subsection tree (rather
 // than being fed by the layout), so it nests three levels everywhere: page >
 // section > subsection. It lives OUTSIDE the persisted <nav> so it re-renders
 // per page and its highlight/open state is always current.
-const manualEntries = (await getCollection("manual")).sort((a, b) => a.data.order - b.data.order);
+const manualEntries = (await getCollection("manual")).sort(
+  (a, b) => a.data.order - b.data.order,
+);
 const path = Astro.url.pathname.replace(/\/$/, "");
-const currentManualId = path.startsWith("/manual/") ? path.slice("/manual/".length) : "";
+const currentManualId = path.startsWith("/manual/")
+  ? path.slice("/manual/".length)
+  : "";
 
 // SidebarItem-style rows (mirrors the app's settings sidebar): no icons, an
 // expand chevron where the icon would sit. A w-5 spacer keeps icon-less top
 // level rows' labels aligned with the chevron rows.
-const row = "flex items-center h-8 pl-1.5 pr-2.5 gap-1.5 rounded-medium transition-colors";
-const rowIdle = "text-default-500 hover:text-default-700 hover:bg-surface-inset";
+const row =
+  "flex items-center h-8 pl-1.5 pr-2.5 gap-1.5 rounded-medium transition-colors";
+const rowIdle =
+  "text-default-500 hover:text-default-700 hover:bg-surface-inset";
 const rowActive = "bg-surface-inset text-default-900";
 ---
 
-{/* transition:persist keeps the navbar bar mounted across view transitions, so
-    the knob can slide to the new page (updated by the script below) and the page
-    content slides under a fixed bar. The sidebar/scrim are intentionally NOT
-    inside this element, so they re-render per page with correct highlights. */}
-<nav transition:persist="navbar" class="sticky top-0 z-50 h-14 bg-surface">
-  <div class="relative mx-auto h-full w-full max-w-6xl px-4 flex items-center justify-between">
-    {/* Left: the tomat icon, painted as a theme-adaptive mask (same technique as
-        the app) so it flips with light/dark instead of staying a fixed color. */}
-    <a
-      href="/"
-      class="flex items-center justify-center shrink-0 p-2 text-xl text-default-700 hov:text-default-900 rounded hov:cursor-pointer transition-colors"
-      aria-label="tomat home"
-    >
+{
+  /* transition:persist keeps the navbar bar mounted across view transitions, so
+    the knob can slide to the new page (updated by the script below). persist
+    alone keeps the DOM node, but the bar's pixels are still captured into the
+    `root` snapshot and would slide with the page; the `vt-navbar` class
+    (site.css) gives it its own view-transition-name so it is lifted into a
+    static group and the page content slides under a fixed bar. The
+    sidebar/scrim are intentionally NOT inside this element, so they re-render
+    per page with correct highlights. */
+}
+<nav
+  transition:persist="navbar"
+  class="vt-navbar sticky top-0 z-50 h-14 bg-surface"
+>
+  <div
+    class="relative mx-auto h-full w-full max-w-6xl px-4 flex items-center justify-between"
+  >
+    {
+      /* Left: the tomat icon, painted as a theme-adaptive mask (same technique as
+        the app) so it flips with light/dark instead of staying a fixed color.
+        Navbar `xl` IconButton scale, matching the GitHub + burger icons. */
+    }
+    <IconButton href="/" size="xl" title="tomat home" ariaLabel="tomat home">
       <span
-        class="block w-5 h-5 bg-current"
+        class="block w-6 h-6 bg-current"
         style="mask:url(/logo.svg) center/contain no-repeat;-webkit-mask:url(/logo.svg) center/contain no-repeat;"
-        aria-hidden="true"
-      ></span>
-    </a>
+        aria-hidden="true"></span>
+    </IconButton>
 
-    {/* Center (desktop): the segmented tab selector, link-based so it works with
+    {
+      /* Center (desktop): the segmented tab selector, link-based so it works with
         no JS. Absolutely centered on the row so it sits at the true center
-        regardless of the differing logo / GitHub+theme widths. */}
-    <div class="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+        regardless of the differing logo / GitHub+theme widths. */
+    }
+    <div
+      class="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+    >
       <div
         class="groove relative flex w-[22rem] h-10 rounded-large bg-surface-inset p-1"
         role="tablist"
         aria-label="Site"
       >
-        {PAGES.map((p) => (
-          <a
-            href={p.href}
-            role="tab"
-            aria-selected={p.id === active}
-            class={`${cell} text-default-600 transition-colors hover:text-default-800`}
-          >
-            {p.label}
-          </a>
-        ))}
+        {
+          PAGES.map((p) => (
+            <a
+              href={p.href}
+              role="tab"
+              aria-selected={p.id === active}
+              class={`${cell} text-default-600 transition-colors hover:text-default-800`}
+            >
+              {p.label}
+            </a>
+          ))
+        }
         <span
           aria-hidden="true"
           data-nav-knob
@@ -75,43 +101,64 @@ const rowActive = "bg-surface-inset text-default-900";
       </div>
     </div>
 
-    {/* Right (desktop): GitHub + theme, both sized to the icon. */}
+    {/* Right (desktop): GitHub + theme, both at the navbar `xl` icon scale. */}
     <div class="hidden md:flex items-center gap-1 shrink-0">
-      <a
+      <IconButton
         href={GITHUB_URL}
         target="_blank"
         rel="noopener noreferrer"
+        size="xl"
+        icon="i-mdi-github"
         title="tomat on GitHub"
-        aria-label="tomat on GitHub"
-        class="flex items-center justify-center shrink-0 p-2 text-xl text-default-700 hov:text-default-900 rounded hov:cursor-pointer transition-colors"
-      >
-        <i class="flex i-mdi-github"></i>
-      </a>
+        ariaLabel="tomat on GitHub"
+      />
       <ThemeToggle client:load />
     </div>
 
-    {/* Right (mobile): burger that morphs to an X. Pure CSS via a hidden
-        checkbox so it works with no JS. */}
-    <input type="checkbox" id="nav-toggle" class="nav-toggle sr-only" aria-hidden="true" />
-    <label
-      for="nav-toggle"
-      class="burger md:hidden flex flex-col justify-center gap-1.5 w-10 h-10 p-2 shrink-0 hover:cursor-pointer"
-      aria-label="Open menu"
+    {
+      /* Right (mobile): burger that morphs to an X. Pure CSS via a hidden
+        checkbox so it works with no JS. The IconButton renders as a `<label>`
+        (forId) and centers the three bars; the morph CSS targets `.burger .bar`. */
+    }
+    <input
+      type="checkbox"
+      id="nav-toggle"
+      class="nav-toggle sr-only"
+      aria-hidden="true"
+    />
+    <IconButton
+      forId="nav-toggle"
+      size="xl"
+      title="Open menu"
+      ariaLabel="Open menu"
+      class="burger md:hidden"
     >
-      <span class="bar block h-0.5 w-full bg-default-800 rounded transition-transform"></span>
-      <span class="bar block h-0.5 w-full bg-default-800 rounded transition-opacity"></span>
-      <span class="bar block h-0.5 w-full bg-default-800 rounded transition-transform"></span>
-    </label>
+      <span class="burger-bars flex flex-col justify-center gap-1.5 w-6">
+        <span
+          class="bar block h-0.5 w-full bg-default-800 rounded transition-transform"
+        ></span>
+        <span
+          class="bar block h-0.5 w-full bg-default-800 rounded transition-opacity"
+        ></span>
+        <span
+          class="bar block h-0.5 w-full bg-default-800 rounded transition-transform"
+        ></span>
+      </span>
+    </IconButton>
   </div>
 </nav>
 
-{/* Mobile sidebar + scrim. Outside the persisted <nav> so they re-render per
-    page (correct highlights), toggled by the persisted checkbox via :has. */}
+{
+  /* Mobile menu + scrim. A full-width panel that drops down from under the navbar
+    to fit its content (not a full-height drawer). Outside the persisted <nav> so
+    they re-render per page (correct highlights), toggled by the persisted
+    checkbox via :has. */
+}
 <label for="nav-toggle" class="scrim md:hidden" aria-hidden="true"></label>
 <aside
-  class="sidebar md:hidden fixed top-14 left-0 bottom-0 w-72 max-w-[80vw] z-50 bg-surface flex flex-col"
+  class="sidebar tomat-scroll md:hidden fixed top-14 left-0 right-0 z-40 bg-surface flex flex-col max-h-[calc(100dvh-3.5rem)] overflow-y-auto"
 >
-  <nav class="flex-1 overflow-y-auto p-3 flex flex-col gap-1" aria-label="Site">
+  <nav class="p-3 flex flex-col gap-1" aria-label="Site">
     <a
       href="/"
       class:list={[row, active === "home" ? rowActive : rowIdle]}
@@ -121,10 +168,14 @@ const rowActive = "bg-surface-inset text-default-900";
       Home
     </a>
 
-    {/* User Manual: expandable, open on a manual page; subsections navigate. */}
+    {
+      /* User Manual: expandable, open on a manual page; subsections navigate. */
+    }
     <details class="expandable" open={active === "manual"}>
       <summary class:list={[row, rowIdle, "hover:cursor-pointer select-none"]}>
-        <i class="expandable-chevron flex text-xl shrink-0 i-material-symbols-chevron-right-rounded"></i>
+        <i
+          class="expandable-chevron flex text-xl shrink-0 i-material-symbols-chevron-right-rounded"
+        ></i>
         User Manual
       </summary>
       <div class="mt-1 pl-3.5">
@@ -133,18 +184,22 @@ const rowActive = "bg-surface-inset text-default-900";
     </details>
   </nav>
 
-  {/* Footer: GitHub, then the theme toggle below it. No border. */}
-  <div class="p-3 flex flex-col gap-1">
+  {
+    /* Footer: GitHub and the theme toggle side by side, as filled card buttons
+      (the client's button style) rather than flat rows. */
+  }
+  <div class="p-3 pt-0 flex gap-2">
     <a
       href={GITHUB_URL}
       target="_blank"
       rel="noopener noreferrer"
-      class={`${row} ${rowIdle}`}
+      class="flex flex-1 items-center justify-center gap-2 h-10 rounded-medium bg-surface-inset text-default-700 hover:bg-surface-inset-strong hover:text-default-900 transition-colors"
     >
-      <i class="flex text-xl shrink-0 i-mdi-github"></i>
-      GitHub
+      <i class="flex text-lg shrink-0 i-mdi-github"></i>
+      <span class="flex-1 text-center">GitHub</span>
+      <i class="flex text-lg shrink-0 i-mdi-github invisible" aria-hidden="true"></i>
     </a>
-    <ThemeToggle client:load variant="row" />
+    <ThemeToggle client:load variant="card" />
   </div>
 </aside>
 
@@ -157,8 +212,11 @@ const rowActive = "bg-surface-inset text-default-900";
   .nav-toggle {
     position: absolute;
   }
+  /* The panel drops down from under the navbar (translateY), sitting BELOW the
+     navbar in the stack (z-40 vs the navbar's z-50) so that while hidden above
+     its top-14 anchor it stays tucked behind the opaque bar. */
   .sidebar {
-    transform: translateX(-100%);
+    transform: translateY(-100%);
     transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   .scrim {
@@ -168,24 +226,34 @@ const rowActive = "bg-surface-inset text-default-900";
     opacity: 0;
     pointer-events: none;
     transition: opacity 250ms ease;
-    z-index: 40;
+    z-index: 30;
   }
   :global(body):has(.nav-toggle:checked) .sidebar {
-    transform: translateX(0);
+    transform: translateY(0);
   }
   :global(body):has(.nav-toggle:checked) .scrim {
     opacity: 1;
     pointer-events: auto;
   }
-  /* Burger -> X morph (checkbox and burger are siblings inside the nav). */
-  nav:has(.nav-toggle:checked) .burger .bar:nth-child(1) {
+  /* Burger -> X morph (checkbox and burger are siblings inside the nav). The
+     bars live in `.burger-bars` (the slotted wrapper inside the IconButton
+     label), not on the label itself, so the label being rendered by the shared
+     component does not affect Astro's style scoping. */
+  nav:has(.nav-toggle:checked) .burger-bars .bar:nth-child(1) {
     transform: translateY(0.5rem) rotate(45deg);
   }
-  nav:has(.nav-toggle:checked) .burger .bar:nth-child(2) {
+  nav:has(.nav-toggle:checked) .burger-bars .bar:nth-child(2) {
     opacity: 0;
   }
-  nav:has(.nav-toggle:checked) .burger .bar:nth-child(3) {
+  nav:has(.nav-toggle:checked) .burger-bars .bar:nth-child(3) {
     transform: translateY(-0.5rem) rotate(-45deg);
+  }
+  /* Keyboard focus lands on the visually-hidden checkbox, so resurface the
+     focus ring on the visible burger bars (mirrors the :checked selector
+     structure, since the label's class can't be Astro-scoped from here). */
+  nav:has(.nav-toggle:focus-visible) .burger-bars {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
   }
   /* The active-page knob slides to its new clip rect (set by the script on
      navigation) instead of snapping. */
@@ -209,10 +277,15 @@ const rowActive = "bg-surface-inset text-default-900";
   function onLoad() {
     const knob = document.querySelector<HTMLElement>("[data-nav-knob]");
     if (knob) {
-      const index = Math.max(0, PAGES.findIndex((p) => p.id === activePageId(location.pathname)));
+      const index = Math.max(
+        0,
+        PAGES.findIndex((p) => p.id === activePageId(location.pathname)),
+      );
       knob.style.clipPath = knobClipPath(index, PAGES.length);
     }
-    const toggle = document.getElementById("nav-toggle") as HTMLInputElement | null;
+    const toggle = document.getElementById(
+      "nav-toggle",
+    ) as HTMLInputElement | null;
     if (toggle) toggle.checked = false;
   }
   document.addEventListener("astro:page-load", onLoad);

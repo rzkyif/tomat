@@ -52,13 +52,19 @@ const LLAMA_KEYS = new Set([
 
 // Keys that, when changed, reconcile the speech sidecar. STT and TTS share one
 // process: stt.threads drives the process thread count and the rest gate which
-// engines load, so tts.enabled lives here too.
+// engines load, so tts.enabled lives here too. The TTS model-selection keys are
+// included so switching preset/model (which writes tts.modelType/modelFiles, not
+// tts.enabled) reloads the engine in place instead of leaving the old voice
+// resident until the user manually toggles TTS off and on.
 const SPEECH_KEYS = new Set([
   "stt.enabled",
   "stt.provider",
   "stt.modelPath",
   "stt.threads",
   "tts.enabled",
+  "tts.modelType",
+  "tts.modelPath",
+  "tts.modelFiles",
 ]);
 
 // The embed sidecar only reads the shared CPU-thread knob; its model is fixed.

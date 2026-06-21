@@ -41,7 +41,7 @@
 </script>
 
 <div
-  class="relative flex items-center gap-1 min-w-0 text-sm text-default-400 transition-colors {disabled
+  class="tomat-focus-wrap rounded-medium relative flex items-center gap-1 min-w-0 text-sm text-default-400 transition-colors {disabled
     ? 'opacity-50'
     : 'hov:text-default-700'}"
   {title}

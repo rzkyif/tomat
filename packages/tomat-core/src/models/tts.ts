@@ -45,7 +45,7 @@ function appliedTts(model: TtsCatalogModel, quant: SpeechQuant): AppliedTtsSetti
   return {
     modelType: model.family,
     modelPath: primaryFileSpec(quant, TTS_PRIMARY_ROLE[model.family]),
-    modelFiles: JSON.stringify(modelFilesObject(quant)),
+    modelFiles: JSON.stringify(modelFilesObject(quant), null, 2),
     voice: model.defaultVoice,
   };
 }

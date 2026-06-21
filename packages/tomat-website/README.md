@@ -5,9 +5,11 @@ The Astro static site behind `au.tomat.ing`. Two pages:
 - **Home** (`/`): a single-viewport feature **showcase** (animated, seekable
   previews of the app built from the real `@tomat/shared/ui` components) above a
   compact install section.
-- **User manual** (`/manual/...`): one markdown subsection per page, with a
-  sidebar outline. Each page's "Last updated" date is derived from the file's
-  last git commit at build time (see `src/lib/git-date.ts`).
+- **User manual** (`/manual/...`): one MDX subsection per page, with a sidebar
+  outline. Pages render the real `@tomat/shared/ui` components inline as live
+  demos. Each page's "Last updated" date is derived from the file's last git
+  commit at build time (see `src/lib/git-date.ts`). How to write a page:
+  [STYLE.md](STYLE.md).
 
 Release artifacts (installers, schemas, signed manifests, binaries) are **not**
 served here; they live in the R2 public bucket at `get.au.tomat.ing`. The Worker

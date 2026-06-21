@@ -25,7 +25,9 @@
     class?: string;
   } = $props();
 
-  const surfaceClass = "bg-surface-inset";
+  // Dropdown trigger: rest inset fill darkens one shade on hover, two on press,
+  // matching the shared button interaction standard.
+  const surfaceClass = "bg-surface-inset hov:bg-surface-inset-strong act:bg-default-400";
 </script>
 
 {#if variant === "invisible"}
@@ -49,7 +51,7 @@
       {title}
       aria-label={ariaLabel}
       onchange={(e) => onchange?.((e.target as HTMLSelectElement).value)}
-      class="appearance-none {surfaceClass} text-default-800 rounded-medium focus:ring-blue-500 focus:border-blue-500 block w-full h-8 px-2 pr-7 outline-none hov:cursor-pointer text-sm"
+      class="appearance-none {surfaceClass} text-default-800 rounded-medium block w-full h-8 px-2 pr-7 outline-none hov:cursor-pointer transition-interactive text-sm"
     >
       {#each options as option (option.value)}
         <option value={option.value} disabled={option.disabled}>{option.label}</option>

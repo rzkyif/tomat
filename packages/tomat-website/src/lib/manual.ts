@@ -4,7 +4,17 @@ export type ManualEntry = CollectionEntry<"manual">;
 
 // Section display order. A section not listed here sorts to the end (by name),
 // so adding a section without touching this still renders sensibly.
-const SECTION_ORDER = ["Getting Started", "Features"];
+const SECTION_ORDER = [
+  "Getting Started",
+  "Core Concepts",
+  "Conversations",
+  "Tuning Replies",
+  "Speech",
+  "Tools & Toolkits",
+  "Knowledge",
+  "Automation",
+  "Settings & Maintenance",
+];
 
 export interface ManualSection {
   name: string;

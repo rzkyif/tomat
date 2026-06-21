@@ -92,7 +92,7 @@
   </div>
 
   {#if footer}
-    <div class="shrink-0 flex flex-col gap-1.5">
+    <div class="shrink-0 flex flex-col gap-1.5 pr-2">
       {@render footer(collapsed)}
     </div>
   {/if}

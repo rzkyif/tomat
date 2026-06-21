@@ -18,6 +18,19 @@
 //     lowercase brand are both fine; only the mixed-case (capital initial) form
 //     is rejected. The needle is built by concatenation so this file never
 //     trips its own rule.
+//   - no-builtin-palette-color: forbid the built-in UnoCSS/Tailwind palette
+//     color utilities (a property prefix + a palette hue + a numeric shade, e.g.
+//     `text-<hue>-<shade>`, `bg-<hue>-<shade>`, `focus:ring-<hue>-<shade>`).
+//     Those paint a fixed sRGB color that ignores the user's appearance settings
+//     and does NOT theme-invert in dark mode, so a color that reads in light
+//     mode gets neutralized in dark. The themable tokens
+//     (`*-accent-{blue|purple|red|green|yellow}-N`, `*-default-N`) resolve to
+//     the per-scope CSS variables and carry dark-mode inversion for free. Like
+//     no-em-dash, scans raw source so it catches class strings in `.ts` and
+//     `.svelte`; check-builtin-palette-color.ts covers the rest. The
+//     `*-accent-*` / `*-default-*` tokens are unaffected (their hue segment is
+//     literally `accent`/`default`, never a palette name). This source keeps no
+//     literal palette-color token, or the rule would flag its own examples.
 //
 // Keep this file em-dash-free and brand-uppercase-free, or the rules will flag
 // their own source.
@@ -52,6 +65,20 @@ const UPPERCASE_BRAND = "T" + "omat";
 const UPPERCASE_BRAND_MESSAGE =
   "The brand is always lowercase 'tomat'. Replace the capital-initial " +
   "spelling. (The all-caps TOMAT_ env-var prefix is a separate token and fine.)";
+
+// A built-in UnoCSS/Tailwind color utility: a color property prefix, a palette
+// hue, and a numeric shade (e.g. `text-<hue>-<shade>`). The `*-accent-*` /
+// `*-default-*` tokens never match: their hue segment is literally
+// `accent`/`default`, not a palette name. KEEP IN SYNC with the copy in
+// check-builtin-palette-color.ts (this file is .ts, lint-covered by oxlint; that
+// one walks the file types oxlint can't parse).
+const PALETTE_COLOR_RE =
+  /\b(?:text|bg|border|ring|from|to|via|fill|stroke|outline|divide|caret|decoration|shadow)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|[1-9]00|950)\b/g;
+const PALETTE_COLOR_MESSAGE =
+  "Built-in palette color utility is not allowed: it paints a fixed color that " +
+  "ignores the appearance settings and does not invert in dark mode. Use a " +
+  "themable token: *-accent-{blue|purple|red|green|yellow}-N for accents or " +
+  "*-default-N for neutrals.";
 
 const noTauriImport = {
   create(context: RuleContext) {
@@ -107,11 +134,33 @@ const noUppercaseBrand = {
   },
 };
 
+const noBuiltinPaletteColor = {
+  create(context: RuleContext) {
+    return {
+      Program() {
+        const lines = context.sourceCode.text.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          PALETTE_COLOR_RE.lastIndex = 0;
+          let m = PALETTE_COLOR_RE.exec(lines[i]);
+          while (m !== null) {
+            context.report({
+              message: PALETTE_COLOR_MESSAGE,
+              loc: { line: i + 1, column: m.index },
+            });
+            m = PALETTE_COLOR_RE.exec(lines[i]);
+          }
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: "tomat" },
   rules: {
     "no-tauri-import": noTauriImport,
     "no-em-dash": noEmDash,
     "no-uppercase-tomat": noUppercaseBrand,
+    "no-builtin-palette-color": noBuiltinPaletteColor,
   },
 };

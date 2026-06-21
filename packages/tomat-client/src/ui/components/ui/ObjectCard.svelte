@@ -28,14 +28,16 @@
      (no dead cursor gaps); the card content is pointer-events-none so clicks
      fall through to it, and only the triple-dot re-enables pointer events. -->
 <div
-  class="relative flex items-stretch gap-2 rounded-large px-3 py-2 transition-colors {onOpen
-    ? 'group hover:bg-surface-inset'
+  class="relative flex items-stretch gap-2 rounded-large px-3 py-2 transition-interactive {onOpen
+    ? 'group hov:bg-surface-inset'
     : ''}"
 >
   {#if onOpen}
+    <!-- Full-bleed overlay carries the press tint (the card content above it is
+         pointer-events-none, so it never receives :active itself). -->
     <button
       type="button"
-      class="absolute inset-0 hover:cursor-pointer"
+      class="absolute inset-0 rounded-large hov:cursor-pointer act:bg-surface-inset-strong transition-interactive"
       aria-label={`Open ${label}`}
       onclick={onOpen}
     ></button>

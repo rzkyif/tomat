@@ -32,13 +32,18 @@
   } = $props();
 
   const displayIcon = $derived(loading ? "i-material-symbols-progress-activity animate-spin" : icon);
+  const iconSizeClass = $derived(size === "sm" ? "text-sm" : "text-base");
 
+  // Hover darkens the rest background one shade step; press darkens two (the
+  // shared interaction standard). Ghost has no rest fill, so it materializes the
+  // inset surface on hover and deepens it on press.
   const variantClass = $derived(
     {
-      primary: "bg-default-inverted-300 text-default-inverted-900",
-      secondary: "bg-surface-inset text-default-800",
-      destructive: "bg-accent-red-200 text-white",
-      ghost: "bg-transparent text-default-800 hov:bg-surface-inset",
+      primary:
+        "bg-default-inverted-300 text-default-inverted-900 hov:bg-default-inverted-400 act:bg-default-inverted-500",
+      secondary: "bg-surface-inset text-default-800 hov:bg-default-300 act:bg-default-400",
+      destructive: "bg-accent-red-200 text-white hov:bg-accent-red-300 act:bg-accent-red-400",
+      ghost: "bg-transparent text-default-800 hov:bg-surface-inset act:bg-surface-inset-strong",
     }[variant],
   );
 
@@ -55,8 +60,17 @@
   {title}
   aria-label={ariaLabel}
   {onclick}
-  class="inline-flex items-center justify-center rounded-medium {sizeClass} {variantClass} hov:cursor-pointer transition-colors disabled:opacity-50 disabled:pointer-events-none {extraClass}"
+  class="inline-flex items-center justify-center rounded-medium {sizeClass} {variantClass} hov:cursor-pointer transition-interactive disabled:opacity-50 disabled:pointer-events-none {extraClass}"
 >
-  {#if displayIcon}<i class="flex {displayIcon} {size === 'sm' ? 'text-sm' : 'text-base'} shrink-0"></i>{/if}
-  {@render children?.()}
+  {#if displayIcon}
+    <!-- Icon pinned to the leading edge; the label centers across the whole
+         button via flex-1, and an invisible mirror icon on the trailing edge
+         balances the width so the centering is true to the button, not to the
+         space left over after the icon. -->
+    <i class="flex {displayIcon} {iconSizeClass} shrink-0"></i>
+    <span class="flex-1 text-center">{@render children?.()}</span>
+    <i class="flex {displayIcon} {iconSizeClass} shrink-0 invisible" aria-hidden="true"></i>
+  {:else}
+    {@render children?.()}
+  {/if}
 </button>

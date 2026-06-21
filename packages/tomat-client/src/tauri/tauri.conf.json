@@ -4,9 +4,15 @@
   "version": "0.1.0",
   "identifier": "au.tomat.ing",
   "build": {
-    "beforeDevCommand": "deno task stage:vad && deno run -A npm:vite@^8 dev",
+    "beforeDevCommand": {
+      "script": "deno task stage:vad && deno run -A npm:vite@^8 dev",
+      "cwd": "../.."
+    },
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "deno task stage:vad && deno run -A npm:vite@^8 build",
+    "beforeBuildCommand": {
+      "script": "deno task stage:vad && deno run -A npm:vite@^8 build",
+      "cwd": "../.."
+    },
     "frontendDist": "../../build"
   },
   "app": {

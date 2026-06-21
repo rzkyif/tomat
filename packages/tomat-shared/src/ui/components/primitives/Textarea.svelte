@@ -91,7 +91,7 @@
       ? "bg-transparent outline-none"
       : error
         ? "bg-accent-red-300 border-accent-red-400 text-default-800 rounded-medium px-2 py-1.5 outline-none"
-        : "bg-surface-inset focus:ring-blue-500 text-default-800 rounded-medium px-2 py-1.5 outline-none",
+        : "bg-surface-inset text-default-800 rounded-medium px-2 py-1.5 outline-none",
   );
 
   const sizeClass = $derived(

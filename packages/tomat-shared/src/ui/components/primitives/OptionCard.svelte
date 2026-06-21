@@ -52,14 +52,16 @@
     purple: "border-accent-purple-300 bg-accent-purple-100",
   };
 
+  // Unselected cards follow the shared interaction standard (rest fill darkens
+  // one step on hover, two on press); the selected treatment stays distinct.
   const stateClass = $derived(
     selectedStyle === "accent"
       ? selected
         ? `border-2 ${accentSelectedMap[accent]} text-default-800`
-        : "border-2 border-transparent bg-surface-inset hov:bg-surface-inset-strong text-default-800"
+        : "border-2 border-transparent bg-surface-inset hov:bg-surface-inset-strong act:bg-default-400 text-default-800"
       : selected
         ? "bg-default-inverted-300 text-default-inverted-800"
-        : "bg-surface-inset text-default-800",
+        : "bg-surface-inset text-default-800 hov:bg-surface-inset-strong act:bg-default-400",
   );
 
   const descriptionClass = $derived(
@@ -72,7 +74,7 @@
 
 <button
   type="button"
-  class="cursor-pointer text-left flex flex-col outline-none transition-colors duration-100 {sizeClass} {stateClass} {extraClass}"
+  class="cursor-pointer text-left flex flex-col outline-none transition-interactive {sizeClass} {stateClass} {extraClass}"
   title={htmlTitle}
   aria-label={ariaLabel}
   {onclick}

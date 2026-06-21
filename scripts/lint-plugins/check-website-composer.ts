@@ -1,0 +1,95 @@
+// Guards the "every website rendition is in lockstep with the client at default
+// settings" rule for the chat composer specifically.
+//
+// `UserInputView` OWNS the canonical default composition: the quick-model bar is
+// always present and the Voice Input button follows `stt.enabled` from the UI
+// context (both matching a fresh client). A bare `<UserInputView .../>` therefore
+// renders exactly what the client shows by default. The props below RE-DECIDE that
+// composition (which controls appear) and exist as the CLIENT's live-override
+// seams; if the website sets them, its renditions drift from the client (some get
+// the quick bar, some the mic, some neither) - the exact bug this check prevents.
+//
+// Allowed: props that only feed the always-present controls scripted STATE
+// (`value`, `placeholder`, `voiceClass`, `vadEnabled`, `vadListening`,
+// `onVoiceToggle`, ...). Those style/animate the canonical composition; they don't
+// change which controls exist.
+//
+// Wired into `deno task lint`. If a website demo genuinely needs a control the
+// client hides at default settings, the fix is to change the client default (and
+// thus the View's default), never to hand-configure the shell here.
+
+import { walk } from "@std/fs/walk";
+
+const ROOT = new URL("../../packages/tomat-website/src/", import.meta.url).pathname;
+const REL = "packages/tomat-website/src/";
+
+// Composition-deciding props: the client's live-override seams.
+const FORBIDDEN = ["belowContent", "showVoice", "showLeftGroup", "contentOverride", "rightSlot"];
+
+interface Violation {
+  file: string;
+  prop: string;
+}
+
+// Return the opening-tag text (`<UserInputView ... >`) starting at `start`,
+// tracking brace/quote nesting so a `>` inside an expression (e.g. an arrow
+// `() => x`) or a string isn't mistaken for the tag's end.
+function openTag(text: string, start: number): string {
+  let depth = 0;
+  let quote = "";
+  let out = "";
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    out += c;
+    if (quote) {
+      if (c === quote) quote = "";
+    } else if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+    } else if (c === "{") depth++;
+    else if (c === "}") depth--;
+    else if (c === ">" && depth === 0) break;
+  }
+  return out;
+}
+
+async function scan(): Promise<Violation[]> {
+  const violations: Violation[] = [];
+  for await (const entry of walk(ROOT, { exts: [".svelte"], includeDirs: false })) {
+    const text = await Deno.readTextFile(entry.path);
+    const rel = entry.path.slice(entry.path.indexOf(REL));
+    let from = 0;
+    for (;;) {
+      const idx = text.indexOf("<UserInputView", from);
+      if (idx < 0) break;
+      from = idx + 1;
+      // Only a real element (next char is whitespace or the self-close), not a
+      // substring like `<UserInputViewFoo`.
+      if (!/[\s/>]/.test(text[idx + "<UserInputView".length] ?? "")) continue;
+      const tag = openTag(text, idx);
+      for (const prop of FORBIDDEN) {
+        // The prop as an attribute name: a boundary before it, then `=`, `/`,
+        // `>`, or whitespace after (covers `prop={...}` and boolean `prop`).
+        if (new RegExp(`(?:^|[\\s])${prop}(?=[\\s=/>])`).test(tag)) {
+          violations.push({ file: rel, prop });
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+const violations = await scan();
+if (violations.length > 0) {
+  console.error(
+    "Website UserInputView renditions may not set composition props " +
+      "(they decide which controls appear and would drift from the client):",
+  );
+  for (const v of violations) console.error(`  ${v.file}  sets \`${v.prop}\``);
+  console.error(
+    "\nUserInputView already renders the canonical default composition (quick-" +
+      "model bar + Voice Input per stt.enabled). Drop the prop and render it bare; " +
+      "feed only scripted STATE (value, voiceClass, vadListening, ...). To change " +
+      "what appears by default, change the client default + the View, not this call.",
+  );
+  Deno.exit(1);
+}

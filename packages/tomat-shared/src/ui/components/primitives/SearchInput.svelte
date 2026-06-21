@@ -28,7 +28,7 @@
 </script>
 
 <div
-  class="relative h-10 bg-surface-inset rounded-large overflow-hidden w-full flex items-center px-4 pr-8 {extraClass}"
+  class="tomat-focus-wrap relative h-10 bg-surface-inset rounded-large overflow-hidden w-full flex items-center px-4 pr-8 {extraClass}"
   class:opacity-50={disabled}
 >
   <input

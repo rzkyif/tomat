@@ -133,7 +133,7 @@
   }
 
   const rawInputClass =
-    "bg-surface-inset text-default-800 rounded-medium h-8 px-2 text-sm outline-none focus:ring-blue-500";
+    "bg-surface-inset text-default-800 rounded-medium h-8 px-2 text-sm outline-none";
 </script>
 
 <div class="flex flex-col gap-2 text-sm {disabled ? 'opacity-60 pointer-events-none' : ''}">
@@ -192,7 +192,7 @@
               {disabled}
               aria-pressed={active}
               class="px-2 h-7 rounded-medium text-xs font-medium transition-colors hover:cursor-pointer {active
-                ? 'bg-blue-500 text-white'
+                ? 'bg-accent-blue-500 text-white'
                 : 'bg-surface-inset text-default-700 hover:text-default-900'}"
               onclick={() => toggleWeekday(day)}
             >

@@ -2,7 +2,7 @@
   import type { Snippet } from "svelte";
   import type { HTMLButtonAttributes } from "svelte/elements";
 
-  type Size = "xs" | "sm" | "md" | "lg" | "lg-tight";
+  type Size = "xs" | "sm" | "md" | "lg" | "lg-tight" | "xl";
   type Variant = "default" | "subtle";
   type Surface = "none" | "filled" | "circle";
 
@@ -12,8 +12,9 @@
   > & {
     /** Icon class string (e.g. "i-material-symbols-add-rounded") or a
      *  snippet for arbitrary inner content (custom SVG, animated indicator,
-     *  conditional icon trees, etc.). */
-    icon: string | Snippet;
+     *  conditional icon trees, etc.). Omit it and pass `children` instead when
+     *  the content comes from a slot (e.g. an Astro host). */
+    icon?: string | Snippet;
     title: string;
     ariaLabel?: string;
     size?: Size;
@@ -30,6 +31,16 @@
     type?: "button" | "submit";
     onclick?: (e: MouseEvent) => void;
     badge?: Snippet;
+    /** Slot content used as the inner icon when `icon` is not supplied (lets an
+     *  Astro host pass a masked logo or animated bars as default-slot children). */
+    children?: Snippet;
+    /** Render as a link (`<a href>`) instead of a `<button>`. */
+    href?: string;
+    target?: string;
+    rel?: string;
+    /** Render as a `<label for>` instead of a `<button>` (e.g. a CSS-only
+     *  checkbox toggle like the mobile menu burger). */
+    forId?: string;
     class?: string;
   };
 
@@ -47,6 +58,11 @@
     type = "button",
     onclick,
     badge,
+    children,
+    href,
+    target,
+    rel,
+    forId,
     class: extraClass = "",
     ...rest
   }: Props = $props();
@@ -60,6 +76,9 @@
       // Same lg icon (text-xl) but half the padding, for buttons packed into a
       // ButtonGroup-style pill that carries the other half as its own padding.
       "lg-tight": "p-1 text-xl",
+      // Navbar scale: a larger icon centered in a 40px box (no padding),
+      // matching the mobile burger button's footprint.
+      xl: "w-10 h-10 text-2xl",
     }[size],
   );
 
@@ -74,11 +93,16 @@
           : "text-default-700 hov:text-default-900"),
   );
 
+  // Hover/press background follows the shared interaction standard. A
+  // surfaceless icon button materializes the inset surface on hover and deepens
+  // it on press (the text-darken in `variantClass` is a complementary cue); a
+  // filled/circle button steps its existing fill one shade on hover, two on
+  // press.
   const surfaceClass = $derived(
     {
-      none: "",
-      filled: "bg-surface-inset",
-      circle: "bg-surface-inset",
+      none: "hov:bg-surface-inset act:bg-surface-inset-strong",
+      filled: "bg-surface-inset hov:bg-surface-inset-strong act:bg-default-400",
+      circle: "bg-surface-inset hov:bg-surface-inset-strong act:bg-default-400",
     }[surface],
   );
 
@@ -90,29 +114,52 @@
         circle: "rounded-full",
       }[surface],
   );
+
+  const cls = $derived(
+    `flex items-center justify-center shrink-0 ${sizeClass} ${variantClass} ${surfaceClass} ${roundedClass} hov:cursor-pointer transition-interactive disabled:opacity-50 disabled:pointer-events-none ${extraClass}`,
+  );
+  const label = $derived(ariaLabel ?? title);
 </script>
 
-<button
-  {...rest}
-  {type}
-  {disabled}
-  {title}
-  aria-label={ariaLabel ?? title}
-  {onclick}
-  class="flex items-center justify-center shrink-0 {sizeClass} {variantClass} {surfaceClass} {roundedClass} hov:cursor-pointer transition-colors disabled:opacity-50 disabled:pointer-events-none {extraClass}"
->
+{#snippet inner()}
   {#if badge}
     <span class="relative flex shrink-0">
       {#if typeof icon === "string"}
         <i class="flex {icon}"></i>
-      {:else}
+      {:else if icon}
         {@render icon()}
+      {:else if children}
+        {@render children()}
       {/if}
       {@render badge()}
     </span>
   {:else if typeof icon === "string"}
     <i class="flex {icon}"></i>
-  {:else}
+  {:else if icon}
     {@render icon()}
+  {:else if children}
+    {@render children()}
   {/if}
-</button>
+{/snippet}
+
+{#if href}
+  <a {href} {target} {rel} {title} aria-label={label} class={cls} {onclick}>
+    {@render inner()}
+  </a>
+{:else if forId}
+  <label for={forId} {title} aria-label={label} class={cls}>
+    {@render inner()}
+  </label>
+{:else}
+  <button
+    {...rest}
+    {type}
+    {disabled}
+    {title}
+    aria-label={label}
+    {onclick}
+    class={cls}
+  >
+    {@render inner()}
+  </button>
+{/if}

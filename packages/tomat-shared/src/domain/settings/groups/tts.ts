@@ -130,11 +130,15 @@ export const ttsGroup: SettingGroup = {
           description:
             "Advanced. The full set of files the model needs, as a JSON object mapping each sherpa role to an @user/repo/branch/file spec. Set automatically when you pick a model.",
           type: "multiline",
-          defaultValue: JSON.stringify({
-            model: "@csukuangfj/kokoro-int8-multi-lang-v1_0/main/model.int8.onnx",
-            voices: "@csukuangfj/kokoro-int8-multi-lang-v1_0/main/voices.bin",
-            tokens: "@csukuangfj/kokoro-int8-multi-lang-v1_0/main/tokens.txt",
-          }),
+          defaultValue: JSON.stringify(
+            {
+              model: "@csukuangfj/kokoro-int8-multi-lang-v1_0/main/model.int8.onnx",
+              voices: "@csukuangfj/kokoro-int8-multi-lang-v1_0/main/voices.bin",
+              tokens: "@csukuangfj/kokoro-int8-multi-lang-v1_0/main/tokens.txt",
+            },
+            null,
+            2,
+          ),
           descriptionTier: "ondemand",
         },
       ],

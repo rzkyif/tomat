@@ -134,6 +134,7 @@ export const appearanceGroup: SettingGroup = {
           description: "Color of your chat message bubbles.",
           type: "color",
           defaultValue: "#86efacff",
+          lockedLightness: 0.985,
           descriptionTier: "ondemand",
         },
         {
@@ -142,6 +143,7 @@ export const appearanceGroup: SettingGroup = {
           description: "Color of the agent's chat message bubbles.",
           type: "color",
           defaultValue: "#93c5fdff",
+          lockedLightness: 0.985,
           descriptionTier: "ondemand",
         },
         {
@@ -150,6 +152,7 @@ export const appearanceGroup: SettingGroup = {
           description: "Bubble color when a reply comes from your secondary model.",
           type: "color",
           defaultValue: "#d8b4feff",
+          lockedLightness: 0.985,
           descriptionTier: "ondemand",
         },
         {

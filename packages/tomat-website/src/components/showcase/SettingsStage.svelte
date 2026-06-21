@@ -4,12 +4,9 @@
   import { getDefaultSettings, SETTINGS_SCHEMA } from "@tomat/shared/domain/settings/engine";
   import SettingsShellView from "@tomat/shared/ui/components/settings/SettingsShellView.svelte";
   import SettingsContentView from "@tomat/shared/ui/components/settings/SettingsContentView.svelte";
-  import SidebarItem from "@tomat/shared/ui/components/primitives/SidebarItem.svelte";
-  import CollapsibleLabel from "@tomat/shared/ui/components/primitives/CollapsibleLabel.svelte";
+  import SettingsDemoFooter from "../demos/SettingsDemoFooter.svelte";
   import Cursor from "./Cursor.svelte";
   import { Demo, type Timeline } from "../../lib/showcase";
-
-  const noop = (): void => {};
 
   let { register }: { register: (h: { timeline: Timeline; reset: () => void }) => void } = $props();
 
@@ -98,6 +95,9 @@
     // 5. Scroll the results.
     demo.scroll(tl, () => shell?.getScrollEl(), 160, { duration: 2.0 });
     demo.hold(tl, 1.3);
+    // Drop the caret left in the search field before the loop auto-advances, so a
+    // focused off-screen input can't fight the track's scroll to the next stage.
+    tl.add(() => demo.blur());
 
     register({
       timeline: tl,
@@ -106,6 +106,7 @@
         // pause(0) seeks to the start with suppressEvents (default), so resetting
         // does not re-fire the timeline's action callbacks.
         tl.pause(0);
+        demo.blur();
         demo.placeFrac(0.5, 0.5);
       },
     });
@@ -117,33 +118,10 @@
   <SettingsContentView searchQuery="color" values={D} />
 {/snippet}
 
-<!-- The app's sidebar footer: Downloads, then the "tomat client vX.X.X" version
-     row (its tomat-mark mask + a collapsing label). Server-status chips only
-     render on error/loading, so a healthy default shows none. -->
+<!-- The app's sidebar footer (Downloads + the "tomat client vX.Y.Z" version row),
+     the same single static copy the manual demos render. -->
 {#snippet sidebarFooter(collapsed: boolean)}
-  <SidebarItem
-    icon="i-material-symbols-downloading-rounded"
-    label="Downloads"
-    {collapsed}
-    title={collapsed ? "Downloads" : undefined}
-    ariaLabel="Downloads"
-    onclick={noop}
-  />
-  <button
-    type="button"
-    class="flex items-center h-8 pl-1.5 {collapsed ? 'pr-0' : 'pr-2.5'} gap-1.5 rounded-medium text-default-500 hov:text-default-700 hov:bg-surface-inset [transition:color_500ms,background-color_200ms,padding_200ms]"
-    title={collapsed ? "tomat client" : undefined}
-    aria-label="tomat client version"
-  >
-    <span class="relative flex shrink-0">
-      <span
-        class="w-5 h-5 bg-current shrink-0"
-        style="mask:url(/logo.svg) center/contain no-repeat;-webkit-mask:url(/logo.svg) center/contain no-repeat;"
-        aria-hidden="true"
-      ></span>
-    </span>
-    <CollapsibleLabel {collapsed} class="text-base text-left">tomat client v0.1.0</CollapsibleLabel>
-  </button>
+  <SettingsDemoFooter {collapsed} />
 {/snippet}
 
 <div bind:this={stageEl} class="relative w-full h-full overflow-hidden flex items-center justify-center">

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import SessionBarView from "@tomat/shared/ui/components/chat/SessionBarView.svelte";
+  import MessageEnter from "./MessageEnter.svelte";
   import {
     messagesState,
     sessionsState,
@@ -149,7 +150,7 @@
   );
 </script>
 
-{#if showBar}
+{#snippet bar()}
   <SessionBarView
     tokenUsage={messagesState.tokenUsage
       ? { used: contextUsed, max: contextMax }
@@ -183,4 +184,18 @@
     }}
     baseColorOverride={themeOverrideHex}
   />
+{/snippet}
+
+{#if showBar}
+  {#if settingsState.getAlignment() === "center"}
+    <!-- Centered: the bar slides down from above the first time a session gains
+         content (showBar false -> true). No msgId, so it animates on every such
+         entry; the session-restore gate keeps a restored bar from animating on
+         load. Off-center (left/right) it just appears, with no entry motion. -->
+    <MessageEnter alignment="center" centerDirection="down">
+      {@render bar()}
+    </MessageEnter>
+  {:else}
+    {@render bar()}
+  {/if}
 {/if}

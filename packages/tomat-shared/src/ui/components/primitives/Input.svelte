@@ -61,7 +61,9 @@
 
   const isNumber = $derived(type === "number");
   const stateClass = $derived(
-    error ? "bg-accent-red-300 border-accent-red-400" : "bg-surface-inset focus:ring-blue-500",
+    error
+      ? "bg-accent-red-300 border-accent-red-400"
+      : "bg-surface-inset",
   );
   const fontClass = $derived(`${mono ? "font-mono" : ""} ${uppercase ? "uppercase" : ""}`);
 
@@ -128,7 +130,7 @@
           type="button"
           tabindex={-1}
           aria-label="Increase"
-          class="text-default-500 hov:text-default-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center h-3.5 w-5"
+          class="text-default-500 hov:text-default-800 act:text-default-900 transition-interactive disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center h-3.5 w-5"
           {disabled}
           onclick={() => adjust(1)}
         >
@@ -138,7 +140,7 @@
           type="button"
           tabindex={-1}
           aria-label="Decrease"
-          class="text-default-500 hov:text-default-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center h-3.5 w-5"
+          class="text-default-500 hov:text-default-800 act:text-default-900 transition-interactive disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center h-3.5 w-5"
           {disabled}
           onclick={() => adjust(-1)}
         >

@@ -17,7 +17,7 @@
 
   let {
     id,
-    title,
+    title: titleText,
     text = "",
     defaultExpanded = false,
     neighborLeft = false,
@@ -63,7 +63,7 @@
       alignment={ui.getAlignment()}
     >
       {#snippet title()}
-        <span>{title}</span>
+        <span>{titleText}</span>
       {/snippet}
       {#snippet children()}
         {#if body}

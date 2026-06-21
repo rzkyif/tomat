@@ -5,10 +5,13 @@
 
   const ui = useUiContext();
 
+  type Accent = "blue" | "green" | "red" | "yellow" | "purple";
+
   let {
     selectedAlignment,
     size = "large",
     bgClass = "bg-surface",
+    accent = undefined,
     extraClass = "",
     active = false,
     pulse = false,
@@ -17,6 +20,7 @@
     neighborRight = false,
     progress,
     progressFillBgClass = "bg-default-800",
+    progressFullHeight = false,
     onclick,
     oncontextmenu,
     ondblclick,
@@ -31,6 +35,14 @@
      *  same vertical extent in a stack row. */
     size?: "small" | "large";
     bgClass?: string;
+    /** Retint the WHOLE bubble to an accent hue by setting `--default-base` on
+     *  the body, so every nested `-default-` color (the `bg-surface` fill,
+     *  insets, text, borders, hover/focus/selected states) re-resolves to the
+     *  accent instead of neutral gray, the same way agent/user bubbles are soft
+     *  hue tints. Code surfaces (`--code-bg*`) stay neutral by design. Keep
+     *  `bgClass` at the default `bg-surface` so a themed bubble sits at surface
+     *  lightness like the agent/user bubbles. Undefined = neutral. */
+    accent?: Accent;
     extraClass?: string;
     active?: boolean;
     pulse?: boolean;
@@ -42,26 +54,78 @@
     /** Visual-right side has another bubble in the same stack row. */
     neighborRight?: boolean;
     /** Progress visualisation rendered AS the bubble background. The fill
-     *  occupies only the top header zone (h-8) so an expanded body underneath
-     *  stays unaffected. `undefined` = no progress; `null` = indeterminate
-     *  sweeping bar; number = percent (0..100). When set, content is rendered
-     *  twice: the top copy is `filter: invert()`-ed and clipped to the fill
-     *  rect so text and other UI elements over the bar read inverted. */
+     *  occupies the top header zone (a `2rem` band, or the whole bubble when
+     *  `progressFullHeight`) so an expanded body underneath stays unaffected.
+     *  `undefined` = no progress; `null` = indeterminate sweeping bar; number =
+     *  percent (0..100). When set, content is rendered twice: the top copy is
+     *  `filter: invert()`-ed and clipped to the fill rect so text and other UI
+     *  elements over the bar read inverted. */
     progress?: number | null;
     /** Override for the determinate/indeterminate fill colour. Defaults to
      *  `bg-default-800` to pair with the default `bg-surface` track. */
     progressFillBgClass?: string;
+    /** When the bubble is header-only (no expanded body underneath), the fill
+     *  and its inverted overlay should span the WHOLE bubble, not the fixed
+     *  top `2rem` header zone, otherwise a header taller than `2rem` (line-height
+     *  rounding, a wrapped description, a non-default font) leaves an uncovered
+     *  strip below the bar. Set this true while collapsed; leave false while a
+     *  body is expanded so the bar stays confined to the header zone above it. */
+    progressFullHeight?: boolean;
     onclick?: (e: MouseEvent) => void;
     oncontextmenu?: (e: MouseEvent) => void;
     ondblclick?: (e: MouseEvent) => void;
     children: Snippet;
   }>();
 
+  // Accent retint: a CSS color value (not a utility class), so a template
+  // literal is fine here. Set on the body element, it re-resolves the whole
+  // `--default-*` ladder to the accent hue for the body and every descendant.
+  let defaultBaseOverride = $derived(
+    accent ? `var(--accent-${accent}-base)` : undefined,
+  );
+
   let paddingClass = $derived(size === "small" ? "px-3 py-2" : "px-5 py-4");
   let minHClass = $derived(size === "small" ? "min-h-8" : "");
   let hasProgress = $derived(progress !== undefined);
   let percent = $derived(
     typeof progress === "number" ? Math.max(0, Math.min(100, progress)) : null,
+  );
+  // Grow-from-zero on spawn. A CSS transition only animates a value that
+  // changes after the element exists, so a bar that mounts already at e.g. 50%
+  // (a tool call that spawns mid-run, or a pending->running flip from the
+  // indeterminate sweep to a fresh determinate element) would otherwise snap to
+  // half-width. Paint the bar at 0 for one frame, then grow to the real value so
+  // `transition-all` animates the spawn. The effect keys on `isDeterminate`
+  // only (not `percent`), so later progress updates animate normally without
+  // re-triggering the reset. rAF/effects never run during SSR, so the static
+  // website build is unaffected.
+  let isDeterminate = $derived(hasProgress && percent !== null);
+  let grown = $state(false);
+  $effect(() => {
+    if (!isDeterminate) {
+      grown = false;
+      return;
+    }
+    grown = false;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        grown = true;
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  });
+  let displayPercent = $derived(grown ? percent : 0);
+  // The vertical extent of the fill bar and its inverted overlay. Full bubble
+  // height when header-only (collapsed), the fixed `2rem` header zone otherwise.
+  // Exported as custom props so the determinate clip-path and the indeterminate
+  // keyframes (which can't read a prop) share one source of truth.
+  let progressZoneHeight = $derived(progressFullHeight ? "100%" : "2rem");
+  let progressZoneBottomInset = $derived(
+    progressFullHeight ? "0px" : "calc(100% - 2rem)",
   );
   // Right-aligned bubbles fill the progress bar from right to left so the
   // motion mirrors the bubble's anchor edge. The determinate fill anchors on
@@ -118,6 +182,10 @@
     {oncontextmenu}
     {ondblclick}
     role={onclick ? "presentation" : undefined}
+    style:--default-base={defaultBaseOverride}
+    style:--progress-zone-bottom-inset={hasProgress
+      ? progressZoneBottomInset
+      : undefined}
     class="bubble-body {bgClass} {minHClass} relative z-10 overflow-hidden rounded-large w-fit max-w-[calc(100vw-5rem)] break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
     class:bubble-body-promote={ringCount > 0}
     class:rounded-l-small={selectedAlignment === "left" || neighborLeft}
@@ -133,18 +201,19 @@
     {#if hasProgress}
       {#if percent === null}
         <div
-          class="absolute top-0 h-8 {progressFillBgClass}"
+          class="absolute top-0 {progressFillBgClass}"
           class:left-0={!isRight}
           class:right-0={isRight}
           class:bubble-progress-indet={!isRight}
           class:bubble-progress-indet-rtl={isRight}
+          style:height={progressZoneHeight}
         ></div>
       {:else}
         <div
-          class="absolute top-0 h-8 {progressFillBgClass} transition-all"
+          class="absolute top-0 {progressFillBgClass} transition-all duration-500"
           class:left-0={!isRight}
           class:right-0={isRight}
-          style="width: {percent}%"
+          style="width: {displayPercent}%; height: {progressZoneHeight}"
         ></div>
       {/if}
     {/if}
@@ -156,21 +225,23 @@
            filled rect. `filter: invert(1) hue-rotate(180deg)` flips all colours
            (text, icons, inline-pill bg/fg) to a perceptually-inverted version
            in one shot, no need to thread invert-color props through every
-           descendant. The clip-path bottom inset keeps the inversion confined
-           to the top h-8 header zone so an expanded body below renders
-           normally. Children are rendered twice; Svelte's bind:expanded on the
+           descendant. The clip-path bottom inset (`--progress-zone-bottom-inset`)
+           keeps the inversion confined to the header zone so an expanded body
+           below renders normally; when header-only (`progressFullHeight`) that
+           inset is `0` so the inversion spans the whole bubble. Children are
+           rendered twice; Svelte's bind:expanded on the
            shared parent state keeps both Expandable instances in lockstep, and
            pointer-events:none on this layer routes all clicks to the lower
            (un-filtered) copy. -->
       <div
-        class="bubble-progress-invert absolute inset-0 z-20 {paddingClass} {extraClass}"
+        class="bubble-progress-invert absolute inset-0 z-20 transition-[clip-path] duration-500 {paddingClass} {extraClass}"
         class:bubble-progress-invert-indet={percent === null && !isRight}
         class:bubble-progress-invert-indet-rtl={percent === null && isRight}
         style:clip-path={percent === null
           ? undefined
           : isRight
-            ? `inset(0 0 calc(100% - 2rem) calc(100% - ${percent}%))`
-            : `inset(0 calc(100% - ${percent}%) calc(100% - 2rem) 0)`}
+            ? `inset(0 0 var(--progress-zone-bottom-inset) calc(100% - ${displayPercent}%))`
+            : `inset(0 calc(100% - ${displayPercent}%) var(--progress-zone-bottom-inset) 0)`}
         aria-hidden="true"
       >
         {@render children()}
@@ -246,15 +317,15 @@
   }
   @keyframes bubble-progress-invert-indet {
     0% {
-      clip-path: inset(0 100% calc(100% - 2rem) 0);
+      clip-path: inset(0 100% var(--progress-zone-bottom-inset) 0);
       animation-timing-function: ease-in;
     }
     50% {
-      clip-path: inset(0 25% calc(100% - 2rem) 25%);
+      clip-path: inset(0 25% var(--progress-zone-bottom-inset) 25%);
       animation-timing-function: ease-out;
     }
     100% {
-      clip-path: inset(0 0 calc(100% - 2rem) 100%);
+      clip-path: inset(0 0 var(--progress-zone-bottom-inset) 100%);
     }
   }
 
@@ -288,15 +359,15 @@
   }
   @keyframes bubble-progress-invert-indet-rtl {
     0% {
-      clip-path: inset(0 0 calc(100% - 2rem) 100%);
+      clip-path: inset(0 0 var(--progress-zone-bottom-inset) 100%);
       animation-timing-function: ease-in;
     }
     50% {
-      clip-path: inset(0 25% calc(100% - 2rem) 25%);
+      clip-path: inset(0 25% var(--progress-zone-bottom-inset) 25%);
       animation-timing-function: ease-out;
     }
     100% {
-      clip-path: inset(0 100% calc(100% - 2rem) 0);
+      clip-path: inset(0 100% var(--progress-zone-bottom-inset) 0);
     }
   }
 </style>

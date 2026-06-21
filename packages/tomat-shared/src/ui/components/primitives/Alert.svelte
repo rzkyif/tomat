@@ -75,7 +75,12 @@
 
 <div class="flex flex-row {alignClass} {sizeClass} {surfaceClass} {paddingClass} {extraClass}">
   {#if resolvedIcon}
-    <i class="flex {resolvedIcon} {iconSizeClass} {iconColorClass} shrink-0"></i>
+    <!-- Wrap the icon in a box the height of one text line (text-sm, 1.25rem)
+         and center the glyph in it, so with align="start" the icon lines up
+         with the first line of text instead of floating above it. -->
+    <span class="flex h-5 items-center shrink-0">
+      <i class="{resolvedIcon} {iconSizeClass} {iconColorClass}"></i>
+    </span>
   {/if}
   <div class="flex-1 min-w-0">
     {@render children()}

@@ -809,11 +809,11 @@
       : "Voice Input (Unavailable)"}
   voiceClass={vadManager.enabled
     ? vadManager.listening
-      ? "text-green-500"
-      : "text-blue-400"
+      ? "text-accent-green-500"
+      : "text-accent-blue-400"
     : sttIdle
-      ? "text-default-700 hover:text-default-900"
-      : "cursor-not-allowed"}
+      ? "text-default-700 hov:text-default-900"
+      : "text-default-700"}
   voiceDisabled={vadManager.loading || (!sttIdle && !vadManager.enabled)}
   onVoiceToggle={() => vadManager.toggle()}
   pttHolding={shortcutHandler.pttHolding}

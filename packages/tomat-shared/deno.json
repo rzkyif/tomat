@@ -38,6 +38,11 @@
     "@noble/hashes": "npm:@noble/hashes@^2.2.0",
     "svelte": "npm:svelte@^5.56.2",
     "unocss": "npm:unocss@^66.7.0",
-    "@unocss/extractor-svelte": "npm:@unocss/extractor-svelte@^66.7.0"
+    "@unocss/extractor-svelte": "npm:@unocss/extractor-svelte@^66.7.0",
+    "dompurify": "npm:dompurify@^3.4.8",
+    "marked": "npm:marked@^18.0.5",
+    "marked-highlight": "npm:marked-highlight@^2.2.4",
+    "highlight.js": "npm:highlight.js@^11.11.1",
+    "highlight.js/": "npm:/highlight.js@^11.11.1/"
   }
 }

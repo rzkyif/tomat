@@ -148,8 +148,9 @@ cd packages/tomat-core && deno task check   # or from inside the package
 ```
 
 `dev:core`, `dev:client`, and `dev:website` start a single component's dev loop.
-The client's `dev` is the full Tauri shell; the Vite-only frontend server is an
-internal step of that (`beforeDevCommand`), not a separate task. The five Rust
+The client's `dev` is the full Tauri shell; it runs the Vite frontend server
+itself through the Tauri `beforeDevCommand` (inlined in `tauri.conf.json`), so
+there is no separate Vite-only verb to confuse with `dev:website`. The five Rust
 helper crates expose the same verbs as cargo wrappers, so
 `deno task check:core-keychain` and `cd packages/tomat-core-keychain && deno
 task lint` work identically to the Deno packages.

@@ -1,5 +1,6 @@
 import { presetIcons, presetTypography, presetWind4, type UserConfig } from "unocss";
 import extractorSvelte from "@unocss/extractor-svelte";
+import { CSS_EASING, INTERACTIVE_MS } from "./animations.ts";
 
 // The shared slice of the UnoCSS config that both the client (Vite) and the
 // website (Astro) spread into their own `defineConfig`. It owns everything that
@@ -45,6 +46,15 @@ export function tomatUnoBase(): UserConfig {
           : undefined,
     ],
     shortcuts: [
+      // The single canonical transition for button-like interaction feedback:
+      // hover/press color shifts at INTERACTIVE_MS with the shared CSS_EASING.
+      // Every clickable element uses this in place of a bare `transition-colors`
+      // so hover and press feel identical app-wide. CSS_EASING's spaces are
+      // stripped because UnoCSS arbitrary values treat spaces as token breaks.
+      [
+        "transition-interactive",
+        `transition-colors duration-[${INTERACTIVE_MS}ms] ease-[${CSS_EASING.replace(/ /g, "")}]`,
+      ],
       // The themable color tokens. Each `*-default-*` and `*-accent-*-*` class
       // resolves to a CSS variable defined in base.css; those variables are
       // derived from a single user-customizable base hex per scope via

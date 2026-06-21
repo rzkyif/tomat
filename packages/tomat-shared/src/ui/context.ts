@@ -26,6 +26,11 @@ export interface UiContext {
   readonly bubbleBlurEnabled: boolean;
   /** How many concentric halo rings to render when blur is on. */
   readonly bubbleBlurRings: number;
+  /** Whether Speech-to-Text is enabled (drives the composer's Voice Input
+   *  button). The composer reads this so its DEFAULT rendition (no host
+   *  override) matches the client at default settings, instead of each caller
+   *  deciding the mic button's presence by hand. */
+  readonly sttEnabled: boolean;
   /** Optional per-system-message base color hex override (appearance setting),
    *  or undefined when no override is set. */
   readonly systemMessageDefaultColor: string | undefined;
@@ -54,6 +59,18 @@ export interface UiContext {
   /** The primary pointer. `"coarse"` (touch) Views gate hover-only affordances
    *  behind `pointer === "fine"`. */
   readonly pointer: "fine" | "coarse";
+}
+
+/** Vertical gap between chat bubbles, as a CSS length. With the frosted halo on,
+ *  widen by twice the shadow distance on top of the tight default so adjacent
+ *  bubbles' shadows/halos stay clear of each other instead of touching; with
+ *  blur off keep the tight default (the old gap-2). Reads the reactive
+ *  `bubbleBlurEnabled` getter, so applying it via `style:gap={bubbleGap(ui)}`
+ *  stays live when the setting toggles. `--bubble-shadow-distance` cascades
+ *  globally (the client writes it from appearance.bubbleShadowDistance; the
+ *  website inherits the base default). */
+export function bubbleGap(ui: UiContext): string {
+  return ui.bubbleBlurEnabled ? "calc(0.5rem + 2 * var(--bubble-shadow-distance))" : "0.5rem";
 }
 
 const KEY = Symbol("tomat:ui-context");
@@ -92,6 +109,9 @@ export function makeUiContext(sources: UiContextSources): UiContext {
     },
     get bubbleBlurRings() {
       return (getSetting("appearance.bubbleBlurRings") as number | undefined) ?? 1;
+    },
+    get sttEnabled() {
+      return getSetting("stt.enabled") !== false;
     },
     get systemMessageDefaultColor() {
       // A fully transparent value means "no override" (fall back to the base).

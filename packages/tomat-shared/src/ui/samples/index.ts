@@ -21,6 +21,7 @@ export { settingsHeaderSamples } from "./settings-header.ts";
 export { settingsShellSamples } from "./settings-shell.ts";
 export { settingsSidebarSamples } from "./settings-sidebar.ts";
 export { snippetAutocompleteSamples } from "./snippet-autocomplete.ts";
+export { toolCallSamples } from "./tool-call.ts";
 export { userInputSamples } from "./user-input.ts";
 export { userMessageSamples } from "./user-message.ts";
 export { SAMPLE_FIRST_GROUP, SAMPLE_GROUPS, SAMPLE_VALUES } from "./settings-groups.ts";
@@ -41,6 +42,7 @@ import { settingsHeaderSamples } from "./settings-header.ts";
 import { settingsShellSamples } from "./settings-shell.ts";
 import { settingsSidebarSamples } from "./settings-sidebar.ts";
 import { snippetAutocompleteSamples } from "./snippet-autocomplete.ts";
+import { toolCallSamples } from "./tool-call.ts";
 import { userInputSamples } from "./user-input.ts";
 import { userMessageSamples } from "./user-message.ts";
 
@@ -63,6 +65,7 @@ export const SAMPLES = {
   SettingsShellView: settingsShellSamples,
   SettingsSidebarView: settingsSidebarSamples,
   SnippetAutocompleteView: snippetAutocompleteSamples,
+  ToolCallView: toolCallSamples,
   UserInputView: userInputSamples,
   UserMessageView: userMessageSamples,
 } as const;

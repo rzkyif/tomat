@@ -5,16 +5,24 @@
   // showcase.
   import UserMessageView from "@tomat/shared/ui/components/chat/messages/UserMessageView.svelte";
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
+  import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
+  import DemoFrame from "./DemoFrame.svelte";
+
+  const ui = useUiContext();
+
+  let { label }: { label?: string } = $props();
 </script>
 
-<div class="flex flex-col gap-2 w-full max-w-md mx-auto">
-  <UserMessageView text="How do I install tomat?" />
-  <AgentMessageView kind="content" bgClass="bubble-agent">
-    {#snippet body()}
-      <span class="whitespace-pre-wrap break-words"
-        >Run the one-line installer from the landing page, then launch the app. Want the per-OS
-        steps?</span
-      >
-    {/snippet}
-  </AgentMessageView>
-</div>
+<DemoFrame {label} designWidth={620}>
+  <div class="mx-auto flex w-full max-w-[620px] flex-col" style:gap={bubbleGap(ui)}>
+    <UserMessageView text="How do I install tomat?" />
+    <AgentMessageView kind="content" bgClass="bubble-agent">
+      {#snippet body()}
+        <span class="whitespace-pre-wrap break-words"
+          >Run the one-line installer from the landing page, then launch the app. Want the per-OS
+          steps?</span
+        >
+      {/snippet}
+    </AgentMessageView>
+  </div>
+</DemoFrame>

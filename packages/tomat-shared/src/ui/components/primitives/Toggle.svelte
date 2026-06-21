@@ -107,7 +107,7 @@
         role="radio"
         aria-checked={value === opt.value}
         tabindex={value === opt.value ? 0 : -1}
-        class="{cellClass} text-default-600 transition-colors hov:text-default-800 hov:cursor-pointer"
+        class="{cellClass} text-default-600 transition-interactive hov:text-default-800 act:text-default-900 hov:cursor-pointer"
         onclick={() => onselect?.(opt.value)}
       >
         {opt.label}
@@ -156,7 +156,7 @@
      would be painted over; resurface keyboard focus on the groove itself. */
   .groove:has(:focus-visible),
   label:has(:focus-visible) .groove {
-    outline: auto;
-    outline-offset: 1px;
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
   }
 </style>

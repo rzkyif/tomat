@@ -1,8 +1,6 @@
 ---
 import { getCollection, render } from "astro:content";
 import ManualLayout from "../../layouts/ManualLayout.astro";
-import ChatDemo from "../../components/demos/ChatDemo.svelte";
-import InstallCard from "../../components/InstallCard.svelte";
 import { gitLastUpdated } from "../../lib/git-date";
 
 export async function getStaticPaths() {
@@ -26,15 +24,8 @@ const { Content } = await render(entry);
     <div class="mt-1 text-xs text-default-500">Last updated {lastUpdated}</div>
   </header>
 
-  {/* The first subsection of a relevant section embeds a real app component /
-      reused feature demo, declared via the `demo` frontmatter field. */}
-  {entry.data.demo === "chat" && (
-    <div class="mb-8"><ChatDemo client:visible /></div>
-  )}
-  {entry.data.demo === "install" && (
-    <div class="mb-8"><InstallCard client:visible /></div>
-  )}
-
+  {/* Demos live inline inside the MDX, rendered at the point each system is
+      discussed (see STYLE.md), so the page shell only frames the prose. */}
   <div class="prose dark:prose-invert max-w-none">
     <Content />
   </div>

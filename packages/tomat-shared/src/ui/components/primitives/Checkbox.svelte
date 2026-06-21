@@ -59,7 +59,7 @@
   /* The real input sits transparent over the box, so its focus ring is
      invisible; resurface keyboard focus on the box itself. */
   .box-wrap:has(:focus-visible) .box {
-    outline: auto;
-    outline-offset: 1px;
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
   }
 </style>

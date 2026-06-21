@@ -60,7 +60,8 @@
       "wraps": "ExpandableMessageView"
     },
     "chat/messages/ToolCall.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "ToolCallView"
     },
     "chat/messages/UserMessage.svelte": {
       "tier": "B",

@@ -2,6 +2,7 @@
 node_modules
 target
 dist
+.svelte-kit
 
 # Build / generated (under packages/tomat-client/)
 packages/tomat-client/build

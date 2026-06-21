@@ -46,7 +46,7 @@
 
 <div class="flex flex-col gap-2 min-w-0 max-w-[calc(100vw-135px)] text-sm">
   <div class="flex items-center gap-2 text-default-800 font-medium">
-    <i class="flex i-material-symbols-shield-question-outline-rounded text-amber-500 text-base shrink-0"></i>
+    <i class="flex i-material-symbols-shield-question-outline-rounded text-accent-yellow-500 text-base shrink-0"></i>
     <span class="break-words">
       The <code class="font-mono bg-surface-inset rounded-small px-1.5 py-0.5">{request.toolName}</code>
       tool wants to {parts.action}.

@@ -134,10 +134,11 @@ export type ColorField = BaseField & {
    *  chroma are used; the theme sets each shade's lightness). The picker hides
    *  the lightness slider and pins OKLCH L to this value, since editing
    *  lightness would have no rendered effect. Choose the light-mode lightness
-   *  of the shade where the color is seen most (e.g. the default color uses the
-   *  bg-surface step, ~0.985); the picker still theme-inverts it, so dark mode
-   *  shows the matching dark shade. Omit for colors rendered as-is (bubbles,
-   *  shadow), which keep a free lightness slider. */
+   *  of the shade where the color is seen most (e.g. the default color and the
+   *  bubble fills both use the bg-surface step, ~0.985); the picker still
+   *  theme-inverts it, so dark mode shows the matching dark shade. Omit for
+   *  colors rendered as-is (the bubble shadow), which keep a free lightness
+   *  slider. */
   lockedLightness?: number;
 };
 export type ShortcutField = BaseField & {

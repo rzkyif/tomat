@@ -163,7 +163,7 @@
         bind:value={editText}
         oninput={handleEditInput}
         onkeydown={handleEditKeydown}
-        class="col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words"
+        class="tomat-no-focus-ring col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words"
         rows="1"
         cols="1"
       ></textarea>

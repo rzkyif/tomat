@@ -1,0 +1,46 @@
+---
+title: Updates and Channels
+section: Settings & Maintenance
+order: 5
+---
+
+import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelte";
+import Aside from "../../../components/Aside.astro";
+
+tomat keeps itself current so you do not have to track releases by hand. When a new
+release is ready, the app offers to install it, and the core can stage and apply
+its own update safely, rolling back if something goes wrong rather than leaving you
+with a broken service. You can always re-run the install command to jump straight
+to the latest build.
+
+## Channels
+
+How new a build you run is set by its **channel**. A channel is a track of releases
+that move at different speeds, so you can choose how close to the leading edge you
+want to be:
+
+| Channel    | Pace           | For                       |
+| ---------- | -------------- | ------------------------- |
+| **Stable** | Changes slowly | Everyday use; the default |
+| **Latest** | Moves faster   | Newer features, sooner    |
+| **Dev**    | Bleeding edge  | Development and testing   |
+
+<SettingsPanelDemo group="general" />
+
+## Running channels side by side
+
+You do not have to choose one channel for good. You can run more than one side by
+side, each with its own separate data under `~/.tomat`, so a newer build is fully
+isolated from your everyday setup. Trying **latest** for a week cannot disturb the
+sessions and settings on **stable**, because they never share state.
+
+<Aside type="note">
+  Large model downloads are the exception: they are shared across channels rather than copied, so
+  switching channels does not mean fetching gigabytes again. See [Models and
+  Providers](/manual/core-concepts/models-and-providers).
+</Aside>
+
+That isolation is what makes a second channel safe to keep around: a place to try
+what is coming next without putting your daily work at risk. It closes the loop the
+manual opened with, from [installing tomat](/manual/getting-started/installing) to
+running it exactly the way you want.

@@ -1,34 +1,33 @@
 <script lang="ts">
-  import { onMount, type Snippet } from "svelte";
-  import { runMessageEnter } from "$lib/appearance/animations";
+  import { type Snippet, untrack } from "svelte";
+  import MessageEnter from "@tomat/shared/ui/components/chat/MessageEnter.svelte";
+  import { claimMessageEnter } from "$lib/appearance/animations";
   import type { Alignment } from "$lib/util/types";
 
   let {
     alignment,
     msgId,
     delayMs = 0,
+    centerDirection = "up",
     class: className = "",
     children,
   }: {
     alignment: Alignment;
     msgId?: string;
-    /** Hold the entry animation for this long; see runMessageEnter. */
+    /** Hold the entry animation for this long; see the shared MessageEnter. */
     delayMs?: number;
+    /** Center-alignment entry axis; see the shared MessageEnter. */
+    centerDirection?: "up" | "down";
     class?: string;
     children: Snippet;
   } = $props();
 
-  let el: HTMLElement | undefined = $state();
-
-  onMount(() => {
-    if (el) runMessageEnter(el, alignment, msgId, delayMs);
-  });
+  // Claim once at mount: records the id and reports whether this mount animates
+  // (suppressed during session restore, never replayed for a seen message).
+  // msgId is fixed per mount, so the one-time read is intentional.
+  const enabled = untrack(() => claimMessageEnter(msgId));
 </script>
 
-<!-- No permanent will-change here: a persistent will-change-transform makes
-     every message row its own stacking context, which lets one bubble's drop
-     shadow paint over neighboring bubbles. runMessageEnter sets the hint
-     inline for the duration of the entry animation only. -->
-<div bind:this={el} class={className}>
+<MessageEnter {alignment} {delayMs} {enabled} {centerDirection} class={className}>
   {@render children()}
-</div>
+</MessageEnter>

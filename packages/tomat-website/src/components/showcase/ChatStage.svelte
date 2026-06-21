@@ -1,24 +1,16 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import gsap from "gsap";
-  import { findField, getDefaultSettings } from "@tomat/shared/domain/settings/engine";
-  import type { ModelPresetField } from "@tomat/shared/domain/settings/types";
-  import {
-    creativityDropdownOptions,
-    creativitySelection,
-    CUSTOM_VALUE,
-    type QuickOption,
-    type QuickSelection,
-    thinkingDropdownOptions,
-    thinkingSelection,
-  } from "@tomat/shared/domain/quick-controls";
   import SessionBarView from "@tomat/shared/ui/components/chat/SessionBarView.svelte";
   import UserInputView from "@tomat/shared/ui/components/chat/UserInputView.svelte";
+  import MessageEnter from "@tomat/shared/ui/components/chat/MessageEnter.svelte";
   import UserMessageView from "@tomat/shared/ui/components/chat/messages/UserMessageView.svelte";
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
-  import QuickModelBarView from "@tomat/shared/ui/components/chat/userinput/QuickModelBarView.svelte";
+  import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
   import Cursor from "./Cursor.svelte";
   import { Demo, type Timeline } from "../../lib/showcase";
+
+  const ui = useUiContext();
 
   let { register, reportHeight }: {
     register: (h: { timeline: Timeline; reset: () => void }) => void;
@@ -39,30 +31,6 @@
   const DECODE_TOKENS_PER_SEC = 25;
   const ANSWER_SECONDS = ANSWER.length / 4 / DECODE_TOKENS_PER_SEC;
 
-  // The quick-access bar mirrors a fresh app: provider local, the default preset,
-  // and the default thinking/creativity selections, all derived from the schema
-  // defaults via the same shared helpers the client uses (controls are inert).
-  const D = getDefaultSettings();
-  const noop = (): void => {};
-  const contextSize = Number(D["llm.contextSize"]) || 4096;
-  const presetField = findField("llm.preset") as ModelPresetField | undefined;
-  const presetOptions = (presetField?.presetConfig.options ?? []).map((o) => ({
-    value: o.id,
-    label: o.title ?? o.label,
-  }));
-  // A selection that matches no preset level shows its raw "custom" label as a
-  // disabled lead option, exactly as the client's quick bar does (so a fresh
-  // app's "Unlimited" thinking budget reads "Unlimited", not "__custom__").
-  function withCustom(sel: QuickSelection, options: QuickOption[]): QuickOption[] {
-    if (sel.value !== CUSTOM_VALUE) return options;
-    const label = sel.customLabel ?? "";
-    return [{ value: CUSTOM_VALUE, label, display: label, disabled: true }, ...options];
-  }
-  const thinkingSel = thinkingSelection(D, "local");
-  const thinkingOpts = withCustom(thinkingSel, thinkingDropdownOptions("local", contextSize));
-  const creativitySel = creativitySelection(D);
-  const creativityOpts = withCustom(creativitySel, creativityDropdownOptions());
-
   // Mock chat state, driven by the timeline.
   let inputValue = $state("");
   let userText = $state("");
@@ -72,6 +40,10 @@
   let showReasoning = $state(false);
   let reasoningStreaming = $state(false);
   let showAnswer = $state(false);
+  // Suppresses the bubble entry animation while we mount every bubble to measure
+  // the fullest content height: an animating bubble starts at max-height 0, which
+  // would mis-measure the column. Off during playback so entrances animate.
+  let measuring = $state(false);
 
   let stageEl: HTMLElement | undefined = $state();
   let cursorRef: HTMLElement | undefined = $state();
@@ -93,6 +65,7 @@
   // height the stream never exceeds, then restore the start state. tick() flushes
   // both updates before the browser paints, so neither transient state is shown.
   async function measureContentHeight(): Promise<void> {
+    measuring = true;
     showUser = true;
     showReasoning = true;
     reasoningStreaming = true;
@@ -103,6 +76,7 @@
     await tick();
     if (columnEl) reportHeight(columnEl.offsetHeight);
     reset();
+    measuring = false;
     await tick();
   }
 
@@ -112,10 +86,13 @@
     // Measure first, then build and register: registering gates the showcase's
     // play loop, so the timeline never runs against the transient measured state.
     void (async () => {
-      await measureContentHeight();
-      if (cancelled || !stageEl || !cursorRef) return;
+      if (!stageEl || !cursorRef) return;
       const demo = new Demo(cursorRef, stageEl);
+      // Rest the cursor at its inactive centre before measuring, so it is in
+      // place on the first paint instead of jumping there once measuring ends.
       demo.placeFrac(0.5, 0.6);
+      await measureContentHeight();
+      if (cancelled) return;
 
       const tl = gsap.timeline({ paused: true });
       timeline = tl;
@@ -154,6 +131,7 @@
           // pause(0) seeks to the start with suppressEvents (default), so resetting
           // does not re-fire the timeline's state callbacks.
           tl.pause(0);
+          demo.blur();
           demo.placeFrac(0.5, 0.6);
         },
       });
@@ -165,13 +143,6 @@
   });
 </script>
 
-{#snippet quickBar()}
-  <QuickModelBarView
-    model={{ value: D["llm.preset"] as string, options: presetOptions, onchange: noop, ariaLabel: "Smart preset" }}
-    thinking={{ value: thinkingSel.value, options: thinkingOpts, onchange: noop }}
-    creativity={{ value: creativitySel.value, options: creativityOpts, onchange: noop }}
-  />
-{/snippet}
 
 <div bind:this={stageEl} class="relative w-full h-full overflow-hidden flex items-center justify-center">
   <!-- The column renders at the app's content width (APP_W = 620px: the 700px
@@ -182,27 +153,35 @@
        input, then the session bar at the very bottom (matching the app). As
        messages stream in above, the centered group pushes the input down. -->
   <div class="shrink-0">
-    <div bind:this={columnEl} class="w-[620px] flex flex-col gap-2">
+    <div bind:this={columnEl} class="w-[620px] flex flex-col" style:gap={bubbleGap(ui)}>
       {#if showUser}
-        <UserMessageView text={userText} />
+        <MessageEnter enabled={!measuring}>
+          <UserMessageView text={userText} />
+        </MessageEnter>
       {/if}
       {#if showReasoning}
-        <AgentMessageView kind="reasoning" isStreaming={reasoningStreaming} reasoningDurationMs={3200}>
-          {#snippet body()}
-            <span>{REASONING}</span>
-          {/snippet}
-        </AgentMessageView>
+        <MessageEnter enabled={!measuring}>
+          <AgentMessageView kind="reasoning" isStreaming={reasoningStreaming} reasoningDurationMs={3200}>
+            {#snippet body()}
+              <span>{REASONING}</span>
+            {/snippet}
+          </AgentMessageView>
+        </MessageEnter>
       {/if}
       {#if showAnswer}
-        <AgentMessageView kind="content" bgClass="bubble-agent">
-          {#snippet body()}
-            <span class="whitespace-pre-wrap break-words">{agentText}</span>
-          {/snippet}
-        </AgentMessageView>
+        <MessageEnter enabled={!measuring}>
+          <AgentMessageView kind="content" bgClass="bubble-agent">
+            {#snippet body()}
+              <span class="whitespace-pre-wrap break-words">{agentText}</span>
+            {/snippet}
+          </AgentMessageView>
+        </MessageEnter>
       {/if}
-      <UserInputView bind:value={inputValue} placeholder="Enter your instructions..." belowContent={quickBar} />
+      <UserInputView bind:value={inputValue} placeholder="Enter your instructions..." />
       {#if showSessionBar}
-        <SessionBarView tokenUsage={{ used: 980, max: 8192 }} showTitle defaultTitle="Installing tomat" titleText="Installing tomat" />
+        <MessageEnter enabled={!measuring} centerDirection="down">
+          <SessionBarView tokenUsage={{ used: 980, max: 8192 }} showTitle defaultTitle="Installing tomat" titleText="Installing tomat" />
+        </MessageEnter>
       {/if}
     </div>
   </div>

@@ -1,0 +1,76 @@
+---
+title: Installing tomat
+section: Getting Started
+order: 1
+---
+
+import InstallCard from "../../../components/InstallCard.svelte";
+import Aside from "../../../components/Aside.astro";
+
+tomat comes in two parts: a **client**, the app you look at, and a **core**, the
+service that does the work. You install the client first, then point it at a core.
+The common setup runs both on your own machine and does everything locally, with
+nothing sent anywhere until you decide otherwise, but the core can just as well run
+on a different computer (see [How tomat Works](/manual/core-concepts/how-tomat-works)).
+
+## Install the client
+
+Pick your operating system and copy the one-line command into a terminal. This
+installs the **client** alone; you connect it to a core in the next step.
+
+<InstallCard client:visible />
+
+The installer is the same script published at `get.au.tomat.ing/install`, so you
+can read it before you run it. Everything it places lives under your home
+directory; there is no system-wide service to manage.
+
+## Set up a core
+
+The first time you launch the client it asks where its core should run, since it
+needs one to do anything. You have two choices:
+
+- **On this computer.** The client installs and starts a local core for you and
+  pairs with it automatically. This is the path most people want: everything stays
+  on your machine, fully local.
+- **On another computer.** Pair with a core running elsewhere, such as a more
+  powerful desktop. Install the core there first, then pair the client with it.
+  See [Running a Core Elsewhere](/manual/settings/installing-a-core).
+
+Either way, once a core is paired the client remembers it and reconnects on its
+own. You can pair more cores or switch between them later under **Cores** in
+Settings (see [Cores and Pairing](/manual/settings/cores-and-pairing)).
+
+## What gets installed
+
+A local setup leaves you with two things:
+
+- The **client**, the desktop app you open from Applications, your app menu, or
+  the Start menu.
+- A **core**, with all of its state kept under `~/.tomat`.
+
+That `~/.tomat` directory is where the core keeps your sessions, documents, and
+settings, along with any models you download later. Keeping it on disk is what
+makes tomat local-first: your conversations are files on the machine running the
+core, not rows in someone else's database. (Snippets and the look of the app are
+kept by the client instead, so they travel with it; see
+[The Settings Panel](/manual/settings/settings-panel).)
+
+<Aside type="caution">
+  Nothing leaves your machine until you point a setting at an **External** provider. When you do,
+  the messages in those sessions are sent to that provider to be answered. See [Models and
+  Providers](/manual/core-concepts/models-and-providers).
+</Aside>
+
+## Staying current
+
+tomat keeps itself up to date. When a new release is available, the app offers to
+install it, and the core can stage and apply its own update in the background,
+rolling back if anything goes wrong. You can also re-run the install command at
+any time to jump straight to the latest build.
+
+How new those builds are is set by your **channel**, which you can leave on its
+default for now. When you want to try faster-moving builds without disturbing
+your setup, see [Updates and Channels](/manual/settings/updates-and-channels).
+
+Next, open the app and send your first message in
+[Your First Chat](/manual/getting-started/your-first-chat).

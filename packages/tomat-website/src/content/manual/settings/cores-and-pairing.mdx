@@ -1,0 +1,56 @@
+---
+title: Cores and Pairing
+section: Settings & Maintenance
+order: 4
+---
+
+import SessionBarDemo from "../../../components/demos/SessionBarDemo.svelte";
+import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelte";
+
+The **core** is the service that does tomat's work, and the **client** is the app
+you look at, as [How tomat Works](/manual/core-concepts/how-tomat-works)
+introduces. They usually sit on the same machine, but they do not have to, and once
+you separate them a few things follow: how a client connects to a core, and how you
+move between more than one.
+
+## Pairing
+
+A client connects to a core by **pairing**. The core mints a short code; in the
+client you add a core by its address and enter that code once. The client captures
+the core's identity at that moment and stores the trust securely, so it reconnects
+on its own every time without you re-entering anything. The code is needed only for
+that first introduction; afterward pairing is a one-time step rather than a login
+you repeat.
+
+When the core runs on the same machine, the client sets this up for you on first
+launch. To pair with a core on a different computer, install one there first and
+turn on its network access, then pair the client with the code it prints, as
+[Running a Core Elsewhere](/manual/settings/installing-a-core) walks through.
+
+## More than one core
+
+You can pair a single client with several cores and switch between them. A common
+setup is a laptop and a more powerful desktop: you carry the client, and point it
+at whichever core you want to do the work, so the heavy model runs on the desktop
+even while you sit at the laptop.
+
+When a session is running against a named core, the session bar shows which one, so
+you always know where the work is happening rather than guessing.
+
+<SessionBarDemo
+  scenario="withCoreChip"
+  highlightLabel="Core"
+  highlightTarget="[data-region=core-chip]"
+/>
+
+## Managing cores
+
+Manage your paired cores under **Cores** in Settings, where you can add a new one
+or switch the active core. This is the counterpart to pairing: where pairing
+introduces a core, this group is where your introduced cores live and where you
+choose between them.
+
+<SettingsPanelDemo group="cores" />
+
+Last in this chapter is how tomat keeps itself current, and how to run more than
+one build at once: [Updates and Channels](/manual/settings/updates-and-channels).

@@ -28,11 +28,27 @@
   import SettingsShellView from "@tomat/shared/ui/components/settings/SettingsShellView.svelte";
   import SettingsSidebarView from "@tomat/shared/ui/components/settings/SettingsSidebarView.svelte";
   import SnippetAutocompleteView from "@tomat/shared/ui/components/chat/SnippetAutocompleteView.svelte";
+  import ToolCallView from "@tomat/shared/ui/components/chat/messages/ToolCallView.svelte";
   import UserInputView from "@tomat/shared/ui/components/chat/UserInputView.svelte";
   import UserMessageView from "@tomat/shared/ui/components/chat/messages/UserMessageView.svelte";
+  import { SETTINGS_SCHEMA } from "@tomat/shared/domain/settings/engine";
+  import SettingsDemoFooter from "../demos/SettingsDemoFooter.svelte";
   import GalleryCard from "./GalleryCard.svelte";
 
   const entries = <T,>(o: Record<string, T>) => Object.entries(o);
+
+  // Static render: SettingsContentView's expand-on-mount `$effect` never runs, so
+  // pass the default-open section keys explicitly (one per labeled, not
+  // defaultCollapsed section) to match the live app.
+  function expandedFor(gid: string | undefined): Set<string> {
+    const keys = new Set<string>();
+    if (gid) {
+      SETTINGS_SCHEMA.find((g) => g.id === gid)?.sections.forEach((s, i) => {
+        if (s.label && !s.defaultCollapsed) keys.add(`${gid}-${i}`);
+      });
+    }
+    return keys;
+  }
 </script>
 
 <div class="mx-auto max-w-5xl px-4 py-10 flex flex-col gap-12">
@@ -130,6 +146,16 @@
       </GalleryCard>
     {/each}
 
+    {#each entries(SAMPLES.ToolCallView) as [name, p] (name)}
+      <GalleryCard label={`ToolCallView · ${name}`}>
+        <ToolCallView {...p as ComponentProps<typeof ToolCallView>}>
+          {#snippet documentContent({ content })}
+            <pre class="whitespace-pre-wrap text-xs">{content}</pre>
+          {/snippet}
+        </ToolCallView>
+      </GalleryCard>
+    {/each}
+
     {#each entries(SAMPLES.SnippetAutocompleteView) as [name, p] (name)}
       <GalleryCard label={`SnippetAutocompleteView · ${name}`}>
         <!-- The dropdown is position:fixed; a transformed wrapper makes it a
@@ -171,8 +197,11 @@
 
     {#each entries(SAMPLES.SettingsContentView) as [name, p] (name)}
       <GalleryCard label={`SettingsContentView · ${name}`}>
-        <div class="w-full h-[28rem] overflow-auto">
-          <SettingsContentView {...p as ComponentProps<typeof SettingsContentView>} />
+        <div class="tomat-scroll-inset w-full h-[28rem] overflow-auto">
+          <SettingsContentView
+            {...p as ComponentProps<typeof SettingsContentView>}
+            expanded={expandedFor((p as ComponentProps<typeof SettingsContentView>).groupId)}
+          />
         </div>
       </GalleryCard>
     {/each}
@@ -184,7 +213,10 @@
           sizeClass="w-[760px] max-w-full h-[28rem]"
         >
           {#snippet groupContent(gid)}
-            <SettingsContentView groupId={gid} values={SAMPLE_VALUES} />
+            <SettingsContentView groupId={gid} values={SAMPLE_VALUES} expanded={expandedFor(gid)} />
+          {/snippet}
+          {#snippet sidebarFooter(collapsed)}
+            <SettingsDemoFooter {collapsed} />
           {/snippet}
         </SettingsShellView>
       </GalleryCard>

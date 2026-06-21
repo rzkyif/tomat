@@ -85,6 +85,7 @@
   <Bubble selectedAlignment={ui.getAlignment()} size="small" extraClass="flex items-center gap-2">
     {#if tokenUsage}
       <div
+        data-region="context-gauge"
         class="relative w-12 h-8 bg-surface-inset rounded-large overflow-hidden shrink-0 border-0.25em border-default-200"
         title="Context: {formatTokens(tokenUsage.used)} / {formatTokens(tokenUsage.max)}"
       >
@@ -101,13 +102,15 @@
     {/if}
 
     {#if showChip}
-      <Chip
-        icon="i-material-symbols-hub-rounded"
-        label={coreName}
-        title="Sessions on this core"
-        truncate
-        labelMaxWidth="8rem"
-      />
+      <span data-region="core-chip" class="flex shrink-0">
+        <Chip
+          icon="i-material-symbols-hub-rounded"
+          label={coreName}
+          title="Sessions on this core"
+          truncate
+          labelMaxWidth="8rem"
+        />
+      </span>
     {/if}
 
     {#if showTitle}
@@ -116,7 +119,7 @@
            hits its max width; the invisible span sizes it and the input shows an
            ellipsis when blurred. -->
       <div
-        class="flex items-center min-w-0 h-8 overflow-hidden bg-surface-inset rounded-large text-sm"
+        class="tomat-focus-wrap flex items-center min-w-0 h-8 overflow-hidden bg-surface-inset rounded-large text-sm"
       >
         <div class="grid items-center min-w-0 overflow-hidden">
           <span

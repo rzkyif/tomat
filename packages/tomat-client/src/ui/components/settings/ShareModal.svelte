@@ -245,7 +245,7 @@
       aria-label="Settings JSON to import"
       class="h-full w-full resize-none overflow-y-auto tomat-scroll rounded-medium px-2 py-1.5 text-sm font-mono text-default-800 outline-none {parsed.error
         ? 'bg-accent-red-300 border-accent-red-400'
-        : 'bg-surface-inset focus:ring-blue-500'}"
+        : 'bg-surface-inset'}"
     ></textarea>
     {@render floatButton(
       "i-material-symbols-content-paste-rounded",

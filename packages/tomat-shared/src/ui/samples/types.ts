@@ -20,6 +20,7 @@ type SnippetPropName =
   | "children"
   | "complexField"
   | "contentOverride"
+  | "documentContent"
   | "editBody"
   | "footer"
   | "groupContent"

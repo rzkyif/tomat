@@ -4,8 +4,11 @@ import { groupManual, type ManualEntry } from "../lib/manual";
 interface Props {
   entries: ManualEntry[];
   currentId: string;
+  /** Start every section expanded (the desktop sidebar) rather than only the
+   *  section holding the current page (the space-constrained mobile menu). */
+  defaultOpen?: boolean;
 }
-const { entries, currentId } = Astro.props;
+const { entries, currentId, defaultOpen = false } = Astro.props;
 const sections = groupManual(entries);
 
 // SidebarItem-style rows (mirrors the app's settings sidebar). The section
@@ -18,11 +21,11 @@ const rowBase = "flex items-center h-8 pr-2.5 gap-1.5 rounded-medium transition-
 
 <nav class="flex flex-col gap-1 text-sm" aria-label="User manual">
   {sections.map((section) => {
-    const open = section.entries.some((e) => e.id === currentId);
+    const open = defaultOpen || section.entries.some((e) => e.id === currentId);
     return (
       <details class="expandable" open={open}>
         <summary
-          class={`${rowBase} pl-1.5 text-default-500 hover:text-default-700 hover:bg-surface-inset hover:cursor-pointer select-none`}
+          class={`${rowBase} pl-1.5 font-semibold text-default-700 hover:text-default-900 hover:bg-surface-inset hover:cursor-pointer select-none`}
         >
           <i class="expandable-chevron flex text-xl shrink-0 i-material-symbols-chevron-right-rounded"></i>
           {section.name}

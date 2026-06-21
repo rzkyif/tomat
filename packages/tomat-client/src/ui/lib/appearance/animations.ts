@@ -6,7 +6,6 @@
  */
 
 import { settingsState } from "$stores";
-import type { Alignment } from "$lib/util/types";
 import {
   BASE_MS,
   collapseLabel,
@@ -17,11 +16,6 @@ import {
 export { BASE_MS, type ExpandHandle };
 
 export const CSS_EASING = "cubic-bezier(0.4, 0, 0.2, 1)";
-
-// cubic-bezier(0.4, 0, 0.2, 1): material "standard" easing.
-function easeInOut(t: number): number {
-  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-}
 
 export function getDuration(ms: number = BASE_MS): number {
   if (!settingsState.currentSettings["appearance.animationsEnabled"]) return 0;
@@ -52,84 +46,23 @@ export function hasMessageAnimated(msgId: string): boolean {
 }
 
 /**
- * Imperatively run the per-message entry animation: one eased rAF phase that
- * simultaneously grows max-height (so neighbours don't jump) and slides the
- * bubble in from the alignment-appropriate edge. No fade: the bubble is
- * fully opaque the whole way. For the duration the node is pushed to
- * z-index -1, so a bubble entering a stack row emerges from UNDER its
- * neighbors instead of sweeping over them.
- *   - `msgId` is used to dedupe replays: a bubble that's already been
- *     animated stays animated even if its parent reshuffles (e.g. when
- *     MessageStackGroup regroups).
- *   - `delayMs` holds the bubble offscreen (collapsed) before the motion
- *     starts. Used to stagger bubbles that mount in the same flush as
- *     another (the tool_filter created alongside its user message), so the
- *     entrances read sequentially instead of racing.
- * No outro: there is no symmetric exit animation, removals are instant.
+ * Decide whether a freshly mounted message wrapper should run its entry
+ * animation, and record the mount. The motion itself lives in the shared
+ * `MessageEnter` component (`@tomat/shared/ui`); this owns only the client's
+ * gating policy:
+ *   - `msgId` dedupes replays: a bubble that's already animated stays animated
+ *     even if its parent reshuffles (e.g. MessageStackGroup regroups). A bubble
+ *     with no stable id (a loading sentinel, the session bar) always animates.
+ *   - During the session-restore burst `messageAnimationsReady` is false, so
+ *     restored bubbles appear without 50 simultaneous entrances; their ids are
+ *     still recorded so they never animate retroactively once the gate opens.
  */
-export function runMessageEnter(
-  node: HTMLElement,
-  alignment: Alignment,
-  msgId?: string,
-  delayMs = 0,
-): void {
+export function claimMessageEnter(msgId?: string): boolean {
   if (msgId) {
-    if (messagesSeen.has(msgId)) return;
+    if (messagesSeen.has(msgId)) return false;
     messagesSeen.add(msgId);
   }
-  if (!messageAnimationsReady) return;
-
-  const dur = getDuration(BASE_MS);
-  if (dur <= 0) return;
-
-  const height = node.offsetHeight;
-
-  const setOffscreen = () => {
-    // Scoped to the animation: left in place permanently, will-change makes
-    // the row a stacking context, which lets one bubble's shadow paint over
-    // its neighbors (see Bubble.svelte's shadow layering).
-    node.style.willChange = "transform";
-    // Below every settled sibling (bodies z-10, shadows z-0) while entering;
-    // needs position since the node is a plain block, not a flex item.
-    node.style.position = "relative";
-    node.style.zIndex = "-1";
-    node.style.maxHeight = "0";
-    node.style.overflow = "hidden";
-    if (alignment === "left") node.style.transform = "translateX(-100%)";
-    else if (alignment === "right") node.style.transform = "translateX(100%)";
-    else node.style.transform = "translateY(100%)";
-  };
-
-  setOffscreen();
-  void node.offsetHeight;
-
-  let startTime = 0;
-  const frame = (now: number) => {
-    if (startTime === 0) startTime = now;
-    const t = Math.min(1, (now - startTime) / dur);
-    if (t >= 1) {
-      node.style.willChange = "";
-      node.style.position = "";
-      node.style.zIndex = "";
-      node.style.maxHeight = "";
-      node.style.overflow = "";
-      node.style.transform = "";
-      return;
-    }
-    const p = easeInOut(t);
-    const travel = 100 * (1 - p);
-    let transform: string;
-    if (alignment === "left") transform = `translateX(${-travel}%)`;
-    else if (alignment === "right") transform = `translateX(${travel}%)`;
-    else transform = `translateY(${travel}%)`;
-    node.style.maxHeight = `${height * p}px`;
-    node.style.overflow = "hidden";
-    node.style.transform = transform;
-    requestAnimationFrame(frame);
-  };
-
-  if (delayMs > 0) setTimeout(() => requestAnimationFrame(frame), delayMs);
-  else requestAnimationFrame(frame);
+  return messageAnimationsReady;
 }
 
 /**

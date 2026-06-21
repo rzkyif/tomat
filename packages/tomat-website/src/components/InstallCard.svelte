@@ -56,7 +56,11 @@
   }
 </script>
 
-<div class="w-full max-w-xl mx-auto flex flex-col gap-2">
+<!-- `not-prose`: the manual renders this inside a `.prose` article, whose
+     typography would otherwise wrap the `<code>` command in backtick quotes
+     (the homepage, outside prose, shows none). Opt out so the card looks the
+     same in both places. -->
+<div class="not-prose w-full max-w-xl mx-auto flex flex-col gap-2">
   <div class="w-56 mx-auto">
     <Tabs tabs={osTabs} active={os} onSelect={(id) => (os = id as Os)} slideMs={300} />
   </div>

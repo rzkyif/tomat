@@ -2,16 +2,58 @@
   import type { Snippet } from "svelte";
   import Bubble from "../primitives/Bubble.svelte";
   import IconButton from "../primitives/IconButton.svelte";
+  import QuickModelBarView from "./userinput/QuickModelBarView.svelte";
   import { useUiContext } from "../../context.ts";
   import type { Alignment } from "../../types.ts";
+  import { findField, getDefaultSettings } from "../../../domain/settings/engine.ts";
+  import type { ModelPresetField } from "../../../domain/settings/types.ts";
+  import {
+    creativityDropdownOptions,
+    creativitySelection,
+    CUSTOM_VALUE,
+    type QuickOption,
+    type QuickSelection,
+    thinkingDropdownOptions,
+    thinkingSelection,
+  } from "../../../domain/quick-controls.ts";
 
   // The composer shell: the input bubble with its auto-growing textarea and the
-  // three control groups (attach/capture | monitor/align/settings | voice/send).
-  // All logic (VAD/STT, autocomplete, screenshots, sending) stays in the client
-  // wrapper; the client-only modes (permission/schedule prompts, the autocorrect
-  // alert, the quick-model bar) arrive as snippets. The website renders the
-  // default shell with static state. Alignment comes from the UI context.
+  // three control groups (attach/capture | monitor/align/settings | voice/send),
+  // plus the quick-model bar below the textarea. This View OWNS the canonical
+  // default composition, so a bare render (no host overrides) matches the client
+  // at default settings: the quick-model bar is always present, and the Voice
+  // Input button follows `stt.enabled` from the UI context. The client passes
+  // LIVE state for both (its `belowContent` quick bar + explicit voice props);
+  // the website passes nothing and inherits the defaults. This is what keeps
+  // every website rendition in lockstep with the client instead of each caller
+  // hand-picking which controls appear (the source of the past drift). All
+  // behaviour (VAD/STT, autocomplete, screenshots, sending) and the client-only
+  // modes (permission/schedule prompts, the autocorrect alert) still arrive as
+  // props/snippets. Alignment comes from the UI context.
   const ui = useUiContext();
+
+  // Default quick-model bar: a fresh app's controls (provider local, the default
+  // preset, default thinking/creativity), derived from the schema defaults via
+  // the same shared helpers the client's live QuickModelBar uses, so the rendered
+  // markup is single-source. Rendered only when the host supplies no `belowContent`
+  // override (i.e. every non-client host); the controls are inert (onchange noop).
+  const noop = (): void => {};
+  const dqDefaults = getDefaultSettings();
+  const dqContextSize = Number(dqDefaults["llm.contextSize"]) || 4096;
+  const dqPresetField = findField("llm.preset") as ModelPresetField | undefined;
+  const dqPresetOptions = (dqPresetField?.presetConfig.options ?? []).map((o) => ({
+    value: o.id,
+    label: o.title ?? o.label,
+  }));
+  function dqWithCustom(sel: QuickSelection, options: QuickOption[]): QuickOption[] {
+    if (sel.value !== CUSTOM_VALUE) return options;
+    const label = sel.customLabel ?? "";
+    return [{ value: CUSTOM_VALUE, label, display: label, disabled: true }, ...options];
+  }
+  const dqThinking = thinkingSelection(dqDefaults, "local");
+  const dqThinkingOpts = dqWithCustom(dqThinking, thinkingDropdownOptions("local", dqContextSize));
+  const dqCreativity = creativitySelection(dqDefaults);
+  const dqCreativityOpts = dqWithCustom(dqCreativity, creativityDropdownOptions());
 
   type MonitorOption = { id: string | number; name: string };
   type CaptureMonitorOption = { id: string | number; name: string; isPrimary: boolean };
@@ -54,8 +96,10 @@
     onSettings,
     // Right group: voice + send, or a custom slot (permission/schedule buttons).
     rightSlot,
-    showVoice = false,
-    voiceTitle = "",
+    // When the host leaves `showVoice` unset, the button's presence follows
+    // `stt.enabled` from the UI context (default on), matching the client.
+    showVoice = undefined,
+    voiceTitle = "Voice Input",
     voiceClass = "",
     voiceDisabled = false,
     onVoiceToggle,
@@ -63,7 +107,7 @@
     pttHoldDuration = 0,
     vadEnabled = false,
     vadListening = false,
-    sttIdle = false,
+    sttIdle = true,
     hasActiveWork = false,
     hasContent = false,
     sendDisabled = false,
@@ -122,6 +166,10 @@
     onInterruptAndSend?: () => void;
   } = $props();
 
+  // Voice button presence: explicit host value wins; otherwise follow the
+  // context's `stt.enabled` (so the website's default render matches the client).
+  const effShowVoice = $derived(showVoice ?? ui.sttEnabled);
+
   const ALIGNMENTS = [
     { value: "left", icon: "i-material-symbols-format-align-left-rounded", title: "Align Left" },
     {
@@ -168,12 +216,29 @@
           autocomplete="off"
           rows="1"
           cols="1"
-          class="col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-[calc(100vw-80px)] max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words placeholder:text-default-400"
+          class="tomat-no-focus-ring col-start-1 row-start-1 bg-transparent outline-none min-w-0 w-full max-w-[calc(100vw-80px)] max-w-full overflow-hidden resize-none whitespace-pre-wrap break-words placeholder:text-default-400"
           {placeholder}
           disabled={textareaDisabled}
         ></textarea>
       </div>
-      {@render belowContent?.()}
+      {#if belowContent}
+        {@render belowContent()}
+      {:else}
+        <!-- Default quick-model bar (see the script header): the canonical
+             always-present control row a fresh app shows, built from schema
+             defaults. The client overrides this via `belowContent` with its
+             live, wired QuickModelBar. -->
+        <QuickModelBarView
+          model={{
+            value: dqDefaults["llm.preset"] as string,
+            options: dqPresetOptions,
+            onchange: noop,
+            ariaLabel: "Smart preset",
+          }}
+          thinking={{ value: dqThinking.value, options: dqThinkingOpts, onchange: noop }}
+          creativity={{ value: dqCreativity.value, options: dqCreativityOpts, onchange: noop }}
+        />
+      {/if}
     {/if}
 
     {@render attachmentSlot?.()}
@@ -192,7 +257,7 @@
                <select> can't live in a <button>, so this matches IconButton's
                lg-tight sizing (p-1 text-xl) by hand. -->
           <div
-            class="relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hov:text-default-900 rounded transition-colors"
+            class="tomat-focus-wrap relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hov:text-default-900 act:text-default-900 hov:bg-surface-inset act:bg-surface-inset-strong rounded transition-interactive"
           >
             <i class="flex i-material-symbols-screenshot-monitor-outline-rounded"></i>
             <select
@@ -223,7 +288,7 @@
 
       <div class="flex items-center bg-surface-inset rounded-large p-1">
         <div
-          class="relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hov:text-default-900 rounded transition-colors"
+          class="tomat-focus-wrap relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hov:text-default-900 act:text-default-900 hov:bg-surface-inset act:bg-surface-inset-strong rounded transition-interactive"
         >
           <i class="flex i-material-symbols-desktop-windows-outline-rounded"></i>
           <select
@@ -263,12 +328,14 @@
         {#if rightSlot}
           {@render rightSlot()}
         {:else}
-          {#if showVoice}
+          {#if effShowVoice}
             <IconButton
+              data-region="voice"
               size="lg"
               surface="filled"
               title={voiceTitle}
-              class="rounded-large {voiceClass}"
+              class="rounded-large"
+              colorClass={voiceClass || undefined}
               disabled={voiceDisabled}
               onclick={() => onVoiceToggle?.()}
             >
@@ -321,7 +388,10 @@
               : hasActiveWork && hasContent
                 ? "Interrupt and Send"
                 : "Send"}
-            class="rounded-large {hasActiveWork && !hasContent ? 'text-red-500 hov:text-red-400' : ''}"
+            class="rounded-large"
+            colorClass={hasActiveWork && !hasContent
+              ? "text-accent-red-500 hov:text-accent-red-400"
+              : undefined}
             disabled={sendDisabled}
             onclick={hasActiveWork && !hasContent
               ? () => onStop?.()

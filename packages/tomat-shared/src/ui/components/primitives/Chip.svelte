@@ -61,10 +61,28 @@
         : "bg-surface-inset text-default-600",
   );
 
+  // Clickable chips follow the shared interaction standard: rest fill darkens
+  // one shade step on hover, two on press. Full strings for the extractor.
+  const accentHoverMap: Record<Accent, string> = {
+    blue: "hov:bg-accent-blue-300 act:bg-accent-blue-400",
+    green: "hov:bg-accent-green-300 act:bg-accent-green-400",
+    red: "hov:bg-accent-red-300 act:bg-accent-red-400",
+    yellow: "hov:bg-accent-yellow-300 act:bg-accent-yellow-400",
+    purple: "hov:bg-accent-purple-300 act:bg-accent-purple-400",
+  };
+
+  const hoverClass = $derived(
+    variant === "subtle"
+      ? "hov:bg-default-400 act:bg-default-500"
+      : variant === "accent"
+        ? accentHoverMap[accent]
+        : "hov:bg-default-300 act:bg-default-400",
+  );
+
   const interactive = $derived(!!onclick);
   const baseClass = $derived(
     `inline-flex items-center shrink-0 ${sizeClass} ${colorClass} ${
-      interactive ? "hov:cursor-pointer transition-colors" : ""
+      interactive ? `hov:cursor-pointer transition-interactive ${hoverClass}` : ""
     } ${extraClass}`,
   );
   const labelClass = $derived(truncate ? "truncate min-w-0" : "");

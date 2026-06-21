@@ -17,6 +17,66 @@ body {
   padding: 0;
 }
 
+/* Keyboard-focus ring. One themed outline -- a muted dark grey (default-600) in
+   light, a muted light grey (default-d-600) in dark -- on every focusable
+   element when focus is keyboard-driven (:focus-visible), replacing the browser's
+   default blue
+   ring, the old blue input ring, and the system `outline: auto` the custom
+   toggle/checkbox/tab grooves resurfaced. The color flows through
+   --focus-ring-color so component-scoped styles (those grooves) get the same
+   theme flip without their own `.dark` override. `:not(:disabled)` lifts the
+   selector above the `outline-none` utility so the ring wins regardless of
+   stylesheet order, and never rings a disabled control. Mouse clicks on buttons
+   don't match :focus-visible, so the ring is keyboard-driven; text fields are
+   the one case browsers always treat as focus-visible, so clicking into an
+   input still shows it.
+
+   The ring is INSET (negative offset == its own width, so the outer edge hugs
+   the border box from the inside). An outset ring is clipped the moment the
+   element sits inside a scroll container or a rounded `overflow-hidden` wrapper
+   -- and a `overflow-y: auto` container clips the x-axis too, so outset rings
+   lose their left/right edges all over the app. Drawing the ring inside the
+   element's own box means no ancestor can ever clip it, and every ring hugs the
+   edge by the same amount. Use --focus-ring (not the raw outline) anywhere a
+   ring is resurfaced on a wrapper so the inset geometry stays in one place. */
+:root {
+  --focus-ring-color: var(--default-600);
+  --focus-ring: 2px solid var(--focus-ring-color);
+  --focus-ring-offset: -2px;
+}
+.dark {
+  --focus-ring-color: var(--default-d-600);
+}
+:focus-visible:not(:disabled) {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Resurface the ring onto a styled wrapper when the real control is a
+   transparent or invisible child: a search pill's `bg-transparent` input, an
+   `opacity-0` <select> overlaid on a custom trigger (FlushSelect, the composer's
+   monitor pickers). Put `tomat-focus-wrap` on the element whose shape should
+   ring; the wrapper rings (inset, so it follows the wrapper's own radius and is
+   never clipped) and the control's own ring is hidden, leaving one ring on the
+   visible shape. Scoped to input/select/textarea so a sibling button inside the
+   wrapper (e.g. a search clear-X) still rings on its own. The taxonomy mirrors
+   the bespoke `:has(:focus-visible)` resurfacing Toggle/Checkbox/Tabs do for
+   their hidden inputs. */
+.tomat-focus-wrap:has(:is(input, select, textarea):focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.tomat-focus-wrap :is(input, select, textarea):focus-visible {
+  outline: none;
+}
+
+/* Opt a field out of the ring. For the chat composer and the inline message
+   editor the textarea auto-grows to the typed text's width, so a ring would
+   shift and re-wrap on every keystroke; the caret carries focus there instead. */
+.tomat-no-focus-ring:focus-visible {
+  outline: none;
+}
+
 /* Both font stacks default to the platform-native system stack and can be
    overridden at runtime by the appearance.defaultFont / appearance.monoFont
    settings, which set these variables on `documentElement`. */
@@ -41,24 +101,47 @@ body {
    (slightly lighter, for an edge against dark surroundings). The trailing
    `/ alpha` keeps transparency from the source through every derivation. */
 :root {
+  /* Picked bubble seed colors. Only chroma/hue/alpha are honored; the fill
+     lightness is pinned (--bubble-bg-l-*, below) to the surface ladder so every
+     bubble fill -- including the neutral system bubble, which renders as
+     bg-surface = default-50 -- sits at one lightness. The client overwrites
+     *-light from the picker and *-dark via the reversible theme inversion (which
+     keeps chroma/hue), so the dark seed only needs to carry the light seed's
+     chroma/hue through; these literals are the pre-JS website fallbacks. */
   --user-bubble-bg-light: #86efacff;
   --agent-bubble-bg-light: #93c5fdff;
   --agent2-bubble-bg-light: #d8b4feff;
 
-  --user-bubble-bg-dark: oklch(from var(--user-bubble-bg-light) calc(l - 0.24) c h / alpha);
-  --agent-bubble-bg-dark: oklch(from var(--agent-bubble-bg-light) calc(l - 0.24) c h / alpha);
-  --agent2-bubble-bg-dark: oklch(from var(--agent2-bubble-bg-light) calc(l - 0.24) c h / alpha);
+  --user-bubble-bg-dark: var(--user-bubble-bg-light);
+  --agent-bubble-bg-dark: var(--agent-bubble-bg-light);
+  --agent2-bubble-bg-dark: var(--agent2-bubble-bg-light);
 
-  --user-bubble-border-light: oklch(from var(--user-bubble-bg-light) calc(l - 0.08) c h / alpha);
-  --user-bubble-border-dark: oklch(from var(--user-bubble-bg-dark) calc(l + 0.08) c h / alpha);
+  /* Bubble fill lightness, matched to the surface ladder (default-50 in light,
+     default-d-50 in dark) so colored bubbles and the neutral system bubble read
+     at the same lightness. Borders ride 0.08 off the fill. */
+  --bubble-bg-l-light: 0.985;
+  --bubble-bg-l-dark: 0.205;
 
-  --agent-bubble-border-light: oklch(from var(--agent-bubble-bg-light) calc(l - 0.08) c h / alpha);
-  --agent-bubble-border-dark: oklch(from var(--agent-bubble-bg-dark) calc(l + 0.08) c h / alpha);
+  --user-bubble-border-light: oklch(
+    from var(--user-bubble-bg-light) calc(var(--bubble-bg-l-light) - 0.08) c h / alpha
+  );
+  --user-bubble-border-dark: oklch(
+    from var(--user-bubble-bg-dark) calc(var(--bubble-bg-l-dark) + 0.08) c h / alpha
+  );
+
+  --agent-bubble-border-light: oklch(
+    from var(--agent-bubble-bg-light) calc(var(--bubble-bg-l-light) - 0.08) c h / alpha
+  );
+  --agent-bubble-border-dark: oklch(
+    from var(--agent-bubble-bg-dark) calc(var(--bubble-bg-l-dark) + 0.08) c h / alpha
+  );
 
   --agent2-bubble-border-light: oklch(
-    from var(--agent2-bubble-bg-light) calc(l - 0.08) c h / alpha
+    from var(--agent2-bubble-bg-light) calc(var(--bubble-bg-l-light) - 0.08) c h / alpha
   );
-  --agent2-bubble-border-dark: oklch(from var(--agent2-bubble-bg-dark) calc(l + 0.08) c h / alpha);
+  --agent2-bubble-border-dark: oklch(
+    from var(--agent2-bubble-bg-dark) calc(var(--bubble-bg-l-dark) + 0.08) c h / alpha
+  );
 
   /* Bubble text colors derived from the same bubble base. We override the
      L to a dark/light extreme and force alpha=1 so a transparent bubble
@@ -86,34 +169,34 @@ body {
 }
 
 .bubble-user {
-  background-color: var(--user-bubble-bg-light);
+  background-color: oklch(from var(--user-bubble-bg-light) var(--bubble-bg-l-light) c h / alpha);
   border-color: var(--user-bubble-border-light);
   color: var(--user-bubble-text-light);
 }
 .dark .bubble-user {
-  background-color: var(--user-bubble-bg-dark);
+  background-color: oklch(from var(--user-bubble-bg-dark) var(--bubble-bg-l-dark) c h / alpha);
   border-color: var(--user-bubble-border-dark);
   color: var(--user-bubble-text-dark);
 }
 
 .bubble-agent {
-  background-color: var(--agent-bubble-bg-light);
+  background-color: oklch(from var(--agent-bubble-bg-light) var(--bubble-bg-l-light) c h / alpha);
   border-color: var(--agent-bubble-border-light);
   color: var(--agent-bubble-text-light);
 }
 .dark .bubble-agent {
-  background-color: var(--agent-bubble-bg-dark);
+  background-color: oklch(from var(--agent-bubble-bg-dark) var(--bubble-bg-l-dark) c h / alpha);
   border-color: var(--agent-bubble-border-dark);
   color: var(--agent-bubble-text-dark);
 }
 
 .bubble-agent-secondary {
-  background-color: var(--agent2-bubble-bg-light);
+  background-color: oklch(from var(--agent2-bubble-bg-light) var(--bubble-bg-l-light) c h / alpha);
   border-color: var(--agent2-bubble-border-light);
   color: var(--agent2-bubble-text-light);
 }
 .dark .bubble-agent-secondary {
-  background-color: var(--agent2-bubble-bg-dark);
+  background-color: oklch(from var(--agent2-bubble-bg-dark) var(--bubble-bg-l-dark) c h / alpha);
   border-color: var(--agent2-bubble-border-dark);
   color: var(--agent2-bubble-text-dark);
 }
@@ -504,4 +587,312 @@ input[type="range"]::-moz-range-thumb {
     0 6px,
     6px -6px,
     -6px 0;
+}
+
+/* Rendered-markdown typography for any `.markdown` container. The client's
+   MessageMarkdown and the website both paint model answers through this class,
+   so the rules live here (the shared paint source) rather than in a client
+   component. Keep light/dark token pairs in sync. */
+.markdown *:first-child {
+  margin-top: 0 !important;
+}
+.markdown *:last-child {
+  margin-bottom: 0 !important;
+}
+.markdown h1 {
+  font-size: 2em;
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+}
+.markdown h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+}
+.markdown h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+}
+.markdown h4 {
+  font-size: 1em;
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+}
+.markdown h5 {
+  font-size: 0.875em;
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+}
+.markdown h6 {
+  font-size: 0.85em;
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+  color: var(--default-500);
+}
+.markdown p {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+.markdown strong {
+  font-weight: 700;
+}
+.markdown em {
+  font-style: italic;
+}
+.markdown del {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+.markdown mark {
+  background-color: var(--accent-yellow-200);
+  color: inherit;
+}
+.markdown sub {
+  font-size: 75%;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+  bottom: -0.25em;
+}
+.markdown sup {
+  font-size: 75%;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+  top: -0.5em;
+}
+.markdown ol {
+  list-style: decimal;
+  margin-top: 0;
+  margin-bottom: 1em;
+  padding-left: 2em;
+}
+.markdown ul {
+  list-style: disc;
+  margin-top: 0;
+  margin-bottom: 1em;
+  padding-left: 2em;
+}
+.markdown li + li {
+  margin-top: 0.25em;
+}
+.markdown li > p {
+  margin-top: 1em;
+}
+.markdown li > ol,
+.markdown li > ul {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.markdown ol ol,
+.markdown ul ol {
+  list-style-type: lower-roman;
+}
+.markdown ul ul ol,
+.markdown ul ol ol,
+.markdown ol ul ol,
+.markdown ol ol ol {
+  list-style-type: lower-alpha;
+}
+/* Display-only task-list checkboxes. The interactive ui/Checkbox.svelte
+   component mirrors this look (box + check glyph); keep them in sync. */
+.markdown li:has(input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -2em;
+  align-items: flex-start;
+  position: relative;
+  padding-left: 2em;
+}
+.markdown input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.markdown li:has(input[type="checkbox"])::before {
+  content: "";
+  position: absolute;
+  left: 0.45em;
+  top: 0.15em;
+  width: 1.1em;
+  height: 1.1em;
+  background: var(--default-50);
+  border: 2px solid var(--default-700);
+  border-radius: 0.25em;
+}
+.markdown input[type="checkbox"]:checked + * {
+  opacity: 0.7;
+}
+.markdown li:has(input[type="checkbox"]:checked)::before {
+  content: "✓";
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+.markdown .code-wrapper {
+  overflow: hidden;
+  border-radius: 6px;
+  margin-bottom: 1em;
+  background-color: var(--code-bg);
+}
+.markdown .code-wrapper pre {
+  border-radius: 0;
+  margin-bottom: 0;
+}
+.markdown .code-scroller {
+  overflow-x: auto;
+  overflow-y: clip;
+}
+.markdown pre {
+  display: flex;
+  line-height: 1.45;
+  background-color: var(--code-bg);
+  border-radius: 6px;
+  padding: 1em;
+  margin-bottom: 1em;
+}
+.markdown pre code {
+  overflow: clip;
+  font-size: 0.9em;
+  font-family: var(--font-mono);
+  background: transparent;
+  padding: 0;
+  color: white;
+}
+.markdown code {
+  background-color: var(--code-bg-inline);
+  color: white;
+  padding: 0.15em 0.4em;
+  border-radius: 6px;
+  margin-left: 0.25em;
+  margin-right: 0.25em;
+  font-size: 0.8em;
+  font-family: var(--font-mono);
+}
+.markdown kbd {
+  display: inline-block;
+  padding: 0.25em;
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    SF Mono,
+    Menlo,
+    Consolas,
+    Liberation Mono,
+    monospace;
+  line-height: 10px;
+  vertical-align: middle;
+  background-color: var(--default-100);
+  border: solid 1px var(--default-300);
+  border-radius: 6px;
+  box-shadow: inset 0 -1px 0 var(--default-300);
+}
+.markdown a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5em;
+  margin: 0.75em 0;
+}
+.markdown blockquote {
+  border-left: 4px solid currentColor;
+  padding: 0 1em;
+  margin: 0 0 1em 0;
+}
+.markdown blockquote > :first-child {
+  margin-top: 0;
+}
+.markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
+.markdown details {
+  display: block;
+}
+.markdown summary {
+  display: list-item;
+  cursor: pointer;
+}
+.markdown .table-wrapper {
+  max-height: 600px;
+  overflow: clip;
+  border-radius: 0.5em;
+  margin-bottom: 1em;
+  background: var(--default-50);
+  color: var(--default-800);
+}
+.markdown .table-scroller {
+  max-height: 600px;
+  overflow: auto;
+}
+.markdown table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0;
+  font-size: 0.95em;
+  font-variant: tabular-nums;
+}
+.markdown th {
+  background-color: var(--default-100);
+  font-weight: 600;
+  text-align: left;
+  padding: 6px 13px;
+  position: sticky;
+  top: 0;
+}
+.markdown td {
+  padding: 6px 13px;
+  border-bottom: 1px solid var(--default-200);
+}
+.markdown tr:last-child td {
+  border-bottom: none;
+}
+.markdown hr {
+  border: none;
+  border-top: 2px solid var(--default-700);
+  margin: 1.5em 0;
+}
+
+html.dark .markdown h6 {
+  color: var(--default-d-500);
+}
+html.dark .markdown mark {
+  background-color: var(--accent-yellow-d-200);
+  color: var(--accent-yellow-d-900);
+}
+html.dark .markdown kbd {
+  background-color: var(--default-d-100);
+  border-color: var(--default-d-300);
+  color: var(--default-d-800);
+  box-shadow: inset 0 -1px 0 var(--default-d-300);
+}
+html.dark .markdown .table-wrapper {
+  background: var(--default-d-50);
+  color: var(--default-d-800);
+}
+html.dark .markdown th {
+  background-color: var(--default-d-100);
+}
+html.dark .markdown td {
+  border-bottom-color: var(--default-d-200);
+}
+html.dark .markdown hr {
+  border-top-color: var(--default-d-700);
+}
+html.dark .markdown li:has(input[type="checkbox"])::before {
+  background: var(--default-d-50);
+  border-color: var(--default-d-700);
 }

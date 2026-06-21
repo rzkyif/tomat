@@ -1,5 +1,6 @@
 import { defineConfig } from "astro/config";
 import svelte from "@astrojs/svelte";
+import mdx from "@astrojs/mdx";
 import UnoCSS from "@unocss/astro";
 import { fileURLToPath } from "node:url";
 
@@ -32,7 +33,7 @@ export default defineConfig({
     // stylesheets are persisted and deduped by href across view transitions.
     inlineStylesheets: "never",
   },
-  integrations: [svelte(), UnoCSS({ injectReset: "@unocss/reset/tailwind-v4.css" })],
+  integrations: [svelte(), mdx(), UnoCSS({ injectReset: "@unocss/reset/tailwind-v4.css" })],
   vite: {
     resolve: {
       alias: [

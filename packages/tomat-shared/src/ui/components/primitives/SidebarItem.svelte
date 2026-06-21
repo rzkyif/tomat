@@ -44,21 +44,27 @@
   // centred icon; icon-only rows stay symmetric rectangles.
   const padRight = $derived(label ? (collapsed ? "pr-0" : "pr-2.5") : "pr-1.5");
 
+  // Press deepens the inset surface one further step (the shared interaction
+  // standard) on top of each row's hover/selected background.
   const stateClass = $derived(
     selected
-      ? "bg-surface-inset text-default-900"
+      ? "bg-surface-inset text-default-900 act:bg-surface-inset-strong"
       : pingTone === "accent"
         ? ping
-          ? "text-accent-yellow-700 hov:bg-surface-inset"
-          : "text-accent-yellow-500 hov:bg-surface-inset"
+          ? "text-accent-yellow-700 hov:bg-surface-inset act:bg-surface-inset-strong"
+          : "text-accent-yellow-500 hov:bg-surface-inset act:bg-surface-inset-strong"
         : ping
-          ? "text-default-700 hov:bg-surface-inset"
-          : "text-default-500 hov:text-default-700 hov:bg-surface-inset",
+          ? "text-default-700 hov:bg-surface-inset act:bg-surface-inset-strong"
+          : "text-default-500 hov:text-default-700 hov:bg-surface-inset act:bg-surface-inset-strong",
   );
 </script>
 
+<!-- color/background-color use the shared 120ms interaction feedback (kept in
+     sync with INTERACTIVE_MS / `transition-interactive`); padding keeps its own
+     200ms because it animates the sidebar collapse, not button feedback, and so
+     cannot share the single-property `transition-interactive` shortcut. -->
 <button
-  class="hov:cursor-pointer flex items-center h-8 pl-1.5 {padRight} gap-1.5 rounded-medium [transition:color_500ms,background-color_200ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {stateClass} {extraClass}"
+  class="hov:cursor-pointer flex items-center h-8 pl-1.5 {padRight} gap-1.5 rounded-medium [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {stateClass} {extraClass}"
   {title}
   aria-label={ariaLabel ?? label}
   aria-pressed={ariaPressed}

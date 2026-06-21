@@ -1,13 +1,15 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "unicorn", "oxc"],
+  "ignorePatterns": ["**/.svelte-kit", "**/.astro", "**/.wrangler"],
   "jsPlugins": ["./scripts/lint-plugins/oxlint-plugin.ts"],
   "categories": {
     "correctness": "error"
   },
   "rules": {
     "tomat/no-em-dash": "error",
-    "tomat/no-uppercase-tomat": "error"
+    "tomat/no-uppercase-tomat": "error",
+    "tomat/no-builtin-palette-color": "error"
   },
   "env": {
     "builtin": true

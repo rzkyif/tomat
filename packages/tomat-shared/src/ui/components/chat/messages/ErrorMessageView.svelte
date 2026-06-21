@@ -30,7 +30,7 @@
   const message = $derived(errorMessage(errorType));
 </script>
 
-<Bubble selectedAlignment={ui.getAlignment()} bgClass="bg-accent-red-300" extraClass="text-default-800">
+<Bubble selectedAlignment={ui.getAlignment()} accent="red" extraClass="text-default-800">
   {message}
   {#if errorDetail}
     <div class="error-code-wrapper">

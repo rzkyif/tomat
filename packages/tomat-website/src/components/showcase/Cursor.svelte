@@ -5,9 +5,13 @@
   let { ref = $bindable() }: { ref?: HTMLElement } = $props();
 </script>
 
+<!-- Starts invisible (opacity-0) so the SSR render never shows it parked at the
+     stage's top-left corner; Demo.placeFrac reveals it once it sets the resting
+     position, so its first painted frame is already centred. Opacity is safe
+     here: the cursor is a sibling of the bubbles, not an ancestor. -->
 <div
   bind:this={ref}
-  class="pointer-events-none absolute left-0 top-0 z-50 will-change-transform"
+  class="pointer-events-none absolute left-0 top-0 z-50 opacity-0 will-change-transform"
   style="filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.45));"
   aria-hidden="true"
 >

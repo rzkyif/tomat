@@ -10,8 +10,11 @@
 <div class="flex flex-col gap-2">
   <div class="text-xs font-mono text-default-500">{label}</div>
   <div
-    class="rounded-medium border border-default-200 bg-surface-inset p-6 flex items-center justify-center min-h-24"
+    class="demo-frame relative rounded-medium border border-default-200 bg-surface-inset p-6 flex items-center justify-center min-h-24"
   >
-    {@render children()}
+    <div class="focus-grid-frame" aria-hidden="true"></div>
+    <div class="relative z-10 flex items-center justify-center">
+      {@render children()}
+    </div>
   </div>
 </div>

@@ -100,7 +100,7 @@
         ? "text-accent-yellow-700"
         : "text-accent-yellow-500";
     }
-    return "text-default-500 hover:text-default-700";
+    return "text-default-500 hov:text-default-700";
   });
 
   async function onClick() {
@@ -251,9 +251,9 @@
      mirrors SidebarItem so the row aligns with the rest of the column. -->
 <button
   type="button"
-  class="hover:cursor-pointer flex items-center h-8 pl-1.5 {collapsed
+  class="hov:cursor-pointer flex items-center h-8 pl-1.5 {collapsed
     ? 'pr-0'
-    : 'pr-2.5'} gap-1.5 rounded-medium [transition:color_500ms,background-color_200ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {tone} hover:bg-surface-inset"
+    : 'pr-2.5'} gap-1.5 rounded-medium [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {tone} hov:bg-surface-inset act:bg-surface-inset-strong"
   title={collapsed ? label : undefined}
   aria-label={label}
   {disabled}

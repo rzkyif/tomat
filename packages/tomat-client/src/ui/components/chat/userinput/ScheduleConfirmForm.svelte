@@ -16,7 +16,7 @@
 
 <div class="flex flex-col gap-2 min-w-0 w-120 max-w-[calc(100vw-135px)] text-sm">
   <div class="flex items-center gap-2 text-default-800 font-medium">
-    <i class="flex i-material-symbols-calendar-clock-outline-rounded text-amber-500 text-base shrink-0"></i>
+    <i class="flex i-material-symbols-calendar-clock-outline-rounded text-accent-yellow-500 text-base shrink-0"></i>
     <span class="break-words">
       Review this Scheduled Prompt before it is saved. It runs as a new session at the
       scheduled times.

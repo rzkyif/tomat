@@ -57,7 +57,7 @@
       type="button"
       role="tab"
       aria-selected={active === tab.id}
-      class="{cellClass} text-default-600 transition-colors hover:text-default-800 hover:cursor-pointer"
+      class="{cellClass} text-default-600 transition-interactive hov:text-default-800 act:text-default-900 hov:cursor-pointer"
       onclick={() => onSelect(tab.id)}
     >
       {tab.label}
@@ -79,7 +79,7 @@
      would be painted over; resurface keyboard focus on the groove itself
      (mirrors Toggle). */
   .groove:has(:focus-visible) {
-    outline: auto;
-    outline-offset: 1px;
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
   }
 </style>

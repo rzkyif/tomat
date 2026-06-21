@@ -2,7 +2,14 @@
 // Multiplexed: every frame carries the discriminator it needs
 // (streamId / callId / jobId) for the client to route it.
 
-import type { AttachmentRef, Message, Session, TokenUsage } from "../domain/session.ts";
+import type {
+  AskUserAnswer,
+  AskUserQuestion,
+  AttachmentRef,
+  Message,
+  Session,
+  TokenUsage,
+} from "../domain/session.ts";
 import type { DownloadEntry, RequiredFile, SidecarSnapshot } from "../domain/model.ts";
 import type { PermissionKind } from "../domain/toolkit.ts";
 import type { ScheduledPromptDraft } from "../domain/scheduled-prompt.ts";
@@ -87,58 +94,18 @@ export const SESSION_CREATED_FOCUSES = ["show", "show_when_done"] as const;
 
 // --- Server → Client -------------------------------------------------------
 
-// One question in a tool's askUser request. Discriminated by `kind`;
-// frames that predate the discriminator carry no kind and mean "choice".
-// Per-kind answer shapes (one entry per question in the response frame):
-// choice = chosen value (string[] when multiselect), diff = "accept" |
-// "reject", files = chosen path(s), image = chosen action value, table =
-// the edited rows as column-keyed records.
-export interface AskUserChoiceQuestion {
-  kind?: "choice";
-  question: string;
-  options?: Array<{ label: string; value: string; description?: string }>;
-  multiselect?: boolean;
-  allowFreeformInput?: boolean;
-}
-
-export interface AskUserDiffQuestion {
-  kind: "diff";
-  question: string;
-  before: string;
-  after: string;
-  title?: string;
-}
-
-export interface AskUserFilesQuestion {
-  kind: "files";
-  question: string;
-  entries: Array<{ path: string; label?: string; description?: string }>;
-  multiselect?: boolean;
-}
-
-export interface AskUserImageQuestion {
-  kind: "image";
-  question: string;
-  dataB64: string;
-  mime: string;
-  actions: Array<{ label: string; value: string }>;
-}
-
-export interface AskUserTableQuestion {
-  kind: "table";
-  question: string;
-  columns: string[];
-  rows: string[][];
-}
-
-export type AskUserQuestion =
-  | AskUserChoiceQuestion
-  | AskUserDiffQuestion
-  | AskUserFilesQuestion
-  | AskUserImageQuestion
-  | AskUserTableQuestion;
-
-export type AskUserAnswer = string | string[] | Array<Record<string, string>>;
+// The askUser question/answer shapes are domain types (also rendered by the
+// shared UI), so they live in `../domain/session.ts`; re-exported here because
+// the WS frames below carry them.
+export type {
+  AskUserAnswer,
+  AskUserChoiceQuestion,
+  AskUserDiffQuestion,
+  AskUserFilesQuestion,
+  AskUserImageQuestion,
+  AskUserQuestion,
+  AskUserTableQuestion,
+} from "../domain/session.ts";
 
 export type ServerToClientFrame =
   | { kind: "pong" }

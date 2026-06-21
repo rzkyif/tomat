@@ -1,0 +1,59 @@
+---
+title: Thinking and Creativity
+section: Tuning Replies
+order: 1
+---
+
+import QuickModelBarDemo from "../../../components/demos/QuickModelBarDemo.svelte";
+import ReasoningTraceDemo from "../../../components/demos/ReasoningTraceDemo.svelte";
+import Aside from "../../../components/Aside.astro";
+
+Once you have chosen a model, two dials change how it answers from one message to
+the next. You reach both, along with the model preset, from the quick controls
+that sit with the input bar, so you can adjust them mid-conversation without
+opening Settings.
+
+<QuickModelBarDemo />
+
+These are per-message choices, not a mode you commit to. You can turn thinking up
+for a hard question and back down for a quick follow-up in the same session,
+because each turn carries its own settings.
+
+## Thinking
+
+**Thinking** is how much the model reasons before it replies. Turn it off when you
+want a fast, direct answer to something simple. Raise it when a question needs the
+model to work through steps, weigh options, or check itself, the kind of problem
+where a snap answer tends to be wrong.
+
+More thinking is not free: it takes longer and spends more of the
+[context window](/manual/core-concepts/sessions-and-context), since the reasoning
+itself occupies the model's attention. The reasoning shows up as a **Thinking**
+bubble above the reply, which you can expand to read.
+
+<ReasoningTraceDemo />
+
+## Creativity
+
+**Creativity** controls how freely the model chooses its words. Keep it low, or
+precise, when you want factual, repeatable answers, the kind where you would expect
+the same question to produce nearly the same response. Raise it for brainstorming,
+varied phrasing, or anything where you want range rather than consistency.
+
+The two dials are independent and often pull in opposite directions: a careful
+factual answer wants thinking up and creativity down, while a freewheeling idea
+session wants the reverse. There is no single right setting; you tune to the task
+in front of you.
+
+<Aside type="tip">
+  A good default is Thinking off and Creativity low: fast, consistent answers. Reach for the dials
+  only when a particular message earns it.
+</Aside>
+
+A note on what these dials are: they are requests to the model, not guarantees.
+Each model honors a level as well as it can, and two different models may respond
+to the same setting differently. Treat them as steering, not switches, and judge
+by the replies you get.
+
+Next, the standing instruction that shapes the agent across a whole session:
+[The System Prompt](/manual/tuning-replies/system-prompt).

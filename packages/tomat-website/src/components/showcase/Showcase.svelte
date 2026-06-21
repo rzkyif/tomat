@@ -1,8 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import gsap from "gsap";
   import ChatStage from "./ChatStage.svelte";
   import SettingsStage from "./SettingsStage.svelte";
+  import DualModelStage from "./DualModelStage.svelte";
+  import CustomToolStage from "./CustomToolStage.svelte";
+  import SpeechStage from "./SpeechStage.svelte";
   import { makeUiContext, setUiContext } from "@tomat/shared/ui/context";
   import { getDefaultSettings } from "@tomat/shared/domain/settings/engine";
   import { BASE_MS } from "@tomat/shared/ui/animations";
@@ -36,9 +40,21 @@
       title: "Make it yours",
       desc: "Every surface is configurable: switch setting groups, collapse the sidebar, and search hundreds of options.",
     },
+    {
+      title: "Two models, picked for you",
+      desc: "Simple questions stay on the fast local model; tomat routes only the hard ones to a stronger model, per message, with no manual switching.",
+    },
+    {
+      title: "Tools you write yourself",
+      desc: "Drop a tool definition and a tiny handler into a toolkit, then trigger it by prompt. Tools can pause to ask you for input before they act.",
+    },
+    {
+      title: "Talk and listen",
+      desc: "Speak your instruction and hear the reply read back, with live captions for both sides of the conversation.",
+    },
   ];
 
-  const STAGES = 2;
+  const STAGES = 5;
   const handles: (Handle | undefined)[] = Array.from(
     { length: STAGES },
     () => undefined,
@@ -49,6 +65,8 @@
   let index = $state(0);
   let progress = $state(0);
   let scrolling = $state(false);
+  // Active stage manually paused by clicking its cover; cleared on settle.
+  let paused = $state(false);
   // Shared available frame height (set by recomputeScale); per-stage scale derives from it.
   let availH = $state(DESIGN_H * MAX_SCALE);
   let trackW = $state(0);
@@ -61,14 +79,32 @@
   const panelGap = $derived(
     trackW > 0 && trackW < NARROW_W ? PANEL_GAP_NARROW : PANEL_GAP_WIDE,
   );
+  // Soft-fade the track edges only when neighbours peek (wide). On a phone the
+  // panel fills the width with no peek, so the fade would dim the active demo's
+  // own left/right edges instead of a peeking neighbour.
+  const edgeFade = $derived(trackW >= NARROW_W);
   const designH = $derived(contentH.map((h) => h + 2 * APP_SHADOW));
   // Per-stage scale: fit the design box into the track width and availH, capped at
   // MAX_SCALE, so a shorter stage (chat) scales larger than a taller one (settings).
+  // Also cap the visible app surface (APP_W, the frame minus its shadow margin) to
+  // the caption/install-card width, so a demo never renders wider than the text and
+  // install card below it; its left/right edges line up with that small content.
+  // (A sub-1 scale is fine for the bubbles' frosted-blur halo, as long as no
+  // ANCESTOR carries a `mask`/`filter`: that is what breaks `backdrop-filter` in
+  // WebKit, which is why the track edge-fade below is an overlay, not a mask.)
   const scales = $derived(
     designH.map((dh) =>
       Math.max(
         0.2,
-        Math.min(MAX_SCALE, (trackW - panelGap) / DESIGN_W, availH / dh),
+        Math.min(
+          MAX_SCALE,
+          CAPTION_W / APP_W,
+          // Width is unknown until the track is measured on mount; treat it as
+          // unconstrained (not the negative `-panelGap/DESIGN_W`, which would
+          // clamp the whole scale to the 0.2 floor and render a collapsed frame).
+          trackW > 0 ? (trackW - panelGap) / DESIGN_W : MAX_SCALE,
+          availH / dh,
+        ),
       ),
     ),
   );
@@ -82,9 +118,6 @@
   const panelW = $derived(
     Math.min(trackW || Infinity, Math.max(maxFrameW + panelGap, CAPTION_W)),
   );
-  // Side padding so the first and last stage can still centre in the track.
-  const sidePad = $derived(Math.max(0, (trackW - panelW) / 2));
-
   let sectionEl: HTMLElement | undefined = $state();
   let barEl: HTMLElement | undefined = $state();
 
@@ -101,10 +134,19 @@
   // Shared UI context for the subtree: schema defaults, but animations collapse to 0
   // under reduced motion so previews jump to the final frame with no movement.
   const showcaseDefaults = getDefaultSettings();
+  // A reactive expansion registry so a stage can collapse/expand a shared
+  // Expandable bubble (e.g. the relevant-tools card) from its timeline by id.
+  const expansion = new SvelteMap<string, boolean>();
   setUiContext(
     makeUiContext({
       getSetting: (key) => showcaseDefaults[key],
       animationDurationMs: (ms = BASE_MS) => (reduce ? 0 : ms),
+      expansionGet: (id, fallback = false) =>
+        id !== undefined ? (expansion.get(id) ?? fallback) : fallback,
+      expansionSet: (id, value) => expansion.set(id, value),
+      expansionInit: (id, value) => {
+        if (!expansion.has(id)) expansion.set(id, value);
+      },
     }),
   );
 
@@ -129,6 +171,15 @@
     }
   }
 
+  // Reveal the homepage hero once every stage has measured and registered (so the
+  // layout has stopped settling). Flipping `main[data-ready]` triggers the staged
+  // fade in site.css: the install button fades in, then the showcase scrim fades
+  // out. All the load-time settling (scale, scroll, height) happens behind that,
+  // so it is never seen as a shift.
+  $effect(() => {
+    if (ready) sectionEl?.closest("main")?.setAttribute("data-ready", "");
+  });
+
   // Play the active timeline only when settled; reduced motion jumps to the end.
   $effect(() => {
     if (!ready) return;
@@ -138,9 +189,14 @@
       tl.progress(1);
       return;
     }
-    if (scrolling) tl.pause();
+    if (scrolling || paused) tl.pause();
     else tl.play();
   });
+
+  // Toggle play/pause on the active stage (clicking its own cover).
+  function togglePause(): void {
+    paused = !paused;
+  }
 
   function lockAndStart(): void {
     handles.forEach((h, j) => {
@@ -166,6 +222,7 @@
     const next = Math.max(0, Math.min(STAGES - 1, Math.round(scrollFrac)));
     index = next;
     scrolling = false;
+    paused = false;
     lockAndStart();
   }
 
@@ -247,21 +304,36 @@
 
 <section
   bind:this={sectionEl}
-  class="shrink-0 w-full flex flex-col items-center gap-1"
+  class="showcase-section relative shrink-0 w-full flex flex-col items-center gap-4"
 >
-  <!-- Stage track: full-width horizontal snap-scroll, one stage per snap unit;
-       neighbours peek and dim, only the centred stage animates. -->
-  <div
-    bind:this={trackEl}
-    onscroll={onScroll}
-    class="no-scrollbar w-full flex overflow-x-auto overscroll-x-none snap-x snap-mandatory"
-    style="padding-inline: {sidePad}px"
-  >
+  <!-- Track + its edge fades. The fades are pointer-events-none gradient
+       OVERLAYS painted in front of the track's left/right edges (fading to the
+       page bg-surface), NOT a `mask` on the track: a mask on the bubbles'
+       ancestor breaks their `backdrop-filter` halo in WebKit, so we paint the
+       fade on top instead. They sit above the demos but below nothing they need
+       to block (pointer-events-none), and only show when neighbours peek. -->
+  <div class="relative w-full">
+    <!-- Stage track: full-width horizontal snap-scroll, one stage per snap unit;
+         neighbours peek and dim, only the centred stage animates. -->
+    <div
+      bind:this={trackEl}
+      onscroll={onScroll}
+      class="no-scrollbar w-full flex overflow-x-auto overflow-y-hidden overscroll-x-none snap-x snap-mandatory"
+      style="padding-inline: max(0px, calc(50% - {panelW / 2}px))"
+    >
     {#each meta as m, i (i)}
       <div
-        class="snap-center shrink-0 flex flex-col items-center justify-end gap-6 sm:gap-10 transition-opacity duration-200"
-        style="width: {panelW}px; opacity: {0.35 + 0.65 * weight(i)}"
+        class="relative snap-center shrink-0 flex flex-col items-center justify-end gap-6 sm:gap-10"
+        style="width: {panelW}px"
       >
+        <!-- Patterned focus grid belonging to this stage: capped to the content
+             width and centered so it backs the demo + caption, gives the demo's
+             blur borders texture to sample, and rides along with the stage as it
+             scrolls. It lives inside the panel, so the panel's dim opacity fades
+             it together with the rest of an off-centre stage. See
+             `.focus-grid-stage` in site.css. -->
+        <div class="focus-grid-stage" aria-hidden="true"></div>
+
         <!-- Uniform footprint; each stage's scaled design frame centres inside it. -->
         <div
           style="width: {maxFrameW}px; height: {maxFrameH}px"
@@ -278,27 +350,88 @@
                 register={(h) => register(0, h)}
                 reportHeight={(h) => reportContentH(0, h)}
               />
-            {:else}
+            {:else if i === 1}
               <SettingsStage register={(h) => register(1, h)} />
+            {:else if i === 2}
+              <DualModelStage
+                register={(h) => register(2, h)}
+                reportHeight={(h) => reportContentH(2, h)}
+              />
+            {:else if i === 3}
+              <CustomToolStage
+                register={(h) => register(3, h)}
+                reportHeight={(h) => reportContentH(3, h)}
+              />
+            {:else}
+              <SpeechStage
+                register={(h) => register(4, h)}
+                reportHeight={(h) => reportContentH(4, h)}
+              />
             {/if}
           </div>
         </div>
 
         <!-- Caption rides inside the panel so it slides with its stage; capped to the
-             install-card width so its left edge aligns with everything below. -->
+             install-card width so its left edge aligns with everything below. It
+             shrink-wraps its content (no min-height), so the description is always
+             the block's bottom edge with no slack. The caption text has its
+             half-leading trimmed (see site.css [data-caption]), so this
+             title->description gap and the section's description->bar gap are the
+             SAME `gap-4` token AND read as the same visible distance. -->
         <div
           data-caption
-          class="w-full max-w-xl mx-auto px-4 min-h-[3.5rem] text-left"
+          class="w-full max-w-xl mx-auto px-4 text-left flex flex-col gap-4"
         >
           <h2 class="text-lg font-semibold text-default-900">{m.title}</h2>
-          <p class="mt-1 text-sm text-default-600 text-justify">{m.desc}</p>
+          <p class="text-sm text-default-600 text-justify">{m.desc}</p>
         </div>
+
+        <!-- Dim overlay: fades an off-centre stage toward the page background. A
+             translucent surface-colored scrim PAINTED OVER the panel (a sibling,
+             pointer-events-none), NOT `opacity` on the panel: opacity < 1 on the
+             bubbles' ancestor establishes a backdrop root in WebKit and kills
+             their `backdrop-filter` halo. Worse, a stage born off-centre (opacity
+             < 1) has its halo layer established broken and never recovers when it
+             later centres, so only the first stage (born centred at opacity 1)
+             kept its blur. A scrim isn't an ancestor of any bubble, so every
+             stage keeps its halo at all times; the centred stage's scrim is fully
+             transparent (the surface-color scrim at 1 - V composites identically
+             to the old panel-at-opacity-V, so the dim look is unchanged). -->
+        <div
+          class="stage-dim"
+          aria-hidden="true"
+          style="opacity: {0.65 * (1 - weight(i))}"
+        ></div>
+
+        <!-- Cover: blocks pointer access to the demo (so the playing demo can't be
+             clicked). On a side demo it focuses that stage; on the active demo it
+             toggles play/pause of its animation. Transparent; the demo shows through. -->
+        <button
+          type="button"
+          aria-label={i === index
+            ? `${paused ? "Play" : "Pause"}: ${m.title}`
+            : `Show: ${m.title}`}
+          class="absolute inset-0 z-20 cursor-pointer"
+          onclick={() => (i === index ? togglePause() : scrollToIndex(i))}
+        ></button>
       </div>
     {/each}
+    </div>
+
+    <!-- Edge fades: pointer-events-none gradient overlays in front of the
+         track's left/right edges (fade to bg-surface), shown only when
+         neighbours peek. An overlay (not a `mask` on the track) keeps the
+         bubbles' `backdrop-filter` halo intact. -->
+    {#if edgeFade}
+      <div class="edge-fade-overlay edge-fade-overlay-left" aria-hidden="true"></div>
+      <div class="edge-fade-overlay edge-fade-overlay-right" aria-hidden="true"></div>
+    {/if}
   </div>
 
   <!-- Playback indicator, one segment per stage: the centred stage is a progress
-       bar, the others dots; scrolling morphs between them. -->
+       bar, the others dots; scrolling morphs between them. While scrolling, each
+       segment's track adopts the growing-fill colour (bg-default-400) so the
+       progress vanishes into its own background; it reverts on settle. -->
   <div bind:this={barEl} class="shrink-0 w-full max-w-xl mx-auto px-4">
     <div class="flex items-center gap-1">
       {#each meta as m, i (i)}
@@ -307,7 +440,9 @@
           onclick={() => scrollToIndex(i)}
           title={m.title}
           aria-label={m.title}
-          class="relative h-1.5 rounded-full overflow-hidden hover:cursor-pointer bg-surface-inset"
+          class="relative h-1.5 rounded-full overflow-hidden hover:cursor-pointer transition-colors duration-200 {scrolling
+            ? 'bg-default-400'
+            : 'bg-surface-inset'}"
           style="flex-grow: {weight(
             i,
           )}; flex-basis: 0.375rem; min-width: 0.375rem"
@@ -320,6 +455,16 @@
       {/each}
     </div>
   </div>
+
+  <!-- Reveal scrim: a surface-colored cover painted OVER the whole showcase that
+       fades OUT once the layout has settled (driven by the critical `data-js` /
+       `main[data-ready]` gate in BaseLayout's <head>). It is a fade, but never
+       `opacity` on the section itself: opacity < 1 on a bubble ancestor kills its
+       `backdrop-filter` halo in WebKit (same reason the dim/edge fades are
+       overlays, not masks). A sibling scrim is not a bubble ancestor, so the
+       halos survive. All its styling lives in the critical head CSS so it covers
+       on the very first paint, before the UnoCSS utilities load. -->
+  <div class="showcase-scrim" aria-hidden="true"></div>
 </section>
 
 <style>
