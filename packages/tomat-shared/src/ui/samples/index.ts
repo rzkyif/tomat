@@ -12,7 +12,7 @@ export { errorMessageSamples } from "./error-message.ts";
 export { expandableMessageSamples } from "./expandable-message.ts";
 export { quickModelBarSamples } from "./quick-model-bar.ts";
 export { reasoningTraceSamples } from "./reasoning-trace.ts";
-export { relevantDocumentsSamples } from "./relevant-documents.ts";
+export { relevantMemoriesSamples } from "./relevant-memories.ts";
 export { relevantToolsSamples } from "./relevant-tools.ts";
 export { sessionBarSamples } from "./session-bar.ts";
 export { settingsContentSamples } from "./settings-content.ts";
@@ -33,7 +33,7 @@ import { errorMessageSamples } from "./error-message.ts";
 import { expandableMessageSamples } from "./expandable-message.ts";
 import { quickModelBarSamples } from "./quick-model-bar.ts";
 import { reasoningTraceSamples } from "./reasoning-trace.ts";
-import { relevantDocumentsSamples } from "./relevant-documents.ts";
+import { relevantMemoriesSamples } from "./relevant-memories.ts";
 import { relevantToolsSamples } from "./relevant-tools.ts";
 import { sessionBarSamples } from "./session-bar.ts";
 import { settingsContentSamples } from "./settings-content.ts";
@@ -56,7 +56,7 @@ export const SAMPLES = {
   ExpandableMessageView: expandableMessageSamples,
   QuickModelBarView: quickModelBarSamples,
   ReasoningTraceView: reasoningTraceSamples,
-  RelevantDocumentsView: relevantDocumentsSamples,
+  RelevantMemoriesView: relevantMemoriesSamples,
   RelevantToolsView: relevantToolsSamples,
   SessionBarView: sessionBarSamples,
   SettingsContentView: settingsContentSamples,

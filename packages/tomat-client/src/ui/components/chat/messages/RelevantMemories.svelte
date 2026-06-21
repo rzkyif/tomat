@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Message } from "$lib/util/types";
-  import RelevantDocumentsView from "@tomat/shared/ui/components/chat/messages/RelevantDocumentsView.svelte";
+  import RelevantMemoriesView from "@tomat/shared/ui/components/chat/messages/RelevantMemoriesView.svelte";
 
   let {
     id,
@@ -15,9 +15,9 @@
   } = $props();
 </script>
 
-<RelevantDocumentsView
+<RelevantMemoriesView
   {id}
-  docs={msg.relevant ?? []}
+  memories={msg.relevant ?? []}
   status={msg.status ?? "complete"}
   errorMessage={msg.errorMessage}
   {neighborLeft}

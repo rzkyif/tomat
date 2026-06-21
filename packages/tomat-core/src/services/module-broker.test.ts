@@ -1,4 +1,4 @@
-// Module broker gating: grant states, undeclared policy, documents
+// Module broker gating: grant states, undeclared policy, memories
 // read/write coverage, and the db declaration gate. Op dispatch behavior is
 // covered by the per-module suites; here a gated request that reaches
 // dispatch (clean resolve, or its arg-validation / unknown-op error) is the
@@ -101,8 +101,8 @@ async function run(
 }
 
 const LLM_DECL: PermissionDecl = { kind: "llm", reason: "summarize things" };
-const DOCS_READ: PermissionDecl = { kind: "documents", access: "read", reason: "read notes" };
-const DOCS_WRITE: PermissionDecl = { kind: "documents", access: "write", reason: "edit notes" };
+const DOCS_READ: PermissionDecl = { kind: "memories", access: "read", reason: "read notes" };
+const DOCS_WRITE: PermissionDecl = { kind: "memories", access: "write", reason: "edit notes" };
 
 Deno.test("broker: granted state dispatches without prompting", async () => {
   const env = await setupTestEnv();
@@ -166,30 +166,30 @@ Deno.test("broker: undeclared follows the toolkit policy", async () => {
   }
 });
 
-Deno.test("broker: documents write grant covers read ops, not vice versa", async () => {
+Deno.test("broker: memories write grant covers read ops, not vice versa", async () => {
   const env = await setupTestEnv();
   try {
     seedToolkit({ permissions: [DOCS_WRITE] });
     setGrant(DOCS_WRITE, "granted");
-    const read = await run("documents", "get", false);
+    const read = await run("memories", "get", false);
     assertEquals(read.outcome, "dispatched");
     assertEquals(read.prompts.length, 0);
 
     // A read-only declaration leaves write ops undeclared (policy deny).
     seedToolkit({ permissions: [DOCS_READ] });
     setGrant(DOCS_READ, "granted");
-    const write = await run("documents", "write", true);
+    const write = await run("memories", "write", true);
     assertEquals(write.outcome, "forbidden");
     assertEquals(write.prompts.length, 0);
     // The read grant itself still works.
-    const read2 = await run("documents", "list", false);
+    const read2 = await run("memories", "list", false);
     assertEquals(read2.outcome, "dispatched");
   } finally {
     await env.teardown();
   }
 });
 
-Deno.test("broker: documents ops round-trip through the store", async () => {
+Deno.test("broker: memories ops round-trip through the store", async () => {
   const env = await setupTestEnv();
   try {
     seedToolkit({ permissions: [DOCS_WRITE] });
@@ -199,7 +199,7 @@ Deno.test("broker: documents ops round-trip through the store", async () => {
         toolkitId: TOOLKIT_ID,
         toolName: TOOL_NAME,
         callId: "call-1",
-        module: "documents",
+        module: "memories",
         op,
         args,
         promptUser: () => Promise.resolve(false),
@@ -218,7 +218,7 @@ Deno.test("broker: documents ops round-trip through the store", async () => {
       ["Notes"],
     );
 
-    // Missing documents and missing args surface as clear errors.
+    // Missing memories and missing args surface as clear errors.
     await assertRejects(() => call("get", { title: "Nope" }), AppError, "not found");
     await assertRejects(() => call("write", { title: "X" }), AppError, "content");
   } finally {

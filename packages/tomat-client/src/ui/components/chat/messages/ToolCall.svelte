@@ -61,7 +61,7 @@
     }
   }
 >
-  {#snippet documentContent({ content })}
+  {#snippet memoryContent({ content })}
     <MessageMarkdown {content} />
   {/snippet}
 </ToolCallView>

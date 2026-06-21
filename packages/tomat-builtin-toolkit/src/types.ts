@@ -41,7 +41,7 @@ export interface ToolChatContext {
   locale?: string;
 }
 
-export interface DocumentListing {
+export interface MemoryListing {
   title: string;
   summary?: string;
   updatedAtMs: number;
@@ -78,14 +78,14 @@ export interface ToolContext {
     table(columns: string[], rows: string[][]): void;
     diff(before: string, after: string, title?: string): void;
   };
-  /** The user's document store, title-keyed. Calls are gated by the host's
-   *  documents permission (read for list/get, write for write/edit); the
+  /** The user's memory store, title-keyed. Calls are gated by the host's
+   *  memories permission (read for list/get, write for write/edit); the
    *  first ungranted use pauses on a user prompt and rejects when refused.
-   *  `write` creates the document or replaces its content; `edit` does an
+   *  `write` creates the memory or replaces its content; `edit` does an
    *  exact single-occurrence find/replace and errors when the find text
    *  matches zero times or more than once. */
-  documents: {
-    list(): Promise<DocumentListing[]>;
+  memories: {
+    list(): Promise<MemoryListing[]>;
     get(title: string): Promise<{ title: string; content: string }>;
     write(
       title: string,

@@ -1,12 +1,12 @@
-// Document tools over a scripted ctx.documents (no real host bridge):
-// argument validation, result kinds, and show_document's markdown push.
+// Memory tools over a scripted ctx.memories (no real host bridge):
+// argument validation, result kinds, and show_memory's markdown push.
 
 import { assertEquals, assertRejects } from "@std/assert";
-import { editDocument, readDocument, showDocument, writeDocument } from "./documents.ts";
+import { editMemory, readMemory, showMemory, writeMemory } from "./memories.ts";
 import type { ToolContext } from "./types.ts";
 
 interface MockCtx extends ToolContext {
-  /** Replay log: every documents call as [op, ...args]. */
+  /** Replay log: every memories call as [op, ...args]. */
   calls: string[][];
   /** Replay log: markdown pushed via ctx.display. */
   shown: string[];
@@ -27,7 +27,7 @@ function makeMockCtx(): MockCtx {
       table() {},
       diff() {},
     },
-    documents: {
+    memories: {
       list() {
         ctx.calls.push(["list"]);
         return Promise.resolve([]);
@@ -61,44 +61,44 @@ function makeMockCtx(): MockCtx {
   return ctx;
 }
 
-Deno.test("write_document: returns a document_diff and allows empty content", async () => {
+Deno.test("write_memory: returns a memory_diff and allows empty content", async () => {
   const ctx = makeMockCtx();
-  const result = await writeDocument({ title: "Notes", content: "" }, ctx);
+  const result = await writeMemory({ title: "Notes", content: "" }, ctx);
   assertEquals(result, {
-    kind: "document_diff",
+    kind: "memory_diff",
     title: "Notes",
     before: "",
     after: "",
     created: true,
   });
   assertEquals(ctx.calls, [["write", "Notes", ""]]);
-  await assertRejects(() => writeDocument({ content: "x" }, ctx), Error, "title");
+  await assertRejects(() => writeMemory({ content: "x" }, ctx), Error, "title");
 });
 
-Deno.test("edit_document: returns a document_diff and requires non-empty find", async () => {
+Deno.test("edit_memory: returns a memory_diff and requires non-empty find", async () => {
   const ctx = makeMockCtx();
-  const result = await editDocument({ title: "Notes", find: "a", replace: "" }, ctx);
-  assertEquals(result, { kind: "document_diff", title: "Notes", before: "a", after: "" });
+  const result = await editMemory({ title: "Notes", find: "a", replace: "" }, ctx);
+  assertEquals(result, { kind: "memory_diff", title: "Notes", before: "a", after: "" });
   await assertRejects(
-    () => editDocument({ title: "Notes", find: " ", replace: "x" }, ctx),
+    () => editMemory({ title: "Notes", find: " ", replace: "x" }, ctx),
     Error,
     "find",
   );
 });
 
-Deno.test("read_document: returns a document_content result", async () => {
+Deno.test("read_memory: returns a memory_content result", async () => {
   const ctx = makeMockCtx();
-  const result = await readDocument({ title: "Notes" }, ctx);
+  const result = await readMemory({ title: "Notes" }, ctx);
   assertEquals(result, {
-    kind: "document_content",
+    kind: "memory_content",
     title: "Notes",
     content: "# Notes\nbody",
   });
 });
 
-Deno.test("show_document: pushes the content as a markdown display", async () => {
+Deno.test("show_memory: pushes the content as a markdown display", async () => {
   const ctx = makeMockCtx();
-  const result = await showDocument({ title: "Notes" }, ctx);
+  const result = await showMemory({ title: "Notes" }, ctx);
   assertEquals(result, { title: "Notes", shown: true });
   assertEquals(ctx.shown, ["# Notes\nbody"]);
 });

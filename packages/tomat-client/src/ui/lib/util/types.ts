@@ -17,7 +17,7 @@ import type {
   AskUserChoiceQuestion,
   AskUserQuestion,
   DisplayContent,
-  DocumentFilterEntryPersisted,
+  MemoryFilterEntryPersisted,
   MessageContent,
   MessagePart,
   PermissionKind,
@@ -89,8 +89,8 @@ export type Message = {
     | "system"
     | "tool"
     | "tool_filter"
-    | "document_filter"
-    /** Tool-pushed display content (ctx.display.* / show_document). */
+    | "memory_filter"
+    /** Tool-pushed display content (ctx.display.* / show_memory). */
     | "display"
     /** Synthetic, render-only role. The +page rendering pipeline injects a
      *  single `role: "loading"` Message into its derived display list while
@@ -135,7 +135,7 @@ export type Message = {
   /** JSON string of arguments as the model emitted them. */
   arguments?: string;
   /** ToolCallStatus for tool rows; "complete" | "error" for tool_filter /
-   *  document_filter rows. */
+   *  memory_filter rows. */
   status?: ToolCallStatus | "complete" | "error";
   progress?: number;
   label?: string;
@@ -150,9 +150,9 @@ export type Message = {
   alwaysAvailable?: ToolFilterEntryPersisted[];
   toolsSent?: number;
   errorMessage?: string;
-  // role: "document_filter" flat fields (DocumentFilterMessage on the wire).
+  // role: "memory_filter" flat fields (MemoryFilterMessage on the wire).
   // Empty array means the filter ran and surfaced nothing.
-  relevant?: DocumentFilterEntryPersisted[];
+  relevant?: MemoryFilterEntryPersisted[];
   // role: "error" extras.
   code?: string;
   details?: Record<string, unknown>;

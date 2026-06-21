@@ -31,7 +31,7 @@ import { __resetForTesting as resetBinariesManager } from "../../src/binaries/ma
 import { __resetForTesting as resetDownloads } from "../../src/downloads/manager.ts";
 import { __resetForTesting as resetCoreSettings } from "../../src/services/core-settings.ts";
 import { __resetForTesting as resetBackgroundQueue } from "../../src/services/background-queue.ts";
-import { __resetForTesting as resetDocumentsStore } from "../../src/services/documents-store.ts";
+import { __resetForTesting as resetMemoriesStore } from "../../src/services/memories-store.ts";
 import { __resetForTesting as resetPromptScheduler } from "../../src/services/prompt-scheduler.ts";
 import * as log from "@std/log";
 
@@ -114,7 +114,7 @@ export async function setupTestEnv(): Promise<TestEnv> {
       resetDownloads();
       resetCoreSettings();
       resetBackgroundQueue();
-      resetDocumentsStore();
+      resetMemoriesStore();
       if (snapshot.prior === undefined) Deno.env.delete(snapshot.key);
       else Deno.env.set(snapshot.key, snapshot.prior);
       await Deno.remove(coreHome, { recursive: true }).catch(() => {});

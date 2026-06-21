@@ -1,18 +1,18 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import type { DocumentMeta } from "@tomat/shared";
-  import { documentsState } from "$stores";
+  import type { MemoryMeta } from "@tomat/shared";
+  import { memoriesState } from "$stores";
   import { getLogger } from "$lib/util/log";
   import FormField from "@tomat/shared/ui/components/primitives/FormField.svelte";
   import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
   import Textarea from "@tomat/shared/ui/components/primitives/Textarea.svelte";
 
-  const log = getLogger("documents");
+  const log = getLogger("memories");
 
   // `reload` refreshes the list behind the detail so the card reflects edits.
-  let { item, reload }: { item: DocumentMeta; reload: () => void } = $props();
+  let { item, reload }: { item: MemoryMeta; reload: () => void } = $props();
 
-  // One-time snapshot of the opened document; later store updates must not
+  // One-time snapshot of the opened memory; later store updates must not
   // clobber an in-progress edit, so these are intentionally not derived.
   let draftTitle = $state(untrack(() => item.title));
   // Content lives on the core only (the list carries metadata), so the editor
@@ -23,25 +23,25 @@
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   const otherTitles = $derived(
-    documentsState.documents
+    memoriesState.memories
       .filter((d) => d.id !== item.id)
       .map((d) => d.title.toLowerCase()),
   );
   const titleError = $derived.by(() => {
     if (!draftTitle.trim()) return "Title cannot be empty";
     if (otherTitles.includes(draftTitle.trim().toLowerCase())) {
-      return "A document with this title already exists";
+      return "A memory with this title already exists";
     }
     return null;
   });
 
   onMount(async () => {
     try {
-      const doc = await documentsState.get(item.id);
+      const doc = await memoriesState.get(item.id);
       draftContent = doc.content;
       contentLoaded = true;
     } catch (e) {
-      log.error("Failed to load document content:", e);
+      log.error("Failed to load memory content:", e);
     }
   });
 
@@ -57,13 +57,13 @@
     }
     if (titleError || !contentLoaded) return;
     try {
-      await documentsState.update(item.id, {
+      await memoriesState.update(item.id, {
         title: draftTitle.trim(),
         content: draftContent,
       });
       reload();
     } catch (e) {
-      log.error("Failed to save document:", e);
+      log.error("Failed to save memory:", e);
     }
   }
 </script>
@@ -73,7 +73,7 @@
     <Input
       type="text"
       value={draftTitle}
-      ariaLabel="Document title"
+      ariaLabel="Memory title"
       error={!!titleError}
       oninput={(v) => {
         draftTitle = v;
@@ -85,7 +85,7 @@
 
   <FormField label="Content">
     <Textarea
-      ariaLabel="Document content"
+      ariaLabel="Memory content"
       autoResize="none"
       class="min-h-48 overflow-y-auto resize-y font-mono"
       value={draftContent}

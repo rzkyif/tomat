@@ -4,7 +4,7 @@ import type ToolCallView from "../components/chat/messages/ToolCallView.svelte";
 
 // One tool call per status, plus an awaiting-input form (driven by
 // `draftsOverride` so the gallery shows a selection without live interaction)
-// and a well-known document result. `documentContent` is a snippet prop, so the
+// and a well-known memory result. `memoryContent` is a snippet prop, so the
 // gallery supplies the markdown renderer; `OmitSnippetProps` strips it here.
 export const toolCallSamples = {
   completed: {
@@ -47,12 +47,12 @@ export const toolCallSamples = {
       0: { text: "", picks: ["kitchen"], freestyleActive: false, rows: [] },
     },
   },
-  documentResult: {
+  memoryResult: {
     toolName: "show_todos",
     status: "completed",
     expanded: true,
     result: {
-      kind: "document_content",
+      kind: "memory_content",
       title: "Today",
       content: "# Today\n\n- water the plants\n- call the vet",
     },

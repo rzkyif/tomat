@@ -29,7 +29,7 @@ export const PERMISSION_KINDS = [
   "env",
   "ffi",
   "sys",
-  "documents",
+  "memories",
   "llm",
   "tts",
   "stt",
@@ -40,8 +40,8 @@ export type PermissionKind = (typeof PERMISSION_KINDS)[number];
 // Wire shape mirroring tools.json permission entries. Cardinality varies by
 // kind: net entries declare host/ports; read/write declare paths; run declares
 // binaries; env declares variable names. ffi/sys are all-or-nothing keys.
-// documents/llm/tts/stt are core-module permissions enforced by the module
-// broker (not Deno flags); documents splits into read/write access.
+// memories/llm/tts/stt are core-module permissions enforced by the module
+// broker (not Deno flags); memories splits into read/write access.
 export type PermissionDecl =
   | {
       kind: "net";
@@ -57,7 +57,7 @@ export type PermissionDecl =
   | { kind: "ffi"; reason: string; optional?: boolean }
   | { kind: "sys"; flag: string; reason: string; optional?: boolean }
   | {
-      kind: "documents";
+      kind: "memories";
       access: "read" | "write";
       reason: string;
       optional?: boolean;
@@ -86,8 +86,8 @@ export function permissionKey(decl: PermissionDecl): string {
       return `ffi`;
     case "sys":
       return `sys:${decl.flag}`;
-    case "documents":
-      return `documents:${decl.access}`;
+    case "memories":
+      return `memories:${decl.access}`;
     case "llm":
       return `llm`;
     case "tts":

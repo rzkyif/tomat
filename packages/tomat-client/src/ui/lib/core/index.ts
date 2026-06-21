@@ -14,7 +14,7 @@ export { BinariesApi } from "./binaries";
 export { RequirementsApi } from "./requirements";
 export { StorageApi } from "./storage";
 export { ToolkitsApi } from "./toolkits";
-export { DocumentsApi } from "./documents";
+export { MemoriesApi } from "./memories";
 export { ScheduledPromptsApi } from "./scheduled-prompts";
 export { GreetingsApi } from "./greetings";
 export { SttApi } from "./stt";

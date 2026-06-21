@@ -1,4 +1,4 @@
-// Module broker: gates and dispatches tool module_request frames (documents,
+// Module broker: gates and dispatches tool module_request frames (memories,
 // db, llm, tts, stt) coming over the worker stdio protocol. The non-PTY
 // counterpart of the runtime permission prompt flow: the access check runs
 // here at the core API layer, and an ask-state (or undeclared, policy `ask`)
@@ -17,8 +17,8 @@ import { toolkitDataDir } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import { loadCoreSettings } from "./core-settings.ts";
-import { documentsStore } from "./documents-store.ts";
-import { scheduleDocumentIndexing } from "./documents-indexer.ts";
+import { memoriesStore } from "./memories-store.ts";
+import { scheduleMemoryIndexing } from "./memories-indexer.ts";
 import { resolveEndpoint } from "./endpoint-resolver.ts";
 import { llmIdle } from "./llm-idle.ts";
 import { singleShot } from "./single-shot.ts";
@@ -30,7 +30,7 @@ const log = getLogger("modulebroker");
 // `permission_request` CallEvent fields the pool forwards to chat.
 export interface ModulePrompt {
   permission: PermissionKind;
-  // What is being touched: the access ("read" | "write") for documents,
+  // What is being touched: the access ("read" | "write") for memories,
   // empty for the all-or-nothing modules.
   resource: string;
   declared: boolean;
@@ -71,7 +71,7 @@ async function gate(req: ModuleRequest): Promise<void> {
   }
 
   const permission: PermissionKind = req.module;
-  const access = req.module === "documents" ? documentsAccessFor(req.op) : undefined;
+  const access = req.module === "memories" ? memoriesAccessFor(req.op) : undefined;
   const resource = access ?? "";
 
   const tool = toolkitsRegistry()
@@ -104,7 +104,7 @@ async function gate(req: ModuleRequest): Promise<void> {
   }
 }
 
-function documentsAccessFor(op: string): "read" | "write" {
+function memoriesAccessFor(op: string): "read" | "write" {
   switch (op) {
     case "list":
     case "get":
@@ -119,8 +119,8 @@ function documentsAccessFor(op: string): "read" | "write" {
   }
 }
 
-// A documents:write grant covers read ops too: write is strictly broader,
-// and a tool that can edit documents can trivially read them through edit
+// A memories:write grant covers read ops too: write is strictly broader,
+// and a tool that can edit memories can trivially read them through edit
 // errors anyway, so requiring a second grant would be ceremony, not safety.
 function declCovers(
   decl: PermissionDecl,
@@ -128,7 +128,7 @@ function declCovers(
   access: "read" | "write" | undefined,
 ): boolean {
   if (decl.kind !== permission) return false;
-  if (decl.kind !== "documents") return true;
+  if (decl.kind !== "memories") return true;
   return decl.access === access || (decl.access === "write" && access === "read");
 }
 
@@ -136,8 +136,8 @@ function declCovers(
 
 function dispatch(req: ModuleRequest): Promise<unknown> {
   switch (req.module) {
-    case "documents":
-      return dispatchDocuments(req.op, req.args);
+    case "memories":
+      return dispatchMemories(req.op, req.args);
     case "db":
       return Promise.resolve(dispatchDb(req.toolkitId, req.toolName, req.op, req.args));
     case "llm":
@@ -154,10 +154,10 @@ function dispatch(req: ModuleRequest): Promise<unknown> {
   }
 }
 
-// Tool-facing documents API is title-keyed: tools never see row ids, and
-// titles are what the model knows from the prompt's relevant-documents list.
-async function dispatchDocuments(op: string, args: unknown): Promise<unknown> {
-  const store = documentsStore();
+// Tool-facing memories API is title-keyed: tools never see row ids, and
+// titles are what the model knows from the prompt's relevant-memories list.
+async function dispatchMemories(op: string, args: unknown): Promise<unknown> {
+  const store = memoriesStore();
   switch (op) {
     case "list":
       return store.list().map((m) => ({
@@ -166,35 +166,37 @@ async function dispatchDocuments(op: string, args: unknown): Promise<unknown> {
         updatedAtMs: m.updatedAtMs,
       }));
     case "get": {
-      const doc = store.getByTitle(argString(args, "title"));
-      if (!doc) throw new AppError("not_found", `document "${argString(args, "title")}" not found`);
-      return { title: doc.title, content: doc.content };
+      const memory = store.getByTitle(argString(args, "title"));
+      if (!memory) {
+        throw new AppError("not_found", `memory "${argString(args, "title")}" not found`);
+      }
+      return { title: memory.title, content: memory.content };
     }
     case "write": {
       const title = argString(args, "title");
       const content = argString(args, "content", { allowEmpty: true });
       const existing = store.getByTitle(title);
       const before = existing?.content ?? "";
-      const doc = existing
+      const memory = existing
         ? store.replaceContent(existing.id, content)
         : store.create(title, content);
-      scheduleDocumentIndexing(doc.id);
-      return { title: doc.title, before, after: content, created: !existing };
+      scheduleMemoryIndexing(memory.id);
+      return { title: memory.title, before, after: content, created: !existing };
     }
     case "edit": {
       const title = argString(args, "title");
       const existing = store.getByTitle(title);
-      if (!existing) throw new AppError("not_found", `document "${title}" not found`);
-      const { document, before, after } = store.editContent(
+      if (!existing) throw new AppError("not_found", `memory "${title}" not found`);
+      const { memory, before, after } = store.editContent(
         existing.id,
         argString(args, "find"),
         argString(args, "replace", { allowEmpty: true }),
       );
-      scheduleDocumentIndexing(document.id);
-      return { title: document.title, before, after };
+      scheduleMemoryIndexing(memory.id);
+      return { title: memory.title, before, after };
     }
     default:
-      throw new AppError("validation_error", `unknown documents op "${op}"`);
+      throw new AppError("validation_error", `unknown memories op "${op}"`);
   }
 }
 

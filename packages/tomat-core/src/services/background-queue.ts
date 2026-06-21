@@ -1,4 +1,4 @@
-// Single-active FIFO queue for deferrable LLM/embedding work (document
+// Single-active FIFO queue for deferrable LLM/embedding work (memory
 // summaries, embedding refreshes). Jobs are deduped by key and drain one at
 // a time, only while the chat service is idle: no in-flight turn, plus a
 // short quiet period after the last one, so background work never competes

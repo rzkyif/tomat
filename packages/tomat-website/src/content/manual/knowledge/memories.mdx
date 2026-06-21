@@ -1,0 +1,49 @@
+---
+title: Memories
+section: Knowledge
+order: 1
+---
+
+import RelevantMemoriesDemo from "../../../components/demos/RelevantMemoriesDemo.svelte";
+import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelte";
+
+**Memories** are notes you keep in tomat for the agent to draw on. Unlike an
+attachment, which belongs to a single message, a memory lives on your core and
+stays available across every session, so a reference you add once is there for
+every future conversation. They are how you give the agent lasting context about
+your work, your projects, or yourself.
+
+## Relevant memories
+
+You do not have to remember which memory matters for a given question. As you write
+a message, tomat finds the memories most related to it, lets the agent see their
+summaries, and lets it read the full text on demand. The memory surfaces itself when
+it is relevant, and stays out of the way when it is not.
+
+<RelevantMemoriesDemo />
+
+The conversation shows which memories were surfaced, so a reply that leans on one
+tells you which it used. When nothing matches, tomat can either stay quiet or show
+that it looked and found nothing, whichever you prefer, so silence is never
+ambiguous.
+
+## Referencing a memory
+
+When you know exactly which memory you want, you do not have to wait for it to be
+ranked in. Type `@` and the memory's name in the input bar to drop its full
+content straight into your message, the same mention you use for snippets. That is
+the difference between the two paths: retrieval is tomat finding a memory for you,
+while a mention is you naming one outright.
+
+## Settings
+
+Turn relevant memories on or off, and cap how many tomat offers at once, under
+**Memories** in Settings. The cap is the main dial worth knowing: a higher one
+surfaces more memories per message at the cost of more of the
+[context window](/manual/core-concepts/sessions-and-context), while a lower one
+keeps replies lean.
+
+<SettingsPanelDemo group="memories" />
+
+For shorter pieces of reusable text you trigger by name rather than memories the
+agent retrieves, see [Snippets](/manual/knowledge/snippets).

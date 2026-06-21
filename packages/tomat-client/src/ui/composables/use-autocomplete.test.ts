@@ -39,7 +39,7 @@ describe("Autocomplete.updateFromInput", () => {
     expect(ac.triggerEnd).toBe(9);
   });
 
-  it("captures an open quoted document token", () => {
+  it("captures an open quoted memory token", () => {
     const src = 'see @"My Do';
     const { ac } = setup(src, src.length);
     ac.updateFromInput(src);

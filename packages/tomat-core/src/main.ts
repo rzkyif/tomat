@@ -18,8 +18,8 @@ import { BROADCAST_SINK } from "./http/routes/toolkits.ts";
 import { initSidecarBoot } from "./services/sidecar-boot.ts";
 import { llmIdle } from "./services/llm-idle.ts";
 import { backgroundQueue } from "./services/background-queue.ts";
-import { documentsStore } from "./services/documents-store.ts";
-import { scheduleDocumentIndexing } from "./services/documents-indexer.ts";
+import { memoriesStore } from "./services/memories-store.ts";
+import { scheduleMemoryIndexing } from "./services/memories-indexer.ts";
 import { promptScheduler } from "./services/prompt-scheduler.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
 import { shutdownJobctl } from "./sidecars/jobctl.ts";
@@ -116,13 +116,13 @@ async function main(): Promise<void> {
     log.warn(`secrets vault check failed: ${errMessage(err)}`);
   });
 
-  // Reconcile the document store with the files on disk, then queue summary /
+  // Reconcile the memory store with the files on disk, then queue summary /
   // embedding refreshes for anything stale (idle-gated, background).
   try {
-    documentsStore().rescan();
-    scheduleDocumentIndexing();
+    memoriesStore().rescan();
+    scheduleMemoryIndexing();
   } catch (err) {
-    log.warn(`document rescan failed: ${errMessage(err)}`);
+    log.warn(`memory rescan failed: ${errMessage(err)}`);
   }
 
   // Arm the scheduled-prompt timer. Overdue rows (core was off at fire

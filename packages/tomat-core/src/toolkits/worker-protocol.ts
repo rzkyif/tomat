@@ -14,9 +14,9 @@ import type {
 } from "@tomat/shared";
 
 // Core modules a tool can reach over the stdio protocol (module_request).
-// Access is gated by the module broker: grants for documents/llm/tts/stt,
+// Access is gated by the module broker: grants for memories/llm/tts/stt,
 // the toolkit's `database` declaration for db.
-export type ModuleName = "documents" | "db" | "llm" | "tts" | "stt";
+export type ModuleName = "memories" | "db" | "llm" | "tts" | "stt";
 
 export interface ChatContext {
   userMessage: string;
@@ -109,7 +109,7 @@ export type WorkerToPoolFrame =
   // One-way: push a display bubble into the chat (ctx.display.*). Never
   // awaited; the pool forwards it as a CallEvent and chat persists it.
   | { kind: "display"; callId: string; content: DisplayContent }
-  // Awaited call into a core module (documents, db, llm, tts, stt). The
+  // Awaited call into a core module (memories, db, llm, tts, stt). The
   // module broker gates access and the pool replies with module_response.
   | {
       kind: "module_request";
@@ -190,7 +190,7 @@ export function parseWorkerFrame(value: unknown): WorkerToPoolFrame | null {
         ? { kind: "display", callId: f.callId, content: canonicalDisplayContent(f.content) }
         : null;
     case "module_request": {
-      const modules: readonly ModuleName[] = ["documents", "db", "llm", "tts", "stt"];
+      const modules: readonly ModuleName[] = ["memories", "db", "llm", "tts", "stt"];
       const module = modules.find((m) => m === f.module);
       return id(f.callId) && id(f.requestId) && module !== undefined && typeof f.op === "string"
         ? {

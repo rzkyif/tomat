@@ -96,11 +96,11 @@ const toolFilterEntrySchema = z
   })
   .strict();
 
-// --- DocumentFilter inner shapes ----------------------------------------
+// --- MemoryFilter inner shapes ------------------------------------------
 
-const documentFilterEntrySchema = z
+const memoryFilterEntrySchema = z
   .object({
-    documentId: z.string(),
+    memoryId: z.string(),
     title: z.string(),
     summary: z.string(),
     score: z.number(),
@@ -191,12 +191,12 @@ export const toolFilterMessageInputSchema = z
   })
   .strict();
 
-export const documentFilterMessageInputSchema = z
+export const memoryFilterMessageInputSchema = z
   .object({
     ...baseShape,
-    role: z.literal("document_filter"),
+    role: z.literal("memory_filter"),
     status: z.enum(["complete", "error"]),
-    relevant: z.array(documentFilterEntrySchema).optional(),
+    relevant: z.array(memoryFilterEntrySchema).optional(),
     errorMessage: z.string().optional(),
   })
   .strict();
@@ -256,7 +256,7 @@ export const messageInputSchema = z.discriminatedUnion("role", [
   toolMessageInputSchema,
   reasoningMessageInputSchema,
   toolFilterMessageInputSchema,
-  documentFilterMessageInputSchema,
+  memoryFilterMessageInputSchema,
   displayMessageInputSchema,
   errorMessageInputSchema,
 ]);
@@ -276,7 +276,7 @@ export const messagePatchSchemaByRole = {
   tool: toolMessageInputSchema.omit({ role: true }).partial().strict(),
   reasoning: reasoningMessageInputSchema.omit({ role: true }).partial().strict(),
   tool_filter: toolFilterMessageInputSchema.omit({ role: true }).partial().strict(),
-  document_filter: documentFilterMessageInputSchema.omit({ role: true }).partial().strict(),
+  memory_filter: memoryFilterMessageInputSchema.omit({ role: true }).partial().strict(),
   display: displayMessageInputSchema.omit({ role: true }).partial().strict(),
   error: errorMessageInputSchema.omit({ role: true }).partial().strict(),
 } as const;

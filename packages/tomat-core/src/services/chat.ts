@@ -6,7 +6,7 @@
 // The server owns message identity and order. A streamed chat-born message
 // (reasoning, assistant, tool) is announced to the client as a `chat.message`
 // birth snapshot before any `chat.delta` touches it; the filter bubbles
-// (tool_filter, document_filter) skip the birth and emit only once they reach
+// (tool_filter, memory_filter) skip the birth and emit only once they reach
 // their end state. The same TurnWriter persists each at the turn's insertion
 // cursor and emits the terminal snapshot (`final: true`). Live order and persisted order
 // therefore converge by construction; the client never mints ids for these
@@ -32,17 +32,17 @@
 //   tools.maxTools                     : number  (default 30, final cap)
 //   tools.secondPassEnabled            : boolean (default true)
 //   tools.alwaysAvailableEnabled       : boolean (default true)
-//   documents.enabled                  : boolean (default true, summary injection)
-//   documents.maxRelevant              : number  (default 3)
+//   memories.enabled                   : boolean (default true, summary injection)
+//   memories.maxRelevant               : number  (default 3)
 
 import type OpenAI from "openai";
 import type {
   AskUserAnswer,
   AssistantMessage,
   DisplayMessage,
-  DocumentFilterMessage,
   ChatStartFrame,
   ErrorCode,
+  MemoryFilterMessage,
   Message,
   MessageContent,
   ReasoningMessage,
@@ -63,12 +63,12 @@ import {
 import { sessionsRepo } from "./sessions-store.ts";
 import { embed } from "./embedding.ts";
 import {
-  documentTokenBlocks,
-  hasDocuments,
-  newDocumentTokenBudget,
-  relevantDocuments,
-  relevantDocumentsBlock,
-} from "./document-injection.ts";
+  hasMemories,
+  memoryTokenBlocks,
+  newMemoryTokenBudget,
+  relevantMemories,
+  relevantMemoriesBlock,
+} from "./memory-injection.ts";
 import { llmScheduler } from "./llm-scheduler.ts";
 import {
   type LlmDelta,
@@ -309,7 +309,7 @@ export class ChatService {
     // phase 2 (LLM relevance), then apply tools.maxTools as a final cap
     // and add always-available tools.
     let toolList: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
-    // Query embedding computed by the tool filter, reused by the document
+    // Query embedding computed by the tool filter, reused by the memory
     // relevance injection below so the turn embeds the query at most once.
     let queryVector: Float32Array | undefined;
     if (boolSetting(settings, "tools.enabled", false)) {
@@ -452,45 +452,45 @@ export class ChatService {
       systemPrompt = systemPrompt ? `${systemPrompt}\n\n${frame.toolsHint}` : frame.toolsHint;
     }
 
-    // Relevant-document summaries: same embedding machinery as the tool
+    // Relevant-memory summaries: same embedding machinery as the tool
     // filter (services/relevance.ts), appended to the system prompt when any
-    // indexed document scores above the floor for this turn's query. The
-    // selection is also surfaced as a document_filter bubble (end state only,
+    // indexed memory scores above the floor for this turn's query. The
+    // selection is also surfaced as a memory_filter bubble (end state only,
     // like the tool filter); the client hides it when empty unless the user
     // turns on "show empty selections".
-    // A bubble is only emitted when the user actually has documents; with none
+    // A bubble is only emitted when the user actually has memories; with none
     // there is nothing to select and an empty bubble on every turn is noise.
-    if (boolSetting(settings, "documents.enabled", true) && hasDocuments()) {
-      const docFilterMsg: DocumentFilterMessage = {
+    if (boolSetting(settings, "memories.enabled", true) && hasMemories()) {
+      const memoryFilterMsg: MemoryFilterMessage = {
         id: newMessageId(),
         ord: -1,
-        role: "document_filter",
+        role: "memory_filter",
         status: "complete",
         createdAtMs: Date.now(),
       };
       try {
-        const docs = await relevantDocuments(
+        const memories = await relevantMemories(
           lastUserText(history),
           queryVector,
-          numSetting(settings, "documents.maxRelevant", 3),
+          numSetting(settings, "memories.maxRelevant", 3),
         );
-        const docsBlock = relevantDocumentsBlock(docs);
-        if (docsBlock) {
-          systemPrompt = systemPrompt ? `${systemPrompt}\n\n${docsBlock}` : docsBlock;
+        const memoriesBlock = relevantMemoriesBlock(memories);
+        if (memoriesBlock) {
+          systemPrompt = systemPrompt ? `${systemPrompt}\n\n${memoriesBlock}` : memoriesBlock;
         }
-        docFilterMsg.relevant = docs.map((d) => ({
-          documentId: d.documentId,
-          title: d.title,
-          summary: d.summary,
-          score: d.score,
+        memoryFilterMsg.relevant = memories.map((m) => ({
+          memoryId: m.memoryId,
+          title: m.title,
+          summary: m.summary,
+          score: m.score,
         }));
-        writer.finalize(docFilterMsg);
+        writer.finalize(memoryFilterMsg);
       } catch (err) {
-        // Non-fatal: the turn just runs without document context.
-        log.warn(`stream ${stream.streamId}: document relevance failed: ${errMessage(err)}`);
-        docFilterMsg.status = "error";
-        docFilterMsg.errorMessage = errMessage(err);
-        writer.finalize(docFilterMsg);
+        // Non-fatal: the turn just runs without memory context.
+        log.warn(`stream ${stream.streamId}: memory relevance failed: ${errMessage(err)}`);
+        memoryFilterMsg.status = "error";
+        memoryFilterMsg.errorMessage = errMessage(err);
+        writer.finalize(memoryFilterMsg);
       }
     }
 
@@ -1231,18 +1231,18 @@ async function toOpenAiMessages(
 ): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam[]> {
   const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
   if (systemPrompt) out.push({ role: "system", content: systemPrompt });
-  const docTokenBudget = newDocumentTokenBudget();
+  const memoryTokenBudget = newMemoryTokenBudget();
   for (const m of history) {
     if (m.role === "user") {
       let content = await userContentToOpenAi(m.content, sessionId, attachmentCache);
-      // `@token` document references: the stored message keeps only the
+      // `@token` memory references: the stored message keeps only the
       // token; the CURRENT content is appended at request-build time, so a
-      // later edit of the document flows into the next turn automatically.
+      // later edit of the memory flows into the next turn automatically.
       // The budget dedupes repeat mentions across the whole request.
-      const docBlocks = documentTokenBlocks(contentToText(m.content), docTokenBudget);
-      if (docBlocks) {
-        if (typeof content === "string") content = `${content}\n\n${docBlocks}`;
-        else content.push({ type: "text", text: docBlocks });
+      const memoryBlocks = memoryTokenBlocks(contentToText(m.content), memoryTokenBudget);
+      if (memoryBlocks) {
+        if (typeof content === "string") content = `${content}\n\n${memoryBlocks}`;
+        else content.push({ type: "text", text: memoryBlocks });
       }
       out.push({ role: "user", content });
     } else if (m.role === "assistant") {
@@ -1279,7 +1279,7 @@ async function toOpenAiMessages(
     } else if (m.role === "reasoning") {
       // Reasoning trace is not part of the OpenAI message protocol; omit.
     }
-    // tool_filter / document_filter / display / error messages are not sent to the LLM.
+    // tool_filter / memory_filter / display / error messages are not sent to the LLM.
   }
   return out;
 }

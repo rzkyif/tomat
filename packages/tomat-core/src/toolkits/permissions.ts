@@ -152,7 +152,7 @@ function applyDecl(flags: FlagSet, decl: PermissionDecl, templates: PathTemplate
     case "sys":
       flags.sys.add(decl.flag);
       break;
-    case "documents":
+    case "memories":
     case "llm":
     case "tts":
     case "stt":
@@ -178,8 +178,8 @@ function declKey(decl: PermissionDecl): string {
       return `ffi`;
     case "sys":
       return `sys:${decl.flag}`;
-    case "documents":
-      return `documents:${decl.access}`;
+    case "memories":
+      return `memories:${decl.access}`;
     case "llm":
       return `llm`;
     case "tts":

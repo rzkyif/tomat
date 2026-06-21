@@ -4,7 +4,7 @@
 export { download } from "./src/download.ts";
 export { open } from "./src/open.ts";
 export { demo } from "./src/demo.ts";
-export { editDocument, readDocument, showDocument, writeDocument } from "./src/documents.ts";
+export { editMemory, readMemory, showMemory, writeMemory } from "./src/memories.ts";
 export { schedulePrompt } from "./src/schedule.ts";
 export { getDatetime } from "./src/datetime.ts";
 export { calculator } from "./src/calculator.ts";

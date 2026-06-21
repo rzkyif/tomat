@@ -28,10 +28,10 @@
           : { action: "load native libraries" };
       case "sys":
         return { action: "read system information", detail: p.resource || undefined };
-      case "documents":
+      case "memories":
         return p.resource === "write"
-          ? { action: "create and edit your documents" }
-          : { action: "read your documents" };
+          ? { action: "create and edit your memories" }
+          : { action: "read your memories" };
       case "llm":
         return { action: "generate text with the model" };
       case "tts":

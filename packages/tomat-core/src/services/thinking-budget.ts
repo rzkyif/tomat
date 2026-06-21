@@ -1,7 +1,7 @@
 // Per-use-case thinking budget for single-shot utility LLM calls.
 //
 // Each single-shot use case (title generation, transcription cleanup/merge,
-// document summary, complexity check, tool-filter refinement) has its own
+// memory summary, complexity check, tool-filter refinement) has its own
 // `*ThinkingBudget` number setting. 0 turns thinking off for that call; N>0
 // enables it and caps the `<think>` block at N tokens. This reads and
 // normalizes one such setting; callers pass it through `overrides.reasoningBudget`

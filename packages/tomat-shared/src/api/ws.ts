@@ -113,7 +113,7 @@ export type ServerToClientFrame =
   // hub drops the connection after the pong timeout (see armHeartbeat).
   | { kind: "ping" }
   // Chat stream events. The server owns message identity and order: every
-  // chat-born message (assistant, reasoning, tool, tool_filter, document_filter)
+  // chat-born message (assistant, reasoning, tool, tool_filter, memory_filter)
   // is announced with a `chat.message` snapshot before any delta touches it, and
   // the same frame kind later carries its persisted terminal form.
   | {

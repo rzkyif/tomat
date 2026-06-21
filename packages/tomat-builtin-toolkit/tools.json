@@ -1,7 +1,7 @@
 {
   "$schema": "https://get.au.tomat.ing/schemas/tools-v1.json",
   "name": "tomat built-in toolkit",
-  "description": "Reference toolkit bundling the starter tools: web search and page reading, a calculator, date and time, downloads (fetch one or organize the folder), opening URLs in the browser, reading and writing the user's documents, scheduled prompts, saving structured rows to a private database, and a UI-walkthrough for the askUser flow. Useful as both a fresh-install starter and a worked example for third-party toolkit authors.",
+  "description": "Reference toolkit bundling the starter tools: web search and page reading, a calculator, date and time, downloads (fetch one or organize the folder), opening URLs in the browser, reading and writing the user's memories, scheduled prompts, saving structured rows to a private database, and a UI-walkthrough for the askUser flow. Useful as both a fresh-install starter and a worked example for third-party toolkit authors.",
   "license": "MIT",
   "homepage": "https://au.tomat.ing",
   "database": true,
@@ -119,51 +119,51 @@
       "permissions": {}
     },
     {
-      "name": "write_document",
-      "description": "Create a document, or replace an existing document's content. Documents are markdown notes the user keeps in tomat; prefer edit_document for small changes to an existing document.",
+      "name": "write_memory",
+      "description": "Create a memory, or replace an existing memory's content. Memories are markdown notes the user keeps in tomat; prefer edit_memory for small changes to an existing memory.",
       "parameters": {
         "type": "object",
         "properties": {
           "title": {
             "type": "string",
-            "description": "Document title. Creates the document if no document with this title exists."
+            "description": "Memory title. Creates the memory if no memory with this title exists."
           },
           "content": {
             "type": "string",
-            "description": "Full markdown content for the document. Replaces any existing content."
+            "description": "Full markdown content for the memory. Replaces any existing content."
           }
         },
         "required": ["title", "content"]
       },
       "triggers": [
-        "write a document about this",
-        "save these notes as a document",
-        "create a new document called shopping list",
-        "replace the contents of my notes document"
+        "write a memory about this",
+        "save these notes as a memory",
+        "create a new memory called shopping list",
+        "replace the contents of my notes memory"
       ],
-      "function": "writeDocument",
+      "function": "writeMemory",
       "permissions": {
-        "documents": [
+        "memories": [
           {
             "access": "write",
-            "reason": "Create the document or replace its content"
+            "reason": "Create the memory or replace its content"
           }
         ]
       }
     },
     {
-      "name": "edit_document",
-      "description": "Edit a document by replacing one exact text occurrence. The find text must appear exactly once; include enough surrounding context to make it unique.",
+      "name": "edit_memory",
+      "description": "Edit a memory by replacing one exact text occurrence. The find text must appear exactly once; include enough surrounding context to make it unique.",
       "parameters": {
         "type": "object",
         "properties": {
           "title": {
             "type": "string",
-            "description": "Title of the document to edit."
+            "description": "Title of the memory to edit."
           },
           "find": {
             "type": "string",
-            "description": "Exact text to find. Must match exactly one place in the document."
+            "description": "Exact text to find. Must match exactly one place in the memory."
           },
           "replace": {
             "type": "string",
@@ -173,46 +173,46 @@
         "required": ["title", "find", "replace"]
       },
       "triggers": [
-        "update the meeting time in my notes document",
-        "fix the typo in that document",
-        "change the deadline in my plan document",
-        "add milk to my shopping list document"
+        "update the meeting time in my notes memory",
+        "fix the typo in that memory",
+        "change the deadline in my plan memory",
+        "add milk to my shopping list memory"
       ],
-      "function": "editDocument",
+      "function": "editMemory",
       "permissions": {
-        "documents": [
+        "memories": [
           {
             "access": "write",
-            "reason": "Apply the find/replace edit to the document"
+            "reason": "Apply the find/replace edit to the memory"
           }
         ]
       }
     },
     {
-      "name": "read_document",
-      "description": "Read the full content of one of the user's documents by title.",
+      "name": "read_memory",
+      "description": "Read the full content of one of the user's memories by title.",
       "parameters": {
         "type": "object",
         "properties": {
           "title": {
             "type": "string",
-            "description": "Title of the document to read."
+            "description": "Title of the memory to read."
           }
         },
         "required": ["title"]
       },
       "triggers": [
-        "read my meeting notes document",
-        "what does my plan document say",
-        "look at the shopping list document",
+        "read my meeting notes memory",
+        "what does my plan memory say",
+        "look at the shopping list memory",
         "check the notes I saved"
       ],
-      "function": "readDocument",
+      "function": "readMemory",
       "permissions": {
-        "documents": [
+        "memories": [
           {
             "access": "read",
-            "reason": "Read the document's content"
+            "reason": "Read the memory's content"
           }
         ]
       }
@@ -229,7 +229,7 @@
           },
           "instruction": {
             "type": "string",
-            "description": "The prompt to send when the schedule fires. Write it as a request from the user, e.g. \"Summarize the headlines from my feeds document.\""
+            "description": "The prompt to send when the schedule fires. Write it as a request from the user, e.g. \"Summarize the headlines from my feeds memory.\""
           },
           "kind": {
             "type": "string",
@@ -284,30 +284,30 @@
       "permissions": {}
     },
     {
-      "name": "show_document",
-      "description": "Show a document to the user, rendered as markdown in the chat. Use when the user wants to see a document rather than have it summarized.",
+      "name": "show_memory",
+      "description": "Show a memory to the user, rendered as markdown in the chat. Use when the user wants to see a memory rather than have it summarized.",
       "parameters": {
         "type": "object",
         "properties": {
           "title": {
             "type": "string",
-            "description": "Title of the document to show."
+            "description": "Title of the memory to show."
           }
         },
         "required": ["title"]
       },
       "triggers": [
-        "show me my meeting notes document",
+        "show me my meeting notes memory",
         "display the shopping list",
-        "open my plan document in the chat",
-        "let me see that document"
+        "open my plan memory in the chat",
+        "let me see that memory"
       ],
-      "function": "showDocument",
+      "function": "showMemory",
       "permissions": {
-        "documents": [
+        "memories": [
           {
             "access": "read",
-            "reason": "Read the document to display it"
+            "reason": "Read the memory to display it"
           }
         ]
       }

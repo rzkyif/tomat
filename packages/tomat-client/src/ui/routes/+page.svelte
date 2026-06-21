@@ -7,7 +7,7 @@
   import DisplayBubble from "$components/chat/messages/DisplayBubble.svelte";
   import ToolCall from "$components/chat/messages/ToolCall.svelte";
   import RelevantTools from "$components/chat/messages/RelevantTools.svelte";
-  import RelevantDocuments from "$components/chat/messages/RelevantDocuments.svelte";
+  import RelevantMemories from "$components/chat/messages/RelevantMemories.svelte";
   import UserInput from "$components/chat/UserInput.svelte";
   import UserMessage from "$components/chat/messages/UserMessage.svelte";
   import SessionBar from "$components/chat/SessionBar.svelte";
@@ -26,8 +26,8 @@
     type MessageContent,
   } from "$lib/util/types";
   import {
-    documentsState,
     downloadsState,
+    memoriesState,
     messagesState,
     scheduledPromptsState,
     serversState,
@@ -475,7 +475,7 @@
       // core-settings fetch or per-module kick.
       settingsState.attach();
       toolkitsState.ensureConnected();
-      documentsState.attach();
+      memoriesState.attach();
       scheduledPromptsState.attach();
       streamingState.attach();
       serversState.attach();
@@ -748,7 +748,7 @@
     if (msg.role === "loading") return true;
     if (msg.role === "tool") return true;
     if (msg.role === "tool_filter") return true;
-    if (msg.role === "document_filter") return true;
+    if (msg.role === "memory_filter") return true;
     if (msg.role === "display") return true;
     // Core-authored prompt of an automated session: a collapsed
     // "Automated Prompt" bubble instead of a full user bubble.
@@ -783,7 +783,7 @@
       const isHiddenSystem =
         msg.role === "system" &&
         !settingsState.currentSettings["prompts.showSystemPrompt"];
-      // Empty filter bubbles (no relevant tools / documents found) are hidden
+      // Empty filter bubbles (no relevant tools / memories found) are hidden
       // unless the user opts to keep them. Errors always show. "No relevant
       // tools" is the filter result, not toolsSent: always-available tools
       // would otherwise keep the bubble on every turn.
@@ -796,17 +796,17 @@
         msg.status !== "error" &&
         toolFilterBase === 0 &&
         !settingsState.currentSettings["tools.showEmptySelection"];
-      const isHiddenEmptyDocFilter =
-        msg.role === "document_filter" &&
+      const isHiddenEmptyMemoryFilter =
+        msg.role === "memory_filter" &&
         msg.status !== "error" &&
         (msg.relevant?.length ?? 0) === 0 &&
-        !settingsState.currentSettings["documents.showEmptySelection"];
+        !settingsState.currentSettings["memories.showEmptySelection"];
       return (
         !isEmptyAssistant &&
         !isHiddenReasoning &&
         !isHiddenSystem &&
         !isHiddenEmptyToolFilter &&
-        !isHiddenEmptyDocFilter
+        !isHiddenEmptyMemoryFilter
       );
     });
     if (!showStreamingLoadingBubble) return real;
@@ -1067,8 +1067,8 @@
                           {neighborLeft}
                           {neighborRight}
                         />
-                      {:else if msg.role === "document_filter"}
-                        <RelevantDocuments
+                      {:else if msg.role === "memory_filter"}
+                        <RelevantMemories
                           id={msg.id}
                           {msg}
                           {neighborLeft}

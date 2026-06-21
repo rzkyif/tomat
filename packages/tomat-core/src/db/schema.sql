@@ -86,21 +86,21 @@ CREATE TABLE IF NOT EXISTS tool_embeddings (
 CREATE TABLE IF NOT EXISTS grants (
   tool_id         TEXT NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
   permission_key  TEXT NOT NULL,              -- e.g. 'net:api.example.com:443'
-  permission_kind TEXT NOT NULL,              -- 'net'|'read'|'write'|'run'|'env'|'ffi'|'sys'|'documents'|'llm'|'tts'|'stt'
+  permission_kind TEXT NOT NULL,              -- 'net'|'read'|'write'|'run'|'env'|'ffi'|'sys'|'memories'|'llm'|'tts'|'stt'
   state           TEXT NOT NULL DEFAULT 'ask',  -- granted|ask|denied
   granted_at_ms   INTEGER NOT NULL,
   PRIMARY KEY (tool_id, permission_key)
 );
 
--- Documents: agent-readable/writable markdown notes. The .md files under
--- core/documents/ are the source of truth (content_hash detects drift on
+-- Memories: agent-readable/writable markdown notes. The .md files under
+-- core/memories/ are the source of truth (content_hash detects drift on
 -- rescan); this table carries the metadata plus the background-generated
 -- summary + embedding, each pinned to the content hash it was derived from
 -- so the indexer can tell when they are stale.
-CREATE TABLE IF NOT EXISTS documents (
+CREATE TABLE IF NOT EXISTS memories (
   id                    TEXT PRIMARY KEY,
   title                 TEXT NOT NULL UNIQUE,
-  filename              TEXT NOT NULL UNIQUE,   -- relative to core/documents/
+  filename              TEXT NOT NULL UNIQUE,   -- relative to core/memories/
   content_hash          TEXT NOT NULL,
   summary               TEXT,
   summary_source_hash   TEXT,

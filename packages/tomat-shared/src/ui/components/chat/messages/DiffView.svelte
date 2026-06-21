@@ -1,6 +1,6 @@
 <script lang="ts">
   // Line diff between two texts, rendered as added/removed/context rows.
-  // Used by the display bubble's diff content and the document tool-result
+  // Used by the display bubble's diff content and the memory tool-result
   // bubbles; intentionally presentation-only (no accept/reject controls).
   import { diffLines } from "diff";
 

@@ -51,10 +51,10 @@ const sysPermission = z.object({
   optional: z.boolean().optional(),
 });
 
-// Host-module permissions (documents store, LLM, TTS, STT) enforced by the
+// Host-module permissions (memory store, LLM, TTS, STT) enforced by the
 // host's module broker rather than the sandbox runtime. All-or-nothing keys
-// except documents, which splits into read/write access.
-const documentsPermission = z.object({
+// except memories, which splits into read/write access.
+const memoriesPermission = z.object({
   access: z.enum(["read", "write"]),
   reason: reasonField,
   optional: z.boolean().optional(),
@@ -74,7 +74,7 @@ export const toolPermissionsSchema = z
     env: z.array(envPermission).default([]),
     ffi: z.array(ffiPermission).default([]),
     sys: z.array(sysPermission).default([]),
-    documents: z.array(documentsPermission).default([]),
+    memories: z.array(memoriesPermission).default([]),
     llm: z.array(modulePermission).default([]),
     tts: z.array(modulePermission).default([]),
     stt: z.array(modulePermission).default([]),
@@ -103,7 +103,7 @@ export const toolSchema = z
       env: [],
       ffi: [],
       sys: [],
-      documents: [],
+      memories: [],
       llm: [],
       tts: [],
       stt: [],

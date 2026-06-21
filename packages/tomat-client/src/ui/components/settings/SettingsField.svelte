@@ -19,7 +19,7 @@
   import ServicesField from "./fields/ServicesField.svelte";
   import ShortcutField from "./fields/ShortcutField.svelte";
   import SnippetsField from "./fields/SnippetsField.svelte";
-  import DocumentsField from "./fields/DocumentsField.svelte";
+  import MemoriesField from "./fields/MemoriesField.svelte";
   import ScheduledPromptsField from "./fields/ScheduledPromptsField.svelte";
   import ToolkitsField from "./fields/ToolkitsField.svelte";
   import CoresField from "./fields/CoresField.svelte";
@@ -154,8 +154,8 @@
       {:else if f.type === "object_management"}
         {#if f.objectType === "snippets"}
           <SnippetsField />
-        {:else if f.objectType === "documents"}
-          <DocumentsField />
+        {:else if f.objectType === "memories"}
+          <MemoriesField />
         {:else if f.objectType === "scheduled_prompts"}
           <ScheduledPromptsField />
         {:else if f.objectType === "toolkits"}

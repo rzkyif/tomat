@@ -52,10 +52,10 @@ export const SNIPPET_PLACEMENT_OPTIONS: {
 const TRIGGER_SCAN = /(^|[^\w@])(@[A-Za-z0-9_-]+)/g;
 
 // Autocomplete text-before-caret scan. Captures a bare `@slug` token or an
-// open quoted token `@"partial name` (unterminated): document references use
+// open quoted token `@"partial name` (unterminated): memory references use
 // the quoted form so a filename with spaces is still addressable. Snippet
 // triggers are always bare (validateTrigger enforces [A-Za-z0-9_-]), so the
-// quote branch only ever resolves to a document.
+// quote branch only ever resolves to a memory.
 export const TRIGGER_BEFORE_CARET = /(?:^|[^\w@])(@(?:"[^"]*|[\w-]*))$/;
 
 export function normalizeTrigger(raw: string): string {

@@ -104,7 +104,7 @@ function declMatches(decl: PermissionDecl, resource: string, ctx: PromptContext)
       return decl.flag === resource;
     case "ffi":
       return true;
-    case "documents":
+    case "memories":
     case "llm":
     case "tts":
     case "stt":

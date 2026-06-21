@@ -8,7 +8,7 @@ export type MessageRole =
   | "tool"
   | "reasoning"
   | "tool_filter"
-  | "document_filter"
+  | "memory_filter"
   | "display"
   | "error";
 
@@ -259,27 +259,27 @@ export interface ToolFilterMessage extends MessageBase {
   errorMessage?: string;
 }
 
-// Per-entry shape carried by the document_filter bubble: one indexed document
+// Per-entry shape carried by the memory_filter bubble: one indexed memory
 // scored against the turn's query by embedding cosine similarity.
-export interface DocumentFilterEntryPersisted {
-  documentId: string;
+export interface MemoryFilterEntryPersisted {
+  memoryId: string;
   title: string;
   summary: string;
   score: number;
 }
 
-export interface DocumentFilterMessage extends MessageBase {
-  role: "document_filter";
+export interface MemoryFilterMessage extends MessageBase {
+  role: "memory_filter";
   status: "complete" | "error";
-  // Documents whose summary scored above the relevance floor, ranked by
+  // Memories whose summary scored above the relevance floor, ranked by
   // cosine. Empty when nothing matched (the client hides the bubble unless the
   // "show empty selections" toggle is on).
-  relevant?: DocumentFilterEntryPersisted[];
+  relevant?: MemoryFilterEntryPersisted[];
   errorMessage?: string;
 }
 
 // Content payload a tool pushes to the chat via the one-way display API
-// (`ctx.display.*`) or the `show_document` builtin. Rendered by the client
+// (`ctx.display.*`) or the `show_memory` builtin. Rendered by the client
 // as a standalone display bubble; never sent to the LLM.
 export type DisplayContent =
   | { type: "markdown"; markdown: string }
@@ -310,7 +310,7 @@ export type Message =
   | ToolMessage
   | ReasoningMessage
   | ToolFilterMessage
-  | DocumentFilterMessage
+  | MemoryFilterMessage
   | DisplayMessage
   | ErrorMessage;
 

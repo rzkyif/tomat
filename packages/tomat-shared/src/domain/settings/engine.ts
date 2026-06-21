@@ -27,7 +27,7 @@ import { appearanceGroup } from "./groups/appearance.ts";
 import { llmGroup } from "./groups/llm.ts";
 import { promptsGroup } from "./groups/prompts.ts";
 import { snippetsGroup } from "./groups/snippets.ts";
-import { documentsGroup } from "./groups/documents.ts";
+import { memoriesGroup } from "./groups/memories.ts";
 import { scheduledPromptsGroup } from "./groups/scheduled-prompts.ts";
 import { greetingsGroup } from "./groups/greetings.ts";
 import { toolsGroup } from "./groups/toolkits.ts";
@@ -140,7 +140,7 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   llmGroup,
   promptsGroup,
   snippetsGroup,
-  documentsGroup,
+  memoriesGroup,
   scheduledPromptsGroup,
   greetingsGroup,
   toolsGroup,

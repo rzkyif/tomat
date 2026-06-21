@@ -12,7 +12,7 @@
     messagesState,
     permissionState,
     scheduleConfirmState,
-    documentsState,
+    memoriesState,
     serversState,
     settingsState,
     snippetsState,
@@ -54,7 +54,7 @@
     useAutocomplete,
   } from "$composables/use-autocomplete.svelte";
   import { useStt } from "$composables/use-stt-input.svelte";
-  import { documentTrigger } from "$stores/documents.svelte";
+  import { memoryTrigger } from "$stores/memories.svelte";
   import {
     applySystemPromptOverride,
     buildContextBlock,
@@ -134,8 +134,8 @@
     const snippetTriggers = new Set(
       snippetsState.snippets.map((s) => s.trigger.toLowerCase()),
     );
-    const documents = documentsState.documents
-      .map((d) => ({ doc: d, trigger: documentTrigger(d) }))
+    const memories = memoriesState.memories
+      .map((d) => ({ memory: d, trigger: memoryTrigger(d) }))
       .filter(
         ({ trigger }) =>
           trigger.toLowerCase().startsWith(prefix) &&
@@ -143,13 +143,13 @@
           !snippetTriggers.has(trigger.toLowerCase()),
       )
       .sort((a, b) => a.trigger.localeCompare(b.trigger))
-      .map<AutocompleteOption>(({ doc, trigger }) => ({
-        id: `document:${doc.id}`,
-        name: doc.title,
+      .map<AutocompleteOption>(({ memory, trigger }) => ({
+        id: `memory:${memory.id}`,
+        name: memory.title,
         trigger,
-        source: "document",
+        source: "memory",
       }));
-    return [...snippets, ...documents];
+    return [...snippets, ...memories];
   });
 
   $effect(() => {

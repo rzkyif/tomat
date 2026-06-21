@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { DocumentMeta } from "@tomat/shared";
-  import { confirmState, documentsState } from "$stores";
-  import { documentTrigger } from "$stores/documents.svelte";
+  import type { MemoryMeta } from "@tomat/shared";
+  import { confirmState, memoriesState } from "$stores";
+  import { memoryTrigger } from "$stores/memories.svelte";
   import type { ParsedQuery } from "$lib/objects/query";
   import { type MenuRow, showFilterSortMenu, showObjectActionMenu } from "$lib/objects/menu";
   import { getLogger } from "$lib/util/log";
@@ -10,49 +10,49 @@
   import ObjectCard from "$components/ui/ObjectCard.svelte";
   import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeader.svelte";
   import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScroll.svelte";
-  import DocumentDetail from "./DocumentDetail.svelte";
+  import MemoryDetail from "./MemoryDetail.svelte";
 
-  const log = getLogger("documents");
+  const log = getLogger("memories");
 
   let query = $state("");
-  let selectedItem = $state<DocumentMeta | null>(null);
+  let selectedItem = $state<MemoryMeta | null>(null);
   let reloadKey = $state(0);
 
-  onMount(() => void documentsState.load().catch((e) => log.warn("document load failed:", e)));
+  onMount(() => void memoriesState.load().catch((e) => log.warn("memory load failed:", e)));
 
   function makeUniqueTitle(): string {
-    const existing = new Set(documentsState.documents.map((d) => d.title.toLowerCase()));
+    const existing = new Set(memoriesState.memories.map((d) => d.title.toLowerCase()));
     let i = 1;
-    while (existing.has(`new document ${i}`)) i++;
-    return `New document ${i}`;
+    while (existing.has(`new memory ${i}`)) i++;
+    return `New memory ${i}`;
   }
 
   function load({ query: q }: { offset: number; limit: number; query: ParsedQuery }) {
     const text = q.text.toLowerCase();
-    let list = documentsState.documents.filter(
+    let list = memoriesState.memories.filter(
       (d) =>
         !text ||
         d.title.toLowerCase().includes(text) ||
-        documentTrigger(d).toLowerCase().includes(text),
+        memoryTrigger(d).toLowerCase().includes(text),
     );
     if (q.sort === "title") list = [...list].sort((a, b) => a.title.localeCompare(b.title));
     else if (q.sort === "updated") list = [...list].sort((a, b) => b.updatedAtMs - a.updatedAtMs);
     return Promise.resolve({ items: list, done: true });
   }
 
-  function cardMenuRows(d: DocumentMeta): MenuRow[] {
+  function cardMenuRows(d: MemoryMeta): MenuRow[] {
     return [
       {
         id: "delete",
         label: "Delete",
         onSelect: () =>
           confirmState.request({
-            title: "Delete document",
-            message: `Delete document "${d.title}"? This cannot be undone.`,
+            title: "Delete memory",
+            message: `Delete memory "${d.title}"? This cannot be undone.`,
             destructive: true,
             confirmLabel: "Delete",
             onConfirm: async () => {
-              await documentsState.delete(d.id);
+              await memoriesState.delete(d.id);
               reloadKey++;
             },
           }),
@@ -60,8 +60,8 @@
     ];
   }
 
-  async function newDocument() {
-    const created = await documentsState.create(makeUniqueTitle());
+  async function newMemory() {
+    const created = await memoriesState.create(makeUniqueTitle());
     reloadKey++;
     selectedItem = created;
   }
@@ -70,8 +70,8 @@
 <ObjectManager
   {load}
   idOf={(d) => d.id}
-  getById={(id) => documentsState.documents.find((d) => d.id === id)}
-  searchPlaceholder="Search documents"
+  getById={(id) => memoriesState.memories.find((d) => d.id === id)}
+  searchPlaceholder="Search memories"
   bind:query
   bind:selectedItem
   bind:reloadKey
@@ -89,14 +89,14 @@
   hasMenu
   onMenu={() =>
     showObjectActionMenu([
-      { id: "new", label: "New Document", onSelect: () => void newDocument() },
+      { id: "new", label: "New Memory", onSelect: () => void newMemory() },
       {
         id: "rescan",
-        label: "Rescan Documents",
+        label: "Rescan Memories",
         onSelect: async () => {
-          // Re-read the documents directory on the core so files copied in
+          // Re-read the memories directory on the core so files copied in
           // by hand show up without a restart.
-          await documentsState.rescan();
+          await memoriesState.rescan();
           reloadKey++;
         },
       },
@@ -106,25 +106,25 @@
     <ObjectCard
       label={item.title}
       description={item.summary || undefined}
-      meta={documentTrigger(item)}
+      meta={memoryTrigger(item)}
       menuRows={cardMenuRows(item)}
       onOpen={open}
     />
   {/snippet}
   {#snippet detail(item)}
-    <ObjectDetailHeader title={item.title} subtitle={documentTrigger(item)} />
+    <ObjectDetailHeader title={item.title} subtitle={memoryTrigger(item)} />
     <ObjectDetailScroll>
-      <DocumentDetail {item} reload={() => reloadKey++} />
+      <MemoryDetail {item} reload={() => reloadKey++} />
     </ObjectDetailScroll>
   {/snippet}
   {#snippet empty()}
     <div class="flex flex-col items-center justify-center gap-1 py-12 text-center">
       {#if query.trim()}
-        <div class="text-base text-default-700">No matching documents</div>
+        <div class="text-base text-default-700">No matching memories</div>
       {:else}
-        <div class="text-base text-default-700">No documents yet</div>
+        <div class="text-base text-default-700">No memories yet</div>
         <div class="text-sm text-default-500">
-          Use the menu to create a document, then reference it with @name in chat.
+          Use the menu to create a memory, then reference it with @name in chat.
         </div>
       {/if}
     </div>

@@ -92,9 +92,9 @@
               "items": { "$ref": "#/$defs/sysPermission" },
               "default": []
             },
-            "documents": {
+            "memories": {
               "type": "array",
-              "items": { "$ref": "#/$defs/documentsPermission" },
+              "items": { "$ref": "#/$defs/memoriesPermission" },
               "default": []
             },
             "llm": {
@@ -196,14 +196,14 @@
         "optional": { "type": "boolean", "default": false }
       }
     },
-    "documentsPermission": {
+    "memoriesPermission": {
       "type": "object",
       "additionalProperties": false,
       "required": ["access", "reason"],
       "properties": {
         "access": {
           "enum": ["read", "write"],
-          "description": "Whether the tool reads the host's document store or also writes to it."
+          "description": "Whether the tool reads the host's memory store or also writes to it."
         },
         "reason": { "$ref": "#/$defs/permissionReason" },
         "optional": { "type": "boolean", "default": false }

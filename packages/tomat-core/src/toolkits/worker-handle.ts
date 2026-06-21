@@ -182,13 +182,13 @@ export class WorkerHandle {
       p.dbFile + "-wal",
       p.dbFile + "-shm",
       p.dbFile + "-journal", // non-WAL fallback journal
-      // Every toolkit's private SQLite db and the documents store are reached
+      // Every toolkit's private SQLite db and the memory store are reached
       // ONLY through the core-side module broker (proxied over stdio), so a
       // worker never needs fs access to them. Deny the whole subtrees so a tool
       // granted a broad ancestor path (e.g. $home, which contains ~/.tomat)
-      // still can't read another toolkit's data or the documents store off disk.
+      // still can't read another toolkit's data or the memory store off disk.
       join(p.root, "toolkit-data"),
-      p.documentsDir,
+      p.memoriesDir,
     ].join(",");
     const ptyMode = spec.promptContext !== undefined && ptyhostAvailableSync();
     const args = [

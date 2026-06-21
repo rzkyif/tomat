@@ -1,5 +1,5 @@
 // llama-embed: a second llama-server instance hosting the embedding model and
-// serving OpenAI-style /v1/embeddings. Tool-relevance + document RAG embed
+// serving OpenAI-style /v1/embeddings. Tool-relevance + memory RAG embed
 // through it (see services/embedding.ts). Unlike the chat `llama` sidecar it is
 // NOT gated on llm.provider: embeddings are always-on infrastructure, so it runs
 // whenever its model + the llama-server binary are present (the gate lives in

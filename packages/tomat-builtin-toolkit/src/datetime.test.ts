@@ -10,7 +10,7 @@ function makeCtx(): ToolContext {
     askUser: () => Promise.resolve([]),
     log() {},
     display: { markdown() {}, image() {}, table() {}, diff() {} },
-    documents: {
+    memories: {
       list: () => Promise.resolve([]),
       get: () => Promise.reject(new Error("not scripted")),
       write: () => Promise.reject(new Error("not scripted")),

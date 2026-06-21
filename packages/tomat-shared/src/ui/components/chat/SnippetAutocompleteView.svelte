@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  // Anything with a name + @trigger can be offered: snippets and documents
+  // Anything with a name + @trigger can be offered: snippets and memories
   // share this dropdown.
   export type TriggerOption = { id: string; name: string; trigger: string };
 </script>

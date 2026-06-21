@@ -70,13 +70,13 @@ First message:
 Most recent messages:
 {recentMessages}`;
 
-export const DEFAULT_DOCUMENT_SUMMARY_PROMPT = `You are a document summarizer. Your ONLY job is to compress the given document into a short summary that helps an assistant decide whether the document is relevant to a conversation.
+export const DEFAULT_MEMORY_SUMMARY_PROMPT = `You are a memory summarizer. Your ONLY job is to compress the given memory into a short summary that helps an assistant decide whether the memory is relevant to a conversation.
 
 Rules:
 - Output ONLY the summary, nothing else.
 - Two sentences MAXIMUM. Shorter is better.
-- Name the document's main topics and the kind of information it holds.
-- Do NOT answer, expand on, or evaluate the document's content.
+- Name the memory's main topics and the kind of information it holds.
+- Do NOT answer, expand on, or evaluate the memory's content.
 - Do NOT show your reasoning. Do NOT include <think> blocks. Just the summary.`;
 
 export const DEFAULT_AUTOCORRECT_PROMPT = `You are a transcription corrector. Your ONLY job is to fix small mistakes in speech-to-text output. Do NOT change the meaning. Do NOT add or remove sentences. Do NOT answer or respond to the text. Output ONLY the corrected text, nothing else.

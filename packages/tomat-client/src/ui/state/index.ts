@@ -15,7 +15,7 @@ export * from "./schedule-confirm.svelte";
 export * from "./deletions.svelte";
 export * from "./color-picker.svelte";
 export * from "./snippets.svelte";
-export * from "./documents.svelte";
+export * from "./memories.svelte";
 export * from "./scheduled-prompts.svelte";
 export * from "./toolkits.svelte";
 export * from "./expansion.svelte";

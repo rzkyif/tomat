@@ -1,4 +1,4 @@
-// DocumentsStore: CRUD, exact-edit semantics, and rescan reconciliation
+// MemoriesStore: CRUD, exact-edit semantics, and rescan reconciliation
 // (files are the source of truth). Mutations are synchronous so a
 // read-modify-write can't interleave with another caller.
 
@@ -7,12 +7,12 @@ import { join } from "@std/path";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
-import { documentsStore } from "./documents-store.ts";
+import { memoriesStore } from "./memories-store.ts";
 
-Deno.test("documents: create, get, list, title conflict", async () => {
+Deno.test("memories: create, get, list, title conflict", async () => {
   const env = await setupTestEnv();
   try {
-    const store = documentsStore();
+    const store = memoriesStore();
     const doc = store.create("Meeting Notes: Q3!", "# Notes\nhello");
     assertEquals(doc.filename, "meeting-notes-q3.md");
     assertEquals(doc.content, "# Notes\nhello");
@@ -22,7 +22,7 @@ Deno.test("documents: create, get, list, title conflict", async () => {
     );
     assertEquals(store.getByTitle("Meeting Notes: Q3!")?.id, doc.id);
     assertThrows(() => store.create("Meeting Notes: Q3!", "again"), AppError, "already exists");
-    // Title conflict is case-insensitive: tools address documents by title
+    // Title conflict is case-insensitive: tools address memories by title
     // and could not tell "Notes" from "notes" apart.
     assertThrows(() => store.create("meeting notes: q3!", "again"), AppError, "already exists");
     assertEquals(store.getByTitle("MEETING NOTES: Q3!")?.id, doc.id);
@@ -34,15 +34,15 @@ Deno.test("documents: create, get, list, title conflict", async () => {
   }
 });
 
-Deno.test("documents: editContent requires exactly one match", async () => {
+Deno.test("memories: editContent requires exactly one match", async () => {
   const env = await setupTestEnv();
   try {
-    const store = documentsStore();
+    const store = memoriesStore();
     const doc = store.create("Todo", "- alpha\n- beta\n- alpha tail");
-    const { before, after, document } = store.editContent(doc.id, "- beta", "- gamma");
+    const { before, after, memory } = store.editContent(doc.id, "- beta", "- gamma");
     assertEquals(before, "- alpha\n- beta\n- alpha tail");
     assertEquals(after, "- alpha\n- gamma\n- alpha tail");
-    assertEquals(document.content, after);
+    assertEquals(memory.content, after);
     assertThrows(() => store.editContent(doc.id, "missing", "x"), AppError, "not found");
     assertThrows(() => store.editContent(doc.id, "- alpha", "x"), AppError, "more than once");
   } finally {
@@ -50,23 +50,23 @@ Deno.test("documents: editContent requires exactly one match", async () => {
   }
 });
 
-Deno.test("documents: a vanished file surfaces as not_found, not empty content", async () => {
+Deno.test("memories: a vanished file surfaces as not_found, not empty content", async () => {
   const env = await setupTestEnv();
   try {
-    const store = documentsStore();
+    const store = memoriesStore();
     const doc = store.create("Ghost", "body");
     // Delete the backing file out from under the row.
-    Deno.removeSync(join(paths().documentsDir, doc.filename));
+    Deno.removeSync(join(paths().memoriesDir, doc.filename));
     assertThrows(() => store.get(doc.id), AppError, "missing on disk");
   } finally {
     await env.teardown();
   }
 });
 
-Deno.test("documents: rename keeps the file, delete removes it", async () => {
+Deno.test("memories: rename keeps the file, delete removes it", async () => {
   const env = await setupTestEnv();
   try {
-    const store = documentsStore();
+    const store = memoriesStore();
     const doc = store.create("Old Title", "body");
     const renamed = store.rename(doc.id, "New Title");
     assertEquals(renamed.title, "New Title");
@@ -76,7 +76,7 @@ Deno.test("documents: rename keeps the file, delete removes it", async () => {
     assertEquals(store.list(), []);
     let fileGone = false;
     try {
-      Deno.statSync(join(paths().documentsDir, doc.filename));
+      Deno.statSync(join(paths().memoriesDir, doc.filename));
     } catch {
       fileGone = true;
     }
@@ -86,13 +86,13 @@ Deno.test("documents: rename keeps the file, delete removes it", async () => {
   }
 });
 
-Deno.test("documents: rescan adds, removes, and flags changed files", async () => {
+Deno.test("memories: rescan adds, removes, and flags changed files", async () => {
   const env = await setupTestEnv();
   try {
-    const store = documentsStore();
+    const store = memoriesStore();
     const kept = store.create("Kept", "kept body");
     const dropped = store.create("Dropped", "dropped body");
-    const dir = paths().documentsDir;
+    const dir = paths().memoriesDir;
     // Simulate external changes: a new file, a deleted file, an edited file.
     Deno.writeTextFileSync(join(dir, "handwritten.md"), "external content");
     Deno.removeSync(join(dir, dropped.filename));

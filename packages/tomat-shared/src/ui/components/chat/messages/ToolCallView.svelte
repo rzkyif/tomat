@@ -33,7 +33,7 @@
   // client wraps this feeding live message + ephemera state; the website feeds
   // scripted state (and drives the form via `draftsOverride`). Alignment and
   // the system-message theme override come from the shared UI context; the
-  // agent name and the document-result markdown renderer are injected, so this
+  // agent name and the memory-result markdown renderer are injected, so this
   // stays free of client stores and the markdown pipeline.
   const ui = useUiContext();
   const themeOverrideHex = $derived(ui.systemMessageDefaultColor ?? null);
@@ -57,7 +57,7 @@
     neighborLeft = false,
     neighborRight = false,
     onAnswer = () => {},
-    documentContent = undefined,
+    memoryContent = undefined,
     expanded = $bindable(false),
   }: {
     toolName: string;
@@ -79,9 +79,9 @@
     neighborLeft?: boolean;
     neighborRight?: boolean;
     onAnswer?: (requestId: string, answers: AskUserAnswer[]) => void;
-    /** Renders the `document_content` result. Client passes MessageMarkdown;
+    /** Renders the `memory_content` result. Client passes MessageMarkdown;
      *  when absent the raw text is shown in a <pre>. */
-    documentContent?: Snippet<[{ title: string; content: string }]>;
+    memoryContent?: Snippet<[{ title: string; content: string }]>;
     expanded?: boolean;
   } = $props();
 
@@ -408,12 +408,12 @@
   let showProgress = $derived(isActive);
 
   // Well-known result kinds get a dedicated renderer instead of raw JSON: the
-  // document tools return `document_diff` (before/after) and `document_content`
+  // memory tools return `memory_diff` (before/after) and `memory_content`
   // (full markdown).
-  let documentDiff = $derived.by<{ title: string; before: string; after: string } | null>(() => {
+  let memoryDiff = $derived.by<{ title: string; before: string; after: string } | null>(() => {
     const r = result as Record<string, unknown> | undefined;
     if (
-      !r || typeof r !== "object" || r.kind !== "document_diff" ||
+      !r || typeof r !== "object" || r.kind !== "memory_diff" ||
       typeof r.before !== "string" || typeof r.after !== "string"
     ) {
       return null;
@@ -424,10 +424,10 @@
       after: r.after,
     };
   });
-  let docContent = $derived.by<{ title: string; content: string } | null>(() => {
+  let memoryResult = $derived.by<{ title: string; content: string } | null>(() => {
     const r = result as Record<string, unknown> | undefined;
     if (
-      !r || typeof r !== "object" || r.kind !== "document_content" ||
+      !r || typeof r !== "object" || r.kind !== "memory_content" ||
       typeof r.content !== "string"
     ) {
       return null;
@@ -770,26 +770,26 @@
               class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-32 overflow-auto whitespace-pre">{argsText}</pre>
           {/if}
           {#if hasResult}
-            {#if documentDiff}
+            {#if memoryDiff}
               <div class="text-default-600">
-                Changes{documentDiff.title ? ` to "${documentDiff.title}"` : ""}
+                Changes{memoryDiff.title ? ` to "${memoryDiff.title}"` : ""}
               </div>
               <div class="max-h-48 overflow-auto">
-                <DiffView before={documentDiff.before} after={documentDiff.after} />
+                <DiffView before={memoryDiff.before} after={memoryDiff.after} />
               </div>
-            {:else if docContent}
+            {:else if memoryResult}
               <div class="text-default-600">
-                {docContent.title || "Document"}
+                {memoryResult.title || "Memory"}
               </div>
-              {#if documentContent}
+              {#if memoryContent}
                 <div
                   class="tomat-scroll-inset bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto"
                 >
-                  {@render documentContent(docContent)}
+                  {@render memoryContent(memoryResult)}
                 </div>
               {:else}
                 <pre
-                  class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre-wrap">{docContent.content}</pre>
+                  class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre-wrap">{memoryResult.content}</pre>
               {/if}
             {:else}
               <div class="text-default-600">Result</div>

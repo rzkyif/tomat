@@ -3,7 +3,7 @@
 Reference tomat toolkit, installed by default on fresh setups and doubling as
 the worked example for third-party toolkit authors. It bundles a spread of
 everyday tools (web search and page reading, a calculator, date and time,
-downloads, documents, scheduled prompts, and a private database) chosen to
+downloads, memories, scheduled prompts, and a private database) chosen to
 exercise the whole `tools.json` surface, not just the simple cases.
 
 The `tools.json` format is an open standard: any host that understands
@@ -22,10 +22,10 @@ tools reach through `ctx.db`.
 | `download_url`       | download          | Download a file from an http(s) URL into the user's Downloads folder.               |
 | `organize_downloads` | organizeDownloads | Pick loose Downloads files, review a plan, move them into category folders.         |
 | `open_website`       | open              | Open a URL in the default browser (macOS `open`, Linux `xdg-open`, Win `rundll32`). |
-| `read_document`      | readDocument      | Read a document's full content by title.                                            |
-| `show_document`      | showDocument      | Render a document as markdown in the chat (one-way display).                        |
-| `write_document`     | writeDocument     | Create a document, or replace an existing document's content.                       |
-| `edit_document`      | editDocument      | Replace one exact text occurrence in a document.                                    |
+| `read_memory`        | readMemory        | Read a memory's full content by title.                                              |
+| `show_memory`        | showMemory        | Render a memory as markdown in the chat (one-way display).                          |
+| `write_memory`       | writeMemory       | Create a memory, or replace an existing memory's content.                           |
+| `edit_memory`        | editMemory        | Replace one exact text occurrence in a memory.                                      |
 | `schedule_prompt`    | schedulePrompt    | Propose a scheduled prompt the user reviews and edits in chat before saving.        |
 | `collect_table`      | collectTable      | Save user-reviewed rows into the toolkit's private database.                        |
 | `askuser_demo`       | demo              | Walk through the askUser kinds (text, single-select, multiselect).                  |
@@ -41,7 +41,7 @@ tools reach through `ctx.db`.
     ├── download.ts    # download_url
     ├── open.ts        # open_website
     ├── demo.ts        # askuser_demo
-    ├── documents.ts   # read / show / write / edit_document
+    ├── memories.ts    # read / show / write / edit_memory
     ├── schedule.ts    # schedule_prompt
     ├── datetime.ts    # get_datetime
     ├── calculator.ts  # calculator
@@ -57,9 +57,9 @@ tools reach through `ctx.db`.
 
 Each tool declares the minimum set of permissions it needs in `tools.json`
 (network hosts, filesystem paths, executables, env vars, plus the tomat module
-kinds `documents`, `llm`, `tts`, `stt`). The worker pool reads the user's
+kinds `memories`, `llm`, `tts`, `stt`). The worker pool reads the user's
 per-tool grants on spawn and gives the worker subprocess exactly the matching
-`--allow-*` flags; module access (documents, the private database, ...) is
+`--allow-*` flags; module access (memories, the private database, ...) is
 brokered by the core rather than handed to the worker. Specifically:
 
 - `download_url` and `organize_downloads` need **read** and **write** on
@@ -72,8 +72,8 @@ brokered by the core rather than handed to the worker. Specifically:
   to `html.duckduckgo.com` only.
 - `open_website` needs **run** access for `open`, `xdg-open`, and `rundll32`
   (one per host OS).
-- `read_document` and `show_document` need **documents:read**; `write_document`
-  and `edit_document` need **documents:write** (which also covers reads).
+- `read_memory` and `show_memory` need **memories:read**; `write_memory`
+  and `edit_memory` need **memories:write** (which also covers reads).
 - `collect_table` needs no per-tool grant: it writes to the toolkit's private
   database, gated by the top-level `"database": true` the user saw at install
   time.
@@ -97,8 +97,8 @@ respect:
 The `ctx` the worker injects gives a tool more than `setProgress` / `log`:
 `ctx.askUser` drives the in-chat forms (plain text, single-select, multiselect,
 and the richer `diff` / `files` / `image` / `table` kinds), `ctx.display.*`
-pushes one-way markdown / image / table / diff bubbles, `ctx.documents` reads
-and writes the user's documents, `ctx.schedulePrompt` proposes a scheduled
+pushes one-way markdown / image / table / diff bubbles, `ctx.memories` reads
+and writes the user's memories, `ctx.schedulePrompt` proposes a scheduled
 prompt, and `ctx.db` reaches the toolkit's private SQLite database (only when
 `"database": true` is declared). `src/types.ts` is the full shape.
 
@@ -138,7 +138,7 @@ function mockCtx(): ToolContext & { progress: number[] } {
     askUser: () => Promise.resolve([]),
     log() {},
     display: { markdown() {}, image() {}, table() {}, diff() {} },
-    documents: {
+    memories: {
       list: () => Promise.resolve([]),
       get: () => Promise.reject(new Error("not stubbed")),
       write: () => Promise.reject(new Error("not stubbed")),

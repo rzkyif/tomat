@@ -19,7 +19,7 @@
   import ExpandableMessageView from "@tomat/shared/ui/components/chat/messages/ExpandableMessageView.svelte";
   import QuickModelBarView from "@tomat/shared/ui/components/chat/userinput/QuickModelBarView.svelte";
   import ReasoningTraceView from "@tomat/shared/ui/components/chat/messages/ReasoningTraceView.svelte";
-  import RelevantDocumentsView from "@tomat/shared/ui/components/chat/messages/RelevantDocumentsView.svelte";
+  import RelevantMemoriesView from "@tomat/shared/ui/components/chat/messages/RelevantMemoriesView.svelte";
   import RelevantToolsView from "@tomat/shared/ui/components/chat/messages/RelevantToolsView.svelte";
   import SessionBarView from "@tomat/shared/ui/components/chat/SessionBarView.svelte";
   import SettingsContentView from "@tomat/shared/ui/components/settings/SettingsContentView.svelte";
@@ -134,9 +134,9 @@
       </GalleryCard>
     {/each}
 
-    {#each entries(SAMPLES.RelevantDocumentsView) as [name, p] (name)}
-      <GalleryCard label={`RelevantDocumentsView · ${name}`}>
-        <RelevantDocumentsView {...p as ComponentProps<typeof RelevantDocumentsView>} />
+    {#each entries(SAMPLES.RelevantMemoriesView) as [name, p] (name)}
+      <GalleryCard label={`RelevantMemoriesView · ${name}`}>
+        <RelevantMemoriesView {...p as ComponentProps<typeof RelevantMemoriesView>} />
       </GalleryCard>
     {/each}
 
@@ -149,7 +149,7 @@
     {#each entries(SAMPLES.ToolCallView) as [name, p] (name)}
       <GalleryCard label={`ToolCallView · ${name}`}>
         <ToolCallView {...p as ComponentProps<typeof ToolCallView>}>
-          {#snippet documentContent({ content })}
+          {#snippet memoryContent({ content })}
             <pre class="whitespace-pre-wrap text-xs">{content}</pre>
           {/snippet}
         </ToolCallView>

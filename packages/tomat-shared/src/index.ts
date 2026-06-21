@@ -16,7 +16,7 @@ export * from "./domain/storage.ts";
 export * from "./domain/settings/index.ts";
 export * from "./domain/prompts.ts";
 export * from "./domain/scheduled-prompt.ts";
-export * from "./domain/document.ts";
+export * from "./domain/memory.ts";
 
 export * from "./validation/tools-json.ts";
 export * from "./validation/pairing.ts";

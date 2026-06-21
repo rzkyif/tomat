@@ -6,28 +6,28 @@
  * Following the convention of use-blink (the consuming component owns the
  * `$effect`/lifecycle), this class holds only the dropdown mechanics. The
  * option list itself stays a `$derived.by` in the component, since it reads two
- * stores (snippets + documents); the component passes that list into the key
+ * stores (snippets + memories); the component passes that list into the key
  * handler and the clamp effect. DOM refs (the textarea and the sizing mirror
  * span) are supplied once via `bind`, because caret measurement needs them.
  */
 
 import { TRIGGER_BEFORE_CARET } from "$lib/snippets/snippets";
 
-// One dropdown serves snippets (expanded client-side at send) and documents
+// One dropdown serves snippets (expanded client-side at send) and memories
 // (token stays in the message; the core injects the content at generation
 // time). On a trigger collision the snippet wins.
 export type AutocompleteOption = {
   id: string;
   name: string;
   trigger: string;
-  source: "snippet" | "document";
+  source: "snippet" | "memory";
 };
 
 // Collects every `@trigger` token already present in `source`, excluding the
 // one spanning [excludeStart, excludeEnd) (the token currently being typed, so
 // it doesn't filter itself out of the suggestions). Matches both the bare
-// `@slug` form (snippets and documents) and the quoted `@"name with spaces"`
-// form (documents), so it lives with the shared autocomplete system rather than
+// `@slug` form (snippets and memories) and the quoted `@"name with spaces"`
+// form (memories), so it lives with the shared autocomplete system rather than
 // with snippets. Used to hide already-applied single-shot entries.
 const TRIGGER_EXISTING = /(^|[^\w@])(@(?:"[^"]+"|[A-Za-z0-9_-]+))/g;
 

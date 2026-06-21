@@ -47,9 +47,9 @@
     "chat/messages/MessageMarkdown.svelte": {
       "tier": "C"
     },
-    "chat/messages/RelevantDocuments.svelte": {
+    "chat/messages/RelevantMemories.svelte": {
       "tier": "B",
-      "wraps": "RelevantDocumentsView"
+      "wraps": "RelevantMemoriesView"
     },
     "chat/messages/RelevantTools.svelte": {
       "tier": "B",
@@ -135,13 +135,13 @@
     "settings/fields/CoresField.svelte": {
       "tier": "C"
     },
-    "settings/fields/DocumentDetail.svelte": {
-      "tier": "C"
-    },
-    "settings/fields/DocumentsField.svelte": {
-      "tier": "C"
-    },
     "settings/fields/FieldCard.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/MemoriesField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/MemoryDetail.svelte": {
       "tier": "C"
     },
     "settings/fields/ModelPresetField.svelte": {

@@ -163,9 +163,9 @@ export function flattenPermissions(
       optional: s.optional,
     });
   }
-  for (const d of perms.documents ?? []) {
+  for (const d of perms.memories ?? []) {
     out.push({
-      kind: "documents",
+      kind: "memories",
       access: d.access,
       reason: d.reason,
       optional: d.optional,

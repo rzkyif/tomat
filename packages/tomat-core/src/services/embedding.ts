@@ -1,7 +1,7 @@
 // Embedding service: a thin client over the llama-embed sidecar's OpenAI-style
 // /v1/embeddings endpoint (a second llama-server instance hosting the MiniLM
 // GGUF; see sidecars/llama-embed.ts + services/sidecar-boot.ts applyLlamaEmbed).
-// Returns 384-dim L2-normalized vectors that tool-relevance + document RAG
+// Returns 384-dim L2-normalized vectors that tool-relevance + memory RAG
 // compare with cosine similarity (services/relevance.ts).
 
 import { EMBED_DIM, EMBED_MODEL_FILE, errMessage } from "@tomat/shared";

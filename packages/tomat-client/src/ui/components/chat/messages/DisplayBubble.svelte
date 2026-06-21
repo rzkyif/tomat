@@ -1,6 +1,6 @@
 <script lang="ts">
   // Bubble for `role: "display"` messages: content a tool pushed into the chat
-  // via ctx.display.* or show_document. Wraps the shared ExpandableMessageView
+  // via ctx.display.* or show_memory. Wraps the shared ExpandableMessageView
   // (expanded by default, since the tool explicitly asked to show this) and
   // injects the rich body (markdown / image / table / diff), which needs the
   // client markdown + diff renderers.

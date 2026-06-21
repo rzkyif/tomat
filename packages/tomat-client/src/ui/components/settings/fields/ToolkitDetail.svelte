@@ -190,10 +190,10 @@
         return { before: "Load native libraries (FFI)", after: "" };
       case "sys":
         return { before: "Read system info (", code: decl.flag, after: ")" };
-      case "documents":
+      case "memories":
         return decl.access === "write"
-          ? { before: "Create and edit your documents", after: "" }
-          : { before: "Read your documents", after: "" };
+          ? { before: "Create and edit your memories", after: "" }
+          : { before: "Read your memories", after: "" };
       case "llm":
         return { before: "Generate text with the model", after: "" };
       case "tts":

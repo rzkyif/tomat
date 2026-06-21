@@ -22,7 +22,7 @@ type ModelKind = "llm" | "stt" | "tts" | "embed";
 
 // Request-body schemas: strict objects with enums + bounded arrays so a
 // malformed or oversized body is rejected before it reaches the managers
-// (matches the zod-validated pattern in documents.ts / scheduled-prompts.ts).
+// (matches the zod-validated pattern in memories.ts / scheduled-prompts.ts).
 const groupEnum = z.enum(["llm", "stt", "tts", "embed"]);
 const downloadBodySchema = z
   .object({

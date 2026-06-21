@@ -22,7 +22,7 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-type DocumentListing = { title: string; summary?: string; updatedAtMs: number };
+type MemoryListing = { title: string; summary?: string; updatedAtMs: number };
 
 type ToolContext = {
   setProgress(progress: number, label?: string, description?: string): void;
@@ -37,8 +37,8 @@ type ToolContext = {
   };
   // Awaited host-module calls, gated by the core's module broker (a first
   // use may pause on a user permission prompt).
-  documents: {
-    list(): Promise<DocumentListing[]>;
+  memories: {
+    list(): Promise<MemoryListing[]>;
     get(title: string): Promise<{ title: string; content: string }>;
     write(
       title: string,
@@ -116,7 +116,7 @@ interface CallState {
       reject: (e: Error) => void;
     }
   >;
-  // Awaited module_request calls (documents, db, llm, tts, stt) waiting on
+  // Awaited module_request calls (memories, db, llm, tts, stt) waiting on
   // the pool's module_response.
   pendingModule: Map<
     string,
@@ -259,18 +259,18 @@ async function handleCall(frame: Extract<PoolToWorkerFrame, { kind: "call" }>): 
         sendDisplay({ type: "diff", before, after, title });
       },
     },
-    documents: {
+    memories: {
       list() {
-        return moduleRequest("documents", "list", {}) as Promise<DocumentListing[]>;
+        return moduleRequest("memories", "list", {}) as Promise<MemoryListing[]>;
       },
       get(title) {
-        return moduleRequest("documents", "get", { title }) as Promise<{
+        return moduleRequest("memories", "get", { title }) as Promise<{
           title: string;
           content: string;
         }>;
       },
       write(title, content) {
-        return moduleRequest("documents", "write", { title, content }) as Promise<{
+        return moduleRequest("memories", "write", { title, content }) as Promise<{
           title: string;
           before: string;
           after: string;
@@ -278,7 +278,7 @@ async function handleCall(frame: Extract<PoolToWorkerFrame, { kind: "call" }>): 
         }>;
       },
       edit(title, find, replace) {
-        return moduleRequest("documents", "edit", { title, find, replace }) as Promise<{
+        return moduleRequest("memories", "edit", { title, find, replace }) as Promise<{
           title: string;
           before: string;
           after: string;

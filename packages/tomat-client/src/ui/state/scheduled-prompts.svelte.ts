@@ -84,7 +84,7 @@ class ScheduledPromptsState {
 
   /** Subscribe to the active core's connection state and (re)load the list on
    *  every connected edge, so the manager opens onto fresh rows instead of an
-   *  empty store. Idempotent, mirroring documentsState.attach(). */
+   *  empty store. Idempotent, mirroring memoriesState.attach(). */
   attach(): void {
     if (this.unsubscribeConn) return;
     this.unsubscribeConn = cores().subscribeConnectionState((state) => {

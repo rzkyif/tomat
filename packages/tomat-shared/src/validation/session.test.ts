@@ -6,8 +6,8 @@
 import { assertEquals } from "@std/assert";
 import {
   assistantMessageInputSchema,
-  documentFilterMessageInputSchema,
   errorMessageInputSchema,
+  memoryFilterMessageInputSchema,
   messageInputSchema,
   messagePatchSchemaByRole,
   reasoningMessageInputSchema,
@@ -34,7 +34,7 @@ const MINIMAL_BY_ROLE: Record<string, Record<string, unknown>> = {
   },
   reasoning: { role: "reasoning", content: "think" },
   tool_filter: { role: "tool_filter", status: "complete" },
-  document_filter: { role: "document_filter", status: "complete" },
+  memory_filter: { role: "memory_filter", status: "complete" },
   display: { role: "display", content: { type: "markdown", markdown: "x" } },
   error: { role: "error", content: "boom" },
 };
@@ -156,7 +156,7 @@ Deno.test("messagePatchSchemaByRole: accepts a partial of fields valid for the r
   assertEquals(messagePatchSchemaByRole.assistant.safeParse({ interrupted: true }).success, true);
 });
 
-Deno.test("reasoning + tool_filter + document_filter + error: each parses its minimum body", () => {
+Deno.test("reasoning + tool_filter + memory_filter + error: each parses its minimum body", () => {
   for (const [schema, body] of [
     [reasoningMessageInputSchema, { role: "reasoning", content: "" }],
     [
@@ -167,9 +167,9 @@ Deno.test("reasoning + tool_filter + document_filter + error: each parses its mi
       },
     ],
     [
-      documentFilterMessageInputSchema,
+      memoryFilterMessageInputSchema,
       {
-        role: "document_filter",
+        role: "memory_filter",
         status: "complete",
       },
     ],

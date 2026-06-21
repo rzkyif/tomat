@@ -165,11 +165,11 @@ export type ObjectManagementType =
   | "snippets"
   | "toolkits"
   | "cores"
-  | "documents"
+  | "memories"
   | "scheduled_prompts";
 
 /** A scrollable, searchable manager for a list of objects (snippets, toolkits,
- *  paired cores, documents, scheduled prompts). Render-only as far as the
+ *  paired cores, memories, scheduled prompts). Render-only as far as the
  *  settings store is concerned: the managed objects live in their own stores
  *  (client settings, core REST, keychain), never in this field's value. The
  *  `objectType` discriminator picks the client provider from the registry. */
@@ -398,7 +398,7 @@ export type ClientGroupId = (typeof CLIENT_GROUP_IDS)[number];
 export const CORE_GROUP_IDS = [
   "llm",
   "prompts",
-  "documents",
+  "memories",
   "scheduledPrompts",
   "greetings",
   "dualModel",

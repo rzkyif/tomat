@@ -1,11 +1,11 @@
-// Document store CRUD + rescan. Backs the Documents settings manager and
+// Memory store CRUD + rescan. Backs the Memories settings manager and
 // the client's @-autocomplete; tools reach the same store through the
 // module broker instead of these routes.
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { documentsStore } from "../../services/documents-store.ts";
-import { scheduleDocumentIndexing } from "../../services/documents-indexer.ts";
+import { memoriesStore } from "../../services/memories-store.ts";
+import { scheduleMemoryIndexing } from "../../services/memories-indexer.ts";
 import { AppError } from "../../shared/errors.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
@@ -23,42 +23,42 @@ const patchBodySchema = z
   })
   .strict();
 
-export function documentsRoutes(): Hono {
+export function memoriesRoutes(): Hono {
   const r = new Hono();
   r.use("*", bearerMiddleware());
 
-  r.get("/", (c) => c.json({ documents: documentsStore().list() }));
+  r.get("/", (c) => c.json({ memories: memoriesStore().list() }));
 
   r.post("/", async (c) => {
     const parsed = createBodySchema.safeParse(await readJson(c));
     if (!parsed.success) throw new AppError("validation_error", parsed.error.message);
-    const doc = documentsStore().create(parsed.data.title, parsed.data.content);
-    scheduleDocumentIndexing(doc.id);
+    const doc = memoriesStore().create(parsed.data.title, parsed.data.content);
+    scheduleMemoryIndexing(doc.id);
     return c.json(doc, 201);
   });
 
   r.post("/rescan", (c) => {
-    const result = documentsStore().rescan();
-    scheduleDocumentIndexing();
+    const result = memoriesStore().rescan();
+    scheduleMemoryIndexing();
     return c.json(result);
   });
 
-  r.get("/:id", (c) => c.json(documentsStore().get(c.req.param("id"))));
+  r.get("/:id", (c) => c.json(memoriesStore().get(c.req.param("id"))));
 
   r.patch("/:id", async (c) => {
     const id = c.req.param("id");
     const parsed = patchBodySchema.safeParse(await readJson(c));
     if (!parsed.success) throw new AppError("validation_error", parsed.error.message);
-    if (parsed.data.title !== undefined) documentsStore().rename(id, parsed.data.title);
+    if (parsed.data.title !== undefined) memoriesStore().rename(id, parsed.data.title);
     if (parsed.data.content !== undefined) {
-      documentsStore().replaceContent(id, parsed.data.content);
+      memoriesStore().replaceContent(id, parsed.data.content);
     }
-    scheduleDocumentIndexing(id);
-    return c.json(documentsStore().get(id));
+    scheduleMemoryIndexing(id);
+    return c.json(memoriesStore().get(id));
   });
 
   r.delete("/:id", (c) => {
-    documentsStore().delete(c.req.param("id"));
+    memoriesStore().delete(c.req.param("id"));
     return c.json({ ok: true });
   });
 

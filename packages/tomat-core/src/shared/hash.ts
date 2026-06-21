@@ -11,7 +11,7 @@ export function toHex(bytes: Uint8Array): string {
 
 /** Synchronous SHA-256 (node:crypto), hex-encoded lowercase. For call sites
  *  whose read-modify-write must not interleave with other callers across an
- *  await (e.g. the documents store). */
+ *  await (e.g. the memory store). */
 export function sha256HexSync(input: string | Uint8Array): string {
   const hash = createHash("sha256");
   hash.update(input);

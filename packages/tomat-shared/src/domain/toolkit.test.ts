@@ -42,12 +42,9 @@ Deno.test("permissionKey: sys carries the flag", () => {
   assertEquals(permissionKey({ kind: "sys", flag: "hostname", reason: "x" }), "sys:hostname");
 });
 
-Deno.test("permissionKey: module kinds key by access (documents) or bare kind", () => {
-  assertEquals(permissionKey({ kind: "documents", access: "read", reason: "x" }), "documents:read");
-  assertEquals(
-    permissionKey({ kind: "documents", access: "write", reason: "x" }),
-    "documents:write",
-  );
+Deno.test("permissionKey: module kinds key by access (memories) or bare kind", () => {
+  assertEquals(permissionKey({ kind: "memories", access: "read", reason: "x" }), "memories:read");
+  assertEquals(permissionKey({ kind: "memories", access: "write", reason: "x" }), "memories:write");
   assertEquals(permissionKey({ kind: "llm", reason: "x" }), "llm");
   assertEquals(permissionKey({ kind: "tts", reason: "x" }), "tts");
   assertEquals(permissionKey({ kind: "stt", reason: "x" }), "stt");

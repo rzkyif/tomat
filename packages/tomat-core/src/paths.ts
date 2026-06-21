@@ -119,7 +119,7 @@ export interface CorePaths {
   denoCacheDir: string;
   stagingDir: string;
   sessionsDir: string;
-  documentsDir: string;
+  memoriesDir: string;
   modelsDir: string;
   toolkitsDir: string;
   workersDir: string;
@@ -164,7 +164,7 @@ export function paths(): CorePaths {
     denoCacheDir: join(root, "deno-cache"),
     stagingDir: join(root, "staging"),
     sessionsDir: join(root, "sessions"),
-    documentsDir: join(root, "documents"),
+    memoriesDir: join(root, "memories"),
     // Shared across channels: ~/.tomat/models (not under the channel root),
     // so dev / latest reuse the same downloaded weights as stable.
     modelsDir: join(tomatBase(), "models"),
@@ -218,7 +218,7 @@ export async function ensureDirs(): Promise<void> {
     p.denoCacheDir,
     p.stagingDir,
     p.sessionsDir,
-    p.documentsDir,
+    p.memoriesDir,
     p.modelsDir,
     p.toolkitsDir,
     p.workersDir,

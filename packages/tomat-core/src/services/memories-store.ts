@@ -1,8 +1,8 @@
-// Document store: markdown files under ~/.tomat/<channel>/core/documents/
-// are the source of truth; SQLite (`documents`) carries metadata plus the
+// Memory store: markdown files under ~/.tomat/<channel>/core/memories/
+// are the source of truth; SQLite (`memories`) carries metadata plus the
 // background-generated summary + embedding. `rescan()` reconciles the two
 // by content hash, so files edited or dropped in by hand (or another sync
-// mechanism) become first-class documents on the next scan.
+// mechanism) become first-class memories on the next scan.
 //
 // Synchronous fs (and synchronous hashing) for the same reasons as
 // sessions-store.ts: call sites are sync (broker ops, chat prompt assembly),
@@ -10,33 +10,33 @@
 // another caller's read-modify-write.
 
 import { join } from "@std/path";
-import type { Document, DocumentMeta } from "@tomat/shared";
+import type { Memory, MemoryMeta } from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { sha256HexSync } from "../shared/hash.ts";
-import { newDocumentId } from "../shared/ids.ts";
+import { newMemoryId } from "../shared/ids.ts";
 import { getLogger } from "../shared/log.ts";
 
-const log = getLogger("documents");
+const log = getLogger("memories");
 
-export class DocumentsStore {
-  list(): DocumentMeta[] {
+export class MemoriesStore {
+  list(): MemoryMeta[] {
     const rows = db()
       .prepare(`${META_SELECT} ORDER BY title COLLATE NOCASE ASC`)
       .all() as MetaRow[];
     return rows.map(rowToMeta);
   }
 
-  get(id: string): Document {
+  get(id: string): Memory {
     const meta = this.metaOrThrow(id);
     return { ...meta, content: readContent(meta.filename) };
   }
 
   // Case-insensitive lookup: titles are unique COLLATE NOCASE (see create),
-  // and tools address documents by the title they saw in the prompt, which
+  // and tools address memories by the title they saw in the prompt, which
   // the model may re-case.
-  getByTitle(title: string): Document | undefined {
+  getByTitle(title: string): Memory | undefined {
     const row = db().prepare(`${META_SELECT} WHERE title = ? COLLATE NOCASE`).get(title) as
       | MetaRow
       | undefined;
@@ -45,15 +45,15 @@ export class DocumentsStore {
     return { ...meta, content: readContent(meta.filename) };
   }
 
-  create(title: string, content: string): Document {
+  create(title: string, content: string): Memory {
     const cleanTitle = title.trim();
-    if (!cleanTitle) throw new AppError("validation_error", "document title required");
+    if (!cleanTitle) throw new AppError("validation_error", "memory title required");
     // NOCASE: "Notes" next to "notes" would be two rows tools can't tell
     // apart through the title-keyed API.
     if (this.titleExists(cleanTitle)) {
-      throw new AppError("conflict", `document "${cleanTitle}" already exists`);
+      throw new AppError("conflict", `memory "${cleanTitle}" already exists`);
     }
-    const id = newDocumentId();
+    const id = newMemoryId();
     const filename = uniqueFilename(cleanTitle);
     const hash = sha256HexSync(content);
     const now = Date.now();
@@ -64,13 +64,13 @@ export class DocumentsStore {
     try {
       db()
         .prepare(`
-        INSERT INTO documents (id, title, filename, content_hash, created_at_ms, updated_at_ms)
+        INSERT INTO memories (id, title, filename, content_hash, created_at_ms, updated_at_ms)
         VALUES (?, ?, ?, ?, ?, ?)
       `)
         .run(id, cleanTitle, filename, hash, now, now);
     } catch (err) {
       try {
-        Deno.removeSync(join(paths().documentsDir, filename));
+        Deno.removeSync(join(paths().memoriesDir, filename));
       } catch {
         /* best-effort; rescan would otherwise re-adopt the orphan file */
       }
@@ -79,11 +79,11 @@ export class DocumentsStore {
     return this.get(id);
   }
 
-  replaceContent(id: string, content: string): Document {
+  replaceContent(id: string, content: string): Memory {
     const meta = this.metaOrThrow(id);
     const hash = sha256HexSync(content);
     db()
-      .prepare(`UPDATE documents SET content_hash = ?, updated_at_ms = ? WHERE id = ?`)
+      .prepare(`UPDATE memories SET content_hash = ?, updated_at_ms = ? WHERE id = ?`)
       .run(hash, Date.now(), id);
     writeContent(meta.filename, content);
     return this.get(id);
@@ -97,13 +97,13 @@ export class DocumentsStore {
     id: string,
     find: string,
     replace: string,
-  ): { document: Document; before: string; after: string } {
+  ): { memory: Memory; before: string; after: string } {
     if (find.length === 0) throw new AppError("validation_error", "find text must not be empty");
     const meta = this.metaOrThrow(id);
     const before = readContent(meta.filename);
     const first = before.indexOf(find);
     if (first === -1) {
-      throw new AppError("validation_error", "find text not found in document");
+      throw new AppError("validation_error", "find text not found in memory");
     }
     if (before.indexOf(find, first + 1) !== -1) {
       throw new AppError(
@@ -112,44 +112,44 @@ export class DocumentsStore {
       );
     }
     const after = before.slice(0, first) + replace + before.slice(first + find.length);
-    const document = this.replaceContent(id, after);
-    return { document, before, after };
+    const memory = this.replaceContent(id, after);
+    return { memory, before, after };
   }
 
-  rename(id: string, title: string): DocumentMeta {
+  rename(id: string, title: string): MemoryMeta {
     const cleanTitle = title.trim();
-    if (!cleanTitle) throw new AppError("validation_error", "document title required");
+    if (!cleanTitle) throw new AppError("validation_error", "memory title required");
     const meta = this.metaOrThrow(id);
     if (cleanTitle === meta.title) return meta;
     if (this.titleExists(cleanTitle, id)) {
-      throw new AppError("conflict", `document "${cleanTitle}" already exists`);
+      throw new AppError("conflict", `memory "${cleanTitle}" already exists`);
     }
     // The file keeps its name: filenames only need to be stable and unique,
     // and a rename that also moved the file would break external references
     // for no user-visible gain. Re-derive happens naturally on rescan if the
     // file is recreated.
     db()
-      .prepare(`UPDATE documents SET title = ?, updated_at_ms = ? WHERE id = ?`)
+      .prepare(`UPDATE memories SET title = ?, updated_at_ms = ? WHERE id = ?`)
       .run(cleanTitle, Date.now(), id);
     return this.metaOrThrow(id);
   }
 
   delete(id: string): void {
     const meta = this.metaOrThrow(id);
-    db().prepare(`DELETE FROM documents WHERE id = ?`).run(id);
+    db().prepare(`DELETE FROM memories WHERE id = ?`).run(id);
     try {
-      Deno.removeSync(join(paths().documentsDir, meta.filename));
+      Deno.removeSync(join(paths().memoriesDir, meta.filename));
     } catch {
       /* already gone */
     }
   }
 
-  /** Reconcile rows with the files on disk. New .md files become documents
+  /** Reconcile rows with the files on disk. New .md files become memories
    *  (title from the filename stem); rows whose file vanished are dropped;
    *  rows whose file content drifted get their hash bumped so the indexer
    *  refreshes summary + embedding. Returns counts for the route response. */
   rescan(): { added: number; removed: number; changed: number } {
-    const dir = paths().documentsDir;
+    const dir = paths().memoriesDir;
     const onDisk = new Map<string, string>(); // filename -> content
     for (const entry of Deno.readDirSync(dir)) {
       if (!entry.isFile || !entry.name.endsWith(".md")) continue;
@@ -171,7 +171,7 @@ export class DocumentsStore {
       for (const row of this.list()) {
         const content = onDisk.get(row.filename);
         if (content === undefined) {
-          db().prepare(`DELETE FROM documents WHERE id = ?`).run(row.id);
+          db().prepare(`DELETE FROM memories WHERE id = ?`).run(row.id);
           removed++;
           continue;
         }
@@ -179,7 +179,7 @@ export class DocumentsStore {
         const hash = sha256HexSync(content);
         if (hash !== row.contentHash) {
           db()
-            .prepare(`UPDATE documents SET content_hash = ?, updated_at_ms = ? WHERE id = ?`)
+            .prepare(`UPDATE memories SET content_hash = ?, updated_at_ms = ? WHERE id = ?`)
             .run(hash, now, row.id);
           changed++;
         }
@@ -188,10 +188,10 @@ export class DocumentsStore {
         const title = uniqueTitle(filename.replace(/\.md$/, ""));
         db()
           .prepare(`
-          INSERT INTO documents (id, title, filename, content_hash, created_at_ms, updated_at_ms)
+          INSERT INTO memories (id, title, filename, content_hash, created_at_ms, updated_at_ms)
           VALUES (?, ?, ?, ?, ?, ?)
         `)
-          .run(newDocumentId(), title, filename, sha256HexSync(content), now, now);
+          .run(newMemoryId(), title, filename, sha256HexSync(content), now, now);
         added++;
       }
       db().exec("COMMIT");
@@ -209,14 +209,14 @@ export class DocumentsStore {
 
   setSummary(id: string, summary: string, sourceHash: string): void {
     db()
-      .prepare(`UPDATE documents SET summary = ?, summary_source_hash = ? WHERE id = ?`)
+      .prepare(`UPDATE memories SET summary = ?, summary_source_hash = ? WHERE id = ?`)
       .run(summary, sourceHash, id);
   }
 
   setEmbedding(id: string, vector: Float32Array, sourceHash: string): void {
     db()
       .prepare(`
-      UPDATE documents
+      UPDATE memories
          SET embedding = ?, embedding_dim = ?, embedding_source_hash = ?
        WHERE id = ?
     `)
@@ -233,7 +233,7 @@ export class DocumentsStore {
   }> {
     const rows = db()
       .prepare(`
-      SELECT id, content_hash, summary_source_hash, embedding_source_hash FROM documents
+      SELECT id, content_hash, summary_source_hash, embedding_source_hash FROM memories
     `)
       .all() as Array<Record<string, unknown>>;
     return rows.map((r) => ({
@@ -244,10 +244,10 @@ export class DocumentsStore {
     }));
   }
 
-  /** All document embeddings, for relevance scoring at prompt time. */
+  /** All memory embeddings, for relevance scoring at prompt time. */
   loadAllEmbeddings(): Map<string, Float32Array> {
     const rows = db()
-      .prepare(`SELECT id, embedding, embedding_dim FROM documents WHERE embedding IS NOT NULL`)
+      .prepare(`SELECT id, embedding, embedding_dim FROM memories WHERE embedding IS NOT NULL`)
       .all() as Array<{ id: string; embedding: Uint8Array; embedding_dim: number }>;
     const out = new Map<string, Float32Array>();
     for (const row of rows) {
@@ -260,23 +260,23 @@ export class DocumentsStore {
 
   // --- internals ------------------------------------------------------------
 
-  private metaOrThrow(id: string): DocumentMeta {
+  private metaOrThrow(id: string): MemoryMeta {
     const row = db().prepare(`${META_SELECT} WHERE id = ?`).get(id) as MetaRow | undefined;
-    if (!row) throw new AppError("not_found", `document ${id} not found`);
+    if (!row) throw new AppError("not_found", `memory ${id} not found`);
     return rowToMeta(row);
   }
 
   private titleExists(title: string, excludeId?: string): boolean {
     const row = db()
-      .prepare(`SELECT id FROM documents WHERE title = ? COLLATE NOCASE`)
+      .prepare(`SELECT id FROM memories WHERE title = ? COLLATE NOCASE`)
       .get(title) as { id: string } | undefined;
     return row !== undefined && row.id !== excludeId;
   }
 }
 
-let _instance: DocumentsStore | null = null;
-export function documentsStore(): DocumentsStore {
-  if (!_instance) _instance = new DocumentsStore();
+let _instance: MemoriesStore | null = null;
+export function memoriesStore(): MemoriesStore {
+  if (!_instance) _instance = new MemoriesStore();
   return _instance;
 }
 
@@ -289,7 +289,7 @@ export function __resetForTesting(): void {
 
 const META_SELECT = `
   SELECT id, title, filename, content_hash, summary, created_at_ms, updated_at_ms
-  FROM documents`;
+  FROM memories`;
 
 interface MetaRow {
   id: string;
@@ -301,7 +301,7 @@ interface MetaRow {
   updated_at_ms: number;
 }
 
-function rowToMeta(row: MetaRow): DocumentMeta {
+function rowToMeta(row: MetaRow): MemoryMeta {
   return {
     id: String(row.id),
     title: String(row.title),
@@ -315,21 +315,21 @@ function rowToMeta(row: MetaRow): DocumentMeta {
 
 function readContent(filename: string): string {
   try {
-    return Deno.readTextFileSync(join(paths().documentsDir, filename));
+    return Deno.readTextFileSync(join(paths().memoriesDir, filename));
   } catch {
     // Row exists but the file vanished (deleted by hand between rescans).
     // Surfacing the loss beats returning "" and letting a tool "read" or
-    // overwrite an empty document it believes is real.
+    // overwrite an empty memory it believes is real.
     throw new AppError(
       "not_found",
-      `document file "${filename}" is missing on disk; run a documents rescan`,
+      `memory file "${filename}" is missing on disk; run a memories rescan`,
     );
   }
 }
 
 // Atomic write (tmp + rename), mirroring sessions-store.writeDoc.
 function writeContent(filename: string, content: string): void {
-  const path = join(paths().documentsDir, filename);
+  const path = join(paths().memoriesDir, filename);
   const tmp = path + ".tmp";
   Deno.writeTextFileSync(tmp, content);
   Deno.renameSync(tmp, path);
@@ -343,13 +343,13 @@ function uniqueFilename(title: string): string {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
-      .slice(0, 64) || "document";
+      .slice(0, 64) || "memory";
   for (let i = 1; ; i++) {
     const name = i === 1 ? `${slug}.md` : `${slug}-${i}.md`;
-    const inDb = db().prepare(`SELECT 1 FROM documents WHERE filename = ?`).get(name);
+    const inDb = db().prepare(`SELECT 1 FROM memories WHERE filename = ?`).get(name);
     if (inDb) continue;
     try {
-      Deno.statSync(join(paths().documentsDir, name));
+      Deno.statSync(join(paths().memoriesDir, name));
     } catch {
       return name; // not on disk either
     }
@@ -359,12 +359,10 @@ function uniqueFilename(title: string): string {
 // Title for a rescanned file, de-duplicated against existing rows the same
 // way filenames are.
 function uniqueTitle(stem: string): string {
-  const base = stem.trim() || "Document";
+  const base = stem.trim() || "Memory";
   for (let i = 1; ; i++) {
     const title = i === 1 ? base : `${base} (${i})`;
-    const exists = db()
-      .prepare(`SELECT 1 FROM documents WHERE title = ? COLLATE NOCASE`)
-      .get(title);
+    const exists = db().prepare(`SELECT 1 FROM memories WHERE title = ? COLLATE NOCASE`).get(title);
     if (!exists) return title;
   }
 }

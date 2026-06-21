@@ -1,11 +1,11 @@
 <script lang="ts">
   import ExpandableMessageView from "./ExpandableMessageView.svelte";
 
-  // The "Found N relevant documents" bubble: the shared collapsed-message shell
-  // with a body listing each matched document and its score. The client wrapper
-  // maps the message's `relevant` array onto `docs`; this stays presentational.
-  export type RelevantDoc = {
-    documentId?: string;
+  // The "Found N relevant memories" bubble: the shared collapsed-message shell
+  // with a body listing each matched memory and its score. The client wrapper
+  // maps the message's `relevant` array onto `memories`; this stays presentational.
+  export type RelevantMemory = {
+    memoryId?: string;
     title: string;
     score: number;
     summary?: string;
@@ -13,7 +13,7 @@
 
   let {
     id,
-    docs = [],
+    memories = [],
     status = "complete",
     errorMessage,
     defaultExpanded = false,
@@ -21,7 +21,7 @@
     neighborRight = false,
   }: {
     id?: string;
-    docs?: RelevantDoc[];
+    memories?: RelevantMemory[];
     status?: string;
     errorMessage?: string;
     defaultExpanded?: boolean;
@@ -29,11 +29,11 @@
     neighborRight?: boolean;
   } = $props();
 
-  const count = $derived(docs.length);
+  const count = $derived(memories.length);
   const titleText = $derived.by(() => {
-    if (status === "error") return "Failed to find relevant documents";
-    if (count === 0) return "No relevant documents";
-    return `Found ${count} relevant document${count === 1 ? "" : "s"}`;
+    if (status === "error") return "Failed to find relevant memories";
+    if (count === 0) return "No relevant memories";
+    return `Found ${count} relevant memor${count === 1 ? "y" : "ies"}`;
   });
 
   const formatScore = (s: number): string => s.toFixed(2);
@@ -58,18 +58,19 @@
       {/if}
 
       {#if count === 0}
-        <div class="text-default-500 italic px-3 py-2">No documents matched.</div>
+        <div class="text-default-500 italic px-3 py-2">No memories matched.</div>
       {:else}
         <div class="flex flex-col gap-1">
-          {#each docs as doc, di (doc.documentId ?? di)}
+          {#each memories as memory, di (memory.memoryId ?? di)}
             <div
               class="bg-surface-inset rounded-large px-4 py-2 text-default-800 whitespace-pre-wrap break-words"
             >
-              <span class="font-bold">{doc.title}</span><span
-                class="text-default-500 tabular-nums font-mono">&nbsp;({formatScore(doc.score)})</span
+              <span class="font-bold">{memory.title}</span><span
+                class="text-default-500 tabular-nums font-mono"
+                >&nbsp;({formatScore(memory.score)})</span
               >
-              {#if doc.summary}
-                <div class="text-default-600">{doc.summary}</div>
+              {#if memory.summary}
+                <div class="text-default-600">{memory.summary}</div>
               {/if}
             </div>
           {/each}

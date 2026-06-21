@@ -1,5 +1,5 @@
 // Embedding-similarity primitives shared by tool relevance filtering and
-// document relevance injection. One implementation so the two stay
+// memory relevance injection. One implementation so the two stay
 // rank-identical: cosine over L2-normalized vectors, top-K selection, and
 // the embed-plus-source-hash pairing the reindex paths persist.
 

@@ -19,7 +19,7 @@ into place, because most settings belong to one side or the other.
 
 The core runs quietly in the background and owns every stateful and computational
 concern. When you send a message, it is the core that streams the model's reply,
-ranks which tools to offer, and reads your documents. The client never does that
+ranks which tools to offer, and reads your memories. The client never does that
 work itself; it asks the core and renders what comes back.
 
 Because the core is a separate service, it does not have to live where the client
@@ -42,7 +42,7 @@ running more than one core.
 ## Local by default
 
 Everything tomat stores lives under `~/.tomat` on the machine running the core:
-your sessions, documents, snippets, downloaded models, and the settings you have
+your sessions, memories, snippets, downloaded models, and the settings you have
 changed. Nothing about a conversation leaves that machine unless you point a
 setting at an **External** provider, and tomat tells you when you have.
 
@@ -67,12 +67,12 @@ chapter:
   and [Thinking and Creativity](/manual/tuning-replies/thinking-and-creativity).
 - **Tools** let the agent act beyond writing text, like searching the web or
   running a calculation. See [Tools and Toolkits](/manual/tools/tools-and-toolkits).
-- **Knowledge** is what you have given tomat to draw on: your documents and
-  snippets. See [Documents](/manual/knowledge/documents).
+- **Knowledge** is what you have given tomat to draw on: your memories and
+  snippets. See [Memories](/manual/knowledge/memories).
 
 You see all three at work in the conversation itself. A reply streams in as a
 bubble; a Thinking bubble shows the model reasoning; tool runs and consulted
-documents appear inline as the agent uses them.
+memories appear inline as the agent uses them.
 
 <MessageBubblesDemo />
 
