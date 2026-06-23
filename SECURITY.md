@@ -2,7 +2,7 @@
 
 tomat is a local-first desktop app: a Deno service (`tomat-core`) that owns all
 state and compute, paired with a deliberately thin Tauri + Svelte client
-(`tomat-client`), plus helper binaries, a bundled toolkit, and a Cloudflare/R2
+(`tomat-client`), plus helper binaries, a bundled extension, and a Cloudflare/R2
 distribution site. The interesting attack surface is binary and model
 provenance, secret handling, the local HTTPS/WSS API, multi-client pairing auth,
 and the third-party tool sandbox. This document describes the security posture,
@@ -47,7 +47,7 @@ like.
    or sneak into the pairing.
 3. **Honest mistakes** by trusted users (footguns, accidental destructive
    actions, secrets ending up where they need not).
-4. **Third-party code and supply chain.** Malicious toolkit npm packages,
+4. **Third-party code and supply chain.** Malicious extension npm packages,
    tampered models or helper binaries, a compromised CDN, and prompt-injected
    model output that drives tool calls.
 
@@ -126,12 +126,12 @@ downloaded from HuggingFace are verified against HF's published sha256 (the LFS
 
 **Tool sandbox.** Tools run in Deno subprocesses with `--no-prompt` and an
 explicit `--allow-*` set. Each tool runs in its **own** worker keyed per
-(toolkit, tool), so its permissions are exactly the grants for that one tool,
+(extension, tool), so its permissions are exactly the grants for that one tool,
 not the union of every enabled tool's grants. Every worker additionally gets
 `--deny-read` / `--deny-write` on the core's secret material (`secrets.enc`,
 `.master-key`, `.admin-token`, the SQLite DB), which Deno enforces over any
 `--allow`, so even a tool granted a broad path like `$home` cannot reach the
-vault. npm toolkit tarballs are integrity-checked (SRI sha512, falling back to
+vault. npm extension tarballs are integrity-checked (SRI sha512, falling back to
 sha1) before extraction; extraction rejects path-traversal (zip-slip) and
 symlink/hardlink entries; `deno install` runs with `--allow-scripts=false` so
 npm lifecycle scripts never execute; tools install default-disabled and
@@ -187,12 +187,12 @@ gitignored `.env`; only public keys are committed.
   against GitHub's published sha256 over TLS, which is outside our Ed25519
   signature. Trust for latest-channel sidecars shifts partly to GitHub and TLS.
   Stable pins URLs and hashes at release time.
-- **Toolkits run third-party code.** A toolkit you install runs with the Deno
-  permissions you grant it. Grant narrowly: a broad `read`/`write`/`run`/`ffi`
-  grant is real capability (the vault is always denied, but a granted `$home`
-  read still exposes the rest of your home directory). Tools are sandboxed
-  per-tool, but a tool you grant network and run access can still act with those
-  capabilities.
+- **Extensions run third-party code.** A extension you install runs with the
+  Deno permissions you grant it. Grant narrowly: a broad
+  `read`/`write`/`run`/`ffi` grant is real capability (the vault is always
+  denied, but a granted `$home` read still exposes the rest of your home
+  directory). Tools are sandboxed per-tool, but a tool you grant network and run
+  access can still act with those capabilities.
 - **Defense-in-depth items not yet tightened.** The Tauri `connect-src` CSP
   still allows a broad `https:` (no live XSS chain makes this exploitable today,
   and core traffic bypasses the webview via the Rust net layer anyway), the
@@ -209,8 +209,8 @@ gitignored `.env`; only public keys are committed.
   still exposes the pairing and health endpoints to the network. Changing it
   requires editing `settings.json` on disk (or `TOMAT_CORE_HOST`); it cannot be
   changed over the API.
-- Grant toolkit permissions as narrowly as possible. Be especially cautious with
-  `run`, `ffi`, and broad `read`/`write` paths.
+- Grant extension permissions as narrowly as possible. Be especially cautious
+  with `run`, `ffi`, and broad `read`/`write` paths.
 - Back up `~/.tomat/<channel>/core/.master-key` if it exists (the
   keychain-sealed path needs no backup); losing it loses all stored secrets.
 - Prefer the secrets vault over plaintext values in `settings.json` for API

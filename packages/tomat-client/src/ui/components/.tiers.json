@@ -5,6 +5,10 @@
       "tier": "B",
       "wraps": "AttachmentListView"
     },
+    "chat/CoreBar.svelte": {
+      "tier": "B",
+      "wraps": "CoreBarView"
+    },
     "chat/MessageEnter.svelte": {
       "tier": "C"
     },
@@ -110,9 +114,6 @@
     "settings/DownloadsModal.svelte": {
       "tier": "C"
     },
-    "settings/ServerStatusChip.svelte": {
-      "tier": "C"
-    },
     "settings/Settings.svelte": {
       "tier": "C"
     },
@@ -177,10 +178,22 @@
     "settings/fields/SttPresetField.svelte": {
       "tier": "C"
     },
-    "settings/fields/ToolkitDetail.svelte": {
+    "settings/fields/ExtensionDetail.svelte": {
       "tier": "C"
     },
-    "settings/fields/ToolkitsField.svelte": {
+    "settings/fields/ExtensionsField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/ToolsField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/ToolDetail.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/McpField.svelte": {
+      "tier": "C"
+    },
+    "settings/fields/McpDetail.svelte": {
       "tier": "C"
     },
     "settings/fields/TtsPresetField.svelte": {

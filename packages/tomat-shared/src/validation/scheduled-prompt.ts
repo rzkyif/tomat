@@ -8,7 +8,12 @@ const minuteField = z.number().int().min(0).max(59);
 
 export const scheduleSpecSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("once"), atMs: z.number().int().positive() }).passthrough(),
-  z.object({ kind: z.literal("interval"), everyMinutes: z.number().int().min(1) }).passthrough(),
+  z
+    .object({
+      kind: z.literal("interval"),
+      everyMinutes: z.number().int().min(1),
+    })
+    .passthrough(),
   z
     .object({
       kind: z.literal("weekly"),

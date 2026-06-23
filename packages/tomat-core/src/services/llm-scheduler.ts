@@ -12,6 +12,7 @@
 import { AppError } from "../shared/errors.ts";
 import { errMessage } from "@tomat/shared";
 import { getLogger } from "../shared/log.ts";
+import { coreStatus } from "./core-status.ts";
 import { type LlmDelta, type LlmRequest, streamChatCompletion } from "./llm-provider.ts";
 
 const log = getLogger("llm-scheduler");
@@ -81,6 +82,12 @@ export class LlmScheduler {
     let n = 0;
     for (const q of this.localQueueByClient.values()) n += q.length;
     return n;
+  }
+
+  /** Push the current local-queue metrics to the core-status aggregator so the
+   *  Busy state reflects in-flight + queued LLM work. */
+  private notifyStatus(): void {
+    coreStatus().noteLlmQueue(this.localActive, this.queueLen());
   }
 
   // Streams a chat completion through the scheduler. Yields the same
@@ -161,6 +168,7 @@ export class LlmScheduler {
   private acquireLocal(clientId: string): Promise<void> {
     if (this.localActive < this.parallelSlots) {
       this.localActive++;
+      this.notifyStatus();
       return Promise.resolve();
     }
     return new Promise<void>((resolve) => {
@@ -172,14 +180,17 @@ export class LlmScheduler {
       }
       q.push(() => {
         this.localActive++;
+        this.notifyStatus();
         resolve();
       });
+      this.notifyStatus();
     });
   }
 
   private releaseLocal(): void {
     this.localActive--;
     this.dispatch();
+    this.notifyStatus();
   }
 
   private dispatch(): void {

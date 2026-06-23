@@ -4,7 +4,7 @@ section: Core Concepts
 order: 1
 ---
 
-import SessionBarDemo from "../../../components/demos/SessionBarDemo.svelte";
+import CoreBarDemo from "../../../components/demos/CoreBarDemo.svelte";
 import MessageBubblesDemo from "../../../components/demos/MessageBubblesDemo.svelte";
 import Aside from "../../../components/Aside.astro";
 
@@ -24,14 +24,10 @@ work itself; it asks the core and renders what comes back.
 
 Because the core is a separate service, it does not have to live where the client
 does. The two usually run on the same machine, but a client can pair with a core
-on a more powerful desktop and drive it from a laptop. When a session is running
-against a named core, the session bar tells you which one.
+on a more powerful desktop and drive it from a laptop. The core bar at the bottom
+of the app tells you which core you are connected to and how it is doing.
 
-<SessionBarDemo
-  scenario="withCoreChip"
-  highlightLabel="Core"
-  highlightTarget="[data-region=core-chip]"
-/>
+<CoreBarDemo highlightLabel="Core" highlightTarget="[data-region=core-status]" />
 
 That separation is also why settings split the way they do: how the app looks is a
 **client** setting, while which model answers you is a **core** setting. The
@@ -66,7 +62,7 @@ chapter:
   answers. See [Models and Providers](/manual/core-concepts/models-and-providers)
   and [Thinking and Creativity](/manual/tuning-replies/thinking-and-creativity).
 - **Tools** let the agent act beyond writing text, like searching the web or
-  running a calculation. See [Tools and Toolkits](/manual/tools/tools-and-toolkits).
+  running a calculation. See [Tools and Extensions](/manual/tools/tools-and-extensions).
 - **Knowledge** is what you have given tomat to draw on: your memories and
   snippets. See [Memories](/manual/knowledge/memories).
 

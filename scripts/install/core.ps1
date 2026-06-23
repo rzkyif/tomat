@@ -314,7 +314,7 @@ $CorePort = 7800 + $PortOffset
 $HomeDir = if ($env:TOMAT_CORE_HOME) { $env:TOMAT_CORE_HOME } else { Join-Path $HOME ".tomat\$Channel\core" }
 $BinDir = Join-Path $HomeDir "bin"
 $WorkersDir = Join-Path $HomeDir "workers"
-$ToolkitsDir = Join-Path $HomeDir "toolkits"
+$ExtensionsDir = Join-Path $HomeDir "extensions"
 $StagingDir = Join-Path $HomeDir "staging"
 $LogsDir = Join-Path $HomeDir "logs"
 $ManifestUrl = "$Storage/$ManifestDir/core.json"
@@ -329,7 +329,7 @@ $TaskName = "tomat-core$ChannelSuffix"
 $ProcName = "tomat-core$ChannelSuffix"
 
 # Make sure the staging tree exists before any UI starts.
-foreach ($d in @($BinDir, $WorkersDir, $ToolkitsDir, $StagingDir, $LogsDir)) {
+foreach ($d in @($BinDir, $WorkersDir, $ExtensionsDir, $StagingDir, $LogsDir)) {
   [void](New-Item -ItemType Directory -Force -Path $d)
 }
 
@@ -353,11 +353,11 @@ try {
   $IdxBin      = Ui-ActionAdd "Installing core binary to $Installed"
   $IdxWorkers  = Ui-ActionAdd "Installing workers to $WorkersDir\"
   $IdxHelpers  = Ui-ActionAdd "Installing helpers to $BinDir\"
-  # Built-in toolkit is CDN-distributed for stable/latest; dev sources it from the
+  # Built-in extension is CDN-distributed for stable/latest; dev sources it from the
   # codebase at runtime, so there's nothing to fetch here.
-  $IdxToolkit  = -1
+  $IdxExtension  = -1
   if ($Channel -ne "dev") {
-    $IdxToolkit = Ui-ActionAdd "Installing built-in toolkit to $ToolkitsDir\"
+    $IdxExtension = Ui-ActionAdd "Installing built-in extension to $ExtensionsDir\"
   }
   $IdxToken    = Ui-ActionAdd "Writing admin token to $AdminTokenFile"
   $IdxSettings = -1
@@ -678,29 +678,29 @@ try {
     }
   }
 
-  # --- action 5b: built-in toolkit ---------------------------------------
-  # Download + extract the CDN-distributed built-in toolkit so a fresh core has
+  # --- action 5b: built-in extension ---------------------------------------
+  # Download + extract the CDN-distributed built-in extension so a fresh core has
   # it out of the box. Core registers + activates it on first boot; if this is
   # skipped (manifest not yet published), core seeds it then.
 
-  if ($IdxToolkit -ne -1) {
-    $tkDir = Join-Path $ToolkitsDir "tomat-builtin-toolkit"
-    if (Test-Path (Join-Path $tkDir "tools.json")) {
-      Ui-ActionSkip $IdxToolkit "(already present)"
+  if ($IdxExtension -ne -1) {
+    $tkDir = Join-Path $ExtensionsDir "tomat-builtin"
+    if (Test-Path (Join-Path $tkDir "tomat.json")) {
+      Ui-ActionSkip $IdxExtension "(already present)"
     } else {
       $tkManifest = $null
       try {
-        $tkResp = Invoke-WebRequest -Uri "$Storage/$ManifestDir/toolkit.json" -UseBasicParsing
+        $tkResp = Invoke-WebRequest -Uri "$Storage/$ManifestDir/extension.json" -UseBasicParsing
         $tkManifest = $tkResp.Content | ConvertFrom-Json
       } catch {
         $tkManifest = $null
       }
       if (-not $tkManifest -or -not $tkManifest.tarballUrl -or -not $tkManifest.sha256) {
         # Non-fatal: core seeds the built-in on first boot if this is missing.
-        Ui-ActionSkip $IdxToolkit "(manifest unavailable; core will seed)"
+        Ui-ActionSkip $IdxExtension "(manifest unavailable; core will seed)"
       } else {
-        Ui-ActionStart $IdxToolkit "Installing built-in toolkit to $ToolkitsDir\" "(downloading)"
-        $tkTmp = Join-Path $StagingDir "builtin-toolkit-$([System.IO.Path]::GetRandomFileName()).tgz"
+        Ui-ActionStart $IdxExtension "Installing built-in extension to $ExtensionsDir\" "(downloading)"
+        $tkTmp = Join-Path $StagingDir "builtin-extension-$([System.IO.Path]::GetRandomFileName()).tgz"
         try {
           Invoke-WebRequest -Uri $tkManifest.tarballUrl -OutFile $tkTmp -UseBasicParsing
         } catch {
@@ -710,22 +710,22 @@ try {
         }
         $tkGot = (Get-FileHash -Algorithm SHA256 -Path $tkTmp).Hash.ToLowerInvariant()
         if ($tkGot -ne $tkManifest.sha256.ToLowerInvariant()) {
-          Ui-Die "sha256 mismatch on built-in toolkit" `
+          Ui-Die "sha256 mismatch on built-in extension" `
             "want $($tkManifest.sha256), got $tkGot" `
             "network corruption is the usual cause; re-run"
         }
-        Ui-ActionUpdate $IdxToolkit "(extracting)"
+        Ui-ActionUpdate $IdxExtension "(extracting)"
         if (Test-Path $tkDir) { Remove-Item -Recurse -Force $tkDir }
         [void](New-Item -ItemType Directory -Force -Path $tkDir)
         # tar.exe (bsdtar) ships with Windows 10+ and handles .tgz.
         & tar.exe -xzf $tkTmp -C $tkDir
         if ($LASTEXITCODE -ne 0) {
-          Ui-Die "Could not extract built-in toolkit" `
+          Ui-Die "Could not extract built-in extension" `
             "tar.exe exited $LASTEXITCODE" `
-            "re-run; check permissions under $ToolkitsDir\"
+            "re-run; check permissions under $ExtensionsDir\"
         }
         Remove-Item -Force $tkTmp -ErrorAction SilentlyContinue
-        Ui-ActionDone $IdxToolkit "(installed)"
+        Ui-ActionDone $IdxExtension "(installed)"
       }
     }
   }

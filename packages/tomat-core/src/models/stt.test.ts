@@ -4,7 +4,7 @@
 // stt.modelPath schema default vs catalog specs.
 
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import { SETTINGS_SCHEMA, type HardwareInfo, type SttPresetField } from "@tomat/shared";
+import { type HardwareInfo, SETTINGS_SCHEMA, type SttPresetField } from "@tomat/shared";
 import { primaryFileSpec, STT_PRIMARY_ROLE } from "@tomat/shared";
 import { buildCatalogPayload } from "../../../tomat-model-catalog/src/index.ts";
 import { buildSttPresetViews, resolveSttSelection, sttThreads } from "./stt.ts";
@@ -26,7 +26,9 @@ function presetField(): SttPresetField {
   for (const group of SETTINGS_SCHEMA) {
     for (const section of group.sections) {
       for (const field of section.fields) {
-        if (field.id === "stt.preset" && field.type === "stt_preset") return field;
+        if (field.id === "stt.preset" && field.type === "stt_preset") {
+          return field;
+        }
       }
     }
   }
@@ -57,7 +59,9 @@ Deno.test("stt: the stt.modelPath schema default is a catalog spec", () => {
 
 Deno.test("stt: the default card matches the stt.modelPath schema default", () => {
   const field = presetField();
-  const applied = resolveSttSelection(catalog, hw(4), { presetId: field.defaultValue });
+  const applied = resolveSttSelection(catalog, hw(4), {
+    presetId: field.defaultValue,
+  });
   const modelPathDefault = SETTINGS_SCHEMA.flatMap((g) => g.sections)
     .flatMap((s) => s.fields)
     .find((f) => f.id === "stt.modelPath")!.defaultValue;
@@ -83,7 +87,9 @@ Deno.test("stt: presetId selection keeps the preset id", () => {
 });
 
 Deno.test("stt: modelId selection applies the default quant (int8)", () => {
-  const applied = resolveSttSelection(catalog, hw(4), { modelId: "whisper-medium.en" });
+  const applied = resolveSttSelection(catalog, hw(4), {
+    modelId: "whisper-medium.en",
+  });
   assertEquals(applied.preset, "custom");
   assertEquals(
     applied.settings.modelPath,
@@ -92,7 +98,9 @@ Deno.test("stt: modelId selection applies the default quant (int8)", () => {
 });
 
 Deno.test("stt: modelId selection resolves a model's int8 bundle (tiny)", () => {
-  const applied = resolveSttSelection(catalog, hw(4), { modelId: "whisper-tiny" });
+  const applied = resolveSttSelection(catalog, hw(4), {
+    modelId: "whisper-tiny",
+  });
   assertEquals(applied.preset, "custom");
   assertEquals(
     applied.settings.modelPath,

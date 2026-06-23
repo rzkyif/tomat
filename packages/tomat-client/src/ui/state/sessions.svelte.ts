@@ -134,6 +134,14 @@ class SessionsState {
     // in-flight fixups in backfillMessageIds. Without the list refetch the chat
     // bar's prev/next/list controls keep a stale (or empty) list and read as
     // "no sessions". Only after a real gap, never on first connect.
+    //
+    // This connected-edge load() is also what recovers a chat.subscribe that
+    // load() sent into a not-yet-open socket (sendWs drops silently then): right
+    // after a core swap the new socket is still "connecting", so the immediate
+    // loadLatest()->load() subscribe is dropped; this re-fires it once the
+    // socket opens, so an in-flight turn on the freshly-selected core resumes.
+    // The "connecting" churn of a swap sets droppedSinceConnected because
+    // hasConnected was already true from the prior core.
     this.unsubscribeConn = cores().subscribeConnectionState((state) => {
       if (state === "connected") {
         if (this.droppedSinceConnected) {
@@ -278,6 +286,12 @@ class SessionsState {
       this.createdAtMs = full.createdAtMs ?? null;
       this.title = full.title || this.defaultTitle;
       this.currentIndex = this.list.findIndex((s) => s.id === sessionId);
+      // Re-attach to any turn still generating on this session: the core
+      // re-emits the in-flight messages so far (catch-up) plus any open tool
+      // prompt, then live deltas resume. A no-op server-side when nothing is in
+      // flight. Covers reopening after a core swap and the reconnect resync; the
+      // GET above only returns finalized messages, so this fills the live tail.
+      cores().api().chat.subscribe(full.id);
     } catch (e) {
       log.error("Failed to load session:", e);
       await this.recoverFromFailedLoad(sessionId);

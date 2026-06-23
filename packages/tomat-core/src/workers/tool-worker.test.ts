@@ -1,16 +1,16 @@
 // protocol round-trip against a real toolWorker subprocess.
 //
-// Spawns the worker entry script with a tempdir-based "toolkit" that exports
+// Spawns the worker entry script with a tempdir-based "extension" that exports
 // a couple of test tools, then drives the NDJSON protocol from the
 // pool side and asserts the worker's frame sequence.
 
 import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
-import type { PoolToWorkerFrame, WorkerToPoolFrame } from "../toolkits/worker-protocol.ts";
+import type { PoolToWorkerFrame, WorkerToPoolFrame } from "../extensions/worker-protocol.ts";
 
 const WORKER_ENTRY = new URL("./tool-worker.ts", import.meta.url).pathname;
 
-const TOOLKIT_SOURCE = `
+const EXTENSION_SOURCE = `
 export async function echo(args, ctx) {
   ctx.setProgress(0.5, "halfway");
   ctx.log("info", "echoing");
@@ -70,7 +70,7 @@ function startWorker(entry: string): WorkerSession {
       "--quiet",
       "--allow-read",
       WORKER_ENTRY,
-      `--toolkit-id=test-toolkit`,
+      `--extension-id=test-extension`,
       `--entry=${entry}`,
     ],
     stdin: "piped",
@@ -160,15 +160,15 @@ async function nextOfKind<K extends WorkerToPoolFrame["kind"]>(
   }
 }
 
-async function setupToolkit(): Promise<{ dir: string; entry: string }> {
+async function setupExtension(): Promise<{ dir: string; entry: string }> {
   const dir = await Deno.makeTempDir({ prefix: "tomat-tool-worker-" });
   const entry = join(dir, "index.ts");
-  await Deno.writeTextFile(entry, TOOLKIT_SOURCE);
+  await Deno.writeTextFile(entry, EXTENSION_SOURCE);
   return { dir, entry };
 }
 
 Deno.test("toolWorker: ready -> booted -> call returns tool_result + progress + log", async () => {
-  const { dir, entry } = await setupToolkit();
+  const { dir, entry } = await setupExtension();
   const session = startWorker(entry);
   try {
     await nextOfKind(session.frames, "ready");
@@ -202,7 +202,7 @@ Deno.test("toolWorker: ready -> booted -> call returns tool_result + progress + 
 });
 
 Deno.test("toolWorker: a throwing tool emits tool_error with the message", async () => {
-  const { dir, entry } = await setupToolkit();
+  const { dir, entry } = await setupExtension();
   const session = startWorker(entry);
   try {
     await nextOfKind(session.frames, "ready");
@@ -229,7 +229,7 @@ Deno.test("toolWorker: a throwing tool emits tool_error with the message", async
 });
 
 Deno.test("toolWorker: cancel aborts an in-flight call", async () => {
-  const { dir, entry } = await setupToolkit();
+  const { dir, entry } = await setupExtension();
   const session = startWorker(entry);
   try {
     await nextOfKind(session.frames, "ready");
@@ -260,7 +260,7 @@ Deno.test("toolWorker: cancel aborts an in-flight call", async () => {
 });
 
 Deno.test("toolWorker: ask_user round-trip resolves the tool with the user's answer", async () => {
-  const { dir, entry } = await setupToolkit();
+  const { dir, entry } = await setupExtension();
   const session = startWorker(entry);
   try {
     await nextOfKind(session.frames, "ready");
@@ -298,7 +298,7 @@ Deno.test("toolWorker: ask_user round-trip resolves the tool with the user's ans
 });
 
 Deno.test("toolWorker: module_request round-trips a db query through the pool", async () => {
-  const { dir, entry } = await setupToolkit();
+  const { dir, entry } = await setupExtension();
   const session = startWorker(entry);
   try {
     await nextOfKind(session.frames, "ready");
@@ -340,7 +340,7 @@ Deno.test("toolWorker: module_request round-trips a db query through the pool", 
 });
 
 Deno.test("toolWorker: display is a one-way frame that precedes the result", async () => {
-  const { dir, entry } = await setupToolkit();
+  const { dir, entry } = await setupExtension();
   const session = startWorker(entry);
   try {
     await nextOfKind(session.frames, "ready");
@@ -372,7 +372,7 @@ Deno.test("toolWorker: display is a one-way frame that precedes the result", asy
 });
 
 Deno.test("toolWorker: schedule_request round-trips and resolves with the confirmation", async () => {
-  const { dir, entry } = await setupToolkit();
+  const { dir, entry } = await setupExtension();
   const session = startWorker(entry);
   try {
     await nextOfKind(session.frames, "ready");

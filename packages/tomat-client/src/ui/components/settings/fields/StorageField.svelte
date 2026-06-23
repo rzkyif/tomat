@@ -1,6 +1,6 @@
 <script lang="ts">
   // Full on-disk storage browser. Driven by a provider chosen by `scope`: the
-  // paired core (models, binaries, sessions, toolkits, cache, logs, settings)
+  // paired core (models, binaries, sessions, extensions, cache, logs, settings)
   // or the local client (settings, logs). The provider serves a tree with a
   // `lock_reason` on anything in use; this renders it, lets the user reclaim
   // disk, and routes every delete through the review modal. The provider

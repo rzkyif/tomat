@@ -66,7 +66,9 @@ vi.mock("@tauri-apps/api/path", () => ({
 }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: tauriGetVersion }));
 vi.mock("@tauri-apps/api/menu", () => ({
-  Menu: { new: vi.fn(() => Promise.resolve({ popup: vi.fn(() => Promise.resolve()) })) },
+  Menu: {
+    new: vi.fn(() => Promise.resolve({ popup: vi.fn(() => Promise.resolve()) })),
+  },
   MenuItem: { new: vi.fn((o) => Promise.resolve(o)) },
   CheckMenuItem: { new: vi.fn((o) => Promise.resolve(o)) },
   PredefinedMenuItem: { new: vi.fn((o) => Promise.resolve(o)) },
@@ -107,7 +109,11 @@ describe("Tauri platform: windowing", () => {
     expect(invoke).toHaveBeenCalledWith("toggle_main_window");
   });
   it("position forwards args to position_window", async () => {
-    await p.windowing.position({ monitorId: "m1", alignment: "left", width: 600 });
+    await p.windowing.position({
+      monitorId: "m1",
+      alignment: "left",
+      width: 600,
+    });
     expect(invoke).toHaveBeenCalledWith("position_window", {
       monitorId: "m1",
       alignment: "left",

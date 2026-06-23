@@ -28,7 +28,7 @@ function fixedSse(text: string): typeof fetch {
 function descriptor(name: string): ToolDescriptor {
   return {
     toolId: `t::${name}`,
-    toolkitId: "t",
+    extensionId: "t",
     name,
     description: `desc-${name}`,
   };

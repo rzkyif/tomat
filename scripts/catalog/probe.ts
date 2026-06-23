@@ -93,7 +93,9 @@ class Reader {
       // huge ones (token-type ids) to bound memory.
       if (count <= 4096) {
         const out: number[] = [];
-        for (let i = 0; i < count; i++) out.push(this.value(elemType) as number);
+        for (let i = 0; i < count; i++) {
+          out.push(this.value(elemType) as number);
+        }
         return out;
       }
       this.off += this.scalarSize(elemType) * count;
@@ -126,7 +128,9 @@ class Reader {
 
 async function fetchRange(url: string, bytes: number): Promise<DataView> {
   const res = await fetch(url, { headers: { Range: `bytes=0-${bytes - 1}` } });
-  if (!res.ok && res.status !== 206) throw new Error(`HTTP ${res.status} for ${url}`);
+  if (!res.ok && res.status !== 206) {
+    throw new Error(`HTTP ${res.status} for ${url}`);
+  }
   const buf = await res.arrayBuffer();
   return new DataView(buf);
 }

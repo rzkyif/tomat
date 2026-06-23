@@ -10,7 +10,7 @@ import { sidecarManager } from "../../sidecars/manager.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
 import { transcribeAudio } from "../../services/stt-transcribe.ts";
 import { AppError } from "../../shared/errors.ts";
-import { bearerMiddleware } from "../middleware/auth.ts";
+import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 
 export function sttRoutes(): Hono {
   const r = new Hono();
@@ -27,7 +27,13 @@ export function sttRoutes(): Hono {
     const settings = await loadCoreSettings();
     // The request-abort signal cancels the upstream inference if the client
     // disconnects mid-decode.
-    const text = await transcribeAudio(settings, audio, languageStr, c.req.raw.signal);
+    const text = await transcribeAudio(
+      settings,
+      audio,
+      languageStr,
+      c.req.raw.signal,
+      requireClient(c).id,
+    );
     return c.json({ text });
   });
 

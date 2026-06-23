@@ -68,8 +68,8 @@ vi.mock("$lib/core", () => ({
 }));
 
 import { getDefaultSettings } from "@tomat/shared";
-import { setPlatform, type Platform } from "$lib/platform";
-import { settingsState, type SettingsChangeOrigin } from "./settings.svelte";
+import { type Platform, setPlatform } from "$lib/platform";
+import { type SettingsChangeOrigin, settingsState } from "./settings.svelte";
 
 const files: Record<string, Record<string, unknown>> = { settings: {} };
 
@@ -191,7 +191,11 @@ describe("settingsState", () => {
     expect(fake.patches).toEqual([{ "tts.enabled": true }]);
     expect(notificationsFor("tts.enabled")).toHaveLength(1);
 
-    emitWs({ kind: "settings.updated", values: { "tts.enabled": true }, deleted: [] });
+    emitWs({
+      kind: "settings.updated",
+      values: { "tts.enabled": true },
+      deleted: [],
+    });
     await settle();
     expect(notificationsFor("tts.enabled")).toHaveLength(1);
     expect(fake.patches).toHaveLength(1);
@@ -202,7 +206,11 @@ describe("settingsState", () => {
     await vi.waitFor(() => expect(settingsState.coreLoaded).toBe(true));
     listen();
 
-    emitWs({ kind: "settings.updated", values: { "llm.contextSize": 16384 }, deleted: [] });
+    emitWs({
+      kind: "settings.updated",
+      values: { "llm.contextSize": 16384 },
+      deleted: [],
+    });
     expect(settingsState.currentSettings["llm.contextSize"]).toBe(16384);
     expect(notificationsFor("llm.contextSize")).toEqual([
       {
@@ -215,7 +223,11 @@ describe("settingsState", () => {
     await settle();
     expect(fake.patches).toHaveLength(0);
 
-    emitWs({ kind: "settings.updated", values: {}, deleted: ["llm.contextSize"] });
+    emitWs({
+      kind: "settings.updated",
+      values: {},
+      deleted: ["llm.contextSize"],
+    });
     expect(settingsState.currentSettings["llm.contextSize"]).toBe(DEFAULTS["llm.contextSize"]);
   });
 
@@ -228,7 +240,10 @@ describe("settingsState", () => {
     // Switch to a different core whose baseline also enables TTS: the reset
     // fires a real true -> false transition first, then the baseline re-arms.
     selectCore("core-b");
-    expect(notificationsFor("tts.enabled")[0]).toMatchObject({ prev: true, next: false });
+    expect(notificationsFor("tts.enabled")[0]).toMatchObject({
+      prev: true,
+      next: false,
+    });
     await vi.waitFor(() => expect(settingsState.currentSettings["tts.enabled"]).toBe(true));
     expect(notificationsFor("tts.enabled")[1]).toMatchObject({
       prev: false,
@@ -277,7 +292,9 @@ describe("settingsState", () => {
     expect(files.settings).toEqual({ "appearance.theme": "light" });
     expect(settingsState.currentSettings["llm.contextSize"]).toBe(DEFAULTS["llm.contextSize"]);
     const llm = notificationsFor("llm.contextSize");
-    expect(llm[llm.length - 1]).toMatchObject({ next: DEFAULTS["llm.contextSize"] });
+    expect(llm[llm.length - 1]).toMatchObject({
+      next: DEFAULTS["llm.contextSize"],
+    });
   });
 
   it("PATCHes the null reset sentinel when a core key reverts to default", async () => {
@@ -288,7 +305,12 @@ describe("settingsState", () => {
     expect(fake.patches).toEqual([{ "llm.contextSize": 16384 }]);
 
     await settingsState.updateSetting("llm.contextSize", DEFAULTS["llm.contextSize"]);
-    expect(fake.patches).toEqual([{ "llm.contextSize": 16384 }, { "llm.contextSize": null }]);
+    expect(fake.patches).toEqual([
+      { "llm.contextSize": 16384 },
+      {
+        "llm.contextSize": null,
+      },
+    ]);
   });
 
   it("routes secrets to the vault only when dirty, never to PATCH or the file", async () => {

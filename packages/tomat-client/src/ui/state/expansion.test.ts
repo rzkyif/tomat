@@ -1,7 +1,7 @@
 // expansion state: the small per-message map that bubbles read/write
 // to decide whether they break the horizontal stack.
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { expansionState, isExpanded } from "./expansion.svelte";
 
 describe("expansionState + isExpanded", () => {

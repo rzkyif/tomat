@@ -10,7 +10,13 @@ export type ScheduleSpec =
   | { kind: "interval"; everyMinutes: number }
   | { kind: "weekly"; weekdays: number[]; hour: number; minute: number }
   | { kind: "monthly"; day: number; hour: number; minute: number }
-  | { kind: "yearly"; month: number; day: number; hour: number; minute: number };
+  | {
+      kind: "yearly";
+      month: number;
+      day: number;
+      hour: number;
+      minute: number;
+    };
 
 // The user-editable fields, as proposed by the agent in the schedule
 // confirm flow and as edited in Settings.

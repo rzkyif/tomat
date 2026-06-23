@@ -44,3 +44,7 @@ export function newMemoryId(): string {
 export function newScheduledPromptId(): string {
   return ulid();
 }
+
+export function newMcpServerId(): string {
+  return ulid();
+}

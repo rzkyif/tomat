@@ -54,7 +54,9 @@ Deno.test("ensureHelperBinaries throws naming the specific missing helper", () =
 
 Deno.test("ensureHelperBinaries passes when every required helper is present", () => {
   withTempBin(() => {
-    for (const name of REQUIRED) Deno.writeTextFileSync(binPath(coreBinaryName(name)), "");
+    for (const name of REQUIRED) {
+      Deno.writeTextFileSync(binPath(coreBinaryName(name)), "");
+    }
     ensureHelperBinaries(); // must not throw
   });
 });

@@ -1,11 +1,15 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import {
-    normalizeTrigger,
+    normalizeName,
+    recommendedSymbol,
     SNIPPET_PLACEMENT_OPTIONS,
+    SNIPPET_SYMBOLS,
     type Snippet,
     type SnippetPlacement,
-    validateTrigger,
+    type SnippetSymbol,
+    snippetTrigger,
+    validateName,
   } from "$lib/snippets/snippets";
   import { snippetsState } from "$stores";
   import { getLogger } from "$lib/util/log";
@@ -22,16 +26,30 @@
   // One-time snapshot of the opened snippet; later store updates must not clobber
   // an in-progress edit, so these are intentionally not derived from `item`.
   let draftName = $state(untrack(() => item.name));
-  let draftTrigger = $state(untrack(() => item.trigger));
+  let draftSymbol = $state<SnippetSymbol>(untrack(() => item.symbol));
   let draftPlacement = $state<SnippetPlacement>(untrack(() => item.placement));
   let draftText = $state(untrack(() => item.text));
+  // Once the user picks a symbol themselves (persisted as `symbolPinned`), stop
+  // auto-tracking the recommendation on later placement changes. Reading the
+  // stored flag (not re-inferring from the symbol) so a deliberate choice that
+  // happens to equal the recommendation is still respected.
+  let symbolTouched = $state(untrack(() => item.symbolPinned));
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   const otherTriggers = $derived(
-    snippetsState.snippets.filter((s) => s.id !== item.id).map((s) => s.trigger.toLowerCase()),
+    snippetsState.snippets
+      .filter((s) => s.id !== item.id)
+      .map((s) => snippetTrigger(s).toLowerCase()),
   );
-  const triggerError = $derived(validateTrigger(draftTrigger, otherTriggers));
+  const nameError = $derived(validateName(draftSymbol, draftName, otherTriggers));
+  const recommended = $derived(recommendedSymbol(draftPlacement));
+  const symbolOptions = $derived(
+    SNIPPET_SYMBOLS.map((sym) => ({
+      value: sym,
+      label: sym === recommended ? `${sym}  (Recommended)` : sym,
+    })),
+  );
 
   function scheduleSave() {
     if (saveTimer) clearTimeout(saveTimer);
@@ -43,12 +61,13 @@
       clearTimeout(saveTimer);
       saveTimer = null;
     }
-    if (triggerError) return;
+    if (nameError) return;
     try {
       await snippetsState.save({
         id: item.id,
-        name: draftName.trim() || "Untitled snippet",
-        trigger: draftTrigger,
+        name: draftName,
+        symbol: draftSymbol,
+        symbolPinned: symbolTouched,
         placement: draftPlacement,
         text: draftText,
       });
@@ -64,31 +83,30 @@
     <Input
       type="text"
       value={draftName}
+      placeholder="scientist"
       ariaLabel="Snippet name"
+      mono
+      error={!!nameError}
       oninput={(v) => {
-        draftName = v;
+        draftName = normalizeName(v);
         scheduleSave();
       }}
       onblur={() => flushSave()}
     />
   </FormField>
 
-  <FormField label="Trigger" error={triggerError}>
-    <Input
-      type="text"
-      value={draftTrigger.startsWith("@") ? draftTrigger.slice(1) : draftTrigger}
-      placeholder="scientist"
-      ariaLabel="Snippet trigger"
-      mono
-      error={!!triggerError}
-      oninput={(v) => {
-        draftTrigger = normalizeTrigger(v);
+  <FormField label="Trigger" error={nameError}>
+    <Select
+      value={draftSymbol}
+      options={symbolOptions}
+      ariaLabel="Snippet trigger symbol"
+      onchange={(v) => {
+        draftSymbol = v as SnippetSymbol;
+        symbolTouched = true;
         scheduleSave();
       }}
-      onblur={() => flushSave()}
-    >
-      {#snippet prefix()}<span class="font-mono">@</span>{/snippet}
-    </Input>
+    />
+    <p class="mt-1 text-xs text-muted font-mono">{draftSymbol}{draftName || "name"}</p>
   </FormField>
 
   <FormField label="Placement">
@@ -98,6 +116,7 @@
       ariaLabel="Snippet placement"
       onchange={(v) => {
         draftPlacement = v as SnippetPlacement;
+        if (!symbolTouched) draftSymbol = recommendedSymbol(draftPlacement);
         scheduleSave();
       }}
     />

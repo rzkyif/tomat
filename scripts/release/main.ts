@@ -38,7 +38,7 @@ import {
 } from "./lib.ts";
 import { encodeBase64 } from "@std/encoding/base64";
 import { coreItem } from "./core.ts";
-import { toolkitItem } from "./toolkit.ts";
+import { extensionItem } from "./extension.ts";
 import { catalogItem } from "./catalog.ts";
 import { clientItem } from "./client.ts";
 import { scriptsItem } from "./install-scripts.ts";
@@ -49,7 +49,7 @@ import { websiteItem } from "./website.ts";
 // website last.
 const ITEMS: ReleaseItem[] = [
   coreItem,
-  toolkitItem,
+  extensionItem,
   catalogItem,
   clientItem,
   scriptsItem,

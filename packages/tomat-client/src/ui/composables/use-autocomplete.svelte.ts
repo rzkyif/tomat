@@ -13,23 +13,24 @@
 
 import { TRIGGER_BEFORE_CARET } from "$lib/snippets/snippets";
 
-// One dropdown serves snippets (expanded client-side at send) and memories
+// One dropdown serves snippets (expanded client-side at send) and `@` memories
 // (token stays in the message; the core injects the content at generation
-// time). On a trigger collision the snippet wins.
+// time). The typed symbol (`#`/`@`/`/`) selects which list is shown. On a
+// trigger collision the snippet wins.
 export type AutocompleteOption = {
   id: string;
   name: string;
   trigger: string;
-  source: "snippet" | "memory";
+  source: "snippet" | "memory" | "mcp_prompt" | "resource";
 };
 
-// Collects every `@trigger` token already present in `source`, excluding the
-// one spanning [excludeStart, excludeEnd) (the token currently being typed, so
-// it doesn't filter itself out of the suggestions). Matches both the bare
-// `@slug` form (snippets and memories) and the quoted `@"name with spaces"`
-// form (memories), so it lives with the shared autocomplete system rather than
-// with snippets. Used to hide already-applied single-shot entries.
-const TRIGGER_EXISTING = /(^|[^\w@])(@(?:"[^"]+"|[A-Za-z0-9_-]+))/g;
+// Collects every `#`/`@`/`/` trigger token already present in `source`,
+// excluding the one spanning [excludeStart, excludeEnd) (the token currently
+// being typed, so it doesn't filter itself out of the suggestions). A bare name
+// is any non-whitespace run (so a memory like `@ext/skills/foo` is one token),
+// minus a trailing sentence-punctuation mark; the quoted `@"name with spaces"`
+// form is only needed to span whitespace. Used to hide already-applied entries.
+const TRIGGER_EXISTING = /(^|[^\w@#/])([#@/](?:"[^"]+"|[^\s"]*[^\s".,:;!?)\]}']))/g;
 
 export function collectExistingTriggers(
   source: string,
@@ -130,7 +131,10 @@ export class Autocomplete {
     const before = text.slice(0, start);
     const after = text.slice(end);
     const replacement = `${trigger} `;
-    return { text: `${before}${replacement}${after}`, caret: start + replacement.length };
+    return {
+      text: `${before}${replacement}${after}`,
+      caret: start + replacement.length,
+    };
   }
 
   onCompositionStart(): void {

@@ -15,7 +15,11 @@ const COMPONENTS = `${ROOT}packages/tomat-client/src/ui/components/`;
 const MANIFEST = `${COMPONENTS}.tiers.json`;
 const SHARED_COMPONENTS = `${ROOT}packages/tomat-shared/src/ui/components/`;
 
-type Entry = { tier: "A0" | "A" | "B" | "C"; wraps?: string; unsharedLeaves?: string[] };
+type Entry = {
+  tier: "A0" | "A" | "B" | "C";
+  wraps?: string;
+  unsharedLeaves?: string[];
+};
 const manifest: { components: Record<string, Entry> } = JSON.parse(
   await Deno.readTextFile(MANIFEST),
 );
@@ -38,7 +42,9 @@ const listed = new Set(Object.keys(manifest.components));
 const problems: string[] = [];
 
 for (const f of onDisk) {
-  if (!listed.has(f)) problems.push(`${f}: on disk but missing from .tiers.json`);
+  if (!listed.has(f)) {
+    problems.push(`${f}: on disk but missing from .tiers.json`);
+  }
 }
 for (const f of listed) {
   if (!onDisk.has(f)) problems.push(`${f}: in .tiers.json but no such file`);

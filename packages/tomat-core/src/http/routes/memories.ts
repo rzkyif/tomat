@@ -11,6 +11,7 @@ import { bearerMiddleware } from "../middleware/auth.ts";
 
 const createBodySchema = z
   .object({
+    kind: z.enum(["knowledge", "skill"]).default("knowledge"),
     title: z.string().min(1),
     content: z.string().default(""),
   })
@@ -20,6 +21,7 @@ const patchBodySchema = z
   .object({
     title: z.string().min(1).optional(),
     content: z.string().optional(),
+    enabled: z.boolean().optional(),
   })
   .strict();
 
@@ -31,8 +33,10 @@ export function memoriesRoutes(): Hono {
 
   r.post("/", async (c) => {
     const parsed = createBodySchema.safeParse(await readJson(c));
-    if (!parsed.success) throw new AppError("validation_error", parsed.error.message);
-    const doc = memoriesStore().create(parsed.data.title, parsed.data.content);
+    if (!parsed.success) {
+      throw new AppError("validation_error", parsed.error.message);
+    }
+    const doc = memoriesStore().create(parsed.data.kind, parsed.data.title, parsed.data.content);
     scheduleMemoryIndexing(doc.id);
     return c.json(doc, 201);
   });
@@ -45,11 +49,25 @@ export function memoriesRoutes(): Hono {
 
   r.get("/:id", (c) => c.json(memoriesStore().get(c.req.param("id"))));
 
+  // One bundled reference file from a skill folder.
+  r.get("/:id/files/:name", (c) =>
+    c.json({
+      content: memoriesStore().getFile(c.req.param("id"), c.req.param("name")),
+    }),
+  );
+
   r.patch("/:id", async (c) => {
     const id = c.req.param("id");
     const parsed = patchBodySchema.safeParse(await readJson(c));
-    if (!parsed.success) throw new AppError("validation_error", parsed.error.message);
-    if (parsed.data.title !== undefined) memoriesStore().rename(id, parsed.data.title);
+    if (!parsed.success) {
+      throw new AppError("validation_error", parsed.error.message);
+    }
+    if (parsed.data.enabled !== undefined) {
+      memoriesStore().setEnabled(id, parsed.data.enabled);
+    }
+    if (parsed.data.title !== undefined) {
+      memoriesStore().rename(id, parsed.data.title);
+    }
     if (parsed.data.content !== undefined) {
       memoriesStore().replaceContent(id, parsed.data.content);
     }

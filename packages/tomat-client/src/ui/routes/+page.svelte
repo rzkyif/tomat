@@ -11,6 +11,7 @@
   import UserInput from "$components/chat/UserInput.svelte";
   import UserMessage from "$components/chat/messages/UserMessage.svelte";
   import SessionBar from "$components/chat/SessionBar.svelte";
+  import CoreBar from "$components/chat/CoreBar.svelte";
   import Settings from "$components/settings/Settings.svelte";
   import NewCore from "$components/new-core/NewCore.svelte";
   import QuickSettings from "$components/quick-settings/QuickSettings.svelte";
@@ -35,7 +36,8 @@
     settingsState,
     snippetsState,
     streamingState,
-    toolkitsState,
+    extensionsState,
+    mcpState,
     updateState,
     viewState,
   } from "$stores";
@@ -461,7 +463,21 @@
       await dropTokenlessCoresAndMaybeOnboard();
       // Reload the active core's sessions on every later core switch. Registered
       // after restoreSelected so boot's own select() doesn't double-trigger it.
-      cores().subscribe(() => void sessionsState.loadLatest());
+      // The registry notifies on rename / unpair too, so detach the in-flight
+      // turn ONLY on an actual current-core change: a deliberate swap closes the
+      // old socket without emitting "disconnected", so the streaming disconnect
+      // handler never fires. Detaching here (before the reload) keeps the old
+      // core's streamId adoptable on return instead of letting load()'s
+      // interruptStreaming abandon it and cross-interrupt the new core.
+      let lastSelectedCoreId = cores().currentEntry()?.id ?? null;
+      cores().subscribe(() => {
+        const id = cores().currentEntry()?.id ?? null;
+        if (id !== lastSelectedCoreId) {
+          lastSelectedCoreId = id;
+          streamingState.detachForResume();
+        }
+        void sessionsState.loadLatest();
+      });
       // On-demand install: spawn the loopback core if it isn't up yet.
       await ensureLocalCoreUpIfNeeded();
       // Wire every WS-driven store to the core socket. These register listeners
@@ -474,7 +490,8 @@
       // settings-effects on every merged transition, so boot needs no explicit
       // core-settings fetch or per-module kick.
       settingsState.attach();
-      toolkitsState.ensureConnected();
+      extensionsState.ensureConnected();
+      mcpState.attach();
       memoriesState.attach();
       scheduledPromptsState.attach();
       streamingState.attach();
@@ -967,9 +984,18 @@
                within a row the bubble's z-0 shadow still sits under its z-10
                body. Pop-out UI (Modal, SnippetAutocomplete) carries its own
                z-50. -->
-          <div class="relative pointer-events-none" style:z-index={messageGroups.length + 3}>
-            <SessionBar />
+          <!-- CoreBar sits at the very bottom of the chat column (DOM-first =
+               visual bottom under flex-col-reverse), below the SessionBar, and
+               paints over it (lower-on-screen wins, so a higher z-index). -->
+          <div class="relative pointer-events-none" style:z-index={messageGroups.length + 4}>
+            <CoreBar />
           </div>
+
+          <!-- SessionBar owns its own positioning wrapper so that when it hides
+               itself (showBar false) it renders NOTHING here, leaving no empty
+               flex item between the CoreBar and UserInput that would double the
+               gap. -->
+          <SessionBar zIndex={messageGroups.length + 3} />
 
           <div class="relative pointer-events-none" style:z-index={messageGroups.length + 2}>
             <UserInput />
@@ -1052,7 +1078,7 @@
                           id={msg.id}
                           {msg}
                           onAnswer={(requestId, answers) =>
-                            toolkitsState.answerAskUser(
+                            extensionsState.answerAskUser(
                               msg.callId!,
                               requestId,
                               answers,
@@ -1137,7 +1163,8 @@
         </div>
       {:else}
         <div
-          class="w-fit pointer-events-none"
+          class="w-fit flex flex-col pointer-events-none"
+          style:gap={bubbleGap(ui)}
           class:ml-auto={settingsState.getAlignment() === "right"}
           class:mr-auto={settingsState.getAlignment() === "left"}
           class:mx-auto={settingsState.getAlignment() === "center"}
@@ -1150,6 +1177,14 @@
             <SessionList />
           {:else}
             <Settings />
+          {/if}
+          <!-- CoreBar pins below the session-list / settings panel (which core
+               you're on, its status, quick switch). Hidden in newCore (no core
+               yet) and quickSettings (transient overlay). -->
+          {#if viewState.mode === "sessionList" || viewState.mode === "settings"}
+            <div class="relative pointer-events-none">
+              <CoreBar />
+            </div>
           {/if}
         </div>
       {/if}

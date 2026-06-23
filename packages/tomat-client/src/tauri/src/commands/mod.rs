@@ -1,7 +1,7 @@
 //! Tauri commands, organized by domain.
 //!
 //! Only platform-specific commands remain: everything server-side
-//! (sessions, settings, sidecars, downloads, toolkits, storage) moved to
+//! (sessions, settings, sidecars, downloads, extensions, storage) moved to
 //! tomat-core and is reached over HTTP/WS by the frontend.
 //!
 //! Submodules:

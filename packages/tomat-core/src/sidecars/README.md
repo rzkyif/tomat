@@ -6,7 +6,14 @@ chat, plus a second instance for embeddings) and `tomat-core-speech`
 supervisor; per-kind argument construction lives in [`llama.ts`](llama.ts),
 [`llama-embed.ts`](llama-embed.ts), and [`speech.ts`](speech.ts). Binary path
 resolution does NOT live here (see `src/binaries/`). The deno tool workers are
-supervised separately (see `src/toolkits/`).
+supervised separately (see `src/extensions/`).
+
+The speech sidecar runs a single engine, so concurrent multi-client STT / TTS
+requests are queued fairly by `services/speech-scheduler.ts` (per-client
+round-robin, one slot, `server_busy` past a depth cap) before they reach
+[`speech.ts`](speech.ts), mirroring `services/llm-scheduler.ts` for the LLM. Both
+queues feed the aggregate core status (`services/core-status.ts`), which the core
+broadcasts as `core.status` frames and surfaces on `/health`.
 
 ## Lifecycle and supersession ([`manager.ts`](manager.ts))
 
@@ -67,7 +74,7 @@ probed.
 
 ## The worker deno binary ([`worker-deno.ts`](worker-deno.ts))
 
-The sandboxed tool workers and the npm-based toolkit installer run as
+The sandboxed tool workers and the npm-based extension installer run as
 `deno run` subprocesses using a bundled `deno` sidecar binary, which is a
 downloadable requirement. `requireWorkerDeno()` resolves and existence-checks it
 so callers get a clean `binary_not_found` error instead of a raw `NotFound` when

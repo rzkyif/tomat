@@ -3,9 +3,9 @@ import { sidecarManager } from "../../sidecars/manager.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
 import { loadModelCatalog } from "../../models/catalog.ts";
 import { selectedTtsVoices } from "../../models/tts.ts";
-import { speechSpeak } from "../../sidecars/speech.ts";
+import { synthesizeSpeech } from "../../services/tts-synthesize.ts";
 import { AppError } from "../../shared/errors.ts";
-import { bearerMiddleware } from "../middleware/auth.ts";
+import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 
 export function ttsRoutes(): Hono {
   const r = new Hono();
@@ -26,7 +26,7 @@ export function ttsRoutes(): Hono {
     if (!body.text || typeof body.text !== "string") {
       throw new AppError("validation_error", "text required");
     }
-    const wav = await speechSpeak(body.text, body.voice, body.speed);
+    const wav = await synthesizeSpeech(body.text, body.voice, body.speed, requireClient(c).id);
     return new Response(wav.buffer as ArrayBuffer, {
       status: 200,
       headers: { "Content-Type": "audio/wav" },

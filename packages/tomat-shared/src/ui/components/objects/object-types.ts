@@ -11,6 +11,6 @@ export interface Badge {
   label: string;
   icon?: string;
   accent?: Accent;
-  /** Tooltip (e.g. a toolkit's lastError). */
+  /** Tooltip (e.g. a extension's lastError). */
   title?: string;
 }

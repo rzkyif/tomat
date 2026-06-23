@@ -68,7 +68,11 @@ async function indexMemory(id: string): Promise<void> {
           SUMMARY_INPUT_MAX_CHARS,
         )}`,
         endpoint,
-        overrides: { temperature: 0, maxTokens: 160 + budget, reasoningBudget: budget },
+        overrides: {
+          temperature: 0,
+          maxTokens: 160 + budget,
+          reasoningBudget: budget,
+        },
       });
       if (summary) store.setSummary(id, summary, state.contentHash);
     } catch (err) {
@@ -86,7 +90,10 @@ async function indexMemory(id: string): Promise<void> {
     // text is still stale, so we only re-arm when there is real work).
     const pending = store.listIndexStates().find((s) => s.id === id);
     if (pending && pending.embeddingSourceHash !== embedSourceHash(embedText(store.get(id)))) {
-      backgroundQueue().enqueueDeferred({ key: `doc-index:${id}`, run: () => indexMemory(id) });
+      backgroundQueue().enqueueDeferred({
+        key: `doc-index:${id}`,
+        run: () => indexMemory(id),
+      });
     }
     return;
   }

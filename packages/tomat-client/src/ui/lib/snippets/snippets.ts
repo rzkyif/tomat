@@ -1,9 +1,16 @@
 /**
- * Defines the snippet shape and the logic that expands `@trigger` tokens
- * inside the user's input. Validates triggers, walks the raw text to
- * substitute matching snippets, and returns the final text along with any
- * system-prompt overrides the snippets ask for.
+ * Defines the snippet shape and the logic that expands trigger tokens inside
+ * the user's input. A snippet fires on one of three symbols - `#`, `@`, or `/` -
+ * each with its own autocomplete list in the message box. The symbol is the
+ * user's free choice, but a recommended one is derived from the placement and
+ * set automatically on create and when the placement changes (until the user
+ * picks their own). Expansion walks the raw text, substitutes matching
+ * snippets, and returns the final text plus any system-prompt overrides.
  */
+
+export type SnippetSymbol = "#" | "@" | "/";
+
+export const SNIPPET_SYMBOLS: SnippetSymbol[] = ["#", "@", "/"];
 
 export type SnippetPlacement =
   | "prepend-system"
@@ -16,8 +23,12 @@ export type SnippetPlacement =
 
 export type Snippet = {
   id: string;
-  name: string;
-  trigger: string;
+  name: string; // bare name, no symbol; [A-Za-z0-9_-]
+  symbol: SnippetSymbol;
+  // True once the user picked the symbol themselves, so a later placement
+  // change must not auto-retrack the recommendation. Inferred from a mismatch
+  // with the recommendation for hand-written files that predate the bit.
+  symbolPinned: boolean;
   placement: SnippetPlacement;
   text: string;
 };
@@ -46,30 +57,52 @@ export const SNIPPET_PLACEMENT_OPTIONS: {
   { value: "append-user", label: "Append User Prompt" },
 ];
 
-// Matches `@word` only when preceded by start-of-string or a non-word char
-// other than `@`. Prevents `email@domain` from being read as a trigger while
-// allowing `(hello @foo)`.
-const TRIGGER_SCAN = /(^|[^\w@])(@[A-Za-z0-9_-]+)/g;
-
-// Autocomplete text-before-caret scan. Captures a bare `@slug` token or an
-// open quoted token `@"partial name` (unterminated): memory references use
-// the quoted form so a filename with spaces is still addressable. Snippet
-// triggers are always bare (validateTrigger enforces [A-Za-z0-9_-]), so the
-// quote branch only ever resolves to a memory.
-export const TRIGGER_BEFORE_CARET = /(?:^|[^\w@])(@(?:"[^"]*|[\w-]*))$/;
-
-export function normalizeTrigger(raw: string): string {
-  const stripped = raw.replace(/^@+/, "").replace(/\s+/g, "");
-  return stripped ? `@${stripped}` : "";
+// The trigger symbol that best fits a placement, marked "(Recommended)" in the
+// editor and applied automatically: `#` inserts inline, `/` acts like a command
+// over the whole user prompt, `@` references context fed to the system prompt.
+export function recommendedSymbol(placement: SnippetPlacement): SnippetSymbol {
+  if (placement === "insert-user") return "#";
+  if (placement.endsWith("-system")) return "@";
+  return "/";
 }
 
-export function validateTrigger(trigger: string, existingTriggers: string[]): string | null {
-  if (!trigger) return "Trigger is required";
-  if (!trigger.startsWith("@")) return "Trigger must start with @";
-  if (!/^@[A-Za-z0-9_-]+$/.test(trigger)) {
+/** The full display trigger for a snippet, e.g. `/summarize`. */
+export function snippetTrigger(s: Pick<Snippet, "symbol" | "name">): string {
+  return `${s.symbol}${s.name}`;
+}
+
+// Matches a `#`/`@`/`/` token only when preceded by start-of-string or a
+// boundary char that is neither a word char nor another trigger symbol. Stops
+// `email@domain` and `http://x` from being misread mid-token. A name is any
+// non-whitespace run (minus a trailing sentence-punctuation mark) so a memory
+// reference like `@ext/skills/foo` is one token and a snippet inside it can't be
+// mis-expanded; a snippet's own name stays bare `[A-Za-z0-9_-]` (validateName).
+const TRIGGER_SCAN = /(^|[^\w@#/])([#@/][^\s"]*[^\s".,:;!?)\]}'])/g;
+
+// Autocomplete text-before-caret scan. Captures the symbol plus the partial
+// name being typed: a bare partial (any non-whitespace, so a dotted/slashed
+// memory name keeps the dropdown open as it is typed) or an open quoted
+// `"partial name` (unterminated). The quoted form is only used by `@` references
+// (memories / resources) whose names may contain spaces; snippet names are
+// always bare.
+export const TRIGGER_BEFORE_CARET = /(?:^|[^\w@#/])([#@/](?:"[^"]*|[^\s"]*))$/;
+
+/** Strip any leading symbol(s) and whitespace from raw input to get a bare
+ *  snippet name. */
+export function normalizeName(raw: string): string {
+  return raw.replace(/^[#@/]+/, "").replace(/\s+/g, "");
+}
+
+export function validateName(
+  symbol: SnippetSymbol,
+  name: string,
+  otherTriggers: string[],
+): string | null {
+  if (!name) return "Name is required";
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) {
     return "Only letters, numbers, underscore, and dash are allowed";
   }
-  if (existingTriggers.includes(trigger)) {
+  if (otherTriggers.includes(`${symbol}${name}`.toLowerCase())) {
     return "This trigger is already used by another snippet";
   }
   return null;
@@ -78,15 +111,14 @@ export function validateTrigger(trigger: string, existingTriggers: string[]): st
 /**
  * Walk the raw user text left-to-right, expanding snippet triggers according
  * to their placement. Tokens that don't resolve to any known snippet are left
- * in place (so a stray `@foo` from the user still ends up in the sent text).
+ * in place (so a stray `@foo` memory reference still reaches the core, and a
+ * stray `/bar` survives untouched).
  *
- * Composition rules (mirror the plan):
+ * Composition rules:
  *  - prepend-user / append-user / insert-user modify the user text in place.
  *  - prepend-system / append-system accumulate into the override, joined by
  *    "\n\n" in trigger-appearance order.
- *  - replace-user and replace-system are last-wins: every replace encountered
- *    overwrites the previous value, so the final result matches "simulate
- *    every replace in left-to-right order".
+ *  - replace-user and replace-system are last-wins.
  */
 export function applySnippets(raw: string, snippets: Snippet[]): SnippetApplyResult {
   if (!raw || snippets.length === 0) {
@@ -95,7 +127,7 @@ export function applySnippets(raw: string, snippets: Snippet[]): SnippetApplyRes
 
   const byTrigger = new Map<string, Snippet>();
   for (const s of snippets) {
-    if (s.trigger) byTrigger.set(s.trigger.toLowerCase(), s);
+    if (s.name) byTrigger.set(snippetTrigger(s).toLowerCase(), s);
   }
   if (byTrigger.size === 0) return { userText: raw };
 
@@ -123,7 +155,7 @@ export function applySnippets(raw: string, snippets: Snippet[]): SnippetApplyRes
     inlinedText += raw.slice(cursor, boundaryEnd);
 
     if (!snippet) {
-      // Unknown trigger: leave the @token as-is.
+      // Unknown trigger: leave the token as-is.
       inlinedText += token;
       cursor = boundaryEnd + token.length;
       continue;
@@ -157,6 +189,14 @@ export function applySnippets(raw: string, snippets: Snippet[]): SnippetApplyRes
         break;
     }
 
+    // A non-inline placement removes its token from the body and contributes
+    // nothing in its place, so the boundary whitespace that preceded it (e.g.
+    // the space in "hello @sys") is a leftover artifact: drop it. `insert-user`
+    // keeps its surroundings since it substitutes text inline.
+    if (snippet.placement !== "insert-user") {
+      inlinedText = inlinedText.replace(/\s+$/, "");
+    }
+
     cursor = boundaryEnd + token.length;
   }
   inlinedText += raw.slice(cursor);
@@ -165,12 +205,28 @@ export function applySnippets(raw: string, snippets: Snippet[]): SnippetApplyRes
   if (anyReplaceUser) {
     userText = replaceUserValue ?? "";
   } else {
-    const middle = inlinedText.trim();
-    const parts: string[] = [];
-    if (prependUserParts.length) parts.push(prependUserParts.join("\n\n"));
-    if (middle) parts.push(middle);
-    if (appendUserParts.length) parts.push(appendUserParts.join("\n\n"));
-    userText = parts.join("\n\n");
+    // Order: prepended snippets, the user's body (token-expanded), appended
+    // snippets. Drop empty/whitespace-only segments, then join with a blank
+    // line. A single segment is returned verbatim so the user's own body keeps
+    // its leading indentation and trailing whitespace; only when an affix sits
+    // next to the body do we trim the whitespace FACING that seam, so the parts
+    // join cleanly without swallowing the body's formatting.
+    const segments = [
+      prependUserParts.length ? prependUserParts.join("\n\n") : "",
+      inlinedText,
+      appendUserParts.length ? appendUserParts.join("\n\n") : "",
+    ].filter((s) => s.trim() !== "");
+    if (segments.length <= 1) {
+      userText = segments[0] ?? "";
+    } else {
+      userText = segments
+        .map((s, i) => {
+          if (i === 0) return s.replace(/\s+$/, "");
+          if (i === segments.length - 1) return s.replace(/^\s+/, "");
+          return s.trim();
+        })
+        .join("\n\n");
+    }
   }
 
   const systemOverride: SnippetOverride | undefined = hasSystemOverride

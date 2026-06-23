@@ -16,16 +16,21 @@ the bar again and again, it should be a snippet.
 
 ## Using a snippet
 
-Type `@` in the input bar and start typing a snippet's trigger. tomat suggests
-matches as you go, so you do not have to remember the exact name; pick one to drop
-its text in.
+Type a trigger symbol in the input bar and start typing a snippet's name. tomat
+suggests matches as you go, so you do not have to remember the exact name; pick
+one to drop its text in.
 
 <SnippetAutocompleteDemo />
 
-That is the whole interaction, and it is the same `@` mention you use to pull in a
-memory, so there is one gesture to learn for both. It keeps your hands on the
-keyboard, which is the point: a snippet is only a shortcut if reaching for it is
-faster than retyping.
+A snippet is triggered by one of three symbols, `#`, `@`, or `/`, and each opens
+its own autocomplete list in the bar. The symbol is your choice when you create
+the snippet, but tomat recommends one based on what the snippet does: `#` for text
+inserted into your message, `/` for snippets that stand in as a command, and `@`
+for ones that feed the system prompt. Memories share the `@` list, so naming a
+snippet with `@` puts it right alongside the notes the agent can find on its own.
+
+It keeps your hands on the keyboard, which is the point: a snippet is only a
+shortcut if reaching for it is faster than retyping.
 
 ## What a snippet can do
 

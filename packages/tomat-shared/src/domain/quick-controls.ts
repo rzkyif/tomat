@@ -87,7 +87,10 @@ export function localThinkingBudget(level: ThinkingLevel, contextSize: number): 
  *  levels have no underlying number, so no suffix. */
 export function thinkingDropdownOptions(provider: LlmProvider, contextSize: number): QuickOption[] {
   if (provider === "external") {
-    return EXTERNAL_THINKING_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
+    return EXTERNAL_THINKING_OPTIONS.map((o) => ({
+      value: o.value,
+      label: o.label,
+    }));
   }
   return LOCAL_THINKING_OPTIONS.map((o) =>
     o.value === "off"
@@ -111,7 +114,10 @@ export function thinkingLevelUpdates(
   if (provider === "external") {
     return { "llm.reasoning": "on", "llm.reasoningEffort": level };
   }
-  return { "llm.reasoning": "on", "llm.reasoningBudget": localThinkingBudget(level, contextSize) };
+  return {
+    "llm.reasoning": "on",
+    "llm.reasoningBudget": localThinkingBudget(level, contextSize),
+  };
 }
 
 /** The current thinking selection. External effort is always a known level;

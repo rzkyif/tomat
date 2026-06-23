@@ -1,21 +1,19 @@
 <script lang="ts">
   import Bubble from "../primitives/Bubble.svelte";
-  import Chip from "../primitives/Chip.svelte";
   import ButtonGroup from "../primitives/ButtonGroup.svelte";
   import IconButton from "../primitives/IconButton.svelte";
   import { useUiContext } from "../../context.ts";
 
-  // The session bar: a small bubble carrying the context-usage gauge, an
-  // optional core chip, the (editable) session title, and session navigation.
-  // All behaviour (title editing, regenerate, delete-confirm, navigation) is
-  // owned by the client wrapper and supplied via props/binds; the website feeds
-  // static values. Alignment comes from the UI context so both apps match.
+  // The session bar: a small bubble carrying the context-usage gauge, the
+  // (editable) session title, and session navigation. All behaviour (title
+  // editing, regenerate, delete-confirm, navigation) is owned by the client
+  // wrapper and supplied via props/binds; the website feeds static values.
+  // Alignment comes from the UI context so both apps match. (Which core you're
+  // on is shown by the CoreBar, not here.)
   const ui = useUiContext();
 
   let {
     tokenUsage = null,
-    showChip = false,
-    coreName = "",
     showTitle = false,
     titleText = $bindable(""),
     defaultTitle = "",
@@ -39,8 +37,6 @@
   }: {
     /** Context-window usage; null hides the gauge. */
     tokenUsage?: { used: number; max: number } | null;
-    showChip?: boolean;
-    coreName?: string;
     showTitle?: boolean;
     titleText?: string;
     defaultTitle?: string;
@@ -99,18 +95,6 @@
           {Math.round(contextRatio * 100)}%
         </span>
       </div>
-    {/if}
-
-    {#if showChip}
-      <span data-region="core-chip" class="flex shrink-0">
-        <Chip
-          icon="i-material-symbols-hub-rounded"
-          label={coreName}
-          title="Sessions on this core"
-          truncate
-          labelMaxWidth="8rem"
-        />
-      </span>
     {/if}
 
     {#if showTitle}

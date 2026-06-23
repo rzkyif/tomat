@@ -287,7 +287,12 @@ export function primaryFileSpec(quant: SpeechQuant, primaryRole: string): string
 
 /** Selects which ModelScore ranks "smartness". Swapping the score provider is a
  *  data change here, not a code change. */
-export const scoreSelectorSchema = z.object({ source: z.string(), metric: z.string() }).strict();
+export const scoreSelectorSchema = z
+  .object({
+    source: z.string(),
+    metric: z.string(),
+  })
+  .strict();
 export type ScoreSelector = z.infer<typeof scoreSelectorSchema>;
 
 /** Data-driven fit policy, shipped in the catalog so tuning needs no release. */
@@ -325,7 +330,11 @@ export type CatalogPayload = z.infer<typeof catalogPayloadSchema>;
 
 /** The signed catalog as served + cached. `signature` is base64 Ed25519 over
  *  canonicalize(payload) (the whole object minus `signature`). */
-export const modelCatalogSchema = catalogPayloadSchema.extend({ signature: z.string() }).strict();
+export const modelCatalogSchema = catalogPayloadSchema
+  .extend({
+    signature: z.string(),
+  })
+  .strict();
 export type ModelCatalog = z.infer<typeof modelCatalogSchema>;
 
 /** Flatten every model across families (browser + fit both iterate models). */

@@ -65,7 +65,7 @@ export const ttsGroup: SettingGroup = {
                 label: "Light (English)",
                 title: "Light (English)",
                 description:
-                  "A tiny English model with eight voices and a very small download, for low memory use.",
+                  "A tiny English model with eight voices and a very small download, for low RAM use.",
               },
               {
                 id: "piper",

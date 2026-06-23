@@ -50,12 +50,20 @@ Deno.test("detectLlmPreset: a single mismatched managed field falls to custom", 
 });
 
 Deno.test("detectLlmPreset: behavior prefs (temperature/budget) don't affect the match", () => {
-  const s = { ...settingsFor(APPLY), "llm.temperature": 1.2, "llm.reasoningBudget": 9999 };
+  const s = {
+    ...settingsFor(APPLY),
+    "llm.temperature": 1.2,
+    "llm.reasoningBudget": 9999,
+  };
   assertEquals(detectLlmPreset(s, { smallest: APPLY }), "smallest");
 });
 
 Deno.test("detectLlmPreset: coerces numeric strings (e.g. gpuLayers) before comparing", () => {
-  const s = { ...settingsFor(APPLY), "llm.gpuLayers": "0", "llm.contextSize": "4096" };
+  const s = {
+    ...settingsFor(APPLY),
+    "llm.gpuLayers": "0",
+    "llm.contextSize": "4096",
+  };
   assertEquals(detectLlmPreset(s, { smallest: APPLY }), "smallest");
 });
 

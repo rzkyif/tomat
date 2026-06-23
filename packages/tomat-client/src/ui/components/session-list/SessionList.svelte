@@ -1,42 +1,24 @@
 <script lang="ts">
   // Session list mode: a scrollable list of clickable session bubbles, each
   // showing the session title and a conversation summary. Replaces the
-  // prev/next session navigation. When more than one core is paired, a core
-  // switcher at the top changes which core's sessions are shown (it commits
-  // the active core via cores().select()).
+  // prev/next session navigation. Which core's sessions are shown follows the
+  // connected core; switching cores lives in the CoreBar pinned below.
 
   import { onMount } from "svelte";
   import type { SessionListEntry, SummaryPart } from "@tomat/shared";
   import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
   import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
-  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
+  import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
   import { sessionsState, settingsState, viewState } from "$stores";
-  import { cores, type PairedCoreEntry } from "$lib/core";
   import { formatSessionDefaultTitle } from "$lib/util/format";
-  import { getLogger } from "$lib/util/log";
 
-  const log = getLogger("sessions");
-
+  const ui = useUiContext();
   let alignment = $derived(settingsState.getAlignment());
 
-  let pairedCores = $state<PairedCoreEntry[]>([]);
-  let currentCoreId = $state<string>("");
   let confirmingDelete = $state<string | null>(null);
-
-  async function refreshCores(): Promise<void> {
-    try {
-      pairedCores = await cores().list();
-      currentCoreId = cores().currentEntry()?.id ?? "";
-    } catch {
-      /* */
-    }
-  }
 
   onMount(() => {
     void sessionsState.loadList();
-    void refreshCores();
-    const unsub = cores().subscribe(() => void refreshCores());
-    return () => unsub();
   });
 
   async function openSession(id: string): Promise<void> {
@@ -56,19 +38,6 @@
     }
     confirmingDelete = null;
     await sessionsState.deleteById(id);
-  }
-
-  // Switching the core in the list commits the active core. It is the same
-  // "active core" the Settings picker switches. The core-change subscription
-  // in +layout reloads the session list for the newly-selected core.
-  async function switchCore(): Promise<void> {
-    confirmingDelete = null;
-    if (!currentCoreId || currentCoreId === cores().currentEntry()?.id) return;
-    try {
-      await cores().select(currentCoreId);
-    } catch (e) {
-      log.warn("switch core failed:", e);
-    }
   }
 
   // Untitled sessions fall back to their creation datetime, matching the
@@ -94,7 +63,7 @@
      header bubble, then one bubble per session, using the same bubble look
      as chat messages, not a card. No scroll container of its own: the page's
      chat scroll area owns scrolling, exactly like the chat view. -->
-<div class="flex flex-col gap-2">
+<div class="flex flex-col" style:gap={bubbleGap(ui)}>
   <!-- Header bubble -->
   <Bubble
     selectedAlignment={alignment}
@@ -112,20 +81,6 @@
       onclick={() => viewState.navigate("chat")}
     />
     <h1 class="text-sm font-medium text-default-800 flex-1">Sessions</h1>
-    {#if pairedCores.length > 1}
-      <div class="shrink-0">
-        <Select
-          value={currentCoreId}
-          options={pairedCores.map((c) => ({ value: c.id, label: c.name }))}
-          onchange={(v) => {
-            currentCoreId = v;
-            void switchCore();
-          }}
-          title="Core"
-          class="w-auto"
-        />
-      </div>
-    {/if}
     <IconButton
       icon="i-material-symbols-add-rounded"
       title="New Session"

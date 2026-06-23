@@ -1,49 +1,72 @@
-// snippet expansion. Pure transform that drives the @trigger substitution
+// snippet expansion. Pure transform that drives the #/@// trigger substitution
 // + placement semantics that snake through the UI's input pipeline.
 
 import { describe, expect, it } from "vitest";
 import {
   applySnippets,
-  normalizeTrigger,
+  normalizeName,
+  recommendedSymbol,
   type Snippet,
   type SnippetPlacement,
-  validateTrigger,
+  type SnippetSymbol,
+  snippetTrigger,
+  validateName,
 } from "./snippets";
 
+// `trigger` is a full display trigger like "@greet" or "/run"; split it into
+// the symbol + bare name the Snippet shape stores.
 const snippet = (
   trigger: string,
   text: string,
   placement: SnippetPlacement = "insert-user",
 ): Snippet => ({
   id: `id-${trigger}`,
-  name: trigger,
-  trigger,
+  name: trigger.slice(1),
+  symbol: trigger[0] as SnippetSymbol,
+  symbolPinned: false,
   placement,
   text,
 });
 
-describe("normalizeTrigger", () => {
-  it("forces a leading @ and strips internal whitespace", () => {
-    expect(normalizeTrigger("foo")).toBe("@foo");
-    expect(normalizeTrigger("@foo bar")).toBe("@foobar");
-    expect(normalizeTrigger("@@@x")).toBe("@x");
+describe("normalizeName", () => {
+  it("strips leading symbols and internal whitespace", () => {
+    expect(normalizeName("foo")).toBe("foo");
+    expect(normalizeName("@foo bar")).toBe("foobar");
+    expect(normalizeName("@@@x")).toBe("x");
+    expect(normalizeName("/run")).toBe("run");
   });
-  it("returns empty string for whitespace-only input", () => {
-    expect(normalizeTrigger("   ")).toBe("");
-    expect(normalizeTrigger("@")).toBe("");
+  it("returns empty string for symbol/whitespace-only input", () => {
+    expect(normalizeName("   ")).toBe("");
+    expect(normalizeName("@")).toBe("");
   });
 });
 
-describe("validateTrigger", () => {
-  it("requires non-empty leading-@ alphanumeric+_-", () => {
-    expect(validateTrigger("", [])).toMatch(/required/);
-    expect(validateTrigger("foo", [])).toMatch(/start with @/);
-    expect(validateTrigger("@!", [])).toMatch(/letters/);
-    expect(validateTrigger("@hello-world_1", [])).toBeNull();
+describe("recommendedSymbol", () => {
+  it("maps placement to a default symbol", () => {
+    expect(recommendedSymbol("insert-user")).toBe("#");
+    expect(recommendedSymbol("replace-user")).toBe("/");
+    expect(recommendedSymbol("prepend-user")).toBe("/");
+    expect(recommendedSymbol("append-system")).toBe("@");
   });
-  it("rejects duplicates against the existing-list", () => {
-    expect(validateTrigger("@foo", ["@foo"])).toMatch(/already used/);
-    expect(validateTrigger("@bar", ["@foo"])).toBeNull();
+});
+
+describe("validateName", () => {
+  it("requires a non-empty alphanumeric+_- name", () => {
+    expect(validateName("@", "", [])).toMatch(/required/);
+    expect(validateName("@", "!", [])).toMatch(/letters/);
+    expect(validateName("@", "hello-world_1", [])).toBeNull();
+  });
+  it("rejects duplicate triggers against the existing-list", () => {
+    expect(validateName("@", "foo", ["@foo"])).toMatch(/already used/);
+    expect(validateName("@", "bar", ["@foo"])).toBeNull();
+    // Same name, different symbol is a distinct trigger.
+    expect(validateName("/", "foo", ["@foo"])).toBeNull();
+  });
+});
+
+describe("snippetTrigger", () => {
+  it("joins symbol and name", () => {
+    expect(snippetTrigger({ symbol: "/", name: "run" })).toBe("/run");
   });
 });
 
@@ -68,6 +91,13 @@ describe("applySnippets", () => {
     expect(out.userText).toBe("hi hello world");
   });
 
+  it("expands `/` and `#` triggers too", () => {
+    const out = applySnippets("go /run now", [snippet("/run", "DO IT", "replace-user")]);
+    expect(out.userText).toBe("DO IT");
+    const tag = applySnippets("a #sig b", [snippet("#sig", "~me", "insert-user")]);
+    expect(tag.userText).toBe("a ~me b");
+  });
+
   it("prepend-user and append-user join with blank lines", () => {
     const out = applySnippets("middle @intro @outro", [
       snippet("@intro", "INTRO", "prepend-user"),
@@ -75,6 +105,21 @@ describe("applySnippets", () => {
     ]);
     // Triggers themselves disappear; middle text is preserved + sandwiched.
     expect(out.userText).toBe("INTRO\n\nmiddle\n\nOUTRO");
+  });
+
+  it("preserves the body's leading indentation when there are no affixes", () => {
+    const out = applySnippets("  indented @greet code", [snippet("@greet", "hello")]);
+    // insert-user only: no prepend/append, so the body is kept verbatim.
+    expect(out.userText).toBe("  indented hello code");
+  });
+
+  it("keeps the body's far-edge whitespace, trimming only the affix seam", () => {
+    const out = applySnippets("  indented code\n@sig", [
+      snippet("@sig", "SIGNATURE", "append-user"),
+    ]);
+    // Leading indentation survives; only the seam before the appended part is
+    // collapsed to the blank-line join.
+    expect(out.userText).toBe("  indented code\n\nSIGNATURE");
   });
 
   it("replace-user wins over inline / prepend / append", () => {

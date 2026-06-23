@@ -86,7 +86,9 @@ export function buildLlamaStartOptions(args: LlamaStartArgs): StartOptions {
     "deepseek",
   ];
   if (args.mmap) argv.push("--mmap");
-  if (typeof args.gpuLayers === "number") argv.push("--n-gpu-layers", String(args.gpuLayers));
+  if (typeof args.gpuLayers === "number") {
+    argv.push("--n-gpu-layers", String(args.gpuLayers));
+  }
   if (args.flashAttn) argv.push("--flash-attn", "on");
   // The llama.cpp web UI is unauthenticated. Only ever enable it when the
   // server is bound to loopback (local debugging); if the sidecar is reachable

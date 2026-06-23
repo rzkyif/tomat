@@ -6,7 +6,7 @@
 // Frame routing on the server side: services that want to push to a specific
 // client (e.g. tool.askuser_request -> the client whose chat triggered it)
 // call hub.broadcastToClient(clientId, frame). Broadcast to all
-// (e.g. downloads.snapshot, sidecar.status, toolkit.snapshot) uses
+// (e.g. downloads.snapshot, core.status, extension.snapshot) uses
 // hub.broadcastAll(frame).
 //
 // Heartbeat: server pings every 25 s and expects a pong within 10 s.
@@ -17,6 +17,7 @@ import type { ServerToClientFrame } from "@tomat/shared";
 import {
   chatInterruptWsSchema,
   chatStartWsSchema,
+  chatSubscribeWsSchema,
   errMessage,
   isSecretSettingKey,
   isValidSettingKey,
@@ -29,10 +30,10 @@ import {
 import { authService } from "../services/auth.ts";
 import { isOriginAllowed } from "../http/middleware/cors.ts";
 import { chatService } from "../services/chat.ts";
+import { coreStatus } from "../services/core-status.ts";
 import { downloadManager } from "../downloads/manager.ts";
-import { sidecarManager } from "../sidecars/manager.ts";
 import { subscribeUpdate } from "../update/self-updater.ts";
-import { onRequirementsChanged, notifyRequirementsChanged } from "../services/requirements.ts";
+import { notifyRequirementsChanged, onRequirementsChanged } from "../services/requirements.ts";
 import { subscribeCoreSettings } from "../services/core-settings.ts";
 import { subscribeSecretsChanged } from "../services/secrets.ts";
 import { onBinaryInstalled } from "../binaries/manager.ts";
@@ -165,6 +166,15 @@ class WsHub {
 
     ws.addEventListener("open", () => {
       this.armHeartbeat(conn);
+      // Seed the just-connected client with the current core status. The
+      // change-broadcast only fires on edges, so without this a client joining
+      // a steady (e.g. idle) core would never learn its status. Also reseeds on
+      // reconnect, including after a core swap.
+      try {
+        conn.ws.send(JSON.stringify({ kind: "core.status", snapshot: coreStatus().snapshot() }));
+      } catch {
+        /* socket closing */
+      }
     });
     ws.addEventListener("message", (ev) => {
       if (typeof ev.data !== "string") {
@@ -230,6 +240,15 @@ class WsHub {
       // Pass the connection's clientId so the chat service only acts on
       // streams/calls owned by this client (cross-client control is rejected).
       chatService().interrupt(parsed.data.streamId, conn.clientId);
+      return;
+    }
+    if (kind === "chat.subscribe") {
+      const parsed = chatSubscribeWsSchema.safeParse(raw);
+      if (!parsed.success) {
+        log.warn(`bad chat.subscribe: ${parsed.error.message}`);
+        return;
+      }
+      chatService().resubscribe(conn.clientId, parsed.data.sessionId);
       return;
     }
     if (kind === "tool.askuser_response") {
@@ -379,15 +398,6 @@ class WsHub {
       for (const id of removed) lastDownloadStatus.delete(id);
       if (changed || removed.length > 0) void notifyRequirementsChanged();
     });
-    sidecarManager().subscribe((snap) => {
-      this.broadcastAll({
-        kind: "sidecar.status",
-        sidecar: snap.kind,
-        status: snap.status,
-        message: snap.message,
-        progress: snap.progress,
-      });
-    });
     subscribeUpdate((e) => {
       if (e.kind === "staged") {
         this.broadcastAll({ kind: "update.staged", version: e.version });
@@ -398,6 +408,12 @@ class WsHub {
           message: e.message,
         });
       }
+    });
+    // Aggregate core lifecycle status. The one status frame broadcast to every
+    // client (core readiness/load is the same for all); the client merges it
+    // with its own transport state before painting the CoreBar.
+    coreStatus().subscribe((snapshot) => {
+      this.broadcastAll({ kind: "core.status", snapshot });
     });
   }
 }

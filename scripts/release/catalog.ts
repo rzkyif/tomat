@@ -1,5 +1,5 @@
 // Release item: the hand-authored @tomat/model-catalog compiled into one signed
-// catalog.json (whole-payload-minus-signature, like core.json / toolkit.json)
+// catalog.json (whole-payload-minus-signature, like core.json / extension.json)
 // and uploaded to R2. Versioned via packages/tomat-model-catalog/deno.json;
 // diffed by content (the generatedAt timestamp is excluded so a re-build alone
 // never counts as a change).
@@ -19,9 +19,9 @@ import {
   ok,
   r2Put,
   readVersionField,
+  rel,
   type ReleaseChannel,
   type ReleaseItem,
-  rel,
   REPO_ROOT,
   sha256String,
   signEd25519,

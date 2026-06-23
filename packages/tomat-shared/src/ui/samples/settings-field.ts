@@ -14,7 +14,9 @@ const allFields: SettingField[] = SETTINGS_SCHEMA.flatMap((g) =>
 
 function sample(type: SettingField["type"]) {
   const field = allFields.find((f) => f.type === type);
-  if (!field) throw new Error(`no sample settings field of type "${type}" in the schema`);
+  if (!field) {
+    throw new Error(`no sample settings field of type "${type}" in the schema`);
+  }
   return { field, value: D[field.id] };
 }
 

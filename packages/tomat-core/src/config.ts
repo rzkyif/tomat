@@ -33,10 +33,10 @@ export function binaryManifestUrl(): string {
   return `${STORAGE_BASE_URL}/${manifestDir()}/binaries.json`;
 }
 
-// Signed manifest for the CDN-distributed built-in toolkit, nested per channel
+// Signed manifest for the CDN-distributed built-in extension, nested per channel
 // alongside core.json / binaries.json.
-export function builtinToolkitManifestUrl(): string {
-  return `${STORAGE_BASE_URL}/${manifestDir()}/toolkit.json`;
+export function builtinExtensionManifestUrl(): string {
+  return `${STORAGE_BASE_URL}/${manifestDir()}/extension.json`;
 }
 
 // Signed model catalog (hand-authored in @tomat/model-catalog, compiled +
@@ -46,7 +46,7 @@ export function modelsCatalogUrl(): string {
   return `${STORAGE_BASE_URL}/${manifestDir()}/catalog.json`;
 }
 
-// Schemas (tools-v1.json) are channel-independent: one published copy.
+// Schemas (tomat-v1.json) are channel-independent: one published copy.
 export const SCHEMAS_BASE_URL = `${STORAGE_BASE_URL}/schemas`;
 
 // Default HTTP bind. Override via TOMAT_CORE_HOST / TOMAT_CORE_PORT env.

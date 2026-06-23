@@ -76,7 +76,9 @@ describe("CoreClient HTTP", () => {
   let netFetch: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     netFetch = vi.fn();
-    setPlatform({ net: { fetch: netFetch, connectWebSocket: vi.fn() } } as unknown as Platform);
+    setPlatform({
+      net: { fetch: netFetch, connectWebSocket: vi.fn() },
+    } as unknown as Platform);
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -110,7 +112,11 @@ describe("CoreClient HTTP", () => {
   });
 
   it("returns undefined for 204 responses", async () => {
-    netFetch.mockResolvedValueOnce({ status: 204, headers: {}, body: new Uint8Array() });
+    netFetch.mockResolvedValueOnce({
+      status: 204,
+      headers: {},
+      body: new Uint8Array(),
+    });
     const c = new CoreClient(ENDPOINT);
     const out = await c.del("/api/v1/x");
     expect(out).toBeUndefined();
@@ -147,7 +153,12 @@ describe("CoreClient WebSocket dispatch", () => {
     await flush();
     const ws = getLast();
     ws.opened?.();
-    const frame = { kind: "chat.delta", streamId: "s1", messageId: "m1", delta: "hi" };
+    const frame = {
+      kind: "chat.delta",
+      streamId: "s1",
+      messageId: "m1",
+      delta: "hi",
+    };
     ws.messaged?.(JSON.stringify(frame));
     expect(received).toEqual([frame]);
   });

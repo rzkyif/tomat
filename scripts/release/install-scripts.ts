@@ -70,6 +70,8 @@ export const scriptsItem: ReleaseItem = {
       ok(`uploaded ${r2Key}`);
       uploaded++;
     }
-    if (!opts.dryRun) ok(`uploaded ${uploaded}/${INSTALL_SCRIPTS.length} install scripts`);
+    if (!opts.dryRun) {
+      ok(`uploaded ${uploaded}/${INSTALL_SCRIPTS.length} install scripts`);
+    }
   },
 };

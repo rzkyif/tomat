@@ -26,7 +26,7 @@ a bunch of other quality of life features.
   staying deeply customizable for more specific use cases and preferences with a
   robust configuration system.
 - **Modular and extensible.** The system is separated into modules that can be
-  completely disabled when not used. The toolkit system provides an easy and
+  completely disabled when not used. The extension system provides an easy and
   secure way to quickly provide additional tools to the assistant.
 
 ## Getting Started
@@ -44,4 +44,5 @@ See [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## License
 
-[AGPL-3.0](LICENSE). Third-party components are listed in [NOTICE.md](NOTICE.md).
+[AGPL-3.0](LICENSE). Third-party components are listed in
+[NOTICE.md](NOTICE.md).

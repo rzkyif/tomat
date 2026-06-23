@@ -32,18 +32,18 @@ export const ERROR_CODES = [
   "provider_unauthorized",
   "provider_rate_limited",
 
-  // Toolkits
-  "no_tools_json",
-  "invalid_tools_json",
+  // Extensions
+  "no_tomat_json",
+  "invalid_tomat_json",
   "deps_install_failed",
   "tarball_fetch_failed",
   "extract_failed",
-  "toolkit_not_found",
+  "extension_not_found",
   "tool_not_found",
   "permissions_required",
   "permissions_revoked",
-  "toolkit_hash_drift",
-  "toolkit_already_installed",
+  "extension_hash_drift",
+  "extension_already_installed",
   "tool_name_collision",
 
   // Models / binaries
@@ -119,17 +119,17 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   provider_unauthorized: 401,
   provider_rate_limited: 429,
 
-  no_tools_json: 422,
-  invalid_tools_json: 422,
+  no_tomat_json: 422,
+  invalid_tomat_json: 422,
   deps_install_failed: 500,
   tarball_fetch_failed: 502,
   extract_failed: 500,
-  toolkit_not_found: 404,
+  extension_not_found: 404,
   tool_not_found: 404,
   permissions_required: 412,
   permissions_revoked: 412,
-  toolkit_hash_drift: 409,
-  toolkit_already_installed: 409,
+  extension_hash_drift: 409,
+  extension_already_installed: 409,
   tool_name_collision: 409,
 
   model_not_found: 404,

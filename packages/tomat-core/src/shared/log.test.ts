@@ -57,7 +57,7 @@ Deno.test("scrubSecrets: masks bare hex strings >= 32 chars", () => {
 
 Deno.test("scrubSecrets: leaves short identifiers alone", () => {
   // 6-digit pairing codes, short ids, file basenames, paths.
-  const msg = "minted pairing code 123456; root: /Users/x/.tomat/core; toolkit: builtin";
+  const msg = "minted pairing code 123456; root: /Users/x/.tomat/core; extension: builtin";
   assertEquals(scrubSecrets(msg), msg);
 });
 

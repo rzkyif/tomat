@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { MemoryMeta } from "@tomat/shared";
+  import { type MemoryKind, type MemoryMeta, USER_MEMORY_PROVIDER } from "@tomat/shared";
   import { confirmState, memoriesState } from "$stores";
+  import type { Badge } from "@tomat/shared/ui/components/objects/object-types";
   import { memoryTrigger } from "$stores/memories.svelte";
   import type { ParsedQuery } from "$lib/objects/query";
   import { type MenuRow, showFilterSortMenu, showObjectActionMenu } from "$lib/objects/menu";
@@ -20,35 +21,58 @@
 
   onMount(() => void memoriesState.load().catch((e) => log.warn("memory load failed:", e)));
 
-  function makeUniqueTitle(): string {
+  function makeUniqueTitle(label: string): string {
     const existing = new Set(memoriesState.memories.map((d) => d.title.toLowerCase()));
     let i = 1;
-    while (existing.has(`new memory ${i}`)) i++;
-    return `New memory ${i}`;
+    while (existing.has(`new ${label} ${i}`)) i++;
+    return `New ${label} ${i}`;
   }
 
   function load({ query: q }: { offset: number; limit: number; query: ParsedQuery }) {
     const text = q.text.toLowerCase();
     let list = memoriesState.memories.filter(
       (d) =>
-        !text ||
-        d.title.toLowerCase().includes(text) ||
-        memoryTrigger(d).toLowerCase().includes(text),
+        (!text ||
+          d.title.toLowerCase().includes(text) ||
+          memoryTrigger(d).toLowerCase().includes(text)) &&
+        (q.filters.size === 0 ||
+          (q.filters.has("knowledge") && d.kind === "knowledge") ||
+          (q.filters.has("skill") && d.kind === "skill") ||
+          (q.filters.has("disabled") && !d.enabled)),
     );
     if (q.sort === "title") list = [...list].sort((a, b) => a.title.localeCompare(b.title));
     else if (q.sort === "updated") list = [...list].sort((a, b) => b.updatedAtMs - a.updatedAtMs);
     return Promise.resolve({ items: list, done: true });
   }
 
+  function cardBadges(d: MemoryMeta): Badge[] {
+    const badges: Badge[] = [{ label: d.kind === "skill" ? "Skill" : "Knowledge" }];
+    if (d.provider !== USER_MEMORY_PROVIDER) badges.push({ label: "Extension" });
+    if (!d.enabled) badges.push({ label: "Off", accent: "yellow" });
+    return badges;
+  }
+
   function cardMenuRows(d: MemoryMeta): MenuRow[] {
-    return [
+    const rows: MenuRow[] = [
       {
+        id: d.enabled ? "disable" : "enable",
+        label: d.enabled ? "Disable" : "Enable",
+        onSelect: async () => {
+          await memoriesState.setEnabled(d.id, !d.enabled);
+          reloadKey++;
+        },
+      },
+    ];
+    // Only user-authored memories can be deleted; extension-provided ones are
+    // removed by uninstalling their extension.
+    if (d.provider === USER_MEMORY_PROVIDER) {
+      rows.push({
         id: "delete",
         label: "Delete",
         onSelect: () =>
           confirmState.request({
             title: "Delete memory",
-            message: `Delete memory "${d.title}"? This cannot be undone.`,
+            message: `Delete "${d.title}"? This cannot be undone.`,
             destructive: true,
             confirmLabel: "Delete",
             onConfirm: async () => {
@@ -56,12 +80,17 @@
               reloadKey++;
             },
           }),
-      },
-    ];
+      });
+    }
+    return rows;
   }
 
-  async function newMemory() {
-    const created = await memoriesState.create(makeUniqueTitle());
+  async function newMemory(kind: MemoryKind) {
+    const label = kind === "skill" ? "skill" : "knowledge";
+    const content = kind === "skill"
+      ? "---\ndescription: \nsuggested-tools: []\n---\n\n# Steps\n\n1. \n"
+      : "";
+    const created = await memoriesState.create(kind, makeUniqueTitle(label), content);
     reloadKey++;
     selectedItem = created;
   }
@@ -78,7 +107,16 @@
   hasFilterSort
   onFilterSort={() =>
     showFilterSortMenu({
-      filters: [],
+      filters: [
+        {
+          label: "Kind",
+          options: [
+            { token: "knowledge", label: "Knowledge" },
+            { token: "skill", label: "Skill" },
+            { token: "disabled", label: "Disabled" },
+          ],
+        },
+      ],
       sorts: [
         { value: "title", label: "Title" },
         { value: "updated", label: "Last updated" },
@@ -89,7 +127,8 @@
   hasMenu
   onMenu={() =>
     showObjectActionMenu([
-      { id: "new", label: "New Memory", onSelect: () => void newMemory() },
+      { id: "new-knowledge", label: "New Knowledge", onSelect: () => void newMemory("knowledge") },
+      { id: "new-skill", label: "New Skill", onSelect: () => void newMemory("skill") },
       {
         id: "rescan",
         label: "Rescan Memories",
@@ -107,6 +146,7 @@
       label={item.title}
       description={item.summary || undefined}
       meta={memoryTrigger(item)}
+      badges={cardBadges(item)}
       menuRows={cardMenuRows(item)}
       onOpen={open}
     />
@@ -124,7 +164,7 @@
       {:else}
         <div class="text-base text-default-700">No memories yet</div>
         <div class="text-sm text-default-500">
-          Use the menu to create a memory, then reference it with @name in chat.
+          Use the menu to add knowledge or a skill, then reference it with @name in chat.
         </div>
       {/if}
     </div>

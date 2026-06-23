@@ -12,7 +12,7 @@
 // dist/, which clears the cursor and forces a full rebuild; --force does the
 // same without cleaning.
 //
-// Builds (core + helpers, client, catalog, website). The toolkit tarball and
+// Builds (core + helpers, client, catalog, website). The extension tarball and
 // the install scripts / schemas have no compile step, so they're release-only.
 //
 // Flags:
@@ -90,7 +90,10 @@ Flags:
   }
   // Build's unlabeled default is the latest channel (matching build:core /
   // build:client), unlike the release lib's stable default.
-  return { channel: parseChannelFlag(args.channel ?? "latest"), force: args.force };
+  return {
+    channel: parseChannelFlag(args.channel ?? "latest"),
+    force: args.force,
+  };
 }
 
 /** Hash an item's compiled artifacts via its buildOutputs() path list. */
@@ -157,7 +160,9 @@ async function buildReason(
   if (force) return "forced";
   if (!rec) return "never built";
   if (rec.source !== source) return "source changed";
-  if ((await item.outputHash()) !== rec.output) return "outputs missing or changed";
+  if ((await item.outputHash()) !== rec.output) {
+    return "outputs missing or changed";
+  }
   return "";
 }
 

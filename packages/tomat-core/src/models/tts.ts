@@ -72,14 +72,21 @@ export function resolveTtsSelection(
       const quant = model.quants.find(
         (q) => primaryFileSpec(q, TTS_PRIMARY_ROLE[model.family]) === body.modelSpec,
       );
-      if (quant) return { preset: "custom", settings: appliedTts(model, quant) };
+      if (quant) {
+        return { preset: "custom", settings: appliedTts(model, quant) };
+      }
     }
     throw new AppError("not_found", `model not in catalog: ${body.modelSpec}`);
   }
   if (body.modelId) {
     const model = tts.models.find((m) => m.id === body.modelId);
-    if (!model) throw new AppError("not_found", `model not in catalog: ${body.modelId}`);
-    return { preset: "custom", settings: appliedTts(model, defaultQuant(model)) };
+    if (!model) {
+      throw new AppError("not_found", `model not in catalog: ${body.modelId}`);
+    }
+    return {
+      preset: "custom",
+      settings: appliedTts(model, defaultQuant(model)),
+    };
   }
   throw new AppError("validation_error", "presetId, modelId, or modelSpec required");
 }

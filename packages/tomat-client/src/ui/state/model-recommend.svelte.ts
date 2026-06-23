@@ -9,10 +9,10 @@
  */
 
 import {
-  errMessage,
   type CatalogModelView,
-  type PresetBucket,
+  errMessage,
   PRESET_BUCKETS,
+  type PresetBucket,
   type RecommendationSet,
 } from "@tomat/shared";
 import { cores } from "$lib/core";
@@ -128,7 +128,10 @@ class ModelRecommendState {
       if (this.recommendations) {
         this.recommendations = {
           ...this.recommendations,
-          applied: { preset: res.applied.preset, modelPath: res.applied.settings.modelPath },
+          applied: {
+            preset: res.applied.preset,
+            modelPath: res.applied.settings.modelPath,
+          },
         };
       }
     } catch (e) {

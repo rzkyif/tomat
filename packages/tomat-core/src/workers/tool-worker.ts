@@ -1,11 +1,11 @@
-// Tool worker subprocess (one per enabled toolkit).
-// Spawned by toolkits/worker-handle.ts with exactly the --allow-* flags
-// derived from the toolkit's enabled tools' granted permissions.
+// Tool worker subprocess (one per enabled extension).
+// Spawned by extensions/worker-handle.ts with exactly the --allow-* flags
+// derived from the extension's enabled tools' granted permissions.
 //
 // CLI:
-//   deno run [flags] tool-worker.ts --toolkit-id=<id> --entry=<absPath>
+//   deno run [flags] tool-worker.ts --extension-id=<id> --entry=<absPath>
 //
-// Protocol: NDJSON on stdio (see toolkits/worker-protocol.ts).
+// Protocol: NDJSON on stdio (see extensions/worker-protocol.ts).
 
 import type {
   AskUserAnswer,
@@ -13,7 +13,7 @@ import type {
   ModuleName,
   PoolToWorkerFrame,
   WorkerToPoolFrame,
-} from "../toolkits/worker-protocol.ts";
+} from "../extensions/worker-protocol.ts";
 import type { DisplayContent, ScheduledPromptDraft } from "@tomat/shared";
 
 // Inlined from @tomat/shared: there is no import map next to the installed
@@ -40,6 +40,7 @@ type ToolContext = {
   memories: {
     list(): Promise<MemoryListing[]>;
     get(title: string): Promise<{ title: string; content: string }>;
+    getFile(title: string, name: string): Promise<{ title: string; name: string; content: string }>;
     write(
       title: string,
       content: string,
@@ -50,9 +51,9 @@ type ToolContext = {
       replace: string,
     ): Promise<{ title: string; before: string; after: string }>;
   };
-  /** Per-toolkit private SQLite, proxied to the core. Requires the
-   *  toolkit's tools.json to declare "database": true; deleted with the
-   *  toolkit on uninstall. */
+  /** Per-extension private SQLite, proxied to the core. Requires the
+   *  extension's tomat.json to declare "database": true; deleted with the
+   *  extension on uninstall. */
   db: {
     query(
       sql: string,
@@ -137,29 +138,29 @@ interface CallState {
 }
 
 const calls = new Map<string, CallState>();
-let toolkitMod: Record<string, unknown> | null = null;
-let _toolkitId = "";
+let extensionMod: Record<string, unknown> | null = null;
+let _extensionId = "";
 
 function send(frame: WorkerToPoolFrame): void {
   Deno.stdout.writeSync(new TextEncoder().encode(JSON.stringify(frame) + "\n"));
 }
 
-async function handleBoot(toolkit: string, entry: string): Promise<void> {
-  _toolkitId = toolkit;
+async function handleBoot(extension: string, entry: string): Promise<void> {
+  _extensionId = extension;
   try {
-    toolkitMod = await import("file://" + entry);
-    send({ kind: "booted", toolkitId: toolkit });
+    extensionMod = await import("file://" + entry);
+    send({ kind: "booted", extensionId: extension });
   } catch (err) {
     send({
       kind: "boot_failed",
-      toolkitId: toolkit,
+      extensionId: extension,
       error: errMessage(err),
     });
   }
 }
 
 async function handleCall(frame: Extract<PoolToWorkerFrame, { kind: "call" }>): Promise<void> {
-  if (!toolkitMod) {
+  if (!extensionMod) {
     send({
       kind: "tool_error",
       callId: frame.callId,
@@ -167,7 +168,7 @@ async function handleCall(frame: Extract<PoolToWorkerFrame, { kind: "call" }>): 
     });
     return;
   }
-  const fn = toolkitMod[frame.fnExport] as ToolFn | undefined;
+  const fn = extensionMod[frame.fnExport] as ToolFn | undefined;
   if (typeof fn !== "function") {
     send({
       kind: "tool_error",
@@ -269,8 +270,18 @@ async function handleCall(frame: Extract<PoolToWorkerFrame, { kind: "call" }>): 
           content: string;
         }>;
       },
+      getFile(title, name) {
+        return moduleRequest("memories", "getFile", { title, name }) as Promise<{
+          title: string;
+          name: string;
+          content: string;
+        }>;
+      },
       write(title, content) {
-        return moduleRequest("memories", "write", { title, content }) as Promise<{
+        return moduleRequest("memories", "write", {
+          title,
+          content,
+        }) as Promise<{
           title: string;
           before: string;
           after: string;
@@ -278,7 +289,11 @@ async function handleCall(frame: Extract<PoolToWorkerFrame, { kind: "call" }>): 
         }>;
       },
       edit(title, find, replace) {
-        return moduleRequest("memories", "edit", { title, find, replace }) as Promise<{
+        return moduleRequest("memories", "edit", {
+          title,
+          find,
+          replace,
+        }) as Promise<{
           title: string;
           before: string;
           after: string;
@@ -287,12 +302,16 @@ async function handleCall(frame: Extract<PoolToWorkerFrame, { kind: "call" }>): 
     },
     db: {
       query(sql, params) {
-        return moduleRequest("db", "query", { sql, params: params ?? [] }) as Promise<
-          Record<string, unknown>[]
-        >;
+        return moduleRequest("db", "query", {
+          sql,
+          params: params ?? [],
+        }) as Promise<Record<string, unknown>[]>;
       },
       execute(sql, params) {
-        return moduleRequest("db", "execute", { sql, params: params ?? [] }) as Promise<{
+        return moduleRequest("db", "execute", {
+          sql,
+          params: params ?? [],
+        }) as Promise<{
           changes: number;
           lastInsertRowId: number;
         }>;
@@ -399,19 +418,19 @@ function handleAskUserResponse(callId: string, requestId: string, answers: AskUs
   p.resolve(answers);
 }
 
-function parseArgs(): { toolkitId: string; entry: string } {
-  let toolkitId = "";
+function parseArgs(): { extensionId: string; entry: string } {
+  let extensionId = "";
   let entry = "";
   for (const arg of Deno.args) {
-    if (arg.startsWith("--toolkit-id=")) {
-      toolkitId = arg.slice("--toolkit-id=".length);
+    if (arg.startsWith("--extension-id=")) {
+      extensionId = arg.slice("--extension-id=".length);
     } else if (arg.startsWith("--entry=")) entry = arg.slice("--entry=".length);
   }
-  if (!toolkitId || !entry) {
-    Deno.stderr.writeSync(new TextEncoder().encode("missing --toolkit-id / --entry\n"));
+  if (!extensionId || !entry) {
+    Deno.stderr.writeSync(new TextEncoder().encode("missing --extension-id / --entry\n"));
     Deno.exit(1);
   }
-  return { toolkitId, entry };
+  return { extensionId, entry };
 }
 
 async function main(): Promise<void> {
@@ -419,7 +438,7 @@ async function main(): Promise<void> {
   // Boot frame is unsolicited: the pool sees ready -> sends boot. Send ready
   // first so the pool can start tracking.
   send({ kind: "ready" });
-  await handleBoot(args.toolkitId, args.entry);
+  await handleBoot(args.extensionId, args.entry);
 
   const decoder = new TextDecoder();
   const reader = Deno.stdin.readable.getReader();
@@ -451,7 +470,7 @@ async function main(): Promise<void> {
         Deno.exit(0);
       } else if (frame.kind === "boot") {
         // Re-boot would be unusual but legal: drop the previous module and re-import.
-        await handleBoot(frame.toolkitId, frame.entryPath);
+        await handleBoot(frame.extensionId, frame.entryPath);
       }
     }
   }

@@ -33,32 +33,32 @@ CREATE TABLE IF NOT EXISTS pairing_codes (
 -- by services/sessions-store.ts (one session.json per session, attachment bytes
 -- alongside under attachments/).
 
--- Toolkits (one row per npm package, local folder, or the built-in). The
+-- Extensions (one row per npm package, local folder, or the built-in). The
 -- `status` column tracks the gated lifecycle: 'downloaded' (files on disk, deps
 -- not installed, content_hash not yet pinned), 'installed' (deps installed,
 -- content_hash pinned, tools enable-able), 'drift' (on-disk content no longer
 -- matches the pinned hash; all tools auto-disabled until the user re-confirms).
-CREATE TABLE IF NOT EXISTS toolkits (
+CREATE TABLE IF NOT EXISTS extensions (
   id              TEXT PRIMARY KEY,           -- flat folder name
   source          TEXT NOT NULL,              -- 'npm' | 'local' | 'builtin'
   display_name    TEXT NOT NULL,
   description     TEXT,
   version         TEXT NOT NULL,
   installed_path  TEXT NOT NULL,
-  tools_json_hash TEXT NOT NULL,
+  manifest_hash TEXT NOT NULL,
   content_hash    TEXT NOT NULL DEFAULT '',   -- '' until pinned at install; the trust anchor
   status          TEXT NOT NULL DEFAULT 'downloaded',  -- 'downloaded' | 'installed' | 'drift'
   has_deps        INTEGER NOT NULL DEFAULT 0,  -- 1 when deno.json/package.json declares deps
-  has_database    INTEGER NOT NULL DEFAULT 0,  -- 1 when tools.json declares "database": true
+  has_database    INTEGER NOT NULL DEFAULT 0,  -- 1 when tomat.json declares "database": true
   undeclared_policy TEXT NOT NULL DEFAULT 'deny',  -- 'deny' | 'ask': runtime prompts outside declared perms
   installed_at_ms INTEGER NOT NULL,
   updated_at_ms   INTEGER NOT NULL
 );
 
--- Tools (per toolkit)
+-- Tools (per extension)
 CREATE TABLE IF NOT EXISTS tools (
-  id                       TEXT PRIMARY KEY,          -- ${toolkit_id}::${name}
-  toolkit_id               TEXT NOT NULL REFERENCES toolkits(id) ON DELETE CASCADE,
+  id                       TEXT PRIMARY KEY,          -- ${extension_id}::${name}
+  extension_id               TEXT NOT NULL REFERENCES extensions(id) ON DELETE CASCADE,
   name                     TEXT NOT NULL,
   description              TEXT NOT NULL,
   parameters_json          TEXT NOT NULL,
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS tools (
   always_available         INTEGER NOT NULL DEFAULT 0,
   enabled                  INTEGER NOT NULL DEFAULT 0,
   required_permissions_json TEXT NOT NULL DEFAULT '[]',  -- flattened PermissionDecl[]
-  UNIQUE(toolkit_id, name)
+  UNIQUE(extension_id, name)
 );
 
 -- Per-tool embedding (for phase-1 relevance)
@@ -92,13 +92,18 @@ CREATE TABLE IF NOT EXISTS grants (
   PRIMARY KEY (tool_id, permission_key)
 );
 
--- Memories: agent-readable/writable markdown notes. The .md files under
--- core/memories/ are the source of truth (content_hash detects drift on
--- rescan); this table carries the metadata plus the background-generated
--- summary + embedding, each pinned to the content hash it was derived from
--- so the indexer can tell when they are stale.
+-- Memories: agent-readable reference knowledge and procedural skills. Their
+-- on-disk form under core/memories/ is the source of truth (content_hash
+-- detects drift on rescan): knowledge is a `<slug>.md` file, a skill is a
+-- `<slug>/` folder holding SKILL.md plus optional bundled files. This table
+-- carries the metadata plus the background-generated summary + embedding, each
+-- pinned to the content hash it was derived from so the indexer can tell when
+-- they are stale. `provider` is 'user' for editable memories or the id of the
+-- extension that ships a read-only one; `suggested_tools` is a JSON array of
+-- advisory tool names (skills only).
 CREATE TABLE IF NOT EXISTS memories (
   id                    TEXT PRIMARY KEY,
+  kind                  TEXT NOT NULL DEFAULT 'knowledge',
   title                 TEXT NOT NULL UNIQUE,
   filename              TEXT NOT NULL UNIQUE,   -- relative to core/memories/
   content_hash          TEXT NOT NULL,
@@ -107,8 +112,39 @@ CREATE TABLE IF NOT EXISTS memories (
   embedding             BLOB,
   embedding_dim         INTEGER,
   embedding_source_hash TEXT,
+  provider              TEXT NOT NULL DEFAULT 'user',
+  enabled               INTEGER NOT NULL DEFAULT 1,
+  suggested_tools       TEXT,
   created_at_ms         INTEGER NOT NULL,
   updated_at_ms         INTEGER NOT NULL
+);
+
+-- MCP servers: external Model Context Protocol servers the user configures as
+-- another provider of tools, prompts, and resources. `kind` is 'stdio' (a
+-- spawned subprocess: `command` + JSON `args_json`) or 'remote' (a streamable
+-- HTTP/SSE endpoint at `url`). For stdio, `runtime` is 'custom' (run `command`
+-- verbatim) or 'deno' (run `command` through the bundled deno binary, with
+-- `deno_allow_all` / `deno_permissions_json` controlling its permissions).
+-- Their tools/prompts/resources are fetched live on connect and cached in
+-- memory, not persisted here. `tool_enabled_json` / `prompt_enabled_json` are
+-- JSON arrays of the tool/prompt names the user enabled, so autocomplete and
+-- tool selection aren't spammed by everything a server offers.
+CREATE TABLE IF NOT EXISTS mcp_servers (
+  id                  TEXT PRIMARY KEY,
+  name                TEXT NOT NULL,
+  kind                TEXT NOT NULL,              -- 'stdio' | 'remote'
+  command             TEXT,                        -- stdio: executable or deno run target
+  args_json           TEXT NOT NULL DEFAULT '[]',  -- stdio: argv
+  runtime             TEXT NOT NULL DEFAULT 'custom', -- stdio: 'custom' | 'deno'
+  deno_allow_all      INTEGER NOT NULL DEFAULT 1,  -- deno runtime: run with --allow-all
+  deno_permissions_json TEXT NOT NULL DEFAULT '[]', -- deno runtime: manual permission flags
+  url                 TEXT,                        -- remote: endpoint
+  enabled             INTEGER NOT NULL DEFAULT 0,
+  has_auth            INTEGER NOT NULL DEFAULT 0,  -- remote: a bearer token is stored in the vault
+  tool_enabled_json   TEXT NOT NULL DEFAULT '[]',
+  prompt_enabled_json TEXT NOT NULL DEFAULT '[]',
+  created_at_ms       INTEGER NOT NULL,
+  updated_at_ms       INTEGER NOT NULL
 );
 
 -- Scheduled prompts: agent- or user-created schedules that fire automated
@@ -132,7 +168,7 @@ CREATE TABLE IF NOT EXISTS scheduled_prompts (
 CREATE TABLE IF NOT EXISTS downloads (
   id               TEXT PRIMARY KEY,
   source           TEXT NOT NULL,
-  destination      TEXT NOT NULL,             -- 'models'|'binaries'|'toolkits'
+  destination      TEXT NOT NULL,             -- 'models'|'binaries'|'extensions'
   rel_path         TEXT NOT NULL,
   abs_path         TEXT NOT NULL,
   filename         TEXT NOT NULL,

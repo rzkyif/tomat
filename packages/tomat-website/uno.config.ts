@@ -46,7 +46,9 @@ function themeFlipCss(): string {
   // :root-seeded pairs (accent shades + bubble seeds): captured once and swapped.
   const pairs: Array<[string, string]> = [];
   for (const c of accents) {
-    for (const s of shades) pairs.push([`--accent-${c}-${s}`, `--accent-${c}-d-${s}`]);
+    for (const s of shades) {
+      pairs.push([`--accent-${c}-${s}`, `--accent-${c}-d-${s}`]);
+    }
   }
   for (const b of ["user", "agent", "agent2"]) {
     pairs.push([`--${b}-bubble-bg-light`, `--${b}-bubble-bg-dark`]);

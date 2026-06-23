@@ -11,6 +11,10 @@ export const AGENT_ANSWER =
 
 export const agentMessageSamples = {
   content: { kind: "content", bgClass: "bubble-agent" },
-  reasoningDone: { kind: "reasoning", isStreaming: false, reasoningDurationMs: 3200 },
+  reasoningDone: {
+    kind: "reasoning",
+    isStreaming: false,
+    reasoningDurationMs: 3200,
+  },
   reasoningStreaming: { kind: "reasoning", isStreaming: true },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof AgentMessageView>>>;

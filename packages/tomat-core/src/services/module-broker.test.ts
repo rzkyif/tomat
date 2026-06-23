@@ -8,19 +8,19 @@ import { assertEquals, assertRejects } from "@std/assert";
 import type { PermissionDecl } from "@tomat/shared";
 import { permissionKey } from "@tomat/shared";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import { toolkitsRegistry } from "../toolkits/registry.ts";
+import { extensionsRegistry } from "../extensions/registry.ts";
 import { AppError } from "../shared/errors.ts";
 import {
-  deleteToolkitData,
+  deleteExtensionData,
   handleModuleRequest,
   type ModulePrompt,
   type ModuleRequest,
 } from "./module-broker.ts";
 
-const TOOLKIT_ID = "example-toolkit";
+const EXTENSION_ID = "example-extension";
 const TOOL_NAME = "do_thing";
 
-function seedToolkit(
+function seedExtension(
   opts: {
     id?: string;
     permissions?: PermissionDecl[];
@@ -28,15 +28,15 @@ function seedToolkit(
     hasDatabase?: boolean;
   } = {},
 ): void {
-  const id = opts.id ?? TOOLKIT_ID;
-  const r = toolkitsRegistry();
-  r.upsertToolkit({
+  const id = opts.id ?? EXTENSION_ID;
+  const r = extensionsRegistry();
+  r.upsertExtension({
     id,
     source: "npm",
     displayName: "Example",
     version: "1.0.0",
     installedPath: "/tmp/example",
-    toolsJsonHash: "deadbeef",
+    manifestHash: "deadbeef",
     contentHash: "cafebabe",
     status: "installed",
     hasDatabase: opts.hasDatabase ?? false,
@@ -44,7 +44,7 @@ function seedToolkit(
   if (opts.undeclaredPolicy) r.setUndeclaredPolicy(id, opts.undeclaredPolicy);
   r.replaceTools(id, [
     {
-      toolkitId: id,
+      extensionId: id,
       name: TOOL_NAME,
       description: "does",
       parameters: { type: "object", properties: {} },
@@ -57,7 +57,7 @@ function seedToolkit(
 }
 
 function setGrant(decl: PermissionDecl, state: "granted" | "ask" | "denied"): void {
-  toolkitsRegistry().setGrants(`${TOOLKIT_ID}::${TOOL_NAME}`, [
+  extensionsRegistry().setGrants(`${EXTENSION_ID}::${TOOL_NAME}`, [
     { key: permissionKey(decl), kind: decl.kind, state },
   ]);
 }
@@ -72,7 +72,7 @@ async function run(
   const prompts: ModulePrompt[] = [];
   try {
     await handleModuleRequest({
-      toolkitId: TOOLKIT_ID,
+      extensionId: EXTENSION_ID,
       toolName: TOOL_NAME,
       callId: "call-1",
       module,
@@ -101,13 +101,21 @@ async function run(
 }
 
 const LLM_DECL: PermissionDecl = { kind: "llm", reason: "summarize things" };
-const DOCS_READ: PermissionDecl = { kind: "memories", access: "read", reason: "read notes" };
-const DOCS_WRITE: PermissionDecl = { kind: "memories", access: "write", reason: "edit notes" };
+const DOCS_READ: PermissionDecl = {
+  kind: "memories",
+  access: "read",
+  reason: "read notes",
+};
+const DOCS_WRITE: PermissionDecl = {
+  kind: "memories",
+  access: "write",
+  reason: "edit notes",
+};
 
 Deno.test("broker: granted state dispatches without prompting", async () => {
   const env = await setupTestEnv();
   try {
-    seedToolkit({ permissions: [LLM_DECL] });
+    seedExtension({ permissions: [LLM_DECL] });
     setGrant(LLM_DECL, "granted");
     const { outcome, prompts } = await run("llm", "complete", false);
     assertEquals(outcome, "dispatched");
@@ -120,12 +128,17 @@ Deno.test("broker: granted state dispatches without prompting", async () => {
 Deno.test("broker: ask state prompts with the declared reason", async () => {
   const env = await setupTestEnv();
   try {
-    seedToolkit({ permissions: [LLM_DECL] });
+    seedExtension({ permissions: [LLM_DECL] });
     // No grant row at all behaves as ask.
     const accepted = await run("llm", "complete", true);
     assertEquals(accepted.outcome, "dispatched");
     assertEquals(accepted.prompts, [
-      { permission: "llm", resource: "", declared: true, reason: "summarize things" },
+      {
+        permission: "llm",
+        resource: "",
+        declared: true,
+        reason: "summarize things",
+      },
     ]);
     const rejected = await run("llm", "complete", false);
     assertEquals(rejected.outcome, "forbidden");
@@ -138,7 +151,7 @@ Deno.test("broker: ask state prompts with the declared reason", async () => {
 Deno.test("broker: denied state rejects without prompting", async () => {
   const env = await setupTestEnv();
   try {
-    seedToolkit({ permissions: [LLM_DECL] });
+    seedExtension({ permissions: [LLM_DECL] });
     setGrant(LLM_DECL, "denied");
     const { outcome, prompts } = await run("llm", "complete", true);
     assertEquals(outcome, "forbidden");
@@ -148,19 +161,25 @@ Deno.test("broker: denied state rejects without prompting", async () => {
   }
 });
 
-Deno.test("broker: undeclared follows the toolkit policy", async () => {
+Deno.test("broker: undeclared follows the extension policy", async () => {
   const env = await setupTestEnv();
   try {
     // Default policy is deny: reject without prompting.
-    seedToolkit();
+    seedExtension();
     const denied = await run("tts", "speak", true);
     assertEquals(denied.outcome, "forbidden");
     assertEquals(denied.prompts.length, 0);
     // Policy ask: forward as undeclared.
-    seedToolkit({ undeclaredPolicy: "ask" });
+    seedExtension({ undeclaredPolicy: "ask" });
     const asked = await run("tts", "speak", true);
     assertEquals(asked.outcome, "dispatched");
-    assertEquals(asked.prompts, [{ permission: "tts", resource: "", declared: false }]);
+    assertEquals(asked.prompts, [
+      {
+        permission: "tts",
+        resource: "",
+        declared: false,
+      },
+    ]);
   } finally {
     await env.teardown();
   }
@@ -169,14 +188,14 @@ Deno.test("broker: undeclared follows the toolkit policy", async () => {
 Deno.test("broker: memories write grant covers read ops, not vice versa", async () => {
   const env = await setupTestEnv();
   try {
-    seedToolkit({ permissions: [DOCS_WRITE] });
+    seedExtension({ permissions: [DOCS_WRITE] });
     setGrant(DOCS_WRITE, "granted");
     const read = await run("memories", "get", false);
     assertEquals(read.outcome, "dispatched");
     assertEquals(read.prompts.length, 0);
 
     // A read-only declaration leaves write ops undeclared (policy deny).
-    seedToolkit({ permissions: [DOCS_READ] });
+    seedExtension({ permissions: [DOCS_READ] });
     setGrant(DOCS_READ, "granted");
     const write = await run("memories", "write", true);
     assertEquals(write.outcome, "forbidden");
@@ -192,11 +211,11 @@ Deno.test("broker: memories write grant covers read ops, not vice versa", async 
 Deno.test("broker: memories ops round-trip through the store", async () => {
   const env = await setupTestEnv();
   try {
-    seedToolkit({ permissions: [DOCS_WRITE] });
+    seedExtension({ permissions: [DOCS_WRITE] });
     setGrant(DOCS_WRITE, "granted");
     const call = (op: string, args: unknown) =>
       handleModuleRequest({
-        toolkitId: TOOLKIT_ID,
+        extensionId: EXTENSION_ID,
         toolName: TOOL_NAME,
         callId: "call-1",
         module: "memories",
@@ -206,12 +225,29 @@ Deno.test("broker: memories ops round-trip through the store", async () => {
       });
 
     const created = await call("write", { title: "Notes", content: "alpha" });
-    assertEquals(created, { title: "Notes", before: "", after: "alpha", created: true });
+    assertEquals(created, {
+      title: "Notes",
+      before: "",
+      after: "alpha",
+      created: true,
+    });
     const replaced = await call("write", { title: "Notes", content: "beta" });
-    assertEquals(replaced, { title: "Notes", before: "alpha", after: "beta", created: false });
-    const edited = await call("edit", { title: "Notes", find: "beta", replace: "gamma" });
+    assertEquals(replaced, {
+      title: "Notes",
+      before: "alpha",
+      after: "beta",
+      created: false,
+    });
+    const edited = await call("edit", {
+      title: "Notes",
+      find: "beta",
+      replace: "gamma",
+    });
     assertEquals(edited, { title: "Notes", before: "beta", after: "gamma" });
-    assertEquals(await call("get", { title: "Notes" }), { title: "Notes", content: "gamma" });
+    assertEquals(await call("get", { title: "Notes" }), {
+      title: "Notes",
+      content: "gamma",
+    });
     const listing = (await call("list", {})) as Array<{ title: string }>;
     assertEquals(
       listing.map((d) => d.title),
@@ -226,15 +262,15 @@ Deno.test("broker: memories ops round-trip through the store", async () => {
   }
 });
 
-Deno.test("broker: db is gated by the toolkit database declaration", async () => {
+Deno.test("broker: db is gated by the extension database declaration", async () => {
   const env = await setupTestEnv();
   try {
-    seedToolkit({ hasDatabase: false });
+    seedExtension({ hasDatabase: false });
     const blocked = await run("db", "query", true);
     assertEquals(blocked.outcome, "forbidden");
     assertEquals(blocked.prompts.length, 0);
 
-    seedToolkit({ hasDatabase: true });
+    seedExtension({ hasDatabase: true });
     const allowed = await run("db", "query", true);
     assertEquals(allowed.outcome, "dispatched");
     assertEquals(allowed.prompts.length, 0);
@@ -246,10 +282,10 @@ Deno.test("broker: db is gated by the toolkit database declaration", async () =>
 Deno.test("broker: db rejects ATTACH/DETACH and VACUUM INTO (sandbox escape)", async () => {
   const env = await setupTestEnv();
   try {
-    seedToolkit({ hasDatabase: true });
+    seedExtension({ hasDatabase: true });
     const call = (sql: string) =>
       handleModuleRequest({
-        toolkitId: TOOLKIT_ID,
+        extensionId: EXTENSION_ID,
         toolName: TOOL_NAME,
         callId: "call-1",
         module: "db",
@@ -271,7 +307,7 @@ Deno.test("broker: db rejects ATTACH/DETACH and VACUUM INTO (sandbox escape)", a
     const ok = await call("INSERT INTO notes (body) VALUES ('please attach the file')");
     assertEquals((ok as { changes: number }).changes, 1);
   } finally {
-    deleteToolkitData(TOOLKIT_ID);
+    deleteExtensionData(EXTENSION_ID);
     await env.teardown();
   }
 });
@@ -279,10 +315,10 @@ Deno.test("broker: db rejects ATTACH/DETACH and VACUUM INTO (sandbox escape)", a
 Deno.test("broker: db returns BigInt-magnitude integers as JSON-safe values", async () => {
   const env = await setupTestEnv();
   try {
-    seedToolkit({ hasDatabase: true });
+    seedExtension({ hasDatabase: true });
     const call = (op: string, sql: string) =>
       handleModuleRequest({
-        toolkitId: TOOLKIT_ID,
+        extensionId: EXTENSION_ID,
         toolName: TOOL_NAME,
         callId: "call-1",
         module: "db",
@@ -301,21 +337,21 @@ Deno.test("broker: db returns BigInt-magnitude integers as JSON-safe values", as
     // response is sent as JSON); a raw BigInt would throw here.
     JSON.stringify(rows);
   } finally {
-    deleteToolkitData(TOOLKIT_ID);
+    deleteExtensionData(EXTENSION_ID);
     await env.teardown();
   }
 });
 
-Deno.test("broker: db ops persist per toolkit and stay isolated", async () => {
+Deno.test("broker: db ops persist per extension and stay isolated", async () => {
   const env = await setupTestEnv();
   const A = "db-iso-a";
   const B = "db-iso-b";
   try {
-    seedToolkit({ id: A, hasDatabase: true });
-    seedToolkit({ id: B, hasDatabase: true });
-    const call = (toolkitId: string, op: string, args: unknown) =>
+    seedExtension({ id: A, hasDatabase: true });
+    seedExtension({ id: B, hasDatabase: true });
+    const call = (extensionId: string, op: string, args: unknown) =>
       handleModuleRequest({
-        toolkitId,
+        extensionId,
         toolName: TOOL_NAME,
         callId: "call-1",
         module: "db",
@@ -324,7 +360,10 @@ Deno.test("broker: db ops persist per toolkit and stay isolated", async () => {
         promptUser: () => Promise.resolve(false),
       });
 
-    await call(A, "execute", { sql: "CREATE TABLE notes (body TEXT)", params: [] });
+    await call(A, "execute", {
+      sql: "CREATE TABLE notes (body TEXT)",
+      params: [],
+    });
     const inserted = await call(A, "execute", {
       sql: "INSERT INTO notes (body) VALUES (?)",
       params: ["hello"],
@@ -334,15 +373,15 @@ Deno.test("broker: db ops persist per toolkit and stay isolated", async () => {
       { body: "hello" },
     ]);
 
-    // Toolkit B has its own database file: A's table does not exist there.
+    // Extension B has its own database file: A's table does not exist there.
     await assertRejects(
       () => call(B, "query", { sql: "SELECT body FROM notes", params: [] }),
       Error,
       "no such table",
     );
   } finally {
-    deleteToolkitData(A);
-    deleteToolkitData(B);
+    deleteExtensionData(A);
+    deleteExtensionData(B);
     await env.teardown();
   }
 });

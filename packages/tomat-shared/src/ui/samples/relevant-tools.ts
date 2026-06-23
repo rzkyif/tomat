@@ -10,6 +10,12 @@ export const relevantToolsSamples = {
       { toolId: "fs.write", name: "write_file", description: "", score: 0.55 },
     ],
     phase2: [{ toolId: "fs.read", name: "read_file", description: "" }],
-    alwaysAvailable: [{ toolId: "sys.now", name: "current_time", description: "" }],
+    alwaysAvailable: [
+      {
+        toolId: "sys.now",
+        name: "current_time",
+        description: "",
+      },
+    ],
   },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof RelevantToolsView>>>;

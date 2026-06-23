@@ -4,15 +4,15 @@
 
 import type { Message, Session, SessionListEntry, TokenUsage } from "../domain/session.ts";
 import type {
+  Extension,
+  ExtensionSearchResult,
+  ExtensionSource,
   Grant,
   OpenAIToolDef,
   PermissionDecl,
   Tool,
   ToolDescriptor,
-  Toolkit,
-  ToolkitSearchResult,
-  ToolkitSource,
-} from "../domain/toolkit.ts";
+} from "../domain/extension.ts";
 import type {
   BinaryKind,
   BinaryProbeResult,
@@ -24,6 +24,7 @@ import type {
   SidecarSnapshot,
 } from "../domain/model.ts";
 import type { StorageTree } from "../domain/storage.ts";
+import type { CoreStatusSnapshot } from "../domain/core-status.ts";
 
 export const API_BASE = "/api/v1";
 
@@ -33,6 +34,9 @@ export interface HealthResponse {
   status: "ok";
   version: string;
   uptimeMs: number;
+  /** Aggregate lifecycle status, so a client can seed the CoreBar on select
+   *  without waiting for the first `core.status` WS frame. */
+  core: CoreStatusSnapshot;
 }
 
 // --- Sessions --------------------------------------------------------------
@@ -180,52 +184,52 @@ export interface UpdateApplyRequest {
   version?: string;
 }
 
-// --- Toolkits --------------------------------------------------------------
+// --- Extensions --------------------------------------------------------------
 
-export type ListToolkitsResponse = Toolkit[];
+export type ListExtensionsResponse = Extension[];
 
-export interface SearchToolkitsResponse {
-  results: ToolkitSearchResult[];
+export interface SearchExtensionsResponse {
+  results: ExtensionSearchResult[];
 }
 
-// Acquire a toolkit's files (POST /download): fetch + extract an npm tarball,
+// Acquire a extension's files (POST /download): fetch + extract an npm tarball,
 // copy the built-in, or register a locally dropped-in folder. Deps are NOT
 // installed here; that is the separate POST /:id/install step.
-export type DownloadToolkitRequest =
+export type DownloadExtensionRequest =
   | { source: "npm"; name: string; version?: string }
   | { source: "local"; path: string; slug?: string }
   | { source: "builtin" };
 
 // Returned by every endpoint that starts a streamed background job (download,
 // install-deps, update). Progress + completion arrive over the
-// toolkit.install_log / toolkit.install_done WS frames, keyed by `jobId`.
-export interface ToolkitJobResponse {
+// extension.install_log / extension.install_done WS frames, keyed by `jobId`.
+export interface ExtensionJobResponse {
   jobId: string;
-  toolkitId: string;
+  extensionId: string;
 }
 
-// Returned by the synchronous toolkit actions: enable-all / disable-all /
+// Returned by the synchronous extension actions: enable-all / disable-all /
 // confirm-reenable.
-export interface ToolkitActionResponse {
+export interface ExtensionActionResponse {
   id: string;
 }
 
-export interface UpdateToolkitRequest {
+export interface UpdateExtensionRequest {
   version?: string;
 }
 
-export interface ListToolkitToolsResponse {
+export interface ListExtensionToolsResponse {
   tools: Tool[];
 }
 
-// Check installed toolkits for newer versions. With no `ids`, every installed
-// toolkit is checked. npm toolkits resolve `dist-tags.latest`; the built-in
-// resolves its signed manifest version; local toolkits have no upstream and
+// Check installed extensions for newer versions. With no `ids`, every installed
+// extension is checked. npm extensions resolve `dist-tags.latest`; the built-in
+// resolves its signed manifest version; local extensions have no upstream and
 // report `latestVersion: null`.
 export interface CheckUpdatesRequest {
   ids?: string[];
 }
-export interface ToolkitUpdateStatus {
+export interface ExtensionUpdateStatus {
   id: string;
   installedVersion: string;
   latestVersion: string | null;
@@ -233,7 +237,7 @@ export interface ToolkitUpdateStatus {
   error?: string;
 }
 export interface CheckUpdatesResponse {
-  results: ToolkitUpdateStatus[];
+  results: ExtensionUpdateStatus[];
 }
 
 export interface SetGrantsRequest {
@@ -326,4 +330,4 @@ export interface SidecarsStatusResponse {
 
 // Re-export commonly needed enums so client code can import everything from
 // one entry without crossing into `domain/*`.
-export type { PermissionDecl, TokenUsage, ToolkitSource };
+export type { ExtensionSource, PermissionDecl, TokenUsage };

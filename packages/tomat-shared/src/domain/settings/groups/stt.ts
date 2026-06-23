@@ -181,20 +181,20 @@ export const sttGroup: SettingGroup = {
                 label: "Light (English)",
                 title: "Light (English)",
                 description:
-                  "English-only and fast with low memory use. Slightly more accurate than the multilingual model of the same size when you only dictate in English.",
+                  "English-only and fast with low RAM use. Slightly more accurate than the multilingual model of the same size when you only dictate in English.",
               },
               {
                 id: "light-multilingual",
                 label: "Light (Multilingual)",
                 title: "Light (Multilingual)",
-                description: "Solid transcription in about 100 languages with low memory use.",
+                description: "Solid transcription in about 100 languages with low RAM use.",
               },
               {
                 id: "accurate",
                 label: "Accurate",
                 title: "Accurate",
                 description:
-                  "The most accurate option for every language, including English. Uses about three times the memory of the light models.",
+                  "The most accurate option for every language, including English. Uses about three times the RAM of the light models.",
               },
               {
                 id: "fast-multilingual",

@@ -11,7 +11,11 @@ export interface NavPage {
 export const PAGES: NavPage[] = [
   { id: "home", label: "Home", href: "/" },
   // The manual is many pages; the tab opens its first subsection.
-  { id: "manual", label: "User Manual", href: "/manual/getting-started/installing" },
+  {
+    id: "manual",
+    label: "User Manual",
+    href: "/manual/getting-started/installing",
+  },
 ];
 
 // Private for now; linked anyway (no star count yet).
@@ -30,5 +34,7 @@ export function activePageId(pathname: string): string {
 export function knobClipPath(index: number, count: number): string {
   const pad = "0.25rem";
   const cell = `(100% - 2 * ${pad}) / ${count}`;
-  return `inset(${pad} calc(${pad} + ${cell} * ${count - 1 - index}) ${pad} calc(${pad} + ${cell} * ${index}) round var(--rounded-large))`;
+  return `inset(${pad} calc(${pad} + ${cell} * ${
+    count - 1 - index
+  }) ${pad} calc(${pad} + ${cell} * ${index}) round var(--rounded-large))`;
 }

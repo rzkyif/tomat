@@ -5,14 +5,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/svelte";
 import SnippetAutocomplete from "./SnippetAutocomplete.svelte";
-import type { Snippet } from "$lib/snippets/snippets";
+import type { AutocompleteOption } from "$composables/use-autocomplete.svelte";
 
-const snippet = (id: string, trigger: string, name = id): Snippet => ({
+const snippet = (id: string, trigger: string, name = id): AutocompleteOption => ({
   id,
   name,
   trigger,
-  placement: "insert-user",
-  text: "stub",
+  source: "snippet",
 });
 
 describe("SnippetAutocomplete", () => {

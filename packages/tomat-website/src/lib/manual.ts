@@ -10,7 +10,7 @@ const SECTION_ORDER = [
   "Conversations",
   "Tuning Replies",
   "Speech",
-  "Tools & Toolkits",
+  "Tools & Extensions",
   "Knowledge",
   "Automation",
   "Settings & Maintenance",

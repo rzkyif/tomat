@@ -2,19 +2,23 @@
 
 _Keep this file at altitude: a high-level overview, common conventions, and
 important decisions only. Specifics (build/test commands, the persistence tree,
-release mechanics, toolkit details) belong in the docs linked under "Pointers",
-not here. When tempted to add something, prefer the canonical doc and link it._
+release mechanics, extension details) belong in the docs linked under
+"Pointers", not here. When tempted to add something, prefer the canonical doc
+and link it._
 
 ## Project Overview
 
 tomat is a local-first modular AI client split into a long-running service and a
 thin desktop UI that talk over an HTTP+WS API, plus helper binaries, a bundled
-toolkit, and a distribution website. The packages:
+extension, and a distribution website. Tools come from two kinds of provider: an
+**extension** (a `tomat.json` bundle the core installs) and an **MCP server** (a
+Model Context Protocol process the core connects to). The packages:
 
 - **`@tomat/core`**: Deno service that owns every stateful and computational
-  concern: session/message storage, LLM streaming, sandboxed tool execution,
-  TTS/STT supervision, model + binary downloads, toolkit installation,
-  embedding-based tool relevance, multi-client pairing auth, and self-update.
+  concern: session/message storage, LLM streaming, sandboxed tool execution, MCP
+  server connections, TTS/STT supervision, model + binary downloads, extension
+  installation, embedding-based tool relevance, multi-client pairing auth, and
+  self-update.
 - **`@tomat/core-updater`**: standalone Rust binary (`tomat-core-updater`) that
   swaps in a staged core build during self-update, then restarts core.
 - **`@tomat/core-keychain`**: standalone Rust binary (`tomat-core-keychain`)
@@ -22,14 +26,15 @@ toolkit, and a distribution website. The packages:
 - **`@tomat/client`**: Tauri + Svelte desktop UI, intentionally "dumb": it
   renders, captures input, plays audio, manages global shortcuts, and talks to
   one or more paired cores.
-- **`@tomat/shared`**: TypeScript types + Zod validators consumed by both
-  sides (API contract, domain shapes, `tools.json` schema, WS frame unions),
-  plus the shared UI layer under `./ui/*` (design tokens, UnoCSS preset, and the
+- **`@tomat/shared`**: TypeScript types + Zod validators consumed by both sides
+  (API contract, domain shapes, `tomat.json` schema, WS frame unions), plus the
+  shared UI layer under `./ui/*` (design tokens, UnoCSS preset, and the
   presentational Svelte components the client and website both render). The
-  non-UI exports stay side-effect-free; only `./ui/*` pulls in `svelte`/`unocss`,
-  and core never imports it.
-- **`@tomat/builtin-toolkit`**: reference toolkit installed by default on a
-  fresh core; doubles as the worked example for the `tools.json` format.
+  non-UI exports stay side-effect-free; only `./ui/*` pulls in
+  `svelte`/`unocss`, and core never imports it.
+- **`@tomat/builtin-extension`**: reference extension installed by default on a
+  fresh core; doubles as the worked example for the `tomat.json` format,
+  including the memories (knowledge and skills) an extension can ship.
 - **`@tomat/website`**: Astro static site at `au.tomat.ing`: the landing page,
   the feature showcase, the user manual, and the changelog. Renders the shared
   `@tomat/shared/ui` components so demos match the app, and is multi-page (link
@@ -42,17 +47,19 @@ through `npm:` specifiers from `deno task`.
 
 **Key locations:**
 
-- Domain types, the API contract, and the `tools.json` schema live in
+- Domain types, the API contract, and the `tomat.json` schema live in
   `packages/tomat-shared/src/`. When changing the wire format, update this
   package first.
 - Core HTTP routes: `packages/tomat-core/src/http/routes/`. WS frames:
   `packages/tomat-shared/src/api/ws.ts`. Settings keys consumed by core are
   documented in the header of `packages/tomat-core/src/services/chat.ts`.
-- Client API access: `packages/tomat-client/src/ui/lib/core/`.
-  Platform-specific Tauri calls: `packages/tomat-client/src/ui/lib/platform/`.
-- Toolkit author API: the Zod schema in
-  `packages/tomat-shared/src/validation/tools-json.ts` and the published JSON
-  Schema in `packages/tomat-shared/src/tools-json-schema.json`.
+- Client API access: `packages/tomat-client/src/ui/lib/core/`. Platform-specific
+  Tauri calls: `packages/tomat-client/src/ui/lib/platform/`.
+- Extension author API: the Zod schema in
+  `packages/tomat-shared/src/validation/tomat-json.ts` and the published JSON
+  Schema in `packages/tomat-shared/src/tomat-json-schema.json`.
+- MCP server connections (the other tool provider): the subsystem under
+  `packages/tomat-core/src/mcp/` (manager, registry, token resolution).
 
 ## Conventions
 
@@ -70,19 +77,20 @@ through `npm:` specifiers from `deno task`.
   section, a group header, a sidebar, a whole panel). "Shared" means BOTH sides
   render it: the client wraps the shared component feeding live state; the
   website wraps the same component feeding scripted/default state. A shared
-  component that ONLY the website uses is NOT allowed - it is a re-implementation
-  in disguise and WILL drift (this is exactly how the settings demo diverged from
-  the app). The fix for any represented-component mismatch is to push that layer
-  into `@tomat/shared/ui` and make the client consume it, NEVER to hand-mirror
-  the client's markup on the website. If extracting a layer breaks the client,
-  that breakage is the next task to fix (by making the client wrap the shared
-  component); it is never acceptable to leave a client-vs-website divergence
-  standing. Client-only behavior on a shared component (validation, pickers,
-  capture, live catalogs) is injected via props/callbacks/snippets, so the
-  rendered markup stays single-source. The mechanism is a four-tier component
-  taxonomy (A0 primitive / A `*View` / B thin client wrapper / C client shell)
-  recorded in `packages/tomat-client/src/ui/components/.tiers.json`, sample
-  bundles + a website gallery, and three lint walkers; the canonical reference is
+  component that ONLY the website uses is NOT allowed - it is a
+  re-implementation in disguise and WILL drift (this is exactly how the settings
+  demo diverged from the app). The fix for any represented-component mismatch is
+  to push that layer into `@tomat/shared/ui` and make the client consume it,
+  NEVER to hand-mirror the client's markup on the website. If extracting a layer
+  breaks the client, that breakage is the next task to fix (by making the client
+  wrap the shared component); it is never acceptable to leave a
+  client-vs-website divergence standing. Client-only behavior on a shared
+  component (validation, pickers, capture, live catalogs) is injected via
+  props/callbacks/snippets, so the rendered markup stays single-source. The
+  mechanism is a four-tier component taxonomy (A0 primitive / A `*View` / B thin
+  client wrapper / C client shell) recorded in
+  `packages/tomat-client/src/ui/components/.tiers.json`, sample bundles + a
+  website gallery, and three lint walkers; the canonical reference is
   [shared UI README](packages/tomat-shared/src/ui/README.md). See also
   [website AGENTS.md](packages/tomat-website/AGENTS.md).
 - **File naming** follows each host language's idiom: TypeScript `kebab-case`,
@@ -99,35 +107,38 @@ through `npm:` specifiers from `deno task`.
 - **Brand is lowercase.** The product is always written lowercase **tomat**,
   even at the start of a sentence or heading. The thin vocabulary: `tomat` (the
   product), `tomat core` (the service), `tomat client` (the desktop UI), and
-  `tomat built-in toolkit`. Hyphenated package names (`tomat-core`), the all-caps
-  `TOMAT_*` env vars, and `au.tomat.ing` identifiers are separate tokens and keep
-  their own casing. `deno task lint` rejects a capital-initial spelling repo-wide
-  via the `tomat/no-uppercase-tomat` oxlint rule plus `check-uppercase-tomat.ts`
-  (the same oxlint-rule-plus-walker pair as the em-dash ban).
+  `tomat built-in extension`. Hyphenated package names (`tomat-core`), the
+  all-caps `TOMAT_*` env vars, and `au.tomat.ing` identifiers are separate
+  tokens and keep their own casing. `deno task lint` rejects a capital-initial
+  spelling repo-wide via the `tomat/no-uppercase-tomat` oxlint rule plus
+  `check-uppercase-tomat.ts` (the same oxlint-rule-plus-walker pair as the
+  em-dash ban).
 - **Logging.** `tomat-core` modules log via `getLogger("scope")` from
   `src/shared/log.ts`; `console.*` is forbidden except the boot-failure catch in
   `main.ts`. Every line runs through `scrubSecrets` (same module) which masks
   tokens before they reach `core.log` or stderr.
+- **Icons.** UI icons are UnoCSS `presetIcons` classes (`i-<collection>-<name>`,
+  almost always `i-material-symbols-*`). A missing icon emits no CSS and renders
+  as an invisible box with no build error, so every icon name is validated
+  against the bundled `@iconify/json` by the `check-icon-classes.ts` walker in
+  `deno task lint`. Verify a name exists (e.g. at https://icones.js.org) before
+  using it; not every icon has a `-rounded`/`-outline` variant.
 - **Library reuse.** Prefer maintained npm/JSR packages over hand-rolled code.
-- **Terminology.** Use one term per concept in user-facing copy (settings,
-  labels, messages): **Thinking** (a model's internal reasoning, never
-  "reasoning"); **Provider** with **Local** / **External**; **Context Window**;
-  **CPU Threads**; **Toolkit** (a bundle) and **Tool** (one function);
-  **Session** (a conversation); **Bubble** (a chat bubble); **Speech-to-Text**
-  for the engine and **Voice Input** for the capture UX; **Snippet**; **Core**
-  (the service) and **Client** (the app). Phrase settings the model only honors,
-  not enforces, as requests ("the language the agent **should** reply in").
+- **User-facing copy.** Every string a user can read (settings, manual, tool and
+  extension descriptions, messages) follows the one guide at [COPY.md](COPY.md):
+  voice, the canonical terminology glossary, and the per-surface rules. Read it
+  before writing or editing any user-facing copy, in any package.
 
 ## Key Decisions
 
 - **Channels and persistence.** All state lives under `~/.tomat/<channel>/`,
-  where
-  the channel (`stable` default, `dev`, `latest`) is selected by `TOMAT_CHANNEL`
-  and resolved identically in core, client, and the install scripts. The one
-  exception is `models/`, shared across channels at `~/.tomat/models` so
-  multi-GB weights are not re-downloaded per channel. Keychain entries, default
-  ports, and service labels are channel-namespaced so two channels can run at
-  once. See [DEVELOPMENT.md](DEVELOPMENT.md) for the channel/port tables.
+  where the channel (`stable` default, `dev`, `latest`) is selected by
+  `TOMAT_CHANNEL` and resolved identically in core, client, and the install
+  scripts. The one exception is `models/`, shared across channels at
+  `~/.tomat/models` so multi-GB weights are not re-downloaded per channel.
+  Keychain entries, default ports, and service labels are channel-namespaced so
+  two channels can run at once. See [DEVELOPMENT.md](DEVELOPMENT.md) for the
+  channel/port tables.
 - **Trust root.** Release manifests are Ed25519-signed. The private key lives in
   a gitignored `.env`; the public key is committed in
   `packages/tomat-core/data/signing-keys.json` so every compiled core trusts the
@@ -145,26 +156,28 @@ through `npm:` specifiers from `deno task`.
 
 For anything beyond the above, the canonical docs are:
 
-- Build / run / test commands, channels:
-  [DEVELOPMENT.md](DEVELOPMENT.md)
+- Build / run / test commands, channels: [DEVELOPMENT.md](DEVELOPMENT.md)
 - Package vs release-item separation and the standardized per-package task
   vocabulary (`<verb>` / `<verb>:<pkg>`, fanned out by `scripts/pkg.ts`):
   [DEVELOPMENT.md](DEVELOPMENT.md). A package is a development unit (the root
   `deno.json` `workspace` array is the source of truth, 6 Deno + 5 Rust crates);
-  a release item is a distribution unit that may span packages (`scripts/release/*.ts`,
-  each declaring its `packages`).
+  a release item is a distribution unit that may span packages
+  (`scripts/release/*.ts`, each declaring its `packages`).
 - Per-package overview (layout, run/build/test, internals): the
-  `packages/<name>/README.md` of the package in question. Subsystem deep
-  dives are nested next to the code:
-  `packages/tomat-core/src/{sidecars,toolkits,update}/README.md` and
+  `packages/<name>/README.md` of the package in question. Subsystem deep dives
+  are nested next to the code:
+  `packages/tomat-core/src/{sidecars,extensions,mcp,update}/README.md` and
   `packages/tomat-client/src/ui/lib/core/README.md`.
 - Test-suite guide (layout, helpers, fixtures, scratch tests, CI):
   [tests/README.md](tests/README.md)
 - Release + deploy, channels, Cloudflare + R2 setup:
   [packages/tomat-website/README.md](packages/tomat-website/README.md)
-- Toolkit author API:
-  [packages/tomat-builtin-toolkit/README.md](packages/tomat-builtin-toolkit/README.md)
-- Settings system + copy and terminology guidelines:
+- Extension author API:
+  [packages/tomat-builtin/README.md](packages/tomat-builtin/README.md)
+- User-facing copy (the single source for any string a user can read: settings,
+  manual, tool and extension descriptions, messages): [COPY.md](COPY.md).
+  Whenever a task touches user-facing copy, in any package, follow it.
+- Settings system architecture (schema, routing, persistence):
   [packages/tomat-shared/src/domain/settings/README.md](packages/tomat-shared/src/domain/settings/README.md)
 - External services we depend on (HuggingFace, GitHub releases, R2) and how to
   fix breakage when they change: [EXTERNAL.md](EXTERNAL.md)

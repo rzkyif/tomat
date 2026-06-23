@@ -16,7 +16,9 @@ function tableNames(): string[] {
 }
 
 function userVersion(): number {
-  const row = db().prepare("PRAGMA user_version").get() as { user_version?: number | bigint };
+  const row = db().prepare("PRAGMA user_version").get() as {
+    user_version?: number | bigint;
+  };
   return Number(row?.user_version ?? 0);
 }
 
@@ -31,7 +33,7 @@ Deno.test("migrate: running twice is idempotent (no throw, schema unchanged)", a
     // messages / attachments are NOT in SQLite (they're JSON files on disk).
     assertEquals(before.includes("clients"), true);
     assertEquals(before.includes("pairing_codes"), true);
-    assertEquals(before.includes("toolkits"), true);
+    assertEquals(before.includes("extensions"), true);
     assertEquals(before.includes("downloads"), true);
   } finally {
     await env.teardown();

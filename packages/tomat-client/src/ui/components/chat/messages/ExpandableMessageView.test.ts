@@ -16,7 +16,10 @@ beforeEach(() => {
 describe("ExpandableMessageView", () => {
   it("renders the title and stays collapsed by default", () => {
     const { container } = render(ExpandableMessageView, {
-      props: { title: "System Prompt", text: "You are a helpful AI assistant." },
+      props: {
+        title: "System Prompt",
+        text: "You are a helpful AI assistant.",
+      },
     });
     expect(container.textContent).toContain("System Prompt");
     expect(container.querySelector(".whitespace-pre-wrap")).toBeNull();
@@ -36,7 +39,11 @@ describe("ExpandableMessageView", () => {
 
   it("preserves whitespace + newlines in the expanded body", () => {
     const { container } = render(ExpandableMessageView, {
-      props: { title: "System Prompt", text: "line 1\nline 2\n  indented", defaultExpanded: true },
+      props: {
+        title: "System Prompt",
+        text: "line 1\nline 2\n  indented",
+        defaultExpanded: true,
+      },
     });
     const body = container.querySelector(".whitespace-pre-wrap");
     expect(body).toBeTruthy();
@@ -50,7 +57,10 @@ describe("ExpandableMessageView", () => {
     // expand; the collapse animation keeps the body mounted, so we don't assert
     // its removal here.
     const { container, getByRole } = render(ExpandableMessageView, {
-      props: { title: "System Prompt", text: "You are a helpful AI assistant." },
+      props: {
+        title: "System Prompt",
+        text: "You are a helpful AI assistant.",
+      },
     });
     const button = getByRole("button");
     expect(button.getAttribute("title")).toBe("Expand");

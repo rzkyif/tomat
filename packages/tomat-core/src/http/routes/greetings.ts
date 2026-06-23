@@ -50,7 +50,9 @@ export function greetingsRoutes(): Hono {
   r.post("/run", async (c) => {
     const me = requireClient(c);
     const parsed = runBodySchema.safeParse(await readJson(c));
-    if (!parsed.success) throw new AppError("validation_error", parsed.error.message);
+    if (!parsed.success) {
+      throw new AppError("validation_error", parsed.error.message);
+    }
     const settings = await loadCoreSettings();
     if (settings["greetings.enabled"] !== true) {
       return c.json({ ran: false, reason: "disabled" });

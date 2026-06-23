@@ -16,7 +16,9 @@ function presetField(): TtsPresetField {
   for (const group of SETTINGS_SCHEMA) {
     for (const section of group.sections) {
       for (const field of section.fields) {
-        if (field.id === "tts.preset" && field.type === "tts_preset") return field;
+        if (field.id === "tts.preset" && field.type === "tts_preset") {
+          return field;
+        }
       }
     }
   }
@@ -47,7 +49,9 @@ Deno.test("tts: the tts.modelPath schema default is a catalog spec", () => {
 
 Deno.test("tts: the default card matches the tts.modelPath schema default", () => {
   const field = presetField();
-  const applied = resolveTtsSelection(catalog, { presetId: field.defaultValue });
+  const applied = resolveTtsSelection(catalog, {
+    presetId: field.defaultValue,
+  });
   const modelPathDefault = SETTINGS_SCHEMA.flatMap((g) => g.sections)
     .flatMap((s) => s.fields)
     .find((f) => f.id === "tts.modelPath")!.defaultValue;

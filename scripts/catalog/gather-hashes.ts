@@ -58,7 +58,9 @@ async function treeOids(repo: string, branch: string): Promise<Map<string, strin
   const json = (await res.json()) as Array<{ path: string; lfs?: { oid?: string } }>;
   const map = new Map<string, string>();
   for (const e of json) {
-    if (e.lfs?.oid && /^[0-9a-f]{64}$/.test(e.lfs.oid)) map.set(e.path, e.lfs.oid);
+    if (e.lfs?.oid && /^[0-9a-f]{64}$/.test(e.lfs.oid)) {
+      map.set(e.path, e.lfs.oid);
+    }
   }
   treeCache.set(key, map);
   return map;
@@ -67,7 +69,9 @@ async function treeOids(repo: string, branch: string): Promise<Map<string, strin
 async function downloadSha256(repo: string, branch: string, file: string): Promise<string> {
   const url = `${HF}/${repo}/resolve/${branch}/${file}`;
   const res = await fetch(url);
-  if (!res.ok || !res.body) throw new Error(`download ${url}: HTTP ${res.status}`);
+  if (!res.ok || !res.body) {
+    throw new Error(`download ${url}: HTTP ${res.status}`);
+  }
   const hash = createHash("sha256");
   for await (const chunk of res.body) hash.update(chunk);
   return hash.digest("hex");
@@ -109,4 +113,6 @@ ${entries}
 const dest = new URL("../../packages/tomat-model-catalog/src/hashes.generated.ts", import.meta.url);
 await Deno.writeTextFile(dest, content);
 console.error(`\nwrote ${sorted.length} hashes to hashes.generated.ts; ${missing.length} missing`);
-if (missing.length > 0) console.error(`missing:\n${missing.map((s) => `  ${s}`).join("\n")}`);
+if (missing.length > 0) {
+  console.error(`missing:\n${missing.map((s) => `  ${s}`).join("\n")}`);
+}

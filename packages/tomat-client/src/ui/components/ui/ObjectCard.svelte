@@ -23,12 +23,15 @@
   } = $props();
 </script>
 
-<!-- `group` (only when openable) lets badges shift on card hover (ObjectBadge).
+<!-- Three stacked rows (title + tags / description / meta + triple-dot) so the
+     description spans the full card width instead of being boxed into a narrow
+     left column beside the badges.
+     `group` (only when openable) lets badges shift on card hover (ObjectBadge).
      When openable, a full-bleed overlay button makes the WHOLE card clickable
      (no dead cursor gaps); the card content is pointer-events-none so clicks
      fall through to it, and only the triple-dot re-enables pointer events. -->
 <div
-  class="relative flex items-stretch gap-2 rounded-large px-3 py-2 transition-interactive {onOpen
+  class="relative flex flex-col gap-0.5 rounded-large px-3 py-2 transition-interactive {onOpen
     ? 'group hov:bg-surface-inset'
     : ''}"
 >
@@ -42,20 +45,11 @@
       onclick={onOpen}
     ></button>
   {/if}
-  <div class="relative flex flex-col gap-0.5 min-w-0 flex-1 pointer-events-none">
-    <span class="text-base font-medium text-default-800 truncate">{label}</span>
-    {#if description}
-      <span class="text-sm text-default-700 line-clamp-2">{description}</span>
-    {/if}
-    {#if meta}
-      <span class="text-xs text-default-600 truncate">{meta}</span>
-    {/if}
-  </div>
-  <div
-    class="relative self-stretch shrink-0 flex flex-col items-end justify-between gap-1 pointer-events-none"
-  >
+  <!-- Row 1: title, with badges pinned to the right. -->
+  <div class="relative flex items-center gap-2 pointer-events-none">
+    <span class="text-base font-medium text-default-800 truncate min-w-0 flex-1">{label}</span>
     {#if badges.length > 0}
-      <div class="flex items-center justify-end flex-wrap gap-1 select-none">
+      <div class="shrink-0 flex items-center justify-end flex-wrap gap-1 select-none">
         {#each badges as badge (badge.label)}
           <ObjectBadge
             label={badge.label}
@@ -66,16 +60,28 @@
         {/each}
       </div>
     {/if}
-    {#if menuRows.length > 0}
-      <div class="pointer-events-auto">
-        <IconButton
-          icon="i-material-symbols-more-vert"
-          title="More actions"
-          size="sm"
-          surface="none"
-          onclick={() => void showObjectActionMenu(menuRows)}
-        />
-      </div>
-    {/if}
   </div>
+  <!-- Row 2: description, free to use the full width. -->
+  {#if description}
+    <span class="relative text-sm text-default-700 line-clamp-2 pointer-events-none">{description}</span>
+  {/if}
+  <!-- Row 3: meta, with the triple-dot pinned to the right. -->
+  {#if meta || menuRows.length > 0}
+    <div class="relative flex items-center gap-2 min-h-6 pointer-events-none">
+      {#if meta}
+        <span class="text-xs text-default-600 truncate min-w-0 flex-1">{meta}</span>
+      {/if}
+      {#if menuRows.length > 0}
+        <div class="ml-auto shrink-0 pointer-events-auto">
+          <IconButton
+            icon="i-material-symbols-more-vert"
+            title="More actions"
+            size="sm"
+            surface="none"
+            onclick={() => void showObjectActionMenu(menuRows)}
+          />
+        </div>
+      {/if}
+    </div>
+  {/if}
 </div>

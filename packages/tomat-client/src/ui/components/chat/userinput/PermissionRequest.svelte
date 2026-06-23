@@ -59,7 +59,7 @@
   {/if}
   {#if !request.declared}
     <span class="text-accent-yellow-600 break-words">
-      This access was not declared by the Toolkit. Only allow it if you trust this Toolkit and
+      This access was not declared by the Extension. Only allow it if you trust this Extension and
       the request makes sense for what you asked.
     </span>
   {/if}

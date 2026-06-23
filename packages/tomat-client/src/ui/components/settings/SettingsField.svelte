@@ -21,7 +21,9 @@
   import SnippetsField from "./fields/SnippetsField.svelte";
   import MemoriesField from "./fields/MemoriesField.svelte";
   import ScheduledPromptsField from "./fields/ScheduledPromptsField.svelte";
-  import ToolkitsField from "./fields/ToolkitsField.svelte";
+  import ExtensionsField from "./fields/ExtensionsField.svelte";
+  import ToolsField from "./fields/ToolsField.svelte";
+  import McpField from "./fields/McpField.svelte";
   import CoresField from "./fields/CoresField.svelte";
   import StorageField from "./fields/StorageField.svelte";
 
@@ -158,8 +160,12 @@
           <MemoriesField />
         {:else if f.objectType === "scheduled_prompts"}
           <ScheduledPromptsField />
-        {:else if f.objectType === "toolkits"}
-          <ToolkitsField {horizontal} />
+        {:else if f.objectType === "tools"}
+          <ToolsField {horizontal} />
+        {:else if f.objectType === "extensions"}
+          <ExtensionsField {horizontal} />
+        {:else if f.objectType === "mcp"}
+          <McpField {horizontal} />
         {:else if f.objectType === "cores"}
           <CoresField />
         {/if}

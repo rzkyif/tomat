@@ -7,6 +7,7 @@
   import { browser } from "$app/environment"
   import { installTauriPlatform } from "$lib/platform/tauri"
   import { connectionState } from "$stores/connection.svelte"
+  import { coreStatusState } from "$stores/core-status.svelte"
   import { makeUiContext, setUiContext } from "@tomat/shared/ui/context"
   import { getDefaultSettings } from "@tomat/shared"
   import { settingsState } from "$stores"
@@ -50,6 +51,9 @@
     // The core restore + initial-mode decision happens in +page.svelte so it
     // completes before the page's first render.
     connectionState.attach()
+    // Backend core status (core.status frames) feeds the CoreBar alongside the
+    // transport state above; same persistent-subscription rationale.
+    coreStatusState.attach()
   })
 </script>
 

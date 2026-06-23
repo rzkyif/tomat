@@ -30,7 +30,9 @@ import { snippetsGroup } from "./groups/snippets.ts";
 import { memoriesGroup } from "./groups/memories.ts";
 import { scheduledPromptsGroup } from "./groups/scheduled-prompts.ts";
 import { greetingsGroup } from "./groups/greetings.ts";
-import { toolsGroup } from "./groups/toolkits.ts";
+import { toolsGroup } from "./groups/tools.ts";
+import { extensionsGroup } from "./groups/extensions.ts";
+import { mcpGroup } from "./groups/mcp.ts";
 import { dualModelGroup } from "./groups/dual-model.ts";
 import { sttGroup } from "./groups/stt.ts";
 import { ttsGroup } from "./groups/tts.ts";
@@ -54,7 +56,9 @@ export function modelFilesMap(v: unknown): Record<string, string> | null {
   } catch {
     return null;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
   const out: Record<string, string> = {};
   for (const [role, spec] of Object.entries(parsed)) {
     if (typeof spec !== "string") return null;
@@ -82,12 +86,14 @@ export function modelFilesError(v: unknown): string | null {
     return "must be a JSON object mapping each file role to an @user/repo/branch/file spec";
   }
   for (const [role, spec] of Object.entries(map)) {
-    if (!isHfSpec(spec)) return `role "${role}" must be an @user/repo/branch/file spec`;
+    if (!isHfSpec(spec)) {
+      return `role "${role}" must be an @user/repo/branch/file spec`;
+    }
   }
   return null;
 }
 
-// Embedding model for toolkit tool-relevance RAG: an all-MiniLM-L6-v2 GGUF
+// Embedding model for extension tool-relevance RAG: an all-MiniLM-L6-v2 GGUF
 // served by the llama-embed sidecar (a second llama-server instance) over
 // /v1/embeddings, 384-dim and L2-normalized with `--pooling mean`. EMBED_REPO is
 // also folded into the stored-vector staleness hash (services/relevance.ts), so
@@ -118,16 +124,22 @@ export function requiredModelRefs(s: Record<string, unknown>): RequiredModelRef[
   const imagesOn = !!s["llm.supportImages"];
 
   const llmModel = s["llm.modelPath"];
-  if (llmLocal && isHfSpec(llmModel)) out.push({ source: llmModel, group: "llm" });
+  if (llmLocal && isHfSpec(llmModel)) {
+    out.push({ source: llmModel, group: "llm" });
+  }
   const mmproj = s["llm.mmprojPath"];
-  if (llmLocal && imagesOn && isHfSpec(mmproj)) out.push({ source: mmproj, group: "llm" });
+  if (llmLocal && imagesOn && isHfSpec(mmproj)) {
+    out.push({ source: mmproj, group: "llm" });
+  }
   if (sttActive) {
-    for (const spec of parseModelFiles(s["stt.modelFiles"]))
+    for (const spec of parseModelFiles(s["stt.modelFiles"])) {
       out.push({ source: spec, group: "stt" });
+    }
   }
   if (s["tts.enabled"]) {
-    for (const spec of parseModelFiles(s["tts.modelFiles"]))
+    for (const spec of parseModelFiles(s["tts.modelFiles"])) {
       out.push({ source: spec, group: "tts" });
+    }
   }
   out.push({ source: EMBED_MODEL_FILE, group: "embed" });
   return out;
@@ -144,6 +156,8 @@ export const SETTINGS_SCHEMA: SettingGroup[] = [
   scheduledPromptsGroup,
   greetingsGroup,
   toolsGroup,
+  extensionsGroup,
+  mcpGroup,
   dualModelGroup,
   sttGroup,
   ttsGroup,
@@ -434,7 +448,7 @@ export function searchFields(
       for (const field of section.fields) {
         // command_preview is a derived display, not user-targetable; the
         // services/storage display panels and object_management managers
-        // (snippets/toolkits/cores) have no atomic field-level state to surface
+        // (snippets/extensions/cores) have no atomic field-level state to surface
         // in search results, and a manager is a full scrolling surface that
         // doesn't render sensibly inline, so they're excluded.
         if (

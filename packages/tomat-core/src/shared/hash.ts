@@ -1,5 +1,5 @@
 // Shared SHA-256 + hex helpers. One home for the hex-encoding and SHA-256
-// digest patterns that were previously copied across downloads, toolkits,
+// digest patterns that were previously copied across downloads, extensions,
 // auth, tls, and the self-updater.
 
 import { createHash } from "node:crypto";

@@ -24,14 +24,14 @@
     reportHeight: (h: number) => void;
   } = $props();
 
-  // Fixed-height stage: the toolkit editor holds the top half while the chat
+  // Fixed-height stage: the extension editor holds the top half while the chat
   // below scrolls. The chat starts as just the input, vertically centered, and
   // scrolls as the tool flow grows.
   const FRAME_H = 820;
   const REL_ID = "ct-relevant";
   const ui = useUiContext();
 
-  // Top half: a hand-written toolkit, shown two-up (handler + manifest). This is
+  // Top half: a hand-written extension, shown two-up (handler + manifest). This is
   // website-only editor chrome, not a client surface.
   const INDEX_TS = `import { dispenseFood } from "@acme/petnet";
 import type { ToolContext } from "tomat:tool";
@@ -133,7 +133,7 @@ export async function feedCat(
       const input = 'textarea[aria-label="Message input"]';
       const send = 'button[title="Send"]';
 
-      // 1. Glance over the toolkit files.
+      // 1. Glance over the extension files.
       demo.move(tl, '[data-pane="index"]', { duration: 0.9 });
       demo.hold(tl, 0.9);
       demo.move(tl, '[data-pane="tools"]', { duration: 0.7 });
@@ -242,7 +242,7 @@ export async function feedCat(
           </div>
           <div data-pane="tools" class="flex flex-col min-h-0">
             <div class="px-3 py-1.5 text-[11px] font-mono text-default-600 bg-surface">
-              tools.json
+              tomat.json
             </div>
             <pre class="demo-code flex-1 min-h-0 overflow-hidden text-[10px] font-mono text-default-800 px-3 py-2 whitespace-pre leading-[1.45]">{@html TOOLS_HTML}</pre>
           </div>

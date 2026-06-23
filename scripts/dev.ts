@@ -7,8 +7,8 @@
 
 import { join } from "@std/path";
 import { ensureDir } from "@std/fs/ensure-dir";
-import { BUILTIN_TOOLKIT_ID } from "@tomat/shared";
-import { hashToolkit } from "../packages/tomat-core/src/toolkits/hash.ts";
+import { BUILTIN_EXTENSION_ID } from "@tomat/shared";
+import { hashExtension } from "../packages/tomat-core/src/extensions/hash.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
@@ -34,16 +34,16 @@ function homeDir(): string {
 const DEV_CORE_DIR = join(homeDir(), ".tomat", "dev", "core");
 const ADMIN_TOKEN_FILE = join(DEV_CORE_DIR, ".admin-token");
 
-// Dev built-in toolkit manifest. There is no published manifests/dev/toolkit.json,
-// so dev.ts generates one from the in-repo toolkit (and regenerates it on edits)
+// Dev built-in extension manifest. There is no published manifests/dev/extension.json,
+// so dev.ts generates one from the in-repo extension (and regenerates it on edits)
 // at the cache path core reads. The version carries a content hash so any edit to
-// the codebase toolkit reads as "Update available" after a check; "Update" then
+// the codebase extension reads as "Update available" after a check; "Update" then
 // reinstalls the codebase copy. Keep the version formula in sync with
-// computeDevManifest() in packages/tomat-core/src/toolkits/builtin-manifest.ts.
-const BUILTIN_SRC_DIR = join(ROOT, "packages", "tomat-builtin-toolkit");
-const DEV_TOOLKIT_MANIFEST = join(DEV_CORE_DIR, "cache", "builtin-toolkit-manifest.json");
+// computeDevManifest() in packages/tomat-core/src/extensions/builtin-manifest.ts.
+const BUILTIN_SRC_DIR = join(ROOT, "packages", "tomat-builtin");
+const DEV_EXTENSION_MANIFEST = join(DEV_CORE_DIR, "cache", "builtin-manifest.json");
 
-async function writeDevToolkitManifest(): Promise<void> {
+async function writeDevExtensionManifest(): Promise<void> {
   let pkgVersion = "0.0.0";
   try {
     const cfg = JSON.parse(await Deno.readTextFile(join(BUILTIN_SRC_DIR, "deno.json"))) as {
@@ -53,32 +53,32 @@ async function writeDevToolkitManifest(): Promise<void> {
   } catch {
     // fall through with the default version
   }
-  const contentHash = await hashToolkit(BUILTIN_SRC_DIR);
+  const contentHash = await hashExtension(BUILTIN_SRC_DIR);
   const manifest = {
     schemaVersion: 1,
     version: `${pkgVersion}+dev.${contentHash.slice(0, 8)}`,
-    id: BUILTIN_TOOLKIT_ID,
+    id: BUILTIN_EXTENSION_ID,
     tarballUrl: "",
     sha256: "",
     signature: "",
   };
   await ensureDir(join(DEV_CORE_DIR, "cache"));
-  const tmp = DEV_TOOLKIT_MANIFEST + ".tmp";
+  const tmp = DEV_EXTENSION_MANIFEST + ".tmp";
   await Deno.writeTextFile(tmp, JSON.stringify(manifest, null, 2));
-  await Deno.rename(tmp, DEV_TOOLKIT_MANIFEST);
+  await Deno.rename(tmp, DEV_EXTENSION_MANIFEST);
 }
 
 /** Regenerate the dev manifest now, then on every change under the codebase
- *  toolkit (debounced). Fire-and-forget: the watcher lives for the dev session
+ *  extension (debounced). Fire-and-forget: the watcher lives for the dev session
  *  and is torn down when the orchestrator exits. */
-async function startDevToolkitManifest(): Promise<void> {
-  await writeDevToolkitManifest();
+async function startDevExtensionManifest(): Promise<void> {
+  await writeDevExtensionManifest();
   void (async () => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
       for await (const _event of Deno.watchFs(BUILTIN_SRC_DIR)) {
         if (timer) clearTimeout(timer);
-        timer = setTimeout(() => void writeDevToolkitManifest().catch(() => {}), 200);
+        timer = setTimeout(() => void writeDevExtensionManifest().catch(() => {}), 200);
       }
     } catch {
       // watch failures are non-fatal in dev
@@ -650,10 +650,10 @@ async function ensureEspeakData(libDir: string): Promise<void> {
 
 const adminToken = await ensureAdminToken();
 
-// Generate the dev built-in toolkit manifest before core boots so first-boot
-// seeding can resolve a version, and keep it fresh as the codebase toolkit is
+// Generate the dev built-in extension manifest before core boots so first-boot
+// seeding can resolve a version, and keep it fresh as the codebase extension is
 // edited.
-await startDevToolkitManifest();
+await startDevExtensionManifest();
 
 // Link the native helper binaries into the dev bin dir before core boots, so
 // its boot-time helper check passes and the first tool call can spawn in

@@ -16,7 +16,7 @@
  * isn't available without the host process).
  */
 
-import { platform, type MonitorInfo } from "$lib/platform";
+import { type MonitorInfo, platform } from "$lib/platform";
 import { getLogger } from "$lib/util/log";
 
 const log = getLogger("capture");

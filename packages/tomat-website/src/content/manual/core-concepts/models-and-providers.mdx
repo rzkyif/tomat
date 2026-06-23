@@ -52,19 +52,18 @@ of tomat.
 ## Context and speed
 
 Two settings shape how a Local model performs, and they trade against your
-machine's memory and cores:
+machine's RAM and CPU:
 
 - **Context Window** is how many tokens the model can consider at once. A larger
   window holds more of the conversation, which matters for long sessions, but uses
-  more memory. This is the same window the [session bar](/manual/core-concepts/sessions-and-context)
+  more RAM. This is the same window the [session bar](/manual/core-concepts/sessions-and-context)
   tracks as you talk.
 - **CPU Threads** is how many of your processor's cores the model runs on. More
   threads can speed up replies on a capable machine, up to the point where you run
   out of cores to give it.
 
-tomat can also unload an idle model from memory after a while, so a Local model
-does not hold gigabytes of RAM when you have stepped away. It loads again on your
-next message.
+tomat can also unload an idle model after a while, so a Local model does not hold
+gigabytes of RAM when you have stepped away. It loads again on your next message.
 
 With a model chosen, you can pair it with a second one for the hard questions:
 [Dual Model](/manual/core-concepts/dual-model).

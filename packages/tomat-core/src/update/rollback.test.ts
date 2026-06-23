@@ -85,7 +85,10 @@ Deno.test("commitUpdate: a first boot that commits clears the marker + anchor (n
     const oldBin = currentBin + ".old";
     await Deno.writeTextFile(currentBin, "WORKING_NEW");
     await Deno.writeTextFile(oldBin, "PREVIOUS");
-    await writeUpdateMarker({ version: CORE_VERSION, previousVersion: "0.0.1" });
+    await writeUpdateMarker({
+      version: CORE_VERSION,
+      previousVersion: "0.0.1",
+    });
 
     // First boot: records the attempt, keeps running.
     assertEquals(await handleUpdateMarkerOnBoot(), false);

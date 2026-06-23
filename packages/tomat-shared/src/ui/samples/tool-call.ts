@@ -37,7 +37,11 @@ export const toolCallSamples = {
         {
           question: "Which bowl should I fill?",
           options: [
-            { label: "Kitchen", value: "kitchen", description: "the usual spot" },
+            {
+              label: "Kitchen",
+              value: "kitchen",
+              description: "the usual spot",
+            },
             { label: "Patio", value: "patio" },
           ],
         },

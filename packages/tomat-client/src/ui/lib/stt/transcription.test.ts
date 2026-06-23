@@ -78,7 +78,11 @@ describe("runTranscriptionChain", () => {
       { autocorrect: false, chain: true },
       deps({ transcribe: () => Promise.resolve({ text: "after" }), merge }),
     );
-    expect(withPrior).toEqual({ kind: "ok", text: "before after", original: null });
+    expect(withPrior).toEqual({
+      kind: "ok",
+      text: "before after",
+      original: null,
+    });
     expect(merge).toHaveBeenCalledTimes(1);
 
     merge.mockClear();
@@ -104,7 +108,11 @@ describe("runTranscriptionChain", () => {
       }),
     );
     // raw -> "prior+helo", corrected -> "prior+hello"; they differ, so original set.
-    expect(out).toEqual({ kind: "ok", text: "prior+hello", original: "prior+helo" });
+    expect(out).toEqual({
+      kind: "ok",
+      text: "prior+hello",
+      original: "prior+helo",
+    });
   });
 
   it("falls back to raw text and warns when autocorrect throws", async () => {

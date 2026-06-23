@@ -15,7 +15,11 @@ type RoleFile = [role: string, modelSpec: string, fileSizeBytes: number];
 function quant(quantName: string, files: RoleFile[]): SpeechQuant {
   return {
     quant: quantName,
-    files: files.map(([role, modelSpec, fileSizeBytes]) => ({ role, modelSpec, fileSizeBytes })),
+    files: files.map(([role, modelSpec, fileSizeBytes]) => ({
+      role,
+      modelSpec,
+      fileSizeBytes,
+    })),
     fileSizeBytes: files.reduce((sum, [, , bytes]) => sum + bytes, 0),
   };
 }

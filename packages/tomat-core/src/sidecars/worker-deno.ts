@@ -1,4 +1,4 @@
-// The sandboxed tool workers and the npm-based toolkit installer run as
+// The sandboxed tool workers and the npm-based extension installer run as
 // `deno run` subprocesses using the bundled `deno` sidecar binary. That binary
 // is a downloadable requirement (see requiredBinaryKinds): until the user
 // installs it, spawning would throw a raw `NotFound` that is easy to leak as an

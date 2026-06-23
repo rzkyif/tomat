@@ -1,9 +1,9 @@
 # AGENTS.md (website)
 
-Scoped guidance for `@tomat/website`. The repo-wide
-[AGENTS.md](../../AGENTS.md) still applies; this file adds what is specific to
-the site. Keep it at altitude: conventions and decisions, not command lists
-(those live in [README.md](README.md)).
+Scoped guidance for `@tomat/website`. The repo-wide [AGENTS.md](../../AGENTS.md)
+still applies; this file adds what is specific to the site. Keep it at altitude:
+conventions and decisions, not command lists (those live in
+[README.md](README.md)).
 
 ## Overview
 
@@ -17,8 +17,8 @@ R2 (`get.au.tomat.ing`), never here.
 
 - **Exact-parity rule (CRITICAL, no exceptions).** Any tomat-client component
   represented on the site must render EXACTLY as the app does on default
-  settings: spacing, colors, rounding, hover, fonts, transitions. The only way to
-  show one is to render the shared `@tomat/shared/ui` component, never a
+  settings: spacing, colors, rounding, hover, fonts, transitions. The only way
+  to show one is to render the shared `@tomat/shared/ui` component, never a
   re-implementation.
   - **Single source means BOTH sides render it.** A shared component is only
     legitimate if the CLIENT also wraps it. A `*View` that only the website uses
@@ -43,11 +43,12 @@ R2 (`get.au.tomat.ing`), never here.
   sample prop bundles there (built from the settings schema, never hardcoded);
   the showcase stages, the demos, and the component **gallery** all consume them
   so demo state has one home. The gallery (`src/pages/gallery.astro` +
-  `components/gallery/Gallery.svelte`) renders every shared View from its samples
-  with no `UiContext` provider (so it falls back to `DEFAULT_UI_CONTEXT`); it is
-  the canonical parity/QA surface and the manual's screenshot source. The
-  `check-view-coverage` lint walker mechanically enforces that every View has a
-  sample, a gallery card, and a client wrapper (a website-only View is illegal).
+  `components/gallery/Gallery.svelte`) renders every shared View from its
+  samples with no `UiContext` provider (so it falls back to
+  `DEFAULT_UI_CONTEXT`); it is the canonical parity/QA surface and the manual's
+  screenshot source. The `check-view-coverage` lint walker mechanically enforces
+  that every View has a sample, a gallery card, and a client wrapper (a
+  website-only View is illegal).
 - **Demo-driven interactive states use `hov:` / `act:`.** The scripted cursor
   sets `data-hover` / `data-active` on its target; the shared `hov:`/`act:`
   UnoCSS variants resolve those to the same styles as `:hover`/`:active`, so a
@@ -73,8 +74,8 @@ R2 (`get.au.tomat.ing`), never here.
   page scroll.
 - **Two pages only.** The changelog was removed; releases are tracked elsewhere.
 - **Last updated is git-derived.** Each manual page's "Last updated" date comes
-  from the file's last git commit at build time (`src/lib/git-date.ts`), not from
-  frontmatter.
+  from the file's last git commit at build time (`src/lib/git-date.ts`), not
+  from frontmatter.
 
 ## Pointers
 
@@ -85,6 +86,8 @@ R2 (`get.au.tomat.ing`), never here.
   `animations.ts`, `uno-preset.ts`, `styles/base.css`).
 - Settings schema + defaults: `packages/tomat-shared/src/domain/settings`
   (`getDefaultSettings`).
+- Writing manual copy (voice, terminology, page shape, the inline-demo rule):
+  the root [COPY.md](../../COPY.md).
 - Run / build / release / Cloudflare setup: [README.md](README.md).
 - Repo-wide dev loop + channels: [DEVELOPMENT.md](../../DEVELOPMENT.md).
 - Content-lock tooling: `scripts/website/`.

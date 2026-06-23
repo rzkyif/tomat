@@ -22,11 +22,4 @@ export const sessionBarSamples = {
     defaultTitle: "New session",
     isNewSession: true,
   },
-  withCoreChip: {
-    tokenUsage: { used: 1200, max: 8192 },
-    showChip: true,
-    coreName: "laptop",
-    showTitle: true,
-    titleText: "Installing tomat",
-  },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof SessionBarView>>>;

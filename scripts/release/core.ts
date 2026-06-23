@@ -355,7 +355,9 @@ async function buildSpeech(triples: Triple[], suffix: string): Promise<SpeechArt
       stdout: "inherit",
       stderr: "inherit",
     }).output();
-    if (code !== 0) fail(`cargo build ${SPEECH_CRATE.name} for ${triple} exited ${code}`);
+    if (code !== 0) {
+      fail(`cargo build ${SPEECH_CRATE.name} for ${triple} exited ${code}`);
+    }
 
     // Stage {exe, espeak-ng-data/} and pack a gzip tarball. The in-archive exe
     // must be the bare `<kind>(.exe)` the extractor matches, with no suffix.
@@ -590,10 +592,14 @@ async function composeBinaryManifest(
   // channel; ours, so there's no upstream release to resolve.
   binaries["tomat-core-speech"] = speech;
 
-  // Sign the WHOLE manifest minus `signature` (matching core.json/toolkit.json),
+  // Sign the WHOLE manifest minus `signature` (matching core.json/extension.json),
   // so the monotonic `version` the runtime uses for downgrade refusal is
   // authenticated, not just `binaries`.
-  const unsigned: Omit<BinaryManifest, "signature"> = { schemaVersion: 1, version, binaries };
+  const unsigned: Omit<BinaryManifest, "signature"> = {
+    schemaVersion: 1,
+    version,
+    binaries,
+  };
   const signature = await signEd25519(privateKey, unsigned);
   return { ...unsigned, signature };
 }
@@ -601,7 +607,7 @@ async function composeBinaryManifest(
 /** Gzip a file to `<srcPath>.gz` for transport. The core's single-file
  *  artifacts (binary, helpers, worker .ts) ship gzip-compressed; the manifest
  *  sha256 stays over the DECOMPRESSED file, so consumers gunzip then verify the
- *  same hash. Mirrors toolkit.ts's `CompressionStream("gzip")` packing. */
+ *  same hash. Mirrors extension.ts's `CompressionStream("gzip")` packing. */
 async function gzipFile(srcPath: string): Promise<{ path: string; size: number }> {
   const gzPath = `${srcPath}.gz`;
   const out = await Deno.open(gzPath, {

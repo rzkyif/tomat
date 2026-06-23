@@ -92,7 +92,7 @@ Deno.test("settingKeyDestination: honors group defaults and section overrides", 
   assertEquals(settingKeyDestination("tts.enabled"), "core");
   assertEquals(settingKeyDestination("tts.voice"), "client");
   // Client section override inside the otherwise core tools group.
-  assertEquals(settingKeyDestination("toolkits.skipRiskyGrantWarning"), "client");
+  assertEquals(settingKeyDestination("extensions.skipRiskyGrantWarning"), "client");
   assertEquals(settingKeyDestination("appearance.theme"), "client");
   assertEquals(settingKeyDestination("totally.unknown.key"), undefined);
 });

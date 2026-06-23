@@ -50,7 +50,7 @@ vi.mock("./vad.svelte", () => ({
   vadManager: { forceDisable: vi.fn() },
 }));
 
-import { setPlatform, type Platform } from "$lib/platform";
+import { type Platform, setPlatform } from "$lib/platform";
 import { settingsState } from "./settings.svelte";
 import { ttsState } from "./tts.svelte";
 import { vadManager } from "./vad.svelte";

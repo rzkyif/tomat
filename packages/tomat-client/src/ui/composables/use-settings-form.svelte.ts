@@ -225,7 +225,9 @@ function bucketAppliedMap(): Partial<Record<PresetBucket, AppliedModelSettings |
   const rec = modelRecommendState.recommendations;
   if (!rec) return {};
   const out: Partial<Record<PresetBucket, AppliedModelSettings | null>> = {};
-  for (const bucket of PRESET_BUCKETS) out[bucket] = rec.buckets[bucket]?.apply ?? null;
+  for (const bucket of PRESET_BUCKETS) {
+    out[bucket] = rec.buckets[bucket]?.apply ?? null;
+  }
   return out;
 }
 

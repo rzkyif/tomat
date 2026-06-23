@@ -38,11 +38,17 @@ export function tomatUnoBase(): UserConfig {
     variants: [
       (matcher) =>
         matcher.startsWith("hov:")
-          ? { matcher: matcher.slice(4), selector: (s) => `${s}:hover, ${s}[data-hover]` }
+          ? {
+              matcher: matcher.slice(4),
+              selector: (s) => `${s}:hover, ${s}[data-hover]`,
+            }
           : undefined,
       (matcher) =>
         matcher.startsWith("act:")
-          ? { matcher: matcher.slice(4), selector: (s) => `${s}:active, ${s}[data-active]` }
+          ? {
+              matcher: matcher.slice(4),
+              selector: (s) => `${s}:active, ${s}[data-active]`,
+            }
           : undefined,
     ],
     shortcuts: [

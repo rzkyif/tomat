@@ -150,7 +150,9 @@ export async function* streamChatCompletion(req: LlmRequest): AsyncIterable<LlmD
   if (isLocal) {
     if (req.endpoint.topK !== undefined) extra.top_k = req.endpoint.topK;
     if (req.endpoint.minP !== undefined) extra.min_p = req.endpoint.minP;
-    if (req.endpoint.repeatPenalty !== undefined) extra.repeat_penalty = req.endpoint.repeatPenalty;
+    if (req.endpoint.repeatPenalty !== undefined) {
+      extra.repeat_penalty = req.endpoint.repeatPenalty;
+    }
   }
 
   const stream = await client.chat.completions.create(

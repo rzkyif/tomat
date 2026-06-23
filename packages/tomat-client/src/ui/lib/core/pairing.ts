@@ -148,7 +148,10 @@ export async function pairWithCode(
     url: `${baseUrl}/api/v1/pairing/pake/finish`,
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pakeId: start.pakeId, confirmC: toBase64(confirmC) }),
+    body: JSON.stringify({
+      pakeId: start.pakeId,
+      confirmC: toBase64(confirmC),
+    }),
     pin,
   });
   if (!ok(finishRes)) throw apiError(finishRes, "pairing failed");

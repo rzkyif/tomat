@@ -78,7 +78,7 @@ jobs:
       - run: deno task fmt:check
       - run: deno task lint
 
-      # The permission-prompt live probe (toolkits/prompt-live-probe.test.ts)
+      # The permission-prompt live probe (extensions/prompt-live-probe.test.ts)
       # needs the real ptyhost binary; build it first and force the test to
       # FAIL rather than skip if the binary is somehow absent, since it is
       # the drift tripwire for deno version bumps.

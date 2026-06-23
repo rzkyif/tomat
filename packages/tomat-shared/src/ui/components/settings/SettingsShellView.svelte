@@ -204,7 +204,10 @@
         onscroll={updateFades}
         data-demo="content"
       >
-        <div bind:this={layerEl}>
+        <!-- min-h-full so the layer always spans the scroll viewport: the
+             group-change slide (translateY 100% of this layer) travels the
+             whole panel height regardless of how few fields the group has. -->
+        <div bind:this={layerEl} class="min-h-full">
           {#if searchMode}
             {@render searchContent?.()}
           {:else}

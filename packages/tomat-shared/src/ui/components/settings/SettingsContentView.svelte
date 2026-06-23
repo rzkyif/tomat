@@ -35,7 +35,6 @@
     activeTab: activeTabProp,
     onSelectTab,
     locked = false,
-    minHeightPx,
   }: {
     /** Render this group's header + sections. Ignored when `searchQuery` is set. */
     groupId?: string;
@@ -56,8 +55,6 @@
     onSelectTab?: (id: string) => void;
     /** Reconnecting: dim + block interaction (client). */
     locked?: boolean;
-    /** Min height for the group-change slide to travel the whole panel (client). */
-    minHeightPx?: number;
   } = $props();
 
   const group = $derived<SettingGroup | undefined>(
@@ -147,7 +144,7 @@
   );
 
   // An object-management group is a single section holding a single
-  // object_management field; it owns the full panel height.
+  // object_management field, rendered full-bleed instead of as sections.
   const omField = $derived.by<SettingField | null>(() => {
     if (!group) return null;
     const om = group.sections.filter((s) =>
@@ -186,14 +183,7 @@
     {/each}
   </div>
 {:else if group}
-  <!-- An object-management group owns the full panel height (definite height so
-       its manager scrolls internally); a sectioned group uses min-height so the
-       group-change slide travels the whole panel. -->
-  <section
-    class="flex flex-col"
-    style:height={omField && minHeightPx ? `${minHeightPx}px` : undefined}
-    style:min-height={!omField && minHeightPx ? `${minHeightPx}px` : undefined}
-  >
+  <section class="flex flex-col">
     <!-- Group header: sticky at the very top (z above section headers at top-7). -->
     <div class="sticky top-0 z-20">
       <SectionHeader label={group.name} level="group">

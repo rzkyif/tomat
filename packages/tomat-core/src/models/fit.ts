@@ -10,21 +10,21 @@
 // the vision module when the model ships one.
 
 import {
-  catalogModels,
-  primaryScore,
+  type AppliedModelSettings,
   type BucketRecommendation,
   type CatalogModel,
+  catalogModels,
+  type CatalogModelView,
   type CatalogPayload,
   type CatalogQuant,
   type CatalogVariant,
+  DEFAULT_SAMPLING,
   type FitConfig,
   type HardwareInfo,
   type PresetBucket,
-  type RecommendationSet,
-  type CatalogModelView,
-  type AppliedModelSettings,
+  primaryScore,
   type QuantOption,
-  DEFAULT_SAMPLING,
+  type RecommendationSet,
 } from "@tomat/shared";
 
 const BYTES_PER_KV_ELEM = 2; // fp16 K/V cache
@@ -84,7 +84,9 @@ const SWEET_SPOT_MAX_BPW = 6.5; // Q6_K
  *  system RAM; a discrete GPU targets VRAM (we offload all layers there). */
 function memoryBudgetBytes(hw: HardwareInfo): number {
   if (hw.unifiedMemory) return hw.totalRamBytes;
-  if (hw.gpu.backend === "cpu" || hw.gpu.vramBytes <= 0) return hw.totalRamBytes;
+  if (hw.gpu.backend === "cpu" || hw.gpu.vramBytes <= 0) {
+    return hw.totalRamBytes;
+  }
   return hw.gpu.vramBytes;
 }
 
@@ -165,7 +167,13 @@ function bestConfigForModel(
       const fit = bestCtx(model, variant, quant, limit, ceiling);
       if (!fit) continue;
       const quantRank = configQuantRank(variant, quant);
-      const cand: FitConfigChoice = { model, variant, quant, ...fit, quantRank };
+      const cand: FitConfigChoice = {
+        model,
+        variant,
+        quant,
+        ...fit,
+        quantRank,
+      };
       if (!best || better(cand, best)) best = cand;
     }
   }
@@ -198,7 +206,9 @@ function recommendedConfigForModel(
       };
       if (!any || better(cand, any)) any = cand;
       const baseBpw = QUANT_BPW[quant.quant] ?? 4.0;
-      if (baseBpw <= SWEET_SPOT_MAX_BPW && (!sweet || better(cand, sweet))) sweet = cand;
+      if (baseBpw <= SWEET_SPOT_MAX_BPW && (!sweet || better(cand, sweet))) {
+        sweet = cand;
+      }
     }
   }
   return sweet ?? any;
@@ -239,7 +249,9 @@ function better(a: FitConfigChoice, b: FitConfigChoice): boolean {
 function tieBreak(a: FitConfigChoice, b: FitConfigChoice, fit: FitConfig): boolean {
   for (const rule of fit.tieBreakers) {
     if (rule === "lowerFootprint") {
-      if (a.footprintBytes !== b.footprintBytes) return a.footprintBytes < b.footprintBytes;
+      if (a.footprintBytes !== b.footprintBytes) {
+        return a.footprintBytes < b.footprintBytes;
+      }
     } else if (rule.startsWith("preferTag:")) {
       const tag = rule.slice("preferTag:".length);
       const at = a.variant.tags.includes(tag);
@@ -336,7 +348,9 @@ function pickSmallest(
     if (score === undefined || score < floorScore) continue;
     const config = configFor(model);
     if (!config) continue;
-    if (!winner || config.footprintBytes < winner.footprintBytes) winner = config;
+    if (!winner || config.footprintBytes < winner.footprintBytes) {
+      winner = config;
+    }
   }
   return winner;
 }

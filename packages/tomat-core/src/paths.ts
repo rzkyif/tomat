@@ -121,7 +121,7 @@ export interface CorePaths {
   sessionsDir: string;
   memoriesDir: string;
   modelsDir: string;
-  toolkitsDir: string;
+  extensionsDir: string;
   workersDir: string;
   cacheDir: string;
   logsDir: string;
@@ -130,9 +130,9 @@ export interface CorePaths {
   // startup to detect post-update first boot vs. crash-loop after a failed
   // update (→ rollback). See update/rollback.ts.
   updateMarkerFile: string;
-  // Exists once the built-in toolkit has been seeded at least once, so a
+  // Exists once the built-in extension has been seeded at least once, so a
   // user-deleted built-in is not re-seeded on the next boot. Core-internal
-  // state, deliberately not a settings key. See toolkits/builtin-seed.ts.
+  // state, deliberately not a settings key. See extensions/builtin-seed.ts.
   builtinSeededMarkerFile: string;
 }
 
@@ -168,7 +168,7 @@ export function paths(): CorePaths {
     // Shared across channels: ~/.tomat/models (not under the channel root),
     // so dev / latest reuse the same downloaded weights as stable.
     modelsDir: join(tomatBase(), "models"),
-    toolkitsDir: join(root, "toolkits"),
+    extensionsDir: join(root, "extensions"),
     workersDir,
     cacheDir: cache,
     logsDir: logs,
@@ -188,16 +188,16 @@ export function sessionAttachmentsDir(sessionId: string): string {
   return join(sessionDir(sessionId), "attachments");
 }
 
-export function toolkitDir(toolkitId: string): string {
-  return join(paths().toolkitsDir, toolkitId);
+export function extensionDir(extensionId: string): string {
+  return join(paths().extensionsDir, extensionId);
 }
 
-/** Per-toolkit private data dir (the module broker's `db` SQLite lives
- *  here). Separate from the toolkit install dir so reinstalls and content
+/** Per-extension private data dir (the module broker's `db` SQLite lives
+ *  here). Separate from the extension install dir so reinstalls and content
  *  hashing never touch user data; created on first use, deleted on
  *  uninstall. */
-export function toolkitDataDir(toolkitId: string): string {
-  return join(paths().root, "toolkit-data", toolkitId);
+export function extensionDataDir(extensionId: string): string {
+  return join(paths().root, "extension-data", extensionId);
 }
 
 export function modelPath(relPath: string): string {
@@ -220,7 +220,7 @@ export async function ensureDirs(): Promise<void> {
     p.sessionsDir,
     p.memoriesDir,
     p.modelsDir,
-    p.toolkitsDir,
+    p.extensionsDir,
     p.workersDir,
     p.cacheDir,
     p.logsDir,

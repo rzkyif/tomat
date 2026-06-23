@@ -130,7 +130,7 @@ export type Message = {
   toolCalls?: ToolCall[];
   // role: "tool" flat fields (ToolMessage on the wire).
   callId?: string;
-  toolkitId?: string;
+  extensionId?: string;
   toolName?: string;
   /** JSON string of arguments as the model emitted them. */
   arguments?: string;
@@ -172,19 +172,6 @@ export function makeMessageId(): string {
 export type Monitor = { id: string | number; name: string; isPrimary: boolean };
 export type Alignment = "left" | "center" | "right";
 
-export type ServerStatus = "Disabled" | "Error" | "Loading" | "Running";
-
-export interface ServerStatusUpdate {
-  // The sidecar kinds are "llama"/"llama-embed"/"speech"/"tool" (per
-  // @tomat/shared) but legacy components still read "llm"/"stt"/"bun".
-  // Keep this string-typed for compatibility; convert at the read site if
-  // strict matching is ever required.
-  server: string;
-  status: ServerStatus;
-  progress?: number;
-  message?: string;
-}
-
 export type DownloadStatus = "Pending" | "Downloading" | "Completed" | "Error" | "Cancelled";
 export type DownloadDestination = "Models";
 
@@ -195,7 +182,7 @@ export type DownloadDestination = "Models";
 export interface DownloadItem {
   id: string;
   source: string;
-  destination: "models" | "binaries" | "toolkits";
+  destination: "models" | "binaries" | "extensions";
   relPath: string;
   absPath: string;
   filename: string;

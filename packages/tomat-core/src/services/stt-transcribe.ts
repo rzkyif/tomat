@@ -7,6 +7,7 @@
 import { errMessage } from "@tomat/shared";
 import OpenAI from "openai";
 import { speechTranscribe } from "../sidecars/speech.ts";
+import { speechScheduler } from "./speech-scheduler.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import { getSecret } from "./secrets.ts";
@@ -15,12 +16,15 @@ const log = getLogger("stt");
 
 /** Transcribe `audio` using the provider the settings select. `signal`
  *  bounds the local-sidecar call on top of the built-in timeout (callers
- *  pass their request-abort signal; omit for the broker path). */
+ *  pass their request-abort signal; omit for the broker path). `clientId`
+ *  keys the local speech queue's per-client fairness (defaults to "core" for
+ *  internal callers like the module broker). */
 export async function transcribeAudio(
   settings: Record<string, unknown>,
   audio: File,
   language: string | undefined,
   signal?: AbortSignal,
+  clientId = "core",
 ): Promise<string> {
   const provider = strSetting(settings, "stt.provider", "local");
 
@@ -66,14 +70,16 @@ export async function transcribeAudio(
     }
   }
 
-  // Local mode: hit the speech sidecar. speechTranscribe bounds the upstream
-  // call and cancels it when the caller aborts, so neither a wedged sidecar nor
-  // an abandoned request keeps the Whisper inference running indefinitely. The
-  // resident model auto-detects the spoken language, so the `language` hint
-  // applies to the external provider only.
+  // Local mode: hit the speech sidecar through the speech scheduler so
+  // concurrent multi-client requests queue fairly behind the single engine.
+  // speechTranscribe bounds the upstream call and cancels it when the caller
+  // aborts, so neither a wedged sidecar nor an abandoned request keeps the
+  // Whisper inference running indefinitely. The resident model auto-detects the
+  // spoken language, so the `language` hint applies to the external provider
+  // only.
   const startedAt = Date.now();
   log.info(`local transcription starting (audio ${audio.size} bytes)`);
-  const text = await speechTranscribe(audio, signal);
+  const text = await speechScheduler().schedule(clientId, () => speechTranscribe(audio, signal));
   log.info(
     `local transcription done in ${Date.now() - startedAt}ms ` +
       `(audio ${audio.size} bytes, out ${text.length} chars)`,

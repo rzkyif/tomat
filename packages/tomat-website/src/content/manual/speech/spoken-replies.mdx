@@ -8,15 +8,15 @@ import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelt
 import Aside from "../../../components/Aside.astro";
 
 tomat can read the agent's replies aloud with **Text-to-Speech**. It is the
-counterpart to [Voice Input](/manual/speech/voice-input): where one turns your
+counterpart to [Speech-to-Text](/manual/speech/voice-input): where one turns your
 speech into a message, this turns the agent's answer into audio, so a conversation
 can be entirely spoken if you want it to be. It is useful when your eyes or hands
 are busy, or simply when you would rather listen than read.
 
 <Aside type="note">
   Text-to-Speech runs locally, so replies are spoken on your machine and nothing is sent away to be
-  voiced. (Voice Input can run locally too, but unlike it, Text-to-Speech has no External option: it
-  is always on-device.)
+  voiced. (Speech-to-Text can run locally too, but unlike it, Text-to-Speech has no External option:
+  it is always local.)
 </Aside>
 
 ## Turning it on
@@ -33,5 +33,5 @@ Picking a model may need a one-time download, which tomat always asks about firs
 and never fetches in the background.
 
 Once it is on, replies are spoken as they arrive, so spoken output pairs naturally
-with [Voice Input](/manual/speech/voice-input) for a hands-free session: you talk,
+with [Speech-to-Text](/manual/speech/voice-input) for a hands-free session: you talk,
 the agent answers aloud, and you never touch the keyboard.

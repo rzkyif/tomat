@@ -47,7 +47,15 @@ export const quickModelBarSamples = {
       onchange: noop,
       ariaLabel: "Smart preset",
     },
-    thinking: { value: thinkingSel.value, options: thinkingOpts, onchange: noop },
-    creativity: { value: creativitySel.value, options: creativityOpts, onchange: noop },
+    thinking: {
+      value: thinkingSel.value,
+      options: thinkingOpts,
+      onchange: noop,
+    },
+    creativity: {
+      value: creativitySel.value,
+      options: creativityOpts,
+      onchange: noop,
+    },
   },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof QuickModelBarView>>>;

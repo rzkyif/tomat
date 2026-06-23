@@ -5,8 +5,9 @@
 // registry is keyed by the exact View component name (`FooView`) so the
 // check-view-coverage walker can assert every View has samples here.
 
-export { agentMessageSamples, AGENT_ANSWER, AGENT_REASONING } from "./agent-message.ts";
+export { AGENT_ANSWER, AGENT_REASONING, agentMessageSamples } from "./agent-message.ts";
 export { attachmentListSamples } from "./attachment-list.ts";
+export { coreBarSamples } from "./core-bar.ts";
 export { diffViewSamples } from "./diff-view.ts";
 export { errorMessageSamples } from "./error-message.ts";
 export { expandableMessageSamples } from "./expandable-message.ts";
@@ -28,6 +29,7 @@ export { SAMPLE_FIRST_GROUP, SAMPLE_GROUPS, SAMPLE_VALUES } from "./settings-gro
 
 import { agentMessageSamples } from "./agent-message.ts";
 import { attachmentListSamples } from "./attachment-list.ts";
+import { coreBarSamples } from "./core-bar.ts";
 import { diffViewSamples } from "./diff-view.ts";
 import { errorMessageSamples } from "./error-message.ts";
 import { expandableMessageSamples } from "./expandable-message.ts";
@@ -51,6 +53,7 @@ import { userMessageSamples } from "./user-message.ts";
 export const SAMPLES = {
   AgentMessageView: agentMessageSamples,
   AttachmentListView: attachmentListSamples,
+  CoreBarView: coreBarSamples,
   DiffView: diffViewSamples,
   ErrorMessageView: errorMessageSamples,
   ExpandableMessageView: expandableMessageSamples,

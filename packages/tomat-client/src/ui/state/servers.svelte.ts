@@ -1,7 +1,9 @@
 /**
- * Reactive snapshot of sidecar status, fed by `sidecar.status` WS frames
- * from the currently-selected core. Components read `serversState.serverStatuses`
- * to render running / loading / error / disabled indicators.
+ * Reactive per-sidecar status facade, rebuilt from the aggregate `core.status`
+ * WS frame's `subsystems` breakdown (the per-sidecar `sidecar.status` frame was
+ * folded into `core.status`). Components read `serversState.serverStatuses` to
+ * render running / loading / error / disabled state per sidecar (the Services
+ * metrics table, the chat input placeholder + voice gating).
  */
 
 import type { ServerToClientFrame, SidecarKind, SidecarStatus } from "@tomat/shared";
@@ -11,20 +13,23 @@ export type ServerStatusUpdate = {
   server: SidecarKind;
   status: SidecarStatus;
   message?: string;
-  progress?: number;
 };
 
-class ServersState {
-  // Seeded with every sidecar kind so a render that reads a status (e.g. the
-  // chat input's STT chip) never hits an undefined entry before the first WS
-  // frame arrives. Keyed by SidecarKind so a stale key (the old "whisper" /
-  // "tts") is a compile error here rather than a runtime crash.
-  serverStatuses = $state<Record<SidecarKind, ServerStatusUpdate>>({
+// Every sidecar kind seeded to Disabled, so a render that reads a status (e.g.
+// the chat input's voice gating) never hits an undefined entry, and a kind the
+// core never started (commonly `tool`) reads as Disabled. Rebuilt fresh on each
+// frame, so a subsystem that drops off the breakdown reverts to Disabled.
+function freshStatuses(): Record<SidecarKind, ServerStatusUpdate> {
+  return {
     llama: { server: "llama", status: "Disabled" },
     "llama-embed": { server: "llama-embed", status: "Disabled" },
     speech: { server: "speech", status: "Disabled" },
     tool: { server: "tool", status: "Disabled" },
-  });
+  };
+}
+
+class ServersState {
+  serverStatuses = $state<Record<SidecarKind, ServerStatusUpdate>>(freshStatuses());
 
   private unsubscribe: (() => void) | null = null;
 
@@ -32,13 +37,12 @@ class ServersState {
   attach(): void {
     if (this.unsubscribe) return;
     this.unsubscribe = cores().subscribeWs((frame: ServerToClientFrame) => {
-      if (frame.kind !== "sidecar.status") return;
-      this.serverStatuses[frame.sidecar] = {
-        server: frame.sidecar,
-        status: frame.status,
-        message: frame.message,
-        progress: frame.progress,
-      };
+      if (frame.kind !== "core.status") return;
+      const next = freshStatuses();
+      for (const s of frame.snapshot.subsystems ?? []) {
+        next[s.kind] = { server: s.kind, status: s.status, message: s.message };
+      }
+      this.serverStatuses = next;
     });
   }
 

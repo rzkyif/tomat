@@ -4,7 +4,7 @@
  * user or the assistant.
  */
 
-import { platform, type ContextMenuItem } from "$lib/platform";
+import { type ContextMenuItem, platform } from "$lib/platform";
 import { isTauri } from "$lib/util/env";
 import { ttsState } from "$stores/tts.svelte";
 
@@ -80,7 +80,11 @@ export async function showAgentMessageMenu(ctx: AgentMenuCtx): Promise<void> {
       dispatch["tts-stop"] = () => ttsState.reset();
     } else if (ctx.isSynthesizing) {
       // Disabled, so no dispatch entry needed.
-      items.push({ id: "tts-synthesizing", label: "Synthesizing...", enabled: false });
+      items.push({
+        id: "tts-synthesizing",
+        label: "Synthesizing...",
+        enabled: false,
+      });
     } else {
       items.push({ id: "tts-play", label: "Read Aloud" });
       dispatch["tts-play"] = () => ttsState.replayMessage(ctx.messageId, ctx.result);

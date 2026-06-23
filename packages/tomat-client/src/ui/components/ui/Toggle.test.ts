@@ -41,7 +41,9 @@ describe("Toggle", () => {
   });
 
   it("slides the knob clip to the selected side", async () => {
-    const { container, rerender } = render(Toggle, { props: { checked: false } });
+    const { container, rerender } = render(Toggle, {
+      props: { checked: false },
+    });
     const knob = container.querySelector<HTMLElement>("[aria-hidden=true]")!;
     const offClip = knob.style.clipPath;
     expect(offClip).toContain("inset(");

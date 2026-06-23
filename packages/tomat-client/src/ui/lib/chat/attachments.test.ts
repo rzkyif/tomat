@@ -68,7 +68,12 @@ describe("collectAttachmentPaths", () => {
   it("collects image_file + document_file paths only", () => {
     const out = collectAttachmentPaths([
       { type: "text", text: "hi" },
-      { type: "image_file", path: "/a.png", filename: "a.png", mime: "image/png" },
+      {
+        type: "image_file",
+        path: "/a.png",
+        filename: "a.png",
+        mime: "image/png",
+      },
       { type: "document_file", path: "/b.md", filename: "b.md" },
       { type: "image_url", image_url: { url: "https://x" } },
       { type: "document", filename: "c.md", markdown: "inline" },
@@ -80,11 +85,21 @@ describe("collectAttachmentPaths", () => {
 describe("diffRemovedAttachmentPaths", () => {
   it("returns paths removed between two contents", () => {
     const prev: MessagePart[] = [
-      { type: "image_file", path: "/a.png", filename: "a.png", mime: "image/png" },
+      {
+        type: "image_file",
+        path: "/a.png",
+        filename: "a.png",
+        mime: "image/png",
+      },
       { type: "document_file", path: "/b.md", filename: "b.md" },
     ];
     const next: MessagePart[] = [
-      { type: "image_file", path: "/a.png", filename: "a.png", mime: "image/png" },
+      {
+        type: "image_file",
+        path: "/a.png",
+        filename: "a.png",
+        mime: "image/png",
+      },
     ];
     expect(diffRemovedAttachmentPaths(prev, next)).toEqual(["/b.md"]);
   });
@@ -119,7 +134,9 @@ describe("classifyAttachment", () => {
   });
 
   it("classifies a known document extension", () => {
-    expect(classifyAttachment("notes.md", "", true)).toEqual({ kind: "document" });
+    expect(classifyAttachment("notes.md", "", true)).toEqual({
+      kind: "document",
+    });
     expect(classifyAttachment("data.csv", "text/csv", false)).toEqual({
       kind: "document",
     });

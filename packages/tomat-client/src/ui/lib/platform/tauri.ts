@@ -8,8 +8,8 @@ import {
   currentMonitor as tauriCurrentMonitor,
   cursorPosition,
   getCurrentWindow,
-  primaryMonitor as tauriPrimaryMonitor,
   type Monitor as TauriMonitor,
+  primaryMonitor as tauriPrimaryMonitor,
 } from "@tauri-apps/api/window";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { join as tauriJoin, tempDir as tauriTempDir } from "@tauri-apps/api/path";
@@ -31,10 +31,10 @@ import {
 import { check as tauriUpdaterCheck, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import {
-  setPlatform,
   type ContextMenuItem,
   type MonitorInfo,
   type Platform,
+  setPlatform,
   type UpdateHandle,
 } from "./index";
 import { getLogger } from "$lib/util/log";
@@ -403,7 +403,9 @@ const impl: Platform = {
       // separators (PredefinedMenuItem) are unambiguous to the native layer.
       const menuItems = await Promise.all(
         items.map((item) => {
-          if ("separator" in item) return PredefinedMenuItem.new({ item: "Separator" });
+          if ("separator" in item) {
+            return PredefinedMenuItem.new({ item: "Separator" });
+          }
           const opts = {
             id: item.id,
             text: item.label,

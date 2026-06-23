@@ -181,8 +181,8 @@ Gotchas:
 Inline `#[cfg(test)] mod tests` for unit tests. The `KeychainStore` trait in
 both `tomat-core-keychain/src/main.rs` and
 `packages/tomat-client/src/tauri/src/commands/keychain.rs` is the pattern for
-any test that would otherwise touch a platform API: define a small trait, ship
-a `Real*` impl that wraps the real crate, and ship an `InMemory*` test impl. The
+any test that would otherwise touch a platform API: define a small trait, ship a
+`Real*` impl that wraps the real crate, and ship an `InMemory*` test impl. The
 same pattern works for filesystem (write to a tempdir under `env::temp_dir()`),
 system clock (newtype around `SystemTime::now`), and any OS resource that
 doesn't have a Rust-side mock.

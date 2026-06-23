@@ -1,0 +1,539 @@
+{
+  "$schema": "https://get.au.tomat.ing/schemas/tomat-v1.json",
+  "name": "tomat-builtin",
+  "displayName": "Built-In",
+  "description": "The everyday starter tools that come with tomat: search the web and read pages, do math, check the date and time, download and tidy files, open links, keep memories, schedule prompts, and save tables.",
+  "license": "MIT",
+  "homepage": "https://au.tomat.ing",
+  "database": true,
+  "tools": [
+    {
+      "name": "download_url",
+      "description": "Download a file from a URL into the user's Downloads folder. Use when the user asks to save or grab a file from a link.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Absolute http(s) URL of the file to download."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Optional filename for the saved file. Defaults to the last segment of the URL."
+          }
+        },
+        "required": ["url"]
+      },
+      "triggers": [
+        "download https://example.com/file.zip",
+        "save that file to my downloads",
+        "grab the pdf from this link",
+        "fetch this archive for me"
+      ],
+      "function": "download",
+      "permissions": {
+        "net": [
+          {
+            "host": "*",
+            "ports": [80, 443],
+            "reason": "Download from arbitrary http(s) URL"
+          }
+        ],
+        "read": [
+          {
+            "path": "$downloads",
+            "reason": "Check the Downloads folder for existing files and pick a non-clobbering name"
+          }
+        ],
+        "write": [
+          {
+            "path": "$downloads",
+            "reason": "Write the downloaded file"
+          }
+        ],
+        "env": [
+          {
+            "key": "XDG_DOWNLOAD_DIR",
+            "reason": "Honor the user's preferred Downloads folder (Linux/XDG)",
+            "optional": true
+          },
+          {
+            "key": "HOME",
+            "reason": "Resolve ~/Downloads fallback",
+            "optional": true
+          },
+          {
+            "key": "USERPROFILE",
+            "reason": "Resolve %USERPROFILE%\\Downloads on Windows",
+            "optional": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "open_website",
+      "description": "Open a web URL in the user's default browser. Use when the user asks to visit, open, or go to a website.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Absolute http:// or https:// URL to open."
+          }
+        },
+        "required": ["url"]
+      },
+      "triggers": [
+        "open https://news.ycombinator.com",
+        "take me to the github page",
+        "visit example.com",
+        "go to the docs website"
+      ],
+      "function": "open",
+      "alwaysAvailable": true,
+      "permissions": {
+        "run": [
+          {
+            "binary": "open",
+            "reason": "Hand the URL off to macOS's `open` command"
+          },
+          {
+            "binary": "xdg-open",
+            "reason": "Hand the URL off to Linux's `xdg-open`"
+          },
+          {
+            "binary": "rundll32",
+            "reason": "Hand the URL off to Windows's default protocol handler"
+          }
+        ]
+      }
+    },
+    {
+      "name": "askuser_demo",
+      "description": "Walk through the in-chat question forms: a text prompt, a single choice, and a multi-select with a write-in option. Use when the user wants to see how these forms work.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "triggers": ["demo the ask user flow", "show me how askUser works", "run the form demo"],
+      "function": "demo",
+      "permissions": {}
+    },
+    {
+      "name": "write_memory",
+      "description": "Create a memory, or replace an existing one's content. Memories are notes the user keeps in tomat; for a small change to an existing memory, prefer edit_memory.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Memory title. Creates the memory if no memory with this title exists."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full markdown content for the memory. Replaces any existing content."
+          }
+        },
+        "required": ["title", "content"]
+      },
+      "triggers": [
+        "write a memory about this",
+        "save these notes as a memory",
+        "create a new memory called shopping list",
+        "replace the contents of my notes memory"
+      ],
+      "function": "writeMemory",
+      "permissions": {
+        "memories": [
+          {
+            "access": "write",
+            "reason": "Create the memory or replace its content"
+          }
+        ]
+      }
+    },
+    {
+      "name": "edit_memory",
+      "description": "Change part of a memory by replacing one exact passage. Use for a small edit to an existing memory. The text to find must appear exactly once, so include enough surrounding context to make it unique.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Title of the memory to edit."
+          },
+          "find": {
+            "type": "string",
+            "description": "Exact text to find. Must match exactly one place in the memory."
+          },
+          "replace": {
+            "type": "string",
+            "description": "Replacement text. May be empty to delete the found text."
+          }
+        },
+        "required": ["title", "find", "replace"]
+      },
+      "triggers": [
+        "update the meeting time in my notes memory",
+        "fix the typo in that memory",
+        "change the deadline in my plan memory",
+        "add milk to my shopping list memory"
+      ],
+      "function": "editMemory",
+      "permissions": {
+        "memories": [
+          {
+            "access": "write",
+            "reason": "Apply the find/replace edit to the memory"
+          }
+        ]
+      }
+    },
+    {
+      "name": "read_memory",
+      "description": "Read the full content of one of the user's memories by title. Use when you need what a memory says to answer.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Title of the memory to read."
+          }
+        },
+        "required": ["title"]
+      },
+      "triggers": [
+        "read my meeting notes memory",
+        "what does my plan memory say",
+        "look at the shopping list memory",
+        "check the notes I saved"
+      ],
+      "function": "readMemory",
+      "permissions": {
+        "memories": [
+          {
+            "access": "read",
+            "reason": "Read the memory's content"
+          }
+        ]
+      }
+    },
+    {
+      "name": "read_skill_file",
+      "description": "Read a bundled reference file that ships alongside a skill. Use when a skill's instructions point you to one of its files.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Title of the skill the file belongs to."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the bundled file to read (as listed by the skill)."
+          }
+        },
+        "required": ["title", "name"]
+      },
+      "triggers": [
+        "read the template file from that skill",
+        "open the skill's reference file",
+        "show me the bundled checklist"
+      ],
+      "function": "readSkillFile",
+      "permissions": {
+        "memories": [
+          {
+            "access": "read",
+            "reason": "Read the skill's bundled file"
+          }
+        ]
+      }
+    },
+    {
+      "name": "schedule_prompt",
+      "description": "Propose a prompt for tomat to run on a schedule. At each scheduled time, tomat starts an automated session and sends the instruction. The user reviews and can edit the proposal before it is saved, so fill in your best suggestion. Times are the user's local time.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Short name for the scheduled prompt, also used as the session title when it fires."
+          },
+          "instruction": {
+            "type": "string",
+            "description": "The prompt to send when the schedule fires. Write it as a request from the user, e.g. \"Summarize the headlines from my feeds memory.\""
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["once", "interval", "weekly", "monthly", "yearly"],
+            "description": "When the prompt repeats: once at a date-time, every N minutes, on weekdays at a time, monthly on a day, or yearly on a date."
+          },
+          "at": {
+            "type": "string",
+            "description": "For kind \"once\": local date-time formatted \"YYYY-MM-DD HH:MM\"."
+          },
+          "everyMinutes": {
+            "type": "integer",
+            "description": "For kind \"interval\": minutes between runs, 1 or more."
+          },
+          "weekdays": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "For kind \"weekly\": weekdays to run on, 0 (Sunday) to 6 (Saturday)."
+          },
+          "month": {
+            "type": "integer",
+            "description": "For kind \"yearly\": month to run in, 1 to 12."
+          },
+          "day": {
+            "type": "integer",
+            "description": "For kinds \"monthly\" and \"yearly\": day of the month, 1 to 31 (clamped to shorter months)."
+          },
+          "hour": {
+            "type": "integer",
+            "description": "For kinds \"weekly\", \"monthly\", and \"yearly\": hour to run at, 0 to 23."
+          },
+          "minute": {
+            "type": "integer",
+            "default": 0,
+            "description": "For kinds \"weekly\", \"monthly\", and \"yearly\": minute to run at, 0 to 59."
+          },
+          "runMissed": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, a run missed while tomat was off is made up once on the next start."
+          }
+        },
+        "required": ["title", "instruction", "kind"]
+      },
+      "triggers": [
+        "remind me every monday at 9am to fill in the timesheet",
+        "every morning give me a summary of my notes",
+        "schedule a prompt for tomorrow at 8",
+        "check the news once every hour"
+      ],
+      "function": "schedulePrompt",
+      "permissions": {}
+    },
+    {
+      "name": "show_memory",
+      "description": "Show a memory to the user in the chat. Use when the user wants to see a memory itself rather than have it summarized.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Title of the memory to show."
+          }
+        },
+        "required": ["title"]
+      },
+      "triggers": [
+        "show me my meeting notes memory",
+        "display the shopping list",
+        "open my plan memory in the chat",
+        "let me see that memory"
+      ],
+      "function": "showMemory",
+      "permissions": {
+        "memories": [
+          {
+            "access": "read",
+            "reason": "Read the memory to display it"
+          }
+        ]
+      }
+    },
+    {
+      "name": "get_datetime",
+      "description": "Get the current date and time in the user's local timezone, including the weekday and UTC offset. Use to anchor relative dates like \"tomorrow\" or \"next friday\" instead of guessing.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "triggers": [
+        "what time is it",
+        "what's today's date",
+        "what day is it tomorrow",
+        "current date and time"
+      ],
+      "function": "getDatetime",
+      "alwaysAvailable": true,
+      "permissions": {}
+    },
+    {
+      "name": "calculator",
+      "description": "Evaluate a math expression and return the exact result. Supports arithmetic, comparisons, and functions like sqrt, sin, cos, log, min, max. Use for any calculation instead of doing the math yourself.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "The expression to evaluate, e.g. \"(2 + 3) * sqrt(16)\"."
+          }
+        },
+        "required": ["expression"]
+      },
+      "triggers": [
+        "calculate 15% of 2400",
+        "what is 2 to the power of 20",
+        "how much is 144 divided by 12",
+        "evaluate this expression"
+      ],
+      "function": "calculator",
+      "alwaysAvailable": true,
+      "permissions": {}
+    },
+    {
+      "name": "fetch_webpage",
+      "description": "Fetch a web page and return its readable text content. Use to read an article, a docs page, or any URL the user mentions.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Absolute http(s) URL of the page to read."
+          }
+        },
+        "required": ["url"]
+      },
+      "triggers": [
+        "read this article for me",
+        "summarize https://example.com/post",
+        "what does this page say",
+        "open the link and tell me the gist"
+      ],
+      "function": "fetchWebpage",
+      "permissions": {
+        "net": [
+          {
+            "host": "*",
+            "ports": [80, 443],
+            "reason": "Fetch the page the user asked to read"
+          }
+        ]
+      }
+    },
+    {
+      "name": "web_search",
+      "description": "Search the web (via DuckDuckGo) and return the top results. Use when the user asks about something current or outside your knowledge, then follow up with fetch_webpage to read a result.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query."
+          },
+          "maxResults": {
+            "type": "integer",
+            "default": 5,
+            "description": "How many results to return, 1 to 10."
+          }
+        },
+        "required": ["query"]
+      },
+      "triggers": [
+        "search the web for deno 2 release notes",
+        "look up the weather in amsterdam",
+        "find recent news about this",
+        "search for how tall the eiffel tower is"
+      ],
+      "function": "webSearch",
+      "permissions": {
+        "net": [
+          {
+            "host": "html.duckduckgo.com",
+            "ports": [443],
+            "reason": "Query DuckDuckGo's HTML search endpoint"
+          }
+        ]
+      }
+    },
+    {
+      "name": "organize_downloads",
+      "description": "Tidy the user's Downloads folder. The user picks which loose files to sort and reviews the plan, then the accepted files move into category folders like Images, Documents, and Archives.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "triggers": [
+        "organize my downloads folder",
+        "clean up my downloads",
+        "sort the files in downloads",
+        "tidy up my downloaded files"
+      ],
+      "function": "organizeDownloads",
+      "permissions": {
+        "read": [
+          {
+            "path": "$downloads",
+            "reason": "List the files in the Downloads folder"
+          }
+        ],
+        "write": [
+          {
+            "path": "$downloads",
+            "reason": "Move files into category subfolders"
+          }
+        ],
+        "env": [
+          {
+            "key": "XDG_DOWNLOAD_DIR",
+            "reason": "Honor the user's preferred Downloads folder (Linux/XDG)",
+            "optional": true
+          },
+          {
+            "key": "HOME",
+            "reason": "Resolve ~/Downloads fallback",
+            "optional": true
+          },
+          {
+            "key": "USERPROFILE",
+            "reason": "Resolve %USERPROFILE%\\Downloads on Windows",
+            "optional": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "collect_table",
+      "description": "Save rows the user mentions, like expenses, contacts, or scores, into this extension's private table store. Propose the columns and rows from the conversation; the user reviews and edits the table before anything is saved.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "description": "Name of the collection to save into, e.g. \"expenses\"."
+          },
+          "columns": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Column names for the table."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "description": "Proposed rows, one array of cell values per row, in column order."
+          }
+        },
+        "required": ["collection", "columns"]
+      },
+      "triggers": [
+        "save these expenses to a table",
+        "keep track of these scores",
+        "record those contacts for me",
+        "add this to my expenses collection"
+      ],
+      "function": "collectTable",
+      "permissions": {}
+    }
+  ],
+  "memories": [
+    { "kind": "knowledge", "path": "memories/tomat-overview.md" },
+    { "kind": "skill", "path": "memories/web-research" }
+  ]
+}

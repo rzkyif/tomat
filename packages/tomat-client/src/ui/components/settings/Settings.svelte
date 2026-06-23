@@ -4,11 +4,11 @@
   import { isTauri } from "$lib/util/env";
   import { groupDestinations, isGroupVisible, SETTINGS_SCHEMA } from "@tomat/shared";
   import type { SettingField } from "@tomat/shared";
-  import type { Monitor, ServerStatus } from "$lib/util/types";
+  import type { Monitor } from "$lib/util/types";
   import { hasAlpha } from "$lib/appearance/color";
   import { getLogger } from "$lib/util/log";
   import { defaultExpandedSections } from "@tomat/shared";
-  import { downloadsState, serversState, settingsState, viewState } from "../../state";
+  import { downloadsState, settingsState, viewState } from "../../state";
   import { connectionState } from "$stores/connection.svelte";
   import { confirmState } from "$stores/confirm.svelte";
   import { useSettingsForm } from "$composables/use-settings-form.svelte";
@@ -26,7 +26,6 @@
   import SettingsShellView from "@tomat/shared/ui/components/settings/SettingsShellView.svelte";
   import SettingsContentView from "@tomat/shared/ui/components/settings/SettingsContentView.svelte";
   import SettingsField from "./SettingsField.svelte";
-  import ServerStatusChip from "./ServerStatusChip.svelte";
   import DownloadsButton from "./DownloadsButton.svelte";
   import UpdateButton from "./UpdateButton.svelte";
   import ColorPickerModal from "./ColorPickerModal.svelte";
@@ -249,20 +248,6 @@
     settingsState.currentSettings["appearance.settingsDefaultColor"] as string,
   );
   const themeOverrideHex = $derived(hasAlpha(themeOverride) ? themeOverride : null);
-
-  // ServerStatusChip only renders when status is not Running and not Disabled;
-  // collapsed mode mirrors that with a colored dot.
-  const chipVisible = (status: ServerStatus): boolean =>
-    status !== "Running" && status !== "Disabled";
-  const chipBgMap: Record<ServerStatus, string> = {
-    Disabled: "bg-surface-inset",
-    Error: "bg-accent-red-200",
-    Loading: "bg-accent-yellow-200",
-    Running: "bg-accent-green-200",
-  };
-  const llmStatus = $derived(serversState.serverStatuses.llama);
-  const sttStatus = $derived(serversState.serverStatuses.speech);
-  const ttsStatus = $derived(serversState.serverStatuses.speech);
 </script>
 
 <div style:display="contents" style:--default-base={themeOverrideHex}>
@@ -327,31 +312,18 @@
   {/snippet}
 
   {#snippet sidebarFooter(collapsed: boolean)}
-    {#if collapsed}
-      {#if chipVisible(llmStatus.status as ServerStatus) || chipVisible(sttStatus.status as ServerStatus) || chipVisible(ttsStatus.status as ServerStatus)}
-        <div class="flex flex-col gap-1.5 items-center px-1.5 py-1">
-          {#if chipVisible(llmStatus.status as ServerStatus)}
-            <span class="w-3 h-3 rounded-full {chipBgMap[llmStatus.status as ServerStatus]}" title={"LLM: " + llmStatus.status}></span>
-          {/if}
-          {#if chipVisible(sttStatus.status as ServerStatus)}
-            <span class="w-3 h-3 rounded-full {chipBgMap[sttStatus.status as ServerStatus]}" title={"STT: " + sttStatus.status}></span>
-          {/if}
-          {#if chipVisible(ttsStatus.status as ServerStatus)}
-            <span class="w-3 h-3 rounded-full {chipBgMap[ttsStatus.status as ServerStatus]}" title={"TTS: " + ttsStatus.status}></span>
-          {/if}
-        </div>
-      {/if}
-    {:else}
-      <div class="flex flex-col gap-1.5 text-sm font-medium w-full">
-        <ServerStatusChip type="LLM" update={llmStatus} />
-        <ServerStatusChip type="STT" update={sttStatus} />
-        <ServerStatusChip type="TTS" update={ttsStatus} />
-      </div>
-    {/if}
+    <!-- Sidecar health is no longer shown here as per-service chips: every
+         failure folds into the core's status, surfaced (and expandable for the
+         specific errors) in the CoreBar pinned at the bottom of this view. -->
     <DownloadsButton {collapsed} disabled={connectionState.reconnecting} />
     <UpdateButton {collapsed} disabled={connectionState.reconnecting} />
   {/snippet}
 
+  <!-- Positioned, bubble-sized wrapper: the settings modals use Modal's default
+       `positioning="absolute"`, so they need a `relative` ancestor matching the
+       bubble for their backdrop blur (inset-0) to stay clipped to the bubble
+       instead of spilling across the viewport. -->
+  <div class="relative w-fit">
   <SettingsShellView
     bind:this={shell}
     groups={shellGroups}
@@ -384,4 +356,5 @@
   <DeletionsModal />
   <ShareModal open={shareOpen} onClose={() => (shareOpen = false)} />
   <ColorPickerModal />
+  </div>
 </div>

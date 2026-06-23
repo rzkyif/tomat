@@ -1,5 +1,5 @@
 // Minimal semver comparison shared by the signed-manifest consumers
-// (core.json self-update, binaries.json, toolkit.json) for downgrade refusal.
+// (core.json self-update, binaries.json, extension.json) for downgrade refusal.
 
 /** Compare two semver strings (major.minor.patch). Returns -1 if a < b,
  *  0 if equal, 1 if a > b. Pre-release tags and build metadata are

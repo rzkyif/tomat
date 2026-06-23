@@ -1,4 +1,4 @@
-// Filesystem path-safety guard shared across the core (toolkit extraction,
+// Filesystem path-safety guard shared across the core (extension extraction,
 // model downloads, local installs). The single canonical check for any path
 // built from user- or remote-influenced input before it is read/written.
 

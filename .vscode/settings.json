@@ -2,7 +2,7 @@
   "deno.enablePaths": [
     "packages/tomat-shared",
     "packages/tomat-core",
-    "packages/tomat-builtin-toolkit",
+    "packages/tomat-builtin",
     "scripts"
   ],
   "deno.lint": false,

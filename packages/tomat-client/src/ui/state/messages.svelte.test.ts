@@ -12,7 +12,7 @@ function toolMessage(id: string, status: ToolCallStatus, callId = id): Message {
     id,
     role: "tool",
     callId,
-    toolkitId: "kit",
+    extensionId: "kit",
     toolName: "do",
     arguments: "{}",
     status,
@@ -91,53 +91,17 @@ describe("messagesState.applyToolEvent", () => {
     });
     expect(messagesState.messages[0].progress).toBe(0.5);
     expect(messagesState.messages[0].label).toBe("Halfway");
-    messagesState.applyToolEvent({ kind: "tool.result", callId: "t1", result: { ok: true } });
+    messagesState.applyToolEvent({
+      kind: "tool.result",
+      callId: "t1",
+      result: { ok: true },
+    });
     expect(messagesState.messages[0].status).toBe("completed");
     expect(messagesState.messages[0].result).toEqual({ ok: true });
   });
 });
 
-describe("messagesState.interruptActiveToolCalls", () => {
-  beforeEach(() => messagesState.clear());
-
-  it("flips in-flight tool calls to failed/interrupted and returns the count", () => {
-    messagesState.hydrate(
-      [
-        toolMessage("a", "running"),
-        toolMessage("b", "pending", "cb"),
-        toolMessage("c", "awaiting_user", "cc"),
-      ],
-      null,
-    );
-    const changed = messagesState.interruptActiveToolCalls();
-    expect(changed).toBe(3);
-    for (const m of messagesState.messages) {
-      expect(m.status).toBe("failed");
-      expect(m.error).toBe("interrupted: core was disconnected mid-call");
-    }
-  });
-
-  it("leaves terminal tool calls untouched", () => {
-    messagesState.hydrate(
-      [
-        toolMessage("a", "completed"),
-        toolMessage("b", "failed", "cb"),
-        toolMessage("c", "cancelled", "cc"),
-      ],
-      null,
-    );
-    const changed = messagesState.interruptActiveToolCalls();
-    expect(changed).toBe(0);
-    expect(messagesState.messages.map((m) => m.status)).toEqual([
-      "completed",
-      "failed",
-      "cancelled",
-    ]);
-  });
-
-  it("preserves an existing error message", () => {
-    messagesState.hydrate([{ ...toolMessage("a", "running"), error: "boom" }], null);
-    messagesState.interruptActiveToolCalls();
-    expect(messagesState.messages[0].error).toBe("boom");
-  });
-});
+// A disconnect no longer fails in-flight tool calls: the turn keeps running
+// server-side and the client re-adopts it on reconnect (see streaming.svelte
+// softReset + sessions.svelte chat.subscribe). Genuinely orphaned non-terminal
+// tool calls are repaired on load by sessionsState.fixupLoadedMessages.

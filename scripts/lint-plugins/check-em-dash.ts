@@ -79,7 +79,12 @@ async function scan(): Promise<Violation[]> {
     for (let i = 0; i < lines.length; i++) {
       let col = lines[i].indexOf(EM_DASH);
       while (col !== -1) {
-        violations.push({ file, line: i + 1, column: col + 1, text: lines[i].trim() });
+        violations.push({
+          file,
+          line: i + 1,
+          column: col + 1,
+          text: lines[i].trim(),
+        });
         col = lines[i].indexOf(EM_DASH, col + 1);
       }
     }

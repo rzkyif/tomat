@@ -23,11 +23,11 @@ import {
   info,
   ok,
   packagesHashInputs,
+  r2Put,
+  rel,
   type ReleaseChannel,
   type ReleaseItem,
-  rel,
   REPO_ROOT,
-  r2Put,
   sha256File,
   signEd25519Bytes,
   step,
@@ -66,7 +66,9 @@ interface ClientManifest {
  *  (tauri.conf.json), which is exactly what Tauri's updater compares against
  *  client.json. Sourcing it from anywhere else risks an update loop. */
 async function readClientVersion(): Promise<string> {
-  const conf = JSON.parse(await Deno.readTextFile(TAURI_CONF_PATH)) as { version?: string };
+  const conf = JSON.parse(await Deno.readTextFile(TAURI_CONF_PATH)) as {
+    version?: string;
+  };
   if (!conf.version) fail(`no version in ${rel(TAURI_CONF_PATH)}`);
   return conf.version;
 }
@@ -135,12 +137,18 @@ async function buildClient(env: DeployEnv, channel: ReleaseChannel): Promise<voi
 async function findClientBundle(triple: Triple): Promise<ClientBundle> {
   const candidates: { dir: string; ext: string }[] = [];
   if (triple.endsWith("apple-darwin")) {
-    candidates.push({ dir: join(TAURI_BUNDLE_OUT, "macos"), ext: ".app.tar.gz" });
+    candidates.push({
+      dir: join(TAURI_BUNDLE_OUT, "macos"),
+      ext: ".app.tar.gz",
+    });
   } else if (triple.endsWith("pc-windows-msvc")) {
     candidates.push({ dir: join(TAURI_BUNDLE_OUT, "msi"), ext: ".msi" });
     candidates.push({ dir: join(TAURI_BUNDLE_OUT, "nsis"), ext: ".exe" });
   } else if (triple.endsWith("unknown-linux-gnu")) {
-    candidates.push({ dir: join(TAURI_BUNDLE_OUT, "appimage"), ext: ".AppImage" });
+    candidates.push({
+      dir: join(TAURI_BUNDLE_OUT, "appimage"),
+      ext: ".AppImage",
+    });
   }
   for (const c of candidates) {
     if (!(await exists(c.dir))) continue;
@@ -151,7 +159,13 @@ async function findClientBundle(triple: Triple): Promise<ClientBundle> {
       if (!(await exists(sigPath))) continue;
       const bundlePath = join(c.dir, entry.name);
       const stat = await Deno.stat(bundlePath);
-      return { triple, bundlePath, sigPath, filename: entry.name, size: stat.size };
+      return {
+        triple,
+        bundlePath,
+        sigPath,
+        filename: entry.name,
+        size: stat.size,
+      };
     }
   }
   fail(

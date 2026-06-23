@@ -125,7 +125,10 @@ export function buildSpeechStartOptions(state: SpeechState): StartOptions {
   return {
     binary: binPath(binaryName("tomat-core-speech")),
     args: argv,
-    readiness: { kind: "http", url: `http://${state.host}:${state.port}/health` },
+    readiness: {
+      kind: "http",
+      url: `http://${state.host}:${state.port}/health`,
+    },
     // Loading the turbo int8 model (~1 GB) on CPU can take a while.
     startupTimeoutMs: SPEECH_CALL_TIMEOUT_MS,
   };
@@ -173,7 +176,9 @@ export async function speechTranscribe(audio: Blob, signal?: AbortSignal): Promi
   } catch (err) {
     throw new AppError("server_unavailable", `speech sidecar not reachable: ${errMessage(err)}`);
   }
-  if (!res.ok) throw new AppError("provider_error", `speech /transcribe HTTP ${res.status}`);
+  if (!res.ok) {
+    throw new AppError("provider_error", `speech /transcribe HTTP ${res.status}`);
+  }
   const json = (await res.json()) as { text?: string };
   return json.text ?? "";
 }
@@ -187,7 +192,9 @@ export async function speechSpeak(
 ): Promise<Uint8Array> {
   const payload: Record<string, unknown> = { text };
   if (voice) payload.voice = voice;
-  if (typeof speed === "number" && Number.isFinite(speed)) payload.speed = speed;
+  if (typeof speed === "number" && Number.isFinite(speed)) {
+    payload.speed = speed;
+  }
   let res: Response;
   try {
     res = await fetch(`${speechBase()}/speak`, {

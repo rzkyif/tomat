@@ -621,7 +621,7 @@
       <i
         class="flex text-xl shrink-0 mt-0.5 {installServiceChoice
           ? 'i-material-symbols-check-box-rounded text-default-800'
-          : 'i-material-symbols-check-box-outline-blank-rounded text-default-500'}"
+          : 'i-material-symbols-check-box-outline-blank text-default-500'}"
       ></i>
       <div class="flex flex-col gap-0.5 flex-1 min-w-0">
         <span class="text-sm font-medium text-default-800">
@@ -645,7 +645,7 @@
       <i
         class="flex text-xl shrink-0 mt-0.5 {installNetworkChoice
           ? 'i-material-symbols-check-box-rounded text-default-800'
-          : 'i-material-symbols-check-box-outline-blank-rounded text-default-500'}"
+          : 'i-material-symbols-check-box-outline-blank text-default-500'}"
       ></i>
       <div class="flex flex-col gap-0.5 flex-1 min-w-0">
         <span class="text-sm font-medium text-default-800">

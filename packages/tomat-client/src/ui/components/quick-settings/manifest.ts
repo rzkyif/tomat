@@ -49,9 +49,18 @@ export const QUICK_SETTINGS_SECTIONS: QuickSettingsSectionDef[] = [
     fields: [
       { id: "stt.provider" },
       { id: "stt.preset" },
-      { id: "stt.external.baseUrl", visibleWhen: { field: "stt.provider", eq: "external" } },
-      { id: "stt.external.apiKey", visibleWhen: { field: "stt.provider", eq: "external" } },
-      { id: "stt.external.model", visibleWhen: { field: "stt.provider", eq: "external" } },
+      {
+        id: "stt.external.baseUrl",
+        visibleWhen: { field: "stt.provider", eq: "external" },
+      },
+      {
+        id: "stt.external.apiKey",
+        visibleWhen: { field: "stt.provider", eq: "external" },
+      },
+      {
+        id: "stt.external.model",
+        visibleWhen: { field: "stt.provider", eq: "external" },
+      },
       { id: "stt.activation" },
       { id: "stt.holdDuration" },
       { id: "stt.llmAutocorrect" },
@@ -64,9 +73,18 @@ export const QUICK_SETTINGS_SECTIONS: QuickSettingsSectionDef[] = [
     fields: [
       { id: "llm.provider" },
       { id: "llm.preset" },
-      { id: "llm.external.baseUrl", visibleWhen: { field: "llm.provider", eq: "external" } },
-      { id: "llm.external.apiKey", visibleWhen: { field: "llm.provider", eq: "external" } },
-      { id: "llm.external.model", visibleWhen: { field: "llm.provider", eq: "external" } },
+      {
+        id: "llm.external.baseUrl",
+        visibleWhen: { field: "llm.provider", eq: "external" },
+      },
+      {
+        id: "llm.external.apiKey",
+        visibleWhen: { field: "llm.provider", eq: "external" },
+      },
+      {
+        id: "llm.external.model",
+        visibleWhen: { field: "llm.provider", eq: "external" },
+      },
       { id: "llm.reasoning" },
       { id: "llm.showReasoning" },
     ],
@@ -75,7 +93,13 @@ export const QUICK_SETTINGS_SECTIONS: QuickSettingsSectionDef[] = [
     id: "tts",
     title: "Text-to-Speech",
     enabledField: "tts.enabled",
-    fields: [{ id: "tts.voice" }, { id: "tts.synthesisSpeed" }, { id: "tts.volume" }],
+    fields: [
+      { id: "tts.voice" },
+      { id: "tts.synthesisSpeed" },
+      {
+        id: "tts.volume",
+      },
+    ],
   },
   {
     id: "tools",

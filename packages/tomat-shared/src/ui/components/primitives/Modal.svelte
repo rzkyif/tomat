@@ -46,7 +46,7 @@
   );
 
   const positioningClass = $derived(
-    positioning === "fixed" ? "fixed pointer-events-auto" : "absolute",
+    positioning === "fixed" ? "fixed pointer-events-auto" : "absolute pointer-events-auto",
   );
 
   const surfaceClass = $derived(

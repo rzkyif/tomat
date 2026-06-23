@@ -6,8 +6,8 @@
 
 import type { RequiredFile, RequirementsSnapshot } from "@tomat/shared";
 import {
-  binaryUnavailableOnTriple,
   binarySource,
+  binaryUnavailableOnTriple,
   requiredBinaryKinds,
   requiredModelRefs,
 } from "@tomat/shared";

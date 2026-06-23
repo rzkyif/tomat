@@ -34,8 +34,8 @@ import {
   isClientGroup,
   isCoreGroup,
   SECRET_KEYS,
-  settingKeyDestination,
   type SettingGroupId,
+  settingKeyDestination,
 } from "@tomat/shared";
 import { platform } from "$lib/platform";
 import { cores } from "$lib/core";
@@ -181,7 +181,9 @@ class SettingsState {
       this.currentSettings[key] = next;
       transitions.push({ key, prev, next });
     }
-    for (const t of transitions) this.notifyListeners(t.key, t.prev, t.next, origin);
+    for (const t of transitions) {
+      this.notifyListeners(t.key, t.prev, t.next, origin);
+    }
     return transitions;
   }
 
@@ -357,7 +359,9 @@ class SettingsState {
     const gen = ++this.baselineGen;
     const api = cores().api().settings;
     const [coreStored, names] = await Promise.all([api.load(), api.listSecrets()]);
-    if (gen !== this.baselineGen || cores().currentEntry()?.id !== entry.id) return;
+    if (gen !== this.baselineGen || cores().currentEntry()?.id !== entry.id) {
+      return;
+    }
 
     const baseline: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(coreStored)) {
@@ -437,13 +441,17 @@ class SettingsState {
       // rather than drop; loadCoreSettings flushes the queue once the
       // baseline lands. Only real transitions queue: a no-op write must not
       // shadow the key from the incoming baseline.
-      if (isCoreKey(t.key) && !this.coreLoaded) this.pendingCoreEdits.add(t.key);
+      if (isCoreKey(t.key) && !this.coreLoaded) {
+        this.pendingCoreEdits.add(t.key);
+      }
     }
     for (const key of Object.keys(updates)) {
       // Record explicit user edits to secret fields so save() writes only the
       // ones actually touched (an untouched secret field is empty because its
       // value is never returned, and must not clobber the vault entry).
-      if (key in DEFAULTS && SECRET_KEY_SET.has(key)) this.dirtySecrets.add(key);
+      if (key in DEFAULTS && SECRET_KEY_SET.has(key)) {
+        this.dirtySecrets.add(key);
+      }
     }
 
     return await this.scheduleFlush();
@@ -514,7 +522,9 @@ class SettingsState {
       log.warn("Failed to save client settings:", e);
       errors.push(e);
       for (const key of Object.keys(DEFAULTS)) {
-        if (!SECRET_KEY_SET.has(key) && destinationFor(key) === "client") rollbackKeys.add(key);
+        if (!SECRET_KEY_SET.has(key) && destinationFor(key) === "client") {
+          rollbackKeys.add(key);
+        }
       }
     }
 

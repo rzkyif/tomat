@@ -31,14 +31,18 @@ export function scheduledPromptsRoutes(): Hono {
   r.post("/", async (c) => {
     const me = requireClient(c);
     const parsed = scheduledPromptDraftSchema.safeParse(await readJson(c));
-    if (!parsed.success) throw new AppError("validation_error", parsed.error.message);
+    if (!parsed.success) {
+      throw new AppError("validation_error", parsed.error.message);
+    }
     return c.json(promptScheduler().create(me.id, parsed.data), 201);
   });
 
   r.patch("/:id", async (c) => {
     const me = requireClient(c);
     const parsed = patchBodySchema.safeParse(await readJson(c));
-    if (!parsed.success) throw new AppError("validation_error", parsed.error.message);
+    if (!parsed.success) {
+      throw new AppError("validation_error", parsed.error.message);
+    }
     return c.json(promptScheduler().update(me.id, c.req.param("id"), parsed.data));
   });
 

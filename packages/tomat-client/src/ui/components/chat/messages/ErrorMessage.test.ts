@@ -2,7 +2,7 @@
 // into a user-readable bubble. Verifies the error-type → message lookup
 // table and the optional code block for the detail.
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { render } from "@testing-library/svelte";
 import ErrorMessage from "./ErrorMessage.svelte";
 import { settingsState } from "$stores";

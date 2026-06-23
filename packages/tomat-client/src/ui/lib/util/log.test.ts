@@ -14,7 +14,7 @@ vi.mock("$app/environment", () => ({
   },
 }));
 
-import { setPlatform, type Platform } from "$lib/platform";
+import { type Platform, setPlatform } from "$lib/platform";
 import { getLogger } from "./log";
 
 // Partial platform whose only job is to spy on logging.log. Mirrors the

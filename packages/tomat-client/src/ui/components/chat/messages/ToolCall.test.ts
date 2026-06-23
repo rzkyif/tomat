@@ -46,7 +46,12 @@ function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
 describe("ToolCall askUser kinds", () => {
   it("diff: clicking Accept auto-submits the verdict", async () => {
     const { container, onAnswer } = renderAwaiting([
-      { kind: "diff", question: "Apply this change?", before: "a\nb", after: "a\nc" },
+      {
+        kind: "diff",
+        question: "Apply this change?",
+        before: "a\nb",
+        after: "a\nc",
+      },
     ]);
     expect(container.textContent).toContain("Apply this change?");
     await fireEvent.click(buttonByText(container, "Accept"));
@@ -143,7 +148,14 @@ describe("ToolCall askUser kinds", () => {
     expect(inputs.map((i) => i.value)).toEqual(["bo", ""]);
     await fireEvent.input(inputs[1], { target: { value: "cy" } });
     await fireEvent.click(buttonByText(container, "Submit"));
-    expect(onAnswer).toHaveBeenCalledWith("req-1", [[{ name: "bo" }, { name: "cy" }]]);
+    expect(onAnswer).toHaveBeenCalledWith("req-1", [
+      [
+        { name: "bo" },
+        {
+          name: "cy",
+        },
+      ],
+    ]);
   });
 
   it("legacy choice questions still auto-submit a single-select pick", async () => {

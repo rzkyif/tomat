@@ -1,6 +1,6 @@
 // Storage view for the Settings "Storage" field: a full per-category view of
 // everything tomat keeps on disk (downloaded models, sidecar binaries, the
-// sessions JSON store, installed toolkits, caches, logs, settings) plus the
+// sessions JSON store, installed extensions, caches, logs, settings) plus the
 // clear/delete operations for each. The core is the sole authority on what may
 // be removed: every node is tagged with a `lock_reason` when it's in use, and a
 // delete request re-derives that lock server-side and refuses anything locked
@@ -12,20 +12,20 @@
 //   - cache:    never (regenerable)
 //   - logs:     the live core.log only
 //   - sessions: an agent is mid-turn on it (chat activeSessionIds)
-//   - toolkits: it has an enabled tool, or it's the built-in toolkit
+//   - extensions: it has an enabled tool, or it's the built-in extension
 //   - settings: never; "clearing" it is a factory reset (defaults + wipe secrets)
 
 import { basename, dirname, isAbsolute, join, normalize, relative } from "@std/path";
 import type { BinaryKind, StorageCategory, StorageCategoryId, StorageNode } from "@tomat/shared";
 import { requiredBinaryKinds, requiredModelRefs } from "@tomat/shared";
-import { paths, sessionDir, toolkitDir } from "../paths.ts";
+import { extensionDir, paths, sessionDir } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import { resolveHfPath } from "../models/manager.ts";
 import { binariesManager } from "../binaries/manager.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
-import { toolkitsRegistry } from "../toolkits/registry.ts";
-import { deleteToolkit } from "../toolkits/uninstall.ts";
+import { extensionsRegistry } from "../extensions/registry.ts";
+import { deleteExtension } from "../extensions/uninstall.ts";
 import { sessionsRepo } from "./sessions-store.ts";
 import { chatService } from "./chat.ts";
 import { loadCoreSettingsResolved, resetCoreSettings } from "./core-settings.ts";
@@ -55,7 +55,7 @@ interface LockContext {
   requiredModelPaths: Set<string>;
   lockedBinaryKinds: Set<BinaryKind>;
   activeSessionIds: Set<string>;
-  enabledToolkitIds: Set<string>;
+  enabledExtensionIds: Set<string>;
 }
 
 async function buildLockContext(): Promise<LockContext> {
@@ -72,29 +72,29 @@ async function buildLockContext(): Promise<LockContext> {
     if (bin) lockedBinaryKinds.add(bin);
   }
 
-  const enabledToolkitIds = new Set<string>();
+  const enabledExtensionIds = new Set<string>();
   try {
-    for (const tk of toolkitsRegistry().list()) {
+    for (const tk of extensionsRegistry().list()) {
       if (
-        toolkitsRegistry()
+        extensionsRegistry()
           .listTools(tk.id)
           .some((t) => t.enabled)
       ) {
-        enabledToolkitIds.add(tk.id);
+        enabledExtensionIds.add(tk.id);
       }
     }
   } catch (err) {
-    // A toolkit-registry read failure (e.g. a stale DB schema) must not blank
-    // the whole storage view; fall back to "nothing enabled" (the toolkits
+    // A extension-registry read failure (e.g. a stale DB schema) must not blank
+    // the whole storage view; fall back to "nothing enabled" (the extensions
     // category itself degrades to empty below).
-    log.warn(`toolkit lock scan failed: ${err instanceof Error ? err.message : err}`);
+    log.warn(`extension lock scan failed: ${err instanceof Error ? err.message : err}`);
   }
 
   return {
     requiredModelPaths,
     lockedBinaryKinds,
     activeSessionIds: chatService().activeSessionIds(),
-    enabledToolkitIds,
+    enabledExtensionIds,
   };
 }
 
@@ -159,7 +159,12 @@ async function collectModelFiles(base: string, dir: string, out: StorageNode[]):
       const ext = (e.name.includes(".") ? e.name.split(".").pop()! : "").toLowerCase();
       if (!MODEL_FILE_EXTS.has(ext)) continue;
       const size = await statSize(p);
-      out.push({ kind: "file", name: relative(base, p).replaceAll("\\", "/"), path: p, size });
+      out.push({
+        kind: "file",
+        name: relative(base, p).replaceAll("\\", "/"),
+        path: p,
+        size,
+      });
     }
   }
 }
@@ -278,7 +283,9 @@ const CATEGORIES: CategoryDescriptor[] = [
         ["staging", p.stagingDir],
       ];
       const out: StorageNode[] = [];
-      for (const [name, dir] of dirs) out.push(folderNode(name, dir, await dirSize(dir)));
+      for (const [name, dir] of dirs) {
+        out.push(folderNode(name, dir, await dirSize(dir)));
+      }
       return out;
     },
     deleteNode: async (node) => {
@@ -347,17 +354,17 @@ const CATEGORIES: CategoryDescriptor[] = [
     },
   },
   {
-    id: "toolkits",
-    label: "Toolkits",
+    id: "extensions",
+    label: "Extensions",
     deletable: true,
     async buildNodes(ctx) {
       const out: StorageNode[] = [];
-      for (const tk of toolkitsRegistry().list()) {
-        const dir = toolkitDir(tk.id);
+      for (const tk of extensionsRegistry().list()) {
+        const dir = extensionDir(tk.id);
         const lock =
           tk.source === "builtin"
-            ? "Built-in toolkit"
-            : ctx.enabledToolkitIds.has(tk.id)
+            ? "Built-in extension"
+            : ctx.enabledExtensionIds.has(tk.id)
               ? "Has enabled tools"
               : undefined;
         out.push(folderNode(tk.displayName || tk.id, dir, await dirSize(dir), [], lock));
@@ -366,7 +373,7 @@ const CATEGORIES: CategoryDescriptor[] = [
       return out;
     },
     deleteNode: async (node) => {
-      await deleteToolkit(basename(node.path));
+      await deleteExtension(basename(node.path));
     },
   },
   {
@@ -409,7 +416,13 @@ export async function buildStorageTree() {
   for (const desc of CATEGORIES) {
     const nodes = await safeBuildNodes(desc, ctx);
     const size = nodes.reduce((s, n) => s + n.size, 0);
-    categories.push({ id: desc.id, label: desc.label, deletable: desc.deletable, nodes, size });
+    categories.push({
+      id: desc.id,
+      label: desc.label,
+      deletable: desc.deletable,
+      nodes,
+      size,
+    });
   }
   return {
     categories,
@@ -455,7 +468,9 @@ export async function deleteStoragePaths(targets: string[]): Promise<void> {
  *  `settings` this performs the factory reset. */
 export async function clearStorageCategory(categoryId: string): Promise<void> {
   const desc = CATEGORY_BY_ID.get(categoryId as StorageCategoryId);
-  if (!desc) throw new AppError("validation_error", `unknown storage category: ${categoryId}`);
+  if (!desc) {
+    throw new AppError("validation_error", `unknown storage category: ${categoryId}`);
+  }
   if (!desc.deletable) {
     throw new AppError("validation_error", `category ${desc.id} is not deletable`);
   }
@@ -481,7 +496,9 @@ async function indexTree(): Promise<{
   const byPath = new Map<string, { desc: CategoryDescriptor; node: StorageNode }>();
   const add = (desc: CategoryDescriptor, node: StorageNode) => {
     byPath.set(normalize(node.path), { desc, node });
-    if (node.kind === "folder") for (const c of node.children) add(desc, c);
+    if (node.kind === "folder") {
+      for (const c of node.children) add(desc, c);
+    }
   };
   for (const desc of CATEGORIES) {
     for (const node of await safeBuildNodes(desc, ctx)) add(desc, node);

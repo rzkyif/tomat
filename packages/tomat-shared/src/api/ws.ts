@@ -10,8 +10,9 @@ import type {
   Session,
   TokenUsage,
 } from "../domain/session.ts";
-import type { DownloadEntry, RequiredFile, SidecarSnapshot } from "../domain/model.ts";
-import type { PermissionKind } from "../domain/toolkit.ts";
+import type { DownloadEntry, RequiredFile } from "../domain/model.ts";
+import type { CoreStatusSnapshot } from "../domain/core-status.ts";
+import type { PermissionKind } from "../domain/extension.ts";
 import type { ScheduledPromptDraft } from "../domain/scheduled-prompt.ts";
 import type { ErrorCode } from "./errors.ts";
 
@@ -46,6 +47,11 @@ export type ClientToServerFrame =
       anchorMessageId?: string;
     }
   | { kind: "chat.interrupt"; streamId: string }
+  // Ask the core to (re)attach this client to a session: if a turn is still
+  // generating on it, the core re-emits the in-flight messages so far (catch-up
+  // snapshot) and any outstanding tool prompt, then live deltas resume. Sent on
+  // session open and after a reconnect; a no-op when nothing is in flight.
+  | { kind: "chat.subscribe"; sessionId: string }
   | {
       kind: "tool.askuser_response";
       callId: string;
@@ -77,11 +83,11 @@ export type ClientToServerFrame =
 // via `z.enum(T)`. That is what keeps the type and the runtime validator from
 // drifting: a value added here flows to both sides at once. `permissionKind`
 // follows the same idea from its own home, `PERMISSION_KINDS` in
-// ../domain/toolkit.ts.
+// ../domain/extension.ts.
 
 export const CHAT_DONE_REASONS = ["stop", "interrupted", "hop_limit", "length"] as const;
 export const TOOL_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
-export const TOOLKIT_INSTALL_STREAMS = ["stdout", "stderr"] as const;
+export const EXTENSION_INSTALL_STREAMS = ["stdout", "stderr"] as const;
 export const SESSION_UPDATED_OPS = [
   "title_changed",
   "title_generating",
@@ -166,11 +172,11 @@ export type ServerToClientFrame =
       /** The Deno API that triggered the check (e.g. `fetch()`), when known. */
       apiName?: string;
       /** False when the access matches none of the tool's declared
-       *  permissions and the toolkit's undeclared policy is `ask`. */
+       *  permissions and the extension's undeclared policy is `ask`. */
       declared: boolean;
       /** The declared permission's reason, when declared. */
       reason?: string;
-      toolkitId: string;
+      extensionId: string;
       toolName: string;
     }
   | {
@@ -182,22 +188,24 @@ export type ServerToClientFrame =
   | { kind: "tool.result"; callId: string; result: unknown }
   | { kind: "tool.error"; callId: string; error: string; code?: ErrorCode }
   | { kind: "tool.cancelled"; callId: string }
-  // Toolkit install / lifecycle
+  // Extension install / lifecycle
   | {
-      kind: "toolkit.install_log";
+      kind: "extension.install_log";
       jobId: string;
       id: string;
-      stream: (typeof TOOLKIT_INSTALL_STREAMS)[number];
+      stream: (typeof EXTENSION_INSTALL_STREAMS)[number];
       line: string;
     }
   | {
-      kind: "toolkit.install_done";
+      kind: "extension.install_done";
       jobId: string;
       id: string;
       ok: boolean;
       code: number;
     }
-  | { kind: "toolkit.snapshot" }
+  | { kind: "extension.snapshot" }
+  // MCP servers: repaint after a config change, connect, or enablement toggle.
+  | { kind: "mcp.snapshot" }
   // Downloads + sidecars
   | { kind: "downloads.snapshot"; items: DownloadEntry[] }
   | {
@@ -217,16 +225,6 @@ export type ServerToClientFrame =
       deleted: string[];
       // Configured secret names; present only when the secret set changed.
       secretNames?: string[];
-    }
-  | {
-      kind: "sidecar.status";
-      sidecar: SidecarSnapshot["kind"];
-      status: SidecarSnapshot["status"];
-      message?: string;
-      // 0..1 during model load / download phases. Drives the progress chip
-      // next to the sidecar name in the Settings sidebar. Absent when the
-      // sidecar has no observable progress (e.g. while running).
-      progress?: number;
     }
   // Session sync (title generated server-side, REST message edits, deletes).
   // Streamed chat messages are NOT mirrored here; they arrive as
@@ -266,6 +264,15 @@ export type ServerToClientFrame =
     }
   // Self-update
   | { kind: "update.staged"; version: string }
-  | { kind: "update.error"; code: ErrorCode; message: string };
+  | { kind: "update.error"; code: ErrorCode; message: string }
+  // Aggregate core lifecycle status (Starting Up / Idle / Busy / Updating /
+  // Error), plus the per-subsystem breakdown and (while busy) queue counts that
+  // back the CoreBar's expanded detail card. The SINGLE status frame: there is
+  // no separate per-sidecar frame; the client rebuilds its per-sidecar facade
+  // (`serversState`) from `snapshot.subsystems`. Broadcast to every connected
+  // client on each change, the one status frame that is intentionally global
+  // (not per-client), since core readiness and load are the same for everyone.
+  // The client merges it with its own transport state before display.
+  | { kind: "core.status"; snapshot: CoreStatusSnapshot };
 
 export type WsFrame = ClientToServerFrame | ServerToClientFrame;

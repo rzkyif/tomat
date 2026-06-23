@@ -12,6 +12,15 @@
 // therefore converge by construction; the client never mints ids for these
 // messages.
 //
+// Resume: the turn keeps running if its client disconnects (transient drop or a
+// core swap). Each ActiveStream buffers its born-but-not-yet-finalized messages
+// (in memory) and any open tool prompt; a reconnecting client (same clientId)
+// sends `chat.subscribe`, and `resubscribe()` re-emits those born snapshots
+// (catch-up) plus the open prompt, to the owning client only, after which live
+// deltas resume on the new socket. A tool awaiting user input therefore survives
+// a client disconnect / restart transparently to the tool code (the worker stays
+// paused); a core restart drops the buffer, which is acceptable.
+//
 // Every settings key read below is defined in the shared schema
 // (`@tomat/shared/src/domain/settings/groups/*.ts`). Defaults applied if
 // absent (sparse settings.json convention).
@@ -34,13 +43,14 @@
 //   tools.alwaysAvailableEnabled       : boolean (default true)
 //   memories.enabled                   : boolean (default true, summary injection)
 //   memories.maxRelevant               : number  (default 3)
+//   memories.skills.autoRelevancy      : boolean (default true, auto-surface skills)
 
 import type OpenAI from "openai";
 import type {
   AskUserAnswer,
   AssistantMessage,
-  DisplayMessage,
   ChatStartFrame,
+  DisplayMessage,
   ErrorCode,
   MemoryFilterMessage,
   Message,
@@ -82,10 +92,14 @@ import { resolveEndpoint } from "./endpoint-resolver.ts";
 import { thinkingBudget } from "./thinking-budget.ts";
 import { loadCoreSettings } from "./core-settings.ts";
 import { llmIdle } from "./llm-idle.ts";
+import { coreStatus } from "./core-status.ts";
 import { promptScheduler } from "./prompt-scheduler.ts";
-import { toolkitsRegistry } from "../toolkits/registry.ts";
-import { validateAndNormalizeToolArgs } from "../toolkits/validate-args.ts";
-import { type CallController, workerPool } from "../toolkits/worker-pool.ts";
+import { extensionsRegistry } from "../extensions/registry.ts";
+import { validateAndNormalizeToolArgs } from "../extensions/validate-args.ts";
+import { type CallController, workerPool } from "../extensions/worker-pool.ts";
+import { mcpRegistry } from "../mcp/registry.ts";
+import { mcpManager } from "../mcp/manager.ts";
+import { mcpResolveTokens } from "../mcp/tokens.ts";
 import { wsHub } from "../ws/hub.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
@@ -102,6 +116,16 @@ interface ActiveStream {
   clientId: string;
   abort: AbortController;
   activeToolCalls: Set<string>;
+  // Born-but-not-yet-finalized messages of this turn, in birth order, each with
+  // the afterId it was born at. Their `message` refs are the live objects the
+  // run loop mutates, so their `content`/`status` reflect the stream so far.
+  // A client that (re)subscribes mid-turn gets these re-emitted as born
+  // snapshots for full live catch-up. Cleared per message on finalize.
+  liveMessages: Map<string, { message: Message; afterId: string | null }>;
+  // Outstanding tool prompts (askuser / permission / schedule-confirm) keyed by
+  // callId, retained so a (re)subscribing client gets the open prompt re-sent.
+  // Dropped when the prompt is answered or its call ends. See Phase 5.
+  outstandingPrompts: Map<string, ServerToClientFrame>;
 }
 
 export class ChatService {
@@ -128,8 +152,11 @@ export class ChatService {
       clientId,
       abort,
       activeToolCalls: new Set(),
+      liveMessages: new Map(),
+      outstandingPrompts: new Map(),
     };
     this.active.set(frame.streamId, stream);
+    coreStatus().noteActiveStreams(this.active.size);
     // Cancel any pending idle-unload as soon as a turn begins (the model is
     // about to be used). run() reloads it before scheduling if it was unloaded.
     llmIdle().noteActivity();
@@ -145,6 +172,7 @@ export class ChatService {
       })
       .finally(() => {
         this.active.delete(frame.streamId);
+        coreStatus().noteActiveStreams(this.active.size);
         // When the last turn ends, arm idle-unload (no-op unless enabled).
         llmIdle().onTurnEnd(this.active.size);
       });
@@ -168,6 +196,7 @@ export class ChatService {
   ): void {
     const entry = inFlightControllers.get(callId);
     if (!entry || entry.clientId !== clientId) return;
+    this.clearPrompt(callId);
     entry.ctl.respondAskUser(requestId, answers);
   }
 
@@ -179,6 +208,7 @@ export class ChatService {
   ): void {
     const entry = inFlightControllers.get(callId);
     if (!entry || entry.clientId !== clientId) return;
+    this.clearPrompt(callId);
     entry.ctl.respondPermission(requestId, allow);
   }
 
@@ -198,6 +228,7 @@ export class ChatService {
     // or forged) must not persist anything: the insert below would otherwise
     // run once per replay.
     if (!entry.ctl.hasPendingSchedule(requestId)) return;
+    this.clearPrompt(callId);
     const confirmed = accepted && draft !== undefined;
     if (confirmed) {
       try {
@@ -228,17 +259,64 @@ export class ChatService {
     return out;
   }
 
+  /** (Re)attach a client to a session after it opens it or reconnects. If a
+   *  turn is still generating on this client's session, re-emit the in-flight
+   *  messages so far as born snapshots (full live catch-up) plus any open tool
+   *  prompt, then live deltas resume naturally (the owning clientId is stable
+   *  across reconnect, so broadcastToClient reaches the new socket). A no-op
+   *  when nothing is in flight. Targeted at the owning client only: a paired
+   *  client that does not own the stream gets nothing. */
+  resubscribe(clientId: string, sessionId: string): void {
+    const stream = this.findActiveOwned(clientId, sessionId);
+    if (!stream) return;
+    for (const { message, afterId } of stream.liveMessages.values()) {
+      this.send(clientId, {
+        kind: "chat.message",
+        streamId: stream.streamId,
+        sessionId: stream.sessionId,
+        message,
+        afterId,
+        final: false,
+      });
+    }
+    // Re-send any outstanding tool prompt so a reconnected / restarted client
+    // can answer it (the worker stayed paused the whole time; see Phase 5).
+    for (const frame of stream.outstandingPrompts.values()) {
+      this.send(clientId, frame);
+    }
+  }
+
   // --- internals --------------------------------------------------------
 
   private hasActiveOn(clientId: string, sessionId: string): boolean {
+    return this.findActiveOwned(clientId, sessionId) !== null;
+  }
+
+  private findActiveOwned(clientId: string, sessionId: string): ActiveStream | null {
     for (const s of this.active.values()) {
-      if (s.clientId === clientId && s.sessionId === sessionId) return true;
+      if (s.clientId === clientId && s.sessionId === sessionId) return s;
     }
-    return false;
+    return null;
   }
 
   private send(clientId: string, frame: ServerToClientFrame): void {
     wsHub().broadcastToClient(clientId, frame);
+  }
+
+  /** Emit a tool prompt (askuser / permission / schedule-confirm) AND retain it
+   *  on the stream so a (re)subscribing client gets the open prompt re-sent.
+   *  At most one prompt per call is open at a time, so keying by callId is
+   *  enough; cleared on response (clearPrompt) or when the call ends. */
+  private emitPrompt(stream: ActiveStream, callId: string, frame: ServerToClientFrame): void {
+    stream.outstandingPrompts.set(callId, frame);
+    this.send(stream.clientId, frame);
+  }
+
+  /** Drop a retained prompt once it is answered or its call ends, so a later
+   *  resubscribe doesn't re-show an already-handled prompt. */
+  private clearPrompt(callId: string): void {
+    const entry = inFlightControllers.get(callId);
+    entry?.stream.outstandingPrompts.delete(callId);
   }
 
   private async run(stream: ActiveStream, frame: ChatStartFrame): Promise<void> {
@@ -291,7 +369,9 @@ export class ChatService {
           payload: { messageId: id },
         });
       }
-      if (removed.length > 0) history = sessionsRepo().listMessages(stream.sessionId);
+      if (removed.length > 0) {
+        history = sessionsRepo().listMessages(stream.sessionId);
+      }
     }
     const anchorId = frame.anchorMessageId ?? lastUserId(history);
     // Condition the model on the anchor's turn, not anything newer: for a
@@ -401,7 +481,7 @@ export class ChatService {
         }
 
         toolList = chosenTools
-          .map((c) => toolkitsRegistry().getTool(c.toolId))
+          .map((c) => extensionsRegistry().getTool(c.toolId))
           .filter((t): t is NonNullable<typeof t> => t !== undefined)
           // Final exposure gate: the relevance filter's candidate set is not
           // grant-aware, so re-apply enabled + fully-granted here (status is
@@ -443,6 +523,32 @@ export class ChatService {
         filterMsg.errorMessage = errMessage(err);
         writer.finalize(filterMsg);
       }
+
+      // Enabled MCP tools aren't in the embedding relevance filter (they live on
+      // their servers); offer them like always-available tools. Two guards:
+      //  - skip any whose name an extension tool already claims (a duplicate
+      //    function name confuses the model, and dispatch resolves the name to
+      //    the extension anyway, so the MCP entry would be dead weight), and
+      //    likewise skip a second MCP tool of the same name.
+      //  - bound the count at `maxTools` so a server with many enabled tools
+      //    can't blow the tool/context budget.
+      const mcpMaxTools = numSetting(settings, "tools.maxTools", 30);
+      const offered = new Set(toolList.map((t) => (t.type === "function" ? t.function.name : "")));
+      let mcpAdded = 0;
+      for (const t of mcpRegistry().listAllTools()) {
+        if (!t.enabled || offered.has(t.name)) continue;
+        if (mcpAdded >= mcpMaxTools) break;
+        offered.add(t.name);
+        mcpAdded++;
+        toolList.push({
+          type: "function",
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          },
+        });
+      }
     }
 
     // The tools hint is rendered client-side (the [toolsAvailable:...]
@@ -473,6 +579,7 @@ export class ChatService {
           lastUserText(history),
           queryVector,
           numSetting(settings, "memories.maxRelevant", 3),
+          boolSetting(settings, "memories.skills.autoRelevancy", true),
         );
         const memoriesBlock = relevantMemoriesBlock(memories);
         if (memoriesBlock) {
@@ -480,6 +587,7 @@ export class ChatService {
         }
         memoryFilterMsg.relevant = memories.map((m) => ({
           memoryId: m.memoryId,
+          kind: m.kind,
           title: m.title,
           summary: m.summary,
           score: m.score,
@@ -492,6 +600,22 @@ export class ChatService {
         memoryFilterMsg.errorMessage = errMessage(err);
         writer.finalize(memoryFilterMsg);
       }
+    }
+
+    // Resolve any `@resource` / `/prompt` MCP references in the user's message
+    // (live server round-trips), appending the fetched blocks to the system
+    // prompt. Non-fatal: a failed reference just doesn't expand. The claimed
+    // token stems are passed to the memory expander so a slug naming both an MCP
+    // resource and a memory expands once (MCP wins), not twice.
+    let mcpClaimedTokens = new Set<string>();
+    try {
+      const mcp = await mcpResolveTokens(lastUserText(history) ?? "");
+      mcpClaimedTokens = mcp.claimed;
+      if (mcp.block) {
+        systemPrompt = systemPrompt ? `${systemPrompt}\n\n${mcp.block}` : mcp.block;
+      }
+    } catch (err) {
+      log.warn(`stream ${stream.streamId}: MCP token resolution failed: ${errMessage(err)}`);
     }
 
     // Reading + base64-encoding image attachments is the costly part of building
@@ -514,6 +638,7 @@ export class ChatService {
         systemPrompt,
         stream.sessionId,
         attachmentCache,
+        mcpClaimedTokens,
       );
       const req: LlmRequest = {
         endpoint,
@@ -580,7 +705,7 @@ export class ChatService {
           ord: -1,
           role: "tool",
           callId: pending.callId,
-          toolkitId: pending.toolkitId,
+          extensionId: pending.extensionId,
           toolName: pending.toolName,
           arguments: pending.arguments,
           status: "running",
@@ -588,13 +713,13 @@ export class ChatService {
         };
         writer.born(toolMsg);
         log.info(
-          `stream ${stream.streamId}: tool call ${pending.toolkitId}/${pending.toolName} ` +
+          `stream ${stream.streamId}: tool call ${pending.extensionId}/${pending.toolName} ` +
             `(${pending.callId}) starting`,
         );
         const startedAt = Date.now();
         await this.executeToolCall(stream, pending, toolMsg, writer);
         log.info(
-          `stream ${stream.streamId}: tool call ${pending.toolkitId}/${pending.toolName} ` +
+          `stream ${stream.streamId}: tool call ${pending.extensionId}/${pending.toolName} ` +
             `(${pending.callId}) ${toolMsg.status} in ${Date.now() - startedAt}ms` +
             (toolMsg.error ? `: ${toolMsg.error}` : ""),
         );
@@ -644,7 +769,7 @@ export class ChatService {
       number,
       {
         callId: string;
-        toolkitId: string;
+        extensionId: string;
         toolName: string;
         argsBuffer: string;
       }
@@ -687,7 +812,9 @@ export class ChatService {
       }
     };
     const scheduleFlush = () => {
-      if (flushTimer === undefined) flushTimer = setTimeout(flushDeltas, COALESCE_MS);
+      if (flushTimer === undefined) {
+        flushTimer = setTimeout(flushDeltas, COALESCE_MS);
+      }
     };
     // Reasoning is finalized HERE, not by the caller: at the first content
     // delta when the model produced a reply (so the thought bubble closes
@@ -759,6 +886,10 @@ export class ChatService {
               finalizeReasoning(false);
             }
             assistantContent += s;
+            // Keep the buffered live ref current so a mid-stream resubscribe
+            // catches up to the text so far (the connected client still
+            // reconstructs from born + deltas; this only affects catch-up).
+            if (assistantMsg) assistantMsg.content = assistantContent;
             pendingContent += s;
             scheduleFlush();
           },
@@ -780,6 +911,7 @@ export class ChatService {
               writer.born(reasoningMsg);
             }
             reasoning += s;
+            if (reasoningMsg) reasoningMsg.content = reasoning;
             pendingReasoning += s;
             scheduleFlush();
           },
@@ -788,7 +920,7 @@ export class ChatService {
             if (!asm) {
               asm = {
                 callId: chunk.id ?? newCallId(),
-                toolkitId: "",
+                extensionId: "",
                 toolName: chunk.name ?? "",
                 argsBuffer: "",
               };
@@ -849,7 +981,7 @@ export class ChatService {
         interrupted: true,
       };
     }
-    // Resolve tool names to (toolkitId, name) pairs.
+    // Resolve tool names to (extensionId, name) pairs.
     const allEnabled = enabledToolsByName();
     const resolved: ResolvedPendingCall[] = [];
     for (const [idx, asm] of toolAssemblers.entries()) {
@@ -867,7 +999,7 @@ export class ChatService {
         // model on next hop.
         resolved.push({
           callId,
-          toolkitId: "unknown",
+          extensionId: "unknown",
           toolName: asm.toolName,
           arguments: asm.argsBuffer || "{}",
           unknown: true,
@@ -876,7 +1008,7 @@ export class ChatService {
       }
       resolved.push({
         callId,
-        toolkitId: found.toolkitId,
+        extensionId: found.extensionId,
         toolName: asm.toolName,
         arguments: asm.argsBuffer || "{}",
       });
@@ -899,7 +1031,7 @@ export class ChatService {
     if (assistantMsg && resolved.length > 0) {
       assistantMsg.toolCalls = resolved.map<ToolCall>((r) => ({
         callId: r.callId,
-        toolkitId: r.toolkitId,
+        extensionId: r.extensionId,
         toolName: r.toolName,
         arguments: r.arguments,
         status: "pending",
@@ -976,6 +1108,47 @@ export class ChatService {
 
   // Runs one tool call and fills the outcome into `msg` (the message the
   // caller already announced as born); the caller finalizes it afterwards.
+  /** Run an MCP tool: parse the model's arguments, call the server, and fold
+   *  the returned content into the tool message. MCP tools have no local
+   *  permissions, progress, or askUser flow, so this is a straight request. */
+  private async executeMcpToolCall(
+    pending: ResolvedPendingCall,
+    msg: ToolMessage,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    let args: Record<string, unknown> = {};
+    try {
+      args = pending.arguments ? JSON.parse(pending.arguments) : {};
+    } catch {
+      // Leave args empty; the server validates against its own schema.
+    }
+    try {
+      const result = (await mcpManager().callTool(
+        pending.extensionId,
+        pending.toolName,
+        args,
+        signal,
+      )) as {
+        content?: Array<{ type: string; text?: string }>;
+        isError?: boolean;
+      };
+      const text = (result.content ?? [])
+        .filter((c) => c.type === "text" && typeof c.text === "string")
+        .map((c) => c.text)
+        .join("\n");
+      if (result.isError) {
+        msg.status = "failed";
+        msg.error = text || "MCP tool returned an error";
+      } else {
+        msg.status = "completed";
+        msg.result = text || result;
+      }
+    } catch (err) {
+      msg.status = "failed";
+      msg.error = errMessage(err);
+    }
+  }
+
   private async executeToolCall(
     stream: ActiveStream,
     pending: ResolvedPendingCall,
@@ -987,37 +1160,47 @@ export class ChatService {
       msg.error = `tool ${pending.toolName} not available`;
       return;
     }
-    const tool = toolkitsRegistry().getTool(`${pending.toolkitId}::${pending.toolName}`);
+    // MCP tools run on their server, not in the local sandbox: dispatch via the
+    // MCP client and skip the worker-pool / permission machinery.
+    if (mcpRegistry().get(pending.extensionId)) {
+      await this.executeMcpToolCall(pending, msg, stream.abort.signal);
+      return;
+    }
+    const tool = extensionsRegistry().getTool(`${pending.extensionId}::${pending.toolName}`);
     if (!tool) {
       msg.status = "failed";
       msg.error = "tool not found";
       return;
     }
-    // Pre-flight before dispatch: (1) re-verify the toolkit's content hash so a
-    // toolkit tampered since boot can't execute (this runs on EVERY call, so a
+    // Pre-flight before dispatch: (1) re-verify the extension's content hash so a
+    // extension tampered since boot can't execute (this runs on EVERY call, so a
     // reused warm worker is re-checked too); (2) validate the model-emitted
     // arguments against the tool's declared schema and fill defaults, so the
     // worker receives normalized args (not raw model output).
     //
     // Residual TOCTOU: a tool granted write into its OWN installed code dir
     // could alter that code in the window between this check and the worker's
-    // import. The content-hash gate therefore assumes a toolkit is not granted
-    // write to its own installedPath; never grant $toolkit write to an untrusted
-    // toolkit.
+    // import. The content-hash gate therefore assumes a extension is not granted
+    // write to its own installedPath; never grant $extension write to an untrusted
+    // extension.
     let normalizedArgs: string;
     try {
-      await toolkitsRegistry().verifyHashFresh(pending.toolkitId);
+      await extensionsRegistry().verifyHashFresh(pending.extensionId);
       normalizedArgs = validateAndNormalizeToolArgs(tool, pending.arguments);
     } catch (err) {
       const errMsg = errMessage(err);
-      this.send(stream.clientId, { kind: "tool.error", callId: pending.callId, error: errMsg });
+      this.send(stream.clientId, {
+        kind: "tool.error",
+        callId: pending.callId,
+        error: errMsg,
+      });
       msg.status = "failed";
       msg.error = errMsg;
       return;
     }
     const ctl = workerPool().startCall(
       {
-        toolkitId: pending.toolkitId,
+        extensionId: pending.extensionId,
         tool,
         required: tool.requiredPermissions,
         argumentsJson: normalizedArgs,
@@ -1032,7 +1215,9 @@ export class ChatService {
           // Persist the tool's latest wording + progress on the message so
           // the reloaded bubble keeps them.
           if (event.label !== undefined) msg.label = event.label;
-          if (event.description !== undefined) msg.description = event.description;
+          if (event.description !== undefined) {
+            msg.description = event.description;
+          }
           msg.progress = event.progress;
           this.send(stream.clientId, {
             kind: "tool.progress",
@@ -1042,21 +1227,21 @@ export class ChatService {
             description: event.description,
           });
         } else if (event.kind === "ask_user_request") {
-          this.send(stream.clientId, {
+          this.emitPrompt(stream, pending.callId, {
             kind: "tool.askuser_request",
             callId: pending.callId,
             requestId: event.requestId,
             questions: event.questions,
           });
         } else if (event.kind === "schedule_request") {
-          this.send(stream.clientId, {
+          this.emitPrompt(stream, pending.callId, {
             kind: "schedule.confirm_request",
             callId: pending.callId,
             requestId: event.requestId,
             draft: event.draft,
           });
         } else if (event.kind === "permission_request") {
-          this.send(stream.clientId, {
+          this.emitPrompt(stream, pending.callId, {
             kind: "tool.permission_request",
             callId: pending.callId,
             requestId: event.requestId,
@@ -1065,7 +1250,7 @@ export class ChatService {
             apiName: event.apiName,
             declared: event.declared,
             reason: event.reason,
-            toolkitId: pending.toolkitId,
+            extensionId: pending.extensionId,
             toolName: pending.toolName,
           });
         } else if (event.kind === "log") {
@@ -1100,6 +1285,7 @@ export class ChatService {
     inFlightControllers.set(pending.callId, {
       clientId: stream.clientId,
       ctl,
+      stream,
     });
     try {
       const result = await ctl.done;
@@ -1120,6 +1306,7 @@ export class ChatService {
       msg.status = "failed";
       msg.error = errMsg;
     } finally {
+      stream.outstandingPrompts.delete(pending.callId);
       inFlightControllers.delete(pending.callId);
     }
   }
@@ -1140,11 +1327,14 @@ export function __resetForTesting(): void {
 
 // In-flight controllers shared between the chat service (creator) and
 // the ws handlers (which forward tool.askuser_response and tool.cancel).
-const inFlightControllers = new Map<string, { clientId: string; ctl: CallController }>();
+const inFlightControllers = new Map<
+  string,
+  { clientId: string; ctl: CallController; stream: ActiveStream }
+>();
 
 interface ResolvedPendingCall {
   callId: string;
-  toolkitId: string;
+  extensionId: string;
   toolName: string;
   arguments: string;
   unknown?: boolean;
@@ -1174,6 +1364,9 @@ class TurnWriter {
   }
 
   born(message: Message): void {
+    // Buffer the live ref (in birth order) with the afterId it was born at, so
+    // a mid-turn (re)subscribe can replay this born snapshot for catch-up.
+    this.stream.liveMessages.set(message.id, { message, afterId: this.liveCursor });
     this.send(this.stream.clientId, {
       kind: "chat.message",
       streamId: this.stream.streamId,
@@ -1194,6 +1387,8 @@ class TurnWriter {
     const { ord } = sessionsRepo().insertMessageAfter(this.stream.sessionId, message, this.cursor);
     message.ord = ord;
     this.cursor = message.id;
+    // Now persisted (reloadable), so drop it from the catch-up buffer.
+    this.stream.liveMessages.delete(message.id);
     this.send(this.stream.clientId, {
       kind: "chat.message",
       streamId: this.stream.streamId,
@@ -1228,10 +1423,15 @@ async function toOpenAiMessages(
   systemPrompt: string,
   sessionId: string,
   attachmentCache?: Map<string, string | null>,
+  mcpClaimedTokens?: Set<string>,
 ): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam[]> {
   const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
   if (systemPrompt) out.push({ role: "system", content: systemPrompt });
   const memoryTokenBudget = newMemoryTokenBudget();
+  // Stems already resolved as MCP resources/prompts are pre-marked expanded so
+  // the memory expander skips them (avoids a double injection on a slug that
+  // names both).
+  for (const t of mcpClaimedTokens ?? []) memoryTokenBudget.claimed.add(t);
   for (const m of history) {
     if (m.role === "user") {
       let content = await userContentToOpenAi(m.content, sessionId, attachmentCache);
@@ -1241,8 +1441,9 @@ async function toOpenAiMessages(
       // The budget dedupes repeat mentions across the whole request.
       const memoryBlocks = memoryTokenBlocks(contentToText(m.content), memoryTokenBudget);
       if (memoryBlocks) {
-        if (typeof content === "string") content = `${content}\n\n${memoryBlocks}`;
-        else content.push({ type: "text", text: memoryBlocks });
+        if (typeof content === "string") {
+          content = `${content}\n\n${memoryBlocks}`;
+        } else content.push({ type: "text", text: memoryBlocks });
       }
       out.push({ role: "user", content });
     } else if (m.role === "assistant") {
@@ -1395,7 +1596,7 @@ async function readAttachmentAsText(
   return result;
 }
 
-// LLM-exposure gate: a tool reaches the model only when its toolkit is
+// LLM-exposure gate: a tool reaches the model only when its extension is
 // 'installed' (not 'downloaded'/'drift'), the tool is enabled, AND no
 // non-optional required permission is denied. A permission without a grant
 // row behaves as 'ask': the tool runs and Deno prompts at the moment of
@@ -1405,12 +1606,22 @@ function toolExposable(t: Tool): boolean {
   return t.requiredPermissions.every((d) => d.optional || !denied.has(permissionKey(d)));
 }
 
-function enabledToolsByName(): Map<string, { toolkitId: string; toolId: string }> {
-  const out = new Map<string, { toolkitId: string; toolId: string }>();
-  for (const tk of toolkitsRegistry().list()) {
+function enabledToolsByName(): Map<string, { extensionId: string; toolId: string }> {
+  const out = new Map<string, { extensionId: string; toolId: string }>();
+  for (const tk of extensionsRegistry().list()) {
     if (tk.status !== "installed") continue;
-    for (const t of toolkitsRegistry().listTools(tk.id)) {
-      if (t.enabled && toolExposable(t)) out.set(t.name, { toolkitId: tk.id, toolId: t.id });
+    for (const t of extensionsRegistry().listTools(tk.id)) {
+      if (t.enabled && toolExposable(t)) {
+        out.set(t.name, { extensionId: tk.id, toolId: t.id });
+      }
+    }
+  }
+  // Enabled MCP tools resolve to their server id, so executeToolCall routes
+  // them through the MCP client. Extension tools win a name collision (set
+  // first), matching the offering order.
+  for (const t of mcpRegistry().listAllTools()) {
+    if (t.enabled && !out.has(t.name)) {
+      out.set(t.name, { extensionId: t.extensionId, toolId: t.id });
     }
   }
   return out;
@@ -1418,9 +1629,9 @@ function enabledToolsByName(): Map<string, { toolkitId: string; toolId: string }
 
 function listEnabledTools(): Tool[] {
   const out: Tool[] = [];
-  for (const tk of toolkitsRegistry().list()) {
+  for (const tk of extensionsRegistry().list()) {
     if (tk.status !== "installed") continue;
-    for (const t of toolkitsRegistry().listTools(tk.id)) {
+    for (const t of extensionsRegistry().listTools(tk.id)) {
       if (t.enabled && toolExposable(t)) out.push(t);
     }
   }
@@ -1484,7 +1695,11 @@ async function classifyComplexity(
   for await (const delta of streamChatCompletion({
     endpoint,
     messages,
-    overrides: { temperature: 0, maxTokens: 16 + budget, reasoningBudget: budget },
+    overrides: {
+      temperature: 0,
+      maxTokens: 16 + budget,
+      reasoningBudget: budget,
+    },
     signal,
   })) {
     if (delta.contentDelta) response += delta.contentDelta;

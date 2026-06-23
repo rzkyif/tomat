@@ -12,13 +12,19 @@ import { buildApp } from "./http/server.ts";
 import { wsHub } from "./ws/hub.ts";
 import { downloadManager } from "./downloads/manager.ts";
 import { commitUpdate, handleUpdateMarkerOnBoot } from "./update/rollback.ts";
-import { toolkitsRegistry } from "./toolkits/registry.ts";
-import { seedBuiltinToolkitIfNeeded } from "./toolkits/builtin-seed.ts";
-import { BROADCAST_SINK } from "./http/routes/toolkits.ts";
+import { extensionsRegistry } from "./extensions/registry.ts";
+import { mcpRegistry } from "./mcp/registry.ts";
+import { mcpManager } from "./mcp/manager.ts";
+import {
+  autoInstallBuiltinIfReady,
+  seedBuiltinExtensionIfNeeded,
+} from "./extensions/builtin-seed.ts";
+import { BROADCAST_SINK } from "./http/routes/extensions.ts";
 import { initSidecarBoot } from "./services/sidecar-boot.ts";
+import { coreStatus } from "./services/core-status.ts";
 import { llmIdle } from "./services/llm-idle.ts";
 import { backgroundQueue } from "./services/background-queue.ts";
-import { memoriesStore } from "./services/memories-store.ts";
+import { memoriesStore, registerMemoryProvider } from "./services/memories-store.ts";
 import { scheduleMemoryIndexing } from "./services/memories-indexer.ts";
 import { promptScheduler } from "./services/prompt-scheduler.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
@@ -84,37 +90,55 @@ async function main(): Promise<void> {
   // Resume any persisted-Pending downloads from the previous run.
   downloadManager().resumePending();
 
-  // Verify toolkit content hashes in the background. Don't gate boot on it:
-  // large toolkits can take seconds to walk. A drifted toolkit is flipped to
+  // Verify extension content hashes in the background. Don't gate boot on it:
+  // large extensions can take seconds to walk. A drifted extension is flipped to
   // status='drift' and has its tools disabled, so the chat-exposure gate blocks
   // its tools until the user confirms re-enable. The first verification result
   // is just slightly delayed.
-  void toolkitsRegistry()
+  void extensionsRegistry()
     .verifyAllOnBoot()
     .then((drifted) => {
       if (drifted.length > 0) {
         log.warn(
-          `toolkit content drift: ${drifted.length} toolkit(s) flipped to ` +
+          `extension content drift: ${drifted.length} extension(s) flipped to ` +
             `status='drift' (tools disabled): ${drifted.join(", ")}`,
         );
       }
     })
     .catch((err) => {
-      log.error(`toolkit verifyAllOnBoot failed: ${errMessage(err)}`);
+      log.error(`extension verifyAllOnBoot failed: ${errMessage(err)}`);
     });
 
-  // Seed the built-in toolkit on a fresh install (background, non-blocking).
+  // Seed the built-in extension on a fresh install (background, non-blocking).
   // Respects a prior user delete via the seed marker; retries next boot if the
   // first attempt is offline.
-  void seedBuiltinToolkitIfNeeded(BROADCAST_SINK).catch((err) => {
-    log.warn(`builtin toolkit seed failed (will retry next boot): ${errMessage(err)}`);
-  });
+  void seedBuiltinExtensionIfNeeded(BROADCAST_SINK)
+    .then(() =>
+      // If the deno runtime is already present (a prior install), finish the
+      // built-in install + enable its defaults now; otherwise the
+      // onBinaryInstalled("deno") hook in sidecar-boot does it once deno lands.
+      autoInstallBuiltinIfReady(BROADCAST_SINK),
+    )
+    .catch((err) => {
+      log.warn(`builtin extension seed failed (will retry next boot): ${errMessage(err)}`);
+    });
 
   // Surface an unreadable secrets vault (sealed secrets.enc but no master key)
   // at startup rather than mid-request. Background, non-mutating.
   void warnIfVaultUnreadable().catch((err) => {
     log.warn(`secrets vault check failed: ${errMessage(err)}`);
   });
+
+  // Re-register the base dir for memories shipped by already-installed
+  // extensions so their (read-only) content resolves after a restart; the rows
+  // persist in the DB, only the provider->dir mapping is in-memory.
+  try {
+    for (const ext of extensionsRegistry().list()) {
+      registerMemoryProvider(ext.id, paths().extensionsDir);
+    }
+  } catch (err) {
+    log.warn(`extension memory provider registration failed: ${errMessage(err)}`);
+  }
 
   // Reconcile the memory store with the files on disk, then queue summary /
   // embedding refreshes for anything stale (idle-gated, background).
@@ -129,10 +153,20 @@ async function main(): Promise<void> {
   // time) tick immediately; the scheduler defers while llama is loading.
   promptScheduler().start();
 
+  // Connect to enabled MCP servers in the background; their tools/prompts/
+  // resources become available as each connection settles. Failures are
+  // captured per-server (status='error'), never block boot.
+  void mcpManager()
+    .sync(mcpRegistry().list())
+    .catch((err) => {
+      log.warn(`MCP sync failed: ${errMessage(err)}`);
+    });
+
   // Kick off llama / whisper sidecar boot based on the persisted settings.
   // Runs in the background. `chat.start` and `/stt/transcribe` against a
-  // sidecar that hasn't bound its port yet return a clear error; the
-  // sidecar.status WS frames let the UI render a loading chip.
+  // sidecar that hasn't bound its port yet return a clear error; the aggregate
+  // `core.status` frame (with its per-subsystem breakdown) lets the UI render
+  // the loading / error state in the CoreBar.
   void initSidecarBoot().catch((err) => {
     log.error(`sidecar boot failed: ${errMessage(err)}`);
   });
@@ -163,6 +197,11 @@ async function main(): Promise<void> {
   // Commit it (remove the marker + `<bin>.old` anchor) so a later ordinary
   // restart can't roll back this working binary. No-op when no update is pending.
   void commitUpdate().catch((err) => log.warn(`update commit failed: ${errMessage(err)}`));
+
+  // Boot is past the point where the core can serve: the listener is bound and
+  // sidecar boot has been kicked. The aggregate status now follows sidecar
+  // readiness (still "starting_up" while a required model is loading).
+  coreStatus().noteBootDone();
 
   // Graceful shutdown. Register one handler per signal and have the first
   // signal remove BOTH: under dev `--watch` the runtime re-runs this module in
@@ -210,6 +249,13 @@ async function main(): Promise<void> {
       .then(() => trace("shutdown: sidecars stopped"))
       .catch((err) => log.warn(`shutdown: sidecar stop failed: ${errMessage(err)}`));
     void shutdownJobctl();
+    // Disconnect MCP servers so spawned stdio children are SIGTERM'd rather than
+    // orphaned. Background like sidecars: each close has its own graceful window
+    // and we don't want to serialize the HTTP drain behind it.
+    void mcpManager()
+      .shutdown()
+      .then(() => trace("shutdown: mcp servers stopped"))
+      .catch((err) => log.warn(`shutdown: mcp stop failed: ${errMessage(err)}`));
     // Close the HTTP server immediately so `await server.finished` in main() can
     // return.
     const closed = server.shutdown().then(() => trace("shutdown: http server closed"));

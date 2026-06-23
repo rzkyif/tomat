@@ -8,8 +8,8 @@ The Astro static site behind `au.tomat.ing`. Two pages:
 - **User manual** (`/manual/...`): one MDX subsection per page, with a sidebar
   outline. Pages render the real `@tomat/shared/ui` components inline as live
   demos. Each page's "Last updated" date is derived from the file's last git
-  commit at build time (see `src/lib/git-date.ts`). How to write a page:
-  [STYLE.md](STYLE.md).
+  commit at build time (see `src/lib/git-date.ts`). How to write a page: the
+  root [COPY.md](../../COPY.md) (its "User manual" section).
 
 Release artifacts (installers, schemas, signed manifests, binaries) are **not**
 served here; they live in the R2 public bucket at `get.au.tomat.ing`. The Worker
@@ -30,8 +30,8 @@ cd packages/tomat-website && deno task preview    # wrangler dev
 
 ## Structure
 
-- `src/pages/` -- `index.astro` (home) and `manual/[...slug].astro` (one page per
-  manual entry).
+- `src/pages/` -- `index.astro` (home) and `manual/[...slug].astro` (one page
+  per manual entry).
 - `src/components/showcase/` -- the showcase: `Showcase.svelte` (snap-scroll
   track + scrub bar + auto-advance) drives per-feature stages (`ChatStage`,
   `SettingsStage`) that script a GSAP timeline over the shared view components.
@@ -55,8 +55,8 @@ deno task release:stable    # ... stable channel
 The release rebuilds only what changed (tracked by a source-hash cursor on R2)
 and gates each item behind a version bump. The website's version lives in
 `packages/tomat-website/deno.json`; for the full version-bump table and channel
-details see [DEVELOPMENT.md](../../DEVELOPMENT.md#channels). The website item runs
-`astro build` then `wrangler deploy`.
+details see [DEVELOPMENT.md](../../DEVELOPMENT.md#channels). The website item
+runs `astro build` then `wrangler deploy`.
 
 **One-time Cloudflare setup** (needs the `tomat.ing` zone on Cloudflare):
 
@@ -68,6 +68,6 @@ deno run -A npm:wrangler@^4 r2 bucket create tomat-releases    # release artifac
 Then in the Cloudflare dashboard attach the custom domains: `get.au.tomat.ing`
 to the R2 bucket (R2 -> tomat-releases -> Settings -> Custom Domains; enables
 public read) and `au.tomat.ing` to the Worker (set on first `deploy` via
-`wrangler.toml`). Seed `.env` at the repo root from `.env.example` (release-only:
-manifest signing + Cloudflare/R2 credentials; the signing keypair is generated on
-first run).
+`wrangler.toml`). Seed `.env` at the repo root from `.env.example`
+(release-only: manifest signing + Cloudflare/R2 credentials; the signing keypair
+is generated on first run).

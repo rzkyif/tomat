@@ -31,11 +31,18 @@ function startServer(): RunningServer {
   const app = buildApp();
   const hub = wsHub();
   const abort = new AbortController();
-  const server = Deno.serve({ port: 0, hostname: "127.0.0.1", signal: abort.signal }, (req) => {
-    const url = new URL(req.url);
-    if (url.pathname === "/ws/v1") return hub.handleUpgrade(req);
-    return app.fetch(req);
-  });
+  const server = Deno.serve(
+    {
+      port: 0,
+      hostname: "127.0.0.1",
+      signal: abort.signal,
+    },
+    (req) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/ws/v1") return hub.handleUpgrade(req);
+      return app.fetch(req);
+    },
+  );
   return {
     port: (server.addr as Deno.NetAddr).port,
     async stop() {
@@ -154,7 +161,10 @@ async function createSessionWithUserMessage(
   api: (path: string, init?: RequestInit) => Promise<Response>,
   text: string,
 ): Promise<{ sessionId: string; userId: string }> {
-  const created = await api("/sessions", { method: "POST", body: JSON.stringify({ title: "" }) });
+  const created = await api("/sessions", {
+    method: "POST",
+    body: JSON.stringify({ title: "" }),
+  });
   const session = await created.json();
   const posted = await api(`/sessions/${session.id}/messages`, {
     method: "POST",
@@ -182,7 +192,14 @@ Deno.test({
       const { sessionId, userId } = await createSessionWithUserMessage(api, "hi");
       const ws = await openWs();
       const done = waitForFrame(ws, (f) => f.kind === "chat.done");
-      ws.send(JSON.stringify({ kind: "chat.start", streamId: "s-1", sessionId, route: "default" }));
+      ws.send(
+        JSON.stringify({
+          kind: "chat.start",
+          streamId: "s-1",
+          sessionId,
+          route: "default",
+        }),
+      );
       const { matched, all } = await done;
       assertEquals(matched.reason, "stop");
       assertEquals(all.filter((f) => f.kind === "chat.error").length, 0);
@@ -222,7 +239,7 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     // Hop 1 streams reasoning + a tool call (unknown tool, so execution
-    // fails fast without a toolkit), hop 2 streams the plain answer.
+    // fails fast without a extension), hop 2 streams the plain answer.
     let call = 0;
     const seqFetch: typeof fetch = (input, init) => {
       const fixture = call++ === 0 ? "streaming-reasoning-tools.sse" : "streaming-basic.sse";
@@ -232,7 +249,14 @@ Deno.test({
       const { sessionId, userId } = await createSessionWithUserMessage(api, "do the thing");
       const ws = await openWs();
       const done = waitForFrame(ws, (f) => f.kind === "chat.done");
-      ws.send(JSON.stringify({ kind: "chat.start", streamId: "s-2", sessionId, route: "default" }));
+      ws.send(
+        JSON.stringify({
+          kind: "chat.start",
+          streamId: "s-2",
+          sessionId,
+          route: "default",
+        }),
+      );
       const { matched, all } = await done;
       assertEquals(matched.reason, "stop");
 
@@ -371,7 +395,10 @@ Deno.test({
       return Promise.resolve(
         new Response(body, {
           status: 200,
-          headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
+          headers: {
+            "content-type": "text/event-stream",
+            "cache-control": "no-cache",
+          },
         }),
       );
     };
@@ -380,7 +407,14 @@ Deno.test({
       const ws = await openWs();
       const done = waitForFrame(ws, (f) => f.kind === "chat.done", 10_000);
       const firstDelta = waitForFrame(ws, (f) => f.kind === "chat.delta");
-      ws.send(JSON.stringify({ kind: "chat.start", streamId: "s-4", sessionId, route: "default" }));
+      ws.send(
+        JSON.stringify({
+          kind: "chat.start",
+          streamId: "s-4",
+          sessionId,
+          route: "default",
+        }),
+      );
       await firstDelta;
       ws.send(JSON.stringify({ kind: "chat.interrupt", streamId: "s-4" }));
       const { matched, all } = await done;
@@ -399,6 +433,142 @@ Deno.test({
       );
       assertEquals(persisted[1].interrupted, true);
       assertEquals(persisted[1].content, "Hello");
+    });
+  },
+});
+
+Deno.test({
+  name: "resubscribe mid-stream: reconnecting client gets catch-up snapshot then live tail",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    // Streams "Hello", then holds the body open until the test releases the
+    // tail (" world" + stop + [DONE]), so the turn is genuinely in-flight while
+    // the client swaps sockets.
+    const encoder = new TextEncoder();
+    const head =
+      'data: {"id":"c","object":"chat.completion.chunk","created":1,"model":"t","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}\n\n';
+    const tail =
+      'data: {"id":"c","object":"chat.completion.chunk","created":1,"model":"t","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}\n\n' +
+      'data: {"id":"c","object":"chat.completion.chunk","created":1,"model":"t","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n' +
+      "data: [DONE]\n\n";
+    let tailController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const gatedFetch: typeof fetch = (_input, _init) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(head));
+          tailController = controller;
+        },
+      });
+      return Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
+        }),
+      );
+    };
+    await withChatHarness(gatedFetch, async ({ api, openWs }) => {
+      const { sessionId, userId } = await createSessionWithUserMessage(api, "hi");
+      const ws1 = await openWs();
+      const firstDelta = waitForFrame(ws1, (f) => f.kind === "chat.delta");
+      ws1.send(
+        JSON.stringify({ kind: "chat.start", streamId: "s-5", sessionId, route: "default" }),
+      );
+      await firstDelta;
+
+      // Client swaps away: drop ws1 mid-turn. Generation continues server-side.
+      ws1.close();
+
+      // Reconnect as the same client and resubscribe.
+      const ws2 = await openWs();
+      const born = waitForFrame(
+        ws2,
+        (f) => f.kind === "chat.message" && !f.final && f.streamId === "s-5",
+      );
+      ws2.send(JSON.stringify({ kind: "chat.subscribe", sessionId }));
+      const { matched: bornFrame } = await born;
+      // Catch-up snapshot carries the partial content streamed before reconnect.
+      assertEquals(bornFrame.message.role, "assistant");
+      assertEquals(bornFrame.message.content, "Hello");
+      assertEquals(bornFrame.afterId, userId);
+
+      // Release the tail; ws2 (same clientId) receives the live remainder.
+      const done = waitForFrame(ws2, (f) => f.kind === "chat.done");
+      tailController!.enqueue(encoder.encode(tail));
+      tailController!.close();
+      const { all } = await done;
+
+      const tailDeltas = all.filter((f) => f.kind === "chat.delta" && f.streamId === "s-5");
+      assertEquals(tailDeltas.map((d) => d.delta).join(""), " world");
+      const finals = all.filter((f) => f.kind === "chat.message" && f.final);
+      assertEquals(finals.at(-1)!.message.content, "Hello world");
+
+      // Convergence: persisted == final snapshot.
+      const persisted = await listPersisted(api, sessionId);
+      assertEquals(
+        persisted.map((m) => m.id),
+        [userId, finals.at(-1)!.message.id],
+      );
+      assertEquals(persisted.at(-1)!.content, "Hello world");
+    });
+  },
+});
+
+Deno.test({
+  name: "resubscribe is owner-scoped: a different client gets no catch-up frames",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const encoder = new TextEncoder();
+    const head =
+      'data: {"id":"c","object":"chat.completion.chunk","created":1,"model":"t","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}\n\n';
+    let tailController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const gatedFetch: typeof fetch = (_input, _init) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(head));
+          tailController = controller;
+        },
+      });
+      return Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
+        }),
+      );
+    };
+    await withChatHarness(gatedFetch, async ({ port, api, openWs }) => {
+      const { sessionId } = await createSessionWithUserMessage(api, "hi");
+      const ws1 = await openWs();
+      const firstDelta = waitForFrame(ws1, (f) => f.kind === "chat.delta");
+      ws1.send(
+        JSON.stringify({ kind: "chat.start", streamId: "s-6", sessionId, route: "default" }),
+      );
+      await firstDelta;
+
+      // A SECOND, distinct client pairs and subscribes to the same session id.
+      // It does not own the stream (and can't even see the session), so it must
+      // receive nothing.
+      const { token: otherToken } = await pairClient("chat-other", "127.0.0.1");
+      const ws2 = new WebSocket(`ws://127.0.0.1:${port}/ws/v1?token=${otherToken}`);
+      await new Promise<void>((resolve, reject) => {
+        ws2.addEventListener("open", () => resolve(), { once: true });
+        ws2.addEventListener("error", reject, { once: true });
+      });
+      const got: string[] = [];
+      ws2.addEventListener("message", (ev) => {
+        if (typeof ev.data === "string") got.push(JSON.parse(ev.data).kind);
+      });
+      ws2.send(JSON.stringify({ kind: "chat.subscribe", sessionId }));
+      // Give the server a beat to (not) emit anything.
+      await new Promise((r) => setTimeout(r, 150));
+      assertEquals(
+        got.filter((k) => k === "chat.message"),
+        [],
+      );
+      ws2.close();
+      tailController!.error(new DOMException("done", "AbortError"));
+      ws1.send(JSON.stringify({ kind: "chat.interrupt", streamId: "s-6" }));
     });
   },
 });

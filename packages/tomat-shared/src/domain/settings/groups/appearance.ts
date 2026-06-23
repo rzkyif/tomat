@@ -131,7 +131,7 @@ export const appearanceGroup: SettingGroup = {
         {
           id: "appearance.userBubbleColor",
           name: "Your Bubble Color",
-          description: "Color of your chat message bubbles.",
+          description: "Color of your bubbles.",
           type: "color",
           defaultValue: "#86efacff",
           lockedLightness: 0.985,
@@ -140,7 +140,7 @@ export const appearanceGroup: SettingGroup = {
         {
           id: "appearance.agentBubbleColor",
           name: "Agent Bubble Color",
-          description: "Color of the agent's chat message bubbles.",
+          description: "Color of the agent's bubbles.",
           type: "color",
           defaultValue: "#93c5fdff",
           lockedLightness: 0.985,

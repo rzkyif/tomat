@@ -1,5 +1,5 @@
 ---
-title: Voice Input
+title: Speech-to-Text
 section: Speech
 order: 1
 ---
@@ -8,20 +8,20 @@ import UserInputDemo from "../../../components/demos/UserInputDemo.svelte";
 import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelte";
 import Aside from "../../../components/Aside.astro";
 
-**Voice Input** lets you dictate a message instead of typing it. It is the same
-input bar you already know, with a **Speech-to-Text** engine transcribing what you
-say into the box, so dictation is just another way to fill the same message rather
-than a separate mode. When it is on, the bar shows a microphone.
+**Speech-to-Text** lets you dictate a message instead of typing it. It is the same
+input bar you already know, transcribing what you say into the box, so dictation
+is just another way to fill the same message rather than a separate mode. When it
+is on, the bar shows a microphone.
 
 <UserInputDemo
   scenario="voiceReady"
-  highlightLabel="Voice Input"
+  highlightLabel="Speech-to-Text"
   highlightTarget="[data-region=voice]"
 />
 
 <Aside type="note">
-  The Speech-to-Text engine can run locally, so your audio is transcribed on your machine and never
-  sent away. That makes Voice Input safe to use for the same things you would type.
+  Speech-to-Text can run locally, so your audio is transcribed on the core and never sent to an
+  external service. That makes it safe to use for the same things you would type.
 </Aside>
 
 ## Turning it on
@@ -35,7 +35,7 @@ or hold a key.
 
 The three ways to start are:
 
-- **Manual**: tap the microphone to start, and tap again to stop. Voice Input
+- **Manual**: tap the microphone to start, and tap again to stop. Dictation
   turns off whenever the app is hidden or closed, so it never listens behind your
   back.
 - **Sticky**: tap once and it keeps listening through hides, closes, and restarts,

@@ -9,7 +9,7 @@ import { getLogger } from "$lib/util/log";
 import { Subscribers } from "../util/subscribers.ts";
 import { BinariesApi } from "./binaries";
 import { ChatApi } from "./chat";
-import { CoreClient, type ConnectionListener, type WsListener } from "./client";
+import { type ConnectionListener, CoreClient, type WsListener } from "./client";
 import { GreetingsApi } from "./greetings";
 import { LlmApi } from "./llm";
 import { MemoriesApi } from "./memories";
@@ -22,7 +22,8 @@ import { PairingApi } from "./pairing";
 import { CoreSettingsApi } from "./settings";
 import { SessionsApi } from "./sessions";
 import { SttApi } from "./stt";
-import { ToolkitsApi } from "./toolkits";
+import { ExtensionsApi } from "./extensions";
+import { McpApi } from "./mcp";
 import { TtsApi } from "./tts";
 import { UpdateApi } from "./update";
 
@@ -59,8 +60,9 @@ class CoresRegistry {
     requirements: RequirementsApi;
     sidecars: SidecarsApi;
     storage: StorageApi;
-    toolkits: ToolkitsApi;
+    extensions: ExtensionsApi;
     memories: MemoriesApi;
+    mcp: McpApi;
     scheduledPrompts: ScheduledPromptsApi;
     greetings: GreetingsApi;
     stt: SttApi;
@@ -112,7 +114,10 @@ class CoresRegistry {
       currentCoreId,
     );
     if (this.current?.entry.id === id) {
-      this.current = { ...this.current, entry: { ...this.current.entry, name } };
+      this.current = {
+        ...this.current,
+        entry: { ...this.current.entry, name },
+      };
     }
     this.notify();
   }
@@ -138,8 +143,9 @@ class CoresRegistry {
       requirements: new RequirementsApi(client),
       sidecars: new SidecarsApi(client),
       storage: new StorageApi(client),
-      toolkits: new ToolkitsApi(client),
+      extensions: new ExtensionsApi(client),
       memories: new MemoriesApi(client),
+      mcp: new McpApi(client),
       scheduledPrompts: new ScheduledPromptsApi(client),
       greetings: new GreetingsApi(client),
       stt: new SttApi(client),
@@ -218,8 +224,9 @@ class CoresRegistry {
     requirements: RequirementsApi;
     sidecars: SidecarsApi;
     storage: StorageApi;
-    toolkits: ToolkitsApi;
+    extensions: ExtensionsApi;
     memories: MemoriesApi;
+    mcp: McpApi;
     scheduledPrompts: ScheduledPromptsApi;
     greetings: GreetingsApi;
     stt: SttApi;

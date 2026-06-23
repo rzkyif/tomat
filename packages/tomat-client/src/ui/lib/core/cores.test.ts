@@ -3,7 +3,7 @@
 // exercised by the e2e flows, not here.
 
 import { describe, expect, it } from "vitest";
-import { setPlatform, type Platform } from "$lib/platform";
+import { type Platform, setPlatform } from "$lib/platform";
 import { cores, type PairedCoreEntry } from "./cores";
 
 function makeMockPlatform(): {
@@ -52,7 +52,10 @@ describe("cores registry", () => {
 
     await cores().addPaired(entry("core-a"), "token-a");
     expect(tokens["core-a"]).toBe("token-a");
-    expect(files.cores).toEqual({ cores: [entry("core-a")], currentCoreId: "core-a" });
+    expect(files.cores).toEqual({
+      cores: [entry("core-a")],
+      currentCoreId: "core-a",
+    });
     expect(await cores().list()).toEqual([entry("core-a")]);
   });
 
@@ -64,7 +67,10 @@ describe("cores registry", () => {
 
     await cores().removePaired("core-b");
     expect(tokens["core-b"]).toBeUndefined();
-    expect(files.cores).toEqual({ cores: [entry("core-a")], currentCoreId: "core-a" });
+    expect(files.cores).toEqual({
+      cores: [entry("core-a")],
+      currentCoreId: "core-a",
+    });
 
     // Removing the last core leaves an empty registry with no current pointer.
     await cores().removePaired("core-a");

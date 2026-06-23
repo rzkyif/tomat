@@ -39,7 +39,9 @@ if (channel !== "stable") {
   override.productName = `tomat-${channel}`;
   override.identifier = `au.tomat.ing.${channel}`;
   override.plugins = {
-    updater: { endpoints: [`${STORAGE_BASE}/manifests/${channel}/client.json`] },
+    updater: {
+      endpoints: [`${STORAGE_BASE}/manifests/${channel}/client.json`],
+    },
   };
 }
 if (!Deno.env.get("TAURI_SIGNING_PRIVATE_KEY")) {

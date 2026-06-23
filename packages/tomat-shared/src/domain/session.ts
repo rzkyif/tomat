@@ -70,7 +70,7 @@ export type ToolCallStatus =
 
 export interface ToolCall {
   callId: string;
-  toolkitId: string;
+  extensionId: string;
   toolName: string;
   arguments: string; // JSON string the LLM emitted
   status: ToolCallStatus;
@@ -192,7 +192,7 @@ export interface SystemMessage extends MessageBase {
 export interface ToolMessage extends MessageBase {
   role: "tool";
   callId: string;
-  toolkitId: string;
+  extensionId: string;
   toolName: string;
   /** JSON string of arguments as the model emitted them. Persisted so the
    *  reloaded bubble keeps the call's inputs. */
@@ -247,7 +247,7 @@ export interface ToolFilterMessage extends MessageBase {
   phase1?: ToolFilterPhase1Persisted[];
   // Subset kept by the second-pass LLM filter, if enabled.
   phase2?: ToolFilterEntryPersisted[];
-  // Tools whose toolkit declares `alwaysAvailable: true`; included
+  // Tools whose extension declares `alwaysAvailable: true`; included
   // regardless of filtering when the bypass setting is on.
   alwaysAvailable?: ToolFilterEntryPersisted[];
   /** Number of tools actually exposed to the model this turn (post-filter,
@@ -263,6 +263,7 @@ export interface ToolFilterMessage extends MessageBase {
 // scored against the turn's query by embedding cosine similarity.
 export interface MemoryFilterEntryPersisted {
   memoryId: string;
+  kind: "knowledge" | "skill";
   title: string;
   summary: string;
   score: number;

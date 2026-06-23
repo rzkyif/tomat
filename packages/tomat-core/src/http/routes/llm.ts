@@ -49,7 +49,9 @@ export function llmRoutes(): Hono {
       overrides: { temperature: 0.2, reasoningBudget: budget },
     });
     log.info(
-      `autocorrect done in ${Date.now() - startedAt}ms (in ${body.text.length} chars, out ${text.length} chars)`,
+      `autocorrect done in ${
+        Date.now() - startedAt
+      }ms (in ${body.text.length} chars, out ${text.length} chars)`,
     );
     return c.json({ text });
   });
@@ -81,7 +83,9 @@ export function llmRoutes(): Hono {
       overrides: { temperature: 0.2, reasoningBudget: budget },
     });
     log.info(
-      `merge done in ${Date.now() - startedAt}ms (in ${userMessage.length} chars, out ${text.length} chars)`,
+      `merge done in ${
+        Date.now() - startedAt
+      }ms (in ${userMessage.length} chars, out ${text.length} chars)`,
     );
     return c.json({ text });
   });

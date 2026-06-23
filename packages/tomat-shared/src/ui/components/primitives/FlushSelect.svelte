@@ -27,6 +27,9 @@
     title,
     icon,
     disabled = false,
+    rounded = "rounded-medium",
+    textClass = "text-default-400 hov:text-default-700",
+    class: extraClass = "",
   }: {
     value: OptionValue;
     options: Option[];
@@ -35,15 +38,23 @@
     title?: string;
     icon?: string;
     disabled?: boolean;
+    /** Corner radius utility; override to match a surrounding pill. */
+    rounded?: string;
+    /** Resting + hover text tone. Defaults to the dim flush tone; override to
+     *  sit at a solid pill's text lightness (e.g. "text-default-700"). */
+    textClass?: string;
+    /** Extra classes on the root (e.g. an inset pill background + padding so the
+     *  whole control reads as a solid pill rather than flush text). */
+    class?: string;
   } = $props();
 
   const current = $derived(options.find((o) => o.value === value));
 </script>
 
 <div
-  class="tomat-focus-wrap rounded-medium relative flex items-center gap-1 min-w-0 text-sm text-default-400 transition-colors {disabled
-    ? 'opacity-50'
-    : 'hov:text-default-700'}"
+  class="tomat-focus-wrap {rounded} relative flex items-center gap-1 min-w-0 text-sm transition-colors {disabled
+    ? 'text-default-400 opacity-50'
+    : textClass} {extraClass}"
   {title}
 >
   {#if icon}

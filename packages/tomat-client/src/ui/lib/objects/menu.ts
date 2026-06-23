@@ -6,7 +6,7 @@
  * gated by `isTauri()` (no-op on the web build, like the message menus).
  */
 
-import { platform, type ContextMenuItem } from "$lib/platform";
+import { type ContextMenuItem, platform } from "$lib/platform";
 import { isTauri } from "$lib/util/env";
 import { parseQuery, setSortToken, toggleFilterToken } from "./query.ts";
 
@@ -56,7 +56,11 @@ export async function showFilterSortMenu(opts: {
   const items: ContextMenuItem[] = [];
   for (const group of filters) {
     if (group.label) {
-      items.push({ id: `hdr:${group.label}`, label: group.label, enabled: false });
+      items.push({
+        id: `hdr:${group.label}`,
+        label: group.label,
+        enabled: false,
+      });
     }
     for (const opt of group.options) {
       items.push({

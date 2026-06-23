@@ -18,11 +18,15 @@ const SAMPLE_ID = [...EXPORTABLE_FIELD_IDS][0];
 
 describe("EXPORTABLE_FIELD_IDS", () => {
   it("only contains valid setting keys", () => {
-    for (const id of EXPORTABLE_FIELD_IDS) expect(isValidSettingKey(id)).toBe(true);
+    for (const id of EXPORTABLE_FIELD_IDS) {
+      expect(isValidSettingKey(id)).toBe(true);
+    }
   });
 
   it("excludes every secret key", () => {
-    for (const key of SECRET_KEYS) expect(EXPORTABLE_FIELD_IDS.has(key)).toBe(false);
+    for (const key of SECRET_KEYS) {
+      expect(EXPORTABLE_FIELD_IDS.has(key)).toBe(false);
+    }
   });
 });
 

@@ -136,7 +136,9 @@ function useOsKeychain(): boolean {
  *  vault on the next boot. Any mismatch counts as "keychain unavailable" so
  *  callers keep the file-based fallback. */
 async function sealInKeychainVerified(encoded: string): Promise<boolean> {
-  if (!(await keychainSet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, encoded))) return false;
+  if (!(await keychainSet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, encoded))) {
+    return false;
+  }
   const readBack = await keychainGet(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
   if (readBack === encoded) return true;
   log.warn(

@@ -27,7 +27,7 @@ const MINIMAL_BY_ROLE: Record<string, Record<string, unknown>> = {
   tool: {
     role: "tool",
     callId: "c1",
-    toolkitId: "t1",
+    extensionId: "t1",
     toolName: "do",
     arguments: "{}",
     status: "completed",
@@ -63,11 +63,19 @@ Deno.test("contract: union variants and PATCH schemas cover the SAME role set", 
 
 Deno.test("messageInputSchema: accepts automated (user) and truncated (assistant)", () => {
   assertEquals(
-    messageInputSchema.safeParse({ role: "user", content: "hi", automated: true }).success,
+    messageInputSchema.safeParse({
+      role: "user",
+      content: "hi",
+      automated: true,
+    }).success,
     true,
   );
   assertEquals(
-    messageInputSchema.safeParse({ role: "assistant", content: "hi", truncated: true }).success,
+    messageInputSchema.safeParse({
+      role: "assistant",
+      content: "hi",
+      truncated: true,
+    }).success,
     true,
   );
 });
@@ -125,7 +133,7 @@ Deno.test("toolMessageInputSchema: requires status from the documented enum", ()
     toolMessageInputSchema.safeParse({
       role: "tool",
       callId: "c",
-      toolkitId: "t",
+      extensionId: "t",
       toolName: "n",
       arguments: "{}",
       status: "not-a-state",

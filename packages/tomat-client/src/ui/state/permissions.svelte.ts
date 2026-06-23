@@ -21,7 +21,7 @@ export type PendingPermission = {
   apiName?: string;
   declared: boolean;
   reason?: string;
-  toolkitId: string;
+  extensionId: string;
   toolName: string;
 };
 
@@ -37,7 +37,7 @@ class PermissionState {
 
   /** Send the user's decision for the head request and surface the next.
    *  The accept is scoped to the current tool call only; "always allow"
-   *  lives in the toolkit detail view. */
+   *  lives in the extension detail view. */
   respond(allow: boolean): void {
     const p = this.queue[0];
     if (!p) return;

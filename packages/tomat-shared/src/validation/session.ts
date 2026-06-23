@@ -56,7 +56,7 @@ const toolCallStatusSchema = z.enum([
 const toolCallSchema = z
   .object({
     callId: z.string(),
-    toolkitId: z.string(),
+    extensionId: z.string(),
     toolName: z.string(),
     arguments: z.string(),
     status: toolCallStatusSchema,
@@ -154,7 +154,7 @@ export const toolMessageInputSchema = z
     ...baseShape,
     role: z.literal("tool"),
     callId: z.string(),
-    toolkitId: z.string(),
+    extensionId: z.string(),
     toolName: z.string(),
     arguments: z.string(),
     result: z.unknown().optional(),

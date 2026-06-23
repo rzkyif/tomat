@@ -11,7 +11,11 @@ export class ChatApi {
     streamId: string,
     sessionId: string,
     route: "default" | "secondary" = "default",
-    opts?: { systemPrompt?: string; toolsHint?: string; anchorMessageId?: string },
+    opts?: {
+      systemPrompt?: string;
+      toolsHint?: string;
+      anchorMessageId?: string;
+    },
   ): void {
     this.client.sendWs({
       kind: "chat.start",
@@ -26,6 +30,14 @@ export class ChatApi {
 
   interrupt(streamId: string): void {
     this.client.sendWs({ kind: "chat.interrupt", streamId });
+  }
+
+  /** Ask the core to (re)attach this client to a session: if a turn is still
+   *  generating on it, the core re-emits the in-flight messages so far and any
+   *  open tool prompt, then live deltas resume. A no-op server-side when
+   *  nothing is in flight. Sent on session open and after a reconnect. */
+  subscribe(sessionId: string): void {
+    this.client.sendWs({ kind: "chat.subscribe", sessionId });
   }
 
   respondAskUser(callId: string, requestId: string, answers: AskUserAnswer[]): void {

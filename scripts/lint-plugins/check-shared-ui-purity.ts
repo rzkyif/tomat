@@ -48,7 +48,9 @@ const violations = await scan();
 if (violations.length > 0) {
   const label = STRICT ? "ERROR" : "WARN";
   console.error(`[${label}] shared UI components must not import client/tauri/api code:`);
-  for (const v of violations) console.error(`  ${v.file}:${v.lineNumber}  ${v.line}`);
+  for (const v of violations) {
+    console.error(`  ${v.file}:${v.lineNumber}  ${v.line}`);
+  }
   console.error(
     "\nInject client-only behavior via props/callbacks/snippets instead; keep the View presentational.",
   );

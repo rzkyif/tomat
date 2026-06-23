@@ -10,10 +10,10 @@ import { encodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import type { PermissionDecl, PermissionKind } from "@tomat/shared";
 import { errMessage, permissionKey } from "@tomat/shared";
-import type { ModuleName } from "../toolkits/worker-protocol.ts";
-import { toolkitsRegistry } from "../toolkits/registry.ts";
-import { speechSpeak } from "../sidecars/speech.ts";
-import { toolkitDataDir } from "../paths.ts";
+import type { ModuleName } from "../extensions/worker-protocol.ts";
+import { extensionsRegistry } from "../extensions/registry.ts";
+import { synthesizeSpeech } from "./tts-synthesize.ts";
+import { extensionDataDir } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import { loadCoreSettings } from "./core-settings.ts";
@@ -38,7 +38,7 @@ export interface ModulePrompt {
 }
 
 export interface ModuleRequest {
-  toolkitId: string;
+  extensionId: string;
   toolName: string;
   callId: string;
   module: ModuleName;
@@ -46,7 +46,7 @@ export interface ModuleRequest {
   args: unknown;
   // Forward an ask-state access to the user; resolves with their decision.
   // The grant is scoped to this tool call only ("always allow" lives in the
-  // Toolkit detail view, exactly as for Deno prompt permissions).
+  // Extension detail view, exactly as for Deno prompt permissions).
   promptUser: (prompt: ModulePrompt) => Promise<boolean>;
 }
 
@@ -61,11 +61,14 @@ export async function handleModuleRequest(req: ModuleRequest): Promise<unknown> 
 
 async function gate(req: ModuleRequest): Promise<void> {
   if (req.module === "db") {
-    // db is declaration-gated only: the toolkit opted in via `database: true`
-    // in its tools.json, which the user saw at install time. No grant rows.
-    const toolkit = toolkitsRegistry().getOrThrow(req.toolkitId);
-    if (!toolkit.hasDatabase) {
-      throw new AppError("forbidden", `toolkit ${req.toolkitId} does not declare "database": true`);
+    // db is declaration-gated only: the extension opted in via `database: true`
+    // in its tomat.json, which the user saw at install time. No grant rows.
+    const extension = extensionsRegistry().getOrThrow(req.extensionId);
+    if (!extension.hasDatabase) {
+      throw new AppError(
+        "forbidden",
+        `extension ${req.extensionId} does not declare "database": true`,
+      );
     }
     return;
   }
@@ -74,18 +77,24 @@ async function gate(req: ModuleRequest): Promise<void> {
   const access = req.module === "memories" ? memoriesAccessFor(req.op) : undefined;
   const resource = access ?? "";
 
-  const tool = toolkitsRegistry()
-    .listTools(req.toolkitId)
+  const tool = extensionsRegistry()
+    .listTools(req.extensionId)
     .find((t) => t.name === req.toolName);
   const decl = tool?.requiredPermissions.find((d) => declCovers(d, permission, access));
 
   if (!decl) {
-    const toolkit = toolkitsRegistry().getOrThrow(req.toolkitId);
-    if (toolkit.undeclaredPolicy === "deny") {
-      throw new AppError("forbidden", `undeclared ${permission} access denied by toolkit policy`);
+    const extension = extensionsRegistry().getOrThrow(req.extensionId);
+    if (extension.undeclaredPolicy === "deny") {
+      throw new AppError("forbidden", `undeclared ${permission} access denied by extension policy`);
     }
-    const allow = await req.promptUser({ permission, resource, declared: false });
-    if (!allow) throw new AppError("forbidden", `${permission} access rejected by user`);
+    const allow = await req.promptUser({
+      permission,
+      resource,
+      declared: false,
+    });
+    if (!allow) {
+      throw new AppError("forbidden", `${permission} access rejected by user`);
+    }
     return;
   }
 
@@ -100,7 +109,9 @@ async function gate(req: ModuleRequest): Promise<void> {
       declared: true,
       reason: decl.reason,
     });
-    if (!allow) throw new AppError("forbidden", `${permission} access rejected by user`);
+    if (!allow) {
+      throw new AppError("forbidden", `${permission} access rejected by user`);
+    }
   }
 }
 
@@ -108,6 +119,7 @@ function memoriesAccessFor(op: string): "read" | "write" {
   switch (op) {
     case "list":
     case "get":
+    case "getFile":
       return "read";
     case "write":
     case "edit":
@@ -139,7 +151,7 @@ function dispatch(req: ModuleRequest): Promise<unknown> {
     case "memories":
       return dispatchMemories(req.op, req.args);
     case "db":
-      return Promise.resolve(dispatchDb(req.toolkitId, req.toolName, req.op, req.args));
+      return Promise.resolve(dispatchDb(req.extensionId, req.toolName, req.op, req.args));
     case "llm":
       return dispatchLlm(req.op, req.args);
     case "tts":
@@ -158,19 +170,38 @@ function dispatch(req: ModuleRequest): Promise<unknown> {
 // titles are what the model knows from the prompt's relevant-memories list.
 async function dispatchMemories(op: string, args: unknown): Promise<unknown> {
   const store = memoriesStore();
+  // A disabled memory is silenced everywhere it would reach the model: not just
+  // hidden from auto-relevance and @-triggers but also unreadable through these
+  // tools, so "disabled" can't be bypassed by the agent reading it by title.
   switch (op) {
     case "list":
-      return store.list().map((m) => ({
-        title: m.title,
-        summary: m.summary,
-        updatedAtMs: m.updatedAtMs,
-      }));
+      return store
+        .list()
+        .filter((m) => m.enabled)
+        .map((m) => ({
+          title: m.title,
+          summary: m.summary,
+          updatedAtMs: m.updatedAtMs,
+        }));
     case "get": {
       const memory = store.getByTitle(argString(args, "title"));
-      if (!memory) {
+      if (!memory || !memory.enabled) {
         throw new AppError("not_found", `memory "${argString(args, "title")}" not found`);
       }
       return { title: memory.title, content: memory.content };
+    }
+    case "getFile": {
+      const title = argString(args, "title");
+      const name = argString(args, "name");
+      const memory = store.getByTitle(title);
+      if (!memory || !memory.enabled) {
+        throw new AppError("not_found", `memory "${title}" not found`);
+      }
+      return {
+        title: memory.title,
+        name,
+        content: store.getFile(memory.id, name),
+      };
     }
     case "write": {
       const title = argString(args, "title");
@@ -179,14 +210,21 @@ async function dispatchMemories(op: string, args: unknown): Promise<unknown> {
       const before = existing?.content ?? "";
       const memory = existing
         ? store.replaceContent(existing.id, content)
-        : store.create(title, content);
+        : store.create("knowledge", title, content);
       scheduleMemoryIndexing(memory.id);
-      return { title: memory.title, before, after: content, created: !existing };
+      return {
+        title: memory.title,
+        before,
+        after: content,
+        created: !existing,
+      };
     }
     case "edit": {
       const title = argString(args, "title");
       const existing = store.getByTitle(title);
-      if (!existing) throw new AppError("not_found", `memory "${title}" not found`);
+      if (!existing) {
+        throw new AppError("not_found", `memory "${title}" not found`);
+      }
       const { memory, before, after } = store.editContent(
         existing.id,
         argString(args, "find"),
@@ -210,49 +248,49 @@ function argString(args: unknown, key: string, opts: { allowEmpty?: boolean } = 
 
 // --- db ----------------------------------------------------------------
 
-// One core-owned SQLite handle per toolkit, opened on first use under
-// toolkit-data/<id>/data.sqlite and proxied to the sandboxed worker over
+// One core-owned SQLite handle per extension, opened on first use under
+// extension-data/<id>/data.sqlite and proxied to the sandboxed worker over
 // stdio (workers never get fs access to it).
-const toolkitDbs = new Map<string, Database>();
+const extensionDbs = new Map<string, Database>();
 
 type DbBindValue = string | number | boolean | null;
 
-function toolkitDb(toolkitId: string): Database {
-  let db = toolkitDbs.get(toolkitId);
+function extensionDb(extensionId: string): Database {
+  let db = extensionDbs.get(extensionId);
   if (!db) {
-    const dir = toolkitDataDir(toolkitId);
+    const dir = extensionDataDir(extensionId);
     Deno.mkdirSync(dir, { recursive: true });
     // Match the core connection (connection.ts): int64 so INTEGER columns
-    // round-trip values past 2^31 (e.g. Date.now() ms timestamps a toolkit
-    // stores), plus the same per-connection pragmas so a toolkit's private db
+    // round-trip values past 2^31 (e.g. Date.now() ms timestamps a extension
+    // stores), plus the same per-connection pragmas so a extension's private db
     // behaves like the rest of core.
     db = new Database(join(dir, "data.sqlite"), { int64: true });
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec("PRAGMA foreign_keys = ON;");
-    // Shorter than core's 5s: toolkit queries run synchronously on core's event
+    // Shorter than core's 5s: extension queries run synchronously on core's event
     // loop, so a contended lock blocks the whole loop for up to this long. A
-    // private per-toolkit db is rarely contended, so 1s fails a stuck write fast
+    // private per-extension db is rarely contended, so 1s fails a stuck write fast
     // rather than freezing core for 5s.
     db.exec("PRAGMA busy_timeout = 1000;");
-    toolkitDbs.set(toolkitId, db);
+    extensionDbs.set(extensionId, db);
   }
   return db;
 }
 
-/** Close the cached handle and remove a toolkit's private data dir. Called
+/** Close the cached handle and remove a extension's private data dir. Called
  *  by the installer on uninstall. */
-export function deleteToolkitData(toolkitId: string): void {
-  const db = toolkitDbs.get(toolkitId);
+export function deleteExtensionData(extensionId: string): void {
+  const db = extensionDbs.get(extensionId);
   if (db) {
     try {
       db.close();
     } catch {
       /* already closed */
     }
-    toolkitDbs.delete(toolkitId);
+    extensionDbs.delete(extensionId);
   }
   try {
-    Deno.removeSync(toolkitDataDir(toolkitId), { recursive: true });
+    Deno.removeSync(extensionDataDir(extensionId), { recursive: true });
   } catch (err) {
     if (!(err instanceof Deno.errors.NotFound)) throw err;
   }
@@ -271,8 +309,8 @@ function dbParams(args: unknown): DbBindValue[] {
   });
 }
 
-// Toolkit SQL runs synchronously in the core process, so it must stay inside
-// the toolkit's own database file: ATTACH/DETACH would open arbitrary database
+// Extension SQL runs synchronously in the core process, so it must stay inside
+// the extension's own database file: ATTACH/DETACH would open arbitrary database
 // files under core's privileges (core.sqlite included) and VACUUM INTO writes
 // a database to an arbitrary path. All three are rejected lexically; string
 // literals, quoted identifiers, and comments are stripped first so a
@@ -280,15 +318,15 @@ function dbParams(args: unknown): DbBindValue[] {
 const SQL_QUERY_MAX_ROWS = 10_000;
 const SQL_SLOW_WARN_MS = 1_000;
 
-function assertSqlAllowed(toolkitId: string, toolName: string, sql: string): void {
+function assertSqlAllowed(extensionId: string, toolName: string, sql: string): void {
   const screened = stripSqlLiterals(sql).toUpperCase();
   const blocked =
     /\bATTACH\b|\bDETACH\b/.test(screened) || /\bVACUUM\b[^;]*\bINTO\b/.test(screened);
   if (blocked) {
-    log.warn(`blocked db statement from ${toolkitId}/${toolName}: ${sqlSnippet(sql)}`);
+    log.warn(`blocked db statement from ${extensionId}/${toolName}: ${sqlSnippet(sql)}`);
     throw new AppError(
       "forbidden",
-      "ATTACH, DETACH, and VACUUM INTO are not allowed in toolkit databases",
+      "ATTACH, DETACH, and VACUUM INTO are not allowed in extension databases",
     );
   }
 }
@@ -363,13 +401,13 @@ function jsonSafe(value: unknown): unknown {
   return value;
 }
 
-function dispatchDb(toolkitId: string, toolName: string, op: string, args: unknown): unknown {
+function dispatchDb(extensionId: string, toolName: string, op: string, args: unknown): unknown {
   const sql = argString(args, "sql");
   const params = dbParams(args);
-  assertSqlAllowed(toolkitId, toolName, sql);
-  const db = toolkitDb(toolkitId);
+  assertSqlAllowed(extensionId, toolName, sql);
+  const db = extensionDb(extensionId);
   // Execution is synchronous on core's event loop; attribute failures and
-  // slow statements to the toolkit/tool so a faulty query is identifiable.
+  // slow statements to the extension/tool so a faulty query is identifiable.
   const startedAt = Date.now();
   try {
     switch (op) {
@@ -377,7 +415,7 @@ function dispatchDb(toolkitId: string, toolName: string, op: string, args: unkno
         const rows = db.prepare(sql).all(...params);
         if (rows.length > SQL_QUERY_MAX_ROWS) {
           log.warn(
-            `db query from ${toolkitId}/${toolName} returned ${rows.length} rows (cap ${SQL_QUERY_MAX_ROWS}): ${sqlSnippet(
+            `db query from ${extensionId}/${toolName} returned ${rows.length} rows (cap ${SQL_QUERY_MAX_ROWS}): ${sqlSnippet(
               sql,
             )}`,
           );
@@ -404,7 +442,7 @@ function dispatchDb(toolkitId: string, toolName: string, op: string, args: unkno
   } catch (err) {
     if (!(err instanceof AppError)) {
       log.warn(
-        `db ${op} from ${toolkitId}/${toolName} failed: ${errMessage(err)}; sql: ${sqlSnippet(
+        `db ${op} from ${extensionId}/${toolName} failed: ${errMessage(err)}; sql: ${sqlSnippet(
           sql,
         )}`,
       );
@@ -413,7 +451,7 @@ function dispatchDb(toolkitId: string, toolName: string, op: string, args: unkno
   } finally {
     const elapsed = Date.now() - startedAt;
     if (elapsed >= SQL_SLOW_WARN_MS) {
-      log.warn(`slow db ${op} (${elapsed}ms) from ${toolkitId}/${toolName}: ${sqlSnippet(sql)}`);
+      log.warn(`slow db ${op} (${elapsed}ms) from ${extensionId}/${toolName}: ${sqlSnippet(sql)}`);
     }
   }
 }
@@ -446,7 +484,7 @@ async function dispatchLlm(op: string, args: unknown): Promise<unknown> {
           : LLM_COMPLETE_DEFAULT_TOKENS,
         LLM_COMPLETE_MAX_TOKENS,
       ),
-      // Toolkit completions are short and expect a clean answer, so thinking is
+      // Extension completions are short and expect a clean answer, so thinking is
       // off (the model's `<think>` text would otherwise land in the returned
       // string). The tool author bounds length via maxTokens.
       reasoningBudget: 0,
@@ -462,7 +500,7 @@ async function dispatchLlm(op: string, args: unknown): Promise<unknown> {
 const TTS_MAX_TEXT_CHARS = 2_000;
 const STT_MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 // The user's tts.voice lives on the client and isn't visible to the broker, so
-// toolkit synthesis uses the schema-default voice (matching the old fallback).
+// extension synthesis uses the schema-default voice (matching the old fallback).
 const BROKER_TTS_VOICE = "af_bella";
 
 async function dispatchTts(op: string, args: unknown): Promise<unknown> {
@@ -477,8 +515,12 @@ async function dispatchTts(op: string, args: unknown): Promise<unknown> {
   if (text.length > TTS_MAX_TEXT_CHARS) {
     throw new AppError("validation_error", `tts text exceeds ${TTS_MAX_TEXT_CHARS} characters`);
   }
-  const wav = await speechSpeak(text, BROKER_TTS_VOICE);
-  return { dataB64: encodeBase64(wav), mime: "audio/wav", sampleRate: wavSampleRate(wav) };
+  const wav = await synthesizeSpeech(text, BROKER_TTS_VOICE);
+  return {
+    dataB64: encodeBase64(wav),
+    mime: "audio/wav",
+    sampleRate: wavSampleRate(wav),
+  };
 }
 
 // WAV sample rate is a little-endian uint32 at byte offset 24; Kokoro is 24 kHz.

@@ -6,7 +6,7 @@
 // manifest. A resolver without `pinnedTag` tracks the LATEST release; with
 // `pinnedTag` it resolves that exact release (deno is pinned this way on
 // every channel, because the permission prompt parsing in
-// toolkits/prompt-parser.ts depends on the prompt wording of the pinned
+// extensions/prompt-parser.ts depends on the prompt wording of the pinned
 // version). The signed manifest commits to the repo + patterns; the concrete
 // download is verified against GitHub's own published sha256 digest. We
 // REFUSE to install an asset that lacks a sha256 digest. There'd be no

@@ -175,7 +175,9 @@ export class PromptScheduler {
     const row = db()
       .prepare(`SELECT * FROM scheduled_prompts WHERE id = ? AND owner_client_id = ?`)
       .get(id, ownerClientId) as Row | undefined;
-    if (!row) throw new AppError("not_found", `scheduled prompt ${id} not found`);
+    if (!row) {
+      throw new AppError("not_found", `scheduled prompt ${id} not found`);
+    }
     return rowToPrompt(row);
   }
 

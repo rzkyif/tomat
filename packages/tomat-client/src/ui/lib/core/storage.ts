@@ -2,7 +2,7 @@ import type { DeleteStoragePathsRequest, GetStorageResponse } from "@tomat/share
 import type { CoreClient } from "./client";
 
 /** Storage view (Settings → Usage → Storage): the full on-disk tree across
- *  categories (models, binaries, sessions, toolkits, cache, logs, settings) and
+ *  categories (models, binaries, sessions, extensions, cache, logs, settings) and
  *  the clear/delete operations. The core owns the files and is the authority on
  *  what's in use; this is a thin wrapper over its /storage endpoints. */
 export class StorageApi {

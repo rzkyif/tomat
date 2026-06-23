@@ -52,8 +52,11 @@ Deno.test("buildSha256Index: covers every distinct downloadable spec", () => {
     }
   }
   for (const cat of [catalog.stt, catalog.tts]) {
-    for (const model of cat.models)
-      for (const q of model.quants) for (const f of q.files) specs.add(f.modelSpec);
+    for (const model of cat.models) {
+      for (const q of model.quants) {
+        for (const f of q.files) specs.add(f.modelSpec);
+      }
+    }
   }
   assertEquals(idx.size, specs.size);
   for (const spec of specs) assertMatch(idx.get(spec)!, SHA256);

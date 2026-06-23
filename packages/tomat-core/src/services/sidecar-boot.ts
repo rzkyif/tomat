@@ -15,8 +15,8 @@ import { errMessage } from "@tomat/shared";
 import {
   buildSpeechStartOptions,
   configureSpeech,
-  type SpeechState,
   speechDesiredState,
+  type SpeechState,
 } from "../sidecars/speech.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
 import { llmScheduler } from "./llm-scheduler.ts";
@@ -24,6 +24,7 @@ import { llmIdle } from "./llm-idle.ts";
 import { loadCoreSettings, subscribeCoreSettings } from "./core-settings.ts";
 import { downloadManager } from "../downloads/manager.ts";
 import { onBinaryInstalled } from "../binaries/manager.ts";
+import { autoInstallBuiltinIfReady } from "../extensions/builtin-seed.ts";
 import { binaryName } from "../binaries/versions.ts";
 import { binPath } from "../paths.ts";
 import { getLogger } from "../shared/log.ts";
@@ -159,7 +160,14 @@ export async function initSidecarBoot(): Promise<void> {
         await applyLlama(s).catch(logErr("llama"));
         await applyLlamaEmbed(s).catch(logErr("llama-embed"));
       }
-      if (kind === "tomat-core-speech") await applySpeech(s).catch(logErr("speech"));
+      if (kind === "tomat-core-speech") {
+        await applySpeech(s).catch(logErr("speech"));
+      }
+      if (kind === "deno") {
+        // The deno worker runtime just landed: finish installing the built-in
+        // extension (Phase-2 deps) and enable its starter tools/memories.
+        await autoInstallBuiltinIfReady().catch(logErr("builtin-auto-install"));
+      }
     })();
   });
 }

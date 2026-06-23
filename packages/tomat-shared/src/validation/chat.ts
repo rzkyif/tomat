@@ -33,6 +33,15 @@ export const chatInterruptWsSchema = z
 
 export type ChatInterruptFrame = z.infer<typeof chatInterruptWsSchema>;
 
+export const chatSubscribeWsSchema = z
+  .object({
+    kind: z.literal("chat.subscribe"),
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+export type ChatSubscribeFrame = z.infer<typeof chatSubscribeWsSchema>;
+
 export const toolAskUserResponseSchema = z
   .object({
     kind: z.literal("tool.askuser_response"),

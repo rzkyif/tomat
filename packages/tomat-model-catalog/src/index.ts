@@ -2,7 +2,7 @@
 // catalog. `scripts/release/catalog.ts` consumes buildCatalogPayload(), signs
 // it, and publishes catalog.json. See README.md for the authoring workflow.
 
-import { catalogPayloadSchema, type CatalogPayload, type ModelFamily } from "@tomat/shared";
+import { type CatalogPayload, catalogPayloadSchema, type ModelFamily } from "@tomat/shared";
 import { FAMILIES } from "./families/index.ts";
 import { FIT_CONFIG } from "./fit.ts";
 import { FILE_HASHES } from "./hashes.generated.ts";
@@ -47,7 +47,9 @@ function stampHashes(payload: CatalogPayload): void {
   for (const fam of payload.families) {
     for (const model of fam.models) {
       for (const v of model.variants) {
-        if (v.mmprojSpec && FILE_HASHES[v.mmprojSpec]) v.mmprojSha256 = FILE_HASHES[v.mmprojSpec];
+        if (v.mmprojSpec && FILE_HASHES[v.mmprojSpec]) {
+          v.mmprojSha256 = FILE_HASHES[v.mmprojSpec];
+        }
         for (const q of v.quants) {
           const h = FILE_HASHES[q.modelSpec];
           if (h) q.sha256 = h;
@@ -78,12 +80,16 @@ function checkSpeechReferences(
 ): void {
   const modelIds = new Set<string>();
   for (const model of models) {
-    if (modelIds.has(model.id)) throw new Error(`duplicate ${kind} model id: ${model.id}`);
+    if (modelIds.has(model.id)) {
+      throw new Error(`duplicate ${kind} model id: ${model.id}`);
+    }
     modelIds.add(model.id);
   }
   const presetIds = new Set<string>();
   for (const preset of presets) {
-    if (presetIds.has(preset.id)) throw new Error(`duplicate ${kind} preset id: ${preset.id}`);
+    if (presetIds.has(preset.id)) {
+      throw new Error(`duplicate ${kind} preset id: ${preset.id}`);
+    }
     presetIds.add(preset.id);
     const model = models.find((m) => m.id === preset.modelId);
     if (!model) {

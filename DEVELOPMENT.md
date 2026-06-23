@@ -19,7 +19,7 @@ flowchart TD
     core["tomat-core (Deno service): sessions, chat, tools, TTS/STT, model/binary mgmt, pairing"]
     llama["llama-server (chat + a 2nd instance for embeddings)"]
     speech["tomat-core-speech (Speech-to-Text + Text-to-Speech)"]
-    workers["tool workers (Deno): one per toolkit, permission-flagged"]
+    workers["tool workers (Deno): one per extension, permission-flagged"]
 
     client -->|HTTP+WS bearer| core
     core --> llama
@@ -30,24 +30,24 @@ flowchart TD
 **Packages** (each links to its own README for layout and internals):
 
 - [`packages/tomat-shared/`](packages/tomat-shared/README.md): TypeScript
-  types + Zod schemas (API contract, `tools.json` schema, WS frame
-  discriminated unions).
-- [`packages/tomat-core/`](packages/tomat-core/README.md): Deno service,
-  single SQLite DB, all sidecar supervision, npm-based toolkit installation,
+  types + Zod schemas (API contract, `tomat.json` schema, WS frame discriminated
+  unions).
+- [`packages/tomat-core/`](packages/tomat-core/README.md): Deno service, single
+  SQLite DB, all sidecar supervision, npm-based extension installation,
   in-process embeddings.
 - [`packages/tomat-core-updater/`](packages/tomat-core-updater/README.md):
   standalone Rust binary that swaps in a staged core build during self-update,
   then restarts core.
 - [`packages/tomat-core-keychain/`](packages/tomat-core-keychain/README.md):
-  native Rust helper that stores the core's master key in the OS keychain over
-  a stdio protocol.
-- [`packages/tomat-core-hwinfo/`](packages/tomat-core-hwinfo/README.md):
-  native Rust helper that reports RAM, physical cores, and GPU/VRAM for the
-  on-device model fit engine.
+  native Rust helper that stores the core's master key in the OS keychain over a
+  stdio protocol.
+- [`packages/tomat-core-hwinfo/`](packages/tomat-core-hwinfo/README.md): native
+  Rust helper that reports RAM, physical cores, and GPU/VRAM for the on-device
+  model fit engine.
 - [`packages/tomat-core-ptyhost/`](packages/tomat-core-ptyhost/README.md):
   native Rust helper that runs a tool worker under a pseudo-terminal so Deno's
-  runtime permission prompts can pause the tool and be answered from chat
-  (unix only for now; Windows falls back to `--no-prompt` workers).
+  runtime permission prompts can pause the tool and be answered from chat (unix
+  only for now; Windows falls back to `--no-prompt` workers).
 
 These four helper binaries (updater, keychain, hwinfo, ptyhost) ship in the
 signed release manifest and are placed in the bin dir at install time. Core
@@ -57,17 +57,17 @@ workers without permission prompts). `deno task dev` builds them from source and
 links them into the dev bin dir before core boots, so dev matches a real
 install; a build failure surfaces in the dev log and core declines to start.
 
-- [`packages/tomat-client/`](packages/tomat-client/README.md): Tauri 2 +
-  Svelte 5 + Vite + UnoCSS desktop UI.
+- [`packages/tomat-client/`](packages/tomat-client/README.md): Tauri 2 + Svelte
+  5 + Vite + UnoCSS desktop UI.
 - [`packages/tomat-model-catalog/`](packages/tomat-model-catalog/README.md):
   hand-authored source for the signed model catalog that drives the model
   pickers in Settings.
-- [`packages/tomat-builtin-toolkit/`](packages/tomat-builtin-toolkit/README.md):
-  the toolkit bundled with core; also a reference implementation of the
-  `tools.json` format and the toolkit author docs.
+- [`packages/tomat-builtin/`](packages/tomat-builtin/README.md): the extension
+  bundled with core; also a reference implementation of the `tomat.json` format
+  and the extension author docs.
 - [`packages/tomat-website/`](packages/tomat-website/README.md): Astro site
-  behind `au.tomat.ing` (landing page only), plus the release + deploy
-  pipeline for the artifacts served from `get.au.tomat.ing`.
+  behind `au.tomat.ing` (landing page only), plus the release + deploy pipeline
+  for the artifacts served from `get.au.tomat.ing`.
 
 ## Setup
 
@@ -152,8 +152,10 @@ The client's `dev` is the full Tauri shell; it runs the Vite frontend server
 itself through the Tauri `beforeDevCommand` (inlined in `tauri.conf.json`), so
 there is no separate Vite-only verb to confuse with `dev:website`. The five Rust
 helper crates expose the same verbs as cargo wrappers, so
-`deno task check:core-keychain` and `cd packages/tomat-core-keychain && deno
-task lint` work identically to the Deno packages.
+`deno task check:core-keychain` and
+`cd packages/tomat-core-keychain && deno
+task lint` work identically to the Deno
+packages.
 
 ## Packages and release items
 
@@ -167,8 +169,8 @@ The repo separates two axes that used to be tangled in the root task list:
   `core` bundles `tomat-core`, `tomat-shared`, and the native helper crates;
   `client` and `website` each pull `tomat-shared`. Release items live in
   `scripts/release/*.ts`; each declares the `packages` it is built from, and the
-  ones whose source hash is "each package's src + manifest" derive that hash from
-  the package list so it cannot drift. Releasing is covered in
+  ones whose source hash is "each package's src + manifest" derive that hash
+  from the package list so it cannot drift. Releasing is covered in
   [packages/tomat-website/README.md](packages/tomat-website/README.md).
 
 ### Cleaning build artifacts
@@ -200,8 +202,8 @@ secrets in dev (and how not to lose them) is covered in
 
 Channels are built to **coexist and run at the same time**, not just isolate
 data: binaries get a channel suffix (`tomat-core` → `tomat-core-latest`), the
-desktop app is a distinct bundle, service labels are suffixed, and default
-ports are offset so two cores can bind at once:
+desktop app is a distinct bundle, service labels are suffixed, and default ports
+are offset so two cores can bind at once:
 
 | channel | core | llama (`llm.port`) | speech | embed |
 | ------- | ---- | ------------------ | ------ | ----- |
@@ -221,8 +223,8 @@ The model catalog and the manifest / update / binary-download paths bet on
 third-party contracts (HuggingFace URLs and headers, GitHub release shapes and
 asset names, upstream archives) that can change under us. When a download or a
 release build breaks and you suspect a third party moved something, start at the
-break-glass reference [EXTERNAL.md](EXTERNAL.md): it maps each external touchpoint
-to the code that relies on it, the symptom, and the fix.
+break-glass reference [EXTERNAL.md](EXTERNAL.md): it maps each external
+touchpoint to the code that relies on it, the symptom, and the fix.
 
 ## Type-check + format + lint
 

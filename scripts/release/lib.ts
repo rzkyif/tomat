@@ -505,7 +505,7 @@ export const PACKAGES: Record<string, { dir: string; kind: PackageKind }> = {
   core: { dir: "packages/tomat-core", kind: "deno" },
   client: { dir: "packages/tomat-client", kind: "deno" },
   website: { dir: "packages/tomat-website", kind: "deno" },
-  toolkit: { dir: "packages/tomat-builtin-toolkit", kind: "deno" },
+  extension: { dir: "packages/tomat-builtin", kind: "deno" },
   catalog: { dir: "packages/tomat-model-catalog", kind: "deno" },
   "core-updater": { dir: "packages/tomat-core-updater", kind: "rust" },
   "core-keychain": { dir: "packages/tomat-core-keychain", kind: "rust" },
@@ -567,7 +567,7 @@ export function semverGt(a: string, b: string): boolean {
 // One tooling-only JSON on R2 recording each item's {version?, sourceHash} as
 // of its last successful release. NEVER fetched or verified by core/client, so
 // it carries no signature and has no Zod schema. Channel-specific items
-// (core/toolkit/catalog/client) nest under channels.<channel>; the
+// (core/extension/catalog/client) nest under channels.<channel>; the
 // channel-independent items (scripts/schemas/website) live under `shared`.
 
 export const RELEASE_STATE_KEY = "manifests/release-state.json";

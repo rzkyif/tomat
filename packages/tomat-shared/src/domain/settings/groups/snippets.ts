@@ -5,7 +5,7 @@ export const snippetsGroup: SettingGroup = {
   destination: "client",
   name: "Snippets",
   description:
-    "Reusable text you trigger with @name while typing. A snippet can add to, replace, or insert into your message or the system prompt.",
+    "Reusable text you trigger with #, @, or / while typing. A snippet can add to, replace, or insert into your message or the system prompt.",
   descriptionTier: "always",
   icon: "i-material-symbols-text-snippet-rounded",
   iconInactive: "i-material-symbols-text-snippet-outline-rounded",

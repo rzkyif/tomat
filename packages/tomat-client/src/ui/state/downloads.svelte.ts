@@ -161,8 +161,9 @@ class DownloadsState {
     confirmState.request({
       title: "Pending Downloads",
       message:
-        `The following file${plans.length === 1 ? "" : "s"} need${plans.length === 1 ? "s" : ""} to be downloaded ` +
-        `so the core can run with the current configuration.`,
+        `The following file${plans.length === 1 ? "" : "s"} need${
+          plans.length === 1 ? "s" : ""
+        } to be downloaded ` + `so the core can run with the current configuration.`,
       confirmLabel: "Download",
       cancelLabel: "Do It Later",
       downloads: plans,

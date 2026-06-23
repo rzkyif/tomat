@@ -20,7 +20,9 @@ const SAMPLE_MANIFEST = {
   binaries: {
     "llama-server": {
       version: "1.2.3",
-      platforms: { "aarch64-apple-darwin": { url: "https://r2/x", sha256: "abc" } },
+      platforms: {
+        "aarch64-apple-darwin": { url: "https://r2/x", sha256: "abc" },
+      },
     },
   },
 } as unknown as BinaryManifest;
@@ -50,7 +52,9 @@ Deno.test("verifyBinariesSignature: rejects a tampered binaries body", async () 
     binaries: {
       "llama-server": {
         version: "1.2.3",
-        platforms: { "aarch64-apple-darwin": { url: "https://evil/x", sha256: "abc" } },
+        platforms: {
+          "aarch64-apple-darwin": { url: "https://evil/x", sha256: "abc" },
+        },
       },
     } as unknown as BinaryManifest["binaries"],
   };
@@ -75,7 +79,12 @@ Deno.test("verifyBinariesSignature: rejects a signature made with a different ke
 });
 
 Deno.test("assertManifestShape: accepts a valid manifest", () => {
-  assertManifestShape({ schemaVersion: 1, version: "1.0.0", binaries: {}, signature: "abc" });
+  assertManifestShape({
+    schemaVersion: 1,
+    version: "1.0.0",
+    binaries: {},
+    signature: "abc",
+  });
 });
 
 Deno.test("assertManifestShape: rejects a missing version", () => {
@@ -93,7 +102,13 @@ Deno.test("assertManifestShape: rejects a missing/empty signature", () => {
     "missing signature",
   );
   assertThrows(
-    () => assertManifestShape({ schemaVersion: 1, version: "1.0.0", binaries: {}, signature: "" }),
+    () =>
+      assertManifestShape({
+        schemaVersion: 1,
+        version: "1.0.0",
+        binaries: {},
+        signature: "",
+      }),
     AppError,
     "missing signature",
   );
@@ -101,12 +116,23 @@ Deno.test("assertManifestShape: rejects a missing/empty signature", () => {
 
 Deno.test("assertManifestShape: rejects a wrong schemaVersion / missing binaries / non-object", () => {
   assertThrows(
-    () => assertManifestShape({ schemaVersion: 2, version: "1.0.0", binaries: {}, signature: "x" }),
+    () =>
+      assertManifestShape({
+        schemaVersion: 2,
+        version: "1.0.0",
+        binaries: {},
+        signature: "x",
+      }),
     AppError,
     "schemaVersion",
   );
   assertThrows(
-    () => assertManifestShape({ schemaVersion: 1, version: "1.0.0", signature: "x" }),
+    () =>
+      assertManifestShape({
+        schemaVersion: 1,
+        version: "1.0.0",
+        signature: "x",
+      }),
     AppError,
     "missing binaries",
   );

@@ -177,7 +177,9 @@ export class SessionsRepo {
     const anchorIdx = doc.messages.findIndex((m) => m.id === anchorMessageId);
     if (anchorIdx === -1) return [];
     let end = anchorIdx + 1;
-    while (end < doc.messages.length && doc.messages[end].role !== "user") end++;
+    while (end < doc.messages.length && doc.messages[end].role !== "user") {
+      end++;
+    }
     if (end === anchorIdx + 1) return [];
     const removed = doc.messages.splice(anchorIdx + 1, end - anchorIdx - 1);
     doc.messages.forEach((m, i) => {
@@ -191,7 +193,9 @@ export class SessionsRepo {
   getMessage(sessionId: string, messageId: string): Message {
     const doc = this.requireExists(sessionId);
     const msg = doc.messages.find((m) => m.id === messageId);
-    if (!msg) throw new AppError("message_not_found", `message ${messageId} not found`);
+    if (!msg) {
+      throw new AppError("message_not_found", `message ${messageId} not found`);
+    }
     return msg;
   }
 
@@ -202,7 +206,9 @@ export class SessionsRepo {
   ): { id: string; ord: number } {
     const doc = this.requireExists(sessionId);
     const idx = doc.messages.findIndex((m) => m.id === messageId);
-    if (idx === -1) throw new AppError("message_not_found", `message ${messageId} not found`);
+    if (idx === -1) {
+      throw new AppError("message_not_found", `message ${messageId} not found`);
+    }
     const current = doc.messages[idx];
     // Pin id / role / ord: a content patch can never re-key, re-role, or
     // reorder a message (ord was a separate, unpatchable DB column before).
@@ -222,7 +228,9 @@ export class SessionsRepo {
   deleteMessage(sessionId: string, messageId: string): void {
     const doc = this.requireExists(sessionId);
     const idx = doc.messages.findIndex((m) => m.id === messageId);
-    if (idx === -1) throw new AppError("message_not_found", "message not found");
+    if (idx === -1) {
+      throw new AppError("message_not_found", "message not found");
+    }
     doc.messages.splice(idx, 1);
     doc.updatedAtMs = Date.now();
     writeDoc(doc);
@@ -305,7 +313,9 @@ export class SessionsRepo {
 
   private requireExists(sessionId: string): SessionDoc {
     const doc = readDoc(sessionId);
-    if (!doc) throw new AppError("session_not_found", `session ${sessionId} not found`);
+    if (!doc) {
+      throw new AppError("session_not_found", `session ${sessionId} not found`);
+    }
     return doc;
   }
 }

@@ -116,7 +116,9 @@ export class CoreClient {
   // --- REST ---------------------------------------------------------------
 
   async health(): Promise<{ status: string; version: string; uptimeMs: number }> {
-    return await this.fetchJson("GET", "/api/v1/health", undefined, { auth: false });
+    return await this.fetchJson("GET", "/api/v1/health", undefined, {
+      auth: false,
+    });
   }
 
   async get<T>(path: string): Promise<T> {
@@ -233,8 +235,12 @@ export class CoreClient {
     body?: unknown,
     options: { auth?: boolean } = {},
   ): Promise<T> {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (options.auth !== false) headers.Authorization = `Bearer ${this.endpoint.token}`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (options.auth !== false) {
+      headers.Authorization = `Bearer ${this.endpoint.token}`;
+    }
     const res = await platform().net.fetch({
       url: this.endpoint.baseUrl + path,
       method,

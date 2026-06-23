@@ -175,7 +175,10 @@ function spawnBurst(stage: HTMLElement, x: number, y: number): void {
   sparks.forEach((s, i) => {
     const angle = (i / N) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
     const dist = 15 + Math.random() * 9;
-    gsap.set(s, { rotation: (angle * 180) / Math.PI + 90, transformOrigin: "50% 50%" });
+    gsap.set(s, {
+      rotation: (angle * 180) / Math.PI + 90,
+      transformOrigin: "50% 50%",
+    });
     gsap.to(s, {
       x: Math.cos(angle) * dist,
       y: Math.sin(angle) * dist,
@@ -220,7 +223,10 @@ export class Demo {
     const r = el.getBoundingClientRect();
     const s = this.stage.getBoundingClientRect();
     const k = this.scale();
-    return { x: (r.left - s.left + r.width / 2) / k, y: (r.top - s.top + r.height / 2) / k };
+    return {
+      x: (r.left - s.left + r.width / 2) / k,
+      y: (r.top - s.top + r.height / 2) / k,
+    };
   }
 
   /** Place the cursor instantly at fractional stage coordinates (0..1). Uses the
@@ -271,7 +277,13 @@ export class Demo {
   click(tl: Timeline, sel: string, fn?: () => void, at?: Pos): void {
     tl.to(
       this.cursor,
-      { scale: 0.82, duration: 0.07, yoyo: true, repeat: 1, ease: "power1.inOut" },
+      {
+        scale: 0.82,
+        duration: 0.07,
+        yoyo: true,
+        repeat: 1,
+        ease: "power1.inOut",
+      },
       at,
     ).add(() => {
       const el = this.q(sel);
@@ -323,7 +335,9 @@ export class Demo {
     // Match the field's own resolved text color, so the caret is theme-aware
     // (dark on light, light on dark) with no token guessing.
     this.caretEl.style.background = getComputedStyle(el).color;
-    if (this.caretEl.parentElement !== this.stage) this.stage.appendChild(this.caretEl);
+    if (this.caretEl.parentElement !== this.stage) {
+      this.stage.appendChild(this.caretEl);
+    }
     this.caretEl.style.display = "";
     this.positionCaret();
   }

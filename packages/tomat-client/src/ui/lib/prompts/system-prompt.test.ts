@@ -47,7 +47,14 @@ describe("applySystemPromptOverride", () => {
   });
 
   it("prepend goes before base, append after, replace swaps base", () => {
-    const out = applySystemPromptOverride(base, { prepend: "PRE", append: "POST" }, ctx);
+    const out = applySystemPromptOverride(
+      base,
+      {
+        prepend: "PRE",
+        append: "POST",
+      },
+      ctx,
+    );
     expect(out).toBe("PRE\n\nBASE\n\nPOST\n\nCTX");
   });
 
@@ -64,7 +71,15 @@ describe("applySystemPromptOverride", () => {
   });
 
   it("prepend + replace + append + context: order is preserved", () => {
-    const out = applySystemPromptOverride(base, { prepend: "A", replace: "B", append: "C" }, "D");
+    const out = applySystemPromptOverride(
+      base,
+      {
+        prepend: "A",
+        replace: "B",
+        append: "C",
+      },
+      "D",
+    );
     expect(out).toBe("A\n\nB\n\nC\n\nD");
   });
 });

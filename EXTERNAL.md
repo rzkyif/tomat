@@ -29,11 +29,12 @@ Reading each row:
 - **Code:** [sources.ts:49](packages/tomat-core/src/downloads/sources.ts#L49)
   builds the URL; [manager.ts](packages/tomat-core/src/downloads/manager.ts)
   runs the download.
-- **Assumes:** `https://huggingface.co/{user}/{repo}/resolve/{branch}/{file}?download=true`
+- **Assumes:**
+  `https://huggingface.co/{user}/{repo}/resolve/{branch}/{file}?download=true`
   serves the file (after a 302 to a CDN).
 - **Fails as:** every catalog download 404s or returns HTML.
-- **Fix:** update the template in `parseSource`. Specs are stored catalog-side as
-  `@user/repo/branch/file`, so only the URL construction changes.
+- **Fix:** update the template in `parseSource`. Specs are stored catalog-side
+  as `@user/repo/branch/file`, so only the URL construction changes.
 
 ### HuggingFace redirect headers
 
@@ -54,7 +55,8 @@ Reading each row:
 
 - **Used for:** pinning each file's sha256 when curating the catalog.
 - **Code:** `scripts/catalog/gather-hashes.ts`, `scripts/catalog/probe.ts`.
-- **Assumes:** `https://huggingface.co/api/models/{repo}/tree/{branch}?recursive=true`
+- **Assumes:**
+  `https://huggingface.co/api/models/{repo}/tree/{branch}?recursive=true`
   returns `[{ path, lfs?: { oid } }]` with `oid` = the 64-hex git-LFS sha256.
 - **Fails as:** `deno run -A scripts/catalog/gather-hashes.ts` errors or pins
   wrong / missing hashes.
@@ -132,9 +134,9 @@ Reading each row:
 - **Assumes:** `releases/tags/v2.8.2` exists with `deno-{triple}.zip` assets.
 - **Fails as:** worker runtime download fails if the tag / assets vanish.
 - **Fix:** bump `pinnedTag` deliberately, then **re-run the live-probe test**
-  ([prompt-live-probe.test.ts](packages/tomat-core/src/toolkits/prompt-live-probe.test.ts))
+  ([prompt-live-probe.test.ts](packages/tomat-core/src/extensions/prompt-live-probe.test.ts))
   because tool-permission prompts are parsed from this version's prompt wording
-  ([prompt-parser.ts](packages/tomat-core/src/toolkits/prompt-parser.ts)).
+  ([prompt-parser.ts](packages/tomat-core/src/extensions/prompt-parser.ts)).
 
 ### GitHub release JSON shape + rate-limiting
 
@@ -143,8 +145,8 @@ Reading each row:
   [upstream-resolver.ts:22-94](packages/tomat-core/src/binaries/upstream-resolver.ts#L22-L94).
 - **Assumes:** the `GitHubRelease` / `GitHubReleaseAsset` shape, and that
   `assets[].digest` is `sha256:...` (required to install on the latest channel).
-  Unauthenticated GitHub is rate-limited (~60/hr); `GITHUB_TOKEN` raises it and a
-  5-minute per-repo cache dampens polling.
+  Unauthenticated GitHub is rate-limited (~60/hr); `GITHUB_TOKEN` raises it and
+  a 5-minute per-repo cache dampens polling.
 - **Fails as:** `manifest_fetch_failed` (rate limit / shape) or
   `checksum_mismatch` (missing digest).
 - **Fix:** update the interfaces / digest handling in `upstream-resolver.ts`;
@@ -184,9 +186,10 @@ they belong on the same map.
 
 - **Used for:** fetching every signed manifest and release artifact.
 - **Code:** [config.ts:17-47](packages/tomat-core/src/config.ts#L17-L47).
-- **Assumes:** `get.au.tomat.ing/{manifests/<channel>/}{core,binaries,toolkit,catalog}.json`
+- **Assumes:**
+  `get.au.tomat.ing/{manifests/<channel>/}{core,binaries,extension,catalog}.json`
   (stable is bare; latest/dev nest under the channel).
-- **Fails as:** all update / catalog / toolkit fetches fail.
+- **Fails as:** all update / catalog / extension fetches fail.
 - **Fix:** all hardcoded hosts live in `config.ts`; changing them is a one-file
   edit. R2 / Cloudflare setup is in the
   [website README](packages/tomat-website/README.md).
@@ -198,7 +201,7 @@ they belong on the same map.
   [data/signing-keys.json](packages/tomat-core/data/signing-keys.json), verified
   in [self-updater.ts](packages/tomat-core/src/update/self-updater.ts),
   [binaries/manifest.ts](packages/tomat-core/src/binaries/manifest.ts),
-  [toolkits/builtin-manifest.ts](packages/tomat-core/src/toolkits/builtin-manifest.ts),
+  [extensions/builtin-manifest.ts](packages/tomat-core/src/extensions/builtin-manifest.ts),
   and [models/catalog.ts](packages/tomat-core/src/models/catalog.ts).
 - **Assumes:** the committed public key matches the private key that signs
   releases; signatures cover the whole payload minus the `signature` field,

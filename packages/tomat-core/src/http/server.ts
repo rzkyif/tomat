@@ -6,7 +6,9 @@
 
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import type { HealthResponse } from "@tomat/shared";
 import { CORE_VERSION } from "../config.ts";
+import { coreStatus } from "../services/core-status.ts";
 import { corsMiddleware } from "./middleware/cors.ts";
 import { sendError } from "./middleware/errors.ts";
 import { binariesRoutes } from "./routes/binaries.ts";
@@ -23,7 +25,9 @@ import { sidecarsRoutes } from "./routes/sidecars.ts";
 import { storageRoutes } from "./routes/storage.ts";
 import { sttRoutes } from "./routes/stt.ts";
 import { ttsRoutes } from "./routes/tts.ts";
-import { toolkitsRoutes } from "./routes/toolkits.ts";
+import { extensionsRoutes } from "./routes/extensions.ts";
+import { toolsRoutes } from "./routes/tools.ts";
+import { mcpRoutes } from "./routes/mcp.ts";
 import { updateRoutes } from "./routes/update.ts";
 
 // Upper bound on a single request body. Generous enough for legitimate
@@ -60,11 +64,13 @@ export function buildApp(): Hono {
   app.onError((err, c) => sendError(c, err));
 
   app.get("/api/v1/health", (c) => {
-    return c.json({
+    const body: HealthResponse = {
       status: "ok",
       version: CORE_VERSION,
       uptimeMs: Math.floor(performance.now()),
-    });
+      core: coreStatus().snapshot(),
+    };
+    return c.json(body);
   });
 
   app.route("/api/v1/pairing", pairingRoutes());
@@ -72,7 +78,9 @@ export function buildApp(): Hono {
   app.route("/api/v1/models", modelsRoutes());
   app.route("/api/v1/binaries", binariesRoutes());
   app.route("/api/v1/requirements", requirementsRoutes());
-  app.route("/api/v1/toolkits", toolkitsRoutes());
+  app.route("/api/v1/extensions", extensionsRoutes());
+  app.route("/api/v1/tools", toolsRoutes());
+  app.route("/api/v1/mcp", mcpRoutes());
   app.route("/api/v1/settings", settingsRoutes());
   app.route("/api/v1/stt", sttRoutes());
   app.route("/api/v1/tts", ttsRoutes());

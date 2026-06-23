@@ -89,14 +89,21 @@ export function resolveSttSelection(
       const quant = model.quants.find(
         (q) => primaryFileSpec(q, STT_PRIMARY_ROLE[model.family]) === body.modelSpec,
       );
-      if (quant) return { preset: "custom", settings: appliedStt(model, quant, hw) };
+      if (quant) {
+        return { preset: "custom", settings: appliedStt(model, quant, hw) };
+      }
     }
     throw new AppError("not_found", `model not in catalog: ${body.modelSpec}`);
   }
   if (body.modelId) {
     const model = stt.models.find((m) => m.id === body.modelId);
-    if (!model) throw new AppError("not_found", `model not in catalog: ${body.modelId}`);
-    return { preset: "custom", settings: appliedStt(model, defaultQuant(model), hw) };
+    if (!model) {
+      throw new AppError("not_found", `model not in catalog: ${body.modelId}`);
+    }
+    return {
+      preset: "custom",
+      settings: appliedStt(model, defaultQuant(model), hw),
+    };
   }
   throw new AppError("validation_error", "presetId, modelId, or modelSpec required");
 }

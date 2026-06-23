@@ -31,7 +31,11 @@ const downloadBodySchema = z
       .max(256),
   })
   .strict();
-const probeBodySchema = z.object({ sources: z.array(z.string().min(1)).max(256) }).strict();
+const probeBodySchema = z
+  .object({
+    sources: z.array(z.string().min(1)).max(256),
+  })
+  .strict();
 const modelSelectBodySchema = z
   .object({
     bucket: z.string().optional(),
@@ -49,7 +53,9 @@ const speechSelectBodySchema = z
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
   const parsed = schema.safeParse(body);
-  if (!parsed.success) throw new AppError("validation_error", parsed.error.message);
+  if (!parsed.success) {
+    throw new AppError("validation_error", parsed.error.message);
+  }
   return parsed.data;
 }
 
@@ -144,7 +150,10 @@ export function modelsRoutes(): Hono {
   // apply (the model browser).
   r.get("/catalog", async (c) => {
     const [catalog, hw] = await Promise.all([loadModelCatalog(), detectHardware()]);
-    return c.json({ generatedAt: catalog.generatedAt, models: buildCatalogViews(catalog, hw) });
+    return c.json({
+      generatedAt: catalog.generatedAt,
+      models: buildCatalogViews(catalog, hw),
+    });
   });
 
   // Apply a preset bucket or a specific catalog model: write the llm.* settings
@@ -258,18 +267,24 @@ async function resolveSelection(body: {
     const rec = computeRecommendations(catalog, hw, appliedFromSettings(settings)).buckets[
       body.bucket as PresetBucket
     ];
-    if (!rec) throw new AppError("validation_error", `no model fits the "${body.bucket}" preset`);
+    if (!rec) {
+      throw new AppError("validation_error", `no model fits the "${body.bucket}" preset`);
+    }
     return { preset: body.bucket, settings: rec.apply };
   }
   // A specific quant (by its unique modelSpec) from the manual picker.
   if (body.modelSpec) {
     const resolved = appliedForModelSpec(catalog, hw, body.modelSpec);
-    if (!resolved) throw new AppError("not_found", `quant not in catalog: ${body.modelSpec}`);
+    if (!resolved) {
+      throw new AppError("not_found", `quant not in catalog: ${body.modelSpec}`);
+    }
     return { preset: "custom", settings: resolved.apply };
   }
   if (body.modelId) {
     const view = buildCatalogViews(catalog, hw).find((m) => m.id === body.modelId);
-    if (!view) throw new AppError("not_found", `model not in catalog: ${body.modelId}`);
+    if (!view) {
+      throw new AppError("not_found", `model not in catalog: ${body.modelId}`);
+    }
     return { preset: "custom", settings: view.apply };
   }
   throw new AppError("validation_error", "bucket, modelId, or modelSpec required");

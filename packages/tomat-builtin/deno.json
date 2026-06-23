@@ -1,0 +1,16 @@
+{
+  "name": "tomat-builtin",
+  "version": "0.1.0",
+  "tasks": {
+    "check": "deno check index.ts",
+    "test": "deno test --allow-all --no-check --quiet"
+  },
+  "exports": "./index.ts",
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.0",
+    "@mozilla/readability": "npm:@mozilla/readability@^0.6.0",
+    "expr-eval": "npm:expr-eval@^2.0.2",
+    "linkedom": "npm:linkedom@^0.18.12",
+    "mime-types": "npm:mime-types@^3.0.2"
+  }
+}

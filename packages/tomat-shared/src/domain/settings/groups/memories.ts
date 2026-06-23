@@ -8,7 +8,7 @@ export const memoriesGroup: SettingGroup = {
   destination: "core",
   name: "Memories",
   description:
-    "Markdown memories the agent can read and edit. Reference one while typing with @name.",
+    "Knowledge the agent can read and skills it can follow. Reference one while typing with its trigger.",
   descriptionTier: "always",
   icon: "i-material-symbols-description-rounded",
   iconInactive: "i-material-symbols-description-outline-rounded",
@@ -38,6 +38,16 @@ export const memoriesGroup: SettingGroup = {
           min: 1,
           max: 10,
           step: 1,
+          visibleWhen: { field: "memories.enabled", eq: true },
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "memories.skills.autoRelevancy",
+          name: "Auto-Apply Relevant Skills",
+          description:
+            "Let the agent automatically apply skills relevant to your message. With this off, a skill applies only when you trigger it yourself. Knowledge is unaffected.",
+          type: "boolean",
+          defaultValue: true,
           visibleWhen: { field: "memories.enabled", eq: true },
           descriptionTier: "ondemand",
         },

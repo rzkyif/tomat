@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import SessionBarView from "@tomat/shared/ui/components/chat/SessionBarView.svelte";
   import MessageEnter from "./MessageEnter.svelte";
   import {
@@ -8,8 +7,12 @@
     settingsState,
     viewState,
   } from "../../state";
-  import { cores } from "$lib/core";
   import { hasAlpha } from "$lib/appearance/color";
+
+  // The stacking z-index for this row, supplied by the chat column so a row
+  // lower on screen paints over the ones above it. Owned here (not in a +page
+  // wrapper) so a hidden bar leaves no empty flex item behind.
+  let { zIndex }: { zIndex: number } = $props();
 
   // getContextSize lived in $lib/sidecar/llm and read from the LLM HTTP
   // /props endpoint. Context size is now reported by core; until the
@@ -32,24 +35,6 @@
   let titleText = $state(sessionsState.title);
   let editingTitle = $state(false);
   let confirmingDelete = $state(false);
-
-  // Active-core chip: shown only when more than one core is paired, so with a
-  // single core the bar matches the original, coreless look.
-  let coreCount = $state(0);
-  let coreName = $state("");
-  async function refreshCore(): Promise<void> {
-    try {
-      coreCount = (await cores().list()).length;
-      coreName = cores().currentEntry()?.name ?? "";
-    } catch {
-      /* settings not readable yet */
-    }
-  }
-  onMount(() => {
-    void refreshCore();
-    const unsub = cores().subscribe(() => void refreshCore());
-    return () => unsub();
-  });
 
   // Sync title from state
   $effect(() => {
@@ -155,8 +140,6 @@
     tokenUsage={messagesState.tokenUsage
       ? { used: contextUsed, max: contextMax }
       : null}
-    showChip={coreCount > 1}
-    {coreName}
     {showTitle}
     bind:titleText
     {defaultTitle}
@@ -187,15 +170,17 @@
 {/snippet}
 
 {#if showBar}
-  {#if settingsState.getAlignment() === "center"}
-    <!-- Centered: the bar slides down from above the first time a session gains
-         content (showBar false -> true). No msgId, so it animates on every such
-         entry; the session-restore gate keeps a restored bar from animating on
-         load. Off-center (left/right) it just appears, with no entry motion. -->
-    <MessageEnter alignment="center" centerDirection="down">
+  <div class="relative pointer-events-none" style:z-index={zIndex}>
+    {#if settingsState.getAlignment() === "center"}
+      <!-- Centered: the bar slides down from above the first time a session gains
+           content (showBar false -> true). No msgId, so it animates on every such
+           entry; the session-restore gate keeps a restored bar from animating on
+           load. Off-center (left/right) it just appears, with no entry motion. -->
+      <MessageEnter alignment="center" centerDirection="down">
+        {@render bar()}
+      </MessageEnter>
+    {:else}
       {@render bar()}
-    </MessageEnter>
-  {:else}
-    {@render bar()}
-  {/if}
+    {/if}
+  </div>
 {/if}

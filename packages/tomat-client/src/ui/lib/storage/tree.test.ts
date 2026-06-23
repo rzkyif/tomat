@@ -30,7 +30,13 @@ function folder(name: string, path: string, children: StorageNode[], lock?: stri
 }
 
 function category(id: string, nodes: StorageNode[]): StorageCategory {
-  return { id: id as StorageCategory["id"], label: id, deletable: true, nodes, size: 0 };
+  return {
+    id: id as StorageCategory["id"],
+    label: id,
+    deletable: true,
+    nodes,
+    size: 0,
+  };
 }
 
 const repo = folder("u/r", "/root/models/u/r", [

@@ -30,7 +30,7 @@ export async function loadModelCatalog(opts: FetchCatalogOptions = {}): Promise<
   // Dev runs from source: there is no published manifests/dev/catalog.json, so
   // compile the in-repo @tomat/model-catalog families directly. The from-source
   // build is the trust anchor, so no signature in dev (mirrors the dev binary +
-  // toolkit manifests).
+  // extension manifests).
   if (channel() === "dev") return await devCatalog();
   if (!opts.force) {
     const cached = await readCachedCatalog();
@@ -126,7 +126,9 @@ export function buildSha256Index(catalog: CatalogPayload): Map<string, string> {
   for (const fam of catalog.families) {
     for (const model of fam.models) {
       for (const v of model.variants) {
-        if (v.mmprojSpec && v.mmprojSha256) out.set(v.mmprojSpec, v.mmprojSha256);
+        if (v.mmprojSpec && v.mmprojSha256) {
+          out.set(v.mmprojSpec, v.mmprojSha256);
+        }
         for (const q of v.quants) if (q.sha256) out.set(q.modelSpec, q.sha256);
       }
     }
@@ -134,7 +136,9 @@ export function buildSha256Index(catalog: CatalogPayload): Map<string, string> {
   for (const cat of [catalog.stt, catalog.tts]) {
     for (const model of cat.models) {
       for (const quant of model.quants) {
-        for (const f of quant.files) if (f.sha256) out.set(f.modelSpec, f.sha256);
+        for (const f of quant.files) {
+          if (f.sha256) out.set(f.modelSpec, f.sha256);
+        }
       }
     }
   }

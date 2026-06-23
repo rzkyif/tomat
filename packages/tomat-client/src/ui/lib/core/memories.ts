@@ -13,15 +13,18 @@ export class MemoriesApi {
     return res.memories;
   }
 
-  create(title: string, content = ""): Promise<Memory> {
-    return this.client.post("/api/v1/memories", { title, content });
+  create(kind: "knowledge" | "skill", title: string, content = ""): Promise<Memory> {
+    return this.client.post("/api/v1/memories", { kind, title, content });
   }
 
   get(id: string): Promise<Memory> {
     return this.client.get(`/api/v1/memories/${encodeURIComponent(id)}`);
   }
 
-  update(id: string, patch: { title?: string; content?: string }): Promise<Memory> {
+  update(
+    id: string,
+    patch: { title?: string; content?: string; enabled?: boolean },
+  ): Promise<Memory> {
     return this.client.patch(`/api/v1/memories/${encodeURIComponent(id)}`, patch);
   }
 

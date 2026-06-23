@@ -75,26 +75,15 @@ class StreamingState {
   attach(): void {
     if (this.unsubscribeWs) return;
     this.unsubscribeWs = cores().subscribeWs((f) => this.onFrame(f));
-    // A core hot-reload (or any disconnect) silently stops the frame stream:
-    // no terminal chat.done/chat.error arrives, so isActive (and the spinner)
-    // would hang forever. On disconnect, abort the in-flight stream and flip any
-    // running tool call to interrupted so the UI unwedges on its own.
+    // A transient transport drop silently stops the frame stream, so isActive
+    // (and the spinner) would hang forever. But the turn keeps running
+    // server-side: detach transparently rather than interrupt it (see
+    // detachForResume). A deliberate core swap closes the socket WITHOUT
+    // emitting "disconnected", so it does NOT reach here; the core-switch path
+    // (+page.svelte) calls detachForResume directly instead.
     this.unsubscribeConn = cores().subscribeConnectionState((state) => {
       if (state !== "disconnected") return;
-      if (this.isActive) {
-        log.info("stream aborted: core disconnected");
-        this.abortForDisconnect();
-      }
-      const interrupted = messagesState.interruptActiveToolCalls();
-      if (interrupted > 0) {
-        log.info(`interrupted ${interrupted} in-flight tool call(s): core disconnected`);
-      }
-      // A pending permission / schedule-confirm prompt belongs to a now-dead
-      // tool call: its response would post into a dropped socket, leaving
-      // UserInput stuck in that input mode. Clear both so the textarea
-      // returns; the call is already flipped to interrupted above.
-      permissionState.clear();
-      scheduleConfirmState.clear();
+      this.detachForResume();
     });
   }
 
@@ -243,7 +232,21 @@ class StreamingState {
       const next = new Set(this.liveIds);
       next.add(msg.id);
       this.liveIds = next;
-      if (local.role === "assistant") this.claimTTS(msg.id);
+      if (local.role === "assistant") {
+        this.claimTTS(msg.id);
+        // Resume catch-up: a born snapshot already carrying content means we
+        // re-attached mid-message (resubscribe). Advance the TTS cursor past
+        // what already streamed so only new sentences are spoken, not the
+        // whole message again.
+        const existing = typeof local.content === "string" ? local.content : "";
+        if (existing && msg.id === this.ttsTargetId) {
+          let stripped = stripMarkdownForTTS(existing);
+          if (!settingsState.currentSettings["tts.spellOutEmojis"]) {
+            stripped = stripEmojisForTTS(stripped);
+          }
+          this.ttsCursor = stripped.length;
+        }
+      }
       return;
     }
     // Final snapshot.
@@ -308,8 +311,9 @@ class StreamingState {
       ttsState.currentMessageId !== null &&
       this.ttsTargetId !== null &&
       ttsState.currentMessageId !== this.ttsTargetId
-    )
+    ) {
       return;
+    }
     let stripped = stripMarkdownForTTS(fullText);
     if (!settings["tts.spellOutEmojis"]) stripped = stripEmojisForTTS(stripped);
     // Speech belongs to the chat view: navigating away resets playback (see
@@ -326,7 +330,9 @@ class StreamingState {
       if (final) ttsState.finalize();
       return;
     }
-    const sentenceSeg = new Intl.Segmenter(undefined, { granularity: "sentence" });
+    const sentenceSeg = new Intl.Segmenter(undefined, {
+      granularity: "sentence",
+    });
     const sentences = Array.from(sentenceSeg.segment(remaining));
     const lastIdx = sentences.length - 1;
     for (let i = 0; i < sentences.length; i++) {
@@ -374,16 +380,35 @@ class StreamingState {
     this.awaitingFirstDelta = false;
   }
 
-  /** Abort an in-flight stream because the core connection dropped (e.g. a
-   *  dev hot-reload restart). No chat.interrupt frame: the socket is down, so
-   *  there's nothing to tell the server. Bubbles that never got their final
-   *  snapshot were never persisted; the reconnect reload in sessionsState
-   *  resyncs to the server's truth. */
-  abortForDisconnect(): void {
-    if (!this.isActive) return;
+  /** Drop the local live-turn presentation when the connection goes away
+   *  (transient drop or a deliberate core swap), WITHOUT abandoning or
+   *  interrupting the stream. The turn keeps running server-side; the streamId
+   *  is intentionally NOT marked abandoned so the resubscribe born snapshots
+   *  can re-adopt it on reconnect for full live catch-up. */
+  softReset(): void {
     this.resetTTSPlayback();
-    this.markAbandoned(this.streamId);
     this.finish();
+  }
+
+  /** Detach the current core's in-flight turn transparently: softReset plus
+   *  clearing the open prompt INPUT MODES. Used on a transient transport drop
+   *  AND on a deliberate core swap (where no "disconnected" is emitted, so the
+   *  connection handler never fires and +page.svelte calls this directly before
+   *  the session reload). Without this on a swap, sessions.load() would run
+   *  interruptStreaming with the OLD core's stream still active, abandoning its
+   *  streamId (blocking re-adoption on return) and firing a cross-core
+   *  chat.interrupt. The turn keeps running server-side and is re-adopted via
+   *  the resubscribe born snapshots on reconnect / when we swap back. */
+  detachForResume(): void {
+    if (this.isActive) log.info("stream detached: resuming on reconnect / return");
+    this.softReset();
+    // The pending permission / schedule-confirm INPUT MODES are core-specific
+    // and would post into a dropped (or now-foreign) socket, so clear them; the
+    // tool bubble itself stays awaiting and the prompt is re-emitted on
+    // resubscribe. The askUser form lives on the message ephemera and is
+    // likewise restored by the resubscribe re-emit after the reload.
+    permissionState.clear();
+    scheduleConfirmState.clear();
   }
 
   abortSilently(): void {

@@ -14,7 +14,7 @@ import type OpenAI from "openai";
 import { errMessage } from "@tomat/shared";
 import type { Tool, ToolDescriptor } from "@tomat/shared";
 import { db } from "../db/connection.ts";
-import { toolkitsRegistry } from "../toolkits/registry.ts";
+import { extensionsRegistry } from "../extensions/registry.ts";
 import { type LlmEndpointConfig, type LlmRequest, streamChatCompletion } from "./llm-provider.ts";
 import { cosineNormalized, embedSourceHash, toolEmbedText } from "./relevance.ts";
 import { getLogger } from "../shared/log.ts";
@@ -38,10 +38,10 @@ export interface Phase1Result {
 export class ToolFilter {
   // Returns the top-K most similar enabled tools, plus the always-available
   // set (if requested). Tools without a stored embedding are silently
-  // skipped; re-index via /api/v1/toolkits/reindex to backfill them.
+  // skipped; re-index via /api/v1/extensions/reindex to backfill them.
   phase1(queryVector: Float32Array, options: Phase1Options = {}): Phase1Result {
     const topK = options.topK ?? 10;
-    const registry = toolkitsRegistry();
+    const registry = extensionsRegistry();
     const tools = enabledTools();
     // One batched query instead of one loadEmbedding() round-trip per tool.
     const embeddings = registry.loadAllEmbeddings();
@@ -56,7 +56,7 @@ export class ToolFilter {
       // Skip vectors embedded by a different model: a stale source hash means
       // the stored vector isn't comparable to the current-model query vector,
       // so scoring it would silently mis-rank. It reads as "not embedded" until
-      // /toolkits/reindex backfills it.
+      // /extensions/reindex backfills it.
       if (emb.sourceHash !== embedSourceHash(toolEmbedText(tool))) continue;
       const score = cosineNormalized(queryVector, emb.vector);
       scored.push({ tool, score });
@@ -107,7 +107,11 @@ export class ToolFilter {
       messages,
       // Thinking off by default (Refinement Thinking Budget = 0); a positive
       // budget opts in, added on top of the short answer allowance.
-      overrides: { temperature: 0, maxTokens: 64 + reasoningBudget, reasoningBudget },
+      overrides: {
+        temperature: 0,
+        maxTokens: 64 + reasoningBudget,
+        reasoningBudget,
+      },
       signal,
     };
 
@@ -157,16 +161,17 @@ export function __resetForTesting(): void {
 function enabledTools(): Tool[] {
   const rows = db()
     .prepare(`
-    SELECT t.id, t.toolkit_id, t.name, t.description, t.parameters_json,
+    SELECT t.id, t.extension_id, t.name, t.description, t.parameters_json,
            t.triggers_json, t.fn_export, t.always_available, t.enabled
     FROM tools t
-    JOIN toolkits k ON k.id = t.toolkit_id
+    JOIN extensions k ON k.id = t.extension_id
     WHERE t.enabled = 1 AND k.status = 'installed'
   `)
     .all() as Array<Record<string, unknown>>;
   return rows.map((r) => ({
     id: String(r.id),
-    toolkitId: String(r.toolkit_id),
+    extensionId: String(r.extension_id),
+    providerKind: "extension" as const,
     name: String(r.name),
     description: String(r.description),
     parameters: JSON.parse(String(r.parameters_json)),
@@ -183,7 +188,7 @@ function enabledTools(): Tool[] {
 function toDescriptor(tool: Tool): ToolDescriptor {
   return {
     toolId: tool.id,
-    toolkitId: tool.toolkitId,
+    extensionId: tool.extensionId,
     name: tool.name,
     description: tool.description,
   };

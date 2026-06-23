@@ -3,7 +3,7 @@ import { glob } from "astro/loaders";
 
 // The user manual: one MDX file per subsection (each becomes its own page). Pages
 // render shared @tomat/shared/ui components inline as demos, placed at the point
-// each system is discussed (see STYLE.md). The "Last updated" date shown on each
+// each system is discussed (see the root COPY.md). The "Last updated" date shown on each
 // page is derived from the file's last git commit at build time (see
 // src/lib/git-date.ts), not declared in frontmatter.
 const manual = defineCollection({

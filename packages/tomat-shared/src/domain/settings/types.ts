@@ -159,16 +159,18 @@ export type RenderOnlyField = BaseField & {
 /** Discriminator selecting which client-side manager renders an
  *  object_management field. The schema names WHICH manager, never HOW: data
  *  loading, actions, and detail rendering live in the per-type field component
- *  (`components/settings/fields/{Snippets,Toolkits,Cores}Field.svelte`), which
+ *  (`components/settings/fields/{Snippets,Extensions,Cores}Field.svelte`), which
  *  `SettingsField.svelte` dispatches to on this value. */
 export type ObjectManagementType =
   | "snippets"
-  | "toolkits"
+  | "tools"
+  | "extensions"
+  | "mcp"
   | "cores"
   | "memories"
   | "scheduled_prompts";
 
-/** A scrollable, searchable manager for a list of objects (snippets, toolkits,
+/** A scrollable, searchable manager for a list of objects (snippets, extensions,
  *  paired cores, memories, scheduled prompts). Render-only as far as the
  *  settings store is concerned: the managed objects live in their own stores
  *  (client settings, core REST, keychain), never in this field's value. The
@@ -284,7 +286,7 @@ export interface SettingSection {
    *  Single-destination groups normally leave this unset and inherit the group
    *  destination; the one sanctioned exception is an unlabeled section holding
    *  only hidden persisted flags (visibleWhen never matches) that must live on
-   *  the other side, e.g. `toolkits.skipRiskyGrantWarning`. */
+   *  the other side, e.g. `extensions.skipRiskyGrantWarning`. */
   destination?: SettingDestination;
   visibleWhen?: FieldCondition;
   expandWhen?: FieldCondition;
@@ -403,6 +405,8 @@ export const CORE_GROUP_IDS = [
   "greetings",
   "dualModel",
   "tools",
+  "extensions",
+  "mcp",
   "stt",
   "tts",
   "usage",

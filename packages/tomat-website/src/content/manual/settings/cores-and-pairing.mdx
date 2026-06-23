@@ -4,7 +4,7 @@ section: Settings & Maintenance
 order: 4
 ---
 
-import SessionBarDemo from "../../../components/demos/SessionBarDemo.svelte";
+import CoreBarDemo from "../../../components/demos/CoreBarDemo.svelte";
 import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelte";
 
 The **core** is the service that does tomat's work, and the **client** is the app
@@ -34,21 +34,33 @@ setup is a laptop and a more powerful desktop: you carry the client, and point i
 at whichever core you want to do the work, so the heavy model runs on the desktop
 even while you sit at the laptop.
 
-When a session is running against a named core, the session bar shows which one, so
-you always know where the work is happening rather than guessing.
+The bar pinned at the bottom of the app, the **core bar**, always shows which core
+you are connected to and how it is doing, and lets you switch cores from one place.
+The status reads at a glance: getting ready, ready, busy with work, updating, or
+having trouble.
 
-<SessionBarDemo
-  scenario="withCoreChip"
-  highlightLabel="Core"
-  highlightTarget="[data-region=core-chip]"
-/>
+<CoreBarDemo scenario="busy" highlightLabel="Status" highlightTarget="[data-region=core-status]" />
+
+When the status carries more than a word, you can open it for the specifics.
+Select the status to expand the bar into a panel: while it is busy it shows what
+is working and waiting, and when something has gone wrong it names each part that
+is affected and the exact problem, so you can tell whether it is the language
+model, speech, or something else, and what to fix.
+
+<CoreBarDemo scenario="errorExpanded" />
+
+The client connects to one core at a time, but the work you start does not stop
+when you look away. You can begin a chat on one core, switch to another, and come
+back later to find the first one right where you left it, the reply still arriving
+and a question it asked still waiting for your answer. The only thing that clears
+that waiting work is restarting the core itself.
 
 ## Managing cores
 
-Manage your paired cores under **Cores** in Settings, where you can add a new one
-or switch the active core. This is the counterpart to pairing: where pairing
-introduces a core, this group is where your introduced cores live and where you
-choose between them.
+Switch cores from the core bar for a quick change. For the full set, manage your
+paired cores under **Cores** in Settings, where you can add a new one, rename one,
+or remove one. This is the counterpart to pairing: where pairing introduces a core,
+this group is where your introduced cores live.
 
 <SettingsPanelDemo group="cores" />
 

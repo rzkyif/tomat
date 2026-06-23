@@ -53,7 +53,15 @@ Deno.test("buildStorageTree: groups models, exposes every category, total = sum 
     assertEquals(models.size, 35);
 
     // Every category id is present.
-    for (const id of ["models", "binaries", "cache", "logs", "sessions", "toolkits", "settings"]) {
+    for (const id of [
+      "models",
+      "binaries",
+      "cache",
+      "logs",
+      "sessions",
+      "extensions",
+      "settings",
+    ]) {
       category(tree, id);
     }
     assertEquals(
@@ -87,7 +95,10 @@ Deno.test("deleteStoragePaths: refuses a model required by current settings", as
   const restore = stubFetch();
   try {
     const abs = await writeModel("u/r/model.gguf", "X".repeat(8));
-    await patchCoreSettings({ "llm.provider": "local", "llm.modelPath": "@u/r/main/model.gguf" });
+    await patchCoreSettings({
+      "llm.provider": "local",
+      "llm.modelPath": "@u/r/main/model.gguf",
+    });
 
     const tree = await buildStorageTree();
     const node = category(tree, "models").nodes.find((n: StorageNode) => n.path === abs);

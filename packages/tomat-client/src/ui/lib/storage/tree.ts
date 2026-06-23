@@ -57,7 +57,7 @@ export function findNode(tree: StorageTree, path: string): StorageNode | null {
 /** Expand the given paths into the concrete paths that get deleted: a file is
  *  itself; a folder with file children expands to those files (so a partially
  *  locked repo can be cleaned file-by-file); a folder with no children (a
- *  summary dir, session, or toolkit) deletes as a whole. */
+ *  summary dir, session, or extension) deletes as a whole. */
 export function expandToFiles(tree: StorageTree, paths: string[]): string[] {
   const out: string[] = [];
   for (const p of paths) {
@@ -67,8 +67,9 @@ export function expandToFiles(tree: StorageTree, paths: string[]): string[] {
       out.push(n.path);
     } else {
       const fileChildren = n.children.filter((c) => c.kind === "file");
-      if (fileChildren.length > 0) for (const c of fileChildren) out.push(c.path);
-      else out.push(n.path);
+      if (fileChildren.length > 0) {
+        for (const c of fileChildren) out.push(c.path);
+      } else out.push(n.path);
     }
   }
   return out;

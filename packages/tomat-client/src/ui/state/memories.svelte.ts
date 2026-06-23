@@ -12,14 +12,15 @@ import { getLogger } from "$lib/util/log";
 const log = getLogger("memories");
 
 /** The @-token a memory responds to: its filename stem ("meeting-notes.md"
- *  -> "@meeting-notes"). A stem with characters outside the bare-token set
- *  (a hand-placed file like "My Notes.md") uses the quoted form
- *  `@"my notes"`, which the matcher on both sides understands. The core
- *  resolves these tokens at generation time; the client only offers them in
- *  autocomplete and never expands them. */
+ *  -> "@meeting-notes"; an extension memory "ext/skills/file-bug" ->
+ *  "@ext/skills/file-bug"). Quotes only exist to hold a name together across
+ *  whitespace, so a stem with no spaces is referenced bare and only a
+ *  hand-placed name containing spaces takes the quoted form `@"my notes"`. Both
+ *  resolve against the lowercased stem on the core; the client only offers them
+ *  in autocomplete and never expands them. */
 export function memoryTrigger(meta: MemoryMeta): string {
   const stem = meta.filename.replace(/\.md$/, "").toLowerCase();
-  return /^[a-z0-9_-]+$/.test(stem) ? `@${stem}` : `@"${stem}"`;
+  return /\s/.test(stem) ? `@"${stem}"` : `@${stem}`;
 }
 
 class MemoriesState {
@@ -28,7 +29,7 @@ class MemoriesState {
   private unsubscribeConn: (() => void) | null = null;
 
   /** Subscribe to the active core's connection state and (re)load the list on
-   *  every connected edge. Idempotent, mirroring toolkitsState.attach(). */
+   *  every connected edge. Idempotent, mirroring extensionsState.attach(). */
   attach(): void {
     if (this.unsubscribeConn) return;
     this.unsubscribeConn = cores().subscribeConnectionState((state) => {
@@ -42,8 +43,8 @@ class MemoriesState {
     this.memories = await cores().api().memories.list();
   }
 
-  async create(title: string, content = ""): Promise<Memory> {
-    const doc = await cores().api().memories.create(title, content);
+  async create(kind: "knowledge" | "skill", title: string, content = ""): Promise<Memory> {
+    const doc = await cores().api().memories.create(kind, title, content);
     await this.load();
     return doc;
   }
@@ -52,10 +53,18 @@ class MemoriesState {
     return cores().api().memories.get(id);
   }
 
-  async update(id: string, patch: { title?: string; content?: string }): Promise<Memory> {
+  async update(
+    id: string,
+    patch: { title?: string; content?: string; enabled?: boolean },
+  ): Promise<Memory> {
     const doc = await cores().api().memories.update(id, patch);
     await this.load();
     return doc;
+  }
+
+  async setEnabled(id: string, enabled: boolean): Promise<void> {
+    await cores().api().memories.update(id, { enabled });
+    await this.load();
   }
 
   async delete(id: string): Promise<void> {

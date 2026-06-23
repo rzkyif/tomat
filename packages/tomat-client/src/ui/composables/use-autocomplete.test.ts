@@ -47,6 +47,14 @@ describe("Autocomplete.updateFromInput", () => {
     expect(ac.prefix).toBe('@"My Do');
   });
 
+  it("keeps the dropdown open while a dotted/slashed name is typed", () => {
+    const src = "ref @ext/skills/file-bug";
+    const { ac } = setup(src, src.length);
+    ac.updateFromInput(src);
+    expect(ac.open).toBe(true);
+    expect(ac.prefix).toBe("@ext/skills/file-bug");
+  });
+
   it("stays closed when there is no trigger before the caret", () => {
     const { ac } = setup("just text", 9);
     ac.updateFromInput("just text");
@@ -166,6 +174,11 @@ describe("collectExistingTriggers", () => {
   it("collects bare and quoted tokens, lowercased", () => {
     const out = collectExistingTriggers('use @Foo and @"My Doc" here', -1, -1);
     expect([...out].sort()).toEqual(['@"my doc"', "@foo"]);
+  });
+
+  it("collects bare names with dots and slashes, dropping trailing punctuation", () => {
+    const out = collectExistingTriggers("see @ext/skills/file-bug. and @node.js!", -1, -1);
+    expect([...out].sort()).toEqual(["@ext/skills/file-bug", "@node.js"]);
   });
 
   it("excludes the token spanning [excludeStart, excludeEnd)", () => {

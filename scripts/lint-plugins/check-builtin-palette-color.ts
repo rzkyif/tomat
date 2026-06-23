@@ -85,7 +85,12 @@ async function scan(): Promise<Violation[]> {
       PALETTE_COLOR_RE.lastIndex = 0;
       let m = PALETTE_COLOR_RE.exec(lines[i]);
       while (m !== null) {
-        violations.push({ file, line: i + 1, column: m.index + 1, text: lines[i].trim() });
+        violations.push({
+          file,
+          line: i + 1,
+          column: m.index + 1,
+          text: lines[i].trim(),
+        });
         m = PALETTE_COLOR_RE.exec(lines[i]);
       }
     }

@@ -35,7 +35,7 @@ const INTER_DOWNLOAD_DELAY_MS = 1_000;
 
 export interface EnqueueSpec {
   source: string;
-  destination: "models" | "binaries" | "toolkits";
+  destination: "models" | "binaries" | "extensions";
   groupId: string;
   sizeHint?: number;
   // Optional SHA-256 (lowercase hex) verified after a successful download.
@@ -247,8 +247,8 @@ export class DownloadManager {
         return p.modelsDir;
       case "binaries":
         return p.binDir;
-      case "toolkits":
-        return p.toolkitsDir;
+      case "extensions":
+        return p.extensionsDir;
     }
   }
 

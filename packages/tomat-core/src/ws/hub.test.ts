@@ -22,11 +22,18 @@ function startServer(): RunningServer {
   const app = buildApp();
   const hub = wsHub();
   const abort = new AbortController();
-  const server = Deno.serve({ port: 0, hostname: "127.0.0.1", signal: abort.signal }, (req) => {
-    const url = new URL(req.url);
-    if (url.pathname === "/ws/v1") return hub.handleUpgrade(req);
-    return app.fetch(req);
-  });
+  const server = Deno.serve(
+    {
+      port: 0,
+      hostname: "127.0.0.1",
+      signal: abort.signal,
+    },
+    (req) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/ws/v1") return hub.handleUpgrade(req);
+      return app.fetch(req);
+    },
+  );
   const port = (server.addr as Deno.NetAddr).port;
   return {
     port,
@@ -62,9 +69,13 @@ function once<T>(ws: WebSocket, ev: "open" | "close" | "error"): Promise<T> {
 function nextMessage(ws: WebSocket): Promise<string> {
   return new Promise((resolve, reject) => {
     const onMsg = (ev: MessageEvent) => {
+      const data = typeof ev.data === "string" ? ev.data : "";
+      // The hub seeds every new connection with a core.status frame; skip it so
+      // these protocol tests see the reply they actually probe for.
+      if (data.includes('"core.status"')) return;
       ws.removeEventListener("message", onMsg);
       ws.removeEventListener("error", onErr);
-      resolve(typeof ev.data === "string" ? ev.data : "");
+      resolve(data);
     };
     const onErr = (ev: Event) => {
       ws.removeEventListener("message", onMsg);
@@ -266,7 +277,10 @@ function waitForFrame(ws: WebSocket, kind: string): Promise<Record<string, unkno
 function patchSettings(port: number, token: string, body: Record<string, unknown>) {
   return fetch(`http://127.0.0.1:${port}/api/v1/settings`, {
     method: "PATCH",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
     body: JSON.stringify(body),
   });
 }
@@ -284,7 +298,9 @@ Deno.test({
       await once(ws, "open");
 
       const valueFramePromise = waitForFrame(ws, "settings.updated");
-      const set = await patchSettings(server.port, token, { "llm.host": "0.0.0.0" });
+      const set = await patchSettings(server.port, token, {
+        "llm.host": "0.0.0.0",
+      });
       assertEquals(set.status, 200);
       await set.body?.cancel();
       const valueFrame = await valueFramePromise;
@@ -324,7 +340,10 @@ Deno.test({
         `http://127.0.0.1:${server.port}/api/v1/settings/secrets/llm.external.apiKey`,
         {
           method: "PUT",
-          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+          },
           body: JSON.stringify({ value: "sk-never-on-the-wire" }),
         },
       );

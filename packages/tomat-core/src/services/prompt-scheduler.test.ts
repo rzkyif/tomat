@@ -184,7 +184,12 @@ function setNextRun(id: string, atMs: number): void {
   db().prepare(`UPDATE scheduled_prompts SET next_run_at_ms = ? WHERE id = ?`).run(atMs, id);
 }
 
-const weeklySpec: ScheduleSpec = { kind: "weekly", weekdays: [1], hour: 9, minute: 0 };
+const weeklySpec: ScheduleSpec = {
+  kind: "weekly",
+  weekdays: [1],
+  hour: 9,
+  minute: 0,
+};
 
 Deno.test("scheduler: create arms a future run and CRUD stays owner-scoped", async () => {
   const env = await setupTestEnv();
@@ -293,8 +298,13 @@ Deno.test("scheduler: update recomputes the next run only when it must", async (
       assert((enabled.nextRunAtMs ?? 0) > Date.now());
 
       // A new schedule re-derives it too.
-      const oneOff: ScheduleSpec = { kind: "once", atMs: Date.now() + 60 * 60 * 1000 };
-      const switched = scheduler.update(owner, created.id, { schedule: oneOff });
+      const oneOff: ScheduleSpec = {
+        kind: "once",
+        atMs: Date.now() + 60 * 60 * 1000,
+      };
+      const switched = scheduler.update(owner, created.id, {
+        schedule: oneOff,
+      });
       assertEquals(switched.nextRunAtMs, oneOff.atMs);
     } finally {
       scheduler.dispose();

@@ -11,7 +11,7 @@
  * to a catalog quant, so that split doesn't need a separate stored value here.
  */
 
-import { type AppliedModelSettings, type PresetBucket, PRESET_BUCKETS } from "./recommend.ts";
+import { type AppliedModelSettings, PRESET_BUCKETS, type PresetBucket } from "./recommend.ts";
 
 export const CUSTOM_PRESET = "custom";
 
@@ -59,6 +59,8 @@ function valueEquals(got: unknown, want: unknown): boolean {
   }
   if (typeof want === "boolean") return got === want;
   // An absent/empty applied value (e.g. no vision module) matches an unset key.
-  if (want === undefined || want === "") return got === undefined || got === null || got === "";
+  if (want === undefined || want === "") {
+    return got === undefined || got === null || got === "";
+  }
   return got === want;
 }

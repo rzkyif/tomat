@@ -3,7 +3,7 @@
 // permission kinds.
 
 import { assertEquals } from "@std/assert";
-import { type PermissionDecl, permissionKey } from "./toolkit.ts";
+import { type PermissionDecl, permissionKey } from "./extension.ts";
 
 Deno.test("permissionKey: net packs host + comma-joined ports", () => {
   const decl: PermissionDecl = {

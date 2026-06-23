@@ -36,7 +36,10 @@ const impl: Platform = {
     position: () => Promise.resolve(),
     isVisible: async () => true,
     subscribeVisibility: async () => () => {},
-    outerSize: async () => ({ width: window.innerWidth, height: window.innerHeight }),
+    outerSize: async () => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }),
     outerPosition: async () => ({ x: window.screenX, y: window.screenY }),
     setOuterSize: unavailable("windowing.setOuterSize"),
     setOuterPosition: unavailable("windowing.setOuterPosition"),

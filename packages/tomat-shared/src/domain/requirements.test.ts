@@ -43,9 +43,11 @@ Deno.test("requiredModelRefs: stt bundle files only when enabled + local", () =>
     false,
   );
   assertEquals(
-    requiredModelRefs({ ...base, "stt.enabled": true, "stt.provider": "external" }).some(
-      (r) => r.group === "stt",
-    ),
+    requiredModelRefs({
+      ...base,
+      "stt.enabled": true,
+      "stt.provider": "external",
+    }).some((r) => r.group === "stt"),
     false,
   );
   assertEquals(

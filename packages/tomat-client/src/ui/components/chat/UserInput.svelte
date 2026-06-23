@@ -13,6 +13,7 @@
     permissionState,
     scheduleConfirmState,
     memoriesState,
+    mcpState,
     serversState,
     settingsState,
     snippetsState,
@@ -47,7 +48,7 @@
     ingestImageBlob,
     MIME_BY_EXT,
   } from "$lib/chat/attachments";
-  import { applySnippets } from "$lib/snippets/snippets";
+  import { applySnippets, snippetTrigger } from "$lib/snippets/snippets";
   import {
     type AutocompleteOption,
     collectExistingTriggers,
@@ -112,29 +113,31 @@
       ac.triggerStart,
       ac.triggerEnd,
     );
+    // The leading symbol the user typed (`#`/`@`/`/`) picks the source list:
+    // snippets match by their full trigger so only the right symbol passes;
+    // memories are `@`-only references.
     const snippets = snippetsState.snippets
-      .filter((s) => {
-        if (!s.trigger.toLowerCase().startsWith(prefix)) return false;
+      .map((s) => ({ snippet: s, trigger: snippetTrigger(s) }))
+      .filter(({ snippet, trigger }) => {
+        if (!trigger.toLowerCase().startsWith(prefix)) return false;
         // insert-user snippets are explicitly designed to be dropped inline
         // multiple times, so don't filter them out even if already present.
-        if (
-          s.placement !== "insert-user" &&
-          existing.has(s.trigger.toLowerCase())
-        ) {
+        if (snippet.placement !== "insert-user" && existing.has(trigger.toLowerCase())) {
           return false;
         }
         return true;
       })
-      .map<AutocompleteOption>((s) => ({
-        id: `snippet:${s.id}`,
-        name: s.name,
-        trigger: s.trigger,
+      .map<AutocompleteOption>(({ snippet, trigger }) => ({
+        id: `snippet:${snippet.id}`,
+        name: snippet.name,
+        trigger,
         source: "snippet",
       }));
     const snippetTriggers = new Set(
-      snippetsState.snippets.map((s) => s.trigger.toLowerCase()),
+      snippetsState.snippets.map((s) => snippetTrigger(s).toLowerCase()),
     );
     const memories = memoriesState.memories
+      .filter((d) => d.enabled)
       .map((d) => ({ memory: d, trigger: memoryTrigger(d) }))
       .filter(
         ({ trigger }) =>
@@ -149,7 +152,36 @@
         trigger,
         source: "memory",
       }));
-    return [...snippets, ...memories];
+    // MCP prompts trigger with "/" (enabled ones only); MCP resources are
+    // "@"-referenceable. Both resolve core-side at send.
+    const mcpResSlug = (n: string) =>
+      `@${n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`;
+    const mcpPrompts = mcpState.prompts
+      .filter((p) => p.enabled)
+      .map((p) => ({ p, trigger: `/${p.name}` }))
+      .filter(({ trigger }) =>
+        trigger.toLowerCase().startsWith(prefix) && !existing.has(trigger.toLowerCase())
+      )
+      .map<AutocompleteOption>(({ p, trigger }) => ({
+        id: `mcp_prompt:${p.serverId}:${p.name}`,
+        name: p.serverName,
+        trigger,
+        source: "mcp_prompt",
+      }));
+    const mcpResources = mcpState.resources
+      .map((r) => ({ r, trigger: mcpResSlug(r.name) }))
+      .filter(({ trigger }) =>
+        trigger.toLowerCase().startsWith(prefix) &&
+        !existing.has(trigger.toLowerCase()) &&
+        !snippetTriggers.has(trigger.toLowerCase())
+      )
+      .map<AutocompleteOption>(({ r, trigger }) => ({
+        id: `resource:${r.serverId}:${r.uri}`,
+        name: r.name,
+        trigger,
+        source: "resource",
+      }));
+    return [...snippets, ...memories, ...mcpPrompts, ...mcpResources];
   });
 
   $effect(() => {
@@ -199,7 +231,7 @@
   // always-allowed. The text input area shows the request instead of the
   // textarea; attach/voice/send controls hide; X and check buttons to the
   // right of the settings group decide. The accept applies to this tool
-  // call only ("always allow" lives in the Toolkit detail view).
+  // call only ("always allow" lives in the Extension detail view).
   let permissionRequest = $derived(permissionState.pending);
 
   // Schedule-confirm mode: a running tool proposed a scheduled prompt and is

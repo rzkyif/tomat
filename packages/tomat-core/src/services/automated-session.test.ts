@@ -49,7 +49,9 @@ Deno.test("runAutomatedSession: persists an automated message, broadcasts, and s
     assertEquals(broadcasts.length, 1);
     assertEquals(broadcasts[0].clientId, clientId);
     const frame = broadcasts[0].frame;
-    if (frame.kind !== "session.created") throw new Error("expected session.created");
+    if (frame.kind !== "session.created") {
+      throw new Error("expected session.created");
+    }
     assertEquals(frame.reason, "schedule");
     assertEquals(frame.focus, "show");
     assertEquals(frame.scheduledPromptId, "sched-1");

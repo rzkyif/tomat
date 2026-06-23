@@ -1,7 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { confirmState, snippetsState } from "$stores";
-  import { SNIPPET_PLACEMENT_OPTIONS, type Snippet } from "$lib/snippets/snippets";
+  import {
+    recommendedSymbol,
+    SNIPPET_PLACEMENT_OPTIONS,
+    type Snippet,
+    snippetTrigger,
+  } from "$lib/snippets/snippets";
   import type { ParsedQuery } from "$lib/objects/query";
   import { type MenuRow, showFilterSortMenu, showObjectActionMenu } from "$lib/objects/menu";
   import ObjectManager from "$components/ui/ObjectManager.svelte";
@@ -20,20 +25,25 @@
     return SNIPPET_PLACEMENT_OPTIONS.find((o) => o.value === p)?.label ?? p;
   }
 
-  function makeUniqueTrigger(): string {
-    const existing = new Set(snippetsState.snippets.map((s) => s.trigger.toLowerCase()));
+  function makeUniqueName(): string {
+    const existing = new Set(snippetsState.snippets.map((s) => s.name.toLowerCase()));
     let i = 1;
-    while (existing.has(`@snippet${i}`)) i++;
-    return `@snippet${i}`;
+    while (existing.has(`snippet${i}`)) i++;
+    return `snippet${i}`;
   }
 
   function load({ query: q }: { offset: number; limit: number; query: ParsedQuery }) {
     const text = q.text.toLowerCase();
     let list = snippetsState.snippets.filter(
-      (s) => !text || s.name.toLowerCase().includes(text) || s.trigger.toLowerCase().includes(text),
+      (s) =>
+        !text ||
+        s.name.toLowerCase().includes(text) ||
+        snippetTrigger(s).toLowerCase().includes(text),
     );
     if (q.sort === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
-    else if (q.sort === "trigger") list = [...list].sort((a, b) => a.trigger.localeCompare(b.trigger));
+    else if (q.sort === "trigger") {
+      list = [...list].sort((a, b) => snippetTrigger(a).localeCompare(snippetTrigger(b)));
+    }
     return Promise.resolve({ items: list, done: true });
   }
 
@@ -45,7 +55,7 @@
         onSelect: () =>
           confirmState.request({
             title: "Delete snippet",
-            message: `Delete snippet "${s.name || s.trigger}"? This cannot be undone.`,
+            message: `Delete snippet "${s.name || snippetTrigger(s)}"? This cannot be undone.`,
             destructive: true,
             confirmLabel: "Delete",
             onConfirm: async () => {
@@ -59,8 +69,9 @@
 
   async function newSnippet() {
     const created = await snippetsState.create({
-      name: "New snippet",
-      trigger: makeUniqueTrigger(),
+      name: makeUniqueName(),
+      symbol: recommendedSymbol("append-system"),
+      symbolPinned: false,
       placement: "append-system",
       text: "",
     });
@@ -108,14 +119,14 @@
     <ObjectCard
       label={item.name || "Untitled snippet"}
       description={item.text || undefined}
-      meta={item.trigger}
+      meta={snippetTrigger(item)}
       badges={[{ label: placementLabel(item.placement) }]}
       menuRows={cardMenuRows(item)}
       onOpen={open}
     />
   {/snippet}
   {#snippet detail(item)}
-    <ObjectDetailHeader title={item.name || "Untitled snippet"} subtitle={item.trigger} />
+    <ObjectDetailHeader title={item.name || "Untitled snippet"} subtitle={snippetTrigger(item)} />
     <ObjectDetailScroll>
       <SnippetDetail {item} reload={() => reloadKey++} />
     </ObjectDetailScroll>
@@ -127,7 +138,7 @@
       {:else}
         <div class="text-base text-default-700">No snippets yet</div>
         <div class="text-sm text-default-500">
-          Use the menu to create a snippet, then trigger it with @name in chat.
+          Use the menu to create a snippet, then trigger it with #, @, or / in chat.
         </div>
       {/if}
     </div>

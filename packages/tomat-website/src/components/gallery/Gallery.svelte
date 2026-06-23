@@ -22,6 +22,7 @@
   import RelevantMemoriesView from "@tomat/shared/ui/components/chat/messages/RelevantMemoriesView.svelte";
   import RelevantToolsView from "@tomat/shared/ui/components/chat/messages/RelevantToolsView.svelte";
   import SessionBarView from "@tomat/shared/ui/components/chat/SessionBarView.svelte";
+  import CoreBarView from "@tomat/shared/ui/components/chat/CoreBarView.svelte";
   import SettingsContentView from "@tomat/shared/ui/components/settings/SettingsContentView.svelte";
   import SettingsFieldView from "@tomat/shared/ui/components/settings/SettingsFieldView.svelte";
   import SettingsHeaderView from "@tomat/shared/ui/components/settings/SettingsHeaderView.svelte";
@@ -113,6 +114,12 @@
     {#each entries(SAMPLES.SessionBarView) as [name, p] (name)}
       <GalleryCard label={`SessionBarView · ${name}`}>
         <SessionBarView {...p as ComponentProps<typeof SessionBarView>} />
+      </GalleryCard>
+    {/each}
+
+    {#each entries(SAMPLES.CoreBarView) as [name, p] (name)}
+      <GalleryCard label={`CoreBarView · ${name}`}>
+        <CoreBarView {...p as ComponentProps<typeof CoreBarView>} />
       </GalleryCard>
     {/each}
 

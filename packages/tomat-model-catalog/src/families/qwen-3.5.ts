@@ -20,10 +20,26 @@ const PROVIDER = "unsloth";
 function quants(repo: string, base: string, sizes: Record<string, number>): CatalogQuant[] {
   const spec = (file: string) => `@${PROVIDER}/${repo}/main/${file}`;
   return [
-    { quant: "Q8_0", modelSpec: spec(`${base}-Q8_0.gguf`), fileSizeBytes: sizes.q8 },
-    { quant: "Q4_K_M", modelSpec: spec(`${base}-Q4_K_M.gguf`), fileSizeBytes: sizes.q4 },
-    { quant: "Q3_K_M", modelSpec: spec(`${base}-Q3_K_M.gguf`), fileSizeBytes: sizes.q3 },
-    { quant: "UD-Q2_K_XL", modelSpec: spec(`${base}-UD-Q2_K_XL.gguf`), fileSizeBytes: sizes.q2 },
+    {
+      quant: "Q8_0",
+      modelSpec: spec(`${base}-Q8_0.gguf`),
+      fileSizeBytes: sizes.q8,
+    },
+    {
+      quant: "Q4_K_M",
+      modelSpec: spec(`${base}-Q4_K_M.gguf`),
+      fileSizeBytes: sizes.q4,
+    },
+    {
+      quant: "Q3_K_M",
+      modelSpec: spec(`${base}-Q3_K_M.gguf`),
+      fileSizeBytes: sizes.q3,
+    },
+    {
+      quant: "UD-Q2_K_XL",
+      modelSpec: spec(`${base}-UD-Q2_K_XL.gguf`),
+      fileSizeBytes: sizes.q2,
+    },
   ];
 }
 
@@ -34,7 +50,13 @@ const aa = (value: number) => [
 // Qwen's recommended thinking-mode sampling, at the precise/reasoning end
 // (temperature 0.6 rather than the higher "general" 1.0) for agentic
 // reliability. Uniform across the family; users can adjust in Model Behavior.
-const SAMPLING = { temperature: 0.6, topP: 0.95, topK: 20, minP: 0, repeatPenalty: 1.0 };
+const SAMPLING = {
+  temperature: 0.6,
+  topP: 0.95,
+  topK: 20,
+  minP: 0,
+  repeatPenalty: 1.0,
+};
 
 export const qwen35: ModelFamily = {
   family: "Qwen 3.5",
@@ -46,7 +68,13 @@ export const qwen35: ModelFamily = {
       scores: aa(10.5),
       paramsB: 0.8,
       contextMax: 262144,
-      arch: { blockCount: 24, embeddingLength: 1024, headCount: 8, headCountKv: 2, headDim: 256 },
+      arch: {
+        blockCount: 24,
+        embeddingLength: 1024,
+        headCount: 8,
+        headCountKv: 2,
+        headDim: 256,
+      },
       capabilities: { tools: true, vision: true, reasoning: true },
       sampling: SAMPLING,
       variants: [
@@ -71,7 +99,13 @@ export const qwen35: ModelFamily = {
       scores: aa(16.3),
       paramsB: 2,
       contextMax: 262144,
-      arch: { blockCount: 24, embeddingLength: 2048, headCount: 8, headCountKv: 2, headDim: 256 },
+      arch: {
+        blockCount: 24,
+        embeddingLength: 2048,
+        headCount: 8,
+        headCountKv: 2,
+        headDim: 256,
+      },
       capabilities: { tools: true, vision: true, reasoning: true },
       sampling: SAMPLING,
       variants: [
@@ -96,7 +130,13 @@ export const qwen35: ModelFamily = {
       scores: aa(27.1),
       paramsB: 4,
       contextMax: 262144,
-      arch: { blockCount: 32, embeddingLength: 2560, headCount: 16, headCountKv: 4, headDim: 256 },
+      arch: {
+        blockCount: 32,
+        embeddingLength: 2560,
+        headCount: 16,
+        headCountKv: 4,
+        headDim: 256,
+      },
       capabilities: { tools: true, vision: true, reasoning: true },
       sampling: SAMPLING,
       variants: [
@@ -121,7 +161,13 @@ export const qwen35: ModelFamily = {
       scores: aa(32.4),
       paramsB: 9,
       contextMax: 262144,
-      arch: { blockCount: 32, embeddingLength: 4096, headCount: 16, headCountKv: 4, headDim: 256 },
+      arch: {
+        blockCount: 32,
+        embeddingLength: 4096,
+        headCount: 16,
+        headCountKv: 4,
+        headDim: 256,
+      },
       capabilities: { tools: true, vision: true, reasoning: true },
       sampling: SAMPLING,
       variants: [

@@ -36,7 +36,7 @@ export type DownloadStatus = "Pending" | "Downloading" | "Completed" | "Error" |
 export interface DownloadEntry {
   id: string;
   source: string;
-  destination: "models" | "binaries" | "toolkits";
+  destination: "models" | "binaries" | "extensions";
   relPath: string;
   absPath: string;
   filename: string;
@@ -113,7 +113,7 @@ export const UPSTREAM_BINARIES: Partial<Record<BinaryKind, UpstreamResolver>> = 
   deno: {
     repo: "denoland/deno",
     // Pinned on every channel: tool-worker permission prompts are parsed
-    // from this version's prompt wording (tomat-core/src/toolkits/
+    // from this version's prompt wording (tomat-core/src/extensions/
     // prompt-parser.ts). Bump deliberately and re-run the live-probe test
     // (prompt-live-probe.test.ts) against the new release first.
     pinnedTag: "v2.8.2",
@@ -259,13 +259,13 @@ export interface CoreManifest {
   signature: string;
 }
 
-// Signed manifest for the CDN-distributed built-in toolkit. Mirrors CoreManifest:
+// Signed manifest for the CDN-distributed built-in extension. Mirrors CoreManifest:
 // the whole object minus `signature` is canonicalized + Ed25519-signed at release
 // time, and the runtime verifier reconstructs the same payload by stripping
-// `signature`. `version` is the toolkit's package.json version; `tarballUrl`
+// `signature`. `version` is the extension's package.json version; `tarballUrl`
 // points at the gzipped tarball for that version and `sha256` is verified before
 // extraction.
-export interface BuiltinToolkitManifest {
+export interface BuiltinExtensionManifest {
   schemaVersion: 1;
   version: string;
   id: string;

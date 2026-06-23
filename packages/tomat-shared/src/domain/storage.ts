@@ -1,6 +1,6 @@
 // On-disk storage view for the Settings "Storage" field. The core walks its
 // whole persistence tree (models, the sessions DB + attachments, sidecar
-// binaries, installed toolkits, caches, logs, settings), tags anything that is
+// binaries, installed extensions, caches, logs, settings), tags anything that is
 // currently in use with a `lock_reason`, and returns this grouped tree; the
 // client renders it and routes deletes back through the storage API, which
 // re-validates the lock server-side. Field names are snake_case to match the
@@ -19,14 +19,17 @@ export type StorageNodeBase = {
 };
 
 export type StorageFile = StorageNodeBase & { kind: "file" };
-export type StorageFolder = StorageNodeBase & { kind: "folder"; children: StorageNode[] };
+export type StorageFolder = StorageNodeBase & {
+  kind: "folder";
+  children: StorageNode[];
+};
 export type StorageNode = StorageFile | StorageFolder;
 
 export type StorageCategoryId =
   | "models"
   | "sessions"
   | "binaries"
-  | "toolkits"
+  | "extensions"
   | "cache"
   | "logs"
   | "settings";
@@ -36,7 +39,7 @@ export type StorageCategory = {
   /** Display label for the group header (e.g. "Models", "Sessions"). */
   label: string;
   /** Whether this category supports deletion at all. Read-only categories
-   *  (toolkits, settings) are display-only; their rows are never selectable. */
+   *  (extensions, settings) are display-only; their rows are never selectable. */
   deletable: boolean;
   nodes: StorageNode[];
   /** Sum of `nodes[].size` for this category. */

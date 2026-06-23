@@ -1,8 +1,14 @@
-// Memory store: markdown files under ~/.tomat/<channel>/core/memories/
-// are the source of truth; SQLite (`memories`) carries metadata plus the
-// background-generated summary + embedding. `rescan()` reconciles the two
-// by content hash, so files edited or dropped in by hand (or another sync
-// mechanism) become first-class memories on the next scan.
+// Memory store: reference *knowledge* (a `<slug>.md` file) and procedural
+// *skills* (a `<slug>/` folder holding SKILL.md plus optional bundled files)
+// under ~/.tomat/<channel>/core/memories/ are the source of truth; SQLite
+// (`memories`) carries metadata plus the background-generated summary +
+// embedding. `rescan()` reconciles the two by content hash, so memories edited
+// or dropped in by hand become first-class on the next scan.
+//
+// Memories shipped by an extension are read-only and live under that
+// extension's install dir; the extension registers its base directory via
+// `registerMemoryProvider` so the store can resolve their content. Only
+// `USER_MEMORY_PROVIDER` memories are editable, written, or rescanned here.
 //
 // Synchronous fs (and synchronous hashing) for the same reasons as
 // sessions-store.ts: call sites are sync (broker ops, chat prompt assembly),
@@ -10,15 +16,38 @@
 // another caller's read-modify-write.
 
 import { join } from "@std/path";
-import type { Memory, MemoryMeta } from "@tomat/shared";
+import { type Memory, type MemoryKind, type MemoryMeta, USER_MEMORY_PROVIDER } from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
+import { isWithin } from "../shared/fs-safety.ts";
 import { sha256HexSync } from "../shared/hash.ts";
 import { newMemoryId } from "../shared/ids.ts";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("memories");
+
+// The instruction body inside a skill folder. The folder name is the slug.
+const SKILL_FILE = "SKILL.md";
+
+// Per-provider base directory. `USER_MEMORY_PROVIDER` resolves lazily to the
+// core memories dir; extensions register theirs at load time.
+const providerBaseDirs = new Map<string, string>();
+
+/** Register where an extension's read-only memories live, so the store can
+ *  resolve their content. Idempotent. */
+export function registerMemoryProvider(provider: string, baseDir: string): void {
+  providerBaseDirs.set(provider, baseDir);
+}
+
+function baseDirFor(provider: string): string {
+  if (provider === USER_MEMORY_PROVIDER) return paths().memoriesDir;
+  const dir = providerBaseDirs.get(provider);
+  if (!dir) {
+    throw new AppError("not_found", `memory provider "${provider}" is not registered`);
+  }
+  return dir;
+}
 
 export class MemoriesStore {
   list(): MemoryMeta[] {
@@ -30,7 +59,7 @@ export class MemoriesStore {
 
   get(id: string): Memory {
     const meta = this.metaOrThrow(id);
-    return { ...meta, content: readContent(meta.filename) };
+    return { ...meta, content: readContent(meta), files: skillFiles(meta) };
   }
 
   // Case-insensitive lookup: titles are unique COLLATE NOCASE (see create),
@@ -42,50 +71,87 @@ export class MemoriesStore {
       | undefined;
     if (!row) return undefined;
     const meta = rowToMeta(row);
-    return { ...meta, content: readContent(meta.filename) };
+    return { ...meta, content: readContent(meta), files: skillFiles(meta) };
   }
 
-  create(title: string, content: string): Memory {
+  /** Read one bundled reference file from a skill folder. Guards against path
+   *  traversal: `name` must be a plain file directly inside the folder. */
+  getFile(id: string, name: string): string {
+    const meta = this.metaOrThrow(id);
+    if (meta.kind !== "skill") {
+      throw new AppError("validation_error", "memory is not a skill");
+    }
+    if (name === SKILL_FILE || name.includes("/") || name.includes("\\") || name.includes("..")) {
+      throw new AppError("validation_error", `invalid skill file "${name}"`);
+    }
+    try {
+      return Deno.readTextFileSync(join(baseDirFor(meta.provider), meta.filename, name));
+    } catch {
+      throw new AppError("not_found", `skill file "${name}" not found`);
+    }
+  }
+
+  create(kind: MemoryKind, title: string, content: string): Memory {
     const cleanTitle = title.trim();
-    if (!cleanTitle) throw new AppError("validation_error", "memory title required");
+    if (!cleanTitle) {
+      throw new AppError("validation_error", "memory title required");
+    }
     // NOCASE: "Notes" next to "notes" would be two rows tools can't tell
     // apart through the title-keyed API.
     if (this.titleExists(cleanTitle)) {
       throw new AppError("conflict", `memory "${cleanTitle}" already exists`);
     }
     const id = newMemoryId();
-    const filename = uniqueFilename(cleanTitle);
+    const filename = uniqueName(kind, cleanTitle);
     const hash = sha256HexSync(content);
     const now = Date.now();
+    const skill = kind === "skill" ? parseSkillMeta(content) : null;
     // Write the file BEFORE the row so a failed write can never leave a row
-    // pointing at a missing file. rescan() tolerates an orphan file, so if the
-    // INSERT then fails we remove the file to avoid a stray (best-effort).
-    writeContent(filename, content);
+    // pointing at missing content. rescan() tolerates orphans, so if the INSERT
+    // then fails we remove what we wrote (best-effort).
+    writeUserContent(kind, filename, content);
     try {
       db()
         .prepare(`
-        INSERT INTO memories (id, title, filename, content_hash, created_at_ms, updated_at_ms)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO memories (id, kind, title, filename, content_hash, summary, summary_source_hash,
+                              provider, enabled, suggested_tools, created_at_ms, updated_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
       `)
-        .run(id, cleanTitle, filename, hash, now, now);
+        .run(
+          id,
+          kind,
+          cleanTitle,
+          filename,
+          hash,
+          skill?.description ?? null,
+          skill?.description ? hash : null,
+          USER_MEMORY_PROVIDER,
+          skill && skill.suggestedTools.length ? JSON.stringify(skill.suggestedTools) : null,
+          now,
+          now,
+        );
     } catch (err) {
-      try {
-        Deno.removeSync(join(paths().memoriesDir, filename));
-      } catch {
-        /* best-effort; rescan would otherwise re-adopt the orphan file */
-      }
+      removeUserContent(kind, filename);
       throw err;
     }
     return this.get(id);
   }
 
   replaceContent(id: string, content: string): Memory {
-    const meta = this.metaOrThrow(id);
+    const meta = this.editableOrThrow(id);
     const hash = sha256HexSync(content);
+    const skill = meta.kind === "skill" ? parseSkillMeta(content) : null;
     db()
-      .prepare(`UPDATE memories SET content_hash = ?, updated_at_ms = ? WHERE id = ?`)
-      .run(hash, Date.now(), id);
-    writeContent(meta.filename, content);
+      .prepare(
+        `UPDATE memories SET content_hash = ?, suggested_tools = ?, updated_at_ms = ? WHERE id = ?`,
+      )
+      .run(
+        hash,
+        skill && skill.suggestedTools.length ? JSON.stringify(skill.suggestedTools) : null,
+        Date.now(),
+        id,
+      );
+    writeUserContent(meta.kind, meta.filename, content);
     return this.get(id);
   }
 
@@ -98,9 +164,11 @@ export class MemoriesStore {
     find: string,
     replace: string,
   ): { memory: Memory; before: string; after: string } {
-    if (find.length === 0) throw new AppError("validation_error", "find text must not be empty");
-    const meta = this.metaOrThrow(id);
-    const before = readContent(meta.filename);
+    if (find.length === 0) {
+      throw new AppError("validation_error", "find text must not be empty");
+    }
+    const meta = this.editableOrThrow(id);
+    const before = readContent(meta);
     const first = before.indexOf(find);
     if (first === -1) {
       throw new AppError("validation_error", "find text not found in memory");
@@ -118,80 +186,117 @@ export class MemoriesStore {
 
   rename(id: string, title: string): MemoryMeta {
     const cleanTitle = title.trim();
-    if (!cleanTitle) throw new AppError("validation_error", "memory title required");
-    const meta = this.metaOrThrow(id);
+    if (!cleanTitle) {
+      throw new AppError("validation_error", "memory title required");
+    }
+    const meta = this.editableOrThrow(id);
     if (cleanTitle === meta.title) return meta;
     if (this.titleExists(cleanTitle, id)) {
       throw new AppError("conflict", `memory "${cleanTitle}" already exists`);
     }
-    // The file keeps its name: filenames only need to be stable and unique,
-    // and a rename that also moved the file would break external references
-    // for no user-visible gain. Re-derive happens naturally on rescan if the
-    // file is recreated.
+    // The on-disk name keeps stable: names only need to be unique, and a rename
+    // that also moved files would break external references for no gain.
     db()
       .prepare(`UPDATE memories SET title = ?, updated_at_ms = ? WHERE id = ?`)
       .run(cleanTitle, Date.now(), id);
     return this.metaOrThrow(id);
   }
 
-  delete(id: string): void {
-    const meta = this.metaOrThrow(id);
-    db().prepare(`DELETE FROM memories WHERE id = ?`).run(id);
-    try {
-      Deno.removeSync(join(paths().memoriesDir, meta.filename));
-    } catch {
-      /* already gone */
-    }
+  /** Toggle whether a memory participates in chat. Allowed for any provider:
+   *  the user may silence an extension's memory without uninstalling it. */
+  setEnabled(id: string, enabled: boolean): MemoryMeta {
+    this.metaOrThrow(id);
+    db()
+      .prepare(`UPDATE memories SET enabled = ?, updated_at_ms = ? WHERE id = ?`)
+      .run(enabled ? 1 : 0, Date.now(), id);
+    return this.metaOrThrow(id);
   }
 
-  /** Reconcile rows with the files on disk. New .md files become memories
-   *  (title from the filename stem); rows whose file vanished are dropped;
-   *  rows whose file content drifted get their hash bumped so the indexer
-   *  refreshes summary + embedding. Returns counts for the route response. */
+  delete(id: string): void {
+    const meta = this.editableOrThrow(id);
+    db().prepare(`DELETE FROM memories WHERE id = ?`).run(id);
+    removeUserContent(meta.kind, meta.filename);
+  }
+
+  /** Reconcile user rows with the files/folders on disk. New `<slug>.md` files
+   *  become knowledge and new `<slug>/SKILL.md` folders become skills (title
+   *  from the slug); rows whose content vanished are dropped; rows whose body
+   *  drifted get their hash bumped so the indexer refreshes. Extension-provided
+   *  memories are reconciled at extension load, not here. */
   rescan(): { added: number; removed: number; changed: number } {
     const dir = paths().memoriesDir;
-    const onDisk = new Map<string, string>(); // filename -> content
+    // filename -> { kind, content }
+    const onDisk = new Map<string, { kind: MemoryKind; content: string }>();
     for (const entry of Deno.readDirSync(dir)) {
-      if (!entry.isFile || !entry.name.endsWith(".md")) continue;
       try {
-        onDisk.set(entry.name, readContent(entry.name));
+        if (entry.isFile && entry.name.endsWith(".md")) {
+          onDisk.set(entry.name, {
+            kind: "knowledge",
+            content: readPath(join(dir, entry.name)),
+          });
+        } else if (entry.isDirectory) {
+          const body = join(dir, entry.name, SKILL_FILE);
+          onDisk.set(entry.name, { kind: "skill", content: readPath(body) });
+        }
       } catch {
-        // Vanished between readDir and read; the next rescan settles it.
+        // Vanished or has no SKILL.md; the next rescan settles it.
       }
     }
     let added = 0;
     let removed = 0;
     let changed = 0;
     const now = Date.now();
-    // One transaction so the table is reconciled atomically (the loops below run
-    // many statements); a mid-rescan failure rolls back rather than leaving the
-    // index half-updated. Mirrors registry.ts replaceTools().
     db().exec("BEGIN");
     try {
       for (const row of this.list()) {
-        const content = onDisk.get(row.filename);
-        if (content === undefined) {
+        if (row.provider !== USER_MEMORY_PROVIDER) continue;
+        const disk = onDisk.get(row.filename);
+        if (disk === undefined || disk.kind !== row.kind) {
           db().prepare(`DELETE FROM memories WHERE id = ?`).run(row.id);
           removed++;
           continue;
         }
         onDisk.delete(row.filename);
-        const hash = sha256HexSync(content);
+        const hash = sha256HexSync(disk.content);
         if (hash !== row.contentHash) {
+          const skill = row.kind === "skill" ? parseSkillMeta(disk.content) : null;
           db()
-            .prepare(`UPDATE memories SET content_hash = ?, updated_at_ms = ? WHERE id = ?`)
-            .run(hash, now, row.id);
+            .prepare(
+              `UPDATE memories SET content_hash = ?, suggested_tools = ?, updated_at_ms = ? WHERE id = ?`,
+            )
+            .run(
+              hash,
+              skill && skill.suggestedTools.length ? JSON.stringify(skill.suggestedTools) : null,
+              now,
+              row.id,
+            );
           changed++;
         }
       }
-      for (const [filename, content] of onDisk) {
-        const title = uniqueTitle(filename.replace(/\.md$/, ""));
+      for (const [filename, disk] of onDisk) {
+        const stem = filename.replace(/\.md$/, "");
+        const title = uniqueTitle(stem);
+        const skill = disk.kind === "skill" ? parseSkillMeta(disk.content) : null;
+        const hash = sha256HexSync(disk.content);
         db()
           .prepare(`
-          INSERT INTO memories (id, title, filename, content_hash, created_at_ms, updated_at_ms)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO memories (id, kind, title, filename, content_hash, summary, summary_source_hash,
+                                provider, enabled, suggested_tools, created_at_ms, updated_at_ms)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
         `)
-          .run(newMemoryId(), title, filename, sha256HexSync(content), now, now);
+          .run(
+            newMemoryId(),
+            disk.kind,
+            title,
+            filename,
+            hash,
+            skill?.description ?? null,
+            skill?.description ? hash : null,
+            USER_MEMORY_PROVIDER,
+            skill && skill.suggestedTools.length ? JSON.stringify(skill.suggestedTools) : null,
+            now,
+            now,
+          );
         added++;
       }
       db().exec("COMMIT");
@@ -203,6 +308,87 @@ export class MemoriesStore {
       log.info(`rescan: ${added} added, ${removed} removed, ${changed} changed`);
     }
     return { added, removed, changed };
+  }
+
+  /** Reconcile the read-only memories an extension ships (from its tomat.json
+   *  `memories` array). The extension's base dir is registered so content
+   *  resolves; one row per declared memory is upserted (provider = extensionId,
+   *  disabled by default per the opt-in rule). Declarations that vanished are
+   *  removed. `extensionsBaseDir` is the parent of the install dir, so a row's
+   *  `filename` (`${extensionId}/${decl.path}`) stays globally unique while
+   *  resolving to `<installDir>/<decl.path>`. */
+  registerExtensionMemories(
+    extensionId: string,
+    extensionsBaseDir: string,
+    decls: Array<{ kind: MemoryKind; path: string }>,
+  ): void {
+    registerMemoryProvider(extensionId, extensionsBaseDir);
+    const now = Date.now();
+    // Defense in depth: the manifest schema already rejects `..`/absolute paths,
+    // but re-check containment here before any path reaches the filesystem, so a
+    // declared memory can never resolve outside the extension's install dir.
+    const installDir = join(extensionsBaseDir, extensionId);
+    const safe = decls.filter((d) => {
+      if (isWithin(installDir, join(installDir, d.path))) return true;
+      log.warn(`extension "${extensionId}" memory path escapes install dir; skipped: ${d.path}`);
+      return false;
+    });
+    const want = new Map(safe.map((d) => [`${extensionId}/${d.path}`, d]));
+    db().exec("BEGIN");
+    try {
+      for (const row of this.list()) {
+        if (row.provider !== extensionId) continue;
+        if (!want.has(row.filename)) {
+          db().prepare(`DELETE FROM memories WHERE id = ?`).run(row.id);
+        } else {
+          want.delete(row.filename); // already present; leave as-is
+        }
+      }
+      for (const [filename, d] of want) {
+        const probe = {
+          kind: d.kind,
+          filename,
+          provider: extensionId,
+        } as MemoryMeta;
+        let content: string;
+        try {
+          content = readContent(probe);
+        } catch {
+          continue; // declared path missing on disk; skip rather than fail install
+        }
+        const hash = sha256HexSync(content);
+        const skill = d.kind === "skill" ? parseSkillMeta(content) : null;
+        const title = uniqueTitle(prettyTitle(d.path));
+        db()
+          .prepare(`
+          INSERT INTO memories (id, kind, title, filename, content_hash, summary, summary_source_hash,
+                                provider, enabled, suggested_tools, created_at_ms, updated_at_ms)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        `)
+          .run(
+            newMemoryId(),
+            d.kind,
+            title,
+            filename,
+            hash,
+            skill?.description ?? null,
+            skill?.description ? hash : null,
+            extensionId,
+            skill && skill.suggestedTools.length ? JSON.stringify(skill.suggestedTools) : null,
+            now,
+            now,
+          );
+      }
+      db().exec("COMMIT");
+    } catch (err) {
+      db().exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  /** Drop every memory an extension provided (called when it is removed). */
+  removeExtensionMemories(extensionId: string): void {
+    db().prepare(`DELETE FROM memories WHERE provider = ?`).run(extensionId);
   }
 
   // --- index bookkeeping (used by the background indexer) ------------------
@@ -266,6 +452,15 @@ export class MemoriesStore {
     return rowToMeta(row);
   }
 
+  /** Like metaOrThrow, but rejects extension-provided (read-only) memories. */
+  private editableOrThrow(id: string): MemoryMeta {
+    const meta = this.metaOrThrow(id);
+    if (meta.provider !== USER_MEMORY_PROVIDER) {
+      throw new AppError("conflict", `memory ${id} is provided by an extension and is read-only`);
+    }
+    return meta;
+  }
+
   private titleExists(title: string, excludeId?: string): boolean {
     const row = db()
       .prepare(`SELECT id FROM memories WHERE title = ? COLLATE NOCASE`)
@@ -283,61 +478,167 @@ export function memoriesStore(): MemoriesStore {
 // Test-only: drops the cached instance.
 export function __resetForTesting(): void {
   _instance = null;
+  providerBaseDirs.clear();
 }
 
 // --- helpers ----------------------------------------------------------------
 
 const META_SELECT = `
-  SELECT id, title, filename, content_hash, summary, created_at_ms, updated_at_ms
+  SELECT id, kind, title, filename, content_hash, summary, provider, enabled, suggested_tools,
+         created_at_ms, updated_at_ms
   FROM memories`;
 
 interface MetaRow {
   id: string;
+  kind: string;
   title: string;
   filename: string;
   content_hash: string;
   summary: string | null;
+  provider: string;
+  enabled: number;
+  suggested_tools: string | null;
   created_at_ms: number;
   updated_at_ms: number;
 }
 
 function rowToMeta(row: MetaRow): MemoryMeta {
+  const kind = row.kind === "skill" ? "skill" : "knowledge";
+  let suggestedTools: string[] | undefined;
+  if (row.suggested_tools) {
+    try {
+      const parsed = JSON.parse(row.suggested_tools);
+      if (Array.isArray(parsed)) suggestedTools = parsed.map(String);
+    } catch {
+      /* ignore malformed cache */
+    }
+  }
   return {
     id: String(row.id),
+    kind,
     title: String(row.title),
     filename: String(row.filename),
     contentHash: String(row.content_hash),
     summary: row.summary == null ? undefined : String(row.summary),
+    provider: String(row.provider),
+    enabled: Number(row.enabled) !== 0,
+    suggestedTools: kind === "skill" ? suggestedTools : undefined,
     createdAtMs: Number(row.created_at_ms),
     updatedAtMs: Number(row.updated_at_ms),
   };
 }
 
-function readContent(filename: string): string {
+function readPath(path: string): string {
+  return Deno.readTextFileSync(path);
+}
+
+function readContent(meta: MemoryMeta): string {
+  const base = baseDirFor(meta.provider);
+  const path =
+    meta.kind === "skill" ? join(base, meta.filename, SKILL_FILE) : join(base, meta.filename);
   try {
-    return Deno.readTextFileSync(join(paths().memoriesDir, filename));
+    return readPath(path);
   } catch {
-    // Row exists but the file vanished (deleted by hand between rescans).
-    // Surfacing the loss beats returning "" and letting a tool "read" or
-    // overwrite an empty memory it believes is real.
+    // Row exists but the content vanished. Surfacing the loss beats returning
+    // "" and letting a tool "read" or overwrite an empty memory it believes is
+    // real.
     throw new AppError(
       "not_found",
-      `memory file "${filename}" is missing on disk; run a memories rescan`,
+      `memory content for "${meta.filename}" is missing on disk; run a memories rescan`,
     );
   }
 }
 
-// Atomic write (tmp + rename), mirroring sessions-store.writeDoc.
-function writeContent(filename: string, content: string): void {
-  const path = join(paths().memoriesDir, filename);
+/** Bundled reference file names beside a skill's SKILL.md, or undefined for
+ *  knowledge. Best-effort: an unreadable folder yields an empty list. */
+function skillFiles(meta: MemoryMeta): string[] | undefined {
+  if (meta.kind !== "skill") return undefined;
+  const out: string[] = [];
+  try {
+    for (const entry of Deno.readDirSync(join(baseDirFor(meta.provider), meta.filename))) {
+      if (entry.isFile && entry.name !== SKILL_FILE) out.push(entry.name);
+    }
+  } catch {
+    /* folder gone; rescan settles it */
+  }
+  return out.sort();
+}
+
+// Atomic write (tmp + rename), mirroring sessions-store.writeDoc. Skills write
+// their SKILL.md inside the (created-if-needed) folder.
+function writeUserContent(kind: MemoryKind, filename: string, content: string): void {
+  const dir = paths().memoriesDir;
+  const path = kind === "skill" ? join(dir, filename, SKILL_FILE) : join(dir, filename);
+  if (kind === "skill") {
+    Deno.mkdirSync(join(dir, filename), { recursive: true });
+  }
   const tmp = path + ".tmp";
   Deno.writeTextFileSync(tmp, content);
   Deno.renameSync(tmp, path);
 }
 
-// "Meeting Notes: Q3!" -> "meeting-notes-q3.md", suffixed -2, -3, ... until
-// it collides with neither a DB row nor a stray file on disk.
-function uniqueFilename(title: string): string {
+function removeUserContent(kind: MemoryKind, filename: string): void {
+  try {
+    Deno.removeSync(join(paths().memoriesDir, filename), {
+      recursive: kind === "skill",
+    });
+  } catch {
+    /* already gone; rescan would otherwise re-adopt an orphan */
+  }
+}
+
+// Optional frontmatter at the top of a SKILL.md: `description` seeds the
+// summary, `suggested-tools` lists advisory tool names (inline `[a, b]` or a
+// YAML block list of `- item` lines). We only ever read these two scalar/list
+// fields, so a focused line parser is enough; absent or malformed frontmatter
+// yields no metadata (the indexer summarizes instead).
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+
+function parseSkillMeta(content: string): { suggestedTools: string[]; description?: string } {
+  const m = content.match(FRONTMATTER_RE);
+  if (!m) return { suggestedTools: [] };
+  const lines = m[1].split(/\r?\n/);
+  let description: string | undefined;
+  const suggestedTools: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const kv = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
+    if (!kv) continue;
+    const key = kv[1].toLowerCase();
+    const value = kv[2].trim();
+    if (key === "description") {
+      description = unquote(value) || undefined;
+    } else if (key === "suggested-tools" || key === "suggestedtools") {
+      if (value.startsWith("[")) {
+        // Inline array: [a, "b", c]
+        for (const part of value.replace(/^\[|\]$/g, "").split(",")) {
+          const t = unquote(part.trim());
+          if (t) suggestedTools.push(t);
+        }
+      } else {
+        // Block list: subsequent `- item` lines. Blank lines are skipped; the
+        // list ends at the next `key:` line or any other non-list content.
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].trim() === "") continue;
+          const item = lines[j].match(/^\s*-\s*(.+)$/);
+          if (!item) break;
+          const t = unquote(item[1].trim());
+          if (t) suggestedTools.push(t);
+        }
+      }
+    }
+  }
+  return { suggestedTools, description };
+}
+
+function unquote(s: string): string {
+  return s.replace(/^["']|["']$/g, "").trim();
+}
+
+// "Meeting Notes: Q3!" -> "meeting-notes-q3" (skill folder) or
+// "meeting-notes-q3.md" (knowledge file), suffixed -2, -3, ... until it
+// collides with neither a DB row nor a stray entry on disk.
+function uniqueName(kind: MemoryKind, title: string): string {
   const slug =
     title
       .toLowerCase()
@@ -345,7 +646,8 @@ function uniqueFilename(title: string): string {
       .replace(/^-+|-+$/g, "")
       .slice(0, 64) || "memory";
   for (let i = 1; ; i++) {
-    const name = i === 1 ? `${slug}.md` : `${slug}-${i}.md`;
+    const stem = i === 1 ? slug : `${slug}-${i}`;
+    const name = kind === "skill" ? stem : `${stem}.md`;
     const inDb = db().prepare(`SELECT 1 FROM memories WHERE filename = ?`).get(name);
     if (inDb) continue;
     try {
@@ -356,8 +658,22 @@ function uniqueFilename(title: string): string {
   }
 }
 
-// Title for a rescanned file, de-duplicated against existing rows the same
-// way filenames are.
+// "skills/file-bug" or "knowledge/release-notes.md" -> "File Bug" /
+// "Release Notes": last path segment, separators to spaces, title-cased.
+function prettyTitle(path: string): string {
+  const last = path.replace(/\/+$/, "").split("/").pop() ?? path;
+  const words = last
+    .replace(/\.md$/i, "")
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1));
+  return words.join(" ") || "Memory";
+}
+
+// Title for a rescanned entry, de-duplicated against existing rows the same
+// way names are.
 function uniqueTitle(stem: string): string {
   const base = stem.trim() || "Memory";
   for (let i = 1; ; i++) {

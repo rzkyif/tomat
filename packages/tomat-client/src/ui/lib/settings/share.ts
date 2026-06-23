@@ -91,13 +91,22 @@ export function buildTree(
       }
       if (fields.length === 0) return;
       if (section.label) {
-        sections.push({ key: `${group.id}-${index}`, label: section.label, fields });
+        sections.push({
+          key: `${group.id}-${index}`,
+          label: section.label,
+          fields,
+        });
       } else {
         directFields.push(...fields);
       }
     });
     if (directFields.length === 0 && sections.length === 0) continue;
-    groups.push({ id: group.id, name: group.name, fields: directFields, sections });
+    groups.push({
+      id: group.id,
+      name: group.name,
+      fields: directFields,
+      sections,
+    });
   }
   return groups;
 }
@@ -146,7 +155,11 @@ export function parseImport(text: string): ParsedImport {
     return { values: {}, unknownKeys: [], error: "Not valid JSON." };
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return { values: {}, unknownKeys: [], error: "Expected a JSON object of setting keys." };
+    return {
+      values: {},
+      unknownKeys: [],
+      error: "Expected a JSON object of setting keys.",
+    };
   }
   const values: Record<string, unknown> = {};
   const unknownKeys: string[] = [];

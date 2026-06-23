@@ -17,6 +17,7 @@ const hoisted = vi.hoisted(() => ({
   connListener: null as null | ((state: string, reason?: string) => void),
   wsListener: null as null | ((frame: unknown) => void),
   started: [] as Array<Record<string, unknown>>,
+  interrupts: [] as string[],
 }));
 
 vi.mock("$lib/core", () => ({
@@ -31,7 +32,9 @@ vi.mock("$lib/core", () => ({
     },
     api: () => ({
       chat: {
-        interrupt: () => {},
+        interrupt: (streamId: string) => {
+          hoisted.interrupts.push(streamId);
+        },
         start: (
           streamId: string,
           sessionId: string,
@@ -74,6 +77,87 @@ describe("streamingState disconnect recovery", () => {
   });
 });
 
+// A deliberate core swap closes the old socket WITHOUT a "disconnected" emit, so
+// the connection handler above never fires; +page.svelte calls detachForResume()
+// directly. It must drop the local turn WITHOUT abandoning the streamId or
+// interrupting the still-running turn, so swapping back can re-adopt it. The old
+// bug let sessions.load()'s interruptStreaming run with the turn still active,
+// which abandoned the id (blocking re-adoption) and cross-interrupted.
+describe("streamingState core swap teardown", () => {
+  beforeEach(() => {
+    hoisted.connListener = null;
+    hoisted.wsListener = null;
+    hoisted.started = [];
+    hoisted.interrupts = [];
+    streamingState.detach();
+    streamingState.resetForSession();
+    messagesState.clear();
+    sessionsState.id = "s1";
+  });
+  afterEach(() => {
+    streamingState.detach();
+    sessionsState.id = null;
+  });
+
+  it("detaches an in-flight turn without abandoning its streamId or interrupting", () => {
+    streamingState.attach();
+    messagesState.hydrate([{ id: "u1", role: "user", content: "hi" }], null);
+    streamingState.beginTurn(null);
+    streamingState.start();
+    const streamIdA = streamingState.streamId!;
+    expect(streamingState.isActive).toBe(true);
+
+    streamingState.detachForResume();
+    expect(streamingState.isActive).toBe(false);
+    expect(streamingState.streamId).toBeNull();
+    // The swap must NOT interrupt the still-running turn on core A.
+    expect(hoisted.interrupts).toEqual([]);
+
+    // Swapping back to A and reopening s1: the core re-emits the born snapshot
+    // with the SAME streamId. It must re-adopt (the id was not abandoned), so
+    // the live tail resumes.
+    const born = {
+      kind: "chat.message",
+      streamId: streamIdA,
+      sessionId: "s1",
+      message: { id: "a1", role: "assistant", content: "Hello" },
+      afterId: "u1",
+      final: false,
+    } as unknown as ServerToClientFrame;
+    hoisted.wsListener?.(born);
+    expect(streamingState.streamId).toBe(streamIdA);
+    expect(streamingState.isActive).toBe(true);
+    expect(messagesState.messages.find((m) => m.id === "a1")?.content).toBe("Hello");
+  });
+
+  it("a user interrupt still abandons the streamId so trailing frames can't re-adopt", async () => {
+    streamingState.attach();
+    messagesState.hydrate([{ id: "u1", role: "user", content: "hi" }], null);
+    streamingState.beginTurn(null);
+    streamingState.start();
+    const streamIdA = streamingState.streamId!;
+
+    await streamingState.interruptStreaming();
+    expect(hoisted.interrupts).toEqual([streamIdA]);
+
+    // The session boundary that follows a user interrupt clears streamId; a late
+    // born frame for the abandoned stream must NOT resurrect its bubble.
+    streamingState.resetForSession();
+    const born = {
+      kind: "chat.message",
+      streamId: streamIdA,
+      sessionId: "s1",
+      message: { id: "a1", role: "assistant", content: "Hello" },
+      afterId: "u1",
+      final: false,
+    } as unknown as ServerToClientFrame;
+    hoisted.wsListener?.(born);
+    expect(streamingState.streamId).toBeNull();
+    expect(streamingState.isActive).toBe(false);
+    expect(messagesState.messages.find((m) => m.id === "a1")).toBeUndefined();
+  });
+});
+
 describe("streamingState live == reload parity", () => {
   beforeEach(() => {
     hoisted.wsListener = null;
@@ -99,7 +183,13 @@ describe("streamingState live == reload parity", () => {
     // Persisted terminal forms, oldest-first, as GET /sessions/:id returns.
     const persisted: ServerMessage[] = [
       { id: "u1", role: "user", content: "Open YouTube" },
-      { id: "f1", role: "tool_filter", status: "complete", phase1: [], toolsSent: 1 },
+      {
+        id: "f1",
+        role: "tool_filter",
+        status: "complete",
+        phase1: [],
+        toolsSent: 1,
+      },
       {
         id: "r1",
         role: "reasoning",
@@ -112,13 +202,18 @@ describe("streamingState live == reload parity", () => {
         id: "t1",
         role: "tool",
         callId: "c1",
-        toolkitId: "kit",
+        extensionId: "kit",
         toolName: "open_website",
         arguments: '{"url":"https://youtube.com"}',
         status: "completed",
         result: { ok: true },
       },
-      { id: "r2", role: "reasoning", content: "Done thinking.", pairedAssistantId: "a2" },
+      {
+        id: "r2",
+        role: "reasoning",
+        content: "Done thinking.",
+        pairedAssistantId: "a2",
+      },
       { id: "a2", role: "assistant", content: "Done." },
     ] as unknown as ServerMessage[];
     const byId = new Map(persisted.map((m) => [(m as { id: string }).id, m]));
@@ -142,7 +237,12 @@ describe("streamingState live == reload parity", () => {
         final: true,
       }) as ServerToClientFrame;
     const delta = (messageId: string, text: string) =>
-      ({ kind: "chat.delta", streamId, messageId, delta: text }) as ServerToClientFrame;
+      ({
+        kind: "chat.delta",
+        streamId,
+        messageId,
+        delta: text,
+      }) as ServerToClientFrame;
 
     const script: ServerToClientFrame[] = [
       // The tool_filter bubble has no loading state: it emits only its terminal

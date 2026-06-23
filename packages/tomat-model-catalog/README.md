@@ -21,16 +21,18 @@ The schemas live in `@tomat/shared` (`domain/catalog.ts`): `ModelFamily`,
 
 For each model record its GGUF variants, architecture, and capability score:
 
-1. **GGUF variants + sizes** - from the provider's GGUF repo (currently Unsloth).
-   Each `CatalogQuant` is `{ quant, modelSpec, fileSizeBytes }`, where `modelSpec`
-   is the HF spec `@provider/repo/branch/file.gguf`. List quants best-quality
-   first. A model may have multiple `variants` (e.g. `standard` and `QAT`); the
-   QAT variant is tagged `["qat"]`.
+1. **GGUF variants + sizes** - from the provider's GGUF repo (currently
+   Unsloth). Each `CatalogQuant` is `{ quant, modelSpec, fileSizeBytes }`, where
+   `modelSpec` is the HF spec `@provider/repo/branch/file.gguf`. List quants
+   best-quality first. A model may have multiple `variants` (e.g. `standard` and
+   `QAT`); the QAT variant is tagged `["qat"]`.
 2. **Architecture** (`arch`) - `blockCount`, `embeddingLength`, `headCount`,
    `headCountKv`, `headDim`. These drive the on-device KV-cache footprint math.
 3. **Score** (`scores`) - a provider-tagged list; currently the Artificial
-   Analysis Intelligence Index (`{ source: "artificial-analysis", metric:
-"intelligence-index", value }`). QAT and standard share the model's score.
+   Analysis Intelligence Index
+   (`{ source: "artificial-analysis", metric:
+"intelligence-index", value }`).
+   QAT and standard share the model's score.
 4. **Capabilities** - `tools`, `vision` (ships an mmproj), `reasoning`.
 
 `scripts/catalog/probe.ts` gathers (1) and (2) from the HF API + GGUF headers:
@@ -48,8 +50,8 @@ Every downloadable file is pinned to a content `sha256`, so a model download
 verifies its bytes against the signed catalog instead of trusting HuggingFace's
 `x-linked-etag` (which a proxy can strip or a non-HF mirror omit). The hashes
 live in the generated `src/hashes.generated.ts` (`modelSpec -> sha256`), which
-`buildCatalogPayload` stamps onto each quant / mmproj / speech file. After adding
-or repointing any model, regenerate them:
+`buildCatalogPayload` stamps onto each quant / mmproj / speech file. After
+adding or repointing any model, regenerate them:
 
 ```
 deno run -A scripts/catalog/gather-hashes.ts

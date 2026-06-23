@@ -7,7 +7,7 @@ export const llmGroup: SettingGroup = {
   destination: "core",
   name: "Language Model",
   description:
-    "The model that powers your chats. Run one locally on this device, or connect to an external API.",
+    "The model that powers your chats. Run one locally on the core's device, or connect to an external API.",
   descriptionTier: "ondemand",
   icon: "i-material-symbols-psychology-rounded",
   iconInactive: "i-material-symbols-psychology-outline-rounded",
@@ -36,7 +36,7 @@ export const llmGroup: SettingGroup = {
           id: "llm.idleUnloadSeconds",
           name: "Unload When Idle",
           description:
-            "Free memory by unloading the model after this long unused. It reloads on your next message; 0 keeps it loaded.",
+            "Free up RAM by unloading the model after this long unused. It reloads on your next message; 0 keeps it loaded.",
           type: "number",
           defaultValue: 0,
           suffix: "s",
@@ -52,7 +52,7 @@ export const llmGroup: SettingGroup = {
           id: "llm.provider",
           name: "Provider",
           description:
-            "Run the model on this device (private, no internet) or connect to an external API.",
+            "Run the model on the core's device (private, no internet) or connect to an external API.",
           type: "select",
           defaultValue: "local",
           options: [
@@ -107,14 +107,14 @@ export const llmGroup: SettingGroup = {
                 label: "Half",
                 title: "Balanced",
                 description:
-                  "A capable model that uses about half your memory. A good everyday default.",
+                  "A capable model that uses about half your RAM. A good everyday default.",
               },
               {
                 id: "full",
                 label: "Full",
                 title: "Smartest",
                 description:
-                  "The largest model your device can handle. Unloads itself after 5 minutes idle to free memory.",
+                  "The largest model your device can handle. Unloads itself after 5 minutes idle to free RAM.",
               },
             ],
             secondaryOptions: [
@@ -267,7 +267,7 @@ export const llmGroup: SettingGroup = {
           id: "llm.contextSize",
           name: "Context Window",
           description:
-            "How much text the model can consider at once, in tokens. Larger uses more memory.",
+            "How much text the model can consider at once, in tokens. Larger uses more RAM.",
           type: "number",
           defaultValue: 4096,
           descriptionTier: "ondemand",
@@ -303,7 +303,7 @@ export const llmGroup: SettingGroup = {
           id: "llm.mmap",
           name: "Memory-Mapped Loading",
           description:
-            "Load the model straight from disk for faster startup and lower memory. Turn off only if you hit stability issues.",
+            "Load the model straight from disk for faster startup and lower RAM use. Turn off only if you hit stability issues.",
           type: "boolean",
           defaultValue: true,
           descriptionTier: "ondemand",

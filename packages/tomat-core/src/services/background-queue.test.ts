@@ -10,7 +10,11 @@ function sleep(ms: number): Promise<void> {
 }
 
 Deno.test("queue: dedupes by key and drains FIFO one at a time", async () => {
-  const q = new BackgroundQueue({ isBusy: () => false, quietPeriodMs: 0, busyPollMs: 5 });
+  const q = new BackgroundQueue({
+    isBusy: () => false,
+    quietPeriodMs: 0,
+    busyPollMs: 5,
+  });
   const ran: string[] = [];
   let concurrent = 0;
   let maxConcurrent = 0;
@@ -36,7 +40,11 @@ Deno.test("queue: dedupes by key and drains FIFO one at a time", async () => {
 
 Deno.test("queue: waits out busy streams plus the quiet period", async () => {
   let busy = true;
-  const q = new BackgroundQueue({ isBusy: () => busy, quietPeriodMs: 30, busyPollMs: 5 });
+  const q = new BackgroundQueue({
+    isBusy: () => busy,
+    quietPeriodMs: 30,
+    busyPollMs: 5,
+  });
   const ran: string[] = [];
   q.enqueue({
     key: "job",
@@ -56,7 +64,11 @@ Deno.test("queue: waits out busy streams plus the quiet period", async () => {
 });
 
 Deno.test("queue: a failing job does not stop the drain", async () => {
-  const q = new BackgroundQueue({ isBusy: () => false, quietPeriodMs: 0, busyPollMs: 5 });
+  const q = new BackgroundQueue({
+    isBusy: () => false,
+    quietPeriodMs: 0,
+    busyPollMs: 5,
+  });
   const ran: string[] = [];
   q.enqueue({ key: "boom", run: () => Promise.reject(new Error("boom")) });
   q.enqueue({
@@ -72,7 +84,11 @@ Deno.test("queue: a failing job does not stop the drain", async () => {
 });
 
 Deno.test("queue: dispose drops queued jobs and blocks new ones", async () => {
-  const q = new BackgroundQueue({ isBusy: () => false, quietPeriodMs: 0, busyPollMs: 5 });
+  const q = new BackgroundQueue({
+    isBusy: () => false,
+    quietPeriodMs: 0,
+    busyPollMs: 5,
+  });
   const ran: string[] = [];
   q.enqueue({
     key: "dropped",

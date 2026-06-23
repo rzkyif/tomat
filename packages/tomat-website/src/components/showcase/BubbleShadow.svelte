@@ -1,7 +1,7 @@
 <script lang="ts">
   // Website-only chrome: renders the same drop shadow + frosted blur halo the
   // shared Bubble paints, as sibling layers behind an arbitrary card that is NOT
-  // a chat bubble (the toolkit editor, the caption pill). The `.bubble-shadow`
+  // a chat bubble (the extension editor, the caption pill). The `.bubble-shadow`
   // and `.bubble-halo` classes and their geometry live in the shared base.css;
   // the ring count is read from the same UI context that drives real bubbles, so
   // these cards track the appearance settings the same way. Drop this inside a

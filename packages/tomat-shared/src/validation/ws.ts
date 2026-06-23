@@ -10,13 +10,14 @@
 import { z } from "zod";
 import {
   CHAT_DONE_REASONS,
+  EXTENSION_INSTALL_STREAMS,
   SESSION_CREATED_FOCUSES,
   SESSION_CREATED_REASONS,
   SESSION_UPDATED_OPS,
   TOOL_LOG_LEVELS,
-  TOOLKIT_INSTALL_STREAMS,
 } from "../api/ws.ts";
-import { PERMISSION_KINDS } from "../domain/toolkit.ts";
+import { PERMISSION_KINDS } from "../domain/extension.ts";
+import { CORE_STATUSES } from "../domain/core-status.ts";
 import { scheduledPromptDraftSchema } from "./scheduled-prompt.ts";
 
 // --- Askuser shapes --------------------------------------------------------
@@ -170,7 +171,7 @@ const toolPermissionRequestFrameSchema = z
     apiName: z.string().optional(),
     declared: z.boolean(),
     reason: z.string().optional(),
-    toolkitId: z.string().min(1),
+    extensionId: z.string().min(1),
     toolName: z.string().min(1),
   })
   .passthrough();
@@ -208,19 +209,19 @@ const toolCancelledFrameSchema = z
   })
   .passthrough();
 
-const toolkitInstallLogFrameSchema = z
+const extensionInstallLogFrameSchema = z
   .object({
-    kind: z.literal("toolkit.install_log"),
+    kind: z.literal("extension.install_log"),
     jobId: z.string().min(1),
     id: z.string().min(1),
-    stream: z.enum(TOOLKIT_INSTALL_STREAMS),
+    stream: z.enum(EXTENSION_INSTALL_STREAMS),
     line: z.string(),
   })
   .passthrough();
 
-const toolkitInstallDoneFrameSchema = z
+const extensionInstallDoneFrameSchema = z
   .object({
-    kind: z.literal("toolkit.install_done"),
+    kind: z.literal("extension.install_done"),
     jobId: z.string().min(1),
     id: z.string().min(1),
     ok: z.boolean(),
@@ -228,9 +229,15 @@ const toolkitInstallDoneFrameSchema = z
   })
   .passthrough();
 
-const toolkitSnapshotFrameSchema = z
+const extensionSnapshotFrameSchema = z
   .object({
-    kind: z.literal("toolkit.snapshot"),
+    kind: z.literal("extension.snapshot"),
+  })
+  .passthrough();
+
+const mcpSnapshotFrameSchema = z
+  .object({
+    kind: z.literal("mcp.snapshot"),
   })
   .passthrough();
 
@@ -265,16 +272,6 @@ const settingsUpdatedFrameSchema = z
     values: z.record(z.string(), z.unknown()),
     deleted: z.array(z.string()),
     secretNames: z.array(z.string()).optional(),
-  })
-  .passthrough();
-
-const sidecarStatusFrameSchema = z
-  .object({
-    kind: z.literal("sidecar.status"),
-    sidecar: z.string(),
-    status: z.string(),
-    message: z.string().optional(),
-    progress: z.number().optional(),
   })
   .passthrough();
 
@@ -332,6 +329,43 @@ const updateErrorFrameSchema = z
   })
   .passthrough();
 
+const coreStatusFrameSchema = z
+  .object({
+    kind: z.literal("core.status"),
+    snapshot: z
+      .object({
+        status: z.enum(CORE_STATUSES),
+        detail: z.string().optional(),
+        progress: z.number().optional(),
+        // Per-subsystem breakdown (folds the old per-sidecar frame). Kept loose
+        // (string kind/status) so the envelope passes; `servers.svelte.ts` and
+        // the CoreBar own the real typing against the domain shapes.
+        subsystems: z
+          .array(
+            z
+              .object({
+                kind: z.string(),
+                status: z.string(),
+                message: z.string().optional(),
+              })
+              .passthrough(),
+          )
+          .optional(),
+        queues: z
+          .object({
+            llmActive: z.number(),
+            llmQueued: z.number(),
+            speechActive: z.number(),
+            speechQueued: z.number(),
+            activeStreams: z.number(),
+          })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
 /** Discriminated union over every server→client frame `kind`. Per-variant
  *  schemas above use `.passthrough()` so unknown fields survive the
  *  decode and a future client can render them once the consumer is
@@ -351,18 +385,19 @@ export const serverToClientFrameSchema = z.discriminatedUnion("kind", [
   toolResultFrameSchema,
   toolErrorFrameSchema,
   toolCancelledFrameSchema,
-  toolkitInstallLogFrameSchema,
-  toolkitInstallDoneFrameSchema,
-  toolkitSnapshotFrameSchema,
+  extensionInstallLogFrameSchema,
+  extensionInstallDoneFrameSchema,
+  extensionSnapshotFrameSchema,
+  mcpSnapshotFrameSchema,
   downloadsSnapshotFrameSchema,
   requirementsSnapshotFrameSchema,
   settingsUpdatedFrameSchema,
-  sidecarStatusFrameSchema,
   sessionUpdatedFrameSchema,
   sessionCreatedFrameSchema,
   scheduleConfirmRequestFrameSchema,
   updateStagedFrameSchema,
   updateErrorFrameSchema,
+  coreStatusFrameSchema,
 ]);
 
 export type ServerToClientFrameParsed = z.infer<typeof serverToClientFrameSchema>;

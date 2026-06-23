@@ -218,14 +218,23 @@ Deno.test("DELETE /api/v1/pairing/clients/:id: admin token authorizes cross-devi
     const { clientId: idA } = await finishA.json();
     const finishB = await pakeViaApp(app, await mintCode(app), "B", pin);
     const { token: tokenB } = await finishB.json();
-    const headers = { authorization: `Bearer ${tokenB}`, "x-admin-token": ADMIN_TOKEN };
+    const headers = {
+      authorization: `Bearer ${tokenB}`,
+      "x-admin-token": ADMIN_TOKEN,
+    };
     const del = await app.fetch(
-      new Request(`http://x/api/v1/pairing/clients/${idA}`, { method: "DELETE", headers }),
+      new Request(`http://x/api/v1/pairing/clients/${idA}`, {
+        method: "DELETE",
+        headers,
+      }),
     );
     assertEquals(del.status, 204);
     // Revoking the now-unknown id again is a 404, not a silent 204.
     const again = await app.fetch(
-      new Request(`http://x/api/v1/pairing/clients/${idA}`, { method: "DELETE", headers }),
+      new Request(`http://x/api/v1/pairing/clients/${idA}`, {
+        method: "DELETE",
+        headers,
+      }),
     );
     assertEquals(again.status, 404);
   } finally {

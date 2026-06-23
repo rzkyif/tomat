@@ -92,7 +92,9 @@ class IpRateLimiter {
     const now = Date.now();
     if (this.hits.size > MAX_TRACKED_IPS) {
       for (const [k, ts] of this.hits) {
-        if (ts.every((t) => now - t >= CLAIMS_PER_IP_WINDOW_MS)) this.hits.delete(k);
+        if (ts.every((t) => now - t >= CLAIMS_PER_IP_WINDOW_MS)) {
+          this.hits.delete(k);
+        }
       }
     }
     const prior = this.hits.get(ip);

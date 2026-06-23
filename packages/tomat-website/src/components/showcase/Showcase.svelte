@@ -46,7 +46,7 @@
     },
     {
       title: "Tools you write yourself",
-      desc: "Drop a tool definition and a tiny handler into a toolkit, then trigger it by prompt. Tools can pause to ask you for input before they act.",
+      desc: "Drop a tool definition and a tiny handler into a extension, then trigger it by prompt. Tools can pause to ask you for input before they act.",
     },
     {
       title: "Talk and listen",

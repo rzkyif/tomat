@@ -12,9 +12,12 @@
 //!       Must be the first frame, exactly once. The child's environment is
 //!       exactly `env` (nothing inherited).
 //!   {"kind":"write","dataB64":"..."}
-//!       Raw bytes for the PTY master: worker-protocol frames and prompt
-//!       answers alike. The core does not distinguish; this helper is a
-//!       dumb pipe.
+//!       Worker-protocol frames for the PTY master. These echo back off the
+//!       slave (ECHO is on, see below); the reader cancels that echo.
+//!   {"kind":"answer","dataB64":"..."}
+//!       A permission-prompt answer for the PTY master. Identical to `write`
+//!       except it is NOT echo-tracked: Deno reads the answer with echo off,
+//!       so it never bounces back and must not seed the echo-cancel queue.
 //!   {"kind":"kill"}
 //!       SIGKILL the child.
 //!
@@ -25,10 +28,12 @@
 //!                                    the same code.
 //!   {"kind":"fatal","error":"..."}   Allocation/spawn failure; ptyhost exits.
 //!
-//! On stdin EOF (core died) the child is SIGKILLed and ptyhost exits. The
-//! PTY slave is switched to raw mode (no echo, no canonical line limit, no
-//! output post-processing) so large protocol frames survive the trip and
-//! written bytes do not echo back into the master stream.
+//! On stdin EOF (core died) the child is SIGKILLed and ptyhost exits. The PTY
+//! slave runs with no canonical line limit and no output post-processing so
+//! large protocol frames survive the trip, but ECHO stays on: Deno 2.8.3 refuses
+//! to prompt when stdin is in raw mode (ICANON and ECHO both off), so disabling
+//! echo would silence permission prompts. The master reader cancels the echo of
+//! everything written via `write` so the core never sees its own frames.
 
 use std::io::{BufRead, Write};
 use std::sync::{Arc, Mutex};
@@ -49,7 +54,15 @@ enum ControlFrame {
         #[serde(default)]
         cwd: Option<String>,
     },
+    /// Worker-protocol bytes for the master; echo-tracked so the slave's
+    /// bounce-back is cancelled before it reaches the core.
     Write {
+        #[serde(rename = "dataB64")]
+        data_b64: String,
+    },
+    /// Permission-prompt answer for the master; NOT echo-tracked (Deno reads it
+    /// with echo off, so it never bounces back).
+    Answer {
         #[serde(rename = "dataB64")]
         data_b64: String,
     },
@@ -78,6 +91,59 @@ fn emit_pty(data: &[u8]) {
 
 fn emit_exit(code: i32) {
     emit_event(format!("{{\"kind\":\"exit\",\"code\":{code}}}"));
+}
+
+// Cap the outstanding-echo queue. A byte that never echoes back (e.g. the slave
+// briefly disabled ECHO) would otherwise wedge the queue and swallow real output
+// forever; past this bound we assume desync, drop the backlog, and let any stray
+// echo through as harmless stderr noise. Comfortably above one protocol frame.
+#[cfg(unix)]
+const PENDING_ECHO_CAP: usize = 4 * 1024 * 1024;
+
+/// Record bytes written to the master that the slave's ECHO will bounce back,
+/// so the reader can drop them. Clears the backlog on overflow (desync guard).
+#[cfg(unix)]
+fn expect_echo(pending: &Mutex<std::collections::VecDeque<u8>>, bytes: &[u8]) {
+    if let Ok(mut q) = pending.lock() {
+        if q.len() + bytes.len() > PENDING_ECHO_CAP {
+            q.clear();
+            return;
+        }
+        q.extend(bytes.iter().copied());
+    }
+}
+
+/// Strip leading echoed bytes from a master read: each byte that matches the
+/// head of `pending` is its own echo and is dropped; the rest is genuine child
+/// output (prompt text or stderr). Echoed frames bounce back contiguously, so a
+/// running prefix match cancels them; a coincidental match only ever drops a
+/// byte of a stderr log line, never protocol output (which rides stdout).
+#[cfg(unix)]
+fn cancel_echo(pending: &Mutex<std::collections::VecDeque<u8>>, chunk: &[u8]) -> Vec<u8> {
+    let Ok(mut q) = pending.lock() else {
+        return chunk.to_vec();
+    };
+    let mut out = Vec::with_capacity(chunk.len());
+    for &b in chunk {
+        if q.front() == Some(&b) {
+            q.pop_front();
+        } else {
+            out.push(b);
+        }
+    }
+    out
+}
+
+/// Write all of `bytes` to `fd`, retrying short writes and giving up on error.
+#[cfg(unix)]
+fn write_all(fd: std::os::fd::BorrowedFd<'_>, bytes: &[u8]) {
+    let mut off = 0;
+    while off < bytes.len() {
+        match nix::unistd::write(fd, &bytes[off..]) {
+            Ok(n) => off += n,
+            Err(_) => break,
+        }
+    }
 }
 
 fn emit_fatal(error: &str) -> ! {
@@ -140,12 +206,18 @@ mod unix {
             Err(e) => emit_fatal(&format!("openpty failed: {e}")),
         };
 
-        // Raw mode on the slave: no echo (written frames must not bounce back
-        // into the master stream), no canonical mode (its ~1 KB line limit
-        // would mangle large protocol frames), no output post-processing.
+        // Slave line discipline: no canonical mode (its ~1 KB line limit would
+        // mangle large protocol frames) and no output post-processing, but ECHO
+        // stays ON. Deno 2.8.3 refuses to show a permission prompt when stdin is
+        // in raw mode, which it defines as `c_lflag & (ICANON | ECHO) == 0` (see
+        // denoland/deno#34457); leaving ECHO set keeps prompts working. The cost
+        // is that every byte written to the master is echoed back into it; the
+        // PTY reader below cancels that echo so it never reaches the core.
         match tcgetattr(pty.slave.as_fd()) {
             Ok(mut t) => {
+                use nix::sys::termios::LocalFlags;
                 cfmakeraw(&mut t);
+                t.local_flags.insert(LocalFlags::ECHO);
                 if let Err(e) = tcsetattr(pty.slave.as_fd(), SetArg::TCSANOW, &t) {
                     emit_fatal(&format!("tcsetattr failed: {e}"));
                 }
@@ -212,13 +284,28 @@ mod unix {
             Err(_) => emit_fatal("failed to clone pty master fd"),
         };
 
-        // PTY master -> core: chunked, base64-wrapped events.
+        // Echo cancellation: the slave echoes every byte written to the master
+        // (ECHO is on so Deno still prompts), so each protocol frame the core
+        // writes bounces straight back. `pending_echo` holds the bytes still
+        // owed an echo; the reader drops them so the core never sees its own
+        // frames. Only protocol writes are tracked here: prompt answers go out
+        // the `answer` frame, which Deno reads with echo disabled, so tracking
+        // them would leave a stuck prefix and desync the queue.
+        let pending_echo = Arc::new(Mutex::new(std::collections::VecDeque::<u8>::new()));
+        let reader_echo = Arc::clone(&pending_echo);
+
+        // PTY master -> core: chunked, base64-wrapped events, echo stripped.
         let reader = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match nix::unistd::read(pty.master.as_raw_fd(), &mut buf) {
                     Ok(0) => break,
-                    Ok(n) => emit_pty(&buf[..n]),
+                    Ok(n) => {
+                        let out = cancel_echo(&reader_echo, &buf[..n]);
+                        if !out.is_empty() {
+                            emit_pty(&out);
+                        }
+                    }
                     // EIO: every slave fd closed (child exited). Anything
                     // else is equally terminal for the bridge.
                     Err(_) => break,
@@ -260,13 +347,18 @@ mod unix {
                     let Ok(bytes) = B64.decode(data_b64) else {
                         continue;
                     };
-                    let mut off = 0;
-                    while off < bytes.len() {
-                        match nix::unistd::write(master_writer.as_fd(), &bytes[off..]) {
-                            Ok(n) => off += n,
-                            Err(_) => break,
-                        }
-                    }
+                    // Expect this frame to echo back; queue it (before the write,
+                    // so the reader can't race ahead) so the reader can cancel it.
+                    expect_echo(&pending_echo, &bytes);
+                    write_all(master_writer.as_fd(), &bytes);
+                }
+                Ok(ControlFrame::Answer { data_b64 }) => {
+                    let Ok(bytes) = B64.decode(data_b64) else {
+                        continue;
+                    };
+                    // Prompt answer: Deno reads it with echo off, so it does not
+                    // bounce back. Write straight through without echo tracking.
+                    write_all(master_writer.as_fd(), &bytes);
                 }
                 Ok(ControlFrame::Kill) => {
                     kill_live();
@@ -331,6 +423,54 @@ mod tests {
         }
         let k: ControlFrame = serde_json::from_str(r#"{"kind":"kill"}"#).unwrap();
         assert!(matches!(k, ControlFrame::Kill));
+    }
+
+    #[test]
+    fn parses_answer_frame() {
+        let a: ControlFrame =
+            serde_json::from_str(r#"{"kind":"answer","dataB64":"eQo="}"#).unwrap();
+        match a {
+            ControlFrame::Answer { data_b64 } => {
+                assert_eq!(B64.decode(data_b64).unwrap(), b"y\n");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn echo_cancel_strips_own_writes_and_keeps_real_output() {
+        use std::collections::VecDeque;
+        let q = Mutex::new(VecDeque::<u8>::new());
+        // A protocol frame is written, then bounces straight back: fully cancelled.
+        expect_echo(&q, b"{\"k\":1}\n");
+        assert_eq!(cancel_echo(&q, b"{\"k\":1}\n"), b"");
+        assert!(q.lock().unwrap().is_empty());
+        // With nothing pending, genuine child output passes through untouched.
+        assert_eq!(cancel_echo(&q, b"hello\n"), b"hello\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn echo_cancel_passes_real_output_interleaved_after_echo() {
+        use std::collections::VecDeque;
+        let q = Mutex::new(VecDeque::<u8>::new());
+        expect_echo(&q, b"AB");
+        // Echo arrives first (cancelled), then real output in the same read.
+        assert_eq!(cancel_echo(&q, b"ABxy"), b"xy");
+        assert!(q.lock().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn echo_cancel_recovers_from_overflow() {
+        use std::collections::VecDeque;
+        let q = Mutex::new(VecDeque::<u8>::new());
+        let huge = vec![b'z'; PENDING_ECHO_CAP + 1];
+        expect_echo(&q, &huge); // overflow: backlog dropped rather than wedged
+        assert!(q.lock().unwrap().is_empty());
+        // Queue is clear, so output flows instead of being swallowed forever.
+        assert_eq!(cancel_echo(&q, b"ok"), b"ok");
     }
 
     #[test]

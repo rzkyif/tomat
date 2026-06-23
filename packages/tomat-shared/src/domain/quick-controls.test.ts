@@ -27,7 +27,9 @@ Deno.test("thinkingLevelUpdates: local writes a context-scaled budget", () => {
     "llm.reasoning": "on",
     "llm.reasoningBudget": 2048,
   });
-  assertEquals(thinkingLevelUpdates("off", "local", 8192), { "llm.reasoning": "off" });
+  assertEquals(thinkingLevelUpdates("off", "local", 8192), {
+    "llm.reasoning": "off",
+  });
 });
 
 Deno.test("thinkingLevelUpdates: external writes an effort level, no budget", () => {
@@ -45,14 +47,24 @@ Deno.test("thinkingSelection: snaps to the level matching the budget at the cont
 
 Deno.test("thinkingSelection: a non-matching budget is a custom 'N tokens' label", () => {
   const sel = thinkingSelection(
-    { "llm.reasoning": "on", "llm.contextSize": 4096, "llm.reasoningBudget": 999 },
+    {
+      "llm.reasoning": "on",
+      "llm.contextSize": 4096,
+      "llm.reasoningBudget": 999,
+    },
     "local",
   );
   assertEquals(sel.customLabel, "999 tokens");
 });
 
 Deno.test("thinkingSelection: an unset/zero budget reads as Unlimited", () => {
-  const sel = thinkingSelection({ "llm.reasoning": "on", "llm.reasoningBudget": "" }, "local");
+  const sel = thinkingSelection(
+    {
+      "llm.reasoning": "on",
+      "llm.reasoningBudget": "",
+    },
+    "local",
+  );
   assertEquals(sel.customLabel, "Unlimited");
 });
 
