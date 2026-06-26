@@ -2,7 +2,13 @@
   import { onMount } from "svelte";
   import { platform } from "$lib/platform";
   import { isTauri } from "$lib/util/env";
-  import { groupDestinations, isGroupVisible, SETTINGS_SCHEMA } from "@tomat/shared";
+  import {
+    destinationNeedsCore,
+    groupDestinations,
+    isGroupVisible,
+    SETTINGS_SCHEMA,
+  } from "@tomat/shared";
+  import { useUiContext } from "@tomat/shared/ui/context";
   import type { SettingField } from "@tomat/shared";
   import type { Monitor } from "$lib/util/types";
   import { hasAlpha } from "$lib/appearance/color";
@@ -30,6 +36,7 @@
   import UpdateButton from "./UpdateButton.svelte";
   import ColorPickerModal from "./ColorPickerModal.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
+  import PasswordPromptModal from "./PasswordPromptModal.svelte";
   import DownloadsModal from "./DownloadsModal.svelte";
   import DeletionsModal from "./DeletionsModal.svelte";
   import ShareModal from "./ShareModal.svelte";
@@ -79,7 +86,11 @@
   // The single group whose sections are shown on the right; bound to the shell.
   let selectedGroupId = $state(SETTINGS_SCHEMA[0].id);
 
-  const visibleGroups = $derived(SETTINGS_SCHEMA.filter((g) => isGroupVisible(g)));
+  const ui = useUiContext();
+  const onMobile = ui.platform === "mobile";
+  const visibleGroups = $derived(
+    SETTINGS_SCHEMA.filter((g) => isGroupVisible(g, ui.platform)),
+  );
   const shellGroups = $derived(
     visibleGroups.map((g) => ({ id: g.id, name: g.name, icon: g.icon, iconInactive: g.iconInactive })),
   );
@@ -103,13 +114,14 @@
   });
   $effect(() => layout.observe());
 
-  // When reconnecting, a purely-core group's fields can't be edited; `locked`
-  // dims + inerts them. A multi-destination group stays usable.
+  // When reconnecting, a group whose single destination needs the core (the
+  // shared `core` store or a `client-on-core` per-client overlay) can't be
+  // edited; `locked` dims + inerts them. A multi-destination group stays usable.
   const coreGroupLocked = $derived(
     connectionState.reconnecting &&
       !!selectedGroup &&
       groupDestinations(selectedGroup).length === 1 &&
-      groupDestinations(selectedGroup)[0] === "core",
+      destinationNeedsCore(groupDestinations(selectedGroup)[0]),
   );
 
   function isGroupDisabled(id: string): boolean {
@@ -118,7 +130,7 @@
     return (
       connectionState.reconnecting &&
       groupDestinations(group).length === 1 &&
-      groupDestinations(group)[0] === "core"
+      destinationNeedsCore(groupDestinations(group)[0])
     );
   }
 
@@ -188,8 +200,12 @@
     // Open on a specific group when an external flow requested one (e.g. the
     // add-core wizard returning to the Cores manager), then clear the request.
     if (viewState.pendingSettingsGroup) {
-      selectedGroupId = viewState.pendingSettingsGroup;
+      const g = viewState.pendingSettingsGroup;
       viewState.pendingSettingsGroup = null;
+      selectedGroupId = g;
+      // On mobile, jump straight into that group's detail screen so the CoreBar's
+      // Cores shortcut lands on the fields, not the group list.
+      if (onMobile) void shell?.selectGroup(g);
     }
     expandedSections = defaultExpandedSections();
     void loadPairedCores();
@@ -213,7 +229,9 @@
       }
     }
     form.validateAllFields();
-    search.inputEl?.focus();
+    // Desktop autofocuses search for keyboard-first use; mobile does not, so the
+    // soft keyboard does not pop open the moment Settings appears.
+    if (!onMobile) search.inputEl?.focus();
   });
 
   // While the core is unreachable, settings can't be read/written: clear the
@@ -279,6 +297,7 @@
         onExpandAll={() => expandAllInGroup(gid)}
         onCollapseAll={() => collapseAllInGroup(gid)}
         locked={coreGroupLocked}
+        onBack={onMobile && !ui.hasSystemBack ? () => shell?.mobileBack() : undefined}
       />
     </div>
   {/snippet}
@@ -323,7 +342,7 @@
        `positioning="absolute"`, so they need a `relative` ancestor matching the
        bubble for their backdrop blur (inset-0) to stay clipped to the bubble
        instead of spilling across the viewport. -->
-  <div class="relative w-fit">
+  <div class="relative {onMobile ? 'w-full h-full' : 'w-fit'}">
   <SettingsShellView
     bind:this={shell}
     groups={shellGroups}
@@ -352,6 +371,7 @@
   />
 
   <ConfirmModal />
+  <PasswordPromptModal />
   <DownloadsModal />
   <DeletionsModal />
   <ShareModal open={shareOpen} onClose={() => (shareOpen = false)} />

@@ -133,6 +133,17 @@
       onStartEdit?.();
     }
   }
+
+  // Right-click (desktop) and long-press (touch) open the same message menu.
+  function openMessageMenu() {
+    void showUserMessageMenu({
+      editing,
+      isStreaming: streamingState.isActive,
+      onToggleEdit: onEdit ? toggleEdit : undefined,
+      onReprocess,
+      onDelete,
+    });
+  }
 </script>
 
 <UserMessageView
@@ -144,14 +155,9 @@
   }}
   oncontextmenu={(e) => {
     e.preventDefault();
-    void showUserMessageMenu({
-      editing,
-      isStreaming: streamingState.isActive,
-      onToggleEdit: onEdit ? toggleEdit : undefined,
-      onReprocess,
-      onDelete,
-    });
+    openMessageMenu();
   }}
+  onlongpress={openMessageMenu}
 >
   {#snippet editBody()}
     <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">

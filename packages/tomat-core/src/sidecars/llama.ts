@@ -111,6 +111,35 @@ export function buildLlamaStartOptions(args: LlamaStartArgs): StartOptions {
   };
 }
 
+/** Readiness timeout for llama-server, scaled to the model file size. Loading a
+ *  multi-GB GGUF (disk read + mmap warm + KV-cache alloc) on a slow disk or CPU
+ *  can far exceed the 60s baseline; a false timeout kills the sidecar and burns
+ *  its flap-guard budget, stranding the user on "Failed to start LLM server"
+ *  with no recovery. A generous ~25s/GiB on top of a 60s base avoids that,
+ *  capped so a pathological size can't wait effectively forever. */
+export function llamaReadinessTimeoutMs(modelSizeBytes: number): number {
+  const gib = modelSizeBytes / 1_073_741_824;
+  const ms = 60_000 + Math.ceil(gib * 25_000);
+  return Math.min(ms, 600_000);
+}
+
+/** Like {@link buildLlamaStartOptions} but with the readiness window scaled to
+ *  the model file size (see {@link llamaReadinessTimeoutMs}). The single
+ *  (re)start path for the llama sidecar, used by both boot and the manual
+ *  restart route so a large model gets the same generous startup window
+ *  whichever way it's launched. Best-effort: keeps the static default if the
+ *  stat fails. */
+export async function buildLlamaStartOptionsScaled(args: LlamaStartArgs): Promise<StartOptions> {
+  const opts = buildLlamaStartOptions(args);
+  try {
+    const { size } = await Deno.stat(args.modelPath);
+    opts.startupTimeoutMs = llamaReadinessTimeoutMs(size);
+  } catch {
+    /* keep buildLlamaStartOptions' default */
+  }
+  return opts;
+}
+
 function schemaDefault(key: string): string {
   const v = getDefaultSettings()[key];
   return typeof v === "string" ? v : "";

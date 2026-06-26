@@ -51,7 +51,7 @@ All commands run from the repo root:
 - `deno task check:client` / `deno task lint:client` / `deno task fmt:client`:
   the client's svelte-check + Tauri-crate cargo checks.
 - `deno task test:e2e`: end-to-end tests; see
-  [tests/e2e/README.md](../../tests/e2e/README.md).
+  [tests/e2e/tauri-driver/README.md](../../tests/e2e/tauri-driver/README.md).
 
 ## Further reading
 

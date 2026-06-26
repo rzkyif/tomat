@@ -1,6 +1,9 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { HTMLButtonAttributes } from "svelte/elements";
+  import { useUiContext } from "../../context.ts";
+  import { RIPPLE_MS } from "../../animations.ts";
+  import { ripple } from "../../actions/ripple.ts";
 
   type Size = "xs" | "sm" | "md" | "lg" | "lg-tight" | "xl";
   type Variant = "default" | "subtle";
@@ -82,10 +85,15 @@
     }[size],
   );
 
+  // A coarse pointer (touch) can't hover, so the `subtle` resting tone can't
+  // rely on `hov:` to brighten: it would sit permanently at the dim shade. Rest
+  // it at the hover shade instead (press feedback comes from the ripple). The
+  // default variant already rests at a readable shade, so only `subtle` shifts.
+  const ui = useUiContext();
   const variantClass = $derived(
     colorClass ??
       (variant === "subtle"
-        ? active
+        ? active || ui.pointer === "coarse"
           ? "text-default-700"
           : "text-default-400 hov:text-default-700"
         : active
@@ -93,18 +101,20 @@
           : "text-default-700 hov:text-default-900"),
   );
 
-  // Hover/press background follows the shared interaction standard. A
-  // surfaceless icon button materializes the inset surface on hover and deepens
-  // it on press (the text-darken in `variantClass` is a complementary cue); a
-  // filled/circle button steps its existing fill one shade on hover, two on
-  // press.
+  // Hover background follows the shared interaction standard; the press splash
+  // is the shared `use:ripple` action, not a color shift. A surfaceless icon
+  // button materializes the inset surface on hover (the text-darken in
+  // `variantClass` is a complementary cue); a filled/circle button steps its
+  // existing fill one shade on hover.
   const surfaceClass = $derived(
     {
-      none: "hov:bg-surface-inset act:bg-surface-inset-strong",
-      filled: "bg-surface-inset hov:bg-surface-inset-strong act:bg-default-400",
-      circle: "bg-surface-inset hov:bg-surface-inset-strong act:bg-default-400",
+      none: "hov:bg-surface-inset",
+      filled: "bg-surface-inset hov:bg-surface-inset-strong",
+      circle: "bg-surface-inset hov:bg-surface-inset-strong",
     }[surface],
   );
+
+  const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
 
   const roundedClass = $derived(
     rounded ??
@@ -115,8 +125,15 @@
       }[surface],
   );
 
+  // On a coarse pointer (touch) every icon button gets at least a 44px box
+  // (the WCAG / Material tap-target floor) without growing the glyph: the icon
+  // keeps its size and the extra space becomes hit area. A surfaceless button's
+  // padding stays invisible; a filled/circle one reads as a fuller tap target,
+  // which matches Material's 48dp icon button around a 24dp glyph.
+  const touchClass = $derived(ui.pointer === "coarse" ? "min-w-11 min-h-11" : "");
+
   const cls = $derived(
-    `flex items-center justify-center shrink-0 ${sizeClass} ${variantClass} ${surfaceClass} ${roundedClass} hov:cursor-pointer transition-interactive disabled:opacity-50 disabled:pointer-events-none ${extraClass}`,
+    `flex items-center justify-center shrink-0 ${sizeClass} ${touchClass} ${variantClass} ${surfaceClass} ${roundedClass} hov:cursor-pointer transition-interactive disabled:opacity-50 disabled:pointer-events-none ${extraClass}`,
   );
   const label = $derived(ariaLabel ?? title);
 </script>
@@ -143,11 +160,26 @@
 {/snippet}
 
 {#if href}
-  <a {href} {target} {rel} {title} aria-label={label} class={cls} {onclick}>
+  <a
+    {href}
+    {target}
+    {rel}
+    {title}
+    aria-label={label}
+    class={cls}
+    {onclick}
+    use:ripple={{ disabled, durationMs: rippleDuration }}
+  >
     {@render inner()}
   </a>
 {:else if forId}
-  <label for={forId} {title} aria-label={label} class={cls}>
+  <label
+    for={forId}
+    {title}
+    aria-label={label}
+    class={cls}
+    use:ripple={{ disabled, durationMs: rippleDuration }}
+  >
     {@render inner()}
   </label>
 {:else}
@@ -159,6 +191,7 @@
     aria-label={label}
     {onclick}
     class={cls}
+    use:ripple={{ disabled, durationMs: rippleDuration }}
   >
     {@render inner()}
   </button>

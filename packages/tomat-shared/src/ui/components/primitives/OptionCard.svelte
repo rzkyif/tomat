@@ -1,6 +1,9 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import HelpText from "./HelpText.svelte";
+  import { useUiContext } from "../../context.ts";
+  import { RIPPLE_MS } from "../../animations.ts";
+  import { ripple } from "../../actions/ripple.ts";
 
   // A selectable card/row (preset pickers, tool-call options, model cards).
   // Shared so client and website render option cards identically. Hover bits use
@@ -53,16 +56,20 @@
   };
 
   // Unselected cards follow the shared interaction standard (rest fill darkens
-  // one step on hover, two on press); the selected treatment stays distinct.
+  // one step on hover; the press splash is the shared `use:ripple` action); the
+  // selected treatment stays distinct.
   const stateClass = $derived(
     selectedStyle === "accent"
       ? selected
         ? `border-2 ${accentSelectedMap[accent]} text-default-800`
-        : "border-2 border-transparent bg-surface-inset hov:bg-surface-inset-strong act:bg-default-400 text-default-800"
+        : "border-2 border-transparent bg-surface-inset hov:bg-surface-inset-strong text-default-800"
       : selected
         ? "bg-default-inverted-300 text-default-inverted-800"
-        : "bg-surface-inset text-default-800 hov:bg-surface-inset-strong act:bg-default-400",
+        : "bg-surface-inset text-default-800 hov:bg-surface-inset-strong",
   );
+
+  const ui = useUiContext();
+  const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
 
   const descriptionClass = $derived(
     selectedStyle === "invert" && selected ? "text-default-inverted-500" : "text-default-500",
@@ -78,6 +85,7 @@
   title={htmlTitle}
   aria-label={ariaLabel}
   {onclick}
+  use:ripple={{ durationMs: rippleDuration }}
 >
   {#if children}
     {@render children()}

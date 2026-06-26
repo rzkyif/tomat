@@ -65,6 +65,11 @@ class SessionsState {
   /** Creation timestamp of the active session, from the server's session
    *  doc. Drives `defaultTitle`; session ids are opaque ULIDs. */
   createdAtMs = $state<number | null>(null);
+  /** Whether the active session is temporary (RAM-only on the core: never
+   *  listed, never on disk, gone once left). Fixed at creation; while a fresh
+   *  chat is unstarted this doubles as the "compose temporary" intent that the
+   *  next session is minted with. */
+  isTemporary = $state(false);
   currentIndex = $state<number>(-1);
   /** Bumps on every session-boundary transition. Consumers use it as a
    *  `{#key}` to force a clean DOM teardown of the message subtree. */
@@ -84,8 +89,10 @@ class SessionsState {
   private droppedSinceConnected = false;
 
   get storageEnabled(): boolean {
-    // Sessions are server-owned now; the toggle remains as a client-side
-    // hint for "don't auto-persist this turn", but the default is true.
+    // Whether new sessions are persisted by default. When off, "don't persist"
+    // is realized through the SAME mechanism as the per-chat temporary toggle:
+    // new sessions are minted temporary (RAM-only on the core), so there is one
+    // backend for "not saved", not a separate client-side suppression path.
     return settingsState.currentSettings["general.session.storeSessions"] !== false;
   }
 
@@ -94,6 +101,13 @@ class SessionsState {
   get defaultTitle(): string {
     if (this.createdAtMs == null) return "";
     return formatSessionDefaultTitle(this.createdAtMs);
+  }
+
+  /** Whether the active conversation has begun: it has a message or a live
+   *  stream. Drives the composer's temporary toggle, which is only offered
+   *  while a chat is still unstarted (its class is fixed once it starts). */
+  get started(): boolean {
+    return this.id != null && (messagesState.messages.length > 0 || streamingState.isActive);
   }
 
   /** Wire up to session.updated frames so title changes / server-side
@@ -210,10 +224,9 @@ class SessionsState {
   }
 
   async loadList(): Promise<void> {
-    if (!this.storageEnabled) {
-      this.list = [];
-      return;
-    }
+    // No storage-off special case: when storage is off, new sessions are
+    // temporary and the core already omits them from this list, so the list is
+    // naturally empty without a separate client-side suppression.
     try {
       this.list = await cores().api().sessions.list();
       if (this.id) {
@@ -226,7 +239,7 @@ class SessionsState {
 
   async updateTitle(title: string): Promise<void> {
     this.title = title;
-    if (!this.id || !this.storageEnabled) return;
+    if (!this.id) return;
     try {
       await cores().api().sessions.patchTitle(this.id, title);
       const idx = this.list.findIndex((s) => s.id === this.id);
@@ -240,7 +253,7 @@ class SessionsState {
    *  spinner via `title_generating` frames; we set it optimistically so the
    *  click feels instant, and clear it on error since no frame will arrive. */
   async regenerateTitle(): Promise<void> {
-    if (!this.id || !this.storageEnabled || this.generatingTitle) return;
+    if (!this.id || this.generatingTitle) return;
     this.generatingTitle = true;
     try {
       await cores().api().sessions.regenerateTitle(this.id);
@@ -258,13 +271,17 @@ class SessionsState {
     this.title = "";
     this.generatingTitle = false;
     this.createdAtMs = null;
+    // Default the fresh compose state's class to the storage setting: storage
+    // off means the next session is temporary unless something loads over it.
+    this.isTemporary = !this.storageEnabled;
     this.epoch++;
   }
 
   async loadLatest(): Promise<void> {
-    if (!this.storageEnabled) return;
     try {
       await this.loadList();
+      // With storage off the list is empty (new sessions are temporary), so
+      // this naturally lands on a fresh compose instead of reopening anything.
       if (this.list.length === 0) return;
       const first = this.list[0];
       await this.load(first.id);
@@ -274,6 +291,10 @@ class SessionsState {
   }
 
   async load(sessionId: string): Promise<void> {
+    // Leaving a temporary session for a different one discards it (RAM-only,
+    // gone the moment you navigate away). Skip when reloading the same id (the
+    // reconnect resync re-fetches the live temporary session).
+    if (sessionId !== this.id) await this.discardActiveTemporary();
     await streamingState.interruptStreaming();
     streamingState.resetTTSPlayback();
     try {
@@ -284,6 +305,7 @@ class SessionsState {
       messagesState.hydrate(fixupLoadedMessages(full.messages).reverse(), full.tokenUsage ?? null);
       this.id = full.id;
       this.createdAtMs = full.createdAtMs ?? null;
+      this.isTemporary = full.temporary ?? false;
       this.title = full.title || this.defaultTitle;
       this.currentIndex = this.list.findIndex((s) => s.id === sessionId);
       // Re-attach to any turn still generating on this session: the core
@@ -365,19 +387,52 @@ class SessionsState {
     await this.load(remaining[nextIdx].id);
   }
 
+  /** Enter "compose mode" for a fresh chat. The server session is NOT created
+   *  here: the first user message mints it (messages.addUserMessage), with the
+   *  class chosen by the composer toggle / storage setting. So "+" just clears
+   *  to an empty composer, and an abandoned new chat leaves nothing behind. */
   async create(): Promise<void> {
+    await this.discardActiveTemporary();
     await streamingState.interruptStreaming();
     streamingState.resetTTSPlayback();
-    try {
-      const session = await cores().api().sessions.create();
+    this.resetAll();
+    this.currentIndex = -1;
+    // Refresh the list so the bar reflects existing sessions; the new chat
+    // itself appears only once its first message creates it.
+    await this.loadList();
+  }
+
+  /** Flip the composer's temporary intent. Only reachable while the active
+   *  chat is unstarted (the composer hides the toggle once it starts, since a
+   *  session's class is fixed at creation). Normally no session exists yet, so
+   *  this just records the intent for the lazy create. If an unstarted session
+   *  does exist (e.g. an empty persistent one loaded from the list), discard it
+   *  so the next message re-mints with the chosen class. */
+  async toggleTemporary(): Promise<void> {
+    const next = !this.isTemporary;
+    if (this.id && !this.started) {
+      const stray = this.id;
       this.resetAll();
-      this.id = session.id;
-      this.createdAtMs = session.createdAtMs ?? null;
-      this.title = session.title || this.defaultTitle;
-      await this.loadList();
-      this.currentIndex = this.list.findIndex((s) => s.id === session.id);
+      try {
+        await cores().api().sessions.delete(stray);
+      } catch (e) {
+        log.warn("Failed to discard stray session on temporary toggle:", e);
+      }
+      void this.loadList();
+    }
+    this.isTemporary = next;
+  }
+
+  /** Delete the active session if it is temporary. Called before navigating
+   *  away so a temporary (RAM-only) session never lingers on the core once it
+   *  is no longer reachable. Best-effort: a failure must not block navigation. */
+  private async discardActiveTemporary(): Promise<void> {
+    if (!this.isTemporary || !this.id) return;
+    const id = this.id;
+    try {
+      await cores().api().sessions.delete(id);
     } catch (e) {
-      log.error("Failed to create session:", e);
+      log.warn("Failed to discard temporary session:", e);
     }
   }
 }

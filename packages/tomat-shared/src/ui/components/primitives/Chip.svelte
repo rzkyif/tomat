@@ -1,5 +1,8 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { useUiContext } from "../../context.ts";
+  import { RIPPLE_MS } from "../../animations.ts";
+  import { ripple } from "../../actions/ripple.ts";
 
   // A compact pill: optional icon + label (or custom children), in a neutral or
   // accent surface, optionally clickable. Shared so the client and website paint
@@ -62,24 +65,27 @@
   );
 
   // Clickable chips follow the shared interaction standard: rest fill darkens
-  // one shade step on hover, two on press. Full strings for the extractor.
+  // one shade step on hover; the press splash is the shared `use:ripple` action.
+  // Full strings for the extractor.
   const accentHoverMap: Record<Accent, string> = {
-    blue: "hov:bg-accent-blue-300 act:bg-accent-blue-400",
-    green: "hov:bg-accent-green-300 act:bg-accent-green-400",
-    red: "hov:bg-accent-red-300 act:bg-accent-red-400",
-    yellow: "hov:bg-accent-yellow-300 act:bg-accent-yellow-400",
-    purple: "hov:bg-accent-purple-300 act:bg-accent-purple-400",
+    blue: "hov:bg-accent-blue-300",
+    green: "hov:bg-accent-green-300",
+    red: "hov:bg-accent-red-300",
+    yellow: "hov:bg-accent-yellow-300",
+    purple: "hov:bg-accent-purple-300",
   };
 
   const hoverClass = $derived(
     variant === "subtle"
-      ? "hov:bg-default-400 act:bg-default-500"
+      ? "hov:bg-default-400"
       : variant === "accent"
         ? accentHoverMap[accent]
-        : "hov:bg-default-300 act:bg-default-400",
+        : "hov:bg-default-300",
   );
 
   const interactive = $derived(!!onclick);
+  const ui = useUiContext();
+  const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
   const baseClass = $derived(
     `inline-flex items-center shrink-0 ${sizeClass} ${colorClass} ${
       interactive ? `hov:cursor-pointer transition-interactive ${hoverClass}` : ""
@@ -98,7 +104,13 @@
 {/snippet}
 
 {#if interactive}
-  <button class={baseClass} type="button" {title} {onclick}>
+  <button
+    class={baseClass}
+    type="button"
+    {title}
+    {onclick}
+    use:ripple={{ durationMs: rippleDuration }}
+  >
     {@render body()}
   </button>
 {:else}

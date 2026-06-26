@@ -6,7 +6,7 @@
 // `sidecarManager()` is a generic supervisor; the kind-specific gates
 // (provider, enabled toggle, model file existence) live here.
 
-import { buildLlamaStartOptions, llamaStartArgsFromSettings } from "../sidecars/llama.ts";
+import { buildLlamaStartOptionsScaled, llamaStartArgsFromSettings } from "../sidecars/llama.ts";
 import {
   buildLlamaEmbedStartOptions,
   llamaEmbedStartArgsFromSettings,
@@ -214,7 +214,9 @@ export async function applyLlama(settings: Record<string, unknown>): Promise<voi
     await sidecarManager().stop("llama");
     return;
   }
-  await sidecarManager().restart("llama", buildLlamaStartOptions(args));
+  // Scale the readiness window to the model size so a large model on slow
+  // hardware isn't false-timed-out into the flap guard.
+  await sidecarManager().restart("llama", await buildLlamaStartOptionsScaled(args));
 }
 
 // Embeddings are always-on infrastructure (no enable toggle): run llama-embed

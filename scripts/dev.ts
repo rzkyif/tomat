@@ -1,7 +1,8 @@
 // Boots tomat-core (deno watch) and tomat-client (tauri dev) together on the
 // "dev" install channel, so all state lives under ~/.tomat/dev/ and never
 // touches a stable install. Seeds a dev admin token (the from-source core
-// never mints one; only the installer does) and prints a ready-to-use
+// never mints one; only the installer does), sets a fresh dev admin password
+// each run (for the password-gated remote flows), and prints a ready-to-use
 // pairing code so connecting the client is a one-paste step.
 // Stops both children on SIGINT/SIGTERM or when either exits.
 
@@ -102,6 +103,17 @@ const CLIENT_RESET_TARGETS = ["settings.json", "cores.json", "snippets"];
 //                   so that flow is front-and-center (dev:reset:install).
 const RESET = Deno.args.includes("--reset");
 const FRESH_INSTALL = Deno.args.includes("--fresh-install");
+// --android runs the mobile client (`tauri android dev`) against this dev core
+// instead of the desktop client. The android WebView runs on an emulator/device,
+// so the core must be reachable off-loopback (TOMAT_CORE_HOST=0.0.0.0 below) and
+// the onboarding prefill is passed through Vite env (android has no launch argv).
+const ANDROID = Deno.args.includes("--android");
+// --client-only spawns just the client (no dev core, no helper/sidecar setup),
+// the orchestrated equivalent of running the bare client task. It exists so the
+// android client-only loop still gets this script's clean teardown (the detached
+// Gradle build sweep below) instead of leaking on Ctrl+C. A core is assumed to
+// be running separately; onboarding derives its address from the dev host.
+const CLIENT_ONLY = Deno.args.includes("--client-only");
 
 // All child labels ("core", "client", "dev") are left-aligned to this width so
 // the message columns line up regardless of label length.
@@ -313,6 +325,33 @@ async function ensureAdminToken(): Promise<string> {
   return token;
 }
 
+// Dev convenience: set a known, randomly-generated admin password on the dev
+// core and return it (or null on failure). The password gates the remote flows
+// (generate a pairing code, remove a device) that an already-paired client
+// drives, so without one those can't be exercised in dev. The stored hash is
+// argon2id (a prior plaintext can't be read back), so we overwrite each run and
+// print the fresh value. Skipped in --fresh-install, where the install screen
+// sets its own password.
+async function setDevAdminPassword(token: string): Promise<string | null> {
+  const suffix = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
+  const password = `dev-${suffix}`; // 12 chars, clears the 8-char floor.
+  try {
+    const r = await fetch(`${CORE_URL}/api/v1/admin/password`, {
+      method: "POST",
+      headers: { "X-Admin-Token": token, "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    await r.body?.cancel();
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return password;
+  } catch (err) {
+    devLog(`could not set dev admin password (${err instanceof Error ? err.message : err})`);
+    return null;
+  }
+}
+
 // Wait for the dev core to answer, mint a pairing code, print how to connect,
 // and return the code (or null on failure). Runs before the client spawns so
 // the code can be forwarded as a launch argument that prefills onboarding.
@@ -350,6 +389,9 @@ async function mintPairingCode(token: string): Promise<string | null> {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = (await r.json()) as { code?: string };
     if (!data.code) throw new Error("response had no code");
+    // Set a known admin password too (non-fresh-install), so the password-gated
+    // flows are testable. Printed in the box below.
+    const devPassword = FRESH_INSTALL ? null : await setDevAdminPassword(token);
     const bar = "─".repeat(58);
     devLog(bar);
     if (FRESH_INSTALL) {
@@ -361,6 +403,9 @@ async function mintPairingCode(token: string): Promise<string | null> {
     }
     devLog(`  URL : ${CORE_URL}`);
     devLog(`  Code: ${data.code}`);
+    if (devPassword) {
+      devLog(`  Admin password: ${devPassword}  (for "Generate pairing code" / removing devices)`);
+    }
     devLog(bar);
     return data.code;
   } catch (err) {
@@ -440,8 +485,9 @@ async function listenersOn(port: number): Promise<number[]> {
 
 const VITE_PORT = 1420;
 
-// Free the Vite dev port before starting the client, in case an earlier dev
-// session left an orphan behind (e.g. killed with SIGKILL, bypassing shutdown).
+// Free the Vite dev port. Called at startup (in case an earlier dev session was
+// SIGKILLed and left an orphan behind) and again at shutdown (in case this
+// session's Vite server outlived the descendant-tree sweep).
 async function reclaimVitePort(): Promise<void> {
   for (const pid of await listenersOn(VITE_PORT)) {
     devLog(`port ${VITE_PORT} held by stale pid ${pid}; terminating it`);
@@ -488,12 +534,61 @@ async function clearStaleViteCache(): Promise<void> {
   }
 }
 
+// The android NDK cross-compile (cargo/rustc/clang) runs as a child of the
+// persistent Gradle daemon, which double-forks into its own session and so sits
+// OUTSIDE this process's descendant tree: `pgrep -P` can't reach it, and a Ctrl+C
+// would otherwise leave it grinding in the background. Match it by the NDK target
+// triples that appear in its command line and reap it. (The Gradle daemon itself
+// and the adb server are persistent by design and intentionally left running;
+// re-spawning the daemon's warm JVM on every run would slow rebuilds.)
+const ANDROID_TARGET_TRIPLES = [
+  "aarch64-linux-android",
+  "armv7-linux-androideabi",
+  "i686-linux-android",
+  "x86_64-linux-android",
+];
+
+async function sweepAndroidBuild(): Promise<void> {
+  if (Deno.build.os === "windows") return;
+  for (const triple of ANDROID_TARGET_TRIPLES) {
+    let pids: number[] = [];
+    try {
+      const out = await new Deno.Command("pgrep", {
+        args: ["-f", triple],
+        stdout: "piped",
+        stderr: "null",
+      }).output();
+      pids = new TextDecoder()
+        .decode(out.stdout)
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map(Number);
+    } catch {
+      continue; // pgrep unavailable
+    }
+    for (const pid of pids) {
+      if (pid === Deno.pid) continue; // never signal the orchestrator itself
+      try {
+        Deno.kill(pid, "SIGKILL");
+      } catch {
+        // Gone.
+      }
+    }
+  }
+}
+
 let shuttingDown = false;
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  // Hard failsafe: whatever happens (a wedged sweep, a process that ignores
+  // every signal), the orchestrator exits. The clean path below exits first.
+  setTimeout(() => Deno.exit(0), 6000);
   // Gather every child's full descendant tree first, then signal them all, so
   // tauri's vite server + app binary die with the session instead of leaking.
+  // (Reparented children keep their pid, so SIGKILLing this captured set still
+  // reaches them even after their parent has exited.)
   const pids = new Set<number>();
   for (const { proc } of children) {
     for (const pid of await processTree(proc.pid)) pids.add(pid);
@@ -505,7 +600,8 @@ async function shutdown(): Promise<void> {
       // Already exited.
     }
   }
-  // Anything still alive after a 3 s grace period gets SIGKILL, then exit.
+  // Anything still alive after a 3 s grace period gets SIGKILL; then sweep the
+  // leftovers a descendant-tree walk can't reach and exit.
   setTimeout(() => {
     for (const pid of pids) {
       try {
@@ -514,8 +610,28 @@ async function shutdown(): Promise<void> {
         // Gone.
       }
     }
-    Deno.exit(0);
+    void finishShutdown();
   }, 3000);
+}
+
+// Final cleanup after the tree is killed: free the Vite port in case its server
+// outlived the tree (orphaned past pgrep -P reach), and on android reap the
+// detached Gradle-daemon cross-compile. Best-effort, then exit unconditionally
+// so a hung sweep can never wedge the shutdown.
+async function finishShutdown(): Promise<void> {
+  try {
+    await reclaimVitePort();
+  } catch {
+    // best-effort
+  }
+  if (ANDROID) {
+    try {
+      await sweepAndroidBuild();
+    } catch {
+      // best-effort
+    }
+  }
+  Deno.exit(0);
 }
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -648,67 +764,96 @@ async function ensureEspeakData(libDir: string): Promise<void> {
   devLog("fetched espeak-ng-data for the dev speech sidecar");
 }
 
-const adminToken = await ensureAdminToken();
+// Core-side setup + the core process itself are skipped under --client-only,
+// where a core is assumed to be running separately.
+let adminToken = "";
+if (!CLIENT_ONLY) {
+  adminToken = await ensureAdminToken();
 
-// Generate the dev built-in extension manifest before core boots so first-boot
-// seeding can resolve a version, and keep it fresh as the codebase extension is
-// edited.
-await startDevExtensionManifest();
+  // Generate the dev built-in extension manifest before core boots so first-boot
+  // seeding can resolve a version, and keep it fresh as the codebase extension is
+  // edited.
+  await startDevExtensionManifest();
 
-// Link the native helper binaries into the dev bin dir before core boots, so
-// its boot-time helper check passes and the first tool call can spawn in
-// prompt-capable mode.
-await provisionHelpers();
-await provisionSpeechSidecar();
+  // Link the native helper binaries into the dev bin dir before core boots, so
+  // its boot-time helper check passes and the first tool call can spawn in
+  // prompt-capable mode.
+  await provisionHelpers();
+  await provisionSpeechSidecar();
 
-children.push(
-  spawn(
-    "core",
-    "36",
-    ["deno", "run", "--watch", "--allow-all", "packages/tomat-core/src/main.ts"],
-    undefined,
-    // Worker .ts files live in the source tree during dev so edits hot-
-    // reload via --watch. Without this override, paths().workersDir would
-    // point at ~/.tomat/dev/core/workers (an empty dir in dev).
-    {
-      ...CHANNEL_ENV,
-      TOMAT_WORKERS_DIR: `${ROOT}packages/tomat-core/src/workers`,
-      // Core runs under `deno run --watch`. On a file change the watcher sends
-      // SIGTERM and waits for the program to wind down so it can re-run the
-      // module in-process. This flag tells core's SIGTERM handler to skip its
-      // Deno.exit(0) (which would hard-kill the watcher and end the dev session)
-      // and instead let the event loop drain for the restart. See main.ts.
-      TOMAT_DEV_WATCH: "1",
-      // dev.ts owns the timestamp + badge column, so core emits bare console
-      // lines (no ISO timestamp). Its stderr is piped here (not a TTY), so force
-      // color on so level coloring survives.
-      TOMAT_LOG_NO_TIME: "1",
-      ...(useColor ? { TOMAT_LOG_COLOR: "1" } : {}),
-    },
-  ),
-);
+  children.push(
+    spawn(
+      "core",
+      "36",
+      ["deno", "run", "--watch", "--allow-all", "packages/tomat-core/src/main.ts"],
+      undefined,
+      // Worker .ts files live in the source tree during dev so edits hot-
+      // reload via --watch. Without this override, paths().workersDir would
+      // point at ~/.tomat/dev/core/workers (an empty dir in dev).
+      {
+        ...CHANNEL_ENV,
+        // For mobile dev the emulator/device reaches the host core over the
+        // network, so bind every interface (loopback-only would be unreachable).
+        // The self-signed cert is still pinned at pairing, so this only widens
+        // reachability, not trust.
+        ...(ANDROID ? { TOMAT_CORE_HOST: "0.0.0.0" } : {}),
+        TOMAT_WORKERS_DIR: `${ROOT}packages/tomat-core/src/workers`,
+        // Core runs under `deno run --watch`. On a file change the watcher sends
+        // SIGTERM and waits for the program to wind down so it can re-run the
+        // module in-process. This flag tells core's SIGTERM handler to skip its
+        // Deno.exit(0) (which would hard-kill the watcher and end the dev session)
+        // and instead let the event loop drain for the restart. See main.ts.
+        TOMAT_DEV_WATCH: "1",
+        // dev.ts owns the timestamp + badge column, so core emits bare console
+        // lines (no ISO timestamp). Its stderr is piped here (not a TTY), so force
+        // color on so level coloring survives.
+        TOMAT_LOG_NO_TIME: "1",
+        ...(useColor ? { TOMAT_LOG_COLOR: "1" } : {}),
+      },
+    ),
+  );
+}
 
 await reclaimVitePort();
 await clearStaleViteCache();
 
 // Mint the pairing code before spawning the client so it can be forwarded as a
 // launch argument. The core boots in parallel during the health poll inside.
-const pairingCode = await mintPairingCode(adminToken);
+// Skipped under --client-only (no core here to mint against).
+const pairingCode = CLIENT_ONLY ? null : await mintPairingCode(adminToken);
 
 // --reset: clear the client's paired-cores state so it boots into onboarding.
 if (RESET) await resetClientSettings();
 
-// Replicate the client package's one-line `dev` task (deno.json) so we can
-// forward arguments to the Tauri app binary. `tauri dev` treats args after the
-// first `--` as runner (cargo) args and args after a SECOND `--` as app args,
-// so the prefill flags go after `-- --` to reach the binary's argv (read by the
-// read_launch_prefill command). Skipped under --fresh-install, where the
-// chooser should stay on "On this computer".
-const clientCmd = ["deno", "run", "-A", "npm:@tauri-apps/cli@^2", "dev"];
-if (!FRESH_INSTALL) {
-  const prefill = [`--core-url=${CORE_URL}`];
-  if (pairingCode) prefill.push(`--pairing-code=${pairingCode}`);
-  clientCmd.push("--", "--", ...prefill);
+// The onboarding prefill reaches the client differently per platform. Desktop
+// forwards it as launch argv (read by the read_launch_prefill command); android
+// has no argv path, so it is passed through Vite env vars that mobile.ts's
+// launchPrefill reads at runtime. Both connect to this same dev core.
+const clientPrefillEnv: Record<string, string> = {};
+const clientCmd = ["deno", "run", "-A", "npm:@tauri-apps/cli@^2"];
+if (ANDROID) {
+  clientCmd.push("android", "dev");
+  // --client-only has no dev core here to point at, so it skips the address
+  // prefill and lets mobile.ts derive it from the dev-server host at runtime.
+  if (!CLIENT_ONLY) {
+    // The device reaches the host core over the network, not loopback: a physical
+    // device uses TAURI_DEV_HOST (also the HMR host); the emulator uses its
+    // host-loopback alias 10.0.2.2. Port = the dev channel core port (see CORE_URL).
+    const devHost = Deno.env.get("TAURI_DEV_HOST") ?? "10.0.2.2";
+    clientPrefillEnv.VITE_DEV_CORE_URL = `https://${devHost}:7820`;
+    if (pairingCode) clientPrefillEnv.VITE_DEV_PAIRING_CODE = pairingCode;
+  }
+} else {
+  // `tauri dev` treats args after the first `--` as runner (cargo) args and args
+  // after a SECOND `--` as app args, so the prefill flags go after `-- --` to
+  // reach the binary's argv. Skipped under --fresh-install, where the chooser
+  // should stay on "On this computer".
+  clientCmd.push("dev");
+  if (!FRESH_INSTALL) {
+    const prefill = [`--core-url=${CORE_URL}`];
+    if (pairingCode) prefill.push(`--pairing-code=${pairingCode}`);
+    clientCmd.push("--", "--", ...prefill);
+  }
 }
 
 // The core may have exited during the health poll (which triggers shutdown);
@@ -730,6 +875,7 @@ if (!shuttingDown) {
       TOMAT_LOG_NO_TIME: "1",
       ...(useColor ? { TOMAT_LOG_COLOR: "1" } : {}),
       ...(FRESH_INSTALL ? { TOMAT_DEV_FRESH_INSTALL: "1" } : {}),
+      ...clientPrefillEnv,
     }),
   );
 }

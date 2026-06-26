@@ -90,11 +90,17 @@ Deno.test("requiredModelRefs: tts bundle files only when tts.enabled; embed alwa
 });
 
 Deno.test("requiredBinaryKinds: deno + llama-server always; speech gated on local STT or TTS", () => {
+  // STT and TTS are off by default, so a fresh install (even with an external
+  // LLM) needs only the always-on pair - voice is opt-in.
   assertEquals(requiredBinaryKinds({ "llm.provider": "external" }).sort(), [
     "deno",
     "llama-server",
   ]);
-  assertEquals(requiredBinaryKinds({ "llm.provider": "local" }).sort(), ["deno", "llama-server"]);
+  // Both engines off: just the always-on pair.
+  assertEquals(requiredBinaryKinds({ "stt.enabled": false, "tts.enabled": false }).sort(), [
+    "deno",
+    "llama-server",
+  ]);
   // Local STT pulls in the combined speech binary.
   assertEquals(
     requiredBinaryKinds({
@@ -111,10 +117,14 @@ Deno.test("requiredBinaryKinds: deno + llama-server always; speech gated on loca
     "tomat-core-speech",
   ]);
   // External STT with TTS off needs no local speech binary.
-  assertEquals(requiredBinaryKinds({ "stt.enabled": true, "stt.provider": "external" }).sort(), [
-    "deno",
-    "llama-server",
-  ]);
+  assertEquals(
+    requiredBinaryKinds({
+      "stt.enabled": true,
+      "stt.provider": "external",
+      "tts.enabled": false,
+    }).sort(),
+    ["deno", "llama-server"],
+  );
 });
 
 Deno.test("binaryUnavailableOnTriple: resolver-backed binaries available on all triples", () => {

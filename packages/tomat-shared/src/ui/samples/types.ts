@@ -20,16 +20,20 @@ type SnippetPropName =
   | "children"
   | "complexField"
   | "contentOverride"
+  | "coreBar"
   | "editBody"
   | "footer"
   | "groupContent"
+  | "input"
   | "leading"
   | "memoryContent"
   | "prefix"
   | "rightSlot"
   | "searchContent"
+  | "sessionBar"
   | "sidebarFooter"
   | "topSlot"
+  | "transcript"
   | "trailing";
 
 /** A View's props minus its snippet props: the shape a sample bundle provides. */

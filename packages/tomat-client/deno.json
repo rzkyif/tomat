@@ -5,8 +5,13 @@
     ".": "./src/ui/app.html"
   },
   "tasks": {
-    "dev": "deno run -A npm:@tauri-apps/cli@^2 dev",
-    "build": "deno run -A npm:@tauri-apps/cli@^2 build",
+    "tauri": "deno run -A npm:@tauri-apps/cli@^2",
+    "dev": "deno task tauri dev",
+    "build": "deno task tauri build",
+    "init:android": "deno task tauri android init",
+    "dev:android": "deno task tauri android dev",
+    "build:android": "deno task tauri android build --apk",
+    "check:android": "cargo check --manifest-path src/tauri/Cargo.toml --target aarch64-linux-android",
     "stage:vad": "deno run -A scripts/stage-vad.ts",
     "sync": "deno run -A npm:@sveltejs/kit@^2/svelte-kit sync",
     "preview": "deno run -A npm:vite@^8 preview",
@@ -27,6 +32,7 @@
     "@tauri-apps/plugin-fs": "npm:@tauri-apps/plugin-fs@^2.5.1",
     "@tauri-apps/plugin-global-shortcut": "npm:@tauri-apps/plugin-global-shortcut@^2.3.2",
     "@tauri-apps/plugin-opener": "npm:@tauri-apps/plugin-opener@^2.5.4",
+    "@tauri-apps/plugin-os": "npm:@tauri-apps/plugin-os@^2.3.1",
     "@tauri-apps/plugin-process": "npm:@tauri-apps/plugin-process@^2.3.1",
     "@tauri-apps/plugin-updater": "npm:@tauri-apps/plugin-updater@^2.10.1",
     "countries-and-timezones": "npm:countries-and-timezones@^3.9.0",

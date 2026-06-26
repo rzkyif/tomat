@@ -37,6 +37,11 @@ export interface HealthResponse {
   /** Aggregate lifecycle status, so a client can seed the CoreBar on select
    *  without waiting for the first `core.status` WS frame. */
   core: CoreStatusSnapshot;
+  /** Whether an admin password has been set. When true, an already-paired
+   *  client can mint pairing codes / revoke other devices with the password
+   *  (no need to read the on-disk admin token). Always true after a normal
+   *  install, which sets one. */
+  adminPasswordSet: boolean;
 }
 
 // --- Sessions --------------------------------------------------------------

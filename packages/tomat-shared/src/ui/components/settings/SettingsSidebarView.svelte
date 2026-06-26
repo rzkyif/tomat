@@ -1,6 +1,12 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import SidebarItem from "../primitives/SidebarItem.svelte";
+  import { useUiContext } from "../../context.ts";
+
+  const ui = useUiContext();
+  // The mobile group list is a full-screen menu, so the rows sit tighter than
+  // the desktop sidebar's gap-2.
+  const listGap = ui.platform === "mobile" ? "gap-0.5" : "gap-2";
 
   // THE single settings sidebar for both the client and the website
   // (single-source rule, AGENTS.md): the collapse toggle, the scrollable group
@@ -18,6 +24,7 @@
     onToggleCollapse,
     onSelectGroup,
     isGroupDisabled,
+    showCollapse = true,
     footer,
   }: {
     groups: Group[];
@@ -28,6 +35,9 @@
     onToggleCollapse: () => void;
     onSelectGroup: (id: string) => void;
     isGroupDisabled?: (id: string) => boolean;
+    /** Whether to render the collapse toggle. Hidden in the mobile stacked nav,
+     *  where the list is full-screen and there is no sidebar to collapse. */
+    showCollapse?: boolean;
     /** Pinned bottom of the sidebar; the boolean is the collapsed state. */
     footer?: Snippet<[boolean]>;
   } = $props();
@@ -46,25 +56,29 @@
 <div class="flex flex-col gap-2 h-full min-h-0">
   <!-- h-6.5 (matches the sticky group header) so the icon's vertical center lines
        up with the group header text when scrolled to the top. -->
-  <button
-    class="shrink-0 hov:cursor-pointer text-default-500 hov:text-default-700 hov:bg-surface-inset w-fit flex items-center gap-2 h-6.5 pl-1.5 pr-1.5 rounded-medium transition-colors"
-    onclick={onToggleCollapse}
-    title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-    aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-    data-demo="collapse"
-  >
-    <i
-      class="flex text-xl shrink-0 {collapsed
-        ? 'i-material-symbols-keyboard-double-arrow-right-rounded'
-        : 'i-material-symbols-keyboard-double-arrow-left-rounded'}"
-    ></i>
-  </button>
+  {#if showCollapse}
+    <button
+      class="shrink-0 hov:cursor-pointer text-default-500 hov:text-default-700 hov:bg-surface-inset w-fit flex items-center gap-2 h-6.5 pl-1.5 pr-1.5 rounded-medium transition-colors"
+      onclick={onToggleCollapse}
+      title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      data-demo="collapse"
+    >
+      <i
+        class="flex text-xl shrink-0 {collapsed
+          ? 'i-material-symbols-keyboard-double-arrow-right-rounded'
+          : 'i-material-symbols-keyboard-double-arrow-left-rounded'}"
+      ></i>
+    </button>
+  {/if}
 
   <div class="relative flex-1 min-h-0">
     <div bind:this={scrollEl} onscroll={updateFades} class="tomat-scroll h-full overflow-y-auto pr-2">
-      <div class="flex flex-col gap-2">
+      <div class="flex flex-col {listGap}">
         {#each groups as g (g.id)}
-          {@const selected = !searchMode && selectedGroupId === g.id}
+          <!-- The mobile list pushes a full-screen detail on tap, so it carries
+               no persistent "selected group" highlight (the desktop split does). -->
+          {@const selected = !searchMode && selectedGroupId === g.id && ui.platform !== "mobile"}
           <SidebarItem
             icon={selected ? g.icon : (g.iconInactive ?? g.icon)}
             label={g.name}

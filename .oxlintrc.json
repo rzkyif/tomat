@@ -22,7 +22,7 @@
       }
     },
     {
-      "files": ["packages/tomat-client/src/ui/lib/platform/tauri.ts"],
+      "files": ["packages/tomat-client/src/ui/lib/platform/*.ts"],
       "rules": {
         "tomat/no-tauri-import": "off"
       }

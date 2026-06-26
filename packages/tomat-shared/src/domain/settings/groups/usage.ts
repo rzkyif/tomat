@@ -5,7 +5,7 @@ import type { SettingGroup } from "../types.ts";
 // collapsible sections. All fields are render-only (no persisted values).
 export const usageGroup: SettingGroup = {
   id: "usage",
-  destination: ["client", "core"],
+  destination: ["client-on-client", "core"],
   name: "Usage",
   description: "What tomat is using right now: RAM, CPU, and disk on this device and on the core.",
   descriptionTier: "ondemand",
@@ -14,7 +14,7 @@ export const usageGroup: SettingGroup = {
   sections: [
     {
       label: "On This Device",
-      destination: "client",
+      destination: "client-on-client",
       fields: [
         {
           id: "usage.clientServices",

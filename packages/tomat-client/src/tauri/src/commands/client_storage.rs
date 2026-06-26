@@ -8,7 +8,7 @@
 
 use crate::error::{AppError, AppResult};
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Serialize)]
 struct StorageNode {
@@ -36,11 +36,7 @@ pub struct StorageTree {
     root_path: String,
 }
 
-fn client_root() -> AppResult<PathBuf> {
-    let home = std::env::home_dir()
-        .ok_or_else(|| AppError::external("could not determine home directory"))?;
-    Ok(crate::channel::channel_root(&home).join("client"))
-}
+use super::paths::client_root;
 
 fn file_size(path: &Path) -> u64 {
     std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
@@ -48,8 +44,8 @@ fn file_size(path: &Path) -> u64 {
 
 /// The client's on-disk storage tree (settings + app data + logs), with sizes.
 #[tauri::command]
-pub fn get_client_storage() -> AppResult<StorageTree> {
-    let root = client_root()?;
+pub fn get_client_storage(handle: tauri::AppHandle) -> AppResult<StorageTree> {
+    let root = client_root(&handle)?;
 
     // Settings: the single client settings.json. Cleared via an empty write,
     // not a file delete; the registry and snippets live in their own files so
@@ -155,8 +151,8 @@ pub fn get_client_storage() -> AppResult<StorageTree> {
 /// leaks the inode on Unix. Rotated backups are deleted by the frontend
 /// (platform.fs.remove). No-op if the file doesn't exist.
 #[tauri::command]
-pub fn truncate_client_log() -> AppResult<()> {
-    let path = client_root()?.join("logs").join("client.log");
+pub fn truncate_client_log(handle: tauri::AppHandle) -> AppResult<()> {
+    let path = client_root(&handle)?.join("logs").join("client.log");
     match std::fs::OpenOptions::new()
         .write(true)
         .truncate(true)

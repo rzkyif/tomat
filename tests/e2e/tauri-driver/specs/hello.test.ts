@@ -2,7 +2,8 @@
 // appears, and exits. The point of this spec is to validate the harness
 // (tauri-driver + WDIO + Mocha) on the developer's machine. If it passes,
 // add real E2E coverage; if it fails, document the platform limitation in
-// tests/e2e/README.md and don't invest further until upstream fixes land.
+// tests/e2e/tauri-driver/README.md and don't invest further until upstream
+// fixes land.
 
 describe("tomat: app boots", () => {
   it("renders the main window", async () => {

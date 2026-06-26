@@ -25,10 +25,12 @@
   },
   "tasks": {
     "dev": "deno run -A --unsafely-ignore-certificate-errors=127.0.0.1 scripts/dev.ts",
+    "dev:android": "deno run -A --unsafely-ignore-certificate-errors=127.0.0.1 scripts/dev.ts --android",
     "dev:reset": "deno run -A --unsafely-ignore-certificate-errors=127.0.0.1 scripts/dev.ts --reset",
     "dev:reset:install": "deno run -A --unsafely-ignore-certificate-errors=127.0.0.1 scripts/dev.ts --reset --fresh-install",
     "dev:core": "deno task --cwd packages/tomat-core dev",
     "dev:client": "deno task --cwd packages/tomat-client dev",
+    "dev:client:android": "deno run -A --unsafely-ignore-certificate-errors=127.0.0.1 scripts/dev.ts --android --client-only",
     "dev:website": "deno task --cwd packages/tomat-website dev",
 
     "check": "deno run -A scripts/pkg.ts check && deno run -A scripts/check.ts",
@@ -37,6 +39,7 @@
     "fmt:check": "deno run -A npm:oxfmt@0.51.0 --check . && deno run -A scripts/pkg.ts fmt:check",
     "test": "deno run -A scripts/pkg.ts test",
     "test:e2e": "deno run -A scripts/test-e2e.ts",
+    "test:e2e:headless": "deno run -A scripts/test-e2e-headless.ts",
 
     "check:shared": "deno task --cwd packages/tomat-shared check",
     "check:core": "deno task --cwd packages/tomat-core check",
@@ -85,6 +88,8 @@
     "build:core:stable": "deno run -A scripts/build-core.ts --channel=stable",
     "build:client": "deno run -A scripts/build-client.ts --channel=latest",
     "build:client:stable": "deno run -A scripts/build-client.ts --channel=stable",
+    "build:client:android": "deno run -A scripts/build-android.ts --channel=latest",
+    "build:client:android:stable": "deno run -A scripts/build-android.ts --channel=stable",
     "build:catalog": "deno run -A scripts/catalog/build.ts",
     "build:website": "deno run -A scripts/website/build.ts",
     "release": "deno run -A scripts/release/main.ts --channel=latest",

@@ -26,6 +26,14 @@ import { viewState } from "./view.svelte";
 
 const log = getLogger("streaming");
 
+// How long to wait for the model's first token before treating the turn as
+// stalled. The window covers only the "awaiting first token" gaps (initial
+// send and each post-tool hop), never tool execution, so a long-running tool
+// can't trip it; it guards the case where a provider accepts the request but
+// never streams, which would otherwise spin forever. Generous so a slow local
+// model doing tool-filtering plus a cold first token isn't cut off.
+const FIRST_TOKEN_TIMEOUT_MS = 120_000;
+
 type InterruptListener = () => void | Promise<void>;
 
 class StreamingState {
@@ -52,6 +60,8 @@ class StreamingState {
   // the TTS stream outright, later hops only claim it when idle.
   private turnHadAssistant = false;
   private interruptListeners: InterruptListener[] = [];
+  // Fires if the model never produces a first token (see FIRST_TOKEN_TIMEOUT_MS).
+  private firstTokenTimer: ReturnType<typeof setTimeout> | null = null;
   private unsubscribeWs: (() => void) | null = null;
   private unsubscribeConn: (() => void) | null = null;
   // Streams this client started and then abandoned (interrupt / disconnect).
@@ -137,6 +147,41 @@ class StreamingState {
         toolsHint,
         anchorMessageId: this.turnAnchorId ?? undefined,
       });
+    this.armFirstTokenWatchdog();
+  }
+
+  /** (Re)start the first-token watchdog for the current "awaiting first token"
+   *  window. Cleared the moment a reasoning/assistant bubble is born or the turn
+   *  ends, so it only ever fires during genuine model silence. */
+  private armFirstTokenWatchdog(): void {
+    this.disarmFirstTokenWatchdog();
+    this.firstTokenTimer = setTimeout(() => this.onFirstTokenTimeout(), FIRST_TOKEN_TIMEOUT_MS);
+  }
+
+  private disarmFirstTokenWatchdog(): void {
+    if (this.firstTokenTimer !== null) {
+      clearTimeout(this.firstTokenTimer);
+      this.firstTokenTimer = null;
+    }
+  }
+
+  private onFirstTokenTimeout(): void {
+    this.firstTokenTimer = null;
+    // Only act if we are still genuinely waiting for a first token (a late birth
+    // or a finished/cancelled turn between scheduling and firing makes this a
+    // no-op).
+    if (!this.isActive || !this.awaitingFirstDelta) return;
+    const streamId = this.streamId;
+    this.markAbandoned(streamId);
+    this.resetTTSPlayback();
+    // recordError() calls finish(), which disarms; surface an actionable bubble
+    // and stop the (still server-side) turn so the input unlocks for a retry.
+    this.recordError(
+      "server_unavailable",
+      "The model took too long to respond and never started. It may be a very slow " +
+        "model or an unresponsive provider. Try again, or pick a smaller local model.",
+    );
+    if (streamId) cores().api().chat.interrupt(streamId);
   }
 
   private onFrame(frame: ServerToClientFrame): void {
@@ -227,6 +272,8 @@ class StreamingState {
     const local: Message = { ...msg };
     if (local.role === "assistant" || local.role === "reasoning") {
       this.awaitingFirstDelta = false;
+      // First token of this hop arrived: the model is responsive.
+      this.disarmFirstTokenWatchdog();
     }
     if (!final) {
       const next = new Set(this.liveIds);
@@ -260,9 +307,11 @@ class StreamingState {
       this.feedTTS(text, true);
     }
     // A finished tool call means the next hop's prompt is processing; bring
-    // the spinner back until that hop's first reasoning/assistant birth.
+    // the spinner back until that hop's first reasoning/assistant birth, and
+    // re-arm the watchdog for that hop's first token.
     if (local.role === "tool" && this.isActive) {
       this.awaitingFirstDelta = true;
+      this.armFirstTokenWatchdog();
     }
     // Core appended the tools hint to this turn's system prompt; mirror it
     // into the system bubble so it keeps showing exactly what the model
@@ -275,6 +324,9 @@ class StreamingState {
   /** Latch onto a stream this client did not start. Mirrors start()'s state
    *  reset, minus the chat.start frame (core already runs the turn). */
   private adoptForeignStream(streamId: string): void {
+    // A foreign (core-initiated) stream we latch onto at its first message is
+    // already producing output; our own first-token watchdog doesn't apply.
+    this.disarmFirstTokenWatchdog();
     this.isActive = true;
     this.awaitingFirstDelta = false;
     this.turnHadAssistant = false;
@@ -347,6 +399,7 @@ class StreamingState {
   }
 
   private finish(): void {
+    this.disarmFirstTokenWatchdog();
     this.isActive = false;
     this.awaitingFirstDelta = false;
     this.streamId = null;
@@ -375,6 +428,7 @@ class StreamingState {
    *  chat.done that follows) still land on the bubbles. */
   cancel(): void {
     if (!this.isActive) return;
+    this.disarmFirstTokenWatchdog();
     this.resetTTSPlayback();
     this.isActive = false;
     this.awaitingFirstDelta = false;
@@ -430,6 +484,7 @@ class StreamingState {
   }
 
   resetForSession(): void {
+    this.disarmFirstTokenWatchdog();
     this.isActive = false;
     this.awaitingFirstDelta = false;
     this.streamId = null;

@@ -10,7 +10,7 @@ import type { SettingGroup } from "../types.ts";
 // the Settings UI has a stable group id for the cores manager.
 export const coresGroup: SettingGroup = {
   id: "cores",
-  destination: "client",
+  destination: "client-on-client",
   name: "Cores",
   description:
     "The cores this app is paired with. Tokens stay in your device keychain; add or remove cores through pairing.",

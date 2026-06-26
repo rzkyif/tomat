@@ -1,0 +1,21 @@
+{
+  "name": "test-echo",
+  "displayName": "Test Echo",
+  "description": "Minimal hermetic test extension with one no-permission tool.",
+  "tools": [
+    {
+      "name": "echo_tool",
+      "description": "Echo the input text back to the caller.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Text to echo." }
+        },
+        "required": ["text"]
+      },
+      "function": "echoTool",
+      "alwaysAvailable": true,
+      "permissions": {}
+    }
+  ]
+}

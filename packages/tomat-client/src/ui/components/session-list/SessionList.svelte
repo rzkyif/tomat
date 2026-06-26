@@ -11,9 +11,14 @@
   import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
   import { sessionsState, settingsState, viewState } from "$stores";
   import { formatSessionDefaultTitle } from "$lib/util/format";
+  import { platform } from "$lib/platform";
 
   const ui = useUiContext();
   let alignment = $derived(settingsState.getAlignment());
+  // On mobile the list fills the screen width (the page wrapper's slim p-3 is the
+  // only horizontal padding), so the bubbles go full-width instead of the
+  // desktop's fixed 28rem column; the back row is dropped where the OS owns back.
+  const mobile = $derived(ui.platform === "mobile");
 
   let confirmingDelete = $state<string | null>(null);
 
@@ -38,6 +43,18 @@
     }
     confirmingDelete = null;
     await sessionsState.deleteById(id);
+  }
+
+  // Touch long-press opens an action sheet (the sheet IS the confirmation, so it
+  // deletes directly rather than going through the two-tap icon-button confirm).
+  // touch-only via the Bubble's longpress action, so desktop is unaffected.
+  async function openSessionMenu(id: string): Promise<void> {
+    const chosen = await platform().menu.showContextMenu([
+      { id: "open", label: "Open" },
+      { id: "delete", label: "Delete Session" },
+    ]);
+    if (chosen === "open") await openSession(id);
+    else if (chosen === "delete") await sessionsState.deleteById(id);
   }
 
   // Untitled sessions fall back to their creation datetime, matching the
@@ -68,18 +85,22 @@
   <Bubble
     selectedAlignment={alignment}
     size="small"
-    extraClass="flex items-center gap-2 w-[28rem] max-w-full"
+    fullWidth={mobile}
+    extraClass="flex items-center gap-2 {mobile ? '' : 'w-[28rem] max-w-full'}"
   >
-    <!-- -ml-1 cancels the IconButton's own p-1 inset so the arrow glyph
-         left-aligns with the session bubbles' title/summary text. -->
-    <IconButton
-      icon="i-material-symbols-arrow-back-rounded"
-      title="Back to Chat"
-      size="md"
-      variant="subtle"
-      class="-ml-1"
-      onclick={() => viewState.navigate("chat")}
-    />
+    {#if !ui.hasSystemBack}
+      <!-- -ml-1 cancels the IconButton's own p-1 inset so the arrow glyph
+           left-aligns with the session bubbles' title/summary text. Dropped on
+           Android, where the system back returns to chat. -->
+      <IconButton
+        icon="i-material-symbols-arrow-back-rounded"
+        title="Back to Chat"
+        size="md"
+        variant="subtle"
+        class="-ml-1"
+        onclick={() => viewState.navigate("chat")}
+      />
+    {/if}
     <h1 class="text-sm font-medium text-default-800 flex-1">Sessions</h1>
     <IconButton
       icon="i-material-symbols-add-rounded"
@@ -95,6 +116,7 @@
     <Bubble
       selectedAlignment={alignment}
       size="small"
+      fullWidth={mobile}
       extraClass="text-sm text-default-500"
     >
       No sessions yet. Start one with the + button above.
@@ -111,11 +133,13 @@
         selectedAlignment={alignment}
         size="small"
         active={isCurrent}
+        fullWidth={mobile}
         borderColorClass={isCurrent ? "border-default-400" : ""}
         onclick={() => openSession(entry.id)}
-        extraClass="flex items-center gap-3 cursor-pointer {isCurrent && alignment !== 'center'
-          ? 'w-[calc(28rem-8px)]'
-          : 'w-[28rem]'} max-w-full"
+        onlongpress={() => void openSessionMenu(entry.id)}
+        extraClass="flex items-center gap-3 cursor-pointer {mobile
+          ? ''
+          : (isCurrent && alignment !== 'center' ? 'w-[calc(28rem-8px)]' : 'w-[28rem]') + ' max-w-full'}"
       >
         <div class="flex flex-col min-w-0 flex-1">
           <span class="text-sm text-default-800 truncate">

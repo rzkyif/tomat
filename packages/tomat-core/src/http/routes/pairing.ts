@@ -1,5 +1,7 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import {
+  clientRevokeRequestSchema,
   errMessage,
   pairingCodeRequestSchema,
   pakeFinishRequestSchema,
@@ -7,8 +9,9 @@ import {
 } from "@tomat/shared";
 import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
 import { authService } from "../../services/auth.ts";
+import { dropClientSettingsCache } from "../../services/core-settings.ts";
 import { tlsCertFingerprint } from "../../services/tls.ts";
-import { adminTokenMiddleware, bearerMiddleware, requireClient } from "../middleware/auth.ts";
+import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 import { AppError } from "../middleware/errors.ts";
 import { getLogger } from "../../shared/log.ts";
 import { wsHub } from "../../ws/hub.ts";
@@ -18,11 +21,24 @@ const log = getLogger("http.pairing");
 export function pairingRoutes(): Hono {
   const r = new Hono();
 
-  r.post("/codes", adminTokenMiddleware(), async (c) => {
+  // Mint a pairing code. Two authorization paths:
+  //   A) X-Admin-Token  - device access (install script, "pair from this
+  //      machine"). High-entropy; no rate limit needed.
+  //   B) Bearer + password - an already-paired client minting remotely. The
+  //      bearer proves the caller is a trusted device; the password is the
+  //      second factor (argon2id + rate limited inside verifyAdminPassword).
+  r.post("/codes", async (c) => {
     const body = await readJsonOrEmpty(c);
     const parsed = pairingCodeRequestSchema.safeParse(body);
     if (!parsed.success) {
       throw new AppError("validation_error", parsed.error.message);
+    }
+    const adminToken = c.req.header("x-admin-token");
+    if (adminToken) {
+      await authService().verifyAdminToken(adminToken);
+    } else {
+      const client = await authService().authenticate(bearerToken(c));
+      authService().verifyAdminPassword(parsed.data.password ?? null, peerIp(c), client.id);
     }
     const result = authService().mintPairingCode(parsed.data.ttlSec);
     return c.json(result);
@@ -36,19 +52,11 @@ export function pairingRoutes(): Hono {
     if (!parsed.success) {
       throw new AppError("validation_error", parsed.error.message);
     }
-    // Rate-limit key: the REAL socket peer address, threaded from Deno.serve
-    // into the Hono env (see main.ts). We deliberately do NOT trust
-    // X-Forwarded-For / X-Real-IP, which are client-settable, so an attacker
-    // would rotate them to hand every guess a fresh, empty rate-limit bucket
-    // and brute-force the pairing code. There is no reverse-proxy deployment
-    // mode today; add a trusted-proxy setting before honoring those headers.
-    const peer = (c.env as { remoteAddr?: { hostname?: string } } | undefined)?.remoteAddr;
-    const ip = peer?.hostname ?? "local";
     const result = authService().pakeStart(
       decodeBase64(parsed.data.sid),
       decodeBase64(parsed.data.msgA),
       parsed.data.clientName,
-      ip,
+      peerIp(c),
       await tlsCertFingerprint(),
     );
     return c.json({ pakeId: result.pakeId, msgB: encodeBase64(result.msgB) });
@@ -86,11 +94,21 @@ export function pairingRoutes(): Hono {
     const id = c.req.param("id") === "me" ? me.id : c.req.param("id");
     // A client may always remove ITSELF (the "leave" action). Revoking a
     // DIFFERENT paired device is a privileged fleet action: without this gate
-    // any single paired device could wipe and lock out every other device. So
-    // cross-client revocation requires the admin token (the same guard that
-    // mints pairing codes), which only a client running on the host can read.
+    // any single paired device could wipe and lock out every other device. It
+    // is authorized the same two ways as minting a code: the admin token
+    // (device access) OR the admin password (an already-paired client, body).
     if (id !== me.id) {
-      await authService().verifyAdminToken(c.req.header("x-admin-token") ?? null);
+      const adminToken = c.req.header("x-admin-token");
+      if (adminToken) {
+        await authService().verifyAdminToken(adminToken);
+      } else {
+        const body = await readJsonOrEmpty(c);
+        const parsed = clientRevokeRequestSchema.safeParse(body);
+        if (!parsed.success) {
+          throw new AppError("validation_error", parsed.error.message);
+        }
+        authService().verifyAdminPassword(parsed.data.password ?? null, peerIp(c), me.id);
+      }
     }
     const { existed, attachmentPaths } = authService().revokeClient(id);
     if (!existed) {
@@ -100,6 +118,9 @@ export function pairingRoutes(): Hono {
     // Cut off any live WebSocket for the revoked client so revocation actually
     // removes access (the WS authenticates only once, at upgrade).
     wsHub().closeClient(id);
+    // The client's per-client settings rows are cascade-deleted with its
+    // `clients` row; drop the in-memory overlay cache to match.
+    dropClientSettingsCache(id);
     // Best-effort cleanup of attachment files on disk. We've already
     // cascaded the DB rows so a stragglers-on-disk situation only wastes
     // bytes; log it but don't fail the request.
@@ -127,7 +148,24 @@ export function pairingRoutes(): Hono {
   return r;
 }
 
-async function readJsonOrEmpty(c: import("hono").Context): Promise<unknown> {
+// The bearer token from the Authorization header, or null. authService()
+// .authenticate turns null into a 401, so callers can pass it straight through.
+function bearerToken(c: Context): string | null {
+  const match = /^Bearer\s+(.+)$/i.exec(c.req.header("authorization") ?? "");
+  return match ? match[1].trim() : null;
+}
+
+// The REAL socket peer address, threaded from Deno.serve into the Hono env (see
+// main.ts). We deliberately do NOT trust X-Forwarded-For / X-Real-IP, which are
+// client-settable: an attacker would rotate them to hand every guess a fresh,
+// empty rate-limit bucket. There is no reverse-proxy deployment mode today; add
+// a trusted-proxy setting before honoring those headers.
+function peerIp(c: Context): string {
+  const peer = (c.env as { remoteAddr?: { hostname?: string } } | undefined)?.remoteAddr;
+  return peer?.hostname ?? "local";
+}
+
+async function readJsonOrEmpty(c: Context): Promise<unknown> {
   // No body OR a whitespace-only body reasonably means "use defaults" for
   // these endpoints (pairing/codes accepts an empty body for the default
   // TTL). A body present but malformed is a real client bug. We surface

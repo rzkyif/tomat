@@ -10,7 +10,7 @@ import { SECURE_URL_VALIDATION } from "../types.ts";
 
 export const sttGroup: SettingGroup = {
   id: "stt",
-  destination: ["client", "core"],
+  destination: ["client-on-client", "core"],
   name: "Speech-to-Text",
   description:
     "Dictate messages with your voice. Capture settings run on this device; the speech recognition model runs on the core.",
@@ -30,14 +30,14 @@ export const sttGroup: SettingGroup = {
           name: "Enable Speech-to-Text",
           description: "Dictate with your microphone using the mic button or push-to-talk.",
           type: "boolean",
-          defaultValue: true,
+          defaultValue: false,
           descriptionTier: "ondemand",
         },
       ],
     },
     {
       label: "Voice Input",
-      destination: "client",
+      destination: "client-on-client",
       fields: [
         {
           id: "stt.activation",
@@ -76,6 +76,9 @@ export const sttGroup: SettingGroup = {
           description: "Turn other audio down while you dictate, so you can hear yourself.",
           type: "boolean",
           defaultValue: false,
+          // System-volume ducking has no mobile equivalent (the app cannot set
+          // the OS output volume), so this and its target are desktop-only.
+          desktopOnly: true,
           visibleWhen: { field: "stt.enabled", eq: true },
           descriptionTier: "ondemand",
         },
@@ -89,6 +92,7 @@ export const sttGroup: SettingGroup = {
           max: 100,
           step: 1,
           suffix: "%",
+          desktopOnly: true,
           visibleWhen: {
             allOf: [
               { field: "stt.enabled", eq: true },
@@ -110,7 +114,7 @@ export const sttGroup: SettingGroup = {
     },
     {
       label: "Transcription",
-      destination: "client",
+      destination: "client-on-client",
       visibleWhen: { field: "stt.enabled", eq: true },
       fields: [
         {

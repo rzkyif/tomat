@@ -45,10 +45,15 @@ R2 (`get.au.tomat.ing`), never here.
   so demo state has one home. The gallery (`src/pages/gallery.astro` +
   `components/gallery/Gallery.svelte`) renders every shared View from its
   samples with no `UiContext` provider (so it falls back to
-  `DEFAULT_UI_CONTEXT`); it is the canonical parity/QA surface and the manual's
-  screenshot source. The `check-view-coverage` lint walker mechanically enforces
-  that every View has a sample, a gallery card, and a client wrapper (a
-  website-only View is illegal).
+  `DEFAULT_UI_CONTEXT`, i.e. the desktop shell); it is the canonical parity/QA
+  surface and the manual's screenshot source. The mobile counterparts live in a
+  separate `components/gallery/MobileGallery.svelte` section that scopes a
+  `platform: "mobile"` provider to its own subtree (so the desktop cards stay on
+  `DEFAULT_UI_CONTEXT`) and frames each card in a phone-sized viewport, so the
+  touch branches (bottom-sheet modals, the stacked settings nav, the fullscreen
+  chat shell) get visual coverage too. The `check-view-coverage` lint walker
+  mechanically enforces that every View has a sample, a gallery card, and a
+  client wrapper (a website-only View is illegal).
 - **Demo-driven interactive states use `hov:` / `act:`.** The scripted cursor
   sets `data-hover` / `data-active` on its target; the shared `hov:`/`act:`
   UnoCSS variants resolve those to the same styles as `:hover`/`:active`, so a

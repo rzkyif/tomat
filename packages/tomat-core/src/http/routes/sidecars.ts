@@ -10,7 +10,7 @@ import { Hono } from "hono";
 import type { SidecarKind, SidecarSnapshot, SidecarsStatusResponse } from "@tomat/shared";
 import { sidecarManager } from "../../sidecars/manager.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
-import { buildLlamaStartOptions, llamaStartArgsFromSettings } from "../../sidecars/llama.ts";
+import { buildLlamaStartOptionsScaled, llamaStartArgsFromSettings } from "../../sidecars/llama.ts";
 import { buildSpeechStartOptions, speechDesiredState } from "../../sidecars/speech.ts";
 import { sampleProcessMetrics } from "../../sidecars/process-metrics.ts";
 import { AppError } from "../../shared/errors.ts";
@@ -68,7 +68,7 @@ export function sidecarsRoutes(): Hono {
             "llama-server cannot start: llm.provider is not local",
           );
         }
-        await sidecarManager().restart("llama", buildLlamaStartOptions(args));
+        await sidecarManager().restart("llama", await buildLlamaStartOptionsScaled(args));
       } else if (kind === "speech") {
         const state = await speechDesiredState(settings);
         if (!state.stt && !state.tts) {

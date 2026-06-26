@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { CSS_EASING } from "../../animations.ts";
+  import { CSS_EASING, RIPPLE_MS } from "../../animations.ts";
   import { useUiContext } from "../../context.ts";
+  import { ripple } from "../../actions/ripple.ts";
   import type { SettingTab } from "../../../domain/settings/types.ts";
 
   const ui = useUiContext();
+  const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
 
   // Segmented tab selector: a bg-surface-inset groove with every tab label
   // resting on it and a knob that slides to the active tab. The knob is an
@@ -57,8 +59,9 @@
       type="button"
       role="tab"
       aria-selected={active === tab.id}
-      class="{cellClass} text-default-600 transition-interactive hov:text-default-800 act:text-default-900 hov:cursor-pointer"
+      class="{cellClass} text-default-600 transition-interactive hov:text-default-800 hov:cursor-pointer"
       onclick={() => onSelect(tab.id)}
+      use:ripple={{ durationMs: rippleDuration }}
     >
       {tab.label}
     </button>

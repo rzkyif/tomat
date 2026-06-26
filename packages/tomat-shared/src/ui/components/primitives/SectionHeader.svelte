@@ -11,6 +11,7 @@
     collapsible = false,
     expanded = true,
     onToggle,
+    leading,
     badge,
     actions,
     level = "section",
@@ -20,6 +21,10 @@
     collapsible?: boolean;
     expanded?: boolean;
     onToggle?: () => void;
+    /** Leading control before the label (e.g. the mobile back button on the
+     *  group header). Only rendered on the non-collapsible (group) header, where
+     *  it is valid markup (the collapsible header is itself a <button>). */
+    leading?: Snippet;
     badge?: Snippet;
     /** Right-aligned controls (expand-all / collapse-all), only on the
      *  non-collapsible (group) header (nesting buttons in the collapsible
@@ -54,6 +59,9 @@
     <div
       class="flex items-center gap-2 h-7 bg-surface text-base {textColor} font-medium uppercase tracking-wide"
     >
+      {#if leading}
+        {@render leading()}
+      {/if}
       <span>{label}</span>
       {#if badge}
         {@render badge()}

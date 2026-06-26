@@ -23,6 +23,12 @@ import { lookupCollection, lookupCollections } from "npm:@iconify/json@^2.2.483"
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 
+// This file's own comments document what a BAD icon class looks like (deliberate
+// typos, e.g. `...chevron-rihgt...`), so scanning it would flag its own teaching
+// examples. A lint script never renders an icon, so skip it: nothing real is
+// lost, and the negative examples can stay readable inline.
+const SELF = new URL(import.meta.url).pathname.slice(ROOT.length);
+
 // File types whose source can contain an icon class. Matches the union of the
 // client and website UnoCSS `content` pipelines.
 const SCAN_EXTS = new Set([".svelte", ".ts", ".tsx", ".jsx", ".mdx", ".astro", ".html"]);
@@ -117,6 +123,7 @@ async function scan(): Promise<Violation[]> {
   const violations: Violation[] = [];
   const decoder = new TextDecoder();
   for (const file of await trackedFiles()) {
+    if (file === SELF) continue;
     if (!SCAN_EXTS.has(extOf(file))) continue;
     let bytes: Uint8Array;
     try {

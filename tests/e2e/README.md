@@ -1,68 +1,40 @@
-# E2E
+# End-to-end lanes
 
-E2E specs drive the real Tauri shell through `tauri-driver` and WebdriverIO.
-They are NOT run in CI. Invoke them manually with `deno task test:e2e`.
+Two opt-in E2E lanes live here, each in its own subdirectory with its own
+runner. Both are **manual only and never run in CI**; the co-located unit +
+component suites are the everyday tools. Reach for a lane only when a change
+spans the client/core wire or the full app boot.
 
-## One-time setup
+| Lane                               | Directory                                 | Runs                          | Use it for                                                                                                                                                                                       |
+| ---------------------------------- | ----------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **headless integration** (primary) | [`headless/`](headless/README.md)         | `deno task test:e2e:headless` | The full product behaviour of client <-> core: real Svelte app in real Chromium over real HTTP+WS+TLS to a real spawned `tomat-core`, outbound deps mocked. Fast, deterministic, cross-platform. |
+| **tauri-driver smoke** (thin)      | [`tauri-driver/`](tauri-driver/README.md) | `deno task test:e2e`          | Only what headless cannot: the native WebView engine, the Rust `net` transport (rustls SPKI pinning), and OS-native calls. Slow, platform-specific.                                              |
 
-This toolchain is opt-in and isn't wired into the workspace `deno.json`.
+The two are complementary: headless owns the breadth of happy-path coverage; the
+tauri-driver lane is a thin smoke test for the native seams headless stubs out.
+The exact behaviour delta between them is documented in
+[headless/README.md](headless/README.md).
 
-```sh
-# 1. tauri-driver supervises the platform WebDriver
-cargo install tauri-driver --locked
+## Why these are npm projects, not Deno
 
-# 2. Build a debug Tauri binary the harness can launch
-deno task build:client
+Both runners are Node-only browser-automation toolchains (WebdriverIO +
+`tauri-driver`; vitest browser mode + Playwright/Chromium) that Deno can't host,
+so each lane keeps its dependencies in a local npm install rather than the
+workspace `deno.json`. This is deliberate: it keeps the heavy toolchains opt-in
+and off developer machines that never run E2E. The whole `tests/e2e/` tree is
+excluded from `deno fmt`/`lint`/`check`. The entry point still stays
+Deno-native: you invoke each lane through a `deno task` wrapper
+(`scripts/test-e2e*.ts`), which execs the lane's local runner.
 
-# 3. WDIO and friends live here rather than in the workspace deno.json,
-#    so they don't get pulled into developer machines that never run E2E.
-cd tests/e2e
-npm init -y
-npm i --save-dev \
-  @wdio/cli@9 \
-  @wdio/local-runner@9 \
-  @wdio/mocha-framework@9 \
-  @wdio/spec-reporter@9 \
-  @types/mocha \
-  webdriverio@9 \
-  expect-webdriverio
-cd ../..
-```
+## Setup and specs
 
-Then verify the harness works:
+Per-lane setup (the one-time toolchain install), the spec layout, and the
+when-to-write guidance live in each lane's own README:
 
-```sh
-deno task test:e2e
-```
+- [headless/README.md](headless/README.md) - architecture, the behaviour delta,
+  setup, and how to write a spec.
+- [tauri-driver/README.md](tauri-driver/README.md) - setup, platform notes, and
+  what to reserve the native lane for.
 
-If `hello.test.ts` passes, the harness is good. Expand coverage from there.
-
-## Platform notes
-
-- **macOS**: `tauri-driver` historically had rough edges on recent macOS. As of
-  darwin 25.4 / macOS 26 the support story is **unverified**. If `tauri-driver`
-  fails to launch or fails to attach to the WebView, document the limitation
-  here and rely on Svelte component tests via vitest plus manual
-  `deno task dev` smoke tests until upstream catches up.
-- **Linux**: usually the most reliable; uses `WebKitWebDriver` from webkit2gtk.
-- **Windows**: requires `msedgedriver` matching the installed Edge WebView2
-  version.
-
-## Naming convention
-
-Permanent specs are `*.test.ts`; agent scratch specs are `*.tmp.test.ts` and
-gitignored. Both globs are picked up by `wdio.conf.ts`.
-
-## What to write E2Es for
-
-E2E is expensive and brittle. Reserve it for flows where the JS / Rust / OS
-boundary is load-bearing AND the in-source tests can't prove the behavior:
-
-- pairing handshake against a real installed core
-- global shortcut registration
-- file-to-markdown conversion with a real picker (only the picker dialog; the
-  parsing layer is in-source)
-- screen capture / region capture overlay
-
-Everything else (the chat surface, settings, message rendering) should be
-covered with vitest + `@testing-library/svelte` and a mocked `platform()`.
+Permanent specs are `*.test.ts`; agent scratch specs are `*.tmp.test.ts` and are
+gitignored everywhere.

@@ -1,35 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Cross-platform capability for the main window. Only permissions for plugins that are registered on every platform (core, os, opener, fs, dialog) belong here; desktop-only plugin permissions live in desktop-capability so they never load on Android, where those plugins are not registered.",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:window:allow-set-ignore-cursor-events",
-    "core:window:allow-cursor-position",
-    "core:window:allow-outer-position",
-    "core:window:allow-outer-size",
-    "core:window:allow-set-size",
-    "core:window:allow-set-position",
-    "core:window:allow-current-monitor",
+    "os:default",
     "opener:default",
-    "opener:allow-reveal-item-in-dir",
+    "opener:allow-open-path",
     "fs:default",
-    "dialog:default",
-    "updater:default",
-    "process:default",
-    "autostart:default",
-    {
-      "identifier": "fs:allow-home-read-recursive",
-      "allow": [{ "path": "$HOME/.tomat/**" }]
-    },
-    {
-      "identifier": "fs:allow-home-write-recursive",
-      "allow": [{ "path": "$HOME/.tomat/**" }]
-    },
-    {
-      "identifier": "fs:allow-home-meta-recursive",
-      "allow": [{ "path": "$HOME/.tomat/**" }]
-    }
+    "dialog:default"
   ]
 }

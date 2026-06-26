@@ -13,21 +13,41 @@
 //! one secret-scrubbing pass (mirrors core's `scrubSecrets`).
 
 use std::io::{IsTerminal, Write};
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use file_rotate::{compression::Compression, suffix::AppendCount, ContentLimit, FileRotate};
 use regex::Regex;
 
-/// Initialize the global logger. Non-fatal: a logging-init failure must never
-/// abort app boot, so it logs to stderr (still captured by the dev console) and
-/// continues. Call once, as early as possible in `run()`.
+/// Initialize the global logger using the home-based log directory. Desktop
+/// entry point: a home dir is always resolvable there. Non-fatal: a
+/// logging-init failure must never abort app boot, so it logs to stderr (still
+/// captured by the dev console) and continues. Call once, as early as possible.
 pub fn init() {
-    if let Err(e) = try_init() {
+    init_with_log_dir(default_log_dir());
+}
+
+/// Initialize the global logger writing its file sink under `log_dir` (or none).
+/// Android calls this from `setup()` with the app-data dir, since there is no
+/// `$HOME` to derive it from and the path needs an `AppHandle`. Call once.
+pub fn init_with_log_dir(log_dir: Option<PathBuf>) {
+    if let Err(e) = try_init(log_dir) {
         eprintln!("[log] logger init failed (continuing without logging): {e}");
     }
 }
 
-fn try_init() -> Result<(), fern::InitError> {
+/// `~/.tomat/<channel>/client/logs` on desktop; `None` where there is no home
+/// directory (android resolves its dir via `init_with_log_dir` instead).
+fn default_log_dir() -> Option<PathBuf> {
+    let home = std::env::home_dir()?;
+    Some(
+        crate::channel::channel_root(&home)
+            .join("client")
+            .join("logs"),
+    )
+}
+
+fn try_init(log_dir: Option<PathBuf>) -> Result<(), fern::InitError> {
     let is_dev = crate::channel::channel() == "dev";
 
     // Color/time env handling mirrors tomat-core/src/shared/log.ts. Our stdout is
@@ -83,45 +103,46 @@ fn try_init() -> Result<(), fern::InitError> {
 
     let mut root = fern::Dispatch::new().chain(stdout_chain);
 
-    // File chain is optional: if the home dir / log file can't be opened, keep
-    // stdout logging rather than failing boot.
-    match file_writer() {
-        Ok(writer) => {
-            let file_chain = fern::Dispatch::new()
-                .level(log::LevelFilter::Warn)
-                .format(|out, message, record| {
-                    let scrubbed = scrub_secrets(&message.to_string());
-                    let ts =
-                        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-                    let scope = match module_name(record.target()) {
-                        "" => String::new(),
-                        m => format!(" [{m}]"),
-                    };
-                    // Per-line head so multi-line entries stay greppable: each
-                    // physical line carries the timestamp + level + scope.
-                    let head = format!("{ts} {}{scope} ", record.level());
-                    let body = scrubbed.replace('\n', &format!("\n{head}"));
-                    out.finish(format_args!("{head}{body}"))
-                })
-                .chain(fern::Output::writer(writer, "\n"));
-            root = root.chain(file_chain);
-        }
-        Err(e) => eprintln!("[log] file logging disabled: {e}"),
+    // File chain is optional: if no log dir was resolved or the file can't be
+    // opened, keep stdout logging rather than failing boot.
+    let writer = match log_dir {
+        Some(dir) => match file_writer(dir) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                eprintln!("[log] file logging disabled: {e}");
+                None
+            }
+        },
+        None => None,
+    };
+    if let Some(writer) = writer {
+        let file_chain = fern::Dispatch::new()
+            .level(log::LevelFilter::Warn)
+            .format(|out, message, record| {
+                let scrubbed = scrub_secrets(&message.to_string());
+                let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                let scope = match module_name(record.target()) {
+                    "" => String::new(),
+                    m => format!(" [{m}]"),
+                };
+                // Per-line head so multi-line entries stay greppable: each
+                // physical line carries the timestamp + level + scope.
+                let head = format!("{ts} {}{scope} ", record.level());
+                let body = scrubbed.replace('\n', &format!("\n{head}"));
+                out.finish(format_args!("{head}{body}"))
+            })
+            .chain(fern::Output::writer(writer, "\n"));
+        root = root.chain(file_chain);
     }
 
     root.apply()?;
     Ok(())
 }
 
-/// Open the size-capped, append-mode log file as a boxed writer. One file
-/// (`client.log`) plus a single rotated backup once it passes ~5 MB.
-fn file_writer() -> std::io::Result<Box<dyn Write + Send>> {
-    let home = std::env::home_dir()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no home directory"))?;
-    let path = crate::channel::channel_root(&home)
-        .join("client")
-        .join("logs")
-        .join("client.log");
+/// Open the size-capped, append-mode log file under `log_dir` as a boxed writer.
+/// One file (`client.log`) plus a single rotated backup once it passes ~5 MB.
+fn file_writer(log_dir: PathBuf) -> std::io::Result<Box<dyn Write + Send>> {
+    let path = log_dir.join("client.log");
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

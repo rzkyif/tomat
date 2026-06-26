@@ -1,10 +1,28 @@
 import type { SettingGroup } from "../types.ts";
 import { SECURE_URL_VALIDATION } from "../types.ts";
-import { DEFAULT_SAMPLING } from "../../recommend.ts";
+
+// Static fallbacks for the local model fields, mirroring the Smallest-floor
+// catalog model (the Qwen 3.5 family; see packages/tomat-model-catalog). They
+// keep a fresh install coherent with an accepted baseline before the Smart
+// Preset resolves the hardware-fit values; the preset overwrites all of these on
+// model select, so they only hold for the brief pre-preset window and for
+// external/custom setups.
+const BASELINE_SAMPLING = {
+  temperature: 0.6,
+  topP: 0.95,
+  topK: 20,
+  minP: 0,
+  repeatPenalty: 1.0,
+} as const;
 
 export const llmGroup: SettingGroup = {
   id: "llm",
-  destination: "core",
+  // Hybrid. The local/external model, its server, and the vision/idle-unload
+  // gates that drive what the shared core loads are core resources (core);
+  // showing thinking and the per-message sampling/thinking knobs are per-client
+  // preferences the core applies per turn (client-on-core). The header collapses
+  // to "Client" + "Core" chips.
+  destination: ["client-on-core", "core"],
   name: "Language Model",
   description:
     "The model that powers your chats. Run one locally on the core's device, or connect to an external API.",
@@ -14,22 +32,14 @@ export const llmGroup: SettingGroup = {
   sections: [
     {
       label: "General",
+      destination: "core",
       fields: [
         {
           id: "llm.supportImages",
           name: "Image Attachments",
           description: "Let yourself attach images to messages. The model must support vision.",
           type: "boolean",
-          defaultValue: true,
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "llm.showReasoning",
-          name: "Show Thinking",
-          description:
-            "Show the model's thinking above each reply, when it thinks.\nSaved with the session but never sent back to the model.",
-          type: "boolean",
-          defaultValue: true,
+          defaultValue: false,
           descriptionTier: "ondemand",
         },
         {
@@ -46,7 +56,23 @@ export const llmGroup: SettingGroup = {
       ],
     },
     {
+      label: "Display",
+      destination: "client-on-core",
+      fields: [
+        {
+          id: "llm.showReasoning",
+          name: "Show Thinking",
+          description:
+            "Show the model's thinking above each reply, when it thinks.\nSaved with the session but never sent back to the model.",
+          type: "boolean",
+          defaultValue: true,
+          descriptionTier: "ondemand",
+        },
+      ],
+    },
+    {
       label: "Model",
+      destination: "core",
       fields: [
         {
           id: "llm.provider",
@@ -80,8 +106,11 @@ export const llmGroup: SettingGroup = {
               "llm.threads",
               "llm.gpuLayers",
               "llm.flashAttn",
-              "llm.supportImages",
               "llm.idleUnloadSeconds",
+              // Image Attachments is deliberately NOT managed: turning vision on
+              // or off is the user's call and must not flip the preset to Custom.
+              // The preset still sets it as a side effect on model select (a
+              // vision model enables it), it just isn't a preset-defining edit.
               // Thinking budget and temperature are behavior preferences, not
               // part of the model's identity: editing them (from the quick
               // model controls or here) leaves the chosen preset intact. Only
@@ -138,6 +167,7 @@ export const llmGroup: SettingGroup = {
     },
     {
       label: "Model Behavior",
+      destination: "client-on-core",
       defaultCollapsed: true,
       fields: [
         {
@@ -197,7 +227,7 @@ export const llmGroup: SettingGroup = {
           description:
             "How varied the model's word choices are. Lower is more focused and predictable; higher is more creative.",
           type: "float",
-          defaultValue: DEFAULT_SAMPLING.temperature,
+          defaultValue: BASELINE_SAMPLING.temperature,
           descriptionTier: "ondemand",
         },
         {
@@ -205,7 +235,7 @@ export const llmGroup: SettingGroup = {
           name: "Top P",
           description: "Narrows word choices to the most likely options. Lower is more focused.",
           type: "float",
-          defaultValue: DEFAULT_SAMPLING.topP,
+          defaultValue: BASELINE_SAMPLING.topP,
           descriptionTier: "ondemand",
         },
         {
@@ -214,7 +244,7 @@ export const llmGroup: SettingGroup = {
           description:
             "Narrows word choices to this many of the most likely options. 0 turns it off.",
           type: "number",
-          defaultValue: DEFAULT_SAMPLING.topK,
+          defaultValue: BASELINE_SAMPLING.topK,
           visibleWhen: { field: "llm.provider", eq: "local" },
           descriptionTier: "ondemand",
         },
@@ -223,7 +253,7 @@ export const llmGroup: SettingGroup = {
           name: "Min P",
           description: "Drops unlikely word choices. Higher is more focused; 0 turns it off.",
           type: "float",
-          defaultValue: DEFAULT_SAMPLING.minP,
+          defaultValue: BASELINE_SAMPLING.minP,
           visibleWhen: { field: "llm.provider", eq: "local" },
           descriptionTier: "ondemand",
         },
@@ -233,7 +263,7 @@ export const llmGroup: SettingGroup = {
           description:
             "How strongly to discourage the model repeating itself. 1 is off; higher reduces repetition.",
           type: "float",
-          defaultValue: DEFAULT_SAMPLING.repeatPenalty,
+          defaultValue: BASELINE_SAMPLING.repeatPenalty,
           visibleWhen: { field: "llm.provider", eq: "local" },
           descriptionTier: "ondemand",
         },
@@ -241,6 +271,7 @@ export const llmGroup: SettingGroup = {
     },
     {
       label: "Model Server Configuration",
+      destination: "core",
       visibleWhen: { field: "llm.provider", eq: "local" },
       defaultCollapsed: true,
       fields: [
@@ -249,7 +280,10 @@ export const llmGroup: SettingGroup = {
           name: "Model File",
           description: "Path to the model file to load, e.g. @user/repo/branch/model.gguf.",
           type: "string",
-          defaultValue: "@unsloth/Qwen3.5-0.8B-GGUF/main/Qwen3.5-0.8B-Q4_K_M.gguf",
+          // Smallest-floor catalog model (Qwen/Qwen3.5-2B). The Smart Preset
+          // overwrites this on first run with the hardware-fit pick; this static
+          // default just keeps a fresh config on an accepted baseline.
+          defaultValue: "@unsloth/Qwen3.5-2B-GGUF/main/Qwen3.5-2B-Q4_K_M.gguf",
           descriptionTier: "ondemand",
         },
         {
@@ -257,7 +291,7 @@ export const llmGroup: SettingGroup = {
           name: "Vision File",
           description: "Path to the vision add-on file for image support.",
           type: "string",
-          defaultValue: "@unsloth/Qwen3.5-0.8B-GGUF/main/mmproj-F16.gguf",
+          defaultValue: "@unsloth/Qwen3.5-2B-GGUF/main/mmproj-F16.gguf",
           placeholder: "@user/repo/branch/mmproj-f16.gguf",
           visibleWhen: { field: "llm.supportImages", eq: true },
           optionalWhen: { field: "llm.supportImages", eq: false },
@@ -359,6 +393,7 @@ export const llmGroup: SettingGroup = {
     },
     {
       label: "External Provider",
+      destination: "core",
       visibleWhen: { field: "llm.provider", eq: "external" },
       fields: [
         {

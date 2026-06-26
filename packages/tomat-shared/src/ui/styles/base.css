@@ -896,3 +896,35 @@ html.dark .markdown li:has(input[type="checkbox"])::before {
   background: var(--default-d-50);
   border-color: var(--default-d-700);
 }
+
+/* Touch-shell fundamentals. Scoped to a coarse pointer so the desktop app and
+   the website (both fine-pointer) render exactly as before. Pairs with the
+   `use:ripple` press affordance and the Android back handling. */
+@media (pointer: coarse) {
+  /* Kill the WebView's grey/blue tap-highlight flash on every press; the ripple
+     is the press feedback now. */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Stop a long-press from selecting a control's label (an easy accident on
+     touch). Text that is meant to be selected -- message bubbles, inputs,
+     editable regions -- stays selectable. */
+  button,
+  label,
+  [role="button"],
+  [role="tab"],
+  [role="radio"],
+  [role="menuitem"] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Keep an inner scroll from rubber-banding the whole activity (and from
+     arming Android pull-to-refresh) when it reaches its end. Sheets and lists
+     that need to fully trap their scroll add `overscroll-contain` themselves. */
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+}

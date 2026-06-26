@@ -51,13 +51,28 @@ export class PairingApi {
     return JSON.parse(text(res)) as PairingCodeResponse;
   }
 
+  // Mint a code on this (already-paired) core using the admin PASSWORD instead
+  // of the on-disk token. The bearer (this.client) proves we're a paired
+  // device; the password is the second factor. This is the remote path: it
+  // needs no device access to the core's filesystem.
+  mintCodeWithPassword(
+    password: string,
+    req: PairingCodeRequest = {},
+  ): Promise<PairingCodeResponse> {
+    return this.client.post("/api/v1/pairing/codes", { ...req, password });
+  }
+
   listClients(): Promise<PairedClientEntry[]> {
     return this.client.get("/api/v1/pairing/clients");
   }
 
-  revoke(clientId: string): Promise<void> {
+  // Revoke a client. Removing OURSELVES (the "leave" action) needs no password.
+  // Removing ANOTHER device is privileged: pass the admin password, sent in the
+  // request body over the pinned TLS channel.
+  revoke(clientId: string, password?: string): Promise<void> {
     return this.client.del(
       `/api/v1/pairing/clients/${encodeURIComponent(clientId)}`,
+      password ? { password } : undefined,
     ) as Promise<void>;
   }
 
@@ -81,6 +96,28 @@ export async function probeCore(baseUrl: string): Promise<{ version: string; pin
     version: typeof body.version === "string" ? body.version : "unknown",
     pin: res.capturedPin ?? "",
   };
+}
+
+/** Set the admin password on a freshly-installed local core, authorized by its
+ *  on-disk admin token, over TOFU TLS. Used by the client's "install on this
+ *  computer" flow (the terminal installer prompts instead). The password lets
+ *  this and other paired devices mint codes / revoke remotely afterward. */
+export async function setAdminPasswordWithToken(
+  baseUrl: string,
+  adminToken: string,
+  password: string,
+): Promise<void> {
+  const res = await platform().net.fetch({
+    url: `${baseUrl}/api/v1/admin/password`,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Admin-Token": adminToken,
+    },
+    body: JSON.stringify({ password }),
+    capturePin: true,
+  });
+  if (!ok(res)) throw apiError(res, "set admin password");
 }
 
 /** Mint a code on an unpaired core via its admin token, over TOFU TLS. */

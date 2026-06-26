@@ -322,6 +322,10 @@ export interface Session {
   createdAtMs: number;
   updatedAtMs: number;
   tokenUsage?: TokenUsage;
+  /** A temporary session lives only in core RAM: it never appears in the
+   *  session list, is never written to disk, and is discarded the moment the
+   *  client navigates away (or the core restarts). Fixed at creation. */
+  temporary?: boolean;
 }
 
 /** One labelled snippet in a session-list summary. The role is symbolic so

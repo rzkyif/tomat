@@ -59,6 +59,18 @@ describe("cores registry", () => {
     expect(await cores().list()).toEqual([entry("core-a")]);
   });
 
+  it("addPaired rejects (and records nothing) when the keychain write doesn't persist", async () => {
+    const { platform, files } = makeMockPlatform();
+    // Simulate a silently-failing keychain: set() resolves but stores nothing.
+    platform.keychain.set = async () => {};
+    setPlatform(platform);
+
+    await expect(cores().addPaired(entry("core-a"), "token-a")).rejects.toThrow(/keychain/i);
+    // The core must NOT be recorded: a registry entry with no readable token is
+    // exactly the dead-connection state this guards against.
+    expect(files.cores).toBeUndefined();
+  });
+
   it("removePaired drops the entry, its token, and re-points current", async () => {
     const { platform, files, tokens } = makeMockPlatform();
     setPlatform(platform);

@@ -64,13 +64,14 @@ through `npm:` specifiers from `deno task`.
 ## Conventions
 
 - **Tauri boundary (absolute rule):** nothing under
-  `packages/tomat-client/src/ui/` outside `lib/platform/tauri.ts` may import
-  from `@tauri-apps/*`. Add a method to the `Platform` interface in
-  `lib/platform/index.ts`, implement it in `tauri.ts` (and a future `mobile.ts`
-  when the mobile build lands), cover it in the `src/ui/test/platform-stub.ts`
-  fixture, then call `platform().<namespace>.<method>()`. There is no web
-  client. Enforced by the `tomat/no-tauri-import` oxlint rule (`.ts`) and a
-  `.svelte` grep pass, both in `deno task lint`.
+  `packages/tomat-client/src/ui/` outside `lib/platform/` may import from
+  `@tauri-apps/*` (`tauri.ts` desktop, `mobile.ts` android, their `shared.ts`
+  helpers, and the `select.ts` OS-based bootstrap). Add a method to the
+  `Platform` interface in `lib/platform/index.ts`, implement it in `tauri.ts`
+  and `mobile.ts`, cover it in the `src/ui/test/platform-stub.ts` fixture, then
+  call `platform().<namespace>.<method>()`. There is no web client. Enforced by
+  the `tomat/no-tauri-import` oxlint rule (`.ts`) and a `.svelte` grep pass, both
+  in `deno task lint`.
 - **Single-source UI (absolute rule):** every UI component the website renders
   must be the EXACT SAME shared `@tomat/shared/ui` component the client renders,
   at EVERY layer (primitive AND composition: a field control, a field row, a
@@ -142,8 +143,15 @@ through `npm:` specifiers from `deno task`.
 - **Trust root.** Release manifests are Ed25519-signed. The private key lives in
   a gitignored `.env`; the public key is committed in
   `packages/tomat-core/data/signing-keys.json` so every compiled core trusts the
-  matching signatures. One keypair signs both `core.json` and `binaries.json`; a
-  separate Tauri-format keypair signs `client.json` and the bundled installers.
+  matching signatures. Three signing identities are in play: (1) the Ed25519
+  keypair signs `core.json`, `binaries.json`, and `android.json` (the Android
+  client also verifies `android.json.sig` against the committed public key before
+  self-updating); (2) a separate Tauri-format keypair signs `client.json` and the
+  bundled desktop installers; (3) a Java keystore signs the Android APK for
+  install (Android enforces it at install time). The keystore is supplied at
+  release time via base64 in the gitignored `.env`
+  (`TOMAT_ANDROID_KEYSTORE_B64`); the decoded `*.jks` + `keystore.properties` are
+  gitignored and never committed.
 - **Distribution split.** Two Cloudflare-hosted hostnames, aligned with content
   type: `au.tomat.ing` (Astro Worker, landing page only) and `get.au.tomat.ing`
   (R2 public bucket, every release artifact: installers, schemas, manifests,
@@ -169,7 +177,12 @@ For anything beyond the above, the canonical docs are:
   `packages/tomat-core/src/{sidecars,extensions,mcp,update}/README.md` and
   `packages/tomat-client/src/ui/lib/core/README.md`.
 - Test-suite guide (layout, helpers, fixtures, scratch tests, CI):
-  [tests/README.md](tests/README.md)
+  [tests/README.md](tests/README.md). Two opt-in, local-only, never-in-CI E2E
+  lanes sit alongside the co-located unit/component suites: a headless
+  integration lane (real app in Chromium <-> real core over TLS, outbound deps
+  mocked; the primary lane, happy paths only) and a tauri-driver smoke lane
+  (native WebView + Rust transport). Deep dive:
+  [tests/e2e/headless/README.md](tests/e2e/headless/README.md).
 - Release + deploy, channels, Cloudflare + R2 setup:
   [packages/tomat-website/README.md](packages/tomat-website/README.md)
 - Extension author API:

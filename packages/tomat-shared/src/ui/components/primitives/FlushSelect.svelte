@@ -1,5 +1,6 @@
 <script lang="ts">
   import Select from "./Select.svelte";
+  import { useUiContext } from "../../context.ts";
 
   // A dropdown that reads as part of the bubble background rather than a button
   // or card: just an icon + the selected label, with a transparent native
@@ -28,7 +29,7 @@
     icon,
     disabled = false,
     rounded = "rounded-medium",
-    textClass = "text-default-400 hov:text-default-700",
+    textClass,
     class: extraClass = "",
   }: {
     value: OptionValue;
@@ -40,13 +41,21 @@
     disabled?: boolean;
     /** Corner radius utility; override to match a surrounding pill. */
     rounded?: string;
-    /** Resting + hover text tone. Defaults to the dim flush tone; override to
-     *  sit at a solid pill's text lightness (e.g. "text-default-700"). */
+    /** Resting + hover text tone. Defaults to the dim flush tone on a fine
+     *  pointer (brightening on hover); on a coarse pointer (touch, which can't
+     *  hover) it rests at the brighter shade so it never reads as too dim.
+     *  Override to sit at a solid pill's text lightness (e.g. "text-default-700"). */
     textClass?: string;
     /** Extra classes on the root (e.g. an inset pill background + padding so the
      *  whole control reads as a solid pill rather than flush text). */
     class?: string;
   } = $props();
+
+  const ui = useUiContext();
+  const resolvedText = $derived(
+    textClass ??
+      (ui.pointer === "coarse" ? "text-default-700" : "text-default-400 hov:text-default-700"),
+  );
 
   const current = $derived(options.find((o) => o.value === value));
 </script>
@@ -54,7 +63,7 @@
 <div
   class="tomat-focus-wrap {rounded} relative flex items-center gap-1 min-w-0 text-sm transition-colors {disabled
     ? 'text-default-400 opacity-50'
-    : textClass} {extraClass}"
+    : resolvedText} {extraClass}"
   {title}
 >
   {#if icon}

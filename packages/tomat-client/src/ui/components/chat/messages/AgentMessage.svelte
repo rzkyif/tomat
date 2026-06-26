@@ -59,6 +59,25 @@
       ttsState.currentMessageId === id,
   );
   let isSpeakingThis = $derived(isMine && ttsState.liveSourceCount > 0);
+
+  // Right-click (desktop) and long-press (touch) open the same message menu.
+  function openMessageMenu() {
+    if (kind === "reasoning") {
+      void showReasoningMessageMenu({ reasoning: displayText });
+    } else {
+      if (!id) return;
+      void showAgentMessageMenu({
+        messageId: id,
+        isStreaming,
+        result: displayText,
+        ttsActive,
+        isSpeakingThis,
+        isSynthesizing: isMine && ttsState.liveSourceCount === 0 && ttsState.synthInflight,
+        onReprocess,
+        onDelete,
+      });
+    }
+  }
   let ttsBusyThis = $derived(
     isMine && (ttsState.liveSourceCount > 0 || ttsState.synthInflight),
   );
@@ -87,23 +106,9 @@
   {neighborRight}
   oncontextmenu={(e) => {
     e.preventDefault();
-    if (kind === "reasoning") {
-      void showReasoningMessageMenu({ reasoning: displayText });
-    } else {
-      if (!id) return;
-      void showAgentMessageMenu({
-        messageId: id,
-        isStreaming,
-        result: displayText,
-        ttsActive,
-        isSpeakingThis,
-        isSynthesizing:
-          isMine && ttsState.liveSourceCount === 0 && ttsState.synthInflight,
-        onReprocess,
-        onDelete,
-      });
-    }
+    openMessageMenu();
   }}
+  onlongpress={openMessageMenu}
 >
   {#snippet body()}
     <!-- isStreaming drives MessageMarkdown's parse throttle; the reasoning trace

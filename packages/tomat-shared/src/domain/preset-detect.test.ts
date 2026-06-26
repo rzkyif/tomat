@@ -58,6 +58,13 @@ Deno.test("detectLlmPreset: behavior prefs (temperature/budget) don't affect the
   assertEquals(detectLlmPreset(s, { smallest: APPLY }), "smallest");
 });
 
+Deno.test("detectLlmPreset: toggling Image Attachments doesn't affect the match", () => {
+  // supportImages is a user choice, not part of the model identity: flipping it
+  // must keep the preset, not drop to custom.
+  const s = { ...settingsFor(APPLY), "llm.supportImages": !APPLY.supportImages };
+  assertEquals(detectLlmPreset(s, { smallest: APPLY }), "smallest");
+});
+
 Deno.test("detectLlmPreset: coerces numeric strings (e.g. gpuLayers) before comparing", () => {
   const s = {
     ...settingsFor(APPLY),

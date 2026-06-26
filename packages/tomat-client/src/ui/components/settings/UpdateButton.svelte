@@ -15,6 +15,9 @@
   import { confirmState, downloadsState } from "$stores";
   import type { BinaryKind, BinaryUpdateCheck } from "@tomat/shared";
   import CollapsibleLabel from "@tomat/shared/ui/components/primitives/CollapsibleLabel.svelte";
+  import { useUiContext } from "@tomat/shared/ui/context.ts";
+  import { RIPPLE_MS } from "@tomat/shared/ui/animations.ts";
+  import { ripple } from "@tomat/shared/ui/actions/ripple.ts";
   import { useBlink } from "$composables/use-blink.svelte";
   import { getLogger } from "$lib/util/log";
 
@@ -24,6 +27,9 @@
     collapsed: boolean;
     disabled?: boolean;
   }>();
+
+  const ui = useUiContext();
+  const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
 
   type Phase =
     | "idle"
@@ -253,7 +259,7 @@
   type="button"
   class="hov:cursor-pointer flex items-center h-8 pl-1.5 {collapsed
     ? 'pr-0'
-    : 'pr-2.5'} gap-1.5 rounded-medium [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {tone} hov:bg-surface-inset act:bg-surface-inset-strong"
+    : 'pr-2.5'} gap-1.5 rounded-medium [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {tone} hov:bg-surface-inset"
   title={collapsed ? label : undefined}
   aria-label={label}
   {disabled}
@@ -262,6 +268,7 @@
   onfocus={() => (hovering = true)}
   onblur={() => (hovering = false)}
   onclick={onClick}
+  use:ripple={{ disabled, durationMs: rippleDuration }}
 >
   <span class="relative flex shrink-0">
     {#if icon.kind === "tomat"}

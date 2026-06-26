@@ -24,6 +24,7 @@
     maxlength,
     prefix,
     suffix,
+    trailing,
     mono = false,
     uppercase = false,
     spellcheck,
@@ -50,6 +51,10 @@
     maxlength?: number;
     prefix?: Snippet;
     suffix?: string;
+    /** Interactive adornment pinned inside the field at the right edge (e.g. a
+     *  small IconButton), like the number spinner. The input reserves right
+     *  padding so its text never runs under the control. */
+    trailing?: Snippet;
     mono?: boolean;
     uppercase?: boolean;
     spellcheck?: boolean;
@@ -122,7 +127,11 @@
       {onclick}
       class="text-default-800 rounded-medium block w-full min-h-8 outline-none text-sm {isNumber
         ? 'tomat-no-spinner'
-        : ''} {prefix ? 'pl-6' : 'pl-2'} {spinner ? 'pr-7' : 'pr-2'} {fontClass} {stateClass} {extraClass}"
+        : ''} {prefix ? 'pl-6' : 'pl-2'} {trailing
+        ? 'pr-9'
+        : spinner
+          ? 'pr-7'
+          : 'pr-2'} {fontClass} {stateClass} {extraClass}"
     />
     {#if spinner && isNumber}
       <div class="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
@@ -146,6 +155,11 @@
         >
           <i class="i-material-symbols-keyboard-arrow-down-rounded text-base flex"></i>
         </button>
+      </div>
+    {/if}
+    {#if trailing}
+      <div class="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
+        {@render trailing()}
       </div>
     {/if}
   </div>

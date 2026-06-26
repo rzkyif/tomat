@@ -29,7 +29,15 @@
     >;
   } = $props();
 
-  let alignment = $derived(settingsState.getAlignment());
+  // Desktop follows the window-alignment setting for the whole group. Mobile is
+  // a conventional chat app: only the user's group hugs the right; every other
+  // group (agent, tool, system, ...) hugs the left, never centered.
+  const mobile = ui.platform === "mobile";
+  let alignment = $derived(
+    mobile
+      ? (messages[0]?.role === "user" ? "right" : "left")
+      : settingsState.getAlignment(),
+  );
 
   // Group layout:
   //   Outer is a vertical column of segment rows. Consecutive collapsed
@@ -180,7 +188,7 @@
      messages). The parent chat container already reverses group order so
      groups themselves still stack newest-on-top across the screen. -->
 <div
-  class="flex flex-col w-fit max-w-[calc(100vw-5rem)]"
+  class="flex flex-col w-fit {mobile ? 'max-w-full' : 'max-w-[calc(100vw-5rem)]'}"
   style:gap={bubbleGap(ui)}
   class:items-start={alignment === "left"}
   class:items-end={alignment === "right"}

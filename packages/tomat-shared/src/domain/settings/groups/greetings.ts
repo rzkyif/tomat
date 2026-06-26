@@ -3,7 +3,7 @@ import { DEFAULT_GREETING_INSTRUCTION } from "../../prompts.ts";
 
 export const greetingsGroup: SettingGroup = {
   id: "greetings",
-  destination: "core",
+  destination: "client-on-client",
   name: "Greetings",
   description: "Have the agent open a session to greet you when the app starts.",
   descriptionTier: "ondemand",
@@ -30,6 +30,10 @@ export const greetingsGroup: SettingGroup = {
             { value: "autostart", label: "Automatic Start Only" },
             { value: "every_start", label: "Every Start" },
           ],
+          // Login autostart has no mobile equivalent, so the choice is hidden
+          // there; a mobile launch always greets (it reports as an automatic
+          // start), matching "every start".
+          desktopOnly: true,
           visibleWhen: { field: "greetings.enabled", eq: true },
           descriptionTier: "ondemand",
         },

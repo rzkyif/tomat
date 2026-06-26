@@ -15,7 +15,14 @@ export const CORE_VERSION = "0.1.0";
 //                       /<version>/<triple>/<file>, /manifests/*.json,
 //                       /install/*, /schemas/*.
 export const WEBSITE_BASE_URL = "https://au.tomat.ing";
-export const STORAGE_BASE_URL = "https://get.au.tomat.ing";
+// The release-artifact host. Overridable via TOMAT_STORAGE_BASE_URL so the E2E
+// harness can point catalog / manifest / binary fetches at a local mock without
+// touching the real R2 bucket. Production leaves the env unset.
+export const STORAGE_BASE_URL =
+  Deno.env.get("TOMAT_STORAGE_BASE_URL") ?? "https://get.au.tomat.ing";
+// The HuggingFace host model-file downloads resolve against. Overridable via
+// TOMAT_HF_BASE_URL for the same test-isolation reason (see downloads/sources.ts).
+export const HF_BASE_URL = Deno.env.get("TOMAT_HF_BASE_URL") ?? "https://huggingface.co";
 
 // Manifests live under a per-channel path segment so latest/dev publish + fetch
 // their own signed manifests without touching stable's. Stable stays bare

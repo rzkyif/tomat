@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
+  import { fade } from "svelte/transition";
   import AgentMessage from "$components/chat/messages/AgentMessage.svelte";
   import ErrorMessage from "$components/chat/messages/ErrorMessage.svelte";
   import AutomatedPrompt from "$components/chat/messages/AutomatedPrompt.svelte";
@@ -8,10 +9,10 @@
   import ToolCall from "$components/chat/messages/ToolCall.svelte";
   import RelevantTools from "$components/chat/messages/RelevantTools.svelte";
   import RelevantMemories from "$components/chat/messages/RelevantMemories.svelte";
-  import UserInput from "$components/chat/UserInput.svelte";
   import UserMessage from "$components/chat/messages/UserMessage.svelte";
-  import SessionBar from "$components/chat/SessionBar.svelte";
   import CoreBar from "$components/chat/CoreBar.svelte";
+  import ChatShell from "$components/chat/ChatShell.svelte";
+  import ActionSheetHost from "$components/chat/ActionSheetHost.svelte";
   import Settings from "$components/settings/Settings.svelte";
   import NewCore from "$components/new-core/NewCore.svelte";
   import QuickSettings from "$components/quick-settings/QuickSettings.svelte";
@@ -42,6 +43,8 @@
     viewState,
   } from "$stores";
   import { connectionState } from "$stores/connection.svelte";
+  import { backState } from "$stores/back.svelte";
+  import type { AppMode } from "$stores/view.svelte";
   import { cores } from "$lib/core";
   import { platform } from "$lib/platform";
   import { useTheme } from "$composables/use-theme.svelte";
@@ -80,15 +83,20 @@
   const log = getLogger("boot");
   const windowLog = getLogger("window");
   const ui = useUiContext();
+  // On mobile the app is a single opaque fullscreen activity: the transparent
+  // bubble window, click-through, blur keepalive, cursor polling, and the
+  // offscreen slide-in choreography are all desktop-only and gated off here.
+  const onMobile = ui.platform === "mobile";
 
   // The keepalive runs exactly while halo rings exist (same condition as
   // Bubble.svelte's ringCount); without rings there's no backdrop to keep
-  // fresh.
+  // fresh. Desktop only: there is no transparent backdrop to resample on mobile.
   const blurActive = $derived(
     settingsState.currentSettings["appearance.bubbleBlurEnabled"] !== false &&
       ((settingsState.currentSettings["appearance.bubbleBlurRings"] as number) ?? 3) > 0,
   );
   $effect(() => {
+    if (onMobile) return;
     if (blurActive) startBlurKeepalive();
     else stopBlurKeepalive();
   });
@@ -111,6 +119,16 @@
   // sequence is just: slide out, swap content inside, slide back in.
   let panelLayer: HTMLElement | undefined = $state();
   let panelToggling = false;
+
+  // Mobile carousel state. During a screen change the outgoing screen is rendered
+  // as a fixed exit overlay (`slideOutMode`) that pages off one edge while the
+  // committed frame pages in from the other, so the two move TOGETHER (a true
+  // cross-slide) rather than one sliding out, a blank beat, then the next sliding
+  // in. The committed frame is the only mount of the incoming screen (no double
+  // load); the overlay is a transient render of the outgoing screen for its exit.
+  let slideOutMode = $state<AppMode | null>(null);
+  let mobileFrameEl: HTMLElement | undefined = $state();
+  let mobileExitEl: HTMLElement | undefined = $state();
 
   const animationsEnabled = $derived(
     !!settingsState.currentSettings["appearance.animationsEnabled"],
@@ -142,6 +160,15 @@
   // "offscreen" call lifts it to 1 while the content is safely off-screen.
   function applyWindowState(state: "visible" | "offscreen", animate: boolean) {
     if (!container) return;
+    // Mobile has no floating window to slide off screen: keep the content
+    // always visible (and lift the first-paint opacity:0) regardless of the
+    // requested state, so the boot reveal sequence below is a no-op visually.
+    if (onMobile) {
+      container.style.transition = "";
+      container.style.transform = "";
+      container.style.opacity = "1";
+      return;
+    }
     const dur = animate ? getDuration() : 0;
     container.style.transition =
       dur > 0
@@ -220,6 +247,7 @@
   let unlistenVisibility: (() => void) | null = null;
   let unlistenMonitor: (() => void) | null = null;
   let unlistenHideRequested: (() => void) | null = null;
+  let unlistenBack: (() => void) | null = null;
   let cleanupSystemTheme: (() => void) | null = null;
 
   // Autostart (login) launches stay hidden until something reveals the window:
@@ -395,7 +423,7 @@
       }
     });
 
-    if (contentEl) {
+    if (contentEl && !onMobile) {
       void startClickThrough(contentEl);
     }
 
@@ -431,6 +459,16 @@
       })
       .then((unlisten) => {
         unlistenMonitor = unlisten;
+      });
+
+    // Android hardware / gesture back: feed every press to the back-handler
+    // registry (state/back.svelte.ts), which resolves the priority chain
+    // (overlay -> wizard -> non-chat mode -> chat-root double-back-to-exit).
+    // Inert on desktop (the stream never fires).
+    platform()
+      .backButton.subscribe(() => backState.back())
+      .then((unlisten) => {
+        unlistenBack = unlisten;
       });
 
     // Global-shortcut listener lives here (not in UserInput) so it stays
@@ -499,9 +537,9 @@
       sessionsState.attach();
       downloadsState.attach();
       updateState.attach();
-      // Report this app start to the greeting trigger once a core is
-      // reachable (once per app run); core decides from the greetings.*
-      // settings whether to open an automated greeting session.
+      // Run a greeting once a core is reachable (once per app run). The
+      // greetings.* settings are client-local, so this gates on them here and
+      // asks the core to open a session only when one should run.
       let greetingReported = false;
       let unsubGreeting: (() => void) | null = null;
       unsubGreeting = cores().subscribeConnectionState((state) => {
@@ -518,22 +556,37 @@
           connectWatchdog = null;
         }
         void (async () => {
+          const s = settingsState.currentSettings;
+          // Mobile has no login autostart, but every mobile launch should greet
+          // (the runOn choice is hidden there), so it counts as an automatic
+          // start.
+          const launchedAutomatically = autostarted || onMobile;
+          const enabled = s["greetings.enabled"] === true;
+          const runOn = (s["greetings.runOn"] as string | undefined) ?? "autostart";
+          // Gate locally: off, or "automatic start only" on a manual launch,
+          // means no greeting. Reveal the window ourselves in that case.
+          const shouldRun = enabled && !(runOn === "autostart" && !launchedAutomatically);
+          if (!shouldRun) {
+            if (autostarted) await platform().windowing.show();
+            return;
+          }
           // The route answers immediately (the greeting itself starts in the
           // background once the model is loaded), so a slow response means
           // something is wrong; don't let an autostart window stay hidden
           // behind a hung request.
           const res = await Promise.race([
-            cores()
-              .api()
-              .greetings.run(autostarted ? "autostart" : "manual"),
+            cores().api().greetings.run({
+              sessionTitle: (s["greetings.sessionTitle"] as string | undefined) ?? "",
+              instruction: (s["greetings.instruction"] as string | undefined) ?? "",
+            }),
             new Promise<never>((_resolve, reject) =>
               setTimeout(() => reject(new Error("greeting trigger timed out")), 10_000),
             ),
           ]);
           // Safety net for an autostart launch that stayed hidden: if the core
-          // ran no greeting (greetings off, or runOn gated this launch out),
-          // reveal the window now. When a greeting DID run, its session reveals
-          // the window on completion via the show_when_done focus path.
+          // ran no greeting (e.g. the per-client dedup suppressed it), reveal
+          // the window now. When a greeting DID run, its session reveals the
+          // window on completion via the show_when_done focus path.
           if (autostarted && !res.ran) await platform().windowing.show();
         })().catch((e) => {
           log.warn("greeting trigger failed:", e);
@@ -576,6 +629,7 @@
     unlistenVisibility?.();
     unlistenMonitor?.();
     unlistenHideRequested?.();
+    unlistenBack?.();
     cleanupSystemTheme?.();
     if (connectWatchdog !== null) clearTimeout(connectWatchdog);
   });
@@ -594,10 +648,57 @@
     if (panelToggling) return;
     panelToggling = true;
 
-    const dur = getDuration();
+    // On mobile, Quick Settings is a bottom-sheet overlay over the chat, not a
+    // panel swap: commit with no slide so the sheet's own transition animates it
+    // in/out while the chat stays put behind it.
+    const overlayOnly = onMobile &&
+      (viewState.pendingMode === "quickSettings" || viewState.mode === "quickSettings");
+    const dur = overlayOnly ? 0 : getDuration();
     const layer = panelLayer;
 
-    if (layer && dur > 0) {
+    if (dur > 0 && onMobile) {
+      // Mobile carousel: a TRUE cross-slide. The outgoing screen (rendered as the
+      // exit overlay) pages off one edge while the incoming screen (the committed
+      // frame) pages in from the opposite edge, both moving together. Leaving chat
+      // (going deeper) pages forward (old exits left, new enters right); returning
+      // to chat pages back (old exits right, new enters left).
+      const forward = viewState.pendingMode !== "chat";
+      const outX = forward ? "-100%" : "100%"; // outgoing screen leaves toward
+      const inX = forward ? "100%" : "-100%"; // incoming screen enters from
+
+      // Mount the outgoing screen as the exit overlay, then commit so the frame
+      // renders the incoming screen; one tick later both panes are in the DOM.
+      slideOutMode = viewState.mode;
+      viewState.commit();
+      await tick();
+      const frame = mobileFrameEl;
+      const exit = mobileExitEl;
+      if (frame && exit) {
+        // Park: incoming frame off on the entering edge, outgoing overlay at rest,
+        // transitions OFF. Two rAFs guarantee the WebView paints the parked state
+        // before the transition turns on, so the motion starts from the edge
+        // instead of jumping mid-screen.
+        frame.style.transition = "none";
+        frame.style.transform = `translateX(${inX})`;
+        exit.style.transition = "none";
+        exit.style.transform = "translateX(0)";
+        await new Promise<void>((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => r()))
+        );
+
+        // Slide both at once: frame to rest, overlay off the far edge.
+        frame.style.transition = `transform ${dur}ms ${TRANSITION_EASING}`;
+        frame.style.transform = "translateX(0)";
+        exit.style.transition = `transform ${dur}ms ${TRANSITION_EASING}`;
+        exit.style.transform = `translateX(${outX})`;
+        await new Promise((r) => setTimeout(r, dur));
+
+        frame.style.transition = "";
+        frame.style.transform = "";
+      }
+      // Drop the overlay; the committed frame is the resting screen.
+      slideOutMode = null;
+    } else if (layer && dur > 0) {
       const offscreen = offscreenTransform(settingsState.getAlignment());
 
       // Phase 1: slide the wrapper (and everything inside) offscreen.
@@ -944,11 +1045,18 @@
 </script>
 
 {#if loaded}
+  <!-- Static surface backdrop behind the sliding panel layer: during the mobile
+       carousel the layer is partly off-screen, so this keeps the uncovered edge
+       reading as app surface instead of flashing the page background. -->
+  {#if onMobile}
+    <div class="fixed inset-0 bg-surface -z-10" aria-hidden="true"></div>
+  {/if}
   <div
     bind:this={panelLayer}
     class="w-screen h-screen overflow-hidden"
     class:will-change-transform={animationsEnabled}
   >
+    {#if !onMobile}
     <main
       bind:this={container}
       class="no-scrollbar flex flex-col-reverse justify-start p-10 text-default-800 w-fit max-w-screen min-h-screen max-h-screen overflow-x-clip overflow-y-auto"
@@ -960,51 +1068,111 @@
     >
     <div bind:this={contentEl} class="flex flex-col-reverse gap-2 my-auto">
       {#if viewState.mode === "chat"}
-        <!-- reading-flow: flex-visual makes keyboard focus traverse the column
-             in VISUAL order (top oldest -> bottom newest -> input -> session
-             bar) instead of DOM order. The DOM is newest-first so flex-col-
-             reverse can put the newest row at the bottom and keep the scroll
-             anchored there for free autoscroll; without reading-flow that makes
-             Tab walk bottom-to-top. Honored by Chromium webviews (WebView2);
-             where unsupported it's ignored and order falls back to DOM. -->
+        <ChatShell stackDepth={messageGroups.length} transcript={messageList} />
+      {:else}
         <div
-          class="w-fit flex flex-col-reverse pointer-events-none"
+          class="w-fit flex flex-col pointer-events-none"
           style:gap={bubbleGap(ui)}
-          style:reading-flow="flex-visual"
           class:ml-auto={settingsState.getAlignment() === "right"}
           class:mr-auto={settingsState.getAlignment() === "left"}
           class:mx-auto={settingsState.getAlignment() === "center"}
         >
-          <!-- Explicit visual stacking: a row that sits LOWER on screen paints
-               over the rows above it (shadow included), like cards fanned
-               upward. The column is flex-col-reverse (first DOM child at the
-               bottom, which keeps the scroll anchor for autoscroll), so tree
-               order paints bottom rows first; these descending z-indexes
-               invert that. Each wrapper is its own stacking context, so
-               within a row the bubble's z-0 shadow still sits under its z-10
-               body. Pop-out UI (Modal, SnippetAutocomplete) carries its own
-               z-50. -->
-          <!-- CoreBar sits at the very bottom of the chat column (DOM-first =
-               visual bottom under flex-col-reverse), below the SessionBar, and
-               paints over it (lower-on-screen wins, so a higher z-index). -->
-          <div class="relative pointer-events-none" style:z-index={messageGroups.length + 4}>
-            <CoreBar />
-          </div>
+          {@render panelColumn()}
+        </div>
+      {/if}
+    </div>
+  </main>
+  {/if}
 
-          <!-- SessionBar owns its own positioning wrapper so that when it hides
-               itself (showBar false) it renders NOTHING here, leaving no empty
-               flex item between the CoreBar and UserInput that would double the
-               gap. -->
-          <SessionBar zIndex={messageGroups.length + 3} />
+  {#if onMobile}
+    <!-- Mobile: a single fullscreen activity. Chat becomes a top app bar
+         (session + core), a flex-1 scrolling transcript (still flex-col-reverse
+         so the newest row stays anchored at the bottom), and the input pinned
+         above the on-screen keyboard. Other modes render their panel full
+         screen. The desktop bubble/window machinery is gated off (see onMobile
+         in the script). -->
+    <!-- The frame fills the whole edge-to-edge window (h-screen, stable: the
+         keyboard is handled by padding, not by resizing the viewport) and is the
+         single safe-area boundary for every in-flow screen. pt clears the status
+         bar (plus a little breathing room); pb clears whichever is taller, the
+         gesture/home bar or the soft keyboard, so the chat composer (and any
+         focused field in settings or the pairing wizard) rides above the keyboard
+         instead of being covered. The inset values are injected natively as CSS
+         variables (see MainActivity) because Android WebView reports env(safe-
+         area-*) as 0 and visualViewport never sees the keyboard. Individual
+         screens must NOT re-apply these (that would double-pad); fixed overlays
+         (Modal sheet, autocomplete) sit outside this frame and lift themselves by
+         --keyboard-inset. -->
+    <!-- The committed frame. It is the single mount of the current screen, and
+         the element the carousel pages IN (runSlide translates mobileFrameEl). -->
+    <div
+      bind:this={mobileFrameEl}
+      class="flex flex-col h-screen w-screen pt-[calc(var(--safe-area-inset-top,0px)+0.5rem)] pb-[max(var(--safe-area-inset-bottom,0px),var(--keyboard-inset,0px))] text-default-800 bg-surface"
+    >
+      {@render mobileScreen(viewState.mode)}
+    </div>
+    <!-- Exit overlay: a transient render of the OUTGOING screen, paged OUT the
+         opposite edge as the frame pages in, so the change reads as one
+         cross-slide. Mounted only mid-slide; `fixed` over the frame, clipped to
+         the screen by the panel layer's overflow. -->
+    {#if slideOutMode}
+      <div
+        bind:this={mobileExitEl}
+        class="fixed inset-0 z-40 flex flex-col h-screen w-screen pt-[calc(var(--safe-area-inset-top,0px)+0.5rem)] pb-[max(var(--safe-area-inset-bottom,0px),var(--keyboard-inset,0px))] text-default-800 bg-surface"
+      >
+        {@render mobileScreen(slideOutMode)}
+      </div>
+    {/if}
+    <!-- Hosts the in-app action sheet that backs platform().menu.showContextMenu
+         on touch (long-press a message / session). Rendered once, above all
+         mobile modes. -->
+    <ActionSheetHost />
+    <!-- Quick Settings presents as a draggable bottom sheet over the chat; it
+         self-gates on viewState.mode so it slides in and out on its own. -->
+    <QuickSettings />
+    {#if backState.exitHint}
+      <!-- A back press at the chat root arms a brief window; this hint says a
+           second press leaves the app. Sits above the gesture/home bar. -->
+      <div
+        class="fixed inset-x-0 bottom-[max(var(--safe-area-inset-bottom,0px),1rem)] flex justify-center pointer-events-none z-50"
+        transition:fade={{ duration: getDuration() }}
+      >
+        <div class="bg-surface-inset-strong text-default-800 text-sm rounded-large px-4 py-2 shadow">
+          Press back again to exit
+        </div>
+      </div>
+    {/if}
+  {/if}
+  </div>
+{/if}
 
-          <div class="relative pointer-events-none" style:z-index={messageGroups.length + 2}>
-            <UserInput />
-          </div>
+{#snippet mobileScreen(mode: AppMode)}
+  {#if mode === "chat" || mode === "quickSettings"}
+    <!-- Chat stays mounted under the Quick Settings bottom sheet, so the sheet
+         rises over a live chat instead of swapping to a full panel. -->
+    <ChatShell stackDepth={messageGroups.length} transcript={messageList} />
+  {:else if mode === "settings"}
+    <!-- Full-screen stacked settings: it fills the frame and owns its own
+         internal scroll, so it gets no outer padding/scroll wrapper. -->
+    <Settings />
+  {:else if mode === "newCore"}
+    <!-- Centered, scrollable wizard, flush on the page (no card). -->
+    <div class="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col p-3">
+      <NewCore />
+    </div>
+  {:else}
+    <!-- Session list: a scrollable column of session bubbles. -->
+    <div class="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col p-3">
+      <SessionList />
+    </div>
+  {/if}
+{/snippet}
 
+{#snippet messageList()}
           {#if sessionLoading}
             <div class="relative pointer-events-none" style:z-index={messageGroups.length + 1}>
               <Bubble
-                selectedAlignment={settingsState.getAlignment()}
+                selectedAlignment={onMobile ? "left" : settingsState.getAlignment()}
                 borderColorClass="border-default-400"
                 extraClass="flex items-center gap-2"
               >
@@ -1031,7 +1199,7 @@
                 <MessageStackGroup messages={group.messages}>
                   {#snippet item({ msg, idx, neighborLeft, neighborRight })}
                     <MessageEnter
-                      alignment={settingsState.getAlignment()}
+                      alignment={onMobile ? "left" : settingsState.getAlignment()}
                       msgId={msg.role === "loading"
                         ? undefined
                         : msgKey(msg, `g-${idx}`)}
@@ -1040,7 +1208,7 @@
                     >
                       {#if msg.role === "loading"}
                         <Bubble
-                          selectedAlignment={settingsState.getAlignment()}
+                          selectedAlignment={onMobile ? "left" : settingsState.getAlignment()}
                           size="small"
                           extraClass="flex items-center"
                           {neighborLeft}
@@ -1160,15 +1328,9 @@
               </div>
             {/each}
           {/key}
-        </div>
-      {:else}
-        <div
-          class="w-fit flex flex-col pointer-events-none"
-          style:gap={bubbleGap(ui)}
-          class:ml-auto={settingsState.getAlignment() === "right"}
-          class:mr-auto={settingsState.getAlignment() === "left"}
-          class:mx-auto={settingsState.getAlignment() === "center"}
-        >
+{/snippet}
+
+{#snippet panelColumn()}
           {#if viewState.mode === "newCore"}
             <NewCore />
           {:else if viewState.mode === "quickSettings"}
@@ -1186,12 +1348,7 @@
               <CoreBar />
             </div>
           {/if}
-        </div>
-      {/if}
-    </div>
-  </main>
-  </div>
-{/if}
+{/snippet}
 
 <style lang="scss">
   :global(.no-scrollbar::-webkit-scrollbar) {

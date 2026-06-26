@@ -1,0 +1,33 @@
+{
+  // Editor-only config for the opt-in headless E2E lane. vitest reads its module
+  // aliases from vite.config (resolve.alias); this mirrors them as tsconfig
+  // "paths" so the editor's TypeScript server resolves the same imports. Not
+  // used by `vitest run` (vite owns resolution at runtime) and intentionally not
+  // wired into the workspace deno.json or any `deno task check`.
+  "compilerOptions": {
+    "module": "esnext",
+    "target": "esnext",
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["@vitest/browser/providers/playwright"],
+    "baseUrl": ".",
+    "paths": {
+      "@client/*": ["../../../packages/tomat-client/src/ui/*"],
+      "@tomat/shared": ["../../../packages/tomat-shared/src/index.ts"],
+      "@tomat/shared/ui/*": ["../../../packages/tomat-shared/src/ui/*"],
+      "$lib/*": ["../../../packages/tomat-client/src/ui/lib/*"],
+      "$components/*": ["../../../packages/tomat-client/src/ui/components/*"],
+      "$composables/*": ["../../../packages/tomat-client/src/ui/composables/*"],
+      "$stores/*": ["../../../packages/tomat-client/src/ui/state/*"],
+      "$app/environment": ["../../../packages/tomat-client/src/ui/test/app-environment.ts"],
+      "@std/assert": ["./harness/std-assert-shim.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.svelte"],
+  "exclude": ["node_modules"]
+}

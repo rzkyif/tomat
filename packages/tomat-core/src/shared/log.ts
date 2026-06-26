@@ -21,6 +21,9 @@ const SCRUBBERS: Array<[RegExp, string]> = [
   [/(bearer\s+)[A-Za-z0-9_\-.~+/=]{16,}/gi, "$1<REDACTED>"],
   // X-Admin-Token: <token>  /  x-admin-token=<token>
   [/(x-admin-token\s*[:=]\s*)\S+/gi, "$1<REDACTED>"],
+  // "password":"<value>" in a logged JSON body (admin-password set / mint /
+  // revoke). Tolerates whitespace; masks the value, keeps the key visible.
+  [/("password"\s*:\s*)"(?:[^"\\]|\\.)*"/gi, '$1"<REDACTED>"'],
   // ?token=<value> in URLs / WS upgrade query strings.
   [/(\btoken=)[A-Za-z0-9_\-.]+/gi, "$1<REDACTED>"],
   // Bare base64url tokens. randomToken() in auth.ts emits 32 random bytes

@@ -5,26 +5,36 @@
 // tokens never collide with a stable install's. Account format: "core:<coreId>",
 // where <coreId> is the ULID assigned by the core during pairing-claim.
 //
-// Backing store, chosen per channel by `store()`:
-//   - stable / latest (signed bundles): the real OS keychain via keyring-core
-//     and the platform credential store (`RealKeychain`).
-//   - dev (`deno task dev`, an unsigned `tauri dev` binary): a file under the
-//     channel-isolated client dir (`DevFileKeychain`). The macOS keychain
+// Backing store, chosen per platform + channel by `store()`:
+//   - desktop stable / latest (signed bundles): the real OS keychain via
+//     keyring-core and the platform credential store (`RealKeychain`),
+//     encrypted at rest.
+//   - desktop dev (`deno task dev`, an unsigned `tauri dev` binary): a file
+//     under the channel-isolated client dir (`FileKeychain`). The macOS keychain
 //     silently no-ops for the unsigned dev build: `set_password` returns Ok
 //     but the entry never persists, so a freshly paired token is gone by the
 //     time `select()` reads it back ("no token for core … re-pair"). Mirrors
 //     tomat-core's `.master-key` file fallback for the same class of reason.
+//   - android (all channels): the same `FileKeychain`, since no keyring-core OS
+//     backend is wired for android. The token is stored as plaintext JSON in the
+//     app-private data dir. This is NOT encrypted at rest like the desktop OS
+//     keychain; it relies on the per-app sandbox plus `allowBackup="false"` in
+//     the manifest (so backups can't copy it off-device). A future improvement
+//     is an Android Keystore / EncryptedSharedPreferences backend.
 //
 // The `KeychainStore` trait is the test seam: unit tests swap in
-// `InMemoryKeychain` and drive `DevFileKeychain` via tempdir paths, so they
+// `InMemoryKeychain` and drive `FileKeychain` via tempdir paths, so they
 // exercise the shared `set_token`/`get_token`/`delete_token` + `account()`
 // plumbing without touching the real OS keychain.
 
-use crate::channel::{channel, channel_root, keychain_service};
+#[cfg(not(target_os = "android"))]
+use crate::channel::channel;
+use crate::channel::keychain_service;
 use crate::error::{AppError, AppResult};
 use keyring_core::Entry;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use tauri::AppHandle;
 
 // Input limits applied at the Tauri command boundary. Real values are far
 // smaller (ULID core_id = 26 chars; bearer token = 43 chars base64url),
@@ -70,27 +80,38 @@ impl KeychainStore for RealKeychain {
 /// failure here is non-fatal and only logged.
 pub fn init_default_store() -> AppResult<()> {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
-    let store = apple_native_keyring_store::keychain::Store::new()?;
+    {
+        let store = apple_native_keyring_store::keychain::Store::new()?;
+        keyring_core::set_default_store(store);
+    }
     #[cfg(target_os = "windows")]
-    let store = windows_native_keyring_store::Store::new()?;
+    {
+        let store = windows_native_keyring_store::Store::new()?;
+        keyring_core::set_default_store(store);
+    }
     #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))]
-    let store = dbus_secret_service_keyring_store::Store::new()?;
-
-    keyring_core::set_default_store(store);
+    {
+        let store = dbus_secret_service_keyring_store::Store::new()?;
+        keyring_core::set_default_store(store);
+    }
+    // Android has no keyring-core OS backend wired here: tokens go to the
+    // app-private file store selected in `store()`, so there is nothing to
+    // register as the process-global default.
     Ok(())
 }
 
-// --- dev file fallback ----------------------------------------------------
+// --- file-backed store (desktop dev + android) ----------------------------
 
-/// File-backed keychain used only on the unsigned `dev` build (see the module
-/// header). Persists the `{ "core:<id>": "<token>" }` map as pretty JSON at
-/// `~/.tomat/dev/client/keychain.json`. Holds its own path so tests can drive
-/// it against a tempdir instead of the real home directory.
-struct DevFileKeychain {
+/// File-backed keychain: the desktop `dev` build's fallback AND android's only
+/// store (see the module header). Persists the `{ "core:<id>": "<token>" }` map
+/// as pretty JSON under the channel-isolated client dir. Plaintext at rest, so
+/// it leans on the OS sandbox; holds its own path so tests can drive it against
+/// a tempdir instead of the real data directory.
+struct FileKeychain {
     path: PathBuf,
 }
 
-impl DevFileKeychain {
+impl FileKeychain {
     fn read_map(&self) -> AppResult<HashMap<String, String>> {
         match std::fs::read_to_string(&self.path) {
             Ok(text) => serde_json::from_str(&text).map_err(AppError::from),
@@ -110,7 +131,7 @@ impl DevFileKeychain {
     }
 }
 
-impl KeychainStore for DevFileKeychain {
+impl KeychainStore for FileKeychain {
     fn set(&self, account: &str, token: &str) -> AppResult<()> {
         let mut map = self.read_map()?;
         map.insert(account.to_string(), token.to_string());
@@ -128,25 +149,35 @@ impl KeychainStore for DevFileKeychain {
     }
 }
 
-/// `~/.tomat/<channel>/client/keychain.json` is the dev fallback file, alongside
-/// the client's `settings.json`.
-fn keychain_file_path() -> AppResult<PathBuf> {
-    let home = std::env::home_dir()
-        .ok_or_else(|| AppError::external("could not determine home directory"))?;
-    Ok(channel_root(&home).join("client").join("keychain.json"))
+/// `<client-data-root>/keychain.json` is the file-backed token store, alongside
+/// the client's `settings.json`. The root is per-platform (home-based on
+/// desktop, the app-private data dir on android); see commands::paths.
+fn keychain_file_path(handle: &AppHandle) -> AppResult<PathBuf> {
+    Ok(super::paths::client_root(handle)?.join("keychain.json"))
 }
 
-/// Pick the keychain backing for the active channel. The unsigned `dev` build
-/// can't use the macOS keychain (writes report success but never persist), so
-/// it stores tokens in a file; the signed stable/latest bundles use the real OS
-/// keychain.
-fn store() -> AppResult<Box<dyn KeychainStore>> {
-    if channel() == "dev" {
-        Ok(Box::new(DevFileKeychain {
-            path: keychain_file_path()?,
-        }))
-    } else {
-        Ok(Box::new(RealKeychain))
+/// Pick the keychain backing for this platform + channel. Android has no
+/// keyring-core OS backend wired, so it always uses the app-private file store.
+/// On desktop, the unsigned `dev` build can't use the macOS keychain (writes
+/// report success but never persist), so it stores tokens in a file; the signed
+/// stable/latest bundles use the real OS keychain.
+fn store(handle: &AppHandle) -> AppResult<Box<dyn KeychainStore>> {
+    #[cfg(target_os = "android")]
+    {
+        return Ok(Box::new(FileKeychain {
+            path: keychain_file_path(handle)?,
+        }));
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        if channel() == "dev" {
+            Ok(Box::new(FileKeychain {
+                path: keychain_file_path(handle)?,
+            }))
+        } else {
+            let _ = handle;
+            Ok(Box::new(RealKeychain))
+        }
     }
 }
 
@@ -172,22 +203,22 @@ fn classify_keyring_error(err: keyring_core::Error) -> AppError {
 }
 
 #[tauri::command]
-pub fn keychain_set_token(core_id: String, token: String) -> AppResult<()> {
+pub fn keychain_set_token(handle: AppHandle, core_id: String, token: String) -> AppResult<()> {
     validate_core_id(&core_id)?;
     validate_token(&token)?;
-    set_token(&*store()?, &core_id, &token)
+    set_token(&*store(&handle)?, &core_id, &token)
 }
 
 #[tauri::command]
-pub fn keychain_get_token(core_id: String) -> AppResult<Option<String>> {
+pub fn keychain_get_token(handle: AppHandle, core_id: String) -> AppResult<Option<String>> {
     validate_core_id(&core_id)?;
-    get_token(&*store()?, &core_id)
+    get_token(&*store(&handle)?, &core_id)
 }
 
 #[tauri::command]
-pub fn keychain_delete_token(core_id: String) -> AppResult<()> {
+pub fn keychain_delete_token(handle: AppHandle, core_id: String) -> AppResult<()> {
     validate_core_id(&core_id)?;
-    delete_token(&*store()?, &core_id)
+    delete_token(&*store(&handle)?, &core_id)
 }
 
 fn validate_core_id(id: &str) -> AppResult<()> {
@@ -348,7 +379,7 @@ mod tests {
 
     #[test]
     fn dev_file_keychain_round_trips_and_deletes() {
-        let store = DevFileKeychain {
+        let store = FileKeychain {
             path: unique_keychain_path(),
         };
         set_token(&store, "01H8XGJWBWBAQ4WG", "bearer-xyz").unwrap();
@@ -365,16 +396,16 @@ mod tests {
         // The exact bug this fixes: addPaired()'s set and select()'s get may
         // run through different store instances; the token must survive on disk.
         let path = unique_keychain_path();
-        set_token(&DevFileKeychain { path: path.clone() }, "core-1", "tok").unwrap();
+        set_token(&FileKeychain { path: path.clone() }, "core-1", "tok").unwrap();
         assert_eq!(
-            get_token(&DevFileKeychain { path }, "core-1").unwrap(),
+            get_token(&FileKeychain { path }, "core-1").unwrap(),
             Some("tok".into())
         );
     }
 
     #[test]
     fn dev_file_keychain_get_missing_returns_none() {
-        let store = DevFileKeychain {
+        let store = FileKeychain {
             path: unique_keychain_path(),
         };
         assert_eq!(get_token(&store, "absent").unwrap(), None);

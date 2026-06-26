@@ -35,13 +35,28 @@ export function tomatUnoBase(): UserConfig {
     // user resolve the EXACT same styles (e.g. `hov:text-default-800`) with no
     // duplicated hover CSS. Interactive extracted components use `hov:`/`act:`
     // in place of `hover:`/`active:`.
+    //
+    // The real `:hover` rule is gated behind `@media (hover: hover)` so it only
+    // fires on hover-capable pointers. On touch, `:hover` would otherwise stick
+    // after a tap (the element stays "hovered" until the next tap elsewhere) and
+    // would never fire at rest, so any "dim until hover" control reads as too
+    // dim. The `[data-hover]` half stays unguarded so the scripted demo cursor
+    // (and any deliberate attribute toggle) resolves the same styles on every
+    // device. `act:`/`:active` works on touch as-is, so it needs no media gate.
     variants: [
       (matcher) =>
         matcher.startsWith("hov:")
-          ? {
-              matcher: matcher.slice(4),
-              selector: (s) => `${s}:hover, ${s}[data-hover]`,
-            }
+          ? [
+              {
+                matcher: matcher.slice(4),
+                selector: (s) => `${s}:hover`,
+                parent: "@media (hover: hover)",
+              },
+              {
+                matcher: matcher.slice(4),
+                selector: (s) => `${s}[data-hover]`,
+              },
+            ]
           : undefined,
       (matcher) =>
         matcher.startsWith("act:")

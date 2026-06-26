@@ -1,3 +1,8 @@
+// The mobile shell legitimately leaves many desktop-oriented helpers and
+// AppState fields unused (shortcuts, volume, region capture, window state), so
+// suppress dead-code noise on mobile only; desktop keeps full dead-code checks.
+#![cfg_attr(mobile, allow(dead_code))]
+
 mod channel;
 mod commands;
 mod error;
@@ -8,16 +13,44 @@ mod types;
 use crate::commands::*;
 use crate::logging::client_log;
 use crate::state::{AppState, AppStateInner};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64};
 use std::sync::{Arc, Mutex};
+
+#[cfg(desktop)]
+use std::sync::atomic::Ordering;
+#[cfg(desktop)]
 use tauri::menu::{Menu, MenuItem};
+#[cfg(desktop)]
 use tauri::{AppHandle, Emitter, Manager, State};
+#[cfg(desktop)]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+/// Shared app state. The desktop-only fields (shortcut, volume, region-capture,
+/// install guards) are simply unused on mobile, so one constructor serves both
+/// the desktop and mobile builders.
+fn new_app_state() -> AppState {
+    AppState(Arc::new(AppStateInner {
+        current_shortcut: Mutex::new(None),
+        // The window is created hidden (`visible: false` in tauri.conf.json)
+        // and revealed by the frontend on boot (or via the tray/shortcut).
+        // Track it as hidden to match, so toggle_window() shows it on the
+        // first press even when the frontend never reached its show() call.
+        // On mobile this field is unused (the single activity is always shown).
+        visible: AtomicBool::new(false),
+        saved_volume: Mutex::new(None),
+        input_shortcuts: Mutex::new(Vec::new()),
+        region_capture_target: Mutex::new("primary".to_string()),
+        install_in_progress: AtomicBool::new(false),
+        install_last_finished_ms: AtomicI64::new(0),
+    }))
+}
+
 /// Default global shortcut applied at startup before the frontend pushes the
-/// persisted value.
+/// persisted value. Desktop only (no OS-level global hotkeys on mobile).
+#[cfg(desktop)]
 pub const DEFAULT_TOGGLE_SHORTCUT: &str = "super+ctrl+shift+z";
 
+#[cfg(desktop)]
 pub fn register_toggle_shortcut(
     app: &AppHandle,
     accelerator: &str,
@@ -36,6 +69,7 @@ pub fn register_toggle_shortcut(
         })
 }
 
+#[cfg(desktop)]
 pub fn toggle_window(app: &AppHandle, visible: &AtomicBool) -> bool {
     if let Some(window) = app.get_webview_window("main") {
         if visible.load(Ordering::Relaxed) {
@@ -54,37 +88,42 @@ pub fn toggle_window(app: &AppHandle, visible: &AtomicBool) -> bool {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-#[allow(clippy::expect_used)]
 pub fn run() {
     // First thing: stand up logging so even Builder/plugin init is captured.
-    logging::init();
-    log::info!(target: "tomat::boot", "tomat client starting (channel={})", crate::channel::channel());
+    // Android has no $HOME to derive the file-sink path from and needs an
+    // AppHandle, so its logger is initialized later in run_mobile's setup().
+    #[cfg(desktop)]
+    {
+        logging::init();
+        log::info!(target: "tomat::boot", "tomat client starting (channel={})", crate::channel::channel());
+    }
 
     // Register the OS keychain as keyring-core's default store before any
     // paired-core token op. Non-fatal: the dev build uses a file store, and a
-    // real failure surfaces cleanly when a keychain command runs.
+    // real failure surfaces cleanly when a keychain command runs. On android
+    // this is a no-op (tokens go to an app-private file; see keychain.rs).
     if let Err(e) = init_default_store() {
         log::warn!(target: "tomat::boot", "keychain store init failed: {e}");
     }
 
+    #[cfg(desktop)]
+    run_desktop();
+    #[cfg(mobile)]
+    run_mobile();
+}
+
+/// Desktop shell: transparent always-on-top bubble window, tray icon, global
+/// toggle shortcut, and the full desktop command set.
+#[cfg(desktop)]
+#[allow(clippy::expect_used)]
+fn run_desktop() {
     let last_monitor: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let move_last_monitor = last_monitor.clone();
 
     tauri::Builder::default()
-        .manage(AppState(Arc::new(AppStateInner {
-            current_shortcut: Mutex::new(None),
-            // The window is created hidden (`visible: false` in tauri.conf.json)
-            // and revealed by the frontend on boot (or via the tray/shortcut).
-            // Track it as hidden to match, so toggle_window() shows it on the
-            // first press even when the frontend never reached its show() call.
-            visible: AtomicBool::new(false),
-            saved_volume: Mutex::new(None),
-            input_shortcuts: Mutex::new(Vec::new()),
-            region_capture_target: Mutex::new("primary".to_string()),
-            install_in_progress: AtomicBool::new(false),
-            install_last_finished_ms: AtomicI64::new(0),
-        })))
+        .manage(new_app_state())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -211,6 +250,7 @@ pub fn run() {
             set_system_volume,
             restore_system_volume,
             resolve_path,
+            client_channel,
             convert_file_to_markdown,
             get_self_metrics,
             was_autostarted,
@@ -218,6 +258,7 @@ pub fn run() {
             truncate_client_log,
             // Pairing / admin
             read_admin_token,
+            read_local_core_boot_error,
             install_local_core,
             local_core_installed,
             local_core_base_url,
@@ -238,6 +279,7 @@ pub fn run() {
             net_ws_open,
             net_ws_send,
             net_ws_close,
+            discover_lan_cores,
             // Logging
             client_log,
         ])
@@ -261,4 +303,55 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// Mobile shell: a single fullscreen activity. No tray, global shortcut,
+/// capture, volume, autostart, or local-core install, so it registers only the
+/// cross-platform command set and the plugins that have Android support.
+#[cfg(mobile)]
+#[allow(clippy::expect_used)]
+fn run_mobile() {
+    tauri::Builder::default()
+        .manage(new_app_state())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // Logging needs the app-data dir (no $HOME on android), so it is
+            // initialized here once an AppHandle exists. Logs land under the same
+            // client root that get_client_storage / truncate_client_log enumerate.
+            let log_dir = crate::commands::paths::client_root(app.handle())
+                .ok()
+                .map(|root| root.join("logs"));
+            crate::logging::init_with_log_dir(log_dir);
+            log::info!(target: "tomat::boot", "tomat client starting (channel={})", crate::channel::channel());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            // Pinned core networking
+            net_fetch,
+            net_ws_open,
+            net_ws_send,
+            net_ws_close,
+            // Client files (settings / cores / snippets) + keychain
+            read_client_file,
+            write_client_file,
+            read_client_snippets,
+            write_client_snippet,
+            delete_client_snippet,
+            keychain_set_token,
+            keychain_get_token,
+            keychain_delete_token,
+            // System (cross-platform subset)
+            get_self_metrics,
+            get_client_storage,
+            truncate_client_log,
+            resolve_path,
+            client_channel,
+            // Logging
+            client_log,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

@@ -81,7 +81,28 @@
     return metrics?.sidecars.find((s) => s.kind === key);
   }
 
-  type Row = { label: string; sub?: string; rssMb?: number; cpuPct?: number };
+  type Row = {
+    label: string;
+    sub?: string;
+    rssMb?: number;
+    cpuPct?: number;
+    // Set for a supervised sidecar in Error, so the row offers a Retry that
+    // re-applies its boot decision (and clears the crash flap-guard).
+    retryKind?: "llama" | "speech";
+  };
+
+  let retrying = $state<"llama" | "speech" | null>(null);
+  async function retry(kind: "llama" | "speech") {
+    retrying = kind;
+    try {
+      await cores().api().sidecars.restart(kind);
+      await refresh();
+    } catch (e) {
+      log.warn("sidecar restart failed", e);
+    } finally {
+      retrying = null;
+    }
+  }
 
   const rows = $derived.by((): Row[] => {
     const out: Row[] = [];
@@ -115,6 +136,8 @@
         sub: `${status}${endpoint ? ` · ${endpoint}` : ""}`,
         rssMb: m?.rssMb,
         cpuPct: m?.cpuPct,
+        // tool is skipped above, so an errored sidecar here is llama or speech.
+        retryKind: status === "Error" ? (key as "llama" | "speech") : undefined,
       });
     }
     return out;
@@ -201,7 +224,19 @@
         <div class="flex flex-col flex-1 min-w-0">
           <div class="text-default-800 text-sm truncate">{row.label}</div>
           {#if row.sub}
-            <div class="text-default-500 text-xs truncate">{row.sub}</div>
+            <div class="flex items-center gap-2">
+              <div class="text-default-500 text-xs truncate">{row.sub}</div>
+              {#if row.retryKind}
+                <button
+                  type="button"
+                  class="shrink-0 text-xs text-accent-blue-400 hov:text-accent-blue-300 act:text-accent-blue-200 transition-interactive disabled:opacity-50"
+                  disabled={retrying !== null}
+                  onclick={() => retry(row.retryKind!)}
+                >
+                  {retrying === row.retryKind ? "Retrying..." : "Retry"}
+                </button>
+              {/if}
+            </div>
           {/if}
         </div>
         <div class="flex items-center gap-2 shrink-0">

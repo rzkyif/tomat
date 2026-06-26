@@ -442,6 +442,7 @@ INSTALL_SERVICE="${TOMAT_INSTALL_SERVICE:-1}"
 INSTALL_BIND_ALL="${TOMAT_INSTALL_BIND_ALL:-0}"
 
 ADMIN_TOKEN_FILE="$HOME_DIR/.admin-token"
+ADMIN_PASSWORD_FILE="$HOME_DIR/.admin-password"
 SETTINGS_FILE="$HOME_DIR/settings.json"
 INSTALLED_BIN="$BIN_DIR/tomat-core$CHANNEL_SUFFIX"
 # launchd label / systemd unit, suffixed per channel so multiple channels
@@ -523,6 +524,45 @@ fi
 # Default for non-Linux paths so the variable is always set.
 : "${SERVICE_HAS_SYSTEMD:=0}"
 
+# --- admin password prompt (interactive installs only) --------------------
+
+# The admin password lets an already-paired client mint pairing codes and
+# revoke devices remotely, without reading the admin token off this machine.
+# We ask for it up front (before the live progress UI starts) so the rest of
+# the install runs unattended, then set it on the core once it is running
+# (below, just before minting the first code). Two reads guard against typos.
+#
+# We read from /dev/tty, not stdin: this script is itself piped in via
+# `curl | bash`, so stdin is the script. When there is no controlling
+# terminal (e.g. the client-driven install), we skip the prompt and the
+# client sets the password through the API afterward. Skipped too when a
+# password is already on disk (re-install).
+ADMIN_PW=""
+if [ ! -s "$ADMIN_PASSWORD_FILE" ] && [ -r /dev/tty ]; then
+  printf '\n%s\n' "Set an admin password for tomat-core." > /dev/tty
+  printf '%s\n\n' "You'll need it to pair new devices remotely, so remember it." > /dev/tty
+  while :; do
+    printf 'Admin password (min 8 chars): ' > /dev/tty
+    IFS= read -rs ADMIN_PW < /dev/tty
+    printf '\n' > /dev/tty
+    printf 'Confirm admin password: ' > /dev/tty
+    IFS= read -rs ADMIN_PW_CONFIRM < /dev/tty
+    printf '\n' > /dev/tty
+    if [ "$ADMIN_PW" != "$ADMIN_PW_CONFIRM" ]; then
+      printf '%s\n' "Passwords did not match. Try again." > /dev/tty
+      ADMIN_PW=""
+      continue
+    fi
+    if [ "${#ADMIN_PW}" -lt 8 ]; then
+      printf '%s\n' "Password must be at least 8 characters. Try again." > /dev/tty
+      ADMIN_PW=""
+      continue
+    fi
+    break
+  done
+  ADMIN_PW_CONFIRM=""
+fi
+
 # --- begin UI -------------------------------------------------------------
 
 ui_init "tomat-core installer"
@@ -546,6 +586,10 @@ if [ "$INSTALL_BIND_ALL" = "1" ]; then
   IDX_SETTINGS=$(ui_action_add "Seeding $SETTINGS_FILE")
 fi
 IDX_SERVICE=$(ui_action_add "$SERVICE_LABEL")
+IDX_PASSWORD=-1
+if [ -n "$ADMIN_PW" ]; then
+  IDX_PASSWORD=$(ui_action_add "Setting admin password")
+fi
 IDX_PAIR=$(ui_action_add "Minting pairing code at https://127.0.0.1:$CORE_PORT")
 
 # --- action 1: detect host -----------------------------------------------
@@ -1155,6 +1199,29 @@ sleep 2
 ADMIN="$(cat "$ADMIN_TOKEN_FILE" 2>/dev/null || true)"
 CODE=""
 PAIR_FAILED=0
+
+# --- action 8a: set admin password ---------------------------------------
+
+# Set the password the user chose at the top, now that core is up. The body is
+# piped via stdin (-d @-), never an argv/header, so it can't leak through `ps`.
+# Authorized by the on-disk admin token over loopback (-k: self-signed cert).
+if [ "$IDX_PASSWORD" != "-1" ] && [ -n "$ADMIN" ]; then
+  ui_action_start "$IDX_PASSWORD" "Setting admin password"
+  PW_STATUS="$(
+    printf '%s' "$ADMIN_PW" | jq -Rs '{password: .}' 2>/dev/null | curl -fsS -k -o /dev/null \
+      -w '%{http_code}' -X POST \
+      -H "X-Admin-Token: $ADMIN" \
+      -H 'Content-Type: application/json' \
+      -d @- \
+      "https://127.0.0.1:$CORE_PORT/api/v1/admin/password" 2>/dev/null || true
+  )"
+  ADMIN_PW=""
+  if [ "$PW_STATUS" = "204" ]; then
+    ui_action_done "$IDX_PASSWORD"
+  else
+    ui_action_skip "$IDX_PASSWORD" "(could not set; set it later in the client)"
+  fi
+fi
 
 # Core serves HTTPS with a self-signed cert. This mint runs on the core host
 # over loopback and is authenticated by the on-disk admin token, so -k (skip

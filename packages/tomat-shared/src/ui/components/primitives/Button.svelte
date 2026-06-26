@@ -1,5 +1,8 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { useUiContext } from "../../context.ts";
+  import { RIPPLE_MS } from "../../animations.ts";
+  import { ripple } from "../../actions/ripple.ts";
 
   type Variant = "primary" | "secondary" | "destructive" | "ghost";
   type Size = "sm" | "md";
@@ -34,23 +37,29 @@
   const displayIcon = $derived(loading ? "i-material-symbols-progress-activity animate-spin" : icon);
   const iconSizeClass = $derived(size === "sm" ? "text-sm" : "text-base");
 
-  // Hover darkens the rest background one shade step; press darkens two (the
-  // shared interaction standard). Ghost has no rest fill, so it materializes the
-  // inset surface on hover and deepens it on press.
+  // Hover darkens the rest background one shade step (the shared interaction
+  // standard); the press splash is the shared `use:ripple` action, not a color
+  // shift. Ghost has no rest fill, so it materializes the inset surface on hover.
   const variantClass = $derived(
     {
       primary:
-        "bg-default-inverted-300 text-default-inverted-900 hov:bg-default-inverted-400 act:bg-default-inverted-500",
-      secondary: "bg-surface-inset text-default-800 hov:bg-default-300 act:bg-default-400",
-      destructive: "bg-accent-red-200 text-white hov:bg-accent-red-300 act:bg-accent-red-400",
-      ghost: "bg-transparent text-default-800 hov:bg-surface-inset act:bg-surface-inset-strong",
+        "bg-default-inverted-300 text-default-inverted-900 hov:bg-default-inverted-400",
+      secondary: "bg-surface-inset text-default-800 hov:bg-default-300",
+      destructive: "bg-accent-red-200 text-white hov:bg-accent-red-300",
+      ghost: "bg-transparent text-default-800 hov:bg-surface-inset",
     }[variant],
   );
 
+  const ui = useUiContext();
+  const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
+
+  // On a coarse pointer the label keeps its size but the button floors at a 44px
+  // tap target (taller than the desktop py-1/py-1.5), so it stays comfortable to
+  // hit without restyling the text.
   const sizeClass = $derived(
-    size === "sm"
-      ? "px-2 py-1 text-xs gap-1"
-      : "px-3 py-1.5 text-sm gap-1.5",
+    `${size === "sm" ? "px-2 py-1 text-xs gap-1" : "px-3 py-1.5 text-sm gap-1.5"} ${
+      ui.pointer === "coarse" ? "min-h-11" : ""
+    }`,
   );
 </script>
 
@@ -61,6 +70,7 @@
   aria-label={ariaLabel}
   {onclick}
   class="inline-flex items-center justify-center rounded-medium {sizeClass} {variantClass} hov:cursor-pointer transition-interactive disabled:opacity-50 disabled:pointer-events-none {extraClass}"
+  use:ripple={{ disabled: disabled || loading, durationMs: rippleDuration }}
 >
   {#if displayIcon}
     <!-- Icon pinned to the leading edge; the label centers across the whole

@@ -164,6 +164,19 @@ CREATE TABLE IF NOT EXISTS scheduled_prompts (
   updated_at_ms    INTEGER NOT NULL
 );
 
+-- Per-client settings overlay. Sparse: only the non-default values a client
+-- set are stored, one row per key. The effective config the core applies for a
+-- client is the shared core settings.json overlaid with this client's rows
+-- (see services/core-settings.ts loadEffective). Holds only "client-on-core"
+-- destination keys (per-client inference knobs); shared-resource keys stay in
+-- settings.json. ON DELETE CASCADE reaps a removed/revoked client's overlay.
+CREATE TABLE IF NOT EXISTS client_settings (
+  client_id   TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  key         TEXT NOT NULL,
+  value_json  TEXT NOT NULL,             -- JSON-encoded scalar
+  PRIMARY KEY (client_id, key)
+);
+
 -- Downloads (ported from the existing Rust download manager)
 CREATE TABLE IF NOT EXISTS downloads (
   id               TEXT PRIMARY KEY,

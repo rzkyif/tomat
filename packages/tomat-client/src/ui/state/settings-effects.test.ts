@@ -101,6 +101,8 @@ describe("settings-effects", () => {
     await settingsState.updateSetting("tts.enabled", false);
     expect(ttsState.setEnabled).toHaveBeenLastCalledWith(false);
 
+    // STT is off by default, so arm it first to exercise the disarm transition.
+    await settingsState.updateSetting("stt.enabled", true);
     await settingsState.updateSetting("stt.enabled", false);
     expect(vadManager.forceDisable).toHaveBeenCalled();
   });

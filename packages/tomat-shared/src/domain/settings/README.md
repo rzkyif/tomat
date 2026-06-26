@@ -27,19 +27,38 @@ Every field persists to exactly one destination, resolved by
 `settingKeyDestination()` in [`engine.ts`](engine.ts): a section's `destination`
 override wins (hybrid groups), otherwise the group's first listed destination.
 That helper is the single routing truth for the client's save path and the
-core's PATCH validation alike.
+core's PATCH validation alike. There are three storage locations but only two
+user-visible labels (the header chip collapses any `client-on-*` to "Client",
+`core` to "Core", via `destinationLabel()`):
 
-- **client** keys live in `~/.tomat/<channel>/client/settings.json`.
+- **client-on-client** keys live in `~/.tomat/<channel>/client/settings.json`.
+  Pure device preferences the core never reads (appearance, shortcuts, the
+  display-only toggles, greetings).
+- **client-on-core** keys live in the core's `client_settings` SQLite table,
+  keyed by `clients.id`. Per-client preferences the core must apply server-side
+  (the per-turn inference knobs: sampling, system/helper prompts, tool and
+  memory selection), including for scheduled/automated sessions that have no
+  client frame. The core reads them via `loadEffective(clientId)` = the shared
+  `core` store overlaid with this client's overrides.
 - **core** keys live in `~/.tomat/<channel>/core/settings.json` on the paired
-  core, reached via `GET`/`PATCH /api/v1/settings`.
+  core. Shared physical resources (the model/server/backend, sidecars, tool
+  worker pool, installed extensions/MCP, the memory store).
 
-Both stores are sparse: only non-default values are persisted, and a `null` in a
-PATCH deletes the key (reverts it to the schema default). The core PATCH is
-strict (`validateSettingsPatch`): unknown keys, client-destination keys,
-render-only fields, secret-typed keys, and wrong-typed values are all rejected,
-and GET responses are sanitized to schema core keys, so the core store can never
-carry junk to clients. Core-internal state (e.g. the built-in extension seed
-marker) lives outside the settings store entirely.
+`client-on-core` and `core` are both reached via `GET`/`PATCH
+/api/v1/settings`: GET returns this client's effective view, and PATCH
+partitions the body by destination, writing `core` keys to the shared store and
+`client-on-core` keys to the client's overlay. `client-on-core` changes
+broadcast `settings.updated` ONLY to the owning client (never to others); `core`
+changes broadcast to all.
+
+All stores are sparse: only non-default values are persisted, and a `null` in a
+PATCH deletes the key (reverts it to the shared/default value). The core PATCH
+is strict (`validateSettingsPatch(patch, { allow })`): unknown keys,
+`client-on-client` keys, render-only fields, secret-typed keys, and wrong-typed
+values are all rejected, and GET responses are sanitized to the core-stored
+schema keys, so the core store can never carry junk to clients. Core-internal
+state (e.g. the built-in extension seed marker) lives outside the settings store
+entirely.
 
 ### The client store
 

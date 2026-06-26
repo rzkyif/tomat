@@ -322,6 +322,7 @@ $InstallService = if ($env:TOMAT_INSTALL_SERVICE) { $env:TOMAT_INSTALL_SERVICE }
 $InstallBindAll = if ($env:TOMAT_INSTALL_BIND_ALL) { $env:TOMAT_INSTALL_BIND_ALL } else { "0" }
 
 $AdminTokenFile = Join-Path $HomeDir ".admin-token"
+$AdminPasswordFile = Join-Path $HomeDir ".admin-password"
 $SettingsFile = Join-Path $HomeDir "settings.json"
 $Installed = Join-Path $BinDir "tomat-core$ChannelSuffix.exe"
 # Scheduled-task name + process name, suffixed per channel so channels coexist.
@@ -339,6 +340,39 @@ if ($InstallService -eq "1") {
   $ServiceLabel = "Registering Windows scheduled task '$TaskName'"
 } else {
   $ServiceLabel = "Starting core in background (Start-Process)"
+}
+
+# --- admin password prompt (interactive installs only) --------------------
+
+# The admin password lets an already-paired client mint pairing codes and
+# revoke devices remotely without reading the admin token off this machine.
+# Ask up front (before the live UI), then set it on the running core below.
+# Skipped when input is redirected (the client-driven install, which sets the
+# password through the API afterward) or a password already exists (re-install).
+$AdminPw = ""
+$InputRedirected = $true
+try { $InputRedirected = [Console]::IsInputRedirected } catch { $InputRedirected = $true }
+if ((-not (Test-Path $AdminPasswordFile)) -and (-not $InputRedirected)) {
+  Write-Host ""
+  Write-Host "Set an admin password for tomat-core."
+  Write-Host "You'll need it to pair new devices remotely, so remember it."
+  Write-Host ""
+  while ($true) {
+    $pw1 = Read-Host -AsSecureString "Admin password (min 8 chars)"
+    $pw2 = Read-Host -AsSecureString "Confirm admin password"
+    $p1 = [System.Net.NetworkCredential]::new("", $pw1).Password
+    $p2 = [System.Net.NetworkCredential]::new("", $pw2).Password
+    if ($p1 -ne $p2) {
+      Write-Host "Passwords did not match. Try again."
+      continue
+    }
+    if ($p1.Length -lt 8) {
+      Write-Host "Password must be at least 8 characters. Try again."
+      continue
+    }
+    $AdminPw = $p1
+    break
+  }
 }
 
 # --- begin UI -------------------------------------------------------------
@@ -365,6 +399,10 @@ try {
     $IdxSettings = Ui-ActionAdd "Seeding $SettingsFile"
   }
   $IdxService = Ui-ActionAdd $ServiceLabel
+  $IdxPassword = -1
+  if ($AdminPw -ne "") {
+    $IdxPassword = Ui-ActionAdd "Setting admin password"
+  }
   $IdxPair    = Ui-ActionAdd "Minting pairing code at https://127.0.0.1:$CorePort"
 
   # --- action 1: detect host ----------------------------------------------
@@ -884,6 +922,30 @@ try {
     $irmExtra['SkipCertificateCheck'] = $true
   } else {
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+  }
+
+  # --- action 8a: set admin password -------------------------------------
+
+  # Set the password the user chose at the top, now that core is up. Authorized
+  # by the on-disk admin token over loopback. ConvertTo-Json escapes arbitrary
+  # password characters safely.
+  if ($IdxPassword -ne -1 -and $admin) {
+    Ui-ActionStart $IdxPassword "Setting admin password"
+    $pwSet = $false
+    try {
+      $pwBody = @{ password = $AdminPw } | ConvertTo-Json -Compress
+      Invoke-RestMethod -Method Post `
+        -Uri "https://127.0.0.1:$CorePort/api/v1/admin/password" `
+        -Headers @{ "X-Admin-Token" = $admin; "Content-Type" = "application/json" } `
+        -Body $pwBody @irmExtra | Out-Null
+      $pwSet = $true
+    } catch { }
+    $AdminPw = ""
+    if ($pwSet) {
+      Ui-ActionDone $IdxPassword
+    } else {
+      Ui-ActionSkip $IdxPassword "(could not set; set it later in the client)"
+    }
   }
 
   $code = $null

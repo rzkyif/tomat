@@ -28,10 +28,23 @@ import { Sha256Stream } from "../shared/hash.ts";
 import { paths } from "../paths.ts";
 import { modelCatalogSha256 } from "../models/catalog.ts";
 import { parseSource } from "./sources.ts";
+import { HF_BASE_URL } from "../config.ts";
 
 const log = getLogger("downloads");
 
+// The HuggingFace host whose resolve redirect carries the LFS content sha256.
+// Derived from HF_BASE_URL so a test/mirror host (TOMAT_HF_BASE_URL) is honored
+// rather than the literal "huggingface.co".
+const HF_HOST = new URL(HF_BASE_URL).host;
+
 const INTER_DOWNLOAD_DELAY_MS = 1_000;
+
+// Abort a download that receives no bytes for this long. A silently-stalled
+// connection (server wedged, network black-holed) otherwise leaves `for await`
+// blocked forever with the UI gated on a download that will never finish or
+// error. The window is generous so a slow-but-progressing transfer never trips
+// it; it only fires on true silence.
+const STALL_TIMEOUT_MS = 60_000;
 
 export interface EnqueueSpec {
   source: string;
@@ -179,6 +192,9 @@ export class DownloadManager {
     if (!row) return;
     if (this.inFlight.has(id)) return;
     db().prepare("DELETE FROM downloads WHERE id = ?").run(id);
+    // Drop any resume partial so discarding a download doesn't orphan a .tmp
+    // (Error rows keep theirs for resume; removing the row is the cleanup point).
+    void Deno.remove(row.absPath + ".tmp").catch(() => {});
     this.broadcast();
   }
 
@@ -292,6 +308,8 @@ export class DownloadManager {
     if (result.ok) {
       this.setStatus(id, "Completed", { downloadedBytes: undefined });
     } else if (inFlight.abort.signal.aborted) {
+      // User-cancelled: drop the partial (the user abandoned this download;
+      // remove() also cleans it, but cancel is the explicit "stop" intent).
       this.setStatus(id, "Cancelled", { error: result.error });
       try {
         await Deno.remove(absPath + ".tmp");
@@ -299,12 +317,12 @@ export class DownloadManager {
         /* fine */
       }
     } else {
+      // Transient failure (network drop, stall, ...): KEEP the partial .tmp so a
+      // retry resumes via a Range request instead of re-downloading from zero
+      // (see streamDownload). Terminal-bad outcomes (checksum mismatch, HTTP
+      // 416) already deleted it inside streamDownload, and remove() drops it if
+      // the user discards the download.
       this.setStatus(id, "Error", { error: result.error });
-      try {
-        await Deno.remove(absPath + ".tmp");
-      } catch {
-        /* fine */
-      }
     }
     this.broadcast();
 
@@ -333,11 +351,6 @@ export class DownloadManager {
     }
     await Deno.mkdir(dirname(absPath), { recursive: true });
     const tmpPath = absPath + ".tmp";
-    const file = await Deno.open(tmpPath, {
-      create: true,
-      write: true,
-      truncate: true,
-    });
 
     // Verify downloaded bytes against a known sha256, preferring the most
     // trustworthy anchor: an explicit spec hash, then (for a catalog model file)
@@ -350,7 +363,7 @@ export class DownloadManager {
       spec.sha256 ??
       (spec.destination === "models" ? await modelCatalogSha256(spec.source) : undefined) ??
       (await resolveHfSha256(url, signal));
-    const sha = expectedSha ? new Sha256Stream() : null;
+    let sha = expectedSha ? new Sha256Stream() : null;
     if (!expectedSha) {
       // No trustworthy content hash is available (no pinned sha256, and HF did
       // not return an x-linked-etag for this file). The bytes are then accepted
@@ -358,25 +371,97 @@ export class DownloadManager {
       // possibly mis-served file. Weights with an LFS sha256 still verify above.
       log.warn(`downloading ${url} without integrity verification (no sha256 available)`);
     }
-    let downloaded = 0;
+
+    // Resume a partial transfer left by an interrupted attempt, but ONLY when we
+    // have a content hash: the final sha256 below verifies the WHOLE file, so a
+    // wrongly-resumed file is still caught and retried. Without a hash we can't
+    // tell a good partial from a bad one, so we always start clean.
+    let resumeFrom = 0;
+    if (expectedSha) {
+      try {
+        const st = await Deno.stat(tmpPath);
+        if (st.isFile && st.size > 0) resumeFrom = st.size;
+      } catch {
+        /* no partial on disk: start fresh */
+      }
+    }
+    // Seed the hasher with the bytes already on disk so the streamed tail hashes
+    // continuously with them. A read failure falls back to a clean restart.
+    if (resumeFrom > 0 && sha) {
+      try {
+        const rf = await Deno.open(tmpPath, { read: true });
+        for await (const chunk of rf.readable) sha.update(chunk);
+      } catch {
+        resumeFrom = 0;
+        sha = new Sha256Stream();
+      }
+    }
+
+    let downloaded = resumeFrom;
     let total: number | undefined = spec.sizeHint;
     let lastEmit = 0;
 
+    // Stall watchdog: abort if no bytes arrive for STALL_TIMEOUT_MS. Combined
+    // with the external signal (user cancel / shutdown) so either can stop the
+    // transfer. Reset on every chunk, so it only fires on true silence.
+    const stall = new AbortController();
+    let stalled = false;
+    const combined = AbortSignal.any([signal, stall.signal]);
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    const armStall = (): void => {
+      if (stallTimer !== null) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        stalled = true;
+        stall.abort();
+      }, STALL_TIMEOUT_MS);
+    };
+
+    let file: Deno.FsFile | null = null;
     try {
-      const res = await fetch(url, { signal });
+      armStall();
+      const headers = resumeFrom > 0 ? { Range: `bytes=${resumeFrom}-` } : undefined;
+      const res = await fetch(url, { signal: combined, headers });
+
+      // The partial is larger than the resource itself (corrupt/stale .tmp): drop
+      // it so the next retry starts clean rather than 416-looping.
+      if (res.status === 416) {
+        await Deno.remove(tmpPath).catch(() => {});
+        throw new AppError(
+          "provider_error",
+          `partial file for ${url} is unusable (HTTP 416); restarting on next retry`,
+        );
+      }
       if (!res.ok) {
         throw new AppError(
           "manifest_fetch_failed",
           `HTTP ${res.status} ${res.statusText} for ${url}`,
         );
       }
+      // 206 means the server honored our Range and is sending only the tail, so
+      // append; anything else (200) is the whole file, so rewrite from scratch
+      // (reset the hasher + truncate the partial).
+      const resuming = resumeFrom > 0 && res.status === 206;
+      if (!resuming) {
+        resumeFrom = 0;
+        downloaded = 0;
+        if (expectedSha) sha = new Sha256Stream();
+      }
+      file = await Deno.open(
+        tmpPath,
+        resuming
+          ? { create: true, write: true, append: true }
+          : { create: true, write: true, truncate: true },
+      );
+
+      // content-length is the BODY length (the remaining tail when resuming), so
+      // the full size is the offset we started at plus it.
       const cl = res.headers.get("content-length");
       let exactTotal: number | undefined;
       if (cl) {
         const n = Number(cl);
         if (Number.isFinite(n)) {
-          total = n;
-          exactTotal = n;
+          exactTotal = downloaded + n;
+          total = exactTotal;
         }
       }
       if (total !== undefined && total !== spec.sizeHint) {
@@ -403,6 +488,7 @@ export class DownloadManager {
         await file.write(chunk);
         if (sha) sha.update(chunk);
         downloaded += chunk.byteLength;
+        armStall(); // progress: reset the stall watchdog
         const now = Date.now();
         if (now - lastEmit > 250) {
           lastEmit = now;
@@ -410,9 +496,21 @@ export class DownloadManager {
           this.broadcast();
         }
       }
+    } catch (err) {
+      // A watchdog abort surfaces as a generic AbortError; rewrite it into a
+      // clear, retryable reason so the UI explains the stall instead of a bare
+      // "operation aborted".
+      if (stalled) {
+        throw new AppError(
+          "server_unavailable",
+          `download for ${url} stalled (no data for ${STALL_TIMEOUT_MS / 1000}s); aborting`,
+        );
+      }
+      throw err;
     } finally {
+      if (stallTimer !== null) clearTimeout(stallTimer);
       try {
-        file.close();
+        file?.close();
       } catch {
         /* fine */
       }
@@ -698,7 +796,13 @@ export { newJobId };
  *  (e.g. small non-LFS files, whose etag is a git blob sha1, or a non-HF URL).
  *  Used to verify model downloads against HF + TLS. */
 async function resolveHfSha256(url: string, signal: AbortSignal): Promise<string | undefined> {
-  if (!url.includes("huggingface.co")) return undefined;
+  let host: string;
+  try {
+    host = new URL(url).host;
+  } catch {
+    return undefined;
+  }
+  if (host !== HF_HOST) return undefined;
   try {
     const res = await fetch(url, {
       method: "HEAD",

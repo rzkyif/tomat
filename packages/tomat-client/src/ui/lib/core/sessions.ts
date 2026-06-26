@@ -10,8 +10,8 @@ export class SessionsApi {
     return this.client.get("/api/v1/sessions");
   }
 
-  create(title?: string): Promise<Session> {
-    return this.client.post("/api/v1/sessions", { title });
+  create(title?: string, opts?: { temporary?: boolean }): Promise<Session> {
+    return this.client.post("/api/v1/sessions", { title, temporary: opts?.temporary });
   }
 
   get(id: string): Promise<GetSessionResponse> {

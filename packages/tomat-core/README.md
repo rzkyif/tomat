@@ -73,10 +73,13 @@ powershell -ExecutionPolicy Bypass -Command "& { $env:TOMAT_CHANNEL='latest'; iw
 
 The installer downloads the signed core manifest, verifies the binary's SHA-256,
 installs an auto-start service (launchd / systemd-user / Task Scheduler), starts
-the daemon, and prints a 6-digit pairing code. Open the client, paste the core's
-URL (e.g. `http://192.168.1.50:7800`) and the pairing code. The client receives
-a long-lived bearer token, stored in the OS keychain under the service
-`tomat-client`. A single client can pair with multiple cores and switch between
+the daemon, prompts for an admin password (entered twice), and prints a 6-digit
+pairing code. Open the client, paste the core's URL (e.g.
+`http://192.168.1.50:7800`) and the pairing code. The client receives a
+long-lived bearer token, stored in the OS keychain under the service
+`tomat-client`. The admin password lets an already-paired client mint more
+pairing codes (and remove other devices) remotely, without reading the admin
+token off the core's machine. A single client can pair with multiple cores and switch between
 them via a dropdown in Settings. A single core can serve multiple clients
 simultaneously. Sessions are owned by the client that created them and are
 invisible to other paired clients.

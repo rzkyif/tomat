@@ -3,7 +3,10 @@ import { SECURE_URL_VALIDATION } from "../types.ts";
 
 export const dualModelGroup: SettingGroup = {
   id: "dualModel",
-  destination: "core",
+  // Hybrid: whether to route complex messages is a per-client preference (the
+  // core honors it per turn), but the secondary model's endpoint is a shared
+  // backend on the core.
+  destination: ["client-on-core", "core"],
   name: "Dual Model",
   description:
     "Keep simple messages on your fast default model and send only complex ones to a stronger model. tomat decides per message; you never switch manually.",
@@ -12,6 +15,8 @@ export const dualModelGroup: SettingGroup = {
   iconInactive: "i-material-symbols-call-split-rounded",
   sections: [
     {
+      label: "General",
+      destination: "client-on-core",
       fields: [
         {
           id: "dualModel.enabled",
@@ -26,6 +31,7 @@ export const dualModelGroup: SettingGroup = {
     },
     {
       label: "Secondary Model",
+      destination: "core",
       visibleWhen: { field: "dualModel.enabled", eq: true },
       fields: [
         {

@@ -1,5 +1,5 @@
 // WebdriverIO config for E2E. Drives the built debug Tauri binary
-// through tauri-driver. Manual-only; see tests/e2e/README.md for setup.
+// through tauri-driver. Manual-only; see tests/e2e/tauri-driver/README.md for setup.
 //
 // One-time setup (do this before invoking `deno task test:e2e`):
 //   1. cargo install tauri-driver --locked
@@ -10,7 +10,7 @@
 // describe the platform notes. As of darwin 25.4 (macOS 26) the support
 // status hasn't been verified. This conf is a starting point, not a
 // proven-working harness. If you hit issues, document them in
-// tests/e2e/README.md and fall back to manual verification with
+// tests/e2e/tauri-driver/README.md and fall back to manual verification with
 // `deno task dev`.
 
 import { type ChildProcess, spawn } from "node:child_process";

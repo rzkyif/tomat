@@ -290,6 +290,25 @@ fn admin_token_path() -> AppResult<PathBuf> {
         .join(".admin-token"))
 }
 
+fn boot_error_path() -> AppResult<PathBuf> {
+    let home = std::env::home_dir()
+        .ok_or_else(|| AppError::external("could not determine home directory"))?;
+    Ok(crate::channel::channel_root(&home)
+        .join("core")
+        .join("last-error.txt"))
+}
+
+/// Read the local core's last fatal boot-failure reason (one line), if any. The
+/// core writes it on a fatal startup path and clears it once it next binds, so
+/// this is non-empty only when the local core failed to come up (port in use,
+/// missing helper, ...). Lets the pair flow explain an otherwise-opaque
+/// connection failure. Returns None when the file is absent or blank. Reuses the
+/// admin-token reader, which is the same "trimmed non-empty string or None".
+#[tauri::command]
+pub fn read_local_core_boot_error() -> AppResult<Option<String>> {
+    read_admin_token_at(&boot_error_path()?)
+}
+
 fn local_core_binary() -> AppResult<PathBuf> {
     let home = std::env::home_dir()
         .ok_or_else(|| AppError::external("could not determine home directory"))?;

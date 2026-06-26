@@ -1,0 +1,5 @@
+node_modules/
+package-lock.json
+# Generated screenshots / attachments from vitest browser mode.
+specs/**/__screenshots__/
+.vitest-attachments/

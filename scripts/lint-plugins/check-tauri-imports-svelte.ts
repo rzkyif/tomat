@@ -10,7 +10,10 @@
 import { walk } from "@std/fs/walk";
 
 const ROOT = new URL("../../packages/tomat-client/src/ui/", import.meta.url).pathname;
-const ALLOW = "lib/platform/tauri.ts";
+// The platform layer (tauri.ts desktop impl, mobile.ts android impl, plus their
+// shared helpers and the selection bootstrap) is the one place allowed to import
+// @tauri-apps/* directly; everything else routes through the Platform interface.
+const ALLOW = "lib/platform/";
 // Match either `from "@tauri-apps/..."` or `import "@tauri-apps/..."`,
 // preceded by whitespace so we don't match inside string literals that
 // happen to contain the substring (e.g. error messages, docstrings).
@@ -25,7 +28,7 @@ interface Violation {
 async function scan(): Promise<Violation[]> {
   const violations: Violation[] = [];
   for await (const entry of walk(ROOT, { exts: [".svelte"], includeDirs: false })) {
-    if (entry.path.endsWith(ALLOW)) continue;
+    if (entry.path.includes(ALLOW)) continue;
     const text = await Deno.readTextFile(entry.path);
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i++) {
@@ -43,7 +46,7 @@ async function scan(): Promise<Violation[]> {
 
 const violations = await scan();
 if (violations.length > 0) {
-  console.error("Direct @tauri-apps imports forbidden outside lib/platform/tauri.ts:");
+  console.error("Direct @tauri-apps imports forbidden outside lib/platform/:");
   for (const v of violations) {
     console.error(`  ${v.file}:${v.lineNumber}  ${v.line}`);
   }

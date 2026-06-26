@@ -37,6 +37,7 @@ import {
   setPlatform,
   type UpdateHandle,
 } from "./index";
+import { net } from "./shared";
 import { getLogger } from "$lib/util/log";
 
 const log = getLogger("platform");
@@ -45,140 +46,10 @@ export function installTauriPlatform(): void {
   setPlatform(impl);
 }
 
-// Wire shape of the Rust `net_fetch` reply (body is base64 to cross IPC).
-interface NetFetchReply {
-  status: number;
-  headers: Record<string, string>;
-  bodyB64: string;
-  capturedPin: string | null;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let s = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    s += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(s);
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
 const impl: Platform = {
-  net: {
-    async fetch(req) {
-      const bodyB64 =
-        req.body === undefined
-          ? null
-          : typeof req.body === "string"
-            ? bytesToBase64(new TextEncoder().encode(req.body))
-            : bytesToBase64(req.body);
-      const res = await invoke<NetFetchReply>("net_fetch", {
-        url: req.url,
-        method: req.method ?? "GET",
-        headers: req.headers ?? {},
-        bodyB64,
-        pin: req.pin ?? null,
-        capturePin: req.capturePin ?? false,
-      });
-      return {
-        status: res.status,
-        headers: res.headers,
-        body: base64ToBytes(res.bodyB64),
-        capturedPin: res.capturedPin ?? undefined,
-      };
-    },
-    async connectWebSocket(url, opts) {
-      // The Rust side connects + forwards frames as per-id Tauri events. We
-      // register the listeners BEFORE invoking net_ws_open and buffer anything
-      // that arrives before CoreClient attaches its callbacks, so no open /
-      // message is lost in the async gap.
-      const wsId = crypto.randomUUID();
-      let onOpenCb: (() => void) | null = null;
-      let onMessageCb: ((d: string) => void) | null = null;
-      let onCloseCb: (() => void) | null = null;
-      let onErrorCb: ((reason?: string) => void) | null = null;
-      let openedEarly = false;
-      let closedEarly = false;
-      let earlyError: string | undefined;
-      const pending: string[] = [];
-
-      const unlisteners: UnlistenFn[] = await Promise.all([
-        listen(`net://ws/${wsId}/open`, () => {
-          if (onOpenCb) onOpenCb();
-          else openedEarly = true;
-        }),
-        listen<string>(`net://ws/${wsId}/message`, (e) => {
-          if (onMessageCb) onMessageCb(e.payload);
-          else pending.push(e.payload);
-        }),
-        listen(`net://ws/${wsId}/close`, () => {
-          if (onCloseCb) onCloseCb();
-          else closedEarly = true;
-          // The socket is gone: detach the JS-side listeners so a server- or
-          // network-initiated close (not just an explicit close()) can't leak
-          // 4 Tauri listeners per reconnect over a long-lived session.
-          detach();
-        }),
-        listen<string>(`net://ws/${wsId}/error`, (e) => {
-          if (onErrorCb) onErrorCb(e.payload);
-          else earlyError = e.payload;
-        }),
-      ]);
-      let detached = false;
-      const detach = (): void => {
-        if (detached) return;
-        detached = true;
-        for (const u of unlisteners) u();
-      };
-
-      await invoke("net_ws_open", { wsId, url, pin: opts?.pin ?? null });
-
-      return {
-        send: (data) => {
-          void invoke("net_ws_send", { wsId, data });
-        },
-        close: () => {
-          void invoke("net_ws_close", { wsId });
-          detach();
-        },
-        onOpen: (cb) => {
-          onOpenCb = cb;
-          if (openedEarly) {
-            openedEarly = false;
-            cb();
-          }
-        },
-        onMessage: (cb) => {
-          onMessageCb = cb;
-          if (pending.length) {
-            const buf = pending.splice(0);
-            for (const m of buf) cb(m);
-          }
-        },
-        onClose: (cb) => {
-          onCloseCb = cb;
-          if (closedEarly) {
-            closedEarly = false;
-            cb();
-          }
-        },
-        onError: (cb) => {
-          onErrorCb = cb;
-          if (earlyError !== undefined) {
-            const r = earlyError;
-            earlyError = undefined;
-            cb(r);
-          }
-        },
-      };
-    },
-  },
+  // Pinned HTTP + WebSocket to a paired core; shared with the mobile impl
+  // since both call the same Rust commands (see lib/platform/shared.ts).
+  net,
   windowing: {
     show: () => invoke("show_main_window"),
     hide: () => invoke("hide_main_window"),
@@ -226,6 +97,12 @@ const impl: Platform = {
       const unlisten = await listen("monitor-changed", () => cb());
       return () => unlisten();
     },
+  },
+  backButton: {
+    // Desktop has no hardware back button: the subscription never fires and the
+    // registry's back() is only reached via this stream, so exit is unreachable.
+    subscribe: async () => () => {},
+    exit: () => Promise.resolve(),
   },
   autostart: {
     isEnabled: () => autostartIsEnabled(),
@@ -321,6 +198,7 @@ const impl: Platform = {
   },
   pairing: {
     readAdminToken: () => invoke("read_admin_token"),
+    readLocalCoreBootError: () => invoke("read_local_core_boot_error"),
     installLocalCore: (opts) =>
       invoke("install_local_core", {
         service: opts?.service ?? true,

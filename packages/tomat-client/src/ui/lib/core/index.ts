@@ -20,6 +20,12 @@ export { GreetingsApi } from "./greetings";
 export { SttApi } from "./stt";
 export { TtsApi } from "./tts";
 export { CoreSettingsApi } from "./settings";
-export { mintCodeWithAdminToken, PairingApi, pairWithCode, probeCore } from "./pairing";
+export {
+  mintCodeWithAdminToken,
+  PairingApi,
+  pairWithCode,
+  probeCore,
+  setAdminPasswordWithToken,
+} from "./pairing";
 export type { PairResult } from "./pairing";
 export { UpdateApi } from "./update";

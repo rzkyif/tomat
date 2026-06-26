@@ -11,4 +11,12 @@ export class SidecarsApi {
   status(): Promise<SidecarsStatusResponse> {
     return this.client.get<SidecarsStatusResponse>("/api/v1/sidecars/status");
   }
+
+  /** Recompute start args from the current settings and (re)start a supervised
+   *  sidecar. The recovery path for one stuck in Error: a fresh restart also
+   *  clears the crash flap-guard, so a sidecar that gave up after repeated
+   *  crashes gets a clean budget. */
+  restart(kind: "llama" | "speech"): Promise<void> {
+    return this.client.post<void>(`/api/v1/sidecars/${kind}/restart`, {});
+  }
 }

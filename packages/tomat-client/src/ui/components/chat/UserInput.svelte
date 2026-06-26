@@ -7,6 +7,7 @@
     MessagePart,
   } from "$lib/util/types";
   import { platform } from "$lib/platform";
+  import { useUiContext } from "@tomat/shared/ui/context";
   import {
     downloadsState,
     messagesState,
@@ -15,6 +16,7 @@
     memoriesState,
     mcpState,
     serversState,
+    sessionsState,
     settingsState,
     snippetsState,
     streamingState,
@@ -27,6 +29,9 @@
   const log = getLogger("user-input");
   const attachLog = getLogger("attach");
   const uiLog = getLogger("ui");
+
+  const ui = useUiContext();
+  const onMobile = ui.platform === "mobile";
 
   async function sendMessages(_anchorUserId?: string): Promise<void> {
     // Trigger the server-side chat turn. The streaming state subscribes
@@ -46,7 +51,9 @@
     ingestDocumentBlob,
     ingestDocumentFromPath,
     ingestImageBlob,
+    ingestTextDocument,
     MIME_BY_EXT,
+    TEXT_DOC_EXTENSIONS,
   } from "$lib/chat/attachments";
   import { applySnippets, snippetTrigger } from "$lib/snippets/snippets";
   import {
@@ -348,13 +355,19 @@
     if (ac.open) ac.updateFromInput(text);
   }
 
+  // Programmatic focus is suppressed on mobile: auto-focusing pops the soft
+  // keyboard without the user asking, covering half the screen. The user taps
+  // the composer to focus instead. (User-initiated focus, e.g. tapping Edit,
+  // goes through the exported focus() / direct calls and is unaffected.)
   function focusTextarea() {
+    if (onMobile) return;
     if (messagesState.messages.length == 0 && textareaElement) {
       setTimeout(() => textareaElement?.focus(), 0);
     }
   }
 
   function focusInput() {
+    if (onMobile) return;
     if (textareaElement) setTimeout(() => textareaElement?.focus(), 0);
   }
 
@@ -644,9 +657,69 @@
     if (handledAny) e.preventDefault();
   }
 
+  // Android: the picker returns a content URI (not an absolute path), so picked
+  // files are read as bytes. The OS offers no single files+photos picker, so the
+  // composer shows two buttons backed by these two handlers. There is no
+  // transparent-window dance to perform.
+  //
+  // Image picker: photos need no conversion, so any model-supported image is
+  // ingested straight from its bytes.
+  async function handleAttachImageMobile() {
+    const supportsImages = settingsState.currentSettings["llm.supportImages"];
+    if (!supportsImages) {
+      attachLog.warn("this model has images disabled; the image picker is a no-op");
+      return;
+    }
+    const picked = await platform().dialog.openFilePicker({
+      multiple: false,
+      filters: [{ name: "Images", extensions: IMAGE_EXTENSIONS }],
+    });
+    if (picked.length === 0) return;
+    const uri = picked[0];
+    const data = await platform().fs.readFile(uri);
+    const rawName = decodeURIComponent(uri.split("/").pop() || "image");
+    const ext = rawName.split(".").pop()?.toLowerCase() || "";
+    const safeExt = IMAGE_EXTENSIONS.includes(ext) ? ext : "png";
+    const fileName = rawName.includes(".") ? rawName : `image.${safeExt}`;
+    const mime = MIME_BY_EXT[safeExt] || "image/png";
+    // .slice() yields a fresh non-shared ArrayBuffer, which Blob's BlobPart needs.
+    const blob = new Blob([data.slice().buffer], { type: mime });
+    attachments = [...attachments, await ingestImageBlob(blob, fileName, safeExt)];
+  }
+
+  // Document picker: the binary converter (anytomd/pdf-extract) is desktop-only,
+  // so on mobile only the plain-text document types (txt, md, code, csv, json,
+  // ...) are offered; their bytes are decoded as UTF-8 and ingested directly. A
+  // binary office/pdf file picked anyway is skipped with a notice.
+  async function handleAttachDocMobile() {
+    const picked = await platform().dialog.openFilePicker({
+      multiple: false,
+      filters: [{ name: "Documents", extensions: TEXT_DOC_EXTENSIONS }],
+    });
+    if (picked.length === 0) return;
+    const uri = picked[0];
+    const rawName = decodeURIComponent(uri.split("/").pop() || "document.txt");
+    const ext = rawName.split(".").pop()?.toLowerCase() || "";
+    if (!TEXT_DOC_EXTENSIONS.includes(ext)) {
+      attachLog.warn(`cannot attach .${ext} on mobile: it needs the desktop document converter`);
+      return;
+    }
+    const fileName = rawName.includes(".") ? rawName : `${rawName}.txt`;
+    const data = await platform().fs.readFile(uri);
+    const text = new TextDecoder().decode(data);
+    attachments = [...attachments, ingestTextDocument(text, fileName)];
+  }
+
   async function handleAttachFile() {
     try {
       const supportsImages = settingsState.currentSettings["llm.supportImages"];
+
+      if (onMobile) {
+        // The composer's "Attach File" button is the document picker on mobile;
+        // images have their own button (handleAttachImageMobile).
+        await handleAttachDocMobile();
+        return;
+      }
 
       const filters = [
         {
@@ -736,6 +809,13 @@
 
   async function captureMonitorById(monitorId: string) {
     if (capturing) return;
+    // A screenshot is an image attachment; skip when the model can't read images
+    // (the capture controls are hidden then, but a bound shortcut still reaches
+    // here).
+    if (!settingsState.currentSettings["llm.supportImages"]) {
+      attachLog.warn("screen capture skipped: image support is off");
+      return;
+    }
     capturing = true;
     try {
       const base64 = await captureMonitor(monitorId);
@@ -758,6 +838,10 @@
 
   async function handleCaptureRegionFromMenu() {
     if (capturing) return;
+    if (!settingsState.currentSettings["llm.supportImages"]) {
+      attachLog.warn("region capture skipped: image support is off");
+      return;
+    }
     capturing = true;
     try {
       const base64 = await captureRegion();
@@ -817,10 +901,12 @@
   attachmentSlot={attachmentRow}
   showLeftGroup={!inPromptMode}
   onAttach={handleAttachFileFromMenu}
+  onAttachImage={handleAttachImageMobile}
   {captureMonitors}
   onCaptureSelect={handleCaptureSelect}
   {capturing}
   onCaptureRegion={handleCaptureRegionFromMenu}
+  showImageCapture={!!settingsState.currentSettings["llm.supportImages"]}
   {monitors}
   selectedMonitor={settingsState.getMonitor()}
   onMonitorChange={handleMonitorChange}
@@ -831,6 +917,9 @@
   {gearTone}
   onSettings={() => viewState.navigate("settings")}
   rightSlot={inPromptMode ? promptButtons : undefined}
+  showTempToggle={sessionsState.storageEnabled && !sessionsState.started}
+  tempActive={sessionsState.isTemporary}
+  onTempToggle={() => sessionsState.toggleTemporary()}
   showVoice={!!settingsState.currentSettings["stt.enabled"]}
   voiceTitle={vadManager.enabled
     ? vadManager.listening

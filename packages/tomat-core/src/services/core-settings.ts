@@ -8,6 +8,7 @@
 
 import { paths } from "../paths.ts";
 import { errMessage, getDefaultSettings } from "@tomat/shared";
+import { db } from "../db/connection.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 
@@ -15,11 +16,19 @@ const log = getLogger("core-settings");
 
 let cached: Record<string, unknown> | null = null;
 
+// Per-client overlay cache: client id -> its sparse "client-on-core" settings
+// (only the keys that client changed from the core-global defaults). Mirrors
+// `cached` but partitioned by client. Populated lazily from the
+// `client_settings` table; replaced on patch, dropped on client revoke.
+const clientCache = new Map<string, Record<string, unknown>>();
+
 // Test-only: drops the in-memory cache so the next `loadCoreSettings()`
 // re-reads from disk. Also clears subscribers; test setup wires its own.
 export function __resetForTesting(): void {
   cached = null;
+  clientCache.clear();
   listeners.clear();
+  clientListeners.clear();
 }
 
 export type SettingsListener = (
@@ -28,6 +37,17 @@ export type SettingsListener = (
 ) => void | Promise<void>;
 
 const listeners = new Set<SettingsListener>();
+
+/** Fired after a per-client overlay PATCH with just the keys that changed for
+ *  that one client (so the hub can deliver `settings.updated` to that client
+ *  alone, never broadcasting another client's preferences). */
+export type ClientSettingsListener = (
+  clientId: string,
+  values: Record<string, unknown>,
+  deleted: string[],
+) => void | Promise<void>;
+
+const clientListeners = new Set<ClientSettingsListener>();
 
 export async function loadCoreSettings(): Promise<Record<string, unknown>> {
   if (cached) return cached;
@@ -114,6 +134,130 @@ export async function resetCoreSettings(): Promise<void> {
 export function subscribeCoreSettings(listener: SettingsListener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+// --- per-client overlay (client-on-core destination) ----------------------
+
+interface ClientSettingRow {
+  key: string;
+  value_json: string;
+}
+
+/** This client's sparse overlay: only the "client-on-core" keys it set, keyed
+ *  by setting id. Read once from the DB then cached. */
+function loadClientOverlay(clientId: string): Record<string, unknown> {
+  const hit = clientCache.get(clientId);
+  if (hit) return hit;
+  const rows = db()
+    .prepare("SELECT key, value_json FROM client_settings WHERE client_id = ?")
+    .all(clientId) as ClientSettingRow[];
+  const overlay: Record<string, unknown> = {};
+  for (const row of rows) {
+    try {
+      overlay[row.key] = JSON.parse(row.value_json);
+    } catch (err) {
+      log.warn(`dropping corrupt client_settings value for ${row.key}: ${errMessage(err)}`);
+    }
+  }
+  clientCache.set(clientId, overlay);
+  return overlay;
+}
+
+/** The effective sparse settings the core should apply for a turn owned by
+ *  `clientId`: the shared core-global values overlaid with that client's
+ *  per-client overrides (overlay wins). Still sparse - downstream readers
+ *  (boolSetting/numSetting/strSetting) apply the schema defaults. Every chat
+ *  turn and automated session reads through this so the core honors each
+ *  client's own inference preferences. */
+export async function loadEffective(clientId: string): Promise<Record<string, unknown>> {
+  const base = await loadCoreSettings();
+  return { ...base, ...loadClientOverlay(clientId) };
+}
+
+/** Apply a sparse patch to one client's overlay (null/undefined deletes a key,
+ *  reverting it to the core-global value). Returns the keys that actually
+ *  changed, split into set values and deletions, for the WS delta. */
+export async function patchClientSettings(
+  clientId: string,
+  partial: Record<string, unknown>,
+): Promise<{ values: Record<string, unknown>; deleted: string[] }> {
+  const overlay = { ...loadClientOverlay(clientId) };
+  const values: Record<string, unknown> = {};
+  const deleted: string[] = [];
+  const database = db();
+  const upsert = database.prepare(
+    "INSERT INTO client_settings (client_id, key, value_json) VALUES (?, ?, ?) " +
+      "ON CONFLICT(client_id, key) DO UPDATE SET value_json = excluded.value_json",
+  );
+  const del = database.prepare("DELETE FROM client_settings WHERE client_id = ? AND key = ?");
+  for (const [k, v] of Object.entries(partial)) {
+    if (v === null || v === undefined) {
+      if (k in overlay) {
+        del.run(clientId, k);
+        delete overlay[k];
+        deleted.push(k);
+      }
+    } else if (!Object.is(overlay[k], v)) {
+      upsert.run(clientId, k, JSON.stringify(v));
+      overlay[k] = v;
+      values[k] = v;
+    }
+  }
+  clientCache.set(clientId, overlay);
+  if (Object.keys(values).length > 0 || deleted.length > 0) {
+    for (const l of clientListeners) {
+      try {
+        await l(clientId, values, deleted);
+      } catch (err) {
+        log.error(`client settings listener error: ${errMessage(err)}`);
+      }
+    }
+  }
+  return { values, deleted };
+}
+
+/** Drop a client's overlay cache entry (the DB rows are reaped by the
+ *  ON DELETE CASCADE from `clients`). Call when a client is removed/revoked. */
+export function dropClientSettingsCache(clientId: string): void {
+  clientCache.delete(clientId);
+}
+
+/** Wipe every client's per-client overlay. Part of the core-wide factory reset:
+ *  the shared store and secrets are cleared alongside this, so the per-client
+ *  inference overrides must go too, or "clear settings" would leave each client's
+ *  agent personality (system prompt, sampling, tool/memory selection) intact.
+ *  Fires `clientListeners` with the just-deleted keys per affected client so a
+ *  connected client re-baselines to defaults without reconnecting. */
+export async function resetAllClientSettings(): Promise<void> {
+  const database = db();
+  const rows = database.prepare("SELECT client_id, key FROM client_settings").all() as {
+    client_id: string;
+    key: string;
+  }[];
+  database.exec("DELETE FROM client_settings");
+  clientCache.clear();
+  if (rows.length === 0) return;
+  const byClient = new Map<string, string[]>();
+  for (const { client_id, key } of rows) {
+    const list = byClient.get(client_id) ?? [];
+    list.push(key);
+    byClient.set(client_id, list);
+  }
+  for (const [clientId, deleted] of byClient) {
+    for (const l of clientListeners) {
+      try {
+        await l(clientId, {}, deleted);
+      } catch (err) {
+        log.error(`client settings listener error: ${errMessage(err)}`);
+      }
+    }
+  }
+}
+
+/** Subscribe to per-client overlay changes (one client's keys at a time). */
+export function subscribeClientSettings(listener: ClientSettingsListener): () => void {
+  clientListeners.add(listener);
+  return () => clientListeners.delete(listener);
 }
 
 async function writeAtomic(value: Record<string, unknown>): Promise<void> {

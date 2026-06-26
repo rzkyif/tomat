@@ -34,7 +34,7 @@ import { coreStatus } from "../services/core-status.ts";
 import { downloadManager } from "../downloads/manager.ts";
 import { subscribeUpdate } from "../update/self-updater.ts";
 import { notifyRequirementsChanged, onRequirementsChanged } from "../services/requirements.ts";
-import { subscribeCoreSettings } from "../services/core-settings.ts";
+import { subscribeClientSettings, subscribeCoreSettings } from "../services/core-settings.ts";
 import { subscribeSecretsChanged } from "../services/secrets.ts";
 import { onBinaryInstalled } from "../binaries/manager.ts";
 import { AppError } from "../shared/errors.ts";
@@ -366,6 +366,25 @@ class WsHub {
       }
       if (Object.keys(values).length > 0 || deleted.length > 0) {
         this.broadcastAll({ kind: "settings.updated", values, deleted });
+      }
+    });
+    // Per-client overlay changes go ONLY to the owning client, never broadcast:
+    // another client must not see (or converge onto) someone else's preferences.
+    // These keys are all client-on-core inference knobs, so no requirements
+    // recompute is needed (model files etc. are core-global).
+    subscribeClientSettings((clientId, rawValues, rawDeleted) => {
+      const values: Record<string, unknown> = {};
+      const deleted: string[] = [];
+      for (const [key, v] of Object.entries(rawValues)) {
+        if (!isValidSettingKey(key) || isSecretSettingKey(key)) continue;
+        values[key] = v;
+      }
+      for (const key of rawDeleted) {
+        if (!isValidSettingKey(key) || isSecretSettingKey(key)) continue;
+        deleted.push(key);
+      }
+      if (Object.keys(values).length > 0 || deleted.length > 0) {
+        this.broadcastToClient(clientId, { kind: "settings.updated", values, deleted });
       }
     });
     // Vault changes ride the same frame as a names-only field so the

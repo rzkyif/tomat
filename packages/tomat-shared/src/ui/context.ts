@@ -31,6 +31,12 @@ export interface UiContext {
    *  override) matches the client at default settings, instead of each caller
    *  deciding the mic button's presence by hand. */
   readonly sttEnabled: boolean;
+  /** Whether the model supports image input (`llm.supportImages`). Drives the
+   *  composer's screen/region capture controls and the mobile image picker, so
+   *  the DEFAULT rendition (no host override) matches the client: with image
+   *  support off, capturing a screenshot would attach an image the model can't
+   *  read, so those affordances are hidden. */
+  readonly imagesEnabled: boolean;
   /** Optional per-system-message base color hex override (appearance setting),
    *  or undefined when no override is set. */
   readonly systemMessageDefaultColor: string | undefined;
@@ -59,6 +65,18 @@ export interface UiContext {
   /** The primary pointer. `"coarse"` (touch) Views gate hover-only affordances
    *  behind `pointer === "fine"`. */
   readonly pointer: "fine" | "coarse";
+  /** Whether the host provides a system-level back gesture/button (Android),
+   *  so in-app back / close affordances are redundant and Views drop them. False
+   *  on desktop (keeps Esc + close buttons) and on iOS (no system back, so the
+   *  on-screen back / close chrome stays). Set true only on Android. */
+  readonly hasSystemBack: boolean;
+  /** Register a back-navigation interceptor with the host (e.g. an open overlay
+   *  wanting the Android back button / Esc to close it before the app navigates
+   *  away). The handler returns `true` when it consumed the press. Returns a
+   *  disposer; call it when the overlay closes. The client wires this to its
+   *  back-handler registry; with no provider (website) it is an inert no-op, so
+   *  a shared overlay never reaches into client code to own back. */
+  registerBack(handler: () => boolean): () => void;
 }
 
 /** Vertical gap between chat bubbles, as a CSS length. With the frosted halo on,
@@ -70,7 +88,11 @@ export interface UiContext {
  *  globally (the client writes it from appearance.bubbleShadowDistance; the
  *  website inherits the base default). */
 export function bubbleGap(ui: UiContext): string {
-  return ui.bubbleBlurEnabled ? "calc(0.5rem + 2 * var(--bubble-shadow-distance))" : "0.5rem";
+  // Mobile bubbles have no shadow/halo (see Bubble.svelte), so they need no
+  // extra clearance: keep the tight default gap.
+  return ui.bubbleBlurEnabled && ui.platform !== "mobile"
+    ? "calc(0.5rem + 2 * var(--bubble-shadow-distance))"
+    : "0.5rem";
 }
 
 const KEY = Symbol("tomat:ui-context");
@@ -93,6 +115,10 @@ export interface UiContextSources {
   platform?: "desktop" | "mobile";
   density?: "comfortable" | "compact";
   pointer?: "fine" | "coarse";
+  /** Whether the host has a system back gesture (Android). Default: false. */
+  hasSystemBack?: boolean;
+  /** Register a back-navigation interceptor. Default: inert no-op disposer. */
+  registerBack?: (handler: () => boolean) => () => void;
 }
 
 /** Build a `UiContext` from host-specific sources. The settings-derived members
@@ -103,7 +129,13 @@ export interface UiContextSources {
 export function makeUiContext(sources: UiContextSources): UiContext {
   const { getSetting } = sources;
   return {
-    getAlignment: () => (getSetting("layout.alignment") as Alignment | undefined) ?? "center",
+    // Mobile is a single fullscreen activity with no window alignment, so the
+    // chat column and every non-message bubble center; the chat message Views
+    // override per sender (user right, agent left). Desktop follows the setting.
+    getAlignment: () =>
+      (sources.platform ?? "desktop") === "mobile"
+        ? "center"
+        : ((getSetting("layout.alignment") as Alignment | undefined) ?? "center"),
     get bubbleBlurEnabled() {
       return getSetting("appearance.bubbleBlurEnabled") !== false;
     },
@@ -112,6 +144,9 @@ export function makeUiContext(sources: UiContextSources): UiContext {
     },
     get sttEnabled() {
       return getSetting("stt.enabled") !== false;
+    },
+    get imagesEnabled() {
+      return getSetting("llm.supportImages") === true;
     },
     get systemMessageDefaultColor() {
       // A fully transparent value means "no override" (fall back to the base).
@@ -125,6 +160,8 @@ export function makeUiContext(sources: UiContextSources): UiContext {
     platform: sources.platform ?? "desktop",
     density: sources.density ?? "comfortable",
     pointer: sources.pointer ?? "fine",
+    hasSystemBack: sources.hasSystemBack ?? false,
+    registerBack: sources.registerBack ?? (() => () => {}),
   };
 }
 

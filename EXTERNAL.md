@@ -211,3 +211,25 @@ they belong on the same map.
   [update README](packages/tomat-core/src/update/README.md) and the
   [website README](packages/tomat-website/README.md). Listed here only so the
   cross-cutting verification path is discoverable from one place.
+
+### Android APK self-update (`android.json` + Java keystore)
+
+- **Used for:** the Android client's self-update (the Tauri updater plugin has no
+  Android support, so this path is bespoke).
+- **Code:** manifest published by
+  [release/android.ts](scripts/release/android.ts); verified + installed by
+  [mobile.ts](packages/tomat-client/src/ui/lib/platform/mobile.ts)
+  (`checkAndroidUpdate`), which checks `android.json.sig` (Ed25519, same public
+  key as above) and the per-ABI `sha256` before handing the APK to Android's
+  package installer.
+- **Assumes:**
+  `get.au.tomat.ing/{manifests/<channel>/}android.json` (+ `.sig`) and the APK at
+  `{channel-prefix}/v<ver>/<abi>/tomat.apk`. The APK is signed by a Java keystore
+  (base64 in `.env` as `TOMAT_ANDROID_KEYSTORE_B64`); Android rejects an update
+  not signed by the same key as the install, so a keystore change breaks
+  upgrades for already-installed users.
+- **Fails as:** the in-app updater silently returns "no update" (signature or
+  hash mismatch), or Android refuses to install (keystore mismatch).
+- **Fix:** keep the keystore stable across releases; the Android `versionCode`
+  is Tauri-derived from `tauri.conf.json` `version`, so a same-version re-spin is
+  NOT installable over the prior build without an uninstall (bump the version).

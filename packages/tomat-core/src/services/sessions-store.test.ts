@@ -6,7 +6,7 @@
 import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import type { Message } from "@tomat/shared";
-import { sessionsRepo } from "./sessions-store.ts";
+import { sessionsRepo, sweepOrphanedSessionDirs } from "./sessions-store.ts";
 import { createTestClient, setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
 import { newMessageId } from "../shared/ids.ts";
@@ -255,6 +255,97 @@ Deno.test("SessionsRepo: deleting a session removes its messages", async () => {
     repo.appendMessage(s.id, userMessage("doomed"));
     repo.delete(owner, s.id);
     assertEquals(repo.listMessages(s.id), []);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("SessionsRepo: temporary session is RAM-only and excluded from every listing", async () => {
+  const env = await setupTestEnv();
+  try {
+    const repo = sessionsRepo();
+    const owner = createTestClient("owner");
+    const persistent = repo.create({ ownerClientId: owner, title: "kept" });
+    const temp = repo.create({ ownerClientId: owner, temporary: true });
+
+    // The flag round-trips, and nothing was written to disk for it.
+    assertEquals(temp.temporary, true);
+    assertThrows(
+      () => Deno.statSync(join(paths().sessionsDir, temp.id, "session.json")),
+      Deno.errors.NotFound,
+    );
+
+    // CRUD works through the in-memory map.
+    repo.getOrThrow(owner, temp.id);
+    repo.appendMessage(temp.id, userMessage("secret"));
+    assertEquals(repo.listMessages(temp.id).length, 1);
+    repo.patchTitle(owner, temp.id, "still hidden");
+    assertEquals(repo.getOrThrow(owner, temp.id).title, "still hidden");
+
+    // Excluded from the per-client list and the cross-client storage view.
+    assertEquals(
+      repo.list(owner).map((s) => s.id),
+      [persistent.id],
+    );
+    assertEquals(
+      repo.listAll().map((s) => s.id),
+      [persistent.id],
+    );
+
+    // Deleting drops it from the map; subsequent reads fail.
+    repo.delete(owner, temp.id);
+    assertThrows(() => repo.getOrThrow(owner, temp.id), AppError);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("SessionsRepo.sweepClientTemporary: drops the caller's other temporary sessions only", async () => {
+  const env = await setupTestEnv();
+  try {
+    const repo = sessionsRepo();
+    const a = createTestClient("a");
+    const b = createTestClient("b");
+    const keep = repo.create({ ownerClientId: a, temporary: true });
+    const orphan = repo.create({ ownerClientId: a, temporary: true });
+    const persistent = repo.create({ ownerClientId: a, title: "kept" });
+    const otherClientTemp = repo.create({ ownerClientId: b, temporary: true });
+
+    repo.sweepClientTemporary(a, keep.id);
+
+    // The kept session survives; the orphaned temporary one is gone.
+    repo.getOrThrow(a, keep.id);
+    assertThrows(() => repo.getOrThrow(a, orphan.id), AppError);
+    // A persistent session of the same client is never swept.
+    repo.getOrThrow(a, persistent.id);
+    // Another client's temporary session is out of scope.
+    repo.getOrThrow(b, otherClientTemp.id);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("sweepOrphanedSessionDirs: removes attachments-only dirs, keeps real sessions", async () => {
+  const env = await setupTestEnv();
+  try {
+    const repo = sessionsRepo();
+    const owner = createTestClient("owner");
+    const real = repo.create({ ownerClientId: owner, title: "real" });
+
+    // Simulate a temporary session's leftover attachment dir: a session
+    // directory with no session.json (its doc lived only in RAM).
+    const orphanDir = join(paths().sessionsDir, "orphan-temp", "attachments");
+    Deno.mkdirSync(orphanDir, { recursive: true });
+    Deno.writeTextFileSync(join(orphanDir, "file.bin"), "bytes");
+
+    sweepOrphanedSessionDirs();
+
+    assertThrows(
+      () => Deno.statSync(join(paths().sessionsDir, "orphan-temp")),
+      Deno.errors.NotFound,
+    );
+    // The real session, which has a session.json, is untouched.
+    assertEquals(Deno.statSync(join(paths().sessionsDir, real.id, "session.json")).isFile, true);
   } finally {
     await env.teardown();
   }

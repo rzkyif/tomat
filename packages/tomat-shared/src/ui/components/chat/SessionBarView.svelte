@@ -11,6 +11,10 @@
   // Alignment comes from the UI context so both apps match. (Which core you're
   // on is shown by the CoreBar, not here.)
   const ui = useUiContext();
+  // Mobile pares the session controls down to the two that matter on a phone:
+  // open the session list and start a new session. Prev / next paging and the
+  // inline delete are dropped (the list view owns delete via long-press).
+  const mobile = $derived(ui.platform === "mobile");
 
   let {
     tokenUsage = null,
@@ -23,6 +27,7 @@
     onTitleKeydown,
     generatingTitle = false,
     onRegenerateTitle,
+    temporary = false,
     showButtonGroup = false,
     prevDisabled = false,
     nextDisabled = false,
@@ -46,6 +51,10 @@
     onTitleKeydown?: (e: KeyboardEvent) => void;
     generatingTitle?: boolean;
     onRegenerateTitle?: () => void;
+    /** Temporary (RAM-only) session: the title is a fixed, non-editable
+     *  "Temporary Session" label with no regenerate button, signalling that
+     *  the chat is never saved. */
+    temporary?: boolean;
     showButtonGroup?: boolean;
     prevDisabled?: boolean;
     nextDisabled?: boolean;
@@ -97,7 +106,16 @@
       </div>
     {/if}
 
-    {#if showTitle}
+    {#if temporary}
+      <!-- Temporary session: a fixed, non-editable label (no input, no
+           regenerate) so it reads as a chat that is never saved. -->
+      <div
+        class="flex items-center gap-1.5 min-w-0 h-8 px-3 overflow-hidden bg-surface-inset rounded-large text-sm text-default-700"
+      >
+        <i class="flex i-material-symbols-timer-outline-rounded shrink-0"></i>
+        <span class="truncate">Temporary Session</span>
+      </div>
+    {:else if showTitle}
       <!-- Title (grid overlap technique for auto-sizing). The container is the
            only `min-w-0` flex item, so it absorbs the squeeze when the bubble
            hits its max width; the invisible span sizes it and the input shows an
@@ -143,30 +161,34 @@
           size="sm"
           onclick={() => onList?.()}
         />
-        <IconButton
-          icon="i-material-symbols-chevron-left-rounded"
-          title="Previous Session"
-          size="sm"
-          disabled={prevDisabled}
-          onclick={() => onPrev?.()}
-        />
-        <IconButton
-          icon="i-material-symbols-chevron-right-rounded"
-          title="Next Session"
-          size="sm"
-          disabled={nextDisabled}
-          onclick={() => onNext?.()}
-        />
-        {#if !isNewSession}
+        {#if !mobile}
           <IconButton
-            icon={confirmingDelete
-              ? "i-material-symbols-delete-forever-rounded"
-              : "i-material-symbols-delete-outline-rounded"}
-            title={confirmingDelete ? "Confirm Delete" : "Delete Session"}
+            icon="i-material-symbols-chevron-left-rounded"
+            title="Previous Session"
             size="sm"
-            onclick={() => onDelete?.()}
-            data-delete-btn
+            disabled={prevDisabled}
+            onclick={() => onPrev?.()}
           />
+          <IconButton
+            icon="i-material-symbols-chevron-right-rounded"
+            title="Next Session"
+            size="sm"
+            disabled={nextDisabled}
+            onclick={() => onNext?.()}
+          />
+        {/if}
+        {#if !isNewSession}
+          {#if !mobile}
+            <IconButton
+              icon={confirmingDelete
+                ? "i-material-symbols-delete-forever-rounded"
+                : "i-material-symbols-delete-outline-rounded"}
+              title={confirmingDelete ? "Confirm Delete" : "Delete Session"}
+              size="sm"
+              onclick={() => onDelete?.()}
+              data-delete-btn
+            />
+          {/if}
           <IconButton
             icon="i-material-symbols-add-rounded"
             title="New Session"

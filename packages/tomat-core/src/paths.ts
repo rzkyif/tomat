@@ -113,6 +113,7 @@ export interface CorePaths {
   secretsEncFile: string;
   secretsPlainFile: string;
   adminTokenFile: string;
+  adminPasswordFile: string;
   dbFile: string;
   binDir: string;
   binLibDir: string;
@@ -126,6 +127,11 @@ export interface CorePaths {
   cacheDir: string;
   logsDir: string;
   logFile: string;
+  // One-line reason for the most recent fatal boot failure (port in use, missing
+  // helper, DB unwritable, ...). Written by main.ts on the fatal path and cleared
+  // once the listener binds, so a supervising client / the install script can
+  // surface why the core won't come up instead of an opaque connection timeout.
+  bootErrorFile: string;
   // Written by self-updater before the binary swap; consumed by main.ts on
   // startup to detect post-update first boot vs. crash-loop after a failed
   // update (→ rollback). See update/rollback.ts.
@@ -158,6 +164,7 @@ export function paths(): CorePaths {
     secretsEncFile: join(root, "secrets.enc"),
     secretsPlainFile: join(root, "secrets.json"),
     adminTokenFile: join(root, ".admin-token"),
+    adminPasswordFile: join(root, ".admin-password"),
     dbFile: join(root, "core.sqlite"),
     binDir: bin,
     binLibDir: join(bin, "lib"),
@@ -173,6 +180,7 @@ export function paths(): CorePaths {
     cacheDir: cache,
     logsDir: logs,
     logFile: join(logs, "core.log"),
+    bootErrorFile: join(root, "last-error.txt"),
     updateMarkerFile: join(root, "update.pending.json"),
     builtinSeededMarkerFile: join(root, "builtin-seeded"),
   };

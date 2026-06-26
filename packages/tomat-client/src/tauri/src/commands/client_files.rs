@@ -13,6 +13,7 @@
 use crate::error::{AppError, AppResult};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use tauri::AppHandle;
 
 /// The fixed-name client JSON files. The enum is the allowlist: the frontend
 /// can only ever address these, never an arbitrary path.
@@ -33,13 +34,13 @@ impl ClientFile {
 }
 
 #[tauri::command]
-pub fn read_client_file(file: ClientFile) -> AppResult<Value> {
-    read_json_at(&client_root()?.join(file.filename()))
+pub fn read_client_file(handle: AppHandle, file: ClientFile) -> AppResult<Value> {
+    read_json_at(&client_root(&handle)?.join(file.filename()))
 }
 
 #[tauri::command]
-pub fn write_client_file(file: ClientFile, data: Value) -> AppResult<()> {
-    write_json_at(&client_root()?.join(file.filename()), data)
+pub fn write_client_file(handle: AppHandle, file: ClientFile, data: Value) -> AppResult<()> {
+    write_json_at(&client_root(&handle)?.join(file.filename()), data)
 }
 
 // --- snippets ---------------------------------------------------------------
@@ -49,22 +50,22 @@ pub fn write_client_file(file: ClientFile, data: Value) -> AppResult<()> {
 /// content are skipped (with a log) rather than failing the whole read: a
 /// user-dropped file must never brick the snippet list.
 #[tauri::command]
-pub fn read_client_snippets() -> AppResult<serde_json::Map<String, Value>> {
-    read_snippets_in(&snippets_dir()?)
+pub fn read_client_snippets(handle: AppHandle) -> AppResult<serde_json::Map<String, Value>> {
+    read_snippets_in(&snippets_dir(&handle)?)
 }
 
 #[tauri::command]
-pub fn write_client_snippet(name: String, data: Value) -> AppResult<()> {
+pub fn write_client_snippet(handle: AppHandle, name: String, data: Value) -> AppResult<()> {
     validate_snippet_name(&name)?;
-    write_json_at(&snippets_dir()?.join(format!("{name}.json")), data)
+    write_json_at(&snippets_dir(&handle)?.join(format!("{name}.json")), data)
 }
 
 /// Remove a snippet file. NotFound-tolerant: deleting an already-gone snippet
 /// is success.
 #[tauri::command]
-pub fn delete_client_snippet(name: String) -> AppResult<()> {
+pub fn delete_client_snippet(handle: AppHandle, name: String) -> AppResult<()> {
     validate_snippet_name(&name)?;
-    match std::fs::remove_file(snippets_dir()?.join(format!("{name}.json"))) {
+    match std::fs::remove_file(snippets_dir(&handle)?.join(format!("{name}.json"))) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(AppError::Io(e)),
@@ -160,14 +161,10 @@ pub fn write_json_at(path: &Path, data: Value) -> AppResult<()> {
     Ok(())
 }
 
-fn client_root() -> AppResult<PathBuf> {
-    let home = std::env::home_dir()
-        .ok_or_else(|| AppError::external("could not determine home directory"))?;
-    Ok(crate::channel::channel_root(&home).join("client"))
-}
+use super::paths::client_root;
 
-fn snippets_dir() -> AppResult<PathBuf> {
-    Ok(client_root()?.join("snippets"))
+fn snippets_dir(handle: &AppHandle) -> AppResult<PathBuf> {
+    Ok(client_root(handle)?.join("snippets"))
 }
 
 #[cfg(test)]

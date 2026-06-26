@@ -10,6 +10,7 @@
 
 import { join } from "@std/path";
 import { AppError } from "../shared/errors.ts";
+import { HF_BASE_URL } from "../config.ts";
 import type { DownloadPlan } from "@tomat/shared";
 
 export interface ParsedSource {
@@ -46,7 +47,7 @@ export function parseSource(source: string): ParsedSource {
   const filename = fileParts.join("/");
   for (const seg of filename.split("/")) assertSafeComponent(seg, source);
   const relPath = `${username}/${reponame}/${filename}`;
-  const url = `https://huggingface.co/${username}/${reponame}/resolve/${branchname}/${filename}?download=true`;
+  const url = `${HF_BASE_URL}/${username}/${reponame}/resolve/${branchname}/${filename}?download=true`;
   const baseName = filename.split("/").pop() ?? filename;
   return { relPath, url, filename: baseName };
 }

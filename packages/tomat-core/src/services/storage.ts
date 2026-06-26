@@ -28,7 +28,11 @@ import { extensionsRegistry } from "../extensions/registry.ts";
 import { deleteExtension } from "../extensions/uninstall.ts";
 import { sessionsRepo } from "./sessions-store.ts";
 import { chatService } from "./chat.ts";
-import { loadCoreSettingsResolved, resetCoreSettings } from "./core-settings.ts";
+import {
+  loadCoreSettingsResolved,
+  resetAllClientSettings,
+  resetCoreSettings,
+} from "./core-settings.ts";
 import { clearAllSecrets } from "./secrets.ts";
 import { notifyRequirementsChanged } from "./requirements.ts";
 
@@ -388,6 +392,7 @@ const CATEGORIES: CategoryDescriptor[] = [
     },
     deleteNode: async () => {
       await resetCoreSettings();
+      await resetAllClientSettings();
       await clearAllSecrets();
     },
   },

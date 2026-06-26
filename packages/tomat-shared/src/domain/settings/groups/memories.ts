@@ -5,7 +5,11 @@ import type { SettingGroup } from "../types.ts";
 // options.
 export const memoriesGroup: SettingGroup = {
   id: "memories",
-  destination: "core",
+  // Hybrid. The memories themselves are a shared store on the core (core); how
+  // many to surface and whether to auto-apply skills is a per-client preference
+  // the core applies per turn (client-on-core). The header shows "Client" +
+  // "Core" chips.
+  destination: ["client-on-core", "core"],
   name: "Memories",
   description:
     "Knowledge the agent can read and skills it can follow. Reference one while typing with its trigger.",
@@ -19,6 +23,8 @@ export const memoriesGroup: SettingGroup = {
   sections: [
     {
       tab: "config",
+      label: "Relevant Memories",
+      destination: "client-on-core",
       fields: [
         {
           id: "memories.enabled",
@@ -65,6 +71,7 @@ export const memoriesGroup: SettingGroup = {
     },
     {
       tab: "manage",
+      destination: "core",
       fields: [
         {
           id: "memories.list",

@@ -10,6 +10,8 @@
   import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
   import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
   import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
+  import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
+  import { useUiContext } from "@tomat/shared/ui/context";
   import QuickSettingsSection from "./QuickSettingsSection.svelte";
   import { QUICK_SETTINGS_SECTIONS, type QuickSettingsSectionDef } from "./manifest";
   import { downloadsState, settingsState, viewState } from "$stores";
@@ -18,6 +20,14 @@
 
   const form = useSettingsForm();
   const layout = useResponsiveLayout();
+  const ui = useUiContext();
+  // On mobile the panel mounts permanently in the chat shell and presents itself
+  // as a draggable Modal bottom sheet that self-gates on the view mode (rising
+  // over the live chat instead of replacing it). The Modal supplies the surface,
+  // padding, rounding, and slide, so the content renders bare inside it. On
+  // desktop the panel is rendered by the route only while in quickSettings mode,
+  // so it draws its own Bubble with no gating.
+  const mobile = $derived(ui.platform === "mobile");
 
   // Track the user's horizontal-mode threshold setting (same wiring as the
   // full Settings panel).
@@ -70,10 +80,25 @@
   }
 </script>
 
-<Bubble
-  selectedAlignment={settingsState.getAlignment()}
-  extraClass="flex flex-col gap-3 w-[34rem] max-w-full max-h-[80vh] overflow-hidden"
->
+{#if mobile}
+  <Modal
+    open={viewState.mode === "quickSettings"}
+    onclose={exit}
+    positioning="fixed"
+    ariaLabel="Quick Settings"
+  >
+    {@render content()}
+  </Modal>
+{:else}
+  <Bubble
+    selectedAlignment={settingsState.getAlignment()}
+    extraClass="flex flex-col gap-3 w-[34rem] max-w-full max-h-[80vh] overflow-hidden"
+  >
+    {@render content()}
+  </Bubble>
+{/if}
+
+{#snippet content()}
   <!-- Header -->
   <div class="flex items-center gap-2 shrink-0">
     <i class="flex i-material-symbols-bolt-rounded text-2xl text-default-700"
@@ -120,4 +145,4 @@
   >
     {exitLabel}
   </Button>
-</Bubble>
+{/snippet}

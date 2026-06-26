@@ -130,6 +130,16 @@ export interface DeployEnv {
   tauriUpdaterPublicKey: string;
   tauriUpdaterPrivateKey: string;
   tauriUpdaterPassword: string;
+  /** Android release keystore (base64 of the .jks) + its passwords/alias. Empty
+   *  when the user hasn't set up Android signing yet; the release orchestrator
+   *  skips the android item with a yellow warning when the keystore is missing.
+   *  Unlike the desktop client, the APK is not self-update-signed by Tauri (the
+   *  updater plugin has no Android support); the keystore signs the APK for
+   *  install and the Ed25519 signingPrivateKey signs android.json. */
+  androidKeystoreB64: string;
+  androidKeystorePassword: string;
+  androidKeyAlias: string;
+  androidKeyPassword: string;
 }
 
 export async function loadOrSeedEnv(): Promise<DeployEnv> {
@@ -191,6 +201,10 @@ export async function loadOrSeedEnv(): Promise<DeployEnv> {
     tauriUpdaterPublicKey: tauriPub,
     tauriUpdaterPrivateKey: tauriPriv,
     tauriUpdaterPassword: get("TAURI_UPDATER_PRIVATE_KEY_PASSWORD"),
+    androidKeystoreB64: get("TOMAT_ANDROID_KEYSTORE_B64"),
+    androidKeystorePassword: get("TOMAT_ANDROID_KEYSTORE_PASSWORD"),
+    androidKeyAlias: get("TOMAT_ANDROID_KEY_ALIAS") || "upload",
+    androidKeyPassword: get("TOMAT_ANDROID_KEY_PASSWORD") || get("TOMAT_ANDROID_KEYSTORE_PASSWORD"),
   };
 }
 

@@ -81,6 +81,19 @@ class CoresRegistry {
 
   async addPaired(entry: PairedCoreEntry, token: string): Promise<void> {
     await platform().keychain.set(entry.id, token);
+    // Verify the token actually landed before recording the core. A keychain
+    // write can fail silently (access denied, the keychain is locked) on some
+    // platforms; without this read-back the entry would persist with an
+    // unreadable token and surface only later as a dead, unrecoverable
+    // connection. Failing here keeps the user in the pairing flow where a retry
+    // is obvious.
+    const stored = await platform().keychain.get(entry.id);
+    if (stored !== token) {
+      throw new Error(
+        "Could not save this core's access token to the system keychain. " +
+          "Grant keychain access (or unlock it) and pair again.",
+      );
+    }
     const cores = await this.list();
     const updated = cores.filter((c) => c.id !== entry.id).concat(entry);
     await this.writeCores(updated, entry.id);

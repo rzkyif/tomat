@@ -280,3 +280,67 @@ describe("streamingState live == reload parity", () => {
     expect(messagesState.messages.find((m) => m.id === "t1")?.status).toBe("completed");
   });
 });
+
+// First-token watchdog: a provider that accepts the request but never streams a
+// token would spin the loading sentinel forever. The watchdog surfaces an error
+// and interrupts the turn, but only while genuinely awaiting the first token.
+describe("streamingState first-token watchdog", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    hoisted.wsListener = null;
+    hoisted.started = [];
+    hoisted.interrupts = [];
+    streamingState.detach();
+    streamingState.resetForSession();
+    messagesState.clear();
+    sessionsState.id = "s1";
+  });
+  afterEach(() => {
+    streamingState.detach();
+    streamingState.resetForSession();
+    sessionsState.id = null;
+    vi.useRealTimers();
+  });
+
+  it("errors and interrupts when no first token ever arrives", () => {
+    streamingState.attach();
+    messagesState.hydrate([{ id: "u1", role: "user", content: "hi" }], null);
+    streamingState.beginTurn(null);
+    streamingState.start();
+    const streamId = streamingState.streamId!;
+    expect(streamingState.awaitingFirstDelta).toBe(true);
+
+    vi.advanceTimersByTime(120_000);
+
+    expect(streamingState.isActive).toBe(false);
+    expect(hoisted.interrupts).toEqual([streamId]);
+    const err = messagesState.messages.find((m) => m.role === "error");
+    expect(typeof err?.content === "string" && err.content.includes("too long")).toBe(true);
+  });
+
+  it("does not fire once the first token has arrived", () => {
+    streamingState.attach();
+    messagesState.hydrate([{ id: "u1", role: "user", content: "hi" }], null);
+    streamingState.beginTurn(null);
+    streamingState.start();
+    const streamId = streamingState.streamId!;
+
+    const born = {
+      kind: "chat.message",
+      streamId,
+      sessionId: "s1",
+      message: { id: "a1", role: "assistant", content: "" },
+      afterId: "u1",
+      final: false,
+    } as unknown as ServerToClientFrame;
+    hoisted.wsListener?.(born);
+    expect(streamingState.awaitingFirstDelta).toBe(false);
+
+    vi.advanceTimersByTime(120_000);
+
+    // The watchdog was disarmed by the birth: no error, no interrupt, turn lives.
+    expect(messagesState.messages.find((m) => m.role === "error")).toBeUndefined();
+    expect(hoisted.interrupts).toEqual([]);
+    expect(streamingState.isActive).toBe(true);
+  });
+});

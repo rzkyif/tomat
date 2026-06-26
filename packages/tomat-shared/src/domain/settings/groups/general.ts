@@ -2,7 +2,7 @@ import type { SettingGroup } from "../types.ts";
 
 export const generalGroup: SettingGroup = {
   id: "general",
-  destination: "client",
+  destination: "client-on-client",
   name: "General",
   icon: "i-material-symbols-tune-rounded",
   iconInactive: "i-material-symbols-tune-rounded",
@@ -80,6 +80,8 @@ export const generalGroup: SettingGroup = {
     },
     {
       label: "Launch",
+      // Start-at-login is a desktop-only concept; mobile apps have no autostart.
+      desktopOnly: true,
       fields: [
         {
           id: "general.launch.autostart",

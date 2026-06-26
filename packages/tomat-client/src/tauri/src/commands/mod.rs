@@ -13,16 +13,27 @@
 //!   (settings.json, cores.json, snippets/).
 //! - [`keychain`]: per-core bearer token storage via the OS keychain.
 
-pub mod capture;
+// Shared commands (compiled on every platform).
 pub mod client_files;
 pub mod client_storage;
-pub mod fonts;
 pub mod keychain;
 pub mod net;
-pub mod pairing;
+pub mod paths;
 pub mod process;
+
+// Desktop-only commands. Each backs a host feature with no Android equivalent
+// (windowing / global shortcuts, screen capture, font enumeration, local-core
+// install); the mobile Platform impl stubs the corresponding methods.
+#[cfg(desktop)]
+pub mod capture;
+#[cfg(desktop)]
+pub mod fonts;
+#[cfg(desktop)]
+pub mod pairing;
+#[cfg(desktop)]
 pub mod window;
 
+#[cfg(desktop)]
 pub use capture::{
     capture_monitor, capture_monitor_region, get_region_capture_target,
     hide_region_capture_overlay, list_capture_monitors, set_region_capture_target,
@@ -33,30 +44,42 @@ pub use client_files::{
     write_client_snippet,
 };
 pub use client_storage::{get_client_storage, truncate_client_log};
+#[cfg(desktop)]
 pub use fonts::list_system_fonts;
 pub use keychain::{
     init_default_store, keychain_delete_token, keychain_get_token, keychain_set_token,
 };
+#[cfg(desktop)]
+pub use net::discover_lan_cores;
 pub use net::{net_fetch, net_ws_close, net_ws_open, net_ws_send};
+#[cfg(desktop)]
 pub use pairing::{
     install_local_core, local_core_base_url, local_core_installed, local_sidecar_ports,
-    read_admin_token, read_launch_prefill, start_local_core,
+    read_admin_token, read_launch_prefill, read_local_core_boot_error, start_local_core,
 };
-pub use process::{get_self_metrics, was_autostarted};
+pub use process::get_self_metrics;
+#[cfg(desktop)]
+pub use process::was_autostarted;
+#[cfg(desktop)]
 pub use window::{
     hide_main_window, position_window, request_hide_main_window, set_global_shortcut,
     set_input_shortcuts, show_main_window, toggle_main_window, validate_shortcut,
 };
 
-use crate::error::{AppError, AppResult};
-use crate::state::AppState;
-use tauri::{AppHandle, Manager, State};
+use crate::error::AppResult;
+use tauri::AppHandle;
+// `Manager` brings `handle.path()` into scope for tilde expansion + file
+// conversion, both of which are desktop-only (android has no home dir and routes
+// conversion through the core), so it is unused on android.
+#[cfg(not(target_os = "android"))]
+use tauri::Manager;
 
 // -------------------------------------------------------------------
-// System volume
+// System volume (desktop only: no app-level OS volume control on Android)
 // -------------------------------------------------------------------
 
 /// Read the default output device's master volume as a 0–100 percent value.
+#[cfg(desktop)]
 #[tauri::command]
 pub async fn get_system_volume() -> AppResult<u8> {
     Ok(cpvc::get_system_volume())
@@ -65,8 +88,12 @@ pub async fn get_system_volume() -> AppResult<u8> {
 /// Lower the system volume to `percent` of its current value for the duration
 /// of an STT listening session, capturing the original level into
 /// `state.saved_volume` so it can be restored later.
+#[cfg(desktop)]
 #[tauri::command]
-pub async fn set_system_volume(state: State<'_, AppState>, percent: u8) -> AppResult<()> {
+pub async fn set_system_volume(
+    state: tauri::State<'_, crate::state::AppState>,
+    percent: u8,
+) -> AppResult<()> {
     let percent = percent.min(100);
     let baseline: u8 = {
         let mut saved = state
@@ -93,8 +120,11 @@ pub async fn set_system_volume(state: State<'_, AppState>, percent: u8) -> AppRe
 }
 
 /// Restore the previously-captured system volume (set by `set_system_volume`).
+#[cfg(desktop)]
 #[tauri::command]
-pub async fn restore_system_volume(state: State<'_, AppState>) -> AppResult<()> {
+pub async fn restore_system_volume(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> AppResult<()> {
     let prev = {
         let mut saved = state
             .0
@@ -131,20 +161,43 @@ pub fn expand_tilde(path: &str, home: &std::path::Path) -> String {
 /// Expand a leading `~` in the given path to the user's home directory.
 #[tauri::command]
 pub fn resolve_path(handle: AppHandle, path: String) -> AppResult<String> {
-    if path.starts_with('~') {
+    if !path.starts_with('~') {
+        return Ok(expand_tilde(&path, std::path::Path::new("")));
+    }
+    // Tilde expansion needs a home directory. Android has none, so a `~` path is
+    // left untouched there rather than erroring; on desktop it expands normally.
+    #[cfg(target_os = "android")]
+    {
+        let _ = &handle;
+        Ok(path)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
         let home = handle.path().home_dir()?;
         Ok(expand_tilde(&path, &home))
-    } else {
-        Ok(expand_tilde(&path, std::path::Path::new("")))
     }
 }
 
+/// The install channel baked into this build ("stable" | "dev" | "latest").
+/// The Android self-host updater uses it to target the matching channel's
+/// android.json instead of always reading stable's.
+#[tauri::command]
+pub fn client_channel() -> &'static str {
+    crate::channel::channel()
+}
+
 // -------------------------------------------------------------------
-// File conversion (anytomd + pdf-extract)
+// File conversion (anytomd + pdf-extract). Desktop only: those crates are
+// not built for Android; mobile attachments route through the core instead.
 // -------------------------------------------------------------------
 
+#[cfg(desktop)]
+use crate::error::AppError;
+
+#[cfg(desktop)]
 const MAX_CONVERTIBLE_FILE_BYTES: u64 = 50 * 1024 * 1024;
 
+#[cfg(desktop)]
 const ALLOWED_CONVERTIBLE_EXTS: &[&str] = &[
     "docx", "pptx", "xlsx", "xls", "csv", "html", "htm", "txt", "md", "json", "xml", "rst", "log",
     "toml", "yaml", "ini", "py", "rs", "js", "ts", "c", "cpp", "go", "java", "pdf",
@@ -153,6 +206,7 @@ const ALLOWED_CONVERTIBLE_EXTS: &[&str] = &[
 /// Validate `path` is small enough and its extension is in the allow-list.
 /// Returns the lowercased extension (which the caller uses to pick the
 /// pdf-extract vs anytomd branch).
+#[cfg(desktop)]
 pub fn validate_convertible_file(path: &std::path::Path, size_bytes: u64) -> AppResult<String> {
     if size_bytes > MAX_CONVERTIBLE_FILE_BYTES {
         return Err(AppError::validation(format!(
@@ -176,6 +230,7 @@ pub fn validate_convertible_file(path: &std::path::Path, size_bytes: u64) -> App
 /// Convert the file at `file_path` to Markdown for attachment as document
 /// context. Kept client-side so the rich Rust crate ecosystem stays
 /// available; the client POSTs the resulting markdown to core.
+#[cfg(desktop)]
 #[tauri::command]
 pub async fn convert_file_to_markdown(file_path: String) -> AppResult<String> {
     let canonical = tokio::fs::canonicalize(&file_path).await?;

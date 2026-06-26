@@ -95,6 +95,24 @@ no `UiContext` provider mounted. It is the visual drift/QA surface (toggle the
 navbar theme for light/dark) and the source for the manual's screenshots. The
 showcase stages consume the same samples, so demo data has one home.
 
+## Interaction feedback (hover / press)
+
+Clickables use the `hov:` (+1 shade) and `act:` (+2 shade) UnoCSS variants from
+[uno-preset.ts](uno-preset.ts) with the `transition-interactive` shortcut, plus
+the shared `use:ripple` action ([actions/ripple.ts](actions/ripple.ts)) for the
+press splash. Two rules keep this working on touch:
+
+- **`hov:` only brightens on a hover-capable pointer.** The variant's real
+  `:hover` rule is gated behind `@media (hover: hover)`; only `[data-hover]`
+  (the website demo cursor) is unguarded. So a "dim until hover" resting tone
+  (e.g. `text-default-400 hov:text-default-700`) never brightens on a touch
+  device and must not be the only legible state there.
+- **Rest at the brighter shade on a coarse pointer.** A primitive whose resting
+  tone relies on hover to become legible reads `useUiContext().pointer` and,
+  when `"coarse"`, rests at the would-be hover shade (see `IconButton` `subtle`,
+  `FlushSelect`, `SidebarItem`). Press feedback then comes from the ripple, not
+  a color shift. Follow this for any new dim-until-hover control.
+
 ## Enforcement
 
 Three walkers under `scripts/lint-plugins/`, run by `deno task lint` (strict:

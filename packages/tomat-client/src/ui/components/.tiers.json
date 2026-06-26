@@ -1,6 +1,13 @@
 {
   "//": "Component-tier manifest (see packages/tomat-shared/src/ui/README.md). tier: A0 shared primitive | A shared View | B thin client wrapper of one View (set wraps) | C client-owned shell. Seeded with current state; migration phases reclassify. The check-component-tiers walker asserts every client component appears here exactly once.",
   "components": {
+    "chat/ActionSheetHost.svelte": {
+      "tier": "C"
+    },
+    "chat/ChatShell.svelte": {
+      "tier": "B",
+      "wraps": "ChatShellView"
+    },
     "chat/AttachmentList.svelte": {
       "tier": "B",
       "wraps": "AttachmentListView"
@@ -112,6 +119,9 @@
       "tier": "C"
     },
     "settings/DownloadsModal.svelte": {
+      "tier": "C"
+    },
+    "settings/PasswordPromptModal.svelte": {
       "tier": "C"
     },
     "settings/Settings.svelte": {

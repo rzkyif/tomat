@@ -175,6 +175,33 @@ export const DOC_EXTENSIONS = [
   "java",
 ];
 
+/** The subset of DOC_EXTENSIONS that is plain UTF-8 text, so it needs no binary
+ *  document converter (anytomd/pdf-extract) and can be ingested by reading the
+ *  bytes directly. Used on mobile, where the converter is unavailable. The
+ *  remainder (pdf, docx, pptx, xlsx, xls) needs the converter and is desktop-only. */
+export const TEXT_DOC_EXTENSIONS = [
+  "csv",
+  "html",
+  "htm",
+  "txt",
+  "md",
+  "json",
+  "xml",
+  "rst",
+  "log",
+  "toml",
+  "yaml",
+  "ini",
+  "py",
+  "rs",
+  "js",
+  "ts",
+  "c",
+  "cpp",
+  "go",
+  "java",
+];
+
 /** Image file types we accept (only when the model supports images). */
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
 
@@ -230,6 +257,14 @@ export async function ingestDocumentBlob(blob: Blob, filename: string): Promise<
   const file = new File([blob], filename, { type: blob.type });
   const pendingData = await platform().fileConvert.toMarkdown(file);
   return { type: "document", filename, pendingData };
+}
+
+/** Wrap already-decoded UTF-8 document text as a document Attachment, skipping
+ *  the binary converter. The text IS the content (a text/markdown/code/csv file
+ *  needs no conversion), so this is the mobile path where the converter is
+ *  unavailable. */
+export function ingestTextDocument(text: string, filename: string): Attachment {
+  return { type: "document", filename, pendingData: text };
 }
 
 /** Convert an on-disk document straight to markdown (file-picker path). */

@@ -20,7 +20,7 @@
 import type OpenAI from "openai";
 import { DEFAULT_TITLE_GENERATION_PROMPT, errMessage } from "@tomat/shared";
 import { sessionsRepo } from "./sessions-store.ts";
-import { loadCoreSettings } from "./core-settings.ts";
+import { loadEffective } from "./core-settings.ts";
 import { type LlmRequest, streamChatCompletion } from "./llm-provider.ts";
 import { resolveContextSize, resolveEndpoint } from "./endpoint-resolver.ts";
 import { thinkingBudget } from "./thinking-budget.ts";
@@ -78,6 +78,10 @@ async function generateTitle(
     } catch {
       return;
     }
+    // Temporary sessions never get a generated title: they show a fixed
+    // "Temporary Session" label in the bar, so a title would be wasted work
+    // (and a wasted LLM call).
+    if (session.temporary) return;
     // The automatic path only titles untitled sessions; the manual path
     // always regenerates.
     if (!opts.force && session.title && session.title.trim() !== "") return;
@@ -93,7 +97,9 @@ async function generateTitle(
     const firstAssistant = sessionMessages.find((m) => m.role === "assistant");
     if (!firstUser || !firstAssistant) return;
 
-    const settings = await loadCoreSettings();
+    // Honor the owner's per-client title prompt + thinking budget (client-on-core);
+    // the endpoint/context-size reads below are core-global and unaffected.
+    const settings = await loadEffective(ownerClientId);
     const template = strSetting(
       settings,
       "prompts.titleGenerationPrompt",

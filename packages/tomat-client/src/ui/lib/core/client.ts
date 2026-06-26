@@ -137,14 +137,16 @@ export class CoreClient {
     return await this.fetchJson<T>("PUT", path, body);
   }
 
-  async del<T>(path: string): Promise<T | void> {
-    return await this.fetchJson<T>("DELETE", path);
+  // `body` is rarely used on DELETE, but the cross-client revoke carries the
+  // admin password in the request body (over the pinned TLS channel).
+  async del<T>(path: string, body?: unknown): Promise<T | void> {
+    return await this.fetchJson<T>("DELETE", path, body);
   }
 
   /** Alias for `del`. Matches `fetch`'s method naming so call sites
    *  reading like `client.delete("/foo")` are natural. */
-  async delete<T>(path: string): Promise<T | void> {
-    return await this.del<T>(path);
+  async delete<T>(path: string, body?: unknown): Promise<T | void> {
+    return await this.del<T>(path, body);
   }
 
   // multipart for attachments + STT audio uploads. FormData is encoded to raw

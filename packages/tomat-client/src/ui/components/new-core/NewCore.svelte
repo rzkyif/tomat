@@ -10,23 +10,34 @@
   import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
   import Alert from "@tomat/shared/ui/components/primitives/Alert.svelte";
   import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
+  import Expand from "@tomat/shared/ui/components/primitives/Expand.svelte";
   import FormField from "@tomat/shared/ui/components/primitives/FormField.svelte";
   import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
   import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
+  import ListItem from "@tomat/shared/ui/components/primitives/ListItem.svelte";
   import {
     cores,
     mintCodeWithAdminToken,
     pairWithCode,
     type PairedCoreEntry,
     probeCore,
+    setAdminPasswordWithToken,
   } from "$lib/core";
-  import { platform } from "$lib/platform";
+  import { MIN_ADMIN_PASSWORD_LENGTH } from "@tomat/shared";
+  import { type DiscoveredCore, platform } from "$lib/platform";
   import { getLogger } from "$lib/util/log";
   import { isTauri } from "$lib/util/env";
-  import { settingsState, viewState } from "$stores";
+  import { useUiContext } from "@tomat/shared/ui/context";
+  import { modelRecommendState, settingsState, viewState } from "$stores";
+  import { backState } from "$stores/back.svelte";
 
   const log = getLogger("cores");
   const CLIENT_NAME = "tomat client";
+  // Mobile is remote-only: no on-device core to install, so the local/remote
+  // chooser and the whole local-install branch are skipped (see
+  // decideInitialView) and the wizard renders full-screen rather than in a
+  // fixed-width bubble.
+  const onMobile = useUiContext().platform === "mobile";
   // Resolved from the platform on mount so a latest client targets the latest
   // core's port (7810) rather than the stable 7800. Falls back to the stable
   // default until resolved (and on the web stub).
@@ -44,6 +55,14 @@
     | { kind: "ok"; version: string; checkedUrl: string }
     | { kind: "error"; message: string }
   >({ kind: "idle" });
+
+  // LAN "ping" discovery: the address-field search button sweeps the local
+  // network for reachable cores and lists them below the field. `discovered`
+  // holds the last sweep's results; `didSweep` gates the (animated) results
+  // panel so a finished sweep with no hits still shows the empty state.
+  let discovering = $state(false);
+  let didSweep = $state(false);
+  let discovered = $state<DiscoveredCore[]>([]);
 
   // Suggested name shown as the placeholder on the (optional) name field: the
   // host portion of the address we just connected to.
@@ -63,11 +82,39 @@
   let destination = $state<"local" | "remote">("local");
   let installServiceChoice = $state(true);
   let installNetworkChoice = $state(false);
+  // Admin password set at install. Required (entered twice) so the user can
+  // later pair new devices remotely without reading the admin token off disk.
+  let installPassword = $state("");
+  let installPasswordConfirm = $state("");
+  const installPasswordValid = $derived(
+    installPassword.length >= MIN_ADMIN_PASSWORD_LENGTH &&
+      installPassword === installPasswordConfirm,
+  );
   let localAlreadyInstalled = $state(false);
   // True when the chooser was skipped (a local core is already paired), so the
   // back arrow on the first step cancels the flow instead of revealing a chooser
   // the user was never meant to see.
   let chooserSkipped = $state(false);
+
+  // Whether an intra-wizard step-back is available (same condition as the header
+  // back arrow). Drives both the arrow and the Android back interceptor below.
+  const canStepBack = $derived(
+    view === "remotePair" ||
+      ((view === "remoteAddress" || view === "localConfirm") && !chooserSkipped),
+  );
+
+  // The Android back button steps the wizard back when a previous step exists,
+  // mirroring the header arrow, before the global chain (mode / root) sees it.
+  // Pushed once; the closure reads the live `canStepBack` / `busy` at press time.
+  $effect(() => {
+    return backState.push(() => {
+      if (canStepBack && busy === null) {
+        goBack();
+        return true;
+      }
+      return false;
+    });
+  });
 
   // Placeholder docs URL. The page does not exist yet (tomat is not live).
   const CORE_SETUP_DOCS_URL = "https://au.tomat.ing/docs/core-setup";
@@ -83,7 +130,14 @@
     const firstEver = list.length === 0;
     const localCorePaired = list.some((c) => isLoopback(c.baseUrl));
 
-    if (!firstEver && localCorePaired) {
+    if (onMobile) {
+      // Remote-only: there is no "this computer" option on mobile, so the
+      // chooser and local-install branch are skipped and we go straight to the
+      // remote-address form (back-arrow suppressed via chooserSkipped).
+      destination = "remote";
+      chooserSkipped = true;
+      view = "remoteAddress";
+    } else if (!firstEver && localCorePaired) {
       destination = "remote";
       chooserSkipped = true;
       view = "remoteAddress";
@@ -108,7 +162,7 @@
       /* no launch prefill available */
     }
 
-    if (isTauri()) {
+    if (isTauri() && !onMobile) {
       try {
         localAlreadyInstalled = await platform().pairing.isLocalCoreInstalled();
       } catch {
@@ -127,6 +181,21 @@
       .catch((e) => log.warn("localCoreBaseUrl failed", e));
   });
 
+  // A local pair can fail because the core died on boot (e.g. its port is
+  // taken), which surfaces here only as a connection timeout. The core leaves a
+  // one-line breadcrumb; fold it into the message so the user sees the real
+  // cause instead of a bare "could not reach the core".
+  async function localPairErrorMessage(e: unknown): Promise<string> {
+    const base = errMessage(e);
+    try {
+      const boot = await platform().pairing.readLocalCoreBootError();
+      if (boot) return `${base}\n\nThe local core failed to start: ${boot}`;
+    } catch {
+      /* best-effort: the breadcrumb is a nicety, not required */
+    }
+    return base;
+  }
+
   function hostFromUrl(url: string): string {
     try {
       return new URL(url).host;
@@ -140,6 +209,7 @@
     baseUrl: string,
     code: string,
     name: string,
+    isLocal = false,
   ): Promise<void> {
     const firstEver = (await cores().list()).length === 0;
     const res = await pairWithCode(baseUrl, CLIENT_NAME, code);
@@ -155,6 +225,25 @@
     // core's settings baseline (and live-sync from there); nothing to fetch
     // here. Edits made before the baseline lands are queued, not dropped.
     await cores().select(entry.id);
+    // First-ever local core: apply the hardware-fit Smallest preset now, before
+    // the pending-downloads gate surfaces, so a fresh install lands on the model
+    // that best fits this device (and the stored preset is truthful) instead of
+    // the static baseline default. Best-effort and awaited so the requirements
+    // recompute reflects the chosen model: applyBucket swallows its own errors,
+    // so if the catalog/hardware probe isn't ready the realigned static default
+    // holds and the user can still pick a preset in Settings.
+    if (isLocal && firstEver) {
+      // Best-effort and time-bounded: applying the hardware-fit preset needs the
+      // signed model catalog, which on a brand-new core may require a network
+      // fetch (no cache yet). Never let a slow/unreachable fetch hang onboarding
+      // on the spinner: the realigned static default is already an accepted 2B
+      // baseline, so fall through after a short wait. applyBucket swallows its
+      // own errors and, if it lands later, still applies in the background.
+      await Promise.race([
+        modelRecommendState.applyBucket("smallest"),
+        new Promise<void>((resolve) => setTimeout(resolve, 8000)),
+      ]);
+    }
     busy = null;
     if (firstEver) {
       // First core ever paired: unlock the UI and open the new-user quick
@@ -231,9 +320,9 @@
       const { code } = await mintCodeWithAdminToken(localBaseUrl, adminToken);
       if (!code) throw new Error("response missing pairing code");
       busy = "claiming";
-      await claimAndAdd(localBaseUrl, code, "Local Core");
+      await claimAndAdd(localBaseUrl, code, "Local Core", true);
     } catch (e) {
-      error = errMessage(e);
+      error = await localPairErrorMessage(e);
       busy = null;
     }
   }
@@ -246,10 +335,17 @@
         service: installServiceChoice,
         bindAll: installNetworkChoice,
       });
+      // Set the admin password the user chose. The terminal installer prompts
+      // for it; the client install runs the script non-interactively, so we set
+      // it here over loopback using the freshly-written admin token.
+      const adminToken = await platform().pairing.readAdminToken();
+      if (adminToken) {
+        await setAdminPasswordWithToken(localBaseUrl, adminToken, installPassword);
+      }
       busy = "claiming";
-      await claimAndAdd(localBaseUrl, code, "Local Core");
+      await claimAndAdd(localBaseUrl, code, "Local Core", true);
     } catch (e) {
-      error = errMessage(e);
+      error = await localPairErrorMessage(e);
       busy = null;
     }
   }
@@ -298,6 +394,33 @@
     }
   }
 
+  // Sweep the local network for reachable cores (the address-field "ping"
+  // button). Discovery only reads each core's public /api/v1/health; the
+  // address it fills still has to clear the full PAKE pairing below, so nothing
+  // found here is trusted yet.
+  async function pingNetwork(): Promise<void> {
+    if (discovering) return;
+    error = "";
+    discovering = true;
+    try {
+      discovered = await platform().net.discoverCores();
+    } catch (e) {
+      log.warn("core discovery failed", e);
+      discovered = [];
+    } finally {
+      didSweep = true;
+      discovering = false;
+    }
+  }
+
+  // Fill the address field from a discovered core and collapse the list. The
+  // user still enters the pairing code on the next step.
+  function useDiscovered(core: DiscoveredCore): void {
+    remoteUrl = core.baseUrl;
+    discovered = [];
+    didSweep = false;
+  }
+
   async function pairRemote(): Promise<void> {
     error = "";
     const url = normalizedRemoteUrl();
@@ -327,10 +450,27 @@
   }
 </script>
 
-<Bubble
-  selectedAlignment={alignment}
-  extraClass="flex flex-col gap-4 w-[22.5rem] max-w-full"
->
+{#if onMobile}
+  <!-- Flush on the page (no card): a centered column that the parent panel
+       scrolls when it overflows. `m-auto` centers it vertically when short
+       without clipping the top when tall, unlike justify-center. The frame
+       shrinks by the keyboard height and owns the safe-area insets, so this
+       recenters in the smaller area above the keyboard without padding for the
+       gesture bar itself. -->
+  <div class="m-auto w-full flex flex-col gap-4">
+
+    {@render wizard()}
+  </div>
+{:else}
+  <Bubble
+    selectedAlignment={alignment}
+    extraClass="flex flex-col gap-4 w-[22.5rem] max-w-full"
+  >
+    {@render wizard()}
+  </Bubble>
+{/if}
+
+{#snippet wizard()}
   {#if view === "chooseDestination" && viewState.locked}
     <!-- Onboarding welcome: centered logo + title, no exit (locked in until a
          core is paired). -->
@@ -347,11 +487,8 @@
          no previous step exists), a centered title, and an optional right close
          (explicit exit, shown whenever a core is already connected). A spacer
          balances whichever side control is absent so the title stays centered. -->
-    {@const showBack =
-      view === "remotePair" ||
-      ((view === "remoteAddress" || view === "localConfirm") && !chooserSkipped)}
     <div class="flex items-center gap-2">
-      {#if showBack}
+      {#if canStepBack}
         <IconButton
           icon="i-material-symbols-arrow-back-rounded"
           title="Back"
@@ -511,14 +648,58 @@
     </p>
 
     <FormField label="Core Address">
+      <!-- Address field with a "ping" button nested inside it (mirrors the
+           regenerate button in the session bar's title field) that sweeps the
+           local network for reachable cores. -->
       <Input
         value={remoteUrl}
         placeholder="https://192.168.1.20:7800"
         disabled={busy !== null}
         ariaLabel="Core address"
         oninput={(v) => (remoteUrl = v)}
-      />
+      >
+        {#snippet trailing()}
+          <IconButton
+            icon={discovering
+              ? "i-line-md:loading-loop"
+              : "i-material-symbols-wifi-find-rounded"}
+            title={discovering
+              ? "Searching your network…"
+              : "Find cores on your network"}
+            size="sm"
+            disabled={discovering || busy !== null}
+            onclick={pingNetwork}
+          />
+        {/snippet}
+      </Input>
     </FormField>
+
+    <!-- Discovered cores: an animated panel that expands once a sweep
+         completes. Clicking a row fills the address field above. -->
+    <Expand open={didSweep && !discovering}>
+      <div class="flex flex-col gap-1">
+        {#if discovered.length === 0}
+          <p class="text-sm text-default-500 px-3 py-2">
+            No cores found on your network.
+          </p>
+        {:else}
+          {#each discovered as core (core.pin)}
+            <ListItem
+              direction="row"
+              role="option"
+              onclick={() => useDiscovered(core)}
+            >
+              <span class="truncate flex-1 text-sm text-default-800">
+                {hostFromUrl(core.baseUrl)}
+              </span>
+              <span class="text-xs font-mono text-default-500 shrink-0">
+                v{core.version}
+              </span>
+            </ListItem>
+          {/each}
+        {/if}
+      </div>
+    </Expand>
 
     {#if connectionStatus.kind === "error"}
       <Alert variant="error" class="rounded-large">
@@ -605,8 +786,8 @@
           class="flex i-material-symbols-key-rounded text-base text-default-500 shrink-0 mt-0.5"
         ></i>
         <span>
-          A pairing code is minted for this client; future clients pair via
-          a fresh code.
+          A pairing code is minted for this client. The admin password you set
+          below lets you pair more devices later.
         </span>
       </li>
     </ul>
@@ -665,13 +846,49 @@
       </div>
     </button>
 
+    <!-- Admin password. Required so the user can pair new devices remotely
+         later (from a paired client) without reading the admin token off disk. -->
+    <div class="flex flex-col gap-2">
+      <FormField label="Admin password">
+        <Input
+          type="password"
+          value={installPassword}
+          placeholder="••••••••"
+          disabled={busy !== null}
+          ariaLabel="Admin password"
+          oninput={(v) => (installPassword = v)}
+        />
+      </FormField>
+      <FormField label="Confirm admin password">
+        <Input
+          type="password"
+          value={installPasswordConfirm}
+          placeholder="••••••••"
+          disabled={busy !== null}
+          ariaLabel="Confirm admin password"
+          oninput={(v) => (installPasswordConfirm = v)}
+        />
+      </FormField>
+      {#if installPassword && installPassword.length < MIN_ADMIN_PASSWORD_LENGTH}
+        <span class="text-xs text-default-500">
+          Use at least {MIN_ADMIN_PASSWORD_LENGTH} characters.
+        </span>
+      {:else if installPasswordConfirm && installPassword !== installPasswordConfirm}
+        <span class="text-xs text-accent-red-600">Passwords do not match.</span>
+      {:else}
+        <span class="text-xs text-default-500">
+          Remember this. You'll need it to pair new devices.
+        </span>
+      {/if}
+    </div>
+
     <Button
       variant="primary"
       icon={busy === "installing" || busy === "claiming"
         ? "i-line-md:loading-loop"
         : "i-material-symbols-download-rounded"}
       class="px-4 py-2.5 rounded-large"
-      disabled={busy !== null}
+      disabled={busy !== null || !installPasswordValid}
       onclick={pairLocal}
     >
       {#if busy === "installing"}
@@ -689,4 +906,4 @@
       {error}
     </Alert>
   {/if}
-</Bubble>
+{/snippet}

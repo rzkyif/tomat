@@ -131,6 +131,37 @@ jobs:
       - run: cargo check --locked --manifest-path packages/tomat-core-ptyhost/Cargo.toml --all-targets
       - run: cargo test --locked --manifest-path packages/tomat-core-ptyhost/Cargo.toml
 
+  # Android cross-compile check. The Tauri shell ships an android build whose
+  # mobile cfg (#[cfg(mobile)] / target_os = "android") is never exercised by the
+  # host-target checks above, so compile it for the primary android ABI here.
+  # ubuntu-latest ships the Android SDK + NDK; we wire the NDK clang as the
+  # cross-compiler so the native bits (rustls/ring) build.
+  android:
+    name: "Android cross-compile check"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/tomat-client/src/tauri
+          key: android
+      - name: Android cargo check (aarch64-linux-android)
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CC_aarch64_linux_android="$TC/aarch64-linux-android24-clang"
+          export CXX_aarch64_linux_android="$TC/aarch64-linux-android24-clang++"
+          export AR_aarch64_linux_android="$TC/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TC/aarch64-linux-android24-clang"
+          cargo check --locked \
+            --manifest-path packages/tomat-client/src/tauri/Cargo.toml \
+            --target aarch64-linux-android
+
   # Dependency-vulnerability gate. Runs on every PR/push and on the weekly
   # schedule so a newly-disclosed advisory in an already-pinned dependency is
   # surfaced even without a code change. cargo-audit covers the Rust crates (the

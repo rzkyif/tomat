@@ -33,9 +33,10 @@ like.
 - **Paired clients.** Pairing is the trust grant. A paired client is treated as
   an administrator of the core it paired with: it can read and write sessions,
   change any setting, run tools, and trigger updates. An action that requires
-  pairing is therefore in-policy, not a vulnerability. The admin token is only
-  needed to pair a _new_ client (mint a pairing code); paired clients never need
-  it again.
+  pairing is therefore in-policy, not a vulnerability. Onboarding a _new_ device
+  (minting a pairing code) or removing another paired device is a privileged
+  action gated by either the admin token (device access) or the admin password
+  (set at install); ordinary use never needs either again.
 
 **Defended against.** We do protect against:
 
@@ -86,6 +87,20 @@ compared in constant time. All HTTP routes require the bearer token except
 upgrade. Revoking or rotating a client force-closes its live WebSockets so a
 removed device loses access immediately rather than at its next reconnect.
 
+**Minting a code remotely (the admin password).** Reading the admin token off
+disk needs access to the core's machine, which a remote operator does not have.
+So `POST /pairing/codes` and cross-client revoke accept a second authorization:
+a valid bearer (an already-paired, trusted device) **plus** an admin password
+set at install. The password is never a standalone gate on the open network. It
+is a second factor behind an existing pairing, it is stored only as an argon2id
+hash (`.admin-password`, mode `0600`, per-install salt), and verification is
+rate-limited per client id, per peer IP, and globally with the cheap counter
+checked _before_ the hash runs so wrong guesses are throttled and argon2id
+cannot be turned into a CPU DoS. Setting or replacing the password itself
+requires the admin token (device access), so a network peer on a `0.0.0.0`-bound
+core cannot overwrite it. The password travels only in the request body over the
+pinned TLS channel and is redacted from logs.
+
 **HTTP and WebSocket surface.** CORS is origin-allowlisted (loopback plus the
 Tauri origins); auth is header-based, so there is no CSRF vector. A global
 request-body size limit bounds memory use. Error responses are run through the
@@ -129,7 +144,8 @@ explicit `--allow-*` set. Each tool runs in its **own** worker keyed per
 (extension, tool), so its permissions are exactly the grants for that one tool,
 not the union of every enabled tool's grants. Every worker additionally gets
 `--deny-read` / `--deny-write` on the core's secret material (`secrets.enc`,
-`.master-key`, `.admin-token`, the SQLite DB), which Deno enforces over any
+`.master-key`, `.admin-token`, `.admin-password`, the SQLite DB), which Deno
+enforces over any
 `--allow`, so even a tool granted a broad path like `$home` cannot reach the
 vault. npm extension tarballs are integrity-checked (SRI sha512, falling back to
 sha1) before extraction; extraction rejects path-traversal (zip-slip) and

@@ -11,6 +11,7 @@ export * from "./streaming.svelte";
 export * from "./core-status.svelte";
 export * from "./messages.svelte";
 export * from "./confirm.svelte";
+export * from "./password-prompt.svelte";
 export * from "./permissions.svelte";
 export * from "./schedule-confirm.svelte";
 export * from "./deletions.svelte";

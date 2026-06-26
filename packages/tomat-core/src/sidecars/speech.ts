@@ -23,7 +23,13 @@
 //     stays resident, with no restart - preserving per-module unload-on-disable.
 
 import { join } from "@std/path";
-import { errMessage, getDefaultSettings, modelFilesMap } from "@tomat/shared";
+import {
+  errMessage,
+  getDefaultSettings,
+  modelFilesMap,
+  sttUsesLocal,
+  ttsUsesLocal,
+} from "@tomat/shared";
 import { binPath, paths, speechPort } from "../paths.ts";
 import { binaryName, libDirFor } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
@@ -70,9 +76,7 @@ export async function speechDesiredState(settings: Record<string, unknown>): Pro
   const threads = numSetting(settings, "stt.threads", 4);
 
   let stt: SpeechSttConfig | null = null;
-  const sttLocal =
-    boolSetting(settings, "stt.enabled", true) &&
-    strSetting(settings, "stt.provider", "local") === "local";
+  const sttLocal = sttUsesLocal(settings);
   if (sttLocal) {
     const family = strSetting(settings, "stt.modelType", schemaDefault("stt.modelType"));
     const roles = await resolveRoles(settings["stt.modelFiles"] ?? schemaDefault("stt.modelFiles"));
@@ -80,7 +84,8 @@ export async function speechDesiredState(settings: Record<string, unknown>): Pro
   }
 
   let tts: SpeechTtsConfig | null = null;
-  if (boolSetting(settings, "tts.enabled", false)) {
+  const ttsLocal = ttsUsesLocal(settings);
+  if (ttsLocal) {
     const family = strSetting(settings, "tts.modelType", schemaDefault("tts.modelType"));
     const roles = await resolveRoles(settings["tts.modelFiles"] ?? schemaDefault("tts.modelFiles"));
     // espeak phonemizer data ships with the binary, not as a download; pass it as
@@ -231,10 +236,6 @@ function schemaDefault(key: string): string {
 function strSetting(s: Record<string, unknown>, k: string, def: string): string {
   const v = s[k];
   return typeof v === "string" ? v : def;
-}
-function boolSetting(s: Record<string, unknown>, k: string, def: boolean): boolean {
-  const v = s[k];
-  return typeof v === "boolean" ? v : def;
 }
 function numSetting(s: Record<string, unknown>, k: string, def: number): number {
   const v = s[k];

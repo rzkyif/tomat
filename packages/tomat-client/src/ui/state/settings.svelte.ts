@@ -30,6 +30,8 @@
 
 import { browser, dev } from "$app/environment";
 import {
+  type SettingDestination,
+  destinationNeedsCore,
   getDefaultSettings,
   isClientGroup,
   isCoreGroup,
@@ -60,12 +62,15 @@ const SECRET_KEY_SET = new Set<string>(SECRET_KEYS);
 // mutable copy in the constructor.
 const DEFAULTS: Readonly<Record<string, unknown>> = getDefaultSettings();
 
-function destinationFor(key: string): "client" | "core" {
-  return settingKeyDestination(key) ?? "client";
+function destinationFor(key: string): SettingDestination {
+  return settingKeyDestination(key) ?? "client-on-client";
 }
 
+// "Core key" here means "persisted on the core" (the shared `core` store OR the
+// per-client `client-on-core` overlay) - i.e. it rides the coreSparse layer and
+// the core PATCH/baseline/WS machinery, as opposed to the local client file.
 function isCoreKey(key: string): boolean {
-  return key in DEFAULTS && !SECRET_KEY_SET.has(key) && destinationFor(key) === "core";
+  return key in DEFAULTS && !SECRET_KEY_SET.has(key) && destinationNeedsCore(destinationFor(key));
 }
 
 // Debounce window for coalescing rapid edits into a single round-trip.
@@ -171,8 +176,12 @@ class SettingsState {
       if (!SECRET_KEY_SET.has(key)) {
         // Secrets never enter the layers (their values live in the vault and
         // their UI value is session-local); everything else lands in its
-        // destination's sparse layer, kept sparse against the defaults.
-        const layer = destinationFor(key) === "core" ? this.coreSparse : this.clientSparse;
+        // destination's sparse layer, kept sparse against the defaults. Both
+        // core-stored layers (core, client-on-core) ride coreSparse; only the
+        // local client file uses clientSparse.
+        const layer = destinationNeedsCore(destinationFor(key))
+          ? this.coreSparse
+          : this.clientSparse;
         if (Object.is(next, DEFAULTS[key])) delete layer[key];
         else layer[key] = next;
       }
@@ -330,7 +339,7 @@ class SettingsState {
     }
     const sparse: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(stored)) {
-      if (k in DEFAULTS && !SECRET_KEY_SET.has(k) && destinationFor(k) === "client") {
+      if (k in DEFAULTS && !SECRET_KEY_SET.has(k) && destinationFor(k) === "client-on-client") {
         sparse[k] = v;
       } else if (dev) {
         log.warn(`dropping non-client key from settings.json: "${k}"`);
@@ -522,7 +531,7 @@ class SettingsState {
       log.warn("Failed to save client settings:", e);
       errors.push(e);
       for (const key of Object.keys(DEFAULTS)) {
-        if (!SECRET_KEY_SET.has(key) && destinationFor(key) === "client") {
+        if (!SECRET_KEY_SET.has(key) && destinationFor(key) === "client-on-client") {
           rollbackKeys.add(key);
         }
       }

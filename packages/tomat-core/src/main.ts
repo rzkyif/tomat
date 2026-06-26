@@ -30,6 +30,7 @@ import { promptScheduler } from "./services/prompt-scheduler.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
 import { shutdownJobctl } from "./sidecars/jobctl.ts";
 import { loadCoreSettings } from "./services/core-settings.ts";
+import { sweepOrphanedSessionDirs } from "./services/sessions-store.ts";
 import { warnIfVaultUnreadable } from "./services/secrets.ts";
 import { tlsServeOptions } from "./services/tls.ts";
 
@@ -86,6 +87,12 @@ async function main(): Promise<void> {
   openDb();
   migrate();
   log.info("db schema ensured");
+
+  // Remove session directories left behind by a temporary session whose
+  // attachments hit disk but whose RAM-only doc was lost on an unclean
+  // shutdown. A persistent session always has a session.json, so this only
+  // ever touches those orphans.
+  sweepOrphanedSessionDirs();
 
   // Resume any persisted-Pending downloads from the previous run.
   downloadManager().resumePending();
@@ -177,20 +184,44 @@ async function main(): Promise<void> {
   // Self-signed cert + sealed key; clients pin the SPKI (see services/tls.ts).
   const tls = await tlsServeOptions(bindHost);
 
-  const server = Deno.serve(
-    { hostname: bindHost, port: cfg.port, cert: tls.cert, key: tls.key },
-    async (req, info) => {
-      const url = new URL(req.url);
-      // WS upgrade path.
-      if (url.pathname === "/ws/v1" && req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-        return await hub.handleUpgrade(req);
-      }
-      // Pass the real socket peer address into the Hono env so security-
-      // sensitive routes (pairing rate limit) can key on it instead of a
-      // spoofable X-Forwarded-For header.
-      return await app.fetch(req, { remoteAddr: info.remoteAddr });
-    },
-  );
+  let server: Deno.HttpServer<Deno.NetAddr>;
+  try {
+    server = Deno.serve(
+      { hostname: bindHost, port: cfg.port, cert: tls.cert, key: tls.key },
+      async (req, info) => {
+        const url = new URL(req.url);
+        // WS upgrade path.
+        if (
+          url.pathname === "/ws/v1" &&
+          req.headers.get("upgrade")?.toLowerCase() === "websocket"
+        ) {
+          return await hub.handleUpgrade(req);
+        }
+        // Pass the real socket peer address into the Hono env so security-
+        // sensitive routes (pairing rate limit) can key on it instead of a
+        // spoofable X-Forwarded-For header.
+        return await app.fetch(req, { remoteAddr: info.remoteAddr });
+      },
+    );
+  } catch (err) {
+    // The most common boot failure: the port is taken (a leftover core, another
+    // channel misconfigured to the same port, or an unrelated program). Deno's
+    // bare "AddrInUse" reaches the user as an opaque connection timeout, so
+    // rewrite it into something actionable. main()'s caller records the reason
+    // to bootErrorFile for a supervising client / the install script to surface.
+    if (err instanceof Deno.errors.AddrInUse) {
+      throw new Error(
+        `port ${cfg.port} on ${bindHost} is already in use. Another tomat core may ` +
+          `already be running, or a different program holds the port. Stop it, or set ` +
+          `TOMAT_CORE_HOST to a free host:port and relaunch.`,
+      );
+    }
+    throw err;
+  }
+
+  // The listener bound cleanly: drop any stale boot-failure breadcrumb so a
+  // supervising client / the install script doesn't surface a resolved error.
+  void Deno.remove(paths().bootErrorFile).catch(() => {});
 
   // Healthy checkpoint: the HTTP listener is bound (the DB is open and the TLS
   // key is unsealed by now), so a pending self-update has proven it can run.
@@ -309,6 +340,16 @@ if (import.meta.main) {
       // structured sink is unavailable, so fall back to console + scrub
       // manually since the formatter never runs.
       console.error(scrubSecrets(`tomat-core failed to start: ${msg}`));
+    }
+    // Leave a one-line breadcrumb a supervising client / the install script can
+    // read to explain why the core won't come up (cleared once it next binds).
+    // Best-effort and scrubbed: a write failure here must not mask the real
+    // error, and the reason can echo a path/token-bearing message.
+    try {
+      const reason = err instanceof Error ? err.message : String(err);
+      await Deno.writeTextFile(paths().bootErrorFile, scrubSecrets(reason) + "\n");
+    } catch {
+      /* best-effort: the root dir may itself be unwritable */
     }
     Deno.exit(1);
   }

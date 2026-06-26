@@ -5,12 +5,38 @@
 // chat.t2; isolating them here would require a full fetch mock harness for
 // dubious return.
 
-import { assertEquals, assertNotEquals } from "@std/assert";
-import { join } from "@std/path";
+import { assertEquals, assertNotEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { dirname, join } from "@std/path";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { db } from "../db/connection.ts";
 import { paths } from "../paths.ts";
 import { DownloadManager } from "./manager.ts";
+import { AppError } from "../shared/errors.ts";
+
+// An ArrayBuffer-backed view, which the WebCrypto + Response typings require.
+function bytesOf(s: string): Uint8Array<ArrayBuffer> {
+  return new Uint8Array(new TextEncoder().encode(s));
+}
+
+async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// A fetch stub for the streaming download path: the HEAD probe (redirect:manual)
+// carries the LFS content hash in `x-linked-etag`; the GET streams the bytes.
+function downloadFetchStub(bytes: Uint8Array<ArrayBuffer>, linkedEtag: string): typeof fetch {
+  return ((_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === "HEAD") {
+      return Promise.resolve(new Response(null, { headers: { "x-linked-etag": linkedEtag } }));
+    }
+    return Promise.resolve(
+      new Response(bytes, { headers: { "content-length": String(bytes.byteLength) } }),
+    );
+  }) as typeof fetch;
+}
 
 function rowsForId(id: string) {
   return db()
@@ -206,6 +232,165 @@ Deno.test("DownloadManager.subscribe: receives a snapshot after mutating cancel"
     // cancel() on a Pending row triggers a broadcast.
     assertEquals(calls, 1);
   } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("DownloadManager.streamDownload: verifies bytes against the HF x-linked-etag and completes on match", async () => {
+  const env = await setupTestEnv();
+  const realFetch = globalThis.fetch;
+  try {
+    const bytes = bytesOf("model-weights-payload");
+    globalThis.fetch = downloadFetchStub(bytes, await sha256Hex(bytes));
+
+    const mgr = new DownloadManager();
+    const abs = await mgr.enqueue({
+      source: "@e2e/integrity/main/weights.bin",
+      // host must match HF_BASE_URL so resolveHfSha256 reads the x-linked-etag.
+      url: "https://huggingface.co/e2e/integrity/resolve/main/weights.bin",
+      destination: "binaries",
+      groupId: "g",
+    });
+    assertEquals(await Deno.readTextFile(abs), "model-weights-payload");
+  } finally {
+    globalThis.fetch = realFetch;
+    await env.teardown();
+  }
+});
+
+Deno.test("DownloadManager.streamDownload: a transient mid-stream failure keeps the partial .tmp for resume", async () => {
+  const env = await setupTestEnv();
+  const realFetch = globalThis.fetch;
+  try {
+    const full = bytesOf("model-weights-payload-interrupted");
+    const head = full.slice(0, 7);
+    globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        // A real hash so resume is even eligible; the transfer never completes.
+        return Promise.resolve(
+          new Response(null, { headers: { "x-linked-etag": "0".repeat(64) } }),
+        );
+      }
+      // Deliver the head on the first pull, then error like a dropped
+      // connection on the next - so the head is written before the failure.
+      let stage = 0;
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (stage === 0) {
+            stage = 1;
+            controller.enqueue(head);
+          } else {
+            controller.error(new Error("connection reset"));
+          }
+        },
+      });
+      return Promise.resolve(
+        new Response(stream, { headers: { "content-length": String(full.byteLength) } }),
+      );
+    }) as typeof fetch;
+
+    const mgr = new DownloadManager();
+    await assertRejects(() =>
+      mgr.enqueue({
+        source: "@e2e/interrupt/main/weights.bin",
+        url: "https://huggingface.co/e2e/interrupt/resolve/main/weights.bin",
+        destination: "binaries",
+        groupId: "g",
+      }),
+    );
+    // The partial survives the Error so a retry can resume it (only checksum
+    // mismatch / 416 / explicit remove drop it).
+    const abs = join(paths().binDir, "e2e", "interrupt", "weights.bin");
+    const st = await Deno.stat(abs + ".tmp");
+    assertEquals(st.size, head.byteLength);
+  } finally {
+    globalThis.fetch = realFetch;
+    await env.teardown();
+  }
+});
+
+Deno.test("DownloadManager.streamDownload: resumes a partial .tmp via a Range request", async () => {
+  const env = await setupTestEnv();
+  const realFetch = globalThis.fetch;
+  try {
+    const bytes = bytesOf("model-weights-payload-resume");
+    const fullSha = await sha256Hex(bytes);
+    const abs = join(paths().binDir, "e2e", "resume", "weights.bin");
+    await Deno.mkdir(dirname(abs), { recursive: true });
+    // A prior interrupted attempt left the first 8 bytes on disk.
+    await Deno.writeFile(abs + ".tmp", bytes.slice(0, 8));
+
+    let rangeStart = -1;
+    globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return Promise.resolve(new Response(null, { headers: { "x-linked-etag": fullSha } }));
+      }
+      const range = new Headers(init?.headers).get("range");
+      if (range) {
+        rangeStart = Number(/bytes=(\d+)-/.exec(range)?.[1] ?? -1);
+        const tail = bytes.slice(rangeStart);
+        return Promise.resolve(
+          new Response(tail, {
+            status: 206,
+            headers: {
+              "content-length": String(tail.byteLength),
+              "content-range": `bytes ${rangeStart}-${bytes.byteLength - 1}/${bytes.byteLength}`,
+            },
+          }),
+        );
+      }
+      return Promise.resolve(
+        new Response(bytes, { headers: { "content-length": String(bytes.byteLength) } }),
+      );
+    }) as typeof fetch;
+
+    const mgr = new DownloadManager();
+    const got = await mgr.enqueue({
+      source: "@e2e/resume/main/weights.bin",
+      url: "https://huggingface.co/e2e/resume/resolve/main/weights.bin",
+      destination: "binaries",
+      groupId: "g",
+    });
+    // It requested the tail from the partial's length, and the assembled file is
+    // the complete, hash-verified payload (head bytes + streamed tail).
+    assertEquals(rangeStart, 8);
+    assertEquals(got, abs);
+    assertEquals(await Deno.readTextFile(abs), "model-weights-payload-resume");
+  } finally {
+    globalThis.fetch = realFetch;
+    await env.teardown();
+  }
+});
+
+Deno.test("DownloadManager.streamDownload: rejects when the streamed bytes do not match the published sha256", async () => {
+  const env = await setupTestEnv();
+  const realFetch = globalThis.fetch;
+  try {
+    const bytes = bytesOf("model-weights-payload");
+    globalThis.fetch = downloadFetchStub(bytes, "0".repeat(64)); // wrong hash
+
+    const mgr = new DownloadManager();
+    const err = await assertRejects(
+      () =>
+        mgr.enqueue({
+          source: "@e2e/integrity/main/weights.bin",
+          url: "https://huggingface.co/e2e/integrity/resolve/main/weights.bin",
+          destination: "binaries",
+          groupId: "g",
+        }),
+      AppError,
+    );
+    assertStringIncludes(err.message, "sha256 mismatch");
+    // The partial download is cleaned up rather than left as a usable artifact.
+    const abs = join(paths().binDir, "e2e", "integrity", "weights.bin");
+    assertEquals(
+      await Deno.stat(abs)
+        .then(() => true)
+        .catch(() => false),
+      false,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
     await env.teardown();
   }
 });

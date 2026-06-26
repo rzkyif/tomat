@@ -1,6 +1,9 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import CollapsibleLabel from "./CollapsibleLabel.svelte";
+  import { useUiContext } from "../../context.ts";
+  import { RIPPLE_MS } from "../../animations.ts";
+  import { ripple } from "../../actions/ripple.ts";
 
   // A sidebar row: leading icon + collapsible label, with selected / hover /
   // ping states. Shared so the client settings sidebar and the website showcase
@@ -44,19 +47,32 @@
   // centred icon; icon-only rows stay symmetric rectangles.
   const padRight = $derived(label ? (collapsed ? "pr-0" : "pr-2.5") : "pr-1.5");
 
-  // Press deepens the inset surface one further step (the shared interaction
-  // standard) on top of each row's hover/selected background.
+  // On a coarse-pointer / compact (mobile) shell the row is the primary
+  // full-screen settings navigation, so grow it to a comfortable tap target.
+  const ui = useUiContext();
+  const heightClass = $derived(ui.density === "compact" ? "h-11" : "h-8");
+
+  // The unselected resting tone brightens on hover; a coarse pointer (touch)
+  // can't hover, so rest it at the brighter shade instead of leaving it dim.
+  const restingText = $derived(
+    ui.pointer === "coarse" ? "text-default-700" : "text-default-500 hov:text-default-700",
+  );
+
+  // Each row's hover/selected background is the resting cue; the press splash is
+  // the shared `use:ripple` action rather than a deeper inset shade.
   const stateClass = $derived(
     selected
-      ? "bg-surface-inset text-default-900 act:bg-surface-inset-strong"
+      ? "bg-surface-inset text-default-900"
       : pingTone === "accent"
         ? ping
-          ? "text-accent-yellow-700 hov:bg-surface-inset act:bg-surface-inset-strong"
-          : "text-accent-yellow-500 hov:bg-surface-inset act:bg-surface-inset-strong"
+          ? "text-accent-yellow-700 hov:bg-surface-inset"
+          : "text-accent-yellow-500 hov:bg-surface-inset"
         : ping
-          ? "text-default-700 hov:bg-surface-inset act:bg-surface-inset-strong"
-          : "text-default-500 hov:text-default-700 hov:bg-surface-inset act:bg-surface-inset-strong",
+          ? "text-default-700 hov:bg-surface-inset"
+          : `${restingText} hov:bg-surface-inset`,
   );
+
+  const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
 </script>
 
 <!-- color/background-color use the shared 120ms interaction feedback (kept in
@@ -64,12 +80,13 @@
      200ms because it animates the sidebar collapse, not button feedback, and so
      cannot share the single-property `transition-interactive` shortcut. -->
 <button
-  class="hov:cursor-pointer flex items-center h-8 pl-1.5 {padRight} gap-1.5 rounded-medium [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {stateClass} {extraClass}"
+  class="hov:cursor-pointer flex items-center {heightClass} pl-1.5 {padRight} gap-1.5 rounded-medium [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {stateClass} {extraClass}"
   {title}
   aria-label={ariaLabel ?? label}
   aria-pressed={ariaPressed}
   {disabled}
   {onclick}
+  use:ripple={{ disabled, durationMs: rippleDuration }}
 >
   <span class="relative flex shrink-0">
     <i class="flex text-xl shrink-0 {icon}"></i>

@@ -8,6 +8,8 @@
   // holds the reasoning body (markdown in the client, plain text on the site).
   // Shared so both render identically; only the body is supplied by the caller.
   const ui = useUiContext();
+  // Mobile chat bubbles always sit on the agent side (left).
+  const align = $derived(ui.platform === "mobile" ? "left" : ui.getAlignment());
 
   let {
     isStreaming,
@@ -92,7 +94,7 @@
 </script>
 
 <div style:display="contents" style:--default-base={overrideHex}>
-  <Expandable bind:expanded alignment={ui.getAlignment()}>
+  <Expandable bind:expanded alignment={align}>
     {#snippet title()}
       <span>{headerText}</span>
     {/snippet}

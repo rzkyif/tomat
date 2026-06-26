@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { SETTINGS_SCHEMA, evalCondition, searchFields } from "../../../domain/settings/engine.ts";
-  import { groupDestinations } from "../../../domain/settings/types.ts";
+  import { destinationLabel, groupDestinationChips } from "../../../domain/settings/types.ts";
   import type { SettingField, SettingGroup, SettingSection } from "../../../domain/settings/types.ts";
   import HelpText from "../primitives/HelpText.svelte";
   import IconButton from "../primitives/IconButton.svelte";
@@ -35,6 +35,7 @@
     activeTab: activeTabProp,
     onSelectTab,
     locked = false,
+    onBack,
   }: {
     /** Render this group's header + sections. Ignored when `searchQuery` is set. */
     groupId?: string;
@@ -55,11 +56,24 @@
     onSelectTab?: (id: string) => void;
     /** Reconnecting: dim + block interaction (client). */
     locked?: boolean;
+    /** When set, the group header shows a leading back button (mobile nested
+     *  navigation returns to the group list). Omitted on desktop. */
+    onBack?: () => void;
   } = $props();
 
   const group = $derived<SettingGroup | undefined>(
     groupId ? SETTINGS_SCHEMA.find((g) => g.id === groupId) : undefined,
   );
+
+  // On mobile, every label (the group header, the section headers, and the
+  // fields) sits on ONE left text column, with a collapsible section's chevron
+  // hanging in the gutter to the left of it. So the group header gets the same
+  // pl-5 the fields already use, the section headers stay flush-left (their
+  // chevron occupies the gutter, their text lands on the column), and the body
+  // (description / tabs / fields) shares the column. The result: section header
+  // text lines up under the group header text, not the chevron under the text.
+  const stacked = $derived(ui.platform === "mobile");
+  const bodyIndent = $derived(stacked ? "pl-5" : "");
 
   // --- tab state (controlled or internal) ---
   let activeTabInternal = $state("");
@@ -97,8 +111,16 @@
 
   function sectionVisible(s: SettingSection): boolean {
     if (!evalCondition(s.visibleWhen, values)) return false;
+    if (s.desktopOnly && ui.platform === "mobile") return false;
     if (group?.tabs && s.tab !== contentTabId) return false;
     return s.fields.length > 0;
+  }
+
+  /** A field is shown when its `visibleWhen` matches AND it is not desktop-only
+   *  on a mobile shell. Mirrors `sectionVisible` at the field grain. */
+  function fieldVisible(f: SettingField): boolean {
+    if (f.desktopOnly && ui.platform === "mobile") return false;
+    return evalCondition(f.visibleWhen, values);
   }
 
   // --- expand state (controlled or internal) ---
@@ -154,7 +176,7 @@
     return om[0].fields[0];
   });
 
-  const search = $derived(searchQuery ? searchFields(searchQuery, values) : []);
+  const search = $derived(searchQuery ? searchFields(searchQuery, values, ui.platform) : []);
 </script>
 
 {#snippet renderField(f: SettingField)}
@@ -186,14 +208,32 @@
   <section class="flex flex-col">
     <!-- Group header: sticky at the very top (z above section headers at top-7). -->
     <div class="sticky top-0 z-20">
-      <SectionHeader label={group.name} level="group">
+      <!-- The pl-5 column applies only without an inline back button (Android):
+           an iOS back button is wider than the gutter, so that shell keeps the
+           leading-button layout (a future iOS pass owns its own alignment). -->
+      <SectionHeader label={group.name} level="group" class={stacked && !onBack ? "pl-5" : ""}>
+        {#snippet leading()}
+          {#if onBack}
+            <!-- -ml-1 pulls the icon's optical edge flush with the group label;
+                 the back affordance lives IN the sticky group header so mobile
+                 nested nav has a single header, not a separate back row. -->
+            <IconButton
+              icon="i-material-symbols-arrow-back-rounded"
+              title="Back to settings"
+              size="sm"
+              variant="subtle"
+              class="-ml-1 w-7 shrink-0"
+              onclick={onBack}
+            />
+          {/if}
+        {/snippet}
         {#snippet badge()}
           <span class="inline-flex items-center gap-1">
-            {#each groupDestinations(group) as dest (dest)}
+            {#each groupDestinationChips(group) as dest (dest)}
               <span
                 class="text-[10px] font-medium uppercase tracking-wider px-1.5 inline-flex items-center h-4 leading-none rounded-medium bg-surface-inset text-default-700"
               >
-                {dest === "core" ? "Core" : "Client"}
+                {destinationLabel(dest)}
               </span>
             {/each}
           </span>
@@ -220,11 +260,11 @@
     </div>
 
     {#if showGroupDesc && group.description}
-      <div class="shrink-0 pt-1"><HelpText text={group.description} /></div>
+      <div class="shrink-0 pt-1 {bodyIndent}"><HelpText text={group.description} /></div>
     {/if}
 
     {#if group.tabs}
-      <div class="shrink-0 pt-2 pb-3">
+      <div class="shrink-0 pt-2 pb-3 {bodyIndent}">
         <Tabs
           tabs={group.tabs.map((t) => ({ id: t.id, label: t.label }))}
           active={activeTab}
@@ -262,9 +302,9 @@
                   </div>
                 {/if}
                 {#if isExpanded}
-                  <div class="flex flex-col gap-1" class:pl-5={collapsible}>
+                  <div class="flex flex-col gap-1" class:pl-5={collapsible || stacked}>
                     {#each section.fields as f (f.id)}
-                      {#if evalCondition(f.visibleWhen, values)}
+                      {#if fieldVisible(f)}
                         {@render renderField(f)}
                       {/if}
                     {/each}

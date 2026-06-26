@@ -174,7 +174,9 @@ class MessagesState {
       // a real ULID. Falls back to a local timestamp ID if the call fails
       // (e.g. offline core). The next persist attempt will still try.
       try {
-        const created = await cores().api().sessions.create();
+        const created = await cores().api().sessions.create(undefined, {
+          temporary: sessionsState.isTemporary,
+        });
         sessionsState.id = created.id;
         sessionsState.createdAtMs = created.createdAtMs ?? null;
         sessionsState.title = sessionsState.title || sessionsState.defaultTitle;

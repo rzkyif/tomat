@@ -484,7 +484,9 @@
     tcStatus === "failed" ? "red" : awaitingInput ? "yellow" : undefined,
   );
 
-  let alignment = $derived(ui.getAlignment());
+  // Mobile chat bubbles always sit on the agent side (left); desktop follows the
+  // window-alignment setting.
+  let alignment = $derived(ui.platform === "mobile" ? "left" : ui.getAlignment());
   // Floor the bubble width only while expanded so the body doesn't squish; when
   // collapsed the bubble shrink-wraps the label + description.
   let bubbleExtraClass = $derived(

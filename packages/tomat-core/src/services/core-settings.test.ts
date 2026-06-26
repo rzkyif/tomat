@@ -2,8 +2,16 @@
 // listener fan-out. File-backed via tempdir.
 
 import { assertEquals } from "@std/assert";
-import { loadCoreSettings, patchCoreSettings, subscribeCoreSettings } from "./core-settings.ts";
-import { setupTestEnv } from "../../tests/helpers/db.ts";
+import {
+  loadCoreSettings,
+  loadEffective,
+  patchClientSettings,
+  patchCoreSettings,
+  resetAllClientSettings,
+  subscribeClientSettings,
+  subscribeCoreSettings,
+} from "./core-settings.ts";
+import { createTestClient, setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
 
 Deno.test("loadCoreSettings: returns {} when settings.json does not exist", async () => {
@@ -76,6 +84,96 @@ Deno.test("subscribeCoreSettings: unsubscribe stops the listener", async () => {
     unsubscribe();
     await patchCoreSettings({ k: "v2" });
     assertEquals(fired, 1);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("loadEffective: core base overlaid with a client's overrides (overlay wins)", async () => {
+  const env = await setupTestEnv();
+  try {
+    const client = createTestClient("a");
+    // Shared core value plus a per-client override of a different key.
+    await patchCoreSettings({ "llm.temperature": 0.5, "prompts.defaultSystemPrompt": "shared" });
+    await patchClientSettings(client, { "prompts.defaultSystemPrompt": "mine" });
+    const eff = await loadEffective(client);
+    assertEquals(eff["llm.temperature"], 0.5); // inherited from core
+    assertEquals(eff["prompts.defaultSystemPrompt"], "mine"); // overlay wins
+    // The shared core store is untouched by the per-client patch.
+    assertEquals((await loadCoreSettings())["prompts.defaultSystemPrompt"], "shared");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("patchClientSettings: per-client isolation + sparse delete", async () => {
+  const env = await setupTestEnv();
+  try {
+    const a = createTestClient("a");
+    const b = createTestClient("b");
+    const res = await patchClientSettings(a, { "llm.temperature": 0.9 });
+    assertEquals(res.values["llm.temperature"], 0.9);
+    // b never sees a's value.
+    assertEquals("llm.temperature" in (await loadEffective(b)), false);
+    assertEquals((await loadEffective(a))["llm.temperature"], 0.9);
+    // null deletes a's override (reverts to the core/default value).
+    const del = await patchClientSettings(a, { "llm.temperature": null });
+    assertEquals(del.deleted, ["llm.temperature"]);
+    assertEquals("llm.temperature" in (await loadEffective(a)), false);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("resetAllClientSettings: wipes every overlay and notifies each affected client", async () => {
+  const env = await setupTestEnv();
+  try {
+    const a = createTestClient("a");
+    const b = createTestClient("b");
+    await patchClientSettings(a, { "llm.temperature": 0.9, "prompts.defaultSystemPrompt": "mine" });
+    await patchClientSettings(b, { "llm.topP": 0.8 });
+    const fired = new Map<string, string[]>();
+    const unsub = subscribeClientSettings((clientId, _values, deleted) => {
+      fired.set(clientId, deleted);
+    });
+    try {
+      await resetAllClientSettings();
+      // Both overlays are gone (effective view falls back to core/defaults).
+      assertEquals("llm.temperature" in (await loadEffective(a)), false);
+      assertEquals("prompts.defaultSystemPrompt" in (await loadEffective(a)), false);
+      assertEquals("llm.topP" in (await loadEffective(b)), false);
+      // Each affected client was notified with its just-deleted keys so a
+      // connected client re-baselines without reconnecting.
+      assertEquals(
+        new Set(fired.get(a)),
+        new Set(["llm.temperature", "prompts.defaultSystemPrompt"]),
+      );
+      assertEquals(fired.get(b), ["llm.topP"]);
+    } finally {
+      unsub();
+    }
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("subscribeClientSettings: fires with the owning client id and delta", async () => {
+  const env = await setupTestEnv();
+  try {
+    const a = createTestClient("a");
+    let firedClient: string | null = null;
+    let firedValues: Record<string, unknown> = {};
+    const unsub = subscribeClientSettings((clientId, values) => {
+      firedClient = clientId;
+      firedValues = values;
+    });
+    try {
+      await patchClientSettings(a, { "llm.topP": 0.8 });
+      assertEquals(firedClient, a);
+      assertEquals(firedValues["llm.topP"], 0.8);
+    } finally {
+      unsub();
+    }
   } finally {
     await env.teardown();
   }

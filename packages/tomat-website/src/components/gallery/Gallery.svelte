@@ -14,6 +14,7 @@
   } from "@tomat/shared/ui/samples";
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
   import AttachmentListView from "@tomat/shared/ui/components/chat/AttachmentListView.svelte";
+  import ChatShellView from "@tomat/shared/ui/components/chat/ChatShellView.svelte";
   import DiffView from "@tomat/shared/ui/components/chat/messages/DiffView.svelte";
   import ErrorMessageView from "@tomat/shared/ui/components/chat/messages/ErrorMessageView.svelte";
   import ExpandableMessageView from "@tomat/shared/ui/components/chat/messages/ExpandableMessageView.svelte";
@@ -35,6 +36,7 @@
   import { SETTINGS_SCHEMA } from "@tomat/shared/domain/settings/engine";
   import SettingsDemoFooter from "../demos/SettingsDemoFooter.svelte";
   import GalleryCard from "./GalleryCard.svelte";
+  import MobileGallery from "./MobileGallery.svelte";
 
   const entries = <T,>(o: Record<string, T>) => Object.entries(o);
 
@@ -172,6 +174,20 @@
         </div>
       </GalleryCard>
     {/each}
+
+    {#each entries(SAMPLES.ChatShellView) as [name, p] (name)}
+      <GalleryCard label={`ChatShellView · ${name} · desktop`}>
+        <div class="h-[26rem] w-full flex">
+          <ChatShellView
+            {...p as ComponentProps<typeof ChatShellView>}
+            coreBar={chatCoreBar}
+            sessionBar={chatSessionBar}
+            input={chatInput}
+            transcript={chatTranscript}
+          />
+        </div>
+      </GalleryCard>
+    {/each}
   </section>
 
   <!-- Settings -->
@@ -229,4 +245,36 @@
       </GalleryCard>
     {/each}
   </section>
+
+  <!-- Mobile counterparts, under a mobile UiContext (scoped to its own subtree
+       so the desktop cards above stay on DEFAULT_UI_CONTEXT). -->
+  <MobileGallery />
 </div>
+
+<!-- Chat-shell regions for the desktop ChatShellView card (the mobile card has
+     its own stand-ins in MobileGallery). Plain stand-ins: the card demonstrates
+     the shell ARRANGEMENT, so the regions only need to read as a core chip, a
+     session title, a composer, and a couple of transcript rows. -->
+{#snippet chatCoreBar()}
+  <div class="rounded-large bg-surface-inset px-3 py-2 text-sm text-default-600">
+    tomat core · connected
+  </div>
+{/snippet}
+{#snippet chatSessionBar(_z: number)}
+  <div class="rounded-large bg-surface-inset px-3 py-2 text-sm font-medium text-default-700">
+    Planning the week
+  </div>
+{/snippet}
+{#snippet chatInput()}
+  <div class="rounded-large bg-surface-inset px-3 py-3 text-sm text-default-500">
+    Message tomat…
+  </div>
+{/snippet}
+{#snippet chatTranscript()}
+  <div class="w-fit rounded-large bg-surface px-4 py-2 text-sm text-default-800 shadow">
+    Can you summarize my notes?
+  </div>
+  <div class="w-fit rounded-large bg-surface px-4 py-2 text-sm text-default-800 shadow">
+    Here is a short summary of your notes.
+  </div>
+{/snippet}

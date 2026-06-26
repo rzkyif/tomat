@@ -5,21 +5,30 @@ import {
   settingKeyDestination,
   validateSettingsPatch,
 } from "@tomat/shared";
-import { loadCoreSettings, patchCoreSettings } from "../../services/core-settings.ts";
+import {
+  loadEffective,
+  patchClientSettings,
+  patchCoreSettings,
+} from "../../services/core-settings.ts";
 import { deleteSecret, listSecretNames, setSecret } from "../../services/secrets.ts";
 import { AppError } from "../../shared/errors.ts";
-import { bearerMiddleware } from "../middleware/auth.ts";
+import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 
 // Sanitize a settings record before it crosses the API: keep only known
-// schema keys that belong to the core store, and never secret-typed keys
-// (API keys etc. live in the encrypted vault and are never returned; the
-// client learns which are configured from GET /settings/secrets and renders
-// a placeholder). A stray value placed directly in settings.json must not
-// leak to clients.
+// schema keys the core stores - the shared `core` keys plus this client's
+// `client-on-core` overlay keys - and never secret-typed keys (API keys etc.
+// live in the encrypted vault and are never returned; the client learns which
+// are configured from GET /settings/secrets and renders a placeholder). A stray
+// value placed directly in settings.json must not leak to clients.
 function sanitizeSettings(settings: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(settings)) {
-    if (isValidSettingKey(k) && settingKeyDestination(k) === "core" && !isSecretSettingKey(k)) {
+    const dest = settingKeyDestination(k);
+    if (
+      isValidSettingKey(k) &&
+      (dest === "core" || dest === "client-on-core") &&
+      !isSecretSettingKey(k)
+    ) {
       out[k] = v;
     }
   }
@@ -30,23 +39,37 @@ export function settingsRoutes(): Hono {
   const r = new Hono();
   r.use("*", bearerMiddleware());
 
-  r.get("/", async (c) => c.json(sanitizeSettings(await loadCoreSettings())));
+  // The effective view for this client: shared core settings overlaid with the
+  // client's own per-client (client-on-core) overrides.
+  r.get("/", async (c) => c.json(sanitizeSettings(await loadEffective(requireClient(c).id))));
 
   r.patch("/", async (c) => {
+    const me = requireClient(c);
     const body = await readJson(c);
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       throw new AppError("validation_error", "object body required");
     }
     const patch = body as Record<string, unknown>;
-    // Strict: only known schema core-destination keys with well-typed values
-    // are accepted (secrets belong in the vault, client keys in the client's
-    // own store). This guards against honest client mistakes (wrong types
-    // flowing into core or sidecar argv) and keeps the store schema-only.
-    const errors = validateSettingsPatch(patch);
+    // Strict: only known schema keys the core stores, with well-typed values,
+    // are accepted (secrets belong in the vault, client-on-client keys in the
+    // client's own local file). This guards against honest client mistakes
+    // (wrong types flowing into core or sidecar argv) and keeps the store
+    // schema-only.
+    const errors = validateSettingsPatch(patch, { allow: ["core", "client-on-core"] });
     if (errors.length > 0) {
       throw new AppError("validation_error", errors.join("; "));
     }
-    return c.json(sanitizeSettings(await patchCoreSettings(patch)));
+    // Partition by destination: shared keys go to the core-global store, the
+    // client's own keys go to its per-client overlay. Both are sparse upserts.
+    const global: Record<string, unknown> = {};
+    const perClient: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (settingKeyDestination(k) === "client-on-core") perClient[k] = v;
+      else global[k] = v;
+    }
+    if (Object.keys(global).length > 0) await patchCoreSettings(global);
+    if (Object.keys(perClient).length > 0) await patchClientSettings(me.id, perClient);
+    return c.json(sanitizeSettings(await loadEffective(me.id)));
   });
 
   // --- secrets -------------------------------------------------------------

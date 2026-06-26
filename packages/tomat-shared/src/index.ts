@@ -29,3 +29,4 @@ export * from "./validation/scheduled-prompt.ts";
 
 export * from "./crypto/pake.ts";
 export * from "./crypto/canonical.ts";
+export * from "./crypto/signature.ts";

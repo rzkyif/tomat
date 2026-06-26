@@ -21,6 +21,15 @@ const base64 = (label: string) =>
 
 const clientName = z.string().min(1).max(64);
 
+// Minimum admin-password length. The password is a second factor gated behind a
+// valid bearer token (never a sole barrier on the open network), so a modest
+// floor plus argon2id + rate limiting is enough. Shared so the set-password
+// endpoint, the client install form, and the password modal all agree.
+export const MIN_ADMIN_PASSWORD_LENGTH = 8;
+export const MAX_ADMIN_PASSWORD_LENGTH = 256;
+
+const adminPassword = z.string().min(MIN_ADMIN_PASSWORD_LENGTH).max(MAX_ADMIN_PASSWORD_LENGTH);
+
 export const pairingCodeRequestSchema = z
   .object({
     // Optional caller-requested TTL in seconds. Core enforces a 60-min ceiling.
@@ -30,10 +39,36 @@ export const pairingCodeRequestSchema = z
       .min(60)
       .max(60 * 60)
       .optional(),
+    // Admin password for the bearer+password mint path. Absent when the caller
+    // authenticates with X-Admin-Token instead. Length is verified by argon2id,
+    // not here, so we accept any non-empty string and let the core reject it.
+    password: z.string().min(1).max(MAX_ADMIN_PASSWORD_LENGTH).optional(),
   })
   .strict();
 
 export type PairingCodeRequest = z.infer<typeof pairingCodeRequestSchema>;
+
+// Body for cross-client revoke (DELETE /pairing/clients/:id) when the caller
+// authorizes with the admin password instead of X-Admin-Token. Self-revoke
+// ("leave") needs neither, so the body is optional/empty there.
+export const clientRevokeRequestSchema = z
+  .object({
+    password: z.string().min(1).max(MAX_ADMIN_PASSWORD_LENGTH).optional(),
+  })
+  .strict();
+
+export type ClientRevokeRequest = z.infer<typeof clientRevokeRequestSchema>;
+
+// Body for POST /admin/password (set/replace the admin password). Guarded by
+// X-Admin-Token (device access); enforces the length floor here so a too-short
+// password is rejected before hashing.
+export const adminPasswordSetRequestSchema = z
+  .object({
+    password: adminPassword,
+  })
+  .strict();
+
+export type AdminPasswordSetRequest = z.infer<typeof adminPasswordSetRequestSchema>;
 
 export interface PairingCodeResponse {
   code: string;

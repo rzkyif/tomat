@@ -182,6 +182,7 @@ export class WorkerHandle {
       p.secretsPlainFile, // legacy plaintext path (declared but unused)
       join(p.root, ".master-key"),
       p.adminTokenFile,
+      p.adminPasswordFile,
       p.dbFile,
       p.dbFile + "-wal",
       p.dbFile + "-shm",

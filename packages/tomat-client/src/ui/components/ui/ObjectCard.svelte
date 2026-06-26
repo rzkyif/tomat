@@ -2,6 +2,9 @@
   import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
   import ObjectBadge from "@tomat/shared/ui/components/objects/ObjectBadge.svelte";
   import type { Badge } from "@tomat/shared/ui/components/objects/object-types.ts";
+  import { useUiContext } from "@tomat/shared/ui/context.ts";
+  import { RIPPLE_MS } from "@tomat/shared/ui/animations.ts";
+  import { ripple } from "@tomat/shared/ui/actions/ripple.ts";
   import { type MenuRow, showObjectActionMenu } from "$lib/objects/menu";
 
   // A flush list row: left column (label / description / meta), right column
@@ -21,6 +24,9 @@
     menuRows?: MenuRow[];
     onOpen?: () => void;
   } = $props();
+
+  const ui = useUiContext();
+  const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
 </script>
 
 <!-- Three stacked rows (title + tags / description / meta + triple-dot) so the
@@ -36,13 +42,14 @@
     : ''}"
 >
   {#if onOpen}
-    <!-- Full-bleed overlay carries the press tint (the card content above it is
-         pointer-events-none, so it never receives :active itself). -->
+    <!-- Full-bleed overlay carries the press ripple (the card content above it
+         is pointer-events-none, so the splash sits behind the content). -->
     <button
       type="button"
-      class="absolute inset-0 rounded-large hov:cursor-pointer act:bg-surface-inset-strong transition-interactive"
+      class="absolute inset-0 rounded-large hov:cursor-pointer transition-interactive"
       aria-label={`Open ${label}`}
       onclick={onOpen}
+      use:ripple={{ durationMs: rippleDuration }}
     ></button>
   {/if}
   <!-- Row 1: title, with badges pinned to the right. -->

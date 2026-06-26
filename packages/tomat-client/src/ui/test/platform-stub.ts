@@ -27,6 +27,7 @@ const impl: Platform = {
   net: {
     fetch: unavailable("net.fetch"),
     connectWebSocket: unavailable("net.connectWebSocket"),
+    discoverCores: async () => [],
   },
   windowing: {
     show: NOOP,
@@ -46,6 +47,10 @@ const impl: Platform = {
     currentMonitor: async () => null,
     subscribeHideRequested: async () => () => {},
     subscribeMonitorChanged: async () => () => {},
+  },
+  backButton: {
+    subscribe: async () => () => {},
+    exit: () => Promise.resolve(),
   },
   autostart: {
     isEnabled: async () => false,
@@ -131,6 +136,9 @@ const impl: Platform = {
   },
   pairing: {
     async readAdminToken() {
+      return null;
+    },
+    async readLocalCoreBootError() {
       return null;
     },
     installLocalCore: unavailable("pairing.installLocalCore"),

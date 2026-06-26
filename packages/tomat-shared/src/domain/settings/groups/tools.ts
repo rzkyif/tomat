@@ -7,7 +7,12 @@ import type { SettingGroup } from "../types.ts";
 // behind `tools.enabled`: you can configure tools before turning tool use on.
 export const toolsGroup: SettingGroup = {
   id: "tools",
-  destination: "core",
+  // Hybrid. Whether tools are on and how they're selected per message is a
+  // per-client preference the core applies per turn (client-on-core); the tool
+  // worker pool and the installed-tool catalog are shared core resources
+  // (core); the risky-grant "do not show again" flag is a local UI flag
+  // (client-on-client). The header collapses to "Client" + "Core" chips.
+  destination: ["client-on-core", "core", "client-on-client"],
   name: "Tools",
   description:
     "Tools the agent can use, like web search or file access. Turn individual tools on and set their permissions under Management; turn tool use on and tune selection under Configuration. They come from Extensions and MCP servers.",
@@ -21,6 +26,8 @@ export const toolsGroup: SettingGroup = {
   sections: [
     {
       tab: "config",
+      label: "General",
+      destination: "client-on-core",
       fields: [
         {
           id: "tools.enabled",
@@ -35,6 +42,7 @@ export const toolsGroup: SettingGroup = {
     {
       tab: "config",
       label: "Tool Selection",
+      destination: "client-on-core",
       defaultCollapsed: true,
       visibleWhen: { field: "tools.enabled", eq: true },
       fields: [
@@ -131,6 +139,7 @@ export const toolsGroup: SettingGroup = {
     {
       tab: "config",
       label: "Tool Execution",
+      destination: "core",
       defaultCollapsed: true,
       visibleWhen: { field: "tools.enabled", eq: true },
       fields: [
@@ -179,6 +188,7 @@ export const toolsGroup: SettingGroup = {
     },
     {
       tab: "manage",
+      destination: "core",
       fields: [
         {
           id: "tools.list",
@@ -191,7 +201,7 @@ export const toolsGroup: SettingGroup = {
     },
     {
       tab: "manage",
-      destination: "client",
+      destination: "client-on-client",
       fields: [
         // Hidden persisted flag: set from the risky-permission confirm dialog's
         // "do not show again" checkbox in the tool detail view. Never rendered.

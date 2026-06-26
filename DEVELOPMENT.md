@@ -121,6 +121,14 @@ dev restarts. **Do not** click "On this computer" in dev. That path runs the
 production installer (it looks for a compiled core binary, which dev never
 builds) and would install a stable core over your dev session.
 
+Each `deno task dev` start also sets a fresh, randomly-generated **admin
+password** on the dev core and prints it in the `[dev]` banner (e.g.
+`dev-1a2b3c4d`). Use it to exercise the password-gated flows under **Cores** in
+Settings: **Generate pairing code** and removing a paired device. It is
+overwritten every run (the stored hash can't be read back), so use the value
+from the latest banner. `--fresh-install` skips this: there the in-app install
+screen sets its own password.
+
 ### Building
 
 ```bash
@@ -156,6 +164,78 @@ helper crates expose the same verbs as cargo wrappers, so
 `cd packages/tomat-core-keychain && deno
 task lint` work identically to the Deno
 packages.
+
+### Android (Tauri-mobile) client
+
+The same client builds for Android from the same Tauri project; only the build
+targets differ. The Android app is remote-only (it pairs with a remote core, no
+on-device core) and is distributed as a self-hosted, keystore-signed APK with an
+Ed25519-signed `android.json` manifest (the mobile analogue of `client.json`).
+
+**One-time host toolchain** (install before the tasks below):
+
+- Android Studio + SDK Manager: SDK Platform (API 34+), Platform-Tools,
+  Build-Tools, Command-line Tools, NDK (Side by side).
+- Env vars: `ANDROID_HOME="$HOME/Library/Android/sdk"`,
+  `NDK_HOME="$ANDROID_HOME/ndk/$(ls -1 $ANDROID_HOME/ndk)"`,
+  `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`
+  (Android Studio's bundled JBR; no separate JDK needed). Adjust paths per OS.
+- Rust cross-compile targets:
+  `rustup target add aarch64-linux-android armv7-linux-androideabi
+i686-linux-android x86_64-linux-android`.
+- An emulator (Android Studio Device Manager) or a USB-debugging device
+  (`adb devices` lists it).
+
+**Tasks** (root `<verb>:<pkg>` form; the client package also exposes the bare
+`init:android` / `dev:android` / `build:android` / `check:android`):
+
+```bash
+deno task --cwd packages/tomat-client init:android   # one-time: generate gen/android
+deno task dev:android                                 # dev core + android client (HMR)
+deno task dev:client:android                          # android client only, no core
+deno task build:client:android                        # latest-channel signed APK
+deno task build:client:android:stable                 # stable-channel signed APK
+```
+
+`dev:android` is the mobile analogue of `dev`: it boots the dev core and the
+android client together. It binds the core to `0.0.0.0` (the
+emulator/device reaches it over the network, not loopback), mints a pairing
+code, and passes the device-reachable core URL + code to onboarding through Vite
+env (`VITE_DEV_CORE_URL` / `VITE_DEV_PAIRING_CODE`), so the fields are prefilled
+on the device. The core URL host is the emulator's host-loopback alias
+`10.0.2.2` by default, or `TAURI_DEV_HOST` when set (a physical device on the
+LAN; the same host HMR uses). `dev:client:android` runs only the client (against
+an already-running core); it goes through the same orchestrator (`scripts/dev.ts
+--android --client-only`) so it shares the clean Ctrl+C teardown. Both reap the
+android cross-compile that the detached Gradle daemon spawns; the Gradle daemon
+and adb server are persistent by design and left running. Non-stable channels
+get a distinct `applicationId` (`au.tomat.ing.<channel>`) so they install
+alongside stable.
+
+**Release signing.** Release APKs are signed by a Java keystore the release
+pipeline materializes from `.env` (`TOMAT_ANDROID_KEYSTORE_B64` +
+passwords/alias; see `.env.example`). A plain local `build:client:android`
+without that keystore falls back to debug signing so the APK still installs for
+testing. The release path never debug-signs: `scripts/release/android.ts` hard
+fails when the keystore env is absent, and `scripts/release/main.ts` drops the
+android item entirely. The decoded `*.jks` + `keystore.properties` are gitignored
+and wiped after the build (including on Ctrl-C).
+
+**versionCode.** Android requires a monotonically increasing integer
+`versionCode` to accept an update. It is Tauri-derived from `tauri.conf.json`
+`version` (`major*1e6 + minor*1e3 + patch`), so bumping the version bumps it.
+Consequence: re-spinning the SAME version (e.g. a rebuild) produces the same
+`versionCode` and is NOT installable over the prior build without uninstalling;
+bump the patch version for any re-publish meant to update existing installs.
+
+**`gen/android` hygiene.** The generated Android Studio project under
+`gen/android` carries hand-applied customizations (manifest permissions +
+`allowBackup=false`, the release `signingConfigs` in `build.gradle.kts`, the
+`<uses-feature>` entries). Treat the project as source: commit it, with
+`gen/android/.gitignore` excluding build output and the signing secrets
+(`build/`, `*.jks`, `keystore.properties`). Re-running `init:android` re-syncs
+the stock Tauri scaffolding; re-apply the customizations if it overwrites them
+(diff against the committed tree).
 
 ## Packages and release items
 
@@ -243,15 +323,43 @@ own check.
 ## Tests
 
 ```bash
-deno task test          # every package's tests (deno test + vitest + cargo test)
-deno task test:client   # just the client (vitest + the Tauri crate's cargo test)
-deno task test:core     # just tomat-core
-deno task test:e2e      # WebdriverIO E2E (manual, opt-in)
+deno task test               # every package's tests (deno test + vitest + cargo test)
+deno task test:client        # just the client (vitest + the Tauri crate's cargo test)
+deno task test:core          # just tomat-core
+deno task test:e2e           # tauri-driver E2E smoke (manual, opt-in)
+deno task test:e2e:headless  # headless integration E2E (manual, opt-in)
 ```
 
-Tests are co-located with source as `*.test.ts`. E2E specs live under
-`tests/e2e/specs/` with their own runner; see
-[tests/e2e/README.md](tests/e2e/README.md) for setup. Scratch tests are
+Tests are co-located with source as `*.test.ts`. Scratch tests are
 `*.tmp.test.ts` (gitignored anywhere in the tree). The developer guide for the
 suite (helpers, fixtures, mocking patterns) is in
 [tests/README.md](tests/README.md).
+
+### End-to-end lanes
+
+There are two E2E lanes, both **opt-in, local-only, and never run in CI**. The
+unit + component suites above are what you run constantly; reach for an E2E lane
+only when a change spans the client/core wire or the full app boot.
+
+- **Headless integration** (`deno task test:e2e:headless`) is the primary lane
+  and where the bulk of happy-path coverage lives. It mounts the real Svelte app
+  in a real Chromium and drives it over real HTTP+WS+TLS against a real spawned
+  `tomat-core` subprocess, with every outbound dependency (LLM, STT, TTS, model
+  and binary downloads) mocked locally. Fast (tens of seconds), deterministic,
+  and cross-platform. Run it when you touch the client/core protocol stack
+  (`lib/core/`), the boot/connection choreography, chat/session/settings flows,
+  the downloader, or anything whose behaviour only emerges from a live
+  client<->core round-trip. Setup, architecture, and the exact behaviour delta
+  versus the tauri-driver lane are in
+  [tests/e2e/headless/README.md](tests/e2e/headless/README.md).
+- **tauri-driver smoke** (`deno task test:e2e`) drives the real Tauri shell
+  through WebdriverIO. It is a thin smoke lane that covers exactly what headless
+  cannot: the native WebView engine, the Rust `net` transport (reqwest/rustls
+  SPKI pinning), and OS-native calls. It is slow and platform-specific; run it
+  only when validating those native seams. Setup is in
+  [tests/e2e/tauri-driver/README.md](tests/e2e/tauri-driver/README.md).
+
+Do **not** add either lane to the default dev loop or to CI. Each needs a
+one-time toolchain install (and the headless lane needs a `deno task dev`
+install present once, to stage the helper + sidecar binaries). Happy paths only
+live in E2E; sad paths belong in co-located unit/component tests.

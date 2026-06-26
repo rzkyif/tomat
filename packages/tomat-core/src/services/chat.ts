@@ -90,7 +90,7 @@ import { toolFilter } from "./tool-filter.ts";
 import { maybeGenerateTitle } from "./title-gen.ts";
 import { resolveEndpoint } from "./endpoint-resolver.ts";
 import { thinkingBudget } from "./thinking-budget.ts";
-import { loadCoreSettings } from "./core-settings.ts";
+import { loadEffective } from "./core-settings.ts";
 import { llmIdle } from "./llm-idle.ts";
 import { coreStatus } from "./core-status.ts";
 import { promptScheduler } from "./prompt-scheduler.ts";
@@ -320,7 +320,12 @@ export class ChatService {
   }
 
   private async run(stream: ActiveStream, frame: ChatStartFrame): Promise<void> {
-    const settings = await loadCoreSettings();
+    // Effective settings for this turn's owner: shared core config overlaid with
+    // the client's own per-client inference knobs (sampling, prompts, tool and
+    // memory selection). Automated/scheduled sessions reach here via
+    // chatService().start(ownerClientId, ...), so they honor the owner's knobs
+    // too. Model/server/provider keys are core-global and unaffected.
+    const settings = await loadEffective(stream.clientId);
     // Reload the local model if idle-unload stopped it (no-op otherwise).
     await llmIdle().ensureLoaded(settings);
 
@@ -339,6 +344,22 @@ export class ChatService {
     }
 
     const endpoint = await resolveEndpoint(settings, route);
+    // An external provider can't stream until it's configured: an empty base
+    // URL, API key, or model otherwise reaches the OpenAI SDK and fails with an
+    // opaque network/auth error on send. Fail fast with an actionable message.
+    // Local always resolves a loopback URL plus a placeholder key/model, so this
+    // only ever trips for an unconfigured external (or dual-model) provider.
+    if (!endpoint.baseUrl || !endpoint.apiKey || !endpoint.model) {
+      this.send(stream.clientId, {
+        kind: "chat.error",
+        streamId: stream.streamId,
+        code: "provider_error",
+        message:
+          "This model provider isn't set up yet. Open Settings and add the " +
+          "provider's Base URL, API Key, and Model.",
+      });
+      return;
+    }
     const maxHops = numSetting(settings, "tools.maxHops", DEFAULT_MAX_TOOL_HOPS);
     // The client composes the effective prompt per turn (its context block
     // holds client-local facts like date/time and OS) and sends it on the

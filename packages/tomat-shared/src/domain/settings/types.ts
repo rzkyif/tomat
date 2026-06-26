@@ -85,6 +85,10 @@ interface BaseField {
   editableWhen?: FieldCondition;
   optionalWhen?: FieldCondition;
   optional?: boolean;
+  /** When true, the field is hidden on mobile (no equivalent on the touch shell,
+   *  e.g. window geometry). Persisted state is untouched; only the control is
+   *  hidden. The section-level flag covers a whole group of such fields. */
+  desktopOnly?: boolean;
   /** Controls how the description is presented:
    *  - `none`: never shown (no info button).
    *  - `ondemand`: hidden behind an info-button toggle (default for non-empty descriptions).
@@ -290,6 +294,10 @@ export interface SettingSection {
   destination?: SettingDestination;
   visibleWhen?: FieldCondition;
   expandWhen?: FieldCondition;
+  /** When true, the whole section is hidden on mobile (no touch-shell
+   *  equivalent, e.g. desktop startup/window options). Persisted state is
+   *  untouched; only the rendering is suppressed. */
+  desktopOnly?: boolean;
   fields: SettingField[];
   /** When true, the section starts collapsed (its fields hidden behind the
    *  section header) on a fresh load and on "reset group to defaults". Only
@@ -298,11 +306,32 @@ export interface SettingSection {
   defaultCollapsed?: boolean;
 }
 
-/** Where the group's settings are persisted: "client" → ~/.tomat/client/settings.json
- *  via Tauri commands; "core" → ~/.tomat/core/settings.json on the
- *  currently-selected paired core via PATCH /api/v1/settings. The UI shows
- *  a chip in the group header so the user knows where their change lands. */
-export type SettingDestination = "client" | "core";
+/** Where a setting is persisted. Three storage locations, two user-visible
+ *  labels (the chip collapses any `client-on-*` to "Client", `core` to "Core"):
+ *   - "client-on-client": this device's `~/.tomat/client/settings.json` (Tauri).
+ *     Pure device preferences the core never reads.
+ *   - "client-on-core": this client's row in the core's `client_settings` table,
+ *     keyed by `clients.id`. Per-user preferences the core must apply
+ *     server-side (inference knobs), including for scheduled/automated sessions
+ *     that have no client frame. Reached via PATCH /api/v1/settings, partitioned
+ *     by destination; layered over `core` as `loadEffective(clientId)`.
+ *   - "core": the shared `~/.tomat/core/settings.json` on the selected paired
+ *     core via PATCH /api/v1/settings. Shared physical resources. */
+export type SettingDestination = "client-on-client" | "client-on-core" | "core";
+
+/** The user-visible label for a destination: the two-value collapse the chip
+ *  renders. Both `client-on-*` values are "this client"; `core` is shared. */
+export function destinationLabel(dest: SettingDestination): "Client" | "Core" {
+  return dest === "core" ? "Core" : "Client";
+}
+
+/** True when persisting this destination requires a live core connection: both
+ *  `core` (shared store) and `client-on-core` (per-client overlay) live on the
+ *  core, while `client-on-client` is a local file write. Drives the client's
+ *  save-layer routing and the reconnect-dim of core-backed groups. */
+export function destinationNeedsCore(dest: SettingDestination): boolean {
+  return dest !== "client-on-client";
+}
 
 /** One mode of a tabbed group. A tab partitions the group's sections (by
  *  `section.tab`) behind a selector rendered below the group description. A tab
@@ -329,6 +358,10 @@ export interface SettingGroup {
    *  entry, not rendered). Used for groups that exist only to register setting
    *  ids / a persistence destination (e.g. `cores`). */
   hidden?: boolean;
+  /** When true, the group is hidden on mobile (the platform has no equivalent of
+   *  the feature it configures, e.g. global keyboard shortcuts). Honored by
+   *  `isGroupVisible(group, platform)` so the desktop UI is unaffected. */
+  desktopOnly?: boolean;
   /** Where this group's values are persisted. Usually a single destination. A
    *  group may declare BOTH (an array) when it spans client and core - currently
    *  only the render-only `usage` group, which shows client + core resources
@@ -382,9 +415,10 @@ export type SettingsRecord = Record<string, unknown>;
 // a derive-check in engine.test.ts fails CI if these ever drift from each
 // group's `destination` in SETTINGS_SCHEMA.
 
-// A group id appears in CLIENT_GROUP_IDS if its destinations include "client"
-// and in CORE_GROUP_IDS if they include "core". A multi-destination group (e.g.
-// `usage`) is therefore listed in BOTH.
+// A group id appears in CLIENT_GROUP_IDS if any of its destinations carry the
+// "Client" label (either `client-on-client` or `client-on-core`) and in
+// CORE_GROUP_IDS if any carry the "Core" label. A group spanning both (e.g.
+// `usage`, or a hybrid llm/tools group) is listed in BOTH.
 export const CLIENT_GROUP_IDS = [
   "appearance",
   "shortcuts",
@@ -394,15 +428,19 @@ export const CLIENT_GROUP_IDS = [
   "stt",
   "tts",
   "general",
+  "greetings",
+  "prompts",
+  "llm",
+  "memories",
+  "dualModel",
+  "tools",
 ] as const;
 export type ClientGroupId = (typeof CLIENT_GROUP_IDS)[number];
 
 export const CORE_GROUP_IDS = [
   "llm",
-  "prompts",
   "memories",
   "scheduledPrompts",
-  "greetings",
   "dualModel",
   "tools",
   "extensions",
@@ -428,4 +466,22 @@ export function groupDestinations(group: {
   destination: SettingDestination | SettingDestination[];
 }): SettingDestination[] {
   return Array.isArray(group.destination) ? group.destination : [group.destination];
+}
+
+/** The chips a group header shows: its destinations deduped by visible label
+ *  (so a group spanning `client-on-client` and `client-on-core` shows one
+ *  "Client" chip, not two), preserving declared order. Each returned value is a
+ *  representative destination for its label, fed to DestinationChip. */
+export function groupDestinationChips(group: {
+  destination: SettingDestination | SettingDestination[];
+}): SettingDestination[] {
+  const out: SettingDestination[] = [];
+  const seen = new Set<string>();
+  for (const dest of groupDestinations(group)) {
+    const label = destinationLabel(dest);
+    if (seen.has(label)) continue;
+    seen.add(label);
+    out.push(dest);
+  }
+  return out;
 }

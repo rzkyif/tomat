@@ -7,6 +7,8 @@
   // client wrapper parses the message content into `errorType` / `errorDetail`;
   // alignment comes from the UI context so both apps match.
   const ui = useUiContext();
+  // Mobile chat bubbles always sit on the agent side (left).
+  const align = $derived(ui.platform === "mobile" ? "left" : ui.getAlignment());
 
   let { errorType, errorDetail = "" }: { errorType: string; errorDetail?: string } = $props();
 
@@ -30,7 +32,7 @@
   const message = $derived(errorMessage(errorType));
 </script>
 
-<Bubble selectedAlignment={ui.getAlignment()} accent="red" extraClass="text-default-800">
+<Bubble selectedAlignment={align} accent="red" extraClass="text-default-800">
   {message}
   {#if errorDetail}
     <div class="error-code-wrapper">

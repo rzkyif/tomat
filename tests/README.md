@@ -1,15 +1,16 @@
 # tomat test suite
 
 Tests live co-located with source as `*.test.ts`. E2E specs are opt-in and live
-under `tests/e2e/specs/` with their own runner.
+under `tests/e2e/` (two lanes: a headless integration lane and a tauri-driver
+smoke lane), each with its own runner.
 
 ## Filename convention
 
-| Pattern              | Where              | Gitignored? |
-| -------------------- | ------------------ | ----------- |
-| `*.test.ts`          | next to source     | no          |
-| `*.test.ts`          | `tests/e2e/specs/` | no          |
-| `*.tmp.test.{ts,rs}` | anywhere           | **yes**     |
+| Pattern              | Where                     | Gitignored? |
+| -------------------- | ------------------------- | ----------- |
+| `*.test.ts`          | next to source            | no          |
+| `*.test.ts`          | `tests/e2e/<lane>/specs/` | no          |
+| `*.tmp.test.{ts,rs}` | anywhere                  | **yes**     |
 
 Rust uses inline `#[cfg(test)] mod tests` for unit tests. If integration tests
 grow, they go in `packages/<pkg>/tests/*.rs` (Cargo's per-file convention).
@@ -21,14 +22,15 @@ CI.
 
 ## Quick reference
 
-| Task                     | What it runs                                                                                        |
-| ------------------------ | --------------------------------------------------------------------------------------------------- |
-| `deno task test`         | All tests across every package (Deno test + vitest + cargo test).                                   |
-| `deno task test:core`    | Just `tomat-core`.                                                                                  |
-| `deno task test:shared`  | Just `tomat-shared`.                                                                                |
-| `deno task test:client`  | Vitest against the Svelte 5 UI + the Tauri crate's `cargo test` (`packages/tomat-client`).          |
-| `deno task test:<crate>` | `cargo test` for one Rust crate, e.g. `test:core-keychain`, `test:core-updater`.                    |
-| `deno task test:e2e`     | WebdriverIO + tauri-driver. Manual only. See [tests/e2e/README.md](e2e/README.md) for opt-in setup. |
+| Task                          | What it runs                                                                                                                                                                |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deno task test`              | All tests across every package (Deno test + vitest + cargo test).                                                                                                           |
+| `deno task test:core`         | Just `tomat-core`.                                                                                                                                                          |
+| `deno task test:shared`       | Just `tomat-shared`.                                                                                                                                                        |
+| `deno task test:client`       | Vitest against the Svelte 5 UI + the Tauri crate's `cargo test` (`packages/tomat-client`).                                                                                  |
+| `deno task test:<crate>`      | `cargo test` for one Rust crate, e.g. `test:core-keychain`, `test:core-updater`.                                                                                            |
+| `deno task test:e2e:headless` | Headless integration E2E (real app in Chromium <-> real core over TLS, deps mocked). Manual only, primary lane. See [tests/e2e/headless/README.md](e2e/headless/README.md). |
+| `deno task test:e2e`          | tauri-driver smoke (real Tauri shell via WebdriverIO). Manual only, thin native lane. See [tests/e2e/tauri-driver/README.md](e2e/tauri-driver/README.md).                   |
 
 ## Layout
 
@@ -42,10 +44,40 @@ packages/tomat-core/tests/
   helpers/time.ts                        # mockClock()
   helpers/free-port.ts                   # ephemeral-port helper
 tests/e2e/
-  wdio.conf.ts                           # WebdriverIO config
-  specs/*.test.ts                        # permanent E2Es
-  specs/*.tmp.test.ts                    # scratch E2Es (gitignored)
+  README.md                              # lane index: when to use which
+  tauri-driver/                          # tauri-driver smoke lane (opt-in npm project)
+    wdio.conf.ts                         # WebdriverIO config
+    specs/*.test.ts                      # native smoke specs
+  headless/                              # headless integration lane (opt-in npm project)
+    harness/                             # the library (core-process, mock-services, app, pages)
+    fixtures/                            # hermetic test extension + stdio MCP server
+    specs/{tier1,tier2}/*.test.ts        # high-level happy-path specs
+    specs/**/*.tmp.test.ts               # scratch specs (gitignored)
 ```
+
+## E2E lanes (both opt-in, never in CI)
+
+Reach for an E2E lane only when a change spans the client/core wire or the full
+app boot; the co-located unit + component suites are the everyday tools.
+
+- **Headless integration** (`test:e2e:headless`, the primary lane) mounts the
+  real Svelte app in a real Chromium and drives it over real HTTP+WS+TLS against
+  a real spawned `tomat-core`, with every outbound dependency (LLM/STT/TTS,
+  model + binary downloads) mocked locally. It is fast, deterministic, and
+  cross-platform, and is where happy-path coverage lives. The harness is a
+  library so specs read at a high level (`launchApp(...)` + page objects).
+  Architecture, the behaviour delta versus tauri-driver, setup, and how to write
+  a spec are in [e2e/headless/README.md](e2e/headless/README.md).
+- **tauri-driver smoke** (`test:e2e`) drives the real Tauri shell to cover what
+  headless deliberately cannot: the native WebView, the Rust `net` transport
+  (rustls SPKI pinning), and OS-native calls. See
+  [e2e/tauri-driver/README.md](e2e/tauri-driver/README.md).
+
+**Happy paths, plus wire-only negatives in E2E.** Default to happy paths. The one
+exception is a negative that only emerges from the real client<->core wire and
+cannot be faithfully unit-tested (a wrong-code PAKE rejection, a provider error
+mid-stream, a dropped-and-recovered connection). Any sad path with a faithful
+seam belongs in a co-located unit/component test, not here.
 
 ## Writing tests against `tomat-core`
 
@@ -198,4 +230,5 @@ crate's clippy config rejects `unwrap` in non-test code.
   cargo tests).
 - The `rs` matrix runs `cargo test` for the Rust crates (tauri shell,
   core-keychain, core-updater) on macOS and Windows.
-- E2E specs are never run in CI.
+- Neither E2E lane (headless integration, tauri-driver smoke) runs in CI; both
+  are opt-in and local-only.

@@ -243,6 +243,192 @@ pub async fn net_fetch(
     })
 }
 
+// --- LAN discovery --------------------------------------------------------
+//
+// The "ping" button on the remote-pairing screen sweeps the local network for
+// reachable cores. Each candidate host is probed at the unauthenticated
+// `GET /api/v1/health` endpoint over a TOFU TLS connection (capture mode, same
+// as the pairing handshake): a 2xx means a core is there. We read its reported
+// version and capture its cert SPKI pin for display only. Nothing is trusted
+// here: pairing still runs the full PAKE + pin-binding flow afterwards, so this
+// adds no new trust surface, only a convenience that finds the address.
+//
+// Desktop-only: it relies on interface enumeration (local-ip-address), which is
+// a desktop dependency. The mobile Platform impl returns an empty list.
+
+#[cfg(desktop)]
+use std::net::Ipv4Addr;
+
+/// The known per-channel core ports (stable / latest / dev). We probe all three
+/// so a client on one channel still finds a core running on another; pairing
+/// itself is channel-agnostic. Mirrors channel.rs `core_port_for()`.
+#[cfg(desktop)]
+const KNOWN_CORE_PORTS: [u16; 3] = [7800, 7810, 7820];
+
+/// Bounded in-flight probes for the sweep. A /24 has 254 hosts * 3 ports;
+/// most are dead and fail the short-timeout connect fast, so this keeps the
+/// whole sweep to a couple of seconds without flooding the network at once.
+#[cfg(desktop)]
+const DISCOVERY_CONCURRENCY: usize = 128;
+
+/// Per-host probe timeout. Short so a /24 full of dead hosts still finishes
+/// quickly; a live core on the LAN answers well within this.
+#[cfg(desktop)]
+const DISCOVERY_TIMEOUT_MS: u64 = 400;
+
+#[cfg(desktop)]
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredCore {
+    base_url: String,
+    version: String,
+    pin: String,
+}
+
+#[cfg(desktop)]
+#[derive(serde::Deserialize)]
+struct HealthBody {
+    version: Option<String>,
+}
+
+/// Sweep the local network for reachable cores. Probes this machine's /24(s)
+/// plus loopback at the known core ports and returns one entry per distinct
+/// core (deduped by cert pin).
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn discover_lan_cores() -> AppResult<Vec<DiscoveredCore>> {
+    use futures_util::stream::{self, StreamExt};
+    let targets = discovery_targets(local_ipv4_addrs());
+    let found: Vec<DiscoveredCore> = stream::iter(targets)
+        .map(|(ip, port)| async move { probe_core_health(ip, port).await })
+        .buffer_unordered(DISCOVERY_CONCURRENCY)
+        .filter_map(|r| async move { r })
+        .collect()
+        .await;
+    Ok(dedupe_by_pin(found))
+}
+
+/// This machine's non-loopback IPv4 interface addresses. Empty on enumeration
+/// failure (the sweep then still covers loopback for the local/dev core).
+#[cfg(desktop)]
+fn local_ipv4_addrs() -> Vec<Ipv4Addr> {
+    local_ip_address::list_afinet_netifas()
+        .map(|ifaces| {
+            ifaces
+                .into_iter()
+                .filter_map(|(_, ip)| match ip {
+                    std::net::IpAddr::V4(v4)
+                        if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_link_local() =>
+                    {
+                        Some(v4)
+                    }
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Build the (host, port) candidate list: loopback plus every host in the /24
+/// of each local interface, crossed with the known core ports. Pure so the
+/// host math can be unit-tested without touching the network.
+#[cfg(desktop)]
+fn discovery_targets(local: Vec<Ipv4Addr>) -> Vec<(Ipv4Addr, u16)> {
+    let mut hosts: Vec<Ipv4Addr> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    // Loopback always, so the local (and dev) core shows even with no LAN.
+    push_host(&mut hosts, &mut seen, Ipv4Addr::LOCALHOST);
+    for ip in local {
+        let o = ip.octets();
+        for h in 1u8..=254 {
+            push_host(&mut hosts, &mut seen, Ipv4Addr::new(o[0], o[1], o[2], h));
+        }
+    }
+    let mut targets = Vec::with_capacity(hosts.len() * KNOWN_CORE_PORTS.len());
+    for ip in hosts {
+        for &port in &KNOWN_CORE_PORTS {
+            targets.push((ip, port));
+        }
+    }
+    targets
+}
+
+#[cfg(desktop)]
+fn push_host(
+    hosts: &mut Vec<Ipv4Addr>,
+    seen: &mut std::collections::HashSet<Ipv4Addr>,
+    ip: Ipv4Addr,
+) {
+    if seen.insert(ip) {
+        hosts.push(ip);
+    }
+}
+
+/// Probe one host:port at /api/v1/health over a TOFU TLS connection. Returns a
+/// `DiscoveredCore` only on a 2xx whose cert pin we could capture.
+#[cfg(desktop)]
+async fn probe_core_health(ip: Ipv4Addr, port: u16) -> Option<DiscoveredCore> {
+    let captured = Arc::new(Mutex::new(None));
+    // A fresh client per probe: the capture cell is per-connection, so reusing
+    // one client across hosts would race their pins onto the same cell.
+    let tls = build_client_config(None, captured.clone()).ok()?;
+    let client = reqwest::Client::builder()
+        .use_preconfigured_tls(tls)
+        .connect_timeout(std::time::Duration::from_millis(DISCOVERY_TIMEOUT_MS))
+        .timeout(std::time::Duration::from_millis(DISCOVERY_TIMEOUT_MS))
+        .build()
+        .ok()?;
+    let base_url = format!("https://{ip}:{port}");
+    let resp = client
+        .get(format!("{base_url}/api/v1/health"))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.bytes().await.ok()?;
+    let version = serde_json::from_slice::<HealthBody>(&body)
+        .ok()
+        .and_then(|b| b.version)
+        .unwrap_or_else(|| "unknown".to_string());
+    let pin = captured
+        .lock()
+        .ok()
+        .and_then(|g| *g)
+        .map(|h| B64.encode(h))?;
+    Some(DiscoveredCore {
+        base_url,
+        version,
+        pin,
+    })
+}
+
+/// Collapse responders that share a cert pin (the local core answers on both
+/// loopback and its own LAN IP) into one entry, preferring a non-loopback
+/// address so the user pairs with a reachable "remote" URL. Sorted for a
+/// stable display order.
+#[cfg(desktop)]
+fn dedupe_by_pin(found: Vec<DiscoveredCore>) -> Vec<DiscoveredCore> {
+    let mut by_pin: HashMap<String, DiscoveredCore> = HashMap::new();
+    for core in found {
+        match by_pin.get(&core.pin) {
+            Some(existing) if !is_loopback_url(&existing.base_url) => {}
+            _ => {
+                by_pin.insert(core.pin.clone(), core);
+            }
+        }
+    }
+    let mut out: Vec<DiscoveredCore> = by_pin.into_values().collect();
+    out.sort_by(|a, b| a.base_url.cmp(&b.base_url));
+    out
+}
+
+#[cfg(desktop)]
+fn is_loopback_url(base_url: &str) -> bool {
+    base_url.contains("127.0.0.1")
+}
+
 // --- WebSocket ------------------------------------------------------------
 
 fn ev(ws_id: &str, kind: &str) -> String {
@@ -436,5 +622,67 @@ mod tests {
         assert!(constant_time_eq(&a, &b));
         b[31] = 2;
         assert!(!constant_time_eq(&a, &b));
+    }
+
+    #[cfg(desktop)]
+    fn core(base_url: &str, pin: &str) -> DiscoveredCore {
+        DiscoveredCore {
+            base_url: base_url.to_string(),
+            version: "0.1.0".to_string(),
+            pin: pin.to_string(),
+        }
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn discovery_targets_cover_loopback_and_each_interface_slash_24() {
+        let local = vec![Ipv4Addr::new(192, 168, 1, 50)];
+        let targets = discovery_targets(local);
+        // (1 loopback + 254 LAN hosts) * 3 ports.
+        assert_eq!(targets.len(), (1 + 254) * KNOWN_CORE_PORTS.len());
+        // Loopback is probed at every known port.
+        for &port in &KNOWN_CORE_PORTS {
+            assert!(targets.contains(&(Ipv4Addr::LOCALHOST, port)));
+        }
+        // The /24 spans .1..=.254, excluding the network (.0) and broadcast (.255).
+        assert!(targets.contains(&(Ipv4Addr::new(192, 168, 1, 1), 7800)));
+        assert!(targets.contains(&(Ipv4Addr::new(192, 168, 1, 254), 7800)));
+        assert!(!targets
+            .iter()
+            .any(|(ip, _)| *ip == Ipv4Addr::new(192, 168, 1, 0)));
+        assert!(!targets
+            .iter()
+            .any(|(ip, _)| *ip == Ipv4Addr::new(192, 168, 1, 255)));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn discovery_targets_dedupe_overlapping_interfaces() {
+        // Two interfaces in the same /24 must not double-probe the same host.
+        let local = vec![Ipv4Addr::new(10, 0, 0, 5), Ipv4Addr::new(10, 0, 0, 9)];
+        let targets = discovery_targets(local);
+        assert_eq!(targets.len(), (1 + 254) * KNOWN_CORE_PORTS.len());
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn dedupe_by_pin_prefers_lan_address_over_loopback() {
+        let found = vec![
+            core("https://127.0.0.1:7820", "PIN_A"),
+            core("https://192.168.1.50:7820", "PIN_A"),
+            core("https://192.168.1.77:7800", "PIN_B"),
+        ];
+        let out = dedupe_by_pin(found);
+        assert_eq!(out.len(), 2);
+        let a = out.iter().find(|c| c.pin == "PIN_A").unwrap();
+        assert_eq!(a.base_url, "https://192.168.1.50:7820"); // LAN wins over loopback
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn dedupe_by_pin_keeps_loopback_when_thats_all_there_is() {
+        let out = dedupe_by_pin(vec![core("https://127.0.0.1:7820", "PIN_A")]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].base_url, "https://127.0.0.1:7820");
     }
 }

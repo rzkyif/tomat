@@ -10,6 +10,9 @@
   // is supplied by the caller (client: MessageMarkdown; website: plain prose),
   // so this stays free of the heavy markdown pipeline. Alignment via context.
   const ui = useUiContext();
+  // On mobile, agent bubbles always sit on the left (a conventional chat app),
+  // regardless of the desktop window-alignment setting; desktop follows it.
+  const align = $derived(ui.platform === "mobile" ? "left" : ui.getAlignment());
 
   let {
     kind,
@@ -22,6 +25,7 @@
     neighborLeft = false,
     neighborRight = false,
     oncontextmenu,
+    onlongpress,
     body,
   }: {
     kind: "reasoning" | "content";
@@ -36,6 +40,8 @@
     neighborLeft?: boolean;
     neighborRight?: boolean;
     oncontextmenu?: (e: MouseEvent) => void;
+    /** Touch long-press (mobile stand-in for the right-click context menu). */
+    onlongpress?: () => void;
     /** The message body: reasoning content or the answer markdown. */
     body: Snippet;
   } = $props();
@@ -43,13 +49,14 @@
 
 {#if kind === "reasoning"}
   <Bubble
-    selectedAlignment={ui.getAlignment()}
+    selectedAlignment={align}
     bgClass="bg-surface"
     extraClass="markdown overflow-clip"
     size="small"
     {neighborLeft}
     {neighborRight}
     {oncontextmenu}
+    {onlongpress}
   >
     <ReasoningTraceView
       {isStreaming}
@@ -61,12 +68,13 @@
   </Bubble>
 {:else}
   <Bubble
-    selectedAlignment={ui.getAlignment()}
+    selectedAlignment={align}
     {bgClass}
     extraClass="markdown overflow-clip flex flex-col gap-3"
     {active}
     {pulse}
     {oncontextmenu}
+    {onlongpress}
   >
     {@render body()}
   </Bubble>

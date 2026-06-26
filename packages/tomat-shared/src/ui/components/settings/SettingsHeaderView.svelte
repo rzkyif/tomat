@@ -1,6 +1,12 @@
 <script lang="ts">
   import IconButton from "../primitives/IconButton.svelte";
   import SearchInput from "../primitives/SearchInput.svelte";
+  import { useUiContext } from "../../context.ts";
+
+  const ui = useUiContext();
+  // The close (X) is dropped only where the OS owns back navigation (Android):
+  // the screen is dismissed with the system back there. Desktop and iOS keep it.
+  const showClose = !ui.hasSystemBack;
 
   // THE single settings panel header for both the client and the website
   // (single-source rule, AGENTS.md): the search box plus the Quick Settings,
@@ -64,12 +70,14 @@
     surface="circle"
     onclick={onShare}
   />
-  <IconButton
-    icon="i-material-symbols-close-rounded"
-    title="Back to Chat"
-    size="lg"
-    variant="subtle"
-    surface="circle"
-    onclick={onClose}
-  />
+  {#if showClose}
+    <IconButton
+      icon="i-material-symbols-close-rounded"
+      title="Back to Chat"
+      size="lg"
+      variant="subtle"
+      surface="circle"
+      onclick={onClose}
+    />
+  {/if}
 </div>

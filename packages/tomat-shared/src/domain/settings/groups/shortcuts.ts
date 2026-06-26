@@ -2,7 +2,10 @@ import type { SettingGroup } from "../types.ts";
 
 export const shortcutsGroup: SettingGroup = {
   id: "shortcuts",
-  destination: "client",
+  destination: "client-on-client",
+  // Global keyboard shortcuts have no mobile equivalent (Android gives a
+  // backgrounded app no foreground-hotkey access), so the group is hidden there.
+  desktopOnly: true,
   name: "Shortcuts",
   description:
     "Keyboard shortcuts for common actions. Click a field, press the keys you want, and clear it to disable.",

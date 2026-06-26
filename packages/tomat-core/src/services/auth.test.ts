@@ -209,6 +209,57 @@ Deno.test("verifyAdminToken: matches the on-disk token via constant-time compare
   }
 });
 
+Deno.test("admin password: set, hasAdminPassword, verify accepts correct + rejects wrong", async () => {
+  const env = await setupTestEnv();
+  try {
+    const auth = authService();
+    assertEquals(auth.hasAdminPassword(), false);
+    await auth.setAdminPassword("a memorable pass");
+    assertEquals(auth.hasAdminPassword(), true);
+    // Correct password passes (no throw); wrong one throws admin_password_invalid.
+    auth.verifyAdminPassword("a memorable pass", "127.0.0.1", "client-1");
+    assertRejects_(() => auth.verifyAdminPassword("nope", "127.0.0.1", "client-1"), "incorrect");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("admin password: verify with none set surfaces admin_password_required", async () => {
+  const env = await setupTestEnv();
+  try {
+    const auth = authService();
+    assertRejects_(
+      () => auth.verifyAdminPassword("x", "127.0.0.1", "client-1"),
+      "no admin password",
+    );
+    assertRejects_(() => auth.verifyAdminPassword(null, "127.0.0.1", "client-1"), "missing");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("admin password: locks out after the per-key failure cap", async () => {
+  const env = await setupTestEnv();
+  try {
+    const auth = authService();
+    await auth.setAdminPassword("the real password");
+    // 5 wrong guesses (PASSWORD_FAIL_MAX_PER_KEY) are "incorrect"; the 6th is
+    // refused as rate-limited BEFORE argon2id runs - even the correct password
+    // is rejected while locked.
+    for (let i = 0; i < 5; i++) {
+      assertRejects_(() => auth.verifyAdminPassword("wrong", "10.0.0.1", "c1"), "incorrect");
+    }
+    assertRejects_(
+      () => auth.verifyAdminPassword("the real password", "10.0.0.1", "c1"),
+      "too many",
+    );
+    // A different client/IP still has its own budget.
+    auth.verifyAdminPassword("the real password", "10.0.0.2", "c2");
+  } finally {
+    await env.teardown();
+  }
+});
+
 // pakeStart is synchronous, so assertRejects (which awaits) doesn't fit; this
 // asserts a synchronous throw carrying the expected message.
 function assertRejects_(fn: () => unknown, includes: string): void {

@@ -1,12 +1,17 @@
 <script lang="ts">
   import SessionBarView from "@tomat/shared/ui/components/chat/SessionBarView.svelte";
   import MessageEnter from "./MessageEnter.svelte";
+  import { useUiContext } from "@tomat/shared/ui/context";
   import {
     messagesState,
     sessionsState,
     settingsState,
     viewState,
   } from "../../state";
+
+  // Mobile rides the panel carousel for screen entry, so the per-bar entry slide
+  // is gated off there (it would double up with the carousel); desktop keeps it.
+  const onMobile = useUiContext().platform === "mobile";
   import { hasAlpha } from "$lib/appearance/color";
 
   // The stacking z-index for this row, supplied by the chat column so a row
@@ -120,16 +125,22 @@
 
   let defaultTitle = $derived(sessionsState.defaultTitle);
   let isNewSession = $derived(messagesState.messages.length === 0);
-  let storageEnabled = $derived(
-    settingsState.currentSettings["general.session.storeSessions"] !== false,
-  );
 
-  let showTitle = $derived(!isNewSession && storageEnabled);
+  // The editable title is for persistent sessions; a temporary session shows a
+  // fixed label instead (SessionBarView's `temporary` branch), so this only
+  // gates the persistent path.
+  let showTitle = $derived(!isNewSession);
   // The session-list button only makes sense when there are stored sessions to
   // list. In a fresh new-chat with no existing sessions the whole bar stays
   // hidden. The only action (new session) is already the current state.
   let hasSessions = $derived(sessionsState.list.length > 0);
-  let showButtonGroup = $derived(storageEnabled && hasSessions);
+  // The active session is a started temporary one (vs. mere pre-send compose
+  // intent, which the composer toggle owns). Drives the fixed bar label.
+  let isTemporarySession = $derived(sessionsState.isTemporary && sessionsState.started);
+  // A temporary session is never in the list, so force the button group on for
+  // it; otherwise (no stored sessions) the list/new controls would hide and
+  // trap the user in the temporary chat with no way back out.
+  let showButtonGroup = $derived(hasSessions || isTemporarySession);
   let showBar = $derived(
     !!messagesState.tokenUsage || showTitle || showButtonGroup,
   );
@@ -149,6 +160,7 @@
     onTitleKeydown={handleTitleKeydown}
     generatingTitle={sessionsState.generatingTitle}
     onRegenerateTitle={() => sessionsState.regenerateTitle()}
+    temporary={isTemporarySession}
     {showButtonGroup}
     prevDisabled={!prevSession}
     nextDisabled={!nextSession}
@@ -171,7 +183,7 @@
 
 {#if showBar}
   <div class="relative pointer-events-none" style:z-index={zIndex}>
-    {#if settingsState.getAlignment() === "center"}
+    {#if !onMobile && settingsState.getAlignment() === "center"}
       <!-- Centered: the bar slides down from above the first time a session gains
            content (showBar false -> true). No msgId, so it animates on every such
            entry; the session-restore gate keeps a restored bar from animating on

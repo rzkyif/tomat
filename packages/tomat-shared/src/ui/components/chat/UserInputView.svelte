@@ -31,6 +31,10 @@
   // modes (permission/schedule prompts, the autocorrect alert) still arrive as
   // props/snippets. Alignment comes from the UI context.
   const ui = useUiContext();
+  // Mobile: the composer spans the full screen width (so the send button is
+  // never clipped) and drops the desktop window controls (screen capture, the
+  // monitor picker, window alignment) that do nothing on a fullscreen app.
+  const mobile = ui.platform === "mobile";
 
   // Default quick-model bar: a fresh app's controls (provider local, the default
   // preset, default thinking/creativity), derived from the schema defaults via
@@ -82,10 +86,16 @@
     // Left group (attach + screen capture). Hidden in prompt modes.
     showLeftGroup = true,
     onAttach,
+    onAttachImage,
     captureMonitors = [],
     onCaptureSelect,
     capturing = false,
     onCaptureRegion,
+    // When the host leaves `showImageCapture` unset, the screen/region capture
+    // controls (and the mobile image picker) follow `llm.supportImages` from the
+    // UI context (default off), matching the client: capturing a screenshot is
+    // pointless when the model can't read images.
+    showImageCapture = undefined,
     // Center group (monitor select + alignment + settings).
     monitors = [],
     selectedMonitor = "primary",
@@ -96,6 +106,13 @@
     onSettings,
     // Right group: voice + send, or a custom slot (permission/schedule buttons).
     rightSlot,
+    // Temporary-session toggle: shown only while the chat is unstarted (the
+    // host hides it once a chat begins, since the class is fixed at creation).
+    // `tempActive` drives the on (accent) styling.
+    showTempToggle = true,
+    tempActive = false,
+    tempTitle = "Temporary Session",
+    onTempToggle,
     // When the host leaves `showVoice` unset, the button's presence follows
     // `stt.enabled` from the UI context (default on), matching the client.
     showVoice = undefined,
@@ -136,10 +153,13 @@
     attachmentSlot?: Snippet;
     showLeftGroup?: boolean;
     onAttach?: () => void;
+    /** Mobile only: the separate image/photo picker beside the file picker. */
+    onAttachImage?: () => void;
     captureMonitors?: CaptureMonitorOption[];
     onCaptureSelect?: (e: Event) => void;
     capturing?: boolean;
     onCaptureRegion?: () => void;
+    showImageCapture?: boolean;
     monitors?: MonitorOption[];
     selectedMonitor?: string;
     onMonitorChange?: (e: Event) => void;
@@ -148,6 +168,10 @@
     gearTone?: string;
     onSettings?: () => void;
     rightSlot?: Snippet;
+    showTempToggle?: boolean;
+    tempActive?: boolean;
+    tempTitle?: string;
+    onTempToggle?: () => void;
     showVoice?: boolean;
     voiceTitle?: string;
     voiceClass?: string;
@@ -169,6 +193,7 @@
   // Voice button presence: explicit host value wins; otherwise follow the
   // context's `stt.enabled` (so the website's default render matches the client).
   const effShowVoice = $derived(showVoice ?? ui.sttEnabled);
+  const effShowImageCapture = $derived(showImageCapture ?? ui.imagesEnabled);
 
   const ALIGNMENTS = [
     { value: "left", icon: "i-material-symbols-format-align-left-rounded", title: "Align Left" },
@@ -184,6 +209,7 @@
 <div style:display="contents" style:--default-base={baseColorOverride}>
   <Bubble
     selectedAlignment={ui.getAlignment()}
+    fullWidth={mobile}
     extraClass="flex flex-col gap-4 min-w-0 overflow-hidden transition-all"
     onclick={onBubbleClick}
   >
@@ -202,6 +228,7 @@
         >
         <textarea
           aria-label="Message input"
+          data-testid="composer-input"
           bind:this={textareaRef}
           bind:value
           onkeydown={onkeydown}
@@ -253,81 +280,121 @@
             onclick={() => onAttach?.()}
           />
 
-          <!-- Screen capture: an icon with an overlaid monitor <select>. A
-               <select> can't live in a <button>, so this matches IconButton's
-               lg-tight sizing (p-1 text-xl) by hand. -->
+          <!-- Mobile splits attachment into two pickers (the OS offers no
+               combined files+photos picker): a document picker here and a
+               photo/image picker beside it. Desktop's one picker covers both. -->
+          {#if mobile && effShowImageCapture}
+            <IconButton
+              icon="i-material-symbols-image-outline-rounded"
+              title="Attach Image"
+              size="lg-tight"
+              onclick={() => onAttachImage?.()}
+            />
+          {/if}
+
+          <!-- Screen capture is desktop-only (no monitors / xcap on mobile), and
+               only useful when the model can read images. -->
+          {#if !mobile && effShowImageCapture}
+            <!-- Screen capture: an icon with an overlaid monitor <select>. A
+                 <select> can't live in a <button>, so this matches IconButton's
+                 lg-tight sizing (p-1 text-xl) by hand. -->
+            <div
+              class="tomat-focus-wrap relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hov:text-default-900 act:text-default-900 hov:bg-surface-inset act:bg-surface-inset-strong rounded transition-interactive"
+            >
+              <i class="flex i-material-symbols-screenshot-monitor-outline-rounded"></i>
+              <select
+                class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
+                title="Screen Capture"
+                aria-label="Screen Capture Monitor"
+                onchange={onCaptureSelect}
+                disabled={capturing}
+                value=""
+              >
+                <option value="" disabled>Select Monitor</option>
+                {#each captureMonitors as mon (mon.id)}
+                  <option value={mon.id}>{mon.name}{mon.isPrimary ? " (Primary)" : ""}</option>
+                {/each}
+              </select>
+            </div>
+
+            <IconButton
+              icon="i-material-symbols-crop-free-rounded"
+              title="Capture Region"
+              ariaLabel="Capture Screen Region"
+              size="lg-tight"
+              disabled={capturing}
+              onclick={() => onCaptureRegion?.()}
+            />
+          {/if}
+        </div>
+      {/if}
+
+      <!-- The middle group is desktop window chrome (monitor picker + window
+           alignment) plus the settings gear. On mobile none of it belongs in the
+           composer: the window controls do nothing, and Settings opens from the
+           core bar instead, so the whole group is dropped. -->
+      {#if !mobile}
+        <div class="flex items-center bg-surface-inset rounded-large p-1">
           <div
             class="tomat-focus-wrap relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hov:text-default-900 act:text-default-900 hov:bg-surface-inset act:bg-surface-inset-strong rounded transition-interactive"
           >
-            <i class="flex i-material-symbols-screenshot-monitor-outline-rounded"></i>
+            <i class="flex i-material-symbols-desktop-windows-outline-rounded"></i>
             <select
               class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
-              title="Screen Capture"
-              aria-label="Screen Capture Monitor"
-              onchange={onCaptureSelect}
-              disabled={capturing}
-              value=""
+              onchange={onMonitorChange}
+              value={selectedMonitor}
             >
-              <option value="" disabled>Select Monitor</option>
-              {#each captureMonitors as mon (mon.id)}
-                <option value={mon.id}>{mon.name}{mon.isPrimary ? " (Primary)" : ""}</option>
+              <option value="primary">Primary Monitor</option>
+              {#each monitors as monitor (monitor.id)}
+                <option value={monitor.id}>{monitor.name}</option>
               {/each}
             </select>
           </div>
 
+          <div class="flex items-center">
+            {#each ALIGNMENTS as align (align.value)}
+              <IconButton
+                icon={align.icon}
+                title={align.title}
+                size="lg-tight"
+                onclick={() => onAlign?.(align.value)}
+              />
+            {/each}
+          </div>
+
           <IconButton
-            icon="i-material-symbols-crop-free-rounded"
-            title="Capture Region"
-            ariaLabel="Capture Screen Region"
+            icon="i-material-symbols-settings-outline-rounded"
+            title={settingsTitle}
+            colorClass={gearTone}
             size="lg-tight"
-            disabled={capturing}
-            onclick={() => onCaptureRegion?.()}
+            onclick={() => onSettings?.()}
+            class="transition-colors duration-500"
           />
         </div>
       {/if}
-
-      <div class="flex items-center bg-surface-inset rounded-large p-1">
-        <div
-          class="tomat-focus-wrap relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hov:text-default-900 act:text-default-900 hov:bg-surface-inset act:bg-surface-inset-strong rounded transition-interactive"
-        >
-          <i class="flex i-material-symbols-desktop-windows-outline-rounded"></i>
-          <select
-            class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base"
-            onchange={onMonitorChange}
-            value={selectedMonitor}
-          >
-            <option value="primary">Primary Monitor</option>
-            {#each monitors as monitor (monitor.id)}
-              <option value={monitor.id}>{monitor.name}</option>
-            {/each}
-          </select>
-        </div>
-
-        <div class="flex items-center">
-          {#each ALIGNMENTS as align (align.value)}
-            <IconButton
-              icon={align.icon}
-              title={align.title}
-              size="lg-tight"
-              onclick={() => onAlign?.(align.value)}
-            />
-          {/each}
-        </div>
-
-        <IconButton
-          icon="i-material-symbols-settings-outline-rounded"
-          title={settingsTitle}
-          colorClass={gearTone}
-          size="lg-tight"
-          onclick={() => onSettings?.()}
-          class="transition-colors duration-500"
-        />
-      </div>
 
       <div class="flex gap-2">
         {#if rightSlot}
           {@render rightSlot()}
         {:else}
+          {#if showTempToggle}
+            <!-- Temporary-session toggle. On = accent icon + accent-tinted
+                 background (surface="none" so the tint isn't fighting the inset
+                 fill); off = the neutral filled look of the voice/send buttons. -->
+            <IconButton
+              data-region="temporary"
+              icon="i-material-symbols-timer-outline-rounded"
+              size="lg"
+              surface={tempActive ? "none" : "filled"}
+              title={tempActive ? "Disable Temporary Session" : "Enable Temporary Session"}
+              ariaLabel={tempTitle}
+              class={tempActive
+                ? "rounded-large bg-accent-blue-500/15"
+                : "rounded-large"}
+              colorClass={tempActive ? "text-accent-blue-500 hov:text-accent-blue-400" : undefined}
+              onclick={() => onTempToggle?.()}
+            />
+          {/if}
           {#if effShowVoice}
             <IconButton
               data-region="voice"
@@ -376,6 +443,7 @@
             </IconButton>
           {/if}
           <IconButton
+            data-testid="composer-send"
             icon={hasActiveWork && !hasContent
               ? "i-material-symbols-stop-rounded"
               : hasActiveWork && hasContent

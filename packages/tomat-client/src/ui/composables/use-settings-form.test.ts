@@ -62,7 +62,8 @@ describe("SettingsForm", () => {
 
   it("re-validates optionalWhen dependents when their controller changes", async () => {
     const form = useSettingsForm();
-    // An empty vision file is an error while image support is on...
+    // An empty vision file is an error while image support is on (off by default).
+    await settingsState.updateSetting("llm.supportImages", true);
     await settingsState.updateSetting("llm.mmprojPath", "");
     form.validateField("llm.mmprojPath", "");
     expect(form.validationErrors["llm.mmprojPath"]).toBe("This field is required");

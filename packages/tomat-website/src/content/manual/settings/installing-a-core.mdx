@@ -37,6 +37,12 @@ toggles fold the options you want into the command before you run it.
   that can route to it.
 </Aside>
 
+During the install you set an **admin password**. Choose something you will
+remember: it is what lets you pair more devices later from a computer you have
+already paired, without going back to the core's machine. (When the client
+installs a core for you on first launch, it asks for this password in the app
+instead of the terminal.)
+
 ## Pair the client with it
 
 When the install finishes it starts the core and prints a **pairing code**. On the
@@ -46,9 +52,12 @@ then on. The full flow, and how to manage more than one core, is in
 [Cores and Pairing](/manual/settings/cores-and-pairing).
 
 A pairing code is short-lived. If it expires before you use it, or you want to pair
-another client later, you can mint a fresh one on the core's machine using the admin
-token the installer saved under `~/.tomat/<channel>/core`. The command the installer
-prints at the end shows exactly how.
+another device later, you do not need to return to the core's machine: from a client
+that is already paired, open **Cores** in Settings, pick the core, and choose
+**Generate pairing code**. Enter your admin password and it mints a fresh code to
+type on the new device. (You can still mint one on the core's machine with the admin
+token the installer saved under `~/.tomat/<channel>/core`, as the command the
+installer prints shows.)
 
 Next is the client side of this: how pairing works and how to move between cores in
 [Cores and Pairing](/manual/settings/cores-and-pairing).

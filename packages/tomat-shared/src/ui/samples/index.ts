@@ -7,6 +7,7 @@
 
 export { AGENT_ANSWER, AGENT_REASONING, agentMessageSamples } from "./agent-message.ts";
 export { attachmentListSamples } from "./attachment-list.ts";
+export { chatShellSamples } from "./chat-shell.ts";
 export { coreBarSamples } from "./core-bar.ts";
 export { diffViewSamples } from "./diff-view.ts";
 export { errorMessageSamples } from "./error-message.ts";
@@ -29,6 +30,7 @@ export { SAMPLE_FIRST_GROUP, SAMPLE_GROUPS, SAMPLE_VALUES } from "./settings-gro
 
 import { agentMessageSamples } from "./agent-message.ts";
 import { attachmentListSamples } from "./attachment-list.ts";
+import { chatShellSamples } from "./chat-shell.ts";
 import { coreBarSamples } from "./core-bar.ts";
 import { diffViewSamples } from "./diff-view.ts";
 import { errorMessageSamples } from "./error-message.ts";
@@ -53,6 +55,7 @@ import { userMessageSamples } from "./user-message.ts";
 export const SAMPLES = {
   AgentMessageView: agentMessageSamples,
   AttachmentListView: attachmentListSamples,
+  ChatShellView: chatShellSamples,
   CoreBarView: coreBarSamples,
   DiffView: diffViewSamples,
   ErrorMessageView: errorMessageSamples,

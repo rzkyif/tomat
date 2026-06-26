@@ -234,6 +234,35 @@ Deno.test({
 });
 
 Deno.test({
+  name: "chat.start: an unconfigured external provider fails fast with an actionable error",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    await withChatHarness(fakeOpenAIFetch("streaming-basic.sse"), async ({ api, openWs }) => {
+      // Blank out the external config the harness seeded: the user picked
+      // External but hasn't filled in the provider details yet.
+      await patchCoreSettings({
+        "llm.external.baseUrl": "",
+        "llm.external.apiKey": "",
+        "llm.external.model": "",
+      });
+      const { sessionId } = await createSessionWithUserMessage(api, "hi");
+      const ws = await openWs();
+      const err = waitForFrame(ws, (f) => f.kind === "chat.error");
+      ws.send(
+        JSON.stringify({ kind: "chat.start", streamId: "s-err", sessionId, route: "default" }),
+      );
+      const { matched, all } = await err;
+      assertEquals(matched.code, "provider_error");
+      // Actionable: it points the user at Settings, not an opaque SDK failure.
+      assertEquals(matched.message.includes("set up"), true);
+      // The fake OpenAI endpoint is never hit and nothing streams.
+      assertEquals(all.filter((f) => f.kind === "chat.delta").length, 0);
+    });
+  },
+});
+
+Deno.test({
   name: "two-hop tool turn: births/finals in order, persisted order identical",
   sanitizeOps: false,
   sanitizeResources: false,

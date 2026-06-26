@@ -13,10 +13,19 @@ import {
 } from "../../models/fit.ts";
 import { buildSttPresetViews, resolveSttSelection } from "../../models/stt.ts";
 import { buildTtsPresetViews, resolveTtsSelection } from "../../models/tts.ts";
-import { loadCoreSettings, patchCoreSettings } from "../../services/core-settings.ts";
+import {
+  loadCoreSettings,
+  patchClientSettings,
+  patchCoreSettings,
+} from "../../services/core-settings.ts";
 import { AppError } from "../../shared/errors.ts";
-import { bearerMiddleware } from "../middleware/auth.ts";
-import { type AppliedModelSettings, PRESET_BUCKETS, type PresetBucket } from "@tomat/shared";
+import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
+import {
+  type AppliedModelSettings,
+  PRESET_BUCKETS,
+  type PresetBucket,
+  settingKeyDestination,
+} from "@tomat/shared";
 
 type ModelKind = "llm" | "stt" | "tts" | "embed";
 
@@ -163,9 +172,23 @@ export function modelsRoutes(): Hono {
   // Downloading multi-GB weights is always the user's explicit choice, never a
   // side effect of selecting a preset.
   r.post("/select", async (c) => {
+    const me = requireClient(c);
     const body = parseBody(modelSelectBodySchema, await readJson(c));
     const apply = await resolveSelection(body);
-    await patchCoreSettings(applyToPatch(apply.settings, apply.preset));
+    // The patch mixes shared model/server keys (core) with the model's
+    // recommended sampling/reasoning tuning (client-on-core). Partition by
+    // destination so the shared store only ever holds `core` keys: the model
+    // restart is core-wide, but the recommended tuning lands in this client's
+    // own overlay rather than rewriting every other client's sampling baseline.
+    const patch = applyToPatch(apply.settings, apply.preset);
+    const core: Record<string, unknown> = {};
+    const perClient: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (settingKeyDestination(k) === "client-on-core") perClient[k] = v;
+      else core[k] = v;
+    }
+    if (Object.keys(core).length > 0) await patchCoreSettings(core);
+    if (Object.keys(perClient).length > 0) await patchClientSettings(me.id, perClient);
     return c.json({ applied: apply });
   });
 
@@ -300,7 +323,10 @@ function applyToPatch(a: AppliedModelSettings, preset: string): Record<string, u
     "llm.threads": a.threads,
     "llm.gpuLayers": a.gpuLayers,
     "llm.flashAttn": a.flashAttn,
-    "llm.supportImages": a.supportImages,
+    // Deliberately NOT writing llm.supportImages: image support is a user choice
+    // (off by default), decoupled from the preset, so selecting a vision-capable
+    // model must not silently turn vision on (and pull in the mmproj download).
+    // mmprojPath is still set so vision works immediately if the user opts in.
     "llm.idleUnloadSeconds": a.idleUnloadSeconds,
     "llm.reasoningBudget": a.reasoningBudget,
     // Sampling is always written (even at the default), so switching models

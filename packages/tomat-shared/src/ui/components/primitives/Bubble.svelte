@@ -2,8 +2,14 @@
   import type { Snippet } from "svelte";
   import type { Alignment } from "../../types.ts";
   import { useUiContext } from "../../context.ts";
+  import { longpress } from "../../actions/longpress.ts";
 
   const ui = useUiContext();
+  // The touch shell renders bubbles flat: the drop shadow and frosted halo are
+  // desktop-window decorations (there is no transparent backdrop to frost on an
+  // opaque app), and the roomy desktop padding wastes width on a phone. So on
+  // mobile the shadow/halo are dropped and padding is slim + equal on both axes.
+  const mobile = ui.platform === "mobile";
 
   type Accent = "blue" | "green" | "red" | "yellow" | "purple";
 
@@ -15,6 +21,7 @@
     extraClass = "",
     active = false,
     pulse = false,
+    fullWidth = false,
     borderColorClass = "",
     neighborLeft = false,
     neighborRight = false,
@@ -23,6 +30,7 @@
     progressFullHeight = false,
     onclick,
     oncontextmenu,
+    onlongpress,
     ondblclick,
     children,
   } = $props<{
@@ -46,6 +54,10 @@
     extraClass?: string;
     active?: boolean;
     pulse?: boolean;
+    /** Stretch to the parent's full width instead of hugging content (`w-fit`).
+     *  Used by the mobile composer so its control row spans the screen and the
+     *  send button is never clipped by the desktop-tuned max-width. */
+    fullWidth?: boolean;
     borderColorClass?: string;
     /** Visual-left side has another bubble in the same stack row; collapse
      *  the left-side rounding to `md` to signal adjacency. Composes with the
@@ -73,6 +85,10 @@
     progressFullHeight?: boolean;
     onclick?: (e: MouseEvent) => void;
     oncontextmenu?: (e: MouseEvent) => void;
+    /** Touch long-press handler (the mobile stand-in for right-click). Wired to
+     *  the body via the shared `longpress` action; touch-only, so desktop mouse
+     *  input is unaffected. */
+    onlongpress?: () => void;
     ondblclick?: (e: MouseEvent) => void;
     children: Snippet;
   }>();
@@ -84,7 +100,13 @@
     accent ? `var(--accent-${accent}-base)` : undefined,
   );
 
-  let paddingClass = $derived(size === "small" ? "px-3 py-2" : "px-5 py-4");
+  // Slim, equal padding on mobile (roughly the default shadow distance); the
+  // roomier asymmetric desktop padding stays on the desktop shell.
+  let paddingClass = $derived(
+    mobile
+      ? (size === "small" ? "p-2" : "p-3")
+      : (size === "small" ? "px-3 py-2" : "px-5 py-4"),
+  );
   let minHClass = $derived(size === "small" ? "min-h-8" : "");
   let hasProgress = $derived(progress !== undefined);
   let percent = $derived(
@@ -139,7 +161,9 @@
   // supplies a static value); rendering exactly N layers (vs a fixed max) is
   // what makes the count an actual perf control. Geometry per ring is computed
   // in CSS from the `--ring-index` / `--ring-count` custom props set below.
-  let ringCount = $derived(ui.bubbleBlurEnabled ? (ui.bubbleBlurRings ?? 3) : 0);
+  let ringCount = $derived(
+    mobile ? 0 : ui.bubbleBlurEnabled ? (ui.bubbleBlurRings ?? 3) : 0,
+  );
 
   // Per-side corner radius, exported to CSS so the shadow layer and the halo
   // rings track the body's alignment/neighbor corner flattening.
@@ -160,7 +184,7 @@
      transformed ancestor is handled by `bubble-body-promote`, which keeps
      the body on its own compositing layer.) -->
 <div
-  class="relative w-fit pointer-events-none"
+  class="relative pointer-events-none {fullWidth ? 'w-full' : 'w-fit'}"
   class:mr-auto={selectedAlignment === "left"}
   class:ml-auto={selectedAlignment === "right"}
   class:mx-auto={selectedAlignment === "center"}
@@ -168,7 +192,9 @@
     ? '--rounded-small'
     : '--rounded-large'})"
 >
-  <div class="bubble-shadow absolute inset-0 z-0" aria-hidden="true"></div>
+  {#if !mobile}
+    <div class="bubble-shadow absolute inset-0 z-0" aria-hidden="true"></div>
+  {/if}
   {#each Array(ringCount) as _, i (i)}
     <div
       class="bubble-halo"
@@ -181,12 +207,15 @@
     {onclick}
     {oncontextmenu}
     {ondblclick}
+    use:longpress={onlongpress}
     role={onclick ? "presentation" : undefined}
     style:--default-base={defaultBaseOverride}
     style:--progress-zone-bottom-inset={hasProgress
       ? progressZoneBottomInset
       : undefined}
-    class="bubble-body {bgClass} {minHClass} relative z-10 overflow-hidden rounded-large w-fit max-w-[calc(100vw-5rem)] break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
+    class="bubble-body {bgClass} {minHClass} relative z-10 overflow-hidden rounded-large {fullWidth
+      ? 'w-full max-w-full'
+      : 'w-fit max-w-[calc(100vw-5rem)]'} break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
     class:bubble-body-promote={ringCount > 0}
     class:rounded-l-small={selectedAlignment === "left" || neighborLeft}
     class:border-l-8={selectedAlignment === "left" && active}

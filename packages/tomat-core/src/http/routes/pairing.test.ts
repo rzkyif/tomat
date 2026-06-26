@@ -45,6 +45,25 @@ async function mintCode(app: ReturnType<typeof buildApp>): Promise<string> {
   return code;
 }
 
+const ADMIN_PASSWORD = "a memorable pass";
+
+async function setAdminPassword(app: ReturnType<typeof buildApp>): Promise<void> {
+  const res = await app.fetch(
+    jsonReq(
+      "http://x/api/v1/admin/password",
+      { password: ADMIN_PASSWORD },
+      { "x-admin-token": ADMIN_TOKEN },
+    ),
+  );
+  assertEquals(res.status, 204);
+}
+
+// Pair a client and return its bearer token.
+async function pairClient(app: ReturnType<typeof buildApp>, name: string): Promise<string> {
+  const finish = await pakeViaApp(app, await mintCode(app), name, await tlsCertFingerprint());
+  return (await finish.json()).token;
+}
+
 Deno.test("POST /api/v1/pairing/codes: rejects without admin token (401)", async () => {
   const env = await setupTestEnv();
   try {
@@ -75,6 +94,102 @@ Deno.test("POST /api/v1/pairing/codes: mints a 6-digit code with the admin token
     const body = await res.json();
     assertEquals(/^\d{6}$/.test(body.code), true);
     assertEquals(typeof body.expiresAtMs, "number");
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("POST /codes: an already-paired client mints with bearer + password", async () => {
+  const env = await setupTestEnv();
+  try {
+    await seedAdminToken();
+    const app = buildApp();
+    await setAdminPassword(app);
+    const token = await pairClient(app, "laptop");
+    // Bearer + correct password mints a code.
+    const ok = await app.fetch(
+      jsonReq(
+        "http://x/api/v1/pairing/codes",
+        { password: ADMIN_PASSWORD },
+        { authorization: `Bearer ${token}` },
+      ),
+    );
+    assertEquals(ok.status, 200);
+    assertEquals(/^\d{6}$/.test((await ok.json()).code), true);
+    // Bearer + wrong password is rejected.
+    const bad = await app.fetch(
+      jsonReq(
+        "http://x/api/v1/pairing/codes",
+        { password: "wrong" },
+        { authorization: `Bearer ${token}` },
+      ),
+    );
+    assertEquals(bad.status, 401);
+    assertEquals((await bad.json()).error.code, "admin_password_invalid");
+    // No bearer and no admin token is unauthorized.
+    const none = await app.fetch(
+      jsonReq("http://x/api/v1/pairing/codes", { password: ADMIN_PASSWORD }),
+    );
+    assertEquals(none.status, 401);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("DELETE /clients/:id: bearer + password authorizes cross-device revoke", async () => {
+  const env = await setupTestEnv();
+  try {
+    await seedAdminToken();
+    const app = buildApp();
+    await setAdminPassword(app);
+    const pin = await tlsCertFingerprint();
+    const finishA = await pakeViaApp(app, await mintCode(app), "A", pin);
+    const { clientId: idA } = await finishA.json();
+    const tokenB = await pairClient(app, "B");
+    // Wrong password: rejected, A stays paired.
+    const bad = await app.fetch(
+      new Request(`http://x/api/v1/pairing/clients/${idA}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${tokenB}`, "content-type": "application/json" },
+        body: JSON.stringify({ password: "nope" }),
+      }),
+    );
+    assertEquals(bad.status, 401);
+    // Correct password: revokes A.
+    const ok = await app.fetch(
+      new Request(`http://x/api/v1/pairing/clients/${idA}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${tokenB}`, "content-type": "application/json" },
+        body: JSON.stringify({ password: ADMIN_PASSWORD }),
+      }),
+    );
+    assertEquals(ok.status, 204);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("POST /admin/password: requires the admin token and enforces a length floor", async () => {
+  const env = await setupTestEnv();
+  try {
+    await seedAdminToken();
+    const app = buildApp();
+    // No admin token → 401.
+    const noTok = await app.fetch(
+      jsonReq("http://x/api/v1/admin/password", { password: "longenough" }),
+    );
+    assertEquals(noTok.status, 401);
+    // Too short → 400 validation_error.
+    const short = await app.fetch(
+      jsonReq(
+        "http://x/api/v1/admin/password",
+        { password: "short" },
+        {
+          "x-admin-token": ADMIN_TOKEN,
+        },
+      ),
+    );
+    assertEquals(short.status, 400);
   } finally {
     await env.teardown();
   }

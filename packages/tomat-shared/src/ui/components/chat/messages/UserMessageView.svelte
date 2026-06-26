@@ -8,6 +8,9 @@
   // stays in the client wrapper and arrives via props/snippets; the website
   // feeds static text. Alignment comes from the UI context so both apps match.
   const ui = useUiContext();
+  // On mobile, user bubbles always sit on the right (a conventional chat app),
+  // regardless of the desktop window-alignment setting; desktop follows it.
+  const align = $derived(ui.platform === "mobile" ? "right" : ui.getAlignment());
 
   let {
     text,
@@ -15,6 +18,7 @@
     active = false,
     ondblclick,
     oncontextmenu,
+    onlongpress,
     editBody,
     attachmentRow,
   }: {
@@ -25,6 +29,8 @@
     active?: boolean;
     ondblclick?: (e: MouseEvent) => void;
     oncontextmenu?: (e: MouseEvent) => void;
+    /** Touch long-press (mobile stand-in for the right-click context menu). */
+    onlongpress?: () => void;
     /** The edit textarea, supplied by the client while `editable`. */
     editBody?: Snippet;
     /** Attachment row, supplied by the caller (client `AttachmentList` with its
@@ -34,12 +40,13 @@
 </script>
 
 <Bubble
-  selectedAlignment={ui.getAlignment()}
+  selectedAlignment={align}
   bgClass="bubble-user"
   extraClass="flex flex-col gap-4"
   {active}
   {ondblclick}
   {oncontextmenu}
+  {onlongpress}
 >
   {#if editable && editBody}
     {@render editBody()}

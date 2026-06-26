@@ -19,6 +19,13 @@ export const BASE_MS = 267;
  *  Paired with CSS_EASING via the `transition-interactive` UnoCSS shortcut. */
 export const INTERACTIVE_MS = 120;
 
+/** The canonical press-ripple duration (the `use:ripple` splash that is the
+ *  app-wide press affordance). Longer than INTERACTIVE_MS so the circle reads
+ *  as it expands and fades, but still snappy. Callers scale it through the UI
+ *  context's `animationDurationMs`, which floors to 0 under reduced motion (the
+ *  action then renders no ripple). */
+export const RIPPLE_MS = 420;
+
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** cubic-bezier(0.4, 0, 0.2, 1) sampled as a JS easing for rAF-driven motion. */

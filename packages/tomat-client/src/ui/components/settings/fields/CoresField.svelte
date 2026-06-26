@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { errMessage } from "@tomat/shared";
+  import { errMessage, type PairedClientEntry } from "@tomat/shared";
   import { cores, type PairedCoreEntry } from "$lib/core";
-  import { confirmState, viewState } from "$stores";
+  import { confirmState, passwordPromptState, viewState } from "$stores";
   import type { ParsedQuery } from "$lib/objects/query";
   import { type MenuRow, showFilterSortMenu, showObjectActionMenu } from "$lib/objects/menu";
   import ObjectManager from "$components/ui/ObjectManager.svelte";
@@ -10,6 +10,7 @@
   import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScroll.svelte";
   import FormField from "@tomat/shared/ui/components/primitives/FormField.svelte";
   import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
+  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
 
   let query = $state("");
   let selectedItem = $state<PairedCoreEntry | null>(null);
@@ -21,14 +22,99 @@
   let draftName = $state("");
   let savedName = $state("");
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Pairing-key generation + the paired-devices list are only available for the
+  // CURRENT core, because we hold a live bearer connection (CoreClient) only for
+  // it. Both reset when a different core is opened.
+  let devices = $state<PairedClientEntry[] | null>(null);
+  let devicesError = $state<string | null>(null);
+  let mintedCode = $state<string | null>(null);
+  let mintedExpiresAtMs = $state<number | null>(null);
+  let codeCopied = $state(false);
+
   $effect(() => {
     const sel = selectedItem;
     draftName = sel?.name ?? "";
     savedName = sel?.name ?? "";
+    // Clear per-core transient UI and (re)load the device list for the current.
+    devices = null;
+    devicesError = null;
+    mintedCode = null;
+    mintedExpiresAtMs = null;
+    codeCopied = false;
+    if (sel && isCurrent(sel.id)) void loadDevices();
   });
 
   function isCurrent(id: string): boolean {
     return cores().currentEntry()?.id === id;
+  }
+
+  async function loadDevices() {
+    try {
+      devices = await cores().api().pairing.listClients();
+      devicesError = null;
+    } catch (e) {
+      devicesError = errMessage(e);
+    }
+  }
+
+  // Generate a pairing code for another device. The password modal stays open on
+  // a wrong password (onSubmit throws); on success it closes and we show the
+  // minted code inline for the user to enter on the new device.
+  function generatePairingCode() {
+    passwordPromptState.request({
+      title: "Generate a pairing code",
+      message: "Enter your admin password to create a code for pairing a new device.",
+      confirmLabel: "Generate",
+      onSubmit: async (password) => {
+        const res = await cores().api().pairing.mintCodeWithPassword(password);
+        mintedCode = res.code;
+        mintedExpiresAtMs = res.expiresAtMs;
+        codeCopied = false;
+      },
+    });
+  }
+
+  async function copyCode() {
+    if (!mintedCode) return;
+    try {
+      await navigator.clipboard.writeText(mintedCode);
+      codeCopied = true;
+      setTimeout(() => (codeCopied = false), 1500);
+    } catch {
+      /* clipboard unavailable; the code is still shown to read */
+    }
+  }
+
+  // Remove another paired device. Privileged, so it asks for the admin password.
+  function removeDevice(d: PairedClientEntry) {
+    passwordPromptState.request({
+      title: "Remove device",
+      message: `Enter your admin password to remove "${d.name}". It will need a new pairing key to reconnect.`,
+      confirmLabel: "Remove",
+      onSubmit: async (password) => {
+        await cores().api().pairing.revoke(d.id, password);
+        await loadDevices();
+      },
+    });
+  }
+
+  // Compact "expires in N minutes" / "last seen" strings. Minute granularity is
+  // plenty for a pairing code's lifetime and a device's last-seen time.
+  function expiresInLabel(expiresAtMs: number): string {
+    const mins = Math.max(0, Math.round((expiresAtMs - Date.now()) / 60000));
+    if (mins <= 0) return "expired";
+    return `expires in ${mins} minute${mins === 1 ? "" : "s"}`;
+  }
+
+  function lastSeenLabel(lastSeenMs: number): string {
+    const mins = Math.round((Date.now() - lastSeenMs) / 60000);
+    if (mins < 1) return "active now";
+    if (mins < 60) return `last seen ${mins} minute${mins === 1 ? "" : "s"} ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `last seen ${hours} hour${hours === 1 ? "" : "s"} ago`;
+    const days = Math.round(hours / 24);
+    return `last seen ${days} day${days === 1 ? "" : "s"} ago`;
   }
 
   function scheduleSave() {
@@ -170,6 +256,72 @@
       <FormField label="Address">
         <div class="text-sm text-default-700 font-mono break-all">{item.baseUrl}</div>
       </FormField>
+
+      {#if isCurrent(item.id)}
+        <FormField
+          label="Pairing code"
+          description="Generate a one-time code to pair a new device. You'll need your admin password."
+        >
+          {#if mintedCode}
+            <div class="flex flex-col gap-2 bg-surface-inset rounded-medium px-3 py-3">
+              <div class="flex items-center gap-2">
+                <div class="flex-1 text-2xl font-mono tracking-widest text-default-800 select-all">
+                  {mintedCode}
+                </div>
+                <Button variant="secondary" size="sm" onclick={() => copyCode()}>
+                  {codeCopied ? "Copied" : "Copy"}
+                </Button>
+              </div>
+              {#if mintedExpiresAtMs}
+                <div class="text-xs text-default-500">
+                  Enter it on the new device. This code {expiresInLabel(mintedExpiresAtMs)}.
+                </div>
+              {/if}
+              <div>
+                <Button variant="ghost" size="sm" onclick={() => generatePairingCode()}>
+                  Generate another
+                </Button>
+              </div>
+            </div>
+          {:else}
+            <Button variant="secondary" onclick={() => generatePairingCode()}>
+              Generate pairing code
+            </Button>
+          {/if}
+        </FormField>
+
+        <FormField label="Paired devices">
+          {#if devicesError}
+            <div class="text-sm text-accent-red-600">{devicesError}</div>
+          {:else if devices === null}
+            <div class="text-sm text-default-500">Loading…</div>
+          {:else if devices.length === 0}
+            <div class="text-sm text-default-500">No paired devices.</div>
+          {:else}
+            <div class="flex flex-col gap-1">
+              {#each devices as d (d.id)}
+                <div class="flex items-center gap-2 bg-surface-inset rounded-medium px-3 py-2">
+                  <div class="flex flex-col flex-1 min-w-0">
+                    <div class="text-sm text-default-800 truncate">{d.name}</div>
+                    <div class="text-xs text-default-500 truncate">{lastSeenLabel(d.lastSeenMs)}</div>
+                  </div>
+                  {#if d.isMe}
+                    <span class="text-xs text-default-500 shrink-0">This device</span>
+                  {:else}
+                    <Button variant="ghost" size="sm" onclick={() => removeDevice(d)}>
+                      Remove
+                    </Button>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </FormField>
+      {:else}
+        <div class="text-sm text-default-500">
+          Switch to this core to generate pairing keys and manage its devices.
+        </div>
+      {/if}
     </ObjectDetailScroll>
   {/snippet}
   {#snippet empty()}

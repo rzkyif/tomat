@@ -24,19 +24,36 @@ export function isOriginAllowed(origin: string): boolean {
 export function corsMiddleware(): MiddlewareHandler {
   return async (c, next) => {
     const origin = c.req.header("origin");
-    if (origin && isOriginAllowed(origin)) {
-      c.header("Access-Control-Allow-Origin", origin);
-      c.header("Vary", "Origin");
-      c.header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
-      c.header("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Admin-Token");
-      c.header("Access-Control-Max-Age", "86400");
-    }
-    // No Origin header (curl, native HTTP, server-to-server) → no CORS
-    // response headers; the request proceeds normally. CORS only gates
-    // browser-driven cross-origin fetches.
+    const allowed = !!origin && isOriginAllowed(origin);
+
+    // Preflight: answer directly with the CORS headers.
     if (c.req.method === "OPTIONS") {
-      return c.body(null, 204);
+      if (!allowed) return c.body(null, 204);
+      return new Response(null, { status: 204, headers: corsHeaders(origin!) });
     }
+
     await next();
+
+    // Apply CORS headers to the final response. Setting them on `c.res` here
+    // (rather than via c.header() before next()) means they survive even when a
+    // handler returns its own `new Response(...)` (e.g. the binary TTS / blob
+    // endpoints), which would otherwise drop context-set headers and make the
+    // response unreadable to a browser cross-origin caller.
+    if (allowed) {
+      const h = corsHeaders(origin!);
+      for (const [k, v] of Object.entries(h)) c.res.headers.set(k, v);
+    }
+    // No Origin header (curl, native HTTP, server-to-server) → no CORS headers;
+    // CORS only gates browser-driven cross-origin fetches.
+  };
+}
+
+function corsHeaders(origin: string): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    Vary: "Origin",
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization,Content-Type,X-Admin-Token",
+    "Access-Control-Max-Age": "86400",
   };
 }

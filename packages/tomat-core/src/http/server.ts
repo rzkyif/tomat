@@ -9,8 +9,10 @@ import { bodyLimit } from "hono/body-limit";
 import type { HealthResponse } from "@tomat/shared";
 import { CORE_VERSION } from "../config.ts";
 import { coreStatus } from "../services/core-status.ts";
+import { authService } from "../services/auth.ts";
 import { corsMiddleware } from "./middleware/cors.ts";
 import { sendError } from "./middleware/errors.ts";
+import { adminRoutes } from "./routes/admin.ts";
 import { binariesRoutes } from "./routes/binaries.ts";
 import { greetingsRoutes } from "./routes/greetings.ts";
 import { llmRoutes } from "./routes/llm.ts";
@@ -69,10 +71,12 @@ export function buildApp(): Hono {
       version: CORE_VERSION,
       uptimeMs: Math.floor(performance.now()),
       core: coreStatus().snapshot(),
+      adminPasswordSet: authService().hasAdminPassword(),
     };
     return c.json(body);
   });
 
+  app.route("/api/v1/admin", adminRoutes());
   app.route("/api/v1/pairing", pairingRoutes());
   app.route("/api/v1/sessions", sessionsRoutes());
   app.route("/api/v1/models", modelsRoutes());

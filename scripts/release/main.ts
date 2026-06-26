@@ -41,6 +41,7 @@ import { coreItem } from "./core.ts";
 import { extensionItem } from "./extension.ts";
 import { catalogItem } from "./catalog.ts";
 import { clientItem } from "./client.ts";
+import { androidItem } from "./android.ts";
 import { scriptsItem } from "./install-scripts.ts";
 import { schemasItem } from "./schemas.ts";
 import { websiteItem } from "./website.ts";
@@ -52,6 +53,7 @@ const ITEMS: ReleaseItem[] = [
   extensionItem,
   catalogItem,
   clientItem,
+  androidItem,
   scriptsItem,
   schemasItem,
   websiteItem,
@@ -183,11 +185,16 @@ async function main(): Promise<void> {
   step("Reading release-state cursor");
   const cursor = await readReleaseCursor(env);
 
-  // The client can only be released when the Tauri updater keys are present;
-  // drop it from the run (with a warning) rather than marking it released.
+  // The client can only be released when the Tauri updater keys are present,
+  // and the android APK only when its signing keystore is present; drop either
+  // from the run (with a warning) rather than marking it released.
   const items = ITEMS.filter((it) => {
     if (it.id === "client" && (!env.tauriUpdaterPublicKey || !env.tauriUpdaterPrivateKey)) {
       info(colors.yellow(`Tauri updater keys not set in .env; skipping the client this run.`));
+      return false;
+    }
+    if (it.id === "android" && !env.androidKeystoreB64) {
+      info(colors.yellow(`Android keystore not set in .env; skipping the android APK this run.`));
       return false;
     }
     return true;

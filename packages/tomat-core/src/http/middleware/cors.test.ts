@@ -6,6 +6,9 @@ function appWithCors(): Hono {
   const app = new Hono();
   app.use("*", corsMiddleware());
   app.get("/ping", (c) => c.json({ ok: true }));
+  // A handler that returns its OWN raw Response (like the binary TTS / blob
+  // endpoints), bypassing Hono's context-built response.
+  app.get("/blob", () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
   return app;
 }
 
@@ -73,6 +76,19 @@ Deno.test("CORS: preflight from cross-origin is 204 with no allow headers", asyn
   );
   assertEquals(res.status, 204);
   assertEquals(res.headers.get("access-control-allow-origin"), null);
+});
+
+Deno.test("CORS: headers are applied to a handler returning a raw Response", async () => {
+  // The binary endpoints (TTS WAV, attachment download) return their own
+  // `new Response(...)`. CORS headers must still be present so a browser
+  // cross-origin caller can read the body.
+  const app = appWithCors();
+  const res = await app.fetch(
+    new Request("http://x/blob", { headers: { origin: "http://localhost:1420" } }),
+  );
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("access-control-allow-origin"), "http://localhost:1420");
+  assertEquals(res.headers.get("vary"), "Origin");
 });
 
 Deno.test("CORS: no Origin header means no CORS headers, request proceeds", async () => {

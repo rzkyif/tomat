@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { useUiContext } from "../../context.ts";
 
   type Placement = "top" | "bottom" | "auto";
 
@@ -24,6 +25,8 @@
     class?: string;
     children: Snippet;
   } = $props();
+
+  const ui = useUiContext();
 
   let backdropEl: HTMLDivElement | undefined = $state();
   let popupEl: HTMLDivElement | undefined = $state();
@@ -81,6 +84,17 @@
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  });
+
+  // The Android back press closes an open popover (the touch analogue of Esc)
+  // before the app navigates. Registered with the host's back registry (inert
+  // on the website), so this shared primitive owns back without client imports.
+  $effect(() => {
+    if (!open || !dismissOnEsc) return;
+    return ui.registerBack(() => {
+      onclose();
+      return true;
+    });
   });
 
   // Move focus into the dialog on open and restore it to the previously-focused

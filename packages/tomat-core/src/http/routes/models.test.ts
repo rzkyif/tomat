@@ -6,7 +6,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { dirname } from "@std/path";
 import type { RequirementsSnapshot } from "@tomat/shared";
-import { EMBED_MODEL_FILE } from "@tomat/shared";
+import { EMBED_MODEL_FILE, settingKeyDestination } from "@tomat/shared";
 import { buildApp } from "../server.ts";
 import { pairClient } from "../../../tests/helpers/pairing.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
@@ -175,6 +175,41 @@ Deno.test("DELETE /api/v1/models/:relPath recomputes requirements so the file fl
     globalThis.fetch = origFetch;
     await env.teardown();
   }
+});
+
+// POST /select applies a model by writing the keys in models.ts `applyToPatch`,
+// then partitions them by destination: shared model/server keys go to the core
+// store, the model's recommended sampling/reasoning tuning to the caller's
+// per-client overlay. This locks the destination contract that partition relies
+// on, so sampling can never regress back into the shared store (where it would
+// broadcast to and overwrite every other client's baseline). The catalog fetch
+// makes a full /select round-trip network-bound, so the route path itself is
+// covered manually; the partition mechanism is the same one settings.test.ts
+// exercises end to end.
+Deno.test("model /select: applied keys partition to the expected destinations", () => {
+  const sharedModelServerKeys = [
+    "llm.provider",
+    "llm.preset",
+    "llm.modelPath",
+    "llm.mmprojPath",
+    "llm.contextSize",
+    "llm.threads",
+    "llm.gpuLayers",
+    "llm.flashAttn",
+    // llm.supportImages is intentionally not in the patch (user-owned, decoupled
+    // from the preset), so it isn't part of this partition contract.
+    "llm.idleUnloadSeconds",
+  ];
+  const perClientTuningKeys = [
+    "llm.reasoningBudget",
+    "llm.temperature",
+    "llm.topP",
+    "llm.topK",
+    "llm.minP",
+    "llm.repeatPenalty",
+  ];
+  for (const k of sharedModelServerKeys) assertEquals(settingKeyDestination(k), "core");
+  for (const k of perClientTuningKeys) assertEquals(settingKeyDestination(k), "client-on-core");
 });
 
 Deno.test("GET /api/v1/models/downloads: empty list before any enqueue", async () => {

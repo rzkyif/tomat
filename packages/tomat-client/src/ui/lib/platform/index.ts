@@ -1,15 +1,16 @@
 // Platform abstraction: every host-only feature the Svelte UI uses goes
 // through this interface so the same code can run under each native shell
-// (Tauri desktop today, a Tauri-mobile build later) with its own impl.
+// (`tauri.ts` desktop, `mobile.ts` android) with its own impl, selected at
+// boot by `select.ts` from the running OS.
 //
 // IMPORTANT: NOTHING under packages/tomat-client/src/ui/ outside of
 // `lib/platform/` may import `@tauri-apps/*`. For components, state stores,
 // and shared modules, all platform-specific calls go through `platform()`.
 // This is enforced by an oxlint rule (see .oxlintrc.json). To add a new
 // platform-specific feature: add the method to the `Platform` interface
-// below, implement it in `tauri.ts` (and a future `mobile.ts` when mobile
-// lands), cover it in the `src/ui/test/platform-stub.ts` fixture, then call
-// `platform().<namespace>.<method>()` from the consumer. There is no web
+// below, implement it in `tauri.ts` and `mobile.ts` (sharing helpers via
+// `shared.ts`), cover it in the `src/ui/test/platform-stub.ts` fixture, then
+// call `platform().<namespace>.<method>()` from the consumer. There is no web
 // client, so there is no browser implementation.
 
 import type { StorageTree } from "@tomat/shared";
@@ -127,6 +128,15 @@ export interface NetResponse {
   capturedPin?: string;
 }
 
+/** A core found on the local network by `net.discoverCores()`. The pin is the
+ *  cert SPKI captured during the discovery probe, kept for display only; the
+ *  real trust is re-established by the PAKE + pin-binding pairing flow. */
+export interface DiscoveredCore {
+  baseUrl: string;
+  version: string;
+  pin: string;
+}
+
 /** A pinned WebSocket. Mirrors the slice of `WebSocket` that CoreClient uses. */
 export interface NetSocket {
   send(data: string): void;
@@ -148,6 +158,11 @@ export interface Platform {
   net: {
     fetch(req: NetRequest): Promise<NetResponse>;
     connectWebSocket(url: string, opts?: { pin?: string }): Promise<NetSocket>;
+    /** Sweep the local network for reachable cores (the pairing "ping"
+     *  button). Probes each host on this machine's /24(s) plus loopback at the
+     *  known core ports against the unauthenticated /api/v1/health, deduped by
+     *  cert pin. Desktop only; returns [] on mobile. */
+    discoverCores(): Promise<DiscoveredCore[]>;
   };
   // Window control.
   windowing: {
@@ -184,6 +199,18 @@ export interface Platform {
     /** Subscribe to the monitor-arrangement-changed event (DPI/scale
      *  change, monitor plugged/unplugged). Returns a detach. */
     subscribeMonitorChanged(cb: () => void): Promise<() => void>;
+  };
+  // Android hardware / gesture back button. Desktop has no analogue, so the
+  // methods are inert there. `subscribe` fires on every system back press; the
+  // app's back-handler registry (state/back.svelte.ts) decides what each press
+  // does. `exit` leaves the app, the final step of the chat-root
+  // double-back-to-exit chain.
+  backButton: {
+    /** Fire `cb` on every Android system back press. Returns a detach. Inert
+     *  (never fires) on desktop. */
+    subscribe(cb: () => void): Promise<() => void>;
+    /** Leave the app (background / quit). No-op on desktop. */
+    exit(): Promise<void>;
   };
   // OS login entry ("start tomat when I log in").
   autostart: {
@@ -257,6 +284,11 @@ export interface Platform {
   // Pairing helpers.
   pairing: {
     readAdminToken(): Promise<string | null>;
+    /** The local core's last fatal boot-failure reason (one line), or null when
+     *  the core came up cleanly. The core writes it on a fatal startup path
+     *  (port in use, missing helper, ...) and clears it once it next binds, so
+     *  the pair flow can explain an otherwise-opaque connection failure. */
+    readLocalCoreBootError(): Promise<string | null>;
     /** Runs the platform install script and returns the printed pairing code.
      *  `service: true` (default) registers a launchd / systemd / scheduled
      *  task so the core boots on login; `false` skips that and expects the

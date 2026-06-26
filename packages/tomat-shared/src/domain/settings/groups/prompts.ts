@@ -12,7 +12,11 @@ import {
 
 export const promptsGroup: SettingGroup = {
   id: "prompts",
-  destination: "core",
+  // The prompts a user gives the agent are personal: each client keeps its own.
+  // They drive the core per turn and for automated sessions, so the whole group
+  // lives in the per-client core overlay (client-on-core), which renders as the
+  // "Client" badge.
+  destination: "client-on-core",
   name: "Prompts",
   description: "Customize the instructions and helper prompts tomat sends behind the scenes.",
   descriptionTier: "ondemand",

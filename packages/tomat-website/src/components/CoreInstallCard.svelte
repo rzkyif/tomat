@@ -29,16 +29,19 @@
     macos: [
       "Open Terminal.",
       "Paste the command above and press Return.",
+      "Set an admin password when prompted; you'll need it to pair more devices.",
       "When it finishes, note the pairing code it prints.",
     ],
     linux: [
       "Open your terminal.",
       "Paste the command above and press Enter.",
+      "Set an admin password when prompted; you'll need it to pair more devices.",
       "When it finishes, note the pairing code it prints.",
     ],
     windows: [
       "Open PowerShell.",
       "Paste the command above and press Enter.",
+      "Set an admin password when prompted; you'll need it to pair more devices.",
       "When it finishes, note the pairing code it prints.",
     ],
   };

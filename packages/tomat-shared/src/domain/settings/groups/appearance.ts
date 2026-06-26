@@ -2,13 +2,17 @@ import type { SettingGroup } from "../types.ts";
 
 export const appearanceGroup: SettingGroup = {
   id: "appearance",
-  destination: "client",
+  destination: "client-on-client",
   name: "Appearance",
   icon: "i-material-symbols-palette",
   iconInactive: "i-material-symbols-palette-outline",
   sections: [
     {
       label: "Layout",
+      // Every field here is desktop window chrome (monitor, alignment, width,
+      // and the desktop settings-panel layout), none of which the single
+      // fullscreen mobile activity has, so the whole section is hidden on mobile.
+      desktopOnly: true,
       fields: [
         {
           id: "layout.monitor",
@@ -156,6 +160,7 @@ export const appearanceGroup: SettingGroup = {
           descriptionTier: "ondemand",
         },
         {
+          // Mobile bubbles render flat (no shadow), so this is desktop-only.
           id: "appearance.bubbleShadowColor",
           name: "Shadow Color",
           description:
@@ -163,6 +168,7 @@ export const appearanceGroup: SettingGroup = {
           type: "color",
           defaultValue: "#00000033",
           descriptionTier: "ondemand",
+          desktopOnly: true,
         },
         {
           id: "appearance.bubbleShadowDistance",
@@ -175,8 +181,10 @@ export const appearanceGroup: SettingGroup = {
           step: 1,
           suffix: "px",
           descriptionTier: "ondemand",
+          desktopOnly: true,
         },
         {
+          // Mobile bubbles render flat (no frosted halo), so this is desktop-only.
           id: "appearance.bubbleBlurEnabled",
           name: "Blur Around Bubbles",
           description:
@@ -184,6 +192,7 @@ export const appearanceGroup: SettingGroup = {
           type: "boolean",
           defaultValue: true,
           descriptionTier: "ondemand",
+          desktopOnly: true,
         },
         {
           id: "appearance.bubbleBlurRings",
@@ -196,6 +205,7 @@ export const appearanceGroup: SettingGroup = {
           step: 1,
           editableWhen: { field: "appearance.bubbleBlurEnabled", eq: true },
           descriptionTier: "ondemand",
+          desktopOnly: true,
         },
       ],
     },

@@ -50,6 +50,7 @@
     "npm:@tauri-apps/plugin-fs@^2.5.1": "2.5.1",
     "npm:@tauri-apps/plugin-global-shortcut@^2.3.2": "2.3.2",
     "npm:@tauri-apps/plugin-opener@^2.5.4": "2.5.4",
+    "npm:@tauri-apps/plugin-os@^2.3.1": "2.3.2",
     "npm:@tauri-apps/plugin-process@^2.3.1": "2.3.1",
     "npm:@tauri-apps/plugin-updater@^2.10.1": "2.10.1",
     "npm:@testing-library/jest-dom@^6.9.1": "6.9.1",
@@ -2410,6 +2411,12 @@
     },
     "@tauri-apps/plugin-opener@2.5.4": {
       "integrity": "sha512-1HnPkb+AmgO29HBazm4uPLKB+r7zzcTBW1d0fyYp1uP+jwtpoiNDGKMMzz58SFp49nOIrxdE3aUJtT57lfO9CQ==",
+      "dependencies": [
+        "@tauri-apps/api"
+      ]
+    },
+    "@tauri-apps/plugin-os@2.3.2": {
+      "integrity": "sha512-n+nXWeuSeF9wcEsSPmRnBEGrRgOy6jjkSU+UVCOV8YUGKb2erhDOxis7IqRXiRVHhY8XMKks00BJ0OAdkpf6+A==",
       "dependencies": [
         "@tauri-apps/api"
       ]
@@ -7334,6 +7341,7 @@
           "npm:@tauri-apps/plugin-fs@^2.5.1",
           "npm:@tauri-apps/plugin-global-shortcut@^2.3.2",
           "npm:@tauri-apps/plugin-opener@^2.5.4",
+          "npm:@tauri-apps/plugin-os@^2.3.1",
           "npm:@tauri-apps/plugin-process@^2.3.1",
           "npm:@tauri-apps/plugin-updater@^2.10.1",
           "npm:@testing-library/jest-dom@^6.9.1",
@@ -7374,6 +7382,7 @@
           "jsr:@std/tar@0.1",
           "jsr:@std/ulid@1",
           "npm:@modelcontextprotocol/sdk@^1.29.0",
+          "npm:@noble/hashes@^2.2.0",
           "npm:@peculiar/x509@2",
           "npm:@zip.js/zip.js@^2.8.26",
           "npm:ajv@^8.20.0",

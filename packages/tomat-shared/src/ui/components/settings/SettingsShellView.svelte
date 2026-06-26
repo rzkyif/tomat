@@ -84,6 +84,26 @@
   let showBottomFade = $state(false);
   let transitioning = false;
 
+  // Mobile uses Android-style nested navigation instead of the side-by-side
+  // sidebar + content: a full-screen group LIST, and tapping a group pushes its
+  // fields as a DETAIL screen with a back affordance. `mobileDetail` tracks
+  // which screen is showing. The single-source rule keeps both layouts in this
+  // one shared shell; the desktop split is untouched.
+  const stacked = $derived(ui.platform === "mobile");
+  let mobileDetail = $state(false);
+
+  // While a group detail or the search results are open, the host's back gesture
+  // (Android) returns to the group list first, instead of leaving Settings
+  // outright. Registered through the UiContext bridge so this shared shell never
+  // reaches into client back state; inert on the website and on desktop.
+  $effect(() => {
+    if (!stacked || (!mobileDetail && !searchMode)) return;
+    return ui.registerBack(() => {
+      mobileBack();
+      return true;
+    });
+  });
+
   function updateFades(): void {
     const el = scrollEl;
     if (!el) return;
@@ -91,9 +111,27 @@
     showBottomFade = el.scrollTop + el.clientHeight < el.scrollHeight - 1;
   }
 
+  /** On mobile, return from a group's detail screen to the group list. */
+  export function mobileBack(): void {
+    mobileDetail = false;
+    searchMode = false;
+  }
+
   /** Slide to a group (or out of search). Vertical swap mirroring the app. */
   export async function selectGroup(id: string): Promise<void> {
     if (transitioning) return;
+    // Mobile: tapping a group in the list pushes its detail screen (no slide;
+    // the list/detail swap is a screen change, not the desktop vertical slide).
+    if (stacked) {
+      selectedGroupId = id;
+      searchMode = false;
+      searchValue = "";
+      mobileDetail = true;
+      await tick();
+      if (scrollEl) scrollEl.scrollTop = 0;
+      updateFades();
+      return;
+    }
     // Re-clicking the active group (when not searching) is not a slide; let the
     // client restore that group's default section state instead.
     if (id === selectedGroupId && !searchMode) {
@@ -162,10 +200,24 @@
   }
 </script>
 
-<Bubble
-  selectedAlignment={ui.getAlignment()}
-  extraClass="flex flex-col gap-3 overflow-hidden {sizeClass} relative"
->
+{#if stacked}
+  <!-- Mobile fills the whole frame as a plain surface (mobile bubbles carry no
+       shadow/halo, and Bubble's intrinsic w-fit would collapse the height chain
+       a full-screen scroll needs). Slim, equal p-3 like the other mobile
+       screens. The desktop panel keeps the Bubble. -->
+  <div class="flex flex-col gap-3 overflow-hidden w-full h-full p-3 bg-surface relative">
+    {@render shellBody()}
+  </div>
+{:else}
+  <Bubble
+    selectedAlignment={ui.getAlignment()}
+    extraClass="flex flex-col gap-3 overflow-hidden {sizeClass} relative"
+  >
+    {@render shellBody()}
+  </Bubble>
+{/if}
+
+{#snippet shellBody()}
   <SettingsHeaderView
     bind:searchValue
     bind:searchEl
@@ -183,19 +235,70 @@
     {@render belowHeader()}
   {/if}
 
-  <div class="flex flex-1 overflow-hidden min-h-0 -mr-2 gap-3">
-    <!-- Sidebar -->
-    <SettingsSidebarView
-      {groups}
-      {selectedGroupId}
-      {searchMode}
-      collapsed={sidebarCollapsed}
-      onToggleCollapse={onToggleSidebar ?? (() => (sidebarCollapsed = !sidebarCollapsed))}
-      onSelectGroup={selectGroup}
-      {isGroupDisabled}
-      footer={sidebarFooter}
-    />
+  {#if stacked}
+    <!-- Mobile nested navigation: the group LIST, a group's DETAIL screen, or
+         full-screen search results. The group detail's back affordance lives in
+         the sticky group header (see SettingsContentView onBack), so only search
+         (which has no group header) needs its own back row. -->
+    <div class="flex flex-1 overflow-hidden min-h-0 -mr-2">
+      {#if searchMode}
+        <div class="flex flex-col flex-1 min-h-0 min-w-0">
+          <!-- Search has no group header to host the back button. Where the OS
+               owns back (Android) the system gesture leaves search (see the
+               registerBack effect above); elsewhere it gets its own back row,
+               otherwise clearing the field would be the only escape. -->
+          {#if !ui.hasSystemBack}
+            <button
+              type="button"
+              class="flex items-center gap-2 px-1 h-11 text-default-700 transition-interactive hov:text-default-900"
+              onclick={mobileBack}
+            >
+              <i class="i-material-symbols-arrow-back-rounded text-xl"></i>
+              <span class="font-medium">Search</span>
+            </button>
+          {/if}
+          {@render contentArea()}
+        </div>
+      {:else if mobileDetail}
+        <div class="flex flex-col flex-1 min-h-0 min-w-0">
+          {@render contentArea()}
+        </div>
+      {:else}
+        <div class="flex-1 min-h-0 min-w-0">
+          <SettingsSidebarView
+            {groups}
+            {selectedGroupId}
+            {searchMode}
+            collapsed={false}
+            onToggleCollapse={noop}
+            onSelectGroup={selectGroup}
+            {isGroupDisabled}
+            showCollapse={false}
+            footer={sidebarFooter}
+          />
+        </div>
+      {/if}
+    </div>
+  {:else}
+    <div class="flex flex-1 overflow-hidden min-h-0 -mr-2 gap-3">
+      <!-- Sidebar -->
+      <SettingsSidebarView
+        {groups}
+        {selectedGroupId}
+        {searchMode}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={onToggleSidebar ?? (() => (sidebarCollapsed = !sidebarCollapsed))}
+        onSelectGroup={selectGroup}
+        {isGroupDisabled}
+        footer={sidebarFooter}
+      />
 
+      {@render contentArea()}
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet contentArea()}
     <!-- Content -->
     <div class="relative flex-1 min-h-0 min-w-0">
       <div
@@ -227,5 +330,4 @@
           : 'opacity-0'}"
       ></div>
     </div>
-  </div>
-</Bubble>
+{/snippet}

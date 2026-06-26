@@ -40,13 +40,24 @@ export function sessionsRoutes(): Hono {
 
   r.post("/", async (c) => {
     const me = requireClient(c);
-    const body = (await readJson(c)) as { title?: string };
-    return c.json(sessionsRepo().create({ ownerClientId: me.id, title: body.title }));
+    const body = (await readJson(c)) as { title?: string; temporary?: boolean };
+    const session = sessionsRepo().create({
+      ownerClientId: me.id,
+      title: body.title,
+      temporary: body.temporary === true,
+    });
+    // Creating any session means the client moved on from a prior temporary
+    // one; reclaim stragglers it didn't (or couldn't) delete itself.
+    sessionsRepo().sweepClientTemporary(me.id, session.id);
+    return c.json(session);
   });
 
   r.get("/:id", (c) => {
     const me = requireClient(c);
     const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
+    // Navigating to a session orphans any other temporary one this client
+    // owns (they are never listed, so there is no way back). Sweep them.
+    sessionsRepo().sweepClientTemporary(me.id, session.id);
     const messages = sessionsRepo().listMessages(session.id);
     return c.json({ ...session, messages });
   });

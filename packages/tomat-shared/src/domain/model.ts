@@ -209,6 +209,33 @@ export interface RequiredModelRef {
   group: RequirementGroup;
 }
 
+// The schema defaults for the two enable flags, applied here so a SPARSE
+// settings object (the on-disk file stores only non-default values) yields the
+// same answer as a resolved one. Both default to false (see
+// settings/groups/{stt,tts}.ts), so a fresh install needs no speech model or
+// binary to send a text message; voice is opt-in. A provider absent or set to
+// anything other than "external" means local.
+const STT_ENABLED_DEFAULT = false;
+const TTS_ENABLED_DEFAULT = false;
+
+/** True when speech-to-text runs on the local `tomat-core-speech` binary (it is
+ *  enabled and not pointed at an external service). The single predicate behind
+ *  every gate that branches local-vs-external STT (model + binary requirements,
+ *  the speech sidecar's desired state), so they cannot drift on an absent flag,
+ *  an absent provider, or a malformed value, whether fed sparse or resolved
+ *  settings. */
+export function sttUsesLocal(s: Record<string, unknown>): boolean {
+  const enabled = s["stt.enabled"] ?? STT_ENABLED_DEFAULT;
+  return !!enabled && s["stt.provider"] !== "external";
+}
+
+/** True when text-to-speech runs on the local `tomat-core-speech` binary.
+ *  Mirror of {@link sttUsesLocal} for the TTS gates. */
+export function ttsUsesLocal(s: Record<string, unknown>): boolean {
+  const enabled = s["tts.enabled"] ?? TTS_ENABLED_DEFAULT;
+  return !!enabled && s["tts.provider"] !== "external";
+}
+
 /** Sidecar binary kinds the settings require: `deno` always (runs the tool
  *  worker); `llama-server` always (local chat when the LLM provider is local,
  *  plus embeddings for tool-relevance, which always run on a second llama-server
@@ -216,8 +243,7 @@ export interface RequiredModelRef {
  *  serves both Whisper STT and Kokoro TTS). */
 export function requiredBinaryKinds(s: Record<string, unknown>): BinaryKind[] {
   const out: BinaryKind[] = ["deno", "llama-server"];
-  const sttLocal = !!s["stt.enabled"] && s["stt.provider"] !== "external";
-  if (sttLocal || !!s["tts.enabled"]) out.push("tomat-core-speech");
+  if (sttUsesLocal(s) || ttsUsesLocal(s)) out.push("tomat-core-speech");
   return out;
 }
 

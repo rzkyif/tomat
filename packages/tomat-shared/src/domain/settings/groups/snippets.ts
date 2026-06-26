@@ -2,7 +2,7 @@ import type { SettingGroup } from "../types.ts";
 
 export const snippetsGroup: SettingGroup = {
   id: "snippets",
-  destination: "client",
+  destination: "client-on-client",
   name: "Snippets",
   description:
     "Reusable text you trigger with #, @, or / while typing. A snippet can add to, replace, or insert into your message or the system prompt.",

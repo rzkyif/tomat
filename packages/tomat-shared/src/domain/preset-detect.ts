@@ -17,7 +17,8 @@ export const CUSTOM_PRESET = "custom";
 
 /** Managed llm.* keys paired with their field on AppliedModelSettings. Mirrors
  *  `llm.preset`'s managedKeys (the model identity + tuning), minus the behavior
- *  prefs (temperature, reasoningBudget) that no longer define a preset. */
+ *  prefs (temperature, reasoningBudget) and Image Attachments (a user choice,
+ *  not part of the model identity) that no longer define a preset. */
 const MANAGED_FIELDS: ReadonlyArray<[string, keyof AppliedModelSettings]> = [
   ["llm.modelPath", "modelPath"],
   ["llm.mmprojPath", "mmprojPath"],
@@ -25,7 +26,6 @@ const MANAGED_FIELDS: ReadonlyArray<[string, keyof AppliedModelSettings]> = [
   ["llm.threads", "threads"],
   ["llm.gpuLayers", "gpuLayers"],
   ["llm.flashAttn", "flashAttn"],
-  ["llm.supportImages", "supportImages"],
   ["llm.idleUnloadSeconds", "idleUnloadSeconds"],
   ["llm.topP", "topP"],
   ["llm.topK", "topK"],

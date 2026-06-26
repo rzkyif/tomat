@@ -255,6 +255,12 @@ class Sidecar {
   }
 
   async restart(options: StartOptions): Promise<void> {
+    // An external restart is a deliberate re-application (settings change, manual
+    // retry from the UI, the wedged-slot watchdog), so clear the crash flap-guard
+    // window: its job is to bound the INTERNAL auto-restart loop, not an explicit
+    // re-apply. The internal loop calls start() directly, so it is unaffected and
+    // still accumulates crashes toward the cap.
+    this.restartTimes = [];
     await this.start(options);
   }
 

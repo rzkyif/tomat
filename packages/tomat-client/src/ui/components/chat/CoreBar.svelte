@@ -3,6 +3,7 @@
   import CoreBarView from "@tomat/shared/ui/components/chat/CoreBarView.svelte";
   import type { DisplayCoreStatus } from "@tomat/shared/ui/components/chat/CoreBarView.svelte";
   import MessageEnter from "./MessageEnter.svelte";
+  import { useUiContext } from "@tomat/shared/ui/context";
   import { coreStatusState, settingsState, viewState } from "../../state";
   import { connectionState } from "$stores/connection.svelte";
   import { cores } from "$lib/core";
@@ -58,6 +59,11 @@
   // panel-slide remounts and stays in sync across the chat / settings views).
   const CORE_BAR_EXPANSION_ID = "core-bar";
   const expanded = $derived(isExpanded(CORE_BAR_EXPANSION_ID, false));
+
+  // Mobile slides the whole chat screen in via the panel carousel, so the bar
+  // rides that motion; a separate per-bar entry slide here would double up and
+  // (because the bar mounts mid-carousel) read as a pop. Desktop keeps it.
+  const onMobile = useUiContext().platform === "mobile";
 </script>
 
 {#snippet bar()}
@@ -78,6 +84,7 @@
       viewState.pendingSettingsGroup = "cores";
       viewState.navigate("settings");
     }}
+    onSettings={() => viewState.navigate("settings")}
     baseColorOverride={themeOverrideHex}
   />
 {/snippet}
@@ -86,7 +93,7 @@
      above on mount (no msgId, so it animates on every entry; the session-restore
      gate keeps a restored bar from animating on load). Off-center it just
      appears, with no entry motion. -->
-{#if settingsState.getAlignment() === "center"}
+{#if !onMobile && settingsState.getAlignment() === "center"}
   <MessageEnter alignment="center" centerDirection="down">
     {@render bar()}
   </MessageEnter>

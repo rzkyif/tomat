@@ -8,10 +8,11 @@
 // Speech-to-Text structure otherwise.
 
 import type { SettingGroup } from "../types.ts";
+import { SECURE_URL_VALIDATION } from "../types.ts";
 
 export const ttsGroup: SettingGroup = {
   id: "tts",
-  destination: ["client", "core"],
+  destination: ["client-on-client", "core"],
   name: "Text-to-Speech",
   description:
     "Have the agent read its replies aloud. Playback runs on this device; the speech model runs on the core.",
@@ -39,8 +40,22 @@ export const ttsGroup: SettingGroup = {
       visibleWhen: { field: "tts.enabled", eq: true },
       fields: [
         {
+          id: "tts.provider",
+          name: "Provider",
+          description:
+            "Run speech synthesis on the core's device (private) or send text to an external API.",
+          type: "select",
+          defaultValue: "local",
+          options: [
+            { value: "local", label: "Local" },
+            { value: "external", label: "External" },
+          ],
+          descriptionTier: "ondemand",
+        },
+        {
           id: "tts.preset",
           name: "Preset",
+          visibleWhen: { field: "tts.provider", eq: "local" },
           description:
             "Curated text-to-speech models. Editing the settings below switches this to Custom.",
           type: "tts_preset",
@@ -98,7 +113,12 @@ export const ttsGroup: SettingGroup = {
     {
       label: "Model Server Configuration",
       destination: "core",
-      visibleWhen: { field: "tts.enabled", eq: true },
+      visibleWhen: {
+        allOf: [
+          { field: "tts.enabled", eq: true },
+          { field: "tts.provider", eq: "local" },
+        ],
+      },
       fields: [
         {
           id: "tts.modelType",
@@ -145,7 +165,7 @@ export const ttsGroup: SettingGroup = {
     },
     {
       label: "Voice",
-      destination: "client",
+      destination: "client-on-client",
       visibleWhen: { field: "tts.enabled", eq: true },
       fields: [
         {
@@ -222,6 +242,56 @@ export const ttsGroup: SettingGroup = {
           max: 100,
           step: 1,
           suffix: "%",
+          descriptionTier: "ondemand",
+        },
+      ],
+    },
+    {
+      label: "External Provider",
+      destination: "core",
+      visibleWhen: {
+        allOf: [
+          { field: "tts.enabled", eq: true },
+          { field: "tts.provider", eq: "external" },
+        ],
+      },
+      fields: [
+        {
+          id: "tts.external.baseUrl",
+          name: "Base URL",
+          description:
+            "The speech synthesis API endpoint. Must be HTTPS (HTTP allowed only for localhost).",
+          type: "string",
+          defaultValue: "",
+          placeholder: "https://api.example.com/v1",
+          regex: SECURE_URL_VALIDATION,
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "tts.external.apiKey",
+          name: "API Key",
+          description: "API key for speech synthesis. Stored securely in your keychain.",
+          type: "password",
+          defaultValue: "",
+          placeholder: "sk-...",
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "tts.external.model",
+          name: "Model",
+          description: "The speech synthesis model name, e.g. tts-1.",
+          type: "string",
+          defaultValue: "",
+          placeholder: "tts-1",
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "tts.external.voice",
+          name: "Voice",
+          description: "The voice name the external model should use, e.g. alloy.",
+          type: "string",
+          defaultValue: "alloy",
+          placeholder: "alloy",
           descriptionTier: "ondemand",
         },
       ],

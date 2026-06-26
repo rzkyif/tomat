@@ -5,7 +5,8 @@
  * types and validation constants live in `./types.ts`. Both the client
  * renderer and core's setting reads consume this module. It's the single
  * source of truth for what setting keys exist, what they default to, and
- * which destination ("client" or "core") they're persisted to.
+ * which destination (client-on-client / client-on-core / core) they're
+ * persisted to.
  */
 
 import type {
@@ -20,6 +21,7 @@ import type {
 } from "./types.ts";
 import { groupDestinations } from "./types.ts";
 import type { RequiredModelRef } from "../model.ts";
+import { sttUsesLocal, ttsUsesLocal } from "../model.ts";
 
 import { generalGroup } from "./groups/general.ts";
 import { shortcutsGroup } from "./groups/shortcuts.ts";
@@ -120,7 +122,8 @@ function isHfSpec(v: unknown): v is string {
 export function requiredModelRefs(s: Record<string, unknown>): RequiredModelRef[] {
   const out: RequiredModelRef[] = [];
   const llmLocal = s["llm.provider"] !== "external";
-  const sttActive = !!s["stt.enabled"] && s["stt.provider"] !== "external";
+  const sttActive = sttUsesLocal(s);
+  const ttsActive = ttsUsesLocal(s);
   const imagesOn = !!s["llm.supportImages"];
 
   const llmModel = s["llm.modelPath"];
@@ -136,7 +139,7 @@ export function requiredModelRefs(s: Record<string, unknown>): RequiredModelRef[
       out.push({ source: spec, group: "stt" });
     }
   }
-  if (s["tts.enabled"]) {
+  if (ttsActive) {
     for (const spec of parseModelFiles(s["tts.modelFiles"])) {
       out.push({ source: spec, group: "tts" });
     }
@@ -224,10 +227,10 @@ function keyDestinations(): Map<string, SettingDestination> {
   return map;
 }
 
-/** Persistence destination ("client" or "core") for a schema field id,
- *  honoring per-section overrides in hybrid groups. Undefined for unknown
- *  keys. The single routing truth for both the client save path and core's
- *  PATCH validation. */
+/** Persistence destination (client-on-client / client-on-core / core) for a
+ *  schema field id, honoring per-section overrides in hybrid groups. Undefined
+ *  for unknown keys. The single routing truth for both the client save path and
+ *  core's PATCH validation. */
 export function settingKeyDestination(key: string): SettingDestination | undefined {
   return keyDestinations().get(key);
 }
@@ -259,9 +262,17 @@ export function isSectionVisible(section: SettingSection): boolean {
   return section.fields.length > 0;
 }
 
-/** True when a group should appear in the settings UI. */
-export function isGroupVisible(group: SettingGroup): boolean {
-  return !group.hidden;
+/** True when a group should appear in the settings UI. `platform` defaults to
+ *  desktop, so existing desktop callers are unaffected; passing `"mobile"` also
+ *  drops `desktopOnly` groups (e.g. global shortcuts) that have no mobile
+ *  equivalent. */
+export function isGroupVisible(
+  group: SettingGroup,
+  platform: "desktop" | "mobile" = "desktop",
+): boolean {
+  if (group.hidden) return false;
+  if (group.desktopOnly && platform === "mobile") return false;
+  return true;
 }
 
 /** The set of section keys (`${groupId}-${sectionIndex}`) that are expanded by
@@ -434,18 +445,24 @@ export function getPresetFieldIds(groupId: string): Set<string> {
 export function searchFields(
   query: string,
   currentSettings: Record<string, unknown>,
+  platform: "desktop" | "mobile" = "desktop",
 ): SearchResultGroup[] {
   if (!query.trim()) return [];
   const q = query.toLowerCase();
   const results: SearchResultGroup[] = [];
 
   for (const group of SETTINGS_SCHEMA) {
+    // Skip groups the current platform hides (e.g. desktop-only Shortcuts on
+    // mobile) so search never surfaces a field the sidebar won't navigate to.
+    if (!isGroupVisible(group, platform)) continue;
     for (let si = 0; si < group.sections.length; si++) {
       const section = group.sections[si];
       if (!evalCondition(section.visibleWhen, currentSettings)) continue;
+      if (section.desktopOnly && platform === "mobile") continue;
 
       const matched: SettingField[] = [];
       for (const field of section.fields) {
+        if (field.desktopOnly && platform === "mobile") continue;
         // command_preview is a derived display, not user-targetable; the
         // services/storage display panels and object_management managers
         // (snippets/extensions/cores) have no atomic field-level state to surface
@@ -544,11 +561,14 @@ function settingValueTypeOk(field: SettingField, value: unknown): boolean {
 }
 
 /**
- * Validate a PATCH body destined for the core settings store
+ * Validate a PATCH body destined for the core's settings endpoint
  * (`PATCH /api/v1/settings`). Returns a list of human-readable errors; an
  * empty list means the patch is acceptable. Rules:
- *   - every key must be a known schema key with a core destination: the core
- *     store never holds client-side or unknown keys.
+ *   - every key must be a known schema key whose destination is in `allow`:
+ *     the shared core store (`allow: ["core"]`, the default) never holds
+ *     client-side or unknown keys; the per-client overlay path passes
+ *     `allow: ["core", "client-on-core"]` so it accepts both core-stored layers
+ *     but still rejects `client-on-client` local-only keys.
  *   - secret-typed keys (password fields) are rejected: their values belong in
  *     the encrypted vault via the secrets endpoint, never in settings.json.
  *   - render-only fields (command preview, services, storage, object
@@ -558,9 +578,13 @@ function settingValueTypeOk(field: SettingField, value: unknown): boolean {
  *   - values are type-checked (and regex-checked for text fields) so a
  *     malformed value can't be persisted.
  */
-export function validateSettingsPatch(patch: Record<string, unknown>): string[] {
+export function validateSettingsPatch(
+  patch: Record<string, unknown>,
+  opts: { allow: SettingDestination[] } = { allow: ["core"] },
+): string[] {
   const errors: string[] = [];
   const secretSet = new Set<string>(SECRET_KEYS);
+  const allowed = new Set<SettingDestination>(opts.allow);
   for (const [key, value] of Object.entries(patch)) {
     if (!isValidSettingKey(key)) {
       errors.push(`"${key}" is not a known setting`);
@@ -570,8 +594,9 @@ export function validateSettingsPatch(patch: Record<string, unknown>): string[] 
       errors.push(`"${key}" is a secret and must be set via the secrets endpoint, not settings`);
       continue;
     }
-    if (settingKeyDestination(key) !== "core") {
-      errors.push(`"${key}" is not a core-destination setting`);
+    const dest = settingKeyDestination(key);
+    if (!dest || !allowed.has(dest)) {
+      errors.push(`"${key}" is not accepted on this settings path`);
       continue;
     }
     const field = findField(key);

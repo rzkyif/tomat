@@ -34,6 +34,10 @@ const log = getLogger("sessions-store");
 export interface CreateSessionInput {
   ownerClientId: string;
   title?: string;
+  /** Create a temporary (RAM-only) session: it lives in the in-memory
+   *  `ephemeral` map below, never touches disk, and is excluded from every
+   *  listing. Fixed at creation; there is no later reclassification. */
+  temporary?: boolean;
 }
 
 export interface AttachmentRecord {
@@ -47,7 +51,9 @@ export interface AttachmentRecord {
   createdAtMs: number;
 }
 
-// The full on-disk document for one session.
+// The full document for one session. Persistent sessions are written to
+// `session.json`; temporary ones (`temporary: true`) live only in the
+// `ephemeral` map and are never serialized.
 interface SessionDoc {
   id: string;
   ownerClientId: string;
@@ -55,9 +61,17 @@ interface SessionDoc {
   createdAtMs: number;
   updatedAtMs: number;
   tokenUsage?: Session["tokenUsage"];
+  temporary?: boolean;
   messages: Message[];
   attachments: AttachmentRecord[];
 }
+
+// Temporary sessions, keyed by id. They never reach disk: `readDoc` checks
+// here first, `writeDoc` keeps a doc that is already here in memory, and
+// `removeSessionDir` drops it. `readAllDocs` only walks disk, so listings
+// (the session bar list, the Settings storage view) exclude them for free.
+// The map is process-lifetime: a core restart wipes every temporary session.
+const ephemeral = new Map<string, SessionDoc>();
 
 export class SessionsRepo {
   // --- sessions ------------------------------------------------------------
@@ -74,7 +88,14 @@ export class SessionsRepo {
       messages: [],
       attachments: [],
     };
-    writeDoc(doc);
+    if (input.temporary) {
+      // Born in the map, never on disk. Mark the id first so the writeDoc
+      // below routes to memory instead of touching the filesystem.
+      doc.temporary = true;
+      ephemeral.set(id, doc);
+    } else {
+      writeDoc(doc);
+    }
     return toSession(doc);
   }
 
@@ -116,6 +137,20 @@ export class SessionsRepo {
     const attachmentPaths = doc.attachments.map((a) => a.absPath);
     removeSessionDir(sessionId);
     return { attachmentPaths };
+  }
+
+  /** Drop every temporary session this client owns except `keepId`. A client
+   *  has at most one reachable temporary session (they are never listed, so
+   *  there is no way back to an older one), so any other temporary session it
+   *  owns was orphaned by navigating away without a clean delete (a crash or a
+   *  dropped request). Calling this on each navigation / creation reclaims the
+   *  RAM (and any on-disk attachment bytes) promptly instead of waiting for a
+   *  core restart. `removeSessionDir` recurses, so attachment files go too. */
+  sweepClientTemporary(ownerClientId: string, keepId?: string): void {
+    const stale = [...ephemeral.values()]
+      .filter((d) => d.ownerClientId === ownerClientId && d.id !== keepId)
+      .map((d) => d.id);
+    for (const id of stale) removeSessionDir(id);
   }
 
   // --- messages ------------------------------------------------------------
@@ -326,10 +361,42 @@ export function sessionsRepo(): SessionsRepo {
   return _instance;
 }
 
-// Test-only: drops the cached instance. The store is stateless (disk is the
-// source of truth), so this mainly exists for symmetry with the other repos.
+// Test-only: drops the cached instance and clears the in-memory temporary
+// sessions, so each test starts from a clean slate (disk is otherwise the
+// source of truth).
 export function __resetForTesting(): void {
   _instance = null;
+  ephemeral.clear();
+}
+
+/** Remove any session directory that has no readable `session.json`. The only
+ *  way such a directory exists is a temporary session whose attachments were
+ *  written to disk (by the attachments route) but whose doc lived only in RAM
+ *  and so was lost on an unclean shutdown. A persistent session always writes
+ *  `session.json` at creation, before any attachment, so this never touches a
+ *  real session. Run once at core boot. */
+export function sweepOrphanedSessionDirs(): void {
+  let entries: Iterable<Deno.DirEntry>;
+  try {
+    entries = Deno.readDirSync(paths().sessionsDir);
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) return;
+    throw err;
+  }
+  for (const e of entries) {
+    if (!e.isDirectory) continue;
+    // Existence, not parseability: a corrupt-but-present session.json is a real
+    // session readDoc skips, not an orphan to delete.
+    if (fileExists(sessionFile(e.name))) continue;
+    try {
+      Deno.removeSync(sessionDir(e.name), { recursive: true });
+      log.info(`swept orphaned session dir ${e.name} (no session.json)`);
+    } catch (err) {
+      if (!(err instanceof Deno.errors.NotFound)) {
+        log.warn(`failed to sweep orphaned session dir ${e.name}: ${err}`);
+      }
+    }
+  }
 }
 
 // --- on-disk helpers -------------------------------------------------------
@@ -346,10 +413,18 @@ function toSession(doc: SessionDoc): Session {
     createdAtMs: doc.createdAtMs,
     updatedAtMs: doc.updatedAtMs,
     tokenUsage: doc.tokenUsage,
+    temporary: doc.temporary,
   };
 }
 
 function readDoc(id: string): SessionDoc | null {
+  const mem = ephemeral.get(id);
+  // Clone so a temporary session reads exactly like a persistent one: every
+  // readDoc hands back a private snapshot, and the map entry only changes
+  // through writeDoc. Returning the live object instead would let an in-place
+  // mutation (harmless on the disk path's throwaway parse) silently corrupt
+  // the canonical state.
+  if (mem) return structuredClone(mem);
   let text: string;
   try {
     text = Deno.readTextFileSync(sessionFile(id));
@@ -375,6 +450,13 @@ function readDoc(id: string): SessionDoc | null {
 }
 
 function writeDoc(doc: SessionDoc): void {
+  // A temporary session lives only in the map: commit the (snapshot) doc the
+  // caller mutated, mirroring how the disk path commits via tmp+rename, and
+  // short-circuit before any filesystem access.
+  if (ephemeral.has(doc.id)) {
+    ephemeral.set(doc.id, doc);
+    return;
+  }
   Deno.mkdirSync(sessionDir(doc.id), { recursive: true });
   const file = sessionFile(doc.id);
   const tmp = file + ".tmp";
@@ -400,6 +482,7 @@ function readAllDocs(): SessionDoc[] {
 }
 
 function removeSessionDir(id: string): void {
+  ephemeral.delete(id);
   try {
     Deno.removeSync(sessionDir(id), { recursive: true });
   } catch (err) {
@@ -418,6 +501,14 @@ function statSize(path: string): number {
     return Deno.statSync(path).size;
   } catch {
     return 0;
+  }
+}
+
+function fileExists(path: string): boolean {
+  try {
+    return Deno.statSync(path).isFile;
+  } catch {
+    return false;
   }
 }
 

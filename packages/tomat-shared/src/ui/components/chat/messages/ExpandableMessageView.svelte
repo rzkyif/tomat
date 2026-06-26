@@ -14,6 +14,8 @@
   // `defaultExpanded`. Alignment and the optional system-message color override
   // also come from the context.
   const ui = useUiContext();
+  // Mobile chat bubbles always sit on the agent side (left).
+  const align = $derived(ui.platform === "mobile" ? "left" : ui.getAlignment());
 
   let {
     id,
@@ -51,7 +53,7 @@
 </script>
 
 <div style:display="contents" style:--default-base={overrideHex}>
-  <Bubble selectedAlignment={ui.getAlignment()} size="small" {neighborLeft} {neighborRight}>
+  <Bubble selectedAlignment={align} size="small" {neighborLeft} {neighborRight}>
     <Expandable
       bind:expanded={
         () => (id !== undefined ? ui.expansionGet(id, defaultExpanded) : localExpanded),
@@ -60,7 +62,7 @@
           else localExpanded = v;
         }
       }
-      alignment={ui.getAlignment()}
+      alignment={align}
     >
       {#snippet title()}
         <span>{titleText}</span>
