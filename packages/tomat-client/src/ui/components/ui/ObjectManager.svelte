@@ -1,15 +1,15 @@
 <script lang="ts" generics="T">
   import { onMount, type Snippet, untrack } from "svelte";
   import { errMessage } from "@tomat/shared";
-  import SearchInput from "@tomat/shared/ui/components/primitives/SearchInput.svelte";
-  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
+  import ObjectManagerView from "@tomat/shared/ui/components/objects/ObjectManagerView.svelte";
   import { type ParsedQuery, parseQuery } from "$lib/objects/query";
 
-  // Generic, presentational shell for the object-management settings UI:
-  // search bar + optional filter/sort + optional triple-dot, a batched
-  // infinite-scroll list, and a list<->detail swap with Esc-to-back. It holds
-  // ZERO domain logic; each per-type field supplies data (load/idOf/subscribe),
-  // the toolbar menu handlers, and the card/detail/empty snippets.
+  // Client wrapper for the object-management settings UI: owns all state
+  // (search query, selection, filtering, loading, infinite-scroll, and the
+  // subscribe/Esc lifecycle) and feeds ObjectManagerView the live data,
+  // callbacks, and the card/detail/empty snippets. It holds ZERO domain logic;
+  // each per-type field supplies data (load/idOf/subscribe), the toolbar menu
+  // handlers, and the card/detail/empty snippets.
   let {
     load,
     idOf,
@@ -175,81 +175,27 @@
   const emptyVisible = $derived(items.length === 0 && !loading && !error);
 </script>
 
-<div class="h-full flex flex-col gap-2">
-  <!-- Toolbar stays visible in both list and detail mode. Editing the search
-       (or inserting a filter/sort token) exits detail; the triple-dot does not. -->
-  <div class="flex items-center gap-1 shrink-0">
-    <div class="flex-1 min-w-0">
-      <SearchInput bind:value={query} placeholder={searchPlaceholder} onclear={() => (query = "")} />
-    </div>
-    {#if hasFilterSort}
-      <IconButton
-        icon="i-material-symbols-filter-alt"
-        title="Filter and sort"
-        size="lg"
-        surface="filled"
-        rounded="rounded-large"
-        onclick={() => onFilterSort?.()}
-      />
-    {/if}
-    {#if hasMenu}
-      <IconButton
-        icon={menuBusy
-          ? "i-material-symbols-progress-activity animate-spin"
-          : "i-material-symbols-more-vert"}
-        title="More actions"
-        size="lg"
-        surface="filled"
-        rounded="rounded-large"
-        disabled={menuBusy}
-        onclick={() => onMenu?.()}
-      />
-    {/if}
-  </div>
-
-  <!-- Only this area swaps between list and detail. The list stays mounted but
-       hidden under detail so its scroll / query / loaded pages survive. -->
-  <div class="flex-1 min-h-0 flex flex-col">
-    <div
-      bind:this={scrollEl}
-      class="tomat-scroll flex-1 min-h-0 overflow-y-auto pr-2 {selectedItem !== null ? 'hidden' : ''}"
-    >
-      {#if error}
-        <div class="px-3 py-2 text-sm text-accent-red-600">{error}</div>
-      {/if}
-      {#if emptyVisible}
-        {@render empty()}
-      {:else}
-        <div class="flex flex-col">
-          {#each items as item (idOf(item))}
-            {@render card(item, () => (selectedItem = item))}
-          {/each}
-        </div>
-      {/if}
-      <div bind:this={sentinelEl} class="h-px"></div>
-      {#if loading}
-        <div class="flex justify-center py-3 text-default-500">
-          <i class="i-material-symbols-progress-activity animate-spin text-lg"></i>
-        </div>
-      {/if}
-    </div>
-
-    {#if selectedItem !== null && live !== undefined && live !== null}
-      <!-- Back button is a left gutter spanning the detail, so the title (in
-           ObjectDetailHeader) and the form body below share one left edge. -->
-      <div class="flex-1 min-h-0 flex gap-2">
-        <IconButton
-          icon="i-material-symbols-arrow-back-rounded"
-          title="Back to list"
-          size="md"
-          surface="none"
-          onclick={() => (selectedItem = null)}
-          class="self-start shrink-0"
-        />
-        <div class="flex flex-col gap-3 flex-1 min-w-0 min-h-0">
-          {@render detail(live, () => (selectedItem = null))}
-        </div>
-      </div>
-    {/if}
-  </div>
-</div>
+<ObjectManagerView
+  {items}
+  {idOf}
+  {selectedItem}
+  live={live ?? null}
+  {searchPlaceholder}
+  {error}
+  {emptyVisible}
+  {loading}
+  {hasFilterSort}
+  {hasMenu}
+  {menuBusy}
+  bind:query
+  bind:scrollEl
+  bind:sentinelEl
+  onClearQuery={() => (query = "")}
+  onSelect={(item) => (selectedItem = item)}
+  onBack={() => (selectedItem = null)}
+  onFilterSort={() => onFilterSort?.()}
+  onMenu={() => onMenu?.()}
+  {card}
+  detailPane={detail}
+  {empty}
+/>

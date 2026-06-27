@@ -23,6 +23,10 @@ SQLite database its tools reach through `ctx.db`.
 | `download_url`       | download          | Download a file from an http(s) URL into the user's Downloads folder.               |
 | `organize_downloads` | organizeDownloads | Pick loose Downloads files, review a plan, move them into category folders.         |
 | `open_website`       | open              | Open a URL in the default browser (macOS `open`, Linux `xdg-open`, Win `rundll32`). |
+| `open_app`           | openApp           | Launch one or more apps by name (macOS `open -a`, Win `start`, Linux `gtk-launch`). |
+| `open_file`          | openFile          | Open a file, in a chosen app or the default one.                                    |
+| `get_window_layout`  | getWindowLayout   | Read open windows' positions and sizes (macOS/Windows/Linux X11; best-effort).      |
+| `set_window_layout`  | setWindowLayout   | Move and resize windows to a remembered layout (macOS/Windows/Linux X11).           |
 | `read_memory`        | readMemory        | Read a memory's full content by title.                                              |
 | `show_memory`        | showMemory        | Render a memory as markdown in the chat (one-way display).                          |
 | `write_memory`       | writeMemory       | Create a memory, or replace an existing memory's content.                           |
@@ -41,6 +45,8 @@ SQLite database its tools reach through `ctx.db`.
 └── src/
     ├── download.ts    # download_url
     ├── open.ts        # open_website
+    ├── app.ts         # open_app, open_file
+    ├── window.ts      # get_window_layout, set_window_layout
     ├── demo.ts        # askuser_demo
     ├── memories.ts    # read / show / write / edit_memory
     ├── schedule.ts    # schedule_prompt
@@ -73,6 +79,20 @@ brokered by the core rather than handed to the worker. Specifically:
   to `html.duckduckgo.com` only.
 - `open_website` needs **run** access for `open`, `xdg-open`, and `rundll32`
   (one per host OS).
+- `open_app` needs **run** for `open`, `cmd`, `gtk-launch`, and `xdg-open` (one
+  set per host OS; only the matching one is ever spawned).
+- `open_file` needs the same **run** binaries minus `gtk-launch`, plus **read**
+  on `/` and `$home`: opening a remembered file means reading from anywhere on
+  disk. `/` covers the whole tree on macOS/Linux; `$home` is the entry that
+  reaches files on Windows, where a `/` grant does not span drive letters (so on
+  Windows, files outside the home folder are not reached). The read defaults to
+  ask, so each open prompts until the user grants it; granting it as always-allow
+  shows a risky-permission warning. The handler also refuses any non-absolute
+  path.
+- `get_window_layout` / `set_window_layout` need **run** for `osascript`
+  (macOS), `powershell` (Windows), and `wmctrl` (Linux X11). They declare
+  `platforms: ["darwin", "windows", "linux_x11"]`, so they never appear on a
+  Linux Wayland session (which has no way to position other apps' windows).
 - `read_memory` and `show_memory` need **memories:read**; `write_memory` and
   `edit_memory` need **memories:write** (which also covers reads).
 - `collect_table` needs no per-tool grant: it writes to the extension's private
@@ -90,7 +110,12 @@ respect:
    schema (`https://au.tomat.ing/schemas/tomat-v1.json`). It needs a `name`, a
    user-facing `displayName`, and a `description`. `tools` is optional: an
    extension may ship only memories and declare no tools at all. Set
-   `"database": true` at the top level if any tool uses `ctx.db`.
+   `"database": true` at the top level if any tool uses `ctx.db`. A tool may
+   declare `platforms` (`darwin` / `windows` / `linux` / `linux_x11` /
+   `linux_wayland`) to limit which operating systems it runs on; tomat hides it
+   everywhere on a host its list doesn't cover, so OS-specific tools never reach
+   the model. The display server (`linux_x11` vs `linux_wayland`) is detected by
+   tomat, so authors never inspect environment variables for it.
 2. Dependencies declared in `deno.json` `imports` (use `npm:` / `jsr:`
    specifiers). The host installs them with `deno install` and never edits your
    `deno.json`. A deno-native extension like this built-in needs no
@@ -159,6 +184,9 @@ run wherever `deno test` does:
   a recording `ctx.db`, run against a tempdir.
 - `src/open.test.ts`: URL validation; skips the actual subprocess spawn (which
   would open a real browser).
+- `src/app.test.ts` / `src/window.test.ts`: assert the pure per-OS command
+  builders and output parsing across every platform, plus handler validation,
+  without spawning (which would launch real apps or move windows).
 
 The pattern, reduced to the minimum (stub the ctx fields your tool actually
 touches; the rest reject so an accidental call is loud):

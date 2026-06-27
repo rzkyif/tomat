@@ -8,6 +8,7 @@
 
 import type { ServerToClientFrame, SidecarKind, SidecarStatus } from "@tomat/shared";
 import { cores } from "$lib/core";
+import { Subscriptions } from "$lib/util/subscriptions";
 
 export type ServerStatusUpdate = {
   server: SidecarKind;
@@ -31,31 +32,24 @@ function freshStatuses(): Record<SidecarKind, ServerStatusUpdate> {
 class ServersState {
   serverStatuses = $state<Record<SidecarKind, ServerStatusUpdate>>(freshStatuses());
 
-  private unsubscribe: (() => void) | null = null;
+  private subs = new Subscriptions();
 
   /** Wire to the WS hub of the currently-selected core. Idempotent. */
   attach(): void {
-    if (this.unsubscribe) return;
-    this.unsubscribe = cores().subscribeWs((frame: ServerToClientFrame) => {
-      if (frame.kind !== "core.status") return;
-      const next = freshStatuses();
-      for (const s of frame.snapshot.subsystems ?? []) {
-        next[s.kind] = { server: s.kind, status: s.status, message: s.message };
-      }
-      this.serverStatuses = next;
-    });
+    this.subs.attach(() => [
+      cores().subscribeWs((frame: ServerToClientFrame) => {
+        if (frame.kind !== "core.status") return;
+        const next = freshStatuses();
+        for (const s of frame.snapshot.subsystems ?? []) {
+          next[s.kind] = { server: s.kind, status: s.status, message: s.message };
+        }
+        this.serverStatuses = next;
+      }),
+    ]);
   }
 
   detach(): void {
-    if (this.unsubscribe) {
-      this.unsubscribe();
-      this.unsubscribe = null;
-    }
-  }
-
-  /** Backwards-compatible mutator for any code still pushing into the store directly. */
-  updateStatus(update: ServerStatusUpdate): void {
-    this.serverStatuses[update.server] = update;
+    this.subs.detach();
   }
 }
 

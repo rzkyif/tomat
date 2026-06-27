@@ -96,6 +96,13 @@ export const toolSchema = z
     triggers: z.array(z.string()).default([]),
     function: z.string().min(1),
     alwaysAvailable: z.boolean().default(false),
+    // OS gating. Empty (or omitted) = every platform. `linux` matches any Linux
+    // session; `linux_x11` / `linux_wayland` narrow to a display server, which
+    // tomat detects centrally. A tool is hidden everywhere on a host its list
+    // doesn't cover.
+    platforms: z
+      .array(z.enum(["darwin", "windows", "linux", "linux_x11", "linux_wayland"]))
+      .default([]),
     permissions: toolPermissionsSchema.default({
       net: [],
       read: [],

@@ -109,6 +109,180 @@
       }
     },
     {
+      "name": "open_app",
+      "description": "Open one or more apps on the user's computer by name. Use when the user asks to launch, open, or start apps like a calculator or a browser.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "apps": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "App names to launch, e.g. [\"Calculator\", \"Brave Browser\"]. Use the app's display name on macOS, its name or executable on Windows, or its desktop id on Linux."
+          }
+        },
+        "required": ["apps"]
+      },
+      "triggers": [
+        "open the calculator",
+        "launch brave and spotify",
+        "start the terminal",
+        "open my notes app"
+      ],
+      "function": "openApp",
+      "alwaysAvailable": true,
+      "permissions": {
+        "run": [
+          {
+            "binary": "open",
+            "reason": "Launch the app on macOS with `open -a`"
+          },
+          {
+            "binary": "cmd",
+            "reason": "Launch the app on Windows with `start`"
+          },
+          {
+            "binary": "gtk-launch",
+            "reason": "Launch the app on Linux by its desktop id"
+          },
+          {
+            "binary": "xdg-open",
+            "reason": "Fall back to Linux's default launcher"
+          }
+        ]
+      }
+    },
+    {
+      "name": "open_file",
+      "description": "Open a file on the user's computer, in a chosen app or the default one. Use when the user asks to open a document, image, or other file, for example a saved report in a specific editor.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file to open."
+          },
+          "appName": {
+            "type": "string",
+            "description": "App to open the file with, e.g. \"Preview\". Omit to use the system default app. On Linux a named app is not supported and the default app is used."
+          }
+        },
+        "required": ["path"]
+      },
+      "triggers": [
+        "open this pdf",
+        "open the report in preview",
+        "open that spreadsheet in excel",
+        "open my notes file in the editor"
+      ],
+      "function": "openFile",
+      "alwaysAvailable": true,
+      "permissions": {
+        "run": [
+          {
+            "binary": "open",
+            "reason": "Open the file on macOS with `open`"
+          },
+          {
+            "binary": "cmd",
+            "reason": "Open the file on Windows with `start`"
+          },
+          {
+            "binary": "xdg-open",
+            "reason": "Open the file on Linux with the default app"
+          }
+        ],
+        "read": [
+          {
+            "path": "/",
+            "reason": "Open any file you point tomat at, wherever it lives on your computer"
+          },
+          {
+            "path": "$home",
+            "reason": "Open files in your home folder (this is the grant that reaches files on Windows)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "get_window_layout",
+      "description": "Read the current position and size of open app windows. Use when the user wants to remember or note their current window layout so it can be restored later. tomat may not be able to read every window; this depends on your operating system.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "triggers": [
+        "remember my current window layout",
+        "save where my windows are",
+        "note the current screen arrangement"
+      ],
+      "function": "getWindowLayout",
+      "platforms": ["darwin", "windows", "linux_x11"],
+      "permissions": {
+        "run": [
+          {
+            "binary": "osascript",
+            "reason": "Read window positions on macOS"
+          },
+          {
+            "binary": "powershell",
+            "reason": "Read window positions on Windows"
+          },
+          {
+            "binary": "wmctrl",
+            "reason": "Read window positions on Linux (X11)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "set_window_layout",
+      "description": "Move and resize open app windows to given positions. Use when the user wants to restore a remembered window layout. tomat may not be able to move every window; this depends on your operating system.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "windows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "app": { "type": "string", "description": "App or window owner name to move." },
+                "x": { "type": "integer", "description": "Left edge in screen pixels." },
+                "y": { "type": "integer", "description": "Top edge in screen pixels." },
+                "width": { "type": "integer", "description": "Width in pixels." },
+                "height": { "type": "integer", "description": "Height in pixels." }
+              },
+              "required": ["app", "x", "y", "width", "height"]
+            },
+            "description": "Target position and size for each window."
+          }
+        },
+        "required": ["windows"]
+      },
+      "triggers": [
+        "restore my window layout",
+        "put my windows back where they were",
+        "arrange the windows like before"
+      ],
+      "function": "setWindowLayout",
+      "platforms": ["darwin", "windows", "linux_x11"],
+      "permissions": {
+        "run": [
+          {
+            "binary": "osascript",
+            "reason": "Move and resize windows on macOS"
+          },
+          {
+            "binary": "powershell",
+            "reason": "Move and resize windows on Windows"
+          },
+          {
+            "binary": "wmctrl",
+            "reason": "Move and resize windows on Linux (X11)"
+          }
+        ]
+      }
+    },
+    {
       "name": "askuser_demo",
       "description": "Walk through the in-chat question forms: a text prompt, a single choice, and a multi-select with a write-in option. Use when the user wants to see how these forms work.",
       "parameters": {

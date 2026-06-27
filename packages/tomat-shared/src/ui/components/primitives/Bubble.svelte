@@ -27,7 +27,6 @@
     neighborRight = false,
     progress,
     progressFillBgClass = "bg-default-800",
-    progressFullHeight = false,
     onclick,
     oncontextmenu,
     onlongpress,
@@ -65,24 +64,17 @@
     neighborLeft?: boolean;
     /** Visual-right side has another bubble in the same stack row. */
     neighborRight?: boolean;
-    /** Progress visualisation rendered AS the bubble background. The fill
-     *  occupies the top header zone (a `2rem` band, or the whole bubble when
-     *  `progressFullHeight`) so an expanded body underneath stays unaffected.
+    /** Progress visualisation rendered AS the bubble background. The fill and
+     *  its inverted overlay span the WHOLE bubble height, so a bubble of any
+     *  size (a one-line header or a tall expanded body) is covered edge to edge.
      *  `undefined` = no progress; `null` = indeterminate sweeping bar; number =
-     *  percent (0..100). When set, content is rendered twice: the top copy is
+     *  percent (0..100). When set, content is rendered twice: the filled copy is
      *  `filter: invert()`-ed and clipped to the fill rect so text and other UI
      *  elements over the bar read inverted. */
     progress?: number | null;
     /** Override for the determinate/indeterminate fill colour. Defaults to
      *  `bg-default-800` to pair with the default `bg-surface` track. */
     progressFillBgClass?: string;
-    /** When the bubble is header-only (no expanded body underneath), the fill
-     *  and its inverted overlay should span the WHOLE bubble, not the fixed
-     *  top `2rem` header zone, otherwise a header taller than `2rem` (line-height
-     *  rounding, a wrapped description, a non-default font) leaves an uncovered
-     *  strip below the bar. Set this true while collapsed; leave false while a
-     *  body is expanded so the bar stays confined to the header zone above it. */
-    progressFullHeight?: boolean;
     onclick?: (e: MouseEvent) => void;
     oncontextmenu?: (e: MouseEvent) => void;
     /** Touch long-press handler (the mobile stand-in for right-click). Wired to
@@ -141,14 +133,6 @@
     };
   });
   let displayPercent = $derived(grown ? percent : 0);
-  // The vertical extent of the fill bar and its inverted overlay. Full bubble
-  // height when header-only (collapsed), the fixed `2rem` header zone otherwise.
-  // Exported as custom props so the determinate clip-path and the indeterminate
-  // keyframes (which can't read a prop) share one source of truth.
-  let progressZoneHeight = $derived(progressFullHeight ? "100%" : "2rem");
-  let progressZoneBottomInset = $derived(
-    progressFullHeight ? "0px" : "calc(100% - 2rem)",
-  );
   // Right-aligned bubbles fill the progress bar from right to left so the
   // motion mirrors the bubble's anchor edge. The determinate fill anchors on
   // `right-0` instead of `left-0`; the indeterminate sweep and the
@@ -210,9 +194,6 @@
     use:longpress={onlongpress}
     role={onclick ? "presentation" : undefined}
     style:--default-base={defaultBaseOverride}
-    style:--progress-zone-bottom-inset={hasProgress
-      ? progressZoneBottomInset
-      : undefined}
     class="bubble-body {bgClass} {minHClass} relative z-10 overflow-hidden rounded-large {fullWidth
       ? 'w-full max-w-full'
       : 'w-fit max-w-[calc(100vw-5rem)]'} break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
@@ -230,19 +211,18 @@
     {#if hasProgress}
       {#if percent === null}
         <div
-          class="absolute top-0 {progressFillBgClass}"
+          class="absolute inset-y-0 {progressFillBgClass}"
           class:left-0={!isRight}
           class:right-0={isRight}
           class:bubble-progress-indet={!isRight}
           class:bubble-progress-indet-rtl={isRight}
-          style:height={progressZoneHeight}
         ></div>
       {:else}
         <div
-          class="absolute top-0 {progressFillBgClass} transition-all duration-500"
+          class="absolute inset-y-0 {progressFillBgClass} transition-all duration-500"
           class:left-0={!isRight}
           class:right-0={isRight}
-          style="width: {displayPercent}%; height: {progressZoneHeight}"
+          style="width: {displayPercent}%"
         ></div>
       {/if}
     {/if}
@@ -254,10 +234,9 @@
            filled rect. `filter: invert(1) hue-rotate(180deg)` flips all colours
            (text, icons, inline-pill bg/fg) to a perceptually-inverted version
            in one shot, no need to thread invert-color props through every
-           descendant. The clip-path bottom inset (`--progress-zone-bottom-inset`)
-           keeps the inversion confined to the header zone so an expanded body
-           below renders normally; when header-only (`progressFullHeight`) that
-           inset is `0` so the inversion spans the whole bubble. Children are
+           descendant. The clip-path spans the full bubble height (zero top and
+           bottom inset) so the inversion tracks the full-height fill on a bubble
+           of any size. Children are
            rendered twice; Svelte's bind:expanded on the
            shared parent state keeps both Expandable instances in lockstep, and
            pointer-events:none on this layer routes all clicks to the lower
@@ -269,8 +248,8 @@
         style:clip-path={percent === null
           ? undefined
           : isRight
-            ? `inset(0 0 var(--progress-zone-bottom-inset) calc(100% - ${displayPercent}%))`
-            : `inset(0 calc(100% - ${displayPercent}%) var(--progress-zone-bottom-inset) 0)`}
+            ? `inset(0 0 0 calc(100% - ${displayPercent}%))`
+            : `inset(0 calc(100% - ${displayPercent}%) 0 0)`}
         aria-hidden="true"
       >
         {@render children()}
@@ -346,15 +325,15 @@
   }
   @keyframes bubble-progress-invert-indet {
     0% {
-      clip-path: inset(0 100% var(--progress-zone-bottom-inset) 0);
+      clip-path: inset(0 100% 0 0);
       animation-timing-function: ease-in;
     }
     50% {
-      clip-path: inset(0 25% var(--progress-zone-bottom-inset) 25%);
+      clip-path: inset(0 25% 0 25%);
       animation-timing-function: ease-out;
     }
     100% {
-      clip-path: inset(0 0 var(--progress-zone-bottom-inset) 100%);
+      clip-path: inset(0 0 0 100%);
     }
   }
 
@@ -388,15 +367,15 @@
   }
   @keyframes bubble-progress-invert-indet-rtl {
     0% {
-      clip-path: inset(0 0 var(--progress-zone-bottom-inset) 100%);
+      clip-path: inset(0 0 0 100%);
       animation-timing-function: ease-in;
     }
     50% {
-      clip-path: inset(0 25% var(--progress-zone-bottom-inset) 25%);
+      clip-path: inset(0 25% 0 25%);
       animation-timing-function: ease-out;
     }
     100% {
-      clip-path: inset(0 100% var(--progress-zone-bottom-inset) 0);
+      clip-path: inset(0 100% 0 0);
     }
   }
 </style>

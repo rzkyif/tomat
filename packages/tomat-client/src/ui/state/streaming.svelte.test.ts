@@ -51,6 +51,9 @@ vi.mock("$lib/core", () => ({
 import { streamingState } from "./streaming.svelte";
 import { messagesState } from "./messages.svelte";
 import { fixupLoadedMessages, sessionsState } from "./sessions.svelte";
+// Wire the store ports (messages<->streaming, sessions<->streaming) the same way
+// the app does, so streamingState reads the session id through its injected port.
+import "./store-wiring";
 
 describe("streamingState disconnect recovery", () => {
   beforeEach(() => {

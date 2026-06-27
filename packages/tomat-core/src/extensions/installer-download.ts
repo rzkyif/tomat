@@ -144,34 +144,51 @@ async function installBuiltin(
   jobId: string,
   sink: InstallEventSink,
 ): Promise<string> {
-  // Resolve the latest version (and CDN tarball, when used) from the signed
-  // manifest. In dev this is the codebase-derived dev manifest.
-  const manifest = await loadBuiltinExtensionManifest();
   await Deno.mkdir(stagingPath, { recursive: true });
 
   if (channel() === "dev") {
     sink.log(jobId, BUILTIN_EXTENSION_ID, "stdout", "installing built-in extension from codebase");
     await copyTreeExcludingNodeModules(builtinCodebasePath(), stagingPath);
-  } else if (spec.preferLocalDir && (await dirExists(spec.preferLocalDir))) {
-    sink.log(
-      jobId,
-      BUILTIN_EXTENSION_ID,
-      "stdout",
-      `installing built-in extension from ${spec.preferLocalDir}`,
-    );
-    await copyTreeExcludingNodeModules(spec.preferLocalDir, stagingPath);
-  } else {
-    sink.log(
-      jobId,
-      BUILTIN_EXTENSION_ID,
-      "stdout",
-      `downloading built-in extension ${manifest.version}`,
-    );
-    await fetchAndExtractTarball(manifest.tarballUrl, stagingPath, {
-      sha256: manifest.sha256,
-    });
+    // Dev manifest is codebase-derived (no network).
+    return (await loadBuiltinExtensionManifest()).version;
   }
 
+  // First-boot seed (`planted` set): install OFFLINE from the install-script-planted
+  // tarball + signed manifest. builtin-seed already verified the manifest signature;
+  // re-verify the tarball against its sha256 (the anchor to that signature) and
+  // extract. No network: a running core never fetches on boot - the install-script
+  // phase, where network is fine, did the fetching.
+  if (spec.planted) {
+    const bytes = await readFileOrNull(spec.planted.tarballPath);
+    if (!bytes) {
+      throw new AppError(
+        "tarball_fetch_failed",
+        `planted built-in tarball not found at ${spec.planted.tarballPath}`,
+      );
+    }
+    await verifyTarball(bytes, spec.planted.tarballPath, { sha256: spec.planted.manifest.sha256 });
+    sink.log(
+      jobId,
+      BUILTIN_EXTENSION_ID,
+      "stdout",
+      "installing built-in extension from planted tarball",
+    );
+    await extractTarballBytes(bytes, stagingPath);
+    return spec.planted.manifest.version;
+  }
+
+  // User-triggered download/update (the client invoked a route on a user action):
+  // resolving + fetching the signed CDN tarball is allowed here.
+  const manifest = await loadBuiltinExtensionManifest();
+  sink.log(
+    jobId,
+    BUILTIN_EXTENSION_ID,
+    "stdout",
+    `downloading built-in extension ${manifest.version}`,
+  );
+  await fetchAndExtractTarball(manifest.tarballUrl, stagingPath, {
+    sha256: manifest.sha256,
+  });
   // Deps run in the install phase like every other source; download just gets
   // the files into the folder.
   return manifest.version;
@@ -210,6 +227,16 @@ async function fetchAndExtractTarball(
   // shasum, then extract from the verified bytes.
   const bytes = new Uint8Array(await res.arrayBuffer());
   await verifyTarball(bytes, url, verify);
+  await extractTarballBytes(bytes, targetDir);
+}
+
+/** Gunzip + untar already-verified tarball bytes into targetDir, applying the
+ *  same zip-slip / symlink / hardlink guards as the fetch path. Callers MUST
+ *  verify the bytes (sha256/integrity) before calling: this trusts them. */
+async function extractTarballBytes(
+  bytes: Uint8Array<ArrayBuffer>,
+  targetDir: string,
+): Promise<void> {
   const gunzip = new DecompressionStream("gzip");
   const entries = new Blob([bytes]).stream().pipeThrough(gunzip).pipeThrough(new UntarStream());
 
@@ -338,11 +365,11 @@ async function copyTreeExcludingNodeModules(src: string, dst: string): Promise<v
   }
 }
 
-async function dirExists(path: string): Promise<boolean> {
+async function readFileOrNull(path: string): Promise<Uint8Array<ArrayBuffer> | null> {
   try {
-    return (await Deno.stat(path)).isDirectory;
+    return await Deno.readFile(path);
   } catch {
-    return false;
+    return null;
   }
 }
 

@@ -90,7 +90,7 @@ export async function probeCore(baseUrl: string): Promise<{ version: string; pin
     url: `${baseUrl}/api/v1/health`,
     capturePin: true,
   });
-  if (!ok(res)) throw new Error(`core responded ${res.status}`);
+  if (!ok(res)) throw new Error(`Core responded ${res.status}`);
   const body = JSON.parse(text(res)) as { version?: unknown };
   return {
     version: typeof body.version === "string" ? body.version : "unknown",
@@ -156,7 +156,7 @@ export async function pairWithCode(
     capturePin: true,
   });
   const pin = probe.capturedPin;
-  if (!pin) throw new Error("could not read the core's TLS certificate");
+  if (!pin) throw new Error("could not read the Core's TLS certificate");
 
   const sid = randomSid();
   const ci = new TextEncoder().encode(pin);
@@ -199,7 +199,7 @@ export async function pairWithCode(
   const serverOk = verifyConfirm(fromBase64(fin.confirmS), isk, "S", init.msgA, msgB, pin);
   if (!serverOk) {
     throw new Error(
-      "core authentication failed: the TLS certificate could not be verified " +
+      "Core authentication failed: the TLS certificate could not be verified " +
         "(possible man-in-the-middle). Not paired.",
     );
   }

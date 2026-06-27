@@ -3,7 +3,7 @@
   // the combined client + core + sidecar update flow.
   //
   // State machine:
-  //   idle                 : "tomat client vX.X.X" / hover "Check for Updates"
+  //   idle                 : "tomat Client vX.X.X" / hover "Check for Updates"
   //   checking             : "Checking…"
   //   available            : "Updates Available!" / hover "Install Updates"
   //   updating             : "Updating…"
@@ -12,12 +12,11 @@
   import { onMount } from "svelte";
   import { platform, type UpdateHandle } from "$lib/platform";
   import { cores } from "$lib/core";
-  import { confirmState, downloadsState } from "$stores";
+  import { confirmState } from "$stores";
   import type { BinaryKind, BinaryUpdateCheck } from "@tomat/shared";
-  import CollapsibleLabel from "@tomat/shared/ui/components/primitives/CollapsibleLabel.svelte";
-  import { useUiContext } from "@tomat/shared/ui/context.ts";
-  import { RIPPLE_MS } from "@tomat/shared/ui/animations.ts";
-  import { ripple } from "@tomat/shared/ui/actions/ripple.ts";
+  import UpdateButtonView, {
+    type UpdateButtonPhase,
+  } from "@tomat/shared/ui/components/settings/UpdateButtonView.svelte";
   import { useBlink } from "$composables/use-blink.svelte";
   import { getLogger } from "$lib/util/log";
 
@@ -28,17 +27,7 @@
     disabled?: boolean;
   }>();
 
-  const ui = useUiContext();
-  const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
-
-  type Phase =
-    | "idle"
-    | "checking"
-    | "available"
-    | "updating"
-    | "clientRestartPending";
-
-  let phase = $state<Phase>("idle");
+  let phase = $state<UpdateButtonPhase>("idle");
   let hovering = $state(false);
   let clientVersion = $state<string>("…");
   let coreAvailable = $state(false);
@@ -66,48 +55,16 @@
       case "clientRestartPending":
         return "Restart to Update";
       default:
-        return hovering ? "Check for Updates" : `tomat client v${clientVersion}`;
-    }
-  });
-
-  /** State-driven icon. Idle/available states render the tomat SVG (matches
-   *  the spec's "tomat icon" affordance); transient states use unocss
-   *  icon classes for the loading / restart glyphs. */
-  type IconMode =
-    | { kind: "tomat" }
-    | { kind: "class"; className: string };
-
-  const icon = $derived.by<IconMode>(() => {
-    switch (phase) {
-      case "checking":
-      case "updating":
-        return { kind: "class", className: "i-line-md:loading-loop" };
-      case "clientRestartPending":
-        return {
-          kind: "class",
-          className: "i-material-symbols-restart-alt-rounded",
-        };
-      default:
-        return { kind: "tomat" };
+        return hovering ? "Check for Updates" : `tomat Client v${clientVersion}`;
     }
   });
 
   // Pulse between two yellow shades while an update is available: a same-hue
-  // attention ping. Interval matches the button's 500ms color transition so the
-  // color is always mid-tween (no flat hold). See useBlink.
+  // attention ping. Interval matches the button's color transition so the color
+  // is always mid-tween (no flat hold). The View renders the two shades; this
+  // feeds it the live toggle. See useBlink.
   const updateBlink = useBlink();
   $effect(() => updateBlink.run(phase === "available"));
-
-  // Lives on the button so the icon (currentColor) and label inherit it and the
-  // button's 500ms color transition tweens the whole row together.
-  const tone = $derived.by<string>(() => {
-    if (phase === "available") {
-      return updateBlink.on
-        ? "text-accent-yellow-700"
-        : "text-accent-yellow-500";
-    }
-    return "text-default-500 hov:text-default-700";
-  });
 
   async function onClick() {
     if (phase === "checking" || phase === "updating") return;
@@ -181,10 +138,10 @@
   async function confirmInstall() {
     const lines: string[] = [];
     if (clientUpdate) {
-      lines.push(`tomat client v${clientUpdate.version} (client)`);
+      lines.push(`tomat Client v${clientUpdate.version} (Client)`);
     }
     if (coreAvailable) {
-      lines.push(`tomat core v${coreLatest} (core, currently v${coreCurrent})`);
+      lines.push(`tomat Core v${coreLatest} (Core, currently v${coreCurrent})`);
     }
     for (const b of binariesAvailable) {
       lines.push(
@@ -196,7 +153,7 @@
       title: "Install updates",
       message:
         `The following components will be updated. Core and sidecars will be ` +
-        `downloaded; the client will need a restart at the end.\n\n` +
+        `downloaded; the Client will need a restart at the end.\n\n` +
         lines.map((l) => `• ${l}`).join("\n"),
       confirmLabel: "Install",
       onConfirm: () => void runInstall(),
@@ -252,36 +209,12 @@
   }
 </script>
 
-<!-- Custom row (not SidebarItem) because the idle "tomat icon" needs the
-     existing SVG-mask approach rather than a unocss icon class. Geometry
-     mirrors SidebarItem so the row aligns with the rest of the column. -->
-<button
-  type="button"
-  class="hov:cursor-pointer flex items-center h-8 pl-1.5 {collapsed
-    ? 'pr-0'
-    : 'pr-2.5'} gap-1.5 rounded-medium [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {tone} hov:bg-surface-inset"
-  title={collapsed ? label : undefined}
-  aria-label={label}
+<UpdateButtonView
+  {phase}
+  {label}
+  {collapsed}
   {disabled}
-  onmouseenter={() => (hovering = true)}
-  onmouseleave={() => (hovering = false)}
-  onfocus={() => (hovering = true)}
-  onblur={() => (hovering = false)}
-  onclick={onClick}
-  use:ripple={{ disabled, durationMs: rippleDuration }}
->
-  <span class="relative flex shrink-0">
-    {#if icon.kind === "tomat"}
-      <span
-        class="w-5 h-5 bg-current shrink-0"
-        style="mask:url(/tomat.svg) center/contain no-repeat;-webkit-mask:url(/tomat.svg) center/contain no-repeat;"
-        aria-hidden="true"
-      ></span>
-    {:else}
-      <i class="flex text-xl shrink-0 {icon.className}"></i>
-    {/if}
-  </span>
-  <CollapsibleLabel {collapsed} class="text-base text-left">
-    {label}
-  </CollapsibleLabel>
-</button>
+  blink={updateBlink.on}
+  {onClick}
+  onHoverChange={(h) => (hovering = h)}
+/>

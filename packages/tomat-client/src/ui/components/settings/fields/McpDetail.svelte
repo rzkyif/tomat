@@ -3,10 +3,8 @@
   import { errMessage, type McpServer } from "@tomat/shared";
   import { confirmState, mcpState } from "$stores";
   import { getLogger } from "$lib/util/log";
-  import FormField from "@tomat/shared/ui/components/primitives/FormField.svelte";
-  import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
-  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
-  import Toggle from "@tomat/shared/ui/components/primitives/Toggle.svelte";
+  import { createDebouncedSave } from "$lib/util/debounced-save";
+  import McpDetailView from "@tomat/shared/ui/components/settings/McpDetailView.svelte";
 
   const log = getLogger("mcp");
 
@@ -32,20 +30,8 @@
   let draftAuthToken = $state("");
   let authTouched = $state(false);
 
-  let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
   // Prompts the live server exposes, toggled for "/" autocomplete.
   const prompts = $derived(mcpState.prompts.filter((p) => p.serverId === server.id));
-
-  const KIND_OPTIONS = [
-    { value: "stdio", label: "Local (stdio)" },
-    { value: "remote", label: "Remote (HTTP/SSE)" },
-  ];
-
-  const RUNTIME_OPTIONS = [
-    { value: "custom", label: "Custom command" },
-    { value: "deno", label: "Bundled deno" },
-  ];
 
   // The command actually run for a stdio server, shown in the enable
   // confirmation so consent reflects what launches.
@@ -59,16 +45,7 @@
     return `${draftCommand.trim()} ${draftArgs.trim()}`.trim();
   }
 
-  function scheduleSave() {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void flushSave(), 600);
-  }
-
-  async function flushSave() {
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
-    }
+  const { scheduleSave, flushSave } = createDebouncedSave(async () => {
     try {
       await mcpState.update(server.id, {
         name: draftName.trim() || "Untitled",
@@ -86,7 +63,7 @@
     } catch (e) {
       log.error("save MCP server failed:", e);
     }
-  }
+  }, 600);
 
   async function applyEnabled(enabled: boolean) {
     try {
@@ -125,218 +102,64 @@
   }
 </script>
 
-<div class="flex flex-col gap-3">
-  <div class="flex {horizontal ? 'items-center justify-between gap-3' : 'flex-col gap-1.5'}">
-    <div class="flex flex-col gap-0.5 min-w-0">
-      <span class="text-sm text-default-800">Connect</span>
-      {#if server.status === "error" && server.statusError}
-        <span class="text-xs text-accent-red-600 break-words">{server.statusError}</span>
-      {:else}
-        <span class="text-xs text-default-600">Status: {server.status}</span>
-      {/if}
-    </div>
-    <div class={horizontal ? "w-28 shrink-0" : ""}>
-      <Toggle
-        compact
-        labels={{ on: "ON", off: "OFF" }}
-        checked={server.enabled}
-        ariaLabel="Enable server"
-        onchange={(v) => toggleEnabled(v)}
-      />
-    </div>
-  </div>
-
-  <FormField label="Name">
-    <Input
-      type="text"
-      value={draftName}
-      ariaLabel="Server name"
-      oninput={(v) => {
-        draftName = v;
-        scheduleSave();
-      }}
-      onblur={() => flushSave()}
-    />
-  </FormField>
-
-  <FormField label="Transport">
-    <Select
-      value={draftKind}
-      options={KIND_OPTIONS}
-      ariaLabel="Transport"
-      onchange={(v) => {
-        draftKind = v as "stdio" | "remote";
-        scheduleSave();
-      }}
-    />
-  </FormField>
-
-  {#if draftKind === "stdio"}
-    <FormField label="Runtime">
-      <Select
-        value={draftRuntime}
-        options={RUNTIME_OPTIONS}
-        ariaLabel="Runtime"
-        onchange={(v) => {
-          draftRuntime = v as "custom" | "deno";
-          scheduleSave();
-        }}
-      />
-    </FormField>
-
-    {#if draftRuntime === "deno"}
-      <FormField label="Package or Script">
-        <Input
-          type="text"
-          value={draftCommand}
-          placeholder="npm:@scope/server"
-          mono
-          ariaLabel="Package or script"
-          oninput={(v) => {
-            draftCommand = v;
-            scheduleSave();
-          }}
-          onblur={() => flushSave()}
-        />
-      </FormField>
-      <FormField label="Arguments">
-        <Input
-          type="text"
-          value={draftArgs}
-          mono
-          ariaLabel="Arguments"
-          oninput={(v) => {
-            draftArgs = v;
-            scheduleSave();
-          }}
-          onblur={() => flushSave()}
-        />
-      </FormField>
-      <div class="flex flex-col gap-1.5 pt-2 border-t border-surface">
-        <div class="flex {horizontal ? 'items-center justify-between gap-3' : 'flex-col gap-1.5'}">
-          <div class="flex flex-col gap-0.5 min-w-0">
-            <span class="text-sm text-default-800">Full Access</span>
-            <span class="text-xs text-default-600">
-              Runs with full access for the widest compatibility. Turn off to choose permissions
-              yourself.
-            </span>
-          </div>
-          <div class={horizontal ? "w-28 shrink-0" : ""}>
-            <Toggle
-              compact
-              labels={{ on: "ON", off: "OFF" }}
-              checked={draftAllowAll}
-              ariaLabel="Full access"
-              onchange={(v) => {
-                draftAllowAll = v;
-                scheduleSave();
-              }}
-            />
-          </div>
-        </div>
-        {#if !draftAllowAll}
-          <FormField label="Permissions">
-            <Input
-              type="text"
-              value={draftPermissions}
-              placeholder="--allow-net --allow-read=/path"
-              mono
-              ariaLabel="Permissions"
-              oninput={(v) => {
-                draftPermissions = v;
-                scheduleSave();
-              }}
-              onblur={() => flushSave()}
-            />
-          </FormField>
-        {/if}
-      </div>
-    {:else}
-      <FormField label="Command">
-        <Input
-          type="text"
-          value={draftCommand}
-          placeholder="npx"
-          mono
-          ariaLabel="Command"
-          oninput={(v) => {
-            draftCommand = v;
-            scheduleSave();
-          }}
-          onblur={() => flushSave()}
-        />
-      </FormField>
-      <FormField label="Arguments">
-        <Input
-          type="text"
-          value={draftArgs}
-          placeholder="-y @some/mcp-server"
-          mono
-          ariaLabel="Arguments"
-          oninput={(v) => {
-            draftArgs = v;
-            scheduleSave();
-          }}
-          onblur={() => flushSave()}
-        />
-      </FormField>
-    {/if}
-  {:else}
-    <FormField label="URL">
-      <Input
-        type="text"
-        value={draftUrl}
-        placeholder="https://example.com/mcp"
-        mono
-        ariaLabel="URL"
-        oninput={(v) => {
-          draftUrl = v;
-          scheduleSave();
-        }}
-        onblur={() => flushSave()}
-      />
-    </FormField>
-    <FormField label="Bearer token">
-      <Input
-        type="password"
-        value={draftAuthToken}
-        placeholder={server.hasAuth ? "(stored - leave blank to keep)" : "optional"}
-        mono
-        ariaLabel="Bearer token"
-        oninput={(v) => {
-          draftAuthToken = v;
-          authTouched = true;
-          scheduleSave();
-        }}
-        onblur={() => flushSave()}
-      />
-    </FormField>
-  {/if}
-
-  {#if prompts.length > 0}
-    <div class="flex flex-col gap-1.5 pt-2 border-t border-surface">
-      <div class="text-default-400 text-[10px] uppercase tracking-wider select-none">
-        Prompts (trigger with /)
-      </div>
-      {#each prompts as p (p.name)}
-        <div class="flex {horizontal ? 'items-center justify-between gap-3' : 'flex-col gap-1'}">
-          <div class="flex flex-col gap-0.5 min-w-0">
-            <code class="text-xs text-default-800 self-start">/{p.name}</code>
-            {#if p.description}
-              <span class="text-xs text-default-600 break-words">{p.description}</span>
-            {/if}
-          </div>
-          <div class={horizontal ? "w-28 shrink-0" : ""}>
-            <Toggle
-              compact
-              labels={{ on: "ON", off: "OFF" }}
-              checked={p.enabled}
-              ariaLabel={`Enable /${p.name}`}
-              onchange={(v) => void mcpState.setPromptEnabled(server.id, p.name, v)}
-            />
-          </div>
-        </div>
-      {/each}
-    </div>
-  {/if}
-</div>
+<McpDetailView
+  enabled={server.enabled}
+  status={server.status}
+  statusError={server.statusError}
+  hasAuth={server.hasAuth}
+  {draftName}
+  {draftKind}
+  {draftCommand}
+  {draftArgs}
+  {draftRuntime}
+  {draftAllowAll}
+  {draftPermissions}
+  {draftUrl}
+  {draftAuthToken}
+  prompts={prompts.map((p) => ({
+    name: p.name,
+    description: p.description,
+    enabled: p.enabled,
+  }))}
+  {horizontal}
+  onToggleEnabled={(v) => toggleEnabled(v)}
+  onNameInput={(v) => {
+    draftName = v;
+    scheduleSave();
+  }}
+  onKindChange={(v) => {
+    draftKind = v;
+    scheduleSave();
+  }}
+  onRuntimeChange={(v) => {
+    draftRuntime = v;
+    scheduleSave();
+  }}
+  onCommandInput={(v) => {
+    draftCommand = v;
+    scheduleSave();
+  }}
+  onArgsInput={(v) => {
+    draftArgs = v;
+    scheduleSave();
+  }}
+  onToggleAllowAll={(v) => {
+    draftAllowAll = v;
+    scheduleSave();
+  }}
+  onPermissionsInput={(v) => {
+    draftPermissions = v;
+    scheduleSave();
+  }}
+  onUrlInput={(v) => {
+    draftUrl = v;
+    scheduleSave();
+  }}
+  onAuthTokenInput={(v) => {
+    draftAuthToken = v;
+    authTouched = true;
+    scheduleSave();
+  }}
+  onFlush={() => flushSave()}
+  onTogglePrompt={(name, v) => void mcpState.setPromptEnabled(server.id, name, v)}
+/>

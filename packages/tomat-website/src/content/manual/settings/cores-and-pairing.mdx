@@ -7,42 +7,42 @@ order: 4
 import CoreBarDemo from "../../../components/demos/CoreBarDemo.svelte";
 import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelte";
 
-The **core** is the service that does tomat's work, and the **client** is the app
+The **Core** is the service that does tomat's work, and the **Client** is the app
 you look at, as [How tomat Works](/manual/core-concepts/how-tomat-works)
 introduces. They usually sit on the same machine, but they do not have to, and once
-you separate them a few things follow: how a client connects to a core, and how you
+you separate them a few things follow: how a Client connects to a Core, and how you
 move between more than one.
 
 ## Pairing
 
-A client connects to a core by **pairing**. The core mints a short code; in the
-client you add a core by its address and enter that code once. The client captures
-the core's identity at that moment and stores the trust securely, so it reconnects
+A Client connects to a Core by **pairing**. The Core mints a short code; in the
+Client you add a Core by its address and enter that code once. The Client captures
+the Core's identity at that moment and stores the trust securely, so it reconnects
 on its own every time without you re-entering anything. The code is needed only for
 that first introduction; afterward pairing is a one-time step rather than a login
 you repeat.
 
-When the core runs on the same machine, the client sets this up for you on first
-launch. To pair with a core on a different computer, install one there first and
-turn on its network access, then pair the client with the code it prints, as
+When the Core runs on the same machine, the Client sets this up for you on first
+launch. To pair with a Core on a different computer, install one there first and
+turn on its network access, then pair the Client with the code it prints, as
 [Running a Core Elsewhere](/manual/settings/installing-a-core) walks through.
 
-To pair an _additional_ device later, you do not have to go back to the core's
-machine. The core has an **admin password**, set when it was installed. From a
-client that is already paired, open the core under **Cores** in Settings and choose
-**Generate pairing code**; enter the admin password and the client mints a fresh
+To pair an _additional_ device later, you do not have to go back to the Core's
+machine. The Core has an **admin password**, set when it was installed. From a
+Client that is already paired, open the Core under **Cores** in Settings and choose
+**Generate pairing code**; enter the admin password and the Client mints a fresh
 code to type on the new device. The same password lets you remove a device you no
-longer want from that core's list of paired devices.
+longer want from that Core's list of paired devices.
 
-## More than one core
+## More than one Core
 
-You can pair a single client with several cores and switch between them. A common
-setup is a laptop and a more powerful desktop: you carry the client, and point it
-at whichever core you want to do the work, so the heavy model runs on the desktop
+You can pair a single Client with several Cores and switch between them. A common
+setup is a laptop and a more powerful desktop: you carry the Client, and point it
+at whichever Core you want to do the work, so the heavy model runs on the desktop
 even while you sit at the laptop.
 
-The bar pinned at the bottom of the app, the **core bar**, always shows which core
-you are connected to and how it is doing, and lets you switch cores from one place.
+The bar pinned at the bottom of the app, the **Core bar**, always shows which Core
+you are connected to and how it is doing, and lets you switch Cores from one place.
 The status reads at a glance: getting ready, ready, busy with work, updating, or
 having trouble.
 
@@ -56,18 +56,18 @@ model, speech, or something else, and what to fix.
 
 <CoreBarDemo scenario="errorExpanded" />
 
-The client connects to one core at a time, but the work you start does not stop
-when you look away. You can begin a chat on one core, switch to another, and come
+The Client connects to one Core at a time, but the work you start does not stop
+when you look away. You can begin a chat on one Core, switch to another, and come
 back later to find the first one right where you left it, the reply still arriving
 and a question it asked still waiting for your answer. The only thing that clears
-that waiting work is restarting the core itself.
+that waiting work is restarting the Core itself.
 
-## Managing cores
+## Managing Cores
 
-Switch cores from the core bar for a quick change. For the full set, manage your
-paired cores under **Cores** in Settings, where you can add a new one, rename one,
-or remove one. This is the counterpart to pairing: where pairing introduces a core,
-this group is where your introduced cores live.
+Switch Cores from the Core bar for a quick change. For the full set, manage your
+paired Cores under **Cores** in Settings, where you can add a new one, rename one,
+or remove one. This is the counterpart to pairing: where pairing introduces a Core,
+this group is where your introduced Cores live.
 
 <SettingsPanelDemo group="cores" />
 

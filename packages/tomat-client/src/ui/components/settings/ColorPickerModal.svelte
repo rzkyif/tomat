@@ -1,8 +1,7 @@
 <script lang="ts">
   import { colorPickerState } from "../../state";
   import { formatOklch, parseColor } from "$lib/appearance/color";
-  import Popover from "@tomat/shared/ui/components/primitives/Popover.svelte";
-  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
+  import ColorPickerModalView from "@tomat/shared/ui/components/settings/ColorPickerModalView.svelte";
 
   // Working OKLCHa state. Re-seeded each time a new request opens so
   // re-opening the same field doesn't carry leftover slider values.
@@ -58,20 +57,20 @@
     return () => window.removeEventListener("keydown", handler);
   });
 
-  function setL(e: Event) {
-    l = parseFloat((e.target as HTMLInputElement).value);
+  function setL(value: number) {
+    l = value;
     dirty = true;
   }
-  function setC(e: Event) {
-    c = parseFloat((e.target as HTMLInputElement).value);
+  function setC(value: number) {
+    c = value;
     dirty = true;
   }
-  function setH(e: Event) {
-    h = parseFloat((e.target as HTMLInputElement).value);
+  function setH(value: number) {
+    h = value;
     dirty = true;
   }
-  function setA(e: Event) {
-    a = parseFloat((e.target as HTMLInputElement).value);
+  function setA(value: number) {
+    a = value;
     dirty = true;
   }
 
@@ -87,88 +86,21 @@
   }
 </script>
 
-<Popover
+<ColorPickerModalView
   open={!!colorPickerState.pending}
   anchor={colorPickerState.pending?.anchor}
-  onclose={() => colorPickerState.close()}
-  class="w-72"
-  ariaLabel="Color picker"
->
-  <div class="grid grid-cols-[1.25rem_1fr_3rem] items-center gap-x-2 gap-y-2">
-    {#if !lockLightness}
-      <span class="text-default-700 text-sm">L</span>
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.001"
-        value={l}
-        oninput={setL}
-        class="w-full"
-        aria-label="Lightness"
-      />
-      <span class="text-default-600 text-xs text-right tabular-nums">
-        {l.toFixed(3)}
-      </span>
-    {/if}
-
-    <span class="text-default-700 text-sm">C</span>
-    <input
-      type="range"
-      min="0"
-      max="0.4"
-      step="0.001"
-      value={c}
-      oninput={setC}
-      class="w-full"
-      aria-label="Chroma"
-    />
-    <span class="text-default-600 text-xs text-right tabular-nums">
-      {c.toFixed(3)}
-    </span>
-
-    <span class="text-default-700 text-sm">H</span>
-    <input
-      type="range"
-      min="0"
-      max="360"
-      step="1"
-      value={h}
-      oninput={setH}
-      class="w-full"
-      aria-label="Hue"
-    />
-    <span class="text-default-600 text-xs text-right tabular-nums">
-      {h.toFixed(0)}°
-    </span>
-
-    <span class="text-default-700 text-sm">A</span>
-    <input
-      type="range"
-      min="0"
-      max="1"
-      step="0.01"
-      value={a}
-      oninput={setA}
-      class="w-full"
-      aria-label="Alpha"
-    />
-    <span class="text-default-600 text-xs text-right tabular-nums">
-      {a.toFixed(2)}
-    </span>
-  </div>
-
-  <div
-    class="alpha-checkerboard rounded-medium overflow-hidden grid grid-rows-2 h-20"
-  >
-    <div style:background-color={newColor} title="New"></div>
-    {#if previousColor}
-      <div style:background-color={previousColor} title="Previous"></div>
-    {/if}
-  </div>
-
-  <div class="flex flex-row items-center gap-2">
-    <Button variant="secondary" class="flex-1" onclick={reset}>Reset</Button>
-    <Button variant="secondary" class="flex-1" onclick={apply}>Apply</Button>
-  </div>
-</Popover>
+  {l}
+  {c}
+  {h}
+  {a}
+  {lockLightness}
+  {newColor}
+  {previousColor}
+  onChangeL={setL}
+  onChangeC={setC}
+  onChangeH={setH}
+  onChangeA={setA}
+  onApply={apply}
+  onReset={reset}
+  onClose={() => colorPickerState.close()}
+/>

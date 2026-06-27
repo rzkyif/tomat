@@ -118,7 +118,7 @@
   <SettingsContentView searchQuery="color" values={D} />
 {/snippet}
 
-<!-- The app's sidebar footer (Downloads + the "tomat client vX.Y.Z" version row),
+<!-- The app's sidebar footer (Downloads + the "tomat Client vX.Y.Z" version row),
      the same single static copy the manual demos render. -->
 {#snippet sidebarFooter(collapsed: boolean)}
   <SettingsDemoFooter {collapsed} />

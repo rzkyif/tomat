@@ -27,4 +27,9 @@ export const settingsFieldSamples = {
   number: sample("number"),
   slider: sample("number_slider"),
   color: { ...sample("color"), isDark: false },
+  float: sample("float"),
+  colorDark: { ...sample("color"), isDark: true },
+  withError: { ...sample("string"), error: "Must not be empty." },
+  readOnly: { ...sample("string"), editable: false },
+  horizontalReset: { ...sample("number"), horizontal: true, showReset: true },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof SettingsFieldView>>>;

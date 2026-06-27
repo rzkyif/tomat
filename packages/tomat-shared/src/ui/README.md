@@ -60,9 +60,11 @@ component's tier; the `check-component-tiers` walker keeps it honest.
   Canonical example: `chat/SessionBar.svelte`.
 - **C - Client-owned shell** (no single matching View): orchestrates lifecycle /
   multiple stores / browser APIs, or composes several Views. Every _visible_
-  leaf inside it must be a Tier A View or A0 primitive; any raw styled leaf is
-  declared as `unsharedLeaves` in the manifest. Example:
-  `chat/UserInput.svelte`.
+  leaf inside it must be a Tier A View or A0 primitive (the `check-component-tiers`
+  raw-leaf cap enforces this); any raw styled leaf is declared as
+  `unsharedLeaves`. It may optionally list the galleried Views it renders in
+  `composes` (and child client components in `orchestratorOf`) to document its
+  coverage. Example: `chat/UserInput.svelte`.
 
 ## The `*View` contract
 
@@ -89,11 +91,54 @@ props are supplied by the renderer (snippets cannot live in a `.ts` file). The
 `SAMPLES` registry in [`samples/index.ts`](samples/index.ts) is keyed by View
 name for the coverage walker.
 
+Primitives have their own sample bundles in
+[`samples/primitives.ts`](samples/primitives.ts) (`PRIMITIVE_SAMPLES`, keyed by
+component name, typed `Partial<ComponentProps<...>>` so the renderer can inject
+callbacks/children). They live apart from `SAMPLES` so the `endsWith("View")`
+logic stays clean.
+
 The website **gallery** (`packages/tomat-website/src/pages/gallery.astro` +
-`components/gallery/Gallery.svelte`) renders every View under each sample with
-no `UiContext` provider mounted. It is the visual drift/QA surface (toggle the
-navbar theme for light/dark) and the source for the manual's screenshots. The
-showcase stages consume the same samples, so demo data has one home.
+`components/gallery/Gallery.svelte`) is a **masonry** of cards, each rendering a
+component from its sample over the same dim **focus grid** the homepage showcases
+use (`bg-surface` + `.focus-grid-frame`, see `GalleryCard.svelte`), with no
+`UiContext` provider mounted. Like the manual demo frames each card is a DOUBLE
+theme flip: `.demo-frame` renders the card chrome + grid in the opposite site
+theme, and a `.demo-unflip` wrapper restores the website theme for the rendered
+component, so a dark site shows a light card framing a dark component (and vice
+versa). Because of that flip a component that ships on top of a bubble must sit on
+a `bg-surface` panel or its dark text lands on the opposite-theme card chrome; so
+settings fields, the object scaffolding, and every primitive render inside the
+card's `surface` panel, while chat-message Views and modals (which carry their own
+surface) sit straight on the grid. Wide shells (and the wider chat pieces: the composer, the
+bars, the session list, the message stack) take a full-width row of their own
+instead of a narrow masonry column, where they keep the faithful 700px-window
+proportions; narrow tiles re-cap their component to the card width (so the bubble
+background and its drop shadow stay in sync). The ChatShellView card renders the
+real chat on a short simulated session, and every card is addressable: its label
+(only the label, never the card body) links to a slug id, so following it changes
+the URL for copying or sharing. Sections run largest-first: whole layout shells, then stateful domain
+Views, then the object master/detail scaffolding, then conditional overlays
+(modals/popovers/sheets shown open over a backdrop on the same grid), then every
+primitive in its variant/state matrix, then the mobile counterparts
+(`MobileGallery.svelte`, under a mobile `UiContext`). It is the visual drift/QA
+surface (toggle the navbar theme for light/dark) and the source for the manual's
+screenshots. The showcase stages consume the same samples, so demo data has one
+home.
+
+What the gallery must cover is a typed registry,
+[`components/gallery/registry.ts`](../../../tomat-website/src/components/gallery/registry.ts)
+(`GALLERY_VIEWS` + `GALLERY_PRIMITIVES`). The renderer is hand-authored (one card
+block per component, since each needs bespoke snippets and a natural background),
+so it does NOT blindly iterate the registry: listing a name is necessary but not
+sufficient. The walkers parse the registry AND assert the renderer actually
+references each entry (a `SAMPLES.<Name>` / `P.<Name>` card), so both a
+name-rendered-but-not-listed and a name-listed-but-not-rendered fail the build.
+A View that is always rendered inside one parent's card (a pure structural
+sub-piece the parent already shows: `ReasoningTraceView` inside `AgentMessageView`,
+`SettingsContentView` inside `SettingsShellView`, ...) earns coverage
+transitively via the `EMBEDDED_VIEWS` map instead of a redundant card of its own;
+the walker exempts it from the card requirement and instead asserts the named
+parent is galleried, rendered, and actually renders it.
 
 ## Interaction feedback (hover / press)
 
@@ -115,15 +160,34 @@ press splash. Two rules keep this working on touch:
 
 ## Enforcement
 
-Three walkers under `scripts/lint-plugins/`, run by `deno task lint` (strict:
-`STRICT = true`, so a violation fails the build):
+Four walkers under `scripts/lint-plugins/`, run by `deno task lint` (strict, so a
+violation fails the build). Together they make "every client component is visible
+in the gallery" a hard rule with no exceptions:
 
 - `check-shared-ui-purity` - no client/tauri/api imports in A0/A components.
-- `check-view-coverage` - every `*View` has a sample, a gallery card, and is
-  wrapped by a client component or composed by another shared View (a
-  website-only View is the single-source drift AGENTS.md forbids).
+- `check-view-coverage` - every `*View` is in `GALLERY_VIEWS`, has a NON-EMPTY
+  bundle in `SAMPLES` (a `{}` bundle that would render zero cards fails), is
+  actually rendered by the hand-authored renderer (a `SAMPLES.<Name>` card in
+  Gallery.svelte/MobileGallery.svelte), and is wrapped by a client component or
+  composed by another shared View (a website-only View is the single-source drift
+  AGENTS.md forbids). A View listed in `EMBEDDED_VIEWS` instead is exempt from the
+  card requirement and checked transitively: its named parent must be galleried,
+  rendered, and must actually render it. Also asserts every `askuser/*` question
+  sub-view is imported by `ToolCallView`, so it is shown transitively.
+- `check-primitive-coverage` - every `primitives/*.svelte` is in
+  `GALLERY_PRIMITIVES`, has a bundle in `PRIMITIVE_SAMPLES`, and is actually
+  rendered (a `P.<Name>` card in Primitives.svelte).
 - `check-component-tiers` - every client component is classified once in
-  `.tiers.json`; a Tier B entry names an existing shared View.
+  `.tiers.json`; a Tier B names an existing, galleried View; a Tier C carries no
+  un-extracted raw styled markup (the **raw-leaf cap**: more than a few styled
+  native leaves means markup that belongs in a shared View). The cap counts native
+  elements with a visual utility class, plus raw native form controls
+  (`select`/`input`/`textarea`, which belong in a shared primitive) and bespoke
+  inline visual styles (`style:`/`style=` carrying mask/background/shadow/filter/
+  clip-path, which the class scan is blind to). Any `composes` a Tier C declares
+  must resolve to a galleried, imported View. The cap is the gate that stops
+  bespoke client markup from escaping the gallery; extracting it into a `*View` is
+  the fix.
 
 ## Layout
 

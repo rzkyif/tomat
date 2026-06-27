@@ -7,7 +7,7 @@
     type Tool,
   } from "@tomat/shared";
   import { confirmState, settingsState, extensionsState, mcpState } from "$stores";
-  import Toggle from "@tomat/shared/ui/components/primitives/Toggle.svelte";
+  import ToolDetailView from "@tomat/shared/ui/components/settings/ToolDetailView.svelte";
 
   // One tool's enable toggle and permission grants. Provider-agnostic: extension
   // tools carry sandbox permissions managed here; MCP tools run on their server
@@ -44,18 +44,14 @@
     return t.grants.find((g) => g.permissionKey === key)?.state ?? "ask";
   }
 
-  const GRANT_OPTIONS = [
-    { value: "denied", label: "Deny" },
-    { value: "ask", label: "Ask" },
-    { value: "granted", label: "Allow" },
-  ];
-
   function riskyWarning(decl: Tool["requiredPermissions"][number]): string | null {
     switch (decl.kind) {
       case "run":
         return `The tool will be able to run the ${decl.binary} program at any time without asking you. Programs it runs are not sandboxed and can do anything you can do on this computer.`;
       case "ffi":
         return "The tool will be able to load native libraries at any time without asking you. Native code runs outside the sandbox and can do anything you can do on this computer.";
+      case "read":
+        return `The tool will be able to read files under ${decl.path} at any time without asking you, including sending their contents anywhere it can reach.`;
       case "write":
         return `The tool will be able to change or delete files under ${decl.path} at any time without asking you.`;
       case "net":
@@ -111,9 +107,6 @@
     );
   }
 
-  const codeClass =
-    "font-mono bg-surface-inset text-default-800 rounded-small px-1.5 py-0.5 break-all";
-
   function permissionParts(decl: Tool["requiredPermissions"][number]): {
     before: string;
     code?: string;
@@ -156,67 +149,40 @@
       (d) => !d.optional && grantStateFor(tool, permissionKey(d)) === "denied",
     ).length,
   );
+
+  // Pre-format every permission row for the View: labels, the inline code chip,
+  // the "(required)" marker, the current grant state, and the aria label. The
+  // declaration is captured in a closure so the grant handler still sees the
+  // typed decl (for its risk warning).
+  const permissionRows = $derived(
+    sortedPermissions(tool).map((decl) => {
+      const key = permissionKey(decl);
+      const parts = permissionParts(decl);
+      return {
+        key,
+        before: parts.before,
+        code: parts.code,
+        after: parts.after,
+        required: !decl.optional,
+        reason: decl.reason,
+        grantState: grantStateFor(tool, key),
+        ariaLabel: `${parts.before}${parts.code ?? ""}${parts.after}`,
+        decl,
+      };
+    }),
+  );
 </script>
 
-<div class="flex flex-col gap-3">
-  <div
-    class="flex {horizontal ? 'items-start justify-between gap-3' : 'flex-col gap-1.5'}"
-  >
-    <div class="flex flex-col gap-1 min-w-0">
-      <span class="text-sm text-default-800">Enabled</span>
-      {#if tool.enabled && deniedRequired > 0}
-        <span class="text-xs text-accent-yellow-600">
-          Enabled, but not offered to the agent while a required permission is denied.
-        </span>
-      {/if}
-    </div>
-    <div class={horizontal ? "w-36 shrink-0" : ""}>
-      <Toggle
-        compact
-        labels={{ on: "ENABLED", off: "DISABLED" }}
-        checked={tool.enabled}
-        disabled={busyId === tool.name}
-        ariaLabel={`Enable ${tool.name}`}
-        onchange={(v) =>
-          runToolAction(tool.name, () => setEnabled(v))}
-      />
-    </div>
-  </div>
-
-  {#if tool.requiredPermissions.length > 0}
-    <div class="flex flex-col gap-1.5">
-      <div class="text-default-400 text-[10px] uppercase tracking-wider select-none">
-        Permissions
-      </div>
-      {#each sortedPermissions(tool) as decl (permissionKey(decl))}
-        {@const key = permissionKey(decl)}
-        {@const state = grantStateFor(tool, key)}
-        {@const parts = permissionParts(decl)}
-        <div
-          class="flex {horizontal ? 'items-start justify-between gap-3' : 'flex-col gap-1.5'}"
-        >
-          <div class="flex flex-col gap-0.5 min-w-0">
-            <span class="text-xs text-default-800 break-words">
-              {parts.before}{#if parts.code}<code class={codeClass}>{parts.code}</code>{/if}{parts.after}{#if !decl.optional}<span
-                  class="text-default-500 ml-1.5">(required)</span
-                >{/if}
-            </span>
-            <span class="text-xs text-default-600 break-words">{decl.reason}</span>
-          </div>
-          <div class={horizontal ? "w-44 shrink-0" : ""}>
-            <Toggle
-              value={state}
-              options={GRANT_OPTIONS}
-              ariaLabel={`${parts.before}${parts.code ?? ""}${parts.after}`}
-              onselect={(v) => handleGrantChange(decl, key, v as GrantState)}
-            />
-          </div>
-        </div>
-      {/each}
-    </div>
-  {:else}
-    <span class="text-xs text-default-600 italic">
-      This tool needs no special permissions.
-    </span>
-  {/if}
-</div>
+<ToolDetailView
+  enabled={tool.enabled}
+  {horizontal}
+  enableBusy={busyId === tool.name}
+  enableAriaLabel={`Enable ${tool.name}`}
+  {deniedRequired}
+  permissions={permissionRows}
+  onToggleEnabled={(v) => runToolAction(tool.name, () => setEnabled(v))}
+  onGrantChange={(key, nextState) => {
+    const row = permissionRows.find((r) => r.key === key);
+    if (row) handleGrantChange(row.decl, key, nextState);
+  }}
+/>

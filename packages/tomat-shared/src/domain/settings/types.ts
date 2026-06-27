@@ -471,7 +471,7 @@ export function groupDestinations(group: {
 /** The chips a group header shows: its destinations deduped by visible label
  *  (so a group spanning `client-on-client` and `client-on-core` shows one
  *  "Client" chip, not two), preserving declared order. Each returned value is a
- *  representative destination for its label, fed to DestinationChip. */
+ *  representative destination for its label, rendered as a group-header chip. */
 export function groupDestinationChips(group: {
   destination: SettingDestination | SettingDestination[];
 }): SettingDestination[] {

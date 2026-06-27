@@ -120,6 +120,25 @@ export interface Grant {
 // enable toggle). The Tools UI aggregates both, so a tool carries its provider.
 export type ToolProviderKind = "extension" | "mcp";
 
+// Platforms a tool can declare it works on. `linux` matches any Linux session;
+// `linux_x11` / `linux_wayland` narrow to a display server. tomat resolves the
+// host's tokens centrally (Core reads the display server once) so authors never
+// detect it themselves. A tool whose declared list doesn't intersect the host's
+// resolved tokens is dropped from every listing path: the relevance filter, the
+// model (even with filtering off), and the Tools UI.
+export type ToolPlatform = "darwin" | "windows" | "linux" | "linux_x11" | "linux_wayland";
+
+// True when a tool with the given declared platforms is supported on a host
+// whose resolved platform tokens are `hostPlatforms`. An empty/absent declared
+// list means "all platforms"; otherwise the lists must intersect (host
+// ["linux","linux_x11"] satisfies a tool declaring ["linux"] OR ["linux_x11"]).
+export function toolPlatformSupported(
+  declared: string[] | undefined,
+  hostPlatforms: string[],
+): boolean {
+  return !declared || declared.length === 0 || declared.some((p) => hostPlatforms.includes(p));
+}
+
 export interface Tool {
   id: string; // `${extensionId}::${name}`
   // Id of the provider that supplies this tool (an extension id, or an MCP
@@ -135,6 +154,9 @@ export interface Tool {
   triggers: string[];
   fnExport: string;
   alwaysAvailable: boolean;
+  // OS gating. Empty = every platform. See toolPlatformSupported. MCP tools
+  // leave this empty (they run on their server, not the local host).
+  platforms: string[];
   enabled: boolean;
   requiredPermissions: PermissionDecl[];
   // Indices into `requiredPermissions` that have no grant row yet. Purely

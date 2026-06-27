@@ -8,6 +8,7 @@ import "../styles/site.css";
 import { ClientRouter } from "astro:transitions";
 import { getCollection } from "astro:content";
 import { groupManual } from "../lib/manual";
+import { PAGES } from "../lib/site";
 import Navbar from "../components/Navbar.astro";
 
 interface Props {
@@ -15,6 +16,12 @@ interface Props {
   description?: string;
 }
 const { title = "tomat", description = "tomat" } = Astro.props;
+
+// The navbar's top-level pages, left-to-right, as the hrefs the inline
+// direction script compares to pick a slide direction (a later page = a larger
+// index = slides forward/up). The manual entry's href matches any of its
+// subsections.
+const navOrder = PAGES.map((p) => p.href);
 
 // The manual outline's flat top-to-bottom order, as `/manual/<id>` paths. The
 // inline direction script below reads it to decide which way a manual ->
@@ -63,9 +70,11 @@ const manualOrder = groupManual(await getCollection("manual"))
     </script>
     {/* Direction-aware page slide: tag <html> with the travel direction before
         each view transition, which the CSS in site.css turns into a slide.
-        Crossing between the navbar's pages (home <-> manual) slides horizontally
-        (forward/back); moving between manual subsections slides vertically
-        (up/down) along the outline order published in #manual-order. The
+        Crossing between the navbar's top-level pages (home/install/manual/gallery,
+        ordered by #nav-order) slides horizontally on desktop (forward/back) and
+        vertically on mobile (page-up/page-down); moving between manual subsections
+        slides vertically (up/down) along the outline order published in
+        #manual-order. The
         direction is computed in before-preparation (so the old snapshot is named
         for the vertical case) and re-applied in after-swap: the swap resets
         documentElement's attributes to the incoming page, and the new snapshot
@@ -148,6 +157,7 @@ const manualOrder = groupManual(await getCollection("manual"))
         }
       }
     </style>
+    <script is:inline id="nav-order" type="application/json" set:html={JSON.stringify(navOrder)} />
     <script is:inline id="manual-order" type="application/json" set:html={JSON.stringify(manualOrder)} />
     <script is:inline>
       (function () {
@@ -158,35 +168,58 @@ const manualOrder = groupManual(await getCollection("manual"))
         function isManual(p) {
           return p.indexOf("/manual") === 0;
         }
-        function manualIndex(p) {
-          var el = document.getElementById("manual-order");
-          if (!el) return -1;
+        function readOrder(id) {
+          var el = document.getElementById(id);
+          if (!el) return [];
           try {
-            return JSON.parse(el.textContent || "[]").indexOf(p);
+            return JSON.parse(el.textContent || "[]");
           } catch (_) {
-            return -1;
+            return [];
           }
+        }
+        function manualIndex(p) {
+          return readOrder("manual-order").indexOf(p);
+        }
+        // Position of a pathname among the navbar's top-level pages. The manual
+        // entry's href matches any /manual subsection (the tab covers the whole
+        // manual), so all manual pages share the manual's navbar slot.
+        function navIndex(p) {
+          var order = readOrder("nav-order");
+          for (var i = 0; i < order.length; i++) {
+            var h = norm(order[i]);
+            if (isManual(h) ? isManual(p) : h === p) return i;
+          }
+          return -1;
         }
         document.addEventListener("astro:before-preparation", function (e) {
           dir = "none";
           try {
             var from = norm(new URL(e.from).pathname);
             var to = norm(new URL(e.to).pathname);
-            if (isManual(from) !== isManual(to)) {
-              // home <-> manual. On desktop the navbar tab selector is a
-              // horizontal control, so the whole page slides sideways. On mobile
-              // (selector hidden, navigation is the vertical burger list) the
-              // whole page slides vertically instead: toward manual (lower in
-              // the list) slides up, toward home slides down.
-              if (matchMedia("(min-width: 768px)").matches) {
-                dir = isManual(to) ? "forward" : "back";
-              } else {
-                dir = isManual(to) ? "page-up" : "page-down";
-              }
-            } else if (isManual(to)) {
+            if (isManual(from) && isManual(to)) {
+              // Within the manual: slide vertically along the outline order (a
+              // lower item = later index = slides up); only the article is named
+              // for this, so the outline sidebar stays put.
               var fi = manualIndex(from);
               var ti = manualIndex(to);
               if (fi !== -1 && ti !== -1 && fi !== ti) dir = ti > fi ? "up" : "down";
+            } else {
+              // Crossing the navbar's top-level pages. On desktop the tab
+              // selector is a horizontal control, so the whole page slides
+              // sideways (forward = a later page in the navbar, back = earlier).
+              // On mobile (selector hidden, navigation is the vertical burger
+              // list) it slides vertically instead: a later page slides up, an
+              // earlier one slides down.
+              var fn = navIndex(from);
+              var tn = navIndex(to);
+              if (fn !== -1 && tn !== -1 && fn !== tn) {
+                var forward = tn > fn;
+                if (matchMedia("(min-width: 768px)").matches) {
+                  dir = forward ? "forward" : "back";
+                } else {
+                  dir = forward ? "page-up" : "page-down";
+                }
+              }
             }
           } catch (_) {}
           document.documentElement.dataset.vtDir = dir;

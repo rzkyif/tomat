@@ -45,91 +45,59 @@
 //   memories.maxRelevant               : number  (default 3)
 //   memories.skills.autoRelevancy      : boolean (default true, auto-surface skills)
 
-import type OpenAI from "openai";
 import type {
   AskUserAnswer,
-  AssistantMessage,
   ChatStartFrame,
-  DisplayMessage,
-  ErrorCode,
   MemoryFilterMessage,
-  Message,
-  MessageContent,
-  ReasoningMessage,
   ScheduledPromptDraft,
   ServerToClientFrame,
-  Tool,
-  ToolCall,
-  ToolDescriptor,
-  ToolFilterMessage,
   ToolMessage,
 } from "@tomat/shared";
-import {
-  contentToText,
-  DEFAULT_COMPLEXITY_DETECTION_PROMPT,
-  errMessage,
-  permissionKey,
-} from "@tomat/shared";
+import { errMessage } from "@tomat/shared";
 import { sessionsRepo } from "./sessions-store.ts";
-import { embed } from "./embedding.ts";
-import {
-  hasMemories,
-  memoryTokenBlocks,
-  newMemoryTokenBudget,
-  relevantMemories,
-  relevantMemoriesBlock,
-} from "./memory-injection.ts";
-import { llmScheduler } from "./llm-scheduler.ts";
-import {
-  type LlmDelta,
-  type LlmEndpointConfig,
-  type LlmRequest,
-  streamChatCompletion,
-} from "./llm-provider.ts";
-import { toolFilter } from "./tool-filter.ts";
+import { boolSetting, numSetting, strSetting } from "./settings-access.ts";
+import { toOpenAiMessages } from "./chat-attachments.ts";
+import { classifyComplexity } from "./chat-complexity-router.ts";
+import type { ActiveStream } from "./chat-types.ts";
+import { TurnWriter } from "./chat-turn-writer.ts";
+import { buildToolList } from "./chat-tool-selection.ts";
+import { StreamMuxer } from "./chat-stream-muxer.ts";
+import { type InFlightEntry, ToolDispatcher } from "./chat-tool-dispatch.ts";
+import { lastUserId, lastUserText } from "./chat-history.ts";
+import { hasMemories, relevantMemories, relevantMemoriesBlock } from "./memory-injection.ts";
+import { type LlmRequest } from "./llm-provider.ts";
 import { maybeGenerateTitle } from "./title-gen.ts";
 import { resolveEndpoint } from "./endpoint-resolver.ts";
-import { thinkingBudget } from "./thinking-budget.ts";
 import { loadEffective } from "./core-settings.ts";
 import { llmIdle } from "./llm-idle.ts";
 import { coreStatus } from "./core-status.ts";
 import { promptScheduler } from "./prompt-scheduler.ts";
-import { extensionsRegistry } from "../extensions/registry.ts";
-import { validateAndNormalizeToolArgs } from "../extensions/validate-args.ts";
-import { type CallController, workerPool } from "../extensions/worker-pool.ts";
-import { mcpRegistry } from "../mcp/registry.ts";
-import { mcpManager } from "../mcp/manager.ts";
 import { mcpResolveTokens } from "../mcp/tokens.ts";
 import { wsHub } from "../ws/hub.ts";
-import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
-import { newCallId, newMessageId } from "../shared/ids.ts";
-import { encodeBase64 } from "@std/encoding/base64";
+import { newMessageId } from "../shared/ids.ts";
 
 const log = getLogger("chat");
 
 const DEFAULT_MAX_TOOL_HOPS = 5;
 
-interface ActiveStream {
-  streamId: string;
-  sessionId: string;
-  clientId: string;
-  abort: AbortController;
-  activeToolCalls: Set<string>;
-  // Born-but-not-yet-finalized messages of this turn, in birth order, each with
-  // the afterId it was born at. Their `message` refs are the live objects the
-  // run loop mutates, so their `content`/`status` reflect the stream so far.
-  // A client that (re)subscribes mid-turn gets these re-emitted as born
-  // snapshots for full live catch-up. Cleared per message on finalize.
-  liveMessages: Map<string, { message: Message; afterId: string | null }>;
-  // Outstanding tool prompts (askuser / permission / schedule-confirm) keyed by
-  // callId, retained so a (re)subscribing client gets the open prompt re-sent.
-  // Dropped when the prompt is answered or its call ends. See Phase 5.
-  outstandingPrompts: Map<string, ServerToClientFrame>;
-}
-
 export class ChatService {
   private active = new Map<string, ActiveStream>();
+
+  // In-flight tool-call controllers, keyed by callId. The forward* methods (fed
+  // by the ws handlers) look a controller up to deliver an askuser/permission/
+  // schedule response or a cancel; the dispatcher owns each entry's lifetime.
+  private inFlightControllers = new Map<string, InFlightEntry>();
+
+  // Runs each tool call to completion and folds the outcome into its message.
+  // Shares the in-flight controller map so the forward*/clearPrompt methods
+  // below can reach a call's controller; emitPrompt retains open prompts for
+  // resubscribe. Stateless beyond those injected references.
+  private dispatcher = new ToolDispatcher(
+    (c, f) => this.send(c, f),
+    (s, callId, f) => this.emitPrompt(s, callId, f),
+    this.inFlightControllers,
+  );
 
   // Called by the WS handler when it sees a chat.start frame. Returns
   // synchronously; the streaming runs in the background and pushes frames
@@ -194,7 +162,7 @@ export class ChatService {
     answers: AskUserAnswer[],
     clientId: string,
   ): void {
-    const entry = inFlightControllers.get(callId);
+    const entry = this.inFlightControllers.get(callId);
     if (!entry || entry.clientId !== clientId) return;
     this.clearPrompt(callId);
     entry.ctl.respondAskUser(requestId, answers);
@@ -206,7 +174,7 @@ export class ChatService {
     allow: boolean,
     clientId: string,
   ): void {
-    const entry = inFlightControllers.get(callId);
+    const entry = this.inFlightControllers.get(callId);
     if (!entry || entry.clientId !== clientId) return;
     this.clearPrompt(callId);
     entry.ctl.respondPermission(requestId, allow);
@@ -222,7 +190,7 @@ export class ChatService {
     draft: ScheduledPromptDraft | undefined,
     clientId: string,
   ): void {
-    const entry = inFlightControllers.get(callId);
+    const entry = this.inFlightControllers.get(callId);
     if (!entry || entry.clientId !== clientId) return;
     // A response whose requestId is not the open confirm (stale, replayed,
     // or forged) must not persist anything: the insert below would otherwise
@@ -243,7 +211,7 @@ export class ChatService {
   }
 
   forwardCancel(callId: string, clientId: string): void {
-    const entry = inFlightControllers.get(callId);
+    const entry = this.inFlightControllers.get(callId);
     if (!entry || entry.clientId !== clientId) return;
     entry.ctl.cancel();
   }
@@ -315,7 +283,7 @@ export class ChatService {
   /** Drop a retained prompt once it is answered or its call ends, so a later
    *  resubscribe doesn't re-show an already-handled prompt. */
   private clearPrompt(callId: string): void {
-    const entry = inFlightControllers.get(callId);
+    const entry = this.inFlightControllers.get(callId);
     entry?.stream.outstandingPrompts.delete(callId);
   }
 
@@ -405,172 +373,20 @@ export class ChatService {
     }
     const writer = new TurnWriter(stream, (c, f) => this.send(c, f), anchorId);
 
-    // Tool path is gated on tools.enabled. If filtering is off, every
-    // enabled tool is sent. If on, run phase 1 (cosine) and optionally
-    // phase 2 (LLM relevance), then apply tools.maxTools as a final cap
-    // and add always-available tools.
-    let toolList: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
-    // Query embedding computed by the tool filter, reused by the memory
-    // relevance injection below so the turn embeds the query at most once.
-    let queryVector: Float32Array | undefined;
-    if (boolSetting(settings, "tools.enabled", false)) {
-      // The filter bubble is emitted only once the pipeline finishes (end
-      // state: complete or error). The in-flight period is covered by the
-      // synthetic loading bubble, which renders until the first model delta.
-      const filterMsg: ToolFilterMessage = {
-        id: newMessageId(),
-        ord: -1,
-        role: "tool_filter",
-        status: "complete",
-        createdAtMs: Date.now(),
-      };
-      try {
-        const queryText = lastUserText(history);
-        const allEnabled = listEnabledTools();
-        const totalCount = allEnabled.length;
-        const filteringEnabled = boolSetting(settings, "tools.filteringEnabled", true);
-        const minToolsToFilter = numSetting(settings, "tools.filteringMinTools", 0);
-        const maxTools = numSetting(settings, "tools.maxTools", 30);
-        const alwaysAvailableEnabled = boolSetting(settings, "tools.alwaysAvailableEnabled", true);
-        const secondPassEnabled = boolSetting(settings, "tools.secondPassEnabled", true);
-
-        // Skip the filter entirely when disabled or when total tool count
-        // is below the user's minimum threshold.
-        const shouldFilter =
-          filteringEnabled &&
-          totalCount > 0 &&
-          (minToolsToFilter === 0 || totalCount >= minToolsToFilter);
-
-        let chosenTools: Array<{ toolId: string }>;
-        let phase1Entries: ToolDescriptor[] = [];
-        let phase2Entries: ToolDescriptor[] | undefined;
-        let alwaysEntries: ToolDescriptor[] = [];
-
-        if (!shouldFilter || !queryText) {
-          const capped: Array<{ toolId: string }> = allEnabled.slice(0, maxTools).map((t) => ({
-            toolId: t.id,
-          }));
-          // maxTools can cut off always-available tools that sort past the cap;
-          // append them so their exposure doesn't depend on the filter toggle
-          // (the filtered branch below also always adds always-available tools).
-          if (alwaysAvailableEnabled) {
-            const seen = new Set(capped.map((c) => c.toolId));
-            for (const t of allEnabled) {
-              if (t.alwaysAvailable && !seen.has(t.id)) {
-                capped.push({ toolId: t.id });
-                seen.add(t.id);
-              }
-            }
-          }
-          chosenTools = capped;
-        } else {
-          const [vector] = await embed([queryText]);
-          queryVector = vector;
-          const result = toolFilter().phase1(vector, {
-            topK: maxTools,
-            includeAlwaysAvailable: alwaysAvailableEnabled,
-          });
-          phase1Entries = result.candidates;
-          alwaysEntries = alwaysAvailableEnabled ? result.alwaysAvailable : [];
-          let candidates = result.candidates;
-          if (secondPassEnabled && candidates.length > 0) {
-            const phase2Endpoint = await resolveEndpoint(settings, route);
-            const filterBudget = thinkingBudget(settings, "tools.filterThinkingBudget");
-            candidates = await toolFilter().phase2(
-              queryText,
-              candidates,
-              phase2Endpoint,
-              filterBudget,
-              stream.abort.signal,
-            );
-            phase2Entries = candidates;
-          }
-          const final: Array<{ toolId: string }> = [];
-          const seen = new Set<string>();
-          for (const c of candidates) {
-            if (final.length >= maxTools) break;
-            if (seen.has(c.toolId)) continue;
-            final.push({ toolId: c.toolId });
-            seen.add(c.toolId);
-          }
-          for (const a of alwaysEntries) {
-            if (seen.has(a.toolId)) continue;
-            final.push({ toolId: a.toolId });
-            seen.add(a.toolId);
-          }
-          chosenTools = final;
-        }
-
-        toolList = chosenTools
-          .map((c) => extensionsRegistry().getTool(c.toolId))
-          .filter((t): t is NonNullable<typeof t> => t !== undefined)
-          // Final exposure gate: the relevance filter's candidate set is not
-          // grant-aware, so re-apply enabled + fully-granted here (status is
-          // already gated upstream) so an ungranted tool never reaches the model.
-          .filter((t) => t.enabled && toolExposable(t))
-          .map((t) => ({
-            type: "function" as const,
-            function: {
-              name: t.name,
-              description: t.description,
-              parameters: t.parameters,
-            },
-          }));
-
-        filterMsg.phase1 = phase1Entries.map((c) => ({
-          toolId: c.toolId,
-          name: c.name,
-          description: c.description,
-          score: c.similarity ?? 0,
-        }));
-        filterMsg.phase2 = phase2Entries?.map((c) => ({
-          toolId: c.toolId,
-          name: c.name,
-          description: c.description,
-        }));
-        filterMsg.alwaysAvailable = alwaysEntries.map((a) => ({
-          toolId: a.toolId,
-          name: a.name,
-          description: a.description,
-        }));
-        filterMsg.toolsSent = toolList.length;
-        writer.finalize(filterMsg);
-      } catch (err) {
-        // Embedding model not present, etc. This is non-fatal; we just skip tools.
-        log.warn(
-          `stream ${stream.streamId}: tool filter failed, skipping tools: ${errMessage(err)}`,
-        );
-        filterMsg.status = "error";
-        filterMsg.errorMessage = errMessage(err);
-        writer.finalize(filterMsg);
-      }
-
-      // Enabled MCP tools aren't in the embedding relevance filter (they live on
-      // their servers); offer them like always-available tools. Two guards:
-      //  - skip any whose name an extension tool already claims (a duplicate
-      //    function name confuses the model, and dispatch resolves the name to
-      //    the extension anyway, so the MCP entry would be dead weight), and
-      //    likewise skip a second MCP tool of the same name.
-      //  - bound the count at `maxTools` so a server with many enabled tools
-      //    can't blow the tool/context budget.
-      const mcpMaxTools = numSetting(settings, "tools.maxTools", 30);
-      const offered = new Set(toolList.map((t) => (t.type === "function" ? t.function.name : "")));
-      let mcpAdded = 0;
-      for (const t of mcpRegistry().listAllTools()) {
-        if (!t.enabled || offered.has(t.name)) continue;
-        if (mcpAdded >= mcpMaxTools) break;
-        offered.add(t.name);
-        mcpAdded++;
-        toolList.push({
-          type: "function",
-          function: {
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters,
-          },
-        });
-      }
-    }
+    // Tool path: select the provider tool list (relevance filter + always-
+    // available + MCP offering); queryVector is reused by the memory relevance
+    // injection below. The tool_filter bubble is finalized here so it lands at
+    // the turn's cursor (message ordering stays with the orchestrator).
+    const toolSelection = await buildToolList({
+      settings,
+      route,
+      streamId: stream.streamId,
+      signal: stream.abort.signal,
+      queryText: lastUserText(history),
+    });
+    const toolList = toolSelection.tools;
+    const queryVector = toolSelection.queryVector;
+    if (toolSelection.filterMessage) writer.finalize(toolSelection.filterMessage);
 
     // The tools hint is rendered client-side (the [toolsAvailable:...]
     // segment of the context template) but belongs in the prompt only on
@@ -668,8 +484,12 @@ export class ChatService {
         signal: stream.abort.signal,
       };
 
-      const { assistant, reasoning, toolCalls, interrupted, truncated, error } =
-        await this.runOneTurn(stream, endpoint, req, writer, route);
+      const muxer = new StreamMuxer(stream, (c, f) => this.send(c, f), writer);
+      const { assistant, reasoning, toolCalls, interrupted, truncated, error } = await muxer.run(
+        endpoint,
+        req,
+        route,
+      );
       // Reasoning was already finalized inside runOneTurn (at the first
       // content delta, or on its exit path), keeping the TurnWriter
       // invariant that reasoning persists before the assistant; here it only
@@ -738,7 +558,7 @@ export class ChatService {
             `(${pending.callId}) starting`,
         );
         const startedAt = Date.now();
-        await this.executeToolCall(stream, pending, toolMsg, writer);
+        await this.dispatcher.execute(stream, pending, toolMsg, writer);
         log.info(
           `stream ${stream.streamId}: tool call ${pending.extensionId}/${pending.toolName} ` +
             `(${pending.callId}) ${toolMsg.status} in ${Date.now() - startedAt}ms` +
@@ -756,581 +576,6 @@ export class ChatService {
       reason: "hop_limit",
     });
   }
-
-  private async runOneTurn(
-    stream: ActiveStream,
-    endpoint: LlmEndpointConfig,
-    req: LlmRequest,
-    writer: TurnWriter,
-    route: "default" | "secondary",
-  ): Promise<{
-    assistant?: AssistantMessage;
-    reasoning?: ReasoningMessage;
-    toolCalls: ResolvedPendingCall[];
-    interrupted?: boolean;
-    truncated?: boolean;
-    error?: { code: ErrorCode; message: string };
-  }> {
-    const isLocal =
-      endpoint.baseUrl.includes("127.0.0.1") || endpoint.baseUrl.includes("localhost");
-    let assistantContent = "";
-    let reasoning = "";
-    // Skeletons born on the first delta of each kind, so the client gets a
-    // server-minted id (and position) before any chat.delta arrives. The
-    // returned messages are these same objects with their content filled in;
-    // the caller finalizes them.
-    let assistantMsg: AssistantMessage | null = null;
-    let reasoningMsg: ReasoningMessage | null = null;
-    // Wall-clock anchors for `reasoningDurationMs`: set on the first
-    // reasoning chunk and the first content chunk respectively. The pair
-    // gives "Thought for Xs" without a recompute from message timestamps.
-    let reasoningStartedAtMs: number | null = null;
-    let contentStartedAtMs: number | null = null;
-    const toolAssemblers = new Map<
-      number,
-      {
-        callId: string;
-        extensionId: string;
-        toolName: string;
-        argsBuffer: string;
-      }
-    >();
-    let usage: { prompt: number; completion: number; total: number } | undefined;
-    // Last finish_reason the provider reported. "length" means the model hit
-    // the context window rather than stopping naturally, so the reply is cut
-    // off (possibly empty, when all the room went to thinking).
-    let lastFinishReason: string | null = null;
-
-    // Coalesce outgoing content/reasoning deltas over a short window instead of
-    // one ws frame per token. A fast local model emits many small tokens; one
-    // JSON.stringify + ws.send each dominates the cost and grows the send buffer
-    // under a slow consumer. We still accumulate every token into the saved
-    // message synchronously (below), so coalescing is lossless; only the wire
-    // frames are batched. The trailing tail is flushed in `finally`.
-    const COALESCE_MS = 30;
-    let pendingContent = "";
-    let pendingReasoning = "";
-    let flushTimer: ReturnType<typeof setTimeout> | undefined;
-    const flushDeltas = () => {
-      flushTimer = undefined;
-      if (pendingReasoning && reasoningMsg) {
-        this.send(stream.clientId, {
-          kind: "chat.delta",
-          streamId: stream.streamId,
-          messageId: reasoningMsg.id,
-          delta: pendingReasoning,
-        });
-        pendingReasoning = "";
-      }
-      if (pendingContent && assistantMsg) {
-        this.send(stream.clientId, {
-          kind: "chat.delta",
-          streamId: stream.streamId,
-          messageId: assistantMsg.id,
-          delta: pendingContent,
-        });
-        pendingContent = "";
-      }
-    };
-    const scheduleFlush = () => {
-      if (flushTimer === undefined) {
-        flushTimer = setTimeout(flushDeltas, COALESCE_MS);
-      }
-    };
-    // Reasoning is finalized HERE, not by the caller: at the first content
-    // delta when the model produced a reply (so the thought bubble closes
-    // with its duration while the reply still streams), otherwise on the
-    // exit path. Pending deltas are flushed first so no chat.delta for the
-    // id can trail its final snapshot.
-    let reasoningFinalized = false;
-    const finalizeReasoning = (interrupted: boolean) => {
-      if (!reasoningMsg || reasoningFinalized) return;
-      reasoningFinalized = true;
-      if (flushTimer !== undefined) clearTimeout(flushTimer);
-      flushDeltas();
-      reasoningMsg.content = reasoning;
-      const endMs = contentStartedAtMs ?? Date.now();
-      reasoningMsg.reasoningDurationMs = Math.max(0, endMs - (reasoningStartedAtMs ?? endMs));
-      reasoningMsg.pairedAssistantId = assistantMsg?.id;
-      if (interrupted) reasoningMsg.interrupted = true;
-      writer.finalize(reasoningMsg);
-    };
-    // Fills the streamed text into the skeletons. Called on every exit path
-    // so a partial (interrupted / errored) message is returned for
-    // finalization rather than dropped.
-    const settleMessages = (interrupted: boolean) => {
-      finalizeReasoning(interrupted);
-      if (assistantMsg) {
-        assistantMsg.content = assistantContent;
-        if (interrupted) assistantMsg.interrupted = true;
-      }
-    };
-
-    const llmStartedAt = Date.now();
-    log.info(
-      `stream ${stream.streamId}: llm call starting ` +
-        `(${isLocal ? "local" : "external"} model ${endpoint.model}, route ${route}, ` +
-        `${req.messages.length} messages${req.tools?.length ? `, ${req.tools.length} tools` : ""})`,
-    );
-    // Completion summary shared by the success and interrupt exits. Token
-    // counts come from the stream's usage chunk; absent (interrupt, provider
-    // without usage support) we still report the wall-clock time.
-    const llmDoneLine = (note: string) => {
-      const elapsedMs = Date.now() - llmStartedAt;
-      let tokens = "";
-      if (usage) {
-        const rate = elapsedMs > 0 ? ((usage.completion / elapsedMs) * 1000).toFixed(1) : "?";
-        tokens = ` (${usage.prompt} prompt + ${usage.completion} completion tokens, ${rate} token/s)`;
-      }
-      return `stream ${stream.streamId}: llm call ${note} in ${elapsedMs}ms${tokens}`;
-    };
-
-    try {
-      for await (const delta of llmScheduler().schedule(req, {
-        clientId: stream.clientId,
-        isLocal,
-      })) {
-        if (delta.finishReason) lastFinishReason = delta.finishReason;
-        this.handleDelta(stream, delta, {
-          appendContent: (s) => {
-            if (contentStartedAtMs === null) {
-              contentStartedAtMs = Date.now();
-              assistantMsg = {
-                id: newMessageId(),
-                ord: -1,
-                role: "assistant",
-                content: "",
-                createdAtMs: Date.now(),
-                modelUsed: route,
-              };
-              writer.born(assistantMsg);
-              finalizeReasoning(false);
-            }
-            assistantContent += s;
-            // Keep the buffered live ref current so a mid-stream resubscribe
-            // catches up to the text so far (the connected client still
-            // reconstructs from born + deltas; this only affects catch-up).
-            if (assistantMsg) assistantMsg.content = assistantContent;
-            pendingContent += s;
-            scheduleFlush();
-          },
-          appendReasoning: (s) => {
-            // Interleaving rule: reasoning deltas arriving after the first
-            // content delta are dropped; the thought bubble is closed once
-            // the reply starts.
-            if (contentStartedAtMs !== null) return;
-            if (reasoningStartedAtMs === null) {
-              reasoningStartedAtMs = Date.now();
-              reasoningMsg = {
-                id: newMessageId(),
-                ord: -1,
-                role: "reasoning",
-                content: "",
-                createdAtMs: Date.now(),
-                modelUsed: route,
-              };
-              writer.born(reasoningMsg);
-            }
-            reasoning += s;
-            if (reasoningMsg) reasoningMsg.content = reasoning;
-            pendingReasoning += s;
-            scheduleFlush();
-          },
-          updateToolCall: (idx, chunk) => {
-            let asm = toolAssemblers.get(idx);
-            if (!asm) {
-              asm = {
-                callId: chunk.id ?? newCallId(),
-                extensionId: "",
-                toolName: chunk.name ?? "",
-                argsBuffer: "",
-              };
-              toolAssemblers.set(idx, asm);
-            } else if (chunk.name) {
-              asm.toolName = chunk.name;
-            }
-            if (chunk.id) asm.callId = chunk.id;
-            if (chunk.argumentsDelta) asm.argsBuffer += chunk.argumentsDelta;
-          },
-          captureUsage: (u) => {
-            usage = u;
-          },
-        });
-      }
-    } catch (err) {
-      // User interrupt: not an error. Partial messages are returned flagged
-      // `interrupted` so the caller finalizes them and live === reload.
-      if (stream.abort.signal.aborted) {
-        log.info(llmDoneLine("interrupted"));
-        settleMessages(true);
-        return {
-          assistant: assistantMsg ?? undefined,
-          reasoning: reasoningMsg ?? undefined,
-          toolCalls: [],
-          interrupted: true,
-        };
-      }
-      settleMessages(true);
-      const classified =
-        err instanceof AppError
-          ? { code: err.code, message: err.message }
-          : classifyProviderError(err);
-      log.error(
-        `stream ${stream.streamId}: llm call failed (${classified.code}): ${classified.message}`,
-      );
-      return {
-        assistant: assistantMsg ?? undefined,
-        reasoning: reasoningMsg ?? undefined,
-        toolCalls: [],
-        error: classified,
-      };
-    } finally {
-      // Flush any buffered tail on both the success and error paths (runs before
-      // the catch's `return` completes), so trailing tokens are never dropped.
-      if (flushTimer !== undefined) clearTimeout(flushTimer);
-      flushDeltas();
-    }
-    // A user interrupt usually lands here, not in the catch: the OpenAI SDK
-    // swallows the AbortError and simply ends the iteration.
-    if (stream.abort.signal.aborted) {
-      log.info(llmDoneLine("interrupted"));
-      settleMessages(true);
-      return {
-        assistant: assistantMsg ?? undefined,
-        reasoning: reasoningMsg ?? undefined,
-        toolCalls: [],
-        interrupted: true,
-      };
-    }
-    // Resolve tool names to (extensionId, name) pairs.
-    const allEnabled = enabledToolsByName();
-    const resolved: ResolvedPendingCall[] = [];
-    for (const [idx, asm] of toolAssemblers.entries()) {
-      // Namespace the controller/correlation id by streamId (and the tool-call
-      // index) so two concurrent turns whose models reuse an id like "call_1"
-      // can't collide in the shared inFlightControllers map: a collision there
-      // makes every askUser/permission/cancel forward fail the clientId guard
-      // and hang both prompts. The model only needs the assistant's
-      // tool_calls[].id and the tool result's tool_call_id to match each OTHER
-      // within a request, which they still do (both carry this same value).
-      const callId = `${stream.streamId}:${idx}:${asm.callId}`;
-      const found = allEnabled.get(asm.toolName);
-      if (!found) {
-        // Tool not found / disabled / grants missing. Emit error msg for the
-        // model on next hop.
-        resolved.push({
-          callId,
-          extensionId: "unknown",
-          toolName: asm.toolName,
-          arguments: asm.argsBuffer || "{}",
-          unknown: true,
-        });
-        continue;
-      }
-      resolved.push({
-        callId,
-        extensionId: found.extensionId,
-        toolName: asm.toolName,
-        arguments: asm.argsBuffer || "{}",
-      });
-    }
-
-    // A tool-call-only turn (no content) still needs an assistant message:
-    // the persisted toolCalls are what lets a later transcript rebuild
-    // replay the model's tool_calls. It was never born (no content deltas),
-    // so its first chat.message emission is the finalization.
-    if (!assistantMsg && resolved.length > 0) {
-      assistantMsg = {
-        id: newMessageId(),
-        ord: -1,
-        role: "assistant",
-        content: "",
-        createdAtMs: Date.now(),
-        modelUsed: route,
-      };
-    }
-    if (assistantMsg && resolved.length > 0) {
-      assistantMsg.toolCalls = resolved.map<ToolCall>((r) => ({
-        callId: r.callId,
-        extensionId: r.extensionId,
-        toolName: r.toolName,
-        arguments: r.arguments,
-        status: "pending",
-      }));
-    }
-    settleMessages(false);
-    // Truncation: the model hit the context window (finish_reason "length")
-    // on a non-tool turn. The reply is cut off; when thinking consumed the
-    // whole window there's no content at all, so synthesize an empty assistant
-    // to carry the "cut off" note. (Tool turns finish_reason "tool_calls".)
-    const truncated = lastFinishReason === "length" && resolved.length === 0;
-    if (truncated) {
-      if (!assistantMsg) {
-        assistantMsg = {
-          id: newMessageId(),
-          ord: -1,
-          role: "assistant",
-          content: "",
-          createdAtMs: Date.now(),
-          modelUsed: route,
-        };
-      }
-      assistantMsg.truncated = true;
-    }
-    log.info(llmDoneLine(truncated ? "truncated (context full)" : "done"));
-    if (usage) {
-      this.send(stream.clientId, {
-        kind: "chat.usage",
-        streamId: stream.streamId,
-        tokenUsage: usage,
-      });
-      sessionsRepo().setTokenUsage(stream.sessionId, usage);
-    }
-
-    return {
-      assistant: assistantMsg ?? undefined,
-      reasoning: reasoningMsg ?? undefined,
-      toolCalls: resolved,
-      truncated,
-    };
-  }
-
-  private handleDelta(
-    stream: ActiveStream,
-    delta: LlmDelta,
-    sink: {
-      appendContent: (s: string) => void;
-      appendReasoning: (s: string) => void;
-      updateToolCall: (
-        idx: number,
-        chunk: {
-          id?: string;
-          name?: string;
-          argumentsDelta?: string;
-        },
-      ) => void;
-      captureUsage: (u: { prompt: number; completion: number; total: number }) => void;
-    },
-  ): void {
-    void stream;
-    if (delta.contentDelta) sink.appendContent(delta.contentDelta);
-    if (delta.reasoningDelta) sink.appendReasoning(delta.reasoningDelta);
-    if (delta.toolCalls) {
-      for (const tc of delta.toolCalls) {
-        sink.updateToolCall(tc.index, {
-          id: tc.id,
-          name: tc.name,
-          argumentsDelta: tc.argumentsDelta,
-        });
-      }
-    }
-    if (delta.usage) sink.captureUsage(delta.usage);
-  }
-
-  // Runs one tool call and fills the outcome into `msg` (the message the
-  // caller already announced as born); the caller finalizes it afterwards.
-  /** Run an MCP tool: parse the model's arguments, call the server, and fold
-   *  the returned content into the tool message. MCP tools have no local
-   *  permissions, progress, or askUser flow, so this is a straight request. */
-  private async executeMcpToolCall(
-    pending: ResolvedPendingCall,
-    msg: ToolMessage,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    let args: Record<string, unknown> = {};
-    try {
-      args = pending.arguments ? JSON.parse(pending.arguments) : {};
-    } catch {
-      // Leave args empty; the server validates against its own schema.
-    }
-    try {
-      const result = (await mcpManager().callTool(
-        pending.extensionId,
-        pending.toolName,
-        args,
-        signal,
-      )) as {
-        content?: Array<{ type: string; text?: string }>;
-        isError?: boolean;
-      };
-      const text = (result.content ?? [])
-        .filter((c) => c.type === "text" && typeof c.text === "string")
-        .map((c) => c.text)
-        .join("\n");
-      if (result.isError) {
-        msg.status = "failed";
-        msg.error = text || "MCP tool returned an error";
-      } else {
-        msg.status = "completed";
-        msg.result = text || result;
-      }
-    } catch (err) {
-      msg.status = "failed";
-      msg.error = errMessage(err);
-    }
-  }
-
-  private async executeToolCall(
-    stream: ActiveStream,
-    pending: ResolvedPendingCall,
-    msg: ToolMessage,
-    writer: TurnWriter,
-  ): Promise<void> {
-    if (pending.unknown) {
-      msg.status = "failed";
-      msg.error = `tool ${pending.toolName} not available`;
-      return;
-    }
-    // MCP tools run on their server, not in the local sandbox: dispatch via the
-    // MCP client and skip the worker-pool / permission machinery.
-    if (mcpRegistry().get(pending.extensionId)) {
-      await this.executeMcpToolCall(pending, msg, stream.abort.signal);
-      return;
-    }
-    const tool = extensionsRegistry().getTool(`${pending.extensionId}::${pending.toolName}`);
-    if (!tool) {
-      msg.status = "failed";
-      msg.error = "tool not found";
-      return;
-    }
-    // Pre-flight before dispatch: (1) re-verify the extension's content hash so a
-    // extension tampered since boot can't execute (this runs on EVERY call, so a
-    // reused warm worker is re-checked too); (2) validate the model-emitted
-    // arguments against the tool's declared schema and fill defaults, so the
-    // worker receives normalized args (not raw model output).
-    //
-    // Residual TOCTOU: a tool granted write into its OWN installed code dir
-    // could alter that code in the window between this check and the worker's
-    // import. The content-hash gate therefore assumes a extension is not granted
-    // write to its own installedPath; never grant $extension write to an untrusted
-    // extension.
-    let normalizedArgs: string;
-    try {
-      await extensionsRegistry().verifyHashFresh(pending.extensionId);
-      normalizedArgs = validateAndNormalizeToolArgs(tool, pending.arguments);
-    } catch (err) {
-      const errMsg = errMessage(err);
-      this.send(stream.clientId, {
-        kind: "tool.error",
-        callId: pending.callId,
-        error: errMsg,
-      });
-      msg.status = "failed";
-      msg.error = errMsg;
-      return;
-    }
-    const ctl = workerPool().startCall(
-      {
-        extensionId: pending.extensionId,
-        tool,
-        required: tool.requiredPermissions,
-        argumentsJson: normalizedArgs,
-        chatContext: {
-          userMessage: lastUserText(sessionsRepo().listMessages(stream.sessionId)) ?? "",
-          sessionId: stream.sessionId,
-          locale: undefined,
-        },
-      },
-      (event) => {
-        if (event.kind === "progress") {
-          // Persist the tool's latest wording + progress on the message so
-          // the reloaded bubble keeps them.
-          if (event.label !== undefined) msg.label = event.label;
-          if (event.description !== undefined) {
-            msg.description = event.description;
-          }
-          msg.progress = event.progress;
-          this.send(stream.clientId, {
-            kind: "tool.progress",
-            callId: pending.callId,
-            progress: event.progress,
-            label: event.label,
-            description: event.description,
-          });
-        } else if (event.kind === "ask_user_request") {
-          this.emitPrompt(stream, pending.callId, {
-            kind: "tool.askuser_request",
-            callId: pending.callId,
-            requestId: event.requestId,
-            questions: event.questions,
-          });
-        } else if (event.kind === "schedule_request") {
-          this.emitPrompt(stream, pending.callId, {
-            kind: "schedule.confirm_request",
-            callId: pending.callId,
-            requestId: event.requestId,
-            draft: event.draft,
-          });
-        } else if (event.kind === "permission_request") {
-          this.emitPrompt(stream, pending.callId, {
-            kind: "tool.permission_request",
-            callId: pending.callId,
-            requestId: event.requestId,
-            permissionKind: event.permission,
-            resource: event.resource,
-            apiName: event.apiName,
-            declared: event.declared,
-            reason: event.reason,
-            extensionId: pending.extensionId,
-            toolName: pending.toolName,
-          });
-        } else if (event.kind === "log") {
-          this.send(stream.clientId, {
-            kind: "tool.log",
-            callId: pending.callId,
-            level: event.level,
-            message: event.message,
-          });
-        } else if (event.kind === "display") {
-          // One-way push: a display bubble is born and persisted in one
-          // step. It lands before the (still-running) tool message in the
-          // durable order, which matches the live order the client saw.
-          const displayMsg: DisplayMessage = {
-            id: newMessageId(),
-            ord: -1,
-            role: "display",
-            callId: pending.callId,
-            content: event.content,
-            createdAtMs: Date.now(),
-          };
-          writer.born(displayMsg);
-          writer.finalize(displayMsg);
-        } else if (event.kind === "tool_cancelled") {
-          this.send(stream.clientId, {
-            kind: "tool.cancelled",
-            callId: pending.callId,
-          });
-        }
-      },
-    );
-    inFlightControllers.set(pending.callId, {
-      clientId: stream.clientId,
-      ctl,
-      stream,
-    });
-    try {
-      const result = await ctl.done;
-      this.send(stream.clientId, {
-        kind: "tool.result",
-        callId: pending.callId,
-        result,
-      });
-      msg.status = "completed";
-      msg.result = result;
-    } catch (err) {
-      const errMsg = errMessage(err);
-      this.send(stream.clientId, {
-        kind: "tool.error",
-        callId: pending.callId,
-        error: errMsg,
-      });
-      msg.status = "failed";
-      msg.error = errMsg;
-    } finally {
-      stream.outstandingPrompts.delete(pending.callId);
-      inFlightControllers.delete(pending.callId);
-    }
-  }
 }
 
 let _instance: ChatService | null = null;
@@ -1339,406 +584,8 @@ export function chatService(): ChatService {
   return _instance;
 }
 
-// Test-only: drops the cached instance and clears the in-flight controllers
-// map so the next `chatService()` call rebuilds against fresh deps.
+// Test-only: drops the cached instance so the next `chatService()` call rebuilds
+// against fresh deps (with a fresh in-flight controllers map).
 export function __resetForTesting(): void {
   _instance = null;
-  inFlightControllers.clear();
-}
-
-// In-flight controllers shared between the chat service (creator) and
-// the ws handlers (which forward tool.askuser_response and tool.cancel).
-const inFlightControllers = new Map<
-  string,
-  { clientId: string; ctl: CallController; stream: ActiveStream }
->();
-
-interface ResolvedPendingCall {
-  callId: string;
-  extensionId: string;
-  toolName: string;
-  arguments: string;
-  unknown?: boolean;
-}
-
-// Owns one turn's message announcements and persistence. `born` announces a
-// message to the client (chat.message, final: false) at the live insertion
-// position; `finalize` persists it at the durable insertion cursor and emits
-// the terminal snapshot. The two cursors only differ while messages of the
-// same hop are live concurrently (reasoning + assistant), and converge
-// because finalization happens in birth order (reasoning before assistant).
-class TurnWriter {
-  // Last persisted id; where the next finalize inserts.
-  private cursor: string | null;
-  // Last announced id (born or first-emission finalize); where the next
-  // birth points its afterId.
-  private liveCursor: string | null;
-  private bornIds = new Set<string>();
-
-  constructor(
-    private readonly stream: ActiveStream,
-    private readonly send: (clientId: string, frame: ServerToClientFrame) => void,
-    anchorId: string | null,
-  ) {
-    this.cursor = anchorId;
-    this.liveCursor = anchorId;
-  }
-
-  born(message: Message): void {
-    // Buffer the live ref (in birth order) with the afterId it was born at, so
-    // a mid-turn (re)subscribe can replay this born snapshot for catch-up.
-    this.stream.liveMessages.set(message.id, { message, afterId: this.liveCursor });
-    this.send(this.stream.clientId, {
-      kind: "chat.message",
-      streamId: this.stream.streamId,
-      sessionId: this.stream.sessionId,
-      message,
-      afterId: this.liveCursor,
-      final: false,
-    });
-    this.bornIds.add(message.id);
-    this.liveCursor = message.id;
-  }
-
-  finalize(message: Message): void {
-    // A message finalized without a prior birth (e.g. a tool-call-only
-    // assistant that never streamed content) is positioned by this frame,
-    // so it carries the live cursor as its afterId.
-    const firstEmission = !this.bornIds.has(message.id);
-    const { ord } = sessionsRepo().insertMessageAfter(this.stream.sessionId, message, this.cursor);
-    message.ord = ord;
-    this.cursor = message.id;
-    // Now persisted (reloadable), so drop it from the catch-up buffer.
-    this.stream.liveMessages.delete(message.id);
-    this.send(this.stream.clientId, {
-      kind: "chat.message",
-      streamId: this.stream.streamId,
-      sessionId: this.stream.sessionId,
-      message,
-      afterId: firstEmission ? this.liveCursor : null,
-      final: true,
-    });
-    if (firstEmission) this.liveCursor = message.id;
-  }
-}
-
-// --- helpers --------------------------------------------------------------
-
-function lastUserText(history: Message[]): string | undefined {
-  for (let i = history.length - 1; i >= 0; i--) {
-    const m = history[i];
-    if (m.role === "user") return contentToText(m.content);
-  }
-  return undefined;
-}
-
-function lastUserId(history: Message[]): string | null {
-  for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i].role === "user") return history[i].id;
-  }
-  return null;
-}
-
-async function toOpenAiMessages(
-  history: Message[],
-  systemPrompt: string,
-  sessionId: string,
-  attachmentCache?: Map<string, string | null>,
-  mcpClaimedTokens?: Set<string>,
-): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam[]> {
-  const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
-  if (systemPrompt) out.push({ role: "system", content: systemPrompt });
-  const memoryTokenBudget = newMemoryTokenBudget();
-  // Stems already resolved as MCP resources/prompts are pre-marked expanded so
-  // the memory expander skips them (avoids a double injection on a slug that
-  // names both).
-  for (const t of mcpClaimedTokens ?? []) memoryTokenBudget.claimed.add(t);
-  for (const m of history) {
-    if (m.role === "user") {
-      let content = await userContentToOpenAi(m.content, sessionId, attachmentCache);
-      // `@token` memory references: the stored message keeps only the
-      // token; the CURRENT content is appended at request-build time, so a
-      // later edit of the memory flows into the next turn automatically.
-      // The budget dedupes repeat mentions across the whole request.
-      const memoryBlocks = memoryTokenBlocks(contentToText(m.content), memoryTokenBudget);
-      if (memoryBlocks) {
-        if (typeof content === "string") {
-          content = `${content}\n\n${memoryBlocks}`;
-        } else content.push({ type: "text", text: memoryBlocks });
-      }
-      out.push({ role: "user", content });
-    } else if (m.role === "assistant") {
-      // Assistant content is always a plain string in this codebase (no
-      // multipart support needed at the model boundary). Tool calls the
-      // model emitted MUST be replayed on the message: the `role: "tool"`
-      // results that follow reference them by id, and an undeclared
-      // tool_call_id renders as an orphaned tool response in the chat
-      // template, garbling every hop after a call.
-      const text = typeof m.content === "string" ? m.content : contentToText(m.content);
-      const calls = (m as AssistantMessage).toolCalls;
-      const param: OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam = {
-        role: "assistant",
-        content: text,
-      };
-      if (calls && calls.length > 0) {
-        param.tool_calls = calls.map((tc) => ({
-          id: tc.callId,
-          type: "function" as const,
-          function: { name: tc.toolName, arguments: tc.arguments },
-        }));
-      }
-      out.push(param);
-    } else if (m.role === "system") {
-      const text = typeof m.content === "string" ? m.content : contentToText(m.content);
-      out.push({ role: "system", content: text });
-    } else if (m.role === "tool") {
-      out.push({
-        role: "tool",
-        tool_call_id: m.callId,
-        content:
-          m.status === "completed" ? JSON.stringify(m.result) : JSON.stringify({ error: m.error }),
-      });
-    } else if (m.role === "reasoning") {
-      // Reasoning trace is not part of the OpenAI message protocol; omit.
-    }
-    // tool_filter / memory_filter / display / error messages are not sent to the LLM.
-  }
-  return out;
-}
-
-// Multipart user content → OpenAI ChatCompletionContentPart[]. `image_file`
-// parts load the bytes from disk and inline them as a data URI so the model
-// receives the actual image; `document_file` reads the file (the client
-// always converts non-image attachments to markdown before upload) and
-// inlines the text with an "[Attached document: filename]" header so the
-// model knows the boundary. Falls back to a string when the content is just
-// text, which keeps the wire payload small for the common no-attachment case.
-async function userContentToOpenAi(
-  content: MessageContent,
-  sessionId: string,
-  attachmentCache?: Map<string, string | null>,
-): Promise<string | OpenAI.Chat.Completions.ChatCompletionContentPart[]> {
-  if (typeof content === "string") return content;
-  const parts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [];
-  for (const p of content) {
-    if (p.type === "text") {
-      parts.push({ type: "text", text: p.text });
-    } else if (p.type === "image_url") {
-      parts.push({ type: "image_url", image_url: { url: p.image_url.url } });
-    } else if (p.type === "image_file") {
-      const dataUrl = await readAttachmentAsDataUrl(
-        sessionId,
-        p.path,
-        p.mime || "image/png",
-        attachmentCache,
-      );
-      if (dataUrl) {
-        parts.push({ type: "image_url", image_url: { url: dataUrl } });
-      }
-    } else if (p.type === "document") {
-      parts.push({
-        type: "text",
-        text: `[Attached document: ${p.filename}]\n\n${p.markdown}`,
-      });
-    } else if (p.type === "document_file") {
-      const text = await readAttachmentAsText(sessionId, p.path, attachmentCache);
-      if (text !== null) {
-        parts.push({
-          type: "text",
-          text: `[Attached document: ${p.filename}]\n\n${text}`,
-        });
-      }
-    }
-  }
-  // Collapse to a plain string when every part is text, because some providers
-  // reject a `content: [{type: "text", ...}]` shape that has no image_url siblings.
-  if (parts.every((p) => p.type === "text")) {
-    return parts
-      .filter((p): p is OpenAI.Chat.Completions.ChatCompletionContentPartText => p.type === "text")
-      .map((p) => p.text)
-      .join("\n");
-  }
-  return parts;
-}
-
-// Pull the trailing attachment id out of the URL the client stored on the
-// MessagePart (the path field is `<baseUrl>/api/v1/sessions/<sid>/attachments/<aid>`).
-// Returns null if the URL doesn't match. We just skip the attachment in that
-// case rather than failing the whole turn.
-function attachmentIdFromPath(path: string): string | null {
-  const m = path.match(/\/attachments\/([^/?#]+)$/);
-  return m ? m[1] : null;
-}
-
-async function readAttachmentAsDataUrl(
-  sessionId: string,
-  path: string,
-  mime: string,
-  cache?: Map<string, string | null>,
-): Promise<string | null> {
-  const id = attachmentIdFromPath(path);
-  if (!id) return null;
-  const cacheKey = `img:${id}`;
-  if (cache?.has(cacheKey)) return cache.get(cacheKey) ?? null;
-  let result: string | null = null;
-  try {
-    const rec = sessionsRepo().getAttachment(sessionId, id);
-    const bytes = await Deno.readFile(rec.absPath);
-    // encodeBase64 over the Uint8Array directly, instead of an O(n) per-byte
-    // String.fromCharCode loop that builds a giant intermediate binary string
-    // on the event loop for every multi-MB image.
-    result = `data:${rec.mime ?? mime};base64,${encodeBase64(bytes)}`;
-  } catch (err) {
-    log.warn(`image attachment load failed (${path}): ${errMessage(err)}`);
-    result = null;
-  }
-  cache?.set(cacheKey, result);
-  return result;
-}
-
-async function readAttachmentAsText(
-  sessionId: string,
-  path: string,
-  cache?: Map<string, string | null>,
-): Promise<string | null> {
-  const id = attachmentIdFromPath(path);
-  if (!id) return null;
-  const cacheKey = `doc:${id}`;
-  if (cache?.has(cacheKey)) return cache.get(cacheKey) ?? null;
-  let result: string | null = null;
-  try {
-    const rec = sessionsRepo().getAttachment(sessionId, id);
-    result = await Deno.readTextFile(rec.absPath);
-  } catch (err) {
-    log.warn(`document attachment load failed (${path}): ${errMessage(err)}`);
-    result = null;
-  }
-  cache?.set(cacheKey, result);
-  return result;
-}
-
-// LLM-exposure gate: a tool reaches the model only when its extension is
-// 'installed' (not 'downloaded'/'drift'), the tool is enabled, AND no
-// non-optional required permission is denied. A permission without a grant
-// row behaves as 'ask': the tool runs and Deno prompts at the moment of
-// access, so only an explicit denial withholds the tool here.
-function toolExposable(t: Tool): boolean {
-  const denied = new Set(t.grants.filter((g) => g.state === "denied").map((g) => g.permissionKey));
-  return t.requiredPermissions.every((d) => d.optional || !denied.has(permissionKey(d)));
-}
-
-function enabledToolsByName(): Map<string, { extensionId: string; toolId: string }> {
-  const out = new Map<string, { extensionId: string; toolId: string }>();
-  for (const tk of extensionsRegistry().list()) {
-    if (tk.status !== "installed") continue;
-    for (const t of extensionsRegistry().listTools(tk.id)) {
-      if (t.enabled && toolExposable(t)) {
-        out.set(t.name, { extensionId: tk.id, toolId: t.id });
-      }
-    }
-  }
-  // Enabled MCP tools resolve to their server id, so executeToolCall routes
-  // them through the MCP client. Extension tools win a name collision (set
-  // first), matching the offering order.
-  for (const t of mcpRegistry().listAllTools()) {
-    if (t.enabled && !out.has(t.name)) {
-      out.set(t.name, { extensionId: t.extensionId, toolId: t.id });
-    }
-  }
-  return out;
-}
-
-function listEnabledTools(): Tool[] {
-  const out: Tool[] = [];
-  for (const tk of extensionsRegistry().list()) {
-    if (tk.status !== "installed") continue;
-    for (const t of extensionsRegistry().listTools(tk.id)) {
-      if (t.enabled && toolExposable(t)) out.push(t);
-    }
-  }
-  return out;
-}
-
-function classifyProviderError(err: unknown): { code: ErrorCode; message: string } {
-  const msg = errMessage(err);
-  // The OpenAI SDK throws APIError with `status` + `code`; also surfaces
-  // human-readable messages we can pattern-match. Try the structured
-  // fields first, then fall back to message regex.
-  const status =
-    (err as { status?: number; statusCode?: number } | null)?.status ??
-    (err as { statusCode?: number } | null)?.statusCode;
-  const code =
-    (err as { code?: string; error?: { code?: string } } | null)?.code ??
-    (err as { error?: { code?: string } } | null)?.error?.code;
-
-  if (status === 401 || code === "invalid_api_key") {
-    return { code: "provider_unauthorized", message: msg };
-  }
-  if (status === 429 || code === "rate_limit_exceeded") {
-    return { code: "provider_rate_limited", message: msg };
-  }
-  if (status === 503 || status === 504) {
-    return { code: "server_unavailable", message: msg };
-  }
-  if (
-    code === "context_length_exceeded" ||
-    /context length|maximum context length|context window/i.test(msg)
-  ) {
-    return { code: "context_window_exceeded", message: msg };
-  }
-  return { code: "provider_error", message: msg };
-}
-
-async function classifyComplexity(
-  settings: Record<string, unknown>,
-  userMessage: string,
-  signal?: AbortSignal,
-): Promise<"default" | "secondary"> {
-  // Single-shot LLM classifier. Asks the DEFAULT model to label the user's
-  // request as "simple" or "complex"; routes complex requests to the
-  // configured secondary endpoint. Ambiguous or empty replies fall back to
-  // the default model.
-  const systemPrompt = strSetting(
-    settings,
-    "prompts.complexityDetectionPrompt",
-    DEFAULT_COMPLEXITY_DETECTION_PROMPT,
-  );
-  const endpoint = await resolveEndpoint(settings, "default");
-  // The classifier must emit one word ("simple"/"complex"), so thinking is off
-  // by default (Complexity Thinking Budget = 0); a positive budget opts in and
-  // is added on top of the one-word answer allowance.
-  const budget = thinkingBudget(settings, "prompts.complexityDetectionThinkingBudget");
-  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userMessage },
-  ];
-  let response = "";
-  for await (const delta of streamChatCompletion({
-    endpoint,
-    messages,
-    overrides: {
-      temperature: 0,
-      maxTokens: 16 + budget,
-      reasoningBudget: budget,
-    },
-    signal,
-  })) {
-    if (delta.contentDelta) response += delta.contentDelta;
-  }
-  const text = response.toLowerCase();
-  if (text.includes("complex") && !text.includes("simple")) return "secondary";
-  return "default";
-}
-
-function strSetting(s: Record<string, unknown>, key: string, def: string): string {
-  const v = s[key];
-  return typeof v === "string" ? v : def;
-}
-function numSetting(s: Record<string, unknown>, key: string, def: number): number {
-  const v = s[key];
-  return typeof v === "number" && Number.isFinite(v) ? v : def;
-}
-function boolSetting(s: Record<string, unknown>, key: string, def: boolean): boolean {
-  const v = s[key];
-  return typeof v === "boolean" ? v : def;
 }

@@ -32,7 +32,6 @@ import { cores } from "$lib/core";
 import { getLogger } from "$lib/util/log";
 import { sessionsState } from "./sessions.svelte";
 import { snippetsState } from "./snippets.svelte";
-import { streamingState } from "./streaming.svelte";
 import {
   ensureMarkdownExtension,
   imageExtFromMime,
@@ -48,6 +47,18 @@ import {
 } from "$lib/prompts/system-prompt";
 
 type SendMessagesHandler = (anchorUserId?: string) => Promise<void>;
+
+// The live-stream control surface the edit/delete/regenerate flows drive
+// (interrupt + abort + a reset, plus an isActive read). It lives in
+// streamingState, which imports this slice, so it is injected (setStreamControl)
+// rather than imported, keeping the static graph one-way (streaming -> messages,
+// never back). Same pattern as setLLMHandlers below.
+interface StreamControl {
+  readonly isActive: boolean;
+  resetTTSPlayback(): void;
+  interruptStreaming(): Promise<void>;
+  abortSilently(): void;
+}
 
 const log = getLogger("messages");
 
@@ -77,6 +88,14 @@ class MessagesState {
 
   setLLMHandlers(send: SendMessagesHandler): void {
     this.sendMessagesHandler = send;
+  }
+
+  // Injected by streamingState at module load (it imports this slice). Calls are
+  // null-safe for the brief window before wiring, matching sendMessagesHandler.
+  private streamControl: StreamControl | null = null;
+
+  setStreamControl(control: StreamControl): void {
+    this.streamControl = control;
   }
 
   /** Drop the active session's transcript from memory. Called by
@@ -166,7 +185,7 @@ class MessagesState {
   }): Promise<void> {
     // Sending a new message always preempts any previous assistant TTS that
     // might still be playing or queued.
-    streamingState.resetTTSPlayback();
+    this.streamControl?.resetTTSPlayback();
 
     const trimmedText = payload.text.trim();
     if (!sessionsState.id) {
@@ -408,12 +427,12 @@ class MessagesState {
   /** Update any user message by id and regenerate the turn. If no id is
    *  provided, falls back to the most recent user message. */
   async updateUserMessage(messageId: string | undefined, content: MessageContent) {
-    await streamingState.interruptStreaming();
+    await this.streamControl?.interruptStreaming();
     // interruptStreaming only stops TTS if something was actively streaming.
     // When editing a message with a settled assistant response, the response
     // is about to be discarded (either spliced out on delete, or replaced by
     // the resend), so any replay-mode TTS tied to it must stop too.
-    streamingState.resetTTSPlayback();
+    this.streamControl?.resetTTSPlayback();
 
     const userIdx = messageId
       ? this.messages.findIndex((m) => m.role === "user" && m.id === messageId)
@@ -505,17 +524,12 @@ class MessagesState {
     await this.regenerateTurn(userMsgId);
   }
 
-  /** Back-compat wrapper: update the most recent user message. */
-  async updateLastUserMessage(content: MessageContent) {
-    await this.updateUserMessage(undefined, content);
-  }
-
   /** Delete a user message along with every bubble in its turn (everything
    *  between this user message and the next-newer user message). If this
    *  empties the session of user messages, remove the session entirely. */
   async deleteUserMessage(messageId: string) {
-    await streamingState.interruptStreaming();
-    streamingState.resetTTSPlayback();
+    await this.streamControl?.interruptStreaming();
+    this.streamControl?.resetTTSPlayback();
 
     const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === messageId);
     if (userIdx < 0) return;
@@ -545,8 +559,8 @@ class MessagesState {
    *  that caused the turn, then delegates to `regenerateTurn`. Equivalent
    *  to "edit that user message with no text change." */
   async reprocessAgentMessage(messageId: string) {
-    if (streamingState.isActive) return;
-    streamingState.resetTTSPlayback();
+    if (this.streamControl?.isActive) return;
+    this.streamControl?.resetTTSPlayback();
 
     const agentIdx = this.messages.findIndex(
       (m) => (m.role === "assistant" || m.role === "error") && m.id === messageId,
@@ -572,8 +586,8 @@ class MessagesState {
    *  context menu: equivalent to editing the message and resending it
    *  unchanged. */
   async reprocessUserMessage(messageId: string) {
-    if (streamingState.isActive) return;
-    streamingState.resetTTSPlayback();
+    if (this.streamControl?.isActive) return;
+    this.streamControl?.resetTTSPlayback();
 
     const userIdx = this.messages.findIndex((m) => m.role === "user" && m.id === messageId);
     if (userIdx < 0) return;
@@ -594,11 +608,11 @@ class MessagesState {
     );
     if (idx < 0) return;
 
-    const isStreamingThis = streamingState.isActive && idx === 0;
+    const isStreamingThis = (this.streamControl?.isActive ?? false) && idx === 0;
     if (isStreamingThis) {
-      streamingState.abortSilently();
+      this.streamControl?.abortSilently();
     }
-    streamingState.resetTTSPlayback();
+    this.streamControl?.resetTTSPlayback();
 
     // Find the user message that caused this turn (walk older = higher idx).
     let userMsgId: string | null = null;

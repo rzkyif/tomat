@@ -1,5 +1,5 @@
 {
-  "//": "Component-tier manifest (see packages/tomat-shared/src/ui/README.md). tier: A0 shared primitive | A shared View | B thin client wrapper of one View (set wraps) | C client-owned shell. Seeded with current state; migration phases reclassify. The check-component-tiers walker asserts every client component appears here exactly once.",
+  "//": "Component-tier manifest (see packages/tomat-shared/src/ui/README.md). tier: A0 shared primitive | A shared View | B thin client wrapper of one View (set wraps) | C client-owned shell (optionally set composes=[galleried Views it renders] and/or orchestratorOf=[child client components] to document coverage; unsharedLeaves=[raw leaves it owns]). The check-component-tiers walker asserts every client component appears here once, every Tier-B wraps a galleried View, and no Tier-C carries un-extracted raw styled markup (the raw-leaf cap).",
   "components": {
     "chat/ActionSheetHost.svelte": {
       "tier": "C"
@@ -20,13 +20,18 @@
       "tier": "C"
     },
     "chat/MessageStack.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "MessageStackView"
     },
     "chat/MessageStackGroup.svelte": {
       "tier": "C"
     },
-    "chat/ScheduleEditor.svelte": {
+    "chat/MessageTranscript.svelte": {
       "tier": "C"
+    },
+    "chat/ScheduleEditor.svelte": {
+      "tier": "B",
+      "wraps": "ScheduleEditorView"
     },
     "chat/SessionBar.svelte": {
       "tier": "B",
@@ -37,7 +42,8 @@
       "wraps": "SnippetAutocompleteView"
     },
     "chat/UserInput.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["UserInputView", "PromptButtonsView"]
     },
     "chat/messages/AgentMessage.svelte": {
       "tier": "B",
@@ -79,84 +85,105 @@
       "wraps": "UserMessageView"
     },
     "chat/userinput/AutocorrectAlert.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "AutocorrectAlertView"
     },
     "chat/userinput/PermissionRequest.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "PermissionRequestView"
     },
     "chat/userinput/QuickModelBar.svelte": {
       "tier": "B",
       "wraps": "QuickModelBarView"
     },
     "chat/userinput/ScheduleConfirmForm.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "ScheduleConfirmFormView"
     },
     "new-core/NewCore.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "NewCoreWizardView"
     },
     "quick-settings/QuickSettings.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "QuickSettingsView"
     },
     "quick-settings/QuickSettingsSection.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "QuickSettingsSectionView"
     },
     "session-list/SessionList.svelte": {
+      "tier": "B",
+      "wraps": "SessionListView"
+    },
+    "settings/BuiltinToolkitModal.svelte": {
       "tier": "C"
     },
     "settings/ColorPickerModal.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "ColorPickerModalView"
     },
     "settings/ConfirmModal.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "ConfirmModalView"
     },
     "settings/DeletionsModal.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "DeletionsModalView"
     },
     "settings/DownloadRow.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "DownloadRowView"
     },
     "settings/DownloadsButton.svelte": {
       "tier": "C"
     },
     "settings/DownloadsModal.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "DownloadsModalView"
     },
     "settings/PasswordPromptModal.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "PasswordPromptModalView"
     },
     "settings/Settings.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["SettingsShellView", "SettingsContentView"]
     },
     "settings/SettingsField.svelte": {
       "tier": "B",
       "wraps": "SettingsFieldView"
     },
     "settings/ShareModal.svelte": {
-      "tier": "C"
-    },
-    "settings/ShareTree.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "ShareModalView"
     },
     "settings/UpdateButton.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "UpdateButtonView"
     },
     "settings/fields/CommandPreviewField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["CommandPreviewFieldView"]
     },
     "settings/fields/CoresField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["CoresFieldView", "ObjectDetailHeaderView", "ObjectDetailScrollView"]
     },
     "settings/fields/FieldCard.svelte": {
       "tier": "C"
     },
     "settings/fields/MemoriesField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["ObjectDetailHeaderView", "ObjectDetailScrollView"]
     },
     "settings/fields/MemoryDetail.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "MemoryDetailView"
     },
     "settings/fields/ModelPresetField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["ModelPresetFieldView"]
     },
     "settings/fields/MultilineField.svelte": {
       "tier": "C"
@@ -165,55 +192,72 @@
       "tier": "C"
     },
     "settings/fields/ScheduledPromptDetail.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "ScheduledPromptDetailView"
     },
     "settings/fields/ScheduledPromptsField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["ObjectDetailHeaderView", "ObjectDetailScrollView"]
     },
     "settings/fields/ServicesField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["ServicesFieldView"]
     },
     "settings/fields/ShortcutField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["ShortcutFieldView"]
     },
     "settings/fields/SnippetDetail.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "SnippetDetailView"
     },
     "settings/fields/SnippetsField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["ObjectDetailHeaderView", "ObjectDetailScrollView"]
     },
     "settings/fields/StorageField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["StorageFieldView"]
     },
     "settings/fields/SttPresetField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["SttPresetFieldView"]
     },
     "settings/fields/ExtensionDetail.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "ExtensionDetailView"
     },
     "settings/fields/ExtensionsField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["ExtensionsFieldView", "ObjectDetailHeaderView", "ObjectDetailScrollView"]
     },
     "settings/fields/ToolsField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["ToolsFieldView", "ObjectDetailHeaderView", "ObjectDetailScrollView"]
     },
     "settings/fields/ToolDetail.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["ToolDetailView"]
     },
     "settings/fields/McpField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["ObjectDetailHeaderView", "ObjectDetailScrollView"]
     },
     "settings/fields/McpDetail.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "McpDetailView"
     },
     "settings/fields/TtsPresetField.svelte": {
-      "tier": "C"
+      "tier": "C",
+      "composes": ["TtsPresetFieldView"]
     },
     "ui/ObjectCard.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "ObjectCardView"
     },
     "ui/ObjectManager.svelte": {
-      "tier": "C"
+      "tier": "B",
+      "wraps": "ObjectManagerView"
     }
   }
 }

@@ -11,8 +11,8 @@
   import { type MenuRow, showFilterSortMenu, showObjectActionMenu } from "$lib/objects/menu";
   import ObjectManager from "$components/ui/ObjectManager.svelte";
   import ObjectCard from "$components/ui/ObjectCard.svelte";
-  import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeader.svelte";
-  import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScroll.svelte";
+  import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeaderView.svelte";
+  import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScrollView.svelte";
   import SnippetDetail from "./SnippetDetail.svelte";
 
   let query = $state("");

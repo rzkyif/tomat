@@ -1,3 +1,32 @@
+<script lang="ts" module>
+  // Plain presentational shape of one tree row. The client builds these from the
+  // settings schema (its `TreeField`/`TreeGroup`); this View only reads them.
+  export interface ShareTreeField {
+    id: string;
+    name: string;
+    /** Importing this field would overwrite a value the user already customized. */
+    warn: boolean;
+    /** Not applicable: importing it is a no-op (its value already matches). */
+    disabled: boolean;
+  }
+
+  export interface ShareTreeSection {
+    /** `${groupId}-${sectionIndex}`, matching the settings panel's section keys. */
+    key: string;
+    label: string;
+    fields: ShareTreeField[];
+  }
+
+  export interface ShareTreeGroup {
+    id: string;
+    name: string;
+    /** Fields of the group's unlabeled (inline) sections, hoisted to sit directly
+     *  under the group with no section row, matching how they render inline. */
+    fields: ShareTreeField[];
+    sections: ShareTreeSection[];
+  }
+</script>
+
 <script lang="ts">
   // Group -> section -> field selector shared by the import and export tabs.
   // For group/section rows, clicking the checkbox or its label selects
@@ -8,14 +37,13 @@
   // parents. Fields flagged `disabled` (not applicable: importing them is a
   // no-op) render dim with a disabled, indeterminate checkbox; a section/group
   // whose every field is disabled is itself shown disabled.
-  import { type TreeField, type TreeGroup } from "$lib/settings/share";
-  import Checkbox from "@tomat/shared/ui/components/primitives/Checkbox.svelte";
+  import Checkbox from "../primitives/Checkbox.svelte";
 
   let {
     nodes,
     selected = $bindable<Set<string>>(new Set()),
   }: {
-    nodes: TreeGroup[];
+    nodes: ShareTreeGroup[];
     selected?: Set<string>;
   } = $props();
 
@@ -47,7 +75,7 @@
   }
 
   // A group's fields are its inline (direct) fields plus every section field.
-  function groupFields(g: TreeGroup): TreeField[] {
+  function groupFields(g: ShareTreeGroup): ShareTreeField[] {
     return [...g.fields, ...g.sections.flatMap((s) => s.fields)];
   }
 </script>
@@ -56,7 +84,7 @@
   <i class="flex i-material-symbols-warning-outline-rounded text-accent-yellow-600 shrink-0"></i>
 {/snippet}
 
-{#snippet parentRow(label: string, fields: TreeField[], key: string, indent: string)}
+{#snippet parentRow(label: string, fields: ShareTreeField[], key: string, indent: string)}
   {@const applicable = fields.filter((f) => !f.disabled).map((f) => f.id)}
   {@const fullyDisabled = applicable.length === 0}
   {@const warns = fields.some((f) => f.warn)}
@@ -100,7 +128,7 @@
   </div>
 {/snippet}
 
-{#snippet fieldRow(field: TreeField, indent: string)}
+{#snippet fieldRow(field: ShareTreeField, indent: string)}
   {#if field.disabled}
     <div class="flex items-center gap-1.5 rounded-medium py-1 pr-2 {indent}">
       <Checkbox disabled indeterminate />

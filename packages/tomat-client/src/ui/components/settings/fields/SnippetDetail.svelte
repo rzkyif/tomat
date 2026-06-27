@@ -13,10 +13,8 @@
   } from "$lib/snippets/snippets";
   import { snippetsState } from "$stores";
   import { getLogger } from "$lib/util/log";
-  import FormField from "@tomat/shared/ui/components/primitives/FormField.svelte";
-  import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
-  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
-  import Textarea from "@tomat/shared/ui/components/primitives/Textarea.svelte";
+  import { createDebouncedSave } from "$lib/util/debounced-save";
+  import SnippetDetailView from "@tomat/shared/ui/components/settings/SnippetDetailView.svelte";
 
   const log = getLogger("snippets");
 
@@ -35,8 +33,6 @@
   // happens to equal the recommendation is still respected.
   let symbolTouched = $state(untrack(() => item.symbolPinned));
 
-  let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
   const otherTriggers = $derived(
     snippetsState.snippets
       .filter((s) => s.id !== item.id)
@@ -50,17 +46,13 @@
       label: sym === recommended ? `${sym}  (Recommended)` : sym,
     })),
   );
+  const placementOptions = SNIPPET_PLACEMENT_OPTIONS.map((o) => ({
+    value: o.value,
+    label: o.label,
+  }));
+  const triggerPreview = $derived(`${draftSymbol}${draftName || "name"}`);
 
-  function scheduleSave() {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void flushSave(), 500);
-  }
-
-  async function flushSave() {
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
-    }
+  const { scheduleSave, flushSave } = createDebouncedSave(async () => {
     if (nameError) return;
     try {
       await snippetsState.save({
@@ -75,64 +67,36 @@
     } catch (e) {
       log.error("Failed to save snippet:", e);
     }
-  }
+  });
 </script>
 
-<div class="flex flex-col gap-3">
-  <FormField label="Name">
-    <Input
-      type="text"
-      value={draftName}
-      placeholder="scientist"
-      ariaLabel="Snippet name"
-      mono
-      error={!!nameError}
-      oninput={(v) => {
-        draftName = normalizeName(v);
-        scheduleSave();
-      }}
-      onblur={() => flushSave()}
-    />
-  </FormField>
-
-  <FormField label="Trigger" error={nameError}>
-    <Select
-      value={draftSymbol}
-      options={symbolOptions}
-      ariaLabel="Snippet trigger symbol"
-      onchange={(v) => {
-        draftSymbol = v as SnippetSymbol;
-        symbolTouched = true;
-        scheduleSave();
-      }}
-    />
-    <p class="mt-1 text-xs text-muted font-mono">{draftSymbol}{draftName || "name"}</p>
-  </FormField>
-
-  <FormField label="Placement">
-    <Select
-      value={draftPlacement}
-      options={SNIPPET_PLACEMENT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-      ariaLabel="Snippet placement"
-      onchange={(v) => {
-        draftPlacement = v as SnippetPlacement;
-        if (!symbolTouched) draftSymbol = recommendedSymbol(draftPlacement);
-        scheduleSave();
-      }}
-    />
-  </FormField>
-
-  <FormField label="Text">
-    <Textarea
-      ariaLabel="Snippet text"
-      autoResize="none"
-      class="max-h-64 min-h-24 overflow-y-auto resize-none"
-      value={draftText}
-      oninput={(v) => {
-        draftText = v;
-        scheduleSave();
-      }}
-      onblur={() => flushSave()}
-    />
-  </FormField>
-</div>
+<SnippetDetailView
+  bind:draftName
+  draftSymbol={draftSymbol}
+  draftPlacement={draftPlacement}
+  bind:draftText
+  {nameError}
+  {triggerPreview}
+  {symbolOptions}
+  {placementOptions}
+  onNameInput={(v) => {
+    draftName = normalizeName(v);
+    scheduleSave();
+  }}
+  onNameBlur={() => flushSave()}
+  onSymbolChange={(v) => {
+    draftSymbol = v as SnippetSymbol;
+    symbolTouched = true;
+    scheduleSave();
+  }}
+  onPlacementChange={(v) => {
+    draftPlacement = v as SnippetPlacement;
+    if (!symbolTouched) draftSymbol = recommendedSymbol(draftPlacement);
+    scheduleSave();
+  }}
+  onTextInput={(v) => {
+    draftText = v;
+    scheduleSave();
+  }}
+  onTextBlur={() => flushSave()}
+/>

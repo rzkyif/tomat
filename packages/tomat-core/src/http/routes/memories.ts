@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { memoriesStore } from "../../services/memories-store.ts";
 import { scheduleMemoryIndexing } from "../../services/memories-indexer.ts";
-import { AppError } from "../../shared/errors.ts";
+import { parseBody, readJson } from "../body.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
 const createBodySchema = z
@@ -32,11 +32,8 @@ export function memoriesRoutes(): Hono {
   r.get("/", (c) => c.json({ memories: memoriesStore().list() }));
 
   r.post("/", async (c) => {
-    const parsed = createBodySchema.safeParse(await readJson(c));
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
-    const doc = memoriesStore().create(parsed.data.kind, parsed.data.title, parsed.data.content);
+    const body = parseBody(createBodySchema, await readJson(c));
+    const doc = memoriesStore().create(body.kind, body.title, body.content);
     scheduleMemoryIndexing(doc.id);
     return c.json(doc, 201);
   });
@@ -58,18 +55,15 @@ export function memoriesRoutes(): Hono {
 
   r.patch("/:id", async (c) => {
     const id = c.req.param("id");
-    const parsed = patchBodySchema.safeParse(await readJson(c));
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
+    const body = parseBody(patchBodySchema, await readJson(c));
+    if (body.enabled !== undefined) {
+      memoriesStore().setEnabled(id, body.enabled);
     }
-    if (parsed.data.enabled !== undefined) {
-      memoriesStore().setEnabled(id, parsed.data.enabled);
+    if (body.title !== undefined) {
+      memoriesStore().rename(id, body.title);
     }
-    if (parsed.data.title !== undefined) {
-      memoriesStore().rename(id, parsed.data.title);
-    }
-    if (parsed.data.content !== undefined) {
-      memoriesStore().replaceContent(id, parsed.data.content);
+    if (body.content !== undefined) {
+      memoriesStore().replaceContent(id, body.content);
     }
     scheduleMemoryIndexing(id);
     return c.json(memoriesStore().get(id));
@@ -81,12 +75,4 @@ export function memoriesRoutes(): Hono {
   });
 
   return r;
-}
-
-async function readJson(c: import("hono").Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
-  }
 }

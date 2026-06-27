@@ -79,9 +79,9 @@
       // Same lg icon (text-xl) but half the padding, for buttons packed into a
       // ButtonGroup-style pill that carries the other half as its own padding.
       "lg-tight": "p-1 text-xl",
-      // Navbar scale: a larger icon centered in a 40px box (no padding),
+      // Navbar scale: a larger icon centered in a 36px box (minimal padding),
       // matching the mobile burger button's footprint.
-      xl: "w-10 h-10 text-2xl",
+      xl: "w-9 h-9 text-[1.75rem]",
     }[size],
   );
 

@@ -11,10 +11,11 @@
 // the user can still pick a tool even with a flaky LLM.
 
 import type OpenAI from "openai";
-import { errMessage } from "@tomat/shared";
+import { errMessage, toolPlatformSupported } from "@tomat/shared";
 import type { Tool, ToolDescriptor } from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import { extensionsRegistry } from "../extensions/registry.ts";
+import { hostPlatforms } from "../shared/platform.ts";
 import { type LlmEndpointConfig, type LlmRequest, streamChatCompletion } from "./llm-provider.ts";
 import { cosineNormalized, embedSourceHash, toolEmbedText } from "./relevance.ts";
 import { getLogger } from "../shared/log.ts";
@@ -158,31 +159,38 @@ export function __resetForTesting(): void {
   _instance = null;
 }
 
+// This query bypasses the registry, so it re-applies the same OS gating the
+// registry does (toolPlatformSupported): an OS-incompatible tool must never
+// reach the relevance filter either.
 function enabledTools(): Tool[] {
   const rows = db()
     .prepare(`
     SELECT t.id, t.extension_id, t.name, t.description, t.parameters_json,
-           t.triggers_json, t.fn_export, t.always_available, t.enabled
+           t.triggers_json, t.fn_export, t.always_available, t.platforms_json, t.enabled
     FROM tools t
     JOIN extensions k ON k.id = t.extension_id
     WHERE t.enabled = 1 AND k.status = 'installed'
   `)
     .all() as Array<Record<string, unknown>>;
-  return rows.map((r) => ({
-    id: String(r.id),
-    extensionId: String(r.extension_id),
-    providerKind: "extension" as const,
-    name: String(r.name),
-    description: String(r.description),
-    parameters: JSON.parse(String(r.parameters_json)),
-    triggers: JSON.parse(String(r.triggers_json)),
-    fnExport: String(r.fn_export),
-    alwaysAvailable: Number(r.always_available) === 1,
-    enabled: Number(r.enabled) === 1,
-    requiredPermissions: [],
-    missingRequired: [],
-    grants: [],
-  }));
+  const host = hostPlatforms();
+  return rows
+    .map((r) => ({
+      id: String(r.id),
+      extensionId: String(r.extension_id),
+      providerKind: "extension" as const,
+      name: String(r.name),
+      description: String(r.description),
+      parameters: JSON.parse(String(r.parameters_json)),
+      triggers: JSON.parse(String(r.triggers_json)),
+      fnExport: String(r.fn_export),
+      alwaysAvailable: Number(r.always_available) === 1,
+      platforms: r.platforms_json ? JSON.parse(String(r.platforms_json)) : [],
+      enabled: Number(r.enabled) === 1,
+      requiredPermissions: [],
+      missingRequired: [],
+      grants: [],
+    }))
+    .filter((t) => toolPlatformSupported(t.platforms, host));
 }
 
 function toDescriptor(tool: Tool): ToolDescriptor {

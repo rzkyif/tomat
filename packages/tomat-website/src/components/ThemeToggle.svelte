@@ -38,7 +38,7 @@
     onclick={toggle}
     {title}
     aria-label={title}
-    class="flex flex-1 items-center justify-center gap-2 h-10 rounded-medium bg-surface-inset text-default-700 hover:bg-surface-inset-strong hover:text-default-900 transition-colors hover:cursor-pointer"
+    class="flex flex-1 items-center justify-center gap-2 h-10 px-4 rounded-medium bg-surface-inset text-default-700 hover:bg-surface-inset-strong hover:text-default-900 transition-colors hover:cursor-pointer"
   >
     <i class="flex text-lg shrink-0 {icon}"></i>
     <span class="flex-1 text-center">{dark ? "Light Theme" : "Dark Theme"}</span>

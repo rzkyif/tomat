@@ -6,9 +6,12 @@
 #
 # Usage (one-liner):
 #   powershell -ExecutionPolicy Bypass -Command "iwr -useb https://get.au.tomat.ing/install/core-uninstall.ps1 | iex"
+#   powershell -ExecutionPolicy Bypass -Command "& { $env:TOMAT_KEEP_DATA='1'; iwr -useb https://get.au.tomat.ing/install/core-uninstall.ps1 | iex }"
 #
 # Flags:
-#   -KeepData  do not remove the core directory (only stop / unregister services).
+#   -KeepData             do not remove the core directory (only stop / unregister services).
+#   $env:TOMAT_KEEP_DATA  "1" is the env equivalent of -KeepData, for the piped one-liner
+#                         above (a switch param can't be passed through `iwr | iex`).
 #
 # Env overrides:
 #   $env:TOMAT_CHANNEL  channel to uninstall: stable (default) | dev | latest.
@@ -26,6 +29,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# The one-liner install path (`iwr ... | iex`) cannot pass the -KeepData switch, so
+# honor $env:TOMAT_KEEP_DATA=1 as the documented equivalent.
+if ($env:TOMAT_KEEP_DATA -in @("1", "true")) {
+  $KeepData = $true
+}
 
 # ===== UI helpers begin =====
 # Self-contained UI helper block. Keep this region intact so future install
@@ -261,6 +270,12 @@ $HomeDir = if ($env:TOMAT_CORE_HOME) { $env:TOMAT_CORE_HOME } else { Join-Path $
 $ChannelSuffix = if ($Channel -eq "stable") { "" } else { "-$Channel" }
 $TaskName = "tomat-core$ChannelSuffix"
 $ProcName = "tomat-core$ChannelSuffix"
+# Core seals its secrets-vault master key in the OS keychain under this
+# service/account (mirrors secrets.ts); the helper that manages it is
+# channel-suffixed like every core binary (mirrors paths.ts coreBinaryName).
+$KeychainExe = Join-Path $HomeDir "bin\tomat-core-keychain$ChannelSuffix.exe"
+$KeychainService = "au.tomat.core$ChannelSuffix"
+$KeychainAccount = "master-key"
 
 # --- pick the data-removal label up front --------------------------------
 
@@ -277,6 +292,7 @@ try {
 
   $IdxTask = Ui-ActionAdd "Unregistering Windows scheduled task '$TaskName'"
   $IdxKill = Ui-ActionAdd "Killing straggler tomat-core processes"
+  $IdxKeychain = Ui-ActionAdd "Clearing keychain entry"
   $IdxData = Ui-ActionAdd $DataLabel
 
   # --- action 1: unregister scheduled task -------------------------------
@@ -330,7 +346,32 @@ try {
     Ui-ActionDone $IdxKill "(killed $killed)"
   }
 
-  # --- action 3: remove home dir -----------------------------------------
+  # --- action 3: clear the keychain master key ---------------------------
+  # Done before the dir is removed (the helper lives under bin\). Skipped under
+  # -KeepData so the kept vault stays decryptable. Delete is idempotent, so it
+  # is a no-op on dev (file fallback) and on re-runs.
+
+  if ($KeepData) {
+    Ui-ActionSkip $IdxKeychain "(kept with data)"
+  } elseif (Test-Path $KeychainExe) {
+    Ui-ActionStart $IdxKeychain "Clearing keychain entry"
+    # delete is idempotent (exit 0 even if absent), so a non-zero exit is a real
+    # failure (keychain locked / unavailable) worth reporting rather than masking.
+    $cleared = $false
+    try {
+      & $KeychainExe delete $KeychainService $KeychainAccount 2>$null | Out-Null
+      if ($LASTEXITCODE -eq 0) { $cleared = $true }
+    } catch { }
+    if ($cleared) {
+      Ui-ActionDone $IdxKeychain "(cleared)"
+    } else {
+      Ui-ActionSkip $IdxKeychain "(could not clear)"
+    }
+  } else {
+    Ui-ActionSkip $IdxKeychain "(helper not present)"
+  }
+
+  # --- action 4: remove home dir -----------------------------------------
 
   if ($KeepData) {
     Ui-ActionSkip $IdxData "(kept per -KeepData)"

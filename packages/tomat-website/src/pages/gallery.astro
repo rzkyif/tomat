@@ -5,6 +5,15 @@ import Gallery from "../components/gallery/Gallery.svelte";
 
 <BaseLayout title="tomat component gallery" description="Shared UI component gallery.">
   <main class="min-h-[calc(100dvh-3.5rem)]">
-    <Gallery client:visible />
+    {/* No `client:*` directive: the gallery is a non-interactive visual QA
+        surface, so it renders to static HTML and ships ZERO component JS. The one
+        thing that relied on the client (a Popover's anchor measurement) is handled
+        statically by the `.gallery-frame [role="dialog"]` reveal in site.css. */}
+    <Gallery />
   </main>
+  {/* Vertical scroll fade for the page as a whole (see site.css). Fixed overlays
+      so the cards dissolve into the background at the top (below the navbar) and
+      bottom rather than ending at a hard edge. */}
+  <div class="gallery-scroll-fade gallery-scroll-fade-top" aria-hidden="true"></div>
+  <div class="gallery-scroll-fade gallery-scroll-fade-bottom" aria-hidden="true"></div>
 </BaseLayout>

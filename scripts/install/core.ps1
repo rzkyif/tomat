@@ -391,7 +391,7 @@ try {
   # codebase at runtime, so there's nothing to fetch here.
   $IdxExtension  = -1
   if ($Channel -ne "dev") {
-    $IdxExtension = Ui-ActionAdd "Installing built-in extension to $ExtensionsDir\"
+    $IdxExtension = Ui-ActionAdd "Planting built-in extension in $ExtensionsDir\"
   }
   $IdxToken    = Ui-ActionAdd "Writing admin token to $AdminTokenFile"
   $IdxSettings = -1
@@ -450,7 +450,7 @@ try {
     if ($status -eq 404) {
       Ui-Die "Manifest not found at $ManifestUrl" `
         "HTTP 404" `
-        "the storage origin may be misconfigured; report at github.com/<repo>/issues"
+        "the storage origin may be misconfigured; report at github.com/rzkyif/tomat/issues"
     } elseif ($status -ge 500 -and $status -lt 600) {
       Ui-Die "Storage returned $status" `
         "" `
@@ -717,53 +717,56 @@ try {
   }
 
   # --- action 5b: built-in extension ---------------------------------------
-  # Download + extract the CDN-distributed built-in extension so a fresh core has
-  # it out of the box. Core registers + activates it on first boot; if this is
-  # skipped (manifest not yet published), core seeds it then.
+  # Plant the tarball AND its signed manifest so core installs the built-in fully
+  # offline on first boot (it re-verifies the manifest signature + tarball sha256,
+  # then extracts - no boot-time fetch; this script does not check the signature,
+  # core does). Planting is an OPTIONAL optimization: every failure here is non-fatal
+  # (we skip and core fetches + verifies + seeds the built-in itself), so it never
+  # aborts the core install.
 
   if ($IdxExtension -ne -1) {
-    $tkDir = Join-Path $ExtensionsDir "tomat-builtin"
-    if (Test-Path (Join-Path $tkDir "tomat.json")) {
+    # Keep these filenames in sync with builtin-seed.ts (PLANTED_TARBALL / MANIFEST).
+    $tkDest = Join-Path $ExtensionsDir ".tomat-builtin.tgz"
+    $tkManifestDest = Join-Path $ExtensionsDir ".tomat-builtin.json"
+    if ((Test-Path $tkDest) -and (Test-Path $tkManifestDest)) {
       Ui-ActionSkip $IdxExtension "(already present)"
     } else {
       $tkManifest = $null
+      $tkManifestRaw = $null
       try {
         $tkResp = Invoke-WebRequest -Uri "$Storage/$ManifestDir/extension.json" -UseBasicParsing
-        $tkManifest = $tkResp.Content | ConvertFrom-Json
+        $tkManifestRaw = $tkResp.Content
+        $tkManifest = $tkManifestRaw | ConvertFrom-Json
       } catch {
         $tkManifest = $null
       }
       if (-not $tkManifest -or -not $tkManifest.tarballUrl -or -not $tkManifest.sha256) {
-        # Non-fatal: core seeds the built-in on first boot if this is missing.
         Ui-ActionSkip $IdxExtension "(manifest unavailable; core will seed)"
       } else {
-        Ui-ActionStart $IdxExtension "Installing built-in extension to $ExtensionsDir\" "(downloading)"
+        Ui-ActionStart $IdxExtension "Planting built-in extension in $ExtensionsDir\" "(downloading)"
         $tkTmp = Join-Path $StagingDir "builtin-extension-$([System.IO.Path]::GetRandomFileName()).tgz"
+        _Ui-TrackStaging $tkTmp
+        $tkPlanted = $false
         try {
           Invoke-WebRequest -Uri $tkManifest.tarballUrl -OutFile $tkTmp -UseBasicParsing
-        } catch {
-          Ui-Die "Download interrupted" `
-            "Invoke-WebRequest failed for $($tkManifest.tarballUrl): $($_.Exception.Message)" `
-            "re-run; partial files were cleaned up"
+          $tkGot = (Get-FileHash -Algorithm SHA256 -Path $tkTmp).Hash.ToLowerInvariant()
+          if ($tkGot -eq $tkManifest.sha256.ToLowerInvariant()) {
+            # Plant the verified tarball + its signed manifest; core re-verifies the
+            # signature + sha256 and extracts on boot. ASCII keeps the JSON BOM-free
+            # so Deno's JSON.parse accepts it.
+            Move-Item -Force $tkTmp $tkDest
+            Set-Content -Path $tkManifestDest -Value $tkManifestRaw -Encoding ascii -NoNewline
+            $tkPlanted = $true
+          }
+        } catch { }
+        if ($tkPlanted) {
+          Ui-ActionDone $IdxExtension "(planted)"
+        } else {
+          Remove-Item -Force $tkTmp -ErrorAction SilentlyContinue
+          Remove-Item -Force $tkDest, $tkManifestDest -ErrorAction SilentlyContinue
+          # Non-fatal: core fetches + verifies + seeds the built-in on first boot.
+          Ui-ActionSkip $IdxExtension "(could not plant; core will seed)"
         }
-        $tkGot = (Get-FileHash -Algorithm SHA256 -Path $tkTmp).Hash.ToLowerInvariant()
-        if ($tkGot -ne $tkManifest.sha256.ToLowerInvariant()) {
-          Ui-Die "sha256 mismatch on built-in extension" `
-            "want $($tkManifest.sha256), got $tkGot" `
-            "network corruption is the usual cause; re-run"
-        }
-        Ui-ActionUpdate $IdxExtension "(extracting)"
-        if (Test-Path $tkDir) { Remove-Item -Recurse -Force $tkDir }
-        [void](New-Item -ItemType Directory -Force -Path $tkDir)
-        # tar.exe (bsdtar) ships with Windows 10+ and handles .tgz.
-        & tar.exe -xzf $tkTmp -C $tkDir
-        if ($LASTEXITCODE -ne 0) {
-          Ui-Die "Could not extract built-in extension" `
-            "tar.exe exited $LASTEXITCODE" `
-            "re-run; check permissions under $ExtensionsDir\"
-        }
-        Remove-Item -Force $tkTmp -ErrorAction SilentlyContinue
-        Ui-ActionDone $IdxExtension "(installed)"
       }
     }
   }
@@ -859,12 +862,19 @@ try {
     # Scheduled task branch.
     Ui-ActionStart $IdxService "Registering Windows scheduled task '$TaskName'"
 
-    # Check whether the existing task already points at the same binary.
+    # Check whether the existing task already points at the same binary. For
+    # non-stable channels the launch is wrapped in cmd.exe (to set TOMAT_CHANNEL),
+    # so the binary lives in the action's arguments, not its Execute field.
     $TaskUnchanged = $false
     try {
       $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-      if ($existing -and $existing.Actions -and $existing.Actions[0].Execute -eq $Installed) {
-        $TaskUnchanged = $true
+      if ($existing -and $existing.Actions) {
+        $act = $existing.Actions[0]
+        if ($Channel -eq "stable") {
+          $TaskUnchanged = ($act.Execute -eq $Installed)
+        } else {
+          $TaskUnchanged = ($act.Execute -eq "cmd.exe" -and $act.Arguments -like "*$Installed*")
+        }
       }
     } catch { }
 
@@ -905,13 +915,6 @@ try {
 
   Ui-ActionStart $IdxPair "Minting pairing code at https://127.0.0.1:$CorePort" "(waiting for core)"
 
-  Start-Sleep -Seconds 2
-
-  $admin = $null
-  try {
-    $admin = Get-Content -Raw -Path $AdminTokenFile
-  } catch { }
-
   # Core serves HTTPS with a self-signed cert. This mint runs on the core host
   # over loopback and is authenticated by the admin token, so skipping cert
   # verification here is fine; the client pins the cert during pairing.
@@ -923,6 +926,24 @@ try {
   } else {
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
   }
+
+  # Poll the unauthenticated health endpoint until the freshly-started core binds
+  # its port. A cold start can take several seconds, so wait rather than failing
+  # the password-set and mint on a single early miss (the old fixed 2s sleep).
+  for ($i = 0; $i -lt 30; $i++) {
+    try {
+      Invoke-WebRequest -Uri "https://127.0.0.1:$CorePort/api/v1/health" `
+        -UseBasicParsing -TimeoutSec 5 @irmExtra | Out-Null
+      break
+    } catch {
+      Start-Sleep -Seconds 1
+    }
+  }
+
+  $admin = $null
+  try {
+    $admin = Get-Content -Raw -Path $AdminTokenFile
+  } catch { }
 
   # --- action 8a: set admin password -------------------------------------
 
@@ -948,19 +969,24 @@ try {
     }
   }
 
+  # Retry a few times: the health probe above confirms the port is bound, but the
+  # pairing route can lag the bind by a moment on a cold start.
   $code = $null
   $pairFailed = $true
   if ($admin) {
-    try {
-      $resp = Invoke-RestMethod -Method Post `
-        -Uri "https://127.0.0.1:$CorePort/api/v1/pairing/codes" `
-        -Headers @{ "X-Admin-Token" = $admin; "Content-Type" = "application/json" } `
-        -Body "{}" @irmExtra
-      if ($resp.code) {
-        $code = $resp.code
-        $pairFailed = $false
-      }
-    } catch { }
+    for ($i = 0; $i -lt 5 -and $pairFailed; $i++) {
+      try {
+        $resp = Invoke-RestMethod -Method Post `
+          -Uri "https://127.0.0.1:$CorePort/api/v1/pairing/codes" `
+          -Headers @{ "X-Admin-Token" = $admin; "Content-Type" = "application/json" } `
+          -Body "{}" @irmExtra
+        if ($resp.code) {
+          $code = $resp.code
+          $pairFailed = $false
+        }
+      } catch { }
+      if ($pairFailed) { Start-Sleep -Seconds 1 }
+    }
   }
 
   if (-not $pairFailed) {

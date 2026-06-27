@@ -180,14 +180,20 @@ _ui_stop_spinner() {
 # --- staging cleanup ------------------------------------------------------
 
 _ui_track_staging() {
-  UI_STAGING_PATHS="$UI_STAGING_PATHS $1"
+  # Newline-separated so a path containing spaces survives cleanup's word split.
+  UI_STAGING_PATHS="$UI_STAGING_PATHS
+$1"
 }
 
 _ui_cleanup_staging() {
   local p
+  local _old_ifs="$IFS"
+  IFS='
+'
   for p in $UI_STAGING_PATHS; do
-    [ -e "$p" ] && rm -f "$p" 2>/dev/null || true
+    [ -n "$p" ] && [ -e "$p" ] && rm -f "$p" 2>/dev/null || true
   done
+  IFS="$_old_ifs"
   UI_STAGING_PATHS=""
 }
 
@@ -531,7 +537,7 @@ if [ "$MANIFEST_CURL_RC" -ne 0 ]; then
       if [ "$MANIFEST_HTTP_STATUS" = "404" ] || [ -z "$MANIFEST_HTTP_STATUS" ]; then
         ui_die "Manifest not found at $MANIFEST_URL" \
           "HTTP 404" \
-          "the storage origin may be misconfigured; report at github.com/<repo>/issues"
+          "the storage origin may be misconfigured; report at github.com/rzkyif/tomat/issues"
       else
         ui_die "Storage returned $MANIFEST_HTTP_STATUS" \
           "" \
@@ -688,9 +694,11 @@ if [ "$uname_os" = "Darwin" ]; then
         "$EXTRACT_ERR" \
         "partial download; re-run"
 
-    # Discover the actual app bundle name (the .app basename may be any case,
-    # depending on Tauri config). We use the one we find, but the destination
-    # path is always /Applications/tomat.app to match the current productName.
+    # Locate the .app inside the tarball (its basename validates the archive),
+    # then install it to the canonical channel path APP_DEST regardless of the
+    # internal basename, so the pre-check, the Gatekeeper step, and the footer
+    # all agree on one location. productName is exactly tomat<suffix>, but copying
+    # to an explicit destination keeps that assumption from leaking.
     APP_SRC="$(find "$EXTRACT_DIR" -maxdepth 2 -name "*.app" -type d | head -n1)"
     if [ -z "$APP_SRC" ]; then
       ui_die "Client tarball is corrupted" \
@@ -698,19 +706,16 @@ if [ "$uname_os" = "Darwin" ]; then
         "redownload and re-run"
     fi
 
-    APP_NAME="$(basename "$APP_SRC")"
-    DEST="/Applications/$APP_NAME"
-
     ui_action_update "$IDX_INSTALL" "(installing)"
-    if [ -d "$DEST" ]; then
-      if ! rm -rf "$DEST" 2>/dev/null; then
-        ui_die "Permission denied removing existing $DEST" \
+    if [ -d "$APP_DEST" ]; then
+      if ! rm -rf "$APP_DEST" 2>/dev/null; then
+        ui_die "Permission denied removing existing $APP_DEST" \
           "" \
           "quit $DISPLAY_NAME and try again, or check if the app is owned by another user"
       fi
     fi
 
-    CP_ERR="$(cp -R "$APP_SRC" /Applications/ 2>&1)" || {
+    CP_ERR="$(cp -R "$APP_SRC" "$APP_DEST" 2>&1)" || {
       # Distinguish disk-full from permission-denied based on stderr.
       case "$CP_ERR" in
         *"No space left"*|*"ENOSPC"*)
@@ -733,7 +738,7 @@ if [ "$uname_os" = "Darwin" ]; then
     rm -f "$TARBALL" 2>/dev/null || true
 
     # Pretty file size for the detail.
-    APP_BYTES="$(du -sk "$DEST" 2>/dev/null | awk '{print $1 * 1024}')"
+    APP_BYTES="$(du -sk "$APP_DEST" 2>/dev/null | awk '{print $1 * 1024}')"
     if [ -n "$APP_BYTES" ] && [ "$APP_BYTES" -gt 0 ]; then
       APP_MB="$((APP_BYTES / 1024 / 1024))"
       ui_action_done "$IDX_INSTALL" "(${APP_MB} MB)"
@@ -745,7 +750,9 @@ else
   # Linux: AppImage.
   BIN_DIR="$HOME/.local/bin"
   APPS_DIR="$HOME/.local/share/applications"
-  ICONS_DIR="$HOME/.local/share/icons/hicolor/512x512/apps"
+  # 256x256 is the largest size Tauri bakes into the AppImage (from the
+  # 128x128@2x source icon), so install the launcher icon under that theme dir.
+  ICONS_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
   mkdir -p "$BIN_DIR" "$APPS_DIR" "$ICONS_DIR"
 
   APPIMAGE="$BIN_DIR/$APPIMAGE_NAME.AppImage"
@@ -840,6 +847,7 @@ else
   APPS_DIR="$HOME/.local/share/applications"
   DESKTOP="$APPS_DIR/$APPIMAGE_NAME.desktop"
   APPIMAGE="$HOME/.local/bin/$APPIMAGE_NAME.AppImage"
+  ICONS_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
 
   DESKTOP_OK=0
   if [ -f "$DESKTOP" ]; then
@@ -852,6 +860,34 @@ else
     ui_action_skip "$IDX_FINALIZE" "(already registered)"
   else
     ui_action_start "$IDX_FINALIZE" "$LABEL_FINALIZE"
+
+    # Install a launcher icon by extracting it from the AppImage so the
+    # .desktop `Icon=` entry resolves. `--appimage-extract` needs no FUSE and
+    # writes ./squashfs-root, so run it from a throwaway staging dir. Best
+    # effort: a missing icon just falls back to a generic launcher glyph.
+    # `-print -quit` (not `... | head`) avoids a SIGPIPE that pipefail would turn
+    # into a fatal error, and `-type f` skips dangling symlinks.
+    ICON_STAGE="$STAGING_DIR/appimage-icon-$$"
+    mkdir -p "$ICON_STAGE"
+    ( cd "$ICON_STAGE" && "$APPIMAGE" --appimage-extract 'usr/share/icons/hicolor/*/apps/*.png' >/dev/null 2>&1 ) || true
+    ICON_SRC=""
+    if [ -d "$ICON_STAGE/squashfs-root" ]; then
+      # Prefer 256x256 (what Tauri ships), then fall back through other sizes.
+      for _sz in 256x256 512x512 128x128 96x96 64x64 48x48 32x32; do
+        ICON_SRC="$(find "$ICON_STAGE/squashfs-root" -path "*/$_sz/apps/*.png" -type f -print -quit 2>/dev/null || true)"
+        [ -n "$ICON_SRC" ] && break
+      done
+    fi
+    if [ -z "$ICON_SRC" ]; then
+      # Fall back to the AppImage's root .DirIcon when it is a real file.
+      ( cd "$ICON_STAGE" && "$APPIMAGE" --appimage-extract '.DirIcon' >/dev/null 2>&1 ) || true
+      ICON_SRC="$(find "$ICON_STAGE/squashfs-root" -maxdepth 1 -name '.DirIcon' -type f -print -quit 2>/dev/null || true)"
+    fi
+    if [ -n "$ICON_SRC" ]; then
+      mkdir -p "$ICONS_DIR"
+      cp -fL "$ICON_SRC" "$ICONS_DIR/$APPIMAGE_NAME.png" 2>/dev/null || true
+    fi
+    rm -rf "$ICON_STAGE" 2>/dev/null || true
 
     mkdir -p "$APPS_DIR"
     if ! cat >"$DESKTOP" <<DESKTOP 2>/dev/null

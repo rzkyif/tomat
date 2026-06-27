@@ -8,6 +8,7 @@
     "jsr:@std/assert@*": "1.0.19",
     "jsr:@std/assert@0.217": "0.217.0",
     "jsr:@std/assert@1": "1.0.19",
+    "jsr:@std/async@1": "1.4.0",
     "jsr:@std/cli@1": "1.0.29",
     "jsr:@std/dotenv@0.225": "0.225.6",
     "jsr:@std/encoding@1": "1.0.10",
@@ -133,6 +134,9 @@
       "dependencies": [
         "jsr:@std/internal@^1.0.12"
       ]
+    },
+    "@std/async@1.4.0": {
+      "integrity": "4d70b008634f571cff9b554090d628c76141c32613aae0ff283fd5fa23d0c379"
     },
     "@std/cli@1.0.29": {
       "integrity": "fa4ef29130baa834d8a13b7d138240c3a2fcfba740bfb7afa646a360a15ec84f",

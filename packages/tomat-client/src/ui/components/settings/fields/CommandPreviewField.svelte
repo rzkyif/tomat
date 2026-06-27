@@ -4,6 +4,7 @@
   import type { CommandType } from "$lib/llm/command";
   import type { SettingField } from "@tomat/shared";
   import FieldCard from "./FieldCard.svelte";
+  import CommandPreviewFieldView from "@tomat/shared/ui/components/settings/CommandPreviewFieldView.svelte";
 
   let { field } = $props<{
     field: SettingField;
@@ -24,13 +25,10 @@
 
 {#if field.commandType}
   <FieldCard {field}>
-    <div class="overflow-hidden rounded-medium bg-surface-inset">
-      <div class="tomat-scroll-inset overflow-x-auto overflow-y-clip">
-        <pre class="flex leading-relaxed m-0"><code
-            class="overflow-clip text-sm font-mono bg-transparent p-3 text-default-800 whitespace-pre"
-            >{#await previewPromise}Loading...{:then preview}{preview}{/await}</code
-          ></pre>
-      </div>
-    </div>
+    {#await previewPromise}
+      <CommandPreviewFieldView preview="Loading..." />
+    {:then preview}
+      <CommandPreviewFieldView {preview} />
+    {/await}
   </FieldCard>
 {/if}

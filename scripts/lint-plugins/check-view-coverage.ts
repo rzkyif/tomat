@@ -1,20 +1,38 @@
 // Coverage check for shared `*View` components. Every View must:
-//   1. have named samples in @tomat/shared/ui/samples (the SAMPLES registry),
-//   2. be rendered by the website component gallery, and
-//   3. be wrapped by at least one client component (the single-source rule:
-//      a View only the website uses is a re-implementation in disguise).
+//   1. have NON-EMPTY named samples in @tomat/shared/ui/samples (the SAMPLES
+//      registry) - at least one scenario, so the card is never blank,
+//   2. be listed in the gallery registry (GALLERY_VIEWS) AND actually rendered
+//      by the gallery (a `SAMPLES.<Name>` reference in Gallery.svelte or
+//      MobileGallery.svelte), and
+//   3. be wrapped by at least one client component, or composed by another
+//      shared View (the single-source rule: a View only the website uses is a
+//      re-implementation in disguise).
 // See packages/tomat-shared/src/ui/README.md and packages/tomat-website/AGENTS.md.
 //
-// Wired into `deno task lint`. Phase 0 ships this in warn mode; Phase 6 flips
-// STRICT to fail the build.
+// The renderer is hand-authored (one card block per View), not a blind iteration
+// of the registry, so listing a View in GALLERY_VIEWS is not enough: this walker
+// also asserts the renderer references it, closing the gap where a registered
+// View is silently never rendered.
+//
+// EMBEDDED_VIEWS are the exception: a pure structural sub-piece always rendered
+// inside one parent View, whose card already shows it, earns coverage
+// transitively instead of via a redundant card of its own. Such a View is exempt
+// from requirements 1-2; instead its declared parent must be galleried, rendered,
+// and must actually render the child (so it can never silently disappear). The
+// askuser question sub-views are the analogous hardcoded case below. Wired into
+// `deno task lint`.
 
 import { walk } from "@std/fs/walk";
+import {
+  EMBEDDED_VIEWS,
+  GALLERY_VIEWS,
+} from "../../packages/tomat-website/src/components/gallery/registry.ts";
+import { SAMPLES } from "../../packages/tomat-shared/src/ui/samples/index.ts";
 
 const STRICT = true;
 const ROOT = new URL("../../", import.meta.url).pathname;
 const VIEWS_DIR = `${ROOT}packages/tomat-shared/src/ui/components/`;
-const SAMPLES_INDEX = `${ROOT}packages/tomat-shared/src/ui/samples/index.ts`;
-const GALLERY = `${ROOT}packages/tomat-website/src/components/gallery/Gallery.svelte`;
+const GALLERY_DIR = `${ROOT}packages/tomat-website/src/components/gallery/`;
 const CLIENT_COMPONENTS = `${ROOT}packages/tomat-client/src/ui/components/`;
 
 async function viewNames(): Promise<string[]> {
@@ -45,33 +63,113 @@ async function concat(dir: string, skip?: (p: string) => boolean): Promise<strin
   return all;
 }
 
-const [views, samplesSrc, gallerySrc, clientSrc, sharedSrc] = await Promise.all([
+const [views, galleryRenderSrc, clientSrc, sharedSrc] = await Promise.all([
   viewNames(),
-  read(SAMPLES_INDEX),
-  read(GALLERY),
+  // The hand-authored renderer: the desktop gallery plus the mobile section.
+  Promise.all(
+    [`${GALLERY_DIR}Gallery.svelte`, `${GALLERY_DIR}MobileGallery.svelte`].map(read),
+  ).then((parts) => parts.join("")),
   concat(CLIENT_COMPONENTS),
   concat(VIEWS_DIR),
 ]);
 
+const sampleBundles = SAMPLES as Record<string, Record<string, unknown>>;
+const galleryViews = new Set<string>(GALLERY_VIEWS);
 const problems: string[] = [];
+// `[/"']${v}.svelte` anchors on a path boundary (`/`, quote) before the name so a
+// longer View name that contains a shorter one as a substring can't false-match.
+const referenced = (v: string, src: string) => new RegExp(`[/"']${v}\\.svelte`).test(src);
 for (const v of views) {
-  // SAMPLES registry key, e.g. `  FooView: fooSamples,`
-  if (!new RegExp(`\\b${v}:\\s`).test(samplesSrc)) {
-    problems.push(`${v}: no samples in @tomat/shared/ui/samples (add to SAMPLES)`);
+  const embeddedParent = EMBEDDED_VIEWS[v];
+  if (embeddedParent) {
+    // Transitively covered: no card of its own, so skip the sample + render-card
+    // requirements and instead prove the parent shows it. A View must not be in
+    // both registries (it would demand a card it deliberately does not have).
+    if (galleryViews.has(v)) {
+      problems.push(`${v}: in both GALLERY_VIEWS and EMBEDDED_VIEWS (pick one)`);
+    }
+    if (!galleryViews.has(embeddedParent)) {
+      problems.push(
+        `${v}: embedded parent "${embeddedParent}" is not galleried (add it to GALLERY_VIEWS)`,
+      );
+    } else if (!new RegExp(`SAMPLES\\.${embeddedParent}\\b`).test(galleryRenderSrc)) {
+      problems.push(
+        `${v}: embedded parent "${embeddedParent}" is not rendered by the gallery (no \`SAMPLES.${embeddedParent}\` card)`,
+      );
+    }
+    // Honesty: the child must actually be rendered under the parent - either a
+    // shared View imports it (the parent composes it directly) or the gallery
+    // renderer supplies it inside the parent's card (a snippet-fed child).
+    if (!referenced(v, sharedSrc) && !referenced(v, galleryRenderSrc)) {
+      problems.push(
+        `${v}: declared embedded in "${embeddedParent}" but nothing renders it (no \`${v}.svelte\` in the shared Views or the gallery renderer)`,
+      );
+    }
+    continue;
   }
-  if (!gallerySrc.includes(v)) {
-    problems.push(`${v}: not rendered by the website gallery (Gallery.svelte)`);
+  // A non-empty sample bundle in the SAMPLES registry (a `{}` bundle would pass
+  // a key-existence check yet render zero cards).
+  const bundle = sampleBundles[v];
+  if (!bundle) {
+    problems.push(`${v}: no samples in @tomat/shared/ui/samples (add to SAMPLES)`);
+  } else if (Object.keys(bundle).length === 0) {
+    problems.push(`${v}: its SAMPLES bundle is empty (add at least one scenario)`);
+  }
+  if (!galleryViews.has(v)) {
+    problems.push(
+      `${v}: not in the gallery registry (add to GALLERY_VIEWS in components/gallery/registry.ts, or EMBEDDED_VIEWS if a parent card shows it)`,
+    );
+  } else if (!new RegExp(`SAMPLES\\.${v}\\b`).test(galleryRenderSrc)) {
+    // Listed but the hand-authored renderer never renders it: a silently broken
+    // gallery entry. The `\b` anchor stops a longer View name (`SAMPLES.FooBarView`)
+    // from satisfying a shorter prefix (`Foo`). Add a card block in Gallery.svelte
+    // (or MobileGallery.svelte).
+    problems.push(
+      `${v}: in GALLERY_VIEWS but the gallery never renders it (no \`SAMPLES.${v}\` card in Gallery.svelte/MobileGallery.svelte)`,
+    );
   }
   // Covered if a client component wraps it directly, or another shared View
   // composes it (so it still ships to the client transitively). A View that is
   // neither is website-only: the single-source drift risk AGENTS.md warns about.
-  // Anchor on a path boundary (`/`, quote) before the name so a longer View
-  // name that contains a shorter one as a substring can't false-match.
-  const ref = new RegExp(`[/"']${v}\\.svelte`);
-  if (!ref.test(clientSrc) && !ref.test(sharedSrc)) {
+  if (!referenced(v, clientSrc) && !referenced(v, sharedSrc)) {
     problems.push(
       `${v}: no client component wraps it and no shared View composes it (single-source rule)`,
     );
+  }
+}
+
+// Reverse: every registry entry must be a real on-disk View, so a stale name
+// (e.g. after a rename) fails instead of silently rendering nothing. The same
+// applies to every EMBEDDED_VIEWS parent (child existence is covered by the main
+// loop above, which walks every on-disk View).
+const onDiskViews = new Set(views);
+for (const v of galleryViews) {
+  if (!onDiskViews.has(v)) {
+    problems.push(
+      `${v}: in GALLERY_VIEWS but no @tomat/shared/ui/components/**/${v}.svelte exists`,
+    );
+  }
+}
+for (const parent of Object.values(EMBEDDED_VIEWS)) {
+  if (!onDiskViews.has(parent)) {
+    problems.push(
+      `${parent}: named as an EMBEDDED_VIEWS parent but no @tomat/shared/ui/components/**/${parent}.svelte exists`,
+    );
+  }
+}
+
+// The askUser question sub-views (chat/messages/askuser/*) are tightly coupled
+// internals of ToolCallView (callbacks + draft state), not standalone Views, so
+// they earn coverage transitively: ToolCallView is galleried and the toolCall
+// samples exercise each question kind. Enforce that every one is actually
+// imported by ToolCallView, so a new question kind cannot be added without being
+// wired into (and thus shown by) the galleried parent.
+const ASKUSER_DIR = `${VIEWS_DIR}chat/messages/askuser/`;
+const toolCallSrc = await read(`${VIEWS_DIR}chat/messages/ToolCallView.svelte`);
+for await (const e of walk(ASKUSER_DIR, { exts: [".svelte"], includeDirs: false })) {
+  const base = e.name.replace(/\.svelte$/, "");
+  if (!new RegExp(`[/"']${base}\\.svelte`).test(toolCallSrc)) {
+    problems.push(`${base}: askUser question not imported by ToolCallView (it would never render)`);
   }
 }
 

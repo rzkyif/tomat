@@ -65,7 +65,7 @@ other docs defer to it.
 | -------------------------------- | -------------------------------------------------- | ----------------------------------------- |
 | A model's internal reasoning     | **Thinking** ("Show Thinking", "Thinking Budget")  | "Reasoning", "thought process"            |
 | Where a model runs               | **Provider**: **Local** / **External**             | "remote", "on-device"                     |
-| What "Local" means, concretely   | runs **on the core's device** (private)            | "on this device" (the core may be remote) |
+| What "Local" means, concretely   | runs **on the Core's device** (private)            | "on this device" (the Core may be remote) |
 | The persona the user talks to    | **agent** (the actor; "Agent Name")                | "assistant", "bot", "AI"                  |
 | The engine behind the replies    | **model** (what a Provider serves)                 | conflating it with "agent"                |
 | Max tokens considered at once    | **Context Window**                                 | "Context Window Size", "context length"   |
@@ -111,7 +111,10 @@ tone, "Requests, not guarantees").
   split the sentence. Do not substitute another dash character.
 - **Always lowercase tomat**, even at the start of a sentence or heading. (The
   hyphenated package names, `TOMAT_*` env vars, and `au.tomat.ing` are separate
-  tokens and keep their own casing.)
+  tokens and keep their own casing.) Only the word `tomat` is forced lowercase:
+  the two halves are **Core** and **Client**, capitalized whenever they name the
+  service or the app, on their own (preferred) or after the brand ("tomat Core",
+  "tomat Client"). Lowercase `core`/`client` only for genuinely generic uses.
 
 The last two are lint-enforced across every tracked file, including this one and
 all the copy it governs (`deno task lint`).
@@ -165,7 +168,7 @@ conceptual first, task-oriented, never breathless.
   settings and maintenance pages read more like reference. Reach for a comparison
   table when a choice has clear axes (Local vs External; the update channels).
 - **The inline-demo rule (the defining convention).** Whenever the prose
-  discusses a surface that exists in the client, render that surface inline at
+  discusses a surface that exists in the Client, render that surface inline at
   the point of discussion with a demo component from `src/components/demos/`. Do
   not describe a control in the abstract, and do not use a screenshot. The demos
   are the same `@tomat/shared/ui` components the app renders, fed from

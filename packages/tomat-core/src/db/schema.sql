@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS tools (
   triggers_json            TEXT NOT NULL,
   fn_export                TEXT NOT NULL,
   always_available         INTEGER NOT NULL DEFAULT 0,
+  platforms_json           TEXT NOT NULL DEFAULT '[]',  -- OS gating; [] = every platform
   enabled                  INTEGER NOT NULL DEFAULT 0,
   required_permissions_json TEXT NOT NULL DEFAULT '[]',  -- flattened PermissionDecl[]
   UNIQUE(extension_id, name)

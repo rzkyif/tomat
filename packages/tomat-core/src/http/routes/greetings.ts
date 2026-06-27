@@ -14,7 +14,7 @@ import { z } from "zod";
 import { DEFAULT_GREETING_INSTRUCTION, errMessage } from "@tomat/shared";
 import { runAutomatedSession } from "../../services/automated-session.ts";
 import { llmStillLoading } from "../../services/prompt-scheduler.ts";
-import { AppError } from "../../shared/errors.ts";
+import { parseBody, readJson } from "../body.ts";
 import { getLogger } from "../../shared/log.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 
@@ -44,10 +44,7 @@ export function greetingsRoutes(): Hono {
 
   r.post("/run", async (c) => {
     const me = requireClient(c);
-    const parsed = runBodySchema.safeParse(await readJson(c));
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
+    const body = parseBody(runBodySchema, await readJson(c));
     const last = lastGreetingAtByClient.get(me.id);
     if (last !== undefined && Date.now() - last < GREETING_MIN_INTERVAL_MS) {
       return c.json({ ran: false, reason: "recent" });
@@ -59,8 +56,8 @@ export function greetingsRoutes(): Hono {
     for (const [id, t] of lastGreetingAtByClient) {
       if (t < cutoff) lastGreetingAtByClient.delete(id);
     }
-    const instruction = (parsed.data.instruction ?? "").trim() || DEFAULT_GREETING_INSTRUCTION;
-    const sessionTitle = (parsed.data.sessionTitle ?? "").trim() || "Greeting {datetime}";
+    const instruction = (body.instruction ?? "").trim() || DEFAULT_GREETING_INSTRUCTION;
+    const sessionTitle = (body.sessionTitle ?? "").trim() || "Greeting {datetime}";
     void runGreetingWhenReady(me.id, sessionTitle, instruction);
     return c.json({ ran: true });
   });
@@ -93,13 +90,5 @@ async function runGreetingWhenReady(
     });
   } catch (err) {
     log.error(`greeting failed to start: ${errMessage(err)}`);
-  }
-}
-
-async function readJson(c: import("hono").Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
   }
 }

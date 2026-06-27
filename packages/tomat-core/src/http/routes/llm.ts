@@ -16,8 +16,10 @@ import { DEFAULT_AUTOCORRECT_PROMPT, DEFAULT_MERGE_TRANSCRIPTION_PROMPT } from "
 import { loadCoreSettings } from "../../services/core-settings.ts";
 import { resolveEndpoint } from "../../services/endpoint-resolver.ts";
 import { singleShot } from "../../services/single-shot.ts";
+import { strSetting } from "../../services/settings-access.ts";
 import { thinkingBudget } from "../../services/thinking-budget.ts";
 import { AppError } from "../../shared/errors.ts";
+import { readJson } from "../body.ts";
 import { getLogger } from "../../shared/log.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
@@ -91,17 +93,4 @@ export function llmRoutes(): Hono {
   });
 
   return r;
-}
-
-function strSetting(s: Record<string, unknown>, key: string, def: string): string {
-  const v = s[key];
-  return typeof v === "string" ? v : def;
-}
-
-async function readJson(c: import("hono").Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
-  }
 }

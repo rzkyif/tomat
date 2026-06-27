@@ -16,4 +16,14 @@ export const relevantMemoriesSamples = {
     ],
   },
   none: { defaultExpanded: true, memories: [] },
+  collapsed: {
+    defaultExpanded: false,
+    memories: [{ memoryId: "1", title: "Installing tomat", score: 0.92 }],
+  },
+  error: {
+    defaultExpanded: true,
+    status: "error",
+    errorMessage: "Embedding model timed out after 30s.",
+    memories: [],
+  },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof RelevantMemoriesView>>>;

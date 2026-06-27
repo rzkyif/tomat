@@ -179,14 +179,20 @@ _ui_stop_spinner() {
 # --- staging cleanup ------------------------------------------------------
 
 _ui_track_staging() {
-  UI_STAGING_PATHS="$UI_STAGING_PATHS $1"
+  # Newline-separated so a path containing spaces survives cleanup's word split.
+  UI_STAGING_PATHS="$UI_STAGING_PATHS
+$1"
 }
 
 _ui_cleanup_staging() {
   local p
+  local _old_ifs="$IFS"
+  IFS='
+'
   for p in $UI_STAGING_PATHS; do
-    [ -e "$p" ] && rm -f "$p" 2>/dev/null || true
+    [ -n "$p" ] && [ -e "$p" ] && rm -f "$p" 2>/dev/null || true
   done
+  IFS="$_old_ifs"
   UI_STAGING_PATHS=""
 }
 
@@ -425,14 +431,22 @@ case "$uname_os" in
 esac
 
 CLIENT_DATA_DIR="$HOME/.tomat/$TOMAT_CHANNEL/client"
+CORES_JSON="$CLIENT_DATA_DIR/cores.json"
+# On signed desktop builds the Client stores each paired core's bearer token in
+# the OS keychain under this service / account "core:<coreId>" (mirrors the
+# client's channel.rs + keychain.rs). Cleared only under --purge, since the
+# non-purge path keeps the paired-core list for a later re-install.
+KEYCHAIN_SERVICE="tomat-client$CHANNEL_SUFFIX"
 
 # --- begin UI -------------------------------------------------------------
 
 ui_init "tomat-client uninstaller"
 
 IDX_REMOVE_APP=$(ui_action_add "$LABEL_REMOVE")
+IDX_KEYCHAIN=-1
 IDX_PURGE=-1
 if [ "$PURGE" = "1" ]; then
+  IDX_KEYCHAIN=$(ui_action_add "Clearing keychain tokens")
   IDX_PURGE=$(ui_action_add "Removing $CLIENT_DATA_DIR (per --purge)")
 fi
 
@@ -460,7 +474,7 @@ else
   # database when the tool is on PATH (folded into this same row).
   APPIMAGE="$HOME/.local/bin/$APPIMAGE_NAME.AppImage"
   DESKTOP="$HOME/.local/share/applications/$APPIMAGE_NAME.desktop"
-  ICON="$HOME/.local/share/icons/hicolor/512x512/apps/$APPIMAGE_NAME.png"
+  ICON="$HOME/.local/share/icons/hicolor/256x256/apps/$APPIMAGE_NAME.png"
 
   if [ ! -f "$APPIMAGE" ] && [ ! -f "$DESKTOP" ] && [ ! -f "$ICON" ]; then
     ui_action_skip "$IDX_REMOVE_APP" "(not installed)"
@@ -482,7 +496,43 @@ else
   fi
 fi
 
-# --- action 2 (conditional): purge client data ---------------------------
+# --- action 2 (conditional): clear keychain tokens -----------------------
+# Runs before the data dir (which holds cores.json) is removed. macOS only:
+# the Client ships no keychain CLI and keyring-core's store format differs per
+# OS, so elsewhere we leave the tokens and say so rather than skip silently.
+
+if [ "$IDX_KEYCHAIN" != "-1" ]; then
+  if [ "$uname_os" != "Darwin" ]; then
+    ui_action_skip "$IDX_KEYCHAIN" "(tokens may remain in keychain)"
+  elif ! command -v security >/dev/null 2>&1; then
+    ui_action_skip "$IDX_KEYCHAIN" "(security tool not found)"
+  elif [ ! -f "$CORES_JSON" ]; then
+    ui_action_skip "$IDX_KEYCHAIN" "(no tokens)"
+  else
+    ui_action_start "$IDX_KEYCHAIN" "Clearing keychain tokens"
+    if command -v jq >/dev/null 2>&1; then
+      CORE_IDS="$(jq -r '.cores[]?.id // empty' "$CORES_JSON" 2>/dev/null || true)"
+    else
+      # Grep fallback: pull every "id": "<value>" (only core entries carry an
+      # `id` key; the current pointer is `currentCoreId`), works minified too.
+      CORE_IDS="$(grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]+"' "$CORES_JSON" 2>/dev/null \
+        | grep -oE '"[^"]+"$' | tr -d '"' || true)"
+    fi
+    CLEARED=0
+    for id in $CORE_IDS; do
+      if security delete-generic-password -s "$KEYCHAIN_SERVICE" -a "core:$id" >/dev/null 2>&1; then
+        CLEARED=$((CLEARED + 1))
+      fi
+    done
+    if [ "$CLEARED" = "0" ]; then
+      ui_action_skip "$IDX_KEYCHAIN" "(no tokens)"
+    else
+      ui_action_done "$IDX_KEYCHAIN" "(cleared $CLEARED)"
+    fi
+  fi
+fi
+
+# --- action 3 (conditional): purge client data ---------------------------
 
 if [ "$IDX_PURGE" != "-1" ]; then
   if [ ! -d "$CLIENT_DATA_DIR" ]; then
@@ -501,7 +551,14 @@ fi
 # --- footer ---------------------------------------------------------------
 
 if [ "$PURGE" = "1" ]; then
-  ui_finish "tomat-client uninstalled."
+  if [ "$uname_os" != "Darwin" ]; then
+    ui_finish \
+      "tomat-client uninstalled." \
+      "" \
+      "A few paired-core tokens may remain in your OS keychain; remove them manually if desired."
+  else
+    ui_finish "tomat-client uninstalled."
+  fi
 else
   ui_finish \
     "tomat-client uninstalled." \

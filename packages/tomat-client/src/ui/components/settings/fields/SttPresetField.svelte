@@ -5,14 +5,12 @@
   import { sttModelsState } from "../../../state/stt-models.svelte";
   import { cores } from "$lib/core";
   import FieldCard from "./FieldCard.svelte";
-  import OptionCard from "@tomat/shared/ui/components/primitives/OptionCard.svelte";
-  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
-  import HelpText from "@tomat/shared/ui/components/primitives/HelpText.svelte";
-  import Alert from "@tomat/shared/ui/components/primitives/Alert.svelte";
+  import SttPresetFieldView from "@tomat/shared/ui/components/settings/SttPresetFieldView.svelte";
 
   // The Speech-to-Text catalog picker. Like ModelPresetField, each card binds
   // to a catalog model and selecting one calls the select API; unlike it there
   // is no fit engine (whisper models fit everywhere), so no buckets or recheck.
+  // This shell owns the catalog store and feeds the pure SttPresetFieldView.
   let { field, onPresetSelect } = $props<{
     field: SettingField;
     onPresetSelect: (fieldId: string, option: PresetOption) => void;
@@ -46,6 +44,28 @@
   function cardPreset(id: string) {
     return ss.catalog?.presets.find((p) => p.id === id) ?? null;
   }
+
+  // --- preset cards -------------------------------------------------------
+  const presets = $derived(
+    cardOptions.map((opt) => {
+      const preset = cardPreset(opt.id);
+      return {
+        id: opt.id,
+        title: opt.title ?? opt.label,
+        description: opt.description,
+        selected: settingsState.currentSettings[field.id] === opt.id,
+        selectable: !!preset,
+        badges: preset
+          ? [
+            { icon: "i-material-symbols-graphic-eq-rounded", text: preset.name },
+            { icon: "i-material-symbols-memory-rounded", text: size(preset.fileSizeBytes) },
+            { icon: "i-material-symbols-language", text: language(preset.english) },
+          ]
+          : null,
+        placeholder: preset ? undefined : ss.loading ? "Loading catalog…" : undefined,
+      };
+    }),
+  );
 
   // --- manual model + quantization dropdowns ------------------------------
 
@@ -103,6 +123,20 @@
   );
   const selectedQuant = $derived(settingsState.currentSettings["stt.modelPath"] as string);
 
+  const custom = $derived(
+    customOption
+      ? {
+        title: customOption.title ?? customOption.label,
+        description: customOption.description,
+        selected: settingsState.currentSettings[field.id] === customOption.id,
+        model: { value: selectedModel, options: modelOptions },
+        quant: !manualSelected && selectedModelView
+          ? { value: selectedQuant, options: quantOptions }
+          : null,
+      }
+      : null,
+  );
+
   function onModelSelect(value: string): void {
     if (value === MANUAL) {
       // Switch to Custom without touching the whisper-server fields, and hide
@@ -121,87 +155,13 @@
 </script>
 
 <FieldCard {field}>
-  <div class="flex flex-col gap-2">
-    {#if ss.error}
-      <Alert variant="error" size="sm">{ss.error}</Alert>
-    {/if}
-
-    {#each cardOptions as opt}
-      {@const preset = cardPreset(opt.id)}
-      {@const selected = settingsState.currentSettings[field.id] === opt.id}
-      {#snippet badges()}
-        {#if preset}
-          <span class="inline-flex items-center gap-1">
-            <i class="i-material-symbols-graphic-eq-rounded text-sm"></i>
-            <span>{preset.name}</span>
-          </span>
-          <span class="inline-flex items-center gap-1">
-            <i class="i-material-symbols-memory-rounded text-sm"></i>
-            <span>{size(preset.fileSizeBytes)}</span>
-          </span>
-          <span class="inline-flex items-center gap-1">
-            <i class="i-material-symbols-language text-sm"></i>
-            <span>{language(preset.english)}</span>
-          </span>
-        {:else if ss.loading}
-          <span class="opacity-60">Loading catalog…</span>
-        {/if}
-      {/snippet}
-      <OptionCard
-        {selected}
-        title={opt.title ?? opt.label}
-        description={opt.description}
-        badges={badges}
-        ariaLabel={opt.title}
-        onclick={() => preset && ss.applyPreset(opt.id)}
-      />
-    {/each}
-
-    {#if customOption}
-      {@const isCustom = settingsState.currentSettings[field.id] === customOption.id}
-      {@const labelClass = isCustom ? "text-default-inverted-600" : "text-default-600"}
-      <div
-        class="flex flex-col gap-2 p-3 rounded-large {isCustom
-          ? 'bg-default-inverted-300 text-default-inverted-800'
-          : 'bg-surface-inset text-default-800'}"
-      >
-        <button
-          type="button"
-          class="text-left flex flex-col gap-1.5 cursor-pointer outline-none"
-          onclick={() => onPresetSelect(field.id, customOption)}
-        >
-          <span class="text-base font-semibold leading-tight">
-            {customOption.title ?? customOption.label}
-          </span>
-          {#if customOption.description}
-            <HelpText
-              text={customOption.description}
-              variant="compact"
-              class={isCustom ? "text-default-inverted-500" : "text-default-500"}
-            />
-          {/if}
-        </button>
-        <div class="flex flex-col gap-1">
-          <span class="text-xs font-medium {labelClass}">Model</span>
-          <Select
-            value={selectedModel}
-            options={modelOptions}
-            onchange={onModelSelect}
-            ariaLabel="Choose a model"
-          />
-        </div>
-        {#if !manualSelected && selectedModelView}
-          <div class="flex flex-col gap-1">
-            <span class="text-xs font-medium {labelClass}">Quantization</span>
-            <Select
-              value={selectedQuant}
-              options={quantOptions}
-              onchange={onQuantSelect}
-              ariaLabel="Choose a quantization"
-            />
-          </div>
-        {/if}
-      </div>
-    {/if}
-  </div>
+  <SttPresetFieldView
+    error={ss.error}
+    {presets}
+    {custom}
+    onSelectPreset={(id) => ss.applyPreset(id)}
+    onSelectCustom={() => customOption && onPresetSelect(field.id, customOption)}
+    {onModelSelect}
+    {onQuantSelect}
+  />
 </FieldCard>

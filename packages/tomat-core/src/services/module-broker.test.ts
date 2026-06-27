@@ -51,6 +51,7 @@ function seedExtension(
       triggers: [],
       fnExport: "doThing",
       alwaysAvailable: false,
+      platforms: [],
       requiredPermissions: opts.permissions ?? [],
     },
   ]);

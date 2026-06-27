@@ -12,6 +12,7 @@ import {
 } from "../../services/core-settings.ts";
 import { deleteSecret, listSecretNames, setSecret } from "../../services/secrets.ts";
 import { AppError } from "../../shared/errors.ts";
+import { readJson } from "../body.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 
 // Sanitize a settings record before it crosses the API: keep only known
@@ -102,12 +103,4 @@ export function settingsRoutes(): Hono {
   });
 
   return r;
-}
-
-async function readJson(c: import("hono").Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
-  }
 }

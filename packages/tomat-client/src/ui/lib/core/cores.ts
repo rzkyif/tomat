@@ -90,7 +90,7 @@ class CoresRegistry {
     const stored = await platform().keychain.get(entry.id);
     if (stored !== token) {
       throw new Error(
-        "Could not save this core's access token to the system keychain. " +
+        "Could not save this Core's access token to the system keychain. " +
           "Grant keychain access (or unlock it) and pair again.",
       );
     }
@@ -317,6 +317,26 @@ let _instance: CoresRegistry | null = null;
 export function cores(): CoresRegistry {
   if (!_instance) _instance = new CoresRegistry();
   return _instance;
+}
+
+// On-demand mode: when the selected core points at loopback and the binary
+// is installed locally, spawn it ourselves if no service has it running.
+// Idempotent: start_local_core probes the port first and exits cleanly if
+// the core is already up. Failures are non-fatal: the user sees a normal
+// "could not reach core" error from the regular call paths.
+export async function ensureLocalCoreUpIfNeeded(): Promise<void> {
+  const current = cores().currentEntry();
+  if (!current) return;
+  if (!current.baseUrl.includes("127.0.0.1") && !current.baseUrl.includes("localhost")) {
+    return;
+  }
+  try {
+    if (await platform().pairing.isLocalCoreInstalled()) {
+      await platform().pairing.startLocalCore();
+    }
+  } catch (e) {
+    log.error("ensureLocalCoreUpIfNeeded:", e);
+  }
 }
 
 if (import.meta.hot) {

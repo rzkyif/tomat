@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { scheduledPromptDraftSchema, scheduleSpecSchema } from "@tomat/shared";
 import { promptScheduler } from "../../services/prompt-scheduler.ts";
-import { AppError } from "../../shared/errors.ts";
+import { parseBody, readJson } from "../body.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 
 const patchBodySchema = z
@@ -30,20 +30,14 @@ export function scheduledPromptsRoutes(): Hono {
 
   r.post("/", async (c) => {
     const me = requireClient(c);
-    const parsed = scheduledPromptDraftSchema.safeParse(await readJson(c));
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
-    return c.json(promptScheduler().create(me.id, parsed.data), 201);
+    const body = parseBody(scheduledPromptDraftSchema, await readJson(c));
+    return c.json(promptScheduler().create(me.id, body), 201);
   });
 
   r.patch("/:id", async (c) => {
     const me = requireClient(c);
-    const parsed = patchBodySchema.safeParse(await readJson(c));
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
-    return c.json(promptScheduler().update(me.id, c.req.param("id"), parsed.data));
+    const body = parseBody(patchBodySchema, await readJson(c));
+    return c.json(promptScheduler().update(me.id, c.req.param("id"), body));
   });
 
   r.delete("/:id", (c) => {
@@ -59,12 +53,4 @@ export function scheduledPromptsRoutes(): Hono {
   });
 
   return r;
-}
-
-async function readJson(c: import("hono").Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
-  }
 }

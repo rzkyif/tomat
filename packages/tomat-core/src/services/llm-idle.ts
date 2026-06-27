@@ -16,6 +16,7 @@
 import { sidecarManager } from "../sidecars/manager.ts";
 import { buildLlamaStartOptions, llamaStartArgsFromSettings } from "../sidecars/llama.ts";
 import { getLogger } from "../shared/log.ts";
+import { numSetting } from "./settings-access.ts";
 import { errMessage } from "@tomat/shared";
 
 const log = getLogger("llm-idle");
@@ -90,14 +91,4 @@ let _instance: LlmIdleManager | null = null;
 export function llmIdle(): LlmIdleManager {
   if (!_instance) _instance = new LlmIdleManager();
   return _instance;
-}
-
-function numSetting(s: Record<string, unknown>, k: string, def: number): number {
-  const v = s[k];
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v !== "") {
-    const n = Number(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return def;
 }

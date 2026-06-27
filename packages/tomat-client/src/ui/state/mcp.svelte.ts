@@ -9,6 +9,7 @@ import type { McpPrompt, McpResource, McpServer, ServerToClientFrame } from "@to
 import { cores } from "$lib/core/cores";
 import type { McpServerInput } from "$lib/core/mcp";
 import { getLogger } from "$lib/util/log";
+import { Subscriptions } from "$lib/util/subscriptions";
 
 const log = getLogger("mcp");
 
@@ -18,23 +19,20 @@ class McpState {
   resources = $state<McpResource[]>([]);
   wsConnected = $state(false);
 
-  private unsubscribeWs: (() => void) | null = null;
-  private unsubscribeConn: (() => void) | null = null;
+  private subs = new Subscriptions();
 
   attach(): void {
-    if (this.unsubscribeWs) return;
-    this.unsubscribeWs = cores().subscribeWs((f) => this.onFrame(f));
-    this.unsubscribeConn = cores().subscribeConnectionState((state) => {
-      this.wsConnected = state === "connected";
-      if (state === "connected") void this.refresh();
-    });
+    this.subs.attach(() => [
+      cores().subscribeWs((f) => this.onFrame(f)),
+      cores().subscribeConnectionState((state) => {
+        this.wsConnected = state === "connected";
+        if (state === "connected") void this.refresh();
+      }),
+    ]);
   }
 
   detach(): void {
-    this.unsubscribeWs?.();
-    this.unsubscribeConn?.();
-    this.unsubscribeWs = null;
-    this.unsubscribeConn = null;
+    this.subs.detach();
   }
 
   private onFrame(frame: ServerToClientFrame): void {

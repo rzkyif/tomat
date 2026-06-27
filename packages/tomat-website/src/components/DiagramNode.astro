@@ -1,0 +1,46 @@
+---
+// One Client / Core role chip inside a device card in the install-page diagram.
+// These are the actual connection endpoints: the flow dots travel between their
+// centres, and the chips sit above the dots (z-2) so a dot is fully covered when
+// it reaches either end. Colours come from the diagram's inverted-theme `--dg-*`
+// aliases. Positioned by the `style` (left/top) the diagram passes; centres on it.
+interface Props {
+  role: "client" | "core";
+  style?: string;
+}
+const { role, style } = Astro.props;
+const ICON = { client: "i-mdi-monitor-dashboard", core: "i-mdi-server" } as const;
+const NAME = { client: "Client", core: "Core" } as const;
+---
+
+<div class={`dg-node dg-node-${role}`} style={style}>
+  <i class={`${ICON[role]} dg-node-icon`} aria-hidden="true"></i>
+  <span>{NAME[role]}</span>
+</div>
+
+<style>
+  .dg-node {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 0.28rem;
+    padding: 0.26rem 0.5rem;
+    border-radius: var(--rounded-medium);
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .dg-node-icon {
+    font-size: 0.9rem;
+  }
+  .dg-node-client {
+    background: var(--dg-client-bg);
+    color: var(--dg-client-fg);
+  }
+  .dg-node-core {
+    background: var(--dg-core-bg);
+    color: var(--dg-core-fg);
+  }
+</style>

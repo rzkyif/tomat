@@ -29,6 +29,7 @@ import {
 import type { AskUserAnswer } from "$lib/util/types";
 import { cores } from "$lib/core";
 import { getLogger } from "$lib/util/log";
+import { Subscriptions } from "$lib/util/subscriptions";
 import { messagesState } from "./messages.svelte";
 import { streamingState } from "./streaming.svelte";
 
@@ -72,8 +73,14 @@ class ExtensionsState {
     return this.installed.some((t) => t.id === BUILTIN_EXTENSION_ID);
   }
 
-  private unsubscribeWs: (() => void) | null = null;
-  private unsubscribeConn: (() => void) | null = null;
+  /** Whether the built-in is present on disk but its tools aren't installed yet
+   *  (status 'downloaded'). This is the state the Tools install prompt targets;
+   *  if the built-in is absent (user deleted it) this is false. */
+  get isBuiltinPendingInstall(): boolean {
+    return this.installed.some((t) => t.id === BUILTIN_EXTENSION_ID && t.status === "downloaded");
+  }
+
+  private subs = new Subscriptions();
   private hydrated = false;
   /** Resolvers awaiting a job's terminal state, keyed by job id (see awaitJob). */
   private jobWaiters = new Map<string, (job: InstallJob) => void>();
@@ -83,36 +90,25 @@ class ExtensionsState {
    *  The CoreClient already handles reconnects internally; this method is
    *  idempotent so re-mounts don't double-subscribe. */
   attach(): void {
-    if (this.unsubscribeWs) return;
-    this.unsubscribeWs = cores().subscribeWs((f) => this.onFrame(f));
-    this.unsubscribeConn = cores().subscribeConnectionState((state) => {
-      this.wsConnected = state === "connected";
-      // First successful connection: hydrate the installed list. The CoreClient
-      // emits "connected" on every reconnect too, so we re-fetch each time to
-      // pick up anything that changed while we were offline.
-      if (state === "connected") {
-        void this.refresh().catch((err) => log.warn("hydrate on ws connect failed:", err));
-      }
+    this.subs.attach(() => {
+      this.hydrated = true;
+      return [
+        cores().subscribeWs((f) => this.onFrame(f)),
+        cores().subscribeConnectionState((state) => {
+          this.wsConnected = state === "connected";
+          // First successful connection: hydrate the installed list. The
+          // CoreClient emits "connected" on every reconnect too, so we re-fetch
+          // each time to pick up anything that changed while we were offline.
+          if (state === "connected") {
+            void this.refresh().catch((err) => log.warn("hydrate on ws connect failed:", err));
+          }
+        }),
+      ];
     });
-    this.hydrated = true;
-  }
-
-  /** Backwards-compatible alias for the previous WS-bootstrap entry point.
-   *  `+page.svelte` still calls `ensureConnected()`; rather than touch that
-   *  file, we forward to `attach()`. */
-  ensureConnected(): void {
-    this.attach();
   }
 
   detach(): void {
-    if (this.unsubscribeWs) {
-      this.unsubscribeWs();
-      this.unsubscribeWs = null;
-    }
-    if (this.unsubscribeConn) {
-      this.unsubscribeConn();
-      this.unsubscribeConn = null;
-    }
+    this.subs.detach();
     this.hydrated = false;
   }
 
@@ -263,6 +259,13 @@ class ExtensionsState {
   /** Download the built-in extension from the CDN (codebase in dev). */
   async downloadBuiltin(): Promise<string> {
     return await this.download({ source: "builtin" });
+  }
+
+  /** Install the built-in's tools at the user's request (the Tools prompt).
+   *  Returns `{ queued: true }` when the worker runtime isn't downloaded yet, in
+   *  which case the install runs automatically once it lands. */
+  async installBuiltinToolkit(): Promise<{ queued: boolean }> {
+    return await cores().api().extensions.installBuiltin();
   }
 
   /** Update a extension to its latest version (npm registry or built-in CDN
@@ -429,11 +432,6 @@ class ExtensionsState {
       if (tool) return { extensionId: tk.id, toolId: tool.id };
     }
     return null;
-  }
-
-  /** Back-compat shim for callers still using the legacy method name. */
-  answerAskUser(callId: string, requestId: string, answers: AskUserAnswer[]): void {
-    this.respondAskUser(callId, requestId, answers);
   }
 }
 

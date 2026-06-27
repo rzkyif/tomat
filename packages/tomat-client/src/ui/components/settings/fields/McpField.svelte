@@ -7,8 +7,8 @@
   import type { Accent } from "@tomat/shared/ui/components/objects/object-types";
   import ObjectManager from "$components/ui/ObjectManager.svelte";
   import ObjectCard from "$components/ui/ObjectCard.svelte";
-  import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeader.svelte";
-  import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScroll.svelte";
+  import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeaderView.svelte";
+  import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScrollView.svelte";
   import McpDetail from "./McpDetail.svelte";
 
   let { horizontal = false }: { horizontal?: boolean } = $props();

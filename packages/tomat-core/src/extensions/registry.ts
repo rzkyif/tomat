@@ -18,7 +18,8 @@ import type {
 import { db } from "../db/connection.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
-import { errMessage, permissionKey } from "@tomat/shared";
+import { hostPlatforms } from "../shared/platform.ts";
+import { errMessage, permissionKey, toolPlatformSupported } from "@tomat/shared";
 import { hashExtension, statSignature } from "./hash.ts";
 import { getLogger } from "../shared/log.ts";
 
@@ -48,6 +49,7 @@ export interface ToolInsertInput {
   triggers: string[];
   fnExport: string;
   alwaysAvailable: boolean;
+  platforms: string[];
   requiredPermissions: PermissionDecl[];
 }
 
@@ -189,6 +191,13 @@ export class ExtensionsRegistry {
     this.hashVerifiedCache.delete(id);
   }
 
+  // Flag drift AND disable every tool, the two steps every drift detection
+  // takes together so a tampered extension can never stay LLM-exposed.
+  private flagDrift(id: string): void {
+    this.markDrift(id);
+    this.disableAllTools(id);
+  }
+
   // Confirm-reenable: re-pin the CURRENT on-disk content as trusted, clear the
   // drift state, return to 'installed'. The user re-enables tools afterward
   // (they were disabled when drift was flagged).
@@ -233,8 +242,7 @@ export class ExtensionsRegistry {
       } catch (err) {
         const msg = errMessage(err);
         log.warn(`[${tk.id}] hash failed: ${msg}; flagging drift`);
-        this.markDrift(tk.id);
-        this.disableAllTools(tk.id);
+        this.flagDrift(tk.id);
         drifted.push(tk.id);
         continue;
       }
@@ -245,8 +253,7 @@ export class ExtensionsRegistry {
             12,
           )} actual=${actualHash.slice(0, 12)}; disabling tools`,
         );
-        this.markDrift(tk.id);
-        this.disableAllTools(tk.id);
+        this.flagDrift(tk.id);
         drifted.push(tk.id);
       }
     }
@@ -277,8 +284,7 @@ export class ExtensionsRegistry {
     try {
       actual = await hashExtension(tk.installedPath);
     } catch (err) {
-      this.markDrift(extensionId);
-      this.disableAllTools(extensionId);
+      this.flagDrift(extensionId);
       throw new AppError(
         "extension_hash_drift",
         `extension ${extensionId} hash failed: ${errMessage(err)}`,
@@ -288,8 +294,7 @@ export class ExtensionsRegistry {
       this.hashVerifiedCache.set(extensionId, { sig, hash: actual });
       return;
     }
-    this.markDrift(extensionId);
-    this.disableAllTools(extensionId);
+    this.flagDrift(extensionId);
     throw new AppError(
       "extension_hash_drift",
       `extension ${extensionId} content changed since it was trusted`,
@@ -339,8 +344,8 @@ export class ExtensionsRegistry {
           .prepare(`
           INSERT INTO tools
             (id, extension_id, name, description, parameters_json, triggers_json,
-             fn_export, always_available, enabled, required_permissions_json)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             fn_export, always_available, platforms_json, enabled, required_permissions_json)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
           .run(
             id,
@@ -351,6 +356,7 @@ export class ExtensionsRegistry {
             JSON.stringify(t.triggers),
             t.fnExport,
             t.alwaysAvailable ? 1 : 0,
+            JSON.stringify(t.platforms),
             prior ? prior.enabled : 0,
             JSON.stringify(t.requiredPermissions),
           );
@@ -376,16 +382,23 @@ export class ExtensionsRegistry {
     }
   }
 
+  // Excludes tools the host OS doesn't support (toolPlatformSupported), so an
+  // OS-gated tool is invisible to every consumer: chat selection, the route
+  // layer, and the Tools UI.
   listTools(extensionId: string): Tool[] {
     const rows = db()
       .prepare(`
       SELECT id, extension_id, name, description, parameters_json, triggers_json,
-             fn_export, always_available, enabled, required_permissions_json
+             fn_export, always_available, platforms_json, enabled, required_permissions_json
       FROM tools WHERE extension_id = ?
       ORDER BY name ASC
     `)
       .all(extensionId) as Array<Record<string, unknown>>;
-    return rows.map((r) => this.attachGrants(rowToTool(r)));
+    const host = hostPlatforms();
+    return rows
+      .map((r) => rowToTool(r))
+      .filter((t) => toolPlatformSupported(t.platforms, host))
+      .map((t) => this.attachGrants(t));
   }
 
   /** Every tool from every installed extension, flat, each tagged with its
@@ -401,15 +414,20 @@ export class ExtensionsRegistry {
     return out;
   }
 
+  // Returns undefined for a tool the host OS doesn't support, so dispatch
+  // refuses to execute an OS-gated tool even if its id is referenced directly.
   getTool(toolId: string): Tool | undefined {
     const row = db()
       .prepare(`
       SELECT id, extension_id, name, description, parameters_json, triggers_json,
-             fn_export, always_available, enabled, required_permissions_json
+             fn_export, always_available, platforms_json, enabled, required_permissions_json
       FROM tools WHERE id = ?
     `)
       .get(toolId) as Record<string, unknown> | undefined;
-    return row ? this.attachGrants(rowToTool(row)) : undefined;
+    if (!row) return undefined;
+    const tool = rowToTool(row);
+    if (!toolPlatformSupported(tool.platforms, hostPlatforms())) return undefined;
+    return this.attachGrants(tool);
   }
 
   setToolEnabled(extensionId: string, name: string, enabled: boolean): void {
@@ -617,6 +635,7 @@ function rowToTool(row: Record<string, unknown>): Tool {
     triggers: JSON.parse(String(row.triggers_json)),
     fnExport: String(row.fn_export),
     alwaysAvailable: Number(row.always_available) === 1,
+    platforms: row.platforms_json ? JSON.parse(String(row.platforms_json)) : [],
     enabled: Number(row.enabled) === 1,
     requiredPermissions: row.required_permissions_json
       ? JSON.parse(String(row.required_permissions_json))

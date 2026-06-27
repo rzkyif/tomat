@@ -4,13 +4,12 @@
   import { confirmState, passwordPromptState, viewState } from "$stores";
   import type { ParsedQuery } from "$lib/objects/query";
   import { type MenuRow, showFilterSortMenu, showObjectActionMenu } from "$lib/objects/menu";
+  import { createDebouncedSave } from "$lib/util/debounced-save";
   import ObjectManager from "$components/ui/ObjectManager.svelte";
   import ObjectCard from "$components/ui/ObjectCard.svelte";
-  import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeader.svelte";
-  import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScroll.svelte";
-  import FormField from "@tomat/shared/ui/components/primitives/FormField.svelte";
-  import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
-  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
+  import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeaderView.svelte";
+  import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScrollView.svelte";
+  import CoresFieldView from "@tomat/shared/ui/components/settings/CoresFieldView.svelte";
 
   let query = $state("");
   let selectedItem = $state<PairedCoreEntry | null>(null);
@@ -21,7 +20,6 @@
   // different core is opened. Reads selectedItem only, so typing won't reset it.
   let draftName = $state("");
   let savedName = $state("");
-  let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Pairing-key generation + the paired-devices list are only available for the
   // CURRENT core, because we hold a live bearer connection (CoreClient) only for
@@ -117,16 +115,7 @@
     return `last seen ${days} day${days === 1 ? "" : "s"} ago`;
   }
 
-  function scheduleSave() {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void flushSave(), 500);
-  }
-
-  async function flushSave() {
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
-    }
+  const { scheduleSave, flushSave } = createDebouncedSave(async () => {
     const id = selectedItem?.id;
     const name = draftName.trim();
     if (!id || !name || name === savedName) return;
@@ -136,7 +125,7 @@
     } catch (e) {
       confirmState.alert({ title: "Rename failed", message: errMessage(e) });
     }
-  }
+  });
 
   async function doSwitch(c: PairedCoreEntry) {
     try {
@@ -148,7 +137,7 @@
 
   function doUnpair(c: PairedCoreEntry, after?: () => void) {
     confirmState.request({
-      title: "Unpair core",
+      title: "Unpair Core",
       message: `Unpair "${c.name}"? You will need to pair again to reconnect.`,
       destructive: true,
       confirmLabel: "Unpair",
@@ -206,7 +195,7 @@
 <ObjectManager
   {load}
   idOf={(c) => c.id}
-  searchPlaceholder="Search paired cores"
+  searchPlaceholder="Search paired Cores"
   subscribe={(onChange) => cores().subscribe(onChange)}
   bind:query
   bind:selectedItem
@@ -241,96 +230,41 @@
       actions={detailActions(item, close)}
     />
     <ObjectDetailScroll>
-      <FormField label="Name">
-        <Input
-          type="text"
-          value={draftName}
-          ariaLabel="Core name"
-          oninput={(v) => {
-            draftName = v;
-            scheduleSave();
-          }}
-          onblur={() => flushSave()}
-        />
-      </FormField>
-      <FormField label="Address">
-        <div class="text-sm text-default-700 font-mono break-all">{item.baseUrl}</div>
-      </FormField>
-
-      {#if isCurrent(item.id)}
-        <FormField
-          label="Pairing code"
-          description="Generate a one-time code to pair a new device. You'll need your admin password."
-        >
-          {#if mintedCode}
-            <div class="flex flex-col gap-2 bg-surface-inset rounded-medium px-3 py-3">
-              <div class="flex items-center gap-2">
-                <div class="flex-1 text-2xl font-mono tracking-widest text-default-800 select-all">
-                  {mintedCode}
-                </div>
-                <Button variant="secondary" size="sm" onclick={() => copyCode()}>
-                  {codeCopied ? "Copied" : "Copy"}
-                </Button>
-              </div>
-              {#if mintedExpiresAtMs}
-                <div class="text-xs text-default-500">
-                  Enter it on the new device. This code {expiresInLabel(mintedExpiresAtMs)}.
-                </div>
-              {/if}
-              <div>
-                <Button variant="ghost" size="sm" onclick={() => generatePairingCode()}>
-                  Generate another
-                </Button>
-              </div>
-            </div>
-          {:else}
-            <Button variant="secondary" onclick={() => generatePairingCode()}>
-              Generate pairing code
-            </Button>
-          {/if}
-        </FormField>
-
-        <FormField label="Paired devices">
-          {#if devicesError}
-            <div class="text-sm text-accent-red-600">{devicesError}</div>
-          {:else if devices === null}
-            <div class="text-sm text-default-500">Loading…</div>
-          {:else if devices.length === 0}
-            <div class="text-sm text-default-500">No paired devices.</div>
-          {:else}
-            <div class="flex flex-col gap-1">
-              {#each devices as d (d.id)}
-                <div class="flex items-center gap-2 bg-surface-inset rounded-medium px-3 py-2">
-                  <div class="flex flex-col flex-1 min-w-0">
-                    <div class="text-sm text-default-800 truncate">{d.name}</div>
-                    <div class="text-xs text-default-500 truncate">{lastSeenLabel(d.lastSeenMs)}</div>
-                  </div>
-                  {#if d.isMe}
-                    <span class="text-xs text-default-500 shrink-0">This device</span>
-                  {:else}
-                    <Button variant="ghost" size="sm" onclick={() => removeDevice(d)}>
-                      Remove
-                    </Button>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </FormField>
-      {:else}
-        <div class="text-sm text-default-500">
-          Switch to this core to generate pairing keys and manage its devices.
-        </div>
-      {/if}
+      <CoresFieldView
+        {draftName}
+        baseUrl={item.baseUrl}
+        isCurrent={isCurrent(item.id)}
+        {mintedCode}
+        mintedExpiresLabel={mintedExpiresAtMs ? expiresInLabel(mintedExpiresAtMs) : null}
+        {codeCopied}
+        devices={devices?.map((d) => ({
+          id: d.id,
+          name: d.name,
+          lastSeenLabel: lastSeenLabel(d.lastSeenMs),
+          isMe: d.isMe,
+        })) ?? null}
+        {devicesError}
+        onNameInput={(v) => {
+          draftName = v;
+          scheduleSave();
+        }}
+        onNameBlur={() => flushSave()}
+        onGenerateCode={() => generatePairingCode()}
+        onCopyCode={() => copyCode()}
+        onRemoveDevice={(id) => {
+          const d = devices?.find((x) => x.id === id);
+          if (d) removeDevice(d);
+        }}
+      />
     </ObjectDetailScroll>
   {/snippet}
   {#snippet empty()}
     <div class="flex flex-col items-center justify-center gap-1 py-12 text-center">
       {#if query.trim()}
-        <div class="text-base text-default-700">No matching cores</div>
+        <div class="text-base text-default-700">No matching Cores</div>
       {:else}
-        <div class="text-base text-default-700">No paired cores</div>
-        <div class="text-sm text-default-500">Use the menu to pair a new core.</div>
+        <div class="text-base text-default-700">No paired Cores</div>
+        <div class="text-sm text-default-500">Use the menu to pair a new Core.</div>
       {/if}
     </div>
   {/snippet}

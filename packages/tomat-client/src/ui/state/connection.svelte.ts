@@ -9,6 +9,7 @@
 
 import type { ConnectionState } from "$lib/core/client";
 import { cores } from "$lib/core";
+import { Subscriptions } from "$lib/util/subscriptions";
 
 const RECONNECT_BANNER_DELAY_MS = 5_000;
 
@@ -31,48 +32,48 @@ class ConnectionStateStore {
   // the reconnect loop; cleared once connected.
   reason = $state<string | null>(null);
 
-  private unsubscribe: (() => void) | null = null;
+  private subs = new Subscriptions();
   // ReturnType so the type works under both browser (number) and node typing.
   private bannerTimer: ReturnType<typeof setTimeout> | null = null;
 
   attach(): void {
-    if (this.unsubscribe) return;
-    this.unsubscribe = cores().subscribeConnectionState((s, r) => {
-      this.state = s;
-      if (s === "connected") {
-        this.disconnectedSinceMs = null;
-        this.clearBannerTimer();
-        this.reconnecting = false;
-        this.unauthorized = false;
-        this.reason = null;
-      } else if (s === "unauthorized") {
-        // Terminal: the client has stopped retrying. Drop the reconnect spinner
-        // and show the re-pair prompt; keep the reason for the message.
-        this.clearBannerTimer();
-        this.reconnecting = false;
-        this.unauthorized = true;
-        if (r) this.reason = r;
-      } else if (s === "disconnected" || s === "connecting") {
-        // Keep the last known reason through the connecting/disconnected churn.
-        if (r) this.reason = r;
-        if (this.disconnectedSinceMs === null) {
-          this.disconnectedSinceMs = Date.now();
+    this.subs.attach(() => [
+      cores().subscribeConnectionState((s, r) => {
+        this.state = s;
+        if (s === "connected") {
+          this.disconnectedSinceMs = null;
+          this.clearBannerTimer();
+          this.reconnecting = false;
+          this.unauthorized = false;
+          this.reason = null;
+        } else if (s === "unauthorized") {
+          // Terminal: the client has stopped retrying. Drop the reconnect spinner
+          // and show the re-pair prompt; keep the reason for the message.
+          this.clearBannerTimer();
+          this.reconnecting = false;
+          this.unauthorized = true;
+          if (r) this.reason = r;
+        } else if (s === "disconnected" || s === "connecting") {
+          // Keep the last known reason through the connecting/disconnected churn.
+          if (r) this.reason = r;
+          if (this.disconnectedSinceMs === null) {
+            this.disconnectedSinceMs = Date.now();
+          }
+          if (!this.reconnecting && this.bannerTimer === null) {
+            this.bannerTimer = setTimeout(() => {
+              this.bannerTimer = null;
+              // Re-check at fire time: a quick reconnect may have already
+              // flipped state back.
+              if (this.state !== "connected") this.reconnecting = true;
+            }, RECONNECT_BANNER_DELAY_MS);
+          }
         }
-        if (!this.reconnecting && this.bannerTimer === null) {
-          this.bannerTimer = setTimeout(() => {
-            this.bannerTimer = null;
-            // Re-check at fire time: a quick reconnect may have already
-            // flipped state back.
-            if (this.state !== "connected") this.reconnecting = true;
-          }, RECONNECT_BANNER_DELAY_MS);
-        }
-      }
-    });
+      }),
+    ]);
   }
 
   detach(): void {
-    this.unsubscribe?.();
-    this.unsubscribe = null;
+    this.subs.detach();
     this.clearBannerTimer();
     this.state = "connecting";
     this.disconnectedSinceMs = null;

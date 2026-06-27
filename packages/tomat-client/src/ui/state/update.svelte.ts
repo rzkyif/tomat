@@ -12,33 +12,32 @@
 
 import type { ErrorCode, ServerToClientFrame } from "@tomat/shared";
 import { cores } from "$lib/core";
+import { Subscriptions } from "$lib/util/subscriptions";
 
 class UpdateState {
   staged = $state<{ version: string; atMs: number } | null>(null);
   lastError = $state<{ code: ErrorCode; message: string; atMs: number } | null>(null);
 
-  private unsubscribeWs: (() => void) | null = null;
+  private subs = new Subscriptions();
 
   attach(): void {
-    if (this.unsubscribeWs) return;
-    this.unsubscribeWs = cores().subscribeWs((frame: ServerToClientFrame) => {
-      if (frame.kind === "update.staged") {
-        this.staged = { version: frame.version, atMs: Date.now() };
-      } else if (frame.kind === "update.error") {
-        this.lastError = {
-          code: frame.code,
-          message: frame.message,
-          atMs: Date.now(),
-        };
-      }
-    });
+    this.subs.attach(() => [
+      cores().subscribeWs((frame: ServerToClientFrame) => {
+        if (frame.kind === "update.staged") {
+          this.staged = { version: frame.version, atMs: Date.now() };
+        } else if (frame.kind === "update.error") {
+          this.lastError = {
+            code: frame.code,
+            message: frame.message,
+            atMs: Date.now(),
+          };
+        }
+      }),
+    ]);
   }
 
   detach(): void {
-    if (this.unsubscribeWs) {
-      this.unsubscribeWs();
-      this.unsubscribeWs = null;
-    }
+    this.subs.detach();
   }
 
   dismissError(): void {

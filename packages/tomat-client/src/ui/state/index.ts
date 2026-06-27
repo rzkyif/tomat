@@ -30,3 +30,6 @@ export * from "./model-recommend.svelte";
 
 // Side-effect import: wires settingsState.onChange listeners.
 import "./settings-effects";
+// Side-effect import: wires the messages<->streaming and sessions<->streaming
+// store ports (kept out of the store modules to avoid re-forming the cycles).
+import "./store-wiring";

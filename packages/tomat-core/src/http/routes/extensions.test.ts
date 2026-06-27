@@ -54,6 +54,7 @@ async function seedInstalledExtension(id: string, hasDeps = false): Promise<stri
       triggers: [],
       fnExport: "t",
       alwaysAvailable: false,
+      platforms: [],
       requiredPermissions: [
         {
           kind: "net",

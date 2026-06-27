@@ -8,36 +8,36 @@ import CoreBarDemo from "../../../components/demos/CoreBarDemo.svelte";
 import MessageBubblesDemo from "../../../components/demos/MessageBubblesDemo.svelte";
 import Aside from "../../../components/Aside.astro";
 
-tomat is built from two programs with a clear division of labor. The **core** is
+tomat is built from two programs with a clear division of labor. The **Core** is
 a service that holds your data and does the heavy lifting: it stores sessions,
-runs models, executes tools, and answers requests. The **client** is the desktop
+runs models, executes tools, and answers requests. The **Client** is the desktop
 app you see: it draws the conversation, captures what you type, plays audio, and
 otherwise stays thin. Understanding that split makes the rest of the manual fall
 into place, because most settings belong to one side or the other.
 
-## Core and client
+## Core and Client
 
-The core runs quietly in the background and owns every stateful and computational
-concern. When you send a message, it is the core that streams the model's reply,
-ranks which tools to offer, and reads your memories. The client never does that
-work itself; it asks the core and renders what comes back.
+The Core runs quietly in the background and owns every stateful and computational
+concern. When you send a message, it is the Core that streams the model's reply,
+ranks which tools to offer, and reads your memories. The Client never does that
+work itself; it asks the Core and renders what comes back.
 
-Because the core is a separate service, it does not have to live where the client
-does. The two usually run on the same machine, but a client can pair with a core
-on a more powerful desktop and drive it from a laptop. The core bar at the bottom
-of the app tells you which core you are connected to and how it is doing.
+Because the Core is a separate service, it does not have to live where the Client
+does. The two usually run on the same machine, but a Client can pair with a Core
+on a more powerful desktop and drive it from a laptop. The Core bar at the bottom
+of the app tells you which Core you are connected to and how it is doing.
 
 <CoreBarDemo highlightLabel="Core" highlightTarget="[data-region=core-status]" />
 
 That separation is also why settings split the way they do: how the app looks is a
-**client** setting, while which model answers you is a **core** setting. The
+**Client** setting, while which model answers you is a **Core** setting. The
 [Settings Panel](/manual/settings/settings-panel) marks each group with the side
 it belongs to, and [Cores and Pairing](/manual/settings/cores-and-pairing) covers
-running more than one core.
+running more than one Core.
 
 ## Local by default
 
-Everything tomat stores lives under `~/.tomat` on the machine running the core:
+Everything tomat stores lives under `~/.tomat` on the machine running the Core:
 your sessions, memories, snippets, downloaded models, and the settings you have
 changed. Nothing about a conversation leaves that machine unless you point a
 setting at an **External** provider, and tomat tells you when you have.

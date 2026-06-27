@@ -114,8 +114,16 @@ the tool as `NotCapable`.
 The built-in extension is CDN-distributed (never on npm) behind an
 Ed25519-signed manifest ([`builtin-manifest.ts`](builtin-manifest.ts)),
 mirroring the binaries manifest; dev runs from the in-repo codebase instead. On
-first boot, [`builtin-seed.ts`](builtin-seed.ts) downloads it (preferring
-install-script-placed files) and leaves it at status `downloaded` with no
-grants: Install, trusting, and per-tool Enable stay explicit user steps. A
-sparse `extensions.builtinSeeded` core setting records the seed so a
-user-deleted built-in does not come back on the next boot.
+first boot, [`builtin-seed.ts`](builtin-seed.ts) installs it OFFLINE from the
+artifacts the install script planted (`extensions/.tomat-builtin.tgz` plus the
+signed `.tomat-builtin.json`): it re-verifies the manifest signature and the
+tarball sha256, then extracts. This honors the no-non-consented-network rule
+(see [AGENTS.md](../../../../AGENTS.md)) - core never fetches on boot; the
+install-script phase did the downloading. If the artifacts are not planted, the
+built-in is left for the user to install through the (user-gated) extensions UI,
+which is the only path that hits the CDN. The seed leaves it at status
+`downloaded` with no grants: Install, trusting, and per-tool Enable stay explicit
+user steps. A sparse `extensions.builtinSeeded` core setting records the seed so
+a user-deleted built-in does not come back on the next boot. Built-in updates are
+surfaced only by the user-gated `POST /extensions/check-updates`, never by a
+boot-time version check.

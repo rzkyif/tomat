@@ -30,4 +30,7 @@ export const attachmentListSamples = {
     editable: true,
     parts: [{ type: "document", filename: "report.pdf", markdown: "# Report" }],
   },
+  imageUrl: {
+    parts: [{ type: "image_url", image_url: { url: BLANK_PNG } }],
+  },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof AttachmentListView>>>;

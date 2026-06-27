@@ -1,23 +1,15 @@
 <script lang="ts">
-  // Settings share popup: Export curates a JSON of non-default values for the
-  // selected groups/sections/fields; Import pastes that JSON and applies the
-  // chosen keys. Both drive the same ShareTree. Overwrites are signalled
-  // inline (warning rows) and in the Import button text rather than a modal.
-  // The modal keeps a constant height: the tree explorer is the scrolling
-  // region, and the tab body slides horizontally on tab change (mirroring the
-  // settings group-tab animation).
+  // Client shell for the settings share popup. Owns all logic: builds the
+  // import/export trees from the schema, computes the export JSON, parses and
+  // classifies pasted import JSON, drives the tab-slide animation, and talks to
+  // the clipboard and the settings store. The presentational markup lives in
+  // ShareModalView.
   import { tick } from "svelte";
   import { getDefaultSettings } from "@tomat/shared";
   import { settingsState } from "../../state";
   import { CSS_EASING, getDuration } from "$lib/appearance/animations";
   import { getLogger } from "$lib/util/log";
-  import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
-  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
-  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
-  import Alert from "@tomat/shared/ui/components/primitives/Alert.svelte";
-  import Textarea from "@tomat/shared/ui/components/primitives/Textarea.svelte";
-  import SettingsTabs from "@tomat/shared/ui/components/primitives/Tabs.svelte";
-  import ShareTree from "./ShareTree.svelte";
+  import ShareModalView from "@tomat/shared/ui/components/settings/ShareModalView.svelte";
   import {
     buildTree,
     classifyImport,
@@ -187,146 +179,34 @@
       importing = false;
     }
   }
-
 </script>
 
-{#snippet floatButton(icon: string, title: string, onclick: () => void)}
-  <IconButton
-    {icon}
-    {title}
-    size="lg"
-    surface="none"
-    rounded="rounded-full"
-    class="absolute top-2 right-2 z-1 bg-surface-inset hover:bg-surface shadow-sm"
-    {onclick}
-  />
-{/snippet}
-
-{#snippet exportPanel()}
-  <p class="text-default-600 text-sm shrink-0">
-    Choose which settings to export. Only values you have changed from their defaults are included.
-  </p>
-  <div class="flex-1 min-h-0 overflow-y-auto tomat-scroll pr-1">
-    <ShareTree nodes={exportTree} bind:selected={exportSelected} />
-  </div>
-  {#if exportHasOutput}
-    <div class="relative flex-1 min-h-0">
-      <Textarea
-        value={exportJson}
-        disabled
-        mono
-        autoResize="none"
-        ariaLabel="Exported settings JSON"
-        class="h-full w-full overflow-y-auto resize-none tomat-scroll"
-      />
-      {@render floatButton(
-        copied
-          ? "i-material-symbols-check-rounded"
-          : "i-material-symbols-content-copy-outline-rounded",
-        "Copy to clipboard",
-        copyExport,
-      )}
-    </div>
-  {/if}
-{/snippet}
-
-{#snippet importPanel()}
-  <p class="text-default-600 text-sm shrink-0">
-    Paste exported settings, then choose which to apply. Highlighted rows will overwrite values you
-    have customized.
-  </p>
-  <div class="relative flex-1 min-h-0">
-    <!-- A native textarea (not the Textarea component) so its single bind:value
-         keeps the caret in place during manual edits; routing the value through
-         a component's prop round-trips it and bounces the caret to the end. -->
-    <textarea
-      bind:value={importText}
-      spellcheck="false"
-      aria-label="Settings JSON to import"
-      class="h-full w-full resize-none overflow-y-auto tomat-scroll rounded-medium px-2 py-1.5 text-sm font-mono text-default-800 outline-none {parsed.error
-        ? 'bg-accent-red-300 border-accent-red-400'
-        : 'bg-surface-inset'}"
-    ></textarea>
-    {@render floatButton(
-      "i-material-symbols-content-paste-rounded",
-      "Paste from clipboard",
-      pasteImport,
-    )}
-  </div>
-
-  {#if parsed.error}
-    <Alert variant="error" size="sm" class="shrink-0">{parsed.error}</Alert>
-  {:else if parsed.unknownKeys.length > 0}
-    <Alert variant="warning" size="sm" class="shrink-0">
-      Ignoring {parsed.unknownKeys.length} unrecognized or unsupported key{parsed.unknownKeys
-        .length === 1
-        ? ""
-        : "s"}.
-    </Alert>
-  {/if}
-  {#if importError}
-    <Alert variant="error" size="sm" class="shrink-0">{importError}</Alert>
-  {/if}
-
-  {#if importHasTree}
-    <div class="flex-1 min-h-0 overflow-y-auto tomat-scroll pr-1">
-      <ShareTree nodes={importTree} bind:selected={importSelected} />
-    </div>
-  {/if}
-
-  {#if importHasTree}
-    <Button
-      variant="primary"
-      loading={importing}
-      disabled={!importCanApply}
-      icon="i-material-symbols-check-rounded"
-      onclick={doImport}
-      class="w-full px-4 py-2.5 rounded-large text-center whitespace-normal shrink-0"
-    >
-      {importCanApply ? importLabel : "Nothing to Apply"}
-    </Button>
-  {/if}
-{/snippet}
-
-<Modal
+<ShareModalView
   {open}
-  onclose={onClose}
-  maxWidth="lg"
-  ariaLabel="Import or export settings"
-  class="h-[70vh] max-h-[40rem]"
->
-  <div class="flex items-center justify-between shrink-0">
-    <div class="text-default-800 font-medium">Import / Export Settings</div>
-    <IconButton
-      icon="i-material-symbols-close-rounded"
-      title="Close"
-      ariaLabel="Close"
-      surface="circle"
-      variant="subtle"
-      size="md"
-      class="hover:bg-default-400"
-      onclick={onClose}
-    />
-  </div>
-
-  <div class="shrink-0">
-    <SettingsTabs {tabs} active={activeTab} onSelect={selectTab} slideMs={tabSlideMs} />
-  </div>
-
-  <!-- overflow-x clip contains the offscreen layer during the slide so the
-       modal never grows a horizontal scrollbar; the y axis stays visible for
-       the tree's own scroll. -->
-  <div class="relative flex-1 min-h-0 flex flex-col" style:overflow-x="clip">
-    <div
-      bind:this={tabLayerEl}
-      class="flex-1 min-h-0 flex flex-col gap-3"
-      class:will-change-transform={animationsEnabled}
-    >
-      {#if contentTab === "export"}
-        {@render exportPanel()}
-      {:else}
-        {@render importPanel()}
-      {/if}
-    </div>
-  </div>
-</Modal>
+  {tabs}
+  {activeTab}
+  {contentTab}
+  {tabSlideMs}
+  {animationsEnabled}
+  {exportTree}
+  bind:exportSelected
+  {exportJson}
+  {exportHasOutput}
+  {copied}
+  bind:importText
+  parsedError={parsed.error}
+  unknownKeysCount={parsed.unknownKeys.length}
+  {importError}
+  {importTree}
+  bind:importSelected
+  {importHasTree}
+  {importCanApply}
+  {importing}
+  {importLabel}
+  {onClose}
+  onSelectTab={selectTab}
+  onCopyExport={copyExport}
+  onPasteImport={pasteImport}
+  onImport={doImport}
+  bind:tabLayerEl
+/>

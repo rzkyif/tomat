@@ -23,6 +23,7 @@
 import type { LlmEndpointConfig } from "./llm-provider.ts";
 import { DEFAULT_SAMPLING } from "@tomat/shared";
 import { getSecret } from "./secrets.ts";
+import { numSetting, strSetting } from "./settings-access.ts";
 import { llmPort } from "../paths.ts";
 
 export type LlmRoute = "default" | "secondary";
@@ -102,19 +103,4 @@ export function resolveContextSize(
     return numSetting(settings, "llm.external.contextSize", 128000);
   }
   return numSetting(settings, "llm.contextSize", 4096);
-}
-
-function strSetting(s: Record<string, unknown>, key: string, def: string): string {
-  const v = s[key];
-  return typeof v === "string" ? v : def;
-}
-
-function numSetting(s: Record<string, unknown>, key: string, def: number): number {
-  const v = s[key];
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v !== "") {
-    const n = Number(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return def;
 }

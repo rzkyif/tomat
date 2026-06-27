@@ -6,8 +6,9 @@
   import { type MenuRow, showFilterSortMenu } from "$lib/objects/menu";
   import ObjectManager from "$components/ui/ObjectManager.svelte";
   import ObjectCard from "$components/ui/ObjectCard.svelte";
-  import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeader.svelte";
-  import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScroll.svelte";
+  import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeaderView.svelte";
+  import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScrollView.svelte";
+  import ToolsFieldView from "@tomat/shared/ui/components/settings/ToolsFieldView.svelte";
   import ToolDetail from "./ToolDetail.svelte";
 
   let { horizontal = false }: { horizontal?: boolean } = $props();
@@ -109,18 +110,6 @@
     </ObjectDetailScroll>
   {/snippet}
   {#snippet empty()}
-    <div class="flex flex-col items-center justify-center gap-1 py-12 text-center">
-      {#if loadError}
-        <div class="text-base text-accent-red-600">Couldn't load tools</div>
-        <div class="text-sm text-default-500">{loadError}</div>
-      {:else if query.trim()}
-        <div class="text-base text-default-700">No matching tools</div>
-      {:else}
-        <div class="text-base text-default-700">No tools yet</div>
-        <div class="text-sm text-default-500">
-          Install an extension or add an MCP server to get tools.
-        </div>
-      {/if}
-    </div>
+    <ToolsFieldView {loadError} hasQuery={!!query.trim()} />
   {/snippet}
 </ObjectManager>

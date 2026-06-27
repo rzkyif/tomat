@@ -15,10 +15,7 @@ import { commitUpdate, handleUpdateMarkerOnBoot } from "./update/rollback.ts";
 import { extensionsRegistry } from "./extensions/registry.ts";
 import { mcpRegistry } from "./mcp/registry.ts";
 import { mcpManager } from "./mcp/manager.ts";
-import {
-  autoInstallBuiltinIfReady,
-  seedBuiltinExtensionIfNeeded,
-} from "./extensions/builtin-seed.ts";
+import { seedBuiltinExtensionIfNeeded } from "./extensions/builtin-seed.ts";
 import { BROADCAST_SINK } from "./http/routes/extensions.ts";
 import { initSidecarBoot } from "./services/sidecar-boot.ts";
 import { coreStatus } from "./services/core-status.ts";
@@ -117,18 +114,12 @@ async function main(): Promise<void> {
     });
 
   // Seed the built-in extension on a fresh install (background, non-blocking).
-  // Respects a prior user delete via the seed marker; retries next boot if the
-  // first attempt is offline.
-  void seedBuiltinExtensionIfNeeded(BROADCAST_SINK)
-    .then(() =>
-      // If the deno runtime is already present (a prior install), finish the
-      // built-in install + enable its defaults now; otherwise the
-      // onBinaryInstalled("deno") hook in sidecar-boot does it once deno lands.
-      autoInstallBuiltinIfReady(BROADCAST_SINK),
-    )
-    .catch((err) => {
-      log.warn(`builtin extension seed failed (will retry next boot): ${errMessage(err)}`);
-    });
+  // This only brings it to status 'downloaded'; installing its tools is an
+  // explicit user choice from the Tools prompt (requestBuiltinInstall). Respects
+  // a prior user delete via the seed marker; retries next boot if offline.
+  void seedBuiltinExtensionIfNeeded(BROADCAST_SINK).catch((err) => {
+    log.warn(`builtin extension seed failed (will retry next boot): ${errMessage(err)}`);
+  });
 
   // Surface an unreadable secrets vault (sealed secrets.enc but no master key)
   // at startup rather than mid-request. Background, non-mutating.
@@ -211,7 +202,7 @@ async function main(): Promise<void> {
     // to bootErrorFile for a supervising client / the install script to surface.
     if (err instanceof Deno.errors.AddrInUse) {
       throw new Error(
-        `port ${cfg.port} on ${bindHost} is already in use. Another tomat core may ` +
+        `port ${cfg.port} on ${bindHost} is already in use. Another tomat Core may ` +
           `already be running, or a different program holds the port. Stop it, or set ` +
           `TOMAT_CORE_HOST to a free host:port and relaunch.`,
       );

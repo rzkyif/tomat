@@ -33,6 +33,7 @@ import {
 import { binPath, paths, speechPort } from "../paths.ts";
 import { binaryName, libDirFor } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
+import { numSetting, strSetting } from "../services/settings-access.ts";
 import { AppError } from "../shared/errors.ts";
 import type { StartOptions } from "./types.ts";
 
@@ -231,18 +232,4 @@ async function fileExists(path: string): Promise<boolean> {
 function schemaDefault(key: string): string {
   const v = getDefaultSettings()[key];
   return typeof v === "string" ? v : "";
-}
-
-function strSetting(s: Record<string, unknown>, k: string, def: string): string {
-  const v = s[k];
-  return typeof v === "string" ? v : def;
-}
-function numSetting(s: Record<string, unknown>, k: string, def: number): number {
-  const v = s[k];
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v !== "") {
-    const n = Number(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return def;
 }

@@ -57,6 +57,7 @@ function themeFlipCss(): string {
   }
   pairs.push(["--bubble-bg-l-light", "--bubble-bg-l-dark"]);
   pairs.push(["--bubble-shadow-color-light", "--bubble-shadow-color-dark"]);
+  pairs.push(["--bubble-flat-shadow-light", "--bubble-flat-shadow-dark"]);
 
   const tmp = (v: string) => `--flip-${v.slice(2)}`;
   const capture = pairs

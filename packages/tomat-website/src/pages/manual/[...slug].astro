@@ -2,6 +2,7 @@
 import { getCollection, render } from "astro:content";
 import ManualLayout from "../../layouts/ManualLayout.astro";
 import { gitLastUpdated } from "../../lib/git-date";
+import { manualNeighbors } from "../../lib/manual";
 
 export async function getStaticPaths() {
   const entries = await getCollection("manual");
@@ -13,6 +14,16 @@ export async function getStaticPaths() {
 
 const { entry, entries, lastUpdated } = Astro.props;
 const { Content } = await render(entry);
+const { prev, next } = manualNeighbors(entries, entry.id);
+
+// Clickable card mirroring CoreBarView's surface-inset row: a single
+// background-only feedback (hover +1 shade, press +2) via transition-interactive,
+// matching the article header's section/title type scale.
+const cardBase =
+  "flex flex-1 items-center gap-2 rounded-large bg-surface-inset px-4 py-3 transition-interactive hov:bg-surface-inset-strong act:bg-default-400 hov:cursor-pointer";
+const sectionLabel = "text-xs font-semibold uppercase tracking-wide text-default-500";
+const titleLabel = "truncate text-default-800";
+const chevron = "shrink-0 text-2xl text-default-500";
 ---
 
 <ManualLayout title={entry.data.title} entries={entries} currentId={entry.id}>
@@ -29,4 +40,33 @@ const { Content } = await render(entry);
   <div class="prose dark:prose-invert max-w-none">
     <Content />
   </div>
+
+  {
+    (prev || next) && (
+      <nav class="mt-10 flex items-stretch gap-3" aria-label="More articles">
+        {prev
+          ? (
+            <a href={prev.href} rel="prev" class={cardBase}>
+              <i class={`i-material-symbols-chevron-left-rounded ${chevron}`} />
+              <span class="flex min-w-0 flex-col">
+                <span class={sectionLabel}>{prev.section}</span>
+                <span class={titleLabel}>{prev.title}</span>
+              </span>
+            </a>
+          )
+          : <span class="flex-1" />}
+        {next
+          ? (
+            <a href={next.href} rel="next" class={`${cardBase} justify-end text-right`}>
+              <span class="flex min-w-0 flex-col">
+                <span class={sectionLabel}>{next.section}</span>
+                <span class={titleLabel}>{next.title}</span>
+              </span>
+              <i class={`i-material-symbols-chevron-right-rounded ${chevron}`} />
+            </a>
+          )
+          : <span class="flex-1" />}
+      </nav>
+    )
+  }
 </ManualLayout>

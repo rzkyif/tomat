@@ -6,7 +6,7 @@
 // badge per section.
 
 import type { SettingGroup } from "../types.ts";
-import { SECURE_URL_VALIDATION } from "../types.ts";
+import { externalModelSection } from "./factories.ts";
 
 export const sttGroup: SettingGroup = {
   id: "stt",
@@ -282,46 +282,22 @@ export const sttGroup: SettingGroup = {
         },
       ],
     },
-    {
+    externalModelSection({
+      idPrefix: "stt.external",
       label: "External Provider",
-      destination: "core",
       visibleWhen: {
         allOf: [
           { field: "stt.enabled", eq: true },
           { field: "stt.provider", eq: "external" },
         ],
       },
-      fields: [
-        {
-          id: "stt.external.baseUrl",
-          name: "Base URL",
-          description:
-            "The speech recognition API endpoint. Must be HTTPS (HTTP allowed only for localhost).",
-          type: "string",
-          defaultValue: "",
-          placeholder: "https://api.example.com/v1",
-          regex: SECURE_URL_VALIDATION,
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "stt.external.apiKey",
-          name: "API Key",
-          description: "API key for speech recognition. Stored securely in your keychain.",
-          type: "password",
-          defaultValue: "",
-          placeholder: "sk-...",
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "stt.external.model",
-          name: "Model",
-          description: "The speech recognition model name, e.g. whisper-1.",
-          type: "string",
-          defaultValue: "",
-          placeholder: "whisper-1",
-          descriptionTier: "ondemand",
-        },
-      ],
-    },
+      baseUrlDescription:
+        "The speech recognition API endpoint. Must be HTTPS (HTTP allowed only for localhost).",
+      apiKeyDescription: "API key for speech recognition. Stored securely in your keychain.",
+      model: {
+        description: "The speech recognition model name, e.g. whisper-1.",
+        placeholder: "whisper-1",
+      },
+    }),
   ],
 };

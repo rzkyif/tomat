@@ -14,8 +14,9 @@
   import type { Badge } from "@tomat/shared/ui/components/objects/object-types.ts";
   import ObjectManager from "$components/ui/ObjectManager.svelte";
   import ObjectCard from "$components/ui/ObjectCard.svelte";
-  import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeader.svelte";
-  import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScroll.svelte";
+  import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeaderView.svelte";
+  import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScrollView.svelte";
+  import ExtensionsFieldView from "@tomat/shared/ui/components/settings/ExtensionsFieldView.svelte";
   import ExtensionDetail from "./ExtensionDetail.svelte";
 
   // A list row is either an installed extension or an npm search result. A single
@@ -36,7 +37,7 @@
   // streamed job instead (extensionsState.isJobRunning).
   let busyAction = $state<string | null>(null);
 
-  onMount(() => void extensionsState.ensureConnected());
+  onMount(() => void extensionsState.attach());
 
   function isUpdatable(tk: Extension): boolean {
     return extensionsState.updateStatus[tk.id]?.updateAvailable ?? false;
@@ -286,6 +287,15 @@
     return { items: list.map((extension) => ({ kind: "installed", extension })), done: true };
   }
 
+  // Which empty-state the field is in, derived from the live query. npm searches
+  // prompt vs report no results; the installed list reports no matches vs none.
+  function emptyMode(): "npmEmpty" | "npmNoResults" | "noMatches" | "none" {
+    if (query.includes("@npm")) {
+      return query.replace(/@npm/g, "").trim() ? "npmNoResults" : "npmEmpty";
+    }
+    return query.trim() ? "noMatches" : "none";
+  }
+
   function detailActions(tk: Extension, close: () => void) {
     // Download/install/update run as streamed jobs; their button shows a spinner
     // for the whole job. Uninstall is a direct call tracked by busyAction. While
@@ -456,20 +466,6 @@
     {/if}
   {/snippet}
   {#snippet empty()}
-    <div class="flex flex-col items-center justify-center gap-1 py-12 text-center">
-      {#if query.includes("@npm")}
-        {#if query.replace(/@npm/g, "").trim()}
-          <div class="text-base text-default-700">No npm packages found</div>
-        {:else}
-          <div class="text-base text-default-700">Search the npm marketplace</div>
-          <div class="text-sm text-default-500">Type a package name to search.</div>
-        {/if}
-      {:else if query.trim()}
-        <div class="text-base text-default-700">No matching extensions</div>
-      {:else}
-        <div class="text-base text-default-700">No extensions installed</div>
-        <div class="text-sm text-default-500">Add @npm to search the marketplace.</div>
-      {/if}
-    </div>
+    <ExtensionsFieldView mode={emptyMode()} />
   {/snippet}
 </ObjectManager>

@@ -11,6 +11,7 @@ export const AGENT_ANSWER =
 
 export const agentMessageSamples = {
   content: { kind: "content", bgClass: "bubble-agent" },
+  active: { kind: "content", bgClass: "bubble-agent", active: true },
   reasoningDone: {
     kind: "reasoning",
     isStreaming: false,

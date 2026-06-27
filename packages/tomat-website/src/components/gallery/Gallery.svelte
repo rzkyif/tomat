@@ -1,11 +1,19 @@
 <script lang="ts">
   import type { ComponentProps } from "svelte";
-  // The component gallery: every shared `*View` rendered in isolation under each
-  // of its registered samples, with NO UiContext provider mounted, so it paints
-  // from DEFAULT_UI_CONTEXT exactly like a fresh app. It is the visual drift/QA
-  // surface and the manual's screenshot source. Drift typing lives in the sample
-  // files (`satisfies`); here we cast each bundle at the spread so this stays a
-  // dumb renderer that supplies only the per-View child snippets.
+  // The component gallery: every shared component rendered from its samples on a
+  // dim focus grid (the homepage showcase recipe), laid out as masonry cards. NO
+  // UiContext provider is mounted, so it paints from DEFAULT_UI_CONTEXT exactly
+  // like a fresh desktop app. It is the visual drift/QA surface and the manual's
+  // screenshot source. Sections run largest-first (whole layouts) -> stateful
+  // domain Views -> objects -> overlays -> primitives -> the mobile counterparts.
+  // Components that ship on top of a bubble (settings fields, the object
+  // scaffolding) render in a `surface` panel so the theme flip resolves on the
+  // right base; chat-message Views and modals carry their own surface. Wide
+  // shells take a full-width row of their own instead of a masonry column.
+  // Drift typing lives in the sample files (`satisfies`); here we cast each bundle
+  // at the spread so this stays a dumb renderer that supplies only the per-View
+  // child snippets. What the gallery must cover is the registry (registry.ts),
+  // which the walkers parse.
   import {
     AGENT_ANSWER,
     AGENT_REASONING,
@@ -15,30 +23,104 @@
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
   import AttachmentListView from "@tomat/shared/ui/components/chat/AttachmentListView.svelte";
   import ChatShellView from "@tomat/shared/ui/components/chat/ChatShellView.svelte";
-  import DiffView from "@tomat/shared/ui/components/chat/messages/DiffView.svelte";
+  import ConfirmModalView from "@tomat/shared/ui/components/settings/ConfirmModalView.svelte";
+  import PasswordPromptModalView from "@tomat/shared/ui/components/settings/PasswordPromptModalView.svelte";
+  import ColorPickerModalView from "@tomat/shared/ui/components/settings/ColorPickerModalView.svelte";
+  import DeletionsModalView from "@tomat/shared/ui/components/settings/DeletionsModalView.svelte";
+  import DownloadsModalView from "@tomat/shared/ui/components/settings/DownloadsModalView.svelte";
+  import ShareModalView from "@tomat/shared/ui/components/settings/ShareModalView.svelte";
+  import PermissionRequestView from "@tomat/shared/ui/components/chat/userinput/PermissionRequestView.svelte";
+  import AutocorrectAlertView from "@tomat/shared/ui/components/chat/userinput/AutocorrectAlertView.svelte";
+  import ObjectBadgeView from "@tomat/shared/ui/components/objects/ObjectBadgeView.svelte";
+  import ObjectCardView from "@tomat/shared/ui/components/objects/ObjectCardView.svelte";
+  import ObjectDetailHeaderView from "@tomat/shared/ui/components/objects/ObjectDetailHeaderView.svelte";
+  import ObjectDetailScrollView from "@tomat/shared/ui/components/objects/ObjectDetailScrollView.svelte";
+  import ObjectManagerView from "@tomat/shared/ui/components/objects/ObjectManagerView.svelte";
+  import CoresFieldView from "@tomat/shared/ui/components/settings/CoresFieldView.svelte";
+  import ServicesFieldView from "@tomat/shared/ui/components/settings/ServicesFieldView.svelte";
+  import StorageFieldView from "@tomat/shared/ui/components/settings/StorageFieldView.svelte";
+  import ExtensionDetailView from "@tomat/shared/ui/components/settings/ExtensionDetailView.svelte";
+  import ExtensionsFieldView from "@tomat/shared/ui/components/settings/ExtensionsFieldView.svelte";
+  import ToolDetailView from "@tomat/shared/ui/components/settings/ToolDetailView.svelte";
+  import ToolsFieldView from "@tomat/shared/ui/components/settings/ToolsFieldView.svelte";
+  import McpDetailView from "@tomat/shared/ui/components/settings/McpDetailView.svelte";
+  import MemoryDetailView from "@tomat/shared/ui/components/settings/MemoryDetailView.svelte";
+  import ModelPresetFieldView from "@tomat/shared/ui/components/settings/ModelPresetFieldView.svelte";
+  import SttPresetFieldView from "@tomat/shared/ui/components/settings/SttPresetFieldView.svelte";
+  import TtsPresetFieldView from "@tomat/shared/ui/components/settings/TtsPresetFieldView.svelte";
+  import ShortcutFieldView from "@tomat/shared/ui/components/settings/ShortcutFieldView.svelte";
+  import ScheduleEditorView from "@tomat/shared/ui/components/chat/ScheduleEditorView.svelte";
+  import PromptButtonsView from "@tomat/shared/ui/components/chat/userinput/PromptButtonsView.svelte";
+  import NewCoreWizardView from "@tomat/shared/ui/components/new-core/NewCoreWizardView.svelte";
   import ErrorMessageView from "@tomat/shared/ui/components/chat/messages/ErrorMessageView.svelte";
   import ExpandableMessageView from "@tomat/shared/ui/components/chat/messages/ExpandableMessageView.svelte";
-  import QuickModelBarView from "@tomat/shared/ui/components/chat/userinput/QuickModelBarView.svelte";
-  import ReasoningTraceView from "@tomat/shared/ui/components/chat/messages/ReasoningTraceView.svelte";
   import RelevantMemoriesView from "@tomat/shared/ui/components/chat/messages/RelevantMemoriesView.svelte";
   import RelevantToolsView from "@tomat/shared/ui/components/chat/messages/RelevantToolsView.svelte";
   import SessionBarView from "@tomat/shared/ui/components/chat/SessionBarView.svelte";
   import CoreBarView from "@tomat/shared/ui/components/chat/CoreBarView.svelte";
   import SettingsContentView from "@tomat/shared/ui/components/settings/SettingsContentView.svelte";
   import SettingsFieldView from "@tomat/shared/ui/components/settings/SettingsFieldView.svelte";
-  import SettingsHeaderView from "@tomat/shared/ui/components/settings/SettingsHeaderView.svelte";
   import SettingsShellView from "@tomat/shared/ui/components/settings/SettingsShellView.svelte";
-  import SettingsSidebarView from "@tomat/shared/ui/components/settings/SettingsSidebarView.svelte";
   import SnippetAutocompleteView from "@tomat/shared/ui/components/chat/SnippetAutocompleteView.svelte";
   import ToolCallView from "@tomat/shared/ui/components/chat/messages/ToolCallView.svelte";
   import UserInputView from "@tomat/shared/ui/components/chat/UserInputView.svelte";
   import UserMessageView from "@tomat/shared/ui/components/chat/messages/UserMessageView.svelte";
+  import CommandPreviewFieldView from "@tomat/shared/ui/components/settings/CommandPreviewFieldView.svelte";
+  import MessageStackView from "@tomat/shared/ui/components/chat/MessageStackView.svelte";
+  import SessionListView from "@tomat/shared/ui/components/session-list/SessionListView.svelte";
+  import UpdateButtonView from "@tomat/shared/ui/components/settings/UpdateButtonView.svelte";
+  import QuickSettingsView from "@tomat/shared/ui/components/quick-settings/QuickSettingsView.svelte";
+  import QuickSettingsSectionView from "@tomat/shared/ui/components/quick-settings/QuickSettingsSectionView.svelte";
+  import ScheduleConfirmFormView from "@tomat/shared/ui/components/chat/userinput/ScheduleConfirmFormView.svelte";
+  import SnippetDetailView from "@tomat/shared/ui/components/settings/SnippetDetailView.svelte";
+  import ScheduledPromptDetailView from "@tomat/shared/ui/components/settings/ScheduledPromptDetailView.svelte";
   import { SETTINGS_SCHEMA } from "@tomat/shared/domain/settings/engine";
   import SettingsDemoFooter from "../demos/SettingsDemoFooter.svelte";
   import GalleryCard from "./GalleryCard.svelte";
+  import Primitives from "./Primitives.svelte";
   import MobileGallery from "./MobileGallery.svelte";
 
   const entries = <T,>(o: Record<string, T>) => Object.entries(o);
+  const chatNoop = (): void => {};
+
+  // Representative card metadata for the ObjectManagerView sample items, keyed by
+  // name, so the gallery's list rows render as the full ObjectCardView (badges,
+  // description, author/meta, triple-dot) the client shows, not a bare label.
+  type ObjectBadge = NonNullable<ComponentProps<typeof ObjectCardView>["badges"]>[number];
+  const OBJECT_CARD_META: Record<
+    string,
+    { description: string; meta: string; badges: ObjectBadge[] }
+  > = {
+    "Code Search": {
+      description: "Searches the codebase for symbols, references, and text matches.",
+      meta: "Built-in extension",
+      badges: [{ label: "Enabled", accent: "green" }, { label: "Updated", accent: "blue" }],
+    },
+    "filesystem": {
+      description: "Local (stdio)",
+      meta: "node ./server.js",
+      badges: [{ label: "Error", accent: "red", title: "Failed to start" }],
+    },
+    "Daily summary": {
+      description: "Runs every weekday at 9:00 AM.",
+      meta: "Scheduled prompt",
+      badges: [{ label: "Enabled", accent: "green" }],
+    },
+  };
+
+  // A short simulated session for the ChatShellView card, so the shell shows the
+  // real chat the way the client paints it (mirrors the homepage ChatStage).
+  const CHAT_PROMPT = "How do I install tomat on macOS?";
+  const CHAT_REASONING =
+    "The user is on macOS, so the one-line installer is the simplest path; point them at the landing-page command and the launch step.";
+  const CHAT_ANSWER =
+    "Run the one-line installer from the landing page, then launch tomat from Applications. Want the per-OS steps?";
+
+  // The color picker is a Popover anchored to an element; each card mounts its
+  // own stand-in anchor so the popover positions inside that card's frame. Keyed
+  // by sample name (a single shared ref would be overwritten by the last card in
+  // the loop, so every popover would anchor to the last button).
+  let colorAnchors = $state<Record<string, HTMLElement | null>>({});
 
   // Static render: SettingsContentView's expand-on-mount `$effect` never runs, so
   // pass the default-open section keys explicitly (one per labeled, not
@@ -54,227 +136,598 @@
   }
 </script>
 
-<div class="mx-auto max-w-5xl px-4 py-10 flex flex-col gap-12">
+<div class="mx-auto max-w-6xl px-4 py-10 flex flex-col gap-12">
   <header class="flex flex-col gap-1">
     <h1 class="text-2xl font-semibold">Component gallery</h1>
     <p class="text-default-500 text-sm">
-      Every shared <code>@tomat/shared/ui</code> View rendered from its samples on default
-      settings. Toggle the navbar theme to check light and dark.
+      Every shared <code>@tomat/shared/ui</code> component rendered from its samples on
+      default settings, over the dim focus grid the showcases use. Toggle the navbar
+      theme to check light and dark.
     </p>
   </header>
 
-  <!-- Chat -->
+  <!-- Largest first: whole layout shells, each on a full-width row of its own. -->
+  <section class="flex flex-col gap-6">
+    <h2 class="text-lg font-medium">Layouts</h2>
+    <div class="flex flex-col gap-4">
+      {#each entries(SAMPLES.ChatShellView) as [name, p] (name)}
+        <GalleryCard label={`ChatShellView · ${name} · desktop`} wide>
+          <!-- No fixed height + overflow-hidden: the desktop shell is a
+               flex-col-reverse column anchored at the bottom, so a capped height
+               clips the TOP (oldest) row. Let it size to its content instead so
+               the whole simulated session is visible. -->
+          <div class="w-full flex justify-center">
+            <ChatShellView
+              {...p as ComponentProps<typeof ChatShellView>}
+              coreBar={chatCoreBar}
+              sessionBar={chatSessionBar}
+              input={chatInput}
+              transcript={chatTranscript}
+            />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.SettingsShellView) as [name, p] (name)}
+        <GalleryCard label={`SettingsShellView · ${name}`} wide>
+          <SettingsShellView
+            {...p as ComponentProps<typeof SettingsShellView>}
+            sizeClass="w-full h-[28rem]"
+          >
+            {#snippet groupContent(gid)}
+              <SettingsContentView groupId={gid} values={SAMPLE_VALUES} expanded={expandedFor(gid)} />
+            {/snippet}
+            {#snippet sidebarFooter(collapsed)}
+              <SettingsDemoFooter {collapsed} />
+            {/snippet}
+          </SettingsShellView>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.NewCoreWizardView) as [name, p] (name)}
+        <GalleryCard label={`NewCoreWizardView · ${name}`} wide>
+          <div class="w-full flex justify-center">
+            <NewCoreWizardView {...p as ComponentProps<typeof NewCoreWizardView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+    </div>
+  </section>
+
+  <!-- Stateful chat Views: messages, bars, composer. Each renders its own bubble
+       or chat-area chrome, so they sit straight on the grid (no surface panel). -->
   <section class="flex flex-col gap-6">
     <h2 class="text-lg font-medium">Chat</h2>
 
-    {#each entries(SAMPLES.UserMessageView) as [name, p] (name)}
-      <GalleryCard label={`UserMessageView · ${name}`}>
-        <UserMessageView {...p as ComponentProps<typeof UserMessageView>} />
-      </GalleryCard>
-    {/each}
+    <!-- The composer, the two bars, the session list, and the message stack are
+         the full-window-width chat pieces; a narrow masonry tile would clip them
+         (and their drop shadows), so each takes a centered full-width row where it
+         renders at the faithful 700px-window proportions. -->
+    <div class="flex flex-col gap-4">
+      {#each entries(SAMPLES.UserInputView) as [name, p] (name)}
+        <GalleryCard label={`UserInputView · ${name}`} wide>
+          <div class="w-full flex justify-center">
+            <UserInputView {...p as ComponentProps<typeof UserInputView>} />
+          </div>
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.AgentMessageView) as [name, p] (name)}
-      <GalleryCard label={`AgentMessageView · ${name}`}>
-        <AgentMessageView {...p as ComponentProps<typeof AgentMessageView>}>
-          {#snippet body()}
-            <span class="whitespace-pre-wrap break-words"
-              >{p.kind === "content" ? AGENT_ANSWER : AGENT_REASONING}</span
-            >
-          {/snippet}
-        </AgentMessageView>
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.SessionBarView) as [name, p] (name)}
+        <GalleryCard label={`SessionBarView · ${name}`} wide>
+          <div class="w-full flex justify-center">
+            <div class="w-[40rem] max-w-full">
+              <SessionBarView {...p as ComponentProps<typeof SessionBarView>} />
+            </div>
+          </div>
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.ReasoningTraceView) as [name, p] (name)}
-      <GalleryCard label={`ReasoningTraceView · ${name}`}>
-        <ReasoningTraceView {...p as ComponentProps<typeof ReasoningTraceView>}>
-          {#snippet body()}
-            <span>{AGENT_REASONING}</span>
-          {/snippet}
-        </ReasoningTraceView>
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.SessionListView) as [name, p] (name)}
+        <GalleryCard label={`SessionListView · ${name}`} wide>
+          <div class="w-full flex justify-center">
+            <SessionListView {...p as ComponentProps<typeof SessionListView>} />
+          </div>
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.AttachmentListView) as [name, p] (name)}
-      <GalleryCard label={`AttachmentListView · ${name}`}>
-        <AttachmentListView {...p as ComponentProps<typeof AttachmentListView>} />
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.MessageStackView) as [name, p] (name)}
+        {@const sp = p as ComponentProps<typeof MessageStackView>}
+        <GalleryCard label={`MessageStackView · ${name}`} wide>
+          <!-- Force the host narrower than its content for the multi-bubble samples
+               so the row GENUINELY overflows and clips (a static page cannot script
+               a live scroll, so without this the fade would hint at hidden content
+               that actually fits). Center the overflow for the "scrolled into the
+               middle" sample so BOTH ends clip and both fades are truthful. See
+               site.css `.stack-demo-*`. -->
+          <div
+            class={`w-full flex justify-center ${sp.count > 1 ? "stack-demo-narrow" : ""} ${
+              name === "rightScrolled" ? "stack-demo-center" : ""
+            }`}
+          >
+            <MessageStackView {...sp}>
+              {#snippet bubble(i)}
+                <!-- A stack row is the client's row of COLLAPSED expandable message
+                     bubbles, so render that exact shared component (a `size="small"`
+                     Bubble wrapping a chevron header), collapsed by default. A plain
+                     pill was both the wrong shape and taller than the real header
+                     strip. Adjacent corners flatten via neighbor flags like the app. -->
+                <ExpandableMessageView
+                  title={`Tool call ${i + 1}`}
+                  text="Collapsed detail body."
+                  neighborLeft={i > 0}
+                  neighborRight={i < sp.count - 1}
+                />
+              {/snippet}
+            </MessageStackView>
+          </div>
+        </GalleryCard>
+      {/each}
+    </div>
 
-    {#each entries(SAMPLES.ErrorMessageView) as [name, p] (name)}
-      <GalleryCard label={`ErrorMessageView · ${name}`}>
-        <ErrorMessageView {...p as ComponentProps<typeof ErrorMessageView>} />
-      </GalleryCard>
-    {/each}
+    <div class="columns-1 sm:columns-2 lg:columns-3 gap-4">
+      {#each entries(SAMPLES.UserMessageView) as [name, p] (name)}
+        <GalleryCard label={`UserMessageView · ${name}`}>
+          <UserMessageView {...p as ComponentProps<typeof UserMessageView>} />
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.ExpandableMessageView) as [name, p] (name)}
-      <GalleryCard label={`ExpandableMessageView · ${name}`}>
-        <ExpandableMessageView {...p as ComponentProps<typeof ExpandableMessageView>} />
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.AgentMessageView) as [name, p] (name)}
+        <GalleryCard label={`AgentMessageView · ${name}`}>
+          <AgentMessageView {...p as ComponentProps<typeof AgentMessageView>}>
+            {#snippet body()}
+              <span class="whitespace-pre-wrap break-words"
+                >{p.kind === "content" ? AGENT_ANSWER : AGENT_REASONING}</span
+              >
+            {/snippet}
+          </AgentMessageView>
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.SessionBarView) as [name, p] (name)}
-      <GalleryCard label={`SessionBarView · ${name}`}>
-        <SessionBarView {...p as ComponentProps<typeof SessionBarView>} />
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.ToolCallView) as [name, p] (name)}
+        <GalleryCard label={`ToolCallView · ${name}`}>
+          <ToolCallView {...p as ComponentProps<typeof ToolCallView>}>
+            {#snippet memoryContent({ content })}
+              <pre class="whitespace-pre-wrap text-xs">{content}</pre>
+            {/snippet}
+          </ToolCallView>
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.CoreBarView) as [name, p] (name)}
-      <GalleryCard label={`CoreBarView · ${name}`}>
-        <CoreBarView {...p as ComponentProps<typeof CoreBarView>} />
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.ErrorMessageView) as [name, p] (name)}
+        <GalleryCard label={`ErrorMessageView · ${name}`}>
+          <ErrorMessageView {...p as ComponentProps<typeof ErrorMessageView>} />
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.QuickModelBarView) as [name, p] (name)}
-      <GalleryCard label={`QuickModelBarView · ${name}`}>
-        <QuickModelBarView {...p as ComponentProps<typeof QuickModelBarView>} />
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.ExpandableMessageView) as [name, p] (name)}
+        <GalleryCard label={`ExpandableMessageView · ${name}`}>
+          <ExpandableMessageView {...p as ComponentProps<typeof ExpandableMessageView>} />
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.UserInputView) as [name, p] (name)}
-      <GalleryCard label={`UserInputView · ${name}`}>
-        <UserInputView {...p as ComponentProps<typeof UserInputView>} />
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.RelevantMemoriesView) as [name, p] (name)}
+        <GalleryCard label={`RelevantMemoriesView · ${name}`}>
+          <RelevantMemoriesView {...p as ComponentProps<typeof RelevantMemoriesView>} />
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.DiffView) as [name, p] (name)}
-      <GalleryCard label={`DiffView · ${name}`}>
-        <DiffView {...p as ComponentProps<typeof DiffView>} />
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.RelevantToolsView) as [name, p] (name)}
+        <GalleryCard label={`RelevantToolsView · ${name}`}>
+          <RelevantToolsView {...p as ComponentProps<typeof RelevantToolsView>} />
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.RelevantMemoriesView) as [name, p] (name)}
-      <GalleryCard label={`RelevantMemoriesView · ${name}`}>
-        <RelevantMemoriesView {...p as ComponentProps<typeof RelevantMemoriesView>} />
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.AttachmentListView) as [name, p] (name)}
+        <GalleryCard label={`AttachmentListView · ${name}`} surface>
+          <AttachmentListView {...p as ComponentProps<typeof AttachmentListView>} />
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.RelevantToolsView) as [name, p] (name)}
-      <GalleryCard label={`RelevantToolsView · ${name}`}>
-        <RelevantToolsView {...p as ComponentProps<typeof RelevantToolsView>} />
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.CoreBarView) as [name, p] (name)}
+        <GalleryCard label={`CoreBarView · ${name}`}>
+          <CoreBarView {...p as ComponentProps<typeof CoreBarView>} />
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.ToolCallView) as [name, p] (name)}
-      <GalleryCard label={`ToolCallView · ${name}`}>
-        <ToolCallView {...p as ComponentProps<typeof ToolCallView>}>
-          {#snippet memoryContent({ content })}
-            <pre class="whitespace-pre-wrap text-xs">{content}</pre>
-          {/snippet}
-        </ToolCallView>
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.PermissionRequestView) as [name, p] (name)}
+        <GalleryCard label={`PermissionRequestView · ${name}`} surface>
+          <PermissionRequestView {...p as ComponentProps<typeof PermissionRequestView>} />
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.SnippetAutocompleteView) as [name, p] (name)}
-      <GalleryCard label={`SnippetAutocompleteView · ${name}`}>
-        <!-- The dropdown is position:fixed; a transformed wrapper makes it a
-             containing block so it stays inside the card instead of the page. -->
-        <div class="relative w-72 h-40" style="transform: translateZ(0)">
-          <SnippetAutocompleteView {...p as ComponentProps<typeof SnippetAutocompleteView>} />
-        </div>
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.AutocorrectAlertView) as [name, p] (name)}
+        <GalleryCard label={`AutocorrectAlertView · ${name}`}>
+          <div class="w-full">
+            <AutocorrectAlertView {...p as ComponentProps<typeof AutocorrectAlertView>} />
+          </div>
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.ChatShellView) as [name, p] (name)}
-      <GalleryCard label={`ChatShellView · ${name} · desktop`}>
-        <div class="h-[26rem] w-full flex">
-          <ChatShellView
-            {...p as ComponentProps<typeof ChatShellView>}
-            coreBar={chatCoreBar}
-            sessionBar={chatSessionBar}
-            input={chatInput}
-            transcript={chatTranscript}
-          />
-        </div>
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.PromptButtonsView) as [name, p] (name)}
+        <GalleryCard label={`PromptButtonsView · ${name}`} surface>
+          <PromptButtonsView {...p as ComponentProps<typeof PromptButtonsView>} />
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.SnippetAutocompleteView) as [name, p] (name)}
+        <GalleryCard label={`SnippetAutocompleteView · ${name}`} backdrop>
+          <!-- The dropdown is position:fixed; this inner transformed stage is its
+               containing block, so a centered anchor lands it in the middle of a
+               known-size box instead of the sample's top-left {0,0}. -->
+          <div
+            class="relative mx-auto w-[20rem] h-48 overflow-hidden"
+            style="transform: translateZ(0)"
+          >
+            <SnippetAutocompleteView
+              {...p as ComponentProps<typeof SnippetAutocompleteView>}
+              anchor={{ top: 24, left: 32 }}
+            />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ScheduleConfirmFormView) as [name, p] (name)}
+        <GalleryCard label={`ScheduleConfirmFormView · ${name}`} surface>
+          <div class="w-full">
+            <ScheduleConfirmFormView {...p as ComponentProps<typeof ScheduleConfirmFormView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+    </div>
   </section>
 
-  <!-- Settings -->
+  <!-- Settings field-level Views, each on the bg-surface panel they ship inside. -->
   <section class="flex flex-col gap-6">
     <h2 class="text-lg font-medium">Settings</h2>
+    <div class="columns-1 sm:columns-2 gap-4">
+      {#each entries(SAMPLES.SettingsFieldView) as [name, p] (name)}
+        <GalleryCard label={`SettingsFieldView · ${name}`} surface>
+          <div class="w-full">
+            <SettingsFieldView {...p as ComponentProps<typeof SettingsFieldView>} />
+          </div>
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.SettingsFieldView) as [name, p] (name)}
-      <GalleryCard label={`SettingsFieldView · ${name}`}>
-        <div class="w-full max-w-md">
-          <SettingsFieldView {...p as ComponentProps<typeof SettingsFieldView>} />
-        </div>
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.CoresFieldView) as [name, p] (name)}
+        <GalleryCard label={`CoresFieldView · ${name}`} surface>
+          <div class="w-full">
+            <CoresFieldView {...p as ComponentProps<typeof CoresFieldView>} />
+          </div>
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.SettingsHeaderView) as [name, p] (name)}
-      <GalleryCard label={`SettingsHeaderView · ${name}`}>
-        <div class="w-full max-w-lg">
-          <SettingsHeaderView {...p as ComponentProps<typeof SettingsHeaderView>} />
-        </div>
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.ServicesFieldView) as [name, p] (name)}
+        <GalleryCard label={`ServicesFieldView · ${name}`} surface>
+          <div class="w-full">
+            <ServicesFieldView {...p as ComponentProps<typeof ServicesFieldView>} />
+          </div>
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.SettingsSidebarView) as [name, p] (name)}
-      <GalleryCard label={`SettingsSidebarView · ${name}`}>
-        <div class="h-96">
-          <SettingsSidebarView {...p as ComponentProps<typeof SettingsSidebarView>} />
-        </div>
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.StorageFieldView) as [name, p] (name)}
+        <GalleryCard label={`StorageFieldView · ${name}`} surface>
+          <div class="w-full">
+            <StorageFieldView {...p as ComponentProps<typeof StorageFieldView>} />
+          </div>
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.SettingsContentView) as [name, p] (name)}
-      <GalleryCard label={`SettingsContentView · ${name}`}>
-        <div class="tomat-scroll-inset w-full h-[28rem] overflow-auto">
-          <SettingsContentView
-            {...p as ComponentProps<typeof SettingsContentView>}
-            expanded={expandedFor((p as ComponentProps<typeof SettingsContentView>).groupId)}
-          />
-        </div>
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.ExtensionsFieldView) as [name, p] (name)}
+        <GalleryCard label={`ExtensionsFieldView · ${name}`} surface>
+          <div class="w-full">
+            <ExtensionsFieldView {...p as ComponentProps<typeof ExtensionsFieldView>} />
+          </div>
+        </GalleryCard>
+      {/each}
 
-    {#each entries(SAMPLES.SettingsShellView) as [name, p] (name)}
-      <GalleryCard label={`SettingsShellView · ${name}`}>
-        <SettingsShellView
-          {...p as ComponentProps<typeof SettingsShellView>}
-          sizeClass="w-[760px] max-w-full h-[28rem]"
-        >
-          {#snippet groupContent(gid)}
-            <SettingsContentView groupId={gid} values={SAMPLE_VALUES} expanded={expandedFor(gid)} />
-          {/snippet}
-          {#snippet sidebarFooter(collapsed)}
-            <SettingsDemoFooter {collapsed} />
-          {/snippet}
-        </SettingsShellView>
-      </GalleryCard>
-    {/each}
+      {#each entries(SAMPLES.ExtensionDetailView) as [name, p] (name)}
+        <GalleryCard label={`ExtensionDetailView · ${name}`} surface>
+          <div class="w-full">
+            <ExtensionDetailView {...p as ComponentProps<typeof ExtensionDetailView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ToolsFieldView) as [name, p] (name)}
+        <GalleryCard label={`ToolsFieldView · ${name}`} surface>
+          <div class="w-full">
+            <ToolsFieldView {...p as ComponentProps<typeof ToolsFieldView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ToolDetailView) as [name, p] (name)}
+        <GalleryCard label={`ToolDetailView · ${name}`} surface>
+          <div class="w-full">
+            <ToolDetailView {...p as ComponentProps<typeof ToolDetailView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.McpDetailView) as [name, p] (name)}
+        <GalleryCard label={`McpDetailView · ${name}`} surface>
+          <div class="w-full">
+            <McpDetailView {...p as ComponentProps<typeof McpDetailView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.MemoryDetailView) as [name, p] (name)}
+        <GalleryCard label={`MemoryDetailView · ${name}`} surface>
+          <div class="w-full">
+            <MemoryDetailView {...p as ComponentProps<typeof MemoryDetailView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ModelPresetFieldView) as [name, p] (name)}
+        <GalleryCard label={`ModelPresetFieldView · ${name}`} surface>
+          <div class="w-full">
+            <ModelPresetFieldView {...p as ComponentProps<typeof ModelPresetFieldView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.SttPresetFieldView) as [name, p] (name)}
+        <GalleryCard label={`SttPresetFieldView · ${name}`} surface>
+          <div class="w-full">
+            <SttPresetFieldView {...p as ComponentProps<typeof SttPresetFieldView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.TtsPresetFieldView) as [name, p] (name)}
+        <GalleryCard label={`TtsPresetFieldView · ${name}`} surface>
+          <div class="w-full">
+            <TtsPresetFieldView {...p as ComponentProps<typeof TtsPresetFieldView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ShortcutFieldView) as [name, p] (name)}
+        <GalleryCard label={`ShortcutFieldView · ${name}`} surface>
+          <div class="w-full">
+            <ShortcutFieldView {...p as ComponentProps<typeof ShortcutFieldView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ScheduleEditorView) as [name, p] (name)}
+        <GalleryCard label={`ScheduleEditorView · ${name}`} surface>
+          <div class="w-full">
+            <ScheduleEditorView {...p as ComponentProps<typeof ScheduleEditorView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ScheduledPromptDetailView) as [name, p] (name)}
+        <GalleryCard label={`ScheduledPromptDetailView · ${name}`} surface>
+          <div class="w-full">
+            <ScheduledPromptDetailView {...p as ComponentProps<typeof ScheduledPromptDetailView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.SnippetDetailView) as [name, p] (name)}
+        <GalleryCard label={`SnippetDetailView · ${name}`} surface>
+          <div class="w-full">
+            <SnippetDetailView {...p as ComponentProps<typeof SnippetDetailView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.CommandPreviewFieldView) as [name, p] (name)}
+        <GalleryCard label={`CommandPreviewFieldView · ${name}`} surface>
+          <div class="w-full min-w-0">
+            <CommandPreviewFieldView {...p as ComponentProps<typeof CommandPreviewFieldView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.UpdateButtonView) as [name, p] (name)}
+        <GalleryCard label={`UpdateButtonView · ${name}`} surface>
+          <div class="w-full">
+            <UpdateButtonView {...p as ComponentProps<typeof UpdateButtonView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.QuickSettingsView) as [name, p] (name)}
+        <GalleryCard label={`QuickSettingsView · ${name}`} surface>
+          <div class="w-full">
+            <QuickSettingsView {...p as ComponentProps<typeof QuickSettingsView>}>
+              {#snippet sections()}
+                <QuickSettingsSectionView title="General" open enabled>
+                  {#snippet body()}
+                    <div class="text-sm text-default-700 py-1">Theme</div>
+                    <div class="text-sm text-default-700 py-1">Alignment</div>
+                  {/snippet}
+                </QuickSettingsSectionView>
+                <QuickSettingsSectionView title="Text to speech" enabled hasToggle>
+                  {#snippet body()}<div class="text-sm text-default-700 py-1">Voice</div>{/snippet}
+                </QuickSettingsSectionView>
+              {/snippet}
+            </QuickSettingsView>
+          </div>
+        </GalleryCard>
+      {/each}
+    </div>
   </section>
+
+  <!-- Object master/detail scaffolding shared across the settings field lists. -->
+  <section class="flex flex-col gap-6">
+    <h2 class="text-lg font-medium">Objects</h2>
+    <div class="columns-1 sm:columns-2 gap-4">
+      {#each entries(SAMPLES.ObjectManagerView) as [name, p] (name)}
+        <GalleryCard label={`ObjectManagerView · ${name}`} surface>
+          <!-- A plain block (not a row flex) so the View, which is `display:flex`,
+               fills the panel width and its toolbar (search + triple-dot) stretches
+               like the client, instead of shrinking to content. -->
+          <div class="w-full h-80">
+            <ObjectManagerView {...p as ComponentProps<typeof ObjectManagerView>}>
+              {#snippet card(item: { name: string }, open: () => void)}
+                <ObjectCardView
+                  label={item.name}
+                  description={OBJECT_CARD_META[item.name]?.description}
+                  meta={OBJECT_CARD_META[item.name]?.meta}
+                  badges={OBJECT_CARD_META[item.name]?.badges ?? []}
+                  hasMenu
+                  onOpen={open}
+                  onMenu={chatNoop}
+                />
+              {/snippet}
+              {#snippet detailPane(item: { name: string })}
+                <ObjectDetailHeaderView title={item.name} />
+              {/snippet}
+              {#snippet empty()}
+                <div class="text-default-500 text-sm p-4">No items yet.</div>
+              {/snippet}
+            </ObjectManagerView>
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ObjectCardView) as [name, p] (name)}
+        <GalleryCard label={`ObjectCardView · ${name}`} surface>
+          <div class="w-full">
+            <ObjectCardView {...p as ComponentProps<typeof ObjectCardView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ObjectDetailHeaderView) as [name, p] (name)}
+        <GalleryCard label={`ObjectDetailHeaderView · ${name}`} surface>
+          <div class="w-full">
+            <ObjectDetailHeaderView {...p as ComponentProps<typeof ObjectDetailHeaderView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ObjectDetailScrollView) as [name, p] (name)}
+        <GalleryCard label={`ObjectDetailScrollView · ${name}`} surface>
+          <div class="w-full">
+            <ObjectDetailScrollView {...p as ComponentProps<typeof ObjectDetailScrollView>}>
+              <div class="text-default-600 text-sm">Type-specific detail content.</div>
+            </ObjectDetailScrollView>
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ObjectBadgeView) as [name, p] (name)}
+        <GalleryCard label={`ObjectBadgeView · ${name}`} surface>
+          <ObjectBadgeView {...p as ComponentProps<typeof ObjectBadgeView>} />
+        </GalleryCard>
+      {/each}
+    </div>
+  </section>
+
+  <!-- Conditional overlays: modals and popovers, each open over a dimmed backdrop
+       pinned to the card, with the focus grid showing behind the scrim. -->
+  <section class="flex flex-col gap-6">
+    <h2 class="text-lg font-medium">Overlays</h2>
+    <div class="columns-1 sm:columns-2 gap-4">
+      {#each entries(SAMPLES.ConfirmModalView) as [name, p] (name)}
+        <GalleryCard label={`ConfirmModalView · ${name}`} backdrop>
+          <div class="relative h-80 w-full">
+            <ConfirmModalView {...p as ComponentProps<typeof ConfirmModalView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.PasswordPromptModalView) as [name, p] (name)}
+        <GalleryCard label={`PasswordPromptModalView · ${name}`} backdrop>
+          <div class="relative h-72 w-full">
+            <PasswordPromptModalView {...p as ComponentProps<typeof PasswordPromptModalView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.DeletionsModalView) as [name, p] (name)}
+        <GalleryCard label={`DeletionsModalView · ${name}`} backdrop>
+          <div class="relative h-[30rem] w-full">
+            <DeletionsModalView {...p as ComponentProps<typeof DeletionsModalView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.DownloadsModalView) as [name, p] (name)}
+        <GalleryCard label={`DownloadsModalView · ${name}`} backdrop>
+          <div class="relative h-[28rem] w-full">
+            <DownloadsModalView {...p as ComponentProps<typeof DownloadsModalView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ShareModalView) as [name, p] (name)}
+        <!-- The dialog is h-[70vh] capped at max-h-[40rem]; size the card taller
+             than that cap so the modal is never clipped AND keeps clear vertical
+             breathing room above and below it on the grid. -->
+        <GalleryCard label={`ShareModalView · ${name}`} backdrop>
+          <div class="relative h-[44rem] w-full">
+            <ShareModalView {...p as ComponentProps<typeof ShareModalView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.ColorPickerModalView) as [name, p] (name)}
+        <GalleryCard label={`ColorPickerModalView · ${name}`} backdrop>
+          <div class="relative h-[26rem] w-full flex items-start justify-center pt-4">
+            <button
+              bind:this={colorAnchors[name]}
+              class="rounded-medium bg-surface-inset px-3 py-1.5 text-sm text-default-700"
+            >
+              Pick color
+            </button>
+            <ColorPickerModalView
+              {...p as ComponentProps<typeof ColorPickerModalView>}
+              anchor={colorAnchors[name] ?? null}
+            />
+          </div>
+        </GalleryCard>
+      {/each}
+    </div>
+  </section>
+
+  <Primitives />
 
   <!-- Mobile counterparts, under a mobile UiContext (scoped to its own subtree
        so the desktop cards above stay on DEFAULT_UI_CONTEXT). -->
   <MobileGallery />
 </div>
 
-<!-- Chat-shell regions for the desktop ChatShellView card (the mobile card has
-     its own stand-ins in MobileGallery). Plain stand-ins: the card demonstrates
-     the shell ARRANGEMENT, so the regions only need to read as a core chip, a
-     session title, a composer, and a couple of transcript rows. -->
+<!-- Chat-shell regions for the desktop ChatShellView card: the REAL shared
+     components on a short simulated session, fed the same samples the client
+     feeds live state, so the card shows the actual chat (core bar, session bar,
+     composer, and a prompt -> reasoning -> answer exchange), not stand-ins. -->
 {#snippet chatCoreBar()}
-  <div class="rounded-large bg-surface-inset px-3 py-2 text-sm text-default-600">
-    tomat core · connected
-  </div>
+  <CoreBarView {...SAMPLES.CoreBarView.idle as ComponentProps<typeof CoreBarView>} />
 {/snippet}
 {#snippet chatSessionBar(_z: number)}
-  <div class="rounded-large bg-surface-inset px-3 py-2 text-sm font-medium text-default-700">
-    Planning the week
-  </div>
+  <!-- Enable the session-management buttons (list + new) the live bar shows, so
+       the shell card matches the client instead of a bar with no controls. -->
+  <SessionBarView
+    {...SAMPLES.SessionBarView.default as ComponentProps<typeof SessionBarView>}
+    showButtonGroup
+    onList={chatNoop}
+    onNew={chatNoop}
+  />
 {/snippet}
 {#snippet chatInput()}
-  <div class="rounded-large bg-surface-inset px-3 py-3 text-sm text-default-500">
-    Message tomat…
-  </div>
+  <UserInputView {...SAMPLES.UserInputView.empty as ComponentProps<typeof UserInputView>} />
 {/snippet}
 {#snippet chatTranscript()}
-  <div class="w-fit rounded-large bg-surface px-4 py-2 text-sm text-default-800 shadow">
-    Can you summarize my notes?
-  </div>
-  <div class="w-fit rounded-large bg-surface px-4 py-2 text-sm text-default-800 shadow">
-    Here is a short summary of your notes.
-  </div>
+  <!-- Newest-first DOM order: the shell's transcript column is flex-col-reverse,
+       so the answer (first here) lands at the visual bottom by the composer and
+       the prompt (last) at the top, reading top-to-bottom chronologically. -->
+  <AgentMessageView kind="content" bgClass="bubble-agent">
+    {#snippet body()}
+      <span class="whitespace-pre-wrap break-words">{CHAT_ANSWER}</span>
+    {/snippet}
+  </AgentMessageView>
+  <AgentMessageView kind="reasoning" reasoningDurationMs={3200}>
+    {#snippet body()}
+      <span>{CHAT_REASONING}</span>
+    {/snippet}
+  </AgentMessageView>
+  <UserMessageView text={CHAT_PROMPT} />
 {/snippet}

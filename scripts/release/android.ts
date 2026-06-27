@@ -294,6 +294,21 @@ export const androidItem: ReleaseItem = {
         const key = `${storagePrefix}${version}/${a.abi}/tomat.apk`;
         info(`uploading ${key}  (${humanBytes(a.size)})`);
         await r2Put(env, key, a.path, "application/vnd.android.package-archive");
+
+        // Mirror each APK to a version-less "current" alias so the install page
+        // can link a stable download URL without knowing the version (see
+        // androidApkUrl in packages/tomat-website/src/lib/install.ts). Short
+        // cache so a new release is picked up; the versioned copy above stays
+        // the source of truth the signed manifest points the updater at.
+        const aliasKey = `${storagePrefix}current/${a.abi}/tomat.apk`;
+        info(`uploading ${aliasKey}  (alias)`);
+        await r2Put(
+          env,
+          aliasKey,
+          a.path,
+          "application/vnd.android.package-archive",
+          MANIFEST_CACHE_CONTROL,
+        );
       }
 
       step(`Uploading ${manifestDir}/android.json to R2`);

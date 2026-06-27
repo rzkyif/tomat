@@ -24,7 +24,8 @@ import { llmIdle } from "./llm-idle.ts";
 import { loadCoreSettings, subscribeCoreSettings } from "./core-settings.ts";
 import { downloadManager } from "../downloads/manager.ts";
 import { onBinaryInstalled } from "../binaries/manager.ts";
-import { autoInstallBuiltinIfReady } from "../extensions/builtin-seed.ts";
+import { runQueuedBuiltinInstall } from "../extensions/builtin-seed.ts";
+import { BROADCAST_SINK } from "../http/routes/extensions.ts";
 import { binaryName } from "../binaries/versions.ts";
 import { binPath } from "../paths.ts";
 import { getLogger } from "../shared/log.ts";
@@ -164,9 +165,9 @@ export async function initSidecarBoot(): Promise<void> {
         await applySpeech(s).catch(logErr("speech"));
       }
       if (kind === "deno") {
-        // The deno worker runtime just landed: finish installing the built-in
-        // extension (Phase-2 deps) and enable its starter tools/memories.
-        await autoInstallBuiltinIfReady().catch(logErr("builtin-auto-install"));
+        // The deno worker runtime just landed: if the user asked to install the
+        // built-in's tools while it was still missing, run that queued install now.
+        await runQueuedBuiltinInstall(BROADCAST_SINK).catch(logErr("builtin-queued-install"));
       }
     })();
   });

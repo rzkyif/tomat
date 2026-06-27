@@ -6,6 +6,7 @@ import {
   deleteStoragePaths,
 } from "../../services/storage.ts";
 import { AppError } from "../../shared/errors.ts";
+import { readJson } from "../body.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
 export function storageRoutes(): Hono {
@@ -40,12 +41,4 @@ export function storageRoutes(): Hono {
   });
 
   return r;
-}
-
-async function readJson(c: import("hono").Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
-  }
 }

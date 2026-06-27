@@ -250,45 +250,67 @@ function argString(args: unknown, key: string, opts: { allowEmpty?: boolean } = 
 
 // One core-owned SQLite handle per extension, opened on first use under
 // extension-data/<id>/data.sqlite and proxied to the sandboxed worker over
-// stdio (workers never get fs access to it).
+// stdio (workers never get fs access to it). Bounded LRU: a core that has run
+// many extensions over its lifetime would otherwise hold a file handle (and WAL
+// memory) for every one forever. Map insertion order is the LRU order; a used
+// handle is re-inserted to the most-recent end, and opening past the cap closes
+// the least-recently-used. Eviction is safe because each dispatch reopens the
+// handle on demand (data lives in the WAL-backed file, not the handle) and a
+// dispatch runs synchronously start to finish, so no handle is mid-use across
+// an eviction.
+const EXTENSION_DB_MAX_OPEN = 16;
 const extensionDbs = new Map<string, Database>();
 
 type DbBindValue = string | number | boolean | null;
 
 function extensionDb(extensionId: string): Database {
-  let db = extensionDbs.get(extensionId);
-  if (!db) {
-    const dir = extensionDataDir(extensionId);
-    Deno.mkdirSync(dir, { recursive: true });
-    // Match the core connection (connection.ts): int64 so INTEGER columns
-    // round-trip values past 2^31 (e.g. Date.now() ms timestamps a extension
-    // stores), plus the same per-connection pragmas so a extension's private db
-    // behaves like the rest of core.
-    db = new Database(join(dir, "data.sqlite"), { int64: true });
-    db.exec("PRAGMA journal_mode = WAL;");
-    db.exec("PRAGMA foreign_keys = ON;");
-    // Shorter than core's 5s: extension queries run synchronously on core's event
-    // loop, so a contended lock blocks the whole loop for up to this long. A
-    // private per-extension db is rarely contended, so 1s fails a stuck write fast
-    // rather than freezing core for 5s.
-    db.exec("PRAGMA busy_timeout = 1000;");
-    extensionDbs.set(extensionId, db);
+  const existing = extensionDbs.get(extensionId);
+  if (existing) {
+    // Touch: move to the most-recently-used end of the Map.
+    extensionDbs.delete(extensionId);
+    extensionDbs.set(extensionId, existing);
+    return existing;
   }
+  // At capacity: evict (close) the least-recently-used handle first.
+  if (extensionDbs.size >= EXTENSION_DB_MAX_OPEN) {
+    const oldest = extensionDbs.keys().next().value;
+    if (oldest !== undefined) closeExtensionDb(oldest);
+  }
+  const dir = extensionDataDir(extensionId);
+  Deno.mkdirSync(dir, { recursive: true });
+  // Match the core connection (connection.ts): int64 so INTEGER columns
+  // round-trip values past 2^31 (e.g. Date.now() ms timestamps a extension
+  // stores), plus the same per-connection pragmas so a extension's private db
+  // behaves like the rest of core.
+  const db = new Database(join(dir, "data.sqlite"), { int64: true });
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA foreign_keys = ON;");
+  // Shorter than core's 5s: extension queries run synchronously on core's event
+  // loop, so a contended lock blocks the whole loop for up to this long. A
+  // private per-extension db is rarely contended, so 1s fails a stuck write fast
+  // rather than freezing core for 5s.
+  db.exec("PRAGMA busy_timeout = 1000;");
+  extensionDbs.set(extensionId, db);
   return db;
+}
+
+// Close a cached handle and drop it from the map. Tolerates an already-closed
+// handle (close throws then). Used by both LRU eviction and uninstall cleanup.
+function closeExtensionDb(extensionId: string): void {
+  const db = extensionDbs.get(extensionId);
+  if (!db) return;
+  try {
+    db.close();
+  } catch {
+    /* already closed */
+  }
+  extensionDbs.delete(extensionId);
 }
 
 /** Close the cached handle and remove a extension's private data dir. Called
  *  by the installer on uninstall. */
 export function deleteExtensionData(extensionId: string): void {
-  const db = extensionDbs.get(extensionId);
-  if (db) {
-    try {
-      db.close();
-    } catch {
-      /* already closed */
-    }
-    extensionDbs.delete(extensionId);
-  }
+  closeExtensionDb(extensionId);
   try {
     Deno.removeSync(extensionDataDir(extensionId), { recursive: true });
   } catch (err) {

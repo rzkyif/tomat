@@ -21,6 +21,7 @@
     title,
     description,
     badges,
+    trailing,
     onclick,
     ariaLabel,
     htmlTitle,
@@ -35,6 +36,8 @@
     title?: string;
     description?: string;
     badges?: Snippet;
+    /** Right-aligned content in the title row (e.g. a "Recommended" chip). */
+    trailing?: Snippet;
     onclick: () => void;
     ariaLabel?: string;
     htmlTitle?: string;
@@ -43,7 +46,9 @@
   } = $props();
 
   const sizeClass = $derived(
-    size === "sm" ? "text-xs px-2 py-1 h-8 rounded gap-1.5" : "p-3 rounded-large gap-1.5",
+    size === "sm"
+      ? "text-xs px-2 py-1 h-8 rounded gap-1.5"
+      : "p-3 rounded-large gap-1.5",
   );
 
   // Full strings so the UnoCSS extractor sees every accent.
@@ -64,7 +69,7 @@
         ? `border-2 ${accentSelectedMap[accent]} text-default-800`
         : "border-2 border-transparent bg-surface-inset hov:bg-surface-inset-strong text-default-800"
       : selected
-        ? "bg-default-inverted-300 text-default-inverted-800"
+        ? "bg-default-inverted-300 text-default-inverted-900"
         : "bg-surface-inset text-default-800 hov:bg-surface-inset-strong",
   );
 
@@ -72,10 +77,14 @@
   const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
 
   const descriptionClass = $derived(
-    selectedStyle === "invert" && selected ? "text-default-inverted-500" : "text-default-500",
+    selectedStyle === "invert" && selected
+      ? "text-default-inverted-600"
+      : "text-default-500",
   );
   const badgesTextClass = $derived(
-    selectedStyle === "invert" && selected ? "text-default-inverted-600" : "text-default-600",
+    selectedStyle === "invert" && selected
+      ? "text-default-inverted-600"
+      : "text-default-600",
   );
 </script>
 
@@ -92,12 +101,17 @@
   {:else if size === "sm"}
     {title}
   {:else}
-    <div class="flex items-center gap-1.5">
+    <!-- min-h keeps the title row a constant height whether or not a trailing
+         chip is present, so descriptions line up across sibling cards. -->
+    <div class="flex items-center gap-1.5 min-h-6">
       {#if icon}
         <i class="{icon} text-lg"></i>
       {/if}
       {#if title}
         <span class="text-base font-semibold leading-tight">{title}</span>
+      {/if}
+      {#if trailing}
+        <span class="ml-auto flex items-center">{@render trailing()}</span>
       {/if}
     </div>
     {#if badges}

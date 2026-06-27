@@ -19,6 +19,7 @@ import {
   patchCoreSettings,
 } from "../../services/core-settings.ts";
 import { AppError } from "../../shared/errors.ts";
+import { parseBody, readJson } from "../body.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 import {
   type AppliedModelSettings,
@@ -59,14 +60,6 @@ const speechSelectBodySchema = z
     modelSpec: z.string().optional(),
   })
   .strict();
-
-function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    throw new AppError("validation_error", parsed.error.message);
-  }
-  return parsed.data;
-}
 
 export function modelsRoutes(): Hono {
   const r = new Hono();
@@ -344,12 +337,4 @@ function appliedFromSettings(s: Record<string, unknown>): { preset?: string; mod
   const modelPath =
     typeof s["llm.modelPath"] === "string" ? (s["llm.modelPath"] as string) : undefined;
   return { preset, modelPath };
-}
-
-async function readJson(c: import("hono").Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
-  }
 }

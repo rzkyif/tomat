@@ -14,6 +14,11 @@
   import { SAMPLE_VALUES, SAMPLES } from "@tomat/shared/ui/samples";
   import ChatShellView from "@tomat/shared/ui/components/chat/ChatShellView.svelte";
   import SnippetAutocompleteView from "@tomat/shared/ui/components/chat/SnippetAutocompleteView.svelte";
+  import CoreBarView from "@tomat/shared/ui/components/chat/CoreBarView.svelte";
+  import SessionBarView from "@tomat/shared/ui/components/chat/SessionBarView.svelte";
+  import UserInputView from "@tomat/shared/ui/components/chat/UserInputView.svelte";
+  import UserMessageView from "@tomat/shared/ui/components/chat/messages/UserMessageView.svelte";
+  import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
   import SettingsShellView from "@tomat/shared/ui/components/settings/SettingsShellView.svelte";
   import SettingsContentView from "@tomat/shared/ui/components/settings/SettingsContentView.svelte";
   import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
@@ -37,6 +42,14 @@
   );
 
   const entries = <T,>(o: Record<string, T>) => Object.entries(o);
+
+  // A short simulated session for the mobile ChatShellView card (mirrors the
+  // desktop card), so the phone frame shows the real chat, not stand-ins.
+  const CHAT_PROMPT = "How do I install tomat on macOS?";
+  const CHAT_REASONING =
+    "The user is on macOS, so the one-line installer is the simplest path; point them at the landing-page command and the launch step.";
+  const CHAT_ANSWER =
+    "Run the one-line installer from the landing page, then launch tomat from Applications. Want the per-OS steps?";
 
   function expandedFor(gid: string | undefined): Set<string> {
     const keys = new Set<string>();
@@ -143,28 +156,41 @@
   {/each}
 </section>
 
-<!-- Chat-shell region stand-ins for the mobile card (a core chip, a session
-     title, a composer, a couple of transcript rows). -->
+<!-- Chat-shell regions for the mobile card: the REAL shared components on a short
+     simulated session under the mobile UiContext, so the phone frame shows the
+     actual touch chat (core bar, session bar, composer, and a prompt -> reasoning
+     -> answer exchange), not stand-ins. -->
 {#snippet chatCoreBar()}
-  <div class="rounded-large bg-surface-inset px-3 py-2 text-sm text-default-600">
-    tomat core · connected
-  </div>
+  <!-- `onSettings` makes the mobile top-app-bar Settings gear render (it is
+       dropped from the mobile composer, so this is its only entry point). -->
+  <CoreBarView
+    {...SAMPLES.CoreBarView.idle as ComponentProps<typeof CoreBarView>}
+    onSettings={noop}
+  />
 {/snippet}
 {#snippet chatSessionBar(_z: number)}
-  <div class="rounded-large bg-surface-inset px-3 py-2 text-sm font-medium text-default-700">
-    Planning the week
-  </div>
+  <!-- Enable the session-management buttons (list + new) the mobile bar shows. -->
+  <SessionBarView
+    {...SAMPLES.SessionBarView.default as ComponentProps<typeof SessionBarView>}
+    showButtonGroup
+    onList={noop}
+    onNew={noop}
+  />
 {/snippet}
 {#snippet chatInput()}
-  <div class="rounded-large bg-surface-inset px-3 py-3 text-sm text-default-500">
-    Message tomat…
-  </div>
+  <UserInputView {...SAMPLES.UserInputView.empty as ComponentProps<typeof UserInputView>} />
 {/snippet}
 {#snippet chatTranscript()}
-  <div class="w-fit rounded-large bg-surface px-4 py-2 text-sm text-default-800 shadow">
-    Can you summarize my notes?
-  </div>
-  <div class="w-fit rounded-large bg-surface px-4 py-2 text-sm text-default-800 shadow">
-    Here is a short summary of your notes.
-  </div>
+  <!-- Newest-first DOM order: the shell's transcript column is flex-col-reverse. -->
+  <AgentMessageView kind="content" bgClass="bubble-agent">
+    {#snippet body()}
+      <span class="whitespace-pre-wrap break-words">{CHAT_ANSWER}</span>
+    {/snippet}
+  </AgentMessageView>
+  <AgentMessageView kind="reasoning" reasoningDurationMs={3200}>
+    {#snippet body()}
+      <span>{CHAT_REASONING}</span>
+    {/snippet}
+  </AgentMessageView>
+  <UserMessageView text={CHAT_PROMPT} />
 {/snippet}

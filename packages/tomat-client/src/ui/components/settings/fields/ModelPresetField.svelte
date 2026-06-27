@@ -4,14 +4,12 @@
   import { modelRecommendState } from "../../../state/model-recommend.svelte";
   import { cores } from "$lib/core";
   import FieldCard from "./FieldCard.svelte";
-  import OptionCard from "@tomat/shared/ui/components/primitives/OptionCard.svelte";
-  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
-  import HelpText from "@tomat/shared/ui/components/primitives/HelpText.svelte";
-  import Alert from "@tomat/shared/ui/components/primitives/Alert.svelte";
+  import ModelPresetFieldView from "@tomat/shared/ui/components/settings/ModelPresetFieldView.svelte";
 
   // The adaptive LLM preset picker. Unlike the generic PresetField, each card's
   // model + tuning is computed by the core for this device; selecting a card
-  // calls the select API rather than applying static defaults.
+  // calls the select API rather than applying static defaults. This shell owns
+  // the recommendation + catalog stores and feeds the pure ModelPresetFieldView.
   let { field, onPresetSelect } = $props<{
     field: SettingField;
     onPresetSelect: (fieldId: string, option: PresetOption) => void;
@@ -64,6 +62,43 @@
         : rs.checkResult === "none"
           ? "i-material-symbols-check-rounded"
           : "i-material-symbols-refresh-rounded",
+  );
+
+  // --- bucket cards -------------------------------------------------------
+  const buckets = $derived(
+    bucketOptions.map((opt) => {
+      const bucket = opt.id as PresetBucket;
+      const rec = bucketRec(opt.id);
+      const title = opt.title ?? opt.label;
+      const better = rs.betterAvailable(bucket);
+      return {
+        id: opt.id,
+        title,
+        description: opt.description,
+        selected: settingsState.currentSettings[field.id] === opt.id,
+        selectable: !!rec,
+        badges: rec
+          ? [
+            { icon: "i-material-symbols-psychology-alt-rounded", text: rec.name },
+            { icon: "i-material-symbols-memory-rounded", text: gb(rec.footprintBytes) },
+            { icon: "i-material-symbols-bolt-rounded", text: rec.quant },
+          ]
+          : null,
+        placeholder: rec
+          ? undefined
+          : rs.loading
+            ? "Computing for your device…"
+            : "No model fits this tier",
+        better: better
+          ? {
+            message: `A better model is available for ${title}: ${rec?.name}`,
+            applying: rs.applying === bucket,
+            onApply: () => rs.applyBucket(bucket),
+            onDismiss: () => rs.dismiss(bucket),
+          }
+          : undefined,
+      };
+    }),
   );
 
   // --- manual model + quantization dropdowns ------------------------------
@@ -124,6 +159,20 @@
   );
   const selectedQuant = $derived(settingsState.currentSettings["llm.modelPath"] as string);
 
+  const custom = $derived(
+    customOption
+      ? {
+        title: customOption.title ?? customOption.label,
+        description: customOption.description,
+        selected: settingsState.currentSettings[field.id] === customOption.id,
+        model: { value: selectedModel, options: modelOptions },
+        quant: !manualSelected && selectedModelView
+          ? { value: selectedQuant, options: quantOptions }
+          : null,
+      }
+      : null,
+  );
+
   function onModelSelect(value: string): void {
     if (value === MANUAL) {
       // Switch to Custom without touching the llama-server fields, and hide the
@@ -142,115 +191,17 @@
 </script>
 
 <FieldCard {field}>
-  <div class="flex flex-col gap-2">
-    {#if rs.error}
-      <Alert variant="error" size="sm">{rs.error}</Alert>
-    {/if}
-
-    <button
-      type="button"
-      class="flex items-center gap-1 px-3 py-2 rounded-large bg-surface-inset text-xs text-default-600 hover:text-default-800 cursor-pointer outline-none"
-      onclick={() => !rs.checking && rs.recheck()}
-      aria-label="Check for newer models"
-    >
-      <i class="{checkIcon} text-sm"></i>
-      <span>{checkLabel}</span>
-    </button>
-
-    {#each bucketOptions as opt}
-      {@const bucket = opt.id as PresetBucket}
-      {@const rec = bucketRec(opt.id)}
-      {@const selected = settingsState.currentSettings[field.id] === opt.id}
-      {@const better = rs.betterAvailable(bucket)}
-      {#snippet badges()}
-        {#if rec}
-          <span class="inline-flex items-center gap-1">
-            <i class="i-material-symbols-psychology-alt-rounded text-sm"></i>
-            <span>{rec.name}</span>
-          </span>
-          <span class="inline-flex items-center gap-1">
-            <i class="i-material-symbols-memory-rounded text-sm"></i>
-            <span>{gb(rec.footprintBytes)}</span>
-          </span>
-          <span class="inline-flex items-center gap-1">
-            <i class="i-material-symbols-bolt-rounded text-sm"></i>
-            <span>{rec.quant}</span>
-          </span>
-        {:else if rs.loading}
-          <span class="opacity-60">Computing for your device…</span>
-        {:else}
-          <span class="opacity-60">No model fits this tier</span>
-        {/if}
-      {/snippet}
-      <OptionCard
-        {selected}
-        title={opt.title ?? opt.label}
-        description={opt.description}
-        badges={badges}
-        ariaLabel={opt.title}
-        onclick={() => rec && rs.applyBucket(bucket)}
-      />
-      {#if better}
-        <Alert
-          variant="info"
-          size="sm"
-          action={{
-            icon: rs.applying === bucket ? "i-line-md:loading-loop" : "i-material-symbols-check-rounded",
-            title: "Apply",
-            onclick: () => rs.applyBucket(bucket),
-          }}
-          onclose={() => rs.dismiss(bucket)}
-        >
-          A better model is available for {opt.title ?? opt.label}: {rec?.name}
-        </Alert>
-      {/if}
-    {/each}
-
-    {#if customOption}
-      {@const isCustom = settingsState.currentSettings[field.id] === customOption.id}
-      {@const labelClass = isCustom ? "text-default-inverted-600" : "text-default-600"}
-      <div
-        class="flex flex-col gap-2 p-3 rounded-large {isCustom
-          ? 'bg-default-inverted-300 text-default-inverted-800'
-          : 'bg-surface-inset text-default-800'}"
-      >
-        <button
-          type="button"
-          class="text-left flex flex-col gap-1.5 cursor-pointer outline-none"
-          onclick={() => onPresetSelect(field.id, customOption)}
-        >
-          <span class="text-base font-semibold leading-tight">
-            {customOption.title ?? customOption.label}
-          </span>
-          {#if customOption.description}
-            <HelpText
-              text={customOption.description}
-              variant="compact"
-              class={isCustom ? "text-default-inverted-500" : "text-default-500"}
-            />
-          {/if}
-        </button>
-        <div class="flex flex-col gap-1">
-          <span class="text-xs font-medium {labelClass}">Model</span>
-          <Select
-            value={selectedModel}
-            options={modelOptions}
-            onchange={onModelSelect}
-            ariaLabel="Choose a model"
-          />
-        </div>
-        {#if !manualSelected && selectedModelView}
-          <div class="flex flex-col gap-1">
-            <span class="text-xs font-medium {labelClass}">Quantization</span>
-            <Select
-              value={selectedQuant}
-              options={quantOptions}
-              onchange={onQuantSelect}
-              ariaLabel="Choose a quantization"
-            />
-          </div>
-        {/if}
-      </div>
-    {/if}
-  </div>
+  <ModelPresetFieldView
+    error={rs.error}
+    {checkLabel}
+    {checkIcon}
+    checkDisabled={rs.checking}
+    {buckets}
+    {custom}
+    onCheck={() => rs.recheck()}
+    onSelectBucket={(id) => rs.applyBucket(id as PresetBucket)}
+    onSelectCustom={() => customOption && onPresetSelect(field.id, customOption)}
+    {onModelSelect}
+    {onQuantSelect}
+  />
 </FieldCard>

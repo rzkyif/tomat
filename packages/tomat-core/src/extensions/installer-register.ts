@@ -102,6 +102,7 @@ function registerDownloaded(
       triggers: t.triggers ?? [],
       fnExport: t.function,
       alwaysAvailable: t.alwaysAvailable ?? false,
+      platforms: t.platforms ?? [],
       requiredPermissions: flattenPermissions(t.permissions),
     })),
   );

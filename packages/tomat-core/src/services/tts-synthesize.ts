@@ -11,6 +11,7 @@ import { speechSpeak } from "../sidecars/speech.ts";
 import { speechScheduler } from "./speech-scheduler.ts";
 import { loadCoreSettings } from "./core-settings.ts";
 import { getSecret } from "./secrets.ts";
+import { strSetting } from "./settings-access.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 
@@ -66,9 +67,4 @@ export async function synthesizeSpeech(
   // Local mode: hit the speech sidecar through the speech scheduler so
   // concurrent multi-client requests queue fairly behind the single engine.
   return speechScheduler().schedule(clientId, () => speechSpeak(text, voice, speed));
-}
-
-function strSetting(s: Record<string, unknown>, k: string, def: string): string {
-  const v = s[k];
-  return typeof v === "string" ? v : def;
 }

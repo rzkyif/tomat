@@ -29,8 +29,13 @@
         import("highlight.js"),
         import("marked"),
         import("marked-highlight"),
-        import("highlight.js/styles/atom-one-dark.css"),
       ]);
+      // The hljs theme stylesheet is purely cosmetic (code-token colours), so it
+      // loads best-effort and OUTSIDE the Promise.all above: a host that chunks
+      // but never emits/serves this asset (the Astro website does exactly this)
+      // would otherwise reject the whole renderer load and freeze anything that
+      // awaits it (e.g. the homepage showcase warming up before it animates).
+      import("highlight.js/styles/atom-one-dark.css").catch(() => {});
       const hljs = hljsMod.default;
       const { marked } = markedMod;
       const { markedHighlight } = markedHighlightMod;

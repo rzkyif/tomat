@@ -82,6 +82,12 @@
           "description": "Name of the exported async function on the entry module that runs this tool."
         },
         "alwaysAvailable": { "type": "boolean", "default": false },
+        "platforms": {
+          "type": "array",
+          "items": { "enum": ["darwin", "windows", "linux", "linux_x11", "linux_wayland"] },
+          "default": [],
+          "description": "Operating systems this tool runs on. Empty (or omitted) means every platform. 'linux' matches any Linux session; 'linux_x11' / 'linux_wayland' narrow to a display server. A tool is hidden everywhere on a host its list doesn't cover."
+        },
         "permissions": {
           "type": "object",
           "additionalProperties": false,

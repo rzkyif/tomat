@@ -46,6 +46,12 @@ export class ExtensionsApi {
     return this.client.post(`/api/v1/extensions/${encodeURIComponent(id)}/install`, {});
   }
 
+  // Install the built-in's tools at the user's request. Installs now if the
+  // worker runtime is present, else `{ queued: true }` (runs once it lands).
+  installBuiltin(): Promise<{ queued: boolean }> {
+    return this.client.post("/api/v1/extensions/builtin-install", {});
+  }
+
   delete(id: string): Promise<void> {
     return this.client.del(`/api/v1/extensions/${encodeURIComponent(id)}`) as Promise<void>;
   }

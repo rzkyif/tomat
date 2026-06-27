@@ -30,13 +30,15 @@ cd packages/tomat-website && deno task preview    # wrangler dev
 
 ## Structure
 
-- `src/pages/` -- `index.astro` (home) and `manual/[...slug].astro` (one page
-  per manual entry).
+- `src/pages/` -- `index.astro` (home), `install.astro` (the install page), and
+  `manual/[...slug].astro` (one page per manual entry).
 - `src/components/showcase/` -- the showcase: `Showcase.svelte` (snap-scroll
   track + scrub bar + auto-advance) drives per-feature stages (`ChatStage`,
   `SettingsStage`) that script a GSAP timeline over the shared view components.
-- `src/components/` -- `Navbar`, `ManualOutline`, `InstallCard`, `ThemeToggle`,
-  and the small static `demos/` reused inside manual pages.
+- `src/components/` -- `Navbar`, `ManualOutline`, `ThemeToggle`, the install
+  page's `InstallDiagram` + `InstallGenerator` (`.astro` no-JS baseline +
+  `.svelte` enhanced island), and the small static `demos/` reused inside manual
+  pages.
 - `src/content/manual/` -- the manual markdown, grouped into sections.
 - `src/lib/` -- `site.ts` (nav config), `manual.ts` (section grouping),
   `showcase.ts` (the GSAP cursor / typing / scroll helpers).

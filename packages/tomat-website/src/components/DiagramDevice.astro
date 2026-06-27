@@ -1,0 +1,51 @@
+---
+// The larger device card behind a machine's Client / Core role chips in the
+// install-page diagram: a surface card with the device icon + name at its top
+// left, wearing the exact same blurred drop shadow + frost halo as the home
+// showcase bubbles (the shared BubbleShadow, rendered statically here). Its
+// colours come from the `--dg-*` aliases the diagram sets (the inverted theme),
+// so it reads like the showcase. Positioned and sized by the `style`
+// (left/top/width/height) the diagram passes.
+import BubbleShadow from "./showcase/BubbleShadow.svelte";
+interface Props {
+  icon: string;
+  name: string;
+  style?: string;
+}
+const { icon, name, style } = Astro.props;
+---
+
+<div class="dg-device" style={style}>
+  <BubbleShadow />
+  <div class="dg-device-body bubble-promote relative z-10 h-full rounded-large">
+    <span class="dg-device-head">
+      <i class={`${icon} dg-device-icon`} aria-hidden="true"></i>
+      <span>{name}</span>
+    </span>
+  </div>
+</div>
+
+<style>
+  .dg-device {
+    position: absolute;
+    z-index: 0;
+  }
+  .dg-device-body {
+    padding: 0.45rem 0.6rem;
+    background: var(--dg-surface);
+    border: 1px solid var(--dg-border);
+  }
+  .dg-device-head {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--dg-text);
+    white-space: nowrap;
+  }
+  .dg-device-icon {
+    font-size: 0.95rem;
+    color: var(--dg-muted);
+  }
+</style>

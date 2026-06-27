@@ -9,6 +9,7 @@
     SETTINGS_SCHEMA,
   } from "@tomat/shared";
   import { useUiContext } from "@tomat/shared/ui/context";
+  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
   import type { SettingField } from "@tomat/shared";
   import type { Monitor } from "$lib/util/types";
   import { hasAlpha } from "$lib/appearance/color";
@@ -317,15 +318,17 @@
            against the selected core's /api/v1/settings. -->
       <div class="flex items-center gap-2 px-1 py-1 text-sm">
         <span class="text-default-600">Editing settings for:</span>
-        <select
-          class="bg-surface-inset text-default-800 rounded-medium px-2 py-1 hover:cursor-pointer"
-          bind:value={selectedCoreId}
-          onchange={() => onSelectedCoreChanged()}
-        >
-          {#each pairedCores as c (c.id)}
-            <option value={c.id}>{c.name}</option>
-          {/each}
-        </select>
+        <div class="w-48">
+          <Select
+            value={selectedCoreId}
+            options={pairedCores.map((c) => ({ value: c.id, label: c.name }))}
+            ariaLabel="Editing settings for"
+            onchange={(v) => {
+              selectedCoreId = v;
+              onSelectedCoreChanged();
+            }}
+          />
+        </div>
       </div>
     {/if}
   {/snippet}
@@ -351,7 +354,7 @@
     bind:searchValue={search.query}
     bind:searchMode={search.mode}
     bind:searchEl={search.inputEl}
-    searchPlaceholder={connectionState.reconnecting ? "Reconnecting to core..." : "Search settings..."}
+    searchPlaceholder={connectionState.reconnecting ? "Reconnecting to Core..." : "Search settings..."}
     searchDisabled={connectionState.reconnecting}
     onSearchInput={() => search.onInput()}
     onSearchFocus={() => {

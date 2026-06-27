@@ -182,14 +182,20 @@ _ui_stop_spinner() {
 # --- staging cleanup ------------------------------------------------------
 
 _ui_track_staging() {
-  UI_STAGING_PATHS="$UI_STAGING_PATHS $1"
+  # Newline-separated so a path containing spaces survives cleanup's word split.
+  UI_STAGING_PATHS="$UI_STAGING_PATHS
+$1"
 }
 
 _ui_cleanup_staging() {
   local p
+  local _old_ifs="$IFS"
+  IFS='
+'
   for p in $UI_STAGING_PATHS; do
-    [ -e "$p" ] && rm -f "$p" 2>/dev/null || true
+    [ -n "$p" ] && [ -e "$p" ] && rm -f "$p" 2>/dev/null || true
   done
+  IFS="$_old_ifs"
   UI_STAGING_PATHS=""
 }
 
@@ -413,9 +419,16 @@ else
   CHANNEL_SUFFIX="-$TOMAT_CHANNEL"
 fi
 HOME_DIR="${TOMAT_CORE_HOME:-$HOME/.tomat/$TOMAT_CHANNEL/core}"
+BIN_DIR="$HOME_DIR/bin"
 SERVICE_LABEL_ID="au.tomat.core$CHANNEL_SUFFIX"
 SYSTEMD_UNIT="tomat-core$CHANNEL_SUFFIX"
 CORE_BIN_NAME="tomat-core$CHANNEL_SUFFIX"
+# Core seals its secrets-vault master key in the OS keychain under this
+# service/account (mirrors secrets.ts); the helper that manages it is
+# channel-suffixed like every core binary (mirrors paths.ts coreBinaryName).
+KEYCHAIN_BIN="$BIN_DIR/tomat-core-keychain$CHANNEL_SUFFIX"
+KEYCHAIN_SERVICE="au.tomat.core$CHANNEL_SUFFIX"
+KEYCHAIN_ACCOUNT="master-key"
 
 uname_os="$(uname -s 2>/dev/null || echo unknown)"
 
@@ -440,6 +453,7 @@ ui_init "tomat-core uninstaller"
 
 IDX_SERVICE=$(ui_action_add "$LABEL_SERVICE")
 IDX_KILL=$(ui_action_add "Killing straggler tomat-core processes")
+IDX_KEYCHAIN=$(ui_action_add "Clearing keychain entry")
 IDX_REMOVE=$(ui_action_add "Removing $HOME_DIR")
 
 # --- action 1: unload service --------------------------------------------
@@ -501,7 +515,33 @@ else
   ui_action_done "$IDX_KILL" "(killed $KILLED_COUNT)"
 fi
 
-# --- action 3: remove the channel's core dir -----------------------------
+# --- action 3: clear the keychain master key -----------------------------
+# Done before the dir is removed (the helper lives in $BIN_DIR). Skipped under
+# --keep-data so the kept vault stays decryptable. Delete is idempotent, so
+# this is a no-op on dev (file fallback, no keychain entry) and on re-runs.
+
+if [ "$KEEP_DATA" = "1" ]; then
+  ui_action_skip "$IDX_KEYCHAIN" "(kept with data)"
+elif [ -x "$KEYCHAIN_BIN" ]; then
+  ui_action_start "$IDX_KEYCHAIN" "Clearing keychain entry"
+  # delete is idempotent (exit 0 even if absent), so a non-zero exit is a real
+  # failure (keychain locked / unavailable) worth reporting rather than masking.
+  if "$KEYCHAIN_BIN" delete "$KEYCHAIN_SERVICE" "$KEYCHAIN_ACCOUNT" >/dev/null 2>&1; then
+    ui_action_done "$IDX_KEYCHAIN" "(cleared)"
+  else
+    ui_action_skip "$IDX_KEYCHAIN" "(could not clear)"
+  fi
+elif [ "$uname_os" = "Darwin" ] && command -v security >/dev/null 2>&1; then
+  # Helper already gone (e.g. a partially-removed install): fall back to the
+  # native macOS keychain tool, which speaks the same generic-password store.
+  ui_action_start "$IDX_KEYCHAIN" "Clearing keychain entry"
+  security delete-generic-password -s "$KEYCHAIN_SERVICE" -a "$KEYCHAIN_ACCOUNT" >/dev/null 2>&1 || true
+  ui_action_done "$IDX_KEYCHAIN" "(cleared)"
+else
+  ui_action_skip "$IDX_KEYCHAIN" "(helper not present)"
+fi
+
+# --- action 4: remove the channel's core dir -----------------------------
 
 if [ "$KEEP_DATA" = "1" ]; then
   ui_action_skip "$IDX_REMOVE" "(skipped per --keep-data)"

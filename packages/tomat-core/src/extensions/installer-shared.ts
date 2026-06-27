@@ -3,13 +3,21 @@
 // the dependency leaf: every phase module imports from here, so nothing here may
 // import them back.
 
+import type { BuiltinExtensionManifest } from "@tomat/shared";
+
 export type InstallSource =
   | { source: "npm"; name: string; version?: string }
   | { source: "local"; path: string; slug: string }
   // The CDN-distributed built-in extension. Bytes are resolved at install time:
-  // the codebase (dev), `preferLocalDir` if it exists (install-script-placed
-  // files, used by first-boot seeding), else the signed CDN tarball.
-  | { source: "builtin"; preferLocalDir?: string };
+  // - `planted` set (first-boot seeding ONLY): install offline from the
+  //   install-script-planted tarball + already-verified signed manifest, with NO
+  //   network request (a running core never fetches without a user action).
+  // - `planted` unset: resolve from the codebase (dev) or the signed CDN tarball.
+  //   That branch fetches, so it runs only from a user-triggered download/update.
+  | {
+      source: "builtin";
+      planted?: { tarballPath: string; manifest: BuiltinExtensionManifest };
+    };
 
 export interface InstallEventSink {
   log(jobId: string, id: string, stream: "stdout" | "stderr", line: string): void;

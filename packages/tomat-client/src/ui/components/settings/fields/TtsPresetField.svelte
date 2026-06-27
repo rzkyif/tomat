@@ -5,14 +5,12 @@
   import { ttsModelsState } from "../../../state/tts-models.svelte";
   import { cores } from "$lib/core";
   import FieldCard from "./FieldCard.svelte";
-  import OptionCard from "@tomat/shared/ui/components/primitives/OptionCard.svelte";
-  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
-  import HelpText from "@tomat/shared/ui/components/primitives/HelpText.svelte";
-  import Alert from "@tomat/shared/ui/components/primitives/Alert.svelte";
+  import TtsPresetFieldView from "@tomat/shared/ui/components/settings/TtsPresetFieldView.svelte";
 
   // The Text-to-Speech catalog picker. Mirrors SttPresetField: each card binds to
   // a catalog model and selecting one calls the select API; there is no fit
-  // engine (TTS bundles are small and fit everywhere).
+  // engine (TTS bundles are small and fit everywhere). This shell owns the
+  // catalog store and feeds the pure TtsPresetFieldView.
   let { field, onPresetSelect } = $props<{
     field: SettingField;
     onPresetSelect: (fieldId: string, option: PresetOption) => void;
@@ -42,6 +40,31 @@
   function cardPreset(id: string) {
     return ts.catalog?.presets.find((p) => p.id === id) ?? null;
   }
+
+  // --- preset cards -------------------------------------------------------
+  const presets = $derived(
+    cardOptions.map((opt) => {
+      const preset = cardPreset(opt.id);
+      return {
+        id: opt.id,
+        title: opt.title ?? opt.label,
+        description: opt.description,
+        selected: settingsState.currentSettings[field.id] === opt.id,
+        selectable: !!preset,
+        badges: preset
+          ? [
+            { icon: "i-material-symbols-graphic-eq-rounded", text: preset.name },
+            { icon: "i-material-symbols-memory-rounded", text: size(preset.fileSizeBytes) },
+            {
+              icon: "i-material-symbols-record-voice-over-rounded",
+              text: voiceCount(preset.voices.length),
+            },
+          ]
+          : null,
+        placeholder: preset ? undefined : ts.loading ? "Loading catalog…" : undefined,
+      };
+    }),
+  );
 
   // --- manual model + quantization dropdowns ------------------------------
 
@@ -86,6 +109,20 @@
   );
   const selectedQuant = $derived(settingsState.currentSettings["tts.modelPath"] as string);
 
+  const custom = $derived(
+    customOption
+      ? {
+        title: customOption.title ?? customOption.label,
+        description: customOption.description,
+        selected: settingsState.currentSettings[field.id] === customOption.id,
+        model: { value: selectedModel, options: modelOptions },
+        quant: !manualSelected && selectedModelView
+          ? { value: selectedQuant, options: quantOptions }
+          : null,
+      }
+      : null,
+  );
+
   function onModelSelect(value: string): void {
     if (value === MANUAL) {
       manualSelected = true;
@@ -102,87 +139,13 @@
 </script>
 
 <FieldCard {field}>
-  <div class="flex flex-col gap-2">
-    {#if ts.error}
-      <Alert variant="error" size="sm">{ts.error}</Alert>
-    {/if}
-
-    {#each cardOptions as opt}
-      {@const preset = cardPreset(opt.id)}
-      {@const selected = settingsState.currentSettings[field.id] === opt.id}
-      {#snippet badges()}
-        {#if preset}
-          <span class="inline-flex items-center gap-1">
-            <i class="i-material-symbols-graphic-eq-rounded text-sm"></i>
-            <span>{preset.name}</span>
-          </span>
-          <span class="inline-flex items-center gap-1">
-            <i class="i-material-symbols-memory-rounded text-sm"></i>
-            <span>{size(preset.fileSizeBytes)}</span>
-          </span>
-          <span class="inline-flex items-center gap-1">
-            <i class="i-material-symbols-record-voice-over-rounded text-sm"></i>
-            <span>{voiceCount(preset.voices.length)}</span>
-          </span>
-        {:else if ts.loading}
-          <span class="opacity-60">Loading catalog…</span>
-        {/if}
-      {/snippet}
-      <OptionCard
-        {selected}
-        title={opt.title ?? opt.label}
-        description={opt.description}
-        badges={badges}
-        ariaLabel={opt.title}
-        onclick={() => preset && ts.applyPreset(opt.id)}
-      />
-    {/each}
-
-    {#if customOption}
-      {@const isCustom = settingsState.currentSettings[field.id] === customOption.id}
-      {@const labelClass = isCustom ? "text-default-inverted-600" : "text-default-600"}
-      <div
-        class="flex flex-col gap-2 p-3 rounded-large {isCustom
-          ? 'bg-default-inverted-300 text-default-inverted-800'
-          : 'bg-surface-inset text-default-800'}"
-      >
-        <button
-          type="button"
-          class="text-left flex flex-col gap-1.5 cursor-pointer outline-none"
-          onclick={() => onPresetSelect(field.id, customOption)}
-        >
-          <span class="text-base font-semibold leading-tight">
-            {customOption.title ?? customOption.label}
-          </span>
-          {#if customOption.description}
-            <HelpText
-              text={customOption.description}
-              variant="compact"
-              class={isCustom ? "text-default-inverted-500" : "text-default-500"}
-            />
-          {/if}
-        </button>
-        <div class="flex flex-col gap-1">
-          <span class="text-xs font-medium {labelClass}">Model</span>
-          <Select
-            value={selectedModel}
-            options={modelOptions}
-            onchange={onModelSelect}
-            ariaLabel="Choose a model"
-          />
-        </div>
-        {#if !manualSelected && selectedModelView}
-          <div class="flex flex-col gap-1">
-            <span class="text-xs font-medium {labelClass}">Quantization</span>
-            <Select
-              value={selectedQuant}
-              options={quantOptions}
-              onchange={onQuantSelect}
-              ariaLabel="Choose a quantization"
-            />
-          </div>
-        {/if}
-      </div>
-    {/if}
-  </div>
+  <TtsPresetFieldView
+    error={ts.error}
+    {presets}
+    {custom}
+    onSelectPreset={(id) => ts.applyPreset(id)}
+    onSelectCustom={() => customOption && onPresetSelect(field.id, customOption)}
+    {onModelSelect}
+    {onQuantSelect}
+  />
 </FieldCard>

@@ -10,6 +10,7 @@ import { getDefaultSettings } from "@tomat/shared";
 import { binPath, llmPort, paths } from "../paths.ts";
 import { libDirFor, platformExe } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
+import { boolSetting, numSetting, strSetting } from "../services/settings-access.ts";
 import type { StartOptions } from "./types.ts";
 
 export interface LlamaStartArgs {
@@ -145,23 +146,6 @@ function schemaDefault(key: string): string {
   return typeof v === "string" ? v : "";
 }
 
-function strSetting(s: Record<string, unknown>, k: string, def: string): string {
-  const v = s[k];
-  return typeof v === "string" ? v : def;
-}
-function boolSetting(s: Record<string, unknown>, k: string, def: boolean): boolean {
-  const v = s[k];
-  return typeof v === "boolean" ? v : def;
-}
-function numSetting(s: Record<string, unknown>, k: string, def: number): number {
-  const v = s[k];
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v !== "") {
-    const n = Number(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return def;
-}
 /** Like optionalNumSetting but keeps 0 (a meaningful value for gpuLayers). Returns
  *  undefined only when the key is absent/blank/non-numeric. */
 function presentNumSetting(s: Record<string, unknown>, k: string): number | undefined {

@@ -13,6 +13,7 @@ function tool(parameters: Record<string, unknown>, id = "tk::t"): Tool {
     triggers: [],
     fnExport: "t",
     alwaysAvailable: false,
+    platforms: [],
     enabled: true,
     requiredPermissions: [],
     missingRequired: [],

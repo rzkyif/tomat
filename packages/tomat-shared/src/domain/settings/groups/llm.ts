@@ -1,5 +1,5 @@
 import type { SettingGroup } from "../types.ts";
-import { SECURE_URL_VALIDATION } from "../types.ts";
+import { externalModelSection } from "./factories.ts";
 
 // Static fallbacks for the local model fields, mirroring the Smallest-floor
 // catalog model (the Qwen 3.5 family; see packages/tomat-model-catalog). They
@@ -391,49 +391,18 @@ export const llmGroup: SettingGroup = {
         },
       ],
     },
-    {
+    externalModelSection({
+      idPrefix: "llm.external",
       label: "External Provider",
-      destination: "core",
       visibleWhen: { field: "llm.provider", eq: "external" },
-      fields: [
-        {
-          id: "llm.external.baseUrl",
-          name: "Base URL",
-          description:
-            "Your provider's API endpoint. Must be HTTPS (HTTP allowed only for localhost).",
-          type: "string",
-          defaultValue: "",
-          placeholder: "https://api.example.com/v1",
-          regex: SECURE_URL_VALIDATION,
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "llm.external.apiKey",
-          name: "API Key",
-          description: "Your provider API key. Stored securely in your device keychain.",
-          type: "password",
-          defaultValue: "",
-          placeholder: "sk-...",
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "llm.external.model",
-          name: "Model",
-          description: "The model name to use, e.g. gpt-4o-mini.",
-          type: "string",
-          defaultValue: "",
-          placeholder: "gpt-4o-mini",
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "llm.external.contextSize",
-          name: "Context Window",
-          description: "The model's context window, in tokens. Used to track usage.",
-          type: "number",
-          defaultValue: 128000,
-          descriptionTier: "ondemand",
-        },
-      ],
-    },
+      baseUrlDescription:
+        "Your provider's API endpoint. Must be HTTPS (HTTP allowed only for localhost).",
+      apiKeyDescription: "Your provider API key. Stored securely in your device keychain.",
+      model: {
+        description: "The model name to use, e.g. gpt-4o-mini.",
+        placeholder: "gpt-4o-mini",
+      },
+      contextSize: true,
+    }),
   ],
 };

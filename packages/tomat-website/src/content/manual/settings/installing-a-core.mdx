@@ -4,60 +4,58 @@ section: Settings & Maintenance
 order: 3
 ---
 
-import CoreInstallCard from "../../../components/CoreInstallCard.svelte";
 import Aside from "../../../components/Aside.astro";
 
-The core does tomat's work: it runs models, executes tools, and keeps your
-sessions. Most installs run it on the same machine as the client, set up for you
-the first time you launch the app. But the core does not have to live where the
-client does. Putting it on a more powerful computer lets the heavy model run there
+The Core does tomat's work: it runs models, executes tools, and keeps your
+sessions. Most installs run it on the same machine as the Client, set up for you
+the first time you launch the app. But the Core does not have to live where the
+Client does. Putting it on a more powerful computer lets the heavy model run there
 while you sit at a laptop, as [How tomat Works](/manual/core-concepts/how-tomat-works)
 describes.
 
-## Install the core
+## Install the Core
 
-On the machine that will run the core, copy this command into a terminal. The
-toggles fold the options you want into the command before you run it.
-
-<CoreInstallCard client:visible />
+On the [Install page](/install), pick **Core** and the operating system of the
+machine that will run it, then copy the command into a terminal on that machine. A
+couple of options there shape the command before you run it:
 
 - **Channel** picks how new a build you run, matching the channel you use on the
-  client. Leave it on **Stable** unless you have a reason not to (see
+  Client. Leave it on **Stable** unless you have a reason not to (see
   [Updates and Channels](/manual/settings/updates-and-channels)).
 - **Allow access from other machines** is the one that matters for a remote setup.
-  By default a core only listens to its own machine, so nothing else on the network
-  can reach it. Turn this on to let the client on another computer pair with it.
-- **Run in the background at login** installs the core as a service so it starts on
+  By default a Core only listens to its own machine, so nothing else on the network
+  can reach it. Turn this on to let the Client on another computer pair with it.
+- **Run in the background at login** installs the Core as a service so it starts on
   its own and is always there to connect to. Turn it off if you would rather start
-  the core by hand.
+  the Core by hand.
 
 <Aside type="caution">
-  Allowing access from other machines opens the core to your local network. Only do this on a
-  network you trust; pairing still requires the one-time code, but the core is reachable to anything
+  Allowing access from other machines opens the Core to your local network. Only do this on a
+  network you trust; pairing still requires the one-time code, but the Core is reachable to anything
   that can route to it.
 </Aside>
 
 During the install you set an **admin password**. Choose something you will
 remember: it is what lets you pair more devices later from a computer you have
-already paired, without going back to the core's machine. (When the client
-installs a core for you on first launch, it asks for this password in the app
+already paired, without going back to the Core's machine. (When the Client
+installs a Core for you on first launch, it asks for this password in the app
 instead of the terminal.)
 
-## Pair the client with it
+## Pair the Client with it
 
-When the install finishes it starts the core and prints a **pairing code**. On the
-machine with the client, add a core by its address (the host's name or IP) and
-enter that code once; the client stores the trust and reconnects on its own from
-then on. The full flow, and how to manage more than one core, is in
+When the install finishes it starts the Core and prints a **pairing code**. On the
+machine with the Client, add a Core by its address (the host's name or IP) and
+enter that code once; the Client stores the trust and reconnects on its own from
+then on. The full flow, and how to manage more than one Core, is in
 [Cores and Pairing](/manual/settings/cores-and-pairing).
 
 A pairing code is short-lived. If it expires before you use it, or you want to pair
-another device later, you do not need to return to the core's machine: from a client
-that is already paired, open **Cores** in Settings, pick the core, and choose
+another device later, you do not need to return to the Core's machine: from a Client
+that is already paired, open **Cores** in Settings, pick the Core, and choose
 **Generate pairing code**. Enter your admin password and it mints a fresh code to
-type on the new device. (You can still mint one on the core's machine with the admin
+type on the new device. (You can still mint one on the Core's machine with the admin
 token the installer saved under `~/.tomat/<channel>/core`, as the command the
 installer prints shows.)
 
-Next is the client side of this: how pairing works and how to move between cores in
+Next is the Client side of this: how pairing works and how to move between Cores in
 [Cores and Pairing](/manual/settings/cores-and-pairing).

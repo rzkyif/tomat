@@ -41,6 +41,7 @@ function addEnabledTool(id: string, name: string): void {
       triggers: [],
       fnExport: name,
       alwaysAvailable: false,
+      platforms: [],
       requiredPermissions: [],
     },
   ]);

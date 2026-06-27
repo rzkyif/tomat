@@ -43,17 +43,22 @@ R2 (`get.au.tomat.ing`), never here.
   sample prop bundles there (built from the settings schema, never hardcoded);
   the showcase stages, the demos, and the component **gallery** all consume them
   so demo state has one home. The gallery (`src/pages/gallery.astro` +
-  `components/gallery/Gallery.svelte`) renders every shared View from its
-  samples with no `UiContext` provider (so it falls back to
-  `DEFAULT_UI_CONTEXT`, i.e. the desktop shell); it is the canonical parity/QA
-  surface and the manual's screenshot source. The mobile counterparts live in a
-  separate `components/gallery/MobileGallery.svelte` section that scopes a
-  `platform: "mobile"` provider to its own subtree (so the desktop cards stay on
-  `DEFAULT_UI_CONTEXT`) and frames each card in a phone-sized viewport, so the
+  `components/gallery/Gallery.svelte`) is a **masonry** of cards rendering every
+  shared View and primitive from its samples, each on the background it ships on
+  (chat / settings / a dimmed modal backdrop), with no `UiContext` provider (so
+  it falls back to `DEFAULT_UI_CONTEXT`, the desktop shell); it is the canonical
+  parity/QA surface and the manual's screenshot source. What it must cover is the
+  typed `components/gallery/registry.ts` (`GALLERY_VIEWS` + `GALLERY_PRIMITIVES`),
+  which the renderer iterates and the lint walkers parse. The mobile counterparts
+  live in a separate `components/gallery/MobileGallery.svelte` section that scopes
+  a `platform: "mobile"` provider to its own subtree (so the desktop cards stay
+  on `DEFAULT_UI_CONTEXT`) and frames each card in a phone-sized viewport, so the
   touch branches (bottom-sheet modals, the stacked settings nav, the fullscreen
-  chat shell) get visual coverage too. The `check-view-coverage` lint walker
-  mechanically enforces that every View has a sample, a gallery card, and a
-  client wrapper (a website-only View is illegal).
+  chat shell) get visual coverage too. The lint walkers mechanically enforce that
+  every View has a sample + a registry entry + a client wrapper, every primitive
+  has a sample + a registry entry, and no client shell carries un-extracted raw
+  styled markup (so a website-only View, an uncovered primitive, or bespoke
+  client markup that never reaches the gallery is illegal).
 - **Demo-driven interactive states use `hov:` / `act:`.** The scripted cursor
   sets `data-hover` / `data-active` on its target; the shared `hov:`/`act:`
   UnoCSS variants resolve those to the same styles as `:hover`/`:active`, so a
@@ -71,13 +76,22 @@ R2 (`get.au.tomat.ing`), never here.
 
 ## Key Decisions
 
-- **No-JS support is dropped.** Build features the best way; priority order is
-  (1) exact component parity, (2) mobile, (3) general best practices. JS-only
-  interactivity (the showcase) is fine.
+- **No-JS support is dropped, except the install page.** Build features the best
+  way; priority order is (1) exact component parity, (2) mobile, (3) general best
+  practices. JS-only interactivity (the showcase) is fine. The one carve-out is
+  `/install`: installing must never be JS-gated, so it ships a native-HTML
+  baseline (`InstallGenerator.astro`: `<input type=radio>` + CSS `:has()` drive
+  the target -> OS selection and reveal a pre-rendered command; the shared
+  primitives are JS-driven, so the baseline cannot use them) and progressively
+  enhances with a Svelte island (`InstallGenerator.svelte`: OS auto-detect, live
+  core-option folding, copy button, the shared OptionCard/Toggle). The two are
+  swapped by a `data-js` gate in `site.css`. The topology diagram
+  (`InstallDiagram.astro`) is pure SVG + SMIL, so it animates with no JS too.
 - **The home page is one `100dvh` viewport:** the showcase (most of the space)
-  above a compact install section, capped to the content width, with no vertical
-  page scroll.
-- **Two pages only.** The changelog was removed; releases are tracked elsewhere.
+  above a compact install call-to-action, capped to the content width, with no
+  vertical page scroll.
+- **Three pages.** Home, Install, and the User Manual. The changelog was removed;
+  releases are tracked elsewhere.
 - **Last updated is git-derived.** Each manual page's "Last updated" date comes
   from the file's last git commit at build time (`src/lib/git-date.ts`), not
   from frontmatter.

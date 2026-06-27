@@ -5,6 +5,7 @@ import { loadModelCatalog } from "../../models/catalog.ts";
 import { selectedTtsVoices } from "../../models/tts.ts";
 import { synthesizeSpeech } from "../../services/tts-synthesize.ts";
 import { AppError } from "../../shared/errors.ts";
+import { readJson } from "../body.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 
 export function ttsRoutes(): Hono {
@@ -59,12 +60,4 @@ export function ttsRoutes(): Hono {
   });
 
   return r;
-}
-
-async function readJson(c: import("hono").Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
-  }
 }

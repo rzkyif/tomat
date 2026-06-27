@@ -18,6 +18,7 @@ import { cores } from "$lib/core";
 import { formatSessionDefaultTitle } from "$lib/util/format";
 import { platform } from "$lib/platform";
 import { getLogger } from "$lib/util/log";
+import { Subscriptions } from "$lib/util/subscriptions";
 import { messagesState } from "./messages.svelte";
 import { settingsState } from "./settings.svelte";
 import { streamingState } from "./streaming.svelte";
@@ -48,7 +49,7 @@ export function fixupLoadedMessages(messages: ServerMessage[]): Message[] {
       out[i] = {
         ...m,
         status: "failed",
-        error: m.error ?? "interrupted: core was disconnected mid-call",
+        error: m.error ?? "interrupted: Core was disconnected mid-call",
       };
     }
   }
@@ -75,8 +76,7 @@ class SessionsState {
    *  `{#key}` to force a clean DOM teardown of the message subtree. */
   epoch = $state(0);
 
-  private unsubscribeWs: (() => void) | null = null;
-  private unsubscribeConn: (() => void) | null = null;
+  private subs = new Subscriptions();
   // Session whose finished stream should pop the window (a greeting with
   // focus "show_when_done").
   private showWhenDoneId: string | null = null;
@@ -113,66 +113,67 @@ class SessionsState {
   /** Wire up to session.updated frames so title changes / server-side
    *  message persistence reach the UI without polling. */
   attach(): void {
-    if (this.unsubscribeWs) return;
-    this.unsubscribeWs = cores().subscribeWs((frame: ServerToClientFrame) => {
-      if (frame.kind === "session.created") {
-        void this.onSessionCreated(frame);
-        return;
-      }
-      if (frame.kind !== "session.updated") return;
-      if (frame.sessionId !== this.id) return;
-      if (frame.op === "title_generating") {
-        this.generatingTitle = frame.payload?.generating ?? false;
-      } else if (frame.op === "title_changed" && frame.payload?.title !== undefined) {
-        this.title = frame.payload.title;
-        this.generatingTitle = false;
-        const idx = this.list.findIndex((s) => s.id === this.id);
-        if (idx >= 0) {
-          this.list[idx] = { ...this.list[idx], title: frame.payload.title };
+    this.subs.attach(() => [
+      cores().subscribeWs((frame: ServerToClientFrame) => {
+        if (frame.kind === "session.created") {
+          void this.onSessionCreated(frame);
+          return;
         }
-      } else if (
-        (frame.op === "message_added" || frame.op === "message_updated") &&
-        frame.payload?.message
-      ) {
-        // REST-driven changes (another paired client's message or edit).
-        // Streamed chat messages arrive via chat.message instead.
-        messagesState.applyServerMessage(frame.payload.message as ServerMessage, null);
-      } else if (frame.op === "message_deleted" && frame.payload?.messageId) {
-        messagesState.removeById(frame.payload.messageId);
-      }
-    });
-    // During a disconnect gap the session.updated/message_added frames above are
-    // lost, so server-side changes (e.g. a finished turn, a session created or
-    // deleted by another client) are missed. On reconnect, refetch the session
-    // list and reload the active session to resync; load() also re-runs the
-    // in-flight fixups in backfillMessageIds. Without the list refetch the chat
-    // bar's prev/next/list controls keep a stale (or empty) list and read as
-    // "no sessions". Only after a real gap, never on first connect.
-    //
-    // This connected-edge load() is also what recovers a chat.subscribe that
-    // load() sent into a not-yet-open socket (sendWs drops silently then): right
-    // after a core swap the new socket is still "connecting", so the immediate
-    // loadLatest()->load() subscribe is dropped; this re-fires it once the
-    // socket opens, so an in-flight turn on the freshly-selected core resumes.
-    // The "connecting" churn of a swap sets droppedSinceConnected because
-    // hasConnected was already true from the prior core.
-    this.unsubscribeConn = cores().subscribeConnectionState((state) => {
-      if (state === "connected") {
-        if (this.droppedSinceConnected) {
-          log.info("reconnected; reloading session list");
-          void this.loadList();
-          if (this.id) {
-            log.info("reconnected; reloading active session");
-            void this.load(this.id);
+        if (frame.kind !== "session.updated") return;
+        if (frame.sessionId !== this.id) return;
+        if (frame.op === "title_generating") {
+          this.generatingTitle = frame.payload?.generating ?? false;
+        } else if (frame.op === "title_changed" && frame.payload?.title !== undefined) {
+          this.title = frame.payload.title;
+          this.generatingTitle = false;
+          const idx = this.list.findIndex((s) => s.id === this.id);
+          if (idx >= 0) {
+            this.list[idx] = { ...this.list[idx], title: frame.payload.title };
           }
+        } else if (
+          (frame.op === "message_added" || frame.op === "message_updated") &&
+          frame.payload?.message
+        ) {
+          // REST-driven changes (another paired client's message or edit).
+          // Streamed chat messages arrive via chat.message instead.
+          messagesState.applyServerMessage(frame.payload.message as ServerMessage, null);
+        } else if (frame.op === "message_deleted" && frame.payload?.messageId) {
+          messagesState.removeById(frame.payload.messageId);
         }
-        this.hasConnected = true;
-        this.droppedSinceConnected = false;
-      } else if (this.hasConnected) {
-        // Disconnected/connecting after a prior connect: a real gap to resync.
-        this.droppedSinceConnected = true;
-      }
-    });
+      }),
+      // During a disconnect gap the session.updated/message_added frames above are
+      // lost, so server-side changes (e.g. a finished turn, a session created or
+      // deleted by another client) are missed. On reconnect, refetch the session
+      // list and reload the active session to resync; load() also re-runs the
+      // in-flight fixups in backfillMessageIds. Without the list refetch the chat
+      // bar's prev/next/list controls keep a stale (or empty) list and read as
+      // "no sessions". Only after a real gap, never on first connect.
+      //
+      // This connected-edge load() is also what recovers a chat.subscribe that
+      // load() sent into a not-yet-open socket (sendWs drops silently then): right
+      // after a core swap the new socket is still "connecting", so the immediate
+      // loadLatest()->load() subscribe is dropped; this re-fires it once the
+      // socket opens, so an in-flight turn on the freshly-selected core resumes.
+      // The "connecting" churn of a swap sets droppedSinceConnected because
+      // hasConnected was already true from the prior core.
+      cores().subscribeConnectionState((state) => {
+        if (state === "connected") {
+          if (this.droppedSinceConnected) {
+            log.info("reconnected; reloading session list");
+            void this.loadList();
+            if (this.id) {
+              log.info("reconnected; reloading active session");
+              void this.load(this.id);
+            }
+          }
+          this.hasConnected = true;
+          this.droppedSinceConnected = false;
+        } else if (this.hasConnected) {
+          // Disconnected/connecting after a prior connect: a real gap to resync.
+          this.droppedSinceConnected = true;
+        }
+      }),
+    ]);
   }
 
   /** Core created a session on its own (a scheduled prompt or greeting
@@ -211,14 +212,7 @@ class SessionsState {
   }
 
   detach(): void {
-    if (this.unsubscribeWs) {
-      this.unsubscribeWs();
-      this.unsubscribeWs = null;
-    }
-    if (this.unsubscribeConn) {
-      this.unsubscribeConn();
-      this.unsubscribeConn = null;
-    }
+    this.subs.detach();
     this.hasConnected = false;
     this.droppedSinceConnected = false;
   }

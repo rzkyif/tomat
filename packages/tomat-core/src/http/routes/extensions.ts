@@ -27,11 +27,13 @@ import {
   searchPackages,
 } from "../../extensions/npm-registry.ts";
 import { loadBuiltinExtensionManifest } from "../../extensions/builtin-manifest.ts";
+import { requestBuiltinInstall } from "../../extensions/builtin-seed.ts";
 import { embed, isEmbeddingModelReady } from "../../services/embedding.ts";
 import { embedWithHash, toolEmbedText } from "../../services/relevance.ts";
 import { toolFilter } from "../../services/tool-filter.ts";
 import { sha256Hex } from "../../shared/hash.ts";
 import { AppError } from "../../shared/errors.ts";
+import { parseBody, readJson } from "../body.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 import { wsHub } from "../../ws/hub.ts";
 import { getLogger } from "../../shared/log.ts";
@@ -109,6 +111,13 @@ export function extensionsRoutes(): Hono {
     }
     return c.json(startInstallDeps(id, BROADCAST_SINK));
   });
+
+  // Install the built-in's tools at the user's explicit request (the Tools
+  // prompt). Installs now if the deno worker runtime is present, otherwise
+  // queues the install in memory until it lands. `{ queued: true }` tells the
+  // client the install is pending the runtime download. A single-segment path so
+  // it doesn't collide with the `/:id/install` route.
+  r.post("/builtin-install", async (c) => c.json(await requestBuiltinInstall(BROADCAST_SINK)));
 
   // Check installed extensions for newer versions (npm `dist-tags.latest`, the
   // built-in's signed manifest; local extensions have no upstream). Per-extension
@@ -293,12 +302,8 @@ export function extensionsRoutes(): Hono {
     .strict();
 
   r.post("/tool-schemas", async (c) => {
-    const raw = await readJson(c);
-    const parsed = toolSchemasBodySchema.safeParse(raw);
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
-    const tools = parsed.data.ids.map((id) => {
+    const body = parseBody(toolSchemasBodySchema, await readJson(c));
+    const tools = body.ids.map((id) => {
       const tool = extensionsRegistry().getTool(id);
       if (!tool) throw new AppError("tool_not_found", id);
       return {
@@ -480,14 +485,6 @@ export async function attachRequiredPermissions(tool: Tool): Promise<Tool> {
   } catch (err) {
     if (err instanceof AppError) throw err;
     return { ...tool, requiredPermissions: [], missingRequired: [] };
-  }
-}
-
-async function readJson(c: import("hono").Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
   }
 }
 

@@ -1,18 +1,16 @@
 ---
 import { getCollection } from "astro:content";
-import { activePageId, GITHUB_URL, knobClipPath, PAGES } from "../lib/site";
+import { activePageId, GITHUB_URL, PAGES } from "../lib/site";
 import ThemeToggle from "./ThemeToggle.svelte";
 import ManualOutline from "./ManualOutline.astro";
 import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
 
 const active = activePageId(Astro.url.pathname);
-const activeIndex = Math.max(
-  0,
-  PAGES.findIndex((p) => p.id === active),
-);
-const knob = knobClipPath(activeIndex, PAGES.length);
+// Cells size to their label (not flex-1 equal columns) so the inter-page gap is
+// uniform; the knob then measures the active cell at runtime and grows/shrinks
+// to fit it as it slides (see the script below).
 const cell =
-  "flex-1 min-w-0 flex items-center justify-center px-3 text-sm whitespace-nowrap";
+  "flex items-center justify-center px-3 text-sm whitespace-nowrap";
 
 // The mobile sidebar self-contains the manual section/subsection tree (rather
 // than being fed by the layout), so it nests three levels everywhere: page >
@@ -51,16 +49,22 @@ const rowActive = "bg-surface-inset text-default-900";
   class="vt-navbar sticky top-0 z-50 h-14 bg-surface"
 >
   <div
-    class="relative mx-auto h-full w-full max-w-6xl px-4 flex items-center justify-between"
+    class="relative mx-auto h-full w-full max-w-6xl px-5 md:px-4 flex items-center justify-between"
   >
     {
       /* Left: the tomat icon, painted as a theme-adaptive mask (same technique as
         the app) so it flips with light/dark instead of staying a fixed color.
         Navbar `xl` IconButton scale, matching the GitHub + burger icons. */
     }
-    <IconButton href="/" size="xl" title="tomat home" ariaLabel="tomat home">
+    <IconButton
+      href="/"
+      size="xl"
+      title="tomat home"
+      ariaLabel="tomat home"
+      class="-ml-1"
+    >
       <span
-        class="block w-6 h-6 bg-current"
+        class="block w-7 h-7 bg-current"
         style="mask:url(/logo.svg) center/contain no-repeat;-webkit-mask:url(/logo.svg) center/contain no-repeat;"
         aria-hidden="true"></span>
     </IconButton>
@@ -74,7 +78,8 @@ const rowActive = "bg-surface-inset text-default-900";
       class="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
     >
       <div
-        class="groove relative flex w-[22rem] h-10 rounded-large bg-surface-inset p-1"
+        data-nav-groove
+        class="groove relative flex items-center gap-1 h-10 rounded-large bg-surface-inset p-1"
         role="tablist"
         aria-label="Site"
       >
@@ -83,18 +88,29 @@ const rowActive = "bg-surface-inset text-default-900";
             <a
               href={p.href}
               role="tab"
+              data-nav-cell
               aria-selected={p.id === active}
-              class={`${cell} text-default-600 transition-colors hover:text-default-800`}
+              class={`${cell} transition-colors ${
+                p.id === active
+                  ? "text-default-900"
+                  : "text-default-600 hover:text-default-800"
+              }`}
             >
               {p.label}
             </a>
           ))
         }
+        {
+          /* The knob is the same labels in the active color, laid out identically
+            so they sit exactly over the links, then clipped to the active cell's
+            measured rect (set by the script). It starts hidden (opacity-0) until
+            the script measures it, so there is no first-paint flash; with no JS
+            the active link's own text-default-900 still marks the page. */
+        }
         <span
           aria-hidden="true"
           data-nav-knob
-          class="nav-knob absolute inset-0 flex p-1 bg-surface-inset-strong text-default-900 pointer-events-none rounded-large"
-          style={`clip-path: ${knob}`}
+          class="nav-knob absolute inset-0 flex items-center gap-1 p-1 bg-surface-inset-strong text-default-900 pointer-events-none opacity-0"
         >
           {PAGES.map((p) => <span class={cell}>{p.label}</span>)}
         </span>
@@ -102,7 +118,7 @@ const rowActive = "bg-surface-inset text-default-900";
     </div>
 
     {/* Right (desktop): GitHub + theme, both at the navbar `xl` icon scale. */}
-    <div class="hidden md:flex items-center gap-1 shrink-0">
+    <div class="hidden md:flex items-center gap-1 shrink-0 -mr-1">
       <IconButton
         href={GITHUB_URL}
         target="_blank"
@@ -131,9 +147,9 @@ const rowActive = "bg-surface-inset text-default-900";
       size="xl"
       title="Open menu"
       ariaLabel="Open menu"
-      class="burger md:hidden"
+      class="burger md:hidden -mr-1"
     >
-      <span class="burger-bars flex flex-col justify-center gap-1.5 w-6">
+      <span class="burger-bars flex flex-col justify-center gap-1.5 w-7">
         <span
           class="bar block h-0.5 w-full bg-default-800 rounded transition-transform"
         ></span>
@@ -168,6 +184,15 @@ const rowActive = "bg-surface-inset text-default-900";
       Home
     </a>
 
+    <a
+      href="/install"
+      class:list={[row, active === "install" ? rowActive : rowIdle]}
+      aria-current={active === "install" ? "page" : undefined}
+    >
+      <span class="w-5 shrink-0"></span>
+      Install
+    </a>
+
     {
       /* User Manual: expandable, open on a manual page; subsections navigate. */
     }
@@ -182,6 +207,15 @@ const rowActive = "bg-surface-inset text-default-900";
         <ManualOutline entries={manualEntries} currentId={currentManualId} />
       </div>
     </details>
+
+    <a
+      href="/gallery"
+      class:list={[row, active === "gallery" ? rowActive : rowIdle]}
+      aria-current={active === "gallery" ? "page" : undefined}
+    >
+      <span class="w-5 shrink-0"></span>
+      Gallery
+    </a>
   </nav>
 
   {
@@ -193,7 +227,7 @@ const rowActive = "bg-surface-inset text-default-900";
       href={GITHUB_URL}
       target="_blank"
       rel="noopener noreferrer"
-      class="flex flex-1 items-center justify-center gap-2 h-10 rounded-medium bg-surface-inset text-default-700 hover:bg-surface-inset-strong hover:text-default-900 transition-colors"
+      class="flex flex-1 items-center justify-center gap-2 h-10 px-4 rounded-medium bg-surface-inset text-default-700 hover:bg-surface-inset-strong hover:text-default-900 transition-colors"
     >
       <i class="flex text-lg shrink-0 i-mdi-github"></i>
       <span class="flex-1 text-center">GitHub</span>
@@ -269,24 +303,73 @@ const rowActive = "bg-surface-inset text-default-900";
 
 <script>
   // The navbar bar is persisted across view transitions, so after each
-  // navigation the knob still sits over the previous page: recompute its clip
-  // rect from the new pathname (the CSS transition turns it into a slide). Also
-  // close the (persisted) burger menu after navigating.
-  import { activePageId, knobClipPath, PAGES } from "../lib/site";
+  // navigation the knob still sits over the previous page: re-measure the active
+  // cell and clip the knob to it (the CSS transition turns the changing rect into
+  // a grow/shrink slide). Cells are content-sized, so the rect can only be known
+  // at runtime; with no JS the active link's text-default-900 still marks the
+  // page. Also close the (persisted) burger menu after navigating.
+  import { activePageId, PAGES } from "../lib/site";
+
+  // First placement (and every resize) snaps; only navigation slides.
+  let initialized = false;
+
+  function positionKnob() {
+    const groove = document.querySelector<HTMLElement>("[data-nav-groove]");
+    if (!groove) return;
+    const knob = groove.querySelector<HTMLElement>("[data-nav-knob]");
+    const cells = Array.from(
+      groove.querySelectorAll<HTMLElement>("[data-nav-cell]"),
+    );
+    const index = Math.max(
+      0,
+      PAGES.findIndex((p) => p.id === activePageId(location.pathname)),
+    );
+    const cell = cells[index];
+    if (!knob || !cell) return;
+
+    // Keep the link colors in sync (the no-JS fallback indicator).
+    cells.forEach((c, i) => {
+      const on = i === index;
+      c.setAttribute("aria-selected", String(on));
+      c.classList.toggle("text-default-900", on);
+      c.classList.toggle("text-default-600", !on);
+      c.classList.toggle("hover:text-default-800", !on);
+    });
+
+    // Clip the full-width knob to the active cell's rect. The knob is inset-0
+    // over the groove, so cell rects taken relative to the groove map straight
+    // onto the knob's coordinate space. The 4px vertical inset matches p-1.
+    const g = groove.getBoundingClientRect();
+    const c = cell.getBoundingClientRect();
+    const left = Math.round(c.left - g.left);
+    const right = Math.round(g.right - c.right);
+    const clip = `inset(4px ${right}px 4px ${left}px round var(--rounded-large))`;
+
+    if (initialized) {
+      knob.style.clipPath = clip;
+      knob.style.opacity = "1";
+    } else {
+      // Apply without the slide on first paint / after a resize.
+      knob.style.transition = "none";
+      knob.style.clipPath = clip;
+      knob.style.opacity = "1";
+      knob.getBoundingClientRect();
+      knob.style.transition = "";
+      initialized = true;
+    }
+  }
 
   function onLoad() {
-    const knob = document.querySelector<HTMLElement>("[data-nav-knob]");
-    if (knob) {
-      const index = Math.max(
-        0,
-        PAGES.findIndex((p) => p.id === activePageId(location.pathname)),
-      );
-      knob.style.clipPath = knobClipPath(index, PAGES.length);
-    }
+    positionKnob();
     const toggle = document.getElementById(
       "nav-toggle",
     ) as HTMLInputElement | null;
     if (toggle) toggle.checked = false;
   }
+
   document.addEventListener("astro:page-load", onLoad);
+  window.addEventListener("resize", () => {
+    initialized = false;
+    positionKnob();
+  });
 </script>

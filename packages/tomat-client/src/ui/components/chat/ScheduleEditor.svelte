@@ -2,11 +2,13 @@
      needs. Controlled component (value + onchange), shared by the in-chat
      schedule confirm form and the Scheduled Prompt detail view in Settings.
      Edits always produce a structurally valid spec; the one thing a parent
-     may still want to check is a "once" date-time that is already past. -->
+     may still want to check is a "once" date-time that is already past.
+
+     This shell owns all schedule serialization and the kind-switch logic; the
+     pure ScheduleEditorView renders the decomposed draft fields. -->
 <script lang="ts">
   import type { ScheduleSpec } from "@tomat/shared";
-  import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
-  import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
+  import ScheduleEditorView from "@tomat/shared/ui/components/chat/ScheduleEditorView.svelte";
 
   let {
     schedule,
@@ -132,125 +134,35 @@
     onchange({ ...schedule, [key]: Math.min(max, Math.max(min, n)) } as ScheduleSpec);
   }
 
-  const rawInputClass =
-    "bg-surface-inset text-default-800 rounded-medium h-8 px-2 text-sm outline-none";
+  function setWhen(text: string): void {
+    const ms = fromLocalInput(text);
+    if (ms !== null) onchange({ kind: "once", atMs: ms });
+  }
 </script>
 
-<div class="flex flex-col gap-2 text-sm {disabled ? 'opacity-60 pointer-events-none' : ''}">
-  <div class="flex items-center gap-2">
-    <span class="text-xs text-default-600 w-16 shrink-0">Repeat</span>
-    <Select
-      value={schedule.kind}
-      options={KIND_OPTIONS}
-      onchange={switchKind}
-      {disabled}
-      ariaLabel="Repeat"
-      class="max-w-44"
-    />
-  </div>
-
-  {#if schedule.kind === "once"}
-    <div class="flex items-center gap-2">
-      <span class="text-xs text-default-600 w-16 shrink-0">When</span>
-      <input
-        type="datetime-local"
-        class={rawInputClass}
-        value={toLocalInput(schedule.atMs)}
-        aria-label="Date and time"
-        {disabled}
-        onchange={(e) => {
-          const ms = fromLocalInput((e.target as HTMLInputElement).value);
-          if (ms !== null) onchange({ kind: "once", atMs: ms });
-        }}
-      />
-    </div>
-  {:else if schedule.kind === "interval"}
-    <div class="flex items-center gap-2">
-      <span class="text-xs text-default-600 w-16 shrink-0">Every</span>
-      <div class="w-24">
-        <Input
-          type="number"
-          value={schedule.everyMinutes}
-          min={1}
-          max={10080}
-          {disabled}
-          ariaLabel="Minutes between runs"
-          onchange={(v) => setIntField("everyMinutes", v, 1, 10080)}
-        />
-      </div>
-      <span class="text-xs text-default-600">minutes</span>
-    </div>
-  {:else}
-    {#if schedule.kind === "weekly"}
-      <div class="flex items-center gap-2">
-        <span class="text-xs text-default-600 w-16 shrink-0">Days</span>
-        <div class="flex flex-wrap gap-1">
-          {#each WEEKDAYS as label, day}
-            {@const active = schedule.weekdays.includes(day)}
-            <button
-              type="button"
-              {disabled}
-              aria-pressed={active}
-              class="px-2 h-7 rounded-medium text-xs font-medium transition-colors hover:cursor-pointer {active
-                ? 'bg-accent-blue-500 text-white'
-                : 'bg-surface-inset text-default-700 hover:text-default-900'}"
-              onclick={() => toggleWeekday(day)}
-            >
-              {label}
-            </button>
-          {/each}
-        </div>
-      </div>
-    {:else if schedule.kind === "monthly"}
-      <div class="flex items-center gap-2">
-        <span class="text-xs text-default-600 w-16 shrink-0">Day</span>
-        <div class="w-24">
-          <Input
-            type="number"
-            value={schedule.day}
-            min={1}
-            max={31}
-            {disabled}
-            ariaLabel="Day of the month"
-            onchange={(v) => setIntField("day", v, 1, 31)}
-          />
-        </div>
-        <span class="text-xs text-default-600">of the month</span>
-      </div>
-    {:else if schedule.kind === "yearly"}
-      <div class="flex items-center gap-2">
-        <span class="text-xs text-default-600 w-16 shrink-0">Date</span>
-        <Select
-          value={schedule.month}
-          options={MONTH_OPTIONS}
-          onchange={(v) => onchange({ ...schedule, month: Number(v) } as ScheduleSpec)}
-          {disabled}
-          ariaLabel="Month"
-          class="max-w-36"
-        />
-        <div class="w-20">
-          <Input
-            type="number"
-            value={schedule.day}
-            min={1}
-            max={31}
-            {disabled}
-            ariaLabel="Day of the month"
-            onchange={(v) => setIntField("day", v, 1, 31)}
-          />
-        </div>
-      </div>
-    {/if}
-    <div class="flex items-center gap-2">
-      <span class="text-xs text-default-600 w-16 shrink-0">Time</span>
-      <input
-        type="time"
-        class={rawInputClass}
-        value={`${pad(schedule.hour)}:${pad(schedule.minute)}`}
-        aria-label="Time of day"
-        {disabled}
-        onchange={(e) => setTime((e.target as HTMLInputElement).value)}
-      />
-    </div>
-  {/if}
-</div>
+<ScheduleEditorView
+  kind={schedule.kind}
+  kindOptions={KIND_OPTIONS}
+  weekdayLabels={WEEKDAYS}
+  monthOptions={MONTH_OPTIONS}
+  whenLocal={schedule.kind === "once" ? toLocalInput(schedule.atMs) : undefined}
+  everyMinutes={schedule.kind === "interval" ? schedule.everyMinutes : undefined}
+  weekdays={schedule.kind === "weekly" ? schedule.weekdays : []}
+  monthlyDay={schedule.kind === "monthly" ? schedule.day : undefined}
+  yearlyMonth={schedule.kind === "yearly" ? schedule.month : undefined}
+  yearlyDay={schedule.kind === "yearly" ? schedule.day : undefined}
+  timeText={schedule.kind === "weekly" ||
+      schedule.kind === "monthly" ||
+      schedule.kind === "yearly"
+    ? `${pad(schedule.hour)}:${pad(schedule.minute)}`
+    : undefined}
+  {disabled}
+  onKindChange={switchKind}
+  onWhenChange={setWhen}
+  onEveryMinutesChange={(v) => setIntField("everyMinutes", v, 1, 10080)}
+  onToggleWeekday={toggleWeekday}
+  onMonthlyDayChange={(v) => setIntField("day", v, 1, 31)}
+  onYearlyMonthChange={(v) => onchange({ ...schedule, month: Number(v) } as ScheduleSpec)}
+  onYearlyDayChange={(v) => setIntField("day", v, 1, 31)}
+  onTimeChange={setTime}
+/>

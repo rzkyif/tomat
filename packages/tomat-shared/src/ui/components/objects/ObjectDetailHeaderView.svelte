@@ -1,6 +1,6 @@
 <script lang="ts">
   import Button from "../primitives/Button.svelte";
-  import ObjectBadge from "./ObjectBadge.svelte";
+  import ObjectBadgeView from "./ObjectBadgeView.svelte";
   import type { Badge } from "./object-types.ts";
 
   // The standardized detail-view header: title + badges, an optional subtitle,
@@ -36,7 +36,7 @@
     <div class="flex items-center gap-2 min-w-0 min-h-7">
       <span class="text-base font-semibold text-default-800 truncate">{title}</span>
       {#each badges as badge (badge.label)}
-        <ObjectBadge label={badge.label} icon={badge.icon} accent={badge.accent} title={badge.title} />
+        <ObjectBadgeView label={badge.label} icon={badge.icon} accent={badge.accent} title={badge.title} />
       {/each}
     </div>
     {#if subtitle}

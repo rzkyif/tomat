@@ -61,12 +61,12 @@ TOMAT_E2E_CORE_LOGS=1 npx vitest run        # surface the spawned core's logs
   (which channel-binds the cert pin) succeeds.
 - **`harness/E2eApp.svelte`** mirrors `+layout.svelte`'s shared-UI context setup
   (minus the Tauri platform install) and mounts the real `+page.svelte`.
-- **`harness/app.ts`** (`launchTomat`) ties it together and exposes page objects.
+- **`harness/app.ts`** (`launchApp`) ties it together and exposes page objects.
 
 A spec reads at a high level:
 
 ```ts
-const app = await launchTomat({ scenario: "paired", llm: { kind: "text", text: "hi" } });
+const app = await launchApp({ scenario: "paired", llm: { kind: "text", text: "hi" } });
 await app.chat.send("hello");
 await app.chat.expectText("hi");
 ```

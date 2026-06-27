@@ -106,8 +106,12 @@ through `npm:` specifiers from `deno task`.
   When flagged, reword so the sentence reads naturally rather than swapping in
   another symbol.
 - **Brand is lowercase.** The product is always written lowercase **tomat**,
-  even at the start of a sentence or heading. The thin vocabulary: `tomat` (the
-  product), `tomat core` (the service), `tomat client` (the desktop UI), and
+  even at the start of a sentence or heading. Only the word `tomat` is forced
+  lowercase: the two halves are **Core** (the service) and **Client** (the
+  desktop UI), capitalized when named in a sentence, whether on their own
+  (preferred: "Core", "Client") or with the brand ("tomat Core", "tomat
+  Client"). The thin vocabulary: `tomat` (the product), `tomat Core` /
+  `Core` (the service), `tomat Client` / `Client` (the desktop UI), and
   `tomat built-in extension`. Hyphenated package names (`tomat-core`), the
   all-caps `TOMAT_*` env vars, and `au.tomat.ing` identifiers are separate
   tokens and keep their own casing. `deno task lint` rejects a capital-initial
@@ -132,6 +136,19 @@ through `npm:` specifiers from `deno task`.
 
 ## Key Decisions
 
+- **No non-consented network (absolute rule).** Once installed, the running Core
+  and Client make NO outbound network request without an explicit user action:
+  update checks happen on a button press, downloads behind a confirmation modal
+  (see `downloads/manager.ts` + the requirements/download routes + the client's
+  `requestRequiredModal`). Boot and background code must not fetch, poll, check
+  for updates, or download. The built-in extension is installed on first boot
+  OFFLINE from artifacts the install script already fetched + verified (the
+  install scripts plant `extensions/.tomat-builtin.{tgz,json}`; `builtin-seed.ts`
+  re-verifies and installs them with zero network) - never a boot-time fetch.
+  The ONLY place network is expected without a user action is the install-script
+  phase itself (`scripts/install/*`), which runs before the app is considered
+  installed. New boot/background work routes through the user-gated download and
+  update flows; it never reaches out on its own.
 - **Channels and persistence.** All state lives under `~/.tomat/<channel>/`,
   where the channel (`stable` default, `dev`, `latest`) is selected by
   `TOMAT_CHANNEL` and resolved identically in core, client, and the install

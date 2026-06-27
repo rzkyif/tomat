@@ -25,6 +25,18 @@ html {
   interpolate-size: allow-keywords;
 }
 
+/* Install page: show exactly one generator. With JS off, the native-HTML
+   baseline (InstallGenerator.astro) is the live control; with JS, the Svelte
+   island (InstallGenerator.svelte) takes over. data-js is set on <html> before
+   first paint (BaseLayout), so neither flashes. This is the one place the site
+   deliberately keeps a no-JS path: installing must never be JS-gated. */
+html[data-js] [data-nojs-fallback] {
+  display: none;
+}
+html:not([data-js]) [data-js-enhanced] {
+  display: none;
+}
+
 /* Website-only bubble drop shadow default: invert the shared default so the
    shadow is WHITE in light mode and BLACK in dark mode (base.css ships the
    opposite, black-on-light / white-on-dark, which the client keeps). This file is
@@ -45,6 +57,67 @@ html {
    own content. Mirrors Bubble's scoped `.bubble-body-promote`. */
 .bubble-promote {
   transform: translateZ(0);
+}
+
+/* Website-only flat-border replacement for the bubble blur halo. The gallery and
+   manual pages stack hundreds of bubbles, and each one's `.bubble-halo` runs a live
+   `backdrop-filter: blur()` that re-samples the backdrop every frame, which
+   overheats the machine. Over these frames' near-solid surface that blur reads as a
+   thick, hard-edged translucent band exactly one shadow-distance wide: it blurs the
+   white (light rendition) or black (dark rendition) drop-shadow glow plus the
+   focus-grid dots, then cuts off sharply where the blur stops. So on frames carrying
+   `.flat-shadow` we drop the halo entirely and repaint `.bubble-shadow` as that same
+   band: a hard `box-shadow` ring (spread, zero blur, so it follows the bubble's
+   rounded per-side radii) one `--bubble-shadow-distance` wide, in a translucent color
+   matched to the live look by pixel measurement (rgba alpha ~0.13). The color tracks
+   the bubble's own drop shadow (white for a light rendition, black for a dark one):
+   the two tokens join the theme-flip pair list in uno.config.ts exactly like
+   `--bubble-shadow-color-*`, so a light rendition rings white and a dark one black on
+   either side of the flip. Applied to the gallery + manual frames; the homepage
+   showcase frames keep the live halo for now. */
+:root {
+  --bubble-flat-shadow-light: rgba(255, 255, 255, 0.13);
+  --bubble-flat-shadow-dark: rgba(0, 0, 0, 0.13);
+}
+.flat-shadow .bubble-halo {
+  display: none;
+}
+.flat-shadow .bubble-shadow {
+  box-shadow: 0 0 0 var(--bubble-shadow-distance) var(--bubble-flat-shadow-light);
+}
+.dark .flat-shadow .bubble-shadow {
+  box-shadow: 0 0 0 var(--bubble-shadow-distance) var(--bubble-flat-shadow-dark);
+}
+
+/* MessageStackView edge-fade alignment (website frames only). The View positions
+   its fades at `top: var(--bubble-shadow-distance)` on the assumption the bubble
+   strip sits one shadow-distance below the host top; measured, the strip sits AT
+   the host top, so the fade rides one shadow-distance too low - over the row's
+   bottom shadow gutter / border instead of the bubble. The live blur halo masked
+   that in the client; the flat-shadow ring on these frames makes it obvious. Pin
+   the fade to the host box (= the bubble body), leaving the shadow gutter as a
+   clean top + bottom margin. Scoped to `.flat-shadow`, so the client component is
+   untouched. */
+.flat-shadow .stack-fade-left,
+.flat-shadow .stack-fade-right {
+  top: 0 !important;
+  bottom: 0 !important;
+  height: auto !important;
+}
+
+/* Stack-demo sizing (gallery). The shared View's host is `w-fit`, so a handful of
+   short collapsed bubbles fit the wide row and never clip - the edge fade then
+   hints at hidden content that is actually fully visible. Force the host narrower
+   than its content for the multi-bubble samples so the row truly overflows and
+   clips, making the fade honest. `> div` is the MessageStackView host. */
+.stack-demo-narrow > div {
+  width: 16rem;
+}
+/* The "scrolled into the middle" sample needs BOTH ends hidden, which on a live
+   page is a mid-scroll position no static page can script. Centering the
+   overflowing row clips both ends equally instead, so both fades are truthful. */
+.stack-demo-center [role="presentation"] {
+  justify-content: center;
 }
 
 /* Scale-to-fit for inline manual demos (the showcase mechanism, applied to a
@@ -78,6 +151,9 @@ html {
    elsewhere keep the live cap. (The homepage showcase frames carry the same
    class, so this one rule covers both surfaces.) */
 .demo-frame .bubble-body {
+  max-width: calc(700px - 5rem);
+}
+.demo-frame .max-w-\[calc\(100vw-5rem\)\] {
   max-width: calc(700px - 5rem);
 }
 .demo-frame .max-w-\[calc\(100vw-135px\)\] {
@@ -395,6 +471,101 @@ html.dark .focus-grid-frame {
   margin-inline: auto;
 }
 
+/* Gallery card adjustments (the `.gallery-frame` cards in components/gallery).
+   A NARROW masonry tile is far narrower than the 700px window the `.demo-frame`
+   re-pins above assume, so a component sized for that window would spill past the
+   tile. On narrow tiles cap every re-pinned width to 100% of the card, so the
+   component shrinks to the card (and its own inner `overflow-x-auto`/`-clip`
+   scrolls). A plain `max-width: 100%` (not `min(design, 100%)`) keeps the cap
+   non-circular, so a bubble's body and its drop-shadow layer (a sibling sized to
+   the same `w-fit` wrapper) stay the same width. WIDE shell rows are NOT capped
+   here: they keep the faithful `.demo-frame` 700px-window proportions, where the
+   background and shadow already agree. The extra class outranks `.demo-frame`. */
+.demo-frame.gallery-frame-narrow .bubble-body,
+.demo-frame.gallery-frame-narrow .max-w-\[calc\(100vw-5rem\)\],
+.demo-frame.gallery-frame-narrow .max-w-\[calc\(100vw-135px\)\],
+.demo-frame.gallery-frame-narrow .max-w-\[calc\(100vw-80px\)\] {
+  max-width: 100%;
+}
+
+/* A modal/popover shown in a backdrop card centers in the card; cap it to the
+   card height MINUS a 4rem gutter (2rem top + bottom) with internal scroll, so a
+   tall state (a long deletions list, many downloads) is never clipped by the
+   card's overflow-hidden AND every modal keeps clear vertical breathing room on
+   the grid. `calc(100% - 4rem)` also caps a modal whose own height would fill the
+   card (e.g. ShareModal's `h-[70vh]` on a tall desktop viewport), which a plain
+   `max-height: 100%` would let fill edge to edge. */
+.gallery-frame [role="dialog"] {
+  max-height: calc(100% - 4rem);
+  overflow-y: auto;
+}
+
+/* The gallery renders to static HTML (no `client:*`), so a Popover popup (the
+   ColorPicker, the Popover primitive) never runs its client-side anchor
+   measurement and would stay at its pre-measurement default of
+   `visibility: hidden`. Reveal it and pin it to a fixed spot inside the card so
+   the component is still visible for QA. The selector matches ONLY an un-measured
+   popup (its inline `visibility: hidden`); a measured one (were the gallery ever
+   hydrated again) overwrites that style, and a Modal dialog is never hidden, so
+   neither is affected. */
+.gallery-frame [role="dialog"][style*="visibility: hidden"] {
+  visibility: visible !important;
+  left: 50% !important;
+  top: 4rem !important;
+  transform: translateX(-50%) !important;
+}
+
+/* The mobile snippet-autocomplete sheet pins itself with
+   `bottom: calc(100dvh - anchorTop)`, which assumes the frame fills the viewport
+   (true on a phone, false for a gallery phone frame, so `dvh` overshoots and the
+   sheet drifts up off the frame and clips). Inside a gallery frame re-pin it to
+   the frame's own bottom edge with absolute positioning, so it sits over the
+   composer the way it does on a real phone. Matches the sheet's distinctive
+   top-rounded class, never the desktop popover (`rounded-large`). */
+.gallery-frame .fixed.rounded-t-large {
+  position: absolute;
+  bottom: 0 !important;
+}
+
+/* Show the focus grid behind a modal instead of the modal's own blur scrim: the
+   gallery renders overlays on the grid (no special dimmed backdrop), so neutralize
+   the shared Modal/Popover scrim layer (`bg-black/20 backdrop-blur`) inside a
+   gallery card only. The selector matches that layer's two classes exactly, never
+   the `.focus-grid-frame` (which carries neither), so the grid stays. */
+.demo-frame.gallery-frame .bg-black\/20.backdrop-blur {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Page-wide vertical scroll fade for the gallery: the scrolling cards dissolve
+   into the page background (bg-surface) at the top (below the sticky navbar) and
+   bottom, rather than ending at a hard edge. An OVERLAY gradient, not a `mask` on
+   the page (a mask on the bubbles' ancestor breaks their backdrop-filter halo in
+   WebKit), and pointer-events-none so it never blocks the cards' header links.
+   Mirrors `.edge-fade-overlay`'s light/dark color handling. */
+.gallery-scroll-fade {
+  position: fixed;
+  inset-inline: 0;
+  height: 3.5rem;
+  z-index: 30;
+  pointer-events: none;
+}
+.gallery-scroll-fade-top {
+  top: 3.5rem;
+  background: linear-gradient(to bottom, var(--default-50), transparent);
+}
+.gallery-scroll-fade-bottom {
+  bottom: 0;
+  background: linear-gradient(to top, var(--default-50), transparent);
+}
+html.dark .gallery-scroll-fade-top {
+  background: linear-gradient(to bottom, var(--default-d-50), transparent);
+}
+html.dark .gallery-scroll-fade-bottom {
+  background: linear-gradient(to top, var(--default-d-50), transparent);
+}
+
 /* Expandable (native <details>): a chevron that rotates from pointing right to
    pointing down on open, and an open/close height animation, both pure CSS.
    Mirrors the app's Expandable look (chevron + subtle body reveal). */
@@ -428,11 +599,13 @@ details[open] > summary .expandable-chevron {
 }
 
 /* Page-to-page slide. The direction is set on <html data-vt-dir> by the script
-   in BaseLayout. Crossing the navbar's pages (home <-> manual) slides the whole
-   page root horizontally (forward = moving right along the navbar, back = left).
-   Moving between manual subsections slides vertically along the outline order
-   (up = a lower item, down = a higher one); only the article is named for that
-   case, so the outline sidebar stays put while the content slides. The navbar is
+   in BaseLayout. Crossing the navbar's top-level pages slides the whole page
+   root horizontally on desktop (forward = a later page in the navbar, back =
+   earlier) and vertically on mobile (page-up/page-down, the burger list being
+   vertical). Moving between manual subsections slides vertically along the
+   outline order (up = a lower item, down = a higher one); only the article is
+   named for that case, so the outline sidebar stays put while the content
+   slides. The navbar is
    transition:persist'd, so it never slides. Falls back to the default cross-fade
    with no JS or reduced motion. */
 
@@ -463,8 +636,8 @@ html[data-vt-dir="down"] .manual-article {
   html[data-vt-dir="back"]::view-transition-new(root) {
     animation: vt-in-left 260ms cubic-bezier(0.4, 0, 0.2, 1) both;
   }
-  /* Mobile home <-> manual: slide the whole page vertically (the article is not
-     named for page-up/page-down, so it travels with the rest of root). */
+  /* Mobile navbar-page crossing: slide the whole page vertically (the article is
+     not named for page-up/page-down, so it travels with the rest of root). */
   html[data-vt-dir="page-up"]::view-transition-old(root) {
     animation: vt-out-up 260ms cubic-bezier(0.4, 0, 0.2, 1) both;
   }

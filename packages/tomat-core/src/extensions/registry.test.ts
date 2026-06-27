@@ -33,6 +33,7 @@ function tool(overrides: Partial<ToolInsertInput> = {}): ToolInsertInput {
     triggers: [],
     fnExport: "doThing",
     alwaysAvailable: false,
+    platforms: [],
     requiredPermissions: [],
     ...overrides,
   };
@@ -111,6 +112,30 @@ Deno.test("replaceTools: drops old tools, inserts new, preserves enabled on matc
     assertEquals(byName.get("keep")?.enabled, true);
     // New tool defaults to disabled (conservative re-install policy).
     assertEquals(byName.get("new")?.enabled, false);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("listTools: hides tools the host OS doesn't support", async () => {
+  const env = await setupTestEnv();
+  try {
+    const r = extensionsRegistry();
+    r.upsertExtension(tk());
+    // A platform token the host can't be: macOS hosts use "darwin", so target
+    // "windows" (and vice versa) to get a guaranteed-incompatible tool.
+    const otherOs = Deno.build.os === "windows" ? "darwin" : "windows";
+    r.replaceTools("example-extension", [
+      tool({ name: "everywhere", platforms: [] }),
+      tool({ name: "host_only", platforms: [Deno.build.os] }),
+      tool({ name: "other_only", platforms: [otherOs] }),
+    ]);
+    const names = new Set(r.listTools("example-extension").map((t) => t.name));
+    assertEquals(names.has("everywhere"), true);
+    assertEquals(names.has("host_only"), true);
+    assertEquals(names.has("other_only"), false);
+    // getTool refuses the incompatible one too, so dispatch can't run it.
+    assertEquals(r.getTool("example-extension::other_only"), undefined);
   } finally {
     await env.teardown();
   }

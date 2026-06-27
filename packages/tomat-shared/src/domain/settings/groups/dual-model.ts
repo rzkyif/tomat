@@ -1,5 +1,5 @@
 import type { SettingGroup } from "../types.ts";
-import { SECURE_URL_VALIDATION } from "../types.ts";
+import { externalModelSection } from "./factories.ts";
 
 export const dualModelGroup: SettingGroup = {
   id: "dualModel",
@@ -29,49 +29,15 @@ export const dualModelGroup: SettingGroup = {
         },
       ],
     },
-    {
+    externalModelSection({
+      idPrefix: "dualModel.external",
       label: "Secondary Model",
-      destination: "core",
       visibleWhen: { field: "dualModel.enabled", eq: true },
-      fields: [
-        {
-          id: "dualModel.external.baseUrl",
-          name: "Base URL",
-          description:
-            "The secondary model's API endpoint. Must be HTTPS (HTTP allowed only for localhost).",
-          type: "string",
-          defaultValue: "",
-          placeholder: "https://api.example.com/v1",
-          regex: SECURE_URL_VALIDATION,
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "dualModel.external.apiKey",
-          name: "API Key",
-          description: "API key for the secondary model. Stored securely in your keychain.",
-          type: "password",
-          defaultValue: "",
-          placeholder: "sk-...",
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "dualModel.external.model",
-          name: "Model",
-          description: "The secondary model name, e.g. gpt-4o.",
-          type: "string",
-          defaultValue: "",
-          placeholder: "gpt-4o",
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "dualModel.external.contextSize",
-          name: "Context Window",
-          description: "The model's context window, in tokens. Used to track usage.",
-          type: "number",
-          defaultValue: 128000,
-          descriptionTier: "ondemand",
-        },
-      ],
-    },
+      baseUrlDescription:
+        "The secondary model's API endpoint. Must be HTTPS (HTTP allowed only for localhost).",
+      apiKeyDescription: "API key for the secondary model. Stored securely in your keychain.",
+      model: { description: "The secondary model name, e.g. gpt-4o.", placeholder: "gpt-4o" },
+      contextSize: true,
+    }),
   ],
 };

@@ -26,6 +26,11 @@
   import Expandable from "../../primitives/Expandable.svelte";
   import Expand from "../../primitives/Expand.svelte";
   import DiffView from "./DiffView.svelte";
+  import DiffQuestion from "./askuser/DiffQuestion.svelte";
+  import FilesQuestion from "./askuser/FilesQuestion.svelte";
+  import ImageQuestion from "./askuser/ImageQuestion.svelte";
+  import TableQuestion from "./askuser/TableQuestion.svelte";
+  import ChoiceQuestion from "./askuser/ChoiceQuestion.svelte";
   import { useUiContext } from "../../../context.ts";
 
   // Presentational tool-call bubble: the status-phrase header, the args /
@@ -525,7 +530,6 @@
   {accent}
   extraClass={bubbleExtraClass}
   progress={showProgress ? percent : undefined}
-  progressFullHeight={!expanded}
   {neighborLeft}
   {neighborRight}
 >
@@ -570,176 +574,53 @@
               <div class="flex flex-col gap-2">
                 <div class="text-sm">{q.question}</div>
                 {#if q.kind === "diff"}
-                  {#if q.title}
-                    <div class="text-xs text-default-600">{q.title}</div>
-                  {/if}
-                  <div class="max-h-48 overflow-auto">
-                    <DiffView before={q.before} after={q.after} />
-                  </div>
-                  <div class="flex gap-1">
-                    {#each [{ label: "Accept", value: "accept" }, { label: "Reject", value: "reject" }] as verdict (verdict.value)}
-                      <button
-                        type="button"
-                        data-tc-nav
-                        class="text-xs px-3 py-1 h-8 rounded cursor-pointer outline-none transition-colors duration-100 {renderDrafts[
-                          qi
-                        ]?.picks[0] === verdict.value
-                          ? selectedClasses
-                          : unselectedClasses}"
-                        onclick={() => togglePick(qi, verdict.value, false)}
-                      >
-                        {verdict.label}
-                      </button>
-                    {/each}
-                  </div>
-                {:else if q.kind === "files"}
-                  <div class="flex flex-col gap-1">
-                    {#each q.entries as entry, ei (ei)}
-                      <button
-                        type="button"
-                        data-tc-nav
-                        class="text-xs px-2 py-1 min-h-8 rounded cursor-pointer text-left outline-none transition-colors duration-100 {renderDrafts[
-                          qi
-                        ]?.picks.includes(entry.path)
-                          ? selectedClasses
-                          : unselectedClasses}"
-                        title={entry.path}
-                        onclick={() =>
-                          togglePick(qi, entry.path, !!q.multiselect)}
-                      >
-                        {entry.label ?? entry.path}
-                        {#if entry.description}
-                          <span class="opacity-60 ml-1">{entry.description}</span>
-                        {/if}
-                      </button>
-                    {/each}
-                  </div>
-                {:else if q.kind === "image"}
-                  <img
-                    src={`data:${q.mime};base64,${q.dataB64}`}
-                    alt={q.question}
-                    class="max-h-64 max-w-full self-start rounded-small"
+                  <DiffQuestion
+                    {q}
+                    {qi}
+                    draft={renderDrafts[qi]}
+                    {selectedClasses}
+                    {unselectedClasses}
+                    {togglePick}
                   />
-                  <div class="flex flex-wrap gap-1">
-                    {#each q.actions as action (action.value)}
-                      <button
-                        type="button"
-                        data-tc-nav
-                        class="text-xs px-3 py-1 h-8 rounded cursor-pointer outline-none transition-colors duration-100 {renderDrafts[
-                          qi
-                        ]?.picks[0] === action.value
-                          ? selectedClasses
-                          : unselectedClasses}"
-                        onclick={() => togglePick(qi, action.value, false)}
-                      >
-                        {action.label}
-                      </button>
-                    {/each}
-                  </div>
+                {:else if q.kind === "files"}
+                  <FilesQuestion
+                    {q}
+                    {qi}
+                    draft={renderDrafts[qi]}
+                    {selectedClasses}
+                    {unselectedClasses}
+                    {togglePick}
+                  />
+                {:else if q.kind === "image"}
+                  <ImageQuestion
+                    {q}
+                    {qi}
+                    draft={renderDrafts[qi]}
+                    {selectedClasses}
+                    {unselectedClasses}
+                    {togglePick}
+                  />
                 {:else if q.kind === "table"}
-                  <div class="overflow-x-auto">
-                    <table class="text-xs border-separate border-spacing-1 -m-1">
-                      <thead>
-                        <tr>
-                          {#each q.columns as col (col)}
-                            <th class="text-left font-semibold text-default-600 px-2">
-                              {col}
-                            </th>
-                          {/each}
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {#each renderDrafts[qi]?.rows ?? [] as row, ri (ri)}
-                          <tr>
-                            {#each q.columns as _col, ci (ci)}
-                              <td>
-                                <input
-                                  type="text"
-                                  data-tc-nav
-                                  class="bg-surface-inset text-default-800 rounded block w-full min-w-20 h-7 px-2 outline-none text-xs"
-                                  value={row[ci] ?? ""}
-                                  oninput={(e) =>
-                                    setCell(
-                                      qi,
-                                      ri,
-                                      ci,
-                                      (e.target as HTMLInputElement).value,
-                                    )}
-                                />
-                              </td>
-                            {/each}
-                            <td>
-                              <button
-                                type="button"
-                                data-tc-nav
-                                data-tc-aux
-                                class="flex items-center justify-center h-7 w-7 rounded cursor-pointer outline-none transition-colors duration-100 {unselectedClasses}"
-                                title="Remove row"
-                                onclick={() => removeRow(qi, ri)}
-                              >
-                                <i class="i-material-symbols-close-rounded"></i>
-                              </button>
-                            </td>
-                          </tr>
-                        {/each}
-                      </tbody>
-                    </table>
-                  </div>
-                  <button
-                    type="button"
-                    data-tc-nav
-                    data-tc-aux
-                    class="self-start flex items-center gap-1 text-xs px-2 py-1 h-7 rounded cursor-pointer outline-none transition-colors duration-100 {unselectedClasses}"
-                    onclick={() => addRow(qi, q.columns.length)}
-                  >
-                    <i class="i-material-symbols-add-rounded"></i>
-                    Add Row
-                  </button>
-                {:else if q.options}
-                  <div class="flex flex-col gap-1">
-                    {#each q.options as opt, oi (oi)}
-                      <button
-                        type="button"
-                        data-tc-nav
-                        class="text-xs px-2 py-1 h-8 rounded cursor-pointer text-left outline-none transition-colors duration-100 {renderDrafts[
-                          qi
-                        ]?.picks.includes(opt.value)
-                          ? selectedClasses
-                          : unselectedClasses}"
-                        title={opt.description}
-                        onclick={() =>
-                          togglePick(qi, opt.value, !!q.multiselect)}
-                      >
-                        {opt.label}
-                      </button>
-                    {/each}
-                  </div>
-                  {#if q.allowFreeformInput}
-                    <input
-                      type="text"
-                      data-tc-nav
-                      class="rounded block w-full h-8 px-2 outline-none -mt-1 text-xs transition-colors duration-100 {renderDrafts[
-                        qi
-                      ]?.freestyleActive
-                        ? selectedClasses
-                        : unselectedClasses}"
-                      placeholder="Or type your own..."
-                      value={renderDrafts[qi]?.text ?? ""}
-                      oninput={(e) =>
-                        setText(qi, (e.target as HTMLInputElement).value)}
-                      onfocus={() => onFreestyleFocus(qi)}
-                      onblur={() => onFreestyleBlur(qi)}
-                    />
-                  {/if}
+                  <TableQuestion
+                    {q}
+                    {qi}
+                    draft={renderDrafts[qi]}
+                    {unselectedClasses}
+                    {setCell}
+                    {addRow}
+                    {removeRow}
+                  />
                 {:else}
-                  <input
-                    type="text"
-                    data-tc-nav
-                    class="bg-surface-inset text-default-800 rounded block w-full h-8 px-2 outline-none text-xs transition-colors duration-100"
-                    value={renderDrafts[qi]?.text ?? ""}
-                    oninput={(e) =>
-                      setText(qi, (e.target as HTMLInputElement).value)}
+                  <ChoiceQuestion
+                    {q}
+                    {qi}
+                    draft={renderDrafts[qi]}
+                    {selectedClasses}
+                    {unselectedClasses}
+                    {togglePick}
+                    {setText}
+                    {onFreestyleFocus}
+                    {onFreestyleBlur}
                   />
                 {/if}
               </div>

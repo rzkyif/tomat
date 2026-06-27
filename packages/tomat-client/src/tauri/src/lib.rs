@@ -95,7 +95,7 @@ pub fn run() {
     #[cfg(desktop)]
     {
         logging::init();
-        log::info!(target: "tomat::boot", "tomat client starting (channel={})", crate::channel::channel());
+        log::info!(target: "tomat::boot", "tomat Client starting (channel={})", crate::channel::channel());
     }
 
     // Register the OS keychain as keyring-core's default store before any
@@ -325,7 +325,7 @@ fn run_mobile() {
                 .ok()
                 .map(|root| root.join("logs"));
             crate::logging::init_with_log_dir(log_dir);
-            log::info!(target: "tomat::boot", "tomat client starting (channel={})", crate::channel::channel());
+            log::info!(target: "tomat::boot", "tomat Client starting (channel={})", crate::channel::channel());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

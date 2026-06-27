@@ -8,6 +8,7 @@
 import type { Memory, MemoryMeta } from "@tomat/shared";
 import { cores } from "$lib/core";
 import { getLogger } from "$lib/util/log";
+import { Subscriptions } from "$lib/util/subscriptions";
 
 const log = getLogger("memories");
 
@@ -26,17 +27,18 @@ export function memoryTrigger(meta: MemoryMeta): string {
 class MemoriesState {
   memories = $state<MemoryMeta[]>([]);
 
-  private unsubscribeConn: (() => void) | null = null;
+  private subs = new Subscriptions();
 
   /** Subscribe to the active core's connection state and (re)load the list on
    *  every connected edge. Idempotent, mirroring extensionsState.attach(). */
   attach(): void {
-    if (this.unsubscribeConn) return;
-    this.unsubscribeConn = cores().subscribeConnectionState((state) => {
-      if (state === "connected") {
-        void this.load().catch((err) => log.warn("memory load on ws connect failed:", err));
-      }
-    });
+    this.subs.attach(() => [
+      cores().subscribeConnectionState((state) => {
+        if (state === "connected") {
+          void this.load().catch((err) => log.warn("memory load on ws connect failed:", err));
+        }
+      }),
+    ]);
   }
 
   async load(): Promise<void> {

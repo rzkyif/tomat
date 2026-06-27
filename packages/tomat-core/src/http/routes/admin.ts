@@ -8,18 +8,15 @@
 import { Hono } from "hono";
 import { adminPasswordSetRequestSchema } from "@tomat/shared";
 import { authService } from "../../services/auth.ts";
+import { parseBody, readJson } from "../body.ts";
 import { adminTokenMiddleware } from "../middleware/auth.ts";
-import { AppError } from "../middleware/errors.ts";
 
 export function adminRoutes(): Hono {
   const r = new Hono();
 
   r.post("/password", adminTokenMiddleware(), async (c) => {
-    const parsed = adminPasswordSetRequestSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
-    await authService().setAdminPassword(parsed.data.password);
+    const body = parseBody(adminPasswordSetRequestSchema, await readJson(c));
+    await authService().setAdminPassword(body.password);
     return c.body(null, 204);
   });
 

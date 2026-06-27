@@ -8,9 +8,8 @@
 
   import { onMount } from "svelte";
   import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
-  import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
-  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
   import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
+  import QuickSettingsView from "@tomat/shared/ui/components/quick-settings/QuickSettingsView.svelte";
   import { useUiContext } from "@tomat/shared/ui/context";
   import QuickSettingsSection from "./QuickSettingsSection.svelte";
   import { QUICK_SETTINGS_SECTIONS, type QuickSettingsSectionDef } from "./manifest";
@@ -99,50 +98,27 @@
 {/if}
 
 {#snippet content()}
-  <!-- Header -->
-  <div class="flex items-center gap-2 shrink-0">
-    <i class="flex i-material-symbols-bolt-rounded text-2xl text-default-700"
-    ></i>
-    <h1 class="text-lg font-medium text-default-800 flex-1">Quick Settings</h1>
-    <IconButton
-      icon="i-material-symbols-close-rounded"
-      title={exitTitle}
-      size="lg"
-      variant="subtle"
-      surface="circle"
-      onclick={exit}
-    />
-  </div>
-  <p class="text-sm text-default-600 -mt-3 shrink-0">
-    The essentials to get going. Everything here is also in Settings.
-  </p>
-
-  <!-- Accordion -->
-  <div
-    class="flex flex-col gap-1 flex-1 min-h-0"
-    bind:this={layout.containerEl}
-  >
-    {#each QUICK_SETTINGS_SECTIONS as section (section.id)}
-      <QuickSettingsSection
-        {section}
-        open={openId === section.id && isEnabled(section)}
-        enabled={isEnabled(section)}
-        horizontal={layout.horizontal}
-        validationErrors={form.validationErrors}
-        onToggleOpen={() => toggleOpen(section.id)}
-        onSetEnabled={(v) => setEnabled(section, v)}
-        onChange={form.handleChange}
-        onReset={form.resetToDefault}
-        onPresetSelect={form.handlePresetSelect}
-      />
-    {/each}
-  </div>
-
-  <Button
-    variant="primary"
-    onclick={exit}
-    class="shrink-0 px-4 py-2.5 rounded-large font-medium"
-  >
+  <QuickSettingsView
     {exitLabel}
-  </Button>
+    {exitTitle}
+    onExit={exit}
+    containerRef={(el) => (layout.containerEl = el ?? undefined)}
+  >
+    {#snippet sections()}
+      {#each QUICK_SETTINGS_SECTIONS as section (section.id)}
+        <QuickSettingsSection
+          {section}
+          open={openId === section.id && isEnabled(section)}
+          enabled={isEnabled(section)}
+          horizontal={layout.horizontal}
+          validationErrors={form.validationErrors}
+          onToggleOpen={() => toggleOpen(section.id)}
+          onSetEnabled={(v) => setEnabled(section, v)}
+          onChange={form.handleChange}
+          onReset={form.resetToDefault}
+          onPresetSelect={form.handlePresetSelect}
+        />
+      {/each}
+    {/snippet}
+  </QuickSettingsView>
 {/snippet}

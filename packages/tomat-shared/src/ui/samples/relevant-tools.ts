@@ -18,4 +18,19 @@ export const relevantToolsSamples = {
       },
     ],
   },
+  collapsed: {
+    defaultExpanded: false,
+    phase1: [{ toolId: "fs.read", name: "read_file", description: "", score: 0.71 }],
+  },
+  emptyPhase: {
+    defaultExpanded: true,
+    phase1: [{ toolId: "fs.read", name: "read_file", description: "", score: 0.71 }],
+    phase2: [],
+  },
+  error: {
+    defaultExpanded: true,
+    status: "error",
+    errorMessage: "Embedding model timed out after 30s.",
+    phase1: [{ toolId: "fs.read", name: "read_file", description: "", score: 0.71 }],
+  },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof RelevantToolsView>>>;

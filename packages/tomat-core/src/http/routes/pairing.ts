@@ -11,6 +11,7 @@ import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
 import { authService } from "../../services/auth.ts";
 import { dropClientSettingsCache } from "../../services/core-settings.ts";
 import { tlsCertFingerprint } from "../../services/tls.ts";
+import { parseBody, readJson } from "../body.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 import { AppError } from "../middleware/errors.ts";
 import { getLogger } from "../../shared/log.ts";
@@ -28,34 +29,26 @@ export function pairingRoutes(): Hono {
   //      bearer proves the caller is a trusted device; the password is the
   //      second factor (argon2id + rate limited inside verifyAdminPassword).
   r.post("/codes", async (c) => {
-    const body = await readJsonOrEmpty(c);
-    const parsed = pairingCodeRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
+    const body = parseBody(pairingCodeRequestSchema, await readJson(c, { allowEmpty: true }));
     const adminToken = c.req.header("x-admin-token");
     if (adminToken) {
       await authService().verifyAdminToken(adminToken);
     } else {
       const client = await authService().authenticate(bearerToken(c));
-      authService().verifyAdminPassword(parsed.data.password ?? null, peerIp(c), client.id);
+      authService().verifyAdminPassword(body.password ?? null, peerIp(c), client.id);
     }
-    const result = authService().mintPairingCode(parsed.data.ttlSec);
+    const result = authService().mintPairingCode(body.ttlSec);
     return c.json(result);
   });
 
   // PAKE step 1: the client runs the CPace initiator keyed by the pairing code
   // and sends its session id + first message. Core responds with its message.
   r.post("/pake/start", async (c) => {
-    const body = await readJsonOrEmpty(c);
-    const parsed = pakeStartRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
+    const body = parseBody(pakeStartRequestSchema, await readJson(c, { allowEmpty: true }));
     const result = authService().pakeStart(
-      decodeBase64(parsed.data.sid),
-      decodeBase64(parsed.data.msgA),
-      parsed.data.clientName,
+      decodeBase64(body.sid),
+      decodeBase64(body.msgA),
+      body.clientName,
       peerIp(c),
       await tlsCertFingerprint(),
     );
@@ -66,14 +59,10 @@ export function pairingRoutes(): Hono {
   // observed). Core verifies it against its OWN pin; a wrong code or a MITM cert
   // both fail. On success core mints the token and returns its own confirmation.
   r.post("/pake/finish", async (c) => {
-    const body = await readJsonOrEmpty(c);
-    const parsed = pakeFinishRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
+    const body = parseBody(pakeFinishRequestSchema, await readJson(c, { allowEmpty: true }));
     const result = await authService().pakeFinish(
-      parsed.data.pakeId,
-      decodeBase64(parsed.data.confirmC),
+      body.pakeId,
+      decodeBase64(body.confirmC),
       await tlsCertFingerprint(),
     );
     return c.json({
@@ -102,12 +91,8 @@ export function pairingRoutes(): Hono {
       if (adminToken) {
         await authService().verifyAdminToken(adminToken);
       } else {
-        const body = await readJsonOrEmpty(c);
-        const parsed = clientRevokeRequestSchema.safeParse(body);
-        if (!parsed.success) {
-          throw new AppError("validation_error", parsed.error.message);
-        }
-        authService().verifyAdminPassword(parsed.data.password ?? null, peerIp(c), me.id);
+        const body = parseBody(clientRevokeRequestSchema, await readJson(c, { allowEmpty: true }));
+        authService().verifyAdminPassword(body.password ?? null, peerIp(c), me.id);
       }
     }
     const { existed, attachmentPaths } = authService().revokeClient(id);
@@ -163,20 +148,4 @@ function bearerToken(c: Context): string | null {
 function peerIp(c: Context): string {
   const peer = (c.env as { remoteAddr?: { hostname?: string } } | undefined)?.remoteAddr;
   return peer?.hostname ?? "local";
-}
-
-async function readJsonOrEmpty(c: Context): Promise<unknown> {
-  // No body OR a whitespace-only body reasonably means "use defaults" for
-  // these endpoints (pairing/codes accepts an empty body for the default
-  // TTL). A body present but malformed is a real client bug. We surface
-  // it as HTTP 400 instead of silently treating it as `{}`. Content-Length
-  // is unreliable across runtimes (Request from `new Request(..., { body: '' })`
-  // may omit it), so peek at the text instead.
-  const text = await c.req.text();
-  if (text.trim().length === 0) return {};
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
-  }
 }

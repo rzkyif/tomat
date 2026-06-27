@@ -16,10 +16,10 @@ import { stripEmojisForTTS, stripMarkdownForTTS } from "$lib/tts/text";
 import { buildToolsHint } from "$lib/prompts/system-prompt";
 import { cores } from "$lib/core";
 import { getLogger } from "$lib/util/log";
+import { Subscriptions } from "$lib/util/subscriptions";
 import { messagesState } from "./messages.svelte";
 import { permissionState } from "./permissions.svelte";
 import { scheduleConfirmState } from "./schedule-confirm.svelte";
-import { sessionsState } from "./sessions.svelte";
 import { settingsState } from "./settings.svelte";
 import { ttsState } from "./tts.svelte";
 import { viewState } from "./view.svelte";
@@ -35,6 +35,16 @@ const log = getLogger("streaming");
 const FIRST_TOKEN_TIMEOUT_MS = 120_000;
 
 type InterruptListener = () => void | Promise<void>;
+
+// The session surface this stream layer reads: the active session id (chat
+// frames target it) and the stream-done notification (pops a "show when done"
+// window). sessionsState imports this module, so it injects the port
+// (setSessionPort) rather than this module importing it, keeping the static
+// graph one-way (sessions -> streaming, never back).
+interface SessionPort {
+  readonly id: string | null;
+  notifyStreamDone(sessionId: string | null): void;
+}
 
 class StreamingState {
   isActive = $state(false);
@@ -62,13 +72,19 @@ class StreamingState {
   private interruptListeners: InterruptListener[] = [];
   // Fires if the model never produces a first token (see FIRST_TOKEN_TIMEOUT_MS).
   private firstTokenTimer: ReturnType<typeof setTimeout> | null = null;
-  private unsubscribeWs: (() => void) | null = null;
-  private unsubscribeConn: (() => void) | null = null;
+  private subs = new Subscriptions();
   // Streams this client started and then abandoned (interrupt / disconnect).
   // The server keeps emitting frames until our interrupt lands, so without
   // this the idle-adoption path below would re-latch onto our own dying
   // stream and resurrect its bubble. Bounded so it can't grow unbounded.
   private abandonedStreamIds: string[] = [];
+  // Injected by sessionsState at module load (it imports this module). Reads are
+  // null-safe for the brief pre-wiring window.
+  private session: SessionPort | null = null;
+
+  setSessionPort(port: SessionPort): void {
+    this.session = port;
+  }
 
   isLive(id: string | undefined): boolean {
     return id !== undefined && this.liveIds.has(id);
@@ -83,29 +99,23 @@ class StreamingState {
   }
 
   attach(): void {
-    if (this.unsubscribeWs) return;
-    this.unsubscribeWs = cores().subscribeWs((f) => this.onFrame(f));
-    // A transient transport drop silently stops the frame stream, so isActive
-    // (and the spinner) would hang forever. But the turn keeps running
-    // server-side: detach transparently rather than interrupt it (see
-    // detachForResume). A deliberate core swap closes the socket WITHOUT
-    // emitting "disconnected", so it does NOT reach here; the core-switch path
-    // (+page.svelte) calls detachForResume directly instead.
-    this.unsubscribeConn = cores().subscribeConnectionState((state) => {
-      if (state !== "disconnected") return;
-      this.detachForResume();
-    });
+    this.subs.attach(() => [
+      cores().subscribeWs((f) => this.onFrame(f)),
+      // A transient transport drop silently stops the frame stream, so isActive
+      // (and the spinner) would hang forever. But the turn keeps running
+      // server-side: detach transparently rather than interrupt it (see
+      // detachForResume). A deliberate core swap closes the socket WITHOUT
+      // emitting "disconnected", so it does NOT reach here; the core-switch path
+      // (+page.svelte) calls detachForResume directly instead.
+      cores().subscribeConnectionState((state) => {
+        if (state !== "disconnected") return;
+        this.detachForResume();
+      }),
+    ]);
   }
 
   detach(): void {
-    if (this.unsubscribeWs) {
-      this.unsubscribeWs();
-      this.unsubscribeWs = null;
-    }
-    if (this.unsubscribeConn) {
-      this.unsubscribeConn();
-      this.unsubscribeConn = null;
-    }
+    this.subs.detach();
   }
 
   resetTTSPlayback(): void {
@@ -117,7 +127,7 @@ class StreamingState {
   }
 
   start(modelUsed: "default" | "secondary" = "default"): void {
-    const sessionId = sessionsState.id;
+    const sessionId = this.session?.id ?? null;
     if (!sessionId) {
       log.warn("start called without an active session");
       return;
@@ -189,7 +199,7 @@ class StreamingState {
       if (
         this.streamId === null &&
         !this.isActive &&
-        frame.sessionId === sessionsState.id &&
+        frame.sessionId === (this.session?.id ?? null) &&
         !this.abandonedStreamIds.includes(frame.streamId)
       ) {
         // Core-initiated stream (a scheduled prompt or greeting fired) on
@@ -220,7 +230,7 @@ class StreamingState {
       this.finish();
       // Pops the window when this session was created with focus
       // "show_when_done" (no-op otherwise).
-      sessionsState.notifyStreamDone(sessionsState.id);
+      if (this.session) this.session.notifyStreamDone(this.session.id);
       return;
     }
     if (frame.kind === "chat.error" && frame.streamId === this.streamId) {
@@ -228,7 +238,7 @@ class StreamingState {
       // A core-initiated turn that errors is still terminal: reveal a
       // "show_when_done" window now, exactly as chat.done does, so a failing
       // greeting on an autostart launch can't strand the app hidden forever.
-      sessionsState.notifyStreamDone(sessionsState.id);
+      if (this.session) this.session.notifyStreamDone(this.session.id);
       return;
     }
     if (frame.kind === "schedule.confirm_request") {

@@ -11,6 +11,7 @@ import { mcpManager } from "../../mcp/manager.ts";
 import { deleteSecret, setSecret } from "../../services/secrets.ts";
 import { wsHub } from "../../ws/hub.ts";
 import { AppError } from "../../shared/errors.ts";
+import { parseBody, readJson } from "../body.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
 const serverBody = z
@@ -58,11 +59,7 @@ export function mcpRoutes(): Hono {
   r.get("/resources", (c) => c.json({ resources: mcpRegistry().listResources() }));
 
   r.post("/", async (c) => {
-    const parsed = serverBody.safeParse(await readJson(c));
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
-    const { authToken, ...input } = parsed.data;
+    const { authToken, ...input } = parseBody(serverBody, await readJson(c));
     const server = mcpRegistry().create(input);
     const hasAuth = await applyAuthToken(server.id, authToken);
     if (hasAuth !== undefined) {
@@ -75,12 +72,8 @@ export function mcpRoutes(): Hono {
   r.get("/:id", (c) => c.json(mcpRegistry().getOrThrow(c.req.param("id"))));
 
   r.patch("/:id", async (c) => {
-    const parsed = serverBody.partial().safeParse(await readJson(c));
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
     const id = c.req.param("id");
-    const { authToken, ...data } = parsed.data;
+    const { authToken, ...data } = parseBody(serverBody.partial(), await readJson(c));
     const hasAuth = await applyAuthToken(id, authToken);
     mcpRegistry().update(id, { ...data, hasAuth });
     // A change to connection config (transport, command/args, url, auth) must
@@ -144,12 +137,4 @@ export function mcpRoutes(): Hono {
   });
 
   return r;
-}
-
-async function readJson(c: import("hono").Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
-  }
 }

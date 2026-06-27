@@ -1,0 +1,395 @@
+---
+// The no-JavaScript baseline of the install generator. Native <input
+// type=radio> + CSS drive the nested target -> OS selection and reveal the
+// matching pre-rendered command; nothing here needs JS, so a reader with JS
+// off (or broken) still gets a working, selectable command to copy by hand.
+// InstallGenerator.svelte mounts the enhanced version over this (live channel /
+// core toggles, OS auto-detect, copy button); install.astro shows exactly one
+// via the data-js gate.
+//
+// `mode` is "install" (the /install page) or "uninstall" (the manual's removal
+// page): same flow, with the uninstall one-liners, a flags note in place of the
+// install options, and a removal note in place of the Android download.
+//
+// Channel is locked to `latest` here: stable has not shipped, so the baseline
+// only renders the latest-channel one-liners. The enhanced island shows the
+// (disabled) stable option for when it does.
+import {
+  androidApkUrl,
+  CLIENT_OS,
+  clientCommand,
+  clientUninstallCommand,
+  CORE_OS,
+  coreCommand,
+  coreUninstallCommand,
+} from "../lib/install.ts";
+
+interface Props {
+  mode?: "install" | "uninstall";
+}
+const { mode = "install" } = Astro.props;
+const verb = mode === "install" ? "Install" : "Uninstall";
+const uninstall = mode === "uninstall";
+
+const CH = "latest";
+const clientCmd = {
+  macos: uninstall ? clientUninstallCommand("macos", CH) : clientCommand("macos", CH),
+  linux: uninstall ? clientUninstallCommand("linux", CH) : clientCommand("linux", CH),
+  windows: uninstall ? clientUninstallCommand("windows", CH) : clientCommand("windows", CH),
+};
+const coreCmd = {
+  macos: uninstall ? coreUninstallCommand("macos", CH) : coreCommand("macos", CH, { bindAll: false, service: true }),
+  linux: uninstall ? coreUninstallCommand("linux", CH) : coreCommand("linux", CH, { bindAll: false, service: true }),
+  windows: uninstall ? coreUninstallCommand("windows", CH) : coreCommand("windows", CH, { bindAll: false, service: true }),
+};
+const apk = androidApkUrl(CH);
+
+const label = "text-xs font-medium uppercase tracking-wide text-default-500";
+const btnBase =
+  "flex items-center justify-center gap-2 px-3 py-2 rounded-medium text-sm transition-colors";
+const osBtn = `ig-os-btn ${btnBase} bg-surface-inset text-default-700 hover:bg-surface-inset-strong cursor-pointer`;
+const btnActive = `${btnBase} bg-default-inverted-300 text-default-inverted-900`;
+const codeBox =
+  "ig-cmd block rounded-large bg-surface-inset px-4 py-3 font-mono text-sm text-default-800 overflow-x-auto whitespace-nowrap";
+---
+
+<div class="ig flex flex-col gap-6">
+  {/* Step 1: client or core, with the "not sure" hint grouped under it. */}
+  <div class="flex flex-col gap-2">
+    <span class={label}>{verb}</span>
+    <div class="flex flex-col gap-3">
+      <fieldset class="grid grid-cols-1 sm:grid-cols-2 gap-3 border-0 p-0 m-0">
+        <legend class="sr-only">What do you want to {verb.toLowerCase()}?</legend>
+
+        <input id="ig-tg-client" class="ig-radio sr-only" type="radio" name="ig-target" checked />
+        <label for="ig-tg-client" class="ig-card flex flex-col gap-1 p-3 rounded-large cursor-pointer">
+          <span class="flex items-center gap-2 min-h-6">
+            <i class="i-mdi-monitor-dashboard text-lg"></i>
+            <span class="text-base font-semibold">Client</span>
+            {!uninstall && <span class="ig-badge ml-auto text-xs px-2 py-0.5 rounded-full">Recommended</span>}
+          </span>
+          <span class="ig-card-desc text-sm">
+            {uninstall
+              ? "The app you look at. Removing it leaves your settings in place unless you choose to wipe them."
+              : "The app you look at. On first launch it can install a Core on this same computer for you, so one install gets you a full local setup."}
+          </span>
+        </label>
+
+        <input id="ig-tg-core" class="ig-radio sr-only" type="radio" name="ig-target" />
+        <label for="ig-tg-core" class="ig-card flex flex-col gap-1 p-3 rounded-large cursor-pointer">
+          <span class="flex items-center gap-2 min-h-6">
+            <i class="i-mdi-server text-lg"></i>
+            <span class="text-base font-semibold">Core</span>
+          </span>
+          <span class="ig-card-desc text-sm">
+            {uninstall
+              ? "The service that does the work. Removing it stops the Core and deletes its data from this computer."
+              : "The service that does the work. Install it on its own when you want it on a separate, more powerful machine that Clients connect to."}
+          </span>
+        </label>
+      </fieldset>
+
+      {!uninstall && (
+        <div class="flex items-start gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-600">
+          <i class="i-material-symbols-info-outline-rounded text-base shrink-0 mt-0.5 text-default-500"></i>
+          <span>
+            Not sure? Install the <strong class="text-default-800">Client</strong> and start there. It
+            walks you through everything, including setting up a Core on this same computer.
+          </span>
+        </div>
+      )}
+    </div>
+  </div>
+
+  {/* Step 2 (client): OS + channel + command. */}
+  <div class="ig-when-client flex-col gap-6">
+    <fieldset class="flex flex-col gap-2 border-0 p-0 m-0">
+      <legend class={`${label} p-0`}>Operating System</legend>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {
+          CLIENT_OS.map((o, i) => (
+            <>
+              <input id={`ig-osc-${o.id}`} class="ig-radio sr-only" type="radio" name="ig-os-client" checked={i === 0} />
+              <label for={`ig-osc-${o.id}`} class={osBtn}>
+                <i class={`${o.icon} text-lg`} />
+                {o.label}
+              </label>
+            </>
+          ))
+        }
+      </div>
+    </fieldset>
+
+    <div class="flex flex-col gap-2">
+      <span class={label}>Channel</span>
+      <div class="grid grid-cols-2 gap-2">
+        <span class={`${btnBase} bg-surface-inset text-default-500 opacity-60 cursor-not-allowed`}>
+          <i class="i-material-symbols-shield-outline-rounded text-lg"></i>
+          Stable
+        </span>
+        <span class={btnActive}>
+          <i class="i-material-symbols-bolt-rounded text-lg"></i>
+          Latest
+        </span>
+      </div>
+    </div>
+
+    <div class="flex flex-col gap-2">
+      <span class={label}>{verb} Command</span>
+      <code class={`${codeBox} ig-cmd-c-macos`}>{clientCmd.macos}</code>
+      <code class={`${codeBox} ig-cmd-c-linux`}>{clientCmd.linux}</code>
+      <code class={`${codeBox} ig-cmd-c-windows`}>{clientCmd.windows}</code>
+      {uninstall ? (
+        <div class="ig-cmd ig-cmd-c-android flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
+          <p class="text-sm text-default-700 m-0">There is no script on Android. Remove tomat like any other app.</p>
+          <ol class="m-0 flex flex-col gap-1 text-sm text-default-600 list-decimal pl-5">
+            <li>Press and hold the tomat icon.</li>
+            <li>Choose Uninstall (or drag it to Uninstall).</li>
+            <li>Confirm to remove the app and its data.</li>
+          </ol>
+        </div>
+      ) : (
+        <div class="ig-cmd ig-cmd-c-android flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
+          <p class="text-sm text-default-700 m-0">The Android app is a signed APK you install directly.</p>
+          <a
+            href={apk}
+            class="inline-flex items-center justify-center gap-2 rounded-large bg-default-inverted-300 px-4 py-2.5 text-sm text-default-inverted-900 hover:cursor-pointer"
+          >
+            <i class="i-material-symbols-download-rounded text-base"></i>
+            Download the Android APK
+          </a>
+          <ol class="m-0 flex flex-col gap-1 text-sm text-default-600 list-decimal pl-5">
+            <li>Open the downloaded file on your phone.</li>
+            <li>If asked, allow installing apps from this source.</li>
+            <li>Confirm the install, then open tomat.</li>
+          </ol>
+        </div>
+      )}
+    </div>
+
+    {uninstall && (
+      <div class="ig-purge-note flex flex-col gap-2">
+        <span class={label}>Options</span>
+        <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
+          <p class="m-0">By default this keeps your settings. To wipe them too, add a flag:</p>
+          <p class="m-0">
+            <span class="font-mono text-default-900">--purge</span>
+            also deletes your saved settings and paired cores.
+          </p>
+          <p class="m-0">
+            On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
+            <span class="font-mono text-default-900">... | bash -s -- --purge</span>. On Windows prefix the line, e.g.
+            <span class="font-mono text-default-900">$env:TOMAT_PURGE="1"; irm ...</span>.
+          </p>
+        </div>
+      </div>
+    )}
+  </div>
+
+  {/* Step 2 (core): OS + channel + command + options. */}
+  <div class="ig-when-core flex-col gap-6">
+    <fieldset class="flex flex-col gap-2 border-0 p-0 m-0">
+      <legend class={`${label} p-0`}>Operating System</legend>
+      <div class="grid grid-cols-3 gap-2">
+        {
+          CORE_OS.map((o, i) => (
+            <>
+              <input id={`ig-oso-${o.id}`} class="ig-radio sr-only" type="radio" name="ig-os-core" checked={i === 0} />
+              <label for={`ig-oso-${o.id}`} class={osBtn}>
+                <i class={`${o.icon} text-lg`} />
+                {o.label}
+              </label>
+            </>
+          ))
+        }
+      </div>
+    </fieldset>
+
+    <div class="flex flex-col gap-2">
+      <span class={label}>Channel</span>
+      <div class="grid grid-cols-2 gap-2">
+        <span class={`${btnBase} bg-surface-inset text-default-500 opacity-60 cursor-not-allowed`}>
+          <i class="i-material-symbols-shield-outline-rounded text-lg"></i>
+          Stable
+        </span>
+        <span class={btnActive}>
+          <i class="i-material-symbols-bolt-rounded text-lg"></i>
+          Latest
+        </span>
+      </div>
+    </div>
+
+    <div class="flex flex-col gap-2">
+      <span class={label}>{verb} Command</span>
+      <code class={`${codeBox} ig-cmd-o-macos`}>{coreCmd.macos}</code>
+      <code class={`${codeBox} ig-cmd-o-linux`}>{coreCmd.linux}</code>
+      <code class={`${codeBox} ig-cmd-o-windows`}>{coreCmd.windows}</code>
+    </div>
+
+    <div class="flex flex-col gap-2">
+      <span class={label}>Options</span>
+      {uninstall ? (
+        <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
+          <p class="m-0">By default this removes the Core and its data. To keep that data, add a flag:</p>
+          <p class="m-0">
+            <span class="font-mono text-default-900">--keep-data</span>
+            keeps the Core's sessions and memories instead of removing them.
+          </p>
+          <p class="m-0">
+            On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
+            <span class="font-mono text-default-900">... | bash -s -- --keep-data</span>. On Windows prefix the line, e.g.
+            <span class="font-mono text-default-900">$env:TOMAT_KEEP_DATA="1"; irm ...</span>.
+          </p>
+        </div>
+      ) : (
+        <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
+          <p class="m-0">Add these before running to change how the Core installs:</p>
+          <ul class="m-0 flex flex-col gap-1 list-disc pl-5">
+            <li>
+              <span class="font-mono text-default-900">TOMAT_INSTALL_BIND_ALL=1</span>
+              lets Clients on other machines pair with this Core.
+            </li>
+            <li>
+              <span class="font-mono text-default-900">TOMAT_INSTALL_SERVICE=0</span>
+              skips the background service so you start the Core by hand.
+            </li>
+          </ul>
+          <p class="m-0">
+            On macOS and Linux put them on the <span class="font-mono">bash</span> side of the pipe,
+            e.g. <span class="font-mono text-default-900">curl ... | TOMAT_INSTALL_BIND_ALL=1 bash</span>.
+            On Windows prefix the line, e.g.
+            <span class="font-mono text-default-900">$env:TOMAT_INSTALL_BIND_ALL="1"; irm ...</span>.
+          </p>
+        </div>
+      )}
+    </div>
+  </div>
+
+  {!uninstall && (
+    <p class="text-sm text-default-500">
+      If you ever need to uninstall, follow <a href="/manual/settings/uninstalling" class="underline hover:text-default-700">the uninstallation guide</a>.
+    </p>
+  )}
+</div>
+
+<style>
+  /* Card + control selected/idle states, driven purely by the native radio
+     that immediately precedes each label (input:checked + label). Cross-cutting
+     visibility (which OS group / which command shows) keys off the radios via
+     :has() on the .ig root. */
+  .ig-card {
+    background: var(--default-100);
+    color: var(--default-800);
+    border: 1px solid var(--default-200);
+    transition: background 150ms ease, border-color 150ms ease;
+  }
+  :global(html.dark) .ig-card {
+    background: var(--default-d-100);
+    color: var(--default-d-800);
+    border-color: var(--default-d-200);
+  }
+  .ig-card:hover {
+    background: var(--default-200);
+  }
+  :global(html.dark) .ig-card:hover {
+    background: var(--default-d-200);
+  }
+  .ig-card-desc {
+    color: var(--default-500);
+  }
+  :global(html.dark) .ig-card-desc {
+    color: var(--default-d-500);
+  }
+
+  /* Recommended chip: neutral, opposite ladder to the card it sits on so it
+     stays legible. Idle card (light inset) -> inverted (dark) chip; selected
+     card (inverted/dark) -> default (light) chip. */
+  .ig-badge {
+    background: var(--default-d-300);
+    color: var(--default-d-900);
+  }
+  :global(html.dark) .ig-badge {
+    background: var(--default-300);
+    color: var(--default-900);
+  }
+  .ig-radio:checked + .ig-card .ig-badge {
+    background: var(--default-300);
+    color: var(--default-900);
+  }
+  :global(html.dark) .ig-radio:checked + .ig-card .ig-badge {
+    background: var(--default-d-300);
+    color: var(--default-d-900);
+  }
+
+  /* Selected target card: the inverted "primary" treatment, mirroring the
+     shared OptionCard's selected invert style (bg-default-inverted-300 =
+     the dark ladder in light mode and the light ladder in dark mode). */
+  .ig-radio:checked + .ig-card {
+    background: var(--default-d-300);
+    color: var(--default-d-900);
+    border-color: var(--default-d-300);
+  }
+  :global(html.dark) .ig-radio:checked + .ig-card {
+    background: var(--default-300);
+    color: var(--default-900);
+    border-color: var(--default-300);
+  }
+  .ig-radio:checked + .ig-card .ig-card-desc {
+    color: var(--default-d-600);
+  }
+  :global(html.dark) .ig-radio:checked + .ig-card .ig-card-desc {
+    color: var(--default-600);
+  }
+
+  /* Selected OS button: same inverted fill as the segmented controls' knob. */
+  .ig-radio:checked + .ig-os-btn {
+    background: var(--default-d-300);
+    color: var(--default-d-900);
+  }
+  :global(html.dark) .ig-radio:checked + .ig-os-btn {
+    background: var(--default-300);
+    color: var(--default-900);
+  }
+
+  /* Keyboard focus lands on the visually-hidden radio; resurface the ring on
+     its visible label. */
+  .ig-radio:focus-visible + .ig-card,
+  .ig-radio:focus-visible + .ig-os-btn {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  /* Target -> which step-2 group shows. */
+  .ig-when-client,
+  .ig-when-core {
+    display: none;
+  }
+  .ig:has(#ig-tg-client:checked) .ig-when-client {
+    display: flex;
+  }
+  .ig:has(#ig-tg-core:checked) .ig-when-core {
+    display: flex;
+  }
+
+  /* OS -> which command shows. One block per target x OS; the rest stay hidden. */
+  .ig-cmd {
+    display: none;
+  }
+  .ig:has(#ig-osc-macos:checked) .ig-cmd-c-macos,
+  .ig:has(#ig-osc-linux:checked) .ig-cmd-c-linux,
+  .ig:has(#ig-osc-windows:checked) .ig-cmd-c-windows,
+  .ig:has(#ig-oso-macos:checked) .ig-cmd-o-macos,
+  .ig:has(#ig-oso-linux:checked) .ig-cmd-o-linux,
+  .ig:has(#ig-oso-windows:checked) .ig-cmd-o-windows {
+    display: block;
+  }
+  .ig:has(#ig-osc-android:checked) .ig-cmd-c-android {
+    display: flex;
+  }
+
+  /* The client --purge note is irrelevant to Android (removed via the OS, no
+     script), so hide it when Android is the selected client OS. */
+  .ig:has(#ig-osc-android:checked) .ig-purge-note {
+    display: none;
+  }
+</style>

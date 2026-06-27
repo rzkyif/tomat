@@ -183,6 +183,7 @@ class McpRegistry {
           triggers: [],
           fnExport: "",
           alwaysAvailable: false,
+          platforms: [],
           enabled: enabled.has(t.name),
           requiredPermissions: [],
           missingRequired: [],

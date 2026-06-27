@@ -10,7 +10,9 @@
 #   powershell -ExecutionPolicy Bypass -Command "& { $env:TOMAT_PURGE='1'; iwr -useb https://get.au.tomat.ing/install/client-uninstall.ps1 | iex }"
 #
 # Flags:
-#   -Purge  also remove %USERPROFILE%\.tomat\client\ (settings, paired-cores, etc.).
+#   -Purge             also remove %USERPROFILE%\.tomat\client\ (settings, paired-cores, etc.).
+#   $env:TOMAT_PURGE   "1" is the env equivalent of -Purge, for the piped one-liner above
+#                      (a switch param can't be passed through `iwr | iex`).
 #
 # UI:
 #   Each phase appears as one row. Pending rows show [ ], the active row
@@ -23,6 +25,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# The one-liner install path (`iwr ... | iex`) cannot pass the -Purge switch, so
+# honor $env:TOMAT_PURGE=1 as the documented equivalent.
+if ($env:TOMAT_PURGE -in @("1", "true")) {
+  $Purge = $true
+}
 
 # ===== UI helpers begin =====
 # Self-contained UI helper block. Keep this region intact so future install
@@ -386,6 +394,15 @@ try {
       $headline,
       "",
       "Settings in $ClientDir were left in place. Re-run with -Purge to remove."
+    )
+  } elseif ($Purge) {
+    # The Client ships no keychain CLI and keyring-core's Credential Manager
+    # entries can't be cleared reliably from here, so we surface the residue
+    # rather than leaving it unmentioned.
+    Ui-Finish @(
+      $headline,
+      "",
+      "A few paired-core tokens may remain in your Windows Credential Manager; remove them manually if desired."
     )
   } else {
     Ui-Finish @(

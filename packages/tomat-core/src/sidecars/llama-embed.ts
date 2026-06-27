@@ -10,6 +10,7 @@ import { EMBED_MODEL_FILE } from "@tomat/shared";
 import { binPath, embedPort, paths } from "../paths.ts";
 import { libDirFor, platformExe } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
+import { numSetting } from "../services/settings-access.ts";
 import type { StartOptions } from "./types.ts";
 
 // MiniLM's trained context length. llama-server caps n_batch to n_ubatch (512)
@@ -69,14 +70,4 @@ export function buildLlamaEmbedStartOptions(args: LlamaEmbedStartArgs): StartOpt
     libraryDir: libDirFor(paths().binDir, "llama-server"),
     startupTimeoutMs: 60_000,
   };
-}
-
-function numSetting(s: Record<string, unknown>, k: string, def: number): number {
-  const v = s[k];
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v !== "") {
-    const n = Number(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return def;
 }

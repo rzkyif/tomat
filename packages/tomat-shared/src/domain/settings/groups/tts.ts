@@ -7,8 +7,16 @@
 // "Model" section holds the preset directly with no provider select; mirror the
 // Speech-to-Text structure otherwise.
 
-import type { SettingGroup } from "../types.ts";
-import { SECURE_URL_VALIDATION } from "../types.ts";
+import type { RegexValidationRule, SettingGroup } from "../types.ts";
+import { externalModelSection } from "./factories.ts";
+
+// Shared validator for the 0.25x-3x speed fields (synthesis + playback).
+const SPEED_RANGE_VALIDATION: RegexValidationRule[] = [
+  {
+    regex: "^(0\\.(2[5-9]|[3-9]\\d?)|[12](\\.\\d+)?|3(\\.0+)?)$",
+    errorMessage: "Must be between 0.25 and 3",
+  },
+];
 
 export const ttsGroup: SettingGroup = {
   id: "tts",
@@ -209,12 +217,7 @@ export const ttsGroup: SettingGroup = {
           type: "float",
           defaultValue: 1,
           suffix: "x",
-          regex: [
-            {
-              regex: "^(0\\.(2[5-9]|[3-9]\\d?)|[12](\\.\\d+)?|3(\\.0+)?)$",
-              errorMessage: "Must be between 0.25 and 3",
-            },
-          ],
+          regex: SPEED_RANGE_VALIDATION,
           descriptionTier: "ondemand",
         },
         {
@@ -224,12 +227,7 @@ export const ttsGroup: SettingGroup = {
           type: "float",
           defaultValue: 1,
           suffix: "x",
-          regex: [
-            {
-              regex: "^(0\\.(2[5-9]|[3-9]\\d?)|[12](\\.\\d+)?|3(\\.0+)?)$",
-              errorMessage: "Must be between 0.25 and 3",
-            },
-          ],
+          regex: SPEED_RANGE_VALIDATION,
           descriptionTier: "ondemand",
         },
         {
@@ -246,55 +244,20 @@ export const ttsGroup: SettingGroup = {
         },
       ],
     },
-    {
+    externalModelSection({
+      idPrefix: "tts.external",
       label: "External Provider",
-      destination: "core",
       visibleWhen: {
         allOf: [
           { field: "tts.enabled", eq: true },
           { field: "tts.provider", eq: "external" },
         ],
       },
-      fields: [
-        {
-          id: "tts.external.baseUrl",
-          name: "Base URL",
-          description:
-            "The speech synthesis API endpoint. Must be HTTPS (HTTP allowed only for localhost).",
-          type: "string",
-          defaultValue: "",
-          placeholder: "https://api.example.com/v1",
-          regex: SECURE_URL_VALIDATION,
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "tts.external.apiKey",
-          name: "API Key",
-          description: "API key for speech synthesis. Stored securely in your keychain.",
-          type: "password",
-          defaultValue: "",
-          placeholder: "sk-...",
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "tts.external.model",
-          name: "Model",
-          description: "The speech synthesis model name, e.g. tts-1.",
-          type: "string",
-          defaultValue: "",
-          placeholder: "tts-1",
-          descriptionTier: "ondemand",
-        },
-        {
-          id: "tts.external.voice",
-          name: "Voice",
-          description: "The voice name the external model should use, e.g. alloy.",
-          type: "string",
-          defaultValue: "alloy",
-          placeholder: "alloy",
-          descriptionTier: "ondemand",
-        },
-      ],
-    },
+      baseUrlDescription:
+        "The speech synthesis API endpoint. Must be HTTPS (HTTP allowed only for localhost).",
+      apiKeyDescription: "API key for speech synthesis. Stored securely in your keychain.",
+      model: { description: "The speech synthesis model name, e.g. tts-1.", placeholder: "tts-1" },
+      voice: true,
+    }),
   ],
 };

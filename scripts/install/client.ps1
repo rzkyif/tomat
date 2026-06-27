@@ -334,7 +334,7 @@ try {
     if ($status -eq 404) {
       Ui-Die "Manifest not found at $ManifestUrl" `
         "HTTP 404" `
-        "the storage origin may be misconfigured; report at github.com/<repo>/issues"
+        "the storage origin may be misconfigured; report at github.com/rzkyif/tomat/issues"
     } elseif ($status -ge 500 -and $status -lt 600) {
       Ui-Die "Storage returned $status" `
         "" `

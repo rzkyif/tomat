@@ -3,7 +3,7 @@
   import { evalCondition } from "@tomat/shared";
   import { settingsState } from "../../../state";
   import FieldCard from "./FieldCard.svelte";
-  import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
+  import ShortcutFieldView from "@tomat/shared/ui/components/settings/ShortcutFieldView.svelte";
 
   let {
     field,
@@ -144,48 +144,14 @@
 </script>
 
 <FieldCard {field} {error} {horizontal} {onReset}>
-  <div class="flex flex-row items-center gap-1.5 w-full">
-    <button
-      type="button"
-      aria-label={field.name}
-      class="flex-1 min-h-8 px-2 py-1 rounded-medium text-left flex flex-row items-center gap-1 flex-wrap outline-none {!editable
-        ? 'opacity-60 pointer-events-none'
-        : ''} {capturing
-        ? 'bg-surface-inset'
-        : hasError
-          ? 'bg-accent-red-300 border-accent-red-400'
-          : 'bg-surface-inset cursor-pointer'}"
-      onclick={startCapture}
-    >
-      {#if capturing}
-        <span class="text-default-600 text-sm italic">
-          Press a key combination… (Esc to cancel)
-        </span>
-      {:else if segments.length === 0}
-        <span class="text-default-500 text-sm italic">Disabled</span>
-      {:else}
-        {#each segments as seg, i}
-          {#if i > 0}
-            <span class="text-default-500 text-xs">+</span>
-          {/if}
-          <kbd
-            class="bg-surface-inset-strong text-default-800 px-1.5 py-0.5 rounded text-xs font-mono uppercase tracking-wide"
-          >
-            {seg}
-          </kbd>
-        {/each}
-      {/if}
-    </button>
-
-    {#if editable && currentValue}
-      <IconButton
-        icon="i-material-symbols-delete-outline-rounded"
-        title="Clear shortcut"
-        size="sm"
-        variant="subtle"
-        onclick={clearShortcut}
-        colorClass="text-default-400 hov:text-accent-red-500"
-      />
-    {/if}
-  </div>
+  <ShortcutFieldView
+    fieldName={field.name}
+    {segments}
+    recording={capturing}
+    {editable}
+    {hasError}
+    showClear={editable && !!currentValue}
+    onStartCapture={startCapture}
+    onClear={clearShortcut}
+  />
 </FieldCard>

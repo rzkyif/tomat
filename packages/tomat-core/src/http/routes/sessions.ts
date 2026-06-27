@@ -10,9 +10,11 @@ import {
   type MessageRoleForPatch,
 } from "@tomat/shared";
 import { sessionsRepo } from "../../services/sessions-store.ts";
+import { numSetting, strSetting } from "../../services/settings-access.ts";
 import { sessionAttachmentsDir } from "../../paths.ts";
 import { AppError } from "../../shared/errors.ts";
 import { newAttachmentId, newMessageId } from "../../shared/ids.ts";
+import { parseBody, readJson } from "../body.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 import { loadCoreSettings } from "../../services/core-settings.ts";
 import { regenerateTitle } from "../../services/title-gen.ts";
@@ -100,11 +102,8 @@ export function sessionsRoutes(): Hono {
   r.post("/:id/messages", async (c) => {
     const me = requireClient(c);
     const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
-    const parsed = messageInputSchema.safeParse(await readJson(c));
-    if (!parsed.success) {
-      throw new AppError("validation_error", parsed.error.message);
-    }
-    return c.json(sessionsRepo().appendMessage(session.id, parsed.data as Message));
+    const body = parseBody(messageInputSchema, await readJson(c));
+    return c.json(sessionsRepo().appendMessage(session.id, body as Message));
   });
 
   r.patch("/:id/messages/:msgId", async (c) => {
@@ -121,6 +120,8 @@ export function sessionsRoutes(): Hono {
         `cannot patch message with unknown role "${existing.role}"`,
       );
     }
+    // `schema` is selected by role, so it is a union of per-role ZodTypes that
+    // `parseBody`'s single-type generic can't unify; validate it inline.
     const parsed = schema.safeParse(await readJson(c));
     if (!parsed.success) {
       throw new AppError("validation_error", parsed.error.message);
@@ -331,24 +332,6 @@ function historyToOpenAI(
     }
   }
   return out;
-}
-
-function strSetting(s: Record<string, unknown>, key: string, def: string): string {
-  const v = s[key];
-  return typeof v === "string" ? v : def;
-}
-
-function numSetting(s: Record<string, unknown>, key: string, def: number): number {
-  const v = s[key];
-  return typeof v === "number" ? v : def;
-}
-
-async function readJson(c: import("hono").Context): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    throw new AppError("validation_error", "invalid JSON body");
-  }
 }
 
 // Filenames are attacker-controlled (uploaded via /sessions/:id/attachments)

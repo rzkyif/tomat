@@ -11,6 +11,7 @@ import { speechScheduler } from "./speech-scheduler.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import { getSecret } from "./secrets.ts";
+import { strSetting } from "./settings-access.ts";
 
 const log = getLogger("stt");
 
@@ -85,9 +86,4 @@ export async function transcribeAudio(
       `(audio ${audio.size} bytes, out ${text.length} chars)`,
   );
   return text;
-}
-
-function strSetting(s: Record<string, unknown>, k: string, def: string): string {
-  const v = s[k];
-  return typeof v === "string" ? v : def;
 }

@@ -12,7 +12,6 @@
   import { deletionsState, settingsState } from "../../../state";
   import { formatBytes } from "$lib/util/format";
   import {
-    categoryKey,
     clearableNodes,
     expandToFiles,
     findNode,
@@ -24,6 +23,10 @@
   } from "$lib/storage/tree";
   import { getLogger } from "$lib/util/log";
   import FieldCard from "./FieldCard.svelte";
+  import StorageFieldView, {
+    type StorageRowView,
+    type StorageTreeView,
+  } from "@tomat/shared/ui/components/settings/StorageFieldView.svelte";
 
   const log = getLogger("storage");
 
@@ -151,8 +154,8 @@
       deletionsState.request({
         title: "Reset settings",
         notice: scope === "core"
-          ? "This resets all core settings to their defaults and removes saved API keys and passwords. This cannot be undone."
-          : "This resets app settings to their defaults. Paired cores and snippets are kept. This cannot be undone.",
+          ? "This resets all Core settings to their defaults and removes saved API keys and passwords. This cannot be undone."
+          : "This resets app settings to their defaults. Paired Cores and snippets are kept. This cannot be undone.",
         items: [],
         skipped: [],
         confirmLabel: "Reset",
@@ -199,141 +202,67 @@
       deleteSelected();
     }
   }
+
+  // Map a live tree node to the View's display shape: sizes pre-formatted via
+  // formatBytes (a client helper), render flags precomputed, so the View is pure.
+  function toRow(node: StorageNode, catId: string): StorageRowView {
+    return {
+      path: node.path,
+      name: node.name,
+      kind: node.kind,
+      sizeText: formatBytes(node.size),
+      locked: !!node.lock_reason,
+      lockReason: node.lock_reason,
+      selectable: selectable(node, catId),
+      hasChildren: node.kind === "folder" && node.children.length > 0,
+      children: node.kind === "folder" ? node.children.map((c) => toRow(c, catId)) : [],
+    };
+  }
+
+  const viewTree = $derived<StorageTreeView | null>(
+    tree
+      ? {
+        categories: tree.categories.map((cat) => ({
+          id: cat.id,
+          label: cat.label,
+          sizeText: formatBytes(cat.size),
+          canClear: canClear(cat),
+          clearIcon: cat.id === "settings"
+            ? "i-material-symbols-restart-alt-rounded"
+            : "i-material-symbols-delete-outline-rounded",
+          clearAriaLabel: cat.id === "settings" ? "Reset to defaults" : `Clear ${cat.label}`,
+          clearTitle: cat.id === "settings" ? "Reset to defaults" : `Clear ${cat.label}`,
+          settings: cat.id === "settings",
+          nodes: cat.nodes.map((n) => toRow(n, cat.id)),
+        })),
+        totalSizeText: formatBytes(tree.total_size),
+      }
+      : null,
+  );
+
+  // The View hands back a path + category id; resolve the live node here so all
+  // selection logic (range, lock checks, expand) stays in the client.
+  function onRowClick(e: MouseEvent, path: string, catId: string) {
+    const node = tree && findNode(tree, path);
+    if (node) handleRowClick(e, node, catId);
+  }
+
+  function onClearCategory(catId: string) {
+    const cat = tree?.categories.find((c) => c.id === catId);
+    if (cat) clearCategory(cat);
+  }
 </script>
 
 <FieldCard {field}>
-  <div class="flex flex-col gap-0.5 outline-none" tabindex="0" role="tree" onkeydown={handleKeyDown}>
-    {#if loading && !tree}
-      <div class="text-default-500 text-sm py-1 select-none">Loading…</div>
-    {:else if loadError && !tree}
-      <div class="text-default-400 text-xs py-1 select-none">Couldn't load storage.</div>
-    {:else if tree}
-      {#each tree.categories as cat (cat.id)}
-        {@const open = expanded.has(categoryKey(cat.id))}
-        <!-- Category header: the whole row toggles expansion (like a settings
-             section header). -->
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="flex items-center gap-1 text-sm py-1 select-none cursor-pointer"
-          role="button"
-          tabindex="-1"
-          onclick={() => toggle(categoryKey(cat.id))}
-        >
-          <i
-            class="flex shrink-0 w-4 justify-center text-default-500 {open
-              ? 'i-material-symbols-expand-more-rounded'
-              : 'i-material-symbols-chevron-right-rounded'}"
-          ></i>
-          <span class="text-default-800 font-medium truncate">{cat.label}</span>
-          {#if canClear(cat)}
-            <button
-              type="button"
-              class="flex shrink-0 w-5 h-5 -ml-0.5 justify-center items-center text-default-500 hover:text-default-900 hover:cursor-pointer transition-colors"
-              onclick={(e) => {
-                e.stopPropagation();
-                clearCategory(cat);
-              }}
-              aria-label={cat.id === "settings" ? "Reset to defaults" : `Clear ${cat.label}`}
-              title={cat.id === "settings" ? "Reset to defaults" : `Clear ${cat.label}`}
-            >
-              <i
-                class="flex {cat.id === 'settings'
-                  ? 'i-material-symbols-restart-alt-rounded'
-                  : 'i-material-symbols-delete-outline-rounded'}"
-              ></i>
-            </button>
-          {/if}
-          <span class="flex-1"></span>
-          <span class="text-default-500 text-xs tabular-nums shrink-0">{formatBytes(cat.size)}</span>
-        </div>
-
-        {#if open}
-          {#if cat.nodes.length === 0}
-            <div class="text-default-400 text-xs pl-5 py-1 select-none">Empty.</div>
-          {/if}
-          {#each cat.nodes as node (node.path)}
-            {@const isLocked = !!node.lock_reason}
-            {@const isSel = selected.has(node.path)}
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div
-              class="flex items-center gap-1 text-sm pl-5 py-1 select-none {isLocked ||
-              cat.id === 'settings'
-                ? node.kind === 'folder'
-                  ? 'cursor-pointer'
-                  : 'cursor-default'
-                : 'cursor-pointer'} {isLocked ? 'opacity-60' : ''} {isSel ? 'bg-default-400' : ''}"
-              title={node.lock_reason ?? undefined}
-              onclick={(e) => handleRowClick(e, node, cat.id)}
-            >
-              {#if node.kind === "folder" && node.children.length > 0}
-                <button
-                  class="flex shrink-0 w-4 justify-center text-default-500 hover:cursor-pointer"
-                  aria-label="Toggle folder"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    toggle(node.path);
-                  }}
-                >
-                  <i
-                    class="flex {expanded.has(node.path)
-                      ? 'i-material-symbols-expand-more-rounded'
-                      : 'i-material-symbols-chevron-right-rounded'}"
-                  ></i>
-                </button>
-              {:else}
-                <span class="flex shrink-0 w-4"></span>
-              {/if}
-              <i
-                class="flex shrink-0 w-4 justify-center {isLocked
-                  ? 'i-material-symbols-lock-outline'
-                  : node.kind === 'folder'
-                    ? 'i-material-symbols-folder-outline-rounded'
-                    : 'i-material-symbols-description-outline-rounded'} text-default-500"
-              ></i>
-              <span class="flex-1 truncate text-default-800">{node.name}</span>
-              <span class="text-default-500 text-xs tabular-nums shrink-0">
-                {formatBytes(node.size)}
-              </span>
-            </div>
-            {#if node.kind === "folder" && expanded.has(node.path)}
-              {#each node.children as child (child.path)}
-                {@const childLocked = !!child.lock_reason}
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div
-                  class="flex items-center gap-1 text-sm pl-10 py-1 select-none {childLocked
-                    ? 'opacity-60 cursor-default'
-                    : 'cursor-pointer'} {selected.has(child.path) ? 'bg-default-400' : ''}"
-                  title={child.lock_reason ?? undefined}
-                  onclick={(e) => handleRowClick(e, child, cat.id)}
-                >
-                  <span class="flex shrink-0 w-4"></span>
-                  <i
-                    class="flex shrink-0 w-4 justify-center {childLocked
-                      ? 'i-material-symbols-lock-outline'
-                      : 'i-material-symbols-description-outline-rounded'} text-default-500"
-                  ></i>
-                  <span class="flex-1 truncate text-default-800">{child.name}</span>
-                  <span class="text-default-500 text-xs tabular-nums shrink-0">
-                    {formatBytes(child.size)}
-                  </span>
-                </div>
-              {/each}
-            {/if}
-          {/each}
-        {/if}
-      {/each}
-
-      <!-- Total -->
-      <div class="flex items-center gap-1 text-sm py-1 select-none">
-        <span class="flex shrink-0 w-4"></span>
-        <span class="text-default-800 font-medium flex-1">Total</span>
-        <span class="text-default-500 text-xs font-bold tabular-nums shrink-0">
-          {formatBytes(tree.total_size)}
-        </span>
-      </div>
-    {/if}
-  </div>
+  <StorageFieldView
+    {loading}
+    {loadError}
+    tree={viewTree}
+    {expanded}
+    {selected}
+    onToggle={toggle}
+    {onRowClick}
+    {onClearCategory}
+    onKeyDown={handleKeyDown}
+  />
 </FieldCard>

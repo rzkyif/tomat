@@ -1,0 +1,62 @@
+---
+title: Uninstalling tomat
+section: Settings & Maintenance
+order: 6
+---
+
+import Aside from "../../../components/Aside.astro";
+import InstallGeneratorStatic from "../../../components/InstallGenerator.astro";
+import InstallGenerator from "../../../components/InstallGenerator.svelte";
+
+Removing tomat is a single command for each part you installed, in the same
+shape as the commands that put it there. Nothing is scattered across your
+system: the Client is one app, and the Core keeps all of its state under
+`~/.tomat`. Taking either one off your machine is quick, and by default it
+leaves your data untouched so you can come back later.
+
+## Run the uninstaller
+
+Pick whether you are removing the **Client**, the **Core**, or both, then choose
+your operating system to get the matching command. Copy it into a terminal and
+run it. Removing the Client deletes the app; removing the Core stops its
+background service first, then deletes it. You can run both commands, in either
+order, if you installed both.
+
+On Android there is no command. Remove tomat the way you remove any app: press
+and hold its icon and choose Uninstall.
+
+<div data-nojs-fallback>
+  <InstallGeneratorStatic mode="uninstall" />
+</div>
+<div data-js-enhanced>
+  <InstallGenerator mode="uninstall" client:load />
+</div>
+
+## What stays behind
+
+By default removal is careful with your data, so a later re-install picks up
+where you left off. Removing the **Client** leaves your settings and the list of
+Cores you paired with in place; add `--purge` to wipe them as well. Removing the
+**Core** takes its sessions and memories with it; add `--keep-data` to keep that
+data and only stop the service.
+
+Downloaded models are always kept. They can be many gigabytes and are shared
+across channels, so the uninstaller never deletes them. If you want that space
+back, remove the `~/.tomat/models` folder by hand.
+
+<Aside type="caution">
+  Removing the Core, or removing the Client with `--purge`, deletes data for good. There is no undo,
+  so be sure you have what you want before you run it.
+</Aside>
+
+## More than one channel
+
+If you run tomat on more than one **channel**, each is a separate install with
+its own data under `~/.tomat`, and the uninstaller removes one channel at a
+time. The commands here remove the latest-channel build. See
+[Updates and Channels](/manual/settings/updates-and-channels) for how channels
+stay isolated.
+
+That is everything tomat leaves on your machine, and how to take it back. If you
+are setting up again rather than leaving, head back to
+[installing tomat](/manual/getting-started/installing).

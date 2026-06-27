@@ -214,6 +214,18 @@ export const toolsGroup: SettingGroup = {
           visibleWhen: { field: "tools.list", eq: "__never__" },
           descriptionTier: "none",
         },
+        // Hidden persisted flag: set from the "Don't Ask Again" choice in the
+        // prompt offering to install the built-in tools when you turn tools on.
+        // Suppresses that prompt thereafter. Never rendered.
+        {
+          id: "tools.builtinPromptDismissed",
+          name: "Built-in Tools Prompt Dismissed",
+          description: "",
+          type: "boolean",
+          defaultValue: false,
+          visibleWhen: { field: "tools.list", eq: "__never__" },
+          descriptionTier: "none",
+        },
       ],
     },
   ],

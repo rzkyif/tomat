@@ -22,7 +22,6 @@
     streamingState,
     viewState,
   } from "../../state";
-  import type { ScheduledPromptDraft } from "@tomat/shared";
   import { connectionState } from "$stores/connection.svelte";
   import { getLogger } from "$lib/util/log";
 
@@ -44,17 +43,6 @@
   // back into this dispatch (see the handler note in messages.svelte.ts).
   messagesState.setLLMHandlers(sendMessages);
 
-  import {
-    classifyAttachment,
-    DOC_EXTENSIONS,
-    IMAGE_EXTENSIONS,
-    ingestDocumentBlob,
-    ingestDocumentFromPath,
-    ingestImageBlob,
-    ingestTextDocument,
-    MIME_BY_EXT,
-    TEXT_DOC_EXTENSIONS,
-  } from "$lib/chat/attachments";
   import { applySnippets, snippetTrigger } from "$lib/snippets/snippets";
   import {
     type AutocompleteOption,
@@ -69,13 +57,9 @@
     buildSystemPromptBase,
   } from "$lib/prompts/system-prompt";
   import SnippetAutocomplete from "./SnippetAutocomplete.svelte";
-  import { pauseClickThrough, resumeClickThrough } from "$lib/window/window";
-  import {
-    listCaptureMonitors,
-    captureMonitor,
-    captureRegion,
-    type CaptureMonitorInfo,
-  } from "$lib/capture/capture";
+  import { ComposerAttachments } from "$composables/use-composer-attachments.svelte";
+  import { InputShortcuts } from "$composables/use-input-shortcuts.svelte";
+  import { PromptModes } from "$composables/use-prompt-modes.svelte";
   import { vadManager } from "$stores/vad.svelte";
   import { shortcutHandler } from "$stores/shortcut.svelte";
   import { useBlink } from "$composables/use-blink.svelte";
@@ -86,6 +70,7 @@
   import PermissionRequest from "./userinput/PermissionRequest.svelte";
   import ScheduleConfirmForm from "./userinput/ScheduleConfirmForm.svelte";
   import UserInputView from "@tomat/shared/ui/components/chat/UserInputView.svelte";
+  import PromptButtonsView from "@tomat/shared/ui/components/chat/userinput/PromptButtonsView.svelte";
   import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
   import { hasAlpha } from "$lib/appearance/color";
 
@@ -100,7 +85,15 @@
   let monitors: Monitor[] = $state([]);
   let textareaElement: HTMLTextAreaElement | undefined = $state();
   let mirrorSpan: HTMLSpanElement | undefined = $state();
-  let attachments = $state<Attachment[]>([]);
+
+  // The composer's attachment pipeline (pending list, pickers, paste, capture,
+  // image preview) is its own stateful unit; this component owns the lifecycle
+  // (monitor fetch in onMount) and the `attachmentParts` derived, and supplies
+  // the refocus hook.
+  const composer = new ComposerAttachments({
+    onMobile,
+    focus: () => focusInput(),
+  });
 
   // The `@trigger` autocomplete dropdown and the speech-to-text pipeline are
   // each their own stateful unit; this component owns the lifecycle wiring (see
@@ -111,6 +104,14 @@
     () => mirrorSpan,
   );
   const stt = useStt();
+
+  // OS-level input shortcuts (attach/capture), armed only while mounted and the
+  // window is visible; this component drives register/clear from its visibility
+  // subscription in onMount. The schedule-confirm prompt's editable draft lives
+  // in its own unit; this component keeps the $derived pending reads and the
+  // $effect that mirrors the pending frame into the draft.
+  const inputShortcuts = new InputShortcuts();
+  const prompt = new PromptModes();
 
   let autocompleteOptions = $derived.by<AutocompleteOption[]>(() => {
     if (!ac.open) return [];
@@ -195,9 +196,6 @@
     ac.clampIndex(autocompleteOptions.length);
   });
 
-  let captureMonitors = $state<CaptureMonitorInfo[]>([]);
-  let capturing = $state(false);
-
   // Transient status notice shown through the textarea placeholder. Chat
   // mode has no room for banners or badges: short, plain-language messages
   // ("Transcription failed! Please try again.") surface where the user is
@@ -246,43 +244,26 @@
   // is replaced by the form, attach/voice/send controls hide, X and check
   // buttons decide. The user's edits ride back on the accept.
   let scheduleConfirm = $derived(scheduleConfirmState.pending);
-  let scheduleDraft = $state<ScheduledPromptDraft | null>(null);
   $effect(() => {
     // The pending frame is reactive deep state, so its draft is a Proxy;
     // structuredClone would throw DataCloneError on it. $state.snapshot
     // returns a plain editable clone (the same call the accept path uses).
-    scheduleDraft = scheduleConfirm
+    prompt.scheduleDraft = scheduleConfirm
       ? $state.snapshot(scheduleConfirm.draft)
       : null;
   });
-  let scheduleDraftReady = $derived.by(() => {
-    const d = scheduleDraft;
-    if (!d) return false;
-    if (!d.title.trim() || !d.instruction.trim()) return false;
-    // A "once" in the past would never fire; make the user pick a future time.
-    if (d.schedule.kind === "once" && d.schedule.atMs <= Date.now())
-      return false;
-    return true;
-  });
-  function respondScheduleConfirm(accepted: boolean): void {
-    const draft = scheduleDraft;
-    scheduleConfirmState.respond(
-      accepted,
-      accepted && draft ? $state.snapshot(draft) : undefined,
-    );
-  }
 
-  let hasContent = $derived(text.trim().length > 0 || attachments.length > 0);
+  let hasContent = $derived(text.trim().length > 0 || composer.attachments.length > 0);
 
   let placeholderText = $derived(
     inputNotice
       ? inputNotice
       : connectionState.reconnecting
-        ? "Reconnecting to core..."
+        ? "Reconnecting to Core..."
         : downloadsState.hasPending
           ? "Pending download, open settings!"
           : downloadsState.loading
-            ? "Connecting to core..."
+            ? "Connecting to Core..."
             : stt.processing
               ? "Transcribing..."
               : vadManager.enabled && vadManager.listening
@@ -298,7 +279,7 @@
   let sttStatus = $derived(serversState.serverStatuses.speech.status);
 
   let attachmentParts = $derived(
-    attachments.map((att): MessagePart => {
+    composer.attachments.map((att): MessagePart => {
       if (att.type === "image") {
         return {
           type: "image_url",
@@ -314,16 +295,6 @@
       };
     }),
   );
-
-  let previewImageUrl = $state<string | null>(null);
-
-  function openImagePreview(url: string) {
-    if (url) previewImageUrl = url;
-  }
-
-  function closeImagePreview() {
-    previewImageUrl = null;
-  }
 
   function applySnippetTrigger(option: { trigger: string }) {
     const ta = textareaElement;
@@ -378,35 +349,14 @@
   onMount(() => {
     const cleanups: Array<() => void> = [];
 
-    // Input-mode shortcuts are registered on the OS level via
+    // Input-mode shortcuts (attach/capture) are registered on the OS level via
     // tauri-plugin-global-shortcut, but only while:
     //   (1) UserInput is mounted (i.e. Settings panel is closed) AND
     //   (2) The window is currently visible.
-    // (1) is satisfied for the lifetime of this component. (2) we track via
-    // the `window-visibility` event: register on visible=true, clear on
-    // visible=false. Initial state is computed inside the async setup below.
-    function readInputBindings(): [string, string][] {
-      const s = settingsState.currentSettings;
-      return [
-        ["attach-file", (s["shortcuts.attachFile"] as string) || ""],
-        ["capture-screen", (s["shortcuts.captureScreen"] as string) || ""],
-        ["capture-region", (s["shortcuts.captureRegion"] as string) || ""],
-      ];
-    }
-    async function registerInputShortcuts() {
-      try {
-        await platform().shortcuts.setInputBindings(readInputBindings());
-      } catch (e) {
-        log.warn("set_input_shortcuts failed:", e);
-      }
-    }
-    async function clearInputShortcuts() {
-      try {
-        await platform().shortcuts.setInputBindings([]);
-      } catch (e) {
-        log.warn("clear input_shortcuts failed:", e);
-      }
-    }
+    // (1) is satisfied for the lifetime of this component. (2) we track via the
+    // `window-visibility` event below: register on visible=true, clear on
+    // visible=false. Initial state is computed by registerIfVisible. The binding
+    // computation + platform calls live in the inputShortcuts unit.
 
     // Focus the textarea on show, and (de)register input shortcuts in lockstep
     // with window visibility.
@@ -414,9 +364,9 @@
       .windowing.subscribeVisibility((visible) => {
         if (visible) {
           focusTextarea();
-          void registerInputShortcuts();
+          void inputShortcuts.register();
         } else {
-          void clearInputShortcuts();
+          void inputShortcuts.clear();
         }
       })
       .then((unsubscribe) => {
@@ -424,52 +374,36 @@
       });
 
     // Populate the monitor list for the always-visible screen-capture select.
-    void listCaptureMonitors().then((m) => {
-      captureMonitors = m;
-    });
+    void composer.loadCaptureMonitors();
 
-    void platform()
-      .shortcuts.subscribeInputEvents({
+    void inputShortcuts
+      .subscribeEvents({
         onAttachFile: () => {
-          void handleAttachFileFromMenu();
+          void composer.handleAttachFile();
         },
         onCaptureScreen: () => {
-          // Pick the primary monitor from the captureMonitors snapshot,
-          // falling back to the first id we see. captureMonitors is
-          // populated lazily via the attach-menu open path; if it's empty
-          // we still try to fetch.
+          // Pick the primary monitor from the composer's snapshot, falling back
+          // to the first id we see. The list is populated lazily, so fetch it
+          // if it's still empty.
           void (async () => {
-            let monitors = captureMonitors;
-            if (monitors.length === 0) {
-              monitors = await listCaptureMonitors();
-              captureMonitors = monitors;
-            }
-            const target =
-              monitors.find((m) => m.isPrimary)?.id || monitors[0]?.id;
-            if (target) await captureMonitorById(target);
+            if (composer.captureMonitors.length === 0) await composer.loadCaptureMonitors();
+            const monitors = composer.captureMonitors;
+            const target = monitors.find((m) => m.isPrimary)?.id || monitors[0]?.id;
+            if (target) await composer.captureMonitorById(target);
           })();
         },
         onCaptureRegion: () => {
-          void handleCaptureRegionFromMenu();
+          void composer.handleCaptureRegionFromMenu();
         },
       })
       .then((unsubscribe) => cleanups.push(unsubscribe));
     cleanups.push(() => {
-      void clearInputShortcuts();
+      void inputShortcuts.clear();
     });
 
-    // Initial registration: only if the window is already visible at mount
-    // time. Most of the time it is (closing Settings doesn't hide the window),
-    // but on app startup with a hidden tray-only launch we'd otherwise
-    // register shortcuts that should be inactive.
-    void (async () => {
-      try {
-        const visible = await platform().windowing.isVisible();
-        if (visible) await registerInputShortcuts();
-      } catch (e) {
-        log.warn("initial visibility check failed:", e);
-      }
-    })();
+    // Initial registration: only if the window is already visible at mount time
+    // (a hidden tray-only launch should not arm shortcuts).
+    void inputShortcuts.registerIfVisible();
 
     // Async setup: monitors, VAD, shortcut listeners, persistent-mode restore.
     // Monitors are best-effort (benign on failure); VAD and shortcut setup
@@ -549,7 +483,7 @@
     if (connectionState.state !== "connected") return;
 
     const trimmedText = text.trim();
-    if (!trimmedText && attachments.length === 0) return;
+    if (!trimmedText && composer.attachments.length === 0) return;
 
     stt.clearDiff();
 
@@ -572,7 +506,7 @@
         ? effectiveSystemPrompt
         : undefined;
 
-    const snapshot: Attachment[] = attachments.map((a) => ({
+    const snapshot: Attachment[] = composer.attachments.map((a) => ({
       type: a.type,
       filename: a.filename,
       pendingData: a.pendingData,
@@ -581,7 +515,7 @@
     const timestamp = Date.now();
 
     text = "";
-    attachments = [];
+    composer.clear();
     ac.open = false;
 
     try {
@@ -626,242 +560,6 @@
     });
   }
 
-  async function handlePaste(e: ClipboardEvent) {
-    const files = Array.from(e.clipboardData?.files || []);
-    if (files.length === 0) return;
-
-    const supportsImages = !!settingsState.currentSettings["llm.supportImages"];
-    let handledAny = false;
-
-    for (const file of files) {
-      const name = file.name || "pasted";
-      const kind = classifyAttachment(name, file.type, supportsImages);
-      if (!kind) continue;
-
-      handledAny = true;
-      try {
-        if (kind.kind === "image") {
-          const baseName = name.includes(".") ? name : `${name}.${kind.ext}`;
-          attachments = [
-            ...attachments,
-            await ingestImageBlob(file, baseName, kind.ext),
-          ];
-        } else {
-          attachments = [...attachments, await ingestDocumentBlob(file, name)];
-        }
-      } catch (err) {
-        attachLog.error("Paste ingestion failed:", err);
-      }
-    }
-
-    if (handledAny) e.preventDefault();
-  }
-
-  // Android: the picker returns a content URI (not an absolute path), so picked
-  // files are read as bytes. The OS offers no single files+photos picker, so the
-  // composer shows two buttons backed by these two handlers. There is no
-  // transparent-window dance to perform.
-  //
-  // Image picker: photos need no conversion, so any model-supported image is
-  // ingested straight from its bytes.
-  async function handleAttachImageMobile() {
-    const supportsImages = settingsState.currentSettings["llm.supportImages"];
-    if (!supportsImages) {
-      attachLog.warn("this model has images disabled; the image picker is a no-op");
-      return;
-    }
-    const picked = await platform().dialog.openFilePicker({
-      multiple: false,
-      filters: [{ name: "Images", extensions: IMAGE_EXTENSIONS }],
-    });
-    if (picked.length === 0) return;
-    const uri = picked[0];
-    const data = await platform().fs.readFile(uri);
-    const rawName = decodeURIComponent(uri.split("/").pop() || "image");
-    const ext = rawName.split(".").pop()?.toLowerCase() || "";
-    const safeExt = IMAGE_EXTENSIONS.includes(ext) ? ext : "png";
-    const fileName = rawName.includes(".") ? rawName : `image.${safeExt}`;
-    const mime = MIME_BY_EXT[safeExt] || "image/png";
-    // .slice() yields a fresh non-shared ArrayBuffer, which Blob's BlobPart needs.
-    const blob = new Blob([data.slice().buffer], { type: mime });
-    attachments = [...attachments, await ingestImageBlob(blob, fileName, safeExt)];
-  }
-
-  // Document picker: the binary converter (anytomd/pdf-extract) is desktop-only,
-  // so on mobile only the plain-text document types (txt, md, code, csv, json,
-  // ...) are offered; their bytes are decoded as UTF-8 and ingested directly. A
-  // binary office/pdf file picked anyway is skipped with a notice.
-  async function handleAttachDocMobile() {
-    const picked = await platform().dialog.openFilePicker({
-      multiple: false,
-      filters: [{ name: "Documents", extensions: TEXT_DOC_EXTENSIONS }],
-    });
-    if (picked.length === 0) return;
-    const uri = picked[0];
-    const rawName = decodeURIComponent(uri.split("/").pop() || "document.txt");
-    const ext = rawName.split(".").pop()?.toLowerCase() || "";
-    if (!TEXT_DOC_EXTENSIONS.includes(ext)) {
-      attachLog.warn(`cannot attach .${ext} on mobile: it needs the desktop document converter`);
-      return;
-    }
-    const fileName = rawName.includes(".") ? rawName : `${rawName}.txt`;
-    const data = await platform().fs.readFile(uri);
-    const text = new TextDecoder().decode(data);
-    attachments = [...attachments, ingestTextDocument(text, fileName)];
-  }
-
-  async function handleAttachFile() {
-    try {
-      const supportsImages = settingsState.currentSettings["llm.supportImages"];
-
-      if (onMobile) {
-        // The composer's "Attach File" button is the document picker on mobile;
-        // images have their own button (handleAttachImageMobile).
-        await handleAttachDocMobile();
-        return;
-      }
-
-      const filters = [
-        {
-          name: "Documents",
-          extensions: DOC_EXTENSIONS,
-        },
-      ];
-
-      if (supportsImages) {
-        filters.push({
-          name: "Images",
-          extensions: IMAGE_EXTENSIONS,
-        });
-      }
-
-      // Shrink window and center Y to prevent macOS dimming overlay on
-      // transparent window while the native file picker is open.
-      const win = platform().windowing;
-      const savedSize = await win.outerSize();
-      const savedPos = await win.outerPosition();
-      const monitor = await win.currentMonitor();
-      const centerX = Math.round(savedPos.x + savedSize.width / 2);
-      const centerY = monitor
-        ? Math.round(monitor.y + monitor.height / 3)
-        : savedPos.y;
-      await pauseClickThrough();
-      await win.setOuterSize({ width: 1, height: 1 });
-      await win.setOuterPosition({ x: centerX, y: centerY });
-
-      let picked: string[];
-      try {
-        picked = await platform().dialog.openFilePicker({
-          multiple: false,
-          filters,
-        });
-      } finally {
-        await win.setOuterPosition({ x: savedPos.x, y: savedPos.y });
-        await win.setOuterSize({
-          width: savedSize.width,
-          height: savedSize.height,
-        });
-        await resumeClickThrough();
-      }
-
-      if (picked.length === 0) return;
-      const filePath = picked[0];
-      const fileName =
-        filePath.split("/").pop() || filePath.split("\\").pop() || "file";
-      const ext = fileName.split(".").pop()?.toLowerCase() || "";
-
-      if (IMAGE_EXTENSIONS.includes(ext)) {
-        const data = await platform().fs.readFile(filePath);
-        const mime = MIME_BY_EXT[ext] || "image/png";
-        // .slice() returns a Uint8Array backed by a fresh non-shared
-        // ArrayBuffer, which Blob's `BlobPart` signature requires.
-        const blob = new Blob([data.slice().buffer], { type: mime });
-        attachments = [
-          ...attachments,
-          await ingestImageBlob(blob, fileName, ext),
-        ];
-      } else {
-        attachments = [
-          ...attachments,
-          await ingestDocumentFromPath(filePath, fileName),
-        ];
-      }
-      focusInput();
-    } catch (err) {
-      attachLog.error("File attach failed:", err);
-    }
-  }
-
-  function removeAttachment(index: number) {
-    attachments = attachments.filter((_, i) => i !== index);
-  }
-
-  async function handleAttachFileFromMenu() {
-    await handleAttachFile();
-  }
-
-  function handleCaptureSelect(e: Event) {
-    const target = e.target as HTMLSelectElement;
-    const id = target.value;
-    target.value = "";
-    if (id) void captureMonitorById(id);
-  }
-
-  async function captureMonitorById(monitorId: string) {
-    if (capturing) return;
-    // A screenshot is an image attachment; skip when the model can't read images
-    // (the capture controls are hidden then, but a bound shortcut still reaches
-    // here).
-    if (!settingsState.currentSettings["llm.supportImages"]) {
-      attachLog.warn("screen capture skipped: image support is off");
-      return;
-    }
-    capturing = true;
-    try {
-      const base64 = await captureMonitor(monitorId);
-      if (base64) {
-        attachments = [
-          ...attachments,
-          {
-            type: "image",
-            filename: `screenshot-${Date.now()}.png`,
-            pendingData: base64,
-            mime: "image/png",
-          },
-        ];
-        focusInput();
-      }
-    } finally {
-      capturing = false;
-    }
-  }
-
-  async function handleCaptureRegionFromMenu() {
-    if (capturing) return;
-    if (!settingsState.currentSettings["llm.supportImages"]) {
-      attachLog.warn("region capture skipped: image support is off");
-      return;
-    }
-    capturing = true;
-    try {
-      const base64 = await captureRegion();
-      if (base64) {
-        attachments = [
-          ...attachments,
-          {
-            type: "image",
-            filename: `region-${Date.now()}.png`,
-            pendingData: base64,
-            mime: "image/png",
-          },
-        ];
-        focusInput();
-      }
-    } finally {
-      capturing = false;
-    }
-  }
-
   function handleBubbleClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (target.closest("button, select, textarea, a, input")) return;
@@ -894,18 +592,18 @@
   oncompositionstart={handleCompositionStart}
   oncompositionend={handleCompositionEnd}
   ontextareablur={() => (ac.open = false)}
-  onpaste={handlePaste}
+  onpaste={(e) => composer.handlePaste(e)}
   topSlot={autocorrectAlert}
   contentOverride={inPromptMode ? promptContent : undefined}
   belowContent={quickModelBar}
   attachmentSlot={attachmentRow}
   showLeftGroup={!inPromptMode}
-  onAttach={handleAttachFileFromMenu}
-  onAttachImage={handleAttachImageMobile}
-  {captureMonitors}
-  onCaptureSelect={handleCaptureSelect}
-  {capturing}
-  onCaptureRegion={handleCaptureRegionFromMenu}
+  onAttach={() => composer.handleAttachFile()}
+  onAttachImage={() => composer.handleAttachImageMobile()}
+  captureMonitors={composer.captureMonitors}
+  onCaptureSelect={(e) => composer.handleCaptureSelect(e)}
+  capturing={composer.capturing}
+  onCaptureRegion={() => composer.handleCaptureRegionFromMenu()}
   showImageCapture={!!settingsState.currentSettings["llm.supportImages"]}
   {monitors}
   selectedMonitor={settingsState.getMonitor()}
@@ -966,10 +664,10 @@
 {#snippet promptContent()}
   {#if permissionRequest}
     <PermissionRequest request={permissionRequest} />
-  {:else if scheduleConfirm && scheduleDraft}
+  {:else if scheduleConfirm && prompt.scheduleDraft}
     <ScheduleConfirmForm
-      draft={scheduleDraft}
-      onChange={(next) => (scheduleDraft = next)}
+      draft={prompt.scheduleDraft}
+      onChange={(next) => (prompt.scheduleDraft = next)}
     />
   {/if}
 {/snippet}
@@ -982,58 +680,51 @@
   <AttachmentList
     parts={attachmentParts}
     editable
-    onRemove={removeAttachment}
-    onImageClick={openImagePreview}
+    onRemove={(i) => composer.removeAttachment(i)}
+    onImageClick={(url) => composer.openImagePreview(url)}
   />
 {/snippet}
 
 {#snippet promptButtons()}
   {#if permissionRequest}
-    <!-- Icon + text on the filled inset surface (rounded-large), neutral text
-         like the other UserInput buttons, at the h-9 height of the pill beside
-         them. -->
-    <button
-      type="button"
-      title="Reject this permission request"
-      class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
-      onclick={() => permissionState.respond(false)}
-    >
-      <i class="flex i-material-symbols-close-rounded text-lg shrink-0"></i>
-      Deny
-    </button>
-    <button
-      type="button"
-      title="Allow for this tool call"
-      class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
-      onclick={() => permissionState.respond(true)}
-    >
-      <i class="flex i-material-symbols-check-rounded text-lg shrink-0"></i>
-      Allow
-    </button>
+    <PromptButtonsView
+      buttons={[
+        {
+          icon: "i-material-symbols-close-rounded",
+          label: "Deny",
+          title: "Reject this permission request",
+          onClick: () => permissionState.respond(false),
+        },
+        {
+          icon: "i-material-symbols-check-rounded",
+          label: "Allow",
+          title: "Allow for this tool call",
+          onClick: () => permissionState.respond(true),
+        },
+      ]}
+    />
   {:else if scheduleConfirm}
-    <button
-      type="button"
-      title="Decline this scheduled prompt"
-      class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors"
-      onclick={() => respondScheduleConfirm(false)}
-    >
-      <i class="flex i-material-symbols-close-rounded text-lg shrink-0"></i>
-      Decline
-    </button>
-    <button
-      type="button"
-      title="Save the scheduled prompt"
-      disabled={!scheduleDraftReady}
-      class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      onclick={() => respondScheduleConfirm(true)}
-    >
-      <i class="flex i-material-symbols-check-rounded text-lg shrink-0"></i>
-      Save
-    </button>
+    <PromptButtonsView
+      buttons={[
+        {
+          icon: "i-material-symbols-close-rounded",
+          label: "Decline",
+          title: "Decline this scheduled prompt",
+          onClick: () => prompt.respondScheduleConfirm(false),
+        },
+        {
+          icon: "i-material-symbols-check-rounded",
+          label: "Save",
+          title: "Save the scheduled prompt",
+          disabled: !prompt.scheduleDraftReady,
+          onClick: () => prompt.respondScheduleConfirm(true),
+        },
+      ]}
+    />
   {/if}
 {/snippet}
 
-<svelte:window onblur={closeImagePreview} />
+<svelte:window onblur={() => composer.closeImagePreview()} />
 
 {#if ac.open}
   <div style:display="contents" style:--default-base={themeOverrideHex}>
@@ -1046,17 +737,17 @@
   </div>
 {/if}
 
-{#if previewImageUrl}
+{#if composer.previewImageUrl}
   <Modal
     open
-    onclose={closeImagePreview}
+    onclose={() => composer.closeImagePreview()}
     positioning="fixed"
     surface="transparent"
     maxWidth="fit"
     ariaLabel="Image preview"
   >
     <img
-      src={previewImageUrl}
+      src={composer.previewImageUrl}
       alt="Preview"
       class="max-h-[calc(100vh-6rem)] max-w-[calc(100vw-6rem)] object-contain rounded-medium shadow-2xl"
     />

@@ -46,3 +46,25 @@ export function firstManualHref(entries: ManualEntry[]): string {
   const first = groupManual(entries)[0]?.entries[0];
   return first ? `/manual/${first.id}` : "/manual";
 }
+
+export interface ManualNeighbor {
+  href: string;
+  section: string;
+  title: string;
+}
+
+/** The articles flanking `currentId` in reading order (sections in display
+ *  order, entries by `order`), crossing section boundaries. */
+export function manualNeighbors(
+  entries: ManualEntry[],
+  currentId: string,
+): { prev: ManualNeighbor | null; next: ManualNeighbor | null } {
+  const flat = groupManual(entries).flatMap((s) => s.entries);
+  const i = flat.findIndex((e) => e.id === currentId);
+  const toNeighbor = (e: ManualEntry | undefined): ManualNeighbor | null =>
+    e ? { href: `/manual/${e.id}`, section: e.data.section, title: e.data.title } : null;
+  return {
+    prev: i > 0 ? toNeighbor(flat[i - 1]) : null,
+    next: i === -1 ? null : toNeighbor(flat[i + 1]),
+  };
+}

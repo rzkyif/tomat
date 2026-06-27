@@ -4,9 +4,9 @@
   // A framed, optionally captioned container for an inline manual demo. The
   // frame paints `bg-surface`, the app surface these components sit on in the
   // client (chat area, settings panel, composer), so a demo renders on its real
-  // backdrop rather than an inset well; the border alone separates it from the
-  // page. `not-prose` stops the surrounding prose typography from restyling the
-  // rendered View.
+  // backdrop rather than an inset well; the dim focus grid separates it from the
+  // page (no border - the app avoids borders). `not-prose` stops the surrounding
+  // prose typography from restyling the rendered View.
   //
   // `designWidth` opts the demo into scale-to-fit: the View is rendered at that
   // fixed width and the whole thing is CSS-scaled down to the column, exactly
@@ -34,7 +34,7 @@
   {#if label}
     <div class="text-xs font-mono text-default-500">{label}</div>
   {/if}
-  <div class="demo-frame relative rounded-medium border border-default-200 bg-surface p-6">
+  <div class="demo-frame flat-shadow relative rounded-medium bg-surface p-6">
     <div class="focus-grid-frame" aria-hidden="true"></div>
     <!-- Double flip: the frame chrome and focus grid above render flipped, but this
          wrapper restores the website theme so the client component reads normally. -->

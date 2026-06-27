@@ -189,14 +189,20 @@ _ui_stop_spinner() {
 # --- staging cleanup ------------------------------------------------------
 
 _ui_track_staging() {
-  UI_STAGING_PATHS="$UI_STAGING_PATHS $1"
+  # Newline-separated so a path containing spaces survives cleanup's word split.
+  UI_STAGING_PATHS="$UI_STAGING_PATHS
+$1"
 }
 
 _ui_cleanup_staging() {
   local p
+  local _old_ifs="$IFS"
+  IFS='
+'
   for p in $UI_STAGING_PATHS; do
-    [ -e "$p" ] && rm -f "$p" 2>/dev/null || true
+    [ -n "$p" ] && [ -e "$p" ] && rm -f "$p" 2>/dev/null || true
   done
+  IFS="$_old_ifs"
   UI_STAGING_PATHS=""
 }
 
@@ -578,7 +584,7 @@ IDX_HELPERS=$(ui_action_add "Installing helpers to $BIN_DIR/")
 # codebase at runtime, so there's nothing to fetch here.
 IDX_EXTENSION=-1
 if [ "$TOMAT_CHANNEL" != "dev" ]; then
-  IDX_EXTENSION=$(ui_action_add "Installing built-in extension to $EXTENSIONS_DIR/")
+  IDX_EXTENSION=$(ui_action_add "Planting built-in extension in $EXTENSIONS_DIR/")
 fi
 IDX_TOKEN=$(ui_action_add "Writing admin token to $ADMIN_TOKEN_FILE")
 IDX_SETTINGS=-1
@@ -644,7 +650,7 @@ if [ "$MANIFEST_CURL_RC" -ne 0 ]; then
       if [ "$MANIFEST_HTTP_STATUS" = "404" ] || [ -z "$MANIFEST_HTTP_STATUS" ]; then
         ui_die "Manifest not found at $MANIFEST_URL" \
           "HTTP 404" \
-          "the storage origin may be misconfigured; report at github.com/<repo>/issues"
+          "the storage origin may be misconfigured; report at github.com/rzkyif/tomat/issues"
       else
         ui_die "Storage returned $MANIFEST_HTTP_STATUS" \
           "" \
@@ -968,48 +974,67 @@ else
 fi
 
 # --- action 5b: built-in extension -----------------------------------------
-# Download + extract the CDN-distributed built-in extension so a fresh core has it
-# out of the box. Core registers + activates it (deps install, enable, grants) on
-# first boot; if this is skipped (manifest not yet published), core seeds it then.
+# Download the CDN-distributed built-in extension and PLANT its verified tarball so
+# core can install it on first boot without re-downloading the tarball. Core still
+# re-verifies the planted tarball against the signed manifest before extracting it.
+# Planting is an OPTIONAL optimization: EVERY failure here is non-fatal (we skip and
+# core fetches + verifies + seeds the built-in itself), so a bad/tampered extension
+# manifest or a flaky CDN never aborts the core install.
 
 if [ "$IDX_EXTENSION" != "-1" ]; then
-  TK_DIR="$EXTENSIONS_DIR/tomat-builtin"
-  if [ -f "$TK_DIR/tomat.json" ]; then
+  # Plant the tarball AND its signed manifest so core installs the built-in fully
+  # offline on first boot (it re-verifies the manifest signature + tarball sha256,
+  # then extracts - no boot-time fetch). Keep these filenames in sync with
+  # builtin-seed.ts (PLANTED_TARBALL / PLANTED_MANIFEST).
+  TK_DEST="$EXTENSIONS_DIR/.tomat-builtin.tgz"
+  TK_MANIFEST_DEST="$EXTENSIONS_DIR/.tomat-builtin.json"
+  if [ -f "$TK_DEST" ] && [ -f "$TK_MANIFEST_DEST" ]; then
     ui_action_skip "$IDX_EXTENSION" "(already present)"
   else
     TK_MANIFEST="$(curl -fsSL "$STORAGE/$MANIFEST_DIR/extension.json" 2>/dev/null || true)"
-    TK_URL="$(printf '%s' "$TK_MANIFEST" | jq -r '.tarballUrl // empty' 2>/dev/null || true)"
-    TK_SHA="$(printf '%s' "$TK_MANIFEST" | jq -r '.sha256 // empty' 2>/dev/null || true)"
-    if [ -z "$TK_URL" ] || [ -z "$TK_SHA" ]; then
-      # Non-fatal: core seeds the built-in on first boot if this is missing.
+    if [ -z "$TK_MANIFEST" ]; then
       ui_action_skip "$IDX_EXTENSION" "(manifest unavailable; core will seed)"
     else
-      ui_action_start "$IDX_EXTENSION" "Installing built-in extension to $EXTENSIONS_DIR/" "(downloading)"
-      TK_TMP="$STAGING_DIR/builtin-extension-$$.tgz"
-      _ui_track_staging "$TK_TMP"
-      TK_RC=0
-      curl -fsSL -o "$TK_TMP" "$TK_URL" 2>/dev/null || TK_RC=$?
-      if [ "$TK_RC" -ne 0 ]; then
-        ui_die "Download interrupted" \
-          "curl exit $TK_RC fetching built-in extension" \
-          "re-run; partial files were cleaned up"
+      ui_action_start "$IDX_EXTENSION" "Planting built-in extension in $EXTENSIONS_DIR/" "(reading)"
+
+      # Read the tarball location + hash from extension.json. We do NOT verify the
+      # manifest signature here: core re-verifies the planted manifest's Ed25519
+      # signature AND the tarball's sha256 OFFLINE before installing on first boot
+      # (readPlantedManifest + the installer), so core is the single trust gate. A
+      # MITM that swaps both manifest and tarball is rejected there, never seeded.
+      # The sha256 check below is only a transport-corruption guard.
+      TK_URL="$(printf '%s' "$TK_MANIFEST" | jq -r '.tarballUrl // empty' 2>/dev/null || true)"
+      TK_SHA="$(printf '%s' "$TK_MANIFEST" | jq -r '.sha256 // empty' 2>/dev/null || true)"
+
+      if [ -z "$TK_URL" ] || [ -z "$TK_SHA" ]; then
+        ui_action_skip "$IDX_EXTENSION" "(manifest incomplete; core will seed)"
+      else
+        ui_action_update "$IDX_EXTENSION" "(downloading)"
+        TK_TMP="$STAGING_DIR/builtin-extension-$$.tgz"
+        _ui_track_staging "$TK_TMP"
+        if ! curl -fsSL -o "$TK_TMP" "$TK_URL" 2>/dev/null; then
+          rm -f "$TK_TMP"
+          ui_action_skip "$IDX_EXTENSION" "(download failed; core will seed)"
+        else
+          TK_GOT="$($SHA_CMD "$TK_TMP" 2>/dev/null | awk '{print $1}')"
+          if [ "$TK_GOT" != "$TK_SHA" ]; then
+            rm -f "$TK_TMP"
+            ui_action_skip "$IDX_EXTENSION" "(checksum mismatch; core will seed)"
+          elif ! mv -f "$TK_TMP" "$TK_DEST" 2>/dev/null; then
+            rm -f "$TK_TMP"
+            ui_action_skip "$IDX_EXTENSION" "(could not place; core will seed)"
+          elif ! printf '%s' "$TK_MANIFEST" > "$TK_MANIFEST_DEST" 2>/dev/null; then
+            # The signed manifest must sit beside the tarball, or core can't verify
+            # + install offline. Drop the tarball too so the next run re-plants both.
+            rm -f "$TK_DEST" "$TK_MANIFEST_DEST"
+            ui_action_skip "$IDX_EXTENSION" "(could not place; core will seed)"
+          else
+            # Planted as-is; on first boot core re-verifies the manifest signature +
+            # tarball sha256 and extracts it, with no network access.
+            ui_action_done "$IDX_EXTENSION" "(planted)"
+          fi
+        fi
       fi
-      TK_GOT="$($SHA_CMD "$TK_TMP" | awk '{print $1}')"
-      if [ "$TK_GOT" != "$TK_SHA" ]; then
-        ui_die "sha256 mismatch on built-in extension" \
-          "want $TK_SHA, got $TK_GOT" \
-          "network corruption is the usual cause; re-run"
-      fi
-      ui_action_update "$IDX_EXTENSION" "(extracting)"
-      rm -rf "$TK_DIR"
-      mkdir -p "$TK_DIR"
-      if ! tar -xzf "$TK_TMP" -C "$TK_DIR" 2>/dev/null; then
-        ui_die "Could not extract built-in extension" \
-          "tar failed on $TK_TMP" \
-          "re-run; check ~/.tomat permissions"
-      fi
-      rm -f "$TK_TMP"
-      ui_action_done "$IDX_EXTENSION" "(installed)"
     fi
   fi
 fi
@@ -1147,6 +1172,7 @@ elif [ "$uname_os" = "Linux" ] && [ "$SERVICE_HAS_SYSTEMD" = "1" ]; then
   cat >"$UNIT" <<UNIT
 [Unit]
 Description=$SYSTEMD_UNIT
+Wants=network-online.target
 After=network-online.target
 
 [Service]
@@ -1194,7 +1220,17 @@ fi
 
 ui_action_start "$IDX_PAIR" "Minting pairing code at https://127.0.0.1:$CORE_PORT" "(waiting for core)"
 
-sleep 2
+# Poll the unauthenticated health endpoint until the freshly-started core binds
+# its port. A cold start can take several seconds, so wait rather than failing
+# the password-set and mint on a single early miss (the old fixed `sleep 2`).
+i=0
+while [ "$i" -lt 30 ]; do
+  if curl -fsS -k -o /dev/null "https://127.0.0.1:$CORE_PORT/api/v1/health" 2>/dev/null; then
+    break
+  fi
+  i=$((i + 1))
+  sleep 1
+done
 
 ADMIN="$(cat "$ADMIN_TOKEN_FILE" 2>/dev/null || true)"
 CODE=""
@@ -1226,15 +1262,23 @@ fi
 # Core serves HTTPS with a self-signed cert. This mint runs on the core host
 # over loopback and is authenticated by the on-disk admin token, so -k (skip
 # cert verification) is fine here; the client pins the cert during pairing.
+# Retry a few times: the health probe above confirms the port is bound, but the
+# pairing route can lag the bind by a moment on a cold start.
 if [ -n "$ADMIN" ]; then
-  CODE_JSON="$(curl -fsS -k -X POST \
-    -H "X-Admin-Token: $ADMIN" \
-    -H 'Content-Type: application/json' \
-    -d '{}' \
-    "https://127.0.0.1:$CORE_PORT/api/v1/pairing/codes" 2>/dev/null || true)"
-  if [ -n "$CODE_JSON" ]; then
-    CODE="$(printf '%s' "$CODE_JSON" | jq -r '.code // empty' 2>/dev/null || true)"
-  fi
+  i=0
+  while [ "$i" -lt 5 ]; do
+    CODE_JSON="$(curl -fsS -k -X POST \
+      -H "X-Admin-Token: $ADMIN" \
+      -H 'Content-Type: application/json' \
+      -d '{}' \
+      "https://127.0.0.1:$CORE_PORT/api/v1/pairing/codes" 2>/dev/null || true)"
+    if [ -n "$CODE_JSON" ]; then
+      CODE="$(printf '%s' "$CODE_JSON" | jq -r '.code // empty' 2>/dev/null || true)"
+    fi
+    [ -n "$CODE" ] && break
+    i=$((i + 1))
+    sleep 1
+  done
 fi
 
 if [ -n "$CODE" ]; then

@@ -5,8 +5,15 @@ client renderer and the core. The layout:
 
 - [`groups/`](groups/): one module per settings group (General, Appearance, LLM,
   ...). These are the data; each file exports its group definition.
-- [`engine.ts`](engine.ts): composes the groups into the one schema both sides
-  read, and handles hydration, parsing, and validation.
+- [`engine.ts`](engine.ts): composition root. Re-exports the runtime split
+  across focused siblings so both sides have one entry point:
+  [`schema.ts`](schema.ts) (composes the groups into the one schema, derived
+  constants, defaults, field lookup), [`routing.ts`](routing.ts) (per-field
+  destination), [`conditions.ts`](conditions.ts) (`visibleWhen`/`editableWhen`
+  evaluation + dependency map), [`search.ts`](search.ts) (visibility helpers +
+  the search index), [`validation.ts`](validation.ts) (core-side PATCH
+  validation), and [`model-files.ts`](model-files.ts) (settings that reference
+  downloadable weights).
 - [`types.ts`](types.ts): the field/section/group primitives. The structural
   mechanics (field/section/group shapes, `descriptionTier`, `destination`) are
   documented on the types themselves.
@@ -24,7 +31,7 @@ How a setting value moves through the system, end to end.
 ### Destinations and routing
 
 Every field persists to exactly one destination, resolved by
-`settingKeyDestination()` in [`engine.ts`](engine.ts): a section's `destination`
+`settingKeyDestination()` in [`routing.ts`](routing.ts): a section's `destination`
 override wins (hybrid groups), otherwise the group's first listed destination.
 That helper is the single routing truth for the client's save path and the
 core's PATCH validation alike. There are three storage locations but only two

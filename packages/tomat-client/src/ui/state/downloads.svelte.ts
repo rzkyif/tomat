@@ -10,6 +10,7 @@ import type { DownloadEntry, RequiredFile, ServerToClientFrame } from "@tomat/sh
 import { cores } from "$lib/core";
 import { platform } from "$lib/platform";
 import { getLogger } from "$lib/util/log";
+import { Subscriptions } from "$lib/util/subscriptions";
 import { confirmState } from "./confirm.svelte";
 
 const log = getLogger("downloads");
@@ -80,27 +81,28 @@ class DownloadsState {
       .join("|"),
   );
 
-  private unsubscribeWs: (() => void) | null = null;
-  private unsubscribeConn: (() => void) | null = null;
+  private subs = new Subscriptions();
 
   attach(): void {
-    if (this.unsubscribeWs) return;
-    this.unsubscribeWs = cores().subscribeWs((frame: ServerToClientFrame) => {
-      if (frame.kind === "downloads.snapshot") {
-        this.items = frame.items;
-      } else if (frame.kind === "requirements.snapshot") {
-        this.applyRequirements(frame.required, frame.missing);
-      }
-    });
-    // The core pushes downloads/requirements as deltas over the WS but never
-    // replays a full snapshot on connect, so (re)seed over HTTP whenever the
-    // socket reaches "connected". onConnectionState fires synchronously with the
-    // current state on subscribe, so this also covers the very first connect.
-    // Covering reconnect is what un-sticks the UI after the core restarts (dev
-    // hot-reload): without it, requirementsLoaded could stay false forever.
-    this.unsubscribeConn = cores().subscribeConnectionState((state) => {
-      if (state === "connected") this.reseedSnapshots();
-    });
+    this.subs.attach(() => [
+      cores().subscribeWs((frame: ServerToClientFrame) => {
+        if (frame.kind === "downloads.snapshot") {
+          this.items = frame.items;
+        } else if (frame.kind === "requirements.snapshot") {
+          this.applyRequirements(frame.required, frame.missing);
+        }
+      }),
+      // The core pushes downloads/requirements as deltas over the WS but never
+      // replays a full snapshot on connect, so (re)seed over HTTP whenever the
+      // socket reaches "connected". onConnectionState fires synchronously with
+      // the current state on subscribe, so this also covers the very first
+      // connect. Covering reconnect is what un-sticks the UI after the core
+      // restarts (dev hot-reload): without it, requirementsLoaded could stay
+      // false forever.
+      cores().subscribeConnectionState((state) => {
+        if (state === "connected") this.reseedSnapshots();
+      }),
+    ]);
   }
 
   /** Pull the REST-only snapshots (downloads + requirements) for the current
@@ -163,7 +165,7 @@ class DownloadsState {
       message:
         `The following file${plans.length === 1 ? "" : "s"} need${
           plans.length === 1 ? "s" : ""
-        } to be downloaded ` + `so the core can run with the current configuration.`,
+        } to be downloaded ` + `so the Core can run with the current configuration.`,
       confirmLabel: "Download",
       cancelLabel: "Do It Later",
       downloads: plans,
@@ -187,14 +189,7 @@ class DownloadsState {
   }
 
   detach(): void {
-    if (this.unsubscribeWs) {
-      this.unsubscribeWs();
-      this.unsubscribeWs = null;
-    }
-    if (this.unsubscribeConn) {
-      this.unsubscribeConn();
-      this.unsubscribeConn = null;
-    }
+    this.subs.detach();
   }
 
   openModal(): void {

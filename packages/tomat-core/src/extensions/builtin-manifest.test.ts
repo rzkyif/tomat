@@ -3,11 +3,16 @@
 // matching the release signer (scripts/release/extension.ts).
 
 import { assertEquals, assertThrows } from "@std/assert";
+import { join } from "@std/path";
 import * as ed from "@noble/ed25519";
 import { encodeBase64 } from "@std/encoding/base64";
 import { canonicalize } from "@tomat/shared";
 import type { BuiltinExtensionManifest } from "@tomat/shared";
-import { assertManifestShape, verifyBuiltinManifestSignature } from "./builtin-manifest.ts";
+import {
+  assertManifestShape,
+  readPlantedManifest,
+  verifyBuiltinManifestSignature,
+} from "./builtin-manifest.ts";
 import { AppError } from "../shared/errors.ts";
 
 async function sign(version: string, sk: Uint8Array): Promise<BuiltinExtensionManifest> {
@@ -51,6 +56,26 @@ Deno.test("assertManifestShape: accepts a well-formed manifest", () => {
     sha256: "a".repeat(64),
     signature: "sig",
   });
+});
+
+Deno.test("readPlantedManifest: fails closed (null) for missing, malformed, or unsigned", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    // Missing file.
+    assertEquals(await readPlantedManifest(join(dir, "nope.json")), null);
+    // Malformed JSON.
+    const bad = join(dir, "bad.json");
+    await Deno.writeTextFile(bad, "{not json");
+    assertEquals(await readPlantedManifest(bad), null);
+    // Well-formed + valid shape, but signed with a throwaway key (NOT the
+    // committed signing key) -> must not be trusted.
+    const sk = ed.utils.randomSecretKey();
+    const wrong = join(dir, "wrong.json");
+    await Deno.writeTextFile(wrong, JSON.stringify(await sign("1.0.0", sk)));
+    assertEquals(await readPlantedManifest(wrong), null);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });
 
 Deno.test("assertManifestShape: rejects bad shapes", () => {
