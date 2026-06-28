@@ -10,6 +10,7 @@ import type { BuiltinExtensionManifest } from "../../packages/tomat-shared/src/d
 import { BUILTIN_EXTENSION_ID } from "../../packages/tomat-shared/src/domain/extension.ts";
 import {
   type ApplyOpts,
+  bumpVersionField,
   channelManifestDir,
   channelStoragePrefix,
   colors,
@@ -95,6 +96,8 @@ export const extensionItem: ReleaseItem = {
   bumpHint: "packages/tomat-builtin/deno.json (version)",
 
   version: readExtensionVersion,
+  versionFile: join(PKG_DIR, "deno.json"),
+  bumpVersion: () => bumpVersionField(join(PKG_DIR, "deno.json")),
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
     const pkgRel = relative(REPO_ROOT, PKG_DIR) + "/";
@@ -144,6 +147,7 @@ export const extensionItem: ReleaseItem = {
     step(`Uploading to R2 bucket "${env.r2Bucket}"`);
     info(`uploading ${tarballKey}  (${humanBytes(size)})`);
     await r2Put(env, tarballKey, tgzPath, "application/gzip");
+    opts.recordVersionedKey?.(tarballKey);
     await r2Put(
       env,
       `${manifestDir}/extension.json`,

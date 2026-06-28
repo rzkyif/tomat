@@ -13,18 +13,50 @@ const { title, entries, currentId } = Astro.props;
 
 <BaseLayout title={title} description={title}>
   <div class="mx-auto flex w-full max-w-6xl gap-8 px-5 py-8 md:px-4">
-    {/* Desktop: a left outline sidebar, sticky under the navbar. */}
+    {/* Desktop: a left outline sidebar, sticky under the navbar. The sticky box
+        is bounded by the <aside>, which stretches to the flex row's (article's)
+        height. Its bottom gap must cover the wrapper's `py-8` (2rem) bottom
+        padding, otherwise at full scroll the aside's bottom edge rises into the
+        pinned box and nudges it up. So the inner scroller's max-h subtracts 4rem:
+        2rem top offset mirrored by the 2rem bottom padding, keeping the box flush
+        within the aside and fixed in place at any scroll position. The sticky box
+        is the fades' positioning context (a sticky box is a containing block for
+        its absolute children); the two overlays mirror the settings sidebar's
+        scroll-area fades (SettingsSidebarView), toggled by the script below. */}
     <aside class="hidden md:block w-60 shrink-0">
-      <div class="tomat-scroll sticky top-[calc(var(--chrome-h)+2rem)] max-h-[calc(100dvh-var(--chrome-h)-3.5rem)] overflow-y-auto pr-2">
-        <ManualOutline entries={entries} currentId={currentId} defaultOpen />
+      <div class="sticky top-[calc(var(--chrome-h)+2rem)]">
+        <div
+          id="manual-outline-scroll"
+          class="tomat-scroll tomat-scroll-thin tomat-scroll-hover max-h-[calc(100dvh-var(--chrome-h)-4rem)] overflow-y-auto pr-2"
+        >
+          <ManualOutline entries={entries} currentId={currentId} defaultOpen />
+        </div>
+        <div
+          id="manual-outline-fade-top"
+          aria-hidden="true"
+          class="pointer-events-none absolute left-0 right-0 top-0 z-1 h-6 bg-gradient-to-b from-default-50 to-transparent opacity-0 transition-opacity duration-100"
+        >
+        </div>
+        <div
+          id="manual-outline-fade-bottom"
+          aria-hidden="true"
+          class="pointer-events-none absolute left-0 right-0 bottom-0 z-1 h-6 bg-gradient-to-t from-default-50 to-transparent opacity-0 transition-opacity duration-100"
+        >
+        </div>
       </div>
     </aside>
 
-    <main class="manual-article relative min-w-0 flex-1">
+    <main class="manual-article min-w-0 flex-1">
       {/* The focus grid lives behind the article content and tracks this column's
-          width and full scroll height (see `.focus-grid-manual` in site.css). */}
-      <div class="focus-grid-manual" aria-hidden="true"></div>
-      <slot />
+          width and scroll height (see `.focus-grid-manual` in site.css). It is
+          inset:0 of this wrapper, not <main>: the prev/next nav's bottom margin
+          (the read-to-the-middle scroll runway) collapses through this non-BFC
+          wrapper out to the flex item <main>, so the wrapper (and the grid) stop
+          at the nav while <main> still carries the runway height. */}
+      <div class="relative">
+        <div class="focus-grid-manual" aria-hidden="true"></div>
+        <slot />
+      </div>
     </main>
   </div>
 
@@ -152,8 +184,51 @@ const { title, entries, currentId } = Astro.props;
     bottom.style.opacity = globalThis.scrollY < max - 1 ? "1" : "0";
   }
 
+  // Toggle the desktop outline sidebar's own scroll fades from its internal
+  // scroll position (the outline scrolls inside the sticky box, independent of
+  // the window): the top fade once scrolled down, the bottom fade while more
+  // outline remains below. Mirrors updateScrollFades but reads the scroller's
+  // own metrics. Re-queries each call since the sidebar re-renders per page.
+  function updateOutlineFades() {
+    const el = document.getElementById("manual-outline-scroll");
+    const top = document.getElementById("manual-outline-fade-top");
+    const bottom = document.getElementById("manual-outline-fade-bottom");
+    if (!el || !top || !bottom) return;
+    top.style.opacity = el.scrollTop > 1 ? "1" : "0";
+    bottom.style.opacity = el.scrollTop + el.clientHeight < el.scrollHeight - 1 ? "1" : "0";
+  }
+  // Wire the outline scroller's fades. The sidebar is recreated on every view
+  // transition, so attach the listener per page (the old element, and its
+  // listener, are discarded with it) and set the initial fade state.
+  function wireOutlineFades() {
+    const el = document.getElementById("manual-outline-scroll");
+    if (!el) return;
+    el.addEventListener("scroll", updateOutlineFades, { passive: true });
+    updateOutlineFades();
+  }
+
+  // Reveal the current article's outline item by scrolling the sidebar's own
+  // scroller (never the window, so the article never jumps): if the item sits
+  // outside the visible band, center it. Runs per page from wire(), so it also
+  // re-centers across in-site view transitions. With no JS the outline is still
+  // hand-scrollable; it just opens at the top.
+  function scrollOutlineToCurrent() {
+    const el = document.getElementById("manual-outline-scroll");
+    if (!el) return;
+    const current = el.querySelector<HTMLElement>("[data-outline-current]");
+    if (!current) return;
+    const band = el.getBoundingClientRect();
+    const item = current.getBoundingClientRect();
+    if (item.top < band.top || item.bottom > band.bottom) {
+      el.scrollTop += item.top - band.top - (el.clientHeight - item.height) / 2;
+    }
+  }
+
   function wire() {
     wireOutlineAutoscroll();
+    // Before wiring the fades, so their initial state matches the scrolled spot.
+    scrollOutlineToCurrent();
+    wireOutlineFades();
     wireDemoScale();
     // After scaling, since a target's offsets can shift as the scaled box and
     // fonts settle.
@@ -170,4 +245,7 @@ const { title, entries, currentId } = Astro.props;
   // transitions, so wiring these per page would stack duplicates.
   globalThis.addEventListener("scroll", updateScrollFades, { passive: true });
   globalThis.addEventListener("resize", updateScrollFades);
+  // The outline's height tracks the viewport (dvh-based max-h), so a resize can
+  // change whether it overflows; re-evaluate its fades too.
+  globalThis.addEventListener("resize", updateOutlineFades);
 </script>

@@ -71,7 +71,6 @@
   import SessionListView from "@tomat/shared/ui/components/session-list/SessionListView.svelte";
   import UpdateButtonView from "@tomat/shared/ui/components/settings/UpdateButtonView.svelte";
   import QuickSettingsView from "@tomat/shared/ui/components/quick-settings/QuickSettingsView.svelte";
-  import QuickSettingsSectionView from "@tomat/shared/ui/components/quick-settings/QuickSettingsSectionView.svelte";
   import ScheduleConfirmFormView from "@tomat/shared/ui/components/chat/userinput/ScheduleConfirmFormView.svelte";
   import SnippetDetailView from "@tomat/shared/ui/components/settings/SnippetDetailView.svelte";
   import ScheduledPromptDetailView from "@tomat/shared/ui/components/settings/ScheduledPromptDetailView.svelte";
@@ -549,20 +548,11 @@
 
       {#each entries(SAMPLES.QuickSettingsView) as [name, p] (name)}
         <GalleryCard label={`QuickSettingsView · ${name}`} surface>
-          <div class="w-full">
-            <QuickSettingsView {...p as ComponentProps<typeof QuickSettingsView>}>
-              {#snippet sections()}
-                <QuickSettingsSectionView title="General" open enabled>
-                  {#snippet body()}
-                    <div class="text-sm text-default-700 py-1">Theme</div>
-                    <div class="text-sm text-default-700 py-1">Alignment</div>
-                  {/snippet}
-                </QuickSettingsSectionView>
-                <QuickSettingsSectionView title="Text to speech" enabled hasToggle>
-                  {#snippet body()}<div class="text-sm text-default-700 py-1">Voice</div>{/snippet}
-                </QuickSettingsSectionView>
-              {/snippet}
-            </QuickSettingsView>
+          <!-- Render at the faithful desktop-panel width so the gallery matches
+               the client; the View itself owns its layout and the real schema
+               fields, so no snippet stand-ins are needed. -->
+          <div class="w-[34rem] max-w-full">
+            <QuickSettingsView {...p as ComponentProps<typeof QuickSettingsView>} />
           </div>
         </GalleryCard>
       {/each}

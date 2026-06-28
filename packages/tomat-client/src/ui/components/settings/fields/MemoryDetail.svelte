@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { type MemoryMeta, USER_MEMORY_PROVIDER } from "@tomat/shared";
-  import { memoriesState } from "$stores";
+  import { type MemoryMeta, parseSkill, serializeSkill, USER_MEMORY_PROVIDER } from "@tomat/shared";
+  import { extensionsState, memoriesState } from "$stores";
   import { getLogger } from "$lib/util/log";
   import { createDebouncedSave } from "$lib/util/debounced-save";
   import MemoryDetailView from "@tomat/shared/ui/components/settings/MemoryDetailView.svelte";
@@ -14,17 +14,21 @@
   // Extension-provided memories are read-only; only the enable toggle applies.
   const editable = $derived(item.provider === USER_MEMORY_PROVIDER);
   const isSkill = $derived(item.kind === "skill");
-  const summarized = $derived(!!item.summary);
   // Absent flag (older cores) is treated as stale so the status never claims a
   // summary is current when we can't tell.
   const summaryStale = $derived(item.summaryStale ?? true);
 
   let draftTitle = $state(untrack(() => item.title));
+  // For a skill these three are the decomposed SKILL.md (frontmatter
+  // description + suggested-tools, then the body); for knowledge `draftContent`
+  // is the whole file and the other two are unused. Edits recompose the file.
+  let draftDescription = $state("");
   let draftContent = $state("");
+  let suggestedTools = $state<string[]>([]);
   let contentLoaded = $state(false);
   let files = $state<string[]>([]);
-  let suggestedTools = $state<string[]>([]);
-  let reindexing = $state(false);
+  // Tool catalog for the suggested-tools autocomplete (skills only).
+  const availableTools = $derived([...new Set(extensionsState.allTools.map((t) => t.name))].sort());
 
   // The currently open bundled file, loaded on demand.
   let openFileName = $state<string | null>(null);
@@ -45,23 +49,45 @@
   });
 
   onMount(async () => {
+    // Load the tool catalog in the background so the suggested-tools
+    // autocomplete has options; failures just leave the list empty.
+    if (isSkill && editable) {
+      extensionsState.loadAllTools().catch((e) => log.warn("Failed to load tools:", e));
+    }
     try {
       const doc = await memoriesState.get(item.id);
-      draftContent = doc.content;
       files = doc.files ?? [];
-      suggestedTools = doc.suggestedTools ?? [];
+      if (isSkill) {
+        // A skill's file is its SKILL.md: split the frontmatter fields out so
+        // each edits on its own, and recompose on save.
+        const parts = parseSkill(doc.content);
+        draftDescription = parts.description;
+        suggestedTools = parts.suggestedTools;
+        draftContent = parts.body;
+      } else {
+        draftContent = doc.content;
+      }
       contentLoaded = true;
     } catch (e) {
       log.error("Failed to load memory content:", e);
     }
   });
 
+  // The content sent to the core is always the whole file: for a skill that
+  // means recomposing the SKILL.md from its three fields, which the core then
+  // re-parses for the summary source and suggested-tools list.
+  function composeContent(): string {
+    return isSkill
+      ? serializeSkill({ description: draftDescription, suggestedTools, body: draftContent })
+      : draftContent;
+  }
+
   const { scheduleSave, flushSave } = createDebouncedSave(async () => {
     if (!editable || titleError || !contentLoaded) return;
     try {
       await memoriesState.update(item.id, {
         title: draftTitle.trim(),
-        content: draftContent,
+        content: composeContent(),
       });
       reload();
     } catch (e) {
@@ -85,18 +111,6 @@
       reload();
     } catch (e) {
       log.error("Failed to toggle memory:", e);
-    }
-  }
-
-  async function reindex() {
-    reindexing = true;
-    try {
-      await memoriesState.reindex(item.id);
-      reload();
-    } catch (e) {
-      log.error("Failed to reindex memory:", e);
-    } finally {
-      reindexing = false;
     }
   }
 
@@ -158,10 +172,11 @@
   {draftTitle}
   titleError={editable ? titleError : null}
   {contentLoaded}
-  {summarized}
   {summaryStale}
-  {reindexing}
+  summary={item.summary ?? ""}
+  bind:draftDescription
   {suggestedTools}
+  {availableTools}
   {files}
   bind:draftContent
   {openFileName}
@@ -173,12 +188,20 @@
     scheduleSave();
   }}
   onTitleBlur={() => flushSave()}
+  onDescriptionInput={(v) => {
+    draftDescription = v;
+    scheduleSave();
+  }}
+  onDescriptionBlur={() => flushSave()}
+  onSuggestedToolsChange={(tools) => {
+    suggestedTools = tools;
+    flushSave();
+  }}
   onContentInput={(v) => {
     draftContent = v;
     scheduleSave();
   }}
   onContentBlur={() => flushSave()}
-  onReindex={() => reindex()}
   onOpenFile={(name) => openFile(name)}
   onCloseFile={() => closeFile()}
   onFileContentInput={(v) => {

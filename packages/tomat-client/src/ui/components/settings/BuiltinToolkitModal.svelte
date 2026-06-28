@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { confirmState, extensionsState, settingsState } from "../../state";
+  import { confirmState, extensionsState, settingsState, viewState } from "../../state";
+  import { useUiContext } from "@tomat/shared/ui/context";
   import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
   import Button from "@tomat/shared/ui/components/primitives/Button.svelte";
 
@@ -8,6 +9,20 @@
   // the built-in is present-but-not-installed, until they install it or choose
   // "Don't Ask Again". The built-in is seeded to 'downloaded' offline on first
   // boot; this prompt drives the explicit install.
+  //
+  // Mounted inside the panel that hosts the Tools toggle (Settings and Quick
+  // Settings), within that panel's `relative` bubble wrapper, so the Modal's
+  // backdrop stays clipped to the panel (not the whole viewport) and, on the
+  // desktop overlay, lives under the click-through content element so its
+  // buttons register as real UI instead of passing the click to the desktop
+  // behind. `surface` names which panel hosts this instance so it only reacts to
+  // a toggle made on the surface the user is actually looking at (on mobile both
+  // panels can be mounted at once).
+
+  let { surface }: { surface: "settings" | "quickSettings" } = $props();
+
+  const ui = useUiContext();
+  const mobile = $derived(ui.platform === "mobile");
 
   let open = $state(false);
   let installing = $state(false);
@@ -19,6 +34,7 @@
   onMount(() =>
     settingsState.onChange((key, _prev, next, origin) => {
       if (key !== "tools.enabled" || origin !== "user" || next !== true) return;
+      if (viewState.mode !== surface) return;
       if (settingsState.currentSettings["tools.builtinPromptDismissed"]) return;
       // Present but not installed. Absent (user deleted it) or already installed
       // => no prompt.
@@ -64,6 +80,7 @@
   <Modal
     open
     onclose={notNow}
+    positioning={mobile ? "fixed" : "absolute"}
     ariaLabel="Install the built-in tools"
   >
     <div class="text-default-800 font-medium">Install Built-in Tools?</div>

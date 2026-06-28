@@ -108,10 +108,6 @@
       "tier": "B",
       "wraps": "QuickSettingsView"
     },
-    "quick-settings/QuickSettingsSection.svelte": {
-      "tier": "B",
-      "wraps": "QuickSettingsSectionView"
-    },
     "session-list/SessionList.svelte": {
       "tier": "B",
       "wraps": "SessionListView"

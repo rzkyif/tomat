@@ -5,6 +5,7 @@
 import { join } from "@std/path";
 import {
   type ApplyOpts,
+  bumpVersionField,
   bytesEqual,
   type DeployEnv,
   fetchR2Bytes,
@@ -40,6 +41,8 @@ export const schemasItem: ReleaseItem = {
   bumpHint: `${VERSION_SRC} (version)`,
 
   version: () => readVersionField(join(REPO_ROOT, VERSION_SRC)),
+  versionFile: join(REPO_ROOT, VERSION_SRC),
+  bumpVersion: () => bumpVersionField(join(REPO_ROOT, VERSION_SRC)),
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
     return hashPaths(SCHEMAS.map((s) => ({ path: join(REPO_ROOT, s.src) })));

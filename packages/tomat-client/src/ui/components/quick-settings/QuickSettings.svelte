@@ -1,18 +1,21 @@
 <script lang="ts">
   // Quick settings mode: a single-open accordion of module sections. Each
   // header carries the module's on/off toggle (where one exists) and the open
-  // body renders curated schema fields through the same SettingsField
-  // renderer and field-change engine as the full Settings panel, so values
-  // round-trip identically. Auto-opened once after the first core is paired;
-  // also openable from Settings.
+  // body renders curated schema fields through the same SettingsField renderer
+  // and field-change engine as the full Settings panel, so values round-trip
+  // identically. Thin wrapper: QuickSettingsView owns the section loop and the
+  // panel chrome; this owns the live accordion state, the settings mutations,
+  // and feeds each field as the live SettingsField via the `field` snippet.
+  // Auto-opened once after the first core is paired; also openable from Settings.
 
   import { onMount } from "svelte";
   import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
   import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
   import QuickSettingsView from "@tomat/shared/ui/components/quick-settings/QuickSettingsView.svelte";
+  import BuiltinToolkitModal from "../settings/BuiltinToolkitModal.svelte";
+  import { QUICK_SETTINGS_SECTIONS } from "@tomat/shared";
   import { useUiContext } from "@tomat/shared/ui/context";
-  import QuickSettingsSection from "./QuickSettingsSection.svelte";
-  import { QUICK_SETTINGS_SECTIONS, type QuickSettingsSectionDef } from "./manifest";
+  import SettingsField from "../settings/SettingsField.svelte";
   import { downloadsState, settingsState, viewState } from "$stores";
   import { useSettingsForm } from "$composables/use-settings-form.svelte";
   import { useResponsiveLayout } from "$composables/use-responsive-layout.svelte";
@@ -43,23 +46,19 @@
   // Single-open accordion. The general section starts open.
   let openId = $state<string | null>("general");
 
-  function isEnabled(section: QuickSettingsSectionDef): boolean {
-    return !section.enabledField ||
-      !!settingsState.currentSettings[section.enabledField];
-  }
-
   function toggleOpen(id: string): void {
     openId = openId === id ? null : id;
   }
 
   // Optimistic: currentSettings flips synchronously, so the body reacts at
-  // once; if the flush later fails and rolls back, the `selected && enabled`
-  // conjunction below collapses the section again on its own.
-  function setEnabled(section: QuickSettingsSectionDef, value: boolean): void {
-    if (!section.enabledField) return;
+  // once; if the flush later fails and rolls back, the View's `selected &&
+  // enabled` conjunction collapses the section again on its own.
+  function setEnabled(id: string, value: boolean): void {
+    const section = QUICK_SETTINGS_SECTIONS.find((s) => s.id === id);
+    if (!section?.enabledField) return;
     void form.handleChange(section.enabledField, value);
-    if (value) openId = section.id;
-    else if (openId === section.id) openId = null;
+    if (value) openId = id;
+    else if (openId === id) openId = null;
   }
 
   // Both exits (close button and bottom button) go to Settings while required
@@ -91,38 +90,47 @@
   >
     {@render content()}
   </Modal>
+  <BuiltinToolkitModal surface="quickSettings" />
 {:else}
-  <Bubble
-    selectedAlignment={settingsState.getAlignment()}
-    extraClass="flex flex-col gap-3 w-[34rem] max-w-full max-h-[80vh] overflow-hidden"
-  >
-    {@render content()}
-  </Bubble>
+  <!-- Positioned, bubble-sized wrapper so the built-in-tools prompt's backdrop
+       (Modal's default absolute positioning) stays clipped to this panel.
+       pointer-events-none keeps the wrapper's empty margins click-through; the
+       Modal re-enables pointer events on its own surface. -->
+  <div class="relative w-fit pointer-events-none">
+    <Bubble
+      selectedAlignment={settingsState.getAlignment()}
+      extraClass="flex flex-col w-[34rem] max-w-full max-h-[80vh] overflow-hidden"
+    >
+      {@render content()}
+    </Bubble>
+    <BuiltinToolkitModal surface="quickSettings" />
+  </div>
 {/if}
 
 {#snippet content()}
   <QuickSettingsView
+    values={settingsState.currentSettings}
+    {openId}
+    horizontal={layout.horizontal}
     {exitLabel}
     {exitTitle}
     {exitIcon}
     onExit={exit}
+    onToggleSection={toggleOpen}
+    onSetEnabled={setEnabled}
     containerRef={(el) => (layout.containerEl = el ?? undefined)}
   >
-    {#snippet sections()}
-      {#each QUICK_SETTINGS_SECTIONS as section (section.id)}
-        <QuickSettingsSection
-          {section}
-          open={openId === section.id && isEnabled(section)}
-          enabled={isEnabled(section)}
-          horizontal={layout.horizontal}
-          validationErrors={form.validationErrors}
-          onToggleOpen={() => toggleOpen(section.id)}
-          onSetEnabled={(v) => setEnabled(section, v)}
-          onChange={form.handleChange}
-          onReset={form.resetToDefault}
-          onPresetSelect={form.handlePresetSelect}
-        />
-      {/each}
+    {#snippet field(f)}
+      <SettingsField
+        field={f}
+        monitors={[]}
+        fonts={[]}
+        error={form.validationErrors[f.id] ?? null}
+        horizontal={layout.horizontal}
+        onChange={form.handleChange}
+        onReset={form.resetToDefault}
+        onPresetSelect={form.handlePresetSelect}
+      />
     {/snippet}
   </QuickSettingsView>
 {/snippet}

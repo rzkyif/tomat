@@ -16,7 +16,13 @@
 // another caller's read-modify-write.
 
 import { join } from "@std/path";
-import { type Memory, type MemoryKind, type MemoryMeta, USER_MEMORY_PROVIDER } from "@tomat/shared";
+import {
+  type Memory,
+  type MemoryKind,
+  type MemoryMeta,
+  parseSkill,
+  USER_MEMORY_PROVIDER,
+} from "@tomat/shared";
 import { db } from "../db/connection.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
@@ -635,54 +641,14 @@ function removeUserContent(kind: MemoryKind, filename: string): void {
   }
 }
 
-// Optional frontmatter at the top of a SKILL.md: `description` seeds the
-// summary, `suggested-tools` lists advisory tool names (inline `[a, b]` or a
-// YAML block list of `- item` lines). Any other key (notably Anthropic Agent
-// Skills' `name`, whose value is the folder slug here) is tolerated and
-// ignored, so a community SKILL.md drops in unchanged. We only ever read these
-// two scalar/list fields, so a focused line parser is enough; absent or
-// malformed frontmatter yields no metadata (the indexer summarizes instead).
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
-
+// The summary source (`description`) and advisory `suggested-tools` are read
+// from the skill's SKILL.md frontmatter. The format (and its tolerance of other
+// keys, so a community SKILL.md drops in unchanged) lives in the shared
+// `parseSkill`; here we only need the two metadata fields, with an absent
+// description normalized to undefined so the indexer summarizes instead.
 function parseSkillMeta(content: string): { suggestedTools: string[]; description?: string } {
-  const m = content.match(FRONTMATTER_RE);
-  if (!m) return { suggestedTools: [] };
-  const lines = m[1].split(/\r?\n/);
-  let description: string | undefined;
-  const suggestedTools: string[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const kv = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
-    if (!kv) continue;
-    const key = kv[1].toLowerCase();
-    const value = kv[2].trim();
-    if (key === "description") {
-      description = unquote(value) || undefined;
-    } else if (key === "suggested-tools" || key === "suggestedtools") {
-      if (value.startsWith("[")) {
-        // Inline array: [a, "b", c]
-        for (const part of value.replace(/^\[|\]$/g, "").split(",")) {
-          const t = unquote(part.trim());
-          if (t) suggestedTools.push(t);
-        }
-      } else {
-        // Block list: subsequent `- item` lines. Blank lines are skipped; the
-        // list ends at the next `key:` line or any other non-list content.
-        for (let j = i + 1; j < lines.length; j++) {
-          if (lines[j].trim() === "") continue;
-          const item = lines[j].match(/^\s*-\s*(.+)$/);
-          if (!item) break;
-          const t = unquote(item[1].trim());
-          if (t) suggestedTools.push(t);
-        }
-      }
-    }
-  }
-  return { suggestedTools, description };
-}
-
-function unquote(s: string): string {
-  return s.replace(/^["']|["']$/g, "").trim();
+  const { description, suggestedTools } = parseSkill(content);
+  return { suggestedTools, description: description || undefined };
 }
 
 // "Meeting Notes: Q3!" -> "meeting-notes-q3" (skill folder) or

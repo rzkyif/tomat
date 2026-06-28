@@ -16,6 +16,7 @@ import type { Triple } from "../../packages/tomat-shared/src/domain/model.ts";
 import {
   type ApplyOpts,
   astroBuild,
+  bumpVersionField,
   colors,
   type DeployEnv,
   fail,
@@ -41,6 +42,8 @@ export const websiteItem: ReleaseItem = {
   bumpHint: "packages/tomat-website/deno.json (version)",
 
   version: () => readVersionField(join(WEBSITE_DIR, "deno.json")),
+  versionFile: join(WEBSITE_DIR, "deno.json"),
+  bumpVersion: () => bumpVersionField(join(WEBSITE_DIR, "deno.json")),
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
     return hashWebsiteSource();

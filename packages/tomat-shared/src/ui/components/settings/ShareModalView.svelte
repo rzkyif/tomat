@@ -110,7 +110,7 @@
         mono
         autoResize="none"
         ariaLabel="Exported settings JSON"
-        class="h-full w-full overflow-y-auto resize-none tomat-scroll"
+        class="h-full w-full overflow-y-auto resize-none"
       />
       {@render floatButton(
         copied

@@ -1,37 +1,63 @@
 <script lang="ts">
   // One Quick Settings accordion section: a header row (an expand button plus an
   // optional module on/off toggle) and, while open, a vertically scrollable body
-  // supplied by the caller. The toggle is a sibling of the expand button, not a
-  // child: nesting the Toggle's input inside a <button> would be invalid HTML.
-  // Pure: the client owns the schema fields it renders into `body` and the live
-  // enabled/open state; this draws the chrome and emits the interactions back.
+  // of the section's curated schema fields. The toggle is a sibling of the
+  // expand button, not a child: nesting the Toggle's input inside a <button>
+  // would be invalid HTML.
+  //
+  // Schema-driven and single-source: the section's fields come straight from the
+  // shared QUICK_SETTINGS_SECTIONS manifest, resolved against SETTINGS_SCHEMA,
+  // and each renders through the injected `field` snippet (the client passes its
+  // live SettingsField) or, with no snippet, a static SettingsFieldView (the
+  // website) - exactly the pattern SettingsContentView uses, so the client and
+  // the website render identical fields.
   import type { Snippet } from "svelte";
+  import type { QuickSettingsSectionDef } from "../../../domain/settings/quick-settings.ts";
+  import type { SettingField } from "../../../domain/settings/types.ts";
+  import { evalCondition, findField } from "../../../domain/settings/engine.ts";
   import Expand from "../primitives/Expand.svelte";
   import Toggle from "../primitives/Toggle.svelte";
+  import SettingsFieldView from "../settings/SettingsFieldView.svelte";
 
   let {
-    title,
+    section,
+    values,
     open = false,
     enabled = true,
-    hasToggle = false,
+    horizontal = false,
     onToggleExpand = noop,
     onSetEnabled = noopBool,
-    body,
+    field,
   }: {
-    title: string;
+    section: QuickSettingsSectionDef;
+    /** Setting id -> value, used to evaluate visibility and (for the static
+     *  fallback renderer) to paint each field. */
+    values: Record<string, unknown>;
     /** Body rendered. The caller derives this as `selected && enabled`, so a
      *  disabled module can never be open. */
     open?: boolean;
     enabled?: boolean;
-    /** Whether the module has an on/off toggle in its header. */
-    hasToggle?: boolean;
+    horizontal?: boolean;
     onToggleExpand?: () => void;
     onSetEnabled?: (value: boolean) => void;
-    body: Snippet;
+    /** Renders one field (client injects its live SettingsField). When omitted,
+     *  a static SettingsFieldView is used (website). */
+    field?: Snippet<[SettingField]>;
   } = $props();
 
   function noop(): void {}
   function noopBool(_value: boolean): void {}
+
+  // The manifest is static, so an unresolved id only happens on schema drift
+  // (guarded by quick-settings.test.ts); drop it rather than crash.
+  const resolved = $derived(
+    section.fields.flatMap((ref) => {
+      const f = findField(ref.id);
+      return f ? [{ ref, field: f }] : [];
+    }),
+  );
+
+  const hasToggle = $derived(!!section.enabledField);
 </script>
 
 <!-- The open section claims the remaining panel height and scrolls inside it;
@@ -50,7 +76,7 @@
           ? 'i-material-symbols-keyboard-arrow-down-rounded'
           : 'i-material-symbols-chevron-right-rounded'}"
       ></i>
-      <span class="flex-1 text-left text-base font-medium">{title}</span>
+      <span class="flex-1 text-left text-base font-medium">{section.title}</span>
     </button>
     {#if hasToggle}
       <div class="w-24 shrink-0">
@@ -58,7 +84,7 @@
           compact
           labels={{ on: "ON", off: "OFF" }}
           checked={enabled}
-          ariaLabel={`Enable ${title}`}
+          ariaLabel={`Enable ${section.title}`}
           onchange={onSetEnabled}
         />
       </div>
@@ -70,6 +96,18 @@
        which a scroll container reports as the full content height even while
        max-height clamps it, so the open/close sweep tracks the real size. -->
   <Expand {open} class="tomat-scroll overflow-y-auto min-h-0 flex flex-col gap-1 pl-7 pr-2 pb-1">
-    {@render body()}
+    {#each resolved as { ref, field: f } (ref.id)}
+      {#if evalCondition(ref.visibleWhen, values) && evalCondition(f.visibleWhen, values)}
+        {#if field}
+          {@render field(f)}
+        {:else}
+          <SettingsFieldView
+            field={f}
+            value={values[f.id] ?? ("defaultValue" in f ? f.defaultValue : "")}
+            {horizontal}
+          />
+        {/if}
+      {/if}
+    {/each}
   </Expand>
 </div>

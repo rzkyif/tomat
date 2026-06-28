@@ -6,6 +6,7 @@
 import { join } from "@std/path";
 import {
   type ApplyOpts,
+  bumpVersionField,
   bytesEqual,
   type DeployEnv,
   fetchR2Bytes,
@@ -44,6 +45,8 @@ export const scriptsItem: ReleaseItem = {
   // nor uploaded: it's the bump source only. A lone bump won't trip the diff;
   // bump it alongside the actual script change it accompanies.
   version: () => readVersionField(join(INSTALL_DIR, "version.json")),
+  versionFile: join(INSTALL_DIR, "version.json"),
+  bumpVersion: () => bumpVersionField(join(INSTALL_DIR, "version.json")),
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
     return hashPaths(INSTALL_SCRIPTS.map((s) => ({ path: join(INSTALL_DIR, s.name) })));

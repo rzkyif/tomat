@@ -1,25 +1,26 @@
 <script lang="ts">
   // Presentational body of a memory's detail pane: the enable toggle with a
-  // kind/read-only subtitle, the index-status line with a regenerate action,
-  // the title field, the content (or SKILL.md instructions) with an
-  // edit/preview toggle, and, for skills, the suggested-tools line and the
-  // bundled-files list with an inline file viewer/editor. All values arrive
-  // pre-resolved (the client owns the store, the loaded content, the
-  // editability and skill flags, the index status, and the draft wiring), so
-  // this stays pure: props in, callbacks out. The detail header and scroll
-  // shell live in ../objects/*; this is only MemoryDetail's own body markup.
-  // `draftContent` and `openFileContent` are $bindable to mirror the client's
-  // textarea drafts.
+  // kind/read-only subtitle, the summarization status, the title field, and the
+  // body editor with an edit/preview toggle. A knowledge memory has one body
+  // ("Content"); a skill splits into three synced fields ("Description",
+  // "Suggested tools", "Instructions") that the client recomposes into the one
+  // SKILL.md, plus the bundled-files list with an inline file viewer/editor. All
+  // values arrive pre-resolved (the client owns the store, the loaded content,
+  // the editability and skill flags, the status, and the draft wiring), so this
+  // stays pure: props in, callbacks out. The detail header and scroll shell live
+  // in ../objects/*; this is only MemoryDetail's own body markup. `draftTitle`
+  // is plain; `draftDescription`, `draftContent`, and `openFileContent` are
+  // $bindable to mirror the client's input/textarea drafts.
   import FormField from "../primitives/FormField.svelte";
   import Input from "../primitives/Input.svelte";
   import Textarea from "../primitives/Textarea.svelte";
   import Toggle from "../primitives/Toggle.svelte";
   import Button from "../primitives/Button.svelte";
   import IconButton from "../primitives/IconButton.svelte";
-  import SubsectionHeader from "../primitives/SubsectionHeader.svelte";
-  import ListItem from "../primitives/ListItem.svelte";
   import Card from "../primitives/Card.svelte";
-  import Markdown from "../primitives/Markdown.svelte";
+  import Expand from "../primitives/Expand.svelte";
+  import Chip from "../primitives/Chip.svelte";
+  import ListItem from "../primitives/ListItem.svelte";
 
   let {
     enabled = false,
@@ -28,10 +29,11 @@
     draftTitle = "",
     titleError = null,
     contentLoaded = false,
-    summarized = false,
     summaryStale = false,
-    reindexing = false,
+    summary = "",
+    draftDescription = $bindable(""),
     suggestedTools = [],
+    availableTools = [],
     files = [],
     draftContent = $bindable(""),
     openFileName = null,
@@ -40,9 +42,11 @@
     onToggleEnabled,
     onTitleInput,
     onTitleBlur,
+    onDescriptionInput,
+    onDescriptionBlur,
+    onSuggestedToolsChange,
     onContentInput,
     onContentBlur,
-    onReindex,
     onOpenFile,
     onCloseFile,
     onFileContentInput,
@@ -56,10 +60,11 @@
     draftTitle?: string;
     titleError?: string | null;
     contentLoaded?: boolean;
-    summarized?: boolean;
     summaryStale?: boolean;
-    reindexing?: boolean;
+    summary?: string;
+    draftDescription?: string;
     suggestedTools?: string[];
+    availableTools?: string[];
     files?: string[];
     draftContent?: string;
     openFileName?: string | null;
@@ -68,9 +73,11 @@
     onToggleEnabled?: (enabled: boolean) => void;
     onTitleInput?: (v: string) => void;
     onTitleBlur?: () => void;
+    onDescriptionInput?: (v: string) => void;
+    onDescriptionBlur?: () => void;
+    onSuggestedToolsChange?: (tools: string[]) => void;
     onContentInput?: (v: string) => void;
     onContentBlur?: () => void;
-    onReindex?: () => void;
     onOpenFile?: (name: string) => void;
     onCloseFile?: () => void;
     onFileContentInput?: (v: string) => void;
@@ -92,38 +99,81 @@
     addingFile = false;
   }
 
-  // Edit/preview is view-local UI state, not domain: which way the user is
-  // currently looking at the markdown body. Resets to edit per mount.
-  let preview = $state(false);
-
-  // The index status as a single two-line item: a title line and a plain
-  // second line explaining what it means for the user. The agent surfaces a
-  // memory by relevance from its summary, so until one is current the memory
-  // won't come up on its own (you can still reference it by trigger).
-  const status = $derived.by(() => {
-    if (!summarized) {
-      return {
-        icon: "i-material-symbols-info-outline-rounded",
-        tone: "text-accent-yellow-700",
-        title: "Not Summarized",
-        detail: "Won't surface by relevance until it's summarized.",
-      };
-    }
-    if (summaryStale) {
-      return {
-        icon: "i-material-symbols-info-outline-rounded",
-        tone: "text-accent-yellow-700",
-        title: "Summary Outdated",
-        detail: "Edited since its last summary.",
-      };
-    }
-    return {
-      icon: "i-material-symbols-check-circle-outline-rounded",
-      tone: "text-default-500",
-      title: "Summarized",
-      detail: "Can surface when it's relevant to your message.",
-    };
+  // Suggested-tools chip multi-select (skills only). View-local typing state;
+  // selections flow out through onSuggestedToolsChange. `available` is the tool
+  // catalog the client feeds (the website feeds a scripted one).
+  let toolQuery = $state("");
+  let toolFocused = $state(false);
+  let toolActiveIndex = $state(0);
+  let toolInputEl: HTMLInputElement | undefined = $state();
+  const toolSuggestions = $derived.by(() => {
+    const q = toolQuery.trim().toLowerCase();
+    return availableTools
+      .filter((t) => !suggestedTools.includes(t))
+      .filter((t) => !q || t.toLowerCase().includes(q))
+      .slice(0, 8);
   });
+  const toolsOpen = $derived(toolFocused && toolSuggestions.length > 0);
+  function addTool(tool: string): void {
+    const t = tool.trim();
+    toolQuery = "";
+    toolActiveIndex = 0;
+    if (!t || suggestedTools.includes(t)) return;
+    (onSuggestedToolsChange ?? noop)([...suggestedTools, t]);
+  }
+  function removeTool(tool: string): void {
+    (onSuggestedToolsChange ?? noop)(suggestedTools.filter((t) => t !== tool));
+  }
+  // Commit the highlighted suggestion, or the typed text, as a chip.
+  function commitTool(): void {
+    if (toolsOpen && toolSuggestions[toolActiveIndex]) addTool(toolSuggestions[toolActiveIndex]);
+    else if (toolQuery.trim()) addTool(toolQuery);
+  }
+  function onToolKeydown(e: KeyboardEvent): void {
+    // Tool names allow only [a-zA-Z0-9_-], so any other printable key (notably
+    // space and comma) terminates the current chip instead of being typed,
+    // just like Enter. Modifier combos (Cmd/Ctrl/Alt) are left to the browser.
+    const illegalChar = e.key.length === 1 &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !/^[a-zA-Z0-9_-]$/.test(e.key);
+    if (e.key === "Enter" || illegalChar) {
+      e.preventDefault();
+      commitTool();
+    } else if (e.key === "Backspace" && toolQuery === "" && suggestedTools.length > 0) {
+      removeTool(suggestedTools[suggestedTools.length - 1]);
+    } else if (e.key === "ArrowDown" && toolsOpen) {
+      e.preventDefault();
+      toolActiveIndex = (toolActiveIndex + 1) % toolSuggestions.length;
+    } else if (e.key === "ArrowUp" && toolsOpen) {
+      e.preventDefault();
+      toolActiveIndex = (toolActiveIndex - 1 + toolSuggestions.length) % toolSuggestions.length;
+    } else if (e.key === "Escape") {
+      toolQuery = "";
+    }
+  }
+
+  // Summarization status: a read-only two-line display. The summary regenerates
+  // on its own in the background a short while after an edit, so there is no
+  // action here. While the summary is stale (never generated, or edited since)
+  // the memory won't surface by relevance, which is what the line explains; once
+  // current, the second line shows the generated summary itself.
+  const status = $derived(
+    summaryStale
+      ? {
+          icon: "i-material-symbols-info-outline-rounded",
+          tone: "text-accent-yellow-700",
+          title: "Pending summarization",
+          detail: "Won't surface by relevance until summarization finishes.",
+        }
+      : {
+          icon: "i-material-symbols-check-circle-outline-rounded",
+          tone: "text-default-500",
+          title: "Summarized",
+          detail: summary.trim() || "Can surface when it's relevant to your message.",
+        },
+  );
 </script>
 
 <div class="flex flex-col gap-3">
@@ -142,22 +192,12 @@
     />
   </FormField>
 
-  <div class="flex items-center gap-2">
-    <i class="{status.icon} {status.tone} shrink-0"></i>
-    <div class="flex flex-col min-w-0">
-      <span class="text-xs text-default-700">{status.title}</span>
-      <span class="text-xs text-default-500">{status.detail}</span>
+  <div class="flex flex-col gap-0.5 text-xs">
+    <div class="flex items-center gap-1.5">
+      <i class="{status.icon} {status.tone} text-xs shrink-0"></i>
+      <span class="text-default-700">{status.title}</span>
     </div>
-    <div class="flex-1"></div>
-    <Button
-      variant="secondary"
-      size="sm"
-      icon="i-material-symbols-refresh-rounded"
-      loading={reindexing}
-      onclick={() => (onReindex ?? noop)()}
-    >
-      Regenerate Summary
-    </Button>
+    <span class="text-default-500">{status.detail}</span>
   </div>
 
   <FormField label="Title" error={editable ? titleError : null}>
@@ -172,57 +212,118 @@
     />
   </FormField>
 
-  <div class="flex flex-col gap-2 text-sm">
-    <div class="flex items-center gap-2">
-      <div class="flex-1 text-default-800">{isSkill ? "Instructions (SKILL.md)" : "Content"}</div>
-      <Button variant="ghost" size="sm" onclick={() => (preview = !preview)}>
-        {preview ? "Edit" : "Preview"}
-      </Button>
-    </div>
-    {#if preview}
-      <Card variant="raised" padding="sm" class="min-h-48 max-h-96 overflow-y-auto">
-        {#if draftContent.trim()}
-          <Markdown content={draftContent} />
-        {:else}
-          <div class="text-default-400 italic">Nothing to preview.</div>
-        {/if}
-      </Card>
-    {:else}
-      <Textarea
-        ariaLabel="Memory content"
-        autoResize="none"
-        class="min-h-48 overflow-y-auto resize-y font-mono"
-        value={draftContent}
-        placeholder={contentLoaded ? "" : "Loading..."}
-        disabled={!contentLoaded || !editable}
-        oninput={(v) => (onContentInput ?? noop)(v)}
-        onblur={() => (onContentBlur ?? noop)()}
+  {#if isSkill}
+    <FormField label="Description">
+      <Input
+        type="text"
+        value={draftDescription}
+        ariaLabel="Skill description"
+        placeholder="What this skill produces"
+        disabled={!editable}
+        oninput={(v) => (onDescriptionInput ?? noop)(v)}
+        onblur={() => (onDescriptionBlur ?? noop)()}
       />
-    {/if}
-  </div>
+    </FormField>
 
-  {#if isSkill && suggestedTools.length > 0}
-    <div class="text-xs text-default-600">
-      Suggested tools: <span class="font-mono">{suggestedTools.join(", ")}</span>
-    </div>
+    <FormField label="Suggested Tools">
+      <div class="relative">
+        <!-- The whole field focuses the input, so the chips + empty space read
+             as one control; the inner <input> is the real focus target. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+        <div
+          class="tomat-focus-wrap flex flex-wrap items-center gap-1.5 w-full min-h-8 rounded-medium bg-surface-inset px-2 py-1 {editable
+            ? 'hov:cursor-text'
+            : 'opacity-60 pointer-events-none'}"
+          onclick={() => toolInputEl?.focus()}
+        >
+          {#each suggestedTools as tool (tool)}
+            <Chip size="sm" variant="subtle">
+              <span class="font-mono truncate">{tool}</span>
+              {#if editable}
+                <button
+                  type="button"
+                  class="flex text-default-500 hov:text-default-800 transition-interactive"
+                  aria-label={`Remove ${tool}`}
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    removeTool(tool);
+                  }}
+                >
+                  <i class="i-material-symbols-close-rounded text-sm flex"></i>
+                </button>
+              {/if}
+            </Chip>
+          {/each}
+          {#if editable}
+            <input
+              bind:this={toolInputEl}
+              bind:value={toolQuery}
+              class="flex-1 min-w-24 bg-transparent outline-none text-sm font-mono text-default-800"
+              aria-label="Add a suggested tool"
+              placeholder={suggestedTools.length > 0 ? "" : "Add a tool"}
+              onfocus={() => (toolFocused = true)}
+              onblur={() => (toolFocused = false)}
+              onkeydown={onToolKeydown}
+            />
+          {/if}
+        </div>
+        {#if toolsOpen}
+          <div
+            class="tomat-scroll absolute z-50 left-0 right-0 mt-1 bg-surface rounded-medium shadow-xl border border-surface overflow-hidden max-h-60 overflow-y-auto"
+            role="listbox"
+          >
+            {#each toolSuggestions as tool, i (tool)}
+              <!-- onmousedown + preventDefault keeps the input focused through
+                   the pick (so the dropdown doesn't blur-close first). -->
+              <ListItem
+                direction="row"
+                selected={i === toolActiveIndex}
+                role="option"
+                ariaSelected={i === toolActiveIndex}
+                class="rounded-none px-3"
+                onmousedown={(e) => {
+                  e.preventDefault();
+                  addTool(tool);
+                }}
+              >
+                <span class="truncate flex-1 text-sm font-mono text-default-800">{tool}</span>
+              </ListItem>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </FormField>
   {/if}
+
+  <FormField label={isSkill ? "Instructions" : "Content"}>
+    <Textarea
+      ariaLabel="Memory content"
+      autoResize="none"
+      mono
+      class="min-h-48 overflow-y-auto resize-y"
+      value={draftContent}
+      placeholder={contentLoaded ? "" : "Loading..."}
+      disabled={!contentLoaded || !editable}
+      oninput={(v) => (onContentInput ?? noop)(v)}
+      onblur={() => (onContentBlur ?? noop)()}
+    />
+  </FormField>
 
   {#if isSkill}
     <div class="flex flex-col gap-1">
-      <SubsectionHeader label="Bundled files">
-        {#snippet actions()}
-          {#if editable}
-            <IconButton
-              icon="i-material-symbols-add-rounded"
-              title="Add file"
-              size="xs"
-              variant="subtle"
-              active={addingFile}
-              onclick={() => (addingFile = !addingFile)}
-            />
-          {/if}
-        {/snippet}
-      </SubsectionHeader>
+      <div class="flex items-center gap-2 min-h-8">
+        <div class="flex-1 text-default-800 text-sm">Bundled Files</div>
+        {#if editable}
+          <IconButton
+            icon="i-material-symbols-add-rounded"
+            title="Add file"
+            size="xs"
+            variant="subtle"
+            active={addingFile}
+            onclick={() => (addingFile = !addingFile)}
+          />
+        {/if}
+      </div>
       {#if addingFile}
         <div class="flex items-center gap-2">
           <Input
@@ -230,7 +331,8 @@
             value={newFileName}
             ariaLabel="New file name"
             placeholder="checklist.md"
-            class="flex-1 text-xs font-mono"
+            mono
+            class="flex-1 text-xs"
             oninput={(v) => (newFileName = v)}
             onkeydown={(e) => {
               if (e.key === "Enter") submitNewFile();
@@ -247,43 +349,57 @@
         <div class="text-xs text-default-400 italic">No bundled files.</div>
       {/if}
       {#each files as f (f)}
-        <div class="flex flex-col gap-1">
-          <ListItem
-            selected={openFileName === f}
-            onclick={() => (openFileName === f ? (onCloseFile ?? noop)() : (onOpenFile ?? noop)(f))}
+        {@const isOpen = openFileName === f}
+        <div class="rounded-medium overflow-hidden bg-surface-inset">
+
+          <!-- The whole padded header is the toggle; the delete button stops the
+               click so it doesn't also expand/collapse. -->
+          <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+          <div
+            class="flex items-center gap-2 px-3 py-2 hov:cursor-pointer"
+            role="button"
+            tabindex="0"
+            onclick={() => (isOpen ? (onCloseFile ?? noop)() : (onOpenFile ?? noop)(f))}
+            onkeydown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                isOpen ? (onCloseFile ?? noop)() : (onOpenFile ?? noop)(f);
+              }
+            }}
           >
-            {#snippet leading()}
-              <i
-                class="{openFileName === f
-                  ? 'i-material-symbols-folder-open-outline-rounded'
-                  : 'i-material-symbols-description-outline-rounded'} text-default-500 shrink-0"
-              ></i>
-            {/snippet}
-            <span class="text-xs font-mono truncate">{f}</span>
-            {#snippet trailing()}
-              {#if editable}
-                <IconButton
-                  icon="i-material-symbols-delete-outline-rounded"
-                  title="Delete file"
-                  size="xs"
-                  variant="subtle"
-                  onclick={() => (onDeleteFile ?? noop)(f)}
+            <i class="i-material-symbols-description-outline-rounded text-default-500 shrink-0"></i>
+            <span class="text-xs font-mono truncate flex-1">{f}</span>
+            {#if editable}
+              <IconButton
+                icon="i-material-symbols-delete-outline-rounded"
+                title="Delete file"
+                size="xs"
+                variant="subtle"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  (onDeleteFile ?? noop)(f);
+                }}
+              />
+            {/if}
+          </div>
+          <Expand open={isOpen}>
+            <div class="px-2 pb-2">
+              <Card variant="default" padding="sm">
+                <Textarea
+                  ariaLabel="Bundled file content"
+                  autoResize="none"
+                  surface="transparent"
+                  mono
+                  class="tomat-scroll min-h-32 max-h-80 w-full overflow-y-auto resize-y text-xs"
+                  value={openFileContent}
+                  placeholder={openFileLoaded ? "" : "Loading..."}
+                  disabled={!openFileLoaded || !editable}
+                  oninput={(v) => (onFileContentInput ?? noop)(v)}
+                  onblur={() => (onFileContentBlur ?? noop)()}
                 />
-              {/if}
-            {/snippet}
-          </ListItem>
-          {#if openFileName === f}
-            <Textarea
-              ariaLabel="Bundled file content"
-              autoResize="none"
-              class="min-h-32 overflow-y-auto resize-y font-mono text-xs"
-              value={openFileContent}
-              placeholder={openFileLoaded ? "" : "Loading..."}
-              disabled={!openFileLoaded || !editable}
-              oninput={(v) => (onFileContentInput ?? noop)(v)}
-              onblur={() => (onFileContentBlur ?? noop)()}
-            />
-          {/if}
+              </Card>
+            </div>
+          </Expand>
         </div>
       {/each}
     </div>

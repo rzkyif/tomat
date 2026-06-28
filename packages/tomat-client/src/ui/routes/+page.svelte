@@ -5,7 +5,6 @@
   import MessageTranscript from "$components/chat/MessageTranscript.svelte";
   import ActionSheetHost from "$components/chat/ActionSheetHost.svelte";
   import Settings from "$components/settings/Settings.svelte";
-  import BuiltinToolkitModal from "$components/settings/BuiltinToolkitModal.svelte";
   import NewCore from "$components/new-core/NewCore.svelte";
   import QuickSettings from "$components/quick-settings/QuickSettings.svelte";
   import SessionList from "$components/session-list/SessionList.svelte";
@@ -571,10 +570,6 @@
 </script>
 
 {#if loaded}
-  <!-- Always mounted so it reacts to the Tools toggle regardless of which surface
-       flipped it (Quick Settings unmounts the Settings panel that hosts the other
-       modals). Self-gates on the off -> on transition. -->
-  <BuiltinToolkitModal />
   <!-- Static surface backdrop behind the sliding panel layer: during the mobile
        carousel the layer is partly off-screen, so this keeps the uncovered edge
        reading as app surface instead of flashing the page background. -->

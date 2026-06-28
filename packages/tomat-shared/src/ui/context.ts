@@ -59,9 +59,6 @@ export interface UiContext {
   /** The host the UI renders on. Views read this to pick layout variants; there
    *  is no web client, so the only values are the two native shells. */
   readonly platform: "desktop" | "mobile";
-  /** Spacing scale for the host. `"compact"` enlarges tap targets / tightens
-   *  chrome on touch shells; `"comfortable"` is the desktop default. */
-  readonly density: "comfortable" | "compact";
   /** The primary pointer. `"coarse"` (touch) Views gate hover-only affordances
    *  behind `pointer === "fine"`. */
   readonly pointer: "fine" | "coarse";
@@ -113,7 +110,6 @@ export interface UiContextSources {
   /** Seed a per-id default only if absent. Default: no-op. */
   expansionInit?: (id: string, value: boolean) => void;
   platform?: "desktop" | "mobile";
-  density?: "comfortable" | "compact";
   pointer?: "fine" | "coarse";
   /** Whether the host has a system back gesture (Android). Default: false. */
   hasSystemBack?: boolean;
@@ -158,7 +154,6 @@ export function makeUiContext(sources: UiContextSources): UiContext {
     expansionSet: sources.expansionSet ?? (() => {}),
     expansionInit: sources.expansionInit ?? (() => {}),
     platform: sources.platform ?? "desktop",
-    density: sources.density ?? "comfortable",
     pointer: sources.pointer ?? "fine",
     hasSystemBack: sources.hasSystemBack ?? false,
     registerBack: sources.registerBack ?? (() => () => {}),

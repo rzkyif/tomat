@@ -4,6 +4,7 @@
 
 export * from "./types.ts";
 export * from "./engine.ts";
+export * from "./quick-settings.ts";
 // Re-export the group definitions so callers (server-side voice catalog,
 // preset lookup, etc.) can introspect a specific group without walking
 // SETTINGS_SCHEMA.

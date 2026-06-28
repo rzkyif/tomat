@@ -32,10 +32,6 @@ export class MemoriesApi {
     return this.client.del(`/api/v1/memories/${encodeURIComponent(id)}`) as Promise<void>;
   }
 
-  reindex(id: string): Promise<{ ok: true }> {
-    return this.client.post(`/api/v1/memories/${encodeURIComponent(id)}/reindex`, {});
-  }
-
   async getFile(id: string, name: string): Promise<string> {
     const res = await this.client.get<{ content: string }>(
       `/api/v1/memories/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`,

@@ -10,6 +10,7 @@ import type { ModelCatalog } from "../../packages/tomat-shared/src/domain/catalo
 import { buildCatalogPayload } from "../../packages/tomat-model-catalog/src/index.ts";
 import {
   type ApplyOpts,
+  bumpVersionField,
   canonicalize,
   channelManifestDir,
   colors,
@@ -38,6 +39,8 @@ export const catalogItem: ReleaseItem = {
   bumpHint: "packages/tomat-model-catalog/deno.json (version)",
 
   version: () => readVersionField(join(REPO_ROOT, "packages/tomat-model-catalog/deno.json")),
+  versionFile: join(REPO_ROOT, "packages/tomat-model-catalog/deno.json"),
+  bumpVersion: () => bumpVersionField(join(REPO_ROOT, "packages/tomat-model-catalog/deno.json")),
 
   async sourceHash(_channel: ReleaseChannel): Promise<string> {
     // Hash the catalog content with generatedAt stripped: a fresh build at a

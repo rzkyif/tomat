@@ -1,22 +1,23 @@
 /**
  * The Quick Settings curation: which schema fields each accordion section
  * shows, in order. Every id resolves against SETTINGS_SCHEMA via findField()
- * and renders through the same SettingsField renderer as the full Settings
- * panel, so adding a setting here is just adding its id (manifest.test.ts
- * guards against schema drift).
+ * and renders through the same SettingsFieldView renderer as the full Settings
+ * panel, so adding a setting here is just adding its id (quick-settings.test.ts
+ * guards against schema drift). Lives in @tomat/shared so the client renderer
+ * and the website gallery derive the exact same sections from one source.
  *
  * Keep at least one entry per section without a `visibleWhen`: the renderer
  * has no empty-body state, so a section whose every field is hidden would
  * open onto nothing.
  */
 
-import type { FieldCondition } from "@tomat/shared";
+import type { FieldCondition } from "./types.ts";
 
 export interface QuickSettingsFieldRef {
   /** A field id in SETTINGS_SCHEMA, resolved with findField(). */
   id: string;
   /** Quick-settings-only visibility, AND-ed with the field's own
-   *  `visibleWhen` (which SettingsField evaluates itself). Needed where the
+   *  `visibleWhen` (which the renderer also evaluates). Needed where the
    *  full Settings hides a field via a SECTION-level condition (e.g. the
    *  External Provider sections), which doesn't exist here. */
   visibleWhen?: FieldCondition;
@@ -43,6 +44,28 @@ export const QUICK_SETTINGS_SECTIONS: QuickSettingsSectionDef[] = [
     ],
   },
   {
+    id: "llm",
+    title: "Language Model",
+    fields: [
+      { id: "llm.provider" },
+      { id: "llm.preset" },
+      {
+        id: "llm.external.baseUrl",
+        visibleWhen: { field: "llm.provider", eq: "external" },
+      },
+      {
+        id: "llm.external.apiKey",
+        visibleWhen: { field: "llm.provider", eq: "external" },
+      },
+      {
+        id: "llm.external.model",
+        visibleWhen: { field: "llm.provider", eq: "external" },
+      },
+      { id: "llm.reasoning" },
+      { id: "llm.showReasoning" },
+    ],
+  },
+  {
     id: "stt",
     title: "Speech-to-Text",
     enabledField: "stt.enabled",
@@ -65,28 +88,6 @@ export const QUICK_SETTINGS_SECTIONS: QuickSettingsSectionDef[] = [
       { id: "stt.holdDuration" },
       { id: "stt.llmAutocorrect" },
       { id: "stt.autoSend" },
-    ],
-  },
-  {
-    id: "llm",
-    title: "Language Model",
-    fields: [
-      { id: "llm.provider" },
-      { id: "llm.preset" },
-      {
-        id: "llm.external.baseUrl",
-        visibleWhen: { field: "llm.provider", eq: "external" },
-      },
-      {
-        id: "llm.external.apiKey",
-        visibleWhen: { field: "llm.provider", eq: "external" },
-      },
-      {
-        id: "llm.external.model",
-        visibleWhen: { field: "llm.provider", eq: "external" },
-      },
-      { id: "llm.reasoning" },
-      { id: "llm.showReasoning" },
     ],
   },
   {

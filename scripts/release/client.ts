@@ -9,6 +9,7 @@ import { join } from "@std/path";
 import type { Triple } from "../../packages/tomat-shared/src/domain/model.ts";
 import {
   type ApplyOpts,
+  bumpVersionField,
   channelManifestDir,
   channelStoragePrefix,
   colors,
@@ -246,6 +247,8 @@ export const clientItem: ReleaseItem = {
   bumpHint: "packages/tomat-client/src/tauri/tauri.conf.json (version)",
 
   version: readClientVersion,
+  versionFile: TAURI_CONF_PATH,
+  bumpVersion: () => bumpVersionField(TAURI_CONF_PATH),
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
     return hashPaths(
@@ -326,6 +329,7 @@ export const clientItem: ReleaseItem = {
       step(`Uploading client bundle to R2 bucket "${env.r2Bucket}"`);
       info(`uploading ${bundleKey}  (${humanBytes(bundle.size)})`);
       await r2Put(env, bundleKey, bundle.bundlePath, "application/octet-stream");
+      opts.recordVersionedKey?.(bundleKey);
 
       step(`Uploading ${manifestDir}/client.json to R2`);
       await r2Put(

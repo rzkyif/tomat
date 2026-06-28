@@ -30,7 +30,7 @@ const rowBase = "flex items-center h-8 pr-2.5 gap-1.5 rounded-medium transition-
           <i class="expandable-chevron flex text-xl shrink-0 i-material-symbols-chevron-right-rounded"></i>
           {section.name}
         </summary>
-        <div class="mt-1 flex flex-col gap-1">
+        <div class="mt-0.5 flex flex-col gap-0.5">
           {section.entries.map((entry) => {
             const current = entry.id === currentId;
             return (

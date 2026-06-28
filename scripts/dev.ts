@@ -86,17 +86,35 @@ async function startDevExtensionManifest(): Promise<void> {
     }
   })();
 }
-// The dev client's per-concern stores: cores.json holds the paired-cores
-// registry (deleting it sends the next boot back through core management,
-// see the boot gate in packages/tomat-client/src/ui/routes/+page.svelte),
-// settings.json the sparse settings, and snippets/ one file per snippet.
+// The dev client's data root. --reset wipes it whole (see resetClientSettings):
+// cores.json (the paired-cores registry, whose absence sends the next boot back
+// through core management, see the boot gate in
+// packages/tomat-client/src/ui/routes/+page.svelte), settings.json, snippets/,
+// keychain.json (the dev file-backed bearer-token store), and logs. None of it
+// needs downloading, so nothing here is preserved.
 const DEV_CLIENT_DIR = join(homeDir(), ".tomat", "dev", "client");
-const CLIENT_RESET_TARGETS = ["settings.json", "cores.json", "snippets"];
+
+// --reset is a denylist, not an allowlist: it deletes EVERYTHING under the dev
+// core dir EXCEPT these names, so the next boot starts from a clean slate
+// (db, settings, sessions, memories, secrets, admin token/password, the
+// builtin-seed marker, installed extensions, logs, caches - all gone and all
+// regenerated on boot). An allowlist silently let new state survive (this is
+// exactly how tools.enabled lingered across resets). The two preserved entries
+// are pure download/build artifacts that are expensive to re-acquire and hold
+// no user state:
+//   - bin/        the sidecar binaries (llama-server, tomat-core-speech + its
+//                 fetched espeak-ng-data, the cargo-built helpers) and deno.
+//   - deno-cache/ the downloaded deno/npm dependency cache.
+// ~/.tomat/models lives outside the channel root and so is never touched.
+// A future download-only cache added under the core dir belongs in this set.
+const CORE_RESET_PRESERVE = new Set(["bin", "deno-cache"]);
 
 // CLI flags, wired to the deno tasks in deno.json:
 //  --reset          delete the dev client's settings.json before launch so the
 //                   client boots into core management instead of straight to
-//                   chat (dev:reset / dev:reset:install).
+//                   chat, AND drop the dev core's SQLite db + built-in seed
+//                   marker so it boots onto a fresh schema and re-stages the
+//                   built-in extension (dev:reset / dev:reset:install).
 //  --fresh-install  make "On this computer" show the fresh-install confirm
 //                   screen. Sets TOMAT_DEV_FRESH_INSTALL for the client (read
 //                   by the Tauri pairing commands) and skips the remote prefill
@@ -417,12 +435,20 @@ async function mintPairingCode(token: string): Promise<string | null> {
   }
 }
 
-// Delete the dev client's stores (settings, paired cores, snippets) so the
-// next boot lands on core management instead of going straight to chat.
-// Best-effort: an absent file is already "reset".
-async function resetClientSettings(): Promise<void> {
-  for (const name of CLIENT_RESET_TARGETS) {
-    const target = join(DEV_CLIENT_DIR, name);
+// Remove every entry directly under `dir` whose name is not in `preserve`.
+// Best-effort: a missing dir is already "reset", and a single stubborn entry is
+// logged without aborting the rest.
+async function wipeDirExcept(dir: string, preserve: Set<string>): Promise<void> {
+  let entries: Deno.DirEntry[];
+  try {
+    entries = await Array.fromAsync(Deno.readDir(dir));
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) return;
+    throw err;
+  }
+  for (const entry of entries) {
+    if (preserve.has(entry.name)) continue;
+    const target = join(dir, entry.name);
     try {
       await Deno.remove(target, { recursive: true });
       devLog(`--reset: deleted ${target}`);
@@ -431,6 +457,27 @@ async function resetClientSettings(): Promise<void> {
       devLog(`--reset: could not delete ${target}: ${err}`);
     }
   }
+}
+
+// Wipe the dev client's data root whole (settings, paired cores, snippets, the
+// dev keychain, logs) so the next boot lands on core management with no carried
+// state. Nothing here needs downloading, so nothing is preserved.
+async function resetClientSettings(): Promise<void> {
+  await wipeDirExcept(DEV_CLIENT_DIR, new Set());
+}
+
+// Wipe the dev core dir to a clean slate, preserving only the download/build
+// artifacts in CORE_RESET_PRESERVE. Everything else (db, settings, sessions,
+// memories, secrets, admin credentials, the builtin-seed marker, installed
+// extensions, caches, logs) is regenerated on the next boot: the db is rebuilt
+// from the current schema (editing schema.sql in place only reaches a fresh db,
+// since the migration runner skips a version the db already has and CREATE TABLE
+// IF NOT EXISTS never adds a column to an existing table; see
+// packages/tomat-core/src/db/migrate.ts), and dropping the builtin-seed marker
+// re-stages the built-in extension against that fresh db. Must run before core
+// spawns and opens the db.
+async function resetCoreState(): Promise<void> {
+  await wipeDirExcept(DEV_CORE_DIR, CORE_RESET_PRESERVE);
 }
 
 // Collect a pid plus every descendant (children, grandchildren, …), gathered
@@ -768,6 +815,11 @@ async function ensureEspeakData(libDir: string): Promise<void> {
 // where a core is assumed to be running separately.
 let adminToken = "";
 if (!CLIENT_ONLY) {
+  // --reset: wipe the core dir to a clean slate FIRST, before any setup below
+  // writes into it (the admin token, the built-in manifest) or core boots and
+  // opens the db. Running it last would delete those just-written files.
+  if (RESET) await resetCoreState();
+
   adminToken = await ensureAdminToken();
 
   // Generate the dev built-in extension manifest before core boots so first-boot

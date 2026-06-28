@@ -15,6 +15,7 @@ import { join } from "@std/path";
 import { decodeBase64 } from "@std/encoding/base64";
 import {
   type ApplyOpts,
+  bumpVersionField,
   channelManifestDir,
   channelStoragePrefix,
   colors,
@@ -225,6 +226,8 @@ export const androidItem: ReleaseItem = {
   bumpHint: "packages/tomat-client/src/tauri/tauri.conf.json (version)",
 
   version: readAndroidVersion,
+  versionFile: TAURI_CONF_PATH,
+  bumpVersion: () => bumpVersionField(TAURI_CONF_PATH),
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
     return hashPaths(
@@ -294,6 +297,7 @@ export const androidItem: ReleaseItem = {
         const key = `${storagePrefix}${version}/${a.abi}/tomat.apk`;
         info(`uploading ${key}  (${humanBytes(a.size)})`);
         await r2Put(env, key, a.path, "application/vnd.android.package-archive");
+        opts.recordVersionedKey?.(key);
 
         // Mirror each APK to a version-less "current" alias so the install page
         // can link a stable download URL without knowing the version (see

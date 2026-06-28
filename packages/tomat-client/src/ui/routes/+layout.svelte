@@ -40,7 +40,6 @@
         if (!expansionState.has(id)) expansionState.set(id, value)
       },
       platform: onMobile ? "mobile" : "desktop",
-      density: onMobile ? "compact" : "comfortable",
       pointer: onMobile ? "coarse" : "fine",
       // Android owns the system back gesture, so its shells drop the in-app
       // back / close buttons; iOS and desktop keep them.

@@ -30,13 +30,12 @@
   const noop = (): void => {};
   const D = getDefaultSettings();
 
-  // The touch shell: compact density, coarse pointer. Schema defaults otherwise,
-  // exactly like the client at default settings on a phone.
+  // The touch shell: coarse pointer. Schema defaults otherwise, exactly like the
+  // client at default settings on a phone.
   setUiContext(
     makeUiContext({
       getSetting: (key) => D[key],
       platform: "mobile",
-      density: "compact",
       pointer: "coarse",
     }),
   );

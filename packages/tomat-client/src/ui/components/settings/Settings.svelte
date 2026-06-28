@@ -41,6 +41,7 @@
   import DownloadsModal from "./DownloadsModal.svelte";
   import DeletionsModal from "./DeletionsModal.svelte";
   import ShareModal from "./ShareModal.svelte";
+  import BuiltinToolkitModal from "./BuiltinToolkitModal.svelte";
 
   const log = getLogger("settings");
 
@@ -379,5 +380,6 @@
   <DeletionsModal />
   <ShareModal open={shareOpen} onClose={() => (shareOpen = false)} />
   <ColorPickerModal />
+  <BuiltinToolkitModal surface="settings" />
   </div>
 </div>

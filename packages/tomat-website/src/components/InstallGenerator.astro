@@ -19,9 +19,11 @@ import {
   CLIENT_OS,
   clientCommand,
   clientUninstallCommand,
+  commandStepsTail,
   CORE_OS,
   coreCommand,
   coreUninstallCommand,
+  openTerminalStep,
 } from "../lib/install.ts";
 
 interface Props {
@@ -52,7 +54,7 @@ const btnBase =
 const osBtn = `ig-os-btn ${btnBase} bg-surface-inset text-default-700 hover:bg-surface-inset-strong cursor-pointer`;
 const btnActive = `${btnBase} bg-default-inverted-300 text-default-inverted-900`;
 const codeBox =
-  "ig-cmd block rounded-large bg-surface-inset px-4 py-3 font-mono text-sm text-default-800 overflow-x-auto whitespace-nowrap";
+  "ig-cmd block rounded-large bg-surface-inset px-4 py-3 font-mono text-sm text-default-800 overflow-x-auto whitespace-nowrap no-scrollbar";
 ---
 
 <div class="ig flex flex-col gap-6">
@@ -186,6 +188,21 @@ const codeBox =
         </div>
       </div>
     )}
+
+    {/* How to: the OS-specific opener is CSS-toggled per client OS; the rest is
+        fixed. Hidden for Android, which has its own steps in the command block. */}
+    <div class="ig-howto-c flex flex-col gap-2">
+      <span class={label}>How to {verb}</span>
+      <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
+        <li class="ig-step ig-step-c-macos">{openTerminalStep("macos")}</li>
+        <li class="ig-step ig-step-c-linux">{openTerminalStep("linux")}</li>
+        <li class="ig-step ig-step-c-windows">{openTerminalStep("windows")}</li>
+        {commandStepsTail(mode, "client").map((s) => <li>{s}</li>)}
+        {!uninstall && (
+          <li>If you ever need to uninstall, follow <a href="/manual/settings/uninstalling" class="underline hover:text-default-700">the uninstallation guide</a>.</li>
+        )}
+      </ol>
+    </div>
   </div>
 
   {/* Step 2 (core): OS + channel + command + options. */}
@@ -265,13 +282,22 @@ const codeBox =
         </div>
       )}
     </div>
-  </div>
 
-  {!uninstall && (
-    <p class="text-sm text-default-500">
-      If you ever need to uninstall, follow <a href="/manual/settings/uninstalling" class="underline hover:text-default-700">the uninstallation guide</a>.
-    </p>
-  )}
+    {/* How to: the OS-specific opener is CSS-toggled per core OS; the rest is
+        fixed. */}
+    <div class="flex flex-col gap-2">
+      <span class={label}>How to {verb}</span>
+      <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
+        <li class="ig-step ig-step-o-macos">{openTerminalStep("macos")}</li>
+        <li class="ig-step ig-step-o-linux">{openTerminalStep("linux")}</li>
+        <li class="ig-step ig-step-o-windows">{openTerminalStep("windows")}</li>
+        {commandStepsTail(mode, "core").map((s) => <li>{s}</li>)}
+        {!uninstall && (
+          <li>If you ever need to uninstall, follow <a href="/manual/settings/uninstalling" class="underline hover:text-default-700">the uninstallation guide</a>.</li>
+        )}
+      </ol>
+    </div>
+  </div>
 </div>
 
 <style>
@@ -392,6 +418,28 @@ const codeBox =
   /* The client --purge note is irrelevant to Android (removed via the OS, no
      script), so hide it when Android is the selected client OS. */
   .ig:has(#ig-osc-android:checked) .ig-purge-note {
+    display: none;
+  }
+
+  /* How-to opener: the OS-specific first step, one per target x OS, toggled by
+     the same radios. list-item (not block, as the command boxes use) so the
+     ordered-list number still renders; the hidden variants drop out of the
+     count. */
+  .ig-step {
+    display: none;
+  }
+  .ig:has(#ig-osc-macos:checked) .ig-step-c-macos,
+  .ig:has(#ig-osc-linux:checked) .ig-step-c-linux,
+  .ig:has(#ig-osc-windows:checked) .ig-step-c-windows,
+  .ig:has(#ig-oso-macos:checked) .ig-step-o-macos,
+  .ig:has(#ig-oso-linux:checked) .ig-step-o-linux,
+  .ig:has(#ig-oso-windows:checked) .ig-step-o-windows {
+    display: list-item;
+  }
+
+  /* Android client installs from a downloaded APK, not a shell command, so its
+     steps live in the command block; hide the generic client how-to for it. */
+  .ig:has(#ig-osc-android:checked) .ig-howto-c {
     display: none;
   }
 </style>

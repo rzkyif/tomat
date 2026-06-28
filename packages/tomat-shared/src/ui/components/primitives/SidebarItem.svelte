@@ -47,10 +47,7 @@
   // centred icon; icon-only rows stay symmetric rectangles.
   const padRight = $derived(label ? (collapsed ? "pr-0" : "pr-2.5") : "pr-1.5");
 
-  // On a coarse-pointer / compact (mobile) shell the row is the primary
-  // full-screen settings navigation, so grow it to a comfortable tap target.
   const ui = useUiContext();
-  const heightClass = $derived(ui.density === "compact" ? "h-11" : "h-8");
 
   // The unselected resting tone brightens on hover; a coarse pointer (touch)
   // can't hover, so rest it at the brighter shade instead of leaving it dim.
@@ -80,7 +77,7 @@
      200ms because it animates the sidebar collapse, not button feedback, and so
      cannot share the single-property `transition-interactive` shortcut. -->
 <button
-  class="hov:cursor-pointer flex items-center {heightClass} pl-1.5 {padRight} gap-1.5 rounded-medium [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {stateClass} {extraClass}"
+  class="hov:cursor-pointer flex items-center h-8 pl-1.5 {padRight} gap-1.5 rounded-medium [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {stateClass} {extraClass}"
   {title}
   aria-label={ariaLabel ?? label}
   aria-pressed={ariaPressed}

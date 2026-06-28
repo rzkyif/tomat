@@ -86,19 +86,23 @@
     if (autoResize === "scroll" && focused) fitToContent();
   }
 
+  // The styled scrollbar is baked into the inset surface so every inset textarea
+  // scrolls consistently regardless of `autoResize` (a `surface="transparent"`
+  // textarea sits on its parent's surface, so the parent supplies the matching
+  // scrollbar class instead).
   const stateClass = $derived(
     surface === "transparent"
       ? "bg-transparent outline-none"
       : error
-        ? "bg-accent-red-300 border-accent-red-400 text-default-800 rounded-medium px-2 py-1.5 outline-none"
-        : "bg-surface-inset text-default-800 rounded-medium px-2 py-1.5 outline-none",
+        ? "bg-accent-red-300 border-accent-red-400 text-default-800 rounded-medium px-2 py-1.5 outline-none tomat-scroll-inset"
+        : "bg-surface-inset text-default-800 rounded-medium px-2 py-1.5 outline-none tomat-scroll-inset",
   );
 
   const sizeClass = $derived(
     autoResize === "grid"
       ? "min-w-0 w-full overflow-hidden resize-none whitespace-pre-wrap break-words"
       : autoResize === "scroll"
-        ? `${minHeight} w-full resize-y overflow-y-hidden focus:overflow-y-auto whitespace-pre-wrap break-words tomat-scroll`
+        ? `${minHeight} w-full resize-y overflow-y-hidden focus:overflow-y-auto whitespace-pre-wrap break-words`
         : "w-full",
   );
 

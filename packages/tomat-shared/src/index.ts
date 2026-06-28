@@ -18,6 +18,7 @@ export * from "./domain/settings/index.ts";
 export * from "./domain/prompts.ts";
 export * from "./domain/scheduled-prompt.ts";
 export * from "./domain/memory.ts";
+export * from "./domain/skill-frontmatter.ts";
 export * from "./domain/mcp.ts";
 
 export * from "./validation/tomat-json.ts";

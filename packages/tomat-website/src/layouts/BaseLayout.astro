@@ -105,17 +105,40 @@ const manualOrder = groupManual(await getCollection("manual"))
     {/* Staged homepage reveal. Marking the document JS-capable lets site.css hide
         the hero (the "Get tomat" button and the showcase) until the showcase
         signals it has measured and settled (`main[data-ready]`), so its
-        load-time layout settling is never seen as a shift. is:inline so it runs
-        before first paint; no-JS renders everything immediately (this never
-        runs). The timeout is a fail-safe in case the showcase never signals. */}
+        load-time layout settling is never seen as a shift. It also gates the
+        install page's data-js generator swap (the Svelte island vs the native
+        baseline). is:inline so it runs before first paint; no-JS renders
+        everything immediately (this never runs). Re-applied on astro:after-swap
+        because the swap resets documentElement's attributes to the incoming page
+        (which lacks data-js), so without this every client-side navigation drops
+        back to the no-JS baseline (e.g. the install generator loses its enhanced
+        island). The timeout is a fail-safe in case the showcase never signals. */}
     <script is:inline>
-      document.documentElement.setAttribute("data-js", "");
-      addEventListener("DOMContentLoaded", function () {
-        setTimeout(function () {
+      (function () {
+        function apply() {
+          document.documentElement.setAttribute("data-js", "");
+        }
+        apply();
+        addEventListener("DOMContentLoaded", function () {
+          setTimeout(function () {
+            var m = document.querySelector("main");
+            if (m) m.setAttribute("data-ready", "");
+          }, 2500);
+        });
+        // On client-side navigation the swap resets documentElement's attributes
+        // to the incoming page (dropping data-js), so re-apply it for the install
+        // generator gate. Also mark the new main ready immediately: the staged
+        // hero reveal hides the showcase's first-paint layout settling, and there
+        // is none to hide on an in-app navigation, so gating it here would just
+        // leave the homepage blank until the client:visible island happens to
+        // mount. after-swap runs before paint, so the homepage shows with no
+        // flash.
+        document.addEventListener("astro:after-swap", function () {
+          apply();
           var m = document.querySelector("main");
           if (m) m.setAttribute("data-ready", "");
-        }, 2500);
-      });
+        });
+      })();
     </script>
     {/* Critical styles for the staged homepage reveal. Inlined render-blocking
         (not UnoCSS utilities, which are injected by JS in dev) so the scrim

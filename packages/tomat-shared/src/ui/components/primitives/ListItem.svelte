@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { useUiContext } from "../../context.ts";
 
   type Direction = "col" | "row";
 
@@ -33,7 +32,6 @@
     class?: string;
   } = $props();
 
-  const ui = useUiContext();
   const interactive = $derived(!!(onclick || onmousedown));
 
   const surfaceClass = $derived(
@@ -44,17 +42,13 @@
         : "bg-transparent",
   );
 
-  // A tappable row floors at a 44px height on a coarse pointer so it is an
-  // easy touch target; non-interactive rows keep their natural height.
-  const touchClass = $derived(interactive && ui.pointer === "coarse" ? "min-h-11" : "");
-
   const contentLayoutClass = $derived(
     direction === "row" ? "flex flex-row items-center gap-3" : "flex flex-col",
   );
 </script>
 
 <div
-  class="flex items-center gap-2 rounded-large px-3 py-2 transition-colors {surfaceClass} {touchClass} {disabled ? 'opacity-60 pointer-events-none' : ''} {extraClass}"
+  class="flex items-center gap-2 rounded-large px-3 py-2 transition-colors {surfaceClass} {disabled ? 'opacity-60 pointer-events-none' : ''} {extraClass}"
   {role}
   aria-selected={ariaSelected}
 >

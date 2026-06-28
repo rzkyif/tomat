@@ -5,7 +5,7 @@
  * every WS connect, so it follows core switches and reconnects.
  */
 
-import type { Memory, MemoryMeta } from "@tomat/shared";
+import type { Memory, MemoryMeta, ServerToClientFrame } from "@tomat/shared";
 import { cores } from "$lib/core";
 import { getLogger } from "$lib/util/log";
 import { Subscriptions } from "$lib/util/subscriptions";
@@ -33,12 +33,22 @@ class MemoriesState {
    *  every connected edge. Idempotent, mirroring extensionsState.attach(). */
   attach(): void {
     this.subs.attach(() => [
+      cores().subscribeWs((f) => this.onFrame(f)),
       cores().subscribeConnectionState((state) => {
         if (state === "connected") {
           void this.load().catch((err) => log.warn("memory load on ws connect failed:", err));
         }
       }),
     ]);
+  }
+
+  /** Extension lifecycle (install, uninstall, delete) adds or drops the
+   *  read-only memories an extension ships, so reload on the same
+   *  `extension.snapshot` repaint signal extensionsState reacts to. */
+  private onFrame(frame: ServerToClientFrame): void {
+    if (frame.kind === "extension.snapshot") {
+      void this.load().catch((err) => log.warn("memory reload on snapshot failed:", err));
+    }
   }
 
   async load(): Promise<void> {
@@ -72,13 +82,6 @@ class MemoriesState {
   async delete(id: string): Promise<void> {
     await cores().api().memories.delete(id);
     this.memories = this.memories.filter((d) => d.id !== id);
-  }
-
-  /** Ask the core to regenerate this memory's summary + embedding. Reloads so
-   *  the staleness flag clears once indexing finishes. */
-  async reindex(id: string): Promise<void> {
-    await cores().api().memories.reindex(id);
-    await this.load();
   }
 
   getFile(id: string, name: string): Promise<string> {

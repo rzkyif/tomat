@@ -13,7 +13,6 @@ export { colorPickerModalSamples } from "./color-picker-modal.ts";
 export { commandPreviewFieldSamples } from "./command-preview-field.ts";
 export { messageStackSamples } from "./message-stack.ts";
 export { quickSettingsSamples } from "./quick-settings.ts";
-export { quickSettingsSectionSamples } from "./quick-settings-section.ts";
 export { scheduleConfirmFormSamples } from "./schedule-confirm-form.ts";
 export { scheduledPromptDetailSamples } from "./scheduled-prompt-detail.ts";
 export { sessionListSamples } from "./session-list.ts";
@@ -78,7 +77,6 @@ import { colorPickerModalSamples } from "./color-picker-modal.ts";
 import { commandPreviewFieldSamples } from "./command-preview-field.ts";
 import { messageStackSamples } from "./message-stack.ts";
 import { quickSettingsSamples } from "./quick-settings.ts";
-import { quickSettingsSectionSamples } from "./quick-settings-section.ts";
 import { scheduleConfirmFormSamples } from "./schedule-confirm-form.ts";
 import { scheduledPromptDetailSamples } from "./scheduled-prompt-detail.ts";
 import { sessionListSamples } from "./session-list.ts";
@@ -145,7 +143,6 @@ export const SAMPLES = {
   ConfirmModalView: confirmModalSamples,
   MessageStackView: messageStackSamples,
   QuickSettingsView: quickSettingsSamples,
-  QuickSettingsSectionView: quickSettingsSectionSamples,
   ScheduleConfirmFormView: scheduleConfirmFormSamples,
   ScheduledPromptDetailView: scheduledPromptDetailSamples,
   SessionListView: sessionListSamples,

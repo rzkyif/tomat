@@ -5,6 +5,7 @@
 import { dirname, join } from "@std/path";
 import { type ExtensionManifest, parseExtensionManifest } from "@tomat/shared";
 import { memoriesStore } from "../services/memories-store.ts";
+import { scheduleMemoryIndexing } from "../services/memories-indexer.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import { sha256Hex } from "../shared/hash.ts";
@@ -110,6 +111,10 @@ function registerDownloaded(
   // parent of the install dir so each row's `${extensionId}/${path}` filename
   // resolves back under the install dir (see registerExtensionMemories).
   memoriesStore().registerExtensionMemories(extensionId, dirname(installPath), parsed.memories);
+  // Index the just-registered memories so a knowledge memory's summary +
+  // embedding land now, rather than waiting for the next boot (skill memories
+  // already carry their frontmatter summary). Matches the manual rescan path.
+  scheduleMemoryIndexing();
 }
 
 // Flatten the per-kind permission object from tomat.json into a single

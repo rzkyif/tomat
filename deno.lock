@@ -7315,6 +7315,7 @@
   "workspace": {
     "dependencies": [
       "jsr:@noble/ed25519@3",
+      "jsr:@std/assert@1",
       "jsr:@std/cli@1",
       "jsr:@std/dotenv@0.225",
       "jsr:@std/encoding@1",

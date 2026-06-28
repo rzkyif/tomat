@@ -135,6 +135,41 @@ export function androidApkUrl(channel: Channel): string {
   return `${STORAGE_BASE}/${prefix}current/android-universal/tomat.apk`;
 }
 
+/** The OS-specific first "how to" step: which terminal to open. Split out from
+ *  the rest so the no-JS baseline can CSS-toggle it per OS while rendering the
+ *  fixed tail (see {@link commandStepsTail}) statically, and the island can read
+ *  it reactively. */
+export function openTerminalStep(os: Os): string {
+  return os === "windows"
+    ? "Open PowerShell."
+    : os === "macos"
+      ? "Open Terminal."
+      : "Open your terminal.";
+}
+
+/** The "how to" steps after the OS-specific opener ({@link openTerminalStep}),
+ *  fixed per mode + target. The install-only "uninstallation guide" pointer is
+ *  appended by the caller, since it carries a link rather than plain text. */
+export function commandStepsTail(mode: "install" | "uninstall", target: Target): string[] {
+  const run = "Paste the command above and press Enter.";
+  if (mode === "uninstall") {
+    return [
+      run,
+      target === "core"
+        ? "It stops the Core and removes it; turn on the option below to keep its sessions and memories."
+        : "It removes the app; turn on the option below to also wipe your settings.",
+    ];
+  }
+  if (target === "core") {
+    return [
+      run,
+      "Set an admin password when prompted; you'll need it to pair more devices.",
+      "When it finishes, note the pairing code it prints.",
+    ];
+  }
+  return [run, "When it finishes, launch tomat and pick where its Core should run."];
+}
+
 /** Map a navigator string to one of our OS ids, best-effort. */
 export function detectOs(ua: string, platform: string): Os {
   const s = `${ua} ${platform}`.toLowerCase();

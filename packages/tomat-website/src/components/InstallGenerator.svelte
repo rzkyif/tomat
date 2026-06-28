@@ -17,10 +17,12 @@
     CLIENT_OS,
     clientCommand,
     clientUninstallCommand,
+    commandStepsTail,
     CORE_OS,
     coreCommand,
     coreUninstallCommand,
     detectOs,
+    openTerminalStep,
     type Os,
     type Target,
   } from "../lib/install.ts";
@@ -70,20 +72,7 @@
         : coreCommand(coreOs, channel, { bindAll, service })),
   );
 
-  const steps = $derived.by(() => {
-    const open = os === "windows" ? "Open PowerShell." : os === "macos" ? "Open Terminal." : "Open your terminal.";
-    const run = "Paste the command above and press Enter.";
-    if (mode === "uninstall") {
-      const tail = target === "core"
-        ? "It stops the Core and removes it; turn on the option below to keep its sessions and memories."
-        : "It removes the app; turn on the option below to also wipe your settings.";
-      return [open, run, tail];
-    }
-    if (target === "core") {
-      return [open, run, "Set an admin password when prompted; you'll need it to pair more devices.", "When it finishes, note the pairing code it prints."];
-    }
-    return [open, run, "When it finishes, launch tomat and pick where its Core should run."];
-  });
+  const steps = $derived([openTerminalStep(os), ...commandStepsTail(mode, target)]);
 
   function selectOs(id: Os) {
     if (target === "client") clientOs = id;

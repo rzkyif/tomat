@@ -17,10 +17,12 @@ import type {
 import { BINARY_KINDS, UPSTREAM_BINARIES } from "../../packages/tomat-shared/src/domain/model.ts";
 import {
   type ApplyOpts,
+  bumpCoreVersion,
   channelBinSuffix,
   channelManifestDir,
   channelStoragePrefix,
   colors,
+  CONFIG_PATH,
   CORE_DIR,
   type DeployEnv,
   detectHostTriple,
@@ -675,6 +677,8 @@ export const coreItem: ReleaseItem = {
   bumpHint: "packages/tomat-core/src/config.ts (CORE_VERSION)",
 
   version: readCoreVersion,
+  versionFile: CONFIG_PATH,
+  bumpVersion: bumpCoreVersion,
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
     return hashPaths(
@@ -757,6 +761,7 @@ export const coreItem: ReleaseItem = {
       const key = `${prefix}${version}/${a.triple}/${a.filename}.gz`;
       info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(a.size)})`);
       await r2Put(env, key, gz.path, "application/gzip");
+      opts.recordVersionedKey?.(key);
     }
     ok(`uploaded ${artifacts.length} binaries`);
 
@@ -766,6 +771,7 @@ export const coreItem: ReleaseItem = {
       const key = `${prefix}${version}/${h.triple}/${h.filename}.gz`;
       info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(h.size)})`);
       await r2Put(env, key, gz.path, "application/gzip");
+      opts.recordVersionedKey?.(key);
     }
     ok(`uploaded ${helpers.length} helpers`);
 
@@ -775,6 +781,7 @@ export const coreItem: ReleaseItem = {
       const key = `${prefix}${version}/${s.triple}/${s.filename}`;
       info(`uploading ${key}  (${humanBytes(s.size)})`);
       await r2Put(env, key, s.path, "application/gzip");
+      opts.recordVersionedKey?.(key);
     }
     ok(`uploaded ${speech.length} speech binaries`);
 
@@ -784,6 +791,7 @@ export const coreItem: ReleaseItem = {
       const key = `${prefix}${version}/workers/${w.name}.gz`;
       info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(w.size)})`);
       await r2Put(env, key, gz.path, "application/gzip");
+      opts.recordVersionedKey?.(key);
     }
     ok(`uploaded ${workers.length} workers`);
 

@@ -53,13 +53,8 @@
   const ui = useUiContext();
   const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
 
-  // On a coarse pointer the label keeps its size but the button floors at a 44px
-  // tap target (taller than the desktop py-1/py-1.5), so it stays comfortable to
-  // hit without restyling the text.
   const sizeClass = $derived(
-    `${size === "sm" ? "px-2 py-1 text-xs gap-1" : "px-3 py-1.5 text-sm gap-1.5"} ${
-      ui.pointer === "coarse" ? "min-h-11" : ""
-    }`,
+    size === "sm" ? "px-2 py-1 text-xs gap-1" : "px-3 py-1.5 text-sm gap-1.5",
   );
 </script>
 

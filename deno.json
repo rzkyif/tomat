@@ -15,6 +15,7 @@
   "nodeModulesDir": "auto",
   "unstable": ["raw-imports"],
   "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.0",
     "@std/cli": "jsr:@std/cli@^1.0.0",
     "@std/path": "jsr:@std/path@^1.0.0",
     "@std/fs": "jsr:@std/fs@^1.0.0",

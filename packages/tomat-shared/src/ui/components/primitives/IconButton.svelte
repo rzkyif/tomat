@@ -125,15 +125,8 @@
       }[surface],
   );
 
-  // On a coarse pointer (touch) every icon button gets at least a 44px box
-  // (the WCAG / Material tap-target floor) without growing the glyph: the icon
-  // keeps its size and the extra space becomes hit area. A surfaceless button's
-  // padding stays invisible; a filled/circle one reads as a fuller tap target,
-  // which matches Material's 48dp icon button around a 24dp glyph.
-  const touchClass = $derived(ui.pointer === "coarse" ? "min-w-11 min-h-11" : "");
-
   const cls = $derived(
-    `flex items-center justify-center shrink-0 ${sizeClass} ${touchClass} ${variantClass} ${surfaceClass} ${roundedClass} hov:cursor-pointer transition-interactive disabled:opacity-50 disabled:pointer-events-none ${extraClass}`,
+    `flex items-center justify-center shrink-0 ${sizeClass} ${variantClass} ${surfaceClass} ${roundedClass} hov:cursor-pointer transition-interactive disabled:opacity-50 disabled:pointer-events-none ${extraClass}`,
   );
   const label = $derived(ariaLabel ?? title);
 </script>

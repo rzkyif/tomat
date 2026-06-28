@@ -572,6 +572,32 @@ input[type="range"]::-moz-range-thumb {
   background: rgba(255, 255, 255, 0.3);
 }
 
+/* Modifiers, combined with a surface class above. Listed after the base so they
+   win on equal specificity.
+
+     .tomat-scroll-thin   a 5px bar instead of 8px, for dense or secondary
+                          scrollers (e.g. the manual outline).
+     .tomat-scroll-hover  the thumb stays invisible until the scroller is
+                          hovered or holds focus, keeping it out of the way while
+                          reading. Pairs with `.tomat-scroll` (default surface);
+                          the gutter stays reserved, so revealing never reflows. */
+.tomat-scroll-thin::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.tomat-scroll-hover::-webkit-scrollbar-thumb,
+.dark .tomat-scroll-hover::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.tomat-scroll-hover:hover::-webkit-scrollbar-thumb,
+.tomat-scroll-hover:focus-within::-webkit-scrollbar-thumb {
+  background: var(--default-200);
+}
+.dark .tomat-scroll-hover:hover::-webkit-scrollbar-thumb,
+.dark .tomat-scroll-hover:focus-within::-webkit-scrollbar-thumb {
+  background: var(--default-d-200);
+}
+
 /* Checkerboard backdrop used behind partially-transparent color swatches
    (e.g. the new/previous comparison rect in the bubble color picker) so
    the alpha channel is visually distinguishable. */

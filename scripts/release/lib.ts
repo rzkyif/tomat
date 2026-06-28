@@ -259,6 +259,41 @@ export async function readVersionField(path: string): Promise<string> {
   return cfg.version;
 }
 
+/** Return `v` with its patch component incremented (major.minor stay put). */
+export function bumpPatch(v: string): string {
+  const [maj, min, patch] = parseSemver(v);
+  return `${maj}.${min}.${patch + 1}`;
+}
+
+/** Surgically bump `CORE_VERSION` in config.ts to the next patch, preserving the
+ *  rest of the file byte-for-byte. Returns the new version. */
+export async function bumpCoreVersion(): Promise<string> {
+  const text = await Deno.readTextFile(CONFIG_PATH);
+  const re = /(export\s+const\s+CORE_VERSION\s*=\s*")([^"]+)(")/;
+  const match = text.match(re);
+  if (!match) fail(`could not parse CORE_VERSION from ${rel(CONFIG_PATH)}`);
+  const next = bumpPatch(match[2]);
+  await Deno.writeTextFile(CONFIG_PATH, text.replace(re, `$1${next}$3`));
+  return next;
+}
+
+/** Surgically bump the top-level `"version"` field of a JSON file to the next
+ *  patch, anchored on its current value so formatting and every other field are
+ *  untouched. Returns the new version. */
+export async function bumpVersionField(path: string): Promise<string> {
+  const text = await Deno.readTextFile(path);
+  const current = await readVersionField(path);
+  const next = bumpPatch(current);
+  const re = new RegExp(`("version"\\s*:\\s*")${escapeRegExp(current)}(")`);
+  if (!re.test(text)) fail(`could not locate "version": "${current}" in ${rel(path)}`);
+  await Deno.writeTextFile(path, text.replace(re, `$1${next}$2`));
+  return next;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // ---------------------------------------------------------------------------
 // canonical JSON for signing. Single-sourced in @tomat/shared (imported above)
 // so the signer here and the core verifiers (binaries/manifest.ts,
@@ -445,6 +480,35 @@ export async function r2PutInline(
   }
 }
 
+/** Delete one R2 object. Warns and continues on failure rather than aborting:
+ *  pruned objects are already off every live manifest, so a lingering artifact is
+ *  harmless, and failing an already-published release over a stale delete is
+ *  worse. Returns whether the delete succeeded. */
+export async function r2Delete(env: DeployEnv, key: string): Promise<boolean> {
+  const cmd = new Deno.Command("deno", {
+    args: [
+      "run",
+      "-A",
+      "npm:wrangler@^4",
+      "r2",
+      "object",
+      "delete",
+      `${env.r2Bucket}/${key}`,
+      "--remote",
+    ],
+    cwd: WEBSITE_DIR,
+    env: wranglerEnv(env),
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const { code } = await cmd.output();
+  if (code !== 0) {
+    info(colors.yellow(`prune: r2 delete ${key} exited ${code}; skipping`));
+    return false;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // idempotency probes (HTTPS GETs against R2 / Worker)
 
@@ -607,15 +671,53 @@ export function semverGt(a: string, b: string): boolean {
 
 export const RELEASE_STATE_KEY = "manifests/release-state.json";
 
+/** Versioned artifacts kept on R2 per item per channel; older ones are pruned. */
+export const VERSION_RETENTION = 2;
+
+export interface VersionEntry {
+  version: string;
+  /** Full bucket keys (WITH channel prefix) uploaded for this version. */
+  keys: string[];
+}
+
 export interface ItemState {
   version?: string;
   sourceHash: string;
+  /** Newest-first published-version history, capped at VERSION_RETENTION.
+   *  Absent for latest-only items (manifests/schemas/scripts). */
+  history?: VersionEntry[];
 }
 
 export interface ReleaseCursor {
   schemaVersion: 1;
   channels: Record<string, Record<string, ItemState>>;
   shared: Record<string, ItemState>;
+}
+
+/** Fold a freshly published version's uploaded keys into an item's history and
+ *  report which keys fall outside the retention window. A version already in the
+ *  history (platform-fill / force republish) has its keys unioned in place, so it
+ *  is not re-ordered and never self-evicts; a genuinely new version goes to the
+ *  front (the version-bump gate guarantees it is the highest, so front == newest).
+ *  Pure and I/O-free so it can be unit-tested without a release. */
+export function mergeVersionHistory(
+  history: VersionEntry[] | undefined,
+  version: string,
+  keys: string[],
+  cap: number,
+): { history: VersionEntry[]; evictedKeys: string[] } {
+  const prior = history ?? [];
+  const idx = prior.findIndex((e) => e.version === version);
+  let next: VersionEntry[];
+  if (idx >= 0) {
+    next = [...prior];
+    next[idx] = { version, keys: [...new Set([...prior[idx].keys, ...keys])] };
+  } else {
+    next = [{ version, keys: [...new Set(keys)] }, ...prior];
+  }
+  const kept = next.slice(0, cap);
+  const evicted = next.slice(cap);
+  return { history: kept, evictedKeys: evicted.flatMap((e) => e.keys) };
 }
 
 export async function readReleaseCursor(env: DeployEnv): Promise<ReleaseCursor> {
@@ -656,6 +758,10 @@ export interface ApplyOpts {
   triples: Triple[];
   /** Build + sign locally but skip every R2 upload. */
   dryRun: boolean;
+  /** Versioned items append each uploaded versioned key (full key, WITH channel
+   *  prefix) here so the orchestrator can record it in the cursor and prune older
+   *  versions. Latest-only items (manifests/schemas/scripts) ignore it. */
+  recordVersionedKey?(key: string): void;
 }
 
 export interface ReleaseItem {
@@ -675,6 +781,14 @@ export interface ReleaseItem {
   sourceHash(channel: ReleaseChannel): Promise<string>;
   /** Current local version. */
   version(): Promise<string>;
+  /** Absolute path of the file holding the version. Doubles as the dedupe key
+   *  for the post-release bump: items sharing a file (client + android both use
+   *  tauri.conf.json) bump it exactly once. */
+  versionFile: string;
+  /** Bump `versionFile`'s version to the next patch (uncommitted) after a
+   *  successful release, so the next cycle publishes the following version.
+   *  Returns the new version. */
+  bumpVersion(): Promise<string>;
   /** Extra "changed" signal beyond a source-hash diff (e.g. a client platform
    *  not yet published at the current version). Never gates a version bump. */
   extraChanged?(env: DeployEnv, channel: ReleaseChannel): Promise<boolean>;
@@ -834,10 +948,18 @@ export async function runReleasePlan(
     return 0;
   }
 
-  const applyOpts: ApplyOpts = { triples: opts.triples, dryRun: opts.dryRun };
+  // Each item's apply() appends the versioned keys it uploads to its own list so
+  // the cursor below can record them and prune older versions.
+  const recordedKeys = new Map<string, string[]>();
   for (const p of changed) {
     step(`Releasing: ${p.item.label}`);
-    await p.item.apply(env, channel, applyOpts);
+    const keys: string[] = [];
+    recordedKeys.set(p.item.id, keys);
+    await p.item.apply(env, channel, {
+      triples: opts.triples,
+      dryRun: opts.dryRun,
+      recordVersionedKey: (k) => keys.push(k),
+    });
   }
 
   if (opts.dryRun) {
@@ -845,16 +967,57 @@ export async function runReleasePlan(
     return changed.length;
   }
 
-  step("Updating release-state cursor");
+  // Auto-bump: each item whose source changed has just published at its current
+  // version, so advance its file to the next patch (uncommitted) ready for the
+  // next cycle. Dedupe by versionFile so a shared file (client + android share
+  // tauri.conf.json) bumps once. A platform-fill change (sourceChanged === false)
+  // republishes the same version and is not bumped.
+  step("Bumping versions for the next release");
+  const bumpedFiles = new Set<string>();
   for (const p of changed) {
-    const state = { version: p.localVersion, sourceHash: p.localHash };
+    if (!p.sourceChanged || bumpedFiles.has(p.item.versionFile)) continue;
+    bumpedFiles.add(p.item.versionFile);
+    const next = await p.item.bumpVersion();
+    ok(`bumped ${p.item.label} ${p.localVersion} -> ${next} (uncommitted)`);
+  }
+
+  step("Updating release-state cursor");
+  const pruneTargets: string[] = [];
+  for (const p of changed) {
+    const prev =
+      p.item.scope === "shared" ? cursor.shared[p.item.id] : cursor.channels[channel]?.[p.item.id];
+    // Record the version just published (not the bumped one) so the gate's
+    // local > recorded check passes next time, and the post-bump source hash so
+    // the version-file edit above does not read as a source change on rerun.
+    const state: ItemState = {
+      version: p.localVersion,
+      sourceHash: await p.item.sourceHash(channel),
+    };
+    const keys = recordedKeys.get(p.item.id) ?? [];
+    if (keys.length > 0) {
+      // Versioned item: fold this version's keys into the retained history and
+      // queue anything beyond the window for deletion.
+      const merged = mergeVersionHistory(prev?.history, p.localVersion, keys, VERSION_RETENTION);
+      state.history = merged.history;
+      pruneTargets.push(...merged.evictedKeys);
+    } else if (prev?.history) {
+      // Latest-only item (or nothing uploaded this run): carry history forward.
+      state.history = prev.history;
+    }
     if (p.item.scope === "shared") {
       cursor.shared[p.item.id] = state;
     } else {
       (cursor.channels[channel] ??= {})[p.item.id] = state;
     }
   }
+  // Write the cursor before pruning so a crash mid-prune leaves harmless orphans
+  // rather than a cursor claiming a just-deleted version is retained.
   await writeReleaseCursor(env, cursor);
   ok(`cursor updated`);
+
+  if (pruneTargets.length > 0) {
+    step(`Pruning ${pruneTargets.length} evicted artifact(s) from R2`);
+    for (const key of pruneTargets) await r2Delete(env, key);
+  }
   return changed.length;
 }
