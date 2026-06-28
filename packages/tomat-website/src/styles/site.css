@@ -25,6 +25,20 @@ html {
   interpolate-size: allow-keywords;
 }
 
+/* Height of the sticky top chrome (pre-release banner + 3.5rem navbar), consumed
+   by every offset that hangs off the bottom of the chrome. These values are the
+   first-paint / no-JS fallback: one banner line on wider screens, two on narrow
+   ones where the notice wraps. BaseLayout's measure script overrides this with
+   the exact rendered height once JS runs (and on resize). */
+:root {
+  --chrome-h: 6rem;
+}
+@media (min-width: 768px) {
+  :root {
+    --chrome-h: 5rem;
+  }
+}
+
 /* Install page: show exactly one generator. With JS off, the native-HTML
    baseline (InstallGenerator.astro) is the live control; with JS, the Svelte
    island (InstallGenerator.svelte) takes over. data-js is set on <html> before
@@ -552,7 +566,7 @@ html.dark .focus-grid-frame {
   pointer-events: none;
 }
 .gallery-scroll-fade-top {
-  top: 3.5rem;
+  top: var(--chrome-h);
   background: linear-gradient(to bottom, var(--default-50), transparent);
 }
 .gallery-scroll-fade-bottom {
@@ -625,15 +639,16 @@ details[open] > summary .expandable-chevron {
    vertical). Moving between manual subsections slides vertically along the
    outline order (up = a lower item, down = a higher one); only the article is
    named for that case, so the outline sidebar stays put while the content
-   slides. The navbar is
+   slides. The top chrome is
    transition:persist'd, so it never slides. Falls back to the default cross-fade
    with no JS or reduced motion. */
 
-/* Lift the persisted navbar into its own view-transition group so it is not
-   captured into the sliding `root` snapshot: with the same name on every page it
-   morphs in place (no movement), keeping the bar fixed while the page slides. */
-.vt-navbar {
-  view-transition-name: vt-navbar;
+/* Lift the persisted top chrome (pre-release banner + navbar) into its own
+   view-transition group so it is not captured into the sliding `root` snapshot:
+   with the same name on every page it morphs in place (no movement), keeping the
+   bar fixed while the page slides. */
+.vt-chrome {
+  view-transition-name: vt-chrome;
 }
 
 /* Name the article only while sliding vertically, so home <-> manual still

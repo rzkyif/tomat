@@ -4,7 +4,7 @@ import Gallery from "../components/gallery/Gallery.svelte";
 ---
 
 <BaseLayout title="tomat Gallery" description="Shared UI component gallery.">
-  <main class="min-h-[calc(100dvh-3.5rem)]">
+  <main class="min-h-[calc(100dvh-var(--chrome-h))]">
     {
       /* No `client:*` directive: the gallery is a non-interactive visual QA
         surface, so it renders to static HTML and ships ZERO component JS. The one

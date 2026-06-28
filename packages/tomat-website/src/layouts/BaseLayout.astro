@@ -68,6 +68,28 @@ const manualOrder = groupManual(await getCollection("manual"))
         document.addEventListener("astro:after-swap", apply);
       })();
     </script>
+    {/* Publish the sticky chrome's real height (the pre-release banner + navbar)
+        as --chrome-h, so every offset that hangs off the bottom of the chrome
+        (the mobile menu + scrim, the scroll fades, the viewport-fit page heights)
+        tracks it. The banner wraps to two-plus lines on narrow screens, so its
+        height is only known at runtime; measure the rendered header and re-measure
+        on resize. Re-applied on astro:after-swap because the swap resets
+        documentElement's inline style (same reason as the theme script); the CSS
+        :root fallback covers first paint and the no-JS case. */}
+    <script is:inline>
+      (function () {
+        function apply() {
+          var el = document.querySelector(".vt-chrome");
+          if (el) {
+            document.documentElement.style.setProperty("--chrome-h", el.offsetHeight + "px");
+          }
+        }
+        addEventListener("DOMContentLoaded", apply);
+        addEventListener("resize", apply);
+        document.addEventListener("astro:after-swap", apply);
+        document.addEventListener("astro:page-load", apply);
+      })();
+    </script>
     {/* Direction-aware page slide: tag <html> with the travel direction before
         each view transition, which the CSS in site.css turns into a slide.
         Crossing between the navbar's top-level pages (home/install/manual/gallery,

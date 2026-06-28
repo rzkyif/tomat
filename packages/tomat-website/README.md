@@ -47,29 +47,32 @@ cd packages/tomat-website && deno task preview    # wrangler dev
 
 ## Release & deploy
 
-The site is published as part of the repo-wide release. From the **repo root**:
+The site ships on its own track, separate from the repo-wide release. From the
+**repo root**:
 
 ```sh
-deno task release           # publish everything changed, latest channel
-deno task release:stable    # ... stable channel
+deno task release:website   # build Astro + wrangler deploy the landing page
 ```
 
-The release rebuilds only what changed (tracked by a source-hash cursor on R2)
-and gates each item behind a version bump. The website's version lives in
+It runs `astro build` then `wrangler deploy`, gated by the same source-hash
+cursor on R2 and version-bump check the umbrella `deno task release` uses, so an
+unchanged site is a no-op (pass `--force` to deploy anyway, `--dry-run` to build
+without deploying). The website's version lives in
 `packages/tomat-website/deno.json`; for the full version-bump table and channel
-details see [DEVELOPMENT.md](../../DEVELOPMENT.md#channels). The website item
-runs `astro build` then `wrangler deploy`.
+details see [DEVELOPMENT.md](../../DEVELOPMENT.md#channels). `deno task release`
+publishes everything **except** the landing page.
 
 **One-time Cloudflare setup** (needs the `tomat.ing` zone on Cloudflare):
 
 ```sh
-deno run -A npm:wrangler@^4 login                              # browser OAuth
 deno run -A npm:wrangler@^4 r2 bucket create tomat-releases    # release artifacts
 ```
 
-Then in the Cloudflare dashboard attach the custom domains: `get.au.tomat.ing`
-to the R2 bucket (R2 -> tomat-releases -> Settings -> Custom Domains; enables
-public read) and `au.tomat.ing` to the Worker (set on first `deploy` via
-`wrangler.toml`). Seed `.env` at the repo root from `.env.example`
-(release-only: manifest signing + Cloudflare/R2 credentials; the signing keypair
-is generated on first run).
+wrangler authenticates with `CLOUDFLARE_API_TOKEN` (+ `CLOUDFLARE_ACCOUNT_ID`)
+from the repo-root `.env`, the same credentials the rest of the release uses; if
+both are blank it falls back to a stored `wrangler login` OAuth session. Then in
+the Cloudflare dashboard attach the custom domains: `get.au.tomat.ing` to the R2
+bucket (R2 -> tomat-releases -> Settings -> Custom Domains; enables public read)
+and `au.tomat.ing` to the Worker (set on first `deploy` via `wrangler.toml`).
+Seed `.env` at the repo root from `.env.example` (release-only: manifest signing
+plus Cloudflare/R2 credentials; the signing keypair is generated on first run).

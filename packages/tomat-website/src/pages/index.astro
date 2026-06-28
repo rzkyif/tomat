@@ -13,7 +13,7 @@ import Showcase from "../components/showcase/Showcase.svelte";
       row's height when sizing the demo. The top padding is the bar->cta gap
       (gap-6/gap-10) minus the navbar's own 0.5rem padding below its tab nav, so
       the navbar->showcase gap matches the other two. */}
-  <main class="h-[calc(100dvh-3.5rem)] flex flex-col justify-center gap-6 sm:gap-10 pt-4 sm:pt-8 pb-6 overflow-hidden">
+  <main class="h-[calc(100dvh-var(--chrome-h))] flex flex-col justify-center gap-6 sm:gap-10 pt-4 sm:pt-8 pb-6 overflow-hidden">
     <Showcase client:visible />
     <div data-install class="home-reveal shrink-0 w-full max-w-xl mx-auto px-4">
       {/* Styled to match the client's primary "Continue" button (NewCore flow),

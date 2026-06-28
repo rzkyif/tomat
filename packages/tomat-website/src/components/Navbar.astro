@@ -35,19 +35,31 @@ const rowActive = "bg-surface-inset text-default-900";
 ---
 
 {
-  /* transition:persist keeps the navbar bar mounted across view transitions, so
-    the knob can slide to the new page (updated by the script below). persist
-    alone keeps the DOM node, but the bar's pixels are still captured into the
-    `root` snapshot and would slide with the page; the `vt-navbar` class
-    (site.css) gives it its own view-transition-name so it is lifted into a
-    static group and the page content slides under a fixed bar. The
-    sidebar/scrim are intentionally NOT inside this element, so they re-render
-    per page with correct highlights. */
+  /* The sticky top chrome: a thin pre-release banner stacked above the navbar
+    bar, pinned together so both stay visible while the page scrolls under them.
+    transition:persist keeps the header mounted across view transitions (so the
+    knob can slide to the new page, updated by the script below); persist alone
+    keeps the DOM node, but its pixels are still captured into the `root`
+    snapshot and would slide with the page, so the `vt-chrome` class (site.css)
+    gives it its own view-transition-name to lift it into a static group while
+    the page content slides under it. The sidebar/scrim are intentionally NOT
+    inside this element, so they re-render per page with correct highlights. */
 }
-<nav
-  transition:persist="navbar"
-  class="vt-navbar sticky top-0 z-50 h-14 bg-surface"
+<header
+  transition:persist="chrome"
+  class="vt-chrome sticky top-0 z-50"
 >
+  {
+    /* Pre-release notice. Auto-height (no fixed height) so it grows to two-plus
+      lines when the copy wraps on narrow screens; the header's measured height
+      feeds --chrome-h (see BaseLayout) so everything below tracks it. */
+  }
+  <div
+    class="flex items-center justify-center bg-accent-yellow-300 px-4 py-1 text-center text-xs text-accent-yellow-900"
+  >
+    This website is currently in a pre-release demo state and may contain incorrect information.
+  </div>
+  <nav class="h-14 bg-surface">
   <div
     class="relative mx-auto h-full w-full max-w-6xl px-5 md:px-4 flex items-center justify-between"
   >
@@ -162,17 +174,18 @@ const rowActive = "bg-surface-inset text-default-900";
       </span>
     </IconButton>
   </div>
-</nav>
+  </nav>
+</header>
 
 {
-  /* Mobile menu + scrim. A full-width panel that drops down from under the navbar
-    to fit its content (not a full-height drawer). Outside the persisted <nav> so
-    they re-render per page (correct highlights), toggled by the persisted
+  /* Mobile menu + scrim. A full-width panel that drops down from under the chrome
+    to fit its content (not a full-height drawer). Outside the persisted <header>
+    so they re-render per page (correct highlights), toggled by the persisted
     checkbox via :has. */
 }
 <label for="nav-toggle" class="scrim md:hidden" aria-hidden="true"></label>
 <aside
-  class="sidebar tomat-scroll md:hidden fixed top-14 left-0 right-0 z-40 bg-surface flex flex-col max-h-[calc(100dvh-3.5rem)] overflow-y-auto"
+  class="sidebar tomat-scroll md:hidden fixed top-[var(--chrome-h)] left-0 right-0 z-40 bg-surface flex flex-col max-h-[calc(100dvh-var(--chrome-h))] overflow-y-auto"
 >
   <nav class="p-3 flex flex-col gap-1" aria-label="Site">
     <a
@@ -246,16 +259,16 @@ const rowActive = "bg-surface-inset text-default-900";
   .nav-toggle {
     position: absolute;
   }
-  /* The panel drops down from under the navbar (translateY), sitting BELOW the
-     navbar in the stack (z-40 vs the navbar's z-50) so that while hidden above
-     its top-14 anchor it stays tucked behind the opaque bar. */
+  /* The panel drops down from under the chrome (translateY), sitting BELOW the
+     chrome in the stack (z-40 vs the chrome's z-50) so that while hidden above
+     its --chrome-h anchor it stays tucked behind the opaque bar. */
   .sidebar {
     transform: translateY(-100%);
     transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   .scrim {
     position: fixed;
-    inset: 3.5rem 0 0 0;
+    inset: var(--chrome-h) 0 0 0;
     background: rgba(0, 0, 0, 0.35);
     opacity: 0;
     pointer-events: none;
@@ -302,7 +315,7 @@ const rowActive = "bg-surface-inset text-default-900";
 </style>
 
 <script>
-  // The navbar bar is persisted across view transitions, so after each
+  // The top chrome is persisted across view transitions, so after each
   // navigation the knob still sits over the previous page: re-measure the active
   // cell and clip the knob to it (the CSS transition turns the changing rect into
   // a grow/shrink slide). Cells are content-sized, so the rect can only be known

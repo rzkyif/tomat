@@ -121,6 +121,11 @@ export function decodeBase64(s: string): Uint8Array {
 export interface DeployEnv {
   signingPrivateKey: Uint8Array;
   signingPublicKey: Uint8Array;
+  /** Cloudflare token + account id wrangler authenticates with. Empty when the
+   *  user relies on a stored `wrangler login` OAuth session instead; the
+   *  release scripts only hand these to wrangler when set (see wranglerEnv). */
+  cloudflareApiToken: string;
+  cloudflareAccountId: string;
   websiteDomain: string;
   storageDomain: string;
   r2Bucket: string;
@@ -195,6 +200,8 @@ export async function loadOrSeedEnv(): Promise<DeployEnv> {
   return {
     signingPrivateKey: decodeBase64(privB64),
     signingPublicKey: decodeBase64(pubB64),
+    cloudflareApiToken: get("CLOUDFLARE_API_TOKEN"),
+    cloudflareAccountId: get("CLOUDFLARE_ACCOUNT_ID"),
     websiteDomain: get("TOMAT_WEBSITE_DOMAIN") || "au.tomat.ing",
     storageDomain: get("TOMAT_STORAGE_DOMAIN") || "get.au.tomat.ing",
     r2Bucket: get("TOMAT_R2_BUCKET") || "tomat-releases",
@@ -310,6 +317,18 @@ export function channelStoragePrefix(channel: ReleaseChannel): string {
 // ---------------------------------------------------------------------------
 // astro + wrangler
 
+/** Subprocess env additions so the spawned wrangler authenticates with the
+ *  CLOUDFLARE_* credentials from .env. loadDotenv runs with export:false, so the
+ *  token never reaches Deno.env and a child wouldn't inherit it; we hand it to
+ *  wrangler explicitly here. Returns undefined when nothing is set, in which
+ *  case wrangler falls back to its stored `wrangler login` OAuth session. */
+export function wranglerEnv(env: DeployEnv): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  if (env.cloudflareApiToken) out.CLOUDFLARE_API_TOKEN = env.cloudflareApiToken;
+  if (env.cloudflareAccountId) out.CLOUDFLARE_ACCOUNT_ID = env.cloudflareAccountId;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export async function astroBuild(): Promise<void> {
   const cmd = new Deno.Command("deno", {
     args: ["run", "-A", "npm:astro@^6.4.4", "build"],
@@ -321,10 +340,11 @@ export async function astroBuild(): Promise<void> {
   if (code !== 0) fail(`astro build exited ${code}`);
 }
 
-export async function wranglerDeploy(): Promise<void> {
+export async function wranglerDeploy(env: DeployEnv): Promise<void> {
   const cmd = new Deno.Command("deno", {
     args: ["run", "-A", "npm:wrangler@^4", "deploy"],
     cwd: WEBSITE_DIR,
+    env: wranglerEnv(env),
     stdout: "inherit",
     stderr: "inherit",
   });
@@ -360,6 +380,7 @@ export async function r2Put(
   const cmd = new Deno.Command("deno", {
     args,
     cwd: WEBSITE_DIR,
+    env: wranglerEnv(env),
     stdout: "inherit",
     stderr: "inherit",
   });
@@ -678,4 +699,162 @@ export async function signEd25519(privateKey: Uint8Array, body: unknown): Promis
  *  over the client.json bytes), where no shared canonicalizer is available. */
 export async function signEd25519Bytes(privateKey: Uint8Array, bytes: Uint8Array): Promise<string> {
   return encodeBase64(await ed.signAsync(bytes, privateKey));
+}
+
+// ---------------------------------------------------------------------------
+// plan + apply orchestration
+//
+// Shared by the umbrella release (main.ts, all items) and the standalone
+// website release (website.ts, the website item only): read the cursor, diff
+// each item, gate changed-but-unbumped items, confirm, apply, and write the
+// cursor back. Callers pre-filter the item list and supply the channel + flags.
+
+export interface RunReleaseOpts {
+  yes: boolean;
+  force: boolean;
+  dryRun: boolean;
+  triples: Triple[];
+}
+
+interface PlanEntry {
+  item: ReleaseItem;
+  changed: boolean;
+  /** the source hash itself changed (gates a version bump). */
+  sourceChanged: boolean;
+  localVersion: string;
+  recordedVersion?: string;
+  localHash: string;
+  /** human description shown in the plan table. */
+  desc: string;
+}
+
+function cursorState(
+  cursor: ReleaseCursor,
+  item: ReleaseItem,
+  channel: ReleaseChannel,
+): { version?: string; sourceHash: string } | undefined {
+  return item.scope === "shared" ? cursor.shared[item.id] : cursor.channels[channel]?.[item.id];
+}
+
+async function planItem(
+  env: DeployEnv,
+  item: ReleaseItem,
+  channel: ReleaseChannel,
+  cursor: ReleaseCursor,
+  force: boolean,
+): Promise<PlanEntry> {
+  const localHash = await item.sourceHash(channel);
+  const localVersion = await item.version();
+  const recorded = cursorState(cursor, item, channel);
+  const sourceChanged = force || !recorded || recorded.sourceHash !== localHash;
+  const extra = item.extraChanged ? await item.extraChanged(env, channel) : false;
+  const changed = sourceChanged || extra;
+
+  let desc: string;
+  if (!changed) {
+    desc = "up to date";
+  } else if (sourceChanged) {
+    desc = `v${recorded?.version ?? "none"} → v${localVersion}`;
+  } else {
+    // changed only because a platform is missing at the current version
+    desc = `v${localVersion} (publish missing platform)`;
+  }
+
+  return {
+    item,
+    changed,
+    sourceChanged,
+    localVersion,
+    recordedVersion: recorded?.version,
+    localHash,
+    desc,
+  };
+}
+
+/** Read the cursor, plan each item, enforce the version-bump gate, confirm, and
+ *  apply + record the changed items. Returns the number of items published (0
+ *  when nothing changed or the user aborted). */
+export async function runReleasePlan(
+  env: DeployEnv,
+  items: ReleaseItem[],
+  channel: ReleaseChannel,
+  opts: RunReleaseOpts,
+): Promise<number> {
+  step("Reading release-state cursor");
+  const cursor = await readReleaseCursor(env);
+
+  step("Planning");
+  const plans: PlanEntry[] = [];
+  for (const item of items) {
+    plans.push(await planItem(env, item, channel, cursor, opts.force));
+  }
+
+  // Version-bump gate: any item whose source changed but whose version isn't
+  // strictly greater than what's published is rejected (only when a prior
+  // record exists; the first release of an item is always allowed). A
+  // platform-fill change (sourceChanged === false) never requires a bump.
+  const needsBump = plans.filter(
+    (p) =>
+      p.sourceChanged &&
+      p.recordedVersion !== undefined &&
+      !semverGt(p.localVersion, p.recordedVersion),
+  );
+  if (needsBump.length > 0) {
+    console.log("\n" + colors.red(colors.bold("Release rejected: version bump required")) + "\n");
+    for (const p of needsBump) {
+      console.log(
+        "  " +
+          colors.red("✗") +
+          ` ${p.item.label}: changed but still v${p.localVersion} ` +
+          `(published v${p.recordedVersion}). Bump ${p.item.bumpHint}`,
+      );
+    }
+    fail(`bump the version(s) above, then re-run.`);
+  }
+
+  const changed = plans.filter((p) => p.changed);
+  if (changed.length === 0) {
+    ok(`nothing to release; everything matches the ${channel} channel`);
+    return 0;
+  }
+
+  console.log("\n" + colors.bold(`Release plan (${channel}):`) + "\n");
+  for (const p of changed) {
+    console.log("  " + colors.green("•") + ` ${p.item.label.padEnd(18)} ${p.desc}`);
+  }
+  console.log("");
+
+  // Confirm before doing any work. Change detection already told us what
+  // differs; the build happens as part of each item's apply() after the user
+  // says yes.
+  if (opts.dryRun) {
+    info(colors.yellow("dry-run: building locally, no uploads or cursor write"));
+  } else if (!opts.yes && !promptYesNo("Proceed with release?")) {
+    info("aborted; nothing was released.");
+    return 0;
+  }
+
+  const applyOpts: ApplyOpts = { triples: opts.triples, dryRun: opts.dryRun };
+  for (const p of changed) {
+    step(`Releasing: ${p.item.label}`);
+    await p.item.apply(env, channel, applyOpts);
+  }
+
+  if (opts.dryRun) {
+    ok(`dry-run complete; ${changed.length} item(s) built locally, nothing published`);
+    return changed.length;
+  }
+
+  step("Updating release-state cursor");
+  for (const p of changed) {
+    const state = { version: p.localVersion, sourceHash: p.localHash };
+    if (p.item.scope === "shared") {
+      cursor.shared[p.item.id] = state;
+    } else {
+      (cursor.channels[channel] ??= {})[p.item.id] = state;
+    }
+  }
+  await writeReleaseCursor(env, cursor);
+  ok(`cursor updated`);
+  return changed.length;
 }

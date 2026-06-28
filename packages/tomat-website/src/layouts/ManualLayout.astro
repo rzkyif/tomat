@@ -15,7 +15,7 @@ const { title, entries, currentId } = Astro.props;
   <div class="mx-auto flex w-full max-w-6xl gap-8 px-5 py-8 md:px-4">
     {/* Desktop: a left outline sidebar, sticky under the navbar. */}
     <aside class="hidden md:block w-60 shrink-0">
-      <div class="tomat-scroll sticky top-[5.5rem] max-h-[calc(100dvh-7rem)] overflow-y-auto pr-2">
+      <div class="tomat-scroll sticky top-[calc(var(--chrome-h)+2rem)] max-h-[calc(100dvh-var(--chrome-h)-3.5rem)] overflow-y-auto pr-2">
         <ManualOutline entries={entries} currentId={currentId} defaultOpen />
       </div>
     </aside>
@@ -29,15 +29,15 @@ const { title, entries, currentId } = Astro.props;
   </div>
 
   {/* Soft scroll fades, fixed to the viewport: the top one sits just under the
-      sticky navbar (top-14), the bottom one hugs the window edge. Each shows
+      sticky chrome (--chrome-h), the bottom one hugs the window edge. Each shows
       only when the window can still scroll that way, toggled by the script
       below. Mirrors the settings panel's scroll-area fades (SettingsShellView):
       from-default-50 matches the page's bg-surface, z-40 keeps them under the
-      navbar's z-50. */}
+      chrome's z-50. */}
   <div
     id="manual-fade-top"
     aria-hidden="true"
-    class="pointer-events-none fixed left-0 right-0 top-14 z-40 h-6 bg-gradient-to-b from-default-50 to-transparent opacity-0 transition-opacity duration-100"
+    class="pointer-events-none fixed left-0 right-0 top-[var(--chrome-h)] z-40 h-6 bg-gradient-to-b from-default-50 to-transparent opacity-0 transition-opacity duration-100"
   >
   </div>
   <div
