@@ -7,11 +7,19 @@
   // write-only handling, and the enable-confirmation flow; this View stays pure:
   // it takes the draft field values + status as data and emits on*-change
   // callbacks, with a pre-filtered prompts array toggled via onTogglePrompt.
-  import type { McpConnectionStatus, McpStdioRuntime, McpTransportKind } from "../../../domain/mcp.ts";
+  import type {
+    McpConnectionStatus,
+    McpRemoteAuth,
+    McpStdioRuntime,
+    McpTransportKind,
+  } from "../../../domain/mcp.ts";
+  import Button from "../primitives/Button.svelte";
   import FormField from "../primitives/FormField.svelte";
   import Input from "../primitives/Input.svelte";
   import Select from "../primitives/Select.svelte";
   import Toggle from "../primitives/Toggle.svelte";
+  import SubsectionHeader from "../primitives/SubsectionHeader.svelte";
+  import ErrorDetailView from "../chat/messages/ErrorDetailView.svelte";
 
   // One prompt row the live server exposes, pre-filtered to this server by the
   // client and toggled for "/" autocomplete.
@@ -27,7 +35,9 @@
     enabled = false,
     status,
     statusError = undefined,
+    remoteAuth = "none",
     hasAuth = false,
+    oauthAuthorized = false,
     draftName,
     draftKind,
     draftCommand,
@@ -48,14 +58,18 @@
     onToggleAllowAll = noop,
     onPermissionsInput = noop,
     onUrlInput = noop,
+    onRemoteAuthChange = noop,
     onAuthTokenInput = noop,
+    onSignIn = noop,
     onFlush = noop,
     onTogglePrompt = noop,
   }: {
     enabled?: boolean;
     status: McpConnectionStatus;
     statusError?: string;
+    remoteAuth?: McpRemoteAuth;
     hasAuth?: boolean;
+    oauthAuthorized?: boolean;
     draftName: string;
     draftKind: McpTransportKind;
     draftCommand: string;
@@ -76,7 +90,9 @@
     onToggleAllowAll?: (v: boolean) => void;
     onPermissionsInput?: (v: string) => void;
     onUrlInput?: (v: string) => void;
+    onRemoteAuthChange?: (v: McpRemoteAuth) => void;
     onAuthTokenInput?: (v: string) => void;
+    onSignIn?: () => void;
     onFlush?: () => void;
     onTogglePrompt?: (name: string, enabled: boolean) => void;
   } = $props();
@@ -88,6 +104,12 @@
     { value: "remote", label: "Remote (HTTP/SSE)" },
   ];
 
+  const AUTH_OPTIONS = [
+    { value: "none", label: "None" },
+    { value: "bearer", label: "Bearer token" },
+    { value: "oauth", label: "OAuth 2.1" },
+  ];
+
   const RUNTIME_OPTIONS = [
     { value: "custom", label: "Custom command" },
     { value: "deno", label: "Bundled deno" },
@@ -95,25 +117,13 @@
 </script>
 
 <div class="flex flex-col gap-3">
-  <div class="flex {horizontal ? 'items-center justify-between gap-3' : 'flex-col gap-1.5'}">
-    <div class="flex flex-col gap-0.5 min-w-0">
-      <span class="text-sm text-default-800">Connect</span>
-      {#if status === "error" && statusError}
-        <span class="text-xs text-accent-red-600 break-words">{statusError}</span>
-      {:else}
-        <span class="text-xs text-default-600">Status: {status}</span>
-      {/if}
-    </div>
-    <div class={horizontal ? "w-28 shrink-0" : ""}>
-      <Toggle
-        compact
-        labels={{ on: "ON", off: "OFF" }}
-        checked={enabled}
-        ariaLabel="Enable server"
-        onchange={(v) => onToggleEnabled(v)}
-      />
-    </div>
-  </div>
+  <FormField label="Connect" description={`Status: ${status}`} descriptionTier="always" {horizontal}>
+    <Toggle checked={enabled} ariaLabel="Enable server" onchange={(v) => onToggleEnabled(v)} />
+  </FormField>
+
+  {#if status === "error" && statusError}
+    <ErrorDetailView detail={statusError} />
+  {/if}
 
   <FormField label="Name">
     <Input
@@ -167,24 +177,18 @@
         />
       </FormField>
       <div class="flex flex-col gap-1.5 pt-2 border-t border-surface">
-        <div class="flex {horizontal ? 'items-center justify-between gap-3' : 'flex-col gap-1.5'}">
-          <div class="flex flex-col gap-0.5 min-w-0">
-            <span class="text-sm text-default-800">Full Access</span>
-            <span class="text-xs text-default-600">
-              Runs with full access for the widest compatibility. Turn off to choose permissions
-              yourself.
-            </span>
-          </div>
-          <div class={horizontal ? "w-28 shrink-0" : ""}>
-            <Toggle
-              compact
-              labels={{ on: "ON", off: "OFF" }}
-              checked={draftAllowAll}
-              ariaLabel="Full access"
-              onchange={(v) => onToggleAllowAll(v)}
-            />
-          </div>
-        </div>
+        <FormField
+          label="Full Access"
+          description="Runs with full access for the widest compatibility. Turn off to choose permissions yourself."
+          descriptionTier="always"
+          {horizontal}
+        >
+          <Toggle
+            checked={draftAllowAll}
+            ariaLabel="Full access"
+            onchange={(v) => onToggleAllowAll(v)}
+          />
+        </FormField>
         {#if !draftAllowAll}
           <FormField label="Permissions">
             <Input
@@ -235,42 +239,66 @@
         onblur={() => onFlush()}
       />
     </FormField>
-    <FormField label="Bearer token">
-      <Input
-        type="password"
-        value={draftAuthToken}
-        placeholder={hasAuth ? "(stored - leave blank to keep)" : "optional"}
-        mono
-        ariaLabel="Bearer token"
-        oninput={(v) => onAuthTokenInput(v)}
-        onblur={() => onFlush()}
+    <FormField label="Authentication">
+      <Select
+        value={remoteAuth}
+        options={AUTH_OPTIONS}
+        ariaLabel="Authentication"
+        onchange={(v) => onRemoteAuthChange(v as McpRemoteAuth)}
       />
     </FormField>
+    {#if remoteAuth === "bearer"}
+      <FormField label="Bearer token">
+        <Input
+          type="password"
+          value={draftAuthToken}
+          placeholder={hasAuth ? "(stored - leave blank to keep)" : "optional"}
+          mono
+          ariaLabel="Bearer token"
+          oninput={(v) => onAuthTokenInput(v)}
+          onblur={() => onFlush()}
+        />
+      </FormField>
+    {:else if remoteAuth === "oauth"}
+      <FormField
+        label="Sign in"
+        description={oauthAuthorized
+          ? "Signed in. Sign in again only if access is revoked."
+          : "Authorize in your browser to connect."}
+        descriptionTier="always"
+        {horizontal}
+      >
+        <Button
+          variant={oauthAuthorized ? "secondary" : "primary"}
+          size="sm"
+          icon="i-material-symbols-login-rounded"
+          onclick={() => onSignIn()}
+        >
+          {oauthAuthorized ? "Sign in again" : "Sign in"}
+        </Button>
+      </FormField>
+    {/if}
   {/if}
 
   {#if prompts.length > 0}
     <div class="flex flex-col gap-1.5 pt-2 border-t border-surface">
-      <div class="text-default-400 text-[10px] uppercase tracking-wider select-none">
-        Prompts (trigger with /)
-      </div>
+      <SubsectionHeader label="Prompts (trigger with /)" />
       {#each prompts as p (p.name)}
-        <div class="flex {horizontal ? 'items-center justify-between gap-3' : 'flex-col gap-1'}">
-          <div class="flex flex-col gap-0.5 min-w-0">
-            <code class="text-xs text-default-800 self-start">/{p.name}</code>
-            {#if p.description}
-              <span class="text-xs text-default-600 break-words">{p.description}</span>
-            {/if}
-          </div>
-          <div class={horizontal ? "w-28 shrink-0" : ""}>
-            <Toggle
-              compact
-              labels={{ on: "ON", off: "OFF" }}
-              checked={p.enabled}
-              ariaLabel={`Enable /${p.name}`}
-              onchange={(v) => onTogglePrompt(p.name, v)}
-            />
-          </div>
-        </div>
+        <FormField label={`/${p.name}`} {horizontal}>
+          {#snippet labelContent()}
+            <div class="flex flex-col gap-0.5 min-w-0">
+              <code class="text-xs text-default-800 self-start">/{p.name}</code>
+              {#if p.description}
+                <span class="text-xs text-default-600 break-words">{p.description}</span>
+              {/if}
+            </div>
+          {/snippet}
+          <Toggle
+            checked={p.enabled}
+            ariaLabel={`Enable /${p.name}`}
+            onchange={(v) => onTogglePrompt(p.name, v)}
+          />
+        </FormField>
       {/each}
     </div>
   {/if}

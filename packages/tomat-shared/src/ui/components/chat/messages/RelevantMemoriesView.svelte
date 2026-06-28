@@ -1,5 +1,6 @@
 <script lang="ts">
   import ExpandableMessageView from "./ExpandableMessageView.svelte";
+  import ErrorDetailView from "./ErrorDetailView.svelte";
 
   // The "Found N relevant memories" bubble: the shared collapsed-message shell
   // with a body listing each matched memory and its score. The client wrapper
@@ -50,11 +51,7 @@
   {#snippet body()}
     <div class="flex flex-col gap-2 text-xs text-left">
       {#if errorMessage}
-        <div class="flex flex-col gap-1">
-          <div class="text-accent-red-700 font-bold">Filter Error</div>
-          <pre
-            class="tomat-scroll-inset font-mono text-accent-red-900 bg-accent-red-100 border border-accent-red-300 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre-wrap break-words">{errorMessage}</pre>
-        </div>
+        <ErrorDetailView message="Couldn't search your memories" detail={errorMessage} />
       {/if}
 
       {#if count === 0}

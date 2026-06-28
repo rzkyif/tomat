@@ -45,7 +45,7 @@
       primary:
         "bg-default-inverted-300 text-default-inverted-900 hov:bg-default-inverted-400",
       secondary: "bg-surface-inset text-default-800 hov:bg-default-300",
-      destructive: "bg-accent-red-200 text-white hov:bg-accent-red-300",
+      destructive: "bg-accent-red-200 text-accent-red-900 hov:bg-accent-red-300",
       ghost: "bg-transparent text-default-800 hov:bg-surface-inset",
     }[variant],
   );

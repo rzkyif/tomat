@@ -12,6 +12,7 @@
   let {
     exitLabel = "Continue to Chat",
     exitTitle = "Back to Chat",
+    exitIcon = "i-material-symbols-arrow-forward-rounded",
     onExit = noop,
     containerRef = noopEl,
     sections,
@@ -20,6 +21,9 @@
     exitLabel?: string;
     /** The close button's title/tooltip. */
     exitTitle?: string;
+    /** The bottom button's leading icon (e.g. a download glyph when downloads
+     *  are pending). */
+    exitIcon?: string;
     onExit?: () => void;
     /** Receives the accordion region element so the client can observe it for
      *  its horizontal-mode threshold. */
@@ -36,22 +40,26 @@
   }
 </script>
 
-<!-- Header -->
-<div class="flex items-center gap-2 shrink-0">
-  <i class="flex i-material-symbols-bolt-rounded text-2xl text-default-700"></i>
-  <h1 class="text-lg font-medium text-default-800 flex-1">Quick Settings</h1>
-  <IconButton
-    icon="i-material-symbols-close-rounded"
-    title={exitTitle}
-    size="lg"
-    variant="subtle"
-    surface="circle"
-    onclick={onExit}
-  />
+<!-- Header: the title row and its intro prose grouped so they read as one block
+     with a small gap, rather than relying on a negative margin to claw back the
+     panel's section gap. -->
+<div class="flex flex-col gap-1 shrink-0">
+  <div class="flex items-center gap-2">
+    <i class="flex i-material-symbols-bolt-rounded text-2xl text-default-700"></i>
+    <h1 class="text-lg font-medium text-default-800 flex-1">Quick Settings</h1>
+    <IconButton
+      icon="i-material-symbols-close-rounded"
+      title={exitTitle}
+      size="lg"
+      variant="subtle"
+      surface="circle"
+      onclick={onExit}
+    />
+  </div>
+  <p class="text-sm text-default-600">
+    The essentials to get going. Everything here is also in Settings.
+  </p>
 </div>
-<p class="text-sm text-default-600 -mt-3 shrink-0">
-  The essentials to get going. Everything here is also in Settings.
-</p>
 
 <!-- Accordion -->
 <div class="flex flex-col gap-1 flex-1 min-h-0" {@attach attachContainer}>
@@ -60,6 +68,7 @@
 
 <Button
   variant="primary"
+  icon={exitIcon}
   onclick={onExit}
   class="shrink-0 px-4 py-2.5 rounded-large font-medium"
 >

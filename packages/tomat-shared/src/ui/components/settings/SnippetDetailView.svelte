@@ -1,10 +1,10 @@
 <script lang="ts">
   // Presentational body of a snippet's detail pane: the name field, the trigger
-  // symbol select with a live trigger preview line, the placement select, and
-  // the snippet text textarea. All values arrive pre-resolved (the client owns
-  // the store, the draft snapshot, the name validation, the symbol options, and
-  // the precomputed `triggerPreview` string), so this stays pure: props in,
-  // callbacks out. The detail header and scroll shell live in ../objects/*;
+  // select (each option is the full live trigger preview, e.g. `@name`), the
+  // placement select, and the snippet text textarea. All values arrive
+  // pre-resolved (the client owns the store, the draft snapshot, the name
+  // validation, and the symbol options whose labels are the previews), so this
+  // stays pure: props in, callbacks out. The detail header and scroll shell live in ../objects/*;
   // this is only SnippetDetail's own body markup. The four draft fields are
   // $bindable to mirror the client's edit drafts.
   import FormField from "../primitives/FormField.svelte";
@@ -16,7 +16,6 @@
 
   let {
     nameError = null,
-    triggerPreview = "",
     symbolOptions = [],
     placementOptions = [],
     onNameInput,
@@ -31,7 +30,6 @@
     draftText = $bindable(""),
   }: {
     nameError?: string | null;
-    triggerPreview?: string;
     symbolOptions?: Option[];
     placementOptions?: Option[];
     onNameInput?: (v: string) => void;
@@ -70,7 +68,6 @@
       ariaLabel="Snippet trigger symbol"
       onchange={(v) => (onSymbolChange ?? noop)(v)}
     />
-    <p class="mt-1 text-xs text-muted font-mono">{triggerPreview}</p>
   </FormField>
 
   <FormField label="Placement">

@@ -6,6 +6,8 @@
   // stays pure: props in, callbacks out. Provider-agnostic: a tool with no
   // declared permissions shows the empty note instead of the grant list.
   import Toggle from "../primitives/Toggle.svelte";
+  import FormField from "../primitives/FormField.svelte";
+  import SubsectionHeader from "../primitives/SubsectionHeader.svelte";
   import type { GrantState } from "../../../domain/extension.ts";
 
   // One permission row, fully pre-formatted by the client. `before`/`code`/
@@ -56,55 +58,44 @@
 </script>
 
 <div class="flex flex-col gap-3">
-  <div
-    class="flex {horizontal ? 'items-start justify-between gap-3' : 'flex-col gap-1.5'}"
+  <FormField
+    label="Enabled"
+    description={enabled && deniedRequired > 0
+      ? "Enabled, but not offered to the agent while a required permission is denied."
+      : undefined}
+    descriptionTier="always"
+    {horizontal}
   >
-    <div class="flex flex-col gap-1 min-w-0">
-      <span class="text-sm text-default-800">Enabled</span>
-      {#if enabled && deniedRequired > 0}
-        <span class="text-xs text-accent-yellow-600">
-          Enabled, but not offered to the agent while a required permission is denied.
-        </span>
-      {/if}
-    </div>
-    <div class={horizontal ? "w-36 shrink-0" : ""}>
-      <Toggle
-        compact
-        labels={{ on: "ENABLED", off: "DISABLED" }}
-        checked={enabled}
-        disabled={enableBusy}
-        ariaLabel={enableAriaLabel}
-        onchange={(v) => (onToggleEnabled ?? noop)(v)}
-      />
-    </div>
-  </div>
+    <Toggle
+      checked={enabled}
+      disabled={enableBusy}
+      ariaLabel={enableAriaLabel}
+      onchange={(v) => (onToggleEnabled ?? noop)(v)}
+    />
+  </FormField>
 
   {#if permissions.length > 0}
     <div class="flex flex-col gap-1.5">
-      <div class="text-default-400 text-[10px] uppercase tracking-wider select-none">
-        Permissions
-      </div>
+      <SubsectionHeader label="Permissions" />
       {#each permissions as perm (perm.key)}
-        <div
-          class="flex {horizontal ? 'items-start justify-between gap-3' : 'flex-col gap-1.5'}"
-        >
-          <div class="flex flex-col gap-0.5 min-w-0">
-            <span class="text-xs text-default-800 break-words">
-              {perm.before}{#if perm.code}<code class={codeClass}>{perm.code}</code>{/if}{perm.after}{#if perm.required}<span
-                  class="text-default-500 ml-1.5">(required)</span
-                >{/if}
-            </span>
-            <span class="text-xs text-default-600 break-words">{perm.reason}</span>
-          </div>
-          <div class={horizontal ? "w-44 shrink-0" : ""}>
-            <Toggle
-              value={perm.grantState}
-              options={GRANT_OPTIONS}
-              ariaLabel={perm.ariaLabel}
-              onselect={(v) => (onGrantChange ?? noop)(perm.key, v as GrantState)}
-            />
-          </div>
-        </div>
+        <FormField label={perm.ariaLabel} {horizontal}>
+          {#snippet labelContent()}
+            <div class="flex flex-col gap-0.5 min-w-0">
+              <span class="text-xs text-default-800 break-words">
+                {perm.before}{#if perm.code}<code class={codeClass}>{perm.code}</code>{/if}{perm.after}{#if perm.required}<span
+                    class="text-default-500 ml-1.5">(required)</span
+                  >{/if}
+              </span>
+              <span class="text-xs text-default-600 break-words">{perm.reason}</span>
+            </div>
+          {/snippet}
+          <Toggle
+            value={perm.grantState}
+            options={GRANT_OPTIONS}
+            ariaLabel={perm.ariaLabel}
+            onselect={(v) => (onGrantChange ?? noop)(perm.key, v as GrantState)}
+          />
+        </FormField>
       {/each}
     </div>
   {:else}

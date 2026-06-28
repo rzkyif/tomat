@@ -11,6 +11,7 @@
   import Select from "../primitives/Select.svelte";
   import HelpText from "../primitives/HelpText.svelte";
   import Alert from "../primitives/Alert.svelte";
+  import IconButton from "../primitives/IconButton.svelte";
 
   // One badge chip inside a card (icon + pre-formatted text).
   interface Badge {
@@ -121,18 +122,28 @@
       onclick={() => b.selectable && (onSelectBucket ?? noop)(b.id)}
     />
     {#if b.better}
-      <Alert
-        variant="info"
-        size="sm"
-        action={{
-          icon: b.better.applying ? "i-line-md:loading-loop" : "i-material-symbols-check-rounded",
-          title: "Apply",
-          onclick: b.better.onApply,
-        }}
-        onclose={b.better.onDismiss}
+      <!-- The "better model available" notice renders in the same inverted color
+           as a selected preset card so it reads as belonging to the bucket above
+           it rather than as a detached info banner. -->
+      <div
+        class="flex items-center gap-2 p-3 rounded-large bg-default-inverted-300 text-default-inverted-800"
       >
-        {b.better.message}
-      </Alert>
+        <span class="flex-1 text-sm">{b.better.message}</span>
+        <IconButton
+          icon={b.better.applying ? "i-line-md:loading-loop" : "i-material-symbols-check-rounded"}
+          title="Apply"
+          size="sm"
+          colorClass="text-default-inverted-600 hov:text-default-inverted-900"
+          onclick={b.better.onApply}
+        />
+        <IconButton
+          icon="i-material-symbols-close-rounded"
+          title="Dismiss"
+          size="sm"
+          colorClass="text-default-inverted-600 hov:text-default-inverted-900"
+          onclick={b.better.onDismiss}
+        />
+      </div>
     {/if}
   {/each}
 

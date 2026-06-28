@@ -153,7 +153,10 @@ async function main(): Promise<void> {
 
   // Connect to enabled MCP servers in the background; their tools/prompts/
   // resources become available as each connection settles. Failures are
-  // captured per-server (status='error'), never block boot.
+  // captured per-server (status='error'), never block boot. The manager
+  // broadcasts a snapshot when it changes status on its own (a dropped
+  // connection, an auto-reconnect, a server's list_changed notification).
+  mcpManager().notifyOn(() => wsHub().broadcastAll({ kind: "mcp.snapshot" }));
   void mcpManager()
     .sync(mcpRegistry().list())
     .catch((err) => {

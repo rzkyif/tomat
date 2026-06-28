@@ -35,6 +35,7 @@ import type OptionCard from "../components/primitives/OptionCard.svelte";
 import type Popover from "../components/primitives/Popover.svelte";
 import type SearchInput from "../components/primitives/SearchInput.svelte";
 import type SectionHeader from "../components/primitives/SectionHeader.svelte";
+import type SubsectionHeader from "../components/primitives/SubsectionHeader.svelte";
 import type Select from "../components/primitives/Select.svelte";
 import type SidebarItem from "../components/primitives/SidebarItem.svelte";
 import type Slider from "../components/primitives/Slider.svelte";
@@ -227,6 +228,11 @@ const sectionHeaderSamples = {
   collapsibleExpanded: { label: "Advanced", collapsible: true, expanded: true },
 } satisfies Bundle<typeof SectionHeader>;
 
+const subsectionHeaderSamples = {
+  default: { label: "Bundled files" },
+  withActions: { label: "Permissions" },
+} satisfies Bundle<typeof SubsectionHeader>;
+
 const selectSamples = {
   default: { value: "balanced", options: SELECT_OPTIONS },
   disabled: { value: "fast", options: SELECT_OPTIONS, disabled: true },
@@ -256,7 +262,7 @@ const sidebarItemSamples = {
     pingTone: "accent",
   },
   disabled: {
-    icon: "i-material-symbols-lock-outline-rounded",
+    icon: "i-material-symbols-lock-outline",
     label: "Locked",
     collapsed: false,
     disabled: true,
@@ -293,7 +299,6 @@ const textareaSamples = {
 const toggleSamples = {
   off: { checked: false },
   on: { checked: true },
-  pill: { checked: true, variant: "pill" },
   multiChoice: {
     options: [
       { value: "off", label: "Off" },
@@ -339,6 +344,7 @@ export const PRIMITIVE_SAMPLES = {
   Popover: popoverSamples,
   SearchInput: searchInputSamples,
   SectionHeader: sectionHeaderSamples,
+  SubsectionHeader: subsectionHeaderSamples,
   Select: selectSamples,
   SidebarItem: sidebarItemSamples,
   Slider: sliderSamples,

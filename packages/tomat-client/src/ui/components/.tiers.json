@@ -241,7 +241,7 @@
     },
     "settings/fields/McpField.svelte": {
       "tier": "C",
-      "composes": ["ObjectDetailHeaderView", "ObjectDetailScrollView"]
+      "composes": ["ObjectDetailHeaderView", "ObjectDetailScrollView", "McpFieldView"]
     },
     "settings/fields/McpDetail.svelte": {
       "tier": "B",

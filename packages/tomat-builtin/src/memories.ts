@@ -1,4 +1,5 @@
-// Memory tools over the host's `ctx.memories` module: write (create or
+// Memory tools over the host's `ctx.memories` module: list (titles +
+// summaries the agent can browse when relevance misses), write (create or
 // replace), edit (exact find/replace), read, and show (render the content
 // as a markdown bubble). Write/edit return a `memory_diff` result and
 // read a `memory_content` result; the client renders those kinds
@@ -41,6 +42,17 @@ export async function editMemory(
   const result = await ctx.memories.edit(title, find, replace);
   ctx.setProgress(1, "Memory edited", result.title);
   return { kind: "memory_diff", ...result };
+}
+
+export async function listMemories(
+  _args: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<{ memories: { title: string; kind: "knowledge" | "skill"; summary?: string }[] }> {
+  const memories = await ctx.memories.list();
+  ctx.setProgress(1, "Listed memories", `${memories.length} found`);
+  return {
+    memories: memories.map((m) => ({ title: m.title, kind: m.kind, summary: m.summary })),
+  };
 }
 
 export async function readMemory(

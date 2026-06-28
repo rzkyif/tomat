@@ -32,15 +32,17 @@ const verb = mode === "install" ? "Install" : "Uninstall";
 const uninstall = mode === "uninstall";
 
 const CH = "latest";
+// No-JS baseline: the command is pre-rendered without options (a static page
+// can't fold a toggle into it), so the flags note below carries the choices.
 const clientCmd = {
-  macos: uninstall ? clientUninstallCommand("macos", CH) : clientCommand("macos", CH),
-  linux: uninstall ? clientUninstallCommand("linux", CH) : clientCommand("linux", CH),
-  windows: uninstall ? clientUninstallCommand("windows", CH) : clientCommand("windows", CH),
+  macos: uninstall ? clientUninstallCommand("macos", CH, { purge: false }) : clientCommand("macos", CH),
+  linux: uninstall ? clientUninstallCommand("linux", CH, { purge: false }) : clientCommand("linux", CH),
+  windows: uninstall ? clientUninstallCommand("windows", CH, { purge: false }) : clientCommand("windows", CH),
 };
 const coreCmd = {
-  macos: uninstall ? coreUninstallCommand("macos", CH) : coreCommand("macos", CH, { bindAll: false, service: true }),
-  linux: uninstall ? coreUninstallCommand("linux", CH) : coreCommand("linux", CH, { bindAll: false, service: true }),
-  windows: uninstall ? coreUninstallCommand("windows", CH) : coreCommand("windows", CH, { bindAll: false, service: true }),
+  macos: uninstall ? coreUninstallCommand("macos", CH, { keepData: false }) : coreCommand("macos", CH, { bindAll: false, service: true }),
+  linux: uninstall ? coreUninstallCommand("linux", CH, { keepData: false }) : coreCommand("linux", CH, { bindAll: false, service: true }),
+  windows: uninstall ? coreUninstallCommand("windows", CH, { keepData: false }) : coreCommand("windows", CH, { bindAll: false, service: true }),
 };
 const apk = androidApkUrl(CH);
 

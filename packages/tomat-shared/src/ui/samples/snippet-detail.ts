@@ -2,17 +2,21 @@ import type { ComponentProps } from "svelte";
 import type { OmitSnippetProps } from "./types.ts";
 import type SnippetDetailView from "../components/settings/SnippetDetailView.svelte";
 
-// The client derives these from a live snippet draft: it validates the name,
-// builds the symbol options (marking the recommended one), maps the placement
-// list, and precomputes the `triggerPreview` string (`symbol` + name). These
-// scripted stand-ins cover a fully-filled snippet, an empty/new one, and a
-// name-collision error state.
+// The client derives these from a live snippet draft: it validates the name and
+// builds the symbol options whose labels are the full trigger preview (`symbol` +
+// name), marking the recommended one. These scripted stand-ins cover a
+// fully-filled snippet, an empty/new one, and a name-collision error state.
 
-const symbolOptions = [
-  { value: "#", label: "#" },
-  { value: "@", label: "@" },
-  { value: "/", label: "/  (Recommended)" },
-];
+// Each option label is the live trigger preview for the draft name, so the
+// dropdown shows `@name` / `#name` / `/name` rather than bare symbols.
+const symbolOptions = (name: string) => {
+  const word = name || "name";
+  return [
+    { value: "#", label: `#${word}` },
+    { value: "@", label: `@${word}` },
+    { value: "/", label: `/${word}  (Recommended)` },
+  ];
+};
 
 const placementOptions = [
   { value: "prepend-system", label: "Prepend System Prompt" },
@@ -31,19 +35,17 @@ export const snippetDetailSamples = {
     draftSymbol: "/",
     draftPlacement: "replace-user",
     draftText: "Summarize the conversation so far in three short bullets.",
-    triggerPreview: "/summarize",
-    symbolOptions,
+    symbolOptions: symbolOptions("summarize"),
     placementOptions,
   },
-  // A fresh snippet before anything is typed: empty name, preview falls back to
-  // the placeholder word.
+  // A fresh snippet before anything is typed: empty name, the option previews
+  // fall back to the placeholder word.
   empty: {
     draftName: "",
     draftSymbol: "#",
     draftPlacement: "insert-user",
     draftText: "",
-    triggerPreview: "#name",
-    symbolOptions,
+    symbolOptions: symbolOptions(""),
     placementOptions,
   },
   // The chosen trigger collides with another snippet's trigger.
@@ -52,9 +54,8 @@ export const snippetDetailSamples = {
     draftSymbol: "@",
     draftPlacement: "prepend-system",
     draftText: "You are a meticulous research scientist.",
-    triggerPreview: "@scientist",
     nameError: "This trigger is already used by another snippet",
-    symbolOptions,
+    symbolOptions: symbolOptions("scientist"),
     placementOptions,
   },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof SnippetDetailView>>>;

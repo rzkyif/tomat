@@ -28,8 +28,8 @@
 <script lang="ts">
   import type { Alignment } from "../../types.ts";
   import Bubble from "../primitives/Bubble.svelte";
-  import Alert from "../primitives/Alert.svelte";
   import Button from "../primitives/Button.svelte";
+  import ErrorDetailView from "../chat/messages/ErrorDetailView.svelte";
   import Expand from "../primitives/Expand.svelte";
   import FormField from "../primitives/FormField.svelte";
   import IconButton from "../primitives/IconButton.svelte";
@@ -173,7 +173,7 @@
         {#if step === "chooseDestination"}
           Add a Core
         {:else if step === "localConfirm"}
-          Set up a Core on this computer
+          Install a Core
         {:else}
           Connect to a Remote Core
         {/if}
@@ -370,9 +370,7 @@
     </Expand>
 
     {#if connectionError}
-      <Alert variant="error" class="rounded-large">
-        {connectionError}
-      </Alert>
+      <ErrorDetailView message={connectionError} />
     {/if}
 
     {#if remoteUrl.trim()}
@@ -570,8 +568,6 @@
   {/if}
 
   {#if error}
-    <Alert variant="error" class="rounded-large">
-      {error}
-    </Alert>
+    <ErrorDetailView message={error} />
   {/if}
 {/snippet}

@@ -44,7 +44,7 @@
 
 <div class="flex flex-col gap-2">
   <button
-    class="{headerClass} {isRight ? 'justify-end' : ''}"
+    class="{headerClass} {isRight ? 'justify-end text-right' : 'text-left'}"
     {disabled}
     onclick={() => (expanded = !expanded)}
     title={expanded ? "Collapse" : "Expand"}

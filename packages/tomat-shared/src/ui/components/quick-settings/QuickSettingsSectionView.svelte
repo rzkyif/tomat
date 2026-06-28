@@ -53,12 +53,15 @@
       <span class="flex-1 text-left text-base font-medium">{title}</span>
     </button>
     {#if hasToggle}
-      <Toggle
-        variant="pill"
-        checked={enabled}
-        ariaLabel={`Enable ${title}`}
-        onchange={onSetEnabled}
-      />
+      <div class="w-24 shrink-0">
+        <Toggle
+          compact
+          labels={{ on: "ON", off: "OFF" }}
+          checked={enabled}
+          ariaLabel={`Enable ${title}`}
+          onchange={onSetEnabled}
+        />
+      </div>
     {/if}
   </div>
   <!-- pl-7 lines the field column up under the header title: chevron

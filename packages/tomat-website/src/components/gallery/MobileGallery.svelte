@@ -169,10 +169,9 @@
   />
 {/snippet}
 {#snippet chatSessionBar(_z: number)}
-  <!-- Enable the session-management buttons (list + new) the mobile bar shows. -->
+  <!-- The session-management buttons (list + new) always show with the bar. -->
   <SessionBarView
     {...SAMPLES.SessionBarView.default as ComponentProps<typeof SessionBarView>}
-    showButtonGroup
     onList={noop}
     onNew={noop}
   />

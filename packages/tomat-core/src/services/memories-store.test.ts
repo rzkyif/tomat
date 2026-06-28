@@ -67,6 +67,54 @@ Deno.test("memories: skills are folders with SKILL.md, frontmatter, and bundled 
   }
 });
 
+Deno.test("memories: writeFile and deleteFile manage a skill's bundled files", async () => {
+  const env = await setupTestEnv();
+  try {
+    const store = memoriesStore();
+    const skill = store.create("skill", "Web Research", "# Steps\nsearch");
+    // Create a bundled file, then read it back through the same store.
+    store.writeFile(skill.id, "checklist.md", "1. cross-check sources");
+    assertEquals(store.get(skill.id).files, ["checklist.md"]);
+    assertEquals(store.getFile(skill.id, "checklist.md"), "1. cross-check sources");
+    // Replace its content.
+    store.writeFile(skill.id, "checklist.md", "1. updated");
+    assertEquals(store.getFile(skill.id, "checklist.md"), "1. updated");
+    // SKILL.md itself (any casing) and traversal are off-limits to the file API.
+    assertThrows(() => store.writeFile(skill.id, "SKILL.md", "x"), AppError);
+    assertThrows(() => store.writeFile(skill.id, "skill.md", "x"), AppError);
+    assertThrows(() => store.writeFile(skill.id, "../escape", "x"), AppError);
+    assertThrows(() => store.writeFile(skill.id, "sub/file.md", "x"), AppError);
+    assertThrows(() => store.writeFile(skill.id, "  ", "x"), AppError);
+    // Delete removes it.
+    store.deleteFile(skill.id, "checklist.md");
+    assertEquals(store.get(skill.id).files, []);
+    assertThrows(() => store.deleteFile(skill.id, "checklist.md"), AppError);
+    // Knowledge has no bundled files.
+    const note = store.create("knowledge", "Note", "body");
+    assertThrows(() => store.writeFile(note.id, "x.md", "y"), AppError);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("memories: summaryStale flips false once the summary pins the content", async () => {
+  const env = await setupTestEnv();
+  try {
+    const store = memoriesStore();
+    const doc = store.create("knowledge", "Pinned", "body");
+    // Fresh memory: never indexed, so stale.
+    assertEquals(store.get(doc.id).summaryStale, true);
+    // The indexer pins a summary to the current content hash.
+    store.setSummary(doc.id, "a summary", doc.contentHash);
+    assertEquals(store.get(doc.id).summaryStale, false);
+    // Editing the content makes the pinned summary stale again.
+    store.replaceContent(doc.id, "new body");
+    assertEquals(store.get(doc.id).summaryStale, true);
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("memories: enable/disable toggles participation", async () => {
   const env = await setupTestEnv();
   try {

@@ -13,6 +13,7 @@ import { errMessage, permissionKey } from "@tomat/shared";
 import type { ModuleName } from "../extensions/worker-protocol.ts";
 import { extensionsRegistry } from "../extensions/registry.ts";
 import { synthesizeSpeech } from "./tts-synthesize.ts";
+import { STT_MAX_AUDIO_BYTES, TTS_MAX_TEXT_CHARS } from "./media-limits.ts";
 import { extensionDataDir } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
@@ -180,6 +181,7 @@ async function dispatchMemories(op: string, args: unknown): Promise<unknown> {
         .filter((m) => m.enabled)
         .map((m) => ({
           title: m.title,
+          kind: m.kind,
           summary: m.summary,
           updatedAtMs: m.updatedAtMs,
         }));
@@ -517,10 +519,6 @@ async function dispatchLlm(op: string, args: unknown): Promise<unknown> {
 
 // --- tts / stt -----------------------------------------------------------
 
-// Bound per-call inputs: synthesis time scales with text length, and the
-// audio payload crosses the stdio pipe as base64.
-const TTS_MAX_TEXT_CHARS = 2_000;
-const STT_MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 // The user's tts.voice lives on the client and isn't visible to the broker, so
 // extension synthesis uses the schema-default voice (matching the old fallback).
 const BROKER_TTS_VOICE = "af_bella";

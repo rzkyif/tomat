@@ -58,10 +58,12 @@
     {:else}
       {#each segments as seg, i}
         {#if i > 0}
-          <span class="text-default-500 text-xs">+</span>
+          <span class="text-xs {hasError ? 'text-accent-red-900' : 'text-default-500'}">+</span>
         {/if}
         <kbd
-          class="bg-surface-inset-strong text-default-800 px-1.5 py-0.5 rounded text-xs font-mono uppercase tracking-wide"
+          class="px-1.5 py-0.5 rounded text-xs font-mono uppercase tracking-wide {hasError
+            ? 'bg-accent-red-400 text-accent-red-900'
+            : 'bg-surface-inset-strong text-default-800'}"
         >
           {seg}
         </kbd>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import Bubble from "../../primitives/Bubble.svelte";
+  import ErrorDetailView from "./ErrorDetailView.svelte";
   import { useUiContext } from "../../../context.ts";
 
   // Presentational error bubble: maps a model/runtime error type to a friendly
@@ -32,42 +33,9 @@
   const message = $derived(errorMessage(errorType));
 </script>
 
-<Bubble selectedAlignment={align} accent="red" extraClass="text-default-800">
+<Bubble selectedAlignment={align} accent="red" extraClass="flex flex-col gap-2 text-default-800">
   {message}
   {#if errorDetail}
-    <div class="error-code-wrapper">
-      <div class="error-code-scroller tomat-scroll-dark">
-        <pre><code>{errorDetail}</code></pre>
-      </div>
-    </div>
+    <ErrorDetailView detail={errorDetail} />
   {/if}
 </Bubble>
-
-<style>
-  .error-code-wrapper {
-    overflow: hidden;
-    border-radius: 6px;
-    margin-top: 0.5rem;
-    background-color: var(--code-bg);
-  }
-  .error-code-scroller {
-    overflow-x: auto;
-    overflow-y: clip;
-  }
-  pre {
-    display: flex;
-    line-height: 1.45;
-    padding: 1rem;
-    margin: 0;
-  }
-  pre code {
-    overflow: clip;
-    font-size: 0.9em;
-    font-family: var(--font-mono);
-    background: transparent;
-    padding: 0;
-    color: white;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-</style>

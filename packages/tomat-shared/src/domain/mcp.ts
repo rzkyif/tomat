@@ -15,6 +15,11 @@ export type McpStdioRuntime = "custom" | "deno";
 
 export type McpConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
+// How a remote server authenticates. "none" is an open endpoint; "bearer" sends
+// a stored static token; "oauth" runs the OAuth 2.1 (PKCE) authorization-code
+// flow and sends the resulting access token, refreshing it as needed.
+export type McpRemoteAuth = "none" | "bearer" | "oauth";
+
 export interface McpServer {
   id: string;
   name: string;
@@ -31,9 +36,15 @@ export interface McpServer {
   denoPermissions: string[];
   // remote transport: the streamable HTTP/SSE endpoint.
   url?: string;
-  // remote transport: whether a bearer token is stored (in the secrets vault,
+  // remote transport: how the server authenticates (see McpRemoteAuth).
+  remoteAuth: McpRemoteAuth;
+  // remote "bearer": whether a static token is stored (in the secrets vault,
   // never on the wire) and sent as the Authorization header on connect.
   hasAuth: boolean;
+  // remote "oauth": whether the authorization-code flow has completed and tokens
+  // are stored (in the vault). Until then an oauth server can't connect; the UI
+  // shows a Sign in action.
+  oauthAuthorized: boolean;
   // Whether core connects to this server at all.
   enabled: boolean;
   // Names of the server's tools / prompts the user turned on (off by default so

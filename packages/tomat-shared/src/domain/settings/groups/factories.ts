@@ -20,6 +20,9 @@ export interface ExternalModelSectionOpts {
   contextSize?: boolean;
   /** Add a "Voice" field (text-to-speech providers name a voice). */
   voice?: boolean;
+  /** Add a "Language" field (speech-to-text providers take an optional default
+   *  language hint; blank lets the provider auto-detect). */
+  language?: boolean;
 }
 
 /** The "External Provider" section every external-model group shares: an HTTPS
@@ -74,6 +77,18 @@ export function externalModelSection(opts: ExternalModelSectionOpts): SettingSec
       type: "string",
       defaultValue: "alloy",
       placeholder: "alloy",
+      descriptionTier: "ondemand",
+    });
+  }
+  if (opts.language) {
+    fields.push({
+      id: `${opts.idPrefix}.language`,
+      name: "Language",
+      description:
+        "An optional default language hint, as an ISO code like en. Leave blank to let the provider detect it.",
+      type: "string",
+      defaultValue: "",
+      placeholder: "en",
       descriptionTier: "ondemand",
     });
   }

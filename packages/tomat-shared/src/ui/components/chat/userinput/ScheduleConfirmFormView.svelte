@@ -64,14 +64,11 @@
 </script>
 
 <div class="flex flex-col gap-2 min-w-0 w-120 max-w-[calc(100vw-135px)] text-sm">
-  <div class="flex items-center gap-2 text-default-800 font-medium">
+  <div class="flex items-center gap-2 text-default-800 font-medium text-xs">
     <i
-      class="flex i-material-symbols-calendar-clock-outline-rounded text-accent-yellow-500 text-base shrink-0"
+      class="flex i-material-symbols-calendar-clock-outline-rounded text-accent-yellow-500 text-sm shrink-0"
     ></i>
-    <span class="break-words">
-      Review this Scheduled Prompt before it is saved. It runs as a new session at the
-      scheduled times.
-    </span>
+    <span class="break-words">Review Scheduled Prompt</span>
   </div>
   <Input
     value={title}
@@ -108,13 +105,16 @@
     {onYearlyDayChange}
     {onTimeChange}
   />
-  <label class="flex items-center gap-2 text-xs text-default-700">
-    <Toggle
-      variant="pill"
-      checked={runMissed}
-      onchange={(v) => (runMissed = v)}
-      ariaLabel="Make up a missed run"
-    />
-    Make up a missed run on the next start
-  </label>
+  <div class="flex items-center justify-between gap-3 text-xs text-default-700">
+    <span>Make up a missed run on the next start</span>
+    <div class="w-24 shrink-0">
+      <Toggle
+        compact
+        labels={{ on: "ON", off: "OFF" }}
+        checked={runMissed}
+        onchange={(v) => (runMissed = v)}
+        ariaLabel="Make up a missed run"
+      />
+    </div>
+  </div>
 </div>

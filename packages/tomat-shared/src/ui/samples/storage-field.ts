@@ -185,7 +185,7 @@ export const storageFieldSamples = {
 
   // Provider failed (e.g. no paired Core).
   error: {
-    loadError: true,
+    loadError: "Could not reach the Core.",
     tree: null,
   },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof StorageFieldView>>>;

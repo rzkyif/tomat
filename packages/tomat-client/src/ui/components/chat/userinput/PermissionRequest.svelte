@@ -34,7 +34,7 @@
           ? { action: "create and edit your memories" }
           : { action: "read your memories" };
       case "llm":
-        return { action: "generate text with the model" };
+        return { action: "use the language model" };
       case "tts":
         return { action: "speak text aloud" };
       case "stt":

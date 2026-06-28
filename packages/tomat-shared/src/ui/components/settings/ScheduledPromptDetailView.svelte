@@ -105,12 +105,13 @@
     </div>
     <div class="flex items-center gap-2">
       <Button size="sm" onclick={() => (onRunNow ?? noop)()}>Run Now</Button>
-      <Toggle
-        variant="pill"
-        checked={enabled}
-        ariaLabel="Enable schedule"
-        onchange={(v) => (onToggleEnabled ?? noop)(v)}
-      />
+      <div class="w-24 shrink-0">
+        <Toggle
+          checked={enabled}
+          ariaLabel="Enable schedule"
+          onchange={(v) => (onToggleEnabled ?? noop)(v)}
+        />
+      </div>
     </div>
   </div>
 
@@ -161,13 +162,11 @@
     />
   </FormField>
 
-  <label class="flex items-center gap-2 text-sm text-default-700">
+  <FormField label="Make up a missed run on the next start" horizontal>
     <Toggle
-      variant="pill"
       checked={runMissed}
       ariaLabel="Make up a missed run"
       onchange={(v) => (onToggleRunMissed ?? noop)(v)}
     />
-    Make up a missed run on the next start
-  </label>
+  </FormField>
 </div>

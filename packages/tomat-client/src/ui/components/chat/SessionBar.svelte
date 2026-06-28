@@ -130,19 +130,19 @@
   // fixed label instead (SessionBarView's `temporary` branch), so this only
   // gates the persistent path.
   let showTitle = $derived(!isNewSession);
-  // The session-list button only makes sense when there are stored sessions to
-  // list. In a fresh new-chat with no existing sessions the whole bar stays
-  // hidden. The only action (new session) is already the current state.
-  let hasSessions = $derived(sessionsState.list.length > 0);
   // The active session is a started temporary one (vs. mere pre-send compose
   // intent, which the composer toggle owns). Drives the fixed bar label.
   let isTemporarySession = $derived(sessionsState.isTemporary && sessionsState.started);
-  // A temporary session is never in the list, so force the button group on for
-  // it; otherwise (no stored sessions) the list/new controls would hide and
-  // trap the user in the temporary chat with no way back out.
-  let showButtonGroup = $derived(hasSessions || isTemporarySession);
+  // Whenever the bar is shown, the navigation button group is shown too (the
+  // list/new controls are always reachable), so the only question is whether the
+  // bar appears at all: it does once there is context to gauge, a title to show,
+  // a started temporary session, or any stored sessions to navigate back to (so
+  // a fresh new-chat that has history still shows the list/new controls). A
+  // first-ever new-chat with nothing stored stays hidden (its sole action,
+  // starting a new session, is already the state).
+  let hasSessions = $derived(sessionsState.list.length > 0);
   let showBar = $derived(
-    !!messagesState.tokenUsage || showTitle || showButtonGroup,
+    !!messagesState.tokenUsage || showTitle || isTemporarySession || hasSessions,
   );
 </script>
 
@@ -161,7 +161,6 @@
     generatingTitle={sessionsState.generatingTitle}
     onRegenerateTitle={() => sessionsState.regenerateTitle()}
     temporary={isTemporarySession}
-    {showButtonGroup}
     prevDisabled={!prevSession}
     nextDisabled={!nextSession}
     {isNewSession}

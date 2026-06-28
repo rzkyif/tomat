@@ -33,6 +33,7 @@ import { __resetForTesting as resetCoreSettings } from "../../src/services/core-
 import { __resetForTesting as resetBackgroundQueue } from "../../src/services/background-queue.ts";
 import { __resetForTesting as resetMemoriesStore } from "../../src/services/memories-store.ts";
 import { __resetForTesting as resetPromptScheduler } from "../../src/services/prompt-scheduler.ts";
+import { __resetForTesting as resetMcpManager } from "../../src/mcp/manager.ts";
 import * as log from "@std/log";
 
 export interface TestEnv {
@@ -115,6 +116,7 @@ export async function setupTestEnv(): Promise<TestEnv> {
       resetCoreSettings();
       resetBackgroundQueue();
       resetMemoriesStore();
+      resetMcpManager();
       if (snapshot.prior === undefined) Deno.env.delete(snapshot.key);
       else Deno.env.set(snapshot.key, snapshot.prior);
       await Deno.remove(coreHome, { recursive: true }).catch(() => {});

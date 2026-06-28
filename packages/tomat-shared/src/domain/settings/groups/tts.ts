@@ -3,9 +3,9 @@
 // because the synthesis engine does: core computes the model files into its
 // required-downloads snapshot, so a client-side value would leave requirements
 // (and the pending-downloads gate) blind to it. Playback and batching settings
-// stay on the client. TTS is local-only for now (no external provider), so the
-// "Model" section holds the preset directly with no provider select; mirror the
-// Speech-to-Text structure otherwise.
+// stay on the client. A provider select switches the model section between the
+// local synthesis engine and an external OpenAI-compatible endpoint, mirroring
+// the Speech-to-Text structure.
 
 import type { RegexValidationRule, SettingGroup } from "../types.ts";
 import { externalModelSection } from "./factories.ts";

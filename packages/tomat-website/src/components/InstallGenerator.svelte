@@ -42,6 +42,10 @@
   const channel: Channel = "latest";
   let bindAll = $state(false);
   let service = $state(true);
+  // Uninstall options, folded into the command the same way the core install
+  // toggles are: client purge (wipe settings) and core keep-data.
+  let purge = $state(false);
+  let keepData = $state(false);
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -59,8 +63,8 @@
   const command = $derived(
     mode === "uninstall"
       ? (target === "client"
-        ? clientUninstallCommand(clientOs, channel)
-        : coreUninstallCommand(coreOs, channel))
+        ? clientUninstallCommand(clientOs, channel, { purge })
+        : coreUninstallCommand(coreOs, channel, { keepData }))
       : (target === "client"
         ? clientCommand(clientOs, channel)
         : coreCommand(coreOs, channel, { bindAll, service })),
@@ -71,8 +75,8 @@
     const run = "Paste the command above and press Enter.";
     if (mode === "uninstall") {
       const tail = target === "core"
-        ? "It stops the Core, then removes it and its data from this computer."
-        : "It removes the app; your settings stay unless you add the flag below.";
+        ? "It stops the Core and removes it; turn on the option below to keep its sessions and memories."
+        : "It removes the app; turn on the option below to also wipe your settings.";
       return [open, run, tail];
     }
     if (target === "core") {
@@ -80,16 +84,6 @@
     }
     return [open, run, "When it finishes, launch tomat and pick where its Core should run."];
   });
-
-  // Uninstall flags note, mirroring the install Options note: what the flag
-  // does, plus how to pass it through the piped one-liner per platform.
-  const flag = $derived(target === "client" ? "--purge" : "--keep-data");
-  const flagEnv = $derived(target === "client" ? "TOMAT_PURGE" : "TOMAT_KEEP_DATA");
-  const flagWhat = $derived(
-    target === "client"
-      ? "also deletes your saved settings and paired cores"
-      : "keeps the Core's sessions and memories instead of removing them",
-  );
 
   function selectOs(id: Os) {
     if (target === "client") clientOs = id;
@@ -216,24 +210,28 @@
     </div>
   {/if}
 
-  <!-- Uninstall flags note, mirroring the install Options note. Not folded into
-       the command (it changes what is deleted), so it is shown as guidance. -->
+  <!-- Uninstall options, folded into the command live like the install ones.
+       Each changes what the removal touches: client purge wipes settings, core
+       keep-data spares the Core's data. -->
   {#if mode === "uninstall" && !isAndroid}
     <div class="flex flex-col gap-2">
       <span class={labelCls}>Options</span>
-      <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
-        <p class="m-0">
-          By default this {target === "core" ? "removes the Core and its data" : "keeps your settings"}. To change that, add a flag:
-        </p>
-        <p class="m-0">
-          <span class="font-mono text-default-900">{flag}</span>
-          {flagWhat}.
-        </p>
-        <p class="m-0">
-          On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
-          <span class="font-mono text-default-900">... | bash -s -- {flag}</span>. On Windows prefix the line, e.g.
-          <span class="font-mono text-default-900">$env:{flagEnv}="1"; irm ...</span>.
-        </p>
+      <div class="flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
+        {#if target === "client"}
+          <label class="flex items-center justify-between gap-4">
+            <span class="text-sm text-default-700">Also delete settings and paired cores</span>
+            <div class="w-24 shrink-0">
+              <Toggle checked={purge} onchange={(v) => (purge = v)} ariaLabel="Also delete settings and paired cores" />
+            </div>
+          </label>
+        {:else}
+          <label class="flex items-center justify-between gap-4">
+            <span class="text-sm text-default-700">Keep sessions and memories</span>
+            <div class="w-24 shrink-0">
+              <Toggle checked={keepData} onchange={(v) => (keepData = v)} ariaLabel="Keep sessions and memories" />
+            </div>
+          </label>
+        {/if}
       </div>
     </div>
   {/if}

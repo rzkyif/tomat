@@ -294,6 +294,29 @@
       "permissions": {}
     },
     {
+      "name": "list_memories",
+      "description": "List the user's memories by title, kind, and short summary. Use to discover what the user has saved when the relevant-memory summaries do not already cover it, then read_memory the one you need.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "triggers": [
+        "what memories do I have",
+        "list my saved notes",
+        "which skills are available",
+        "do I have a memory about this"
+      ],
+      "function": "listMemories",
+      "permissions": {
+        "memories": [
+          {
+            "access": "read",
+            "reason": "List the titles and summaries of your memories"
+          }
+        ]
+      }
+    },
+    {
       "name": "write_memory",
       "description": "Create a memory, or replace an existing one's content. Memories are notes the user keeps in tomat; for a small change to an existing memory, prefer edit_memory.",
       "parameters": {

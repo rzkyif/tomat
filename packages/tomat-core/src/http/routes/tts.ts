@@ -4,6 +4,7 @@ import { loadCoreSettings } from "../../services/core-settings.ts";
 import { loadModelCatalog } from "../../models/catalog.ts";
 import { selectedTtsVoices } from "../../models/tts.ts";
 import { synthesizeSpeech } from "../../services/tts-synthesize.ts";
+import { TTS_MAX_TEXT_CHARS } from "../../services/media-limits.ts";
 import { AppError } from "../../shared/errors.ts";
 import { readJson } from "../body.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
@@ -26,6 +27,9 @@ export function ttsRoutes(): Hono {
     };
     if (!body.text || typeof body.text !== "string") {
       throw new AppError("validation_error", "text required");
+    }
+    if (body.text.length > TTS_MAX_TEXT_CHARS) {
+      throw new AppError("validation_error", `tts text exceeds ${TTS_MAX_TEXT_CHARS} characters`);
     }
     const wav = await synthesizeSpeech(body.text, body.voice, body.speed, requireClient(c).id);
     return new Response(wav.buffer as ArrayBuffer, {

@@ -6,7 +6,7 @@
   // disk, and routes every delete through the review modal. The provider
   // re-validates locks, so the client never decides what is safe to remove.
   import { onMount } from "svelte";
-  import type { SettingField } from "@tomat/shared";
+  import { errMessage, type SettingField } from "@tomat/shared";
   import { cores } from "$lib/core";
   import { clientStorageProvider } from "$lib/core/client-storage";
   import { deletionsState, settingsState } from "../../../state";
@@ -34,7 +34,7 @@
 
   let tree = $state<StorageTree | null>(null);
   let loading = $state(true);
-  let loadError = $state(false);
+  let loadError = $state<string | null>(null);
   let expanded = $state<Set<string>>(new Set());
   let selected = $state<Set<string>>(new Set());
   let lastSelectedPath = $state<string | null>(null);
@@ -51,18 +51,18 @@
       // Core scope with no paired/selected core: cores().api() would throw.
       if (scope === "core" && !cores().currentClient()) {
         tree = null;
-        loadError = true;
+        loadError = "No Core is connected.";
         return;
       }
       tree = await provider().get();
-      loadError = false;
+      loadError = null;
       // Drop selections for paths that no longer exist.
       const next = new Set<string>();
       for (const p of selected) if (tree && findNode(tree, p)) next.add(p);
       selected = next;
     } catch (e) {
       log.warn("load failed:", e);
-      loadError = true;
+      loadError = errMessage(e);
     } finally {
       loading = false;
     }

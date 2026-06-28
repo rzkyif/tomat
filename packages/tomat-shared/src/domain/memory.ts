@@ -21,6 +21,10 @@ export interface MemoryMeta {
   contentHash: string;
   // LLM-generated; absent until the background indexer has run.
   summary?: string;
+  // Whether the summary (and embedding) no longer match the current content:
+  // true when the memory has never been indexed or was edited since. While
+  // stale the memory does not surface in auto-relevance, so the UI flags it.
+  summaryStale?: boolean;
   // `USER_MEMORY_PROVIDER` for editable user memories, otherwise the shipping
   // extension id (read-only).
   provider: string;

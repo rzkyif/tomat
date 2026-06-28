@@ -34,6 +34,7 @@
   import Popover from "@tomat/shared/ui/components/primitives/Popover.svelte";
   import SearchInput from "@tomat/shared/ui/components/primitives/SearchInput.svelte";
   import SectionHeader from "@tomat/shared/ui/components/primitives/SectionHeader.svelte";
+  import SubsectionHeader from "@tomat/shared/ui/components/primitives/SubsectionHeader.svelte";
   import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
   import SidebarItem from "@tomat/shared/ui/components/primitives/SidebarItem.svelte";
   import Slider from "@tomat/shared/ui/components/primitives/Slider.svelte";
@@ -201,6 +202,14 @@
       <GalleryCard label={`SectionHeader · ${name}`} surface>
         <div class="w-64">
           <SectionHeader {...p as ComponentProps<typeof SectionHeader>} onToggle={noop} />
+        </div>
+      </GalleryCard>
+    {/each}
+
+    {#each entries(P.SubsectionHeader) as [name, p] (name)}
+      <GalleryCard label={`SubsectionHeader · ${name}`} surface>
+        <div class="w-64">
+          <SubsectionHeader {...p as ComponentProps<typeof SubsectionHeader>} />
         </div>
       </GalleryCard>
     {/each}

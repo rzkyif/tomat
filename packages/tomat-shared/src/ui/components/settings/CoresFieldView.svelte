@@ -9,6 +9,8 @@
   import FormField from "../primitives/FormField.svelte";
   import Input from "../primitives/Input.svelte";
   import Button from "../primitives/Button.svelte";
+  import IconButton from "../primitives/IconButton.svelte";
+  import ErrorDetailView from "../chat/messages/ErrorDetailView.svelte";
 
   // One paired device row, pre-formatted by the client (name + a compact
   // "last seen" label). `isMe` swaps the Remove button for a quiet marker.
@@ -71,36 +73,44 @@
     description="Generate a one-time code to pair a new device. You'll need your admin password."
   >
     {#if mintedCode}
-      <div class="flex flex-col gap-2 bg-surface-inset rounded-medium px-3 py-3">
-        <div class="flex items-center gap-2">
-          <div class="flex-1 text-2xl font-mono tracking-widest text-default-800 select-all">
-            {mintedCode}
+      <div class="flex flex-col gap-2">
+        <div class="flex flex-col gap-2 bg-surface-inset rounded-medium px-3 py-3">
+          <div class="flex items-center gap-2">
+            <div class="flex-1 text-2xl font-mono tracking-widest text-default-800 select-all">
+              {mintedCode}
+            </div>
+            <IconButton
+              icon={codeCopied
+                ? "i-material-symbols-check-rounded"
+                : "i-material-symbols-content-copy-outline-rounded"}
+              title={codeCopied ? "Copied" : "Copy to clipboard"}
+              size="md"
+              surface="filled"
+              onclick={() => (onCopyCode ?? noop)()}
+            />
           </div>
-          <Button variant="secondary" size="sm" onclick={() => (onCopyCode ?? noop)()}>
-            {codeCopied ? "Copied" : "Copy"}
-          </Button>
+          {#if mintedExpiresLabel}
+            <div class="text-xs text-default-500">
+              Enter it on the new device. This code {mintedExpiresLabel}.
+            </div>
+          {/if}
         </div>
-        {#if mintedExpiresLabel}
-          <div class="text-xs text-default-500">
-            Enter it on the new device. This code {mintedExpiresLabel}.
-          </div>
-        {/if}
-        <div>
-          <Button variant="ghost" size="sm" onclick={() => (onGenerateCode ?? noop)()}>
-            Generate another
+        <div class="flex justify-end">
+          <Button variant="secondary" onclick={() => (onGenerateCode ?? noop)()}>
+            Generate Another
           </Button>
         </div>
       </div>
     {:else}
       <Button variant="secondary" onclick={() => (onGenerateCode ?? noop)()}>
-        Generate pairing code
+        Generate Pairing Code
       </Button>
     {/if}
   </FormField>
 
   <FormField label="Paired devices">
     {#if devicesError}
-      <div class="text-sm text-accent-red-600">{devicesError}</div>
+      <ErrorDetailView message="Couldn't load paired devices" detail={devicesError} />
     {:else if devices === null}
       <div class="text-sm text-default-500">Loading…</div>
     {:else if devices.length === 0}

@@ -28,7 +28,17 @@ export const attachmentListSamples = {
   },
   editable: {
     editable: true,
-    parts: [{ type: "document", filename: "report.pdf", markdown: "# Report" }],
+    onRemove: () => {},
+    parts: [
+      {
+        type: "image_file",
+        filename: "screenshot.png",
+        path: "/tmp/screenshot.png",
+        mime: "image/png",
+      },
+      { type: "document", filename: "report.pdf", markdown: "# Report" },
+    ],
+    imageUrls: { "/tmp/screenshot.png": BLANK_PNG },
   },
   imageUrl: {
     parts: [{ type: "image_url", image_url: { url: BLANK_PNG } }],

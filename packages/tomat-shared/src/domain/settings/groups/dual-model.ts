@@ -22,7 +22,7 @@ export const dualModelGroup: SettingGroup = {
           id: "dualModel.enabled",
           name: "Enable Dual Model",
           description:
-            "Route complex messages to a stronger secondary model automatically. The rule that decides this lives in Prompts > Complexity Check.",
+            "Route complex messages to a stronger secondary model automatically. The secondary model answers directly, without thinking, for a fast reply. The rule that decides this lives in Prompts > Complexity Check.",
           type: "boolean",
           defaultValue: false,
           descriptionTier: "ondemand",

@@ -17,6 +17,17 @@ export interface CoreOptions {
   service: boolean;
 }
 
+export interface ClientUninstallOptions {
+  /** Also wipe saved settings and paired cores (--purge / TOMAT_PURGE). */
+  purge: boolean;
+}
+
+export interface CoreUninstallOptions {
+  /** Keep the Core's sessions and memories instead of removing them
+   *  (--keep-data / TOMAT_KEEP_DATA). */
+  keepData: boolean;
+}
+
 export interface OsChoice {
   id: Os;
   label: string;
@@ -47,9 +58,19 @@ function envVars(channel: Channel, core?: CoreOptions): Array<[string, string]> 
   return vars;
 }
 
-function shCommand(script: string, runner: "sh" | "bash", vars: Array<[string, string]>): string {
+// Env vars ride on the runner's side of the pipe (so the script sees them);
+// `flags` are positional args the script's own arg parser reads, passed through
+// the piped runner as `<runner> -s -- <flag...>` (the uninstall scripts take
+// --purge / --keep-data this way, since they read flags, not env vars).
+function shCommand(
+  script: string,
+  runner: "sh" | "bash",
+  vars: Array<[string, string]>,
+  flags: string[] = [],
+): string {
   const env = vars.map(([k, v]) => `${k}=${v} `).join("");
-  return `curl -fsSL ${STORAGE_BASE}/install/${script} | ${env}${runner}`;
+  const tail = flags.length ? ` -s -- ${flags.join(" ")}` : "";
+  return `curl -fsSL ${STORAGE_BASE}/install/${script} | ${env}${runner}${tail}`;
 }
 
 function psCommand(script: string, vars: Array<[string, string]>): string {
@@ -73,24 +94,36 @@ export function coreCommand(os: Os, channel: Channel, opts: CoreOptions): string
   return shCommand("core.sh", "bash", vars);
 }
 
-/** The one-liner for removing the client. Mirrors {@link clientCommand}: the
- *  channel rides as an env var, and Android has no script (it is removed like
- *  any app, see {@link androidApkUrl}), so it returns "". The wipe-everything
- *  flag (`--purge` / `-Purge`) is documented separately, not folded in here. */
-export function clientUninstallCommand(os: Os, channel: Channel): string {
+/** The one-liner for removing the client, with its purge option folded in.
+ *  Mirrors {@link clientCommand}: the channel rides as an env var, and Android
+ *  has no script (it is removed like any app, see {@link androidApkUrl}), so it
+ *  returns "". Purge passes through as the `--purge` flag on bash and the
+ *  `TOMAT_PURGE` env var on Windows (a switch can't cross `irm | iex`). */
+export function clientUninstallCommand(
+  os: Os,
+  channel: Channel,
+  opts: ClientUninstallOptions,
+): string {
   if (os === "android") return "";
   const vars = envVars(channel);
-  if (os === "windows") return psCommand("client-uninstall.ps1", vars);
-  return shCommand("client-uninstall.sh", "bash", vars);
+  if (os === "windows") {
+    if (opts.purge) vars.push(["TOMAT_PURGE", "1"]);
+    return psCommand("client-uninstall.ps1", vars);
+  }
+  return shCommand("client-uninstall.sh", "bash", vars, opts.purge ? ["--purge"] : []);
 }
 
-/** The one-liner for removing the core. Mirrors {@link coreCommand} without the
- *  install options; the keep-data flag (`--keep-data` / `-KeepData`) is
- *  documented separately rather than folded in. */
-export function coreUninstallCommand(os: Os, channel: Channel): string {
+/** The one-liner for removing the core, with its keep-data option folded in.
+ *  Mirrors {@link coreUninstallCommand}'s client twin: keep-data passes through
+ *  as the `--keep-data` flag on bash and the `TOMAT_KEEP_DATA` env var on
+ *  Windows. */
+export function coreUninstallCommand(os: Os, channel: Channel, opts: CoreUninstallOptions): string {
   const vars = envVars(channel);
-  if (os === "windows") return psCommand("core-uninstall.ps1", vars);
-  return shCommand("core-uninstall.sh", "bash", vars);
+  if (os === "windows") {
+    if (opts.keepData) vars.push(["TOMAT_KEEP_DATA", "1"]);
+    return psCommand("core-uninstall.ps1", vars);
+  }
+  return shCommand("core-uninstall.sh", "bash", vars, opts.keepData ? ["--keep-data"] : []);
 }
 
 /** The fixed "newest build" APK alias published per channel by

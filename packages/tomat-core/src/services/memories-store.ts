@@ -77,18 +77,56 @@ export class MemoriesStore {
   /** Read one bundled reference file from a skill folder. Guards against path
    *  traversal: `name` must be a plain file directly inside the folder. */
   getFile(id: string, name: string): string {
-    const meta = this.metaOrThrow(id);
-    if (meta.kind !== "skill") {
-      throw new AppError("validation_error", "memory is not a skill");
-    }
-    if (name === SKILL_FILE || name.includes("/") || name.includes("\\") || name.includes("..")) {
-      throw new AppError("validation_error", `invalid skill file "${name}"`);
-    }
+    const path = this.skillFilePath(this.metaOrThrow(id), name);
     try {
-      return Deno.readTextFileSync(join(baseDirFor(meta.provider), meta.filename, name));
+      return Deno.readTextFileSync(path);
     } catch {
       throw new AppError("not_found", `skill file "${name}" not found`);
     }
+  }
+
+  /** Create or replace a bundled reference file beside a user skill's SKILL.md.
+   *  Extension skills are read-only; the same traversal guard as getFile
+   *  applies. Bumps the memory's updated_at so the card reflects the edit. */
+  writeFile(id: string, name: string, content: string): void {
+    const path = this.skillFilePath(this.editableOrThrow(id), name);
+    const tmp = path + ".tmp";
+    Deno.writeTextFileSync(tmp, content);
+    Deno.renameSync(tmp, path);
+    this.touch(id);
+  }
+
+  /** Delete a bundled reference file from a user skill's folder. */
+  deleteFile(id: string, name: string): void {
+    const path = this.skillFilePath(this.editableOrThrow(id), name);
+    try {
+      Deno.removeSync(path);
+    } catch {
+      throw new AppError("not_found", `skill file "${name}" not found`);
+    }
+    this.touch(id);
+  }
+
+  /** Path of a bundled file inside a skill folder, with the traversal guard
+   *  shared by getFile/writeFile/deleteFile. SKILL.md itself is off-limits:
+   *  it is the memory's content, edited through replaceContent. */
+  private skillFilePath(meta: MemoryMeta, name: string): string {
+    if (meta.kind !== "skill") {
+      throw new AppError("validation_error", "memory is not a skill");
+    }
+    // SKILL.md is rejected case-insensitively: on a case-insensitive filesystem
+    // a "skill.md" bundled file would otherwise resolve to and overwrite the
+    // instruction body, which is edited through replaceContent, not here.
+    if (
+      name.trim() === "" ||
+      name.toLowerCase() === SKILL_FILE.toLowerCase() ||
+      name.includes("/") ||
+      name.includes("\\") ||
+      name.includes("..")
+    ) {
+      throw new AppError("validation_error", `invalid skill file "${name}"`);
+    }
+    return join(baseDirFor(meta.provider), meta.filename, name);
   }
 
   create(kind: MemoryKind, title: string, content: string): Memory {
@@ -461,6 +499,10 @@ export class MemoriesStore {
     return meta;
   }
 
+  private touch(id: string): void {
+    db().prepare(`UPDATE memories SET updated_at_ms = ? WHERE id = ?`).run(Date.now(), id);
+  }
+
   private titleExists(title: string, excludeId?: string): boolean {
     const row = db()
       .prepare(`SELECT id FROM memories WHERE title = ? COLLATE NOCASE`)
@@ -484,8 +526,8 @@ export function __resetForTesting(): void {
 // --- helpers ----------------------------------------------------------------
 
 const META_SELECT = `
-  SELECT id, kind, title, filename, content_hash, summary, provider, enabled, suggested_tools,
-         created_at_ms, updated_at_ms
+  SELECT id, kind, title, filename, content_hash, summary, summary_source_hash, provider, enabled,
+         suggested_tools, created_at_ms, updated_at_ms
   FROM memories`;
 
 interface MetaRow {
@@ -495,6 +537,7 @@ interface MetaRow {
   filename: string;
   content_hash: string;
   summary: string | null;
+  summary_source_hash: string | null;
   provider: string;
   enabled: number;
   suggested_tools: string | null;
@@ -520,6 +563,11 @@ function rowToMeta(row: MetaRow): MemoryMeta {
     filename: String(row.filename),
     contentHash: String(row.content_hash),
     summary: row.summary == null ? undefined : String(row.summary),
+    // Stale when never indexed or edited since: the pinned summary source hash
+    // differs from the current content hash.
+    summaryStale:
+      row.summary_source_hash == null ||
+      String(row.summary_source_hash) !== String(row.content_hash),
     provider: String(row.provider),
     enabled: Number(row.enabled) !== 0,
     suggestedTools: kind === "skill" ? suggestedTools : undefined,
@@ -589,9 +637,11 @@ function removeUserContent(kind: MemoryKind, filename: string): void {
 
 // Optional frontmatter at the top of a SKILL.md: `description` seeds the
 // summary, `suggested-tools` lists advisory tool names (inline `[a, b]` or a
-// YAML block list of `- item` lines). We only ever read these two scalar/list
-// fields, so a focused line parser is enough; absent or malformed frontmatter
-// yields no metadata (the indexer summarizes instead).
+// YAML block list of `- item` lines). Any other key (notably Anthropic Agent
+// Skills' `name`, whose value is the folder slug here) is tolerated and
+// ignored, so a community SKILL.md drops in unchanged. We only ever read these
+// two scalar/list fields, so a focused line parser is enough; absent or
+// malformed frontmatter yields no metadata (the indexer summarizes instead).
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 function parseSkillMeta(content: string): { suggestedTools: string[]; description?: string } {

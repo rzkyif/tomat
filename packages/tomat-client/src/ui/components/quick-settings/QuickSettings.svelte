@@ -73,6 +73,9 @@
   const exitTitle = $derived(
     hasPending ? "Review Pending Downloads" : "Back to Chat",
   );
+  const exitIcon = $derived(
+    hasPending ? "i-material-symbols-download-rounded" : "i-material-symbols-arrow-forward-rounded",
+  );
 
   function exit(): void {
     viewState.navigate(hasPending ? "settings" : "chat");
@@ -101,6 +104,7 @@
   <QuickSettingsView
     {exitLabel}
     {exitTitle}
+    {exitIcon}
     onExit={exit}
     containerRef={(el) => (layout.containerEl = el ?? undefined)}
   >

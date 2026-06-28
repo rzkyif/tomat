@@ -140,8 +140,10 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   deno_allow_all      INTEGER NOT NULL DEFAULT 1,  -- deno runtime: run with --allow-all
   deno_permissions_json TEXT NOT NULL DEFAULT '[]', -- deno runtime: manual permission flags
   url                 TEXT,                        -- remote: endpoint
+  remote_auth         TEXT NOT NULL DEFAULT 'none', -- remote: 'none' | 'bearer' | 'oauth'
   enabled             INTEGER NOT NULL DEFAULT 0,
-  has_auth            INTEGER NOT NULL DEFAULT 0,  -- remote: a bearer token is stored in the vault
+  has_auth            INTEGER NOT NULL DEFAULT 0,  -- remote 'bearer': a static token is stored in the vault
+  oauth_authorized    INTEGER NOT NULL DEFAULT 0,  -- remote 'oauth': the auth-code flow completed, tokens in vault
   tool_enabled_json   TEXT NOT NULL DEFAULT '[]',
   prompt_enabled_json TEXT NOT NULL DEFAULT '[]',
   created_at_ms       INTEGER NOT NULL,

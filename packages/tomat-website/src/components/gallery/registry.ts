@@ -32,6 +32,7 @@ export const GALLERY_VIEWS = [
   "ExtensionDetailView",
   "ExtensionsFieldView",
   "McpDetailView",
+  "McpFieldView",
   "MemoryDetailView",
   "MessageStackView",
   "ModelPresetFieldView",
@@ -82,6 +83,7 @@ export const EMBEDDED_VIEWS: Record<string, string> = {
   // child View -> parent View whose card renders it
   DiffView: "ToolCallView",
   DownloadRowView: "DownloadsModalView",
+  ErrorDetailView: "ErrorMessageView",
   QuickModelBarView: "UserInputView",
   QuickSettingsSectionView: "QuickSettingsView",
   ReasoningTraceView: "AgentMessageView",
@@ -116,6 +118,7 @@ export const GALLERY_PRIMITIVES = [
   "Popover",
   "SearchInput",
   "SectionHeader",
+  "SubsectionHeader",
   "Select",
   "SidebarItem",
   "Slider",

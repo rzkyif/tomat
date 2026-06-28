@@ -6,7 +6,14 @@ export { open } from "./src/open.ts";
 export { openApp, openFile } from "./src/app.ts";
 export { getWindowLayout, setWindowLayout } from "./src/window.ts";
 export { demo } from "./src/demo.ts";
-export { editMemory, readMemory, readSkillFile, showMemory, writeMemory } from "./src/memories.ts";
+export {
+  editMemory,
+  listMemories,
+  readMemory,
+  readSkillFile,
+  showMemory,
+  writeMemory,
+} from "./src/memories.ts";
 export { schedulePrompt } from "./src/schedule.ts";
 export { getDatetime } from "./src/datetime.ts";
 export { calculator } from "./src/calculator.ts";

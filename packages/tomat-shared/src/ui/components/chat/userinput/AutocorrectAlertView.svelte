@@ -25,9 +25,9 @@
     onclick: onReject,
   }}
 >
-  <div class="flex items-start gap-2">
-    <span class="shrink-0 font-medium">Before Autocorrect:</span>
-    <span class="whitespace-pre-wrap break-words flex-1">
+  <div class="flex flex-col gap-1">
+    <span class="font-medium">Before Autocorrect:</span>
+    <span class="whitespace-pre-wrap break-words">
       {original}
     </span>
   </div>

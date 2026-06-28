@@ -547,7 +547,7 @@ html.dark .focus-grid-frame {
 .gallery-scroll-fade {
   position: fixed;
   inset-inline: 0;
-  height: 3.5rem;
+  height: 2.5rem;
   z-index: 30;
   pointer-events: none;
 }
@@ -564,6 +564,26 @@ html.dark .gallery-scroll-fade-top {
 }
 html.dark .gallery-scroll-fade-bottom {
   background: linear-gradient(to top, var(--default-d-50), transparent);
+}
+
+/* Gallery card horizontal scroll gutter. The card's scroller (`.demo-unflip
+   .tomat-scroll`) sits on the FLIPPED `.demo-frame` chrome, which reads as the
+   OPPOSITE site theme, but `tomat-scroll`'s thumb resolves in the unflipped
+   component theme - so by default a dark thumb lands on a light card (and vice
+   versa). Invert the thumb slot relative to the page theme so it matches the card
+   chrome: page-light cards are dark (use the d-ladder), page-dark cards are light
+   (use the base ladder). */
+.gallery-frame .tomat-scroll::-webkit-scrollbar-thumb {
+  background: var(--default-d-200);
+}
+.gallery-frame .tomat-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--default-d-400);
+}
+html.dark .gallery-frame .tomat-scroll::-webkit-scrollbar-thumb {
+  background: var(--default-200);
+}
+html.dark .gallery-frame .tomat-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--default-400);
 }
 
 /* Expandable (native <details>): a chevron that rotates from pointing right to

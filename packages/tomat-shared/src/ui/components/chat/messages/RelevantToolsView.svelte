@@ -4,6 +4,7 @@
     ToolFilterPhase1Persisted,
   } from "../../../../domain/session.ts";
   import ExpandableMessageView from "./ExpandableMessageView.svelte";
+  import ErrorDetailView from "./ErrorDetailView.svelte";
 
   // The "Found N relevant tools" bubble: the shared collapsed-message shell with
   // a body summarizing each tool-filter phase that ran. The client wrapper maps
@@ -81,9 +82,7 @@
     <div class="flex flex-col gap-2 text-xs text-left">
       {#if errorMessage}
         <div class="flex flex-col gap-1">
-          <div class="text-accent-red-700 font-bold">Filter Error</div>
-          <pre
-            class="tomat-scroll-inset font-mono text-accent-red-900 bg-accent-red-100 border border-accent-red-300 rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre-wrap break-words">{errorMessage}</pre>
+          <ErrorDetailView message="Couldn't filter tools" detail={errorMessage} />
           <div class="text-accent-red-700">
             Phase-1 candidates are kept as a fallback so the main model still sees tools.
           </div>

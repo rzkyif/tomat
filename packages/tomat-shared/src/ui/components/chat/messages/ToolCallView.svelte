@@ -26,6 +26,7 @@
   import Expandable from "../../primitives/Expandable.svelte";
   import Expand from "../../primitives/Expand.svelte";
   import DiffView from "./DiffView.svelte";
+  import ErrorDetailView from "./ErrorDetailView.svelte";
   import DiffQuestion from "./askuser/DiffQuestion.svelte";
   import FilesQuestion from "./askuser/FilesQuestion.svelte";
   import ImageQuestion from "./askuser/ImageQuestion.svelte";
@@ -539,8 +540,9 @@
         {#if label}
           {label}
         {:else}
-          {statusPhrase.pre}<code class="tc-inline">{toolName}</code
-          >{statusPhrase.post}
+          {statusPhrase.pre}<code
+            class="font-mono bg-surface-inset text-default-800 rounded-small px-1.5 py-0.5 text-[0.8em] mx-1"
+          >{toolName}</code>{statusPhrase.post}
         {/if}
       </span>
       {#if description && !expanded}
@@ -625,14 +627,11 @@
                 {/if}
               </div>
             {/each}
-            <Expand
-              open={requiresSubmit && readyToSubmit(tcAskUser.questions)}
-              class="self-end"
-            >
+            <Expand open={requiresSubmit && readyToSubmit(tcAskUser.questions)}>
               <button
                 type="button"
                 data-tc-nav
-                class="text-xs px-3 py-1 rounded bg-surface-inset text-default-800 cursor-pointer outline-none transition-colors duration-100"
+                class="w-full text-xs px-3 h-8 rounded bg-surface-inset text-default-800 cursor-pointer outline-none transition-colors duration-100"
                 onclick={submit}
               >
                 Submit
@@ -642,8 +641,7 @@
         {/if}
 
         {#if hasCancelledError}
-          <pre
-            class="tomat-scroll-inset text-xs font-mono text-default-700 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{error}</pre>
+          <ErrorDetailView detail={error} />
         {/if}
 
         <div class="flex flex-col gap-1 text-xs">
@@ -681,9 +679,7 @@
             {/if}
           {/if}
           {#if hasError}
-            <div class="text-default-600">Error</div>
-            <pre
-              class="tomat-scroll-inset font-mono text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{error}</pre>
+            <ErrorDetailView detail={error} />
           {/if}
           {#if hasLogs}
             <div class="text-default-600">Logs</div>
@@ -704,19 +700,3 @@
   </Expandable>
 </Bubble>
 </div>
-
-<style>
-  /* Inline code pill matching MessageMarkdown's :global(code) treatment so the
-     tool name in the header reads like a code span from the markdown renderer
-     used in AgentMessage. */
-  .tc-inline {
-    background-color: var(--code-bg-inline);
-    color: white;
-    padding: 0.15em 0.4em;
-    border-radius: 6px;
-    margin-left: 0.25em;
-    margin-right: 0.25em;
-    font-size: 0.8em;
-    font-family: var(--font-mono);
-  }
-</style>

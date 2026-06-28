@@ -27,9 +27,14 @@ Two transports, chosen by the server's `kind`:
   The deno runtime grants `--allow-all` when `denoAllowAll` is set (the default,
   for the widest compatibility) or the server's manual `denoPermissions` flags
   otherwise, and its npm/deno cache is contained under the channel's `DENO_DIR`.
-- **remote**: an HTTP/SSE `url` reached with `StreamableHTTPClientTransport`. If
-  the server stores a bearer token (see below) it is sent as the `Authorization`
-  header on every request.
+- **remote**: an HTTP/SSE `url` reached with `StreamableHTTPClientTransport`,
+  with one of three `remoteAuth` modes. `none` is an open endpoint; `bearer`
+  sends a stored static token (see below) as the `Authorization` header; `oauth`
+  runs the OAuth 2.1 (PKCE) authorization-code flow via the SDK's `authProvider`,
+  attaching and refreshing the stored access token. An `oauth` server that
+  hasn't been signed into has no tokens, so rather than let the SDK kick off a
+  dynamic registration on every background connect, the manager surfaces a clear
+  "sign-in required" status and makes no network call until the user signs in.
 
 A connect failure is reported with the child's piped stderr appended, so a deno
 `PermissionDenied` from a too-narrow manual permission set is visible; a missing
@@ -38,14 +43,21 @@ Node.js or switch to the deno runtime; install the Python tool).
 
 On connect the manager fetches the server's `tools`, `prompts`, and `resources`
 and caches them in memory; a server may implement only some of those list
-methods, so each list is fetched defensively and defaults to empty. The manager
-also exposes `callTool`, `getPrompt`, and `readResource` against a connected
-server, each bounded by a request timeout and the turn's abort signal so a
-hung server can't stall a turn indefinitely.
+methods, so each list is fetched defensively and defaults to empty. It then
+watches the live client: a `tools` / `prompts` / `resources` `list_changed`
+notification re-fetches just that list, and an unexpected close moves the server
+to `error` and schedules a bounded, backoff-spaced auto-reconnect (only for a
+server that is still enabled; reconnecting re-establishes a connection the user
+already consented to, never a new endpoint). After any such on-its-own change
+the manager fires a snapshot broadcast (wired at boot) so clients repaint. The
+manager also exposes `callTool`, `getPrompt`, and `readResource` against a
+connected server, each bounded by a request timeout and the turn's abort signal
+so a hung server can't stall a turn indefinitely.
 
 `sync()` is serialized so two overlapping CRUD requests can't both spawn the
-same server (which would leak a child). `shutdown()` (wired into the core's
-signal handler) disconnects every server so spawned stdio children are
+same server (which would leak a child); the auto-reconnect reconciles through
+the same chain. `shutdown()` (wired into the core's signal handler) cancels
+pending reconnects and disconnects every server so spawned stdio children are
 terminated rather than orphaned on exit.
 
 ### Trust and consent
@@ -63,10 +75,11 @@ The DB-backed registry is the configured list of servers (`mcp_servers` table)
 plus the user's per-tool and per-prompt enablement (stored as JSON sets on the
 row). It owns CRUD and the projections the API serves. `project()` merges a
 row's stored config with the manager's live `status` and capability counts into
-the shared `McpServer` shape. A remote server's bearer token never lives on the
-row: only a `has_auth` flag does. The token itself is stored in the secrets
-vault under the key from [`secret-key.ts`](secret-key.ts) (the route writes it;
-the manager reads it on connect), so it never reaches the DB or the wire
+the shared `McpServer` shape. A remote server's secrets never live on the
+row: only a `has_auth` flag (bearer) and an `oauth_authorized` flag (oauth) do.
+The bearer token and the OAuth state (client registration, tokens, PKCE
+verifier) are stored in the secrets vault under the keys from
+[`secret-key.ts`](secret-key.ts), so they never reach the DB or the wire
 projection.
 
 The capability listings each cross the row's stored enablement with the
@@ -97,7 +110,19 @@ MCP resource and a memory expands once (MCP wins) instead of twice.
 ## Routes ([`../http/routes/mcp.ts`](../http/routes/mcp.ts))
 
 The HTTP routes are CRUD for servers, per-tool / per-prompt enable/disable, a
-`reconnect` action, and the live `prompts` / `resources` listings the client's
-`/` and `@` autocomplete consume. Any change that affects which servers are
-enabled calls `resync()`, which has the manager reconcile connections and then
-broadcasts an `mcp.snapshot` WS frame so every client repaints.
+`reconnect` action, an `oauth/start` action, and the live `prompts` /
+`resources` listings the client's `/` and `@` autocomplete consume. Any change
+that affects which servers are enabled calls `resync()`, which has the manager
+reconcile connections and then broadcasts an `mcp.snapshot` WS frame so every
+client repaints.
+
+`oauth/start` ([`oauth-flow.ts`](oauth-flow.ts)) runs the RFC 8252 native-app
+sign-in: it opens a short-lived loopback HTTP listener as the redirect target
+(so the browser never has to trust core's self-signed cert), runs the SDK's
+`auth()` to discover metadata, dynamically register, and build the PKCE
+authorization URL, and returns that URL for the client to open in a browser.
+When the browser redirects to the loopback listener with the code, the listener
+exchanges it for tokens (stored in the vault via
+[`oauth-provider.ts`](oauth-provider.ts)), marks the server authorized, and
+resyncs. This is a user-initiated action, so opening a browser and reaching the
+authorization server is consented network, not background reach.

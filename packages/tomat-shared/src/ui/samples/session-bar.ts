@@ -13,7 +13,6 @@ export const sessionBarSamples = {
     tokenUsage: { used: 7800, max: 8192 },
     showTitle: true,
     titleText: "Long debugging session",
-    showButtonGroup: true,
   },
   newSession: {
     tokenUsage: null,

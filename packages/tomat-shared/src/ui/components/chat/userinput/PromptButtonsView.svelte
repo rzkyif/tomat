@@ -21,15 +21,19 @@
   } = $props();
 </script>
 
-{#each buttons as button (button.label)}
-  <button
-    type="button"
-    title={button.title}
-    disabled={button.disabled}
-    class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-    onclick={() => button.onClick()}
-  >
-    <i class="flex {button.icon} text-lg shrink-0"></i>
-    {button.label}
-  </button>
-{/each}
+<!-- Self-contained gap so the pair is spaced the same whether the host row adds
+     a gap (the composer's control row) or not (the gallery card). -->
+<div class="flex gap-2">
+  {#each buttons as button (button.label)}
+    <button
+      type="button"
+      title={button.title}
+      disabled={button.disabled}
+      class="flex items-center gap-1.5 h-9 px-3 shrink-0 rounded-large bg-surface-inset text-sm font-medium text-default-700 hover:text-default-900 hover:cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      onclick={() => button.onClick()}
+    >
+      <i class="flex {button.icon} text-lg shrink-0"></i>
+      {button.label}
+    </button>
+  {/each}
+</div>

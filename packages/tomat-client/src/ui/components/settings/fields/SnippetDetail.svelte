@@ -41,16 +41,18 @@
   const nameError = $derived(validateName(draftSymbol, draftName, otherTriggers));
   const recommended = $derived(recommendedSymbol(draftPlacement));
   const symbolOptions = $derived(
-    SNIPPET_SYMBOLS.map((sym) => ({
-      value: sym,
-      label: sym === recommended ? `${sym}  (Recommended)` : sym,
-    })),
+    SNIPPET_SYMBOLS.map((sym) => {
+      const preview = `${sym}${draftName || "name"}`;
+      return {
+        value: sym,
+        label: sym === recommended ? `${preview}  (Recommended)` : preview,
+      };
+    }),
   );
   const placementOptions = SNIPPET_PLACEMENT_OPTIONS.map((o) => ({
     value: o.value,
     label: o.label,
   }));
-  const triggerPreview = $derived(`${draftSymbol}${draftName || "name"}`);
 
   const { scheduleSave, flushSave } = createDebouncedSave(async () => {
     if (nameError) return;
@@ -76,7 +78,6 @@
   draftPlacement={draftPlacement}
   bind:draftText
   {nameError}
-  {triggerPreview}
   {symbolOptions}
   {placementOptions}
   onNameInput={(v) => {

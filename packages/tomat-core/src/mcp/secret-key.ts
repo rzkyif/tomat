@@ -6,3 +6,9 @@
 export function mcpAuthSecretName(serverId: string): string {
   return `mcp.${serverId}.authToken`;
 }
+
+/** Vault key under which a remote server's OAuth state (client registration,
+ *  tokens, PKCE verifier) is stored as a single JSON bag. */
+export function mcpOAuthSecretName(serverId: string): string {
+  return `mcp.${serverId}.oauth`;
+}

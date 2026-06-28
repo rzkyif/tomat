@@ -120,7 +120,7 @@ export const toolCallSamples = {
           question: "Does this look right?",
           mime: "image/png",
           dataB64:
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAIklEQVR42u3BAQ0AAADCoPdPbQ8HFAAAAAAAAAAAAAAA8G4wQAAB7OHIlwAAAABJRU5ErkJggg==",
           actions: [
             { label: "Looks good", value: "approve" },
             { label: "Try again", value: "retry" },

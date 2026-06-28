@@ -298,6 +298,7 @@ export const sttGroup: SettingGroup = {
         description: "The speech recognition model name, e.g. whisper-1.",
         placeholder: "whisper-1",
       },
+      language: true,
     }),
   ],
 };

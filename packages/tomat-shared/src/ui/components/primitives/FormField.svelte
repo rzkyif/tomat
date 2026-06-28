@@ -21,6 +21,7 @@
     controlWidth = "w-48",
     fieldId,
     class: extraClass = "",
+    labelContent,
     children,
   }: {
     label: string;
@@ -33,6 +34,11 @@
     controlWidth?: string;
     fieldId?: string;
     class?: string;
+    /** Custom label markup rendered in place of the plain `label` text, inside
+     *  the same label container (so the control slot + spacing stay identical).
+     *  For rich labels a plain string can't express (code chips, markers); the
+     *  plain `label` is still required and used as the aria/fallback name. */
+    labelContent?: Snippet;
     children: Snippet;
   } = $props();
 
@@ -96,7 +102,16 @@
 <div data-field-id={fieldId} class="flex flex-col gap-2 max-w-full overflow-clip text-sm {extraClass}">
   <div class="flex {horizontal ? 'flex-row items-start gap-3' : 'flex-col gap-1'}">
     <div class="flex flex-col flex-1 min-w-0 gap-0.5">
-      {#if horizontal}
+      {#if labelContent}
+        <div class="flex flex-row items-center gap-2 min-h-8">
+          <div class="flex-1 text-default-800 min-w-0">{@render labelContent()}</div>
+          {#if hasButtons}
+            <div class="flex items-center gap-0.5">
+              {@render buttons()}
+            </div>
+          {/if}
+        </div>
+      {:else if horizontal}
         <!-- Smart line-break: keep the last word glued to the inline buttons so
              they never wrap to the next line alone. -->
         {@const lastSpace = label.lastIndexOf(" ")}

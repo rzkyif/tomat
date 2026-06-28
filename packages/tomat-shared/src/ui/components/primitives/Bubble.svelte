@@ -230,19 +230,30 @@
       {@render children()}
     </div>
     {#if hasProgress}
-      <!-- Inverted layer: same content rendered atop the fill, clipped to the
-           filled rect. `filter: invert(1) hue-rotate(180deg)` flips all colours
-           (text, icons, inline-pill bg/fg) to a perceptually-inverted version
-           in one shot, no need to thread invert-color props through every
-           descendant. The clip-path spans the full bubble height (zero top and
-           bottom inset) so the inversion tracks the full-height fill on a bubble
-           of any size. Children are
-           rendered twice; Svelte's bind:expanded on the
-           shared parent state keeps both Expandable instances in lockstep, and
-           pointer-events:none on this layer routes all clicks to the lower
-           (un-filtered) copy. -->
+      <!-- Inverted layer: same content rendered atop the fill so text and other
+           UI sitting over the bar read inverted. `filter: invert(1)
+           hue-rotate(180deg)` flips all colours (text, icons, inline-pill
+           bg/fg) to a perceptually-inverted version in one shot, no need to
+           thread invert-color props through every descendant.
+
+           The clip and the filter are split across two nested elements ON
+           PURPOSE. The OUTER element clips to the filled rect (clip-path spans
+           the full bubble height, zero top/bottom inset, so the inversion
+           tracks the full-height fill at any bubble size); the INNER element
+           carries the filter. They must not share one element: WebKit
+           mis-renders an element that has BOTH a `clip-path` and a `filter`
+           when it lives inside a `transform`-promoted ancestor (the
+           `bubble-body-promote` compositing layer), clipping the filtered
+           content to a stale sub-rect even where the clip-path reveals it, so
+           only part of the inverted text shows. Keeping clip and filter on
+           separate elements sidesteps that.
+
+           Children are rendered twice; Svelte's bind:expanded on the shared
+           parent state keeps both Expandable instances in lockstep, and
+           pointer-events:none routes all clicks to the lower (un-filtered)
+           copy. -->
       <div
-        class="bubble-progress-invert absolute inset-0 z-20 transition-[clip-path] duration-500 {paddingClass} {extraClass}"
+        class="absolute inset-0 z-20 pointer-events-none transition-[clip-path] duration-500"
         class:bubble-progress-invert-indet={percent === null && !isRight}
         class:bubble-progress-invert-indet-rtl={percent === null && isRight}
         style:clip-path={percent === null
@@ -252,7 +263,9 @@
             : `inset(0 calc(100% - ${displayPercent}%) 0 0)`}
         aria-hidden="true"
       >
-        {@render children()}
+        <div class="bubble-progress-invert absolute inset-0 {paddingClass} {extraClass}">
+          {@render children()}
+        </div>
       </div>
     {/if}
   </div>

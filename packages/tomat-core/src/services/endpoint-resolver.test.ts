@@ -68,10 +68,33 @@ Deno.test("resolveEndpoint: external provider forwards llm.reasoningEffort", asy
     "llm.provider": "external",
     "llm.external.baseUrl": "https://api.openai.com/v1",
     "llm.external.model": "gpt-4o-mini",
+    "llm.external.apiKey": "sk-real",
     "llm.reasoning": "on",
     "llm.reasoningEffort": "low",
   });
   assertEquals(cfg.reasoningEffort, "low");
+});
+
+Deno.test("resolveEndpoint: external provider without an API key resolves an empty key (chat path reports it)", async () => {
+  // resolveEndpoint stays total: the chat orchestrator turns an empty apiKey
+  // into a friendly "provider isn't set up" message rather than throwing here.
+  const cfg = await resolveEndpoint({
+    "llm.provider": "external",
+    "llm.external.baseUrl": "https://api.openai.com/v1",
+    "llm.external.model": "gpt-4o-mini",
+  });
+  assertEquals(cfg.apiKey, "");
+});
+
+Deno.test("resolveEndpoint: external localhost gateway needs no API key", async () => {
+  const cfg = await resolveEndpoint({
+    "llm.provider": "external",
+    "llm.external.baseUrl": "http://127.0.0.1:1234/v1",
+    "llm.external.model": "local-model",
+  });
+  assertEquals(cfg.baseUrl, "http://127.0.0.1:1234/v1");
+  // A keyless loopback gateway gets a harmless placeholder so the SDK builds.
+  assertEquals(cfg.apiKey, "sk-noauth");
 });
 
 Deno.test("resolveEndpoint: route=secondary reads dualModel.* fields", async () => {

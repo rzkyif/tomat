@@ -14,7 +14,7 @@
 </script>
 
 <div class="overflow-x-auto">
-  <table class="text-xs border-separate border-spacing-1 -m-1">
+  <table class="text-xs border-separate border-spacing-1">
     <thead>
       <tr>
         {#each q.columns as col (col)}

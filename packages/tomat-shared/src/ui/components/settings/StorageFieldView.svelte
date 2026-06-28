@@ -54,11 +54,13 @@
   // it. Category headers toggle expansion; rows select (multi/range) and folders
   // expand; the Clear button and Delete key route back to the client, which owns
   // every decision about what is safe to remove.
+  import ErrorDetailView from "../chat/messages/ErrorDetailView.svelte";
+
   const categoryKey = (id: string): string => `__cat__:${id}`;
 
   let {
     loading = false,
-    loadError = false,
+    loadError = null,
     tree = null,
     expanded = new Set<string>(),
     selected = new Set<string>(),
@@ -68,7 +70,7 @@
     onKeyDown,
   }: {
     loading?: boolean;
-    loadError?: boolean;
+    loadError?: string | null;
     tree?: StorageTreeView | null;
     /** Expanded category group keys (`__cat__:<id>`) + expanded folder paths. */
     expanded?: ReadonlySet<string>;
@@ -92,7 +94,9 @@
   {#if loading && !tree}
     <div class="text-default-500 text-sm py-1 select-none">Loading…</div>
   {:else if loadError && !tree}
-    <div class="text-default-400 text-xs py-1 select-none">Couldn't load storage.</div>
+    <div class="py-1">
+      <ErrorDetailView message="Couldn't load storage" detail={loadError} />
+    </div>
   {:else if tree}
     {#each tree.categories as cat (cat.id)}
       {@const open = expanded.has(categoryKey(cat.id))}
@@ -101,7 +105,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        class="flex items-center gap-1 text-sm py-1 select-none cursor-pointer"
+        class="flex items-center gap-1 text-sm py-1 pr-2 select-none cursor-pointer"
         role="button"
         tabindex="-1"
         onclick={() => (onToggle ?? noop)(categoryKey(cat.id))}
@@ -139,7 +143,7 @@
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
-            class="flex items-center gap-1 text-sm pl-5 py-1 select-none {node.locked ||
+            class="flex items-center gap-1 text-sm pl-5 pr-2 py-1 select-none {node.locked ||
             cat.settings
               ? node.kind === 'folder'
                 ? 'cursor-pointer'
@@ -183,7 +187,7 @@
               <!-- svelte-ignore a11y_click_events_have_key_events -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
-                class="flex items-center gap-1 text-sm pl-10 py-1 select-none {child.locked
+                class="flex items-center gap-1 text-sm pl-10 pr-2 py-1 select-none {child.locked
                   ? 'opacity-60 cursor-default'
                   : 'cursor-pointer'} {selected.has(child.path) ? 'bg-default-400' : ''}"
                 title={child.lockReason ?? undefined}
@@ -207,7 +211,7 @@
     {/each}
 
     <!-- Total -->
-    <div class="flex items-center gap-1 text-sm py-1 select-none">
+    <div class="flex items-center gap-1 text-sm py-1 pr-2 select-none">
       <span class="flex shrink-0 w-4"></span>
       <span class="text-default-800 font-medium flex-1">Total</span>
       <span class="text-default-500 text-xs font-bold tabular-nums shrink-0">

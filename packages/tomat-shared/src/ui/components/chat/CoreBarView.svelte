@@ -73,6 +73,7 @@
   import Bubble from "../primitives/Bubble.svelte";
   import ButtonGroup from "../primitives/ButtonGroup.svelte";
   import Expand from "../primitives/Expand.svelte";
+  import ErrorDetailView from "./messages/ErrorDetailView.svelte";
   import FlushSelect from "../primitives/FlushSelect.svelte";
   import IconButton from "../primitives/IconButton.svelte";
   import { useUiContext } from "../../context.ts";
@@ -236,13 +237,7 @@
         >
           {#if status === "error"}
             {#each erroredSubsystems as s (s.kind)}
-              <div class="flex flex-col gap-1">
-                <span class="font-medium text-accent-red-700">{subsystemName(s.kind)}</span>
-                {#if s.message}
-                  <pre
-                    class="font-mono whitespace-pre-wrap break-words text-default-600 m-0">{s.message}</pre>
-                {/if}
-              </div>
+              <ErrorDetailView message={subsystemName(s.kind)} detail={s.message} />
             {/each}
           {:else if status === "busy"}
             {#each busyLines as line (line)}
@@ -305,15 +300,13 @@
       class="h-8 px-3 bg-surface-inset"
     />
 
-    {#if onManageCores}
-      <ButtonGroup size="sm" class="shrink-0">
-        <IconButton
-          icon="i-material-symbols-hub-outline"
-          title="Manage cores"
-          size="sm"
-          onclick={() => onManageCores?.()}
-        />
-      </ButtonGroup>
-    {/if}
+    <ButtonGroup size="sm" class="shrink-0">
+      <IconButton
+        icon="i-material-symbols-hub-outline"
+        title="Manage cores"
+        size="sm"
+        onclick={() => onManageCores?.()}
+      />
+    </ButtonGroup>
   </div>
 {/snippet}

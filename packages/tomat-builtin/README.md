@@ -27,6 +27,7 @@ SQLite database its tools reach through `ctx.db`.
 | `open_file`          | openFile          | Open a file, in a chosen app or the default one.                                    |
 | `get_window_layout`  | getWindowLayout   | Read open windows' positions and sizes (macOS/Windows/Linux X11; best-effort).      |
 | `set_window_layout`  | setWindowLayout   | Move and resize windows to a remembered layout (macOS/Windows/Linux X11).           |
+| `list_memories`      | listMemories      | List the user's memories by title, kind, and short summary.                         |
 | `read_memory`        | readMemory        | Read a memory's full content by title.                                              |
 | `show_memory`        | showMemory        | Render a memory as markdown in the chat (one-way display).                          |
 | `write_memory`       | writeMemory       | Create a memory, or replace an existing memory's content.                           |
@@ -48,7 +49,7 @@ SQLite database its tools reach through `ctx.db`.
     ├── app.ts         # open_app, open_file
     ├── window.ts      # get_window_layout, set_window_layout
     ├── demo.ts        # askuser_demo
-    ├── memories.ts    # read / show / write / edit_memory
+    ├── memories.ts    # list / read / show / write / edit_memory
     ├── schedule.ts    # schedule_prompt
     ├── datetime.ts    # get_datetime
     ├── calculator.ts  # calculator
@@ -93,8 +94,9 @@ brokered by the core rather than handed to the worker. Specifically:
   (macOS), `powershell` (Windows), and `wmctrl` (Linux X11). They declare
   `platforms: ["darwin", "windows", "linux_x11"]`, so they never appear on a
   Linux Wayland session (which has no way to position other apps' windows).
-- `read_memory` and `show_memory` need **memories:read**; `write_memory` and
-  `edit_memory` need **memories:write** (which also covers reads).
+- `list_memories`, `read_memory`, and `show_memory` need **memories:read**;
+  `write_memory` and `edit_memory` need **memories:write** (which also covers
+  reads).
 - `collect_table` needs no per-tool grant: it writes to the extension's private
   database, gated by the top-level `"database": true` the user saw at install
   time.
@@ -157,8 +159,11 @@ The two kinds differ in shape and in how the agent uses them:
 - **Skill** is procedural instructions the agent follows when relevant. The
   `path` points at a `<slug>/` folder holding a `SKILL.md` plus any optional
   bundled reference files. `SKILL.md` may open with simple frontmatter giving a
-  `description` (used for relevance and the listing) and `suggested-tools`. A
-  skill is read on demand; the agent reaches its bundled files through the
+  `description` (used for relevance and the listing) and `suggested-tools`. The
+  folder layout matches Anthropic's Agent Skills format, so a community
+  `SKILL.md` drops in unchanged: its `name` key is tolerated and ignored (the
+  slug names the skill here) and its `description` seeds the summary. A skill is
+  read on demand; the agent reaches its bundled files through the
   `read_skill_file` tool.
 
 Memories an extension ships are read-only to the user, alongside the knowledge

@@ -22,7 +22,7 @@
 
 import type { LlmEndpointConfig } from "./llm-provider.ts";
 import { DEFAULT_SAMPLING } from "@tomat/shared";
-import { getSecret } from "./secrets.ts";
+import { resolveExternalApiKey } from "./external-endpoint.ts";
 import { numSetting, strSetting } from "./settings-access.ts";
 import { llmPort } from "../paths.ts";
 
@@ -33,12 +33,14 @@ export async function resolveEndpoint(
   route: LlmRoute = "default",
 ): Promise<LlmEndpointConfig> {
   if (route === "secondary") {
-    const settingsKey = strSetting(settings, "dualModel.external.apiKey", "");
-    const apiKey = (await getSecret("dualModel.external.apiKey")) || settingsKey || "";
+    const baseUrl = strSetting(settings, "dualModel.external.baseUrl", "");
+    const apiKey = await resolveExternalApiKey(settings, "dualModel.external.apiKey", baseUrl);
     return {
-      baseUrl: strSetting(settings, "dualModel.external.baseUrl", ""),
+      baseUrl,
       apiKey,
       model: strSetting(settings, "dualModel.external.model", ""),
+      // The secondary route is a fast classifier/responder for simple turns:
+      // thinking is forced off and sampling overrides are dropped by design.
       reasoning: "off",
     };
   }
@@ -52,8 +54,8 @@ export async function resolveEndpoint(
   const temperature = numSetting(settings, "llm.temperature", DEFAULT_SAMPLING.temperature);
   const topP = numSetting(settings, "llm.topP", DEFAULT_SAMPLING.topP);
   if (provider === "external") {
-    const settingsKey = strSetting(settings, "llm.external.apiKey", "");
-    const apiKey = (await getSecret("llm.external.apiKey")) || settingsKey || "";
+    const baseUrl = strSetting(settings, "llm.external.baseUrl", "");
+    const apiKey = await resolveExternalApiKey(settings, "llm.external.apiKey", baseUrl);
     // OpenAI-style endpoints take an effort level rather than a token budget.
     const reasoningEffort = strSetting(settings, "llm.reasoningEffort", "high") as
       | "minimal"
@@ -61,7 +63,7 @@ export async function resolveEndpoint(
       | "medium"
       | "high";
     return {
-      baseUrl: strSetting(settings, "llm.external.baseUrl", ""),
+      baseUrl,
       apiKey,
       model: strSetting(settings, "llm.external.model", ""),
       reasoning,

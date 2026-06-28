@@ -14,6 +14,8 @@ export interface McpServerInput {
   denoAllowAll?: boolean;
   denoPermissions?: string[];
   url?: string;
+  // Remote: how the server authenticates ("none" | "bearer" | "oauth").
+  remoteAuth?: "none" | "bearer" | "oauth";
   enabled?: boolean;
   // Remote bearer token: write-only. Omit to leave unchanged, "" to clear, a
   // value to store. The server only ever echoes back `hasAuth`.
@@ -52,6 +54,13 @@ export class McpApi {
 
   reconnect(id: string): Promise<McpServer> {
     return this.client.post(`/api/v1/mcp/${encodeURIComponent(id)}/reconnect`, {});
+  }
+
+  // Begin OAuth sign-in: returns the authorization URL to open in a browser, or
+  // null if stored tokens already authorized. Completion arrives later as an
+  // mcp.snapshot once the browser redirect lands on core's loopback listener.
+  startOAuth(id: string): Promise<{ authorizationUrl: string | null }> {
+    return this.client.post(`/api/v1/mcp/${encodeURIComponent(id)}/oauth/start`, {});
   }
 
   setToolEnabled(id: string, tool: string, enabled: boolean): Promise<McpServer> {

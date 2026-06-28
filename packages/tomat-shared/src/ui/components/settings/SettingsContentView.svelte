@@ -269,6 +269,7 @@
           tabs={group.tabs.map((t) => ({ id: t.id, label: t.label }))}
           active={activeTab}
           onSelect={selectTab}
+          slideMs={ui.animationDurationMs() * 2}
         />
       </div>
     {/if}

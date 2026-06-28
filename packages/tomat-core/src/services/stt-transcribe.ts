@@ -4,14 +4,14 @@
 // the configured OpenAI-compatible endpoint (stt.external.{baseUrl, apiKey,
 // model}).
 
-import { errMessage } from "@tomat/shared";
 import OpenAI from "openai";
 import { speechTranscribe } from "../sidecars/speech.ts";
 import { speechScheduler } from "./speech-scheduler.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
-import { getSecret } from "./secrets.ts";
 import { strSetting } from "./settings-access.ts";
+import { classifyProviderError } from "./chat-provider-errors.ts";
+import { EXTERNAL_TIMEOUT_MS, resolveExternalApiKey } from "./external-endpoint.ts";
 
 const log = getLogger("stt");
 
@@ -39,27 +39,41 @@ export async function transcribeAudio(
       );
     }
     // Vault is authoritative; a plaintext value in settings.json is a
-    // lower-precedence fallback (client routes keys to the vault, and core
-    // redacts them from GET).
-    const settingsKey = strSetting(settings, "stt.external.apiKey", "");
-    const apiKey = (await getSecret("stt.external.apiKey")) || settingsKey || "";
-    // Keep the SDK's default timeout (10 minutes). Never pass `timeout: 0`:
-    // the SDK treats it as a literal 0ms deadline and aborts every request
-    // instantly with "Request timed out".
+    // lower-precedence fallback. A keyless loopback gateway gets a placeholder;
+    // any other host with no key is a misconfiguration we reject up front.
+    const apiKey = await resolveExternalApiKey(settings, "stt.external.apiKey", baseUrl);
+    if (!apiKey) {
+      throw new AppError(
+        "validation_error",
+        "external STT requires an API key (stt.external.apiKey)",
+      );
+    }
+    // A request-pinned language hint (per call) overrides the configured
+    // default; local auto-detects, so the hint applies to the external path.
+    const lang = language || strSetting(settings, "stt.external.language", "") || undefined;
+    // Bound the call at 120s to match the local sidecar. Never pass
+    // `timeout: 0`: the SDK treats it as a literal 0ms deadline and aborts
+    // every request instantly with "Request timed out".
     const client = new OpenAI({
       baseURL: baseUrl,
-      apiKey: apiKey || "sk-stt",
-      maxRetries: 0,
+      apiKey,
+      maxRetries: 2,
+      timeout: EXTERNAL_TIMEOUT_MS,
     });
     try {
       const startedAt = Date.now();
       log.info(`external transcription starting (audio ${audio.size} bytes, model ${model})`);
-      const res = await client.audio.transcriptions.create({
-        model,
-        file: audio,
-        ...(language ? { language } : {}),
-        response_format: "json",
-      });
+      const res = await client.audio.transcriptions.create(
+        {
+          model,
+          file: audio,
+          ...(lang ? { language: lang } : {}),
+          response_format: "json",
+        },
+        // Cancel the upstream request if the caller aborts (client disconnect),
+        // matching the local path so an abandoned transcription stops billing.
+        { signal },
+      );
       const text = (res as { text?: string }).text ?? "";
       log.info(
         `external transcription done in ${Date.now() - startedAt}ms ` +
@@ -67,7 +81,8 @@ export async function transcribeAudio(
       );
       return text;
     } catch (err) {
-      throw new AppError("provider_error", `external STT failed: ${errMessage(err)}`);
+      const { code, message } = classifyProviderError(err);
+      throw new AppError(code, `external STT failed: ${message}`);
     }
   }
 

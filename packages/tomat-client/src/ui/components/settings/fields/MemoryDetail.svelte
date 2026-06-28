@@ -14,12 +14,22 @@
   // Extension-provided memories are read-only; only the enable toggle applies.
   const editable = $derived(item.provider === USER_MEMORY_PROVIDER);
   const isSkill = $derived(item.kind === "skill");
+  const summarized = $derived(!!item.summary);
+  // Absent flag (older cores) is treated as stale so the status never claims a
+  // summary is current when we can't tell.
+  const summaryStale = $derived(item.summaryStale ?? true);
 
   let draftTitle = $state(untrack(() => item.title));
   let draftContent = $state("");
   let contentLoaded = $state(false);
   let files = $state<string[]>([]);
   let suggestedTools = $state<string[]>([]);
+  let reindexing = $state(false);
+
+  // The currently open bundled file, loaded on demand.
+  let openFileName = $state<string | null>(null);
+  let openFileContent = $state("");
+  let openFileLoaded = $state(false);
 
   const otherTitles = $derived(
     memoriesState.memories
@@ -59,12 +69,84 @@
     }
   });
 
+  const fileSave = createDebouncedSave(async () => {
+    if (!editable || !openFileName || !openFileLoaded) return;
+    try {
+      await memoriesState.writeFile(item.id, openFileName, openFileContent);
+      reload();
+    } catch (e) {
+      log.error("Failed to save bundled file:", e);
+    }
+  });
+
   async function toggleEnabled(enabled: boolean) {
     try {
       await memoriesState.setEnabled(item.id, enabled);
       reload();
     } catch (e) {
       log.error("Failed to toggle memory:", e);
+    }
+  }
+
+  async function reindex() {
+    reindexing = true;
+    try {
+      await memoriesState.reindex(item.id);
+      reload();
+    } catch (e) {
+      log.error("Failed to reindex memory:", e);
+    } finally {
+      reindexing = false;
+    }
+  }
+
+  async function openFile(name: string) {
+    fileSave.flushSave();
+    openFileName = name;
+    openFileLoaded = false;
+    openFileContent = "";
+    try {
+      const content = await memoriesState.getFile(item.id, name);
+      // A second click (or a close) may have superseded this load while the
+      // fetch was in flight; don't drop another file's content into the editor.
+      if (openFileName !== name) return;
+      openFileContent = content;
+      openFileLoaded = true;
+    } catch (e) {
+      log.error("Failed to load bundled file:", e);
+    }
+  }
+
+  function closeFile() {
+    fileSave.flushSave();
+    openFileName = null;
+    openFileContent = "";
+    openFileLoaded = false;
+  }
+
+  async function addFile(name: string) {
+    if (files.includes(name)) {
+      await openFile(name);
+      return;
+    }
+    try {
+      await memoriesState.writeFile(item.id, name, "");
+      files = [...files, name].sort();
+      reload();
+      await openFile(name);
+    } catch (e) {
+      log.error("Failed to add bundled file:", e);
+    }
+  }
+
+  async function deleteFile(name: string) {
+    try {
+      await memoriesState.deleteFile(item.id, name);
+      files = files.filter((f) => f !== name);
+      if (openFileName === name) closeFile();
+      reload();
+    } catch (e) {
+      log.error("Failed to delete bundled file:", e);
     }
   }
 </script>
@@ -76,9 +158,15 @@
   {draftTitle}
   titleError={editable ? titleError : null}
   {contentLoaded}
+  {summarized}
+  {summaryStale}
+  {reindexing}
   {suggestedTools}
   {files}
   bind:draftContent
+  {openFileName}
+  bind:openFileContent
+  {openFileLoaded}
   onToggleEnabled={(v) => toggleEnabled(v)}
   onTitleInput={(v) => {
     draftTitle = v;
@@ -90,4 +178,14 @@
     scheduleSave();
   }}
   onContentBlur={() => flushSave()}
+  onReindex={() => reindex()}
+  onOpenFile={(name) => openFile(name)}
+  onCloseFile={() => closeFile()}
+  onFileContentInput={(v) => {
+    openFileContent = v;
+    fileSave.scheduleSave();
+  }}
+  onFileContentBlur={() => fileSave.flushSave()}
+  onAddFile={(name) => addFile(name)}
+  onDeleteFile={(name) => deleteFile(name)}
 />

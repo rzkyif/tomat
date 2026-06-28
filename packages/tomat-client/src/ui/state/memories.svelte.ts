@@ -74,6 +74,27 @@ class MemoriesState {
     this.memories = this.memories.filter((d) => d.id !== id);
   }
 
+  /** Ask the core to regenerate this memory's summary + embedding. Reloads so
+   *  the staleness flag clears once indexing finishes. */
+  async reindex(id: string): Promise<void> {
+    await cores().api().memories.reindex(id);
+    await this.load();
+  }
+
+  getFile(id: string, name: string): Promise<string> {
+    return cores().api().memories.getFile(id, name);
+  }
+
+  async writeFile(id: string, name: string, content: string): Promise<void> {
+    await cores().api().memories.putFile(id, name, content);
+    await this.load();
+  }
+
+  async deleteFile(id: string, name: string): Promise<void> {
+    await cores().api().memories.deleteFile(id, name);
+    await this.load();
+  }
+
   async rescan(): Promise<{ added: number; removed: number; changed: number }> {
     const result = await cores().api().memories.rescan();
     await this.load();

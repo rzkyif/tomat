@@ -12,6 +12,7 @@ export const quickSettingsSamples = {
   default: {
     exitLabel: "Continue to Chat",
     exitTitle: "Back to Chat",
+    exitIcon: "i-material-symbols-arrow-forward-rounded",
   },
 
   // A field here picked something that still needs downloading, so the exits
@@ -19,5 +20,6 @@ export const quickSettingsSamples = {
   pendingDownloads: {
     exitLabel: "Review Pending Downloads",
     exitTitle: "Review Pending Downloads",
+    exitIcon: "i-material-symbols-download-rounded",
   },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof QuickSettingsView>>>;

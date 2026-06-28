@@ -249,10 +249,10 @@ Deno.test("broker: memories ops round-trip through the store", async () => {
       title: "Notes",
       content: "gamma",
     });
-    const listing = (await call("list", {})) as Array<{ title: string }>;
+    const listing = (await call("list", {})) as Array<{ title: string; kind: string }>;
     assertEquals(
-      listing.map((d) => d.title),
-      ["Notes"],
+      listing.map((d) => [d.title, d.kind]),
+      [["Notes", "knowledge"]],
     );
 
     // Missing memories and missing args surface as clear errors.

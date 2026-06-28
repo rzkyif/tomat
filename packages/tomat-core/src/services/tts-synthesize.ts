@@ -5,15 +5,15 @@
 // (tts.external.{baseUrl, apiKey, model, voice}) via /v1/audio/speech. Mirrors
 // stt-transcribe.ts.
 
-import { errMessage } from "@tomat/shared";
 import OpenAI from "openai";
 import { speechSpeak } from "../sidecars/speech.ts";
 import { speechScheduler } from "./speech-scheduler.ts";
 import { loadCoreSettings } from "./core-settings.ts";
-import { getSecret } from "./secrets.ts";
 import { strSetting } from "./settings-access.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
+import { classifyProviderError } from "./chat-provider-errors.ts";
+import { EXTERNAL_TIMEOUT_MS, resolveExternalApiKey } from "./external-endpoint.ts";
 
 const log = getLogger("tts");
 
@@ -39,11 +39,27 @@ export async function synthesizeSpeech(
       );
     }
     // Vault is authoritative; a plaintext value in settings.json is a
-    // lower-precedence fallback (client routes keys to the vault, core redacts).
-    const settingsKey = strSetting(settings, "tts.external.apiKey", "");
-    const apiKey = (await getSecret("tts.external.apiKey")) || settingsKey || "";
-    const selectedVoice = voice || strSetting(settings, "tts.external.voice", "alloy");
-    const client = new OpenAI({ baseURL: baseUrl, apiKey: apiKey || "sk-tts", maxRetries: 0 });
+    // lower-precedence fallback. A keyless loopback gateway gets a placeholder;
+    // any other host with no key is a misconfiguration we reject up front.
+    const apiKey = await resolveExternalApiKey(settings, "tts.external.apiKey", baseUrl);
+    if (!apiKey) {
+      throw new AppError(
+        "validation_error",
+        "external TTS requires an API key (tts.external.apiKey)",
+      );
+    }
+    // The `voice` argument is a local Kokoro voice id (the client always sends
+    // tts.voice); it means nothing to an external provider, so the external
+    // path uses the dedicated tts.external.voice setting instead.
+    const selectedVoice = strSetting(settings, "tts.external.voice", "alloy");
+    // Output stays WAV: the client playback queue and the module broker's
+    // sample-rate probe both assume WAV bytes.
+    const client = new OpenAI({
+      baseURL: baseUrl,
+      apiKey,
+      maxRetries: 2,
+      timeout: EXTERNAL_TIMEOUT_MS,
+    });
     try {
       const startedAt = Date.now();
       log.info(`external synthesis starting (model ${model}, ${text.length} chars)`);
@@ -60,7 +76,8 @@ export async function synthesizeSpeech(
       );
       return bytes;
     } catch (err) {
-      throw new AppError("provider_error", `external TTS failed: ${errMessage(err)}`);
+      const { code, message } = classifyProviderError(err);
+      throw new AppError(code, `external TTS failed: ${message}`);
     }
   }
 

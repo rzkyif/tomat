@@ -49,6 +49,7 @@ export interface ToolChatContext {
 
 export interface MemoryListing {
   title: string;
+  kind: "knowledge" | "skill";
   summary?: string;
   updatedAtMs: number;
 }

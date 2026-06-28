@@ -3,19 +3,17 @@
   import { useUiContext } from "../../context.ts";
 
   // The settings switch: a bg-surface-inset groove with an inverted knob that
-  // clip-path slides to the selected cell (binary on/off, segmented N-way, or a
-  // compact pill). Shared so client and website render switches identically; the
-  // slide duration comes from the UI context (settings-aware client, BASE_MS
-  // website). Hover bits use `hov:` for demo-cursor parity.
+  // clip-path slides to the selected cell (binary on/off labels, or a segmented
+  // N-way set of options). Shared so client and website render switches
+  // identically; the slide duration comes from the UI context (settings-aware
+  // client, BASE_MS website). Hover bits use `hov:` for demo-cursor parity.
   const ui = useUiContext();
 
-  type Variant = "labels" | "pill";
   type Option = { value: string; label: string };
 
   let {
     checked = false,
     onchange,
-    variant = "labels",
     labels = { on: "on", off: "off" },
     options,
     value,
@@ -27,7 +25,6 @@
   }: {
     checked?: boolean;
     onchange?: (value: boolean) => void;
-    variant?: Variant;
     labels?: { on: string; off: string };
     options?: Option[];
     value?: string;
@@ -44,15 +41,12 @@
   const selectedIndex = $derived(
     options ? options.findIndex((o) => o.value === value) : checked ? 1 : 0,
   );
-  const isPill = $derived(!options && variant === "pill");
   const knobStyle = $derived.by(() => {
-    const pad = isPill ? "0.125rem" : "0.25rem";
+    const pad = "0.25rem";
     const cell = `(100% - 2 * ${pad}) / ${count}`;
     const clip = selectedIndex < 0
       ? `inset(${pad} calc(100% - ${pad}) ${pad} ${pad})`
-      : `inset(${pad} calc(${pad} + ${cell} * ${count - 1 - selectedIndex}) ${pad} calc(${pad} + ${cell} * ${selectedIndex}) round ${
-        isPill ? "9999px" : "var(--rounded-medium)"
-      })`;
+      : `inset(${pad} calc(${pad} + ${cell} * ${count - 1 - selectedIndex}) ${pad} calc(${pad} + ${cell} * ${selectedIndex}) round var(--rounded-medium))`;
     return `clip-path: ${clip}; transition: clip-path ${ui.animationDurationMs()}ms ${CSS_EASING};`;
   });
   const cellClass = $derived(
@@ -117,9 +111,7 @@
   </div>
 {:else}
   <label
-    class="relative {variant === 'pill'
-      ? 'inline-flex'
-      : 'flex w-full'} items-center cursor-pointer {disabled
+    class="relative flex w-full items-center cursor-pointer {disabled
       ? 'opacity-60 pointer-events-none'
       : ''} {extraClass}"
   >
@@ -131,23 +123,13 @@
       {disabled}
       onchange={(e) => onchange?.((e.target as HTMLInputElement).checked)}
     />
-    {#if variant === "pill"}
-      <span class="groove relative w-11 h-6 shrink-0 rounded-full bg-surface-inset">
-        <span
-          aria-hidden="true"
-          class="absolute inset-0 bg-default-inverted-300 pointer-events-none"
-          style={knobStyle}
-        ></span>
-      </span>
-    {:else}
-      <span
-        class="groove relative flex w-full h-8 rounded-medium bg-surface-inset p-1 text-default-600"
-      >
-        <span class={cellClass}>{labels.off}</span>
-        <span class={cellClass}>{labels.on}</span>
-        {@render knob([labels.off, labels.on])}
-      </span>
-    {/if}
+    <span
+      class="groove relative flex w-full h-8 rounded-medium bg-surface-inset p-1 text-default-600"
+    >
+      <span class={cellClass}>{labels.off}</span>
+      <span class={cellClass}>{labels.on}</span>
+      {@render knob([labels.off, labels.on])}
+    </span>
   </label>
 {/if}
 

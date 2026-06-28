@@ -6,8 +6,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { mcpRegistry } from "../../mcp/registry.ts";
-import { mcpAuthSecretName } from "../../mcp/secret-key.ts";
+import { mcpAuthSecretName, mcpOAuthSecretName } from "../../mcp/secret-key.ts";
 import { mcpManager } from "../../mcp/manager.ts";
+import { cancel as cancelMcpOAuth, startMcpOAuth } from "../../mcp/oauth-flow.ts";
 import { deleteSecret, setSecret } from "../../services/secrets.ts";
 import { wsHub } from "../../ws/hub.ts";
 import { AppError } from "../../shared/errors.ts";
@@ -24,6 +25,7 @@ const serverBody = z
     denoAllowAll: z.boolean().optional(),
     denoPermissions: z.array(z.string()).optional(),
     url: z.string().optional(),
+    remoteAuth: z.enum(["none", "bearer", "oauth"]).optional(),
     enabled: z.boolean().optional(),
     // Remote bearer token: write-only. Omitted = leave as-is; "" = clear; a
     // value = store in the vault. Never echoed back (the projection only
@@ -87,6 +89,7 @@ export function mcpRoutes(): Hono {
       data.denoAllowAll !== undefined ||
       data.denoPermissions !== undefined ||
       data.url !== undefined ||
+      data.remoteAuth !== undefined ||
       hasAuth !== undefined
     ) {
       await mcpManager().disconnect(id);
@@ -97,8 +100,10 @@ export function mcpRoutes(): Hono {
 
   r.delete("/:id", async (c) => {
     const id = c.req.param("id");
+    cancelMcpOAuth(id);
     mcpRegistry().delete(id);
     await deleteSecret(mcpAuthSecretName(id)).catch(() => {});
+    await deleteSecret(mcpOAuthSecretName(id)).catch(() => {});
     await resync();
     return c.json({ ok: true });
   });
@@ -108,6 +113,24 @@ export function mcpRoutes(): Hono {
     await mcpManager().disconnect(c.req.param("id"));
     await resync();
     return c.json(mcpRegistry().getOrThrow(c.req.param("id")));
+  });
+
+  // Begin the OAuth 2.1 sign-in for a remote server: returns the authorization
+  // URL the client opens in a browser. The token exchange completes when the
+  // browser redirects to the loopback listener, which flips the server to
+  // authorized and reconnects. A null URL means stored tokens already worked.
+  r.post("/:id/oauth/start", async (c) => {
+    const id = c.req.param("id");
+    const server = mcpRegistry().getOrThrow(id);
+    if (server.kind !== "remote" || !server.url) {
+      throw new AppError("validation_error", "OAuth is only for a remote server with a url");
+    }
+    const { authorizationUrl } = await startMcpOAuth(id, server.url, (ok) => {
+      if (!ok) return;
+      mcpRegistry().update(id, { remoteAuth: "oauth", oauthAuthorized: true });
+      void resync();
+    });
+    return c.json({ authorizationUrl });
   });
 
   r.post("/:id/tools/:tool/:action", (c) => {

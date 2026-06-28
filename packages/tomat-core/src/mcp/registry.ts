@@ -7,6 +7,7 @@
 
 import type {
   McpPrompt,
+  McpRemoteAuth,
   McpResource,
   McpServer,
   McpStdioRuntime,
@@ -39,10 +40,13 @@ export interface McpServerInput {
   denoAllowAll?: boolean;
   denoPermissions?: string[];
   url?: string;
+  remoteAuth?: McpRemoteAuth;
   enabled?: boolean;
   // Whether a bearer token is stored for this server (the token itself goes to
   // the secrets vault via the route, never through the registry/DB).
   hasAuth?: boolean;
+  // Whether the OAuth authorization-code flow has completed (tokens in vault).
+  oauthAuthorized?: boolean;
 }
 
 interface Row {
@@ -55,8 +59,10 @@ interface Row {
   deno_allow_all: number;
   deno_permissions_json: string;
   url: string | null;
+  remote_auth: string;
   enabled: number;
   has_auth: number;
+  oauth_authorized: number;
   tool_enabled_json: string;
   prompt_enabled_json: string;
   created_at_ms: number;
@@ -98,9 +104,10 @@ class McpRegistry {
     db()
       .prepare(`
       INSERT INTO mcp_servers (id, name, kind, command, args_json, runtime, deno_allow_all,
-                               deno_permissions_json, url, enabled, has_auth,
-                               tool_enabled_json, prompt_enabled_json, created_at_ms, updated_at_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?)
+                               deno_permissions_json, url, remote_auth, enabled, has_auth,
+                               oauth_authorized, tool_enabled_json, prompt_enabled_json,
+                               created_at_ms, updated_at_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?)
     `)
       .run(
         id,
@@ -112,8 +119,10 @@ class McpRegistry {
         input.denoAllowAll === false ? 0 : 1,
         JSON.stringify(input.denoPermissions ?? []),
         input.url ?? null,
+        input.remoteAuth ?? "none",
         input.enabled ? 1 : 0,
         input.hasAuth ? 1 : 0,
+        input.oauthAuthorized ? 1 : 0,
         now,
         now,
       );
@@ -134,7 +143,8 @@ class McpRegistry {
       .prepare(`
       UPDATE mcp_servers
          SET name = ?, kind = ?, command = ?, args_json = ?, runtime = ?, deno_allow_all = ?,
-             deno_permissions_json = ?, url = ?, enabled = ?, has_auth = ?, updated_at_ms = ?
+             deno_permissions_json = ?, url = ?, remote_auth = ?, enabled = ?, has_auth = ?,
+             oauth_authorized = ?, updated_at_ms = ?
        WHERE id = ?
     `)
       .run(
@@ -146,8 +156,16 @@ class McpRegistry {
         (input.denoAllowAll === undefined ? cur.denoAllowAll : input.denoAllowAll) ? 1 : 0,
         JSON.stringify(input.denoPermissions ?? cur.denoPermissions),
         input.url ?? cur.url ?? null,
+        input.remoteAuth ?? cur.remoteAuth,
         input.enabled === undefined ? (cur.enabled ? 1 : 0) : input.enabled ? 1 : 0,
         input.hasAuth === undefined ? (cur.hasAuth ? 1 : 0) : input.hasAuth ? 1 : 0,
+        input.oauthAuthorized === undefined
+          ? cur.oauthAuthorized
+            ? 1
+            : 0
+          : input.oauthAuthorized
+            ? 1
+            : 0,
         now,
         id,
       );
@@ -263,7 +281,10 @@ class McpRegistry {
       denoAllowAll: row.deno_allow_all !== 0,
       denoPermissions: JSON.parse(row.deno_permissions_json),
       url: row.url ?? undefined,
+      remoteAuth:
+        row.remote_auth === "bearer" || row.remote_auth === "oauth" ? row.remote_auth : "none",
       hasAuth: row.has_auth !== 0,
+      oauthAuthorized: row.oauth_authorized !== 0,
       enabled: row.enabled !== 0,
       toolEnabled: JSON.parse(row.tool_enabled_json),
       promptEnabled: JSON.parse(row.prompt_enabled_json),

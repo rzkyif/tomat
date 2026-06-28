@@ -7,11 +7,18 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  PromptListChangedNotificationSchema,
+  ResourceListChangedNotificationSchema,
+  ToolListChangedNotificationSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpConnectionStatus, McpServer } from "@tomat/shared";
 import { errMessage } from "@tomat/shared";
 import { getLogger } from "../shared/log.ts";
 import { getSecret } from "../services/secrets.ts";
 import { mcpAuthSecretName } from "./secret-key.ts";
+import { McpOAuthProvider } from "./oauth-provider.ts";
 import { requireWorkerDeno } from "../sidecars/worker-deno.ts";
 import { paths } from "../paths.ts";
 
@@ -22,6 +29,11 @@ const log = getLogger("mcp");
 // SDK aborts the request when this elapses; callers fold the rejection into a
 // failed tool result / dropped token rather than crashing the turn.
 const REQUEST_TIMEOUT_MS = 30_000;
+
+// Backoff steps for auto-reconnecting an enabled server after an unexpected
+// drop. After the last step the manager gives up and leaves the server in
+// `error` until the user hits Reconnect or a CRUD resync retries it.
+const RECONNECT_BACKOFF_MS = [1_000, 2_000, 5_000, 15_000, 30_000];
 
 export interface McpToolDef {
   name: string;
@@ -61,6 +73,32 @@ class McpManager {
   // `conns.has` guard in connect() and spawn the same server twice (the second
   // would overwrite the first connection and leak its child process).
   private syncChain: Promise<void> = Promise.resolve();
+  // The enabled/disabled set from the most recent sync, so an unexpected drop
+  // can reconcile against current config without importing the registry (which
+  // imports us). Kept current because every CRUD path calls resync -> sync.
+  private desired: McpServer[] = [];
+  // Pending auto-reconnect timers and their attempt index, keyed by server id.
+  private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private reconnectAttempts = new Map<string, number>();
+  // Fired after an async status or capability change the manager makes on its
+  // own (a dropped connection, an auto-reconnect, a server's list_changed
+  // notification) so clients repaint. A no-op until wired at boot; the route
+  // layer already broadcasts on CRUD.
+  private onChange: () => void = () => {};
+  // How a transport is built for a server. Swappable in tests so a client can be
+  // linked to an in-memory MCP server instead of spawning a process / reaching a
+  // URL.
+  private transportFactory: (server: McpServer) => Promise<Transport> = makeTransport;
+
+  /** Register the snapshot-broadcast callback (wired at boot). */
+  notifyOn(fn: () => void): void {
+    this.onChange = fn;
+  }
+
+  /** Test seam: override transport creation. */
+  setTransportFactory(fn: (server: McpServer) => Promise<Transport>): void {
+    this.transportFactory = fn;
+  }
 
   status(id: string): { status: McpConnectionStatus; error?: string } {
     const c = this.conns.get(id);
@@ -92,6 +130,7 @@ class McpManager {
   }
 
   private async doSync(servers: McpServer[]): Promise<void> {
+    this.desired = servers;
     const enabled = new Map(servers.filter((s) => s.enabled).map((s) => [s.id, s]));
     // Drop connections no longer wanted. Deleting the current key from a Map
     // during for-of iteration is safe (the spec won't revisit it).
@@ -100,6 +139,11 @@ class McpManager {
     }
     for (const id of this.failed.keys()) {
       if (!enabled.has(id)) this.failed.delete(id);
+    }
+    // Cancel a scheduled reconnect for any server no longer enabled. Deleting
+    // the current key from a Map during for-of iteration is safe.
+    for (const id of this.reconnectTimers.keys()) {
+      if (!enabled.has(id)) this.cancelReconnect(id);
     }
     // Bring up newly enabled ones.
     await Promise.all(
@@ -118,7 +162,7 @@ class McpManager {
       },
     );
     try {
-      const transport = await makeTransport(server);
+      const transport = await this.transportFactory(server);
       const readStderr = captureStderr(transport);
       await client.connect(transport).catch((err: unknown) => {
         // Spawn/handshake failure: fold in whatever the child printed to stderr
@@ -127,31 +171,19 @@ class McpManager {
         // the user sees why instead of a bare "connection closed".
         throw new Error(describeConnectError(server, err, readStderr()));
       });
+      // Fetch capabilities; a server may not implement every list method.
       const conn: Connection = {
         client,
         status: "connected",
-        tools: [],
-        prompts: [],
-        resources: [],
+        tools: await listTools(client),
+        prompts: await listPrompts(client),
+        resources: await listResources(client),
       };
-      // Fetch capabilities; a server may not implement every list method.
-      conn.tools = await safeList(
-        () => client.listTools(),
-        (r) => (r as { tools: McpToolDef[] }).tools,
-      );
-      conn.prompts = await safeList(
-        () => client.listPrompts(),
-        (r) =>
-          (r as { prompts: McpPromptDef[] }).prompts.map((p) => ({
-            ...p,
-            arguments: p.arguments ?? [],
-          })),
-      );
-      conn.resources = await safeList(
-        () => client.listResources(),
-        (r) => (r as { resources: McpResourceDef[] }).resources,
-      );
       this.conns.set(server.id, conn);
+      this.reconnectAttempts.delete(server.id);
+      // Watch for a dropped connection or a server-pushed list change now that
+      // this client is the active one.
+      this.watchConnection(server.id, client);
       log.info(
         `connected ${server.name}: ${conn.tools.length} tools, ${conn.prompts.length} prompts, ` +
           `${conn.resources.length} resources`,
@@ -170,13 +202,93 @@ class McpManager {
   }
 
   async disconnect(id: string): Promise<void> {
+    // An intentional disconnect (disable, delete, config change, manual
+    // reconnect) cancels any pending backoff and resets the attempt count so a
+    // later re-enable starts fresh.
+    this.cancelReconnect(id);
+    this.reconnectAttempts.delete(id);
     const c = this.conns.get(id);
     if (!c) return;
+    // Delete before close so the onclose watcher sees a stale client (the active
+    // conn no longer matches) and treats this as intentional, not a drop.
     this.conns.delete(id);
     try {
       await c.client.close();
     } catch {
       /* best effort */
+    }
+  }
+
+  /** Watch the active client for an unexpected close (-> error + auto-reconnect)
+   *  and for server-pushed list_changed notifications (-> refresh the affected
+   *  capability). A close we initiate is ignored because disconnect() removes
+   *  the conn first, so the active client no longer matches `client`. */
+  private watchConnection(id: string, client: Client): void {
+    client.onclose = () => {
+      if (this.conns.get(id)?.client !== client) return;
+      this.conns.delete(id);
+      this.failed.set(id, "Connection closed");
+      this.onChange();
+      // Re-establish a connection the user already enabled (never a new
+      // endpoint). doSync cancels this if the server is meanwhile disabled.
+      this.scheduleReconnect(id);
+    };
+    client.setNotificationHandler(
+      ToolListChangedNotificationSchema,
+      () => void this.refreshCapability(id, client, "tools"),
+    );
+    client.setNotificationHandler(
+      PromptListChangedNotificationSchema,
+      () => void this.refreshCapability(id, client, "prompts"),
+    );
+    client.setNotificationHandler(
+      ResourceListChangedNotificationSchema,
+      () => void this.refreshCapability(id, client, "resources"),
+    );
+  }
+
+  /** Re-fetch one capability list after a server's list_changed notification and
+   *  repaint. Ignores a notification from a client that's no longer active. */
+  private async refreshCapability(
+    id: string,
+    client: Client,
+    kind: "tools" | "prompts" | "resources",
+  ): Promise<void> {
+    const conn = this.conns.get(id);
+    if (!conn || conn.client !== client) return;
+    if (kind === "tools") conn.tools = await listTools(client);
+    else if (kind === "prompts") conn.prompts = await listPrompts(client);
+    else conn.resources = await listResources(client);
+    this.onChange();
+  }
+
+  /** Schedule the next backoff-spaced reconnect attempt for a dropped enabled
+   *  server, reconciling against the latest desired set. Stops after the backoff
+   *  steps are exhausted. */
+  private scheduleReconnect(id: string): void {
+    this.cancelReconnect(id);
+    const attempt = this.reconnectAttempts.get(id) ?? 0;
+    const delay = RECONNECT_BACKOFF_MS[attempt];
+    if (delay === undefined) return; // exhausted; wait for manual / CRUD retry
+    this.reconnectAttempts.set(id, attempt + 1);
+    const timer = setTimeout(() => {
+      this.reconnectTimers.delete(id);
+      void this.sync(this.desired).then(() => {
+        // connect() clears the attempt count on success; if still down and
+        // wanted, step to the next backoff delay.
+        if (!this.conns.has(id) && this.desired.some((s) => s.id === id && s.enabled)) {
+          this.scheduleReconnect(id);
+        }
+      });
+    }, delay);
+    this.reconnectTimers.set(id, timer);
+  }
+
+  private cancelReconnect(id: string): void {
+    const timer = this.reconnectTimers.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.reconnectTimers.delete(id);
     }
   }
 
@@ -228,6 +340,7 @@ class McpManager {
   }
 
   async shutdown(): Promise<void> {
+    for (const id of this.reconnectTimers.keys()) this.cancelReconnect(id);
     await Promise.all([...this.conns.keys()].map((id) => this.disconnect(id)));
   }
 }
@@ -245,11 +358,23 @@ async function makeTransport(server: McpServer) {
     });
   }
   if (!server.url) throw new Error("remote MCP server has no url");
-  // Send the stored bearer token (if any) as the Authorization header on every
-  // request. The token lives in the secrets vault, keyed by server id; it never
-  // touches the DB or the wire projection.
+  // OAuth 2.1: connect with the vault-backed provider so the SDK attaches the
+  // stored access token and refreshes it as needed. A server that hasn't been
+  // signed into yet has no tokens; rather than let the SDK kick off a dynamic
+  // registration on every failed connect (no browser is open here), surface a
+  // clear "sign in" status and make no network call.
+  if (server.remoteAuth === "oauth") {
+    if (!server.oauthAuthorized) throw new Error("OAuth sign-in required");
+    const authProvider = new McpOAuthProvider(server.id, "http://127.0.0.1/callback");
+    return new StreamableHTTPClientTransport(new URL(server.url), { authProvider });
+  }
+  // "bearer" mode: send the stored token as the Authorization header on every
+  // request. Gated on the mode (not just `hasAuth`) so switching a server to
+  // "none" stops sending a token left over from a previous bearer setup. The
+  // token lives in the secrets vault, keyed by server id; it never touches the
+  // DB or the wire projection.
   let requestInit: RequestInit | undefined;
-  if (server.hasAuth) {
+  if (server.remoteAuth === "bearer" && server.hasAuth) {
     const token = await getSecret(mcpAuthSecretName(server.id));
     if (token) {
       requestInit = { headers: { Authorization: `Bearer ${token}` } };
@@ -343,8 +468,40 @@ async function safeList<R, T>(call: () => Promise<R>, pick: (r: R) => T[]): Prom
   }
 }
 
+// One fetcher per capability list, used on connect and on a list_changed
+// refresh. A server may not implement every list method, so each defaults to
+// empty on error.
+function listTools(client: Client): Promise<McpToolDef[]> {
+  return safeList(
+    () => client.listTools(),
+    (r) => (r as { tools: McpToolDef[] }).tools,
+  );
+}
+function listPrompts(client: Client): Promise<McpPromptDef[]> {
+  return safeList(
+    () => client.listPrompts(),
+    (r) =>
+      (r as { prompts: McpPromptDef[] }).prompts.map((p) => ({
+        ...p,
+        arguments: p.arguments ?? [],
+      })),
+  );
+}
+function listResources(client: Client): Promise<McpResourceDef[]> {
+  return safeList(
+    () => client.listResources(),
+    (r) => (r as { resources: McpResourceDef[] }).resources,
+  );
+}
+
 let _instance: McpManager | null = null;
 export function mcpManager(): McpManager {
   if (!_instance) _instance = new McpManager();
   return _instance;
+}
+
+/** Drop the cached singleton (and its live connections) between tests. */
+export function __resetForTesting(): void {
+  void _instance?.shutdown();
+  _instance = null;
 }

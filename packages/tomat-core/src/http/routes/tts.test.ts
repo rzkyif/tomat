@@ -70,6 +70,26 @@ Deno.test("POST /api/v1/tts/synthesize: empty text returns 400", async () => {
   }
 });
 
+Deno.test("POST /api/v1/tts/synthesize: text over the length cap returns 400", async () => {
+  const env = await setupTestEnv();
+  try {
+    const { token } = await pair();
+    const app = buildApp();
+    const res = await app.fetch(
+      new Request("http://x/api/v1/tts/synthesize", {
+        method: "POST",
+        headers: { ...bearer(token), "content-type": "application/json" },
+        body: JSON.stringify({ text: "a".repeat(2_001) }),
+      }),
+    );
+    assertEquals(res.status, 400);
+    const body = await res.json();
+    assertEquals(body.error.code, "validation_error");
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("GET /api/v1/tts/status: returns the controller status object", async () => {
   const env = await setupTestEnv();
   try {

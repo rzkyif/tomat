@@ -2,7 +2,7 @@
 // argument validation, result kinds, and show_memory's markdown push.
 
 import { assertEquals, assertRejects } from "@std/assert";
-import { editMemory, readMemory, showMemory, writeMemory } from "./memories.ts";
+import { editMemory, listMemories, readMemory, showMemory, writeMemory } from "./memories.ts";
 import type { ToolContext } from "./types.ts";
 
 interface MockCtx extends ToolContext {
@@ -30,11 +30,18 @@ function makeMockCtx(): MockCtx {
     memories: {
       list() {
         ctx.calls.push(["list"]);
-        return Promise.resolve([]);
+        return Promise.resolve([
+          { title: "Notes", kind: "knowledge" as const, summary: "my notes", updatedAtMs: 1 },
+          { title: "Web research", kind: "skill" as const, updatedAtMs: 2 },
+        ]);
       },
       get(title: string) {
         ctx.calls.push(["get", title]);
         return Promise.resolve({ title, content: `# ${title}\nbody` });
+      },
+      getFile(title: string, name: string) {
+        ctx.calls.push(["getFile", title, name]);
+        return Promise.resolve({ title, name, content: `contents of ${name}` });
       },
       write(title: string, content: string) {
         ctx.calls.push(["write", title, content]);
@@ -65,6 +72,18 @@ function makeMockCtx(): MockCtx {
   } as MockCtx;
   return ctx;
 }
+
+Deno.test("list_memories: returns titles, kinds, and summaries", async () => {
+  const ctx = makeMockCtx();
+  const result = await listMemories({}, ctx);
+  assertEquals(result, {
+    memories: [
+      { title: "Notes", kind: "knowledge", summary: "my notes" },
+      { title: "Web research", kind: "skill", summary: undefined },
+    ],
+  });
+  assertEquals(ctx.calls, [["list"]]);
+});
 
 Deno.test("write_memory: returns a memory_diff and allows empty content", async () => {
   const ctx = makeMockCtx();

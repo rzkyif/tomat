@@ -3,9 +3,9 @@ import type { OmitSnippetProps } from "./types.ts";
 import type CoreBarView from "../components/chat/CoreBarView.svelte";
 
 const CORES = [
-  { id: "laptop", name: "laptop" },
-  { id: "desktop", name: "desktop" },
-  { id: "studio", name: "mac studio" },
+  { id: "laptop", name: "Laptop" },
+  { id: "desktop", name: "Desktop" },
+  { id: "studio", name: "Mac Studio" },
 ];
 
 export const coreBarSamples = {

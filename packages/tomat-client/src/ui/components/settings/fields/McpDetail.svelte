@@ -24,6 +24,7 @@
   let draftAllowAll = $state(untrack(() => server.denoAllowAll));
   let draftPermissions = $state(untrack(() => (server.denoPermissions ?? []).join(" ")));
   let draftUrl = $state(untrack(() => server.url ?? ""));
+  let draftRemoteAuth = $state<"none" | "bearer" | "oauth">(untrack(() => server.remoteAuth));
   // The bearer token is write-only: core never sends it back, so the field
   // starts blank and is persisted only once the user edits it (so an untouched
   // save doesn't wipe an existing token).
@@ -56,6 +57,7 @@
         denoAllowAll: draftAllowAll,
         denoPermissions: draftPermissions.trim() ? draftPermissions.trim().split(/\s+/) : [],
         url: draftKind === "remote" ? draftUrl.trim() : undefined,
+        remoteAuth: draftKind === "remote" ? draftRemoteAuth : undefined,
         // Only send the token field once the user has touched it.
         ...(authTouched ? { authToken: draftAuthToken } : {}),
       });
@@ -106,7 +108,9 @@
   enabled={server.enabled}
   status={server.status}
   statusError={server.statusError}
+  remoteAuth={draftRemoteAuth}
   hasAuth={server.hasAuth}
+  oauthAuthorized={server.oauthAuthorized}
   {draftName}
   {draftKind}
   {draftCommand}
@@ -155,10 +159,21 @@
     draftUrl = v;
     scheduleSave();
   }}
+  onRemoteAuthChange={(v) => {
+    draftRemoteAuth = v;
+    scheduleSave();
+  }}
   onAuthTokenInput={(v) => {
     draftAuthToken = v;
     authTouched = true;
     scheduleSave();
+  }}
+  onSignIn={async () => {
+    try {
+      await mcpState.startOAuth(server.id);
+    } catch (e) {
+      confirmState.alert({ title: "Sign in failed", message: errMessage(e) });
+    }
   }}
   onFlush={() => flushSave()}
   onTogglePrompt={(name, v) => void mcpState.setPromptEnabled(server.id, name, v)}

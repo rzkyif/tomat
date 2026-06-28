@@ -5,9 +5,16 @@
  * autocomplete. Refreshed on connect and on every `mcp.snapshot` frame.
  */
 
-import type { McpPrompt, McpResource, McpServer, ServerToClientFrame } from "@tomat/shared";
+import {
+  errMessage,
+  type McpPrompt,
+  type McpResource,
+  type McpServer,
+  type ServerToClientFrame,
+} from "@tomat/shared";
 import { cores } from "$lib/core/cores";
 import type { McpServerInput } from "$lib/core/mcp";
+import { platform } from "$lib/platform";
 import { getLogger } from "$lib/util/log";
 import { Subscriptions } from "$lib/util/subscriptions";
 
@@ -18,6 +25,12 @@ class McpState {
   prompts = $state<McpPrompt[]>([]);
   resources = $state<McpResource[]>([]);
   wsConnected = $state(false);
+  // Reason the last refresh failed, surfaced as the manager's empty/error state.
+  // Null once a refresh succeeds.
+  loadError = $state<string | null>(null);
+  // Server ids with a reconnect/delete call in flight, so the card can show a
+  // spinner and disable the menu row while it runs.
+  busy = $state<Record<string, boolean>>({});
 
   private subs = new Subscriptions();
 
@@ -49,8 +62,10 @@ class McpState {
       this.servers = servers;
       this.prompts = prompts;
       this.resources = resources;
+      this.loadError = null;
     } catch (err) {
       log.warn("MCP refresh failed:", err);
+      this.loadError = errMessage(err);
     }
   }
 
@@ -66,13 +81,33 @@ class McpState {
   }
 
   async delete(id: string): Promise<void> {
-    await cores().api().mcp.delete(id);
-    await this.refresh();
+    this.busy = { ...this.busy, [id]: true };
+    try {
+      await cores().api().mcp.delete(id);
+      await this.refresh();
+    } finally {
+      const { [id]: _, ...rest } = this.busy;
+      this.busy = rest;
+    }
   }
 
   async reconnect(id: string): Promise<void> {
-    await cores().api().mcp.reconnect(id);
-    await this.refresh();
+    this.busy = { ...this.busy, [id]: true };
+    try {
+      await cores().api().mcp.reconnect(id);
+      await this.refresh();
+    } finally {
+      const { [id]: _, ...rest } = this.busy;
+      this.busy = rest;
+    }
+  }
+
+  /** Start OAuth sign-in for a remote server and open the authorization page in
+   *  the browser. Completion arrives later via an mcp.snapshot frame. */
+  async startOAuth(id: string): Promise<void> {
+    const { authorizationUrl } = await cores().api().mcp.startOAuth(id);
+    if (authorizationUrl) await platform().openExternal(authorizationUrl);
+    else await this.refresh();
   }
 
   async setToolEnabled(id: string, tool: string, enabled: boolean): Promise<void> {

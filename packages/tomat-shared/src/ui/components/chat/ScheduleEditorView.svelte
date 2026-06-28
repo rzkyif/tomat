@@ -55,8 +55,11 @@
     onTimeChange?: (text: string) => void;
   } = $props();
 
+  // `color-scheme` is bound to the app theme (not the OS) so the browser paints
+  // the native calendar / clock picker indicators light-on-dark in dark mode
+  // instead of leaving a black glyph.
   const rawInputClass =
-    "bg-surface-inset text-default-800 rounded-medium h-8 px-2 text-sm outline-none";
+    "bg-surface-inset text-default-800 rounded-medium h-8 px-2 text-sm outline-none [color-scheme:light] dark:[color-scheme:dark]";
 </script>
 
 <div class="flex flex-col gap-2 text-sm {disabled ? 'opacity-60 pointer-events-none' : ''}">
@@ -77,7 +80,7 @@
       <span class="text-xs text-default-600 w-16 shrink-0">When</span>
       <input
         type="datetime-local"
-        class={rawInputClass}
+        class="{rawInputClass} w-full max-w-44"
         value={whenLocal}
         aria-label="Date and time"
         {disabled}
@@ -112,7 +115,7 @@
               {disabled}
               aria-pressed={active}
               class="px-2 h-7 rounded-medium text-xs font-medium transition-colors hover:cursor-pointer {active
-                ? 'bg-accent-blue-500 text-white'
+                ? 'bg-accent-blue-500 text-default-inverted-900'
                 : 'bg-surface-inset text-default-700 hover:text-default-900'}"
               onclick={() => onToggleWeekday(day)}
             >

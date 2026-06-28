@@ -28,7 +28,6 @@
     generatingTitle = false,
     onRegenerateTitle,
     temporary = false,
-    showButtonGroup = false,
     prevDisabled = false,
     nextDisabled = false,
     isNewSession = false,
@@ -55,7 +54,6 @@
      *  "Temporary Session" label with no regenerate button, signalling that
      *  the chat is never saved. */
     temporary?: boolean;
-    showButtonGroup?: boolean;
     prevDisabled?: boolean;
     nextDisabled?: boolean;
     isNewSession?: boolean;
@@ -153,8 +151,7 @@
       </div>
     {/if}
 
-    {#if showButtonGroup}
-      <ButtonGroup size="sm" class="shrink-0">
+    <ButtonGroup size="sm" class="shrink-0">
         <IconButton
           icon="i-material-symbols-format-list-bulleted-rounded"
           title="Session List"
@@ -196,7 +193,6 @@
             onclick={() => onNew?.()}
           />
         {/if}
-      </ButtonGroup>
-    {/if}
+    </ButtonGroup>
   </Bubble>
 </div>

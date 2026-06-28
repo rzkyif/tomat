@@ -44,6 +44,7 @@
   import ToolDetailView from "@tomat/shared/ui/components/settings/ToolDetailView.svelte";
   import ToolsFieldView from "@tomat/shared/ui/components/settings/ToolsFieldView.svelte";
   import McpDetailView from "@tomat/shared/ui/components/settings/McpDetailView.svelte";
+  import McpFieldView from "@tomat/shared/ui/components/settings/McpFieldView.svelte";
   import MemoryDetailView from "@tomat/shared/ui/components/settings/MemoryDetailView.svelte";
   import ModelPresetFieldView from "@tomat/shared/ui/components/settings/ModelPresetFieldView.svelte";
   import SttPresetFieldView from "@tomat/shared/ui/components/settings/SttPresetFieldView.svelte";
@@ -79,6 +80,7 @@
   import GalleryCard from "./GalleryCard.svelte";
   import Primitives from "./Primitives.svelte";
   import MobileGallery from "./MobileGallery.svelte";
+  import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
 
   const entries = <T,>(o: Record<string, T>) => Object.entries(o);
   const chatNoop = (): void => {};
@@ -337,9 +339,12 @@
 
       {#each entries(SAMPLES.AutocorrectAlertView) as [name, p] (name)}
         <GalleryCard label={`AutocorrectAlertView · ${name}`}>
-          <div class="w-full">
+          <!-- The client renders this alert inside the composer bubble (it arrives
+               as the composer's top slot), so the gallery wraps it in the same
+               shared Bubble rather than showing it bare on the grid. -->
+          <Bubble selectedAlignment="left" extraClass="w-full">
             <AutocorrectAlertView {...p as ComponentProps<typeof AutocorrectAlertView>} />
-          </div>
+          </Bubble>
         </GalleryCard>
       {/each}
 
@@ -390,7 +395,9 @@
 
       {#each entries(SAMPLES.CoresFieldView) as [name, p] (name)}
         <GalleryCard label={`CoresFieldView · ${name}`} surface>
-          <div class="w-full">
+          <!-- Match the gap the client's ObjectDetailScrollView puts between the
+               field sections, so the gallery shows the same section spacing. -->
+          <div class="w-full flex flex-col gap-3">
             <CoresFieldView {...p as ComponentProps<typeof CoresFieldView>} />
           </div>
         </GalleryCard>
@@ -448,6 +455,14 @@
         <GalleryCard label={`McpDetailView · ${name}`} surface>
           <div class="w-full">
             <McpDetailView {...p as ComponentProps<typeof McpDetailView>} />
+          </div>
+        </GalleryCard>
+      {/each}
+
+      {#each entries(SAMPLES.McpFieldView) as [name, p] (name)}
+        <GalleryCard label={`McpFieldView · ${name}`} surface>
+          <div class="w-full">
+            <McpFieldView {...p as ComponentProps<typeof McpFieldView>} />
           </div>
         </GalleryCard>
       {/each}
@@ -703,11 +718,10 @@
   <CoreBarView {...SAMPLES.CoreBarView.idle as ComponentProps<typeof CoreBarView>} />
 {/snippet}
 {#snippet chatSessionBar(_z: number)}
-  <!-- Enable the session-management buttons (list + new) the live bar shows, so
+  <!-- The session-management buttons (list + new) always show with the bar, so
        the shell card matches the client instead of a bar with no controls. -->
   <SessionBarView
     {...SAMPLES.SessionBarView.default as ComponentProps<typeof SessionBarView>}
-    showButtonGroup
     onList={chatNoop}
     onNew={chatNoop}
   />

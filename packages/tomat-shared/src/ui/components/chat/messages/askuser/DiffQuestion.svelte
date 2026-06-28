@@ -19,12 +19,13 @@
 <div class="max-h-48 overflow-auto">
   <DiffView before={q.before} after={q.after} />
 </div>
+<!-- Bottom action row: full-width split, affirmative (Accept) on the right. -->
 <div class="flex gap-1">
-  {#each [{ label: "Accept", value: "accept" }, { label: "Reject", value: "reject" }] as verdict (verdict.value)}
+  {#each [{ label: "Reject", value: "reject" }, { label: "Accept", value: "accept" }] as verdict (verdict.value)}
     <button
       type="button"
       data-tc-nav
-      class="text-xs px-3 py-1 h-8 rounded cursor-pointer outline-none transition-colors duration-100 {draft
+      class="flex-1 text-xs px-3 h-8 rounded cursor-pointer outline-none transition-colors duration-100 {draft
         ?.picks[0] === verdict.value
         ? selectedClasses
         : unselectedClasses}"

@@ -17,6 +17,12 @@ const createBodySchema = z
   })
   .strict();
 
+const fileBodySchema = z
+  .object({
+    content: z.string().default(""),
+  })
+  .strict();
+
 const patchBodySchema = z
   .object({
     title: z.string().min(1).optional(),
@@ -44,6 +50,15 @@ export function memoriesRoutes(): Hono {
     return c.json(result);
   });
 
+  // Re-run the background indexer for one memory (regenerate summary + embedding).
+  // The store get below confirms the id exists before scheduling.
+  r.post("/:id/reindex", (c) => {
+    const id = c.req.param("id");
+    memoriesStore().get(id);
+    scheduleMemoryIndexing(id);
+    return c.json({ ok: true });
+  });
+
   r.get("/:id", (c) => c.json(memoriesStore().get(c.req.param("id"))));
 
   // One bundled reference file from a skill folder.
@@ -52,6 +67,18 @@ export function memoriesRoutes(): Hono {
       content: memoriesStore().getFile(c.req.param("id"), c.req.param("name")),
     }),
   );
+
+  // Create or replace a bundled file beside a user skill's SKILL.md.
+  r.put("/:id/files/:name", async (c) => {
+    const body = parseBody(fileBodySchema, await readJson(c));
+    memoriesStore().writeFile(c.req.param("id"), c.req.param("name"), body.content);
+    return c.json({ ok: true });
+  });
+
+  r.delete("/:id/files/:name", (c) => {
+    memoriesStore().deleteFile(c.req.param("id"), c.req.param("name"));
+    return c.json({ ok: true });
+  });
 
   r.patch("/:id", async (c) => {
     const id = c.req.param("id");

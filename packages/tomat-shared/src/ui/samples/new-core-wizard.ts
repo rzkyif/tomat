@@ -2,7 +2,7 @@ import type { ComponentProps } from "svelte";
 import type { OmitSnippetProps } from "./types.ts";
 import type NewCoreWizardView from "../components/new-core/NewCoreWizardView.svelte";
 
-const DOCS_URL = "https://au.tomat.ing/docs/core-setup";
+const DOCS_URL = "https://au.tomat.ing/manual/settings/installing-a-core";
 
 export const newCoreWizardSamples = {
   // Step 1: destination chooser, onboarding (locked) welcome header.

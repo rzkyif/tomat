@@ -40,6 +40,7 @@ export { extensionsFieldSamples } from "./extensions-field.ts";
 export { toolDetailSamples } from "./tool-detail.ts";
 export { toolsFieldSamples } from "./tools-field.ts";
 export { mcpDetailSamples } from "./mcp-detail.ts";
+export { mcpFieldSamples } from "./mcp-field.ts";
 export { memoryDetailSamples } from "./memory-detail.ts";
 export { modelPresetFieldSamples } from "./model-preset-field.ts";
 export { sttPresetFieldSamples } from "./stt-preset-field.ts";
@@ -104,6 +105,7 @@ import { extensionsFieldSamples } from "./extensions-field.ts";
 import { toolDetailSamples } from "./tool-detail.ts";
 import { toolsFieldSamples } from "./tools-field.ts";
 import { mcpDetailSamples } from "./mcp-detail.ts";
+import { mcpFieldSamples } from "./mcp-field.ts";
 import { memoryDetailSamples } from "./memory-detail.ts";
 import { modelPresetFieldSamples } from "./model-preset-field.ts";
 import { sttPresetFieldSamples } from "./stt-preset-field.ts";
@@ -169,6 +171,7 @@ export const SAMPLES = {
   ToolDetailView: toolDetailSamples,
   ToolsFieldView: toolsFieldSamples,
   McpDetailView: mcpDetailSamples,
+  McpFieldView: mcpFieldSamples,
   MemoryDetailView: memoryDetailSamples,
   ModelPresetFieldView: modelPresetFieldSamples,
   SttPresetFieldView: sttPresetFieldSamples,

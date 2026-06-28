@@ -21,8 +21,11 @@
   });
 </script>
 
+<!-- A thick border the same color as the fill (matching the SessionBar context
+     gauge) frames the rows so the rounded card clips their corners instead of
+     leaving square row rectangles floating inside padding. -->
 <div
-  class="font-mono text-xs text-left bg-surface-inset rounded-large px-2 py-2 overflow-x-auto"
+  class="font-mono text-xs text-left bg-surface-inset rounded-large border-0.25em border-default-200 overflow-x-auto"
 >
   {#each rows as row}
     <div

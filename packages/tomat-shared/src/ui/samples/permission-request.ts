@@ -11,7 +11,7 @@ export const permissionRequestSamples = {
   },
   noDetail: {
     toolName: "model",
-    action: "generate text with the model",
+    action: "use the language model",
     declared: true,
   },
   undeclared: {

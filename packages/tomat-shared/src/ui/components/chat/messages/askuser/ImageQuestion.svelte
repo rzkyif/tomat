@@ -17,12 +17,13 @@
   alt={q.question}
   class="max-h-64 max-w-full self-start rounded-small"
 />
-<div class="flex flex-wrap gap-1">
+<!-- Bottom action row: full-width, split evenly across the actions. -->
+<div class="flex gap-1">
   {#each q.actions as action (action.value)}
     <button
       type="button"
       data-tc-nav
-      class="text-xs px-3 py-1 h-8 rounded cursor-pointer outline-none transition-colors duration-100 {draft
+      class="flex-1 text-xs px-3 h-8 rounded cursor-pointer outline-none transition-colors duration-100 {draft
         ?.picks[0] === action.value
         ? selectedClasses
         : unselectedClasses}"

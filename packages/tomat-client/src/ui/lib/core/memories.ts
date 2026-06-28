@@ -32,6 +32,30 @@ export class MemoriesApi {
     return this.client.del(`/api/v1/memories/${encodeURIComponent(id)}`) as Promise<void>;
   }
 
+  reindex(id: string): Promise<{ ok: true }> {
+    return this.client.post(`/api/v1/memories/${encodeURIComponent(id)}/reindex`, {});
+  }
+
+  async getFile(id: string, name: string): Promise<string> {
+    const res = await this.client.get<{ content: string }>(
+      `/api/v1/memories/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`,
+    );
+    return res.content;
+  }
+
+  putFile(id: string, name: string, content: string): Promise<{ ok: true }> {
+    return this.client.put(
+      `/api/v1/memories/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`,
+      { content },
+    );
+  }
+
+  deleteFile(id: string, name: string): Promise<void> {
+    return this.client.del(
+      `/api/v1/memories/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`,
+    ) as Promise<void>;
+  }
+
   rescan(): Promise<{ added: number; removed: number; changed: number }> {
     return this.client.post("/api/v1/memories/rescan", {});
   }

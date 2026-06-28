@@ -22,7 +22,12 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-type MemoryListing = { title: string; summary?: string; updatedAtMs: number };
+type MemoryListing = {
+  title: string;
+  kind: "knowledge" | "skill";
+  summary?: string;
+  updatedAtMs: number;
+};
 
 type ToolContext = {
   setProgress(progress: number, label?: string, description?: string): void;
