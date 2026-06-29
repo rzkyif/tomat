@@ -8,7 +8,11 @@
 
   const log = getLogger("mcp");
 
-  let { server, horizontal = false, reload }: {
+  let {
+    server,
+    horizontal = false,
+    reload,
+  }: {
     server: McpServer;
     horizontal?: boolean;
     reload: () => void;
@@ -86,15 +90,14 @@
       return;
     }
     const cmd = effectiveCommand();
-    const message = draftKind === "stdio"
-      ? `Enabling this server runs the command "${cmd}" on your machine. It ` +
-        `runs OUTSIDE the tool sandbox with your full access. Only enable MCP ` +
-        `servers you trust.`
-      : `Enabling this server connects to ${
-        draftUrl.trim()
-      } and sends it your requests${
-        server.hasAuth ? " with your stored token" : ""
-      }. Only enable MCP servers you trust.`;
+    const message =
+      draftKind === "stdio"
+        ? `Enabling this server runs the command "${cmd}" on your machine. It ` +
+          `runs OUTSIDE the tool sandbox with your full access. Only enable MCP ` +
+          `servers you trust.`
+        : `Enabling this server connects to ${draftUrl.trim()} and sends it your requests${
+            server.hasAuth ? " with your stored token" : ""
+          }. Only enable MCP servers you trust.`;
     confirmState.request({
       title: "Enable MCP server?",
       message,

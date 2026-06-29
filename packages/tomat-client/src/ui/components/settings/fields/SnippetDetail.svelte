@@ -74,8 +74,8 @@
 
 <SnippetDetailView
   bind:draftName
-  draftSymbol={draftSymbol}
-  draftPlacement={draftPlacement}
+  {draftSymbol}
+  {draftPlacement}
   bind:draftText
   {nameError}
   {symbolOptions}

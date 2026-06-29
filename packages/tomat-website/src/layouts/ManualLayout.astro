@@ -13,7 +13,8 @@ const { title, entries, currentId } = Astro.props;
 
 <BaseLayout title={title} description={title}>
   <div class="mx-auto flex w-full max-w-6xl gap-8 px-5 py-8 md:px-4">
-    {/* Desktop: a left outline sidebar, sticky under the navbar. The sticky box
+    {
+      /* Desktop: a left outline sidebar, sticky under the navbar. The sticky box
         is bounded by the <aside>, which stretches to the flex row's (article's)
         height. Its bottom gap must cover the wrapper's `py-8` (2rem) bottom
         padding, otherwise at full scroll the aside's bottom edge rises into the
@@ -22,12 +23,13 @@ const { title, entries, currentId } = Astro.props;
         within the aside and fixed in place at any scroll position. The sticky box
         is the fades' positioning context (a sticky box is a containing block for
         its absolute children); the two overlays mirror the settings sidebar's
-        scroll-area fades (SettingsSidebarView), toggled by the script below. */}
+        scroll-area fades (SettingsSidebarView), toggled by the script below. */
+    }
     <aside class="hidden md:block w-60 shrink-0">
       <div class="sticky top-[calc(var(--chrome-h)+2rem)]">
         <div
           id="manual-outline-scroll"
-          class="tomat-scroll tomat-scroll-thin tomat-scroll-hover max-h-[calc(100dvh-var(--chrome-h)-4rem)] overflow-y-auto pr-2"
+          class="tomat-scroll tomat-scroll-hover max-h-[calc(100dvh-var(--chrome-h)-4rem)] overflow-y-auto pr-2"
         >
           <ManualOutline entries={entries} currentId={currentId} defaultOpen />
         </div>
@@ -47,12 +49,14 @@ const { title, entries, currentId } = Astro.props;
     </aside>
 
     <main class="manual-article min-w-0 flex-1">
-      {/* The focus grid lives behind the article content and tracks this column's
+      {
+        /* The focus grid lives behind the article content and tracks this column's
           width and scroll height (see `.focus-grid-manual` in site.css). It is
           inset:0 of this wrapper, not <main>: the prev/next nav's bottom margin
           (the read-to-the-middle scroll runway) collapses through this non-BFC
           wrapper out to the flex item <main>, so the wrapper (and the grid) stop
-          at the nav while <main> still carries the runway height. */}
+          at the nav while <main> still carries the runway height. */
+      }
       <div class="relative">
         <div class="focus-grid-manual" aria-hidden="true"></div>
         <slot />
@@ -60,12 +64,14 @@ const { title, entries, currentId } = Astro.props;
     </main>
   </div>
 
-  {/* Soft scroll fades, fixed to the viewport: the top one sits just under the
+  {
+    /* Soft scroll fades, fixed to the viewport: the top one sits just under the
       sticky chrome (--chrome-h), the bottom one hugs the window edge. Each shows
       only when the window can still scroll that way, toggled by the script
       below. Mirrors the settings panel's scroll-area fades (SettingsShellView):
       from-default-50 matches the page's bg-surface, z-40 keeps them under the
-      chrome's z-50. */}
+      chrome's z-50. */
+  }
   <div
     id="manual-fade-top"
     aria-hidden="true"
@@ -165,9 +171,7 @@ const { title, entries, currentId } = Astro.props;
     overlay.hidden = false;
   }
   function wireDemoHighlights() {
-    const overlays = Array.from(
-      document.querySelectorAll<HTMLElement>("[data-highlight-target]"),
-    );
+    const overlays = Array.from(document.querySelectorAll<HTMLElement>("[data-highlight-target]"));
     for (const o of overlays) positionHighlight(o);
   }
 

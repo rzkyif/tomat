@@ -121,7 +121,7 @@
       {
         none: "rounded",
         filled: "rounded-medium",
-        circle: "rounded-full",
+        circle: "rounded-large",
       }[surface],
   );
 

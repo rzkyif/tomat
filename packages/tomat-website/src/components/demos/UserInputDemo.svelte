@@ -9,7 +9,12 @@
   // the Voice Input mic button. Pass `highlightTarget` (a `[data-region=...]`
   // selector) to mark one part, such as the mic.
   type Scenario = keyof typeof userInputSamples;
-  let { scenario = "withText", label, highlightLabel, highlightTarget }: {
+  let {
+    scenario = "withText",
+    label,
+    highlightLabel,
+    highlightTarget,
+  }: {
     scenario?: Scenario;
     label?: string;
     highlightLabel?: string;

@@ -11,6 +11,7 @@ const cmd = new Deno.Command("deno", {
     "scripts/website/dev.ts",
     "scripts/website/build.ts",
     "scripts/pkg.ts",
+    "scripts/fmt-web.ts",
   ],
   cwd: ROOT,
   stdout: "inherit",

@@ -14,12 +14,7 @@
   // at the spread so this stays a dumb renderer that supplies only the per-View
   // child snippets. What the gallery must cover is the registry (registry.ts),
   // which the walkers parse.
-  import {
-    AGENT_ANSWER,
-    AGENT_REASONING,
-    SAMPLE_VALUES,
-    SAMPLES,
-  } from "@tomat/shared/ui/samples";
+  import { AGENT_ANSWER, AGENT_REASONING, SAMPLE_VALUES, SAMPLES } from "@tomat/shared/ui/samples";
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
   import AttachmentListView from "@tomat/shared/ui/components/chat/AttachmentListView.svelte";
   import ChatShellView from "@tomat/shared/ui/components/chat/ChatShellView.svelte";
@@ -95,9 +90,12 @@
     "Code Search": {
       description: "Searches the codebase for symbols, references, and text matches.",
       meta: "Built-in extension",
-      badges: [{ label: "Enabled", accent: "green" }, { label: "Updated", accent: "blue" }],
+      badges: [
+        { label: "Enabled", accent: "green" },
+        { label: "Updated", accent: "blue" },
+      ],
     },
-    "filesystem": {
+    filesystem: {
       description: "Local (stdio)",
       meta: "node ./server.js",
       badges: [{ label: "Error", accent: "red", title: "Failed to start" }],
@@ -141,9 +139,8 @@
   <header class="flex flex-col gap-1">
     <h1 class="text-2xl font-semibold">Component gallery</h1>
     <p class="text-default-500 text-sm">
-      Every shared <code>@tomat/shared/ui</code> component rendered from its samples on
-      default settings, over the dim focus grid the showcases use. Toggle the navbar
-      theme to check light and dark.
+      Every shared <code>@tomat/shared/ui</code> component rendered from its samples on default settings,
+      over the dim focus grid the showcases use. Toggle the navbar theme to check light and dark.
     </p>
   </header>
 
@@ -176,7 +173,11 @@
             sizeClass="w-full h-[28rem]"
           >
             {#snippet groupContent(gid)}
-              <SettingsContentView groupId={gid} values={SAMPLE_VALUES} expanded={expandedFor(gid)} />
+              <SettingsContentView
+                groupId={gid}
+                values={SAMPLE_VALUES}
+                expanded={expandedFor(gid)}
+              />
             {/snippet}
             {#snippet sidebarFooter(collapsed)}
               <SettingsDemoFooter {collapsed} />
@@ -640,8 +641,10 @@
       {/each}
 
       {#each entries(SAMPLES.PasswordPromptModalView) as [name, p] (name)}
+        <!-- Tall enough that the error state (the extra alert row) clears the
+             gallery's `calc(100% - 4rem)` dialog cap, so the modal never scrolls. -->
         <GalleryCard label={`PasswordPromptModalView · ${name}`} backdrop>
-          <div class="relative h-72 w-full">
+          <div class="relative h-[22rem] w-full">
             <PasswordPromptModalView {...p as ComponentProps<typeof PasswordPromptModalView>} />
           </div>
         </GalleryCard>

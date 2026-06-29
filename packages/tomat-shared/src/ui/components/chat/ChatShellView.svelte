@@ -44,9 +44,7 @@
       {@render coreBar()}
       {@render sessionBar(1)}
     </div>
-    <div
-      class="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col-reverse gap-2 p-3"
-    >
+    <div class="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col-reverse gap-2 p-3">
       {@render transcript()}
     </div>
     <!-- The frame owns the safe-area insets (status bar + home indicator) and
@@ -54,7 +52,6 @@
          just needs its own slim padding; it rides above both the keyboard and the
          gesture bar without re-applying env(safe-area-*) here. -->
     <div class="shrink-0 p-2">
-
       {@render input()}
     </div>
   </div>

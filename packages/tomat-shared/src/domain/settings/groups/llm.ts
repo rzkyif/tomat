@@ -1,14 +1,17 @@
 import type { SettingGroup } from "../types.ts";
 import { externalModelSection } from "./factories.ts";
+import { DEFAULT_CONTEXT_SIZE, localThinkingBudget } from "../../quick-controls.ts";
+import { DEFAULT_SAMPLING } from "../../recommend.ts";
 
 // Static fallbacks for the local model fields, mirroring the Smallest-floor
 // catalog model (the Qwen 3.5 family; see packages/tomat-model-catalog). They
 // keep a fresh install coherent with an accepted baseline before the Smart
 // Preset resolves the hardware-fit values; the preset overwrites all of these on
 // model select, so they only hold for the brief pre-preset window and for
-// external/custom setups.
+// external/custom setups. Temperature mirrors the shared sampling default so a
+// fresh app's Creativity reads as "Balanced" in the quick model bar.
 const BASELINE_SAMPLING = {
-  temperature: 0.6,
+  temperature: DEFAULT_SAMPLING.temperature,
   topP: 0.95,
   topK: 20,
   minP: 0,
@@ -188,7 +191,9 @@ export const llmGroup: SettingGroup = {
           name: "Thinking Budget",
           description: "How many tokens the model may spend thinking.",
           type: "number",
-          defaultValue: "",
+          // "Low" thinking for a fresh app (1/16 of the default context), so the
+          // quick model bar reads as "Low" rather than an open-ended "Unlimited".
+          defaultValue: localThinkingBudget("low", DEFAULT_CONTEXT_SIZE),
           visibleWhen: {
             allOf: [
               { field: "llm.provider", eq: "local" },

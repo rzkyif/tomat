@@ -30,9 +30,7 @@
   const live = $derived(scheduledPromptsState.prompts.find((p) => p.id === item.id) ?? item);
 
   const titleError = $derived(draftTitle.trim() ? null : "Title cannot be empty");
-  const instructionError = $derived(
-    draftInstruction.trim() ? null : "Prompt cannot be empty",
-  );
+  const instructionError = $derived(draftInstruction.trim() ? null : "Prompt cannot be empty");
 
   const { scheduleSave, flushSave } = createDebouncedSave(async () => {
     if (titleError || instructionError) return;
@@ -94,9 +92,9 @@
   /** Epoch ms -> the local "YYYY-MM-DDTHH:MM" a datetime-local input wants. */
   function toLocalInput(ms: number): string {
     const d = new Date(ms);
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${
-      pad(d.getMinutes())
-    }`;
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
+      d.getMinutes(),
+    )}`;
   }
 
   function fromLocalInput(text: string): number | null {
@@ -192,10 +190,10 @@
   lastRunText={lastRunText(live) ?? ""}
   enabled={draftEnabled}
   runMissed={draftRunMissed}
-  draftTitle={draftTitle}
-  titleError={titleError}
-  draftInstruction={draftInstruction}
-  instructionError={instructionError}
+  {draftTitle}
+  {titleError}
+  {draftInstruction}
+  {instructionError}
   kind={draftSchedule.kind}
   kindOptions={KIND_OPTIONS}
   weekdayLabels={WEEKDAYS}
@@ -207,8 +205,8 @@
   yearlyMonth={draftSchedule.kind === "yearly" ? draftSchedule.month : undefined}
   yearlyDay={draftSchedule.kind === "yearly" ? draftSchedule.day : undefined}
   timeText={draftSchedule.kind === "weekly" ||
-      draftSchedule.kind === "monthly" ||
-      draftSchedule.kind === "yearly"
+  draftSchedule.kind === "monthly" ||
+  draftSchedule.kind === "yearly"
     ? `${pad(draftSchedule.hour)}:${pad(draftSchedule.minute)}`
     : undefined}
   onRunNow={() => void runNow()}

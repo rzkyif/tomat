@@ -4,10 +4,7 @@
   import { getTextContent, type MessageContent } from "$lib/util/types";
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
   import MessageMarkdown from "./MessageMarkdown.svelte";
-  import {
-    showAgentMessageMenu,
-    showReasoningMessageMenu,
-  } from "$lib/chat/message-menu";
+  import { showAgentMessageMenu, showReasoningMessageMenu } from "$lib/chat/message-menu";
 
   // AgentMessage is a discriminated bubble: a `kind: "reasoning"` instance
   // shows the reasoning trace produced by the model in a `role: "reasoning"`
@@ -46,9 +43,7 @@
   // bubbles are large and never expandable, so they don't read this.
 
   let displayText = $derived(getTextContent(content));
-  let bgClass = $derived(
-    modelUsed === "secondary" ? "bubble-agent-secondary" : "bubble-agent",
-  );
+  let bgClass = $derived(modelUsed === "secondary" ? "bubble-agent-secondary" : "bubble-agent");
 
   // TTS only attaches to content bubbles; reasoning is never read aloud.
   let isMine = $derived(
@@ -78,14 +73,9 @@
       });
     }
   }
-  let ttsBusyThis = $derived(
-    isMine && (ttsState.liveSourceCount > 0 || ttsState.synthInflight),
-  );
+  let ttsBusyThis = $derived(isMine && (ttsState.liveSourceCount > 0 || ttsState.synthInflight));
   let ttsActive = $derived(
-    kind === "content" &&
-      id !== undefined &&
-      ttsState.enabled &&
-      ttsState.loaded,
+    kind === "content" && id !== undefined && ttsState.enabled && ttsState.loaded,
   );
 </script>
 

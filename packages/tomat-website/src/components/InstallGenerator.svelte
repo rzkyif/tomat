@@ -64,12 +64,12 @@
 
   const command = $derived(
     mode === "uninstall"
-      ? (target === "client"
+      ? target === "client"
         ? clientUninstallCommand(clientOs, channel, { purge })
-        : coreUninstallCommand(coreOs, channel, { keepData }))
-      : (target === "client"
+        : coreUninstallCommand(coreOs, channel, { keepData })
+      : target === "client"
         ? clientCommand(clientOs, channel)
-        : coreCommand(coreOs, channel, { bindAll, service })),
+        : coreCommand(coreOs, channel, { bindAll, service }),
   );
 
   const steps = $derived([openTerminalStep(os), ...commandStepsTail(mode, target)]);
@@ -119,12 +119,12 @@
           {#snippet trailing()}
             {#if mode === "install"}
               <span
-                class={`text-xs px-2 py-0.5 rounded-full ${
+                class={`text-xs px-2 py-0.5 rounded-large ${
                   target === "client"
                     ? "bg-default-300 text-default-900"
                     : "bg-default-inverted-300 text-default-inverted-900"
-                }`}
-              >Recommended</span>
+                }`}>Recommended</span
+              >
             {/if}
           {/snippet}
         </OptionCard>
@@ -139,8 +139,12 @@
         />
       </div>
       {#if mode === "install"}
-        <div class="flex items-start gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-600">
-          <i class="i-material-symbols-info-outline-rounded text-base shrink-0 mt-0.5 text-default-500"></i>
+        <div
+          class="flex items-start gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-600"
+        >
+          <i
+            class="i-material-symbols-info-outline-rounded text-base shrink-0 mt-0.5 text-default-500"
+          ></i>
           <span>
             Not sure? Install the <strong class="text-default-800">Client</strong> and start there. It
             walks you through everything, including setting up a Core on this same computer.
@@ -155,7 +159,12 @@
     <span class={labelCls}>Operating System</span>
     <div class={`grid gap-2 ${target === "client" ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
       {#each osChoices as o (o.id)}
-        <button type="button" class={`${os === o.id ? btnActive : btnIdle} hover:cursor-pointer`} aria-pressed={os === o.id} onclick={() => selectOs(o.id)}>
+        <button
+          type="button"
+          class={`${os === o.id ? btnActive : btnIdle} hover:cursor-pointer`}
+          aria-pressed={os === o.id}
+          onclick={() => selectOs(o.id)}
+        >
           <i class={`${o.icon} text-lg`}></i>
           {o.label}
         </button>
@@ -167,7 +176,12 @@
   <div class="flex flex-col gap-2">
     <span class={labelCls}>Channel</span>
     <div class="grid grid-cols-2 gap-2">
-      <button type="button" class={`${btnBase} bg-surface-inset text-default-500 opacity-60 cursor-not-allowed`} disabled aria-disabled="true">
+      <button
+        type="button"
+        class={`${btnBase} bg-surface-inset text-default-500 opacity-60 cursor-not-allowed`}
+        disabled
+        aria-disabled="true"
+      >
         <i class="i-material-symbols-shield-outline-rounded text-lg"></i>
         Stable
       </button>
@@ -186,13 +200,21 @@
         <label class="flex items-center justify-between gap-4">
           <span class="text-sm text-default-700">Allow access from other machines</span>
           <div class="w-24 shrink-0">
-            <Toggle checked={bindAll} onchange={(v) => (bindAll = v)} ariaLabel="Allow access from other machines" />
+            <Toggle
+              checked={bindAll}
+              onchange={(v) => (bindAll = v)}
+              ariaLabel="Allow access from other machines"
+            />
           </div>
         </label>
         <label class="flex items-center justify-between gap-4">
           <span class="text-sm text-default-700">Run in the background at login</span>
           <div class="w-24 shrink-0">
-            <Toggle checked={service} onchange={(v) => (service = v)} ariaLabel="Run in the background at login" />
+            <Toggle
+              checked={service}
+              onchange={(v) => (service = v)}
+              ariaLabel="Run in the background at login"
+            />
           </div>
         </label>
       </div>
@@ -210,14 +232,22 @@
           <label class="flex items-center justify-between gap-4">
             <span class="text-sm text-default-700">Also delete settings and paired cores</span>
             <div class="w-24 shrink-0">
-              <Toggle checked={purge} onchange={(v) => (purge = v)} ariaLabel="Also delete settings and paired cores" />
+              <Toggle
+                checked={purge}
+                onchange={(v) => (purge = v)}
+                ariaLabel="Also delete settings and paired cores"
+              />
             </div>
           </label>
         {:else}
           <label class="flex items-center justify-between gap-4">
             <span class="text-sm text-default-700">Keep sessions and memories</span>
             <div class="w-24 shrink-0">
-              <Toggle checked={keepData} onchange={(v) => (keepData = v)} ariaLabel="Keep sessions and memories" />
+              <Toggle
+                checked={keepData}
+                onchange={(v) => (keepData = v)}
+                ariaLabel="Keep sessions and memories"
+              />
             </div>
           </label>
         {/if}
@@ -230,7 +260,9 @@
     <div class="flex flex-col gap-2">
       <span class={labelCls}>Remove</span>
       <div class="flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
-        <p class="text-sm text-default-700 m-0">There is no script on Android. Remove tomat like any other app.</p>
+        <p class="text-sm text-default-700 m-0">
+          There is no script on Android. Remove tomat like any other app.
+        </p>
         <ol class="m-0 flex flex-col gap-1 text-sm text-default-600 list-decimal pl-5">
           <li>Press and hold the tomat icon.</li>
           <li>Choose Uninstall (or drag it to Uninstall).</li>
@@ -242,7 +274,9 @@
     <div class="flex flex-col gap-2">
       <span class={labelCls}>Download</span>
       <div class="flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
-        <p class="text-sm text-default-700 m-0">The Android app is a signed APK you install directly.</p>
+        <p class="text-sm text-default-700 m-0">
+          The Android app is a signed APK you install directly.
+        </p>
         <a
           href={androidApkUrl(channel)}
           class="inline-flex items-center justify-center gap-2 rounded-large bg-default-inverted-300 px-4 py-2.5 text-sm text-default-inverted-900 hover:cursor-pointer"
@@ -277,7 +311,10 @@
         aria-label={`Copy ${verb.toLowerCase()} command`}
         class="group flex items-center gap-3 px-4 py-3 rounded-large bg-surface-inset transition-interactive hov:bg-surface-inset-strong hov:cursor-pointer"
       >
-        <code class="font-mono text-sm text-default-800 overflow-x-auto whitespace-nowrap flex-1 no-scrollbar">{command}</code>
+        <code
+          class="font-mono text-sm text-default-800 overflow-x-auto whitespace-nowrap flex-1 no-scrollbar"
+          >{command}</code
+        >
         <i
           class={`text-lg shrink-0 ${
             copied
@@ -296,7 +333,12 @@
           <li>{step}</li>
         {/each}
         {#if mode === "install"}
-          <li>If you ever need to uninstall, follow <a href="/manual/settings/uninstalling" class="underline hov:text-default-700">the uninstallation guide</a>.</li>
+          <li>
+            If you ever need to uninstall, follow <a
+              href="/manual/settings/uninstalling"
+              class="underline hov:text-default-700">the uninstallation guide</a
+            >.
+          </li>
         {/if}
       </ol>
     </div>

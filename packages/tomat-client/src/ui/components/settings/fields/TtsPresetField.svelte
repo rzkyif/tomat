@@ -53,13 +53,13 @@
         selectable: !!preset,
         badges: preset
           ? [
-            { icon: "i-material-symbols-graphic-eq-rounded", text: preset.name },
-            { icon: "i-material-symbols-memory-rounded", text: size(preset.fileSizeBytes) },
-            {
-              icon: "i-material-symbols-record-voice-over-rounded",
-              text: voiceCount(preset.voices.length),
-            },
-          ]
+              { icon: "i-material-symbols-graphic-eq-rounded", text: preset.name },
+              { icon: "i-material-symbols-memory-rounded", text: size(preset.fileSizeBytes) },
+              {
+                icon: "i-material-symbols-record-voice-over-rounded",
+                text: voiceCount(preset.voices.length),
+              },
+            ]
           : null,
         placeholder: preset ? undefined : ts.loading ? "Loading catalog…" : undefined,
       };
@@ -84,8 +84,8 @@
       m.quants.some(
         (q) =>
           primaryFileSpec(q, TTS_PRIMARY_ROLE[m.family]) ===
-            settingsState.currentSettings["tts.modelPath"],
-      )
+          settingsState.currentSettings["tts.modelPath"],
+      ),
     ) ?? null,
   );
 
@@ -103,7 +103,9 @@
 
   const quantOptions = $derived(
     (selectedModelView?.quants ?? []).map((q) => ({
-      value: selectedModelView ? primaryFileSpec(q, TTS_PRIMARY_ROLE[selectedModelView.family]) : "",
+      value: selectedModelView
+        ? primaryFileSpec(q, TTS_PRIMARY_ROLE[selectedModelView.family])
+        : "",
       label: `${q.quant} · ${size(q.fileSizeBytes)}`,
     })),
   );
@@ -112,14 +114,15 @@
   const custom = $derived(
     customOption
       ? {
-        title: customOption.title ?? customOption.label,
-        description: customOption.description,
-        selected: settingsState.currentSettings[field.id] === customOption.id,
-        model: { value: selectedModel, options: modelOptions },
-        quant: !manualSelected && selectedModelView
-          ? { value: selectedQuant, options: quantOptions }
-          : null,
-      }
+          title: customOption.title ?? customOption.label,
+          description: customOption.description,
+          selected: settingsState.currentSettings[field.id] === customOption.id,
+          model: { value: selectedModel, options: modelOptions },
+          quant:
+            !manualSelected && selectedModelView
+              ? { value: selectedQuant, options: quantOptions }
+              : null,
+        }
       : null,
   );
 

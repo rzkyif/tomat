@@ -7,9 +7,7 @@
   // The request as a plain-language action ("run a program") plus the concrete
   // target (the command, path, host, ...) shown on its own in a mono card, so
   // the sentence reads cleanly and the exact value is easy to scan.
-  function permissionParts(
-    p: PendingPermission,
-  ): { action: string; detail?: string } {
+  function permissionParts(p: PendingPermission): { action: string; detail?: string } {
     switch (p.permissionKind) {
       case "net":
         return { action: "connect to a server", detail: p.resource };

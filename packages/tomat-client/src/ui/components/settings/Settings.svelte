@@ -90,11 +90,14 @@
 
   const ui = useUiContext();
   const onMobile = ui.platform === "mobile";
-  const visibleGroups = $derived(
-    SETTINGS_SCHEMA.filter((g) => isGroupVisible(g, ui.platform)),
-  );
+  const visibleGroups = $derived(SETTINGS_SCHEMA.filter((g) => isGroupVisible(g, ui.platform)));
   const shellGroups = $derived(
-    visibleGroups.map((g) => ({ id: g.id, name: g.name, icon: g.icon, iconInactive: g.iconInactive })),
+    visibleGroups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      icon: g.icon,
+      iconInactive: g.iconInactive,
+    })),
   );
   const selectedGroup = $derived(visibleGroups.find((g) => g.id === selectedGroupId));
 
@@ -347,39 +350,41 @@
        bubble for their backdrop blur (inset-0) to stay clipped to the bubble
        instead of spilling across the viewport. -->
   <div class="relative {onMobile ? 'w-full h-full' : 'w-fit'}">
-  <SettingsShellView
-    bind:this={shell}
-    groups={shellGroups}
-    bind:selectedGroupId
-    {sidebarCollapsed}
-    bind:searchValue={search.query}
-    bind:searchMode={search.mode}
-    bind:searchEl={search.inputEl}
-    searchPlaceholder={connectionState.reconnecting ? "Reconnecting to Core..." : "Search settings..."}
-    searchDisabled={connectionState.reconnecting}
-    onSearchInput={() => search.onInput()}
-    onSearchFocus={() => {
-      if (search.query.trim() && !search.mode) void search.setMode(true);
-    }}
-    onSearchClear={() => search.clear()}
-    onQuickSettings={() => viewState.navigate("quickSettings")}
-    onShare={() => (shareOpen = true)}
-    onClose={() => viewState.navigate("chat")}
-    {isGroupDisabled}
-    onReselectGroup={(id) => withScrollAnchor(() => resetGroupToDefault(id))}
-    onToggleSidebar={toggleSidebar}
-    {belowHeader}
-    {groupContent}
-    {searchContent}
-    {sidebarFooter}
-  />
+    <SettingsShellView
+      bind:this={shell}
+      groups={shellGroups}
+      bind:selectedGroupId
+      {sidebarCollapsed}
+      bind:searchValue={search.query}
+      bind:searchMode={search.mode}
+      bind:searchEl={search.inputEl}
+      searchPlaceholder={connectionState.reconnecting
+        ? "Reconnecting to Core..."
+        : "Search settings..."}
+      searchDisabled={connectionState.reconnecting}
+      onSearchInput={() => search.onInput()}
+      onSearchFocus={() => {
+        if (search.query.trim() && !search.mode) void search.setMode(true);
+      }}
+      onSearchClear={() => search.clear()}
+      onQuickSettings={() => viewState.navigate("quickSettings")}
+      onShare={() => (shareOpen = true)}
+      onClose={() => viewState.navigate("chat")}
+      {isGroupDisabled}
+      onReselectGroup={(id) => withScrollAnchor(() => resetGroupToDefault(id))}
+      onToggleSidebar={toggleSidebar}
+      {belowHeader}
+      {groupContent}
+      {searchContent}
+      {sidebarFooter}
+    />
 
-  <ConfirmModal />
-  <PasswordPromptModal />
-  <DownloadsModal />
-  <DeletionsModal />
-  <ShareModal open={shareOpen} onClose={() => (shareOpen = false)} />
-  <ColorPickerModal />
-  <BuiltinToolkitModal surface="settings" />
+    <ConfirmModal />
+    <PasswordPromptModal />
+    <DownloadsModal />
+    <DeletionsModal />
+    <ShareModal open={shareOpen} onClose={() => (shareOpen = false)} />
+    <ColorPickerModal />
+    <BuiltinToolkitModal surface="settings" />
   </div>
 </div>

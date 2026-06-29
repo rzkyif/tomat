@@ -48,7 +48,11 @@
 
   // A stable, shareable anchor id derived from the label.
   const id = $derived(
-    "c-" + label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""),
+    "c-" +
+      label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, ""),
   );
 
   // Narrow masonry tiles re-cap their rendered component to the card width (see
@@ -62,7 +66,8 @@
   <a
     href={`#${id}`}
     class="w-fit font-mono text-xs text-default-500 no-underline transition-interactive hov:text-default-700"
-  >{label}</a>
+    >{label}</a
+  >
   <div
     class={`demo-frame flat-shadow ${frameClass} relative rounded-medium bg-surface min-h-24 overflow-hidden ${
       backdrop ? "" : "flex items-center justify-center"

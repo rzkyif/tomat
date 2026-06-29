@@ -127,10 +127,9 @@
       {spellcheck}
       {autocomplete}
       {autocapitalize}
-      value={value}
+      {value}
       oninput={handleInput}
-      onchange={(e) =>
-        onchange?.((e.target as HTMLTextAreaElement).value, e)}
+      onchange={(e) => onchange?.((e.target as HTMLTextAreaElement).value, e)}
       onfocus={handleFocus}
       onblur={handleBlur}
       {onkeydown}
@@ -153,7 +152,7 @@
     {spellcheck}
     {autocomplete}
     {autocapitalize}
-    value={value}
+    {value}
     oninput={handleInput}
     onchange={(e) => onchange?.((e.target as HTMLTextAreaElement).value, e)}
     onfocus={handleFocus}

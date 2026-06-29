@@ -89,7 +89,7 @@
     {title}
     size="lg"
     surface="none"
-    rounded="rounded-full"
+    rounded="rounded-large"
     class="absolute top-2 right-2 z-1 bg-surface-inset hover:bg-surface shadow-sm"
     {onclick}
   />

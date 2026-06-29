@@ -30,9 +30,7 @@
   );
   let parsedArgs = $derived.by<Record<string, unknown>>(() => {
     try {
-      return msg.arguments
-        ? (JSON.parse(msg.arguments) as Record<string, unknown>)
-        : {};
+      return msg.arguments ? (JSON.parse(msg.arguments) as Record<string, unknown>) : {};
     } catch {
       return {};
     }

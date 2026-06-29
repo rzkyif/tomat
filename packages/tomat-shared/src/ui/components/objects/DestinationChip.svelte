@@ -11,9 +11,7 @@
 
 <span
   class="text-[10px] font-medium uppercase tracking-wider px-1.5 inline-flex items-center h-4 leading-none rounded-medium bg-surface-inset text-default-700"
-  title={dest === "core"
-    ? "Shared by every client paired to this core"
-    : "Specific to this client"}
+  title={dest === "core" ? "Shared by every client paired to this core" : "Specific to this client"}
 >
   {destinationLabel(dest)}
 </span>

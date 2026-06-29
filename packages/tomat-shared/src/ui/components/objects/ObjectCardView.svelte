@@ -73,7 +73,9 @@
   </div>
   <!-- Row 2: description, free to use the full width. -->
   {#if description}
-    <span class="relative text-sm text-default-700 line-clamp-2 pointer-events-none">{description}</span>
+    <span class="relative text-sm text-default-700 line-clamp-2 pointer-events-none"
+      >{description}</span
+    >
   {/if}
   <!-- Row 3: meta, with the triple-dot pinned to the right. -->
   {#if meta || hasMenu}

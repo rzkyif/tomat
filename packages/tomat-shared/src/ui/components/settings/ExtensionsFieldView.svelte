@@ -8,7 +8,9 @@
   //  - npmNoResults: "@npm" with query text but no matches
   //  - noMatches:    installed filter has query text but no matches
   //  - none:         no query, nothing installed
-  let { mode }: {
+  let {
+    mode,
+  }: {
     mode: "npmEmpty" | "npmNoResults" | "noMatches" | "none";
   } = $props();
 </script>

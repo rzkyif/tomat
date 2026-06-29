@@ -53,8 +53,8 @@
 <section class="flex flex-col gap-6">
   <h2 class="text-lg font-medium">Primitives</h2>
   <p class="text-default-500 text-sm">
-    The shared A0 leaves, each in its variants and states. Every other component
-    in this gallery is built from these.
+    The shared A0 leaves, each in its variants and states. Every other component in this gallery is
+    built from these.
   </p>
 
   <div class="columns-1 sm:columns-2 lg:columns-3 gap-4">
@@ -270,7 +270,9 @@
       <GalleryCard label={`CollapsibleLabel · ${name}`} surface>
         <div class="flex items-center gap-1 text-sm text-default-700">
           <span class="i-material-symbols-folder-outline-rounded text-base"></span>
-          <CollapsibleLabel {...p as ComponentProps<typeof CollapsibleLabel>}>Label</CollapsibleLabel>
+          <CollapsibleLabel {...p as ComponentProps<typeof CollapsibleLabel>}
+            >Label</CollapsibleLabel
+          >
         </div>
       </GalleryCard>
     {/each}
@@ -294,7 +296,11 @@
             {...p as ComponentProps<typeof ActionSheet>}
             onclose={noop}
             items={[
-              { label: "Copy", icon: "i-material-symbols-content-copy-outline-rounded", onSelect: noop },
+              {
+                label: "Copy",
+                icon: "i-material-symbols-content-copy-outline-rounded",
+                onSelect: noop,
+              },
               { label: "Edit", icon: "i-material-symbols-edit-outline-rounded", onSelect: noop },
               {
                 label: "Delete",

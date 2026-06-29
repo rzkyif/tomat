@@ -37,14 +37,26 @@ const CH = "latest";
 // No-JS baseline: the command is pre-rendered without options (a static page
 // can't fold a toggle into it), so the flags note below carries the choices.
 const clientCmd = {
-  macos: uninstall ? clientUninstallCommand("macos", CH, { purge: false }) : clientCommand("macos", CH),
-  linux: uninstall ? clientUninstallCommand("linux", CH, { purge: false }) : clientCommand("linux", CH),
-  windows: uninstall ? clientUninstallCommand("windows", CH, { purge: false }) : clientCommand("windows", CH),
+  macos: uninstall
+    ? clientUninstallCommand("macos", CH, { purge: false })
+    : clientCommand("macos", CH),
+  linux: uninstall
+    ? clientUninstallCommand("linux", CH, { purge: false })
+    : clientCommand("linux", CH),
+  windows: uninstall
+    ? clientUninstallCommand("windows", CH, { purge: false })
+    : clientCommand("windows", CH),
 };
 const coreCmd = {
-  macos: uninstall ? coreUninstallCommand("macos", CH, { keepData: false }) : coreCommand("macos", CH, { bindAll: false, service: true }),
-  linux: uninstall ? coreUninstallCommand("linux", CH, { keepData: false }) : coreCommand("linux", CH, { bindAll: false, service: true }),
-  windows: uninstall ? coreUninstallCommand("windows", CH, { keepData: false }) : coreCommand("windows", CH, { bindAll: false, service: true }),
+  macos: uninstall
+    ? coreUninstallCommand("macos", CH, { keepData: false })
+    : coreCommand("macos", CH, { bindAll: false, service: true }),
+  linux: uninstall
+    ? coreUninstallCommand("linux", CH, { keepData: false })
+    : coreCommand("linux", CH, { bindAll: false, service: true }),
+  windows: uninstall
+    ? coreUninstallCommand("windows", CH, { keepData: false })
+    : coreCommand("windows", CH, { bindAll: false, service: true }),
 };
 const apk = androidApkUrl(CH);
 
@@ -66,42 +78,59 @@ const codeBox =
         <legend class="sr-only">What do you want to {verb.toLowerCase()}?</legend>
 
         <input id="ig-tg-client" class="ig-radio sr-only" type="radio" name="ig-target" checked />
-        <label for="ig-tg-client" class="ig-card flex flex-col gap-1 p-3 rounded-large cursor-pointer">
+        <label
+          for="ig-tg-client"
+          class="ig-card flex flex-col gap-1 p-3 rounded-large cursor-pointer"
+        >
           <span class="flex items-center gap-2 min-h-6">
             <i class="i-mdi-monitor-dashboard text-lg"></i>
             <span class="text-base font-semibold">Client</span>
-            {!uninstall && <span class="ig-badge ml-auto text-xs px-2 py-0.5 rounded-full">Recommended</span>}
+            {
+              !uninstall && (
+                <span class="ig-badge ml-auto text-xs px-2 py-0.5 rounded-full">Recommended</span>
+              )
+            }
           </span>
           <span class="ig-card-desc text-sm">
-            {uninstall
-              ? "The app you look at. Removing it leaves your settings in place unless you choose to wipe them."
-              : "The app you look at. On first launch it can install a Core on this same computer for you, so one install gets you a full local setup."}
+            {
+              uninstall
+                ? "The app you look at. Removing it leaves your settings in place unless you choose to wipe them."
+                : "The app you look at. On first launch it can install a Core on this same computer for you, so one install gets you a full local setup."
+            }
           </span>
         </label>
 
         <input id="ig-tg-core" class="ig-radio sr-only" type="radio" name="ig-target" />
-        <label for="ig-tg-core" class="ig-card flex flex-col gap-1 p-3 rounded-large cursor-pointer">
+        <label
+          for="ig-tg-core"
+          class="ig-card flex flex-col gap-1 p-3 rounded-large cursor-pointer"
+        >
           <span class="flex items-center gap-2 min-h-6">
             <i class="i-mdi-server text-lg"></i>
             <span class="text-base font-semibold">Core</span>
           </span>
           <span class="ig-card-desc text-sm">
-            {uninstall
-              ? "The service that does the work. Removing it stops the Core and deletes its data from this computer."
-              : "The service that does the work. Install it on its own when you want it on a separate, more powerful machine that Clients connect to."}
+            {
+              uninstall
+                ? "The service that does the work. Removing it stops the Core and deletes its data from this computer."
+                : "The service that does the work. Install it on its own when you want it on a separate, more powerful machine that Clients connect to."
+            }
           </span>
         </label>
       </fieldset>
 
-      {!uninstall && (
-        <div class="flex items-start gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-600">
-          <i class="i-material-symbols-info-outline-rounded text-base shrink-0 mt-0.5 text-default-500"></i>
-          <span>
-            Not sure? Install the <strong class="text-default-800">Client</strong> and start there. It
-            walks you through everything, including setting up a Core on this same computer.
-          </span>
-        </div>
-      )}
+      {
+        !uninstall && (
+          <div class="flex items-start gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-600">
+            <i class="i-material-symbols-info-outline-rounded text-base shrink-0 mt-0.5 text-default-500" />
+            <span>
+              Not sure? Install the <strong class="text-default-800">Client</strong> and start
+              there. It walks you through everything, including setting up a Core on this same
+              computer.
+            </span>
+          </div>
+        )
+      }
     </div>
   </div>
 
@@ -113,7 +142,13 @@ const codeBox =
         {
           CLIENT_OS.map((o, i) => (
             <>
-              <input id={`ig-osc-${o.id}`} class="ig-radio sr-only" type="radio" name="ig-os-client" checked={i === 0} />
+              <input
+                id={`ig-osc-${o.id}`}
+                class="ig-radio sr-only"
+                type="radio"
+                name="ig-os-client"
+                checked={i === 0}
+              />
               <label for={`ig-osc-${o.id}`} class={osBtn}>
                 <i class={`${o.icon} text-lg`} />
                 {o.label}
@@ -143,54 +178,65 @@ const codeBox =
       <code class={`${codeBox} ig-cmd-c-macos`}>{clientCmd.macos}</code>
       <code class={`${codeBox} ig-cmd-c-linux`}>{clientCmd.linux}</code>
       <code class={`${codeBox} ig-cmd-c-windows`}>{clientCmd.windows}</code>
-      {uninstall ? (
-        <div class="ig-cmd ig-cmd-c-android flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
-          <p class="text-sm text-default-700 m-0">There is no script on Android. Remove tomat like any other app.</p>
-          <ol class="m-0 flex flex-col gap-1 text-sm text-default-600 list-decimal pl-5">
-            <li>Press and hold the tomat icon.</li>
-            <li>Choose Uninstall (or drag it to Uninstall).</li>
-            <li>Confirm to remove the app and its data.</li>
-          </ol>
-        </div>
-      ) : (
-        <div class="ig-cmd ig-cmd-c-android flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
-          <p class="text-sm text-default-700 m-0">The Android app is a signed APK you install directly.</p>
-          <a
-            href={apk}
-            class="inline-flex items-center justify-center gap-2 rounded-large bg-default-inverted-300 px-4 py-2.5 text-sm text-default-inverted-900 hover:cursor-pointer"
-          >
-            <i class="i-material-symbols-download-rounded text-base"></i>
-            Download the Android APK
-          </a>
-          <ol class="m-0 flex flex-col gap-1 text-sm text-default-600 list-decimal pl-5">
-            <li>Open the downloaded file on your phone.</li>
-            <li>If asked, allow installing apps from this source.</li>
-            <li>Confirm the install, then open tomat.</li>
-          </ol>
-        </div>
-      )}
+      {
+        uninstall ? (
+          <div class="ig-cmd ig-cmd-c-android flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
+            <p class="text-sm text-default-700 m-0">
+              There is no script on Android. Remove tomat like any other app.
+            </p>
+            <ol class="m-0 flex flex-col gap-1 text-sm text-default-600 list-decimal pl-5">
+              <li>Press and hold the tomat icon.</li>
+              <li>Choose Uninstall (or drag it to Uninstall).</li>
+              <li>Confirm to remove the app and its data.</li>
+            </ol>
+          </div>
+        ) : (
+          <div class="ig-cmd ig-cmd-c-android flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
+            <p class="text-sm text-default-700 m-0">
+              The Android app is a signed APK you install directly.
+            </p>
+            <a
+              href={apk}
+              class="inline-flex items-center justify-center gap-2 rounded-large bg-default-inverted-300 px-4 py-2.5 text-sm text-default-inverted-900 hover:cursor-pointer"
+            >
+              <i class="i-material-symbols-download-rounded text-base" />
+              Download the Android APK
+            </a>
+            <ol class="m-0 flex flex-col gap-1 text-sm text-default-600 list-decimal pl-5">
+              <li>Open the downloaded file on your phone.</li>
+              <li>If asked, allow installing apps from this source.</li>
+              <li>Confirm the install, then open tomat.</li>
+            </ol>
+          </div>
+        )
+      }
     </div>
 
-    {uninstall && (
-      <div class="ig-purge-note flex flex-col gap-2">
-        <span class={label}>Options</span>
-        <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
-          <p class="m-0">By default this keeps your settings. To wipe them too, add a flag:</p>
-          <p class="m-0">
-            <span class="font-mono text-default-900">--purge</span>
-            also deletes your saved settings and paired cores.
-          </p>
-          <p class="m-0">
-            On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
-            <span class="font-mono text-default-900">... | bash -s -- --purge</span>. On Windows prefix the line, e.g.
-            <span class="font-mono text-default-900">$env:TOMAT_PURGE="1"; irm ...</span>.
-          </p>
+    {
+      uninstall && (
+        <div class="ig-purge-note flex flex-col gap-2">
+          <span class={label}>Options</span>
+          <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
+            <p class="m-0">By default this keeps your settings. To wipe them too, add a flag:</p>
+            <p class="m-0">
+              <span class="font-mono text-default-900">--purge</span>
+              also deletes your saved settings and paired cores.
+            </p>
+            <p class="m-0">
+              On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
+              <span class="font-mono text-default-900">... | bash -s -- --purge</span>. On Windows
+              prefix the line, e.g.
+              <span class="font-mono text-default-900">$env:TOMAT_PURGE="1"; irm ...</span>.
+            </p>
+          </div>
         </div>
-      </div>
-    )}
+      )
+    }
 
-    {/* How to: the OS-specific opener is CSS-toggled per client OS; the rest is
-        fixed. Hidden for Android, which has its own steps in the command block. */}
+    {
+      /* How to: the OS-specific opener is CSS-toggled per client OS; the rest is
+        fixed. Hidden for Android, which has its own steps in the command block. */
+    }
     <div class="ig-howto-c flex flex-col gap-2">
       <span class={label}>How to {verb}</span>
       <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
@@ -198,9 +244,17 @@ const codeBox =
         <li class="ig-step ig-step-c-linux">{openTerminalStep("linux")}</li>
         <li class="ig-step ig-step-c-windows">{openTerminalStep("windows")}</li>
         {commandStepsTail(mode, "client").map((s) => <li>{s}</li>)}
-        {!uninstall && (
-          <li>If you ever need to uninstall, follow <a href="/manual/settings/uninstalling" class="underline hover:text-default-700">the uninstallation guide</a>.</li>
-        )}
+        {
+          !uninstall && (
+            <li>
+              If you ever need to uninstall, follow{" "}
+              <a href="/manual/settings/uninstalling" class="underline hover:text-default-700">
+                the uninstallation guide
+              </a>
+              .
+            </li>
+          )
+        }
       </ol>
     </div>
   </div>
@@ -213,7 +267,13 @@ const codeBox =
         {
           CORE_OS.map((o, i) => (
             <>
-              <input id={`ig-oso-${o.id}`} class="ig-radio sr-only" type="radio" name="ig-os-core" checked={i === 0} />
+              <input
+                id={`ig-oso-${o.id}`}
+                class="ig-radio sr-only"
+                type="radio"
+                name="ig-os-core"
+                checked={i === 0}
+              />
               <label for={`ig-oso-${o.id}`} class={osBtn}>
                 <i class={`${o.icon} text-lg`} />
                 {o.label}
@@ -247,44 +307,57 @@ const codeBox =
 
     <div class="flex flex-col gap-2">
       <span class={label}>Options</span>
-      {uninstall ? (
-        <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
-          <p class="m-0">By default this removes the Core and its data. To keep that data, add a flag:</p>
-          <p class="m-0">
-            <span class="font-mono text-default-900">--keep-data</span>
-            keeps the Core's sessions and memories instead of removing them.
-          </p>
-          <p class="m-0">
-            On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
-            <span class="font-mono text-default-900">... | bash -s -- --keep-data</span>. On Windows prefix the line, e.g.
-            <span class="font-mono text-default-900">$env:TOMAT_KEEP_DATA="1"; irm ...</span>.
-          </p>
-        </div>
-      ) : (
-        <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
-          <p class="m-0">Add these before running to change how the Core installs:</p>
-          <ul class="m-0 flex flex-col gap-1 list-disc pl-5">
-            <li>
-              <span class="font-mono text-default-900">TOMAT_INSTALL_BIND_ALL=1</span>
-              lets Clients on other machines pair with this Core.
-            </li>
-            <li>
-              <span class="font-mono text-default-900">TOMAT_INSTALL_SERVICE=0</span>
-              skips the background service so you start the Core by hand.
-            </li>
-          </ul>
-          <p class="m-0">
-            On macOS and Linux put them on the <span class="font-mono">bash</span> side of the pipe,
-            e.g. <span class="font-mono text-default-900">curl ... | TOMAT_INSTALL_BIND_ALL=1 bash</span>.
-            On Windows prefix the line, e.g.
-            <span class="font-mono text-default-900">$env:TOMAT_INSTALL_BIND_ALL="1"; irm ...</span>.
-          </p>
-        </div>
-      )}
+      {
+        uninstall ? (
+          <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
+            <p class="m-0">
+              By default this removes the Core and its data. To keep that data, add a flag:
+            </p>
+            <p class="m-0">
+              <span class="font-mono text-default-900">--keep-data</span>
+              keeps the Core's sessions and memories instead of removing them.
+            </p>
+            <p class="m-0">
+              On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
+              <span class="font-mono text-default-900">... | bash -s -- --keep-data</span>. On
+              Windows prefix the line, e.g.
+              <span class="font-mono text-default-900">$env:TOMAT_KEEP_DATA="1"; irm ...</span>.
+            </p>
+          </div>
+        ) : (
+          <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
+            <p class="m-0">Add these before running to change how the Core installs:</p>
+            <ul class="m-0 flex flex-col gap-1 list-disc pl-5">
+              <li>
+                <span class="font-mono text-default-900">TOMAT_INSTALL_BIND_ALL=1</span>
+                lets Clients on other machines pair with this Core.
+              </li>
+              <li>
+                <span class="font-mono text-default-900">TOMAT_INSTALL_SERVICE=0</span>
+                skips the background service so you start the Core by hand.
+              </li>
+            </ul>
+            <p class="m-0">
+              On macOS and Linux put them on the <span class="font-mono">bash</span> side of the
+              pipe, e.g.{" "}
+              <span class="font-mono text-default-900">
+                curl ... | TOMAT_INSTALL_BIND_ALL=1 bash
+              </span>
+              . On Windows prefix the line, e.g.
+              <span class="font-mono text-default-900">
+                $env:TOMAT_INSTALL_BIND_ALL="1"; irm ...
+              </span>
+              .
+            </p>
+          </div>
+        )
+      }
     </div>
 
-    {/* How to: the OS-specific opener is CSS-toggled per core OS; the rest is
-        fixed. */}
+    {
+      /* How to: the OS-specific opener is CSS-toggled per core OS; the rest is
+        fixed. */
+    }
     <div class="flex flex-col gap-2">
       <span class={label}>How to {verb}</span>
       <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
@@ -292,9 +365,17 @@ const codeBox =
         <li class="ig-step ig-step-o-linux">{openTerminalStep("linux")}</li>
         <li class="ig-step ig-step-o-windows">{openTerminalStep("windows")}</li>
         {commandStepsTail(mode, "core").map((s) => <li>{s}</li>)}
-        {!uninstall && (
-          <li>If you ever need to uninstall, follow <a href="/manual/settings/uninstalling" class="underline hover:text-default-700">the uninstallation guide</a>.</li>
-        )}
+        {
+          !uninstall && (
+            <li>
+              If you ever need to uninstall, follow{" "}
+              <a href="/manual/settings/uninstalling" class="underline hover:text-default-700">
+                the uninstallation guide
+              </a>
+              .
+            </li>
+          )
+        }
       </ol>
     </div>
   </div>
@@ -309,7 +390,9 @@ const codeBox =
     background: var(--default-100);
     color: var(--default-800);
     border: 1px solid var(--default-200);
-    transition: background 150ms ease, border-color 150ms ease;
+    transition:
+      background 150ms ease,
+      border-color 150ms ease;
   }
   :global(html.dark) .ig-card {
     background: var(--default-d-100);

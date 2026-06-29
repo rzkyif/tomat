@@ -231,14 +231,14 @@
           data-testid="composer-input"
           bind:this={textareaRef}
           bind:value
-          onkeydown={onkeydown}
-          oninput={oninput}
-          onkeyup={onkeyup}
+          {onkeydown}
+          {oninput}
+          {onkeyup}
           onclick={ontextareaclick}
-          oncompositionstart={oncompositionstart}
-          oncompositionend={oncompositionend}
+          {oncompositionstart}
+          {oncompositionend}
           onblur={ontextareablur}
-          onpaste={onpaste}
+          {onpaste}
           autocapitalize="on"
           autocomplete="off"
           rows="1"
@@ -388,9 +388,7 @@
               surface={tempActive ? "none" : "filled"}
               title={tempActive ? "Disable Temporary Session" : "Enable Temporary Session"}
               ariaLabel={tempTitle}
-              class={tempActive
-                ? "rounded-large bg-accent-blue-500/15"
-                : "rounded-large"}
+              class={tempActive ? "rounded-large bg-accent-blue-500/15" : "rounded-large"}
               colorClass={tempActive ? "text-accent-blue-500 hov:text-accent-blue-400" : undefined}
               onclick={() => onTempToggle?.()}
             />

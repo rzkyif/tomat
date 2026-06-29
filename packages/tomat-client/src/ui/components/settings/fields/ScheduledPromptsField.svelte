@@ -18,8 +18,9 @@
   let selectedItem = $state<ScheduledPrompt | null>(null);
   let reloadKey = $state(0);
 
-  onMount(() =>
-    void scheduledPromptsState.load().catch((e) => log.warn("scheduled prompt load failed:", e)),
+  onMount(
+    () =>
+      void scheduledPromptsState.load().catch((e) => log.warn("scheduled prompt load failed:", e)),
   );
 
   function makeUniqueTitle(): string {
@@ -33,15 +34,13 @@
     const text = q.text.toLowerCase();
     let list = scheduledPromptsState.prompts.filter(
       (p) =>
-        !text ||
-        p.title.toLowerCase().includes(text) ||
-        p.instruction.toLowerCase().includes(text),
+        !text || p.title.toLowerCase().includes(text) || p.instruction.toLowerCase().includes(text),
     );
     if (q.sort === "title") list = [...list].sort((a, b) => a.title.localeCompare(b.title));
     else if (q.sort === "next") {
       list = [...list].sort(
-        (a, b) => (a.nextRunAtMs ?? Number.MAX_SAFE_INTEGER) -
-          (b.nextRunAtMs ?? Number.MAX_SAFE_INTEGER),
+        (a, b) =>
+          (a.nextRunAtMs ?? Number.MAX_SAFE_INTEGER) - (b.nextRunAtMs ?? Number.MAX_SAFE_INTEGER),
       );
     }
     return Promise.resolve({ items: list, done: true });

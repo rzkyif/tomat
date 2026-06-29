@@ -38,9 +38,7 @@
   async function load({ query: q }: { offset: number; limit: number; query: ParsedQuery }) {
     await mcpState.refresh();
     const text = q.text.toLowerCase();
-    const list = mcpState.servers.filter(
-      (s) => !text || s.name.toLowerCase().includes(text),
-    );
+    const list = mcpState.servers.filter((s) => !text || s.name.toLowerCase().includes(text));
     return { items: list, done: true };
   }
 
@@ -116,7 +114,10 @@
     />
   {/snippet}
   {#snippet detail(item)}
-    <ObjectDetailHeader title={item.name} subtitle={item.kind === "stdio" ? "Local (stdio)" : "Remote"} />
+    <ObjectDetailHeader
+      title={item.name}
+      subtitle={item.kind === "stdio" ? "Local (stdio)" : "Remote"}
+    />
     <ObjectDetailScroll>
       <McpDetail server={item} {horizontal} reload={() => reloadKey++} />
     </ObjectDetailScroll>

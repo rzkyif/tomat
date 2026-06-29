@@ -12,6 +12,8 @@
 
 <DemoFrame {label} designWidth={448}>
   <div class="mx-auto w-full max-w-md">
-    <SettingsFieldView {...settingsFieldSamples[type] as ComponentProps<typeof SettingsFieldView>} />
+    <SettingsFieldView
+      {...settingsFieldSamples[type] as ComponentProps<typeof SettingsFieldView>}
+    />
   </div>
 </DemoFrame>

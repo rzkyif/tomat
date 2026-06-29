@@ -25,12 +25,10 @@
   // sees every variant. (group-hover keys off the card's `group` class; the
   // detail header has no group, so chips stay at rest there.)
   const accentMap: Record<Accent, string> = {
-    blue:
-      "bg-accent-blue-200 text-accent-blue-700 group-hover:bg-[var(--accent-blue-100)] dark:group-hover:bg-[var(--accent-blue-d-100)]",
+    blue: "bg-accent-blue-200 text-accent-blue-700 group-hover:bg-[var(--accent-blue-100)] dark:group-hover:bg-[var(--accent-blue-d-100)]",
     green:
       "bg-accent-green-200 text-accent-green-700 group-hover:bg-[var(--accent-green-100)] dark:group-hover:bg-[var(--accent-green-d-100)]",
-    red:
-      "bg-accent-red-200 text-accent-red-700 group-hover:bg-[var(--accent-red-100)] dark:group-hover:bg-[var(--accent-red-d-100)]",
+    red: "bg-accent-red-200 text-accent-red-700 group-hover:bg-[var(--accent-red-100)] dark:group-hover:bg-[var(--accent-red-d-100)]",
     yellow:
       "bg-accent-yellow-200 text-accent-yellow-700 group-hover:bg-[var(--accent-yellow-100)] dark:group-hover:bg-[var(--accent-yellow-d-100)]",
     purple:

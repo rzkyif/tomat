@@ -7,6 +7,7 @@
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
   import UserInputView from "@tomat/shared/ui/components/chat/UserInputView.svelte";
   import MessageEnter from "@tomat/shared/ui/components/chat/MessageEnter.svelte";
+  import MessageStackView from "@tomat/shared/ui/components/chat/MessageStackView.svelte";
   import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
   import type { AskUserQuestion } from "@tomat/shared";
   import hljs from "highlight.js/lib/core";
@@ -19,7 +20,10 @@
   hljs.registerLanguage("typescript", typescript);
   hljs.registerLanguage("json", json);
 
-  let { register, reportHeight }: {
+  let {
+    register,
+    reportHeight,
+  }: {
     register: (h: { timeline: Timeline; reset: () => void }) => void;
     reportHeight: (h: number) => void;
   } = $props();
@@ -92,7 +96,10 @@ export async function feedCat(
   let showRelevant = $state(false);
   let showFeed = $state(false);
   let feedStatus = $state<"running" | "awaiting_user" | "completed">("running");
-  let feedDrafts = $state<Record<number, { text: string; picks: string[]; freestyleActive: boolean; rows: string[][] }> | undefined>(undefined);
+  let feedDrafts = $state<
+    | Record<number, { text: string; picks: string[]; freestyleActive: boolean; rows: string[][] }>
+    | undefined
+  >(undefined);
   let feedResult = $state<unknown>(undefined);
   let showAnswer = $state(false);
   let answerText = $state("");
@@ -101,6 +108,18 @@ export async function feedCat(
   let stageEl: HTMLElement | undefined = $state();
   let cursorRef: HTMLElement | undefined = $state();
   let chatScroll: HTMLElement | undefined = $state();
+
+  // The relevant-tools and tool-call bubbles are small bubbles, so they share one
+  // horizontal message stack while the tool is collapsed. When the tool needs the
+  // user's answer it expands, which (per the client's stacking rule) breaks it out
+  // of the stack as a standalone row; it rejoins once it completes and collapses.
+  const feedExpanded = $derived(feedStatus === "awaiting_user");
+  const align = $derived(ui.getAlignment());
+  const stackItems = $derived(
+    [showRelevant ? "relevant" : null, showFeed && !feedExpanded ? "feed" : null].filter(
+      (x): x is string => !!x,
+    ),
+  );
 
   function reset(): void {
     inputValue = "";
@@ -174,21 +193,13 @@ export async function feedCat(
       demo.scroll(tl, () => chatScroll, 9999, { duration: 0.4 });
       demo.hold(tl, 0.6);
 
-      // 4. The cursor opens the relevant-tools card to inspect what matched...
-      demo.move(tl, '[data-demo="relevant"]', { duration: 0.7 });
-      demo.hover(tl, '[data-demo="relevant"]', true);
-      demo.click(tl, '[data-demo="relevant"]', () => ui.expansionSet(REL_ID, true));
-      demo.hover(tl, '[data-demo="relevant"]', false);
-      demo.scroll(tl, () => chatScroll, 9999, { duration: 0.4 });
-      demo.hold(tl, 0.9);
-
-      // ...then answers the tool's question.
-      demo.move(tl, '[data-tc-nav]', { duration: 0.7 });
-      demo.hover(tl, '[data-tc-nav]', true);
-      demo.click(tl, '[data-tc-nav]', () => {
+      // 4. The cursor answers the tool's question.
+      demo.move(tl, "[data-tc-nav]", { duration: 0.7 });
+      demo.hover(tl, "[data-tc-nav]", true);
+      demo.click(tl, "[data-tc-nav]", () => {
         feedDrafts = { 0: { text: "", picks: ["kitchen"], freestyleActive: false, rows: [] } };
       });
-      demo.hover(tl, '[data-tc-nav]', false);
+      demo.hover(tl, "[data-tc-nav]", false);
       demo.hold(tl, 0.7);
       // 5. The tool resumes and completes.
       tl.add(() => {
@@ -207,8 +218,6 @@ export async function feedCat(
       demo.type(tl, (v) => (answerText = v), ANSWER, { duration: ANSWER_SECONDS });
       tl.add(() => (answerStreaming = false));
       demo.scroll(tl, () => chatScroll, 9999, { duration: 0.4 });
-      demo.hold(tl, 1.6);
-
       register({
         timeline: tl,
         reset: () => {
@@ -232,19 +241,23 @@ export async function feedCat(
          Wears the shared bubble drop shadow + blur halo via BubbleShadow. -->
     <div class="relative shrink-0 h-[348px]">
       <BubbleShadow />
-      <div class="bubble-promote relative z-10 h-full rounded-large overflow-hidden border border-default-200 bg-surface">
+      <div
+        class="bubble-promote relative z-10 h-full rounded-large overflow-hidden border border-default-200 bg-surface"
+      >
         <div class="grid grid-cols-2 h-full">
           <div data-pane="index" class="flex flex-col min-h-0">
             <div class="px-3 py-1.5 text-[11px] font-mono text-default-600 bg-surface">
               index.ts
             </div>
-            <pre class="demo-code flex-1 min-h-0 overflow-hidden text-[10px] font-mono text-default-800 px-3 py-2 whitespace-pre leading-[1.45]">{@html INDEX_HTML}</pre>
+            <pre
+              class="demo-code flex-1 min-h-0 overflow-hidden text-[10px] font-mono text-default-800 px-3 py-2 whitespace-pre leading-[1.45]">{@html INDEX_HTML}</pre>
           </div>
           <div data-pane="tools" class="flex flex-col min-h-0">
             <div class="px-3 py-1.5 text-[11px] font-mono text-default-600 bg-surface">
               tomat.json
             </div>
-            <pre class="demo-code flex-1 min-h-0 overflow-hidden text-[10px] font-mono text-default-800 px-3 py-2 whitespace-pre leading-[1.45]">{@html TOOLS_HTML}</pre>
+            <pre
+              class="demo-code flex-1 min-h-0 overflow-hidden text-[10px] font-mono text-default-800 px-3 py-2 whitespace-pre leading-[1.45]">{@html TOOLS_HTML}</pre>
           </div>
         </div>
       </div>
@@ -259,32 +272,70 @@ export async function feedCat(
             <UserMessageView text={userText} />
           </MessageEnter>
         {/if}
-        {#if showRelevant}
+        {#if stackItems.length}
           <MessageEnter>
-            <div data-demo="relevant">
-              <RelevantToolsView
-                id={REL_ID}
-                phase1={[
-                  { toolId: "petcare.feed_cat", name: "feed_cat", description: "Dispense a portion from the smart feeder.", score: 0.82 },
-                  { toolId: "home.show_todos", name: "show_todos", description: "Show today's todo list.", score: 0.41 },
-                ]}
-                phase2={[
-                  { toolId: "petcare.feed_cat", name: "feed_cat", description: "Dispense a portion from the smart feeder." },
-                ]}
-              />
+            <div
+              class="w-fit"
+              class:mx-auto={align === "center"}
+              class:ml-auto={align === "right"}
+              class:mr-auto={align === "left"}
+            >
+              <MessageStackView count={stackItems.length} alignment={align}>
+                {#snippet bubble(i)}
+                  {@const neighborLeft = i > 0}
+                  {@const neighborRight = i < stackItems.length - 1}
+                  {#if stackItems[i] === "relevant"}
+                    <RelevantToolsView
+                      id={REL_ID}
+                      {neighborLeft}
+                      {neighborRight}
+                      phase1={[
+                        {
+                          toolId: "petcare.feed_cat",
+                          name: "feed_cat",
+                          description: "Dispense a portion from the smart feeder.",
+                          score: 0.82,
+                        },
+                        {
+                          toolId: "home.show_todos",
+                          name: "show_todos",
+                          description: "Show today's todo list.",
+                          score: 0.41,
+                        },
+                      ]}
+                      phase2={[
+                        {
+                          toolId: "petcare.feed_cat",
+                          name: "feed_cat",
+                          description: "Dispense a portion from the smart feeder.",
+                        },
+                      ]}
+                    />
+                  {:else}
+                    <ToolCallView
+                      {neighborLeft}
+                      {neighborRight}
+                      toolName="feed_cat"
+                      status={feedStatus}
+                      description={feedStatus === "running" ? "Dispensing" : undefined}
+                      progress={feedStatus === "running" ? 0.5 : undefined}
+                      result={feedResult}
+                    />
+                  {/if}
+                {/snippet}
+              </MessageStackView>
             </div>
           </MessageEnter>
         {/if}
-        {#if showFeed}
+        <!-- When the tool needs the user's answer it expands out of the stack as a
+             standalone row (the client's split-on-expand rule). -->
+        {#if showFeed && feedExpanded}
           <MessageEnter>
             <ToolCallView
               toolName="feed_cat"
               status={feedStatus}
-              description={feedStatus === "running" ? "Dispensing" : undefined}
-              progress={feedStatus === "running" ? 0.5 : undefined}
-              askUser={feedStatus === "awaiting_user" ? feedAsk : undefined}
+              askUser={feedAsk}
               draftsOverride={feedDrafts}
-              result={feedResult}
             />
           </MessageEnter>
         {/if}

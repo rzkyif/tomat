@@ -2,7 +2,14 @@
   import type { AskUserFilesQuestion } from "../../../../../domain/session.ts";
   import type { DraftAnswer } from "../ToolCallView.svelte";
 
-  let { q, qi, draft, selectedClasses, unselectedClasses, togglePick }: {
+  let {
+    q,
+    qi,
+    draft,
+    selectedClasses,
+    unselectedClasses,
+    togglePick,
+  }: {
     q: AskUserFilesQuestion;
     qi: number;
     draft: DraftAnswer | undefined;
@@ -17,8 +24,9 @@
     <button
       type="button"
       data-tc-nav
-      class="text-xs px-2 py-1 min-h-8 rounded cursor-pointer text-left outline-none transition-colors duration-100 {draft
-        ?.picks.includes(entry.path)
+      class="text-xs px-2 py-1 min-h-8 rounded cursor-pointer text-left outline-none transition-colors duration-100 {draft?.picks.includes(
+        entry.path,
+      )
         ? selectedClasses
         : unselectedClasses}"
       title={entry.path}

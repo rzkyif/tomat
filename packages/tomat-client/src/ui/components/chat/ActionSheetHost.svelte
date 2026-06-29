@@ -18,8 +18,8 @@
       .map((i) => ({
         label: i.label,
         disabled: i.enabled === false,
-        destructive: /delete|remove|unpair|forget/i.test(i.id) ||
-          /delete|remove|unpair|forget/i.test(i.label),
+        destructive:
+          /delete|remove|unpair|forget/i.test(i.id) || /delete|remove|unpair|forget/i.test(i.label),
         onSelect: () => actionSheetHost.select(i.id),
       })),
   );

@@ -87,9 +87,8 @@
 
   async function newMemory(kind: MemoryKind) {
     const label = kind === "skill" ? "skill" : "knowledge";
-    const content = kind === "skill"
-      ? "---\ndescription: \nsuggested-tools: []\n---\n\n# Steps\n\n1. \n"
-      : "";
+    const content =
+      kind === "skill" ? "---\ndescription: \nsuggested-tools: []\n---\n\n# Steps\n\n1. \n" : "";
     const created = await memoriesState.create(kind, makeUniqueTitle(label), content);
     reloadKey++;
     selectedItem = created;

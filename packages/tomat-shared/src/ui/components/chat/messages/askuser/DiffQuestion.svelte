@@ -3,7 +3,14 @@
   import type { DraftAnswer } from "../ToolCallView.svelte";
   import DiffView from "../DiffView.svelte";
 
-  let { q, qi, draft, selectedClasses, unselectedClasses, togglePick }: {
+  let {
+    q,
+    qi,
+    draft,
+    selectedClasses,
+    unselectedClasses,
+    togglePick,
+  }: {
     q: AskUserDiffQuestion;
     qi: number;
     draft: DraftAnswer | undefined;

@@ -48,13 +48,7 @@
   const numberFromEvent = (e: Event): number => parseFloat((e.target as HTMLInputElement).value);
 </script>
 
-<Popover
-  {open}
-  {anchor}
-  onclose={onClose}
-  class="w-72"
-  ariaLabel="Color picker"
->
+<Popover {open} {anchor} onclose={onClose} class="w-72" ariaLabel="Color picker">
   <div class="grid grid-cols-[1.25rem_1fr_3rem] items-center gap-x-2 gap-y-2">
     {#if !lockLightness}
       <span class="text-default-700 text-sm">L</span>
@@ -119,9 +113,7 @@
     </span>
   </div>
 
-  <div
-    class="alpha-checkerboard rounded-medium overflow-hidden grid grid-rows-2 h-20"
-  >
+  <div class="alpha-checkerboard rounded-medium overflow-hidden grid grid-rows-2 h-20">
     <div style:background-color={newColor} title="New"></div>
     {#if previousColor}
       <div style:background-color={previousColor} title="Previous"></div>

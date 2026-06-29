@@ -52,9 +52,9 @@
   /** Epoch ms -> the local "YYYY-MM-DDTHH:MM" a datetime-local input wants. */
   function toLocalInput(ms: number): string {
     const d = new Date(ms);
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${
-      pad(d.getMinutes())
-    }`;
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
+      d.getMinutes(),
+    )}`;
   }
 
   function fromLocalInput(text: string): number | null {
@@ -151,9 +151,7 @@
   monthlyDay={schedule.kind === "monthly" ? schedule.day : undefined}
   yearlyMonth={schedule.kind === "yearly" ? schedule.month : undefined}
   yearlyDay={schedule.kind === "yearly" ? schedule.day : undefined}
-  timeText={schedule.kind === "weekly" ||
-      schedule.kind === "monthly" ||
-      schedule.kind === "yearly"
+  timeText={schedule.kind === "weekly" || schedule.kind === "monthly" || schedule.kind === "yearly"
     ? `${pad(schedule.hour)}:${pad(schedule.minute)}`
     : undefined}
   {disabled}

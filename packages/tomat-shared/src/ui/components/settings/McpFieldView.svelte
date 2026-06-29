@@ -25,9 +25,7 @@
       <div class="text-base text-default-700">No matching servers</div>
     {:else}
       <div class="text-base text-default-700">No MCP servers yet</div>
-      <div class="text-sm text-default-500">
-        Use the menu to add an MCP server.
-      </div>
+      <div class="text-sm text-default-500">Use the menu to add an MCP server.</div>
     {/if}
   </div>
 {/if}

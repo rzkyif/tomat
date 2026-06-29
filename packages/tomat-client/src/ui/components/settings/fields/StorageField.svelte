@@ -153,9 +153,10 @@
     if (cat.id === "settings") {
       deletionsState.request({
         title: "Reset settings",
-        notice: scope === "core"
-          ? "This resets all Core settings to their defaults and removes saved API keys and passwords. This cannot be undone."
-          : "This resets app settings to their defaults. Paired Cores and snippets are kept. This cannot be undone.",
+        notice:
+          scope === "core"
+            ? "This resets all Core settings to their defaults and removes saved API keys and passwords. This cannot be undone."
+            : "This resets app settings to their defaults. Paired Cores and snippets are kept. This cannot be undone.",
         items: [],
         skipped: [],
         confirmLabel: "Reset",
@@ -222,21 +223,22 @@
   const viewTree = $derived<StorageTreeView | null>(
     tree
       ? {
-        categories: tree.categories.map((cat) => ({
-          id: cat.id,
-          label: cat.label,
-          sizeText: formatBytes(cat.size),
-          canClear: canClear(cat),
-          clearIcon: cat.id === "settings"
-            ? "i-material-symbols-restart-alt-rounded"
-            : "i-material-symbols-delete-outline-rounded",
-          clearAriaLabel: cat.id === "settings" ? "Reset to defaults" : `Clear ${cat.label}`,
-          clearTitle: cat.id === "settings" ? "Reset to defaults" : `Clear ${cat.label}`,
-          settings: cat.id === "settings",
-          nodes: cat.nodes.map((n) => toRow(n, cat.id)),
-        })),
-        totalSizeText: formatBytes(tree.total_size),
-      }
+          categories: tree.categories.map((cat) => ({
+            id: cat.id,
+            label: cat.label,
+            sizeText: formatBytes(cat.size),
+            canClear: canClear(cat),
+            clearIcon:
+              cat.id === "settings"
+                ? "i-material-symbols-restart-alt-rounded"
+                : "i-material-symbols-delete-outline-rounded",
+            clearAriaLabel: cat.id === "settings" ? "Reset to defaults" : `Clear ${cat.label}`,
+            clearTitle: cat.id === "settings" ? "Reset to defaults" : `Clear ${cat.label}`,
+            settings: cat.id === "settings",
+            nodes: cat.nodes.map((n) => toRow(n, cat.id)),
+          })),
+          totalSizeText: formatBytes(tree.total_size),
+        }
       : null,
   );
 

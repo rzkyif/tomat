@@ -31,8 +31,9 @@
       <button
         type="button"
         data-tc-nav
-        class="text-xs px-2 py-1 h-8 rounded cursor-pointer text-left outline-none transition-colors duration-100 {draft
-          ?.picks.includes(opt.value)
+        class="text-xs px-2 py-1 h-8 rounded cursor-pointer text-left outline-none transition-colors duration-100 {draft?.picks.includes(
+          opt.value,
+        )
           ? selectedClasses
           : unselectedClasses}"
         title={opt.description}
@@ -46,8 +47,7 @@
     <input
       type="text"
       data-tc-nav
-      class="rounded block w-full h-8 px-2 outline-none -mt-1 text-xs transition-colors duration-100 {draft
-        ?.freestyleActive
+      class="rounded block w-full h-8 px-2 outline-none -mt-1 text-xs transition-colors duration-100 {draft?.freestyleActive
         ? selectedClasses
         : unselectedClasses}"
       placeholder="Or type your own..."

@@ -24,6 +24,11 @@ export default defineConfig({
   site: "https://au.tomat.ing",
   output: "static",
   trailingSlash: "ignore",
+  // Keep Astro 6's HTML-aware whitespace compression. Astro 7 changed the default
+  // to 'jsx', which collapses whitespace between adjacent inline elements (the way
+  // React does) and can drop visible spaces in rendered copy. Pinning `true` keeps
+  // the rendered output identical across the upgrade.
+  compressHTML: true,
   build: {
     assets: "_astro",
     // Emit every stylesheet as an external file rather than inlining per-page

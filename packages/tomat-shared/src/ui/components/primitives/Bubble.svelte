@@ -88,16 +88,12 @@
   // Accent retint: a CSS color value (not a utility class), so a template
   // literal is fine here. Set on the body element, it re-resolves the whole
   // `--default-*` ladder to the accent hue for the body and every descendant.
-  let defaultBaseOverride = $derived(
-    accent ? `var(--accent-${accent}-base)` : undefined,
-  );
+  let defaultBaseOverride = $derived(accent ? `var(--accent-${accent}-base)` : undefined);
 
   // Slim, equal padding on mobile (roughly the default shadow distance); the
   // roomier asymmetric desktop padding stays on the desktop shell.
   let paddingClass = $derived(
-    mobile
-      ? (size === "small" ? "p-2" : "p-3")
-      : (size === "small" ? "px-3 py-2" : "px-5 py-4"),
+    mobile ? (size === "small" ? "p-2" : "p-3") : size === "small" ? "px-3 py-2" : "px-5 py-4",
   );
   let minHClass = $derived(size === "small" ? "min-h-8" : "");
   let hasProgress = $derived(progress !== undefined);
@@ -145,9 +141,7 @@
   // supplies a static value); rendering exactly N layers (vs a fixed max) is
   // what makes the count an actual perf control. Geometry per ring is computed
   // in CSS from the `--ring-index` / `--ring-count` custom props set below.
-  let ringCount = $derived(
-    mobile ? 0 : ui.bubbleBlurEnabled ? (ui.bubbleBlurRings ?? 3) : 0,
-  );
+  let ringCount = $derived(mobile ? 0 : ui.bubbleBlurEnabled ? (ui.bubbleBlurRings ?? 3) : 0);
 
   // Per-side corner radius, exported to CSS so the shadow layer and the halo
   // rings track the body's alignment/neighbor corner flattening.
@@ -172,7 +166,9 @@
   class:mr-auto={selectedAlignment === "left"}
   class:ml-auto={selectedAlignment === "right"}
   class:mx-auto={selectedAlignment === "center"}
-  style="--bubble-radius-left: var({leftSmall ? '--rounded-small' : '--rounded-large'}); --bubble-radius-right: var({rightSmall
+  style="--bubble-radius-left: var({leftSmall
+    ? '--rounded-small'
+    : '--rounded-large'}); --bubble-radius-right: var({rightSmall
     ? '--rounded-small'
     : '--rounded-large'})"
 >

@@ -5,7 +5,10 @@
 
   // `horizontal` mirrors the settings-panel layout flag: controls sit to the
   // right of their label when there is room, and stack below when narrow.
-  let { extension, horizontal = false }: {
+  let {
+    extension,
+    horizontal = false,
+  }: {
     extension: Extension;
     horizontal?: boolean;
   } = $props();

@@ -12,17 +12,22 @@
 
   const ui = useUiContext();
 
-  let { register, reportHeight }: {
+  let {
+    register,
+    reportHeight,
+  }: {
     register: (h: { timeline: Timeline; reset: () => void }) => void;
     reportHeight: (h: number) => void;
   } = $props();
 
   // No real audio: the subtitle band conveys both halves of the voice loop.
-  // Voice Input captures the user's speech (transcript lands in the real input,
-  // then sends); Text-to-Speech reads the reply aloud, the band tracking the
-  // spoken words in sync with the streaming bubble.
-  const TRANSCRIPT = "Remind me to water the plants when I get home.";
-  const ANSWER = "Done. I'll remind you to water the plants when you get home this evening.";
+  // Voice Input captures the user's speech and, with Send After Dictation on by
+  // default, sends the transcript automatically once it finishes; Text-to-Speech
+  // reads the reply aloud, the band tracking the spoken words in sync with the
+  // streaming bubble.
+  const TRANSCRIPT = "What can I use instead of buttermilk?";
+  const ANSWER =
+    "Stir a tablespoon of lemon juice into a cup of milk and let it sit for five minutes. That gives you a quick buttermilk substitute.";
 
   const DECODE_TOKENS_PER_SEC = 25;
   const ANSWER_SECONDS = ANSWER.length / 4 / DECODE_TOKENS_PER_SEC;
@@ -123,7 +128,6 @@
       const tl = gsap.timeline({ paused: true });
       timeline = tl;
       const voice = 'button[title="Voice Input"]';
-      const send = 'button[title="Send"]';
 
       // 1. Voice Input armed: tap the mic; the button turns blue and the input
       //    waits for speech (vadEnabled, not yet listening).
@@ -161,24 +165,18 @@
       });
       demo.hold(tl, 0.8);
 
-      // 4. Finalized transcript drops into the input; Voice Input switches off.
+      // 4. Transcription finishes. With Send After Dictation on (the default),
+      //    the finalized transcript is sent automatically, no Send tap needed:
+      //    Voice Input switches off and the user's message appears on its own.
       tl.add(() => {
         vadEnabled = false;
         voiceClass = VOICE_CLASS_IDLE;
         placeholder = PLACEHOLDER_IDLE;
         showBand = false;
-        inputValue = TRANSCRIPT;
-      });
-      demo.hold(tl, 0.5);
-      demo.move(tl, send, { duration: 0.6 });
-      demo.hover(tl, send, true);
-      demo.click(tl, send, () => {
         userText = TRANSCRIPT;
-        inputValue = "";
         showUser = true;
       });
-      demo.hover(tl, send, false);
-      demo.hold(tl, 0.5);
+      demo.hold(tl, 0.6);
 
       // 5. Text-to-Speech, generation stage: the reply streams in while its
       //    bubble border PINGS, signalling audio is being synthesised for it.
@@ -211,8 +209,6 @@
         ttsActive = false;
         bandActive = false;
       });
-      demo.hold(tl, 2);
-
       register({
         timeline: tl,
         reset: () => {

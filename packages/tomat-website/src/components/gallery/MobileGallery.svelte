@@ -64,9 +64,9 @@
 <section class="flex flex-col gap-6">
   <h2 class="text-lg font-medium">Mobile</h2>
   <p class="text-default-500 text-sm">
-    The same shared components under a mobile UiContext, framed in a phone-sized
-    viewport so their touch branches (bottom sheets, stacked settings, the
-    fullscreen chat shell) render the way the Android client paints them.
+    The same shared components under a mobile UiContext, framed in a phone-sized viewport so their
+    touch branches (bottom sheets, stacked settings, the fullscreen chat shell) render the way the
+    Android client paints them.
   </p>
 
   {#each entries(SAMPLES.ChatShellView) as [name, p] (name)}
@@ -89,7 +89,9 @@
     <div
       class="relative mx-auto flex w-[360px] h-[720px] overflow-hidden rounded-large border border-default-200 bg-surface"
     >
-      <SettingsShellView {...SAMPLES.SettingsShellView.default as ComponentProps<typeof SettingsShellView>}>
+      <SettingsShellView
+        {...SAMPLES.SettingsShellView.default as ComponentProps<typeof SettingsShellView>}
+      >
         {#snippet groupContent(gid)}
           <SettingsContentView groupId={gid} values={SAMPLE_VALUES} expanded={expandedFor(gid)} />
         {/snippet}
@@ -107,9 +109,8 @@
       <Modal open onclose={noop} ariaLabel="Bottom sheet">
         <h3 class="text-base font-medium text-default-800">Bottom sheet</h3>
         <p class="text-sm text-default-600">
-          On touch every modal presents as a bottom sheet: a grab handle,
-          drag-to-dismiss, and a slide-up transition, inherited from the one
-          shared primitive.
+          On touch every modal presents as a bottom sheet: a grab handle, drag-to-dismiss, and a
+          slide-up transition, inherited from the one shared primitive.
         </p>
       </Modal>
     </div>
@@ -124,7 +125,11 @@
         onclose={noop}
         title="Message"
         items={[
-          { label: "Copy", icon: "i-material-symbols-content-copy-outline-rounded", onSelect: noop },
+          {
+            label: "Copy",
+            icon: "i-material-symbols-content-copy-outline-rounded",
+            onSelect: noop,
+          },
           { label: "Edit", icon: "i-material-symbols-edit-outline-rounded", onSelect: noop },
           {
             label: "Delete",

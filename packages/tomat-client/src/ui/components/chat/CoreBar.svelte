@@ -45,7 +45,9 @@
     }
     return coreStatusState.snapshot.status;
   });
-  const connected = $derived(connectionState.state === "connected" && !connectionState.unauthorized);
+  const connected = $derived(
+    connectionState.state === "connected" && !connectionState.unauthorized,
+  );
   const detail = $derived(
     connected ? coreStatusState.snapshot.detail : (connectionState.reason ?? undefined),
   );

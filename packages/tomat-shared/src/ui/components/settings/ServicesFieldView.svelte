@@ -86,14 +86,10 @@
   <div class="flex items-baseline gap-3">
     <div class="text-default-800 text-sm flex-1 min-w-0 truncate">Total</div>
     <div class="flex items-center gap-2 shrink-0">
-      <div
-        class="text-default-500 text-xs font-bold tabular-nums text-right {cpuWidthClass}"
-      >
+      <div class="text-default-500 text-xs font-bold tabular-nums text-right {cpuWidthClass}">
         {totalCpuText}
       </div>
-      <div
-        class="text-default-500 text-xs font-bold tabular-nums text-right {ramWidthClass}"
-      >
+      <div class="text-default-500 text-xs font-bold tabular-nums text-right {ramWidthClass}">
         {totalRamText}
       </div>
     </div>

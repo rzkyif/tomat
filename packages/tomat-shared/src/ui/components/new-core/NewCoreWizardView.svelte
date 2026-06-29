@@ -126,14 +126,10 @@
        recenters in the smaller area above the keyboard without padding for the
        gesture bar itself. -->
   <div class="m-auto w-full flex flex-col gap-4">
-
     {@render wizardBody()}
   </div>
 {:else}
-  <Bubble
-    selectedAlignment={alignment}
-    extraClass="flex flex-col gap-4 w-[22.5rem] max-w-full"
-  >
+  <Bubble selectedAlignment={alignment} extraClass="flex flex-col gap-4 w-[22.5rem] max-w-full">
     {@render wizardBody()}
   </Bubble>
 {/if}
@@ -197,8 +193,8 @@
   {#if step === "chooseDestination"}
     <!-- Step 1 of initial setup: pick where the core runs. -->
     <p class="text-sm text-default-600">
-      tomat needs a Core: the local service that runs language models, speech
-      services and tools. Where should it run?
+      tomat needs a Core: the local service that runs language models, speech services and tools.
+      Where should it run?
     </p>
 
     <div class="flex flex-col gap-2">
@@ -237,8 +233,8 @@
               ? 'text-default-inverted-500'
               : 'text-default-500'}"
           >
-            Models and tools run locally. No data leaves your machine, and no
-            other device can pair unless you allow it.
+            Models and tools run locally. No data leaves your machine, and no other device can pair
+            unless you allow it.
           </span>
         </div>
       </button>
@@ -271,9 +267,8 @@
               ? 'text-default-inverted-500'
               : 'text-default-500'}"
           >
-            Connect to a Core already running on another machine in your
-            network. Models and tools run there; this device only sends
-            input and renders the UI.
+            Connect to a Core already running on another machine in your network. Models and tools
+            run there; this device only sends input and renders the UI.
           </span>
         </div>
       </button>
@@ -281,9 +276,7 @@
 
     <Button
       variant="primary"
-      icon={busy !== null
-        ? "i-line-md:loading-loop"
-        : "i-material-symbols-arrow-forward-rounded"}
+      icon={busy !== null ? "i-line-md:loading-loop" : "i-material-symbols-arrow-forward-rounded"}
       class="px-4 py-2.5 rounded-large"
       disabled={busy !== null}
       onclick={() => (onContinueFromChoose ?? noop)()}
@@ -299,8 +292,8 @@
   {:else if step === "remoteAddress"}
     <!-- Remote step 1: enter the address and verify the connection. -->
     <p class="text-sm text-default-600">
-      Enter the address of a Core already running on another machine, then check
-      the connection before pairing.
+      Enter the address of a Core already running on another machine, then check the connection
+      before pairing.
     </p>
 
     <p class="text-sm text-default-500">
@@ -328,12 +321,8 @@
       >
         {#snippet trailing()}
           <IconButton
-            icon={discovering
-              ? "i-line-md:loading-loop"
-              : "i-material-symbols-wifi-find-rounded"}
-            title={discovering
-              ? "Searching your network…"
-              : "Find Cores on your network"}
+            icon={discovering ? "i-line-md:loading-loop" : "i-material-symbols-wifi-find-rounded"}
+            title={discovering ? "Searching your network…" : "Find Cores on your network"}
             size="sm"
             disabled={discovering || busy !== null}
             onclick={() => (onPingNetwork ?? noop)()}
@@ -347,16 +336,10 @@
     <Expand open={didSweep && !discovering}>
       <div class="flex flex-col gap-1">
         {#if discovered.length === 0}
-          <p class="text-sm text-default-500 px-3 py-2">
-            No Cores found on your network.
-          </p>
+          <p class="text-sm text-default-500 px-3 py-2">No Cores found on your network.</p>
         {:else}
           {#each discovered as core (core.pin)}
-            <ListItem
-              direction="row"
-              role="option"
-              onclick={() => (onUseDiscovered ?? noop)(core)}
-            >
+            <ListItem direction="row" role="option" onclick={() => (onUseDiscovered ?? noop)(core)}>
               <span class="truncate flex-1 text-sm text-default-800">
                 {core.hostLabel}
               </span>
@@ -389,8 +372,7 @@
   {:else if step === "remotePair"}
     <!-- Remote step 2: name the core and enter its pairing code. -->
     <p class="text-sm text-default-600">
-      Give this Core a name and enter the 6-digit pairing code shown on the host
-      machine.
+      Give this Core a name and enter the 6-digit pairing code shown on the host machine.
     </p>
 
     <div class="flex flex-col gap-2">
@@ -433,14 +415,12 @@
   {:else if step === "localConfirm"}
     <!-- Step 2 (local branch): confirm install + per-install toggles. -->
     <p class="text-sm text-default-600">
-      tomat will install the Core service on this computer. Here's what
-      that means:
+      tomat will install the Core service on this computer. Here's what that means:
     </p>
 
     <ul class="flex flex-col gap-2 text-sm text-default-700">
       <li class="flex gap-2">
-        <i
-          class="flex i-material-symbols-folder-rounded text-base text-default-500 shrink-0 mt-0.5"
+        <i class="flex i-material-symbols-folder-rounded text-base text-default-500 shrink-0 mt-0.5"
         ></i>
         <span>
           Binaries and data go to
@@ -448,12 +428,11 @@
         </span>
       </li>
       <li class="flex gap-2">
-        <i
-          class="flex i-material-symbols-key-rounded text-base text-default-500 shrink-0 mt-0.5"
+        <i class="flex i-material-symbols-key-rounded text-base text-default-500 shrink-0 mt-0.5"
         ></i>
         <span>
-          A pairing code is minted for this Client. The admin password you set
-          below lets you pair more devices later.
+          A pairing code is minted for this Client. The admin password you set below lets you pair
+          more devices later.
         </span>
       </li>
     </ul>
@@ -475,9 +454,9 @@
           Keep Core running in the background
         </span>
         <span class="text-xs text-default-500">
-          When on, a launchd / systemd / scheduled-task entry boots the Core
-          on login so other Clients on this machine can connect anytime.
-          When off, the Client launches the Core on demand at startup.
+          When on, a launchd / systemd / scheduled-task entry boots the Core on login so other
+          Clients on this machine can connect anytime. When off, the Client launches the Core on
+          demand at startup.
         </span>
       </div>
     </button>
@@ -499,15 +478,13 @@
           Allow other devices on this network to pair
         </span>
         <span class="text-xs text-default-500">
-          When on, the Core listens on <code
-            class="bg-surface-inset-strong px-1 rounded-small">0.0.0.0:7800</code
+          When on, the Core listens on <code class="bg-surface-inset-strong px-1 rounded-small"
+            >0.0.0.0:7800</code
           >
-          so other Clients in your LAN can connect. When off (default), only
-          this device can reach it via <code
-            class="bg-surface-inset-strong px-1 rounded-small">127.0.0.1</code
-          >. Changeable later by editing the Core's <code
-            class="bg-surface-inset-strong px-1 rounded-small">settings.json</code
-          >.
+          so other Clients in your LAN can connect. When off (default), only this device can reach it
+          via <code class="bg-surface-inset-strong px-1 rounded-small">127.0.0.1</code>. Changeable
+          later by editing the Core's
+          <code class="bg-surface-inset-strong px-1 rounded-small">settings.json</code>.
         </span>
       </div>
     </button>

@@ -1,11 +1,5 @@
 <script lang="ts">
-  import {
-    errMessage,
-    type Grant,
-    type GrantState,
-    permissionKey,
-    type Tool,
-  } from "@tomat/shared";
+  import { errMessage, type Grant, type GrantState, permissionKey, type Tool } from "@tomat/shared";
   import { confirmState, settingsState, extensionsState, mcpState } from "$stores";
   import ToolDetailView from "@tomat/shared/ui/components/settings/ToolDetailView.svelte";
 

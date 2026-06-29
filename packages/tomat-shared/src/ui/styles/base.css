@@ -90,6 +90,19 @@ body {
   font-family: var(--font-default);
 }
 
+/* Tie the browser's native control palette (scrollbars, and the date/time
+   picker glyphs) to the app theme rather than the OS, so a dark window never
+   shows a light clock/calendar icon. `color-scheme` inherits, so every native
+   <input type=time|date> follows without per-input overrides. The website's
+   theme-flip re-asserts it on `.demo-frame` (site.css) since the flip swaps the
+   color ladders without toggling `.dark`. */
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
 /* User-customizable bubble colors. The `*-bg-light` AND `*-bg-dark` variables
    are both written from JS in the client: +page.svelte sets `-light` to the
    stored hex and `-dark` to its theme inversion (color.ts `darkFromLight`, the
@@ -502,7 +515,7 @@ input[type="range"]::-moz-range-thumb {
   background: var(--default-d-500);
 }
 
-/* Shared scrollbar styling. One canonical look (8px, transparent track, a
+/* Shared scrollbar styling. One canonical look (5px, transparent track, a
    thumb that tracks the themable default scale and darkens on hover) applied
    via three classes that differ only by the surface the scroller sits on:
 
@@ -514,13 +527,13 @@ input[type="range"]::-moz-range-thumb {
      .tomat-scroll-dark   content on a dark or code background: white-alpha
                           thumb that reads on any dark fill.
 
-   Both axes get an 8px scrollbar so the same class covers vertical and
+   Both axes get a 5px scrollbar so the same class covers vertical and
    horizontal scrollers. */
 .tomat-scroll::-webkit-scrollbar,
 .tomat-scroll-inset::-webkit-scrollbar,
 .tomat-scroll-dark::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
 }
 .tomat-scroll::-webkit-scrollbar-track,
 .tomat-scroll-inset::-webkit-scrollbar-track,
@@ -572,19 +585,11 @@ input[type="range"]::-moz-range-thumb {
   background: rgba(255, 255, 255, 0.3);
 }
 
-/* Modifiers, combined with a surface class above. Listed after the base so they
-   win on equal specificity.
-
-     .tomat-scroll-thin   a 5px bar instead of 8px, for dense or secondary
-                          scrollers (e.g. the manual outline).
-     .tomat-scroll-hover  the thumb stays invisible until the scroller is
-                          hovered or holds focus, keeping it out of the way while
-                          reading. Pairs with `.tomat-scroll` (default surface);
-                          the gutter stays reserved, so revealing never reflows. */
-.tomat-scroll-thin::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
+/* Reveal-on-hover modifier, combined with a surface class above. Listed after
+   the base so it wins on equal specificity: the thumb stays invisible until the
+   scroller is hovered or holds focus, keeping it out of the way while reading.
+   Pairs with `.tomat-scroll` (default surface); the gutter stays reserved, so
+   revealing never reflows. */
 .tomat-scroll-hover::-webkit-scrollbar-thumb,
 .dark .tomat-scroll-hover::-webkit-scrollbar-thumb {
   background: transparent;

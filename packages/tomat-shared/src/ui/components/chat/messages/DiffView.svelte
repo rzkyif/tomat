@@ -34,6 +34,8 @@
         : row.kind === 'removed'
           ? 'bg-accent-red-200 text-accent-red-700'
           : 'text-default-700'}"
-    >{row.kind === "added" ? "+ " : row.kind === "removed" ? "- " : "  "}{row.text}</div>
+    >
+      {row.kind === "added" ? "+ " : row.kind === "removed" ? "- " : "  "}{row.text}
+    </div>
   {/each}
 </div>

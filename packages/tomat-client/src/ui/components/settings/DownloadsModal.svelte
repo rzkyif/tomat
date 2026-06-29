@@ -40,7 +40,7 @@
   function groupIcon(item: DownloadItem): string {
     return (
       SETTINGS_SCHEMA.find((g) => g.id === item.groupId)?.icon ??
-        "i-material-symbols-download-rounded"
+      "i-material-symbols-download-rounded"
     );
   }
 

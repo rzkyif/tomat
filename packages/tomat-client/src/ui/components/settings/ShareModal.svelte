@@ -140,7 +140,8 @@
 
   const importLabel = $derived.by(() => {
     const { apply, overwrite } = counts;
-    if (apply > 0 && overwrite > 0) return `Apply ${plural(apply)} and Overwrite ${plural(overwrite)}`;
+    if (apply > 0 && overwrite > 0)
+      return `Apply ${plural(apply)} and Overwrite ${plural(overwrite)}`;
     if (overwrite > 0) return `Overwrite ${plural(overwrite)}`;
     return `Apply ${plural(apply)}`;
   });

@@ -36,9 +36,7 @@
   let openFileLoaded = $state(false);
 
   const otherTitles = $derived(
-    memoriesState.memories
-      .filter((d) => d.id !== item.id)
-      .map((d) => d.title.toLowerCase()),
+    memoriesState.memories.filter((d) => d.id !== item.id).map((d) => d.title.toLowerCase()),
   );
   const titleError = $derived.by(() => {
     if (!draftTitle.trim()) return "Title cannot be empty";

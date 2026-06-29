@@ -36,7 +36,12 @@
     <div class="flex items-center gap-2 min-w-0 min-h-7">
       <span class="text-base font-semibold text-default-800 truncate">{title}</span>
       {#each badges as badge (badge.label)}
-        <ObjectBadgeView label={badge.label} icon={badge.icon} accent={badge.accent} title={badge.title} />
+        <ObjectBadgeView
+          label={badge.label}
+          icon={badge.icon}
+          accent={badge.accent}
+          title={badge.title}
+        />
       {/each}
     </div>
     {#if subtitle}

@@ -56,7 +56,11 @@
     }
     if (isUpdatable(tk)) {
       const latest = extensionsState.updateStatus[tk.id]?.latestVersion;
-      return { label: "Update available", accent: "yellow", title: latest ? `v${latest}` : undefined };
+      return {
+        label: "Update available",
+        accent: "yellow",
+        title: latest ? `v${latest}` : undefined,
+      };
     }
     if (tk.status === "downloaded") return { label: "Install to enable", accent: "yellow" };
     return { label: "Installed", accent: "green" };
@@ -185,8 +189,7 @@
   function deleteExtension(tk: Extension, after?: () => void) {
     confirmState.request({
       title: "Delete extension",
-      message:
-        `Delete "${tk.displayName || tk.id}" v${tk.version}? Its grants and installed files will be removed.`,
+      message: `Delete "${tk.displayName || tk.id}" v${tk.version}? Its grants and installed files will be removed.`,
       destructive: true,
       confirmLabel: "Delete",
       onConfirm: async () => {
@@ -248,7 +251,11 @@
     return [{ label: "Downloadable" }];
   }
 
-  async function load({ query: q, offset, limit }: {
+  async function load({
+    query: q,
+    offset,
+    limit,
+  }: {
     offset: number;
     limit: number;
     query: ParsedQuery;
@@ -373,7 +380,13 @@
   onFilterSort={() =>
     showFilterSortMenu({
       filters: [
-        { label: "Source", options: [{ token: "installed", label: "Installed" }, { token: "npm", label: "npm Marketplace" }] },
+        {
+          label: "Source",
+          options: [
+            { token: "installed", label: "Installed" },
+            { token: "npm", label: "npm Marketplace" },
+          ],
+        },
         { label: "Status", options: [{ token: "update-available", label: "Update available" }] },
       ],
       sorts: [

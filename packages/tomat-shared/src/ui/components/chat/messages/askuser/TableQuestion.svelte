@@ -2,7 +2,15 @@
   import type { AskUserTableQuestion } from "../../../../../domain/session.ts";
   import type { DraftAnswer } from "../ToolCallView.svelte";
 
-  let { q, qi, draft, unselectedClasses, setCell, addRow, removeRow }: {
+  let {
+    q,
+    qi,
+    draft,
+    unselectedClasses,
+    setCell,
+    addRow,
+    removeRow,
+  }: {
     q: AskUserTableQuestion;
     qi: number;
     draft: DraftAnswer | undefined;
@@ -35,8 +43,7 @@
                 data-tc-nav
                 class="bg-surface-inset text-default-800 rounded block w-full min-w-20 h-7 px-2 outline-none text-xs"
                 value={row[ci] ?? ""}
-                oninput={(e) =>
-                  setCell(qi, ri, ci, (e.target as HTMLInputElement).value)}
+                oninput={(e) => setCell(qi, ri, ci, (e.target as HTMLInputElement).value)}
               />
             </td>
           {/each}

@@ -10,7 +10,12 @@
   // `highlightTarget` (a `[data-region=...]` selector) to mark one part, such as
   // the context gauge or the core chip.
   type Scenario = keyof typeof sessionBarSamples;
-  let { scenario = "default", label, highlightLabel, highlightTarget }: {
+  let {
+    scenario = "default",
+    label,
+    highlightLabel,
+    highlightTarget,
+  }: {
     scenario?: Scenario;
     label?: string;
     highlightLabel?: string;

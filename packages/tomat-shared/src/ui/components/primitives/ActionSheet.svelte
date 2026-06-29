@@ -57,7 +57,9 @@
       <button
         type="button"
         class="flex items-center gap-3 rounded-medium px-2 py-3.5 text-left transition-interactive hov:cursor-pointer
-          {item.destructive ? 'text-accent-red-300 hov:bg-accent-red-200/20' : 'text-default-800 hov:bg-surface-inset'}
+          {item.destructive
+          ? 'text-accent-red-300 hov:bg-accent-red-200/20'
+          : 'text-default-800 hov:bg-surface-inset'}
           {item.disabled ? 'opacity-40 pointer-events-none' : ''}"
         onclick={() => choose(item)}
         use:ripple={{ disabled: item.disabled, durationMs: rippleDuration }}

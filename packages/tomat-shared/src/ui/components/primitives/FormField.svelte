@@ -99,7 +99,10 @@
   {/if}
 {/snippet}
 
-<div data-field-id={fieldId} class="flex flex-col gap-2 max-w-full overflow-clip text-sm {extraClass}">
+<div
+  data-field-id={fieldId}
+  class="flex flex-col gap-2 max-w-full overflow-clip text-sm {extraClass}"
+>
   <div class="flex {horizontal ? 'flex-row items-start gap-3' : 'flex-col gap-1'}">
     <div class="flex flex-col flex-1 min-w-0 gap-0.5">
       {#if labelContent}

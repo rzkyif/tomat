@@ -56,12 +56,10 @@
 
     if (placeAbove) {
       const top = aRect.top - b.top - margin;
-      popupStyle =
-        `left: ${cx}px; top: ${top}px; transform: translate(-50%, -100%); visibility: visible;`;
+      popupStyle = `left: ${cx}px; top: ${top}px; transform: translate(-50%, -100%); visibility: visible;`;
     } else {
       const top = aRect.bottom - b.top + margin;
-      popupStyle =
-        `left: ${cx}px; top: ${top}px; transform: translate(-50%, 0); visibility: visible;`;
+      popupStyle = `left: ${cx}px; top: ${top}px; transform: translate(-50%, 0); visibility: visible;`;
     }
   }
 
@@ -112,11 +110,7 @@
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    bind:this={backdropEl}
-    class="absolute inset-0 z-50"
-    onpointerdown={onclose}
-  >
+  <div bind:this={backdropEl} class="absolute inset-0 z-50" onpointerdown={onclose}>
     <!-- Blur+dim lives on its OWN layer, never as the popup's parent. WebKit
          folds a backdrop-filter element's compositing-layer children (e.g. a
          scroll container) into the filtered region, which would blur the popup's

@@ -1,11 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import type {
-    Alignment,
-    Monitor,
-    Attachment,
-    MessagePart,
-  } from "$lib/util/types";
+  import type { Alignment, Monitor, Attachment, MessagePart } from "$lib/util/types";
   import { platform } from "$lib/platform";
   import { useUiContext } from "@tomat/shared/ui/context";
   import {
@@ -77,9 +72,7 @@
   const themeOverride = $derived(
     settingsState.currentSettings["appearance.userInputDefaultColor"] as string,
   );
-  const themeOverrideHex = $derived(
-    hasAlpha(themeOverride) ? themeOverride : null,
-  );
+  const themeOverrideHex = $derived(hasAlpha(themeOverride) ? themeOverride : null);
 
   let text = $state("");
   let monitors: Monitor[] = $state([]);
@@ -116,11 +109,7 @@
   let autocompleteOptions = $derived.by<AutocompleteOption[]>(() => {
     if (!ac.open) return [];
     const prefix = ac.prefix.toLowerCase();
-    const existing = collectExistingTriggers(
-      text,
-      ac.triggerStart,
-      ac.triggerEnd,
-    );
+    const existing = collectExistingTriggers(text, ac.triggerStart, ac.triggerEnd);
     // The leading symbol the user typed (`#`/`@`/`/`) picks the source list:
     // snippets match by their full trigger so only the right symbol passes;
     // memories are `@`-only references.
@@ -163,12 +152,16 @@
     // MCP prompts trigger with "/" (enabled ones only); MCP resources are
     // "@"-referenceable. Both resolve core-side at send.
     const mcpResSlug = (n: string) =>
-      `@${n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`;
+      `@${n
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")}`;
     const mcpPrompts = mcpState.prompts
       .filter((p) => p.enabled)
       .map((p) => ({ p, trigger: `/${p.name}` }))
-      .filter(({ trigger }) =>
-        trigger.toLowerCase().startsWith(prefix) && !existing.has(trigger.toLowerCase())
+      .filter(
+        ({ trigger }) =>
+          trigger.toLowerCase().startsWith(prefix) && !existing.has(trigger.toLowerCase()),
       )
       .map<AutocompleteOption>(({ p, trigger }) => ({
         id: `mcp_prompt:${p.serverId}:${p.name}`,
@@ -178,10 +171,11 @@
       }));
     const mcpResources = mcpState.resources
       .map((r) => ({ r, trigger: mcpResSlug(r.name) }))
-      .filter(({ trigger }) =>
-        trigger.toLowerCase().startsWith(prefix) &&
-        !existing.has(trigger.toLowerCase()) &&
-        !snippetTriggers.has(trigger.toLowerCase())
+      .filter(
+        ({ trigger }) =>
+          trigger.toLowerCase().startsWith(prefix) &&
+          !existing.has(trigger.toLowerCase()) &&
+          !snippetTriggers.has(trigger.toLowerCase()),
       )
       .map<AutocompleteOption>(({ r, trigger }) => ({
         id: `resource:${r.serverId}:${r.uri}`,
@@ -248,9 +242,7 @@
     // The pending frame is reactive deep state, so its draft is a Proxy;
     // structuredClone would throw DataCloneError on it. $state.snapshot
     // returns a plain editable clone (the same call the accept path uses).
-    prompt.scheduleDraft = scheduleConfirm
-      ? $state.snapshot(scheduleConfirm.draft)
-      : null;
+    prompt.scheduleDraft = scheduleConfirm ? $state.snapshot(scheduleConfirm.draft) : null;
   });
 
   let hasContent = $derived(text.trim().length > 0 || composer.attachments.length > 0);
@@ -424,9 +416,7 @@
 
         await vadManager.attach(handleVadAudio);
 
-        const mode = settingsState.currentSettings[
-          "stt.activation"
-        ] as ActivationMode;
+        const mode = settingsState.currentSettings["stt.activation"] as ActivationMode;
         if (
           mode === "sticky" &&
           settingsState.currentSettings["stt.vadPersistedState"] === true &&
@@ -492,19 +482,14 @@
     // resolved effective system prompt (including any snippet-driven
     // prepend/replace/append) is attached to the user message so sendMessages
     // can pick it up verbatim.
-    const { userText, systemOverride } = applySnippets(
-      trimmedText,
-      snippetsState.snippets,
-    );
+    const { userText, systemOverride } = applySnippets(trimmedText, snippetsState.snippets);
     const effectiveSystemPrompt = applySystemPromptOverride(
       buildSystemPromptBase(),
       systemOverride,
       buildContextBlock(),
     );
     const systemPromptOverride =
-      systemOverride && effectiveSystemPrompt
-        ? effectiveSystemPrompt
-        : undefined;
+      systemOverride && effectiveSystemPrompt ? effectiveSystemPrompt : undefined;
 
     const snapshot: Attachment[] = composer.attachments.map((a) => ({
       type: a.type,
@@ -609,9 +594,7 @@
   selectedMonitor={settingsState.getMonitor()}
   onMonitorChange={handleMonitorChange}
   onAlign={(v) => handleAlignment(v)}
-  settingsTitle={downloadsState.hasPending
-    ? "Pending downloads - open settings"
-    : "Settings"}
+  settingsTitle={downloadsState.hasPending ? "Pending downloads - open settings" : "Settings"}
   {gearTone}
   onSettings={() => viewState.navigate("settings")}
   rightSlot={inPromptMode ? promptButtons : undefined}
@@ -753,4 +736,3 @@
     />
   </Modal>
 {/if}
-

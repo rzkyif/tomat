@@ -46,9 +46,7 @@
   } = $props();
 
   const sizeClass = $derived(
-    size === "sm"
-      ? "text-xs px-2 py-1 h-8 rounded gap-1.5"
-      : "p-3 rounded-large gap-1.5",
+    size === "sm" ? "text-xs px-2 py-1 h-8 rounded gap-1.5" : "p-3 rounded-large gap-1.5",
   );
 
   // Full strings so the UnoCSS extractor sees every accent.
@@ -77,14 +75,10 @@
   const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
 
   const descriptionClass = $derived(
-    selectedStyle === "invert" && selected
-      ? "text-default-inverted-600"
-      : "text-default-500",
+    selectedStyle === "invert" && selected ? "text-default-inverted-600" : "text-default-500",
   );
   const badgesTextClass = $derived(
-    selectedStyle === "invert" && selected
-      ? "text-default-inverted-600"
-      : "text-default-600",
+    selectedStyle === "invert" && selected ? "text-default-inverted-600" : "text-default-600",
   );
 </script>
 

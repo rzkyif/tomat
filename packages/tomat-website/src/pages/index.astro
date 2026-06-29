@@ -4,27 +4,32 @@ import Showcase from "../components/showcase/Showcase.svelte";
 ---
 
 <BaseLayout title="tomat" description="A local-first AI client.">
-  {/* A single, non-scrolling viewport under the sticky navbar. The "Get tomat"
-      call to action claims its height first; the feature showcase scales its
-      demo to the leftover space and hugs it, so the whole column centers as one
-      group. The showcase track is full-bleed (so neighbouring stages can peek on
-      wide screens) while the caption, indicator, and call to action stay capped
-      to the showcase-card width. `data-install` lets the showcase measure this
-      row's height when sizing the demo. The top padding is the bar->cta gap
-      (gap-6/gap-10) minus the navbar's own 0.5rem padding below its tab nav, so
-      the navbar->showcase gap matches the other two. */}
-  <main class="h-[calc(100dvh-var(--chrome-h))] flex flex-col justify-center gap-6 sm:gap-10 pt-4 sm:pt-8 pb-6 overflow-hidden">
+  {
+    /* A single, non-scrolling viewport under the sticky navbar: a flex column of
+      the feature showcase (which grows to fill the leftover height) and the "Get
+      tomat" call to action (fixed height, content width). The showcase scroll
+      track is full-bleed (so neighbouring stages can peek on wide screens) while
+      each panel, the indicator, and the call to action stay capped to the content
+      width. The top padding is the bar->cta gap (gap-6/gap-10) minus the navbar's
+      own 0.5rem padding below its tab nav, so the navbar->showcase gap matches the
+      other two. */
+  }
+  <main class="h-[calc(100dvh-var(--chrome-h))] flex flex-col gap-6 sm:gap-10 pb-6 overflow-hidden">
     <Showcase client:visible />
-    <div data-install class="home-reveal shrink-0 w-full max-w-xl mx-auto px-4">
-      {/* Styled to match the client's primary "Continue" button (NewCore flow),
-          rendered as an anchor so navigation works without JS. */}
+    <div class="home-reveal shrink-0 w-full max-w-xl mx-auto px-4">
+      {
+        /* Styled to match the client's primary "Continue" button (NewCore flow),
+          rendered as an anchor so navigation works without JS. */
+      }
       <a
         href="/install"
         class="inline-flex w-full items-center justify-center gap-1.5 rounded-large bg-default-inverted-300 px-4 py-2.5 text-sm text-default-inverted-900 transition-colors hover:cursor-pointer"
       >
         <i class="flex i-material-symbols-arrow-forward-rounded text-base shrink-0"></i>
         <span class="flex-1 text-center">Get tomat</span>
-        <i class="flex i-material-symbols-arrow-forward-rounded text-base shrink-0 invisible" aria-hidden="true"></i>
+        <i
+          class="flex i-material-symbols-arrow-forward-rounded text-base shrink-0 invisible"
+          aria-hidden="true"></i>
       </a>
     </div>
   </main>

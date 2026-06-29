@@ -72,7 +72,11 @@
        (or inserting a filter/sort token) exits detail; the triple-dot does not. -->
   <div class="flex items-center gap-1 shrink-0">
     <div class="flex-1 min-w-0">
-      <SearchInput bind:value={query} placeholder={searchPlaceholder} onclear={onClearQuery ?? noop} />
+      <SearchInput
+        bind:value={query}
+        placeholder={searchPlaceholder}
+        onclear={onClearQuery ?? noop}
+      />
     </div>
     {#if hasFilterSort}
       <IconButton
@@ -104,7 +108,9 @@
   <div class="flex-1 min-h-0 flex flex-col">
     <div
       bind:this={scrollEl}
-      class="tomat-scroll flex-1 min-h-0 overflow-y-auto pr-2 {selectedItem !== null ? 'hidden' : ''}"
+      class="tomat-scroll flex-1 min-h-0 overflow-y-auto pr-2 {selectedItem !== null
+        ? 'hidden'
+        : ''}"
     >
       {#if error}
         <div class="px-3 py-2 text-sm text-accent-red-600">{error}</div>

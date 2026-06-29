@@ -2,7 +2,11 @@
   import type { Snippet } from "svelte";
   import { SETTINGS_SCHEMA, evalCondition, searchFields } from "../../../domain/settings/engine.ts";
   import { destinationLabel, groupDestinationChips } from "../../../domain/settings/types.ts";
-  import type { SettingField, SettingGroup, SettingSection } from "../../../domain/settings/types.ts";
+  import type {
+    SettingField,
+    SettingGroup,
+    SettingSection,
+  } from "../../../domain/settings/types.ts";
   import HelpText from "../primitives/HelpText.svelte";
   import IconButton from "../primitives/IconButton.svelte";
   import SectionHeader from "../primitives/SectionHeader.svelte";
@@ -169,8 +173,8 @@
   // object_management field, rendered full-bleed instead of as sections.
   const omField = $derived.by<SettingField | null>(() => {
     if (!group) return null;
-    const om = group.sections.filter((s) =>
-      sectionVisible(s) && s.fields.some((f) => f.type === "object_management")
+    const om = group.sections.filter(
+      (s) => sectionVisible(s) && s.fields.some((f) => f.type === "object_management"),
     );
     if (om.length !== 1 || om[0].fields.length !== 1) return null;
     return om[0].fields[0];
@@ -183,7 +187,11 @@
   {#if field}
     {@render field(f)}
   {:else}
-    <SettingsFieldView field={f} value={values[f.id] ?? ("defaultValue" in f ? f.defaultValue : "")} {horizontal} />
+    <SettingsFieldView
+      field={f}
+      value={values[f.id] ?? ("defaultValue" in f ? f.defaultValue : "")}
+      {horizontal}
+    />
   {/if}
 {/snippet}
 

@@ -31,14 +31,8 @@
   import { useTheme } from "$composables/use-theme.svelte";
   import { WindowChoreography } from "$composables/use-window-choreography.svelte";
   import { getLogger } from "$lib/util/log";
-  import {
-    shortcutHandler,
-    windowTransition,
-  } from "$stores/shortcut.svelte";
-  import {
-    enableMessageAnimations,
-    getDuration,
-  } from "$lib/appearance/animations";
+  import { shortcutHandler, windowTransition } from "$stores/shortcut.svelte";
+  import { enableMessageAnimations, getDuration } from "$lib/appearance/animations";
 
   // Sidecar lifecycle is server-side; the client only attaches WS-driven
   // state subscribers so status frames reach the UI.
@@ -54,10 +48,7 @@
     pauseClickThrough,
     resumeClickThrough,
   } from "$lib/window/window";
-  import {
-    startBlurKeepalive,
-    stopBlurKeepalive,
-  } from "$lib/window/window";
+  import { startBlurKeepalive, stopBlurKeepalive } from "$lib/window/window";
 
   const log = getLogger("boot");
   const ui = useUiContext();
@@ -103,10 +94,7 @@
     const anchor = (e.target as HTMLElement).closest("a");
     if (anchor && anchor.href && anchor.href.startsWith("http")) {
       const url = new URL(anchor.href);
-      if (
-        !url.hostname.includes("localhost") &&
-        !url.hostname.includes("tauri.localhost")
-      ) {
+      if (!url.hostname.includes("localhost") && !url.hostname.includes("tauri.localhost")) {
         e.preventDefault();
         void platform().openExternal(anchor.href);
       }
@@ -204,7 +192,9 @@
     // It is a local Tauri call (reads launch args); default to a manual launch.
     let autostarted = false;
     try {
-      autostarted = await platform().autostart.wasAutostarted().catch(() => false);
+      autostarted = await platform()
+        .autostart.wasAutostarted()
+        .catch(() => false);
       await settingsState.loadClientSettings();
       // Decide the initial mode from LOCAL data only: whether a core is paired
       // is the client-settings `cores` list, with no select()/keychain/network.
@@ -221,8 +211,7 @@
       // Only show the "Loading latest session…" placeholder when we're actually
       // about to load one: a core must be paired, and "always start new" mode
       // has nothing to load so the placeholder would mislead.
-      sessionLoading = paired &&
-        !settingsState.currentSettings["general.session.alwaysStartNew"];
+      sessionLoading = paired && !settingsState.currentSettings["general.session.alwaysStartNew"];
       await choreo.positionWindow();
     } catch (e) {
       // A local read should never keep the window hidden. Log and show anyway.
@@ -421,10 +410,12 @@
           // something is wrong; don't let an autostart window stay hidden
           // behind a hung request.
           const res = await Promise.race([
-            cores().api().greetings.run({
-              sessionTitle: (s["greetings.sessionTitle"] as string | undefined) ?? "",
-              instruction: (s["greetings.instruction"] as string | undefined) ?? "",
-            }),
+            cores()
+              .api()
+              .greetings.run({
+                sessionTitle: (s["greetings.sessionTitle"] as string | undefined) ?? "",
+                instruction: (s["greetings.instruction"] as string | undefined) ?? "",
+              }),
             new Promise<never>((_resolve, reject) =>
               setTimeout(() => reject(new Error("greeting trigger timed out")), 10_000),
             ),
@@ -535,20 +526,53 @@
         "--agent2-bubble-bg-dark",
         settingsState.currentSettings["appearance.secondaryAgentBubbleColor"],
       ),
-    () => theme.applyBubbleColor("--default-base", settingsState.currentSettings["appearance.defaultColor"]),
-    () => theme.applyBubbleColor("--accent-red-base", settingsState.currentSettings["appearance.accentRed"]),
-    () => theme.applyBubbleColor("--accent-blue-base", settingsState.currentSettings["appearance.accentBlue"]),
     () =>
-      theme.applyBubbleColor("--accent-purple-base", settingsState.currentSettings["appearance.accentPurple"]),
+      theme.applyBubbleColor(
+        "--default-base",
+        settingsState.currentSettings["appearance.defaultColor"],
+      ),
     () =>
-      theme.applyBubbleColor("--accent-green-base", settingsState.currentSettings["appearance.accentGreen"]),
+      theme.applyBubbleColor(
+        "--accent-red-base",
+        settingsState.currentSettings["appearance.accentRed"],
+      ),
     () =>
-      theme.applyBubbleColor("--accent-yellow-base", settingsState.currentSettings["appearance.accentYellow"]),
-    () => theme.applyCssVarPx("--rounded-small", settingsState.currentSettings["appearance.roundedSmall"] as number),
+      theme.applyBubbleColor(
+        "--accent-blue-base",
+        settingsState.currentSettings["appearance.accentBlue"],
+      ),
     () =>
-      theme.applyCssVarPx("--rounded-medium", settingsState.currentSettings["appearance.roundedMedium"] as number),
-    () => theme.applyCssVarPx("--rounded-large", settingsState.currentSettings["appearance.roundedLarge"] as number),
-    () => theme.applyFont("--font-default", settingsState.currentSettings["appearance.defaultFont"]),
+      theme.applyBubbleColor(
+        "--accent-purple-base",
+        settingsState.currentSettings["appearance.accentPurple"],
+      ),
+    () =>
+      theme.applyBubbleColor(
+        "--accent-green-base",
+        settingsState.currentSettings["appearance.accentGreen"],
+      ),
+    () =>
+      theme.applyBubbleColor(
+        "--accent-yellow-base",
+        settingsState.currentSettings["appearance.accentYellow"],
+      ),
+    () =>
+      theme.applyCssVarPx(
+        "--rounded-small",
+        settingsState.currentSettings["appearance.roundedSmall"] as number,
+      ),
+    () =>
+      theme.applyCssVarPx(
+        "--rounded-medium",
+        settingsState.currentSettings["appearance.roundedMedium"] as number,
+      ),
+    () =>
+      theme.applyCssVarPx(
+        "--rounded-large",
+        settingsState.currentSettings["appearance.roundedLarge"] as number,
+      ),
+    () =>
+      theme.applyFont("--font-default", settingsState.currentSettings["appearance.defaultFont"]),
     () => theme.applyFont("--font-mono", settingsState.currentSettings["appearance.monoFont"]),
     () =>
       theme.setThemeColor(
@@ -566,7 +590,6 @@
     if (!loaded) return;
     for (const apply of appearanceAppliers) apply();
   });
-
 </script>
 
 {#if loaded}
@@ -582,41 +605,41 @@
     class:will-change-transform={animationsEnabled}
   >
     {#if !onMobile}
-    <main
-      bind:this={choreo.container}
-      class="no-scrollbar flex flex-col-reverse justify-start p-10 text-default-800 w-fit max-w-screen min-h-screen max-h-screen overflow-x-clip overflow-y-auto"
-      class:mx-auto={settingsState.getAlignment() === "center"}
-      class:ml-auto={settingsState.getAlignment() === "right"}
-      class:mr-auto={settingsState.getAlignment() === "left"}
-      class:will-change-transform={animationsEnabled}
-      style="opacity: 0"
-    >
-    <div bind:this={contentEl} class="flex flex-col-reverse gap-2 my-auto">
-      {#if viewState.mode === "chat"}
-        <MessageTranscript {sessionLoading} />
-      {:else}
-        <div
-          class="w-fit flex flex-col pointer-events-none"
-          style:gap={bubbleGap(ui)}
-          class:ml-auto={settingsState.getAlignment() === "right"}
-          class:mr-auto={settingsState.getAlignment() === "left"}
-          class:mx-auto={settingsState.getAlignment() === "center"}
-        >
-          {@render panelColumn()}
+      <main
+        bind:this={choreo.container}
+        class="no-scrollbar flex flex-col-reverse justify-start p-10 text-default-800 w-fit max-w-screen min-h-screen max-h-screen overflow-x-clip overflow-y-auto"
+        class:mx-auto={settingsState.getAlignment() === "center"}
+        class:ml-auto={settingsState.getAlignment() === "right"}
+        class:mr-auto={settingsState.getAlignment() === "left"}
+        class:will-change-transform={animationsEnabled}
+        style="opacity: 0"
+      >
+        <div bind:this={contentEl} class="flex flex-col-reverse gap-2 my-auto">
+          {#if viewState.mode === "chat"}
+            <MessageTranscript {sessionLoading} />
+          {:else}
+            <div
+              class="w-fit flex flex-col pointer-events-none"
+              style:gap={bubbleGap(ui)}
+              class:ml-auto={settingsState.getAlignment() === "right"}
+              class:mr-auto={settingsState.getAlignment() === "left"}
+              class:mx-auto={settingsState.getAlignment() === "center"}
+            >
+              {@render panelColumn()}
+            </div>
+          {/if}
         </div>
-      {/if}
-    </div>
-  </main>
-  {/if}
+      </main>
+    {/if}
 
-  {#if onMobile}
-    <!-- Mobile: a single fullscreen activity. Chat becomes a top app bar
+    {#if onMobile}
+      <!-- Mobile: a single fullscreen activity. Chat becomes a top app bar
          (session + core), a flex-1 scrolling transcript (still flex-col-reverse
          so the newest row stays anchored at the bottom), and the input pinned
          above the on-screen keyboard. Other modes render their panel full
          screen. The desktop bubble/window machinery is gated off (see onMobile
          in the script). -->
-    <!-- The frame fills the whole edge-to-edge window (h-screen, stable: the
+      <!-- The frame fills the whole edge-to-edge window (h-screen, stable: the
          keyboard is handled by padding, not by resizing the viewport) and is the
          single safe-area boundary for every in-flow screen. pt clears the status
          bar (plus a little breathing room); pb clears whichever is taller, the
@@ -628,46 +651,48 @@
          screens must NOT re-apply these (that would double-pad); fixed overlays
          (Modal sheet, autocomplete) sit outside this frame and lift themselves by
          --keyboard-inset. -->
-    <!-- The committed frame. It is the single mount of the current screen, and
+      <!-- The committed frame. It is the single mount of the current screen, and
          the element the carousel pages IN (runSlide translates mobileFrameEl). -->
-    <div
-      bind:this={choreo.mobileFrameEl}
-      class="flex flex-col h-screen w-screen pt-[calc(var(--safe-area-inset-top,0px)+0.5rem)] pb-[max(var(--safe-area-inset-bottom,0px),var(--keyboard-inset,0px))] text-default-800 bg-surface"
-    >
-      {@render mobileScreen(viewState.mode)}
-    </div>
-    <!-- Exit overlay: a transient render of the OUTGOING screen, paged OUT the
+      <div
+        bind:this={choreo.mobileFrameEl}
+        class="flex flex-col h-screen w-screen pt-[calc(var(--safe-area-inset-top,0px)+0.5rem)] pb-[max(var(--safe-area-inset-bottom,0px),var(--keyboard-inset,0px))] text-default-800 bg-surface"
+      >
+        {@render mobileScreen(viewState.mode)}
+      </div>
+      <!-- Exit overlay: a transient render of the OUTGOING screen, paged OUT the
          opposite edge as the frame pages in, so the change reads as one
          cross-slide. Mounted only mid-slide; `fixed` over the frame, clipped to
          the screen by the panel layer's overflow. -->
-    {#if choreo.slideOutMode}
-      <div
-        bind:this={choreo.mobileExitEl}
-        class="fixed inset-0 z-40 flex flex-col h-screen w-screen pt-[calc(var(--safe-area-inset-top,0px)+0.5rem)] pb-[max(var(--safe-area-inset-bottom,0px),var(--keyboard-inset,0px))] text-default-800 bg-surface"
-      >
-        {@render mobileScreen(choreo.slideOutMode)}
-      </div>
-    {/if}
-    <!-- Hosts the in-app action sheet that backs platform().menu.showContextMenu
+      {#if choreo.slideOutMode}
+        <div
+          bind:this={choreo.mobileExitEl}
+          class="fixed inset-0 z-40 flex flex-col h-screen w-screen pt-[calc(var(--safe-area-inset-top,0px)+0.5rem)] pb-[max(var(--safe-area-inset-bottom,0px),var(--keyboard-inset,0px))] text-default-800 bg-surface"
+        >
+          {@render mobileScreen(choreo.slideOutMode)}
+        </div>
+      {/if}
+      <!-- Hosts the in-app action sheet that backs platform().menu.showContextMenu
          on touch (long-press a message / session). Rendered once, above all
          mobile modes. -->
-    <ActionSheetHost />
-    <!-- Quick Settings presents as a draggable bottom sheet over the chat; it
+      <ActionSheetHost />
+      <!-- Quick Settings presents as a draggable bottom sheet over the chat; it
          self-gates on viewState.mode so it slides in and out on its own. -->
-    <QuickSettings />
-    {#if backState.exitHint}
-      <!-- A back press at the chat root arms a brief window; this hint says a
+      <QuickSettings />
+      {#if backState.exitHint}
+        <!-- A back press at the chat root arms a brief window; this hint says a
            second press leaves the app. Sits above the gesture/home bar. -->
-      <div
-        class="fixed inset-x-0 bottom-[max(var(--safe-area-inset-bottom,0px),1rem)] flex justify-center pointer-events-none z-50"
-        transition:fade={{ duration: getDuration() }}
-      >
-        <div class="bg-surface-inset-strong text-default-800 text-sm rounded-large px-4 py-2 shadow">
-          Press back again to exit
+        <div
+          class="fixed inset-x-0 bottom-[max(var(--safe-area-inset-bottom,0px),1rem)] flex justify-center pointer-events-none z-50"
+          transition:fade={{ duration: getDuration() }}
+        >
+          <div
+            class="bg-surface-inset-strong text-default-800 text-sm rounded-large px-4 py-2 shadow"
+          >
+            Press back again to exit
+          </div>
         </div>
-      </div>
+      {/if}
     {/if}
-  {/if}
   </div>
 {/if}
 
@@ -694,23 +719,23 @@
 {/snippet}
 
 {#snippet panelColumn()}
-          {#if viewState.mode === "newCore"}
-            <NewCore />
-          {:else if viewState.mode === "quickSettings"}
-            <QuickSettings />
-          {:else if viewState.mode === "sessionList"}
-            <SessionList />
-          {:else}
-            <Settings />
-          {/if}
-          <!-- CoreBar pins below the session-list / settings panel (which core
+  {#if viewState.mode === "newCore"}
+    <NewCore />
+  {:else if viewState.mode === "quickSettings"}
+    <QuickSettings />
+  {:else if viewState.mode === "sessionList"}
+    <SessionList />
+  {:else}
+    <Settings />
+  {/if}
+  <!-- CoreBar pins below the session-list / settings panel (which core
                you're on, its status, quick switch). Hidden in newCore (no core
                yet) and quickSettings (transient overlay). -->
-          {#if viewState.mode === "sessionList" || viewState.mode === "settings"}
-            <div class="relative pointer-events-none">
-              <CoreBar />
-            </div>
-          {/if}
+  {#if viewState.mode === "sessionList" || viewState.mode === "settings"}
+    <div class="relative pointer-events-none">
+      <CoreBar />
+    </div>
+  {/if}
 {/snippet}
 
 <style lang="scss">

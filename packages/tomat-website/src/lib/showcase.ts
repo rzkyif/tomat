@@ -394,15 +394,18 @@ export class Demo {
     tl.to({}, { duration: dur }, at);
   }
 
-  /** Smoothly scroll an element's `scrollTop` from its current value to `target`. */
+  /** Smoothly scroll an element's `scrollTop` from its current value to `target`.
+   *  `target` may be a function resolved at tween start, so a stage can scroll to
+   *  wherever a (lazily measured) element currently sits. */
   scroll(
     tl: Timeline,
     getEl: () => HTMLElement | undefined,
-    target: number,
+    target: number | (() => number),
     opts: { duration?: number; at?: Pos } = {},
   ): void {
     const o = { v: 0 };
     let from = 0;
+    let to = 0;
     tl.to(
       o,
       {
@@ -411,13 +414,49 @@ export class Demo {
         ease: "power1.inOut",
         onStart: () => {
           from = getEl()?.scrollTop ?? 0;
+          to = typeof target === "function" ? target() : target;
         },
         onUpdate: () => {
           const el = getEl();
-          if (el) el.scrollTop = from + (target - from) * o.v;
+          if (el) el.scrollTop = from + (to - from) * o.v;
         },
       },
       opts.at,
     );
   }
+
+  /** Scroll a container so `sel` sits `pad` px below its top edge. Returns the
+   *  target scrollTop (for `scroll`), 0 if the element or container is missing. */
+  scrollSelectorTop(getEl: () => HTMLElement | undefined, sel: string, pad = 72): number {
+    const sc = getEl();
+    const el = this.q(sel);
+    if (!sc || !el) return sc?.scrollTop ?? 0;
+    const er = el.getBoundingClientRect();
+    const sr = sc.getBoundingClientRect();
+    return sc.scrollTop + (er.top - sr.top) - pad;
+  }
+}
+
+/** Resolve once `el`'s height has been stable for a few animation frames (so an
+ *  in-flight expand / font swap has settled), or after `maxFrames`. Used by the
+ *  measured chat stages so the reported frame height never under-measures and
+ *  clips the column. */
+export function awaitStableHeight(el: HTMLElement, maxFrames = 48): Promise<number> {
+  return new Promise((resolve) => {
+    let last = -1;
+    let stable = 0;
+    let frames = 0;
+    const tick = (): void => {
+      const h = el.offsetHeight;
+      if (h === last) stable++;
+      else {
+        stable = 0;
+        last = h;
+      }
+      frames++;
+      if (stable >= 3 || frames >= maxFrames) resolve(last);
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
 }

@@ -2,7 +2,14 @@
   import type { AskUserImageQuestion } from "../../../../../domain/session.ts";
   import type { DraftAnswer } from "../ToolCallView.svelte";
 
-  let { q, qi, draft, selectedClasses, unselectedClasses, togglePick }: {
+  let {
+    q,
+    qi,
+    draft,
+    selectedClasses,
+    unselectedClasses,
+    togglePick,
+  }: {
     q: AskUserImageQuestion;
     qi: number;
     draft: DraftAnswer | undefined;

@@ -2,11 +2,41 @@ import type { ComponentProps } from "svelte";
 import type { OmitSnippetProps } from "./types.ts";
 import type ModelPresetFieldView from "../components/settings/ModelPresetFieldView.svelte";
 
+// The device-tier buckets and the catalog models mirror what tomat actually
+// ships (the recommendation tiers Smallest / Balanced / Smartest, and the
+// real Gemma 4 + Qwen3.5 families), so the gallery and the website demos show
+// the genuine picker rather than placeholder names.
+const MODEL_OPTIONS = [
+  { value: "google/gemma-4-E2B-it", label: "Gemma 4 E2B · 1.8-5.1 GB" },
+  { value: "google/gemma-4-E4B-it", label: "Gemma 4 E4B · 2.9-8.0 GB" },
+  { value: "Qwen/Qwen3.5-4B", label: "Qwen3.5 4B · 2.3-4.5 GB" },
+  { value: "Qwen/Qwen3.5-9B", label: "Qwen3.5 9B · 5.0-9.5 GB" },
+  { value: "__manual__", label: "Manual Configuration" },
+];
+
+const QUANT_OPTIONS = [
+  { value: "Q8_0", label: "Q8_0 · 4.5 GB · highest quality" },
+  { value: "Q4_K_M", label: "Q4_K_M · 2.7 GB · recommended" },
+  { value: "Q3_K_M", label: "Q3_K_M · 2.3 GB" },
+];
+
 export const modelPresetFieldSamples = {
   recommended: {
     checkLabel: "Check for Newer Models",
     checkIcon: "i-material-symbols-refresh-rounded",
     buckets: [
+      {
+        id: "smallest",
+        title: "Smallest",
+        description: "The lightest model that still runs well, for low-RAM devices.",
+        selected: false,
+        selectable: true,
+        badges: [
+          { icon: "i-material-symbols-psychology-alt-rounded", text: "Gemma 4 E2B" },
+          { icon: "i-material-symbols-memory-rounded", text: "2.4 GB" },
+          { icon: "i-material-symbols-bolt-rounded", text: "Q4_K_M" },
+        ],
+      },
       {
         id: "balanced",
         title: "Balanced",
@@ -14,21 +44,21 @@ export const modelPresetFieldSamples = {
         selected: true,
         selectable: true,
         badges: [
-          { icon: "i-material-symbols-psychology-alt-rounded", text: "Qwen2.5 7B" },
-          { icon: "i-material-symbols-memory-rounded", text: "4.7 GB" },
+          { icon: "i-material-symbols-psychology-alt-rounded", text: "Qwen3.5 4B" },
+          { icon: "i-material-symbols-memory-rounded", text: "2.7 GB" },
           { icon: "i-material-symbols-bolt-rounded", text: "Q4_K_M" },
         ],
       },
       {
-        id: "quality",
-        title: "Quality",
+        id: "smartest",
+        title: "Smartest",
         description: "The strongest model that still fits this device.",
         selected: false,
         selectable: true,
         badges: [
-          { icon: "i-material-symbols-psychology-alt-rounded", text: "Qwen2.5 14B" },
-          { icon: "i-material-symbols-memory-rounded", text: "9.0 GB" },
-          { icon: "i-material-symbols-bolt-rounded", text: "Q5_K_M" },
+          { icon: "i-material-symbols-psychology-alt-rounded", text: "Qwen3.5 9B" },
+          { icon: "i-material-symbols-memory-rounded", text: "5.8 GB" },
+          { icon: "i-material-symbols-bolt-rounded", text: "Q4_K_M" },
         ],
       },
     ],
@@ -37,19 +67,12 @@ export const modelPresetFieldSamples = {
       description: "Pick any catalog model and quantization yourself.",
       selected: false,
       model: {
-        value: "qwen2.5-7b",
-        options: [
-          { value: "qwen2.5-7b", label: "Qwen2.5 7B · 4.4-8.1 GB" },
-          { value: "qwen2.5-14b", label: "Qwen2.5 14B · 9.0-15.7 GB" },
-          { value: "__manual__", label: "Manual Configuration" },
-        ],
+        value: "Qwen/Qwen3.5-4B",
+        options: MODEL_OPTIONS,
       },
       quant: {
-        value: "qwen2.5-7b-q4_k_m",
-        options: [
-          { value: "qwen2.5-7b-q4_k_m", label: "Q4_K_M · 4.7 GB · recommended" },
-          { value: "qwen2.5-7b-q8_0", label: "Q8_0 · 8.1 GB" },
-        ],
+        value: "Q4_K_M",
+        options: QUANT_OPTIONS,
       },
     },
   },
@@ -80,12 +103,12 @@ export const modelPresetFieldSamples = {
         selected: true,
         selectable: true,
         badges: [
-          { icon: "i-material-symbols-psychology-alt-rounded", text: "Qwen2.5 7B" },
-          { icon: "i-material-symbols-memory-rounded", text: "4.7 GB" },
+          { icon: "i-material-symbols-psychology-alt-rounded", text: "Qwen3.5 4B" },
+          { icon: "i-material-symbols-memory-rounded", text: "2.7 GB" },
           { icon: "i-material-symbols-bolt-rounded", text: "Q4_K_M" },
         ],
         better: {
-          message: "A better model is available for Balanced: Qwen3 8B",
+          message: "A better model is available for Balanced: Qwen3.6 27B",
           applying: false,
           onApply: () => {},
           onDismiss: () => {},
@@ -98,8 +121,8 @@ export const modelPresetFieldSamples = {
       model: {
         value: "__manual__",
         options: [
-          { value: "qwen2.5-7b", label: "Qwen2.5 7B · 4.4-8.1 GB" },
-          { value: "qwen2.5-72b", label: "Qwen2.5 72B · 47.4 GB · won't fit", disabled: true },
+          { value: "Qwen/Qwen3.5-4B", label: "Qwen3.5 4B · 2.3-4.5 GB" },
+          { value: "Qwen/Qwen3.6-27B", label: "Qwen3.6 27B · 16.4 GB · won't fit", disabled: true },
           { value: "__manual__", label: "Manual Configuration" },
         ],
       },
@@ -123,8 +146,8 @@ export const modelPresetFieldSamples = {
         selected: true,
         selectable: true,
         badges: [
-          { icon: "i-material-symbols-psychology-alt-rounded", text: "Qwen2.5 7B" },
-          { icon: "i-material-symbols-memory-rounded", text: "4.7 GB" },
+          { icon: "i-material-symbols-psychology-alt-rounded", text: "Qwen3.5 4B" },
+          { icon: "i-material-symbols-memory-rounded", text: "2.7 GB" },
           { icon: "i-material-symbols-bolt-rounded", text: "Q4_K_M" },
         ],
       },

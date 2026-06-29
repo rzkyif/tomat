@@ -36,13 +36,7 @@
 
 <!-- Defer Esc to ConfirmModal when both layers are open, so each press
      dismisses one layer at a time. -->
-<Modal
-  {open}
-  onclose={onClose ?? noop}
-  {dismissOnEsc}
-  class="max-h-[80vh]"
-  ariaLabel="Downloads"
->
+<Modal {open} onclose={onClose ?? noop} {dismissOnEsc} class="max-h-[80vh]" ariaLabel="Downloads">
   <div class="flex items-center justify-between">
     <div class="text-default-800 font-medium">Downloads</div>
     <IconButton
@@ -58,9 +52,7 @@
   </div>
 
   {#if items.length === 0}
-    <div
-      class="bg-surface-inset rounded-medium px-4 py-6 text-default-500 text-sm text-center"
-    >
+    <div class="bg-surface-inset rounded-medium px-4 py-6 text-default-500 text-sm text-center">
       No downloads
     </div>
   {:else}
@@ -73,11 +65,7 @@
 
   {#if hasCompleted}
     <div class="flex items-center justify-end">
-      <Button
-        variant="secondary"
-        onclick={onClearCompleted ?? noop}
-        class="hover:bg-default-400"
-      >
+      <Button variant="secondary" onclick={onClearCompleted ?? noop} class="hover:bg-default-400">
         Clear completed
       </Button>
     </div>

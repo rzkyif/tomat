@@ -19,12 +19,8 @@
     onReset: (fieldId: string) => void;
   }>();
 
-  const editable = $derived(
-    evalCondition(field.editableWhen, settingsState.currentSettings),
-  );
-  const currentValue = $derived(
-    (settingsState.currentSettings[field.id] ?? "") as string,
-  );
+  const editable = $derived(evalCondition(field.editableWhen, settingsState.currentSettings));
+  const currentValue = $derived((settingsState.currentSettings[field.id] ?? "") as string);
   const hasError = $derived(!!error);
 
   let capturing = $state(false);

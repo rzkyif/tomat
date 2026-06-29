@@ -44,9 +44,10 @@
   const knobStyle = $derived.by(() => {
     const pad = "0.25rem";
     const cell = `(100% - 2 * ${pad}) / ${count}`;
-    const clip = selectedIndex < 0
-      ? `inset(${pad} calc(100% - ${pad}) ${pad} ${pad})`
-      : `inset(${pad} calc(${pad} + ${cell} * ${count - 1 - selectedIndex}) ${pad} calc(${pad} + ${cell} * ${selectedIndex}) round var(--rounded-medium))`;
+    const clip =
+      selectedIndex < 0
+        ? `inset(${pad} calc(100% - ${pad}) ${pad} ${pad})`
+        : `inset(${pad} calc(${pad} + ${cell} * ${count - 1 - selectedIndex}) ${pad} calc(${pad} + ${cell} * ${selectedIndex}) round var(--rounded-medium))`;
     return `clip-path: ${clip}; transition: clip-path ${ui.animationDurationMs()}ms ${CSS_EASING};`;
   });
   const cellClass = $derived(

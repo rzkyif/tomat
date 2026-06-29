@@ -74,7 +74,11 @@
   const isDelegated = $derived(DELEGATED.has(field.type));
 
   const inputType = $derived(
-    field.type === "password" ? "password" : field.type === "number" || field.type === "float" ? "number" : "text",
+    field.type === "password"
+      ? "password"
+      : field.type === "number" || field.type === "float"
+        ? "number"
+        : "text",
   );
   const isNumeric = $derived(field.type === "number" || field.type === "float");
 
@@ -82,7 +86,8 @@
     if (field.type !== "select") return [];
     if (field.optionsSource === "monitors") return [{ value: "primary", label: "Primary Monitor" }];
     if (field.optionsSource === "fonts") return [{ value: "default", label: "Default" }];
-    if (field.optionsSource === "tts_voices") return [{ value: String(value), label: String(value) }];
+    if (field.optionsSource === "tts_voices")
+      return [{ value: String(value), label: String(value) }];
     return field.options ?? [];
   }
   const resolvedOptions = $derived(selectOptions ?? defaultSelectOptions());
@@ -106,7 +111,9 @@
   // it as a hex and throw `invalid hex: 8`).
   const isColor = $derived(field.type === "color");
   const lockedLightness = $derived(field.type === "color" ? field.lockedLightness : undefined);
-  const displayedColor = $derived(isColor ? storedToDisplay(String(value ?? ""), isDark, lockedLightness) : "");
+  const displayedColor = $derived(
+    isColor ? storedToDisplay(String(value ?? ""), isDark, lockedLightness) : "",
+  );
   let colorInput = $state("");
   let colorFocused = $state(false);
   let colorInvalid = $state(false);
@@ -143,7 +150,9 @@
     </div>
   {:else if field.type === "shortcut"}
     <FormField label={field.name} description={field.description} {horizontal}>
-      <div class="flex-1 min-h-8 px-2 py-1 rounded-medium flex flex-row items-center gap-1 flex-wrap bg-surface-inset">
+      <div
+        class="flex-1 min-h-8 px-2 py-1 rounded-medium flex flex-row items-center gap-1 flex-wrap bg-surface-inset"
+      >
         {#if shortcutSegments.length === 0}
           <span class="text-default-500 text-sm italic">Disabled</span>
         {:else}
@@ -170,7 +179,9 @@
     </FormField>
   {:else}
     <FormField label={field.name} description={field.description} {horizontal}>
-      <div class="bg-surface-inset rounded-medium px-3 py-2 text-sm text-default-500">{field.name}</div>
+      <div class="bg-surface-inset rounded-medium px-3 py-2 text-sm text-default-500">
+        {field.name}
+      </div>
     </FormField>
   {/if}
 {:else}
@@ -185,7 +196,12 @@
     {onReset}
   >
     {#if field.type === "boolean"}
-      <Toggle checked={Boolean(value)} disabled={!editable} ariaLabel={field.name} onchange={(v) => onChange(v)} />
+      <Toggle
+        checked={Boolean(value)}
+        disabled={!editable}
+        ariaLabel={field.name}
+        onchange={(v) => onChange(v)}
+      />
     {:else if field.type === "select"}
       <Select
         value={value as string | number}
@@ -208,7 +224,11 @@
         onchange={(v) => onChange(v)}
       />
     {:else if field.type === "color"}
-      <div class="flex flex-row items-center gap-2 w-full {!editable ? 'opacity-60 pointer-events-none' : ''}">
+      <div
+        class="flex flex-row items-center gap-2 w-full {!editable
+          ? 'opacity-60 pointer-events-none'
+          : ''}"
+      >
         <button
           bind:this={swatchEl}
           type="button"

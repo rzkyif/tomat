@@ -5,19 +5,19 @@
   // branch, so this file imports nothing from @tauri-apps. It renders the REAL
   // +page.svelte app shell, so navigation, boot choreography, chat, settings,
   // etc. are all the production components under test.
-  import "@tomat/shared/ui/styles/base.css"
-  import { onMount } from "svelte"
-  import { connectionState } from "$stores/connection.svelte"
-  import { coreStatusState } from "$stores/core-status.svelte"
-  import { makeUiContext, setUiContext } from "@tomat/shared/ui/context"
-  import { getDefaultSettings } from "@tomat/shared"
-  import { settingsState } from "$stores"
-  import { expansionState, isExpanded } from "$stores/expansion.svelte"
-  import { getDuration } from "$lib/appearance/animations"
-  import { viewState } from "$stores"
-  import Page from "@client/routes/+page.svelte"
+  import "@tomat/shared/ui/styles/base.css";
+  import { onMount } from "svelte";
+  import { connectionState } from "$stores/connection.svelte";
+  import { coreStatusState } from "$stores/core-status.svelte";
+  import { makeUiContext, setUiContext } from "@tomat/shared/ui/context";
+  import { getDefaultSettings } from "@tomat/shared";
+  import { settingsState } from "$stores";
+  import { expansionState, isExpanded } from "$stores/expansion.svelte";
+  import { getDuration } from "$lib/appearance/animations";
+  import { viewState } from "$stores";
+  import Page from "@client/routes/+page.svelte";
 
-  const settingDefaults = getDefaultSettings()
+  const settingDefaults = getDefaultSettings();
 
   setUiContext(
     makeUiContext({
@@ -26,18 +26,18 @@
       expansionGet: (id, fallback) => isExpanded(id, fallback),
       expansionSet: (id, value) => expansionState.set(id, value),
       expansionInit: (id, value) => {
-        if (!expansionState.has(id)) expansionState.set(id, value)
+        if (!expansionState.has(id)) expansionState.set(id, value);
       },
       platform: "desktop",
       density: "comfortable",
       pointer: "fine",
     }),
-  )
+  );
 
   onMount(() => {
-    connectionState.attach()
-    coreStatusState.attach()
-  })
+    connectionState.attach();
+    coreStatusState.attach();
+  });
 </script>
 
 <!-- Expose the real viewState.mode as a single reactive testid so specs can
@@ -48,6 +48,6 @@
 <span
   data-testid={`mode-${viewState.mode}`}
   aria-hidden="true"
-  style="position:absolute;top:0;left:0;width:1px;height:1px;overflow:hidden">m</span>
+  style="position:absolute;top:0;left:0;width:1px;height:1px;overflow:hidden">m</span
+>
 <Page />
-

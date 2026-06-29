@@ -38,21 +38,16 @@
   // there (Smallest / Balanced / Smartest) are already short enough for the bar.
   // llm.preset is a model_preset field; narrow so presetConfig is in view.
   const presetField = findField("llm.preset") as ModelPresetField | undefined;
-  const bucketOptions = (presetField?.presetConfig.options ??
-    []) as PresetOption[];
+  const bucketOptions = (presetField?.presetConfig.options ?? []) as PresetOption[];
   const customOption = (presetField?.presetConfig.secondaryOptions ?? [])[0] as
     | PresetOption
     | undefined;
 
   const provider = $derived(
-    settingsState.currentSettings["llm.provider"] === "external"
-      ? "external"
-      : "local",
+    settingsState.currentSettings["llm.provider"] === "external" ? "external" : "local",
   );
   const preset = $derived(settingsState.currentSettings["llm.preset"]);
-  const contextSize = $derived(
-    Number(settingsState.currentSettings["llm.contextSize"]) || 4096,
-  );
+  const contextSize = $derived(Number(settingsState.currentSettings["llm.contextSize"]) || 4096);
 
   // Mirror the Custom card's dropdown wiring from ModelPresetField.svelte.
   const MANUAL = "__manual__";
@@ -69,9 +64,7 @@
 
   const selectedModelView = $derived(
     (rs.catalog ?? []).find((m) =>
-      m.quants.some(
-        (q) => q.modelSpec === settingsState.currentSettings["llm.modelPath"],
-      ),
+      m.quants.some((q) => q.modelSpec === settingsState.currentSettings["llm.modelPath"]),
     ) ?? null,
   );
 
@@ -80,20 +73,14 @@
   let manualSelected = $state(false);
   let lastModelPath: string | undefined = undefined;
   $effect(() => {
-    const path = settingsState.currentSettings["llm.modelPath"] as
-      | string
-      | undefined;
+    const path = settingsState.currentSettings["llm.modelPath"] as string | undefined;
     if (path !== lastModelPath) {
       lastModelPath = path;
       manualSelected = false;
     }
   });
-  const selectedModel = $derived(
-    manualSelected ? MANUAL : (selectedModelView?.id ?? MANUAL),
-  );
-  const selectedQuant = $derived(
-    settingsState.currentSettings["llm.modelPath"] as string,
-  );
+  const selectedModel = $derived(manualSelected ? MANUAL : (selectedModelView?.id ?? MANUAL));
+  const selectedQuant = $derived(settingsState.currentSettings["llm.modelPath"] as string);
 
   // --- option lists ---------------------------------------------------------
 
@@ -140,25 +127,16 @@
   ): QuickOption[] {
     if (selection.value !== CUSTOM_VALUE) return options;
     const label = selection.customLabel ?? "";
-    return [
-      { value: CUSTOM_VALUE, label, display: label, disabled: true },
-      ...options,
-    ];
+    return [{ value: CUSTOM_VALUE, label, display: label, disabled: true }, ...options];
   }
 
-  const thinking = $derived(
-    thinkingSelection(settingsState.currentSettings, provider),
-  );
+  const thinking = $derived(thinkingSelection(settingsState.currentSettings, provider));
   const thinkingDropdown = $derived(
     withCustom(thinking, thinkingDropdownOptions(provider, contextSize)),
   );
 
-  const creativity = $derived(
-    creativitySelection(settingsState.currentSettings),
-  );
-  const creativityDropdown = $derived(
-    withCustom(creativity, creativityDropdownOptions()),
-  );
+  const creativity = $derived(creativitySelection(settingsState.currentSettings));
+  const creativityDropdown = $derived(withCustom(creativity, creativityDropdownOptions()));
 
   // --- handlers -------------------------------------------------------------
 
@@ -182,8 +160,7 @@
     }
     if (value === MANUAL) {
       manualSelected = true;
-      if (customOption)
-        void form.handlePresetSelect("llm.preset", customOption);
+      if (customOption) void form.handlePresetSelect("llm.preset", customOption);
       return;
     }
     manualSelected = false;
@@ -197,11 +174,7 @@
   async function onThinkingChange(level: string): Promise<void> {
     // The custom budget entry is disabled and not selectable.
     if (level === CUSTOM_VALUE) return;
-    const updates = thinkingLevelUpdates(
-      level as ThinkingLevel,
-      provider,
-      contextSize,
-    );
+    const updates = thinkingLevelUpdates(level as ThinkingLevel, provider, contextSize);
     // Apply each key through handleChange so validation + dependency re-eval run
     // exactly as they would from the Settings UI.
     for (const [key, value] of Object.entries(updates)) {
@@ -211,10 +184,7 @@
 
   function onCreativityChange(level: string): void {
     if (level === CUSTOM_VALUE) return;
-    void form.handleChange(
-      "llm.temperature",
-      creativityTemperature(level as CreativityLevel),
-    );
+    void form.handleChange("llm.temperature", creativityTemperature(level as CreativityLevel));
   }
 
   // Map the derived selections onto the presentational view's slot descriptors.
@@ -249,5 +219,9 @@
   model={modelSlot}
   quant={quantSlot}
   thinking={{ value: thinking.value, options: thinkingDropdown, onchange: onThinkingChange }}
-  creativity={{ value: creativity.value, options: creativityDropdown, onchange: onCreativityChange }}
+  creativity={{
+    value: creativity.value,
+    options: creativityDropdown,
+    onchange: onCreativityChange,
+  }}
 />

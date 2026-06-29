@@ -24,7 +24,8 @@
     <AgentMessageView
       {...agentMessageSamples.reasoningDone as ComponentProps<typeof AgentMessageView>}
     >
-      {#snippet body()}<span class="whitespace-pre-wrap break-words">{AGENT_REASONING}</span>{/snippet}
+      {#snippet body()}<span class="whitespace-pre-wrap break-words">{AGENT_REASONING}</span
+        >{/snippet}
     </AgentMessageView>
     <AgentMessageView {...agentMessageSamples.content as ComponentProps<typeof AgentMessageView>}>
       {#snippet body()}<span class="whitespace-pre-wrap break-words">{AGENT_ANSWER}</span>{/snippet}

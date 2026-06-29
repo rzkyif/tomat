@@ -299,35 +299,35 @@
 {/snippet}
 
 {#snippet contentArea()}
-    <!-- Content -->
-    <div class="relative flex-1 min-h-0 min-w-0">
-      <div
-        class="tomat-scroll overflow-y-auto pr-2 h-full"
-        bind:this={scrollEl}
-        onscroll={updateFades}
-        data-demo="content"
-      >
-        <!-- min-h-full so the layer always spans the scroll viewport: the
+  <!-- Content -->
+  <div class="relative flex-1 min-h-0 min-w-0">
+    <div
+      class="tomat-scroll overflow-y-auto pr-2 h-full"
+      bind:this={scrollEl}
+      onscroll={updateFades}
+      data-demo="content"
+    >
+      <!-- min-h-full so the layer always spans the scroll viewport: the
              group-change slide (translateY 100% of this layer) travels the
              whole panel height regardless of how few fields the group has. -->
-        <div bind:this={layerEl} class="min-h-full">
-          {#if searchMode}
-            {@render searchContent?.()}
-          {:else}
-            {@render groupContent(selectedGroupId)}
-          {/if}
-        </div>
+      <div bind:this={layerEl} class="min-h-full">
+        {#if searchMode}
+          {@render searchContent?.()}
+        {:else}
+          {@render groupContent(selectedGroupId)}
+        {/if}
       </div>
-      <div
-        class="absolute left-0 right-0 top-0 h-6 pointer-events-none z-1 bg-gradient-to-b from-default-50 to-transparent transition-opacity duration-100 {showTopFade &&
-        searchMode
-          ? 'opacity-100'
-          : 'opacity-0'}"
-      ></div>
-      <div
-        class="absolute left-0 right-0 bottom-0 h-6 pointer-events-none z-1 bg-gradient-to-t from-default-50 to-transparent transition-opacity duration-100 {showBottomFade
-          ? 'opacity-100'
-          : 'opacity-0'}"
-      ></div>
     </div>
+    <div
+      class="absolute left-0 right-0 top-0 h-6 pointer-events-none z-1 bg-gradient-to-b from-default-50 to-transparent transition-opacity duration-100 {showTopFade &&
+      searchMode
+        ? 'opacity-100'
+        : 'opacity-0'}"
+    ></div>
+    <div
+      class="absolute left-0 right-0 bottom-0 h-6 pointer-events-none z-1 bg-gradient-to-t from-default-50 to-transparent transition-opacity duration-100 {showBottomFade
+        ? 'opacity-100'
+        : 'opacity-0'}"
+    ></div>
+  </div>
 {/snippet}

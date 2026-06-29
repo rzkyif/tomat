@@ -16,9 +16,7 @@
     children: Snippet;
   } = $props();
 
-  const variantClass = $derived(
-    variant === "raised" ? "bg-surface-inset" : "bg-surface",
-  );
+  const variantClass = $derived(variant === "raised" ? "bg-surface-inset" : "bg-surface");
 
   const padClass = $derived(
     { none: "", sm: "px-2 py-1", md: "px-3 py-2", lg: "px-5 py-4" }[padding],

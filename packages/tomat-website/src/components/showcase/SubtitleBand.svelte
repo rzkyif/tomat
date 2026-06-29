@@ -30,17 +30,22 @@
       <i class="flex shrink-0 i-material-symbols-mic-rounded text-base text-accent-blue-500"></i>
       <span class="shrink-0 text-xs font-semibold text-accent-blue-600">You</span>
     {:else}
-      <i class="flex shrink-0 i-material-symbols-volume-up-rounded text-base text-accent-green-500"></i>
+      <i class="flex shrink-0 i-material-symbols-volume-up-rounded text-base text-accent-green-500"
+      ></i>
       <span class="shrink-0 text-xs font-semibold text-accent-green-600">tomat</span>
     {/if}
     {#if active}
       <span class="relative flex shrink-0 h-1.5 w-1.5">
         {#if isUser}
-          <span class="absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping bg-accent-blue-500"></span>
-          <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-blue-500"></span>
+          <span
+            class="absolute inline-flex h-full w-full rounded-large opacity-60 animate-ping bg-accent-blue-500"
+          ></span>
+          <span class="relative inline-flex h-1.5 w-1.5 rounded-large bg-accent-blue-500"></span>
         {:else}
-          <span class="absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping bg-accent-green-500"></span>
-          <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-green-500"></span>
+          <span
+            class="absolute inline-flex h-full w-full rounded-large opacity-60 animate-ping bg-accent-green-500"
+          ></span>
+          <span class="relative inline-flex h-1.5 w-1.5 rounded-large bg-accent-green-500"></span>
         {/if}
       </span>
     {/if}

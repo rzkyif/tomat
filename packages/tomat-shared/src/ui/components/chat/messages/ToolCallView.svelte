@@ -108,10 +108,7 @@
     if (s === "awaiting_user") {
       expanded = true;
       wasAwaiting = true;
-    } else if (
-      wasAwaiting &&
-      (s === "completed" || s === "failed" || s === "cancelled")
-    ) {
+    } else if (wasAwaiting && (s === "completed" || s === "failed" || s === "cancelled")) {
       expanded = false;
       wasAwaiting = false;
     }
@@ -230,8 +227,7 @@
         if (!d.text.trim()) return false;
         continue;
       }
-      const hasFreestyle =
-        !!q.allowFreeformInput && d.freestyleActive && !!d.text.trim();
+      const hasFreestyle = !!q.allowFreeformInput && d.freestyleActive && !!d.text.trim();
       if (d.picks.length === 0 && !hasFreestyle) return false;
     }
     return true;
@@ -246,9 +242,7 @@
     if (q.kind === "diff" || q.kind === "image") return d.picks[0] ?? "";
     if (q.kind === "files") return q.multiselect ? d.picks : (d.picks[0] ?? "");
     if (q.kind === "table") {
-      return d.rows.map((row) =>
-        Object.fromEntries(q.columns.map((c, i) => [c, row[i] ?? ""])),
-      );
+      return d.rows.map((row) => Object.fromEntries(q.columns.map((c, i) => [c, row[i] ?? ""])));
     }
     if (!q.options) return d.text.trim();
     const text = d.text.trim();
@@ -257,8 +251,7 @@
       if (q.allowFreeformInput && text.length > 0) all.push(text);
       return all;
     }
-    const useFreestyle =
-      !!q.allowFreeformInput && d.freestyleActive && text.length > 0;
+    const useFreestyle = !!q.allowFreeformInput && d.freestyleActive && text.length > 0;
     return useFreestyle ? text : (d.picks[0] ?? "");
   }
 
@@ -294,8 +287,7 @@
       if (!q.options) return true;
       if (q.multiselect) return true;
       if (q.allowFreeformInput) {
-        const engaged =
-          freeformFocused[i] === true || (drafts[i]?.freestyleActive ?? false);
+        const engaged = freeformFocused[i] === true || (drafts[i]?.freestyleActive ?? false);
         if (engaged) return true;
       }
     }
@@ -331,9 +323,7 @@
     if (!target || !container) return;
 
     const cycle = (offset: number) => {
-      const items = Array.from(
-        container.querySelectorAll<HTMLElement>("[data-tc-nav]"),
-      ).filter(
+      const items = Array.from(container.querySelectorAll<HTMLElement>("[data-tc-nav]")).filter(
         (el) => !(el as HTMLButtonElement).disabled && el.offsetParent !== null,
       );
       if (items.length === 0) return;
@@ -376,11 +366,7 @@
   function onContainerPointerMove() {
     if (keyboardNav) keyboardNav = false;
     const active = document.activeElement as HTMLElement | null;
-    if (
-      active &&
-      active.tagName === "BUTTON" &&
-      askUserContainer?.contains(active)
-    ) {
+    if (active && active.tagName === "BUTTON" && askUserContainer?.contains(active)) {
       active.blur();
     }
   }
@@ -407,9 +393,7 @@
     }
   });
 
-  let percent = $derived(
-    typeof progress === "number" ? Math.round(progress * 100) : null,
-  );
+  let percent = $derived(typeof progress === "number" ? Math.round(progress * 100) : null);
   let isActive = $derived(tcStatus === "pending" || tcStatus === "running");
   let showProgress = $derived(isActive);
 
@@ -419,8 +403,11 @@
   let memoryDiff = $derived.by<{ title: string; before: string; after: string } | null>(() => {
     const r = result as Record<string, unknown> | undefined;
     if (
-      !r || typeof r !== "object" || r.kind !== "memory_diff" ||
-      typeof r.before !== "string" || typeof r.after !== "string"
+      !r ||
+      typeof r !== "object" ||
+      r.kind !== "memory_diff" ||
+      typeof r.before !== "string" ||
+      typeof r.after !== "string"
     ) {
       return null;
     }
@@ -433,7 +420,9 @@
   let memoryResult = $derived.by<{ title: string; content: string } | null>(() => {
     const r = result as Record<string, unknown> | undefined;
     if (
-      !r || typeof r !== "object" || r.kind !== "memory_content" ||
+      !r ||
+      typeof r !== "object" ||
+      r.kind !== "memory_content" ||
       typeof r.content !== "string"
     ) {
       return null;
@@ -468,18 +457,10 @@
   let hasCancelledError = $derived(tcStatus === "cancelled" && !!error);
   let hasAskUser = $derived(tcStatus === "awaiting_user" && !!tcAskUser);
   let hasBody = $derived(
-    !!description ||
-      hasArgs ||
-      hasLogs ||
-      hasResult ||
-      hasError ||
-      hasCancelledError ||
-      hasAskUser,
+    !!description || hasArgs || hasLogs || hasResult || hasError || hasCancelledError || hasAskUser,
   );
 
-  let awaitingInput = $derived(
-    tcStatus === "awaiting_user" || tcStatus === "awaiting_permission",
-  );
+  let awaitingInput = $derived(tcStatus === "awaiting_user" || tcStatus === "awaiting_permission");
 
   // States that color the whole bubble: a failed call reads red, awaiting input
   // reads yellow. `accent` retints the bubble fill AND every nested `-default-`
@@ -495,9 +476,7 @@
   let alignment = $derived(ui.platform === "mobile" ? "left" : ui.getAlignment());
   // Floor the bubble width only while expanded so the body doesn't squish; when
   // collapsed the bubble shrink-wraps the label + description.
-  let bubbleExtraClass = $derived(
-    expanded ? "text-default-800 min-w-60" : "text-default-800",
-  );
+  let bubbleExtraClass = $derived(expanded ? "text-default-800 min-w-60" : "text-default-800");
 
   // Selected vs. unselected styling for option buttons and the freeform input.
   let unselectedClasses = $derived(
@@ -525,178 +504,172 @@
 </script>
 
 <div style:display="contents" style:--default-base={themeOverrideHex}>
-<Bubble
-  selectedAlignment={alignment}
-  size="small"
-  {accent}
-  extraClass={bubbleExtraClass}
-  progress={showProgress ? percent : undefined}
-  {neighborLeft}
-  {neighborRight}
->
-  <Expandable bind:expanded {alignment} disabled={!hasBody}>
-    {#snippet title()}
-      <span>
-        {#if label}
-          {label}
-        {:else}
-          {statusPhrase.pre}<code
-            class="font-mono bg-surface-inset text-default-800 rounded-small px-1.5 py-0.5 text-[0.8em] mx-1"
-          >{toolName}</code>{statusPhrase.post}
-        {/if}
-      </span>
-      {#if description && !expanded}
-        <span class="text-default-600 truncate">{description}</span>
-      {/if}
-    {/snippet}
-    {#snippet children()}
-      <!-- Body content is intentionally alignment-independent: `text-left`
+  <Bubble
+    selectedAlignment={alignment}
+    size="small"
+    {accent}
+    extraClass={bubbleExtraClass}
+    progress={showProgress ? percent : undefined}
+    {neighborLeft}
+    {neighborRight}
+  >
+    <Expandable bind:expanded {alignment} disabled={!hasBody}>
+      {#snippet title()}
+        <span>
+          {#if label}
+            {label}
+          {:else}
+            {statusPhrase.pre}<code
+              class="font-mono bg-surface-inset text-default-800 rounded-small px-1.5 py-0.5 text-[0.8em] mx-1"
+              >{toolName}</code
+            >{statusPhrase.post}
+          {/if}
+        </span>
+      {/snippet}
+      {#snippet children()}
+        <!-- Body content is intentionally alignment-independent: `text-left`
            overrides the Expandable wrapper's `text-right` so questions, args,
            results, and error/log blocks always read left-to-right. -->
-      <div class="flex flex-col gap-2 text-left">
-        {#if description}
-          <div
-            class="text-xs text-default-600 {alignment === 'right'
-              ? 'text-right'
-              : ''}"
-          >
-            {description}
-          </div>
-        {/if}
-
-        {#if hasAskUser && tcAskUser}
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div
-            bind:this={askUserContainer}
-            class="flex flex-col gap-2"
-            onkeydown={onContainerKeydown}
-            onpointermove={onContainerPointerMove}
-          >
-            {#each tcAskUser.questions as q, qi (qi)}
-              <div class="flex flex-col gap-2">
-                <div class="text-sm">{q.question}</div>
-                {#if q.kind === "diff"}
-                  <DiffQuestion
-                    {q}
-                    {qi}
-                    draft={renderDrafts[qi]}
-                    {selectedClasses}
-                    {unselectedClasses}
-                    {togglePick}
-                  />
-                {:else if q.kind === "files"}
-                  <FilesQuestion
-                    {q}
-                    {qi}
-                    draft={renderDrafts[qi]}
-                    {selectedClasses}
-                    {unselectedClasses}
-                    {togglePick}
-                  />
-                {:else if q.kind === "image"}
-                  <ImageQuestion
-                    {q}
-                    {qi}
-                    draft={renderDrafts[qi]}
-                    {selectedClasses}
-                    {unselectedClasses}
-                    {togglePick}
-                  />
-                {:else if q.kind === "table"}
-                  <TableQuestion
-                    {q}
-                    {qi}
-                    draft={renderDrafts[qi]}
-                    {unselectedClasses}
-                    {setCell}
-                    {addRow}
-                    {removeRow}
-                  />
-                {:else}
-                  <ChoiceQuestion
-                    {q}
-                    {qi}
-                    draft={renderDrafts[qi]}
-                    {selectedClasses}
-                    {unselectedClasses}
-                    {togglePick}
-                    {setText}
-                    {onFreestyleFocus}
-                    {onFreestyleBlur}
-                  />
-                {/if}
-              </div>
-            {/each}
-            <Expand open={requiresSubmit && readyToSubmit(tcAskUser.questions)}>
-              <button
-                type="button"
-                data-tc-nav
-                class="w-full text-xs px-3 h-8 rounded bg-surface-inset text-default-800 cursor-pointer outline-none transition-colors duration-100"
-                onclick={submit}
-              >
-                Submit
-              </button>
-            </Expand>
-          </div>
-        {/if}
-
-        {#if hasCancelledError}
-          <ErrorDetailView detail={error} />
-        {/if}
-
-        <div class="flex flex-col gap-1 text-xs">
-          {#if hasArgs}
-            <div class="text-default-600">Arguments</div>
-            <pre
-              class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-32 overflow-auto whitespace-pre">{argsText}</pre>
-          {/if}
-          {#if hasResult}
-            {#if memoryDiff}
-              <div class="text-default-600">
-                Changes{memoryDiff.title ? ` to "${memoryDiff.title}"` : ""}
-              </div>
-              <div class="max-h-48 overflow-auto">
-                <DiffView before={memoryDiff.before} after={memoryDiff.after} />
-              </div>
-            {:else if memoryResult}
-              <div class="text-default-600">
-                {memoryResult.title || "Memory"}
-              </div>
-              {#if memoryContent}
-                <div
-                  class="tomat-scroll-inset bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto"
-                >
-                  {@render memoryContent(memoryResult)}
-                </div>
-              {:else}
-                <pre
-                  class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre-wrap">{memoryResult.content}</pre>
-              {/if}
-            {:else}
-              <div class="text-default-600">Result</div>
-              <pre
-                class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{resultText}</pre>
-            {/if}
-          {/if}
-          {#if hasError}
-            <ErrorDetailView detail={error} />
-          {/if}
-          {#if hasLogs}
-            <div class="text-default-600">Logs</div>
-            <div
-              class="tomat-scroll-inset bg-surface-inset rounded-small px-2 py-1 max-h-32 overflow-auto flex flex-col gap-0.5 whitespace-pre"
-            >
-              {#each tcLogs as log, i (i)}
-                <div class="text-default-700">
-                  <span class="text-default-500">[{log.level}]</span>
-                  {log.message}
-                </div>
-              {/each}
+        <div class="flex flex-col gap-2 text-left">
+          {#if description}
+            <div class="text-xs text-default-600 {alignment === 'right' ? 'text-right' : ''}">
+              {description}
             </div>
           {/if}
+
+          {#if hasAskUser && tcAskUser}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              bind:this={askUserContainer}
+              class="flex flex-col gap-2"
+              onkeydown={onContainerKeydown}
+              onpointermove={onContainerPointerMove}
+            >
+              {#each tcAskUser.questions as q, qi (qi)}
+                <div class="flex flex-col gap-2">
+                  <div class="text-sm">{q.question}</div>
+                  {#if q.kind === "diff"}
+                    <DiffQuestion
+                      {q}
+                      {qi}
+                      draft={renderDrafts[qi]}
+                      {selectedClasses}
+                      {unselectedClasses}
+                      {togglePick}
+                    />
+                  {:else if q.kind === "files"}
+                    <FilesQuestion
+                      {q}
+                      {qi}
+                      draft={renderDrafts[qi]}
+                      {selectedClasses}
+                      {unselectedClasses}
+                      {togglePick}
+                    />
+                  {:else if q.kind === "image"}
+                    <ImageQuestion
+                      {q}
+                      {qi}
+                      draft={renderDrafts[qi]}
+                      {selectedClasses}
+                      {unselectedClasses}
+                      {togglePick}
+                    />
+                  {:else if q.kind === "table"}
+                    <TableQuestion
+                      {q}
+                      {qi}
+                      draft={renderDrafts[qi]}
+                      {unselectedClasses}
+                      {setCell}
+                      {addRow}
+                      {removeRow}
+                    />
+                  {:else}
+                    <ChoiceQuestion
+                      {q}
+                      {qi}
+                      draft={renderDrafts[qi]}
+                      {selectedClasses}
+                      {unselectedClasses}
+                      {togglePick}
+                      {setText}
+                      {onFreestyleFocus}
+                      {onFreestyleBlur}
+                    />
+                  {/if}
+                </div>
+              {/each}
+              <Expand open={requiresSubmit && readyToSubmit(tcAskUser.questions)}>
+                <button
+                  type="button"
+                  data-tc-nav
+                  class="w-full text-xs px-3 h-8 rounded bg-surface-inset text-default-800 cursor-pointer outline-none transition-colors duration-100"
+                  onclick={submit}
+                >
+                  Submit
+                </button>
+              </Expand>
+            </div>
+          {/if}
+
+          {#if hasCancelledError}
+            <ErrorDetailView detail={error} />
+          {/if}
+
+          <div class="flex flex-col gap-1 text-xs">
+            {#if hasArgs}
+              <div class="text-default-600">Arguments</div>
+              <pre
+                class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-32 overflow-auto whitespace-pre">{argsText}</pre>
+            {/if}
+            {#if hasResult}
+              {#if memoryDiff}
+                <div class="text-default-600">
+                  Changes{memoryDiff.title ? ` to "${memoryDiff.title}"` : ""}
+                </div>
+                <div class="max-h-48 overflow-auto">
+                  <DiffView before={memoryDiff.before} after={memoryDiff.after} />
+                </div>
+              {:else if memoryResult}
+                <div class="text-default-600">
+                  {memoryResult.title || "Memory"}
+                </div>
+                {#if memoryContent}
+                  <div
+                    class="tomat-scroll-inset bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto"
+                  >
+                    {@render memoryContent(memoryResult)}
+                  </div>
+                {:else}
+                  <pre
+                    class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre-wrap">{memoryResult.content}</pre>
+                {/if}
+              {:else}
+                <div class="text-default-600">Result</div>
+                <pre
+                  class="tomat-scroll-inset text-default-800 bg-surface-inset rounded-small px-2 py-1 max-h-48 overflow-auto whitespace-pre">{resultText}</pre>
+              {/if}
+            {/if}
+            {#if hasError}
+              <ErrorDetailView detail={error} />
+            {/if}
+            {#if hasLogs}
+              <div class="text-default-600">Logs</div>
+              <div
+                class="tomat-scroll-inset bg-surface-inset rounded-small px-2 py-1 max-h-32 overflow-auto flex flex-col gap-0.5 whitespace-pre"
+              >
+                {#each tcLogs as log, i (i)}
+                  <div class="text-default-700">
+                    <span class="text-default-500">[{log.level}]</span>
+                    {log.message}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
         </div>
-      </div>
-    {/snippet}
-  </Expandable>
-</Bubble>
+      {/snippet}
+    </Expandable>
+  </Bubble>
 </div>

@@ -9,7 +9,9 @@
   // Content format: "error_type" or "error_type\ndetail message".
   let rawText = $derived(getTextContent(content));
   let errorType = $derived(rawText.split("\n")[0]);
-  let errorDetail = $derived(rawText.includes("\n") ? rawText.slice(rawText.indexOf("\n") + 1) : "");
+  let errorDetail = $derived(
+    rawText.includes("\n") ? rawText.slice(rawText.indexOf("\n") + 1) : "",
+  );
 </script>
 
 <ErrorMessageView {errorType} {errorDetail} />

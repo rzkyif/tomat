@@ -10,7 +10,12 @@
   // samples, exactly as the app does. Pass `highlightTarget` (a
   // `[data-region=...]` selector) to mark one part, such as the status.
   type Scenario = keyof typeof coreBarSamples;
-  let { scenario = "idle", label, highlightLabel, highlightTarget }: {
+  let {
+    scenario = "idle",
+    label,
+    highlightLabel,
+    highlightTarget,
+  }: {
     scenario?: Scenario;
     label?: string;
     highlightLabel?: string;

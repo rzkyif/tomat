@@ -133,11 +133,8 @@
     // Tool names allow only [a-zA-Z0-9_-], so any other printable key (notably
     // space and comma) terminates the current chip instead of being typed,
     // just like Enter. Modifier combos (Cmd/Ctrl/Alt) are left to the browser.
-    const illegalChar = e.key.length === 1 &&
-      !e.ctrlKey &&
-      !e.metaKey &&
-      !e.altKey &&
-      !/^[a-zA-Z0-9_-]$/.test(e.key);
+    const illegalChar =
+      e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !/^[a-zA-Z0-9_-]$/.test(e.key);
     if (e.key === "Enter" || illegalChar) {
       e.preventDefault();
       commitTool();
@@ -351,7 +348,6 @@
       {#each files as f (f)}
         {@const isOpen = openFileName === f}
         <div class="rounded-medium overflow-hidden bg-surface-inset">
-
           <!-- The whole padded header is the toggle; the delete button stops the
                click so it doesn't also expand/collapse. -->
           <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->

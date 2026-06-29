@@ -28,9 +28,11 @@
     detail,
     empty,
   }: {
-    load: (
-      ctx: { offset: number; limit: number; query: ParsedQuery },
-    ) => Promise<{ items: T[]; done: boolean }>;
+    load: (ctx: {
+      offset: number;
+      limit: number;
+      query: ParsedQuery;
+    }) => Promise<{ items: T[]; done: boolean }>;
     idOf: (item: T) => string;
     /** Live lookup for detail freshness; omit for async-only sources (cores).
      *  When present and it returns undefined, the detail auto-closes. */

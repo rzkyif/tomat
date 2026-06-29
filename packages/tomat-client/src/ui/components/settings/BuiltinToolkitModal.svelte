@@ -40,7 +40,7 @@
       // => no prompt.
       if (!extensionsState.isBuiltinPendingInstall) return;
       open = true;
-    })
+    }),
   );
 
   async function install() {
@@ -85,17 +85,13 @@
   >
     <div class="text-default-800 font-medium">Install Built-in Tools?</div>
     <div class="text-default-600 text-sm">
-      tomat ships a built-in Extension with tools like web search and file access.
-      Install it so the agent can use the tools you turn on.
+      tomat ships a built-in Extension with tools like web search and file access. Install it so the
+      agent can use the tools you turn on.
     </div>
     <div class="flex items-center justify-end gap-2">
-      <Button variant="ghost" class="mr-auto" onclick={dontAskAgain}>
-        Don't Ask Again
-      </Button>
+      <Button variant="ghost" class="mr-auto" onclick={dontAskAgain}>Don't Ask Again</Button>
       <Button variant="secondary" onclick={notNow}>Not Now</Button>
-      <Button variant="primary" loading={installing} onclick={install}>
-        Install
-      </Button>
+      <Button variant="primary" loading={installing} onclick={install}>Install</Button>
     </div>
   </Modal>
 {/if}

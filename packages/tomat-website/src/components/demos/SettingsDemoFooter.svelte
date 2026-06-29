@@ -10,21 +10,37 @@
   // and the homepage showcase), so the footer cannot be present in one rendition
   // and missing from another. The boolean mirrors the sidebar's collapsed state,
   // so rows collapse to icons with it.
+  // `downloading` mirrors the client's DownloadsButton active state: the
+  // self-animating loop icon, a "Downloading..." label, and a neutral ping
+  // (driven by `blink`, which the host toggles). Off by default so every other
+  // settings demo shows the idle Downloads row.
   const noop = (): void => {};
-  let { collapsed = false }: { collapsed?: boolean } = $props();
+  let {
+    collapsed = false,
+    downloading = false,
+    blink = false,
+  }: {
+    collapsed?: boolean;
+    downloading?: boolean;
+    blink?: boolean;
+  } = $props();
 </script>
 
 <SidebarItem
-  icon="i-material-symbols-downloading-rounded"
-  label="Downloads"
+  icon={downloading ? "i-line-md-downloading-loop" : "i-material-symbols-downloading-rounded"}
+  label={downloading ? "Downloading..." : "Downloads"}
   {collapsed}
-  title={collapsed ? "Downloads" : undefined}
+  ping={downloading && blink}
+  pingTone="default"
+  title={collapsed ? (downloading ? "Downloading..." : "Downloads") : undefined}
   ariaLabel="Downloads"
   onclick={noop}
 />
 <button
   type="button"
-  class="flex items-center h-8 pl-1.5 {collapsed ? 'pr-0' : 'pr-2.5'} gap-1.5 rounded-medium text-default-500 hov:text-default-700 hov:bg-surface-inset [transition:color_500ms,background-color_200ms,padding_200ms]"
+  class="flex items-center h-8 pl-1.5 {collapsed
+    ? 'pr-0'
+    : 'pr-2.5'} gap-1.5 rounded-medium text-default-500 hov:text-default-700 hov:bg-surface-inset [transition:color_500ms,background-color_200ms,padding_200ms]"
   title={collapsed ? "tomat Client" : undefined}
   aria-label="tomat Client version"
 >

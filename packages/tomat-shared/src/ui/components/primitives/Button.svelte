@@ -34,7 +34,9 @@
     children?: Snippet;
   } = $props();
 
-  const displayIcon = $derived(loading ? "i-material-symbols-progress-activity animate-spin" : icon);
+  const displayIcon = $derived(
+    loading ? "i-material-symbols-progress-activity animate-spin" : icon,
+  );
   const iconSizeClass = $derived(size === "sm" ? "text-sm" : "text-base");
 
   // Hover darkens the rest background one shade step (the shared interaction
@@ -42,8 +44,7 @@
   // shift. Ghost has no rest fill, so it materializes the inset surface on hover.
   const variantClass = $derived(
     {
-      primary:
-        "bg-default-inverted-300 text-default-inverted-900 hov:bg-default-inverted-400",
+      primary: "bg-default-inverted-300 text-default-inverted-900 hov:bg-default-inverted-400",
       secondary: "bg-surface-inset text-default-800 hov:bg-default-300",
       destructive: "bg-accent-red-200 text-accent-red-900 hov:bg-accent-red-300",
       ghost: "bg-transparent text-default-800 hov:bg-surface-inset",

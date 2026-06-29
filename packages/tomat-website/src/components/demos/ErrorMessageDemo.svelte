@@ -11,6 +11,8 @@
 
 <DemoFrame {label} designWidth={620}>
   <div class="mx-auto w-full max-w-[620px]">
-    <ErrorMessageView {...errorMessageSamples[scenario] as ComponentProps<typeof ErrorMessageView>} />
+    <ErrorMessageView
+      {...errorMessageSamples[scenario] as ComponentProps<typeof ErrorMessageView>}
+    />
   </div>
 </DemoFrame>

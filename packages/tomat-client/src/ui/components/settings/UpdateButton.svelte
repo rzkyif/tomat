@@ -130,8 +130,7 @@
 
     await Promise.allSettled(tasks);
 
-    const anyAvailable = coreAvailable || binariesAvailable.length > 0 ||
-      !!clientUpdate;
+    const anyAvailable = coreAvailable || binariesAvailable.length > 0 || !!clientUpdate;
     phase = anyAvailable ? "available" : "idle";
   }
 

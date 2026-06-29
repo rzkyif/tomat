@@ -152,47 +152,47 @@
     {/if}
 
     <ButtonGroup size="sm" class="shrink-0">
+      <IconButton
+        icon="i-material-symbols-format-list-bulleted-rounded"
+        title="Session List"
+        size="sm"
+        onclick={() => onList?.()}
+      />
+      {#if !mobile}
         <IconButton
-          icon="i-material-symbols-format-list-bulleted-rounded"
-          title="Session List"
+          icon="i-material-symbols-chevron-left-rounded"
+          title="Previous Session"
           size="sm"
-          onclick={() => onList?.()}
+          disabled={prevDisabled}
+          onclick={() => onPrev?.()}
         />
+        <IconButton
+          icon="i-material-symbols-chevron-right-rounded"
+          title="Next Session"
+          size="sm"
+          disabled={nextDisabled}
+          onclick={() => onNext?.()}
+        />
+      {/if}
+      {#if !isNewSession}
         {#if !mobile}
           <IconButton
-            icon="i-material-symbols-chevron-left-rounded"
-            title="Previous Session"
+            icon={confirmingDelete
+              ? "i-material-symbols-delete-forever-rounded"
+              : "i-material-symbols-delete-outline-rounded"}
+            title={confirmingDelete ? "Confirm Delete" : "Delete Session"}
             size="sm"
-            disabled={prevDisabled}
-            onclick={() => onPrev?.()}
-          />
-          <IconButton
-            icon="i-material-symbols-chevron-right-rounded"
-            title="Next Session"
-            size="sm"
-            disabled={nextDisabled}
-            onclick={() => onNext?.()}
+            onclick={() => onDelete?.()}
+            data-delete-btn
           />
         {/if}
-        {#if !isNewSession}
-          {#if !mobile}
-            <IconButton
-              icon={confirmingDelete
-                ? "i-material-symbols-delete-forever-rounded"
-                : "i-material-symbols-delete-outline-rounded"}
-              title={confirmingDelete ? "Confirm Delete" : "Delete Session"}
-              size="sm"
-              onclick={() => onDelete?.()}
-              data-delete-btn
-            />
-          {/if}
-          <IconButton
-            icon="i-material-symbols-add-rounded"
-            title="New Session"
-            size="sm"
-            onclick={() => onNew?.()}
-          />
-        {/if}
+        <IconButton
+          icon="i-material-symbols-add-rounded"
+          title="New Session"
+          size="sm"
+          onclick={() => onNew?.()}
+        />
+      {/if}
     </ButtonGroup>
   </Bubble>
 </div>

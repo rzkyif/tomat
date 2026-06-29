@@ -114,7 +114,8 @@
         onlongpress={() => onLongPress(row.id)}
         extraClass="flex items-center gap-3 cursor-pointer {mobile
           ? ''
-          : (row.active && alignment !== 'center' ? 'w-[calc(28rem-8px)]' : 'w-[28rem]') + ' max-w-full'}"
+          : (row.active && alignment !== 'center' ? 'w-[calc(28rem-8px)]' : 'w-[28rem]') +
+            ' max-w-full'}"
       >
         <div class="flex flex-col min-w-0 flex-1">
           <span class="text-sm text-default-800 truncate">

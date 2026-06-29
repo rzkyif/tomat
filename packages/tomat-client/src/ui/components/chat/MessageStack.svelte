@@ -64,9 +64,7 @@
     const wrapperRect = wrapper.getBoundingClientRect();
     const lastRect = wrapper.lastElementChild.getBoundingClientRect();
     const delta =
-      alignment === "right"
-        ? lastRect.left - wrapperRect.left
-        : lastRect.right - wrapperRect.right;
+      alignment === "right" ? lastRect.left - wrapperRect.left : lastRect.right - wrapperRect.right;
     if (delta !== 0) wrapper.scrollLeft += delta;
   }
 
@@ -91,10 +89,8 @@
     const wrapperRect = wrapper.getBoundingClientRect();
     const leftChild = alignment === "right" ? last : first;
     const rightChild = alignment === "right" ? first : last;
-    const hiddenLeft =
-      wrapperRect.left - leftChild.getBoundingClientRect().left;
-    const hiddenRight =
-      rightChild.getBoundingClientRect().right - wrapperRect.right;
+    const hiddenLeft = wrapperRect.left - leftChild.getBoundingClientRect().left;
+    const hiddenRight = rightChild.getBoundingClientRect().right - wrapperRect.right;
     fadeLeft = hiddenLeft > 4 ? "1rem" : "0px";
     fadeRight = hiddenRight > 4 ? "1rem" : "0px";
   }
@@ -114,8 +110,7 @@
     // Trackpad gestures often emit a small non-zero deltaX alongside a much
     // larger deltaY; picking by magnitude avoids letting that jitter swallow
     // a vertical wheel translation.
-    const delta =
-      Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
     if (delta === 0) return;
     // Detect visual edges via element rects (not scrollLeft), since under
     // flex-row-reverse the scrollLeft range flips negative and the usual
@@ -124,10 +119,8 @@
     const wrapperRect = wrapper.getBoundingClientRect();
     const leftChild = alignment === "right" ? last : first;
     const rightChild = alignment === "right" ? first : last;
-    const atLeft =
-      leftChild.getBoundingClientRect().left >= wrapperRect.left - 4;
-    const atRight =
-      rightChild.getBoundingClientRect().right <= wrapperRect.right + 4;
+    const atLeft = leftChild.getBoundingClientRect().left >= wrapperRect.left - 4;
+    const atRight = rightChild.getBoundingClientRect().right <= wrapperRect.right + 4;
     if ((delta < 0 && atLeft) || (delta > 0 && atRight)) return;
     e.preventDefault();
     wrapper.scrollLeft += delta;

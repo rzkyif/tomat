@@ -24,7 +24,12 @@
   //    (`wireDemoHighlights` in ManualLayout), using layout offsets so it stays
   //    correct under the demo's CSS scale. It renders hidden until positioned, so
   //    with no script the demo still shows cleanly, just without the annotation.
-  let { label, target, fit = false, children }: {
+  let {
+    label,
+    target,
+    fit = false,
+    children,
+  }: {
     label?: string;
     target?: string;
     fit?: boolean;
@@ -43,7 +48,8 @@
       {#if label}
         <span
           class="absolute -top-2 left-2 rounded-small bg-accent-blue-600 px-1.5 py-0.5 text-[0.625rem] font-medium leading-none text-white"
-        >{label}</span>
+          >{label}</span
+        >
       {/if}
     </div>
   {:else}
@@ -53,7 +59,8 @@
       {#if label}
         <span
           class="absolute -top-2 left-2 rounded-small bg-accent-blue-600 px-1.5 py-0.5 text-[0.625rem] font-medium leading-none text-white"
-        >{label}</span>
+          >{label}</span
+        >
       {/if}
     </div>
   {/if}

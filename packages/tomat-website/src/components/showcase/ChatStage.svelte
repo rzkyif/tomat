@@ -6,21 +6,46 @@
   import MessageEnter from "@tomat/shared/ui/components/chat/MessageEnter.svelte";
   import UserMessageView from "@tomat/shared/ui/components/chat/messages/UserMessageView.svelte";
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
-  import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
+  import { bubbleGap, makeUiContext, setUiContext, useUiContext } from "@tomat/shared/ui/context";
+  import { getDefaultSettings } from "@tomat/shared/domain/settings/engine";
+  import { BASE_MS } from "@tomat/shared/ui/animations";
+  import type { Alignment } from "@tomat/shared/ui/types";
   import Cursor from "./Cursor.svelte";
-  import { Demo, type Timeline } from "../../lib/showcase";
+  import { awaitStableHeight, Demo, type Timeline } from "../../lib/showcase";
 
+  // The flagship demo ends by flipping the chat alignment (right, then left), so
+  // unlike the other stages it owns its OWN subtree UI context whose
+  // `layout.alignment` reads a reactive local var; mutating it re-runs the
+  // alignment `$derived` inside the message Views, sliding the bubbles to the new
+  // edge. Everything else mirrors the root showcase context (stt forced on,
+  // animations collapsed under reduced motion).
+  const reduce =
+    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const chatDefaults = getDefaultSettings();
+  let alignment = $state<Alignment>("center");
+  setUiContext(
+    makeUiContext({
+      getSetting: (key) =>
+        key === "stt.enabled" ? true : key === "layout.alignment" ? alignment : chatDefaults[key],
+      animationDurationMs: (ms = BASE_MS) => (reduce ? 0 : ms),
+    }),
+  );
   const ui = useUiContext();
 
-  let { register, reportHeight }: {
+  let {
+    register,
+    reportHeight,
+  }: {
     register: (h: { timeline: Timeline; reset: () => void }) => void;
     reportHeight: (h: number) => void;
   } = $props();
 
-  const PROMPT = "How do I install tomat on macOS?";
-  const REASONING = "The user is on macOS, so the one-line installer script is the simplest path; point them at the landing page command and the launch step.";
+  const PROMPT =
+    "Draft a friendly reply to my landlord asking to move Friday's inspection to the morning.";
+  const REASONING =
+    "A short, polite reschedule note: thank them, propose a morning time, and keep the tone warm.";
   const ANSWER =
-    "Run the one-line installer from the landing page, then launch tomat from Applications. Want the per-OS steps?";
+    "Here's a draft you can send:\nHi Sam, thanks for the heads-up about Friday's inspection. Could we move it to the morning, around 9am? That works much better for me. Thanks so much!";
 
   // Stream the answer at a ~2B model's realistic decode rate on consumer
   // hardware: a 2B Q4 model runs ~35-55 tok/s on Apple Silicon and ~15-25 tok/s
@@ -58,6 +83,7 @@
     showReasoning = false;
     reasoningStreaming = false;
     showAnswer = false;
+    alignment = "center";
   }
 
   // Report the fullest content height (every bubble shown; the thinking bubble
@@ -74,7 +100,7 @@
     userText = PROMPT;
     agentText = ANSWER;
     await tick();
-    if (columnEl) reportHeight(columnEl.offsetHeight);
+    if (columnEl) reportHeight(await awaitStableHeight(columnEl));
     reset();
     measuring = false;
     await tick();
@@ -121,8 +147,25 @@
         reasoningStreaming = false;
         showAnswer = true;
       });
-      demo.type(tl, (v) => (agentText = v), ANSWER, { duration: ANSWER_SECONDS });
-      demo.hold(tl, 1.4);
+      demo.type(tl, (v) => (agentText = v), ANSWER, {
+        duration: ANSWER_SECONDS,
+      });
+      demo.hold(tl, 0.6);
+
+      // Closing beat: flip the chat alignment to show the layout modes. The
+      // cursor taps the composer's align controls; the bubbles slide to the new
+      // edge as the reactive `alignment` re-runs each message's alignment derive.
+      const alignRight = 'button[title="Align Right"]';
+      const alignLeft = 'button[title="Align Left"]';
+      demo.move(tl, alignRight, { duration: 0.7 });
+      demo.hover(tl, alignRight, true);
+      demo.click(tl, alignRight, () => (alignment = "right"));
+      demo.hover(tl, alignRight, false);
+      demo.hold(tl, 1.1);
+      demo.move(tl, alignLeft, { duration: 0.7 });
+      demo.hover(tl, alignLeft, true);
+      demo.click(tl, alignLeft, () => (alignment = "left"));
+      demo.hover(tl, alignLeft, false);
 
       register({
         timeline: tl,
@@ -143,8 +186,10 @@
   });
 </script>
 
-
-<div bind:this={stageEl} class="relative w-full h-full overflow-hidden flex items-center justify-center">
+<div
+  bind:this={stageEl}
+  class="relative w-full h-full overflow-hidden flex items-center justify-center"
+>
   <!-- The column renders at the app's content width (APP_W = 620px: the 700px
        window minus the bubble's 5rem max-w cap), so every bubble, the input, and
        the session bar wrap and size exactly like the client. The showcase frame
@@ -161,7 +206,11 @@
       {/if}
       {#if showReasoning}
         <MessageEnter enabled={!measuring}>
-          <AgentMessageView kind="reasoning" isStreaming={reasoningStreaming} reasoningDurationMs={3200}>
+          <AgentMessageView
+            kind="reasoning"
+            isStreaming={reasoningStreaming}
+            reasoningDurationMs={3200}
+          >
             {#snippet body()}
               <span>{REASONING}</span>
             {/snippet}
@@ -177,10 +226,19 @@
           </AgentMessageView>
         </MessageEnter>
       {/if}
-      <UserInputView bind:value={inputValue} placeholder="Enter your instructions..." />
+      <UserInputView
+        bind:value={inputValue}
+        placeholder="Enter your instructions..."
+        onAlign={(v) => (alignment = v)}
+      />
       {#if showSessionBar}
         <MessageEnter enabled={!measuring} centerDirection="down">
-          <SessionBarView tokenUsage={{ used: 980, max: 8192 }} showTitle defaultTitle="Installing tomat" titleText="Installing tomat" />
+          <SessionBarView
+            tokenUsage={{ used: 980, max: 8192 }}
+            showTitle
+            defaultTitle="Landlord reply"
+            titleText="Landlord reply"
+          />
         </MessageEnter>
       {/if}
     </div>

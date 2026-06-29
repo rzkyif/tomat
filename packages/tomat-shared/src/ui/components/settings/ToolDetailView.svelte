@@ -82,8 +82,9 @@
           {#snippet labelContent()}
             <div class="flex flex-col gap-0.5 min-w-0">
               <span class="text-xs text-default-800 break-words">
-                {perm.before}{#if perm.code}<code class={codeClass}>{perm.code}</code>{/if}{perm.after}{#if perm.required}<span
-                    class="text-default-500 ml-1.5">(required)</span
+                {perm.before}{#if perm.code}<code class={codeClass}>{perm.code}</code
+                  >{/if}{perm.after}{#if perm.required}<span class="text-default-500 ml-1.5"
+                    >(required)</span
                   >{/if}
               </span>
               <span class="text-xs text-default-600 break-words">{perm.reason}</span>
@@ -99,8 +100,6 @@
       {/each}
     </div>
   {:else}
-    <span class="text-xs text-default-600 italic">
-      This tool needs no special permissions.
-    </span>
+    <span class="text-xs text-default-600 italic"> This tool needs no special permissions. </span>
   {/if}
 </div>

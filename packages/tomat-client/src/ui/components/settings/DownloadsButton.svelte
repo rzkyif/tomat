@@ -18,9 +18,7 @@
     isPending ? "Pending Downloads" : isActive ? "Downloading..." : "Downloads",
   );
   const icon = $derived(
-    isActive
-      ? "i-line-md-downloading-loop"
-      : "i-material-symbols-downloading-rounded",
+    isActive ? "i-line-md-downloading-loop" : "i-material-symbols-downloading-rounded",
   );
 
   // Ping while there's something to act on: accent-yellow when setup is pending,

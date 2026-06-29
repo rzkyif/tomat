@@ -19,9 +19,7 @@
     children: Snippet;
   }>();
 
-  const editable = $derived(
-    evalCondition(field.editableWhen, settingsState.currentSettings),
-  );
+  const editable = $derived(evalCondition(field.editableWhen, settingsState.currentSettings));
   const currentValue = $derived(settingsState.currentSettings[field.id]);
   const isModified = $derived(currentValue !== field.defaultValue);
 

@@ -61,8 +61,7 @@
   // natural width on row hover. The wrapper handles overflow-clip so the
   // button itself keeps its natural sizing - putting the clip on the
   // button caused the icon mask to render scaled-down rather than clipped.
-  const xWrapClass =
-    "overflow-clip w-0 group-hover:w-5 transition-[width] duration-150 shrink-0";
+  const xWrapClass = "overflow-clip w-0 group-hover:w-5 transition-[width] duration-150 shrink-0";
 </script>
 
 <div
@@ -77,8 +76,7 @@
     ></div>
   {/if}
 
-  <i
-    class="flex text-base shrink-0 relative z-10 transition-colors duration-500 {textClass} {icon}"
+  <i class="flex text-base shrink-0 relative z-10 transition-colors duration-500 {textClass} {icon}"
   ></i>
 
   <div class="flex-1 min-w-0 relative z-10 flex items-center gap-2">

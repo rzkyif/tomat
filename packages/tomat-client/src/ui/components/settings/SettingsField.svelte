@@ -27,7 +27,16 @@
   import CoresField from "./fields/CoresField.svelte";
   import StorageField from "./fields/StorageField.svelte";
 
-  let { field, monitors, fonts, error, horizontal = false, onChange, onReset, onPresetSelect } = $props<{
+  let {
+    field,
+    monitors,
+    fonts,
+    error,
+    horizontal = false,
+    onChange,
+    onReset,
+    onPresetSelect,
+  } = $props<{
     field: SettingField;
     monitors: Monitor[];
     fonts: string[];
@@ -45,9 +54,8 @@
 
   // Theme-aware color preview (the swatch + value render the dark-inverted color
   // when the app is in dark mode), mirrored from the picker's own logic.
-  const themeMql = typeof window !== "undefined"
-    ? window.matchMedia("(prefers-color-scheme: dark)")
-    : null;
+  const themeMql =
+    typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   let systemDark = $state(themeMql?.matches ?? false);
   $effect(() => {
     if (!themeMql) return;
@@ -101,7 +109,10 @@
       ];
     }
     if (field.optionsSource === "fonts") {
-      return [{ value: "default", label: "Default" }, ...fonts.map((f: string) => ({ value: f, label: f }))];
+      return [
+        { value: "default", label: "Default" },
+        ...fonts.map((f: string) => ({ value: f, label: f })),
+      ];
     }
     if (field.optionsSource === "tts_voices") return ttsVoices;
     return field.options ?? [];

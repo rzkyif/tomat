@@ -9,7 +9,12 @@
 
   // `horizontal` mirrors the settings-panel layout flag: controls sit to the
   // right of their label when there is room, and stack below when narrow.
-  let { extension, horizontal = false, busy = false, onPolicyChange = noop }: {
+  let {
+    extension,
+    horizontal = false,
+    busy = false,
+    onPolicyChange = noop,
+  }: {
     extension: Extension;
     horizontal?: boolean;
     busy?: boolean;
@@ -33,9 +38,8 @@
     <div class="flex flex-col gap-1 p-3 mb-1 bg-surface-inset rounded-large">
       <span class="text-sm text-accent-red-600">Content Changed Since Install</span>
       <span class="text-xs text-default-700 break-words">
-        This extension's files changed on disk, so its tools were disabled. Review the
-        change, then choose "Review &amp; re-enable" from the extension menu to trust the
-        current contents.
+        This extension's files changed on disk, so its tools were disabled. Review the change, then
+        choose "Review &amp; re-enable" from the extension menu to trust the current contents.
       </span>
     </div>
   {/if}
@@ -58,7 +62,7 @@
 
   <div class="text-xs text-default-600 break-words py-2 border-t border-surface">
     Provides {extension.toolCount}
-    {extension.toolCount === 1 ? "tool" : "tools"} ({extension.enabledToolCount} enabled). Turn
-    individual tools on and manage their permissions under Tools.
+    {extension.toolCount === 1 ? "tool" : "tools"} ({extension.enabledToolCount} enabled). Turn individual
+    tools on and manage their permissions under Tools.
   </div>
 </div>

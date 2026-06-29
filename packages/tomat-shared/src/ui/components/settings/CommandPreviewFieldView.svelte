@@ -10,8 +10,7 @@
 <div class="min-w-0 overflow-hidden rounded-medium bg-surface-inset">
   <div class="tomat-scroll-inset overflow-x-auto">
     <pre class="flex leading-relaxed m-0"><code
-        class="text-sm font-mono bg-transparent p-3 text-default-800 whitespace-pre"
-        >{preview}</code
+        class="text-sm font-mono bg-transparent p-3 text-default-800 whitespace-pre">{preview}</code
       ></pre>
   </div>
 </div>

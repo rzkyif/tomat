@@ -164,26 +164,19 @@
       cpuText: fmtCpu(r.cpuPct),
       ramText: fmtRam(r.rssMb),
       retryKind: r.retryKind,
-      retryLabel: r.retryKind
-        ? retrying === r.retryKind
-          ? "Retrying..."
-          : "Retry"
-        : undefined,
+      retryLabel: r.retryKind ? (retrying === r.retryKind ? "Retrying..." : "Retry") : undefined,
       retryDisabled: retrying !== null,
     })),
   );
   const totalCpuText = $derived(rows.length > 0 ? `${totalCpu.toFixed(1)}%` : "-");
-  const totalRamText = $derived(
-    rows.length > 0 ? formatBytes(totalRss * 1024 * 1024) : "-",
-  );
+  const totalRamText = $derived(rows.length > 0 ? formatBytes(totalRss * 1024 * 1024) : "-");
 
   async function refresh() {
     if (scope === "client") {
       try {
         const self = await platform().process.selfMetrics();
         // pid 0 (web stub) means the platform can't measure itself; drop the row.
-        mainMetrics =
-          self.pid !== 0 ? { rssMb: self.rssMb, cpuPct: self.cpuPct } : null;
+        mainMetrics = self.pid !== 0 ? { rssMb: self.rssMb, cpuPct: self.cpuPct } : null;
       } catch (e) {
         log.debug("selfMetrics failed", e);
       }

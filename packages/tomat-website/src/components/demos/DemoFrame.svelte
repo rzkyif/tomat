@@ -21,7 +21,13 @@
   // The whole block is a `group`, so a demo that wraps a sub-fragment in
   // `Highlight` can fade its overlay out on hover. Pass `highlighted` when the
   // demo contains a Highlight.
-  let { label, highlighted = false, designWidth, maxHeight, children }: {
+  let {
+    label,
+    highlighted = false,
+    designWidth,
+    maxHeight,
+    children,
+  }: {
     label?: string;
     highlighted?: boolean;
     designWidth?: number;

@@ -11,7 +11,12 @@
   // Presentational autocomplete dropdown anchored at a fixed position, listing
   // trigger options. All behavior (which options, selection index, what a
   // selection does) is owned by the caller and supplied via props.
-  let { options, selectedIndex, anchor, onSelect }: {
+  let {
+    options,
+    selectedIndex,
+    anchor,
+    onSelect,
+  }: {
     options: TriggerOption[];
     selectedIndex: number;
     anchor: { top: number; left: number };

@@ -45,4 +45,3 @@
 </script>
 
 <AttachmentListView {parts} {editable} {onRemove} {onImageClick} imageUrls={imageUrlCache} />
-

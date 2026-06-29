@@ -115,8 +115,8 @@
     sheet
       ? "w-full max-w-full"
       : maxWidth === "fit"
-      ? "w-fit"
-      : `w-[calc(100%-2rem)] ${maxWidthClass}`,
+        ? "w-fit"
+        : `w-[calc(100%-2rem)] ${maxWidthClass}`,
   );
 
   const positioningClass = $derived(
@@ -129,15 +129,15 @@
   const surfaceClass = $derived(
     surface === "transparent"
       ? ""
-      // The sheet pads its bottom past the home indicator (safe-area); the soft
-      // keyboard is cleared by lifting the WHOLE sheet (the container's
-      // --keyboard-inset padding below), so its bottom edge rests on the keyboard
-      // top instead of hiding behind it. max-h shrinks by the keyboard so a tall
-      // sheet stays fully above it; overscroll-contain stops a scroll at the
-      // sheet's end from chaining to the page behind it.
-      : sheet
-      ? "bg-surface rounded-t-large p-5 pb-[calc(1.25rem+var(--safe-area-inset-bottom,0px))] shadow-xl max-h-[calc(85dvh-var(--keyboard-inset,0px))] overflow-y-auto overscroll-contain"
-      : "bg-surface rounded-large p-5 shadow-xl",
+      : // The sheet pads its bottom past the home indicator (safe-area); the soft
+        // keyboard is cleared by lifting the WHOLE sheet (the container's
+        // --keyboard-inset padding below), so its bottom edge rests on the keyboard
+        // top instead of hiding behind it. max-h shrinks by the keyboard so a tall
+        // sheet stays fully above it; overscroll-contain stops a scroll at the
+        // sheet's end from chaining to the page behind it.
+        sheet
+        ? "bg-surface rounded-t-large p-5 pb-[calc(1.25rem+var(--safe-area-inset-bottom,0px))] shadow-xl max-h-[calc(85dvh-var(--keyboard-inset,0px))] overflow-y-auto overscroll-contain"
+        : "bg-surface rounded-large p-5 shadow-xl",
   );
 
   $effect(() => {
@@ -212,7 +212,7 @@
           onpointerup={onDragEnd}
           onpointercancel={onDragEnd}
         >
-          <div class="h-1.5 w-10 rounded-full bg-default-300"></div>
+          <div class="h-1.5 w-10 rounded-large bg-default-300"></div>
         </div>
       {/if}
       {@render children()}

@@ -66,9 +66,7 @@
 
   const isNumber = $derived(type === "number");
   const stateClass = $derived(
-    error
-      ? "bg-accent-red-300 border-accent-red-400"
-      : "bg-surface-inset",
+    error ? "bg-accent-red-300 border-accent-red-400" : "bg-surface-inset",
   );
   const fontClass = $derived(`${mono ? "font-mono" : ""} ${uppercase ? "uppercase" : ""}`);
 

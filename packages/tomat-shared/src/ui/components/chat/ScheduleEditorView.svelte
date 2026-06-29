@@ -55,11 +55,11 @@
     onTimeChange?: (text: string) => void;
   } = $props();
 
-  // `color-scheme` is bound to the app theme (not the OS) so the browser paints
-  // the native calendar / clock picker indicators light-on-dark in dark mode
-  // instead of leaving a black glyph.
+  // The native calendar / clock picker glyphs follow the app theme via the
+  // inherited `color-scheme` set on the theme root (base.css), so a dark window
+  // paints them light-on-dark with no per-input override here.
   const rawInputClass =
-    "bg-surface-inset text-default-800 rounded-medium h-8 px-2 text-sm outline-none [color-scheme:light] dark:[color-scheme:dark]";
+    "bg-surface-inset text-default-800 rounded-medium h-8 px-2 text-sm outline-none";
 </script>
 
 <div class="flex flex-col gap-2 text-sm {disabled ? 'opacity-60 pointer-events-none' : ''}">

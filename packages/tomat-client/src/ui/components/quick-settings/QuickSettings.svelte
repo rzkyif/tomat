@@ -35,9 +35,7 @@
   // full Settings panel).
   $effect(() => {
     layout.threshold =
-      (settingsState.currentSettings[
-        "appearance.settings.horizontalThreshold"
-      ] as number) ?? 680;
+      (settingsState.currentSettings["appearance.settings.horizontalThreshold"] as number) ?? 680;
   });
   $effect(() => layout.observe());
 
@@ -66,12 +64,8 @@
   // Settings pops its pending-downloads modal on arrival. Otherwise back to
   // chat.
   const hasPending = $derived(downloadsState.hasPending);
-  const exitLabel = $derived(
-    hasPending ? "Review Pending Downloads" : "Continue to Chat",
-  );
-  const exitTitle = $derived(
-    hasPending ? "Review Pending Downloads" : "Back to Chat",
-  );
+  const exitLabel = $derived(hasPending ? "Review Pending Downloads" : "Continue to Chat");
+  const exitTitle = $derived(hasPending ? "Review Pending Downloads" : "Back to Chat");
   const exitIcon = $derived(
     hasPending ? "i-material-symbols-download-rounded" : "i-material-symbols-arrow-forward-rounded",
   );

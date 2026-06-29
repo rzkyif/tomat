@@ -6,14 +6,19 @@
   import MessageEnter from "@tomat/shared/ui/components/chat/MessageEnter.svelte";
   import UserMessageView from "@tomat/shared/ui/components/chat/messages/UserMessageView.svelte";
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
-  import Markdown, { preloadMarkdown } from "@tomat/shared/ui/components/primitives/Markdown.svelte";
+  import Markdown, {
+    preloadMarkdown,
+  } from "@tomat/shared/ui/components/primitives/Markdown.svelte";
   import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
   import Cursor from "./Cursor.svelte";
   import { Demo, type Timeline } from "../../lib/showcase";
 
   const ui = useUiContext();
 
-  let { register, reportHeight }: {
+  let {
+    register,
+    reportHeight,
+  }: {
     register: (h: { timeline: Timeline; reset: () => void }) => void;
     reportHeight: (h: number) => void;
   } = $props();
@@ -180,8 +185,6 @@ LWW is cheap and easy to reason about; CRDTs preserve every edit but cost more i
       });
       demo.type(tl, (v) => (answer2 = v), A2, { duration: A2_SECONDS });
       tl.add(() => (answer2Streaming = false));
-      demo.hold(tl, 1.6);
-
       register({
         timeline: tl,
         reset: () => {
@@ -199,8 +202,10 @@ LWW is cheap and easy to reason about; CRDTs preserve every edit but cost more i
   });
 </script>
 
-
-<div bind:this={stageEl} class="relative w-full h-full overflow-hidden flex items-center justify-center">
+<div
+  bind:this={stageEl}
+  class="relative w-full h-full overflow-hidden flex items-center justify-center"
+>
   <div class="shrink-0">
     <div bind:this={columnEl} class="w-[620px] flex flex-col" style:gap={bubbleGap(ui)}>
       {#if showUser1}
@@ -224,7 +229,11 @@ LWW is cheap and easy to reason about; CRDTs preserve every edit but cost more i
       {/if}
       {#if showReasoning2}
         <MessageEnter enabled={!measuring}>
-          <AgentMessageView kind="reasoning" isStreaming={reasoning2Streaming} reasoningDurationMs={2600}>
+          <AgentMessageView
+            kind="reasoning"
+            isStreaming={reasoning2Streaming}
+            reasoningDurationMs={2600}
+          >
             {#snippet body()}
               <span>{REASONING2}</span>
             {/snippet}
@@ -243,7 +252,12 @@ LWW is cheap and easy to reason about; CRDTs preserve every edit but cost more i
       <UserInputView bind:value={inputValue} placeholder="Enter your instructions..." />
       {#if showSessionBar}
         <MessageEnter enabled={!measuring} centerDirection="down">
-          <SessionBarView tokenUsage={{ used: 1240, max: 8192 }} showTitle defaultTitle="Dual model" titleText="Dual model" />
+          <SessionBarView
+            tokenUsage={{ used: 1240, max: 8192 }}
+            showTitle
+            defaultTitle="Dual model"
+            titleText="Dual model"
+          />
         </MessageEnter>
       {/if}
     </div>

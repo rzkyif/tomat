@@ -27,11 +27,7 @@
     settingsState,
     streamingState,
   } from "$stores";
-  import {
-    BASE_MS,
-    getDuration,
-    hasMessageAnimated,
-  } from "$lib/appearance/animations";
+  import { BASE_MS, getDuration, hasMessageAnimated } from "$lib/appearance/animations";
 
   // The transcript model (message grouping + entry-stagger delays) and its
   // markup, wrapping the shared ChatShell. Rendered identically on desktop (in
@@ -46,9 +42,7 @@
 
   // Find the most recent user message (messages is newest-first).
   // Used to default the editing target to the latest sent message.
-  let lastUserMsg = $derived(
-    messagesState.messages.find((m) => m.role === "user"),
-  );
+  let lastUserMsg = $derived(messagesState.messages.find((m) => m.role === "user"));
   let lastUserMsgId = $derived(lastUserMsg?.id ?? null);
 
   // Single shared "which user message is in edit mode": only one bubble can
@@ -112,22 +106,17 @@
   // grouping pipeline instead of being a standalone element outside it.
   let displayedMessages = $derived.by<Message[]>(() => {
     const real = messagesState.messages.filter((msg) => {
-      const isEmptyAssistant =
-        msg.role === "assistant" && getTextContent(msg.content) === "";
+      const isEmptyAssistant = msg.role === "assistant" && getTextContent(msg.content) === "";
       const isHiddenReasoning =
-        msg.role === "reasoning" &&
-        !settingsState.currentSettings["llm.showReasoning"];
+        msg.role === "reasoning" && !settingsState.currentSettings["llm.showReasoning"];
       const isHiddenSystem =
-        msg.role === "system" &&
-        !settingsState.currentSettings["prompts.showSystemPrompt"];
+        msg.role === "system" && !settingsState.currentSettings["prompts.showSystemPrompt"];
       // Empty filter bubbles (no relevant tools / memories found) are hidden
       // unless the user opts to keep them. Errors always show. "No relevant
       // tools" is the filter result, not toolsSent: always-available tools
       // would otherwise keep the bubble on every turn.
       const toolFilterBase =
-        msg.phase2 !== undefined
-          ? msg.phase2.length
-          : (msg.phase1?.length ?? 0);
+        msg.phase2 !== undefined ? msg.phase2.length : (msg.phase1?.length ?? 0);
       const isHiddenEmptyToolFilter =
         msg.role === "tool_filter" &&
         msg.status !== "error" &&
@@ -266,20 +255,20 @@
 <ChatShell stackDepth={messageGroups.length} transcript={messageList} />
 
 {#snippet messageList()}
-          {#if sessionLoading}
-            <div class="relative pointer-events-none" style:z-index={messageGroups.length + 1}>
-              <Bubble
-                selectedAlignment={onMobile ? "left" : settingsState.getAlignment()}
-                borderColorClass="border-default-400"
-                extraClass="flex items-center gap-2"
-              >
-                <i class="i-line-md:loading-alt-loop text-xl"></i>
-                <span>Loading latest session…</span>
-              </Bubble>
-            </div>
-          {/if}
+  {#if sessionLoading}
+    <div class="relative pointer-events-none" style:z-index={messageGroups.length + 1}>
+      <Bubble
+        selectedAlignment={onMobile ? "left" : settingsState.getAlignment()}
+        borderColorClass="border-default-400"
+        extraClass="flex items-center gap-2"
+      >
+        <i class="i-line-md:loading-alt-loop text-xl"></i>
+        <span>Loading latest session…</span>
+      </Bubble>
+    </div>
+  {/if}
 
-          <!-- Force a clean teardown of the entire message subtree on every
+  <!-- Force a clean teardown of the entire message subtree on every
                session boundary. Without the key, the cancelled tool's
                Expandable body (transition:expand|global) and the various
                per-component effects (auto-close, expansion-state writers,
@@ -287,142 +276,113 @@
                with `messages = []` and leave stale DOM behind after a
                delete-with-active-tool-call. The key bumps inside
                `sessionsState.resetAllSessionState`. -->
-          {#key sessionsState.epoch}
-            {#each messageGroups as group, gi (group.key)}
-              <!-- Descending z down the transcript (gi 0 = newest = bottom):
+  {#key sessionsState.epoch}
+    {#each messageGroups as group, gi (group.key)}
+      <!-- Descending z down the transcript (gi 0 = newest = bottom):
                    see the stacking comment on the SessionBar wrapper above. -->
-              <div class="relative pointer-events-none" style:z-index={messageGroups.length - gi}>
-              {#if group.kind === "stack"}
-                <MessageStackGroup messages={group.messages}>
-                  {#snippet item({ msg, idx, neighborLeft, neighborRight })}
-                    <MessageEnter
-                      alignment={onMobile ? "left" : settingsState.getAlignment()}
-                      msgId={msg.role === "loading"
-                        ? undefined
-                        : msgKey(msg, `g-${idx}`)}
-                      delayMs={enterDelays.get(enterDelayKey(msg) ?? "") ?? 0}
-                      class="pointer-events-none"
-                    >
-                      {#if msg.role === "loading"}
-                        <Bubble
-                          selectedAlignment={onMobile ? "left" : settingsState.getAlignment()}
-                          size="small"
-                          extraClass="flex items-center"
-                          {neighborLeft}
-                          {neighborRight}
-                        >
-                          <i class="i-line-md:loading-alt-loop text-base"></i>
-                        </Bubble>
-                      {:else if msg.role === "reasoning"}
-                        <AgentMessage
-                          kind="reasoning"
-                          id={msg.id}
-                          content={asMessageContent(msg.content)}
-                          modelUsed={msg.modelUsed}
-                          reasoningDurationMs={msg.reasoningDurationMs}
-                          isStreaming={streamingState.isLive(msg.id)}
-                          {neighborLeft}
-                          {neighborRight}
-                        />
-                      {:else if msg.role === "system"}
-                        <SystemMessage
-                          id={msg.id}
-                          content={msg.content as string}
-                          {neighborLeft}
-                          {neighborRight}
-                        />
-                      {:else if msg.role === "user"}
-                        <AutomatedPrompt
-                          id={msg.id}
-                          content={getTextContent(asMessageContent(msg.content))}
-                          {neighborLeft}
-                          {neighborRight}
-                        />
-                      {:else if msg.role === "tool"}
-                        <ToolCall
-                          id={msg.id}
-                          {msg}
-                          onAnswer={(requestId, answers) =>
-                            extensionsState.respondAskUser(
-                              msg.callId!,
-                              requestId,
-                              answers,
-                            )}
-                          {neighborLeft}
-                          {neighborRight}
-                        />
-                      {:else if msg.role === "tool_filter"}
-                        <RelevantTools
-                          id={msg.id}
-                          {msg}
-                          {neighborLeft}
-                          {neighborRight}
-                        />
-                      {:else if msg.role === "memory_filter"}
-                        <RelevantMemories
-                          id={msg.id}
-                          {msg}
-                          {neighborLeft}
-                          {neighborRight}
-                        />
-                      {:else if msg.role === "display"}
-                        {@const display = displayContentOf(msg)}
-                        {#if display}
-                          <DisplayBubble
-                            id={msg.id}
-                            content={display}
-                            {neighborLeft}
-                            {neighborRight}
-                          />
-                        {/if}
-                      {/if}
-                    </MessageEnter>
-                  {/snippet}
-                </MessageStackGroup>
-              {:else}
-                {@const msg = group.message}
-                <MessageEnter
-                  alignment={settingsState.getAlignment()}
-                  msgId={msgKey(msg, group.key)}
-                  delayMs={enterDelays.get(enterDelayKey(msg) ?? "") ?? 0}
-                  class="relative pointer-events-none"
-                >
-                  {#if msg.role === "user"}
-                    <UserMessage
-                      content={asMessageContent(msg.content)}
-                      editing={msg.id != null && msg.id === editingUserMsgId}
-                      onStartEdit={() =>
-                        (editingUserMsgId = msg.id ?? null)}
-                      onStopEdit={() => (editingUserMsgId = null)}
-                      onEdit={(newContent) =>
-                        messagesState.updateUserMessage(msg.id, newContent)}
-                      onReprocess={msg.id
-                        ? () => messagesState.reprocessUserMessage(msg.id!)
-                        : undefined}
-                      onDelete={msg.id
-                        ? () => messagesState.deleteUserMessage(msg.id!)
-                        : undefined}
-                    />
-                  {:else if msg.role === "error"}
-                    <ErrorMessage content={asMessageContent(msg.content)} />
-                  {:else if msg.role === "assistant"}
-                    <AgentMessage
-                      kind="content"
-                      id={msg.id}
-                      content={assistantContent(msg)}
-                      modelUsed={msg.modelUsed}
-                      isStreaming={streamingState.isLive(msg.id)}
-                      onReprocess={msg.id
-                        ? () => messagesState.reprocessAgentMessage(msg.id!)
-                        : undefined}
-                      onDelete={msg.id
-                        ? () => messagesState.deleteAgentMessage(msg.id!)
-                        : undefined}
-                    />
+      <div class="relative pointer-events-none" style:z-index={messageGroups.length - gi}>
+        {#if group.kind === "stack"}
+          <MessageStackGroup messages={group.messages}>
+            {#snippet item({ msg, idx, neighborLeft, neighborRight })}
+              <MessageEnter
+                alignment={onMobile ? "left" : settingsState.getAlignment()}
+                msgId={msg.role === "loading" ? undefined : msgKey(msg, `g-${idx}`)}
+                delayMs={enterDelays.get(enterDelayKey(msg) ?? "") ?? 0}
+                class="pointer-events-none"
+              >
+                {#if msg.role === "loading"}
+                  <Bubble
+                    selectedAlignment={onMobile ? "left" : settingsState.getAlignment()}
+                    size="small"
+                    extraClass="flex items-center"
+                    {neighborLeft}
+                    {neighborRight}
+                  >
+                    <i class="i-line-md:loading-alt-loop text-base"></i>
+                  </Bubble>
+                {:else if msg.role === "reasoning"}
+                  <AgentMessage
+                    kind="reasoning"
+                    id={msg.id}
+                    content={asMessageContent(msg.content)}
+                    modelUsed={msg.modelUsed}
+                    reasoningDurationMs={msg.reasoningDurationMs}
+                    isStreaming={streamingState.isLive(msg.id)}
+                    {neighborLeft}
+                    {neighborRight}
+                  />
+                {:else if msg.role === "system"}
+                  <SystemMessage
+                    id={msg.id}
+                    content={msg.content as string}
+                    {neighborLeft}
+                    {neighborRight}
+                  />
+                {:else if msg.role === "user"}
+                  <AutomatedPrompt
+                    id={msg.id}
+                    content={getTextContent(asMessageContent(msg.content))}
+                    {neighborLeft}
+                    {neighborRight}
+                  />
+                {:else if msg.role === "tool"}
+                  <ToolCall
+                    id={msg.id}
+                    {msg}
+                    onAnswer={(requestId, answers) =>
+                      extensionsState.respondAskUser(msg.callId!, requestId, answers)}
+                    {neighborLeft}
+                    {neighborRight}
+                  />
+                {:else if msg.role === "tool_filter"}
+                  <RelevantTools id={msg.id} {msg} {neighborLeft} {neighborRight} />
+                {:else if msg.role === "memory_filter"}
+                  <RelevantMemories id={msg.id} {msg} {neighborLeft} {neighborRight} />
+                {:else if msg.role === "display"}
+                  {@const display = displayContentOf(msg)}
+                  {#if display}
+                    <DisplayBubble id={msg.id} content={display} {neighborLeft} {neighborRight} />
                   {/if}
-                </MessageEnter>
-              {/if}
-              </div>
-            {/each}
-          {/key}
+                {/if}
+              </MessageEnter>
+            {/snippet}
+          </MessageStackGroup>
+        {:else}
+          {@const msg = group.message}
+          <MessageEnter
+            alignment={settingsState.getAlignment()}
+            msgId={msgKey(msg, group.key)}
+            delayMs={enterDelays.get(enterDelayKey(msg) ?? "") ?? 0}
+            class="relative pointer-events-none"
+          >
+            {#if msg.role === "user"}
+              <UserMessage
+                content={asMessageContent(msg.content)}
+                editing={msg.id != null && msg.id === editingUserMsgId}
+                onStartEdit={() => (editingUserMsgId = msg.id ?? null)}
+                onStopEdit={() => (editingUserMsgId = null)}
+                onEdit={(newContent) => messagesState.updateUserMessage(msg.id, newContent)}
+                onReprocess={msg.id ? () => messagesState.reprocessUserMessage(msg.id!) : undefined}
+                onDelete={msg.id ? () => messagesState.deleteUserMessage(msg.id!) : undefined}
+              />
+            {:else if msg.role === "error"}
+              <ErrorMessage content={asMessageContent(msg.content)} />
+            {:else if msg.role === "assistant"}
+              <AgentMessage
+                kind="content"
+                id={msg.id}
+                content={assistantContent(msg)}
+                modelUsed={msg.modelUsed}
+                isStreaming={streamingState.isLive(msg.id)}
+                onReprocess={msg.id
+                  ? () => messagesState.reprocessAgentMessage(msg.id!)
+                  : undefined}
+                onDelete={msg.id ? () => messagesState.deleteAgentMessage(msg.id!) : undefined}
+              />
+            {/if}
+          </MessageEnter>
+        {/if}
+      </div>
+    {/each}
+  {/key}
 {/snippet}

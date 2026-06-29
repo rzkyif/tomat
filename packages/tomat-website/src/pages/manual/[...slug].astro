@@ -35,8 +35,10 @@ const chevron = "shrink-0 text-2xl text-default-500";
     <div class="mt-1 text-xs text-default-500">Last updated {lastUpdated}</div>
   </header>
 
-  {/* Demos live inline inside the MDX, rendered at the point each system is
-      discussed (see the root COPY.md), so the page shell only frames the prose. */}
+  {
+    /* Demos live inline inside the MDX, rendered at the point each system is
+      discussed (see the root COPY.md), so the page shell only frames the prose. */
+  }
   <div class="prose dark:prose-invert max-w-none">
     <Content />
   </div>
@@ -44,28 +46,28 @@ const chevron = "shrink-0 text-2xl text-default-500";
   {
     (prev || next) && (
       <nav class="mt-10 md:mb-[20dvh] flex items-stretch gap-3" aria-label="More articles">
-        {prev
-          ? (
-            <a href={prev.href} rel="prev" class={cardBase}>
-              <i class={`i-material-symbols-chevron-left-rounded ${chevron}`} />
-              <span class="flex min-w-0 flex-col">
-                <span class={sectionLabel}>{prev.section}</span>
-                <span class={titleLabel}>{prev.title}</span>
-              </span>
-            </a>
-          )
-          : <span class="flex-1" />}
-        {next
-          ? (
-            <a href={next.href} rel="next" class={`${cardBase} justify-end text-right`}>
-              <span class="flex min-w-0 flex-col">
-                <span class={sectionLabel}>{next.section}</span>
-                <span class={titleLabel}>{next.title}</span>
-              </span>
-              <i class={`i-material-symbols-chevron-right-rounded ${chevron}`} />
-            </a>
-          )
-          : <span class="flex-1" />}
+        {prev ? (
+          <a href={prev.href} rel="prev" class={cardBase}>
+            <i class={`i-material-symbols-chevron-left-rounded ${chevron}`} />
+            <span class="flex min-w-0 flex-col">
+              <span class={sectionLabel}>{prev.section}</span>
+              <span class={titleLabel}>{prev.title}</span>
+            </span>
+          </a>
+        ) : (
+          <span class="flex-1" />
+        )}
+        {next ? (
+          <a href={next.href} rel="next" class={`${cardBase} justify-end text-right`}>
+            <span class="flex min-w-0 flex-col">
+              <span class={sectionLabel}>{next.section}</span>
+              <span class={titleLabel}>{next.title}</span>
+            </span>
+            <i class={`i-material-symbols-chevron-right-rounded ${chevron}`} />
+          </a>
+        ) : (
+          <span class="flex-1" />
+        )}
       </nav>
     )
   }

@@ -146,7 +146,9 @@
 
   const meta = $derived(STATUS_META[status]);
   const pct = $derived(
-    status === "starting_up" && typeof progress === "number" ? ` ${Math.round(progress * 100)}%` : "",
+    status === "starting_up" && typeof progress === "number"
+      ? ` ${Math.round(progress * 100)}%`
+      : "",
   );
   const options = $derived(cores.map((c) => ({ value: c.id, label: c.name })));
 
@@ -220,11 +222,7 @@
       <!-- Header row. Collapsed it packs left; expanded the status pill stays left
            and the switcher + manage button move to the right edge (justify-between
            over the card's width below). -->
-      <div
-        class="flex items-center gap-2"
-        class:w-full={open}
-        class:justify-between={open}
-      >
+      <div class="flex items-center gap-2" class:w-full={open} class:justify-between={open}>
         {@render headerRegions()}
       </div>
     {/if}

@@ -117,7 +117,12 @@
 </script>
 
 <div class="flex flex-col gap-3">
-  <FormField label="Connect" description={`Status: ${status}`} descriptionTier="always" {horizontal}>
+  <FormField
+    label="Connect"
+    description={`Status: ${status}`}
+    descriptionTier="always"
+    {horizontal}
+  >
     <Toggle checked={enabled} ariaLabel="Enable server" onchange={(v) => onToggleEnabled(v)} />
   </FormField>
 

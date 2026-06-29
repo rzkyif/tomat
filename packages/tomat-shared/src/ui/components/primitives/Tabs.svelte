@@ -46,14 +46,10 @@
 
   // min-w-0 keeps the cells exactly equal-width even if a label overflows, since
   // the knob clip assumes uniform Nths.
-  const cellClass =
-    "flex-1 min-w-0 flex items-center justify-center px-2 text-sm";
+  const cellClass = "flex-1 min-w-0 flex items-center justify-center px-2 text-sm";
 </script>
 
-<div
-  class="groove relative flex w-full h-10 rounded-large bg-surface-inset p-1"
-  role="tablist"
->
+<div class="groove relative flex w-full h-10 rounded-large bg-surface-inset p-1" role="tablist">
   {#each tabs as tab (tab.id)}
     <button
       type="button"

@@ -10,6 +10,8 @@
 
 <DemoFrame {label} designWidth={620}>
   <div class="mx-auto w-full max-w-[620px]">
-    <RelevantToolsView {...relevantToolsSamples.twoPhase as ComponentProps<typeof RelevantToolsView>} />
+    <RelevantToolsView
+      {...relevantToolsSamples.twoPhase as ComponentProps<typeof RelevantToolsView>}
+    />
   </div>
 </DemoFrame>

@@ -3,11 +3,7 @@
   import AttachmentList from "../AttachmentList.svelte";
   import UserMessageView from "@tomat/shared/ui/components/chat/messages/UserMessageView.svelte";
   import { streamingState } from "../../../state";
-  import {
-    getTextContent,
-    type MessageContent,
-    type MessagePart,
-  } from "$lib/util/types";
+  import { getTextContent, type MessageContent, type MessagePart } from "$lib/util/types";
   import { showUserMessageMenu } from "$lib/chat/message-menu";
 
   let {
@@ -93,8 +89,7 @@
   function emitEdit() {
     if (!onEdit) return;
     const newContent = buildEditContent();
-    const isEmpty =
-      typeof newContent === "string" ? !newContent : newContent.length === 0;
+    const isEmpty = typeof newContent === "string" ? !newContent : newContent.length === 0;
     if (isEmpty) {
       onEdit(newContent);
       return;

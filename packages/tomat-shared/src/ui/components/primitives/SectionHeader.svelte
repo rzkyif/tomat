@@ -37,7 +37,9 @@
   const textColor = $derived(level === "group" ? "text-default-800" : "text-default-500");
   const hoverColor = $derived(level === "group" ? "" : "hov:text-default-700 transition-colors");
   const chevronIcon = $derived(
-    expanded ? "i-material-symbols-expand-more-rounded" : "i-material-symbols-chevron-right-rounded",
+    expanded
+      ? "i-material-symbols-expand-more-rounded"
+      : "i-material-symbols-chevron-right-rounded",
   );
 </script>
 

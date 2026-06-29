@@ -192,6 +192,18 @@ html.dark .demo-frame {
   color: var(--default-d-800);
 }
 
+/* Native control palette for the flip. The flip swaps the color ladders without
+   toggling `.dark`, so `color-scheme` (which base.css keys on `.dark`) can't
+   follow it: a light site renders the demo DARK, a dark site renders it LIGHT.
+   Re-assert the opposite-of-site scheme on the frame so the date/time picker
+   glyphs (and native scrollbars) match the rendition they sit in. */
+.demo-frame {
+  color-scheme: dark;
+}
+html.dark .demo-frame {
+  color-scheme: light;
+}
+
 /* The double-flip (manual demo frames): the inner content wrapper is `.demo-unflip`,
    so its ladder is restored to the website theme while the frame chrome and dots
    stay flipped. Re-assert the base text color here too, from the restored ladder,
@@ -202,6 +214,14 @@ html.dark .demo-frame {
 }
 html.dark .demo-unflip {
   color: var(--default-d-800);
+}
+/* The inner double-flip subtree is back on the website theme, so its native
+   controls follow the site scheme again. */
+.demo-unflip {
+  color-scheme: light;
+}
+html.dark .demo-unflip {
+  color-scheme: dark;
 }
 
 /* Manual prose colors. UnoCSS `presetTypography` ships a cool, slate-tinted gray
@@ -343,9 +363,10 @@ html.dark .stage-dim {
    intersect so the corners fall off together. Both are plain absolute, in-flow
    elements (no fixed positioning or viewport math), so they re-measure correctly
    across Astro view transitions. `.focus-grid-stage` lives inside each homepage
-   showcase stage panel (capped to the content width and centered so it backs that
-   stage's demo + caption, dims with the panel, and scrolls along with it);
-   `.focus-grid-manual` fills the article column on manual pages. */
+   showcase stage's demo footprint (capped to the content width and centered so it
+   backs only that stage's demo and not the caption text, dims with the panel, and
+   scrolls along with it); `.focus-grid-manual` fills the article column on manual
+   pages. */
 .focus-grid-stage,
 .focus-grid-manual,
 .focus-grid-frame {
@@ -479,7 +500,7 @@ html.dark .focus-grid-frame {
 
 /* Cap each stage's grid to the install-card / caption width (max-w-xl) and
    center it (inset 0 + a definite width lets the auto margins center it), so the
-   dots line up under the demo + caption rather than spanning the full panel. */
+   dots line up under the demo rather than spanning its full footprint. */
 .focus-grid-stage {
   width: min(100%, 36rem);
   margin-inline: auto;

@@ -48,7 +48,9 @@
 </script>
 
 <div
-  class="flex items-center gap-2 rounded-large px-3 py-2 transition-colors {surfaceClass} {disabled ? 'opacity-60 pointer-events-none' : ''} {extraClass}"
+  class="flex items-center gap-2 rounded-large px-3 py-2 transition-colors {surfaceClass} {disabled
+    ? 'opacity-60 pointer-events-none'
+    : ''} {extraClass}"
   {role}
   aria-selected={ariaSelected}
 >

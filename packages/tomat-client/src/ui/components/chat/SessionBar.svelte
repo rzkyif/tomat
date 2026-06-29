@@ -2,12 +2,7 @@
   import SessionBarView from "@tomat/shared/ui/components/chat/SessionBarView.svelte";
   import MessageEnter from "./MessageEnter.svelte";
   import { useUiContext } from "@tomat/shared/ui/context";
-  import {
-    messagesState,
-    sessionsState,
-    settingsState,
-    viewState,
-  } from "../../state";
+  import { messagesState, sessionsState, settingsState, viewState } from "../../state";
 
   // Mobile rides the panel carousel for screen entry, so the per-bar entry slide
   // is gated off there (it would double up with the carousel); desktop keeps it.
@@ -28,13 +23,9 @@
   }
 
   const themeOverride = $derived(
-    settingsState.currentSettings[
-      "appearance.sessionBarDefaultColor"
-    ] as string,
+    settingsState.currentSettings["appearance.sessionBarDefaultColor"] as string,
   );
-  const themeOverrideHex = $derived(
-    hasAlpha(themeOverride) ? themeOverride : null,
-  );
+  const themeOverrideHex = $derived(hasAlpha(themeOverride) ? themeOverride : null);
 
   let titleInput: HTMLInputElement | undefined = $state();
   let titleText = $state(sessionsState.title);
@@ -148,9 +139,7 @@
 
 {#snippet bar()}
   <SessionBarView
-    tokenUsage={messagesState.tokenUsage
-      ? { used: contextUsed, max: contextMax }
-      : null}
+    tokenUsage={messagesState.tokenUsage ? { used: contextUsed, max: contextMax } : null}
     {showTitle}
     bind:titleText
     {defaultTitle}

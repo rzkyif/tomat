@@ -43,6 +43,7 @@
   } = $props();
 
   let scrollEl = $state<HTMLDivElement>();
+  let contentEl = $state<HTMLDivElement>();
   let showTopFade = $state(false);
   let showBottomFade = $state(false);
   function updateFades(): void {
@@ -51,6 +52,20 @@
     showTopFade = el.scrollTop > 1;
     showBottomFade = el.scrollTop + el.clientHeight < el.scrollHeight - 1;
   }
+  // `onscroll` keeps the fades live while scrolling; this sets their initial
+  // state and recomputes when the viewport or the group list resizes (the list
+  // overflows differently as groups change, the sidebar collapses, or the panel
+  // resizes), so the bottom fade shows as soon as content overflows rather than
+  // only after the first scroll.
+  $effect(() => {
+    const el = scrollEl;
+    if (!el) return;
+    const ro = new ResizeObserver(updateFades);
+    ro.observe(el);
+    if (contentEl) ro.observe(contentEl);
+    updateFades();
+    return () => ro.disconnect();
+  });
 </script>
 
 <div class="flex flex-col gap-2 h-full min-h-0">
@@ -73,8 +88,12 @@
   {/if}
 
   <div class="relative flex-1 min-h-0">
-    <div bind:this={scrollEl} onscroll={updateFades} class="tomat-scroll h-full overflow-y-auto pr-2">
-      <div class="flex flex-col {listGap}">
+    <div
+      bind:this={scrollEl}
+      onscroll={updateFades}
+      class="tomat-scroll tomat-scroll-hover h-full overflow-y-auto pr-2"
+    >
+      <div bind:this={contentEl} class="flex flex-col {listGap}">
         {#each groups as g (g.id)}
           <!-- The mobile list pushes a full-screen detail on tap, so it carries
                no persistent "selected group" highlight (the desktop split does). -->

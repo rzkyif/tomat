@@ -63,7 +63,9 @@
     </div>
   {/if}
   {#if dontShowAgainLabel}
-    <label class="flex items-center gap-2 text-default-600 text-sm select-none hover:cursor-pointer">
+    <label
+      class="flex items-center gap-2 text-default-600 text-sm select-none hover:cursor-pointer"
+    >
       <Checkbox checked={dontShowAgain} onchange={(v) => (dontShowAgain = v)} />
       {dontShowAgainLabel}
     </label>

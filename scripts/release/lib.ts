@@ -366,7 +366,7 @@ export function wranglerEnv(env: DeployEnv): Record<string, string> | undefined 
 
 export async function astroBuild(): Promise<void> {
   const cmd = new Deno.Command("deno", {
-    args: ["run", "-A", "npm:astro@^6.4.4", "build"],
+    args: ["run", "-A", "npm:astro@^7", "build"],
     cwd: WEBSITE_DIR,
     stdout: "inherit",
     stderr: "inherit",

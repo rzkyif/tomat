@@ -29,9 +29,7 @@
     }
   });
 
-  const bucketOptions = $derived(
-    (field.presetConfig?.options ?? []) as PresetOption[],
-  );
+  const bucketOptions = $derived((field.presetConfig?.options ?? []) as PresetOption[]);
   const customOption = $derived(
     (field.presetConfig?.secondaryOptions ?? [])[0] as PresetOption | undefined,
   );
@@ -79,10 +77,10 @@
         selectable: !!rec,
         badges: rec
           ? [
-            { icon: "i-material-symbols-psychology-alt-rounded", text: rec.name },
-            { icon: "i-material-symbols-memory-rounded", text: gb(rec.footprintBytes) },
-            { icon: "i-material-symbols-bolt-rounded", text: rec.quant },
-          ]
+              { icon: "i-material-symbols-psychology-alt-rounded", text: rec.name },
+              { icon: "i-material-symbols-memory-rounded", text: gb(rec.footprintBytes) },
+              { icon: "i-material-symbols-bolt-rounded", text: rec.quant },
+            ]
           : null,
         placeholder: rec
           ? undefined
@@ -91,11 +89,11 @@
             : "No model fits this tier",
         better: better
           ? {
-            message: `A better model is available for ${title}: ${rec?.name}`,
-            applying: rs.applying === bucket,
-            onApply: () => rs.applyBucket(bucket),
-            onDismiss: () => rs.dismiss(bucket),
-          }
+              message: `A better model is available for ${title}: ${rec?.name}`,
+              applying: rs.applying === bucket,
+              onApply: () => rs.applyBucket(bucket),
+              onDismiss: () => rs.dismiss(bucket),
+            }
           : undefined,
       };
     }),
@@ -126,7 +124,7 @@
   // catalog, it falls back to "Manual Configuration".
   const selectedModelView = $derived(
     (rs.catalog ?? []).find((m) =>
-      m.quants.some((q) => q.modelSpec === settingsState.currentSettings["llm.modelPath"])
+      m.quants.some((q) => q.modelSpec === settingsState.currentSettings["llm.modelPath"]),
     ) ?? null,
   );
 
@@ -152,7 +150,8 @@
   const quantOptions = $derived(
     (selectedModelView?.quants ?? []).map((q) => ({
       value: q.modelSpec,
-      label: `${q.quant}${q.variantLabel !== "standard" ? ` (${q.variantLabel})` : ""}` +
+      label:
+        `${q.quant}${q.variantLabel !== "standard" ? ` (${q.variantLabel})` : ""}` +
         ` · ${gb(q.footprintBytes)}${q.recommended ? " · recommended" : ""}${q.fits ? "" : " · won't fit"}`,
       disabled: !q.fits,
     })),
@@ -162,14 +161,15 @@
   const custom = $derived(
     customOption
       ? {
-        title: customOption.title ?? customOption.label,
-        description: customOption.description,
-        selected: settingsState.currentSettings[field.id] === customOption.id,
-        model: { value: selectedModel, options: modelOptions },
-        quant: !manualSelected && selectedModelView
-          ? { value: selectedQuant, options: quantOptions }
-          : null,
-      }
+          title: customOption.title ?? customOption.label,
+          description: customOption.description,
+          selected: settingsState.currentSettings[field.id] === customOption.id,
+          model: { value: selectedModel, options: modelOptions },
+          quant:
+            !manualSelected && selectedModelView
+              ? { value: selectedQuant, options: quantOptions }
+              : null,
+        }
       : null,
   );
 

@@ -48,9 +48,9 @@
   /** Epoch ms -> the local "YYYY-MM-DDTHH:MM" a datetime-local input wants. */
   function toLocalInput(ms: number): string {
     const d = new Date(ms);
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${
-      pad(d.getMinutes())
-    }`;
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
+      d.getMinutes(),
+    )}`;
   }
 
   function fromLocalInput(text: string): number | null {
@@ -155,7 +155,8 @@
   });
   $effect(() => {
     if (
-      title !== draft.title || instruction !== draft.instruction ||
+      title !== draft.title ||
+      instruction !== draft.instruction ||
       runMissed !== draft.runMissed
     ) {
       onChange({ ...draft, title, instruction, runMissed });
@@ -175,8 +176,8 @@
   yearlyMonth={draft.schedule.kind === "yearly" ? draft.schedule.month : undefined}
   yearlyDay={draft.schedule.kind === "yearly" ? draft.schedule.day : undefined}
   timeText={draft.schedule.kind === "weekly" ||
-      draft.schedule.kind === "monthly" ||
-      draft.schedule.kind === "yearly"
+  draft.schedule.kind === "monthly" ||
+  draft.schedule.kind === "yearly"
     ? `${pad(draft.schedule.hour)}:${pad(draft.schedule.minute)}`
     : undefined}
   onKindChange={switchKind}

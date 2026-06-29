@@ -2,7 +2,11 @@
   import type { ComponentProps } from "svelte";
   import UserMessageView from "@tomat/shared/ui/components/chat/messages/UserMessageView.svelte";
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
-  import { AGENT_REASONING, agentMessageSamples, userMessageSamples } from "@tomat/shared/ui/samples";
+  import {
+    AGENT_REASONING,
+    agentMessageSamples,
+    userMessageSamples,
+  } from "@tomat/shared/ui/samples";
   import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
   import DemoFrame from "./DemoFrame.svelte";
   import Highlight from "./Highlight.svelte";
@@ -27,7 +31,8 @@
     <UserMessageView {...userMessageSamples.default as ComponentProps<typeof UserMessageView>} />
     <Highlight label="Thinking" fit>
       <AgentMessageView {...reasoning}>
-        {#snippet body()}<span class="whitespace-pre-wrap break-words">{AGENT_REASONING}</span>{/snippet}
+        {#snippet body()}<span class="whitespace-pre-wrap break-words">{AGENT_REASONING}</span
+          >{/snippet}
       </AgentMessageView>
     </Highlight>
   </div>

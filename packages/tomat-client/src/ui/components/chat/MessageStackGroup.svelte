@@ -34,9 +34,7 @@
   // group (agent, tool, system, ...) hugs the left, never centered.
   const mobile = ui.platform === "mobile";
   let alignment = $derived(
-    mobile
-      ? (messages[0]?.role === "user" ? "right" : "left")
-      : settingsState.getAlignment(),
+    mobile ? (messages[0]?.role === "user" ? "right" : "left") : settingsState.getAlignment(),
   );
 
   // Group layout:
@@ -141,8 +139,7 @@
     let runStart = 0;
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
-      const isExpanded =
-        msg.id !== undefined && (layoutExpanded.get(msg.id) ?? false);
+      const isExpanded = msg.id !== undefined && (layoutExpanded.get(msg.id) ?? false);
       if (isExpanded) {
         if (run.length) {
           out.push({
@@ -204,12 +201,7 @@
          later DOM = lower on screen = higher z. -->
     <div class="relative pointer-events-none" style:z-index={si + 1}>
       {#if seg.kind === "stack"}
-        <MessageStack
-          messages={seg.messages}
-          baseIdx={seg.baseIdx}
-          {alignment}
-          {item}
-        />
+        <MessageStack messages={seg.messages} baseIdx={seg.baseIdx} {alignment} {item} />
       {:else}
         {@render item({
           msg: seg.message,
