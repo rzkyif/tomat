@@ -3,6 +3,7 @@
   import type { Alignment, Monitor, Attachment, MessagePart } from "$lib/util/types";
   import { platform } from "$lib/platform";
   import { useUiContext } from "@tomat/shared/ui/context";
+  import type { PendingPermission } from "../../state";
   import {
     downloadsState,
     messagesState,
@@ -55,6 +56,7 @@
   import { ComposerAttachments } from "$composables/use-composer-attachments.svelte";
   import { InputShortcuts } from "$composables/use-input-shortcuts.svelte";
   import { PromptModes } from "$composables/use-prompt-modes.svelte";
+  import { AskUser, type PendingAsk } from "$composables/use-askuser.svelte";
   import { vadManager } from "$stores/vad.svelte";
   import { shortcutHandler } from "$stores/shortcut.svelte";
   import { useBlink } from "$composables/use-blink.svelte";
@@ -62,7 +64,6 @@
   import AttachmentList from "./AttachmentList.svelte";
   import QuickModelBar from "./userinput/QuickModelBar.svelte";
   import AutocorrectAlert from "./userinput/AutocorrectAlert.svelte";
-  import PermissionRequest from "./userinput/PermissionRequest.svelte";
   import ScheduleConfirmForm from "./userinput/ScheduleConfirmForm.svelte";
   import UserInputView from "@tomat/shared/ui/components/chat/UserInputView.svelte";
   import PromptButtonsView from "@tomat/shared/ui/components/chat/userinput/PromptButtonsView.svelte";
@@ -105,6 +106,10 @@
   // $effect that mirrors the pending frame into the draft.
   const inputShortcuts = new InputShortcuts();
   const prompt = new PromptModes();
+  // The askUser prompt's editable answers live in their own unit; this
+  // component keeps the $derived pending read (off the awaiting tool message's
+  // ephemera) and the $effect that mirrors it in.
+  const ask = new AskUser();
 
   let autocompleteOptions = $derived.by<AutocompleteOption[]>(() => {
     if (!ac.open) return [];
@@ -228,10 +233,83 @@
 
   // Permission mode: a running tool is paused on a permission it was not
   // always-allowed. The text input area shows the request instead of the
-  // textarea; attach/voice/send controls hide; X and check buttons to the
-  // right of the settings group decide. The accept applies to this tool
-  // call only ("always allow" lives in the Extension detail view).
+  // textarea; the voice/send controls become Deny / Allow. The accept applies
+  // to this tool call only ("always allow" lives in the Extension detail view).
   let permissionRequest = $derived(permissionState.pending);
+
+  // Map the pending permission to the plain-language action + concrete target
+  // the shared composer renders. Kept here (not in the View) because the kind ->
+  // sentence mapping is client domain logic; the View takes the resolved strings.
+  function permissionParts(p: PendingPermission): { action: string; detail?: string } {
+    switch (p.permissionKind) {
+      case "net":
+        return { action: "connect to a server", detail: p.resource };
+      case "read":
+        return { action: "read a file", detail: p.resource };
+      case "write":
+        return { action: "write to a file", detail: p.resource };
+      case "run":
+        return { action: "run a program", detail: p.resource };
+      case "env":
+        return p.resource
+          ? { action: "read an environment variable", detail: p.resource }
+          : { action: "read all environment variables" };
+      case "ffi":
+        return p.resource
+          ? { action: "load a native library", detail: p.resource }
+          : { action: "load native libraries" };
+      case "sys":
+        return { action: "read system information", detail: p.resource || undefined };
+      case "memories":
+        return p.resource === "write"
+          ? { action: "create and edit your memories" }
+          : { action: "read your memories" };
+      case "llm":
+        return { action: "use the language model" };
+      case "tts":
+        return { action: "speak text aloud" };
+      case "stt":
+        return { action: "transcribe audio to text" };
+    }
+  }
+
+  let permissionPrompt = $derived.by(() => {
+    if (!permissionRequest) return null;
+    const parts = permissionParts(permissionRequest);
+    return {
+      toolName: permissionRequest.toolName,
+      action: parts.action,
+      detail: parts.detail,
+      declared: permissionRequest.declared,
+    };
+  });
+
+  // askUser mode: a running tool called `ctx.askUser()` and is paused on its
+  // form. The request lives in the awaiting tool message's ephemera, so there is
+  // no dedicated store; derive the one pending form and mirror it into the unit.
+  // If several tools await at once, surface the oldest first (FIFO, matching the
+  // permission queue): `messages` is newest-first, so scan from the tail.
+  let pendingAsk = $derived.by<PendingAsk | null>(() => {
+    const msgs = messagesState.messages;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (
+        m.role === "tool" &&
+        m.status === "awaiting_user" &&
+        m.callId &&
+        m.ephemera?.askUser &&
+        m.ephemera.askUser.answers === null
+      ) {
+        return {
+          callId: m.callId,
+          requestId: m.ephemera.askUser.requestId,
+          questions: m.ephemera.askUser.questions,
+        };
+      }
+    }
+    return null;
+  });
+  $effect(() => ask.sync(pendingAsk));
 
   // Schedule-confirm mode: a running tool proposed a scheduled prompt and is
   // paused on this editable form. Mirrors the permission mode: the textarea
@@ -553,7 +631,38 @@
 
   // Voice button is idle/available when the speech sidecar is up (or disabled).
   let sttIdle = $derived(sttStatus === "Running" || sttStatus === "Disabled");
-  let inPromptMode = $derived(!!permissionRequest || !!scheduleConfirm);
+  // Permission and askUser modes are driven through the shared composer's
+  // `permissionPrompt` / `askUserPrompt` state; only the (client-only) schedule-
+  // confirm form still rides the generic content/right slots. Precedence
+  // permission > askUser > schedule keeps one prompt in the composer at a time.
+  let inAskMode = $derived(!permissionPrompt && !!pendingAsk);
+  let inScheduleMode = $derived(!permissionPrompt && !inAskMode && !!scheduleConfirm);
+
+  // The askUser bundle the View renders (form content + hoisted commit actions),
+  // mirroring how `permissionPrompt` is derived. Auto-submit for the no-explicit-
+  // submit kinds (single-select choice/files, diff, image) rides the effect below.
+  let askUserPrompt = $derived(
+    inAskMode && ask.pending
+      ? {
+          questions: ask.pending.questions,
+          drafts: ask.drafts,
+          togglePick: ask.togglePick,
+          setText: ask.setText,
+          onFreestyleFocus: ask.onFreestyleFocus,
+          onFreestyleBlur: ask.onFreestyleBlur,
+          setCell: ask.setCell,
+          addRow: ask.addRow,
+          removeRow: ask.removeRow,
+          canSubmit: ask.readyToSubmit,
+          onSubmit: ask.submit,
+          actions: ask.actions,
+        }
+      : null,
+  );
+  $effect(() => {
+    if (!inAskMode || ask.requiresSubmit || !ask.readyToSubmit) return;
+    ask.submit();
+  });
   let textareaDisabled = $derived(
     downloadsState.hasPending ||
       downloadsState.loading ||
@@ -579,10 +688,14 @@
   ontextareablur={() => (ac.open = false)}
   onpaste={(e) => composer.handlePaste(e)}
   topSlot={autocorrectAlert}
-  contentOverride={inPromptMode ? promptContent : undefined}
+  contentOverride={inScheduleMode ? promptContent : undefined}
   belowContent={quickModelBar}
   attachmentSlot={attachmentRow}
-  showLeftGroup={!inPromptMode}
+  {permissionPrompt}
+  onPermissionDeny={() => permissionState.respond(false)}
+  onPermissionAllow={() => permissionState.respond(true)}
+  {askUserPrompt}
+  showLeftGroup={!inScheduleMode}
   onAttach={() => composer.handleAttachFile()}
   onAttachImage={() => composer.handleAttachImageMobile()}
   captureMonitors={composer.captureMonitors}
@@ -597,7 +710,7 @@
   settingsTitle={downloadsState.hasPending ? "Pending downloads - open settings" : "Settings"}
   {gearTone}
   onSettings={() => viewState.navigate("settings")}
-  rightSlot={inPromptMode ? promptButtons : undefined}
+  rightSlot={inScheduleMode ? promptButtons : undefined}
   showTempToggle={sessionsState.storageEnabled && !sessionsState.started}
   tempActive={sessionsState.isTemporary}
   onTempToggle={() => sessionsState.toggleTemporary()}
@@ -645,9 +758,7 @@
 {/snippet}
 
 {#snippet promptContent()}
-  {#if permissionRequest}
-    <PermissionRequest request={permissionRequest} />
-  {:else if scheduleConfirm && prompt.scheduleDraft}
+  {#if scheduleConfirm && prompt.scheduleDraft}
     <ScheduleConfirmForm
       draft={prompt.scheduleDraft}
       onChange={(next) => (prompt.scheduleDraft = next)}
@@ -669,24 +780,7 @@
 {/snippet}
 
 {#snippet promptButtons()}
-  {#if permissionRequest}
-    <PromptButtonsView
-      buttons={[
-        {
-          icon: "i-material-symbols-close-rounded",
-          label: "Deny",
-          title: "Reject this permission request",
-          onClick: () => permissionState.respond(false),
-        },
-        {
-          icon: "i-material-symbols-check-rounded",
-          label: "Allow",
-          title: "Allow for this tool call",
-          onClick: () => permissionState.respond(true),
-        },
-      ]}
-    />
-  {:else if scheduleConfirm}
+  {#if scheduleConfirm}
     <PromptButtonsView
       buttons={[
         {

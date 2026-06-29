@@ -55,7 +55,6 @@
   let agentText = $state("");
   let showUser = $state(false);
   let showAnswer = $state(false);
-  let answerStreaming = $state(false);
   // Gate bubble entry animations off while measuring full content height (an
   // animating bubble starts collapsed at max-height 0 and would mis-measure).
   let measuring = $state(false);
@@ -87,7 +86,6 @@
     agentText = "";
     showUser = false;
     showAnswer = false;
-    answerStreaming = false;
     showBand = false;
     bandSpeaker = "user";
     bandText = "";
@@ -182,15 +180,11 @@
       //    bubble border PINGS, signalling audio is being synthesised for it.
       tl.add(() => {
         showAnswer = true;
-        answerStreaming = true;
         ttsActive = true;
         ttsPulse = true;
       });
       demo.type(tl, (v) => (agentText = v), ANSWER, { duration: ANSWER_SECONDS });
       // A short synth tail after the text finishes, border still pinging.
-      tl.add(() => {
-        answerStreaming = false;
-      });
       demo.hold(tl, 0.5);
 
       // 6. Playback stage: audio plays, the border goes steady (no longer

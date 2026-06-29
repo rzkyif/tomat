@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { AskUserTableQuestion } from "../../../../../domain/session.ts";
-  import type { DraftAnswer } from "../ToolCallView.svelte";
+  import type { DraftAnswer } from "../../userinput/AskUserFormView.svelte";
 
   let {
     q,

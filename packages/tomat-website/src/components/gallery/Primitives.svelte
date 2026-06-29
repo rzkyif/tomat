@@ -52,10 +52,6 @@
 
 <section class="flex flex-col gap-6">
   <h2 class="text-lg font-medium">Primitives</h2>
-  <p class="text-default-500 text-sm">
-    The shared A0 leaves, each in its variants and states. Every other component in this gallery is
-    built from these.
-  </p>
 
   <div class="columns-1 sm:columns-2 lg:columns-3 gap-4">
     {#each entries(P.Button) as [name, p] (name)}

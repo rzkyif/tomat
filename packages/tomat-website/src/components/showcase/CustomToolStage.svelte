@@ -87,7 +87,6 @@ export async function feedCat(
       ],
     },
   ];
-  const feedAsk = { requestId: "feed-req", questions: feedQuestions };
 
   // Chat state, driven by the timeline.
   let inputValue = $state("");
@@ -103,22 +102,18 @@ export async function feedCat(
   let feedResult = $state<unknown>(undefined);
   let showAnswer = $state(false);
   let answerText = $state("");
-  let answerStreaming = $state(false);
 
   let stageEl: HTMLElement | undefined = $state();
   let cursorRef: HTMLElement | undefined = $state();
   let chatScroll: HTMLElement | undefined = $state();
 
   // The relevant-tools and tool-call bubbles are small bubbles, so they share one
-  // horizontal message stack while the tool is collapsed. When the tool needs the
-  // user's answer it expands, which (per the client's stacking rule) breaks it out
-  // of the stack as a standalone row; it rejoins once it completes and collapses.
-  const feedExpanded = $derived(feedStatus === "awaiting_user");
+  // horizontal message stack. While the tool awaits the user's answer its bubble
+  // stays in the stack, collapsed and yellow; the answer form itself renders in
+  // the composer below (the askUser form moved out of the bubble).
   const align = $derived(ui.getAlignment());
   const stackItems = $derived(
-    [showRelevant ? "relevant" : null, showFeed && !feedExpanded ? "feed" : null].filter(
-      (x): x is string => !!x,
-    ),
+    [showRelevant ? "relevant" : null, showFeed ? "feed" : null].filter((x): x is string => !!x),
   );
 
   function reset(): void {
@@ -132,7 +127,6 @@ export async function feedCat(
     feedResult = undefined;
     showAnswer = false;
     answerText = "";
-    answerStreaming = false;
     ui.expansionSet(REL_ID, false);
     if (chatScroll) chatScroll.scrollTop = 0;
   }
@@ -152,13 +146,7 @@ export async function feedCat(
       const input = 'textarea[aria-label="Message input"]';
       const send = 'button[title="Send"]';
 
-      // 1. Glance over the extension files.
-      demo.move(tl, '[data-pane="index"]', { duration: 0.9 });
-      demo.hold(tl, 0.9);
-      demo.move(tl, '[data-pane="tools"]', { duration: 0.7 });
-      demo.hold(tl, 0.9);
-
-      // 2. Trigger the tool by prompt.
+      // 1. Trigger the tool by prompt.
       demo.move(tl, input, { duration: 0.7 });
       demo.click(tl, input);
       demo.type(tl, (v) => (inputValue = v), PROMPT, { duration: 1.3 });
@@ -173,7 +161,7 @@ export async function feedCat(
       demo.hover(tl, send, false);
       demo.scroll(tl, () => chatScroll, 9999, { duration: 0.5 });
 
-      // 3. The relevant-tools bubble appears collapsed, then the agent's tool
+      // 2. The relevant-tools bubble appears collapsed, then the agent's tool
       //    call follows right behind it and holds waiting for input (neither
       //    waits on a cursor click to appear).
       demo.hold(tl, 0.4);
@@ -193,7 +181,7 @@ export async function feedCat(
       demo.scroll(tl, () => chatScroll, 9999, { duration: 0.4 });
       demo.hold(tl, 0.6);
 
-      // 4. The cursor answers the tool's question.
+      // 3. The cursor answers the tool's question.
       demo.move(tl, "[data-tc-nav]", { duration: 0.7 });
       demo.hover(tl, "[data-tc-nav]", true);
       demo.click(tl, "[data-tc-nav]", () => {
@@ -201,7 +189,7 @@ export async function feedCat(
       });
       demo.hover(tl, "[data-tc-nav]", false);
       demo.hold(tl, 0.7);
-      // 5. The tool resumes and completes.
+      // 4. The tool resumes and completes.
       tl.add(() => {
         feedStatus = "completed";
         feedDrafts = undefined;
@@ -210,13 +198,9 @@ export async function feedCat(
       demo.scroll(tl, () => chatScroll, 9999, { duration: 0.4 });
       demo.hold(tl, 0.6);
 
-      // 6. The agent's closing reply.
-      tl.add(() => {
-        showAnswer = true;
-        answerStreaming = true;
-      });
+      // 5. The agent's closing reply.
+      tl.add(() => (showAnswer = true));
       demo.type(tl, (v) => (answerText = v), ANSWER, { duration: ANSWER_SECONDS });
-      tl.add(() => (answerStreaming = false));
       demo.scroll(tl, () => chatScroll, 9999, { duration: 0.4 });
       register({
         timeline: tl,
@@ -327,18 +311,6 @@ export async function feedCat(
             </div>
           </MessageEnter>
         {/if}
-        <!-- When the tool needs the user's answer it expands out of the stack as a
-             standalone row (the client's split-on-expand rule). -->
-        {#if showFeed && feedExpanded}
-          <MessageEnter>
-            <ToolCallView
-              toolName="feed_cat"
-              status={feedStatus}
-              askUser={feedAsk}
-              draftsOverride={feedDrafts}
-            />
-          </MessageEnter>
-        {/if}
         {#if showAnswer}
           <MessageEnter>
             <AgentMessageView kind="content" bgClass="bubble-agent">
@@ -348,7 +320,18 @@ export async function feedCat(
             </AgentMessageView>
           </MessageEnter>
         {/if}
-        <UserInputView bind:value={inputValue} placeholder="Enter your instructions..." />
+        <!-- The composer hosts the tool's askUser form while it awaits input: the
+             question + options render in place of the textarea, neutral, and the
+             left controls hide (matching the client's askUser composer mode). -->
+        <!-- Single-select choice commits by clicking an option tile, so `actions`
+             is empty (no row buttons), matching the client's askUser composer. -->
+        <UserInputView
+          bind:value={inputValue}
+          placeholder="Enter your instructions..."
+          askUserPrompt={feedStatus === "awaiting_user"
+            ? { questions: feedQuestions, drafts: feedDrafts ?? {}, actions: [], autoFocus: false }
+            : null}
+        />
       </div>
     </div>
   </div>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
+  import { type Snippet, untrack } from "svelte";
   import type { Alignment } from "../../types.ts";
   import { useUiContext } from "../../context.ts";
   import { longpress } from "../../actions/longpress.ts";
@@ -64,16 +64,20 @@
     neighborLeft?: boolean;
     /** Visual-right side has another bubble in the same stack row. */
     neighborRight?: boolean;
-    /** Progress visualisation rendered AS the bubble background. The fill and
-     *  its inverted overlay span the WHOLE bubble height, so a bubble of any
-     *  size (a one-line header or a tall expanded body) is covered edge to edge.
-     *  `undefined` = no progress; `null` = indeterminate sweeping bar; number =
-     *  percent (0..100). When set, content is rendered twice: the filled copy is
-     *  `filter: invert()`-ed and clipped to the fill rect so text and other UI
-     *  elements over the bar read inverted. */
+    /** Progress visualisation rendered AS the bubble background. When set, the
+     *  WHOLE bubble reads inverted (a solid `progressFillBgClass` fill under an
+     *  `invert()`-ed copy of the content) and the progress bar is an
+     *  un-inverted WINDOW showing the original colours where the bar has
+     *  reached. The overlay and window span the full bubble height, so a bubble
+     *  of any size (a one-line header or a tall expanded body) is covered edge
+     *  to edge. `undefined` = no progress; `null` = indeterminate sweeping
+     *  window; number = percent (0..100). When progress clears, the window
+     *  sweeps to 100% (the inversion lifts off the whole bubble) before the
+     *  layers unmount. */
     progress?: number | null;
-    /** Override for the determinate/indeterminate fill colour. Defaults to
-     *  `bg-default-800` to pair with the default `bg-surface` track. */
+    /** Override for the inverted-overlay fill colour (the bubble's colour while
+     *  inverted). Defaults to `bg-default-800` to pair with the default
+     *  `bg-surface` track. */
     progressFillBgClass?: string;
     onclick?: (e: MouseEvent) => void;
     oncontextmenu?: (e: MouseEvent) => void;
@@ -100,16 +104,37 @@
   let percent = $derived(
     typeof progress === "number" ? Math.max(0, Math.min(100, progress)) : null,
   );
-  // Grow-from-zero on spawn. A CSS transition only animates a value that
-  // changes after the element exists, so a bar that mounts already at e.g. 50%
-  // (a tool call that spawns mid-run, or a pending->running flip from the
-  // indeterminate sweep to a fresh determinate element) would otherwise snap to
-  // half-width. Paint the bar at 0 for one frame, then grow to the real value so
-  // `transition-all` animates the spawn. The effect keys on `isDeterminate`
-  // only (not `percent`), so later progress updates animate normally without
-  // re-triggering the reset. rAF/effects never run during SSR, so the static
-  // website build is unaffected.
   let isDeterminate = $derived(hasProgress && percent !== null);
+  // Progress lifecycle. The overlay + window layers stay mounted through an
+  // exit animation after `progress` clears, so the un-inverted window can sweep
+  // to 100% (the inversion lifts off the whole bubble) before they unmount.
+  // Initialised from the current prop so a server-rendered bubble that already
+  // has progress paints its layers without waiting for an effect.
+  let mounted = $state(untrack(() => progress !== undefined));
+  let exiting = $state(false);
+  $effect(() => {
+    if (hasProgress) {
+      mounted = true;
+      exiting = false;
+      return;
+    }
+    if (!mounted) return;
+    exiting = true;
+    const done = setTimeout(() => {
+      mounted = false;
+      exiting = false;
+    }, 500);
+    return () => clearTimeout(done);
+  });
+  // Grow-from-zero on spawn. A CSS transition only animates a value that
+  // changes after the element exists, so a window that mounts already at e.g.
+  // 50% (a tool call that spawns mid-run, or a pending->running flip from the
+  // indeterminate sweep to a fresh determinate element) would otherwise snap to
+  // half-width. Paint the window at 0 for one frame, then grow to the real
+  // value so `transition-[clip-path]` animates the spawn. The effect keys on
+  // `isDeterminate` only (not `percent`), so later progress updates animate
+  // normally without re-triggering the reset. rAF/effects never run during SSR,
+  // so the static website build is unaffected.
   let grown = $state(false);
   $effect(() => {
     if (!isDeterminate) {
@@ -128,11 +153,13 @@
       cancelAnimationFrame(raf2);
     };
   });
-  let displayPercent = $derived(grown ? percent : 0);
-  // Right-aligned bubbles fill the progress bar from right to left so the
-  // motion mirrors the bubble's anchor edge. The determinate fill anchors on
-  // `right-0` instead of `left-0`; the indeterminate sweep and the
-  // inverted-layer clip-path use mirrored keyframes / inset values.
+  // Width of the un-inverted progress window, anchored at the bubble's origin
+  // edge. During the exit animation it sweeps to 100% so the bubble fully
+  // returns to its normal colours before the layers unmount.
+  let displayPercent = $derived(exiting ? 100 : grown ? percent : 0);
+  // Right-aligned bubbles fill the window from right to left so the motion
+  // mirrors the bubble's anchor edge. The indeterminate sweep and the window's
+  // clip-path use mirrored keyframes / inset values.
   let isRight = $derived(selectedAlignment === "right");
 
   // Frosted-edge halo: render exactly N concentric blur rings (0 when the
@@ -204,62 +231,65 @@
     class:border-b-0={selectedAlignment === "center" && !active}
     class:bubble-border-pulse={active && pulse}
   >
-    {#if hasProgress}
-      {#if percent === null}
-        <div
-          class="absolute inset-y-0 {progressFillBgClass}"
-          class:left-0={!isRight}
-          class:right-0={isRight}
-          class:bubble-progress-indet={!isRight}
-          class:bubble-progress-indet-rtl={isRight}
-        ></div>
-      {:else}
-        <div
-          class="absolute inset-y-0 {progressFillBgClass} transition-all duration-500"
-          class:left-0={!isRight}
-          class:right-0={isRight}
-          style="width: {displayPercent}%"
-        ></div>
-      {/if}
-    {/if}
     <div class="relative z-10 {paddingClass} {extraClass}">
       {@render children()}
     </div>
-    {#if hasProgress}
-      <!-- Inverted layer: same content rendered atop the fill so text and other
-           UI sitting over the bar read inverted. `filter: invert(1)
-           hue-rotate(180deg)` flips all colours (text, icons, inline-pill
-           bg/fg) to a perceptually-inverted version in one shot, no need to
-           thread invert-color props through every descendant.
-
-           The clip and the filter are split across two nested elements ON
-           PURPOSE. The OUTER element clips to the filled rect (clip-path spans
-           the full bubble height, zero top/bottom inset, so the inversion
-           tracks the full-height fill at any bubble size); the INNER element
-           carries the filter. They must not share one element: WebKit
-           mis-renders an element that has BOTH a `clip-path` and a `filter`
-           when it lives inside a `transform`-promoted ancestor (the
-           `bubble-body-promote` compositing layer), clipping the filtered
-           content to a stale sub-rect even where the clip-path reveals it, so
-           only part of the inverted text shows. Keeping clip and filter on
-           separate elements sidesteps that.
-
-           Children are rendered twice; Svelte's bind:expanded on the shared
-           parent state keeps both Expandable instances in lockstep, and
-           pointer-events:none routes all clicks to the lower (un-filtered)
-           copy. -->
+    {#if mounted}
+      <!-- Inverted overlay: the whole bubble reads inverted. Split in two:
+           a solid `progressFillBgClass` fill and, over it, an
+           `invert(1) hue-rotate(180deg)` copy of the content (flipping text,
+           icons and inline pills to their perceptual inverse in one shot, no
+           need to thread invert-color props through every descendant). The fill
+           is bled 1px past every edge so the body's rounded `overflow-hidden`
+           clip - not the fill's own antialiased edge - defines the boundary;
+           otherwise a hairline of the original (light) background shows at the
+           edges, glaring at full-inversion's max contrast. The content stays at
+           the true bubble box so the inverted copy lines up with the base and
+           window copies (a bled content box would reflow its text by ~1px). The
+           un-inverted window below sits ON TOP and reveals the original colours
+           wherever the bar has reached. -->
       <div
-        class="absolute inset-0 z-20 pointer-events-none transition-[clip-path] duration-500"
-        class:bubble-progress-invert-indet={percent === null && !isRight}
-        class:bubble-progress-invert-indet-rtl={percent === null && isRight}
-        style:clip-path={percent === null
+        class="absolute z-20 pointer-events-none {progressFillBgClass}"
+        style="inset: -1px"
+        aria-hidden="true"
+      ></div>
+      <div class="absolute inset-0 z-20 pointer-events-none" aria-hidden="true">
+        <div class="bubble-progress-invert absolute inset-0 {paddingClass} {extraClass}">
+          {@render children()}
+        </div>
+      </div>
+      <!-- Un-inverted window: a copy of the bubble's normal colours clipped to
+           the bar's reached region, so the filled part of the progress reads as
+           the original (non-inverted) bubble. `transition-[clip-path]` animates
+           the determinate grow and the sweep to 100% on exit; the indeterminate
+           state instead slides an animated mask (a clip-path animated via
+           @keyframes mis-composites in WebKit when it overlaps the inverted
+           overlay below, so the band would collapse to the bubble's centre).
+
+           The clip and the filter are split across separate elements ON
+           PURPOSE. This window carries ONLY the clip (no filter); the overlay
+           above carries ONLY the filter (no clip). They must not share one
+           element: WebKit mis-renders an element that has BOTH a `clip-path`
+           and a `filter` when it lives inside a `transform`-promoted ancestor
+           (the `bubble-body-promote` compositing layer), clipping the filtered
+           content to a stale sub-rect even where the clip-path reveals it.
+
+           Children are rendered a second extra time here (base + overlay +
+           window); Svelte's bind:expanded on the shared parent state keeps
+           every Expandable copy in lockstep, and pointer-events:none routes all
+           clicks to the base (lower, un-clipped) copy. -->
+      <div
+        class="absolute inset-0 z-30 pointer-events-none {bgClass} transition-[clip-path] duration-500"
+        class:bubble-progress-window-indet={percent === null && !exiting && !isRight}
+        class:bubble-progress-window-indet-rtl={percent === null && !exiting && isRight}
+        style:clip-path={percent === null && !exiting
           ? undefined
           : isRight
             ? `inset(0 0 0 calc(100% - ${displayPercent}%))`
             : `inset(0 calc(100% - ${displayPercent}%) 0 0)`}
         aria-hidden="true"
       >
-        <div class="bubble-progress-invert absolute inset-0 {paddingClass} {extraClass}">
+        <div class="absolute inset-0 {paddingClass} {extraClass}">
           {@render children()}
         </div>
       </div>
@@ -301,90 +331,89 @@
     pointer-events: none;
   }
 
-  /* Indeterminate fill: bar sweeps left → right, widening at the midpoint
-     and collapsing at each end. Continuous motion via complementary
-     per-keyframe easing. `ease-in` 0%→50% accelerates into the midpoint,
-     `ease-out` 50%→100% decelerates out of it. */
-  .bubble-progress-indet {
-    animation: bubble-progress-indet 1.6s linear infinite;
-    width: 0%;
-    will-change: left, width;
+  /* Indeterminate sweep: a hard-edged band of the un-inverted window slides
+     across the inverted bubble, widening to half the bubble at the midpoint and
+     collapsing to nothing at each end (`ease-in` into the midpoint, `ease-out`
+     out of it) - the original determinate-fill motion.
+
+     Driven by an animated MASK whose two opaque edges (`--bar-from`/`--bar-to`,
+     registered with @property so they interpolate as <percentage>s) move and
+     spread, NOT by an animated `clip-path`: WebKit (and Chromium) mis-composite
+     an element whose `clip-path` is animated via @keyframes when it overlaps a
+     sibling layer (here the full-cover inverted overlay) - the animated-clip
+     window collapses and only the dark overlay shows, so the bar looked trapped
+     in a central band. An animated mask composites correctly. (Static clip-path
+     and clip-path TRANSITIONS are unaffected, so the determinate bar above
+     keeps them.) The gradient jumps straight from transparent to opaque at each
+     edge, so the band reads as a crisp rectangle, not a feathered blur. */
+  @property --bar-from {
+    syntax: "<percentage>";
+    inherits: false;
+    initial-value: 0%;
   }
-  @keyframes bubble-progress-indet {
+  @property --bar-to {
+    syntax: "<percentage>";
+    inherits: false;
+    initial-value: 0%;
+  }
+  .bubble-progress-window-indet,
+  .bubble-progress-window-indet-rtl {
+    --bar-from: 0%;
+    --bar-to: 0%;
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent var(--bar-from),
+      #000 var(--bar-from),
+      #000 var(--bar-to),
+      transparent var(--bar-to)
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent var(--bar-from),
+      #000 var(--bar-from),
+      #000 var(--bar-to),
+      transparent var(--bar-to)
+    );
+  }
+  .bubble-progress-window-indet {
+    animation: bubble-progress-window-indet 1.6s linear infinite;
+  }
+  @keyframes bubble-progress-window-indet {
     0% {
-      left: 0%;
-      width: 0%;
+      --bar-from: 0%;
+      --bar-to: 0%;
       animation-timing-function: ease-in;
     }
     50% {
-      left: 25%;
-      width: 50%;
+      --bar-from: 25%;
+      --bar-to: 75%;
       animation-timing-function: ease-out;
     }
     100% {
-      left: 100%;
-      width: 0%;
-    }
-  }
-  /* Inversion clip tracks the indeterminate fill exactly: same duration,
-     timing, and per-keyframe easing, so the inverted content always
-     coincides with the moving bar. */
-  .bubble-progress-invert-indet {
-    animation: bubble-progress-invert-indet 1.6s linear infinite;
-  }
-  @keyframes bubble-progress-invert-indet {
-    0% {
-      clip-path: inset(0 100% 0 0);
-      animation-timing-function: ease-in;
-    }
-    50% {
-      clip-path: inset(0 25% 0 25%);
-      animation-timing-function: ease-out;
-    }
-    100% {
-      clip-path: inset(0 0 0 100%);
+      --bar-from: 100%;
+      --bar-to: 100%;
     }
   }
 
-  /* Right-to-left mirror of the indeterminate sweep: bar enters from the
-     right edge, widens through the midpoint, and collapses at the left.
-     Anchors on `right` instead of `left` so the right-aligned bubble's
-     progress motion mirrors its anchor edge. */
-  .bubble-progress-indet-rtl {
-    animation: bubble-progress-indet-rtl 1.6s linear infinite;
-    width: 0%;
-    will-change: right, width;
+  /* Right-to-left mirror: the band sweeps from the right edge to the left, so
+     the right-aligned bubble's progress motion mirrors its anchor edge. */
+  .bubble-progress-window-indet-rtl {
+    animation: bubble-progress-window-indet-rtl 1.6s linear infinite;
   }
-  @keyframes bubble-progress-indet-rtl {
+  @keyframes bubble-progress-window-indet-rtl {
     0% {
-      right: 0%;
-      width: 0%;
+      --bar-from: 100%;
+      --bar-to: 100%;
       animation-timing-function: ease-in;
     }
     50% {
-      right: 25%;
-      width: 50%;
+      --bar-from: 25%;
+      --bar-to: 75%;
       animation-timing-function: ease-out;
     }
     100% {
-      right: 100%;
-      width: 0%;
-    }
-  }
-  .bubble-progress-invert-indet-rtl {
-    animation: bubble-progress-invert-indet-rtl 1.6s linear infinite;
-  }
-  @keyframes bubble-progress-invert-indet-rtl {
-    0% {
-      clip-path: inset(0 0 0 100%);
-      animation-timing-function: ease-in;
-    }
-    50% {
-      clip-path: inset(0 25% 0 25%);
-      animation-timing-function: ease-out;
-    }
-    100% {
-      clip-path: inset(0 100% 0 0);
+      --bar-from: 0%;
+      --bar-to: 0%;
     }
   }
 </style>

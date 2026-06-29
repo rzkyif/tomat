@@ -159,17 +159,19 @@ for (const parent of Object.values(EMBEDDED_VIEWS)) {
 }
 
 // The askUser question sub-views (chat/messages/askuser/*) are tightly coupled
-// internals of ToolCallView (callbacks + draft state), not standalone Views, so
-// they earn coverage transitively: ToolCallView is galleried and the toolCall
-// samples exercise each question kind. Enforce that every one is actually
-// imported by ToolCallView, so a new question kind cannot be added without being
-// wired into (and thus shown by) the galleried parent.
+// internals of AskUserFormView (callbacks + draft state), not standalone Views,
+// so they earn coverage transitively: AskUserFormView is galleried and the
+// askUserForm samples exercise each question kind. Enforce that every one is
+// actually imported by AskUserFormView, so a new question kind cannot be added
+// without being wired into (and thus shown by) the galleried parent.
 const ASKUSER_DIR = `${VIEWS_DIR}chat/messages/askuser/`;
-const toolCallSrc = await read(`${VIEWS_DIR}chat/messages/ToolCallView.svelte`);
+const askUserFormSrc = await read(`${VIEWS_DIR}chat/userinput/AskUserFormView.svelte`);
 for await (const e of walk(ASKUSER_DIR, { exts: [".svelte"], includeDirs: false })) {
   const base = e.name.replace(/\.svelte$/, "");
-  if (!new RegExp(`[/"']${base}\\.svelte`).test(toolCallSrc)) {
-    problems.push(`${base}: askUser question not imported by ToolCallView (it would never render)`);
+  if (!new RegExp(`[/"']${base}\\.svelte`).test(askUserFormSrc)) {
+    problems.push(
+      `${base}: askUser question not imported by AskUserFormView (it would never render)`,
+    );
   }
 }
 

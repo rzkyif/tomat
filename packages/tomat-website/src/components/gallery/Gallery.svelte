@@ -136,11 +136,20 @@
 </script>
 
 <div class="mx-auto max-w-6xl px-4 py-10 flex flex-col gap-12">
-  <header class="flex flex-col gap-1">
-    <h1 class="text-2xl font-semibold">Component gallery</h1>
+  <header class="flex flex-col gap-2">
+    <h1 class="text-2xl font-semibold">Component Gallery</h1>
     <p class="text-default-500 text-sm">
-      Every shared <code>@tomat/shared/ui</code> component rendered from its samples on default settings,
-      over the dim focus grid the showcases use. Toggle the navbar theme to check light and dark.
+      A one to one replica of tomat Client components in various states.
+    </p>
+    <p class="text-default-500 text-sm">
+      The Client is built with Tauri and Svelte, and both it and this page shares one UI package. A
+      state shown here should be identical to the one in the Client.
+    </p>
+    <p class="text-default-500 text-sm">
+      If anything looks off, please <a
+        class="underline"
+        href="https://github.com/rzkyif/tomat/issues">report it as an issue.</a
+      >
     </p>
   </header>
 
@@ -156,7 +165,7 @@
                the whole simulated session is visible. -->
           <div class="w-full flex justify-center">
             <ChatShellView
-              {...p as ComponentProps<typeof ChatShellView>}
+              {...p as ComponentProps}
               coreBar={chatCoreBar}
               sessionBar={chatSessionBar}
               input={chatInput}
@@ -168,10 +177,7 @@
 
       {#each entries(SAMPLES.SettingsShellView) as [name, p] (name)}
         <GalleryCard label={`SettingsShellView · ${name}`} wide>
-          <SettingsShellView
-            {...p as ComponentProps<typeof SettingsShellView>}
-            sizeClass="w-full h-[28rem]"
-          >
+          <SettingsShellView {...p as ComponentProps} sizeClass="w-full h-[28rem]">
             {#snippet groupContent(gid)}
               <SettingsContentView
                 groupId={gid}
@@ -189,7 +195,7 @@
       {#each entries(SAMPLES.NewCoreWizardView) as [name, p] (name)}
         <GalleryCard label={`NewCoreWizardView · ${name}`} wide>
           <div class="w-full flex justify-center">
-            <NewCoreWizardView {...p as ComponentProps<typeof NewCoreWizardView>} />
+            <NewCoreWizardView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -209,7 +215,7 @@
       {#each entries(SAMPLES.UserInputView) as [name, p] (name)}
         <GalleryCard label={`UserInputView · ${name}`} wide>
           <div class="w-full flex justify-center">
-            <UserInputView {...p as ComponentProps<typeof UserInputView>} />
+            <UserInputView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -218,7 +224,7 @@
         <GalleryCard label={`SessionBarView · ${name}`} wide>
           <div class="w-full flex justify-center">
             <div class="w-[40rem] max-w-full">
-              <SessionBarView {...p as ComponentProps<typeof SessionBarView>} />
+              <SessionBarView {...p as ComponentProps} />
             </div>
           </div>
         </GalleryCard>
@@ -227,13 +233,13 @@
       {#each entries(SAMPLES.SessionListView) as [name, p] (name)}
         <GalleryCard label={`SessionListView · ${name}`} wide>
           <div class="w-full flex justify-center">
-            <SessionListView {...p as ComponentProps<typeof SessionListView>} />
+            <SessionListView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
 
       {#each entries(SAMPLES.MessageStackView) as [name, p] (name)}
-        {@const sp = p as ComponentProps<typeof MessageStackView>}
+        {@const sp = p as ComponentProps}
         <GalleryCard label={`MessageStackView · ${name}`} wide>
           <!-- Force the host narrower than its content for the multi-bubble samples
                so the row GENUINELY overflows and clips (a static page cannot script
@@ -269,13 +275,13 @@
     <div class="columns-1 sm:columns-2 lg:columns-3 gap-4">
       {#each entries(SAMPLES.UserMessageView) as [name, p] (name)}
         <GalleryCard label={`UserMessageView · ${name}`}>
-          <UserMessageView {...p as ComponentProps<typeof UserMessageView>} />
+          <UserMessageView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
 
       {#each entries(SAMPLES.AgentMessageView) as [name, p] (name)}
         <GalleryCard label={`AgentMessageView · ${name}`}>
-          <AgentMessageView {...p as ComponentProps<typeof AgentMessageView>}>
+          <AgentMessageView {...p as ComponentProps}>
             {#snippet body()}
               <span class="whitespace-pre-wrap break-words"
                 >{p.kind === "content" ? AGENT_ANSWER : AGENT_REASONING}</span
@@ -287,7 +293,7 @@
 
       {#each entries(SAMPLES.ToolCallView) as [name, p] (name)}
         <GalleryCard label={`ToolCallView · ${name}`}>
-          <ToolCallView {...p as ComponentProps<typeof ToolCallView>}>
+          <ToolCallView {...p as ComponentProps}>
             {#snippet memoryContent({ content })}
               <pre class="whitespace-pre-wrap text-xs">{content}</pre>
             {/snippet}
@@ -297,43 +303,43 @@
 
       {#each entries(SAMPLES.ErrorMessageView) as [name, p] (name)}
         <GalleryCard label={`ErrorMessageView · ${name}`}>
-          <ErrorMessageView {...p as ComponentProps<typeof ErrorMessageView>} />
+          <ErrorMessageView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
 
       {#each entries(SAMPLES.ExpandableMessageView) as [name, p] (name)}
         <GalleryCard label={`ExpandableMessageView · ${name}`}>
-          <ExpandableMessageView {...p as ComponentProps<typeof ExpandableMessageView>} />
+          <ExpandableMessageView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
 
       {#each entries(SAMPLES.RelevantMemoriesView) as [name, p] (name)}
         <GalleryCard label={`RelevantMemoriesView · ${name}`}>
-          <RelevantMemoriesView {...p as ComponentProps<typeof RelevantMemoriesView>} />
+          <RelevantMemoriesView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
 
       {#each entries(SAMPLES.RelevantToolsView) as [name, p] (name)}
         <GalleryCard label={`RelevantToolsView · ${name}`}>
-          <RelevantToolsView {...p as ComponentProps<typeof RelevantToolsView>} />
+          <RelevantToolsView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
 
       {#each entries(SAMPLES.AttachmentListView) as [name, p] (name)}
         <GalleryCard label={`AttachmentListView · ${name}`} surface>
-          <AttachmentListView {...p as ComponentProps<typeof AttachmentListView>} />
+          <AttachmentListView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
 
       {#each entries(SAMPLES.CoreBarView) as [name, p] (name)}
         <GalleryCard label={`CoreBarView · ${name}`}>
-          <CoreBarView {...p as ComponentProps<typeof CoreBarView>} />
+          <CoreBarView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
 
       {#each entries(SAMPLES.PermissionRequestView) as [name, p] (name)}
         <GalleryCard label={`PermissionRequestView · ${name}`} surface>
-          <PermissionRequestView {...p as ComponentProps<typeof PermissionRequestView>} />
+          <PermissionRequestView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
 
@@ -343,14 +349,14 @@
                as the composer's top slot), so the gallery wraps it in the same
                shared Bubble rather than showing it bare on the grid. -->
           <Bubble selectedAlignment="left" extraClass="w-full">
-            <AutocorrectAlertView {...p as ComponentProps<typeof AutocorrectAlertView>} />
+            <AutocorrectAlertView {...p as ComponentProps} />
           </Bubble>
         </GalleryCard>
       {/each}
 
       {#each entries(SAMPLES.PromptButtonsView) as [name, p] (name)}
         <GalleryCard label={`PromptButtonsView · ${name}`} surface>
-          <PromptButtonsView {...p as ComponentProps<typeof PromptButtonsView>} />
+          <PromptButtonsView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
 
@@ -363,10 +369,7 @@
             class="relative mx-auto w-[20rem] h-48 overflow-hidden"
             style="transform: translateZ(0)"
           >
-            <SnippetAutocompleteView
-              {...p as ComponentProps<typeof SnippetAutocompleteView>}
-              anchor={{ top: 24, left: 32 }}
-            />
+            <SnippetAutocompleteView {...p as ComponentProps} anchor={{ top: 24, left: 32 }} />
           </div>
         </GalleryCard>
       {/each}
@@ -374,7 +377,7 @@
       {#each entries(SAMPLES.ScheduleConfirmFormView) as [name, p] (name)}
         <GalleryCard label={`ScheduleConfirmFormView · ${name}`} surface>
           <div class="w-full">
-            <ScheduleConfirmFormView {...p as ComponentProps<typeof ScheduleConfirmFormView>} />
+            <ScheduleConfirmFormView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -388,7 +391,7 @@
       {#each entries(SAMPLES.SettingsFieldView) as [name, p] (name)}
         <GalleryCard label={`SettingsFieldView · ${name}`} surface>
           <div class="w-full">
-            <SettingsFieldView {...p as ComponentProps<typeof SettingsFieldView>} />
+            <SettingsFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -398,7 +401,7 @@
           <!-- Match the gap the client's ObjectDetailScrollView puts between the
                field sections, so the gallery shows the same section spacing. -->
           <div class="w-full flex flex-col gap-3">
-            <CoresFieldView {...p as ComponentProps<typeof CoresFieldView>} />
+            <CoresFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -406,7 +409,7 @@
       {#each entries(SAMPLES.ServicesFieldView) as [name, p] (name)}
         <GalleryCard label={`ServicesFieldView · ${name}`} surface>
           <div class="w-full">
-            <ServicesFieldView {...p as ComponentProps<typeof ServicesFieldView>} />
+            <ServicesFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -414,7 +417,7 @@
       {#each entries(SAMPLES.StorageFieldView) as [name, p] (name)}
         <GalleryCard label={`StorageFieldView · ${name}`} surface>
           <div class="w-full">
-            <StorageFieldView {...p as ComponentProps<typeof StorageFieldView>} />
+            <StorageFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -422,7 +425,7 @@
       {#each entries(SAMPLES.ExtensionsFieldView) as [name, p] (name)}
         <GalleryCard label={`ExtensionsFieldView · ${name}`} surface>
           <div class="w-full">
-            <ExtensionsFieldView {...p as ComponentProps<typeof ExtensionsFieldView>} />
+            <ExtensionsFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -430,7 +433,7 @@
       {#each entries(SAMPLES.ExtensionDetailView) as [name, p] (name)}
         <GalleryCard label={`ExtensionDetailView · ${name}`} surface>
           <div class="w-full">
-            <ExtensionDetailView {...p as ComponentProps<typeof ExtensionDetailView>} />
+            <ExtensionDetailView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -438,7 +441,7 @@
       {#each entries(SAMPLES.ToolsFieldView) as [name, p] (name)}
         <GalleryCard label={`ToolsFieldView · ${name}`} surface>
           <div class="w-full">
-            <ToolsFieldView {...p as ComponentProps<typeof ToolsFieldView>} />
+            <ToolsFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -446,7 +449,7 @@
       {#each entries(SAMPLES.ToolDetailView) as [name, p] (name)}
         <GalleryCard label={`ToolDetailView · ${name}`} surface>
           <div class="w-full">
-            <ToolDetailView {...p as ComponentProps<typeof ToolDetailView>} />
+            <ToolDetailView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -454,7 +457,7 @@
       {#each entries(SAMPLES.McpDetailView) as [name, p] (name)}
         <GalleryCard label={`McpDetailView · ${name}`} surface>
           <div class="w-full">
-            <McpDetailView {...p as ComponentProps<typeof McpDetailView>} />
+            <McpDetailView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -462,7 +465,7 @@
       {#each entries(SAMPLES.McpFieldView) as [name, p] (name)}
         <GalleryCard label={`McpFieldView · ${name}`} surface>
           <div class="w-full">
-            <McpFieldView {...p as ComponentProps<typeof McpFieldView>} />
+            <McpFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -470,7 +473,7 @@
       {#each entries(SAMPLES.MemoryDetailView) as [name, p] (name)}
         <GalleryCard label={`MemoryDetailView · ${name}`} surface>
           <div class="w-full">
-            <MemoryDetailView {...p as ComponentProps<typeof MemoryDetailView>} />
+            <MemoryDetailView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -478,7 +481,7 @@
       {#each entries(SAMPLES.ModelPresetFieldView) as [name, p] (name)}
         <GalleryCard label={`ModelPresetFieldView · ${name}`} surface>
           <div class="w-full">
-            <ModelPresetFieldView {...p as ComponentProps<typeof ModelPresetFieldView>} />
+            <ModelPresetFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -486,7 +489,7 @@
       {#each entries(SAMPLES.SttPresetFieldView) as [name, p] (name)}
         <GalleryCard label={`SttPresetFieldView · ${name}`} surface>
           <div class="w-full">
-            <SttPresetFieldView {...p as ComponentProps<typeof SttPresetFieldView>} />
+            <SttPresetFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -494,7 +497,7 @@
       {#each entries(SAMPLES.TtsPresetFieldView) as [name, p] (name)}
         <GalleryCard label={`TtsPresetFieldView · ${name}`} surface>
           <div class="w-full">
-            <TtsPresetFieldView {...p as ComponentProps<typeof TtsPresetFieldView>} />
+            <TtsPresetFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -502,7 +505,7 @@
       {#each entries(SAMPLES.ShortcutFieldView) as [name, p] (name)}
         <GalleryCard label={`ShortcutFieldView · ${name}`} surface>
           <div class="w-full">
-            <ShortcutFieldView {...p as ComponentProps<typeof ShortcutFieldView>} />
+            <ShortcutFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -510,7 +513,7 @@
       {#each entries(SAMPLES.ScheduleEditorView) as [name, p] (name)}
         <GalleryCard label={`ScheduleEditorView · ${name}`} surface>
           <div class="w-full">
-            <ScheduleEditorView {...p as ComponentProps<typeof ScheduleEditorView>} />
+            <ScheduleEditorView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -518,7 +521,7 @@
       {#each entries(SAMPLES.ScheduledPromptDetailView) as [name, p] (name)}
         <GalleryCard label={`ScheduledPromptDetailView · ${name}`} surface>
           <div class="w-full">
-            <ScheduledPromptDetailView {...p as ComponentProps<typeof ScheduledPromptDetailView>} />
+            <ScheduledPromptDetailView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -526,7 +529,7 @@
       {#each entries(SAMPLES.SnippetDetailView) as [name, p] (name)}
         <GalleryCard label={`SnippetDetailView · ${name}`} surface>
           <div class="w-full">
-            <SnippetDetailView {...p as ComponentProps<typeof SnippetDetailView>} />
+            <SnippetDetailView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -534,7 +537,7 @@
       {#each entries(SAMPLES.CommandPreviewFieldView) as [name, p] (name)}
         <GalleryCard label={`CommandPreviewFieldView · ${name}`} surface>
           <div class="w-full min-w-0">
-            <CommandPreviewFieldView {...p as ComponentProps<typeof CommandPreviewFieldView>} />
+            <CommandPreviewFieldView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -542,7 +545,7 @@
       {#each entries(SAMPLES.UpdateButtonView) as [name, p] (name)}
         <GalleryCard label={`UpdateButtonView · ${name}`} surface>
           <div class="w-full">
-            <UpdateButtonView {...p as ComponentProps<typeof UpdateButtonView>} />
+            <UpdateButtonView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -553,7 +556,7 @@
                the client; the View itself owns its layout and the real schema
                fields, so no snippet stand-ins are needed. -->
           <div class="w-[34rem] max-w-full">
-            <QuickSettingsView {...p as ComponentProps<typeof QuickSettingsView>} />
+            <QuickSettingsView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -570,7 +573,7 @@
                fills the panel width and its toolbar (search + triple-dot) stretches
                like the client, instead of shrinking to content. -->
           <div class="w-full h-80">
-            <ObjectManagerView {...p as ComponentProps<typeof ObjectManagerView>}>
+            <ObjectManagerView {...p as ComponentProps}>
               {#snippet card(item: { name: string }, open: () => void)}
                 <ObjectCardView
                   label={item.name}
@@ -596,7 +599,7 @@
       {#each entries(SAMPLES.ObjectCardView) as [name, p] (name)}
         <GalleryCard label={`ObjectCardView · ${name}`} surface>
           <div class="w-full">
-            <ObjectCardView {...p as ComponentProps<typeof ObjectCardView>} />
+            <ObjectCardView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -604,7 +607,7 @@
       {#each entries(SAMPLES.ObjectDetailHeaderView) as [name, p] (name)}
         <GalleryCard label={`ObjectDetailHeaderView · ${name}`} surface>
           <div class="w-full">
-            <ObjectDetailHeaderView {...p as ComponentProps<typeof ObjectDetailHeaderView>} />
+            <ObjectDetailHeaderView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -612,7 +615,7 @@
       {#each entries(SAMPLES.ObjectDetailScrollView) as [name, p] (name)}
         <GalleryCard label={`ObjectDetailScrollView · ${name}`} surface>
           <div class="w-full">
-            <ObjectDetailScrollView {...p as ComponentProps<typeof ObjectDetailScrollView>}>
+            <ObjectDetailScrollView {...p as ComponentProps}>
               <div class="text-default-600 text-sm">Type-specific detail content.</div>
             </ObjectDetailScrollView>
           </div>
@@ -621,7 +624,7 @@
 
       {#each entries(SAMPLES.ObjectBadgeView) as [name, p] (name)}
         <GalleryCard label={`ObjectBadgeView · ${name}`} surface>
-          <ObjectBadgeView {...p as ComponentProps<typeof ObjectBadgeView>} />
+          <ObjectBadgeView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
     </div>
@@ -635,7 +638,7 @@
       {#each entries(SAMPLES.ConfirmModalView) as [name, p] (name)}
         <GalleryCard label={`ConfirmModalView · ${name}`} backdrop>
           <div class="relative h-80 w-full">
-            <ConfirmModalView {...p as ComponentProps<typeof ConfirmModalView>} />
+            <ConfirmModalView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -645,7 +648,7 @@
              gallery's `calc(100% - 4rem)` dialog cap, so the modal never scrolls. -->
         <GalleryCard label={`PasswordPromptModalView · ${name}`} backdrop>
           <div class="relative h-[22rem] w-full">
-            <PasswordPromptModalView {...p as ComponentProps<typeof PasswordPromptModalView>} />
+            <PasswordPromptModalView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -653,7 +656,7 @@
       {#each entries(SAMPLES.DeletionsModalView) as [name, p] (name)}
         <GalleryCard label={`DeletionsModalView · ${name}`} backdrop>
           <div class="relative h-[30rem] w-full">
-            <DeletionsModalView {...p as ComponentProps<typeof DeletionsModalView>} />
+            <DeletionsModalView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -661,7 +664,7 @@
       {#each entries(SAMPLES.DownloadsModalView) as [name, p] (name)}
         <GalleryCard label={`DownloadsModalView · ${name}`} backdrop>
           <div class="relative h-[28rem] w-full">
-            <DownloadsModalView {...p as ComponentProps<typeof DownloadsModalView>} />
+            <DownloadsModalView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -672,7 +675,7 @@
              breathing room above and below it on the grid. -->
         <GalleryCard label={`ShareModalView · ${name}`} backdrop>
           <div class="relative h-[44rem] w-full">
-            <ShareModalView {...p as ComponentProps<typeof ShareModalView>} />
+            <ShareModalView {...p as ComponentProps} />
           </div>
         </GalleryCard>
       {/each}
@@ -686,10 +689,7 @@
             >
               Pick color
             </button>
-            <ColorPickerModalView
-              {...p as ComponentProps<typeof ColorPickerModalView>}
-              anchor={colorAnchors[name] ?? null}
-            />
+            <ColorPickerModalView {...p as ComponentProps} anchor={colorAnchors[name] ?? null} />
           </div>
         </GalleryCard>
       {/each}
@@ -708,19 +708,19 @@
      feeds live state, so the card shows the actual chat (core bar, session bar,
      composer, and a prompt -> reasoning -> answer exchange), not stand-ins. -->
 {#snippet chatCoreBar()}
-  <CoreBarView {...SAMPLES.CoreBarView.idle as ComponentProps<typeof CoreBarView>} />
+  <CoreBarView {...SAMPLES.CoreBarView.idle as ComponentProps} />
 {/snippet}
 {#snippet chatSessionBar(_z: number)}
   <!-- The session-management buttons (list + new) always show with the bar, so
        the shell card matches the client instead of a bar with no controls. -->
   <SessionBarView
-    {...SAMPLES.SessionBarView.default as ComponentProps<typeof SessionBarView>}
+    {...SAMPLES.SessionBarView.default as ComponentProps}
     onList={chatNoop}
     onNew={chatNoop}
   />
 {/snippet}
 {#snippet chatInput()}
-  <UserInputView {...SAMPLES.UserInputView.empty as ComponentProps<typeof UserInputView>} />
+  <UserInputView {...SAMPLES.UserInputView.empty as ComponentProps} />
 {/snippet}
 {#snippet chatTranscript()}
   <!-- Newest-first DOM order: the shell's transcript column is flex-col-reverse,

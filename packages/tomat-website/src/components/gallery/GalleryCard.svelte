@@ -62,7 +62,16 @@
   const frameClass = $derived(wide ? "gallery-frame" : "gallery-frame gallery-frame-narrow");
 </script>
 
-<div {id} class={`scroll-mt-20 flex flex-col gap-2 mb-4 ${wide ? "" : "break-inside-avoid"}`}>
+<!-- scroll-margin clears the fixed navbar (--chrome-h) plus the 2.5rem top scroll
+     fade, with a little gap, so following a label link lands the caption fully
+     below the chrome instead of tucked behind it. Tracks the responsive
+     --chrome-h the navbar sets. -->
+<div
+  {id}
+  class={`scroll-mt-[calc(var(--chrome-h)+3.5rem)] flex flex-col gap-2 mb-4 ${
+    wide ? "" : "break-inside-avoid"
+  }`}
+>
   <a
     href={`#${id}`}
     class="w-fit font-mono text-xs text-default-500 no-underline transition-interactive hov:text-default-700"
@@ -92,10 +101,12 @@
            the surface bubble expand to wrap that content. The `p-6` sits inside the
            scroll area so drop shadows have room before the clip and the scrollbar
            tucks into the padding. -->
-      <div
-        class="demo-unflip tomat-scroll relative z-10 w-full max-w-full min-w-0 overflow-x-auto p-6"
-      >
-        <div class="flex w-fit min-w-full items-center justify-center">
+      <!-- The scroller stays on the flipped frame theme (no `.demo-unflip`) so its
+           scrollbar resolves the same swapped ladder as the card chrome and tracks
+           the flip automatically; `.demo-unflip` restores the website theme on the
+           inner content so the rendered component matches the site. -->
+      <div class="tomat-scroll relative z-10 w-full max-w-full min-w-0 overflow-x-auto p-6">
+        <div class="demo-unflip flex w-fit min-w-full items-center justify-center">
           {#if surface}
             <!-- `fullWidth` makes the bubble track the inner row: it fills the card
                  for short/fill content (so a stretch component like ObjectManager

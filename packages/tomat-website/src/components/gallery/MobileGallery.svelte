@@ -63,11 +63,6 @@
 
 <section class="flex flex-col gap-6">
   <h2 class="text-lg font-medium">Mobile</h2>
-  <p class="text-default-500 text-sm">
-    The same shared components under a mobile UiContext, framed in a phone-sized viewport so their
-    touch branches (bottom sheets, stacked settings, the fullscreen chat shell) render the way the
-    Android client paints them.
-  </p>
 
   {#each entries(SAMPLES.ChatShellView) as [name, p] (name)}
     <GalleryCard label={`ChatShellView · ${name} · mobile`}>

@@ -20,13 +20,7 @@
     type Message,
     type MessageContent,
   } from "$lib/util/types";
-  import {
-    extensionsState,
-    messagesState,
-    sessionsState,
-    settingsState,
-    streamingState,
-  } from "$stores";
+  import { messagesState, sessionsState, settingsState, streamingState } from "$stores";
   import { BASE_MS, getDuration, hasMessageAnimated } from "$lib/appearance/animations";
 
   // The transcript model (message grouping + entry-stagger delays) and its
@@ -326,14 +320,7 @@
                     {neighborRight}
                   />
                 {:else if msg.role === "tool"}
-                  <ToolCall
-                    id={msg.id}
-                    {msg}
-                    onAnswer={(requestId, answers) =>
-                      extensionsState.respondAskUser(msg.callId!, requestId, answers)}
-                    {neighborLeft}
-                    {neighborRight}
-                  />
+                  <ToolCall id={msg.id} {msg} {neighborLeft} {neighborRight} />
                 {:else if msg.role === "tool_filter"}
                   <RelevantTools id={msg.id} {msg} {neighborLeft} {neighborRight} />
                 {:else if msg.role === "memory_filter"}

@@ -51,7 +51,8 @@
   const NEW_FONT = "Georgia";
   const NEW_MONO = "Courier New";
   const NEW_BASE_COLOR = "oklch(0.97 0.05 300)"; // a light lavender panel tint
-  const NEW_SHADOW_COLOR = "#ff5a36cc"; // a vibrant red-orange shadow
+  const NEW_SHADOW_COLOR = "#ff00ffff"; // maximum pink/magenta, fully opaque
+  const NEW_SHADOW_DISTANCE = "40px"; // the Shadow Size slider's max
   const SERIF_STACK = `"Georgia", "Times New Roman", Times, serif`;
   const MONO_FALLBACK = `ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`;
 
@@ -124,14 +125,21 @@
       setVal("appearance.bubbleBlurEnabled", false);
     });
     demo.hold(tl, 0.4);
-    // Shadow colour (the drop shadow stays visible; its size is left untouched).
-    // The flip re-asserts `--bubble-shadow-color-*` on every element under
-    // `.demo-frame`, so an inherited value is overridden; a marker class carries
-    // the override with `!important` to win per-element (see the <style> below).
+    // Shadow colour goes maximum pink/magenta. The flip re-asserts
+    // `--bubble-shadow-color-*` on every element under `.demo-frame`, so an
+    // inherited value is overridden; a marker class carries the override with
+    // `!important` to win per-element (see the <style> below).
     demo.move(tl, 'input[aria-label="Shadow Color value"]', { duration: 0.7 });
     demo.click(tl, 'input[aria-label="Shadow Color value"]', () => {
       setVal("appearance.bubbleShadowColor", NEW_SHADOW_COLOR);
       themeRoot?.classList.add("theme-demo-shadowed");
+    });
+    demo.hold(tl, 0.4);
+    // Crank the shadow size to its max so the magenta shadow reads dramatically.
+    demo.move(tl, 'input[aria-label="Shadow Size"]', { duration: 0.7 });
+    demo.click(tl, 'input[aria-label="Shadow Size"]', () => {
+      setVal("appearance.bubbleShadowDistance", Number.parseInt(NEW_SHADOW_DISTANCE, 10));
+      setProp("--bubble-shadow-distance", NEW_SHADOW_DISTANCE);
     });
     demo.hold(tl, 0.4);
 
@@ -212,7 +220,7 @@
      matches NEW_SHADOW_COLOR. */
   :global(.theme-demo-shadowed),
   :global(.theme-demo-shadowed *) {
-    --bubble-shadow-color-light: #ff5a36cc !important;
-    --bubble-shadow-color-dark: #ff5a36cc !important;
+    --bubble-shadow-color-light: #ff00ffff !important;
+    --bubble-shadow-color-dark: #ff00ffff !important;
   }
 </style>

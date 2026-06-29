@@ -42,7 +42,7 @@
       desc: "Press the shortcut key and it will show up over other applications for quick access. It has been designed to feel integrated to your operating system.",
     },
     {
-      title: "Complete audio capabilities",
+      title: "End-to-end speech capabilities",
       desc: "Speech-to-Text lets you talk to the assistant, Text-to-Speech lets you hear the assistant.",
     },
     {
@@ -51,7 +51,7 @@
         'Powered by <a class="relative z-30 underline transition-interactive hov:text-default-900" href="https://github.com/ggml-org/llama.cpp" target="_blank" rel="noreferrer">llama.cpp</a> and <a class="relative z-30 underline transition-interactive hov:text-default-900" href="https://github.com/k2-fsa/sherpa-onnx" target="_blank" rel="noreferrer">sherpa-onnx</a> to provide a selection of state-of-the-art local language and audio models. Runs completely off the internet, while still allowing you to use external providers if you want.',
     },
     {
-      title: "Dual model support",
+      title: "Dual model complexity detection",
       desc: "You can also choose to run a small model locally while redirecting more complex requests to an external provider.",
     },
     {
@@ -64,10 +64,10 @@
     },
     {
       title: "Knowledges and skills",
-      desc: "Configure the assistant with the memories and skills it needs, and it will automatically recall the most relevant ones on every prompt.",
+      desc: "Configure the assistant with the knowledges and skills it needs, and it will automatically recall the most relevant ones on every prompt.",
     },
     {
-      title: "MCP Support",
+      title: "Model Context Protocol support",
       desc: "Plug-in popular MCP servers to quickly give your assistant access to external services.",
     },
     {
@@ -75,7 +75,7 @@
       desc: "If you need the agent to do something super specific, write your own simple tool in JavaScript or TypeScript by making use of our powerful Tools API.",
     },
     {
-      title: "Securely sandboxed tool execution",
+      title: "Sandboxed tool execution",
       descHtml: `Tools runs on the <a class="relative z-30 underline transition-interactive hov:text-default-900" href="https://deno.com/" target="_blank" rel="noreferrer">deno</a> runtime and are constrained by its sandboxing system, letting you worry less when using third-party tools.`,
     },
     {

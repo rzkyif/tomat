@@ -6,9 +6,6 @@
   import UserMessageView from "@tomat/shared/ui/components/chat/messages/UserMessageView.svelte";
   import ToolCallView from "@tomat/shared/ui/components/chat/messages/ToolCallView.svelte";
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
-  import PermissionRequestView from "@tomat/shared/ui/components/chat/userinput/PermissionRequestView.svelte";
-  import PromptButtonsView from "@tomat/shared/ui/components/chat/userinput/PromptButtonsView.svelte";
-  import Bubble from "@tomat/shared/ui/components/primitives/Bubble.svelte";
   import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
   import type { ToolCallStatus } from "@tomat/shared";
   import Cursor from "./Cursor.svelte";
@@ -34,6 +31,14 @@
 
   const ALLOW_TITLE = "Allow for this tool call";
   const RESULT = { pushed: 3, branch: "origin/main" };
+  // The scripted permission the composer renders while paused (the same scripted
+  // STATE the client feeds from its live permission store).
+  const PERMISSION = {
+    toolName: "shell",
+    action: "run a program",
+    detail: "git push origin main",
+    declared: true,
+  };
 
   let inputValue = $state("");
   let userText = $state("");
@@ -186,40 +191,19 @@
           </AgentMessageView>
         </MessageEnter>
       {/if}
-      <!-- The permission review: the shared shield line + the Deny / Allow
-           buttons, the exact components the client renders. It sits above the
-           composer (which keeps its real controls, e.g. the monitor / alignment
-           / settings group), since the website lint forbids re-composing the
-           composer itself (check-website-composer). -->
-      {#if inPromptMode}
-        <Bubble selectedAlignment={ui.getAlignment()} extraClass="flex flex-col gap-4">
-          <PermissionRequestView
-            toolName="shell"
-            action="run a program"
-            detail="git push origin main"
-            declared
-          />
-          <div class="flex justify-end">
-            <PromptButtonsView
-              buttons={[
-                {
-                  icon: "i-material-symbols-close-rounded",
-                  label: "Deny",
-                  title: "Reject this permission request",
-                  onClick: () => {},
-                },
-                {
-                  icon: "i-material-symbols-check-rounded",
-                  label: "Allow",
-                  title: ALLOW_TITLE,
-                  onClick: () => {},
-                },
-              ]}
-            />
-          </div>
-        </Bubble>
-      {/if}
-      <UserInputView bind:value={inputValue} placeholder="Enter your instructions..." />
+      <!-- The permission prompt renders INSIDE the composer (the shared
+           UserInputView's permission mode), exactly as the client shows it: the
+           shield line + target replace the textarea and the send group becomes
+           Deny / Allow, while the composer's own controls stay in place. Driven
+           by scripted STATE (`permissionPrompt`), so it is single-source with the
+           client and clears the composer lint without re-composing the shell. -->
+      <UserInputView
+        bind:value={inputValue}
+        placeholder="Enter your instructions..."
+        permissionPrompt={inPromptMode ? PERMISSION : null}
+        onPermissionDeny={() => {}}
+        onPermissionAllow={() => {}}
+      />
     </div>
   </div>
   <Cursor bind:ref={cursorRef} />

@@ -601,24 +601,19 @@ html.dark .gallery-scroll-fade-bottom {
   background: linear-gradient(to top, var(--default-d-50), transparent);
 }
 
-/* Gallery card horizontal scroll gutter. The card's scroller (`.demo-unflip
-   .tomat-scroll`) sits on the FLIPPED `.demo-frame` chrome, which reads as the
-   OPPOSITE site theme, but `tomat-scroll`'s thumb resolves in the unflipped
-   component theme - so by default a dark thumb lands on a light card (and vice
-   versa). Invert the thumb slot relative to the page theme so it matches the card
-   chrome: page-light cards are dark (use the d-ladder), page-dark cards are light
-   (use the base ladder). */
-.gallery-frame .tomat-scroll::-webkit-scrollbar-thumb {
-  background: var(--default-d-200);
-}
-.gallery-frame .tomat-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--default-d-400);
-}
-html.dark .gallery-frame .tomat-scroll::-webkit-scrollbar-thumb {
+/* Manual outline scroll-hover reveal, driven by a JS-toggled class instead of
+   the shared `.tomat-scroll-hover:hover` rule. WebKit/Chromium do not repaint a
+   custom scrollbar thumb when only the container's `:hover` state flips, so the
+   thumb appears/disappears a beat late (and only once the cursor crosses the
+   track). An explicit class mutation forces the style recalc that repaints the
+   thumb in step with the pointer. Mirrors the shared reveal colors; the always
+   present 5px track means toggling the thumb color never reflows. The `:hover`
+   rule still applies as a no-JS fallback. */
+#manual-outline-scroll.is-scroll-hovered::-webkit-scrollbar-thumb {
   background: var(--default-200);
 }
-html.dark .gallery-frame .tomat-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--default-400);
+html.dark #manual-outline-scroll.is-scroll-hovered::-webkit-scrollbar-thumb {
+  background: var(--default-d-200);
 }
 
 /* Expandable (native <details>): a chevron that rotates from pointing right to

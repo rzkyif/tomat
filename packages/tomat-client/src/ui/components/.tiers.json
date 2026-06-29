@@ -88,10 +88,6 @@
       "tier": "B",
       "wraps": "AutocorrectAlertView"
     },
-    "chat/userinput/PermissionRequest.svelte": {
-      "tier": "B",
-      "wraps": "PermissionRequestView"
-    },
     "chat/userinput/QuickModelBar.svelte": {
       "tier": "B",
       "wraps": "QuickModelBarView"

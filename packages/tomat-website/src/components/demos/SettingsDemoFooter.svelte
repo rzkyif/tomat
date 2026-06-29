@@ -10,30 +10,41 @@
   // and the homepage showcase), so the footer cannot be present in one rendition
   // and missing from another. The boolean mirrors the sidebar's collapsed state,
   // so rows collapse to icons with it.
-  // `downloading` mirrors the client's DownloadsButton active state: the
-  // self-animating loop icon, a "Downloading..." label, and a neutral ping
-  // (driven by `blink`, which the host toggles). Off by default so every other
-  // settings demo shows the idle Downloads row.
+  // `pending` and `downloading` mirror the client's DownloadsButton states:
+  // pending shows a "Pending Downloads" label with an accent-yellow ping (files
+  // await approval); downloading shows the self-animating loop icon, a
+  // "Downloading..." label, and a neutral ping. The ping is driven by `blink`,
+  // which the host toggles. Both off by default so every other settings demo
+  // shows the idle Downloads row.
   const noop = (): void => {};
   let {
     collapsed = false,
+    pending = false,
     downloading = false,
     blink = false,
   }: {
     collapsed?: boolean;
+    pending?: boolean;
     downloading?: boolean;
     blink?: boolean;
   } = $props();
+
+  const label = $derived(
+    pending ? "Pending Downloads" : downloading ? "Downloading..." : "Downloads",
+  );
+  const icon = $derived(
+    downloading ? "i-line-md-downloading-loop" : "i-material-symbols-downloading-rounded",
+  );
 </script>
 
 <SidebarItem
-  icon={downloading ? "i-line-md-downloading-loop" : "i-material-symbols-downloading-rounded"}
-  label={downloading ? "Downloading..." : "Downloads"}
+  {icon}
+  {label}
   {collapsed}
-  ping={downloading && blink}
-  pingTone="default"
-  title={collapsed ? (downloading ? "Downloading..." : "Downloads") : undefined}
-  ariaLabel="Downloads"
+  ping={(pending || downloading) && blink}
+  pingTone={pending ? "accent" : "default"}
+  title={collapsed ? label : undefined}
+  ariaLabel={label}
   onclick={noop}
 />
 <button

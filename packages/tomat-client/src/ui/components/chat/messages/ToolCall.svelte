@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AskUserAnswer, Message } from "$lib/util/types";
+  import type { Message } from "$lib/util/types";
   import ToolCallView from "@tomat/shared/ui/components/chat/messages/ToolCallView.svelte";
   import MessageMarkdown from "./MessageMarkdown.svelte";
   import { settingsState } from "../../../state";
@@ -9,18 +9,16 @@
   // ephemera overlay onto the View's props, supplies the agent name and the
   // markdown renderer the shared component can't import, and binds expansion to
   // the shared expansion map (read by MessageStackGroup to split substacks
-  // around an open bubble). All tool-call presentation + the askUser form live
-  // in the View.
+  // around an open bubble). While awaiting input the bubble reads yellow but is
+  // form-free; the askUser form itself lives in the composer (UserInput).
   let {
     id,
     msg,
-    onAnswer,
     neighborLeft = false,
     neighborRight = false,
   } = $props<{
     id?: string;
     msg: Message;
-    onAnswer: (requestId: string, answers: AskUserAnswer[]) => void;
     neighborLeft?: boolean;
     neighborRight?: boolean;
   }>();
@@ -47,11 +45,9 @@
   error={msg.error}
   progress={msg.progress}
   logs={msg.ephemera?.logs ?? []}
-  askUser={msg.ephemera?.askUser}
   {agentName}
   {neighborLeft}
   {neighborRight}
-  {onAnswer}
   bind:expanded={
     () => (id !== undefined ? isExpanded(id, false) : false),
     (v) => {

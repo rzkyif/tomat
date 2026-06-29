@@ -211,6 +211,19 @@ const { title, entries, currentId } = Astro.props;
     updateOutlineFades();
   }
 
+  // Reveal the outline scrollbar thumb while the pointer is over the scroller.
+  // The shared `.tomat-scroll-hover` does this in CSS via the container's
+  // `:hover`, but WebKit/Chromium do not repaint a custom scrollbar thumb on a
+  // bare hover-state flip, so it lags the pointer (see `.is-scroll-hovered` in
+  // site.css). Toggling a class forces the style recalc that repaints it in
+  // step. Per page, since the sidebar is recreated on every view transition.
+  function wireOutlineHover() {
+    const el = document.getElementById("manual-outline-scroll");
+    if (!el) return;
+    el.addEventListener("mouseenter", () => el.classList.add("is-scroll-hovered"));
+    el.addEventListener("mouseleave", () => el.classList.remove("is-scroll-hovered"));
+  }
+
   // Reveal the current article's outline item by scrolling the sidebar's own
   // scroller (never the window, so the article never jumps): if the item sits
   // outside the visible band, center it. Runs per page from wire(), so it also
@@ -233,6 +246,7 @@ const { title, entries, currentId } = Astro.props;
     // Before wiring the fades, so their initial state matches the scrolled spot.
     scrollOutlineToCurrent();
     wireOutlineFades();
+    wireOutlineHover();
     wireDemoScale();
     // After scaling, since a target's offsets can shift as the scaled box and
     // fonts settle.

@@ -77,10 +77,11 @@ export const GALLERY_VIEWS = [
 // would be a redundant duplicate. check-view-coverage exempts these from the
 // GALLERY_VIEWS card requirement and instead asserts the parent is galleried,
 // rendered, and actually renders the child (so it cannot silently disappear). The
-// askuser question sub-views are covered by the analogous ToolCallView rule in
+// askuser question sub-views are covered by the analogous AskUserFormView rule in
 // the walker. Keep the keys sorted.
 export const EMBEDDED_VIEWS: Record<string, string> = {
   // child View -> parent View whose card renders it
+  AskUserFormView: "UserInputView",
   DiffView: "ToolCallView",
   DownloadRowView: "DownloadsModalView",
   ErrorDetailView: "ErrorMessageView",

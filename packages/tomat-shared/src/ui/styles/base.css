@@ -537,8 +537,10 @@ input[type="range"]::-moz-range-thumb {
 }
 .tomat-scroll::-webkit-scrollbar-track,
 .tomat-scroll-inset::-webkit-scrollbar-track,
+.tomat-scroll-dark::-webkit-scrollbar-track,
 .tomat-scroll::-webkit-scrollbar-corner,
-.tomat-scroll-inset::-webkit-scrollbar-corner {
+.tomat-scroll-inset::-webkit-scrollbar-corner,
+.tomat-scroll-dark::-webkit-scrollbar-corner {
   background: transparent;
   border-radius: 4px;
 }
@@ -574,10 +576,6 @@ input[type="range"]::-moz-range-thumb {
   background: var(--default-d-500);
 }
 
-.tomat-scroll-dark::-webkit-scrollbar-track,
-.tomat-scroll-dark::-webkit-scrollbar-corner {
-  background: rgba(255, 255, 255, 0.05);
-}
 .tomat-scroll-dark::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
 }

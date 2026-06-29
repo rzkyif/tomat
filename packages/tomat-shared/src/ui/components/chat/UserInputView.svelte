@@ -3,8 +3,38 @@
   import Bubble from "../primitives/Bubble.svelte";
   import IconButton from "../primitives/IconButton.svelte";
   import QuickModelBarView from "./userinput/QuickModelBarView.svelte";
+  import PermissionRequestView from "./userinput/PermissionRequestView.svelte";
+  import PromptButtonsView from "./userinput/PromptButtonsView.svelte";
+  import AskUserFormView, { type DraftAnswer } from "./userinput/AskUserFormView.svelte";
+  import type { AskUserQuestion } from "../../../domain/session.ts";
   import { useUiContext } from "../../context.ts";
   import type { Alignment } from "../../types.ts";
+
+  // The askUser form's controlled state + its hoisted commit actions, fed as one
+  // bundle so this is scripted STATE (like `permissionPrompt`), not website-side
+  // composition: the View decides the layout, the host supplies the data. The
+  // client feeds its live AskUser unit; the website feeds a static snapshot.
+  type AskUserPrompt = {
+    questions: AskUserQuestion[];
+    drafts: Record<number, DraftAnswer>;
+    togglePick?: (idx: number, value: string, multi: boolean) => void;
+    setText?: (idx: number, text: string) => void;
+    onFreestyleFocus?: (idx: number) => void;
+    onFreestyleBlur?: (idx: number) => void;
+    setCell?: (idx: number, row: number, col: number, value: string) => void;
+    addRow?: (idx: number, columns: number) => void;
+    removeRow?: (idx: number, row: number) => void;
+    canSubmit?: boolean;
+    onSubmit?: () => void;
+    autoFocus?: boolean;
+    actions: Array<{
+      icon?: string;
+      label: string;
+      title: string;
+      disabled?: boolean;
+      onClick: () => void;
+    }>;
+  };
   import { findField, getDefaultSettings } from "../../../domain/settings/engine.ts";
   import type { ModelPresetField } from "../../../domain/settings/types.ts";
   import {
@@ -83,7 +113,22 @@
     contentOverride,
     belowContent,
     attachmentSlot,
-    // Left group (attach + screen capture). Hidden in prompt modes.
+    // Permission-prompt mode: a guarded tool is paused awaiting permission. When
+    // set, the textarea + quick-model bar are replaced by the shared permission
+    // request (shield line + target), and the voice/send group becomes Deny /
+    // Allow. The composer's own controls (attach/capture, monitor/align/settings)
+    // stay in place. This is scripted STATE both the client and the website feed,
+    // so the rendered markup is single-source (the client wires the callbacks to
+    // its permission store; the website animates the prompt with inert handlers).
+    permissionPrompt = null,
+    onPermissionDeny,
+    onPermissionAllow,
+    // askUser-prompt mode: a running tool is paused on its `ctx.askUser()` form.
+    // When set, the textarea is replaced by the shared askUser form (neutral) and
+    // the voice/send group becomes the form's commit actions; the left group
+    // hides to give them room. Scripted STATE both the client and website feed.
+    askUserPrompt = null,
+    // Left group (attach + screen capture).
     showLeftGroup = true,
     onAttach,
     onAttachImage,
@@ -151,6 +196,15 @@
     contentOverride?: Snippet;
     belowContent?: Snippet;
     attachmentSlot?: Snippet;
+    permissionPrompt?: {
+      toolName: string;
+      action: string;
+      detail?: string;
+      declared: boolean;
+    } | null;
+    onPermissionDeny?: () => void;
+    onPermissionAllow?: () => void;
+    askUserPrompt?: AskUserPrompt | null;
     showLeftGroup?: boolean;
     onAttach?: () => void;
     /** Mobile only: the separate image/photo picker beside the file picker. */
@@ -195,6 +249,12 @@
   const effShowVoice = $derived(showVoice ?? ui.sttEnabled);
   const effShowImageCapture = $derived(showImageCapture ?? ui.imagesEnabled);
 
+  // Prompt mode: the composer is standing in for a paused tool awaiting the user
+  // (a permission request or an askUser form). It then reads accent-yellow (the
+  // same hue as the paused tool-call bubble) and hides the left attach/capture
+  // group, since composing a new message is not what the moment calls for.
+  const promptActive = $derived(!!permissionPrompt || !!askUserPrompt);
+
   const ALIGNMENTS = [
     { value: "left", icon: "i-material-symbols-format-align-left-rounded", title: "Align Left" },
     {
@@ -210,6 +270,7 @@
   <Bubble
     selectedAlignment={ui.getAlignment()}
     fullWidth={mobile}
+    accent={promptActive ? "yellow" : undefined}
     extraClass="flex flex-col gap-4 min-w-0 overflow-hidden transition-all"
     onclick={onBubbleClick}
   >
@@ -217,6 +278,28 @@
 
     {#if contentOverride}
       {@render contentOverride()}
+    {:else if permissionPrompt}
+      <PermissionRequestView
+        toolName={permissionPrompt.toolName}
+        action={permissionPrompt.action}
+        detail={permissionPrompt.detail}
+        declared={permissionPrompt.declared}
+      />
+    {:else if askUserPrompt}
+      <AskUserFormView
+        questions={askUserPrompt.questions}
+        drafts={askUserPrompt.drafts}
+        togglePick={askUserPrompt.togglePick}
+        setText={askUserPrompt.setText}
+        onFreestyleFocus={askUserPrompt.onFreestyleFocus}
+        onFreestyleBlur={askUserPrompt.onFreestyleBlur}
+        setCell={askUserPrompt.setCell}
+        addRow={askUserPrompt.addRow}
+        removeRow={askUserPrompt.removeRow}
+        canSubmit={askUserPrompt.canSubmit}
+        onSubmit={askUserPrompt.onSubmit}
+        autoFocus={askUserPrompt.autoFocus}
+      />
     {:else}
       <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
         <!-- Hidden span: mirrors the typed text so the grid auto-sizes width and
@@ -271,7 +354,7 @@
     {@render attachmentSlot?.()}
 
     <div class="flex items-end justify-between gap-2 text-2xl text-default-700 w-full">
-      {#if showLeftGroup}
+      {#if showLeftGroup && !promptActive}
         <div class="flex items-center bg-surface-inset rounded-large p-1">
           <IconButton
             icon="i-material-symbols-attach-file-rounded"
@@ -376,6 +459,25 @@
       <div class="flex gap-2">
         {#if rightSlot}
           {@render rightSlot()}
+        {:else if permissionPrompt}
+          <PromptButtonsView
+            buttons={[
+              {
+                icon: "i-material-symbols-close-rounded",
+                label: "Deny",
+                title: "Reject this permission request",
+                onClick: () => onPermissionDeny?.(),
+              },
+              {
+                icon: "i-material-symbols-check-rounded",
+                label: "Allow",
+                title: "Allow for this tool call",
+                onClick: () => onPermissionAllow?.(),
+              },
+            ]}
+          />
+        {:else if askUserPrompt}
+          <PromptButtonsView buttons={askUserPrompt.actions} />
         {:else}
           {#if showTempToggle}
             <!-- Temporary-session toggle. On = accent icon + accent-tinted

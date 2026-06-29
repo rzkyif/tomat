@@ -2,10 +2,10 @@ import type { ComponentProps } from "svelte";
 import type { OmitSnippetProps } from "./types.ts";
 import type ToolCallView from "../components/chat/messages/ToolCallView.svelte";
 
-// One tool call per status, plus an awaiting-input form (driven by
-// `draftsOverride` so the gallery shows a selection without live interaction)
-// and a well-known memory result. `memoryContent` is a snippet prop, so the
-// gallery supplies the markdown renderer; `OmitSnippetProps` strips it here.
+// One tool call per status (including the form-free awaiting-input bubble,
+// which reads yellow while its askUser form shows in the composer) plus a
+// well-known memory result. `memoryContent` is a snippet prop, so the gallery
+// supplies the markdown renderer; `OmitSnippetProps` strips it here.
 export const toolCallSamples = {
   completed: {
     toolName: "feed_cat",
@@ -41,123 +41,11 @@ export const toolCallSamples = {
     description: "Closing the garage door",
     expanded: true,
   },
-  awaitingChoice: {
+  awaiting: {
     toolName: "feed_cat",
     status: "awaiting_user",
+    args: { portion: "1 scoop" },
     expanded: true,
-    askUser: {
-      requestId: "sample-req",
-      questions: [
-        {
-          question: "Which bowl should I fill?",
-          options: [
-            {
-              label: "Kitchen",
-              value: "kitchen",
-              description: "the usual spot",
-            },
-            { label: "Patio", value: "patio" },
-          ],
-        },
-      ],
-    },
-    draftsOverride: {
-      0: { text: "", picks: ["kitchen"], freestyleActive: false, rows: [] },
-    },
-  },
-  awaitingDiff: {
-    toolName: "edit_file",
-    status: "awaiting_user",
-    expanded: true,
-    askUser: {
-      requestId: "sample-req-diff",
-      questions: [
-        {
-          kind: "diff",
-          question: "Apply this change?",
-          title: "config.toml",
-          before: "timeout = 30\nretries = 1\n",
-          after: "timeout = 60\nretries = 3\n",
-        },
-      ],
-    },
-    draftsOverride: {
-      0: { text: "", picks: ["accept"], freestyleActive: false, rows: [] },
-    },
-  },
-  awaitingFiles: {
-    toolName: "open_files",
-    status: "awaiting_user",
-    expanded: true,
-    askUser: {
-      requestId: "sample-req-files",
-      questions: [
-        {
-          kind: "files",
-          question: "Which files should I read?",
-          multiselect: true,
-          entries: [
-            { path: "src/main.ts", label: "main.ts", description: "entry point" },
-            { path: "src/config.ts", label: "config.ts" },
-            { path: "README.md", label: "README.md" },
-          ],
-        },
-      ],
-    },
-    draftsOverride: {
-      0: { text: "", picks: ["src/main.ts", "README.md"], freestyleActive: false, rows: [] },
-    },
-  },
-  awaitingImage: {
-    toolName: "review_screenshot",
-    status: "awaiting_user",
-    expanded: true,
-    askUser: {
-      requestId: "sample-req-image",
-      questions: [
-        {
-          kind: "image",
-          question: "Does this look right?",
-          mime: "image/png",
-          dataB64:
-            "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAIklEQVR42u3BAQ0AAADCoPdPbQ8HFAAAAAAAAAAAAAAA8G4wQAAB7OHIlwAAAABJRU5ErkJggg==",
-          actions: [
-            { label: "Looks good", value: "approve" },
-            { label: "Try again", value: "retry" },
-          ],
-        },
-      ],
-    },
-    draftsOverride: {
-      0: { text: "", picks: ["approve"], freestyleActive: false, rows: [] },
-    },
-  },
-  awaitingTable: {
-    toolName: "fill_table",
-    status: "awaiting_user",
-    expanded: true,
-    askUser: {
-      requestId: "sample-req-table",
-      questions: [
-        {
-          kind: "table",
-          question: "Confirm the schedule",
-          columns: ["Day", "Task"],
-          rows: [["Mon", "water plants"]],
-        },
-      ],
-    },
-    draftsOverride: {
-      0: {
-        text: "",
-        picks: [],
-        freestyleActive: false,
-        rows: [
-          ["Mon", "water plants"],
-          ["Wed", "call vet"],
-        ],
-      },
-    },
   },
   memoryResult: {
     toolName: "show_todos",
