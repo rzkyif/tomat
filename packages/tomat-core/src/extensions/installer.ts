@@ -15,7 +15,6 @@ import { errMessage } from "@tomat/shared";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
 import { newJobId } from "../shared/ids.ts";
-import { BUILTIN_EXTENSION_ID } from "./builtin-manifest.ts";
 import { flattenNpmName, type InstallEventSink, type InstallSource } from "./installer-shared.ts";
 import { runDownload } from "./installer-download.ts";
 import { runInstallDeps } from "./installer-deps.ts";
@@ -127,7 +126,7 @@ export function startUpdate(
 function extensionIdForSpec(spec: InstallSource): string {
   return spec.source === "npm"
     ? flattenNpmName(spec.name)
-    : spec.source === "builtin"
-      ? BUILTIN_EXTENSION_ID
+    : spec.source === "seeded"
+      ? spec.id
       : spec.slug;
 }

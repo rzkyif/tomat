@@ -5,8 +5,13 @@
 // same version. Versioned via packages/tomat-client/src/tauri/tauri.conf.json.
 
 import { ensureDir } from "@std/fs/ensure-dir";
+import { encodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import type { Triple } from "../../packages/tomat-shared/src/domain/model.ts";
+import { type ClientDescriptor, reanchorFile } from "./artifacts.ts";
+import { reportRouting, routeTriples } from "./all-targets.ts";
+import { withEnvironment } from "./drivers/lifecycle.ts";
+import type { BuildEnvironment } from "./drivers/mod.ts";
 import {
   type ApplyOpts,
   bumpVersionField,
@@ -51,7 +56,8 @@ const MANIFEST_CACHE_CONTROL = "public, max-age=300";
 interface ClientBundle {
   triple: Triple;
   bundlePath: string;
-  sigPath: string;
+  /** Absent for an artifact with no Tauri updater `.sig` (the Linux `.deb`). */
+  sigPath?: string;
   filename: string;
   size: number;
 }
@@ -117,11 +123,21 @@ async function injectTauriPubkey(pubkey: string): Promise<() => Promise<void>> {
 // ---------------------------------------------------------------------------
 // build client + locate bundle
 
-async function buildClient(env: DeployEnv, channel: ReleaseChannel): Promise<void> {
+async function buildClient(
+  env: DeployEnv,
+  channel: ReleaseChannel,
+  triple?: Triple,
+  bundles?: string[],
+): Promise<void> {
   // Drive build-client.ts directly with the channel so it bakes TOMAT_CHANNEL
-  // + applies the per-channel app-identity config override.
+  // + applies the per-channel app-identity config override. `triple` cross-builds
+  // the host's other arch; `bundles` narrows the bundle targets (the cross-built
+  // Linux client emits only `.deb`).
+  const args = ["run", "-A", "scripts/build-client.ts", `--channel=${channel}`];
+  if (triple) args.push(`--target=${triple}`);
+  if (bundles?.length) args.push(`--bundles=${bundles.join(",")}`);
   const cmd = new Deno.Command("deno", {
-    args: ["run", "-A", "scripts/build-client.ts", `--channel=${channel}`],
+    args,
     cwd: REPO_ROOT,
     stdout: "inherit",
     stderr: "inherit",
@@ -135,43 +151,43 @@ async function buildClient(env: DeployEnv, channel: ReleaseChannel): Promise<voi
   if (code !== 0) fail(`build-client.ts (${channel}) exited ${code}`);
 }
 
-async function findClientBundle(triple: Triple): Promise<ClientBundle> {
-  const candidates: { dir: string; ext: string }[] = [];
+/** Locate the built installer (+ its Tauri `.sig` when present) for `triple`
+ *  under `bundleRoot` - `target/release/bundle` for a host-native build, or
+ *  `target/<triple>/release/bundle` for a cross-targeted one. `debOnly` looks for
+ *  the cross-built Linux `.deb` (Tauri emits no updater `.sig` for it). */
+async function findClientBundle(
+  triple: Triple,
+  bundleRoot: string,
+  debOnly = false,
+): Promise<ClientBundle> {
+  const candidates: { dir: string; ext: string; sig: boolean }[] = [];
   if (triple.endsWith("apple-darwin")) {
-    candidates.push({
-      dir: join(TAURI_BUNDLE_OUT, "macos"),
-      ext: ".app.tar.gz",
-    });
+    candidates.push({ dir: join(bundleRoot, "macos"), ext: ".app.tar.gz", sig: true });
   } else if (triple.endsWith("pc-windows-msvc")) {
-    candidates.push({ dir: join(TAURI_BUNDLE_OUT, "msi"), ext: ".msi" });
-    candidates.push({ dir: join(TAURI_BUNDLE_OUT, "nsis"), ext: ".exe" });
+    candidates.push({ dir: join(bundleRoot, "msi"), ext: ".msi", sig: true });
+    candidates.push({ dir: join(bundleRoot, "nsis"), ext: ".exe", sig: true });
   } else if (triple.endsWith("unknown-linux-gnu")) {
-    candidates.push({
-      dir: join(TAURI_BUNDLE_OUT, "appimage"),
-      ext: ".AppImage",
-    });
+    if (debOnly) {
+      candidates.push({ dir: join(bundleRoot, "deb"), ext: ".deb", sig: false });
+    } else {
+      candidates.push({ dir: join(bundleRoot, "appimage"), ext: ".AppImage", sig: true });
+    }
   }
   for (const c of candidates) {
     if (!(await exists(c.dir))) continue;
     for await (const entry of Deno.readDir(c.dir)) {
       if (!entry.isFile) continue;
       if (!entry.name.endsWith(c.ext)) continue;
-      const sigPath = join(c.dir, `${entry.name}.sig`);
-      if (!(await exists(sigPath))) continue;
+      const sigPath = c.sig ? join(c.dir, `${entry.name}.sig`) : undefined;
+      if (sigPath && !(await exists(sigPath))) continue;
       const bundlePath = join(c.dir, entry.name);
       const stat = await Deno.stat(bundlePath);
-      return {
-        triple,
-        bundlePath,
-        sigPath,
-        filename: entry.name,
-        size: stat.size,
-      };
+      return { triple, bundlePath, sigPath, filename: entry.name, size: stat.size };
     }
   }
   fail(
-    `no Tauri bundle + .sig found for ${triple} under ${rel(TAURI_BUNDLE_OUT)} ` +
-      `(checked ${candidates.map((c) => `${rel(c.dir)}/*${c.ext}`).join(", ")})`,
+    `no Tauri bundle${debOnly ? " (.deb)" : " + .sig"} found for ${triple} under ` +
+      `${rel(bundleRoot)} (checked ${candidates.map((c) => `${rel(c.dir)}/*${c.ext}`).join(", ")})`,
   );
 }
 
@@ -200,25 +216,6 @@ export async function clientBuildOutputs(): Promise<string[]> {
   return found;
 }
 
-function composeClientManifest(
-  version: string,
-  hostKey: string,
-  url: string,
-  signature: string,
-  sha256: string,
-  live: ClientManifest | null,
-): ClientManifest {
-  // Carry forward platform entries from the prior manifest only if it's the
-  // same version. A version bump invalidates platforms not yet re-published.
-  const carryover = live?.version === version ? live.platforms : {};
-  return {
-    version,
-    notes: `tomat ${version}`,
-    pub_date: new Date().toISOString(),
-    platforms: { ...carryover, [hostKey]: { signature, url, sha256 } },
-  };
-}
-
 async function writeManifestFile(
   manifestDir: string,
   name: string,
@@ -229,6 +226,217 @@ async function writeManifestFile(
   const path = join(dir, name);
   await Deno.writeTextFile(path, JSON.stringify(body, null, 2));
   return path;
+}
+
+// ---------------------------------------------------------------------------
+// build half (runs on each native platform: local apply or a CI build runner)
+
+/** Build + Tauri-sign the host platform's client bundle, copy it (and its .sig)
+ *  under dist/<triple>/ so it survives the move to the publish host, and return
+ *  the descriptor the publish half composes client.json from. Used by the local
+ *  apply (then composed immediately) and by scripts/release/ci-build.ts (staged
+ *  for the coordinator). The Ed25519 manifest key is NOT needed here, only the
+ *  Tauri minisign key, so a build runner never holds the trust-root private key. */
+export async function buildClientBundle(
+  env: DeployEnv,
+  channel: ReleaseChannel,
+  opts: { triple?: Triple; bundles?: string[] } = {},
+): Promise<ClientDescriptor> {
+  const version = await readClientVersion();
+  const triple = opts.triple ?? detectHostTriple();
+  const tauriKey = tauriPlatformKey(triple);
+  const debOnly = opts.bundles?.length === 1 && opts.bundles[0] === "deb";
+  // A host-native build (no --target) emits under target/release/bundle; a
+  // cross-targeted one under <CARGO_TARGET_DIR|target>/<triple>/release/bundle
+  // (the Podman client build points CARGO_TARGET_DIR at /tmp so it doesn't write
+  // the read-only repo mount).
+  const targetDir = Deno.env.get("CARGO_TARGET_DIR") ?? join(REPO_ROOT, "target");
+  const bundleRoot = opts.triple ? join(targetDir, triple, "release", "bundle") : TAURI_BUNDLE_OUT;
+  info(`client triple: ${triple} (tauri key: ${tauriKey}), version ${version}`);
+
+  step(`Building Tauri client bundle (${triple})`);
+  const restore = await injectTauriPubkey(env.tauriUpdaterPublicKey);
+  try {
+    await buildClient(env, channel, opts.triple, opts.bundles);
+    const bundle = await findClientBundle(triple, bundleRoot, debOnly);
+    ok(
+      `${triple}/${bundle.filename}  ${humanBytes(bundle.size)}` +
+        (bundle.sigPath ? `  → ${rel(bundle.sigPath)}` : `  (no .sig)`),
+    );
+
+    // Copy the bundle (+ its Tauri .sig when present) under dist/<triple>/ so they
+    // ride along with the core artifacts; the publish host re-anchors + verifies.
+    const relPath = `${triple}/${bundle.filename}`;
+    const sigRelPath = bundle.sigPath ? `${triple}/${bundle.filename}.sig` : "";
+    await ensureDir(join(DIST_DIR, triple));
+    await Deno.copyFile(bundle.bundlePath, join(DIST_DIR, relPath));
+    if (bundle.sigPath) await Deno.copyFile(bundle.sigPath, join(DIST_DIR, sigRelPath));
+
+    // sha256 over the exact bytes the installer downloads (mirrors core.json):
+    // the Tauri minisign signature protects in-app updates, this protects the
+    // FIRST install (client.sh verifies it before installing). The Linux .deb has
+    // no Tauri updater .sig (signature ""), so its first-install relies on the
+    // sha256 + the Ed25519 client.json.sig alone.
+    const signature = bundle.sigPath ? (await Deno.readTextFile(bundle.sigPath)).trim() : "";
+    const { sha256 } = await sha256File(bundle.bundlePath);
+    return {
+      version,
+      channel,
+      triple,
+      tauriKey,
+      filename: bundle.filename,
+      relPath,
+      sigRelPath,
+      sha256,
+      size: bundle.size,
+      signature,
+    };
+  } finally {
+    await restore();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// publish half (runs ONCE on the host over every platform's descriptor)
+
+/** Compose client.json from the union of platform descriptors, Ed25519-sign the
+ *  detached client.json.sig, and upload the bundles + manifest to R2. Carry
+ *  forward any platform from the live manifest at the same version that this run
+ *  did not (re)build, so a single-host local release still fills its own slot
+ *  without dropping the others. */
+export async function composeAndUploadClient(
+  env: DeployEnv,
+  channel: ReleaseChannel,
+  version: string,
+  descriptors: ClientDescriptor[],
+  opts: ApplyOpts,
+): Promise<void> {
+  if (descriptors.length === 0) fail(`no client bundles to publish`);
+  const manifestDir = channelManifestDir(channel);
+  const storagePrefix = channelStoragePrefix(channel);
+  const live = await fetchLiveJson<ClientManifest>(env, `${manifestDir}/client.json`);
+
+  step("Composing client.json (Tauri updater manifest)");
+  const platforms: ClientManifest["platforms"] =
+    live?.version === version ? { ...live.platforms } : {};
+  const uploads: Array<{ key: string; path: string; descriptor: ClientDescriptor }> = [];
+  for (const d of descriptors) {
+    // Re-anchor + verify the bundle bytes against the descriptor's sha256.
+    const bundlePath = await reanchorFile(d.relPath, d.sha256);
+    const key = `${storagePrefix}${version}/${d.triple}/${d.filename}`;
+    platforms[d.tauriKey] = {
+      signature: d.signature,
+      url: `https://${env.storageDomain}/${key}`,
+      sha256: d.sha256,
+    };
+    uploads.push({ key, path: bundlePath, descriptor: d });
+  }
+
+  const manifest: ClientManifest = {
+    version,
+    notes: `tomat ${version}`,
+    pub_date: new Date().toISOString(),
+    platforms,
+  };
+  const clientJsonPath = await writeManifestFile(manifestDir, "client.json", manifest);
+  ok(`client.json → ${rel(clientJsonPath)}`);
+
+  // Detached Ed25519 signature over the exact client.json bytes, so client.sh
+  // authenticates the manifest (and thus the sha256 it trusts) before installing.
+  const clientJsonSig = await signEd25519Bytes(
+    env.signingPrivateKey,
+    await Deno.readFile(clientJsonPath),
+  );
+  const clientSigPath = join(DIST_DIR, manifestDir, "client.json.sig");
+  await Deno.writeTextFile(clientSigPath, clientJsonSig);
+  ok(`client.json.sig → ${rel(clientSigPath)}`);
+
+  if (opts.dryRun) {
+    info(
+      colors.yellow(`dry-run: skipping upload of client bundle(s) + ${manifestDir}/client.json`),
+    );
+    return;
+  }
+
+  step(`Uploading client bundle(s) to R2 bucket "${env.r2Bucket}"`);
+  for (const u of uploads) {
+    info(`uploading ${u.key}  (${humanBytes(u.descriptor.size)})`);
+    await r2Put(env, u.key, u.path, "application/octet-stream");
+    opts.recordVersionedKey?.(u.key);
+    opts.recordReleaseAsset?.(u.path, `${u.descriptor.triple}_${u.descriptor.filename}`);
+  }
+
+  step(`Uploading ${manifestDir}/client.json to R2`);
+  await r2Put(
+    env,
+    `${manifestDir}/client.json`,
+    clientJsonPath,
+    "application/json",
+    MANIFEST_CACHE_CONTROL,
+  );
+  ok(`https://${env.storageDomain}/${manifestDir}/client.json`);
+
+  step(`Uploading ${manifestDir}/client.json.sig to R2`);
+  await r2Put(
+    env,
+    `${manifestDir}/client.json.sig`,
+    clientSigPath,
+    "text/plain",
+    MANIFEST_CACHE_CONTROL,
+  );
+  ok(`https://${env.storageDomain}/${manifestDir}/client.json.sig`);
+}
+
+// ---------------------------------------------------------------------------
+// local all-targets build (host cross-arch + on-demand driver environments)
+
+/** Build the client installer for every requested triple across this host + the
+ *  given build environments, mirroring core's buildCoreUnified: the host builds
+ *  its own OS's triples directly (native + same-OS cross-arch), and every other
+ *  triple is routed to an environment (Podman/UTM) started on demand. Returns a
+ *  descriptor per built triple for composeAndUploadClient. Triples whose driver
+ *  can't build the client (or isn't available) are reported and dropped - the
+ *  live manifest carries them forward at the same version. */
+export async function buildClientUnified(
+  triples: Triple[],
+  env: DeployEnv,
+  channel: ReleaseChannel,
+  environments: BuildEnvironment[],
+): Promise<ClientDescriptor[]> {
+  const routing = await routeTriples(triples, environments);
+  reportRouting(routing);
+
+  const descriptors: ClientDescriptor[] = [];
+  // Host: build each same-OS triple directly (e.g. both apple-darwin arches).
+  for (const triple of routing.host) {
+    descriptors.push(await buildClientBundle(env, channel, { triple }));
+  }
+  // Drivers: each environment builds its triples' installers and ships the
+  // bundles + descriptors back into the host's dist/. The Tauri minisign key
+  // transits to envs that produce a signed installer (Windows); the Linux .deb
+  // needs none, so its driver ignores it.
+  for (const { env: drv, triples: envTriples } of routing.byEnv) {
+    if (!drv.buildClient) {
+      info(
+        colors.yellow(`${drv.id} can't build the client; ${envTriples.join(", ")} carry forward`),
+      );
+      continue;
+    }
+    const ds = await withEnvironment(drv, () =>
+      drv.buildClient!({
+        triples: envTriples,
+        channel,
+        secrets: {
+          signingPublicKeyB64: encodeBase64(env.signingPublicKey),
+          tauriPublicKey: env.tauriUpdaterPublicKey,
+          tauriPrivateKey: env.tauriUpdaterPrivateKey,
+          tauriPassword: env.tauriUpdaterPassword,
+        },
+      }),
+    );
+    descriptors.push(...ds);
+  }
+  return descriptors;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,83 +483,20 @@ export const clientItem: ReleaseItem = {
   },
 
   async apply(env: DeployEnv, channel: ReleaseChannel, opts: ApplyOpts): Promise<void> {
-    const manifestDir = channelManifestDir(channel);
-    const storagePrefix = channelStoragePrefix(channel);
     const version = await readClientVersion();
-
-    const hostTriple = detectHostTriple();
-    const hostKey = tauriPlatformKey(hostTriple);
-    info(`host triple: ${hostTriple} (tauri key: ${hostKey}), version ${version}`);
-
-    const live = await fetchLiveJson<ClientManifest>(env, `${manifestDir}/client.json`);
-
-    // The bundle's download URL is deterministic (it's where we'll upload it),
-    // so the signed manifest can be composed before the upload.
-    step("Building Tauri client bundle (host-only)");
-    const restore = await injectTauriPubkey(env.tauriUpdaterPublicKey);
-    try {
-      await buildClient(env, channel);
-      const bundle = await findClientBundle(hostTriple);
-      ok(`${hostTriple}/${bundle.filename}  ${humanBytes(bundle.size)}  → ${rel(bundle.sigPath)}`);
-
-      const bundleKey = `${storagePrefix}${version}/${bundle.triple}/${bundle.filename}`;
-      const bundleUrl = `https://${env.storageDomain}/${bundleKey}`;
-
-      step("Composing client.json (Tauri updater manifest)");
-      const signature = (await Deno.readTextFile(bundle.sigPath)).trim();
-      // sha256 over the exact bytes the installer downloads, so client.sh can
-      // verify integrity before install (mirrors core.json). The Tauri minisign
-      // signature protects in-app updates; this protects the FIRST install.
-      const { sha256 } = await sha256File(bundle.bundlePath);
-      const manifest = composeClientManifest(version, hostKey, bundleUrl, signature, sha256, live);
-      const clientJsonPath = await writeManifestFile(manifestDir, "client.json", manifest);
-      ok(`client.json → ${rel(clientJsonPath)}`);
-
-      // Detached Ed25519 signature over the exact client.json bytes, so client.sh
-      // authenticates the manifest (and thus the sha256 it trusts) before
-      // installing. client.json is the Tauri updater endpoint, so the signature
-      // is a sidecar file rather than an added field (Tauri never fetches it).
-      const clientJsonSig = await signEd25519Bytes(
-        env.signingPrivateKey,
-        await Deno.readFile(clientJsonPath),
-      );
-      const clientSigPath = join(DIST_DIR, manifestDir, "client.json.sig");
-      await Deno.writeTextFile(clientSigPath, clientJsonSig);
-      ok(`client.json.sig → ${rel(clientSigPath)}`);
-
-      if (opts.dryRun) {
-        info(
-          colors.yellow(`dry-run: skipping upload of client bundle + ${manifestDir}/client.json`),
-        );
-        return;
-      }
-
-      step(`Uploading client bundle to R2 bucket "${env.r2Bucket}"`);
-      info(`uploading ${bundleKey}  (${humanBytes(bundle.size)})`);
-      await r2Put(env, bundleKey, bundle.bundlePath, "application/octet-stream");
-      opts.recordVersionedKey?.(bundleKey);
-
-      step(`Uploading ${manifestDir}/client.json to R2`);
-      await r2Put(
-        env,
-        `${manifestDir}/client.json`,
-        clientJsonPath,
-        "application/json",
-        MANIFEST_CACHE_CONTROL,
-      );
-      ok(`https://${env.storageDomain}/${manifestDir}/client.json`);
-
-      step(`Uploading ${manifestDir}/client.json.sig to R2`);
-      await r2Put(
-        env,
-        `${manifestDir}/client.json.sig`,
-        clientSigPath,
-        "text/plain",
-        MANIFEST_CACHE_CONTROL,
-      );
-      ok(`https://${env.storageDomain}/${manifestDir}/client.json.sig`);
-    } finally {
-      await restore();
+    // Prebuilt mode (CI publish): compose over the descriptors the desktop build
+    // runners produced. All-targets mode: build this host's OS triples + route
+    // the rest to on-demand driver environments. Host-only mode: just this host's
+    // bundle (the live manifest carries forward the other platforms at version).
+    const descriptors = opts.prebuilt
+      ? opts.prebuilt.clientDescriptors
+      : opts.environments?.length
+        ? await buildClientUnified(opts.triples, env, channel, opts.environments)
+        : [await buildClientBundle(env, channel)];
+    if (descriptors.length === 0) {
+      info(colors.yellow("no client bundles produced; skipping client publish"));
+      return;
     }
+    await composeAndUploadClient(env, channel, version, descriptors, opts);
   },
 };

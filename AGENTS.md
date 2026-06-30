@@ -32,9 +32,13 @@ Model Context Protocol process the core connects to). The packages:
   presentational Svelte components the client and website both render). The
   non-UI exports stay side-effect-free; only `./ui/*` pulls in
   `svelte`/`unocss`, and core never imports it.
-- **`@tomat/builtin-extension`**: reference extension installed by default on a
-  fresh core; doubles as the worked example for the `tomat.json` format,
-  including the memories (knowledge and skills) an extension can ship.
+- **`@tomat/tomat-extension-builtin`**: reference/baseline extension installed by
+  default on a fresh core; doubles as the worked example for the `tomat.json`
+  format.
+- **`@tomat/tomat-extension-samples`**: dev-only capability showcase exercising
+  the full `tomat.json` surface (every askUser kind, display kinds, llm/tts/stt/db/schedulePrompt,
+  a sample knowledge memory and a sample skill); NOT installed in production,
+  only codebase-installed in the dev environment.
 - **`@tomat/website`**: Astro static site at `au.tomat.ing`: the landing page,
   the feature showcase, the user manual, and the changelog. Renders the shared
   `@tomat/shared/ui` components so demos match the app, and is multi-page (link
@@ -143,8 +147,9 @@ through `npm:` specifiers from `deno task`.
   `requestRequiredModal`). Boot and background code must not fetch, poll, check
   for updates, or download. The built-in extension is installed on first boot
   OFFLINE from artifacts the install script already fetched + verified (the
-  install scripts plant `extensions/.tomat-builtin.{tgz,json}`; `builtin-seed.ts`
-  re-verifies and installs them with zero network) - never a boot-time fetch.
+  install scripts plant `extensions/.tomat-extension-builtin.{tgz,json}`;
+  `seeding.ts` re-verifies and installs them with zero network) - never a
+  boot-time fetch.
   The ONLY place network is expected without a user action is the install-script
   phase itself (`scripts/install/*`), which runs before the app is considered
   installed. New boot/background work routes through the user-gated download and
@@ -203,7 +208,7 @@ For anything beyond the above, the canonical docs are:
 - Release + deploy, channels, Cloudflare + R2 setup:
   [packages/tomat-website/README.md](packages/tomat-website/README.md)
 - Extension author API:
-  [packages/tomat-builtin/README.md](packages/tomat-builtin/README.md)
+  [packages/tomat-extension-builtin/README.md](packages/tomat-extension-builtin/README.md)
 - User-facing copy (the single source for any string a user can read: settings,
   manual, tool and extension descriptions, messages): [COPY.md](COPY.md).
   Whenever a task touches user-facing copy, in any package, follow it.

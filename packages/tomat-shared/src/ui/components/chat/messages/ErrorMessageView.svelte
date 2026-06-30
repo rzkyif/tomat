@@ -36,6 +36,6 @@
 <Bubble selectedAlignment={align} accent="red" extraClass="flex flex-col gap-2 text-default-800">
   {message}
   {#if errorDetail}
-    <ErrorDetailView detail={errorDetail} />
+    <ErrorDetailView detail={errorDetail} onAccentSurface />
   {/if}
 </Bubble>

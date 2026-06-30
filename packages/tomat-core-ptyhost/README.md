@@ -32,7 +32,6 @@ post-processing.
 ## Run, build, test
 
 This crate exposes the standardized verbs as cargo wrappers (its `deno.json`):
-`deno task check:core-ptyhost`, `lint:core-ptyhost`, `test:core-ptyhost`,
-`build:core-ptyhost`, or `cd` in and run `deno task <verb>`. It is also compiled
-as part of `deno task build:core` and folded into the repo-wide
-`deno task check` / `lint` / `test`.
+`deno task lint:core-ptyhost`, `test:core-ptyhost`, `build:core-ptyhost`, or
+`cd` in and run `deno task <verb>`. It is also compiled as part of
+`deno task build:core` and folded into the repo-wide `deno task lint` / `test`.

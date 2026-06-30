@@ -511,6 +511,14 @@ case "$(uname -m)" in
 esac
 TRIPLE="${HOST_ARCH}-${HOST_OS}"
 
+# client.json is the Tauri updater endpoint, so its `platforms` map is keyed in
+# Tauri's `<os>-<arch>` format (darwin-aarch64, linux-x86_64), NOT the Rust
+# triple. Match tauriPlatformKey() in scripts/release/client.ts.
+case "$HOST_OS" in
+  apple-darwin)      PLATFORM_KEY="darwin-${HOST_ARCH}" ;;
+  unknown-linux-gnu) PLATFORM_KEY="linux-${HOST_ARCH}" ;;
+esac
+
 ui_action_done "$IDX_HOST" "($TRIPLE)"
 
 # --- action 2: fetch manifest --------------------------------------------
@@ -598,9 +606,9 @@ if [ -z "$VERSION" ]; then
     "the storage origin may be misconfigured"
 fi
 
-URL="$(printf '%s' "$MANIFEST_JSON" | jq -r --arg t "$TRIPLE" '.platforms[$t].url // empty' 2>/dev/null || true)"
+URL="$(printf '%s' "$MANIFEST_JSON" | jq -r --arg t "$PLATFORM_KEY" '.platforms[$t].url // empty' 2>/dev/null || true)"
 if [ -z "$URL" ]; then
-  ui_die "No client artifact for $TRIPLE in manifest" \
+  ui_die "No client artifact for $PLATFORM_KEY in manifest" \
     "" \
     "your platform may not be supported yet"
 fi
@@ -609,7 +617,7 @@ fi
 # tampered/MITM'd artifact from being installed (and, on macOS, having Gatekeeper
 # stripped). The release script always publishes it; a missing hash means a
 # too-old or tampered manifest, so we fail closed at verification time.
-EXPECTED_SHA="$(printf '%s' "$MANIFEST_JSON" | jq -r --arg t "$TRIPLE" '.platforms[$t].sha256 // empty' 2>/dev/null || true)"
+EXPECTED_SHA="$(printf '%s' "$MANIFEST_JSON" | jq -r --arg t "$PLATFORM_KEY" '.platforms[$t].sha256 // empty' 2>/dev/null || true)"
 
 # Resolve the sha-256 command once (sha256sum or shasum -a 256).
 SHA_CMD="sha256sum"
@@ -628,7 +636,7 @@ verify_sha256() {
   _vlabel="$2"
   if [ -z "$EXPECTED_SHA" ]; then
     ui_die "Manifest is missing an integrity hash for the $_vlabel" \
-      "no .platforms[$TRIPLE].sha256 in client.json" \
+      "no .platforms[$PLATFORM_KEY].sha256 in client.json" \
       "the release is too old or has been tampered with; do not install"
   fi
   if [ -z "$SHA_CMD" ]; then

@@ -25,7 +25,7 @@ Speech-to-Text or Text-to-Speech is turned on. See
 ## Run, build, test
 
 This crate exposes the standardized verbs as cargo wrappers (its `deno.json`):
-`deno task check:core-speech`, `lint:core-speech`, `build:core-speech`, or `cd`
-in and run `deno task <verb>`. It is also folded into the repo-wide
-`deno task check` / `lint`. There is no test suite, so `test:core-speech` just
-runs `cargo test` and finds nothing.
+`deno task lint:core-speech`, `build:core-speech`, or `cd` in and run
+`deno task <verb>`. It is also folded into the repo-wide `deno task lint`. There
+is no test suite, so `test:core-speech` just runs `cargo test` and finds
+nothing.

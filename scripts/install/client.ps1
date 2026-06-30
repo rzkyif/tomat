@@ -302,6 +302,10 @@ try {
   }
   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "aarch64" } else { "x86_64" }
   $Triple = "$arch-pc-windows-msvc"
+  # client.json is the Tauri updater endpoint, so its `platforms` map is keyed in
+  # Tauri's `<os>-<arch>` format (windows-x86_64, windows-aarch64), NOT the Rust
+  # triple. Match tauriPlatformKey() in scripts/release/client.ts.
+  $PlatformKey = "windows-$arch"
 
   Ui-ActionDone $IdxHost "($Triple)"
 
@@ -351,9 +355,9 @@ try {
       "" `
       "the storage origin may be misconfigured"
   }
-  $entry = $manifest.platforms.$Triple
+  $entry = $manifest.platforms.$PlatformKey
   if (-not $entry -or -not $entry.url) {
-    Ui-Die "No client artifact for $Triple in manifest" `
+    Ui-Die "No client artifact for $PlatformKey in manifest" `
       "" `
       "your platform may not be supported yet"
   }

@@ -7501,15 +7501,6 @@
       "jsr:@std/tar@0.1"
     ],
     "members": {
-      "packages/tomat-builtin": {
-        "dependencies": [
-          "jsr:@std/assert@1",
-          "npm:@mozilla/readability@0.6",
-          "npm:expr-eval@^2.0.2",
-          "npm:linkedom@~0.18.12",
-          "npm:mime-types@^3.0.2"
-        ]
-      },
       "packages/tomat-client": {
         "dependencies": [
           "npm:@iconify/json@^2.2.483",
@@ -7576,6 +7567,20 @@
           "npm:reflect-metadata@~0.2.2",
           "npm:safe-regex@^2.1.1",
           "npm:zod@^4.4.3"
+        ]
+      },
+      "packages/tomat-extension-builtin": {
+        "dependencies": [
+          "jsr:@std/assert@1",
+          "npm:@mozilla/readability@0.6",
+          "npm:expr-eval@^2.0.2",
+          "npm:linkedom@~0.18.12",
+          "npm:mime-types@^3.0.2"
+        ]
+      },
+      "packages/tomat-extension-samples": {
+        "dependencies": [
+          "jsr:@std/assert@1"
         ]
       },
       "packages/tomat-model-catalog": {

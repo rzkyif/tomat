@@ -10,7 +10,7 @@ export const passwordPromptModalSamples = {
   error: {
     title: "Admin access required",
     password: "wrong",
-    error: "Incorrect password. Try again.",
+    error: "Incorrect password, try again",
   },
   submitting: {
     title: "Admin access required",

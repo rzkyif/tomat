@@ -123,6 +123,10 @@ export function tomatUnoBase(): UserConfig {
         /^border-accent-(blue|purple|red|green|yellow)-(\d+)$/,
         ([, c, s]) => `border-[var(--accent-${c}-${s})] dark:border-[var(--accent-${c}-d-${s})]`,
       ],
+      [
+        /^outline-accent-(blue|purple|red|green|yellow)-(\d+)$/,
+        ([, c, s]) => `outline-[var(--accent-${c}-${s})] dark:outline-[var(--accent-${c}-d-${s})]`,
+      ],
       // Semantic surface tokens: the single source of truth for what shade a
       // panel vs an on-panel well/control paints. Each expands to a `*-default-N`
       // shortcut above, so dark-mode inversion and per-component `--default-base`

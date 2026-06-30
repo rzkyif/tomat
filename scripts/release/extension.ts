@@ -1,6 +1,7 @@
 // Release item: the built-in extension, packed into a gzipped tarball with a
 // signed extension.json manifest (whole-manifest-minus-signature, like
-// core.json). Versioned via packages/tomat-builtin/deno.json.
+// core.json). Versioned via packages/tomat-extension-builtin/deno.json. The
+// dev-only samples extension is never released; it has no release item.
 
 import { ensureDir } from "@std/fs/ensure-dir";
 import { walk } from "@std/fs/walk";
@@ -31,7 +32,7 @@ import {
   step,
 } from "./lib.ts";
 
-const PKG_DIR = join(REPO_ROOT, "packages/tomat-builtin");
+const PKG_DIR = join(REPO_ROOT, "packages/tomat-extension-builtin");
 const MANIFEST_CACHE_CONTROL = "public, max-age=300";
 // Dev / VCS / test cruft, plus the lockfile (deno regenerates it on install).
 const EXCLUDE_DIRS = new Set(["node_modules", ".git", "tests"]);
@@ -93,7 +94,7 @@ export const extensionItem: ReleaseItem = {
   label: "built-in extension",
   scope: "channel",
   packages: ["extension"],
-  bumpHint: "packages/tomat-builtin/deno.json (version)",
+  bumpHint: "packages/tomat-extension-builtin/deno.json (version)",
 
   version: readExtensionVersion,
   versionFile: join(PKG_DIR, "deno.json"),

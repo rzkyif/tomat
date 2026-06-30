@@ -115,7 +115,7 @@
               {disabled}
               aria-pressed={active}
               class="px-2 h-7 rounded-medium text-xs font-medium transition-colors hover:cursor-pointer {active
-                ? 'bg-accent-blue-500 text-default-inverted-900'
+                ? 'bg-default-inverted-300 text-default-inverted-800'
                 : 'bg-surface-inset text-default-700 hover:text-default-900'}"
               onclick={() => onToggleWeekday(day)}
             >

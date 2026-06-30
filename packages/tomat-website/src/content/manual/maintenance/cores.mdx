@@ -1,0 +1,113 @@
+---
+title: Cores and Pairing
+section: Cores & Maintenance
+order: 2
+---
+
+import CoreBarDemo from "../../../components/demos/CoreBarDemo.svelte";
+import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelte";
+import Aside from "../../../components/Aside.astro";
+
+The **Core** is the service that does tomat's work, and the **Client** is the app
+you look at, as [The Basics](/manual/getting-started/basics) introduces. They usually
+sit on the same machine, set up for you the first time you launch the app. But the
+Core does not have to live where the Client does, and once you separate them a few
+things follow: how to run a Core elsewhere, how a Client connects to one, and how you
+move between more than one.
+
+## Running a Core elsewhere
+
+Putting the Core on a more powerful computer lets the heavy model run there while you
+sit at a laptop. On the [Install page](/install), pick **Core** and the operating
+system of the machine that will run it, then copy the command into a terminal on that
+machine. A few options shape the command before you run it:
+
+- **Channel** picks how new a build you run, matching the channel you use on the
+  Client. Leave it on **Stable** unless you have a reason not to (see
+  [Updates and Channels](/manual/maintenance/updates-and-channels)).
+- **Allow access from other machines** is the one that matters for a remote setup.
+  By default a Core only listens to its own machine, so nothing else on the network
+  can reach it. Turn this on to let the Client on another computer pair with it.
+- **Run in the background at login** installs the Core as a service so it starts on
+  its own and is always there to connect to. Turn it off to start the Core by hand.
+
+During the install you set an **admin password**. Choose something you will remember:
+it is what lets you pair more devices later from a computer you have already paired,
+without going back to the Core's machine. (When the Client installs a Core for you on
+first launch, it asks for this password in the app instead of the terminal.)
+
+<Aside type="caution">
+  Allowing access from other machines opens the Core to your local network. Only do this on a
+  network you trust; pairing still requires the one-time code, but the Core is reachable to anything
+  that can route to it.
+</Aside>
+
+## Pairing
+
+A Client connects to a Core by **pairing**. The Core mints a short code; in the
+Client you add a Core by its address and enter that code once. The Client captures
+the Core's identity at that moment and stores the trust securely, so it reconnects on
+its own every time without you re-entering anything. The code is needed only for that
+first introduction; afterward pairing is a one-time step rather than a login you
+repeat.
+
+To pair an _additional_ device later, you do not have to go back to the Core's
+machine. From a Client that is already paired, open the Core under **Cores** in
+Settings and choose **Generate Pairing Code**; enter the admin password and the
+Client mints a fresh code to type on the new device. The same password lets you
+remove a device you no longer want from that Core's list of paired devices.
+
+## More than one Core
+
+You can pair a single Client with several Cores and switch between them. A common
+setup is a laptop and a more powerful desktop: you carry the Client and point it at
+whichever Core you want to do the work. The **Core bar** pinned at the bottom of the
+app always shows which Core you are connected to and how it is doing, and lets you
+switch from one place. The status reads at a glance: getting ready, ready, busy with
+work, updating, or having trouble.
+
+<CoreBarDemo scenario="busy" highlightLabel="Status" highlightTarget="[data-region=core-status]" />
+
+Select the status to expand the bar into a panel. While it is busy it shows what is
+working and waiting; when something has gone wrong it names each part that is affected
+and the exact problem, so you can tell whether it is the language model, speech, or
+something else, and what to fix.
+
+<CoreBarDemo scenario="errorExpanded" />
+
+The Client connects to one Core at a time, but the work you start does not stop when
+you look away. You can begin a chat on one Core, switch to another, and come back to
+find the first one right where you left it, the reply still arriving and a question it
+asked still waiting. The only thing that clears that waiting work is restarting the
+Core itself.
+
+## Managing Cores
+
+Switch Cores from the Core bar for a quick change. For the full set, manage your
+paired Cores under **Cores** in Settings, where you can add a new one, rename one, or
+remove one. This is the counterpart to pairing: where pairing introduces a Core, this
+group is where your introduced Cores live.
+
+<SettingsPanelDemo group="cores" />
+
+## How It Works
+
+Pairing has to do two things at once: prove you typed the right code, and make sure
+you are talking to the real Core and not something impersonating it on the network.
+tomat handles both with a short exchange built around the one-time code. The Client
+and the Core each run a calculation from the code and trade the results; only if both
+started from the same code do they agree, so a wrong code fails outright, and the code
+itself never crosses the network in a form anyone could replay. In the same step the
+Client records the Core's identity, so from then on it can tell it is reconnecting to
+the same Core and refuse a stand-in.
+
+What you get out of a successful pairing is a long-lived key the Client stores in your
+operating system's keychain, the secure place the OS keeps passwords. Every later
+request carries that key, which is why you pair once and never sign in again, and why
+removing a device is a matter of revoking its key rather than changing a shared
+password. The admin password is separate: it is what authorizes minting new codes
+from an already-paired Client, so you can add devices without returning to the Core's
+machine.
+
+Next, keeping an eye on what the Core is using:
+[Usage](/manual/maintenance/usage).

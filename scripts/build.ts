@@ -15,15 +15,22 @@
 // Builds (core + helpers, client, catalog, website). The extension tarball and
 // the install scripts / schemas have no compile step, so they're release-only.
 //
+// `deno task build` builds all targets (the host builds every arch it can
+// natively; the rest are reported skipped pending their environment driver);
+// `deno task build:native` builds the host triple only.
+//
 // Flags:
 //   --channel=stable|latest   channel for the core/client builds (default latest)
+//   --triples=all|host|<csv>  targets to build (default all); host = build:native
 //   --force                   rebuild every item, ignoring the cursor
 //   --help
 
 import { parseArgs } from "@std/cli/parse-args";
 import { ensureDir } from "@std/fs/ensure-dir";
 import { join } from "@std/path";
+import type { Triple } from "../packages/tomat-shared/src/domain/model.ts";
 import {
+  channelBinSuffix,
   colors,
   DIST_DIR,
   exists,
@@ -37,7 +44,11 @@ import {
   REPO_ROOT,
   step,
 } from "./release/lib.ts";
-import { coreItem } from "./release/core.ts";
+import { ALL_KNOWN_TRIPLES, RELEASE_TARGET_TRIPLES } from "./release/all-targets.ts";
+import { buildCoreUnified, coreItem, coreOutputs } from "./release/core.ts";
+import type { BuildEnvironment } from "./release/drivers/mod.ts";
+import { podmanLinuxDriver } from "./release/drivers/podman.ts";
+import { windowsUtmDriver } from "./release/drivers/windows.ts";
 import { clientItem } from "./release/client.ts";
 import { catalogItem } from "./release/catalog.ts";
 import { websiteItem } from "./release/website.ts";
@@ -54,8 +65,12 @@ interface Buildable {
    *  differently (hashPaths skips absent paths), so a wiped or swapped output
    *  no longer matches the cursor and triggers a rebuild. */
   outputHash(): Promise<string>;
-  /** Args to `deno`, run from the repo root. */
-  cmd: string[];
+  /** Args to `deno`, run from the repo root (host-only builds). Mutually
+   *  exclusive with `run`. */
+  cmd?: string[];
+  /** In-process build (cross-platform core: drives the host + driver
+   *  environments via buildCoreUnified). Mutually exclusive with `cmd`. */
+  run?: () => Promise<void>;
 }
 
 /** {source, output} hashes recorded after each item's last successful build. */
@@ -67,6 +82,11 @@ type BuildState = Record<string, BuildRecord>;
 
 interface Flags {
   channel: ReleaseChannel;
+  /** Triples the user asked to build for (already validated). */
+  requestedTriples: Triple[];
+  /** True when building for more than the host triple (the `build` task;
+   *  `build:native` stays host-only). Drives the multi-arch core build. */
+  crossPlatform: boolean;
   force: boolean;
 }
 
@@ -74,24 +94,44 @@ function parseFlags(): Flags {
   const args = parseArgs(
     Deno.args.filter((a) => a !== "--"),
     {
-      string: ["channel"],
+      string: ["channel", "triples"],
       boolean: ["force", "help"],
       default: { force: false, help: false },
     },
   );
   if (args.help) {
-    console.log(`Usage: deno task build[:stable] [flags]
+    console.log(`Usage: deno task build[:native][:stable] [flags]
 
 Flags:
   --channel=stable|latest   channel for the core/client builds (default latest)
+  --triples=all|host|<csv>  all targets (default), host only, or a triple list
   --force                   rebuild every item, ignoring the cursor
   --help`);
     Deno.exit(0);
   }
+  const spec = (args.triples ?? "all").trim();
+  let requestedTriples: Triple[];
+  if (spec === "host") {
+    requestedTriples = [Deno.build.target as Triple];
+  } else if (spec === "all") {
+    requestedTriples = RELEASE_TARGET_TRIPLES;
+  } else {
+    requestedTriples = spec.split(",").map((t) => t.trim()) as Triple[];
+    for (const t of requestedTriples) {
+      if (!ALL_KNOWN_TRIPLES.includes(t)) {
+        fail(`unknown --triples entry "${t}". Valid: ${ALL_KNOWN_TRIPLES.join(", ")}, host, all`);
+      }
+    }
+  }
+  const crossPlatform = !(
+    requestedTriples.length === 1 && requestedTriples[0] === (Deno.build.target as Triple)
+  );
   // Build's unlabeled default is the latest channel (matching build:core /
   // build:client), unlike the release lib's stable default.
   return {
     channel: parseChannelFlag(args.channel ?? "latest"),
+    requestedTriples,
+    crossPlatform,
     force: args.force,
   };
 }
@@ -101,14 +141,38 @@ function outputHash(item: ReleaseItem, channel: ReleaseChannel): Promise<string>
   return item.buildOutputs!(channel).then((paths) => hashPaths(paths.map((path) => ({ path }))));
 }
 
-function buildables(channel: ReleaseChannel): Buildable[] {
+function buildables(
+  channel: ReleaseChannel,
+  coreTriples: Triple[],
+  environments: BuildEnvironment[] | undefined,
+): Buildable[] {
   return [
     {
       key: `core:${channel}`,
       label: "core + helpers",
       sourceHash: () => coreItem.sourceHash(channel),
-      outputHash: () => outputHash(coreItem, channel),
-      cmd: ["run", "-A", "scripts/build-core.ts", `--channel=${channel}`],
+      // Hash the outputs for every arch built (not just the host), so a
+      // cross-platform build re-runs when any arch's binaries are missing (and
+      // is skipped, including the heavy env spin-up, when they're all present).
+      outputHash: () => hashPaths(coreOutputs(channel, coreTriples).map((path) => ({ path }))),
+      // Cross-platform: build host triples here + the rest in their environments
+      // (in-process, so the same buildCoreUnified path as release). Host-only:
+      // the build-core.ts subprocess, unchanged.
+      ...(environments
+        ? {
+            run: async () => {
+              await buildCoreUnified(coreTriples, channelBinSuffix(channel), channel, environments);
+            },
+          }
+        : {
+            cmd: [
+              "run",
+              "-A",
+              "scripts/build-core.ts",
+              `--channel=${channel}`,
+              ...coreTriples.map((t) => `--target=${t}`),
+            ],
+          }),
     },
     {
       key: `client:${channel}`,
@@ -166,7 +230,9 @@ async function buildReason(
   return "";
 }
 
-async function runBuild(cmd: string[]): Promise<void> {
+async function runBuildable(b: Buildable): Promise<void> {
+  if (b.run) return await b.run();
+  const cmd = b.cmd!;
   const p = new Deno.Command("deno", {
     args: cmd,
     cwd: REPO_ROOT,
@@ -179,10 +245,19 @@ async function runBuild(cmd: string[]): Promise<void> {
 
 async function main(): Promise<void> {
   const flags = parseFlags();
-  console.log(colors.bold(`\ntomat build: ${flags.channel} channel\n`));
+  const mode = flags.crossPlatform ? "all targets" : "host only";
+  console.log(colors.bold(`\ntomat build: ${flags.channel} channel (${mode})\n`));
+
+  // Cross-platform passes the build environments; the core item routes each
+  // triple to the host or a driver (started on demand, stopped after), same as
+  // release. Host-only (build:native) builds just the host triple, no drivers.
+  const coreTriples = flags.crossPlatform ? flags.requestedTriples : [Deno.build.target as Triple];
+  const environments: BuildEnvironment[] | undefined = flags.crossPlatform
+    ? [podmanLinuxDriver, windowsUtmDriver]
+    : undefined;
 
   const state = await readState();
-  const items = buildables(flags.channel);
+  const items = buildables(flags.channel, coreTriples, environments);
   let built = 0;
   for (const item of items) {
     const source = await item.sourceHash();
@@ -192,7 +267,7 @@ async function main(): Promise<void> {
       continue;
     }
     step(`Building: ${item.label} (${reason})`);
-    await runBuild(item.cmd);
+    await runBuildable(item);
     // Record source + output hashes only after a successful build, and persist
     // immediately so a later failure doesn't force the just-built items to
     // rebuild on the next run.

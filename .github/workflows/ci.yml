@@ -14,15 +14,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # All Deno-driven checks (type-check, svelte-check, cargo check on Linux,
-  # format check, lint, clippy, tests). The run steps delegate straight to the
-  # `deno task` targets in deno.json so CI can't drift from the canonical
-  # command lists. Single job because deno task check already drives the full
-  # pipeline and we don't want a second worker to repeat the npm/JSR resolution.
+  # TypeScript pipeline: type-check + svelte-check (deno task check), format check
+  # (fmt:check), and JS/Svelte lint (lint:js = oxlint + the custom walkers), then
+  # the deno + vitest tests (test:js). The run steps delegate to the `deno task`
+  # targets so CI can't drift from the canonical command lists. Rust
+  # compile-checking (clippy, a superset of cargo check) and the cargo test suite
+  # live in the `rs` matrix below and run in parallel with this job; this job
+  # stays TS-only and light. Its only cargo touches are `cargo fmt --check` (which
+  # does not compile) and the tiny ptyhost binary the permission-prompt live probe
+  # needs - neither needs the Tauri/webkit system libs.
   deno:
-    name: "Rust and Typescript checks (linux)"
+    name: "TypeScript checks (linux)"
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: denoland/setup-deno@v2
@@ -35,34 +39,17 @@ jobs:
       - name: Verify frozen deno lockfile
         run: deno install --frozen
 
-      # Cargo check (part of `deno task check`) needs the Tauri/webkit and
-      # PipeWire/ALSA system libs (the same set the old CI installed for the
-      # Rust matrix).
-      - name: Install Linux deps for Tauri / xcap / cpal
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            libpipewire-0.3-dev \
-            libasound2-dev \
-            libgbm-dev \
-            patchelf
-
+      # Toolchain for `cargo fmt --check` (no compile) and the small ptyhost build
+      # below; the heavy Rust compile lives in the `rs` matrix.
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.96.0
-          components: rustfmt, clippy
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            packages/tomat-client/src/tauri
-            packages/tomat-core-keychain
-            packages/tomat-core-updater
-            packages/tomat-core-ptyhost
+          workspaces: packages/tomat-core-ptyhost
+          cache-all-crates: true
 
       # Cache Deno's module + npm cache between runs.
       - uses: actions/cache@v5
@@ -76,31 +63,33 @@ jobs:
 
       - run: deno task check
       - run: deno task fmt:check
-      - run: deno task lint
+      - run: deno task lint:js
 
       # The permission-prompt live probe (extensions/prompt-live-probe.test.ts)
-      # needs the real ptyhost binary; build it first and force the test to
-      # FAIL rather than skip if the binary is somehow absent, since it is
-      # the drift tripwire for deno version bumps.
+      # needs the real ptyhost binary; build it first and force the test to FAIL
+      # rather than skip if the binary is somehow absent, since it is the drift
+      # tripwire for deno version bumps.
       - run: cargo build -p tomat-core-ptyhost
 
-      # In-source tests via `deno task test` (deno + vitest one-shot + cargo).
-      # E2E (WebdriverIO + tauri-driver under tests/e2e/) is intentionally not
-      # run in CI. See tests/e2e/README.md.
-      - run: deno task test
+      # In-source TS tests via `deno task test:js` (deno + vitest one-shot). The
+      # cargo test suite runs in the `rs` matrix. E2E (WebdriverIO + tauri-driver
+      # under tests/e2e/) is intentionally not run in CI. See tests/e2e/README.md.
+      - run: deno task test:js
         env:
           TOMAT_REQUIRE_PTYHOST: "1"
 
-  # Cross-platform Rust checks. Linux already runs inside `deno task check`
-  # above; this matrix covers macOS + Windows so the Rust crates (the Tauri
-  # shell, the core-keychain helper, and the core-updater helper) stay
-  # buildable on every supported host without the rest of the Deno pipeline.
+  # Rust pipeline: clippy (the single Rust compile-check - `--all-targets` is a
+  # superset of cargo check, so check is never run separately) plus the cargo test
+  # suite. The shipping crates (the Tauri shell, core-keychain, core-updater,
+  # core-ptyhost) run on every supported host so their platform-specific cfgs stay
+  # buildable; the core-hwinfo and core-speech helpers are Linux-only checks. Runs
+  # in parallel with the TS job above, Linux included.
   rs:
     name: "Rust checks (${{ matrix.os }})"
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -109,6 +98,21 @@ jobs:
         with:
           toolchain: 1.96.0
           components: clippy
+      # Tauri / xcap / cpal need the webkit + PipeWire/ALSA system libs on Linux;
+      # macOS and Windows use the system webview and need nothing extra.
+      - name: Install Linux deps for Tauri / xcap / cpal
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libpipewire-0.3-dev \
+            libasound2-dev \
+            libgbm-dev \
+            patchelf
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -116,20 +120,30 @@ jobs:
             packages/tomat-core-keychain
             packages/tomat-core-updater
             packages/tomat-core-ptyhost
+            packages/tomat-core-hwinfo
+            packages/tomat-core-speech
+          shared-key: rs-${{ matrix.os }}
+          cache-all-crates: true
       # --locked fails if any Cargo.lock would change, so a drifted lock can't
       # pass CI (the signed helper binaries are built from these locks).
       - run: cargo clippy --locked --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo check --locked --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets
       - run: cargo test --locked --manifest-path packages/tomat-client/src/tauri/Cargo.toml --lib
       - run: cargo clippy --locked --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings
-      - run: cargo check --locked --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets
       - run: cargo test --locked --manifest-path packages/tomat-core-keychain/Cargo.toml
       - run: cargo clippy --locked --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets -- -D warnings
-      - run: cargo check --locked --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets
       - run: cargo test --locked --manifest-path packages/tomat-core-updater/Cargo.toml
       - run: cargo clippy --locked --manifest-path packages/tomat-core-ptyhost/Cargo.toml --all-targets -- -D warnings
-      - run: cargo check --locked --manifest-path packages/tomat-core-ptyhost/Cargo.toml --all-targets
       - run: cargo test --locked --manifest-path packages/tomat-core-ptyhost/Cargo.toml
+      # core-hwinfo and core-speech are Linux-only checks (they were previously
+      # covered on Linux only, inside the old monolithic job).
+      - run: cargo clippy --locked --manifest-path packages/tomat-core-hwinfo/Cargo.toml --all-targets -- -D warnings
+        if: runner.os == 'Linux'
+      - run: cargo test --locked --manifest-path packages/tomat-core-hwinfo/Cargo.toml
+        if: runner.os == 'Linux'
+      - run: cargo clippy --locked --manifest-path packages/tomat-core-speech/Cargo.toml --all-targets -- -D warnings
+        if: runner.os == 'Linux'
+      - run: cargo test --locked --manifest-path packages/tomat-core-speech/Cargo.toml
+        if: runner.os == 'Linux'
 
   # Android cross-compile check. The Tauri shell ships an android build whose
   # mobile cfg (#[cfg(mobile)] / target_os = "android") is never exercised by the
@@ -150,6 +164,7 @@ jobs:
         with:
           workspaces: packages/tomat-client/src/tauri
           key: android
+          cache-all-crates: true
       - name: Android cargo check (aarch64-linux-android)
         run: |
           NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
@@ -176,10 +191,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.96.0
+      # Prebuilt binary - avoids compiling cargo-audit from source every run.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
       - name: cargo-audit (Cargo.lock)
-        run: |
-          cargo install cargo-audit --locked
-          cargo audit
+        run: cargo audit
       - name: osv-scanner (deno.lock + Cargo.lock)
         # Pinned to a known-good release; bump alongside other action versions.
         uses: google/osv-scanner-action@v2.0.2

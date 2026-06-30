@@ -49,7 +49,7 @@
   });
 
   const textClass = $derived.by(() => {
-    if (status === "Error") return "text-accent-red-400";
+    if (status === "Error") return "text-accent-red-700";
     // While flashing, pulse the text between bright and dim default tones.
     if (flashing) return blinkOn ? "text-default-900" : "text-default-500";
     if (status === "Pending" || status === "Cancelled") return "text-default-500";

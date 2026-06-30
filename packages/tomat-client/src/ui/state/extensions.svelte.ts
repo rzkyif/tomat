@@ -198,11 +198,7 @@ class ExtensionsState {
    *  lands in status 'downloaded'; the user then calls installDeps. */
   async download(req: DownloadExtensionRequest): Promise<string> {
     const label =
-      req.source === "npm"
-        ? req.name
-        : req.source === "builtin"
-          ? BUILTIN_EXTENSION_ID
-          : (req.slug ?? req.path);
+      req.source === "npm" ? req.name : req.source === "seeded" ? req.id : (req.slug ?? req.path);
     const res = await cores().api().extensions.download(req);
     this.registerJob(res.jobId, res.extensionId, label);
     return res.jobId;
@@ -258,7 +254,7 @@ class ExtensionsState {
 
   /** Download the built-in extension from the CDN (codebase in dev). */
   async downloadBuiltin(): Promise<string> {
-    return await this.download({ source: "builtin" });
+    return await this.download({ source: "seeded", id: BUILTIN_EXTENSION_ID });
   }
 
   /** Install the built-in's tools at the user's request (the Tools prompt).

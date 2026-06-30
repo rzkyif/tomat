@@ -45,7 +45,7 @@
       : ''} {recording
       ? 'bg-surface-inset'
       : hasError
-        ? 'bg-accent-red-300 border-accent-red-400'
+        ? 'bg-surface-inset tomat-error-ring cursor-pointer'
         : 'bg-surface-inset cursor-pointer'}"
     onclick={onStartCapture ?? noop}
   >
@@ -58,12 +58,10 @@
     {:else}
       {#each segments as seg, i}
         {#if i > 0}
-          <span class="text-xs {hasError ? 'text-accent-red-900' : 'text-default-500'}">+</span>
+          <span class="text-xs text-default-500">+</span>
         {/if}
         <kbd
-          class="px-1.5 py-0.5 rounded text-xs font-mono uppercase tracking-wide {hasError
-            ? 'bg-accent-red-400 text-accent-red-900'
-            : 'bg-surface-inset-strong text-default-800'}"
+          class="px-1.5 py-0.5 rounded text-xs font-mono uppercase tracking-wide bg-surface-inset-strong text-default-800"
         >
           {seg}
         </kbd>

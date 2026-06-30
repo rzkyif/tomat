@@ -26,6 +26,7 @@
   import FormField from "@tomat/shared/ui/components/primitives/FormField.svelte";
   import HelpText from "@tomat/shared/ui/components/primitives/HelpText.svelte";
   import IconButton from "@tomat/shared/ui/components/primitives/IconButton.svelte";
+  import IconText from "@tomat/shared/ui/components/primitives/IconText.svelte";
   import Input from "@tomat/shared/ui/components/primitives/Input.svelte";
   import ListItem from "@tomat/shared/ui/components/primitives/ListItem.svelte";
   import Markdown from "@tomat/shared/ui/components/primitives/Markdown.svelte";
@@ -63,6 +64,26 @@
     {#each entries(P.IconButton) as [name, p] (name)}
       <GalleryCard label={`IconButton · ${name}`} surface>
         <IconButton {...p as ComponentProps<typeof IconButton>} onclick={noop} />
+      </GalleryCard>
+    {/each}
+
+    {#each entries(P.IconText) as [name, p] (name)}
+      <GalleryCard label={`IconText · ${name}`} surface>
+        <div class="w-56">
+          <IconText {...p as ComponentProps<typeof IconText>}>
+            {#if name === "header"}
+              <code
+                class="font-mono bg-accent-yellow-200 text-accent-yellow-700 rounded-small px-1.5 py-0.5"
+                >read_file</code
+              >
+              wants to read a file
+            {:else if name === "error"}
+              Couldn't complete that action
+            {:else}
+              Summarized
+            {/if}
+          </IconText>
+        </div>
       </GalleryCard>
     {/each}
 

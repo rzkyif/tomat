@@ -119,7 +119,7 @@ export const shareModalSamples = {
     exportHasOutput: false,
     copied: false,
     importText: "{ not valid json",
-    parsedError: "Not valid JSON.",
+    parsedError: "Not valid JSON",
     unknownKeysCount: 0,
     importError: null,
     importTree: [],

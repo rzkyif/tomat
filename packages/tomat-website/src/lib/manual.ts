@@ -6,14 +6,12 @@ export type ManualEntry = CollectionEntry<"manual">;
 // so adding a section without touching this still renders sensibly.
 const SECTION_ORDER = [
   "Getting Started",
-  "Core Concepts",
-  "Conversations",
-  "Tuning Replies",
+  "Models",
   "Speech",
-  "Tools & Extensions",
-  "Knowledge",
-  "Automation",
-  "Settings & Maintenance",
+  "Conversation & Automation",
+  "Tools & Knowledge",
+  "Personalization",
+  "Cores & Maintenance",
 ];
 
 export interface ManualSection {

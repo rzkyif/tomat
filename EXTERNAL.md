@@ -201,7 +201,7 @@ they belong on the same map.
   [data/signing-keys.json](packages/tomat-core/data/signing-keys.json), verified
   in [self-updater.ts](packages/tomat-core/src/update/self-updater.ts),
   [binaries/manifest.ts](packages/tomat-core/src/binaries/manifest.ts),
-  [extensions/builtin-manifest.ts](packages/tomat-core/src/extensions/builtin-manifest.ts),
+  [extensions/seeded-manifest.ts](packages/tomat-core/src/extensions/seeded-manifest.ts),
   and [models/catalog.ts](packages/tomat-core/src/models/catalog.ts).
 - **Assumes:** the committed public key matches the private key that signs
   releases; signatures cover the whole payload minus the `signature` field,

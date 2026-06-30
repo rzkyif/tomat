@@ -66,6 +66,7 @@
       value={draftSymbol}
       options={symbolOptions}
       ariaLabel="Snippet trigger symbol"
+      error={!!nameError}
       onchange={(v) => (onSymbolChange ?? noop)(v)}
     />
   </FormField>

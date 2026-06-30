@@ -14,6 +14,13 @@ import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import { load as loadDotenv } from "@std/dotenv";
 import * as ed from "@noble/ed25519";
 import { canonicalize } from "../../packages/tomat-shared/src/crypto/canonical.ts";
+import type { BuildEnvironment } from "./drivers/mod.ts";
+// Type-only: artifacts.ts imports values from this module, so a value import
+// here would be a runtime cycle. `import type` is erased, so it is safe.
+import type { PrebuiltStaging } from "./artifacts.ts";
+// github-release.ts imports values back from this module; the ES-module cycle
+// resolves because neither side calls the other at module-eval time.
+import { publishGithubRelease } from "./github-release.ts";
 
 // ---------------------------------------------------------------------------
 // paths
@@ -207,6 +214,37 @@ export async function loadOrSeedEnv(): Promise<DeployEnv> {
     r2Bucket: get("TOMAT_R2_BUCKET") || "tomat-releases",
     tauriUpdaterPublicKey: tauriPub,
     tauriUpdaterPrivateKey: tauriPriv,
+    tauriUpdaterPassword: get("TAURI_UPDATER_PRIVATE_KEY_PASSWORD"),
+    androidKeystoreB64: get("TOMAT_ANDROID_KEYSTORE_B64"),
+    androidKeystorePassword: get("TOMAT_ANDROID_KEYSTORE_PASSWORD"),
+    androidKeyAlias: get("TOMAT_ANDROID_KEY_ALIAS") || "upload",
+    androidKeyPassword: get("TOMAT_ANDROID_KEY_PASSWORD") || get("TOMAT_ANDROID_KEYSTORE_PASSWORD"),
+  };
+}
+
+/** The minimal DeployEnv a BUILD environment needs, constructed directly from
+ *  the process env rather than via loadOrSeedEnv: only the build-time signing
+ *  fields (Tauri minisign, Android keystore) and the Ed25519 PUBLIC key. The
+ *  Ed25519 PRIVATE key is left empty, so it never reaches a build runner or a
+ *  driver-driven environment (manifest signing happens only on the publish host).
+ *  Shared by the CI build half (ci-build.ts) and the local in-environment build
+ *  entry (build-release-bundle.ts) so the two pipelines build identically. */
+export function envFromProcess(): DeployEnv {
+  const get = (k: string) => Deno.env.get(k) ?? "";
+  const pubB64 = get("TOMAT_SIGNING_PUBLIC_KEY_B64");
+  if (!pubB64) {
+    fail(`TOMAT_SIGNING_PUBLIC_KEY_B64 is required (baked into the core binary for verification).`);
+  }
+  return {
+    signingPrivateKey: new Uint8Array(),
+    signingPublicKey: decodeBase64(pubB64),
+    cloudflareApiToken: "",
+    cloudflareAccountId: "",
+    websiteDomain: get("TOMAT_WEBSITE_DOMAIN") || "au.tomat.ing",
+    storageDomain: get("TOMAT_STORAGE_DOMAIN") || "get.au.tomat.ing",
+    r2Bucket: get("TOMAT_R2_BUCKET") || "tomat-releases",
+    tauriUpdaterPublicKey: get("TAURI_UPDATER_PUBLIC_KEY"),
+    tauriUpdaterPrivateKey: get("TAURI_UPDATER_PRIVATE_KEY"),
     tauriUpdaterPassword: get("TAURI_UPDATER_PRIVATE_KEY_PASSWORD"),
     androidKeystoreB64: get("TOMAT_ANDROID_KEYSTORE_B64"),
     androidKeystorePassword: get("TOMAT_ANDROID_KEYSTORE_PASSWORD"),
@@ -604,7 +642,7 @@ export const PACKAGES: Record<string, { dir: string; kind: PackageKind }> = {
   core: { dir: "packages/tomat-core", kind: "deno" },
   client: { dir: "packages/tomat-client", kind: "deno" },
   website: { dir: "packages/tomat-website", kind: "deno" },
-  extension: { dir: "packages/tomat-builtin", kind: "deno" },
+  extension: { dir: "packages/tomat-extension-builtin", kind: "deno" },
   catalog: { dir: "packages/tomat-model-catalog", kind: "deno" },
   "core-updater": { dir: "packages/tomat-core-updater", kind: "rust" },
   "core-keychain": { dir: "packages/tomat-core-keychain", kind: "rust" },
@@ -756,12 +794,26 @@ export function promptYesNo(message: string): boolean {
 export interface ApplyOpts {
   /** Triples to build (core/client). Other items ignore this. */
   triples: Triple[];
+  /** On-demand build environments (Podman, UTM) for triples this host can't
+   *  build natively. Present only in all-targets mode; the core item routes
+   *  non-host triples through them. Absent -> host-only (today's behavior). */
+  environments?: BuildEnvironment[];
+  /** Pre-built artifacts collected from CI build runners. When present, the
+   *  core/client/android items SKIP building and compose+sign+upload these
+   *  instead (the publish half of the CI build/publish split). Absent -> the
+   *  item builds locally (drivers or host-only). */
+  prebuilt?: PrebuiltStaging;
   /** Build + sign locally but skip every R2 upload. */
   dryRun: boolean;
   /** Versioned items append each uploaded versioned key (full key, WITH channel
    *  prefix) here so the orchestrator can record it in the cursor and prune older
    *  versions. Latest-only items (manifests/schemas/scripts) ignore it. */
   recordVersionedKey?(key: string): void;
+  /** Items append the local file + flat asset name of each artifact they want
+   *  mirrored to the GitHub Release (installers, APKs, binaries). The
+   *  orchestrator uploads them after R2 when githubRelease is on. Manifests are
+   *  collected separately by the publisher. */
+  recordReleaseAsset?(localPath: string, assetName: string): void;
 }
 
 export interface ReleaseItem {
@@ -828,6 +880,17 @@ export interface RunReleaseOpts {
   force: boolean;
   dryRun: boolean;
   triples: Triple[];
+  environments?: BuildEnvironment[];
+  /** Pre-built artifacts from CI build runners (the publish half of the CI
+   *  build/publish split). Passed to each item's apply as opts.prebuilt. */
+  prebuilt?: PrebuiltStaging;
+  /** Skip the post-release version auto-bump. CI never writes the repo: versions
+   *  are bumped on `main` before the channel transfer, so the cursor records the
+   *  as-built source hash (not a post-bump one), keeping re-pushes idempotent. */
+  noBump?: boolean;
+  /** Mirror this run's artifacts + manifests to the rolling per-channel GitHub
+   *  Release after the R2 upload. Off for a plain local release. */
+  githubRelease?: boolean;
 }
 
 interface PlanEntry {
@@ -949,16 +1012,21 @@ export async function runReleasePlan(
   }
 
   // Each item's apply() appends the versioned keys it uploads to its own list so
-  // the cursor below can record them and prune older versions.
+  // the cursor below can record them and prune older versions. Items also append
+  // the local files they want mirrored to the GitHub Release.
   const recordedKeys = new Map<string, string[]>();
+  const releaseAssets: Array<{ path: string; name: string }> = [];
   for (const p of changed) {
     step(`Releasing: ${p.item.label}`);
     const keys: string[] = [];
     recordedKeys.set(p.item.id, keys);
     await p.item.apply(env, channel, {
       triples: opts.triples,
+      environments: opts.environments,
+      prebuilt: opts.prebuilt,
       dryRun: opts.dryRun,
       recordVersionedKey: (k) => keys.push(k),
+      recordReleaseAsset: (path, name) => releaseAssets.push({ path, name }),
     });
   }
 
@@ -967,18 +1035,32 @@ export async function runReleasePlan(
     return changed.length;
   }
 
+  // Mirror to the rolling per-channel GitHub Release BEFORE writing the cursor,
+  // so a mirror failure fails the whole run and a re-push retries everything
+  // (R2 puts are idempotent). Doing it after the cursor write would let a
+  // mirror failure leave the cursor claiming success, so the re-push would skip.
+  if (opts.githubRelease) {
+    await publishGithubRelease(env, channel, {
+      items: changed.map((p) => ({ label: p.item.label, version: p.localVersion })),
+      assets: releaseAssets,
+    });
+  }
+
   // Auto-bump: each item whose source changed has just published at its current
   // version, so advance its file to the next patch (uncommitted) ready for the
   // next cycle. Dedupe by versionFile so a shared file (client + android share
   // tauri.conf.json) bumps once. A platform-fill change (sourceChanged === false)
-  // republishes the same version and is not bumped.
-  step("Bumping versions for the next release");
+  // republishes the same version and is not bumped. Skipped under noBump (CI):
+  // the repo is never written, versions are bumped on `main` before the transfer.
   const bumpedFiles = new Set<string>();
-  for (const p of changed) {
-    if (!p.sourceChanged || bumpedFiles.has(p.item.versionFile)) continue;
-    bumpedFiles.add(p.item.versionFile);
-    const next = await p.item.bumpVersion();
-    ok(`bumped ${p.item.label} ${p.localVersion} -> ${next} (uncommitted)`);
+  if (!opts.noBump) {
+    step("Bumping versions for the next release");
+    for (const p of changed) {
+      if (!p.sourceChanged || bumpedFiles.has(p.item.versionFile)) continue;
+      bumpedFiles.add(p.item.versionFile);
+      const next = await p.item.bumpVersion();
+      ok(`bumped ${p.item.label} ${p.localVersion} -> ${next} (uncommitted)`);
+    }
   }
 
   step("Updating release-state cursor");
@@ -987,11 +1069,14 @@ export async function runReleasePlan(
     const prev =
       p.item.scope === "shared" ? cursor.shared[p.item.id] : cursor.channels[channel]?.[p.item.id];
     // Record the version just published (not the bumped one) so the gate's
-    // local > recorded check passes next time, and the post-bump source hash so
-    // the version-file edit above does not read as a source change on rerun.
+    // local > recorded check passes next time. For the source hash: with a
+    // post-release bump (local), re-hash AFTER the bump so the version-file edit
+    // does not read as a source change on rerun. Under noBump (CI) nothing was
+    // edited, so the as-built hash already on hand is the one to record -
+    // re-pushing the same commit then reads as unchanged (idempotent).
     const state: ItemState = {
       version: p.localVersion,
-      sourceHash: await p.item.sourceHash(channel),
+      sourceHash: opts.noBump ? p.localHash : await p.item.sourceHash(channel),
     };
     const keys = recordedKeys.get(p.item.id) ?? [];
     if (keys.length > 0) {

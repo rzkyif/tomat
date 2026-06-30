@@ -240,7 +240,7 @@
               {/if}
             {/if}
             {#if hasError}
-              <ErrorDetailView detail={error} />
+              <ErrorDetailView detail={error} onAccentSurface />
             {/if}
             {#if hasLogs}
               <div class="text-default-600">Logs</div>

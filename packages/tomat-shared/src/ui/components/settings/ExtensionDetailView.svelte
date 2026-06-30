@@ -6,6 +6,7 @@
   import type { Extension } from "../../../domain/extension.ts";
   import Toggle from "../primitives/Toggle.svelte";
   import FormField from "../primitives/FormField.svelte";
+  import IconText from "../primitives/IconText.svelte";
 
   // `horizontal` mirrors the settings-panel layout flag: controls sit to the
   // right of their label when there is room, and stack below when narrow.
@@ -35,8 +36,10 @@
 
 <div class="flex flex-col">
   {#if drifted}
-    <div class="flex flex-col gap-1 p-3 mb-1 bg-surface-inset rounded-large">
-      <span class="text-sm text-accent-red-600">Content Changed Since Install</span>
+    <div class="flex flex-col gap-1 mb-1">
+      <IconText icon="i-material-symbols-error-rounded" color="text-accent-red-700">
+        Content Changed Since Install
+      </IconText>
       <span class="text-xs text-default-700 break-words">
         This extension's files changed on disk, so its tools were disabled. Review the change, then
         choose "Review &amp; re-enable" from the extension menu to trust the current contents.

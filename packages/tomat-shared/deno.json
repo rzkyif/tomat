@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "tasks": {
     "check": "deno check src/index.ts",
-    "test": "deno test --no-check --quiet"
+    "test:js": "deno test --no-check --quiet",
+    "test": "deno task test:js"
   },
   "exports": {
     ".": "./src/index.ts",

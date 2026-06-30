@@ -7,7 +7,7 @@
 import { dirname, join } from "@std/path";
 import { UntarStream } from "@std/tar/untar-stream";
 import { encodeBase64 } from "@std/encoding/base64";
-import { errMessage } from "@tomat/shared";
+import { errMessage, seededExtensionById } from "@tomat/shared";
 import { channel, paths } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { isWithin } from "../shared/fs-safety.ts";
@@ -15,11 +15,7 @@ import { getLogger } from "../shared/log.ts";
 import { sha256Hex, toHex } from "../shared/hash.ts";
 import { extensionInstallPath } from "./registry.ts";
 import { resolveVersion } from "./npm-registry.ts";
-import {
-  BUILTIN_EXTENSION_ID,
-  builtinCodebasePath,
-  loadBuiltinExtensionManifest,
-} from "./builtin-manifest.ts";
+import { loadSeededManifest, seededCodebasePath } from "./seeded-manifest.ts";
 import { finishRegister, parseManifestOrThrow } from "./installer-register.ts";
 import {
   flattenNpmName,
@@ -54,8 +50,8 @@ export async function runDownload(
     let version: string;
     if (spec.source === "npm") {
       version = await installNpm(spec, stagingPath, jobId, sink);
-    } else if (spec.source === "builtin") {
-      version = await installBuiltin(spec, stagingPath, jobId, sink);
+    } else if (spec.source === "seeded") {
+      version = await installSeeded(spec, stagingPath, jobId, sink);
     } else {
       await installLocal(spec, stagingPath);
       version = "local";
@@ -136,25 +132,39 @@ async function installNpm(
   return resolved.version;
 }
 
-// --- builtin path ---------------------------------------------------------
+// --- seeded path ----------------------------------------------------------
 
-async function installBuiltin(
-  spec: Extract<InstallSource, { source: "builtin" }>,
+async function installSeeded(
+  spec: Extract<InstallSource, { source: "seeded" }>,
   stagingPath: string,
   jobId: string,
   sink: InstallEventSink,
 ): Promise<string> {
+  const ext = seededExtensionById(spec.id);
+  if (!ext) {
+    throw new AppError("validation_error", `unknown seeded extension "${spec.id}"`);
+  }
+  // A dev-only extension (samples) is never released or planted in prod, so it
+  // must never install outside the dev channel - including via a user-triggered
+  // download/update route. The boot seed loop already skips it; this is the
+  // chokepoint that also covers the HTTP install paths.
+  if (ext.devOnly && channel() !== "dev") {
+    throw new AppError(
+      "validation_error",
+      `${ext.id} is a dev-only extension and cannot be installed on the ${channel()} channel`,
+    );
+  }
   await Deno.mkdir(stagingPath, { recursive: true });
 
   if (channel() === "dev") {
-    sink.log(jobId, BUILTIN_EXTENSION_ID, "stdout", "installing built-in extension from codebase");
-    await copyTreeExcludingNodeModules(builtinCodebasePath(), stagingPath);
+    sink.log(jobId, ext.id, "stdout", `installing seeded extension ${ext.id} from codebase`);
+    await copyTreeExcludingNodeModules(seededCodebasePath(ext.dir), stagingPath);
     // Dev manifest is codebase-derived (no network).
-    return (await loadBuiltinExtensionManifest()).version;
+    return (await loadSeededManifest(ext)).version;
   }
 
   // First-boot seed (`planted` set): install OFFLINE from the install-script-planted
-  // tarball + signed manifest. builtin-seed already verified the manifest signature;
+  // tarball + signed manifest. Seeding already verified the manifest signature;
   // re-verify the tarball against its sha256 (the anchor to that signature) and
   // extract. No network: a running core never fetches on boot - the install-script
   // phase, where network is fine, did the fetching.
@@ -163,29 +173,19 @@ async function installBuiltin(
     if (!bytes) {
       throw new AppError(
         "tarball_fetch_failed",
-        `planted built-in tarball not found at ${spec.planted.tarballPath}`,
+        `planted ${ext.id} tarball not found at ${spec.planted.tarballPath}`,
       );
     }
     await verifyTarball(bytes, spec.planted.tarballPath, { sha256: spec.planted.manifest.sha256 });
-    sink.log(
-      jobId,
-      BUILTIN_EXTENSION_ID,
-      "stdout",
-      "installing built-in extension from planted tarball",
-    );
+    sink.log(jobId, ext.id, "stdout", `installing seeded extension ${ext.id} from planted tarball`);
     await extractTarballBytes(bytes, stagingPath);
     return spec.planted.manifest.version;
   }
 
   // User-triggered download/update (the client invoked a route on a user action):
   // resolving + fetching the signed CDN tarball is allowed here.
-  const manifest = await loadBuiltinExtensionManifest();
-  sink.log(
-    jobId,
-    BUILTIN_EXTENSION_ID,
-    "stdout",
-    `downloading built-in extension ${manifest.version}`,
-  );
+  const manifest = await loadSeededManifest(ext);
+  sink.log(jobId, ext.id, "stdout", `downloading seeded extension ${ext.id} ${manifest.version}`);
   await fetchAndExtractTarball(manifest.tarballUrl, stagingPath, {
     sha256: manifest.sha256,
   });

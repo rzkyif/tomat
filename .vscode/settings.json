@@ -2,7 +2,8 @@
   "deno.enablePaths": [
     "packages/tomat-shared",
     "packages/tomat-core",
-    "packages/tomat-builtin",
+    "packages/tomat-extension-builtin",
+    "packages/tomat-extension-samples",
     "packages/tomat-model-catalog",
     "scripts"
   ],

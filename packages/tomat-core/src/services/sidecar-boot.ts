@@ -24,7 +24,7 @@ import { llmIdle } from "./llm-idle.ts";
 import { loadCoreSettings, subscribeCoreSettings } from "./core-settings.ts";
 import { downloadManager } from "../downloads/manager.ts";
 import { onBinaryInstalled } from "../binaries/manager.ts";
-import { runQueuedBuiltinInstall } from "../extensions/builtin-seed.ts";
+import { runQueuedBuiltinInstall } from "../extensions/seeding.ts";
 import { BROADCAST_SINK } from "../http/routes/extensions.ts";
 import { binaryName } from "../binaries/versions.ts";
 import { binPath } from "../paths.ts";

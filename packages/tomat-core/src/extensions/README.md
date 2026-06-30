@@ -2,7 +2,7 @@
 
 How core installs, registers, trusts, and executes extensions. The `tomat.json`
 format and everything a extension author needs live in
-[the built-in extension README](../../../tomat-builtin/README.md); this document
+[the built-in extension README](../../../tomat-extension-builtin/README.md); this document
 only covers the host machinery.
 
 An extension is one of two tool providers; the other is an MCP server, whose
@@ -112,11 +112,11 @@ the tool as `NotCapable`.
 ## Built-in extension seeding
 
 The built-in extension is CDN-distributed (never on npm) behind an
-Ed25519-signed manifest ([`builtin-manifest.ts`](builtin-manifest.ts)),
+Ed25519-signed manifest ([`seeded-manifest.ts`](seeded-manifest.ts)),
 mirroring the binaries manifest; dev runs from the in-repo codebase instead. On
-first boot, [`builtin-seed.ts`](builtin-seed.ts) installs it OFFLINE from the
-artifacts the install script planted (`extensions/.tomat-builtin.tgz` plus the
-signed `.tomat-builtin.json`): it re-verifies the manifest signature and the
+first boot, [`seeding.ts`](seeding.ts) installs it OFFLINE from the
+artifacts the install script planted (`extensions/.tomat-extension-builtin.{tgz,json}`):
+it re-verifies the manifest signature and the
 tarball sha256, then extracts. This honors the no-non-consented-network rule
 (see [AGENTS.md](../../../../AGENTS.md)) - core never fetches on boot; the
 install-script phase did the downloading. If the artifacts are not planted, the

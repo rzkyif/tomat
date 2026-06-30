@@ -6,6 +6,7 @@ import {
   type Grant,
   parseExtensionManifest,
   permissionKey,
+  seededExtensionById,
   type Tool,
 } from "@tomat/shared";
 import {
@@ -20,14 +21,14 @@ import { extensionsRegistry } from "../../extensions/registry.ts";
 import { hashExtension } from "../../extensions/hash.ts";
 import { workerPool } from "../../extensions/worker-pool.ts";
 import { deleteExtension, uninstallExtension } from "../../extensions/uninstall.ts";
-import { paths } from "../../paths.ts";
+import { channel, paths } from "../../paths.ts";
 import {
   resolveLatestVersion,
   resolveVersion,
   searchPackages,
 } from "../../extensions/npm-registry.ts";
-import { loadBuiltinExtensionManifest } from "../../extensions/builtin-manifest.ts";
-import { requestBuiltinInstall } from "../../extensions/builtin-seed.ts";
+import { loadSeededManifest } from "../../extensions/seeded-manifest.ts";
+import { requestBuiltinInstall } from "../../extensions/seeding.ts";
 import { embed, isEmbeddingModelReady } from "../../services/embedding.ts";
 import { embedWithHash, toolEmbedText } from "../../services/relevance.ts";
 import { toolFilter } from "../../services/tool-filter.ts";
@@ -85,7 +86,7 @@ export function extensionsRoutes(): Hono {
     const body = (await readJson(c)) as
       | { source: "npm"; name: string; version?: string }
       | { source: "local"; path: string; slug?: string }
-      | { source: "builtin" };
+      | { source: "seeded"; id: string };
     if (body.source === "npm") {
       return c.json(startDownload(body, BROADCAST_SINK));
     } else if (body.source === "local") {
@@ -95,8 +96,18 @@ export function extensionsRoutes(): Hono {
       return c.json(
         startDownload({ source: "local", path: body.path, slug: body.slug }, BROADCAST_SINK),
       );
-    } else if (body.source === "builtin") {
-      return c.json(startDownload({ source: "builtin" }, BROADCAST_SINK));
+    } else if (body.source === "seeded") {
+      const ext = seededExtensionById(body.id);
+      if (!ext) {
+        throw new AppError("validation_error", `unknown seeded extension "${body.id}"`);
+      }
+      if (ext.devOnly && channel() !== "dev") {
+        throw new AppError(
+          "validation_error",
+          `${ext.id} is a dev-only extension and cannot be installed on the ${channel()} channel`,
+        );
+      }
+      return c.json(startDownload({ source: "seeded", id: body.id }, BROADCAST_SINK));
     }
     throw new AppError("validation_error", "unknown source");
   });
@@ -155,13 +166,14 @@ export function extensionsRoutes(): Hono {
     const id = c.req.param("id");
     const extension = extensionsRegistry().getOrThrow(id);
     const body = (await readJson(c)) as { version?: string };
-    if (extension.source === "builtin") {
-      // Re-download + re-install from the latest CDN manifest (same id). The
-      // install path re-pins the hash, so a legitimate update never trips drift.
-      return c.json(startUpdate({ source: "builtin" }, BROADCAST_SINK));
+    if (extension.source === "seeded") {
+      // Re-download + re-install from the latest manifest (CDN for the built-in,
+      // codebase in dev), same id. The install path re-pins the hash, so a
+      // legitimate update never trips drift.
+      return c.json(startUpdate({ source: "seeded", id }, BROADCAST_SINK));
     }
     if (extension.source !== "npm") {
-      throw new AppError("validation_error", "only npm and built-in extensions can be updated");
+      throw new AppError("validation_error", "only npm and seeded extensions can be updated");
     }
     const npmName = id.replace("__", "/");
     const resolved = await resolveVersion(npmName, body.version);
@@ -365,19 +377,21 @@ async function checkUpdates(
   const targets = Array.isArray(ids) ? all.filter((t) => (ids as unknown[]).includes(t.id)) : all;
 
   const results: import("@tomat/shared").ExtensionUpdateStatus[] = [];
-  // Sequential to stay polite to the npm registry; only installed npm/builtin
+  // Sequential to stay polite to the npm registry; only installed npm/seeded
   // extensions hit the network, and a per-extension failure is isolated.
   for (const tk of targets) {
     const base = { id: tk.id, installedVersion: tk.version };
-    if (tk.source === "local") {
+    const seeded = tk.source === "seeded" ? seededExtensionById(tk.id) : undefined;
+    // No upstream to check: local extensions, and any seeded row whose id is no
+    // longer a known seeded extension (don't let it fall through to an npm lookup).
+    if (tk.source === "local" || (tk.source === "seeded" && !seeded)) {
       results.push({ ...base, latestVersion: null, updateAvailable: false });
       continue;
     }
     try {
-      const latestVersion =
-        tk.source === "builtin"
-          ? (await loadBuiltinExtensionManifest({ force: true })).version
-          : await resolveLatestVersion(tk.id.replace("__", "/"));
+      const latestVersion = seeded
+        ? (await loadSeededManifest(seeded, { force: true })).version
+        : await resolveLatestVersion(tk.id.replace("__", "/"));
       results.push({
         ...base,
         latestVersion,

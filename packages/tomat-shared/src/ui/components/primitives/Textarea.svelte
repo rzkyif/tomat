@@ -94,7 +94,7 @@
     surface === "transparent"
       ? "bg-transparent outline-none"
       : error
-        ? "bg-accent-red-300 border-accent-red-400 text-default-800 rounded-medium px-2 py-1.5 outline-none tomat-scroll-inset"
+        ? "bg-surface-inset tomat-error-ring text-default-800 rounded-medium px-2 py-1.5 outline-none tomat-scroll-inset"
         : "bg-surface-inset text-default-800 rounded-medium px-2 py-1.5 outline-none tomat-scroll-inset",
   );
 

@@ -79,6 +79,7 @@ other docs defer to it.
 | A conversation                   | **Session**                                        | "chat", "conversation" (mixed)            |
 | A chat bubble                    | **Bubble**                                         | "message box", "chat message bubble"      |
 | Voice dictation                  | **Speech-to-Text** (the one top-level name)        | "Voice Input" as a same-level synonym     |
+| Reading replies aloud            | **Text-to-Speech**                                 | "Spoken Replies"                          |
 | Reusable text fragment           | **Snippet**                                        |                                           |
 | Message-box trigger symbols      | **`#`** / **`@`** / **`/`** (each its own list)    | "mention" for all three                   |
 | The two halves                   | **Core** (service) / **Client** (app)              |                                           |
@@ -159,14 +160,21 @@ conceptual first, task-oriented, never breathless.
 
 - **Page shape.** A short lead paragraph (what this is and why you would use it,
   no heading above it), then `##` sections of two to four developed paragraphs
-  each, a closing pointer to the natural next page, and inline cross-links the
-  first time the prose names another topic. Use `##` only; the page title is the
-  `h1`. Target roughly 350 to 800 words plus demos, one topic per page.
+  each. A feature or system page closes with a `## How It Works` section (see
+  below) before its closing pointer to the natural next page; a cosmetic or
+  self-evident page skips it. Add inline cross-links the first time the prose
+  names another topic. Use `##` only; the page title is the `h1`. Target roughly
+  350 to 800 words plus demos and the How It Works section, one topic per page.
 - **Density.** Each section should leave the reader knowing the concept, how it
   behaves, and when to reach for it, not just a definition. Scale it to the
   reader: Getting Started stays light and stepwise; feature chapters run fullest;
   settings and maintenance pages read more like reference. Reach for a comparison
   table when a choice has clear axes (Local vs External; the update channels).
+- **Cover what is specific to tomat.** Spend the words on behavior a reader cannot
+  find elsewhere, not on general chatbot concepts they can google (what a bubble
+  is, that replies stream, how a text box works). Assume that baseline and explain
+  the part only this product can. A topic that warrants no tomat-specific
+  explanation does not warrant a page.
 - **The inline-demo rule (the defining convention).** Whenever the prose
   discusses a surface that exists in the Client, render that surface inline at
   the point of discussion with a demo component from `src/components/demos/`. Do
@@ -178,17 +186,21 @@ conceptual first, task-oriented, never breathless.
   prerequisite or clarification), `caution` (loses data, costs money, or leaves
   the device). One to three sentences. Seasoning, not structure: a page with one
   lands; a page with five trains the reader to skip them.
-- **How It Works (the internals carve-out).** The "no internals" rule has exactly
-  one exception: a clearly-marked **How It Works** section or page may take a
-  brief, educational, high-level dip into the technical side of a module, so a
-  curious non-technical reader learns more and a technical reader sees the
-  architecture at a glance. Keep it high-level and scoped to that section;
-  day-to-day copy never spills internals outside it.
+- **How It Works (the expected closer on feature pages).** The "no internals" rule
+  has one carve-out: a clearly-marked **How It Works** section that takes a brief,
+  educational, high-level dip into the technical side of a module, so a curious
+  non-technical reader learns more and a technical reader sees the architecture at
+  a glance. It is not optional decoration: every feature or system page ends with
+  one, and only cosmetic or self-evident pages (appearance, uninstalling, the
+  settings-panel overview) skip it. Name the real mechanism
+  (voice-activity detection, embeddings, the sandboxed worker, the pairing
+  handshake) without explaining the basics under it, keep it scoped to that
+  section, and never spill internals into the day-to-day copy outside it.
 
 ## Extensions and tools
 
 For the user-facing copy in a `tomat.json` bundle and the memories an extension
-ships (the built-in is `packages/tomat-builtin/`). Remember the hybrid audience:
+ships (the built-in is `packages/tomat-extension-builtin/`). Remember the hybrid audience:
 the user, the model, and relevance ranking all read tool and skill descriptions.
 
 - **Extension `description`.** One or two sentences on what the user gets, in

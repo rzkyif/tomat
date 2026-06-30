@@ -8,8 +8,8 @@
 
 import { join } from "@std/path";
 import { ensureDir } from "@std/fs/ensure-dir";
-import { BUILTIN_EXTENSION_ID } from "@tomat/shared";
-import { hashExtension } from "../packages/tomat-core/src/extensions/hash.ts";
+import { SEEDED_EXTENSIONS } from "@tomat/shared";
+import { computeDevManifest } from "../packages/tomat-core/src/extensions/seeded-manifest.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
@@ -35,51 +35,41 @@ function homeDir(): string {
 const DEV_CORE_DIR = join(homeDir(), ".tomat", "dev", "core");
 const ADMIN_TOKEN_FILE = join(DEV_CORE_DIR, ".admin-token");
 
-// Dev built-in extension manifest. There is no published manifests/dev/extension.json,
-// so dev.ts generates one from the in-repo extension (and regenerates it on edits)
-// at the cache path core reads. The version carries a content hash so any edit to
-// the codebase extension reads as "Update available" after a check; "Update" then
-// reinstalls the codebase copy. Keep the version formula in sync with
-// computeDevManifest() in packages/tomat-core/src/extensions/builtin-manifest.ts.
-const BUILTIN_SRC_DIR = join(ROOT, "packages", "tomat-builtin");
-const DEV_EXTENSION_MANIFEST = join(DEV_CORE_DIR, "cache", "builtin-manifest.json");
+// Dev seeded-extension manifests. There is no published manifests/dev/extension.json,
+// so dev.ts generates one per seeded extension (the built-in plus the dev-only
+// samples) from the in-repo source and regenerates it on edits, at the cache path
+// core reads. The version carries a content hash so any edit reads as "Update
+// available" after a check; "Update" then reinstalls the codebase copy. The
+// version formula is reused from computeDevManifest() in
+// packages/tomat-core/src/extensions/seeded-manifest.ts (no duplication).
+const SEEDED_SRC_DIRS = SEEDED_EXTENSIONS.map((e) => join(ROOT, "packages", e.dir));
 
-async function writeDevExtensionManifest(): Promise<void> {
-  let pkgVersion = "0.0.0";
-  try {
-    const cfg = JSON.parse(await Deno.readTextFile(join(BUILTIN_SRC_DIR, "deno.json"))) as {
-      version?: string;
-    };
-    pkgVersion = cfg.version ?? "0.0.0";
-  } catch {
-    // fall through with the default version
-  }
-  const contentHash = await hashExtension(BUILTIN_SRC_DIR);
-  const manifest = {
-    schemaVersion: 1,
-    version: `${pkgVersion}+dev.${contentHash.slice(0, 8)}`,
-    id: BUILTIN_EXTENSION_ID,
-    tarballUrl: "",
-    sha256: "",
-    signature: "",
-  };
-  await ensureDir(join(DEV_CORE_DIR, "cache"));
-  const tmp = DEV_EXTENSION_MANIFEST + ".tmp";
-  await Deno.writeTextFile(tmp, JSON.stringify(manifest, null, 2));
-  await Deno.rename(tmp, DEV_EXTENSION_MANIFEST);
+function devManifestPath(id: string): string {
+  return join(DEV_CORE_DIR, "cache", `${id}-manifest.json`);
 }
 
-/** Regenerate the dev manifest now, then on every change under the codebase
- *  extension (debounced). Fire-and-forget: the watcher lives for the dev session
- *  and is torn down when the orchestrator exits. */
+async function writeDevExtensionManifests(): Promise<void> {
+  await ensureDir(join(DEV_CORE_DIR, "cache"));
+  for (const ext of SEEDED_EXTENSIONS) {
+    const manifest = await computeDevManifest(ext);
+    const path = devManifestPath(ext.id);
+    const tmp = path + ".tmp";
+    await Deno.writeTextFile(tmp, JSON.stringify(manifest, null, 2));
+    await Deno.rename(tmp, path);
+  }
+}
+
+/** Regenerate the dev manifests now, then on every change under any seeded
+ *  extension's source dir (debounced). Fire-and-forget: the watcher lives for the
+ *  dev session and is torn down when the orchestrator exits. */
 async function startDevExtensionManifest(): Promise<void> {
-  await writeDevExtensionManifest();
+  await writeDevExtensionManifests();
   void (async () => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
-      for await (const _event of Deno.watchFs(BUILTIN_SRC_DIR)) {
+      for await (const _event of Deno.watchFs(SEEDED_SRC_DIRS)) {
         if (timer) clearTimeout(timer);
-        timer = setTimeout(() => void writeDevExtensionManifest().catch(() => {}), 200);
+        timer = setTimeout(() => void writeDevExtensionManifests().catch(() => {}), 200);
       }
     } catch {
       // watch failures are non-fatal in dev
@@ -97,7 +87,7 @@ const DEV_CLIENT_DIR = join(homeDir(), ".tomat", "dev", "client");
 // --reset is a denylist, not an allowlist: it deletes EVERYTHING under the dev
 // core dir EXCEPT these names, so the next boot starts from a clean slate
 // (db, settings, sessions, memories, secrets, admin token/password, the
-// builtin-seed marker, installed extensions, logs, caches - all gone and all
+// seed markers, installed extensions, logs, caches - all gone and all
 // regenerated on boot). An allowlist silently let new state survive (this is
 // exactly how tools.enabled lingered across resets). The two preserved entries
 // are pure download/build artifacts that are expensive to re-acquire and hold
@@ -468,13 +458,13 @@ async function resetClientSettings(): Promise<void> {
 
 // Wipe the dev core dir to a clean slate, preserving only the download/build
 // artifacts in CORE_RESET_PRESERVE. Everything else (db, settings, sessions,
-// memories, secrets, admin credentials, the builtin-seed marker, installed
+// memories, secrets, admin credentials, the seed markers, installed
 // extensions, caches, logs) is regenerated on the next boot: the db is rebuilt
 // from the current schema (editing schema.sql in place only reaches a fresh db,
 // since the migration runner skips a version the db already has and CREATE TABLE
 // IF NOT EXISTS never adds a column to an existing table; see
-// packages/tomat-core/src/db/migrate.ts), and dropping the builtin-seed marker
-// re-stages the built-in extension against that fresh db. Must run before core
+// packages/tomat-core/src/db/migrate.ts), and dropping the seed markers
+// re-stages the seeded extensions against that fresh db. Must run before core
 // spawns and opens the db.
 async function resetCoreState(): Promise<void> {
   await wipeDirExcept(DEV_CORE_DIR, CORE_RESET_PRESERVE);

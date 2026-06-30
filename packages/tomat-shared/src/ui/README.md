@@ -140,6 +140,28 @@ transitively via the `EMBEDDED_VIEWS` map instead of a redundant card of its own
 the walker exempts it from the card requirement and instead asserts the named
 parent is galleried, rendered, and actually renders it.
 
+## Icon + text rows (`IconText`)
+
+Every icon-beside-short-text row (status lines, field errors, error/prompt
+headers) renders through the shared `IconText` primitive
+([primitives/IconText.svelte](components/primitives/IconText.svelte)), never a
+hand-rolled `<i>` + `<span>` flex. It fixes the gap, the icon size (one step
+above the text), the wrap-with-pinned-icon behavior, and the rule that a single
+`color` paints both the icon and the text the same. When an inset card sits
+below an `IconText` (an error's mono detail card, an errored field), give the
+card's accent outline the SAME shade as that `IconText`'s text (errors:
+`text-accent-red-700` + `outline-accent-red-700` / the `tomat-error-ring`
+helper).
+
+**Always pass the FILLED icon variant to `IconText`** (e.g.
+`i-material-symbols-error-rounded`, not `i-material-symbols-error-outline-rounded`).
+A filled glyph reads as a deliberate badge at this small size. This is the one
+deliberate exception to the app's usual outline-icon default (see the Icons
+convention in [AGENTS.md](../../../../AGENTS.md)).
+
+**No trailing period** on `IconText` text, even when it reads as a sentence
+("[tool] wants to read a file", not "...a file."). It is a compact label.
+
 ## Interaction feedback (hover / press)
 
 Clickables use the `hov:` (+1 shade) and `act:` (+2 shade) UnoCSS variants from

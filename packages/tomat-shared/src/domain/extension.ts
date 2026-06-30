@@ -3,7 +3,11 @@
 // (see validation/tomat-json.ts). These types describe the DB-projected
 // view that the API serves.
 
-export type ExtensionSource = "npm" | "local" | "builtin";
+// "seeded" covers every extension tomat ships and installs on a fresh Core (the
+// built-in and the dev-only samples). Seeded bytes resolve from the codebase in
+// dev and from install-script-planted / CDN artifacts in prod; npm + local are
+// the user-supplied sources.
+export type ExtensionSource = "npm" | "local" | "seeded";
 
 // Gated lifecycle status. `downloaded`: files on disk, deps not installed,
 // content hash not pinned. `installed`: deps installed, content hash pinned,
@@ -12,11 +16,34 @@ export type ExtensionSource = "npm" | "local" | "builtin";
 // re-confirms (which re-pins the current content).
 export type ExtensionStatus = "downloaded" | "installed" | "drift";
 
-// The built-in extension is CDN-distributed (never published to npm) and carries a
-// fixed id, which doubles as its on-disk folder name under the extensions dir. It
-// is the package's own name and already satisfies the local-slug charset, so no
-// flattening is applied.
-export const BUILTIN_EXTENSION_ID = "tomat-builtin";
+// Seeded extensions tomat ships and installs on a fresh Core. Each id doubles as
+// the on-disk folder name under the extensions dir and as the package directory
+// name under packages/; ids satisfy the local-slug charset, so no flattening is
+// applied. The built-in is released + planted in prod; samples is dev-only (never
+// released, never planted) and exists purely as the capability showcase.
+export const BUILTIN_EXTENSION_ID = "tomat-extension-builtin";
+export const SAMPLES_EXTENSION_ID = "tomat-extension-samples";
+
+// One seeded extension: its id (also the extensions-dir folder name) + the
+// packages/ directory that is both its release source and its dev byte source.
+// `devOnly` extensions are skipped by the prod seed path, the release pipeline,
+// and the install-script planting; they are only ever codebase-installed in dev.
+export interface SeededExtension {
+  id: string;
+  dir: string;
+  devOnly: boolean;
+}
+
+export const SEEDED_EXTENSIONS: readonly SeededExtension[] = [
+  { id: BUILTIN_EXTENSION_ID, dir: "tomat-extension-builtin", devOnly: false },
+  { id: SAMPLES_EXTENSION_ID, dir: "tomat-extension-samples", devOnly: true },
+];
+
+/** The seeded-extension descriptor for an id, or undefined if the id is not a
+ *  seeded extension. */
+export function seededExtensionById(id: string): SeededExtension | undefined {
+  return SEEDED_EXTENSIONS.find((e) => e.id === id);
+}
 
 // Single source of truth for the permission kinds: the type is derived from
 // this tuple, and runtime validators (e.g. the WS permission-request schema)

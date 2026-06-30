@@ -10,6 +10,7 @@
     options,
     onchange,
     disabled = false,
+    error = false,
     variant = "default",
     ariaLabel,
     title,
@@ -19,6 +20,7 @@
     options: Option[];
     onchange?: (v: string) => void;
     disabled?: boolean;
+    error?: boolean;
     variant?: Variant;
     ariaLabel?: string;
     title?: string;
@@ -26,8 +28,11 @@
   } = $props();
 
   // Dropdown trigger: rest inset fill darkens one shade on hover, two on press,
-  // matching the shared button interaction standard.
+  // matching the shared button interaction standard. An errored select keeps the
+  // neutral fill and reads as a red inset outline (the `tomat-error-ring` helper,
+  // matching the field's error message), the same as an errored Input.
   const surfaceClass = "bg-surface-inset hov:bg-surface-inset-strong act:bg-default-400";
+  const errorClass = $derived(error ? "tomat-error-ring" : "");
 </script>
 
 {#if variant === "invisible"}
@@ -51,7 +56,7 @@
       {title}
       aria-label={ariaLabel}
       onchange={(e) => onchange?.((e.target as HTMLSelectElement).value)}
-      class="appearance-none {surfaceClass} text-default-800 rounded-medium block w-full h-8 px-2 pr-7 outline-none hov:cursor-pointer transition-interactive text-sm"
+      class="appearance-none {surfaceClass} {errorClass} text-default-800 rounded-medium block w-full h-8 px-2 pr-7 outline-none hov:cursor-pointer transition-interactive text-sm"
     >
       {#each options as option (option.value)}
         <option value={option.value} disabled={option.disabled}>{option.label}</option>

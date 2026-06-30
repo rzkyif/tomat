@@ -1,0 +1,57 @@
+---
+title: Extensions
+section: Tools & Knowledge
+order: 2
+---
+
+import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelte";
+import Aside from "../../../components/Aside.astro";
+
+An **extension** is a bundle of [tools](/manual/tools/tools) you install or remove
+as a unit. It is one of the two ways the agent gains new abilities, the other being
+an [MCP server](/manual/tools/mcp). A fresh Core arrives with a built-in extension
+already installed, so the agent has a starting set of abilities to switch on, and
+you add more by installing extensions for the things you want it to do.
+
+## Installing and removing
+
+You install, update, and remove extensions under **Extensions** in Settings.
+Installing one is how you teach the agent new abilities; removing it takes them away
+cleanly, since an extension is a self-contained bundle rather than a loose pile of
+tools. The tools an extension brings then appear in the
+[Tools](/manual/tools/tools) group for you to switch on and set permissions for.
+
+<SettingsPanelDemo group="extensions" />
+
+## More than tools
+
+An extension can ship more than tools. It can also bring its own
+[knowledge and skills](/manual/tools/memories), installed read-only alongside the
+ones you write yourself, so adding an extension can hand the agent a body of
+reference and a set of procedures in one step. That makes an extension a way to
+teach the agent not only new actions but new context to go with them.
+
+<Aside type="caution">
+  An extension's tools act on your behalf, sometimes on the network or with access to files. Install
+  extensions you trust, and read the permissions one declares before you enable its tools.
+</Aside>
+
+## How It Works
+
+Extensions are distributed the same way as ordinary software packages. tomat finds
+them on the public package registry by a keyword that marks a package as a tomat
+extension, downloads the one you chose as a single archive, and checks it against
+the registry's own checksum before unpacking, so a corrupted or tampered download is
+caught rather than installed. It then resolves and locks the extension's
+dependencies, and records a fingerprint of the installed files. That fingerprint is
+what lets tomat notice later if an extension's files have changed unexpectedly and
+hold off running them until you confirm.
+
+The built-in extension is the one exception to downloading. It ships with tomat and
+is installed on first boot from a copy that the installer already placed on disk,
+verified against a signature, with no network call at all. That is deliberate: a
+fresh Core sets itself up completely offline and reaches out only when you choose to
+install something more.
+
+The other provider of tools is a program tomat talks to rather than a bundle it
+installs: [MCP Servers](/manual/tools/mcp).

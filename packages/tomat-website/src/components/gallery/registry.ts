@@ -111,6 +111,7 @@ export const GALLERY_PRIMITIVES = [
   "FormField",
   "HelpText",
   "IconButton",
+  "IconText",
   "Input",
   "ListItem",
   "Markdown",

@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS pairing_codes (
 -- matches the pinned hash; all tools auto-disabled until the user re-confirms).
 CREATE TABLE IF NOT EXISTS extensions (
   id              TEXT PRIMARY KEY,           -- flat folder name
-  source          TEXT NOT NULL,              -- 'npm' | 'local' | 'builtin'
+  source          TEXT NOT NULL,              -- 'npm' | 'local' | 'seeded'
   display_name    TEXT NOT NULL,
   description     TEXT,
   version         TEXT NOT NULL,

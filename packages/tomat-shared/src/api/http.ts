@@ -198,12 +198,12 @@ export interface SearchExtensionsResponse {
 }
 
 // Acquire a extension's files (POST /download): fetch + extract an npm tarball,
-// copy the built-in, or register a locally dropped-in folder. Deps are NOT
-// installed here; that is the separate POST /:id/install step.
+// copy a seeded extension (built-in / samples), or register a locally dropped-in
+// folder. Deps are NOT installed here; that is the separate POST /:id/install step.
 export type DownloadExtensionRequest =
   | { source: "npm"; name: string; version?: string }
   | { source: "local"; path: string; slug?: string }
-  | { source: "builtin" };
+  | { source: "seeded"; id: string };
 
 // Returned by every endpoint that starts a streamed background job (download,
 // install-deps, update). Progress + completion arrive over the

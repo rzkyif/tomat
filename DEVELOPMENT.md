@@ -62,9 +62,12 @@ install; a build failure surfaces in the dev log and core declines to start.
 - [`packages/tomat-model-catalog/`](packages/tomat-model-catalog/README.md):
   hand-authored source for the signed model catalog that drives the model
   pickers in Settings.
-- [`packages/tomat-builtin/`](packages/tomat-builtin/README.md): the extension
-  bundled with core; also a reference implementation of the `tomat.json` format
-  and the extension author docs.
+- [`packages/tomat-extension-builtin/`](packages/tomat-extension-builtin/README.md):
+  the extension bundled with core; also a reference implementation of the
+  `tomat.json` format and the extension author docs.
+- [`packages/tomat-extension-samples/`](packages/tomat-extension-samples/README.md):
+  dev-only capability showcase exercising the full `tomat.json` surface; not
+  released to production, only codebase-installed in the dev environment.
 - [`packages/tomat-website/`](packages/tomat-website/README.md): Astro site
   behind `au.tomat.ing` (landing page only), plus the release + deploy pipeline
   for the artifacts served from `get.au.tomat.ing`.
@@ -159,10 +162,10 @@ cd packages/tomat-core && deno task check   # or from inside the package
 The client's `dev` is the full Tauri shell; it runs the Vite frontend server
 itself through the Tauri `beforeDevCommand` (inlined in `tauri.conf.json`), so
 there is no separate Vite-only verb to confuse with `dev:website`. The five Rust
-helper crates expose the same verbs as cargo wrappers, so
-`deno task check:core-keychain` and
-`cd packages/tomat-core-keychain && deno
-task lint` work identically to the Deno
+helper crates expose cargo-wrapper verbs (`lint`/`fmt`/`test`/`build`; clippy is
+their compile-check, so they carry no separate `check`), so
+`deno task lint:core-keychain` and
+`cd packages/tomat-core-keychain && deno task lint` work identically to the Deno
 packages.
 
 ### Android (Tauri-mobile) client
@@ -295,7 +298,11 @@ are offset so two cores can bind at once:
 
 Building and releasing (to the latest or stable channel) is covered in
 [packages/tomat-website/README.md](packages/tomat-website/README.md), the
-release + deploy doc.
+release + deploy doc. Two release pipelines share one R2 idempotency cursor: the
+local `deno task release`, and a branch-driven GitHub Actions pipeline where
+fast-forwarding `main` -> `latest` -> `stable` publishes each channel (build +
+release automated, also mirrored to GitHub Releases). Bump versions on `main`
+before transferring; the channel branches stay clean fast-forwards.
 
 ## External dependencies
 
@@ -309,26 +316,39 @@ touchpoint to the code that relies on it, the symptom, and the fix.
 ## Type-check + format + lint
 
 ```bash
-deno task check     # deno check / svelte-check + cargo check, fanned across packages
-deno task fmt       # oxfmt (all TS/JS/JSON/MD) + cargo fmt per crate
-deno task lint      # oxlint (incl. no-tauri-import) + .svelte tauri grep + shared-UI walkers (purity / view-coverage / component-tiers) + cargo clippy
+deno task check     # deno check / svelte-check, fanned across packages (TS only)
+deno task fmt       # oxfmt (all TS/JS/JSON/MD) + fmt-web (.svelte/.astro/.css) + cargo fmt per crate
+deno task lint      # lint:js (oxlint + the custom walkers) + cargo clippy per Rust crate
+deno task lint:js   # just the JS/Svelte half of lint (oxlint + walkers, no cargo)
 ```
 
 Each aggregate fans the same-named verb out across the packages that define it
-(see [Packages and release items](#packages-and-release-items)). `fmt` and
-`lint` run oxfmt/oxlint once over the whole tree (they also cover root-level
-files) and add `cargo fmt`/`clippy` per Rust crate; `check` runs each package's
-own check.
+(see [Packages and release items](#packages-and-release-items)), running them
+concurrently (cap with `TOMAT_PKG_CONCURRENCY`). `fmt` and `lint` run
+oxfmt/oxlint once over the whole tree (they also cover root-level files) and add
+`cargo fmt`/`clippy` per Rust crate; `check` runs each package's own check.
+
+`clippy` is the single Rust compile-check: `cargo clippy --all-targets` is a
+superset of `cargo check`, so the Rust crates carry no separate `check` task and
+`deno task check` is TS-only. A Rust compile error therefore surfaces in
+`deno task lint` (clippy), not in `check`; the full gate set still catches it.
+The `lint:js` split lets CI run the JS/Svelte lint on one runner while clippy
+runs in parallel on the Rust runners.
 
 ## Tests
 
 ```bash
 deno task test               # every package's tests (deno test + vitest + cargo test)
+deno task test:js            # just the TS half (deno test + vitest, no cargo)
 deno task test:client        # just the client (vitest + the Tauri crate's cargo test)
 deno task test:core          # just tomat-core
 deno task test:e2e           # tauri-driver E2E smoke (manual, opt-in)
 deno task test:e2e:headless  # headless integration E2E (manual, opt-in)
 ```
+
+`test:js` is the Rust-free subset CI runs on the TypeScript runner (the cargo
+test suite runs in parallel on the Rust runners); locally you usually want the
+full `deno task test`.
 
 Tests are co-located with source as `*.test.ts`. Scratch tests are
 `*.tmp.test.ts` (gitignored anywhere in the tree). The developer guide for the

@@ -1,0 +1,105 @@
+# Linux build image for the all-targets release (podman.ts driver).
+#
+# Builds x86_64-unknown-linux-gnu by CROSS-COMPILING from a native arm64 image
+# (not by emulating an amd64 image: qemu-emulated rustc SIGSEGVs on Apple
+# Silicon). rustc runs native arm64 and emits x64 code; the GNU cross toolchain
+# (x86_64-linux-gnu-gcc) compiles the C deps and links. deno cross-compiles via
+# --target; sherpa-onnx-sys downloads the linux-x64 static lib it maps.
+#
+# Build it (from the repo root):
+#
+#   podman build --platform linux/arm64 -t tomat-linux-build:latest \
+#     -f scripts/release/drivers/linux/Containerfile scripts/release/drivers/linux
+#
+# The driver bind-mounts the repo at /work and runs scripts/build-release-bundle.ts
+# inside (core: read-only mount + CARGO_TARGET_DIR=/tmp/target; client: writable
+# mount for the vite frontend).
+#
+# Scope: core + helpers + speech (cross-compiled, dbus via amd64 multiarch), AND
+# the Tauri Linux desktop client `.deb` (the GUI app cross-links against an amd64
+# SYSROOT built in the first stage below - the multiarch `-dev` route is a dead-end
+# because libwebkit2gtk-4.1-dev:amd64 pulls gobject-introspection/python3/build-
+# essential :amd64 that don't resolve, so instead we install webkit NATIVELY in an
+# amd64 image and copy its tree as a sysroot the cross toolchain links against).
+
+# --- stage 1: amd64 sysroot with the Tauri GUI libs -------------------------
+# Native amd64 (runs under qemu - apt/dpkg work; only rustc/LLVM crash, and none
+# run here). Installing webkit2gtk-4.1-dev natively pulls its whole dependency
+# closure cleanly (no multiarch conflicts); stage 2 copies this tree as the
+# cross-link sysroot.
+# The dev-lib set mirrors the proven Linux client deps in .github/workflows/ci.yml
+# (webkit/gtk/rsvg/soup/appindicator + pipewire/alsa/gbm for audio/VAD/capture),
+# so the local cross-build links the same libraries CI builds against natively.
+FROM --platform=linux/amd64 debian:bookworm-slim AS amd64-sysroot
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev \
+    libsoup-3.0-dev libpipewire-0.3-dev libasound2-dev libgbm-dev \
+    libssl-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+# --- stage 2: the arm64 build image -----------------------------------------
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Native arm64 toolchain + the x86_64-linux GNU cross toolchain (cross C/C++
+# compiler + linker for the x64 target). build-essential/clang build native-side
+# bits; the gcc-x86-64-linux-gnu pair cross-compiles ring/bzip2-sys + links the
+# downloaded sherpa static lib.
+#
+# The keychain helper's dbus-secret-service backend links libdbus (C) found via
+# pkg-config, so the x64 core build needs the TARGET's dbus dev lib: enable amd64
+# as a foreign dpkg arch and install libdbus-1-dev:amd64 (its .pc + .so land under
+# the x86_64-linux-gnu multiarch dir, where the cross pkg-config env below finds
+# them). dpkg-dev/fakeroot let the Tauri bundler assemble the `.deb`.
+# libayatana-appindicator3-dev (native arm64) satisfies the Tauri bundler's
+# tray-library detection, which does a NATIVE `pkg-config ayatana-appindicator3-0.1`
+# lookup (get_appindicator_library_path) - it needs the .pc, not just the runtime
+# .so. For a `.deb` this only sets the package's Depends name (no arch-specific
+# copy), so the native arm64 lib is correct. Without it the bundler aborts with
+# "Can't detect any appindicator library".
+RUN dpkg --add-architecture amd64 \
+  && apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl unzip xz-utils git \
+    build-essential cmake clang pkg-config libssl-dev \
+    gcc-x86-64-linux-gnu g++-x86-64-linux-gnu \
+    libdbus-1-dev:amd64 \
+    dpkg-dev fakeroot \
+    libayatana-appindicator3-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+# Cross pkg-config for the x64 CORE build: allow cross queries (pkg-config
+# otherwise refuses when host != target) and point it at the amd64 multiarch .pc
+# dir, so libdbus-sys resolves the x86_64 dbus lib. (The CLIENT build overrides
+# these per-run to point at the sysroot instead - see drivers/podman.ts.)
+ENV PKG_CONFIG_ALLOW_CROSS=1 \
+    PKG_CONFIG_PATH_x86_64_unknown_linux_gnu=/usr/lib/x86_64-linux-gnu/pkgconfig
+
+# The amd64 GUI sysroot from stage 1: webkit2gtk/gtk/soup/... + their whole .so +
+# header + .pc closure + the amd64 libc/crt, laid out so `gcc --sysroot` and a
+# sysroot-scoped pkg-config resolve the x86_64 Tauri client link. Only the client
+# build uses it (via the per-run env in drivers/podman.ts); the core build keeps
+# using the multiarch dbus above.
+COPY --from=amd64-sysroot /usr /opt/amd64-sysroot/usr
+COPY --from=amd64-sysroot /lib /opt/amd64-sysroot/lib
+COPY --from=amd64-sysroot /lib64 /opt/amd64-sysroot/lib64
+
+# Rust (pinned to match rust-toolchain.toml) + the x86_64 Linux target's std.
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain 1.96.0 \
+  && rustup target add x86_64-unknown-linux-gnu
+
+# Route the x64 target's link + C compilation through the GNU cross toolchain, so
+# `cargo build --target x86_64-unknown-linux-gnu` cross-compiles with no extra
+# flags (the CORE build scripts pass no special env). The CLIENT build adds
+# --sysroot on top via per-run env.
+ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc \
+    CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc \
+    CXX_x86_64_unknown_linux_gnu=x86_64-linux-gnu-g++
+
+# Deno (arm64-native; cross-compiles the core to x64 via --target).
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/opt/deno sh
+ENV PATH=/opt/deno/bin:$PATH
+
+WORKDIR /work

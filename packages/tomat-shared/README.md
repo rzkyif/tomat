@@ -55,5 +55,5 @@ the repo root:
 - [`src/domain/settings/README.md`](src/domain/settings/README.md): the settings
   system architecture (schema, routing, persistence). Copy rules for settings
   strings live in the root [`COPY.md`](../../COPY.md).
-- [`../tomat-builtin/README.md`](../tomat-builtin/README.md): extension author
+- [`../tomat-extension-builtin/README.md`](../tomat-extension-builtin/README.md): extension author
   docs for the `tomat.json` format.

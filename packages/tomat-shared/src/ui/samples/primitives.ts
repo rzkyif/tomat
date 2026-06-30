@@ -27,6 +27,7 @@ import type FlushSelect from "../components/primitives/FlushSelect.svelte";
 import type FormField from "../components/primitives/FormField.svelte";
 import type HelpText from "../components/primitives/HelpText.svelte";
 import type IconButton from "../components/primitives/IconButton.svelte";
+import type IconText from "../components/primitives/IconText.svelte";
 import type Input from "../components/primitives/Input.svelte";
 import type ListItem from "../components/primitives/ListItem.svelte";
 import type Markdown from "../components/primitives/Markdown.svelte";
@@ -148,7 +149,7 @@ const formFieldSamples = {
   vertical: { label: "Display name" },
   withDescription: { label: "Display name", description: "Shown on every message you send." },
   horizontal: { label: "Compact mode", horizontal: true },
-  withError: { label: "Port", error: "Must be between 1 and 65535." },
+  withError: { label: "Port", error: "Must be between 1 and 65535" },
 } satisfies Bundle<typeof FormField>;
 
 const helpTextSamples = {
@@ -172,6 +173,15 @@ const iconButtonSamples = {
   disabled: { icon: "i-material-symbols-delete-outline-rounded", title: "Delete", disabled: true },
   large: { icon: "i-material-symbols-send-rounded", title: "Send", size: "lg" },
 } satisfies Bundle<typeof IconButton>;
+
+const iconTextSamples = {
+  status: { icon: "i-material-symbols-check-circle-rounded", color: "text-default-700" },
+  error: { icon: "i-material-symbols-error-rounded", color: "text-accent-red-700" },
+  header: {
+    icon: "i-material-symbols-shield-question-rounded",
+    color: "text-default-800",
+  },
+} satisfies Bundle<typeof IconText>;
 
 const inputSamples = {
   default: { value: "Hello" },
@@ -236,6 +246,7 @@ const subsectionHeaderSamples = {
 const selectSamples = {
   default: { value: "balanced", options: SELECT_OPTIONS },
   disabled: { value: "fast", options: SELECT_OPTIONS, disabled: true },
+  error: { value: "balanced", options: SELECT_OPTIONS, error: true },
   invisible: { value: "balanced", options: SELECT_OPTIONS, variant: "invisible" },
 } satisfies Bundle<typeof Select>;
 
@@ -336,6 +347,7 @@ export const PRIMITIVE_SAMPLES = {
   FormField: formFieldSamples,
   HelpText: helpTextSamples,
   IconButton: iconButtonSamples,
+  IconText: iconTextSamples,
   Input: inputSamples,
   ListItem: listItemSamples,
   Markdown: markdownSamples,

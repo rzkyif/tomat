@@ -1,0 +1,51 @@
+---
+title: Text-to-Speech
+section: Speech
+order: 2
+---
+
+import SettingsPanelDemo from "../../../components/demos/SettingsPanelDemo.svelte";
+import Aside from "../../../components/Aside.astro";
+
+tomat can read the agent's replies aloud with **Text-to-Speech**. It is the
+counterpart to [Speech-to-Text](/manual/speech/speech-to-text): where one turns
+your speech into a message, this turns the agent's answer into audio, so a
+conversation can be entirely spoken if you want it to be. It is useful when your
+eyes or hands are busy, or when you would rather listen than read.
+
+<Aside type="note">
+  Text-to-Speech runs locally, so replies are spoken on your machine and nothing is sent away to be
+  voiced. (Speech-to-Text can run locally too, but unlike it, Text-to-Speech has no External option:
+  it is always local.)
+</Aside>
+
+## Turning it on
+
+Enable Text-to-Speech under its group in Settings, then choose a model and a voice.
+The model is the engine that produces the speech; the voice is the particular sound
+it speaks in.
+
+<SettingsPanelDemo group="tts" />
+
+Each model offers its own set of voices, and some span several languages, so the
+right model depends as much on the voice and languages you want as on raw quality.
+Picking a model may need a one-time download, which tomat always asks about first
+and never fetches in the background.
+
+Once it is on, replies are spoken as they arrive, so spoken output pairs naturally
+with [Speech-to-Text](/manual/speech/speech-to-text) for a hands-free session: you
+talk, the agent answers aloud, and you never touch the keyboard.
+
+## How It Works
+
+Speaking a reply as it streams means tomat cannot wait for the whole answer before
+it starts. Instead the Client breaks the incoming text into small pieces, roughly a
+sentence at a time, and hands each one to the Core as soon as it is complete. The
+Core's speech service synthesizes that piece into audio with the voice model you
+chose and sends the sound back, and the Client plays the clips in order. Because the
+pieces are produced and played back to back, you hear a continuous reply rather than
+the answer arriving all at once at the end. The whole path stays on your machine,
+which is why Text-to-Speech has no External option to configure.
+
+Next, the standing instruction that shapes the agent across a whole session:
+[The System Prompt](/manual/conversation/system-prompt).

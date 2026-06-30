@@ -13,6 +13,7 @@ import { ensureDir } from "@std/fs/ensure-dir";
 import { walk } from "@std/fs/walk";
 import { join } from "@std/path";
 import { decodeBase64 } from "@std/encoding/base64";
+import { type AndroidApkRecord, type AndroidDescriptor, reanchorFile } from "./artifacts.ts";
 import {
   type ApplyOpts,
   bumpVersionField,
@@ -249,93 +250,141 @@ export const androidItem: ReleaseItem = {
   },
 
   async apply(env: DeployEnv, channel: ReleaseChannel, opts: ApplyOpts): Promise<void> {
-    const manifestDir = channelManifestDir(channel);
-    const storagePrefix = channelStoragePrefix(channel);
     const version = await readAndroidVersion();
-    info(`android version ${version}`);
-
-    step("Building signed Android APK");
-    const cleanupKeystore = await materializeKeystore(env);
-    try {
-      await buildAndroid(channel);
-      const apks = await findApks();
-      for (const a of apks) {
-        ok(`${a.abi}/${a.filename}  ${humanBytes(a.size)}`);
-      }
-
-      // The download URLs are deterministic (where we upload), so the signed
-      // manifest is composed before the upload.
-      step("Composing android.json");
-      const abis: Record<string, { url: string; sha256: string }> = {};
-      for (const a of apks) {
-        const { sha256 } = await sha256File(a.path);
-        const key = `${storagePrefix}${version}/${a.abi}/tomat.apk`;
-        abis[a.abi] = { url: `https://${env.storageDomain}/${key}`, sha256 };
-      }
-      const manifest = composeAndroidManifest(version, abis);
-      const androidJsonPath = await writeManifestFile(manifestDir, "android.json", manifest);
-      ok(`android.json → ${rel(androidJsonPath)}`);
-
-      // Detached Ed25519 signature over the exact android.json bytes, so the
-      // in-app updater authenticates the manifest (and the sha256 it trusts)
-      // before downloading the APK. Sidecar file, mirroring client.json.sig.
-      const androidJsonSig = await signEd25519Bytes(
-        env.signingPrivateKey,
-        await Deno.readFile(androidJsonPath),
-      );
-      const androidSigPath = join(DIST_DIR, manifestDir, "android.json.sig");
-      await Deno.writeTextFile(androidSigPath, androidJsonSig);
-      ok(`android.json.sig → ${rel(androidSigPath)}`);
-
-      if (opts.dryRun) {
-        info(colors.yellow(`dry-run: skipping upload of APK(s) + ${manifestDir}/android.json`));
-        return;
-      }
-
-      step(`Uploading APK(s) to R2 bucket "${env.r2Bucket}"`);
-      for (const a of apks) {
-        const key = `${storagePrefix}${version}/${a.abi}/tomat.apk`;
-        info(`uploading ${key}  (${humanBytes(a.size)})`);
-        await r2Put(env, key, a.path, "application/vnd.android.package-archive");
-        opts.recordVersionedKey?.(key);
-
-        // Mirror each APK to a version-less "current" alias so the install page
-        // can link a stable download URL without knowing the version (see
-        // androidApkUrl in packages/tomat-website/src/lib/install.ts). Short
-        // cache so a new release is picked up; the versioned copy above stays
-        // the source of truth the signed manifest points the updater at.
-        const aliasKey = `${storagePrefix}current/${a.abi}/tomat.apk`;
-        info(`uploading ${aliasKey}  (alias)`);
-        await r2Put(
-          env,
-          aliasKey,
-          a.path,
-          "application/vnd.android.package-archive",
-          MANIFEST_CACHE_CONTROL,
-        );
-      }
-
-      step(`Uploading ${manifestDir}/android.json to R2`);
-      await r2Put(
-        env,
-        `${manifestDir}/android.json`,
-        androidJsonPath,
-        "application/json",
-        MANIFEST_CACHE_CONTROL,
-      );
-      ok(`https://${env.storageDomain}/${manifestDir}/android.json`);
-
-      step(`Uploading ${manifestDir}/android.json.sig to R2`);
-      await r2Put(
-        env,
-        `${manifestDir}/android.json.sig`,
-        androidSigPath,
-        "text/plain",
-        MANIFEST_CACHE_CONTROL,
-      );
-      ok(`https://${env.storageDomain}/${manifestDir}/android.json.sig`);
-    } finally {
-      await cleanupKeystore();
+    // Prebuilt mode (CI publish): the Linux build runner already keystore-signed
+    // the APKs; just compose + upload. Otherwise build them here.
+    if (opts.prebuilt && !opts.prebuilt.android) {
+      info(colors.yellow("no android bundle produced; skipping android publish"));
+      return;
     }
+    const descriptor = opts.prebuilt?.android ?? (await buildAndroidBundle(env, channel));
+    await composeAndUploadAndroid(env, channel, version, descriptor, opts);
   },
 };
+
+// ---------------------------------------------------------------------------
+// build half (runs on the Linux build runner: local apply or ci-build.ts)
+
+/** Build + keystore-sign the APK(s), copy each under dist/android/<abi>/ so they
+ *  survive the move to the publish host, and return the descriptor the publish
+ *  half composes android.json from. Needs the Android keystore (build-time
+ *  signing) but NOT the Ed25519 manifest key (that signs android.json on the
+ *  publish host), so a build runner never holds the trust-root private key. */
+export async function buildAndroidBundle(
+  env: DeployEnv,
+  channel: ReleaseChannel,
+): Promise<AndroidDescriptor> {
+  const version = await readAndroidVersion();
+  info(`android version ${version}`);
+
+  step("Building signed Android APK");
+  const cleanupKeystore = await materializeKeystore(env);
+  try {
+    await buildAndroid(channel);
+    const apks = await findApks();
+    const records: AndroidApkRecord[] = [];
+    for (const a of apks) {
+      ok(`${a.abi}/${a.filename}  ${humanBytes(a.size)}`);
+      const relPath = `android/${a.abi}/${a.filename}`;
+      await ensureDir(join(DIST_DIR, "android", a.abi));
+      await Deno.copyFile(a.path, join(DIST_DIR, relPath));
+      const { sha256 } = await sha256File(a.path);
+      records.push({ abi: a.abi, filename: a.filename, relPath, sha256, size: a.size });
+    }
+    return { version, channel, apks: records };
+  } finally {
+    await cleanupKeystore();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// publish half (runs ONCE on the host)
+
+/** Compose + Ed25519-sign android.json from a built descriptor, upload the
+ *  versioned APKs + the version-less `current/` alias + the manifest to R2. */
+export async function composeAndUploadAndroid(
+  env: DeployEnv,
+  channel: ReleaseChannel,
+  version: string,
+  descriptor: AndroidDescriptor,
+  opts: ApplyOpts,
+): Promise<void> {
+  const manifestDir = channelManifestDir(channel);
+  const storagePrefix = channelStoragePrefix(channel);
+
+  step("Composing android.json");
+  const abis: Record<string, { url: string; sha256: string }> = {};
+  const uploads: Array<{ abi: string; path: string; key: string; aliasKey: string; size: number }> =
+    [];
+  for (const a of descriptor.apks) {
+    // Re-anchor + verify the APK bytes against the descriptor's sha256.
+    const path = await reanchorFile(a.relPath, a.sha256);
+    const key = `${storagePrefix}${version}/${a.abi}/tomat.apk`;
+    abis[a.abi] = { url: `https://${env.storageDomain}/${key}`, sha256: a.sha256 };
+    uploads.push({
+      abi: a.abi,
+      path,
+      key,
+      aliasKey: `${storagePrefix}current/${a.abi}/tomat.apk`,
+      size: a.size,
+    });
+  }
+  const manifest = composeAndroidManifest(version, abis);
+  const androidJsonPath = await writeManifestFile(manifestDir, "android.json", manifest);
+  ok(`android.json → ${rel(androidJsonPath)}`);
+
+  // Detached Ed25519 signature over the exact android.json bytes, so the in-app
+  // updater authenticates the manifest before downloading. Mirrors client.json.sig.
+  const androidJsonSig = await signEd25519Bytes(
+    env.signingPrivateKey,
+    await Deno.readFile(androidJsonPath),
+  );
+  const androidSigPath = join(DIST_DIR, manifestDir, "android.json.sig");
+  await Deno.writeTextFile(androidSigPath, androidJsonSig);
+  ok(`android.json.sig → ${rel(androidSigPath)}`);
+
+  if (opts.dryRun) {
+    info(colors.yellow(`dry-run: skipping upload of APK(s) + ${manifestDir}/android.json`));
+    return;
+  }
+
+  step(`Uploading APK(s) to R2 bucket "${env.r2Bucket}"`);
+  for (const u of uploads) {
+    info(`uploading ${u.key}  (${humanBytes(u.size)})`);
+    await r2Put(env, u.key, u.path, "application/vnd.android.package-archive");
+    opts.recordVersionedKey?.(u.key);
+    opts.recordReleaseAsset?.(u.path, `android-${u.abi}_tomat.apk`);
+
+    // Mirror each APK to a version-less "current" alias so the install page can
+    // link a stable download URL without knowing the version. Short cache; the
+    // versioned copy above stays the source of truth the signed manifest names.
+    info(`uploading ${u.aliasKey}  (alias)`);
+    await r2Put(
+      env,
+      u.aliasKey,
+      u.path,
+      "application/vnd.android.package-archive",
+      MANIFEST_CACHE_CONTROL,
+    );
+  }
+
+  step(`Uploading ${manifestDir}/android.json to R2`);
+  await r2Put(
+    env,
+    `${manifestDir}/android.json`,
+    androidJsonPath,
+    "application/json",
+    MANIFEST_CACHE_CONTROL,
+  );
+  ok(`https://${env.storageDomain}/${manifestDir}/android.json`);
+
+  step(`Uploading ${manifestDir}/android.json.sig to R2`);
+  await r2Put(
+    env,
+    `${manifestDir}/android.json.sig`,
+    androidSigPath,
+    "text/plain",
+    MANIFEST_CACHE_CONTROL,
+  );
+  ok(`https://${env.storageDomain}/${manifestDir}/android.json.sig`);
+}

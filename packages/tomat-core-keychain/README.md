@@ -30,10 +30,9 @@ without touching the real OS keychain.
 ## Run, build, test
 
 This crate exposes the standardized verbs as cargo wrappers (its `deno.json`):
-`deno task check:core-keychain`, `lint:core-keychain`, `test:core-keychain`,
-`build:core-keychain`, or `cd` in and run `deno task <verb>`. It is also
-compiled as part of `deno task build:core` and folded into the repo-wide
-`deno task check` / `lint` / `test`.
+`deno task lint:core-keychain`, `test:core-keychain`, `build:core-keychain`, or
+`cd` in and run `deno task <verb>`. It is also compiled as part of
+`deno task build:core` and folded into the repo-wide `deno task lint` / `test`.
 
 Called from
 [`tomat-core/src/services/keychain.ts`](../tomat-core/src/services/keychain.ts).

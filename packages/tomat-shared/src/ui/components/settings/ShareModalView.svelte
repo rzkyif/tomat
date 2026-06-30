@@ -16,6 +16,7 @@
   import Alert from "../primitives/Alert.svelte";
   import Textarea from "../primitives/Textarea.svelte";
   import SettingsTabs from "../primitives/Tabs.svelte";
+  import ErrorDetailView from "../chat/messages/ErrorDetailView.svelte";
   import ShareTreeView, { type ShareTreeGroup } from "./ShareTreeView.svelte";
 
   type TabId = "import" | "export";
@@ -137,7 +138,7 @@
       spellcheck="false"
       aria-label="Settings JSON to import"
       class="h-full w-full resize-none overflow-y-auto tomat-scroll rounded-medium px-2 py-1.5 text-sm font-mono text-default-800 outline-none {parsedError
-        ? 'bg-accent-red-300 border-accent-red-400'
+        ? 'bg-surface-inset tomat-error-ring'
         : 'bg-surface-inset'}"
     ></textarea>
     {@render floatButton(
@@ -148,7 +149,7 @@
   </div>
 
   {#if parsedError}
-    <Alert variant="error" size="sm" class="shrink-0">{parsedError}</Alert>
+    <ErrorDetailView message={parsedError} />
   {:else if unknownKeysCount > 0}
     <Alert variant="warning" size="sm" class="shrink-0">
       Ignoring {unknownKeysCount} unrecognized or unsupported key{unknownKeysCount === 1
@@ -157,7 +158,7 @@
     </Alert>
   {/if}
   {#if importError}
-    <Alert variant="error" size="sm" class="shrink-0">{importError}</Alert>
+    <ErrorDetailView message={importError} />
   {/if}
 
   {#if importHasTree}

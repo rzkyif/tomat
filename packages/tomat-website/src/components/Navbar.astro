@@ -343,6 +343,28 @@ const rowActive = "bg-surface-inset text-default-900";
     if (toggle) toggle.checked = false;
   }
 
+  // Close the mobile menu BEFORE the view transition snapshots the page, not on
+  // page-load (which fires after it). Left open, the panel is captured into the
+  // outgoing snapshot, so it sits over the sliding article and then lingers above
+  // the new page's header until page-load finally unchecks it. Jump it shut
+  // without its 250ms slide (the snapshot is taken once the next page has loaded,
+  // which can be instant for a cached page) so a half-open panel is never caught.
+  function closeMenuForNav() {
+    const toggle = document.getElementById("nav-toggle") as HTMLInputElement | null;
+    if (!toggle?.checked) return;
+    const panels = [
+      document.querySelector<HTMLElement>(".sidebar"),
+      document.querySelector<HTMLElement>(".scrim"),
+    ];
+    for (const el of panels) if (el) el.style.transition = "none";
+    toggle.checked = false;
+    // Force the closed position to apply now, then restore the slide so a later
+    // manual open still animates (matters only if the navigation is aborted).
+    void panels[0]?.offsetHeight;
+    for (const el of panels) if (el) el.style.transition = "";
+  }
+
+  document.addEventListener("astro:before-preparation", closeMenuForNav);
   document.addEventListener("astro:page-load", onLoad);
   window.addEventListener("resize", () => {
     initialized = false;

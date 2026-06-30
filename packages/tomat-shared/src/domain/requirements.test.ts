@@ -134,11 +134,8 @@ Deno.test("binaryUnavailableOnTriple: resolver-backed binaries available on all 
   }
 });
 
-Deno.test("binaryUnavailableOnTriple: self-hosted speech available except windows-arm64", () => {
+Deno.test("binaryUnavailableOnTriple: self-hosted speech available on all triples", () => {
   for (const triple of TRIPLES) {
-    assertEquals(
-      binaryUnavailableOnTriple("tomat-core-speech", triple),
-      triple === "aarch64-pc-windows-msvc",
-    );
+    assertEquals(binaryUnavailableOnTriple("tomat-core-speech", triple), false);
   }
 });

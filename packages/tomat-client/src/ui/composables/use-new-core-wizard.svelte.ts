@@ -273,7 +273,7 @@ export class NewCoreWizard {
       return;
     }
     if (!isTauri()) {
-      this.error = "Local install requires the desktop app.";
+      this.error = "Local install requires the desktop app";
       return;
     }
     if (this.localAlreadyInstalled) {
@@ -396,15 +396,15 @@ export class NewCoreWizard {
     this.error = "";
     const url = this.normalizedRemoteUrl();
     if (!url) {
-      this.error = "Enter the Core's address.";
+      this.error = "Enter the Core's address";
       return;
     }
     if (!/^\d{6}$/.test(this.remoteCode)) {
-      this.error = "Pairing code must be 6 digits.";
+      this.error = "Pairing code must be 6 digits";
       return;
     }
     if (this.connectionStatus.kind !== "ok" || this.connectionStatus.checkedUrl !== url) {
-      this.error = "Check the connection first.";
+      this.error = "Check the connection first";
       return;
     }
     this.busy = "claiming";

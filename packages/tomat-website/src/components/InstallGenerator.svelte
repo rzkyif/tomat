@@ -335,7 +335,7 @@
         {#if mode === "install"}
           <li>
             If you ever need to uninstall, follow <a
-              href="/manual/settings/uninstalling"
+              href="/manual/maintenance/uninstalling"
               class="underline hov:text-default-700">the uninstallation guide</a
             >.
           </li>

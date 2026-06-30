@@ -14,7 +14,11 @@ import type {
   CoreManifest,
   Triple,
 } from "../../packages/tomat-shared/src/domain/model.ts";
-import { BINARY_KINDS, UPSTREAM_BINARIES } from "../../packages/tomat-shared/src/domain/model.ts";
+import {
+  BINARY_KINDS,
+  binaryUnavailableOnTriple,
+  UPSTREAM_BINARIES,
+} from "../../packages/tomat-shared/src/domain/model.ts";
 import {
   type ApplyOpts,
   bumpCoreVersion,
@@ -43,6 +47,10 @@ import {
   signEd25519,
   step,
 } from "./lib.ts";
+import { reportRouting, routeTriples } from "./all-targets.ts";
+import { type ArtifactBundle, mergeCoreBundles } from "./artifacts.ts";
+import { withEnvironment } from "./drivers/lifecycle.ts";
+import type { BuildEnvironment } from "./drivers/mod.ts";
 
 // ---------------------------------------------------------------------------
 // constants
@@ -96,7 +104,7 @@ const MANIFEST_CACHE_CONTROL = "public, max-age=300";
 // ---------------------------------------------------------------------------
 // types
 
-interface BuildArtifact {
+export interface BuildArtifact {
   triple: Triple;
   name: "tomat-core";
   filename: string;
@@ -105,14 +113,14 @@ interface BuildArtifact {
   size: number;
 }
 
-interface WorkerArtifact {
+export interface WorkerArtifact {
   name: string;
   path: string;
   sha256: string;
   size: number;
 }
 
-interface HelperArtifact {
+export interface HelperArtifact {
   triple: Triple;
   entryName: string;
   filename: string;
@@ -121,7 +129,7 @@ interface HelperArtifact {
   size: number;
 }
 
-interface SpeechArtifact {
+export interface SpeechArtifact {
   triple: Triple;
   // `<name><suffix>.tar.gz`. The sha256 is over this ARCHIVE (verified before
   // extraction), unlike the single-file `.gz` artifacts whose sha is over the
@@ -130,6 +138,16 @@ interface SpeechArtifact {
   path: string;
   sha256: string;
   size: number;
+}
+
+// Everything a single environment builds for the core release item. The host
+// concatenates one of these per build environment, then composes + signs +
+// uploads the unified manifests once over the union (composeAndUploadCore).
+export interface CoreBuildArtifacts {
+  artifacts: BuildArtifact[];
+  helpers: HelperArtifact[];
+  speech: SpeechArtifact[];
+  workers: WorkerArtifact[];
 }
 
 // ---------------------------------------------------------------------------
@@ -199,8 +217,21 @@ async function compileFor(
   const outDir = join(DIST_DIR, triple);
   await ensureDir(outDir);
   const outPath = join(outDir, `${name}${exe}`);
+  // `deno compile` can cross-compile to every triple EXCEPT aarch64-pc-windows-msvc
+  // (it's absent from --target's list). It CAN compile that triple natively, so
+  // there we drop --target and require the running deno to already be the
+  // arm64-windows build (the Windows driver installs it). Every other triple
+  // cross-compiles via --target.
+  const nativeOnly = triple === "aarch64-pc-windows-msvc";
+  if (nativeOnly && Deno.build.target !== triple) {
+    fail(
+      `building ${triple} needs the arm64-windows deno on PATH (deno compile can't ` +
+        `cross-target it); the running deno is ${Deno.build.target}.`,
+    );
+  }
+  const targetArgs = nativeOnly ? [] : ["--target", triple];
   const cmd = new Deno.Command("deno", {
-    args: ["compile", "--allow-all", "--target", triple, "--output", outPath, entryRelative],
+    args: ["compile", "--allow-all", ...targetArgs, "--output", outPath, entryRelative],
     cwd: compileWorkspace,
     stdout: "inherit",
     stderr: "inherit",
@@ -240,6 +271,37 @@ export async function buildAll(triples: Triple[], suffix: string): Promise<Build
   }
 }
 
+// Where cargo writes its build output. Honors CARGO_TARGET_DIR (the Podman Linux
+// driver points it at /tmp/target because the repo is bind-mounted read-only, so
+// cargo can't write into REPO_ROOT/target there); falls back to the in-repo
+// target/ on the host, where the env is unset.
+function cargoTargetDir(): string {
+  return Deno.env.get("CARGO_TARGET_DIR") ?? join(REPO_ROOT, "target");
+}
+
+// Each helper/speech crate compiles per triple with `cargo --target <triple>`,
+// which needs that target's std installed. The drivers pre-install their targets
+// (Containerfile / windows-provision.ps1); on the host the second arch (e.g.
+// x86_64-apple-darwin on an arm64 mac, now part of the all-targets matrix) may be
+// missing. Add each idempotently via rustup before the cargo builds (a no-op when
+// already present). Best-effort: if rustup is absent or the add fails, fall
+// through and let cargo surface its own clearer error.
+async function ensureRustTargets(triples: Triple[]): Promise<void> {
+  for (const triple of triples) {
+    const code = await new Deno.Command("rustup", {
+      args: ["target", "add", triple],
+      stdout: "inherit",
+      stderr: "inherit",
+    })
+      .output()
+      .then((o) => o.code)
+      .catch(() => 1);
+    if (code !== 0) {
+      info(colors.yellow(`rustup target add ${triple} skipped (rustup absent or add failed)`));
+    }
+  }
+}
+
 export async function buildHelpers(triples: Triple[], suffix: string): Promise<HelperArtifact[]> {
   const out: HelperArtifact[] = [];
   for (const triple of triples) {
@@ -272,7 +334,7 @@ export async function buildHelpers(triples: Triple[], suffix: string): Promise<H
       });
       const { code } = await cmd.output();
       if (code !== 0) fail(`cargo build ${name} for ${triple} exited ${code}`);
-      const builtPath = join(REPO_ROOT, "target", triple, "release", `${name}${exe}`);
+      const builtPath = join(cargoTargetDir(), triple, "release", `${name}${exe}`);
       await Deno.copyFile(builtPath, outPath);
       const { sha256, size } = await sha256File(outPath);
       out.push({ triple, entryName, filename, path: outPath, sha256, size });
@@ -338,8 +400,17 @@ async function ensureEspeakData(): Promise<string> {
  *  channel suffix. sha256 is over the archive (verified before extraction). */
 async function buildSpeech(triples: Triple[], suffix: string): Promise<SpeechArtifact[]> {
   const out: SpeechArtifact[] = [];
+  // Safety net: if a triple is ever marked speech-unavailable (binaries.json),
+  // skip it rather than fail the whole core build. None are today (windows-arm64
+  // links the sherpa lib via SHERPA_ONNX_LIB_DIR in the guest), so this filters
+  // nothing.
+  const speechTriples = triples.filter((t) => !binaryUnavailableOnTriple("tomat-core-speech", t));
+  for (const skipped of triples.filter((t) => !speechTriples.includes(t))) {
+    info(colors.yellow(`skipping speech for ${skipped} (marked unavailable)`));
+  }
+  if (speechTriples.length === 0) return out;
   const espeakData = await ensureEspeakData();
-  for (const triple of triples) {
+  for (const triple of speechTriples) {
     const isWin = triple.includes("windows");
     const exe = isWin ? ".exe" : "";
     info(`cargo build ${SPEECH_CRATE.name} for ${triple}`);
@@ -365,7 +436,7 @@ async function buildSpeech(triples: Triple[], suffix: string): Promise<SpeechArt
     // must be the bare `<kind>(.exe)` the extractor matches, with no suffix.
     const exeIn = `${SPEECH_CRATE.name}${exe}`;
     const staging = await Deno.makeTempDir({ prefix: "tomat-speech-" });
-    await Deno.copyFile(join(REPO_ROOT, "target", triple, "release", exeIn), join(staging, exeIn));
+    await Deno.copyFile(join(cargoTargetDir(), triple, "release", exeIn), join(staging, exeIn));
     await copy(espeakData, join(staging, "espeak-ng-data"));
 
     const filename = `${SPEECH_CRATE.name}${suffix}.tar.gz`;
@@ -386,7 +457,7 @@ async function buildSpeech(triples: Triple[], suffix: string): Promise<SpeechArt
   return out;
 }
 
-async function hashWorkers(): Promise<WorkerArtifact[]> {
+export async function hashWorkers(): Promise<WorkerArtifact[]> {
   const workersDir = join(CORE_DIR, "src/workers");
   const out: WorkerArtifact[] = [];
   for (const name of WORKER_FILES) {
@@ -658,15 +729,21 @@ const CORE_PACKAGES = [
 ];
 const CORE_HASH_INPUTS = packagesHashInputs(CORE_PACKAGES);
 
-// The dist/<host>/ binaries buildAll + buildHelpers emit for this channel:
+// The dist/<triple>/ binaries buildAll + buildHelpers emit for this channel:
 // tomat-core plus the four helpers, each with the channel suffix. The unified
 // build hash-checks these so a wiped or swapped artifact forces a rebuild.
-export function coreOutputs(channel: ReleaseChannel): string[] {
-  const triple = detectHostTriple();
-  const exe = triple.includes("windows") ? ".exe" : "";
+// Defaults to the host triple; a cross-platform build passes the triples it
+// built so the cursor tracks every arch, not just the host's.
+export function coreOutputs(
+  channel: ReleaseChannel,
+  triples: Triple[] = [detectHostTriple()],
+): string[] {
   const suffix = channelBinSuffix(channel);
   const names = ["tomat-core", ...HELPER_CRATES.map((h) => h.name)];
-  return names.map((n) => join(DIST_DIR, triple, `${n}${suffix}${exe}`));
+  return triples.flatMap((triple) => {
+    const exe = triple.includes("windows") ? ".exe" : "";
+    return names.map((n) => join(DIST_DIR, triple, `${n}${suffix}${exe}`));
+  });
 }
 
 export const coreItem: ReleaseItem = {
@@ -695,124 +772,199 @@ export const coreItem: ReleaseItem = {
 
   async apply(env: DeployEnv, channel: ReleaseChannel, opts: ApplyOpts): Promise<void> {
     const suffix = channelBinSuffix(channel);
-    const prefix = channelStoragePrefix(channel);
-    const manifestDir = channelManifestDir(channel);
     const version = await readCoreVersion();
-
-    step(`Building Deno binaries (${opts.triples.length} triples)`);
-    const artifacts = await buildAll(opts.triples, suffix);
-    for (const a of artifacts) {
-      ok(`${a.triple}/${a.filename}  ${humanBytes(a.size)}  ${a.sha256.slice(0, 12)}…`);
-    }
-
-    step(`Building native helpers (${opts.triples.length} triples)`);
-    const helpers = await buildHelpers(opts.triples, suffix);
-    for (const h of helpers) {
-      ok(`${h.triple}/${h.filename}  ${humanBytes(h.size)}  ${h.sha256.slice(0, 12)}…`);
-    }
-
-    step(`Building speech binary (${opts.triples.length} triples)`);
-    const speech = await buildSpeech(opts.triples, suffix);
-    for (const s of speech) {
-      ok(`${s.triple}/${s.filename}  ${humanBytes(s.size)}  ${s.sha256.slice(0, 12)}…`);
-    }
-
-    step("Hashing worker scripts");
-    const workers = await hashWorkers();
-    for (const w of workers) {
-      ok(`workers/${w.name}  ${humanBytes(w.size)}  ${w.sha256.slice(0, 12)}…`);
-    }
-
-    step("Composing + signing core.json");
-    const coreManifest = await composeCoreManifest(
-      version,
-      artifacts,
-      workers,
-      helpers,
-      env.storageDomain,
-      prefix,
-      env.signingPrivateKey,
-    );
-    const coreJsonPath = await writeManifestFile(manifestDir, "core.json", coreManifest);
-    ok(`signed core.json → ${rel(coreJsonPath)}`);
-
-    step("Composing + signing binaries.json");
-    const binaryManifest = await composeBinaryManifest(
-      env.signingPrivateKey,
-      channel,
-      version,
-      composeSpeechEntry(speech, version, env.storageDomain, prefix),
-    );
-    const binJsonPath = await writeManifestFile(manifestDir, "binaries.json", binaryManifest);
-    ok(`signed binaries.json → ${rel(binJsonPath)}`);
-
-    if (opts.dryRun) {
-      info(
-        colors.yellow(`dry-run: manifests under ${rel(join(DIST_DIR, manifestDir))}, no upload`),
-      );
-      return;
-    }
-
-    // Single-file artifacts ship gzip-compressed (see gzipFile); the manifest
-    // URLs end in `.gz` and consumers verify sha256 over the decompressed file.
-    step(`Uploading binaries to R2 bucket "${env.r2Bucket}"`);
-    for (const a of artifacts) {
-      const gz = await gzipFile(a.path);
-      const key = `${prefix}${version}/${a.triple}/${a.filename}.gz`;
-      info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(a.size)})`);
-      await r2Put(env, key, gz.path, "application/gzip");
-      opts.recordVersionedKey?.(key);
-    }
-    ok(`uploaded ${artifacts.length} binaries`);
-
-    step(`Uploading helpers to R2 bucket "${env.r2Bucket}"`);
-    for (const h of helpers) {
-      const gz = await gzipFile(h.path);
-      const key = `${prefix}${version}/${h.triple}/${h.filename}.gz`;
-      info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(h.size)})`);
-      await r2Put(env, key, gz.path, "application/gzip");
-      opts.recordVersionedKey?.(key);
-    }
-    ok(`uploaded ${helpers.length} helpers`);
-
-    step(`Uploading speech binary to R2 bucket "${env.r2Bucket}"`);
-    for (const s of speech) {
-      // Already a .tar.gz (its own transport form); upload as-is, no extra gzip.
-      const key = `${prefix}${version}/${s.triple}/${s.filename}`;
-      info(`uploading ${key}  (${humanBytes(s.size)})`);
-      await r2Put(env, key, s.path, "application/gzip");
-      opts.recordVersionedKey?.(key);
-    }
-    ok(`uploaded ${speech.length} speech binaries`);
-
-    step(`Uploading workers to R2 bucket "${env.r2Bucket}"`);
-    for (const w of workers) {
-      const gz = await gzipFile(w.path);
-      const key = `${prefix}${version}/workers/${w.name}.gz`;
-      info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(w.size)})`);
-      await r2Put(env, key, gz.path, "application/gzip");
-      opts.recordVersionedKey?.(key);
-    }
-    ok(`uploaded ${workers.length} workers`);
-
-    step(`Uploading manifests to R2 bucket "${env.r2Bucket}"`);
-    await r2Put(
-      env,
-      `${manifestDir}/core.json`,
-      coreJsonPath,
-      "application/json",
-      MANIFEST_CACHE_CONTROL,
-    );
-    ok(`uploaded ${manifestDir}/core.json`);
-    await r2Put(
-      env,
-      `${manifestDir}/binaries.json`,
-      binJsonPath,
-      "application/json",
-      MANIFEST_CACHE_CONTROL,
-    );
-    ok(`uploaded ${manifestDir}/binaries.json`);
+    // Prebuilt mode (CI publish): merge the bundles the build runners produced
+    // (their dist/<triple>/ files already collected under DIST_DIR) and hash the
+    // platform-independent workers from this host's checkout. No build.
+    // All-targets mode: build host triples here + the rest in their environments.
+    // Host-only mode: today's single-host build.
+    const built = opts.prebuilt
+      ? await mergeCoreBundles(opts.prebuilt.coreBundles, await hashWorkers())
+      : opts.environments?.length
+        ? await buildCoreUnified(opts.triples, suffix, channel, opts.environments)
+        : await buildCoreArtifacts(opts.triples, suffix);
+    await composeAndUploadCore(env, channel, version, built, opts);
   },
 };
+
+// Build the core artifacts for `triples` across this host + the given build
+// environments: the host compiles its own OS's triples directly; every other
+// triple is routed to an environment (started on demand, torn down after) that
+// builds it and ships the artifacts back into the host's dist/. The results are
+// merged into one CoreBuildArtifacts for composeAndUploadCore. Triples with no
+// available environment are reported and dropped (the manifests tolerate a
+// partial platform set).
+export async function buildCoreUnified(
+  triples: Triple[],
+  suffix: string,
+  channel: ReleaseChannel,
+  environments: BuildEnvironment[],
+): Promise<CoreBuildArtifacts> {
+  const routing = await routeTriples(triples, environments);
+  reportRouting(routing);
+
+  const hostBuilt = await buildCoreArtifacts(routing.host, suffix);
+
+  const bundles: ArtifactBundle[] = [];
+  for (const { env, triples: envTriples } of routing.byEnv) {
+    const bundle = await withEnvironment(env, () =>
+      env.buildCore({ triples: envTriples, channel, suffix }),
+    );
+    bundles.push(bundle);
+  }
+  // Re-anchor + verify the environments' artifacts (already copied into dist/).
+  // Workers are platform-independent, so the host's are authoritative.
+  const fromEnvs = await mergeCoreBundles(bundles, []);
+  return {
+    artifacts: [...hostBuilt.artifacts, ...fromEnvs.artifacts],
+    helpers: [...hostBuilt.helpers, ...fromEnvs.helpers],
+    speech: [...hostBuilt.speech, ...fromEnvs.speech],
+    workers: hostBuilt.workers,
+  };
+}
+
+// Build everything the core release item needs for a set of triples, in the
+// current environment: the deno-compiled binaries, the four native helpers, the
+// speech sidecar, and the (platform-independent) worker hashes. This is the half
+// that runs INSIDE each build environment (host, a Podman container, the Windows
+// VM); composeAndUploadCore aggregates the results and runs once on the host.
+export async function buildCoreArtifacts(
+  triples: Triple[],
+  suffix: string,
+): Promise<CoreBuildArtifacts> {
+  step(`Building Deno binaries (${triples.length} triples)`);
+  const artifacts = await buildAll(triples, suffix);
+  for (const a of artifacts) {
+    ok(`${a.triple}/${a.filename}  ${humanBytes(a.size)}  ${a.sha256.slice(0, 12)}…`);
+  }
+
+  step(`Building native helpers (${triples.length} triples)`);
+  await ensureRustTargets(triples);
+  const helpers = await buildHelpers(triples, suffix);
+  for (const h of helpers) {
+    ok(`${h.triple}/${h.filename}  ${humanBytes(h.size)}  ${h.sha256.slice(0, 12)}…`);
+  }
+
+  step(`Building speech binary (${triples.length} triples)`);
+  const speech = await buildSpeech(triples, suffix);
+  for (const s of speech) {
+    ok(`${s.triple}/${s.filename}  ${humanBytes(s.size)}  ${s.sha256.slice(0, 12)}…`);
+  }
+
+  step("Hashing worker scripts");
+  const workers = await hashWorkers();
+  for (const w of workers) {
+    ok(`workers/${w.name}  ${humanBytes(w.size)}  ${w.sha256.slice(0, 12)}…`);
+  }
+
+  return { artifacts, helpers, speech, workers };
+}
+
+// Compose + sign core.json/binaries.json over the given (possibly cross-env)
+// artifact set, then upload the artifacts + manifests to R2. Runs ONCE on the
+// host: composeCoreManifest/composeBinaryManifest carry no R2 carry-forward, so
+// the arrays passed here must already be the full union across every triple.
+export async function composeAndUploadCore(
+  env: DeployEnv,
+  channel: ReleaseChannel,
+  version: string,
+  built: CoreBuildArtifacts,
+  opts: ApplyOpts,
+): Promise<void> {
+  const { artifacts, helpers, speech, workers } = built;
+  const prefix = channelStoragePrefix(channel);
+  const manifestDir = channelManifestDir(channel);
+
+  step("Composing + signing core.json");
+  const coreManifest = await composeCoreManifest(
+    version,
+    artifacts,
+    workers,
+    helpers,
+    env.storageDomain,
+    prefix,
+    env.signingPrivateKey,
+  );
+  const coreJsonPath = await writeManifestFile(manifestDir, "core.json", coreManifest);
+  ok(`signed core.json → ${rel(coreJsonPath)}`);
+
+  step("Composing + signing binaries.json");
+  const binaryManifest = await composeBinaryManifest(
+    env.signingPrivateKey,
+    channel,
+    version,
+    composeSpeechEntry(speech, version, env.storageDomain, prefix),
+  );
+  const binJsonPath = await writeManifestFile(manifestDir, "binaries.json", binaryManifest);
+  ok(`signed binaries.json → ${rel(binJsonPath)}`);
+
+  if (opts.dryRun) {
+    info(colors.yellow(`dry-run: manifests under ${rel(join(DIST_DIR, manifestDir))}, no upload`));
+    return;
+  }
+
+  // Single-file artifacts ship gzip-compressed (see gzipFile); the manifest
+  // URLs end in `.gz` and consumers verify sha256 over the decompressed file.
+  step(`Uploading binaries to R2 bucket "${env.r2Bucket}"`);
+  for (const a of artifacts) {
+    const gz = await gzipFile(a.path);
+    const key = `${prefix}${version}/${a.triple}/${a.filename}.gz`;
+    info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(a.size)})`);
+    await r2Put(env, key, gz.path, "application/gzip");
+    opts.recordVersionedKey?.(key);
+    opts.recordReleaseAsset?.(gz.path, `${a.triple}_${a.filename}.gz`);
+  }
+  ok(`uploaded ${artifacts.length} binaries`);
+
+  step(`Uploading helpers to R2 bucket "${env.r2Bucket}"`);
+  for (const h of helpers) {
+    const gz = await gzipFile(h.path);
+    const key = `${prefix}${version}/${h.triple}/${h.filename}.gz`;
+    info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(h.size)})`);
+    await r2Put(env, key, gz.path, "application/gzip");
+    opts.recordVersionedKey?.(key);
+    opts.recordReleaseAsset?.(gz.path, `${h.triple}_${h.filename}.gz`);
+  }
+  ok(`uploaded ${helpers.length} helpers`);
+
+  step(`Uploading speech binary to R2 bucket "${env.r2Bucket}"`);
+  for (const s of speech) {
+    // Already a .tar.gz (its own transport form); upload as-is, no extra gzip.
+    const key = `${prefix}${version}/${s.triple}/${s.filename}`;
+    info(`uploading ${key}  (${humanBytes(s.size)})`);
+    await r2Put(env, key, s.path, "application/gzip");
+    opts.recordVersionedKey?.(key);
+    opts.recordReleaseAsset?.(s.path, `${s.triple}_${s.filename}`);
+  }
+  ok(`uploaded ${speech.length} speech binaries`);
+
+  step(`Uploading workers to R2 bucket "${env.r2Bucket}"`);
+  for (const w of workers) {
+    const gz = await gzipFile(w.path);
+    const key = `${prefix}${version}/workers/${w.name}.gz`;
+    info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(w.size)})`);
+    await r2Put(env, key, gz.path, "application/gzip");
+    opts.recordVersionedKey?.(key);
+  }
+  ok(`uploaded ${workers.length} workers`);
+
+  step(`Uploading manifests to R2 bucket "${env.r2Bucket}"`);
+  await r2Put(
+    env,
+    `${manifestDir}/core.json`,
+    coreJsonPath,
+    "application/json",
+    MANIFEST_CACHE_CONTROL,
+  );
+  ok(`uploaded ${manifestDir}/core.json`);
+  await r2Put(
+    env,
+    `${manifestDir}/binaries.json`,
+    binJsonPath,
+    "application/json",
+    MANIFEST_CACHE_CONTROL,
+  );
+  ok(`uploaded ${manifestDir}/binaries.json`);
+}
 
 export { ALL_TRIPLES };

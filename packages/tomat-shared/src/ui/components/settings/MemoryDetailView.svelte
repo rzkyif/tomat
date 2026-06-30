@@ -21,6 +21,7 @@
   import Expand from "../primitives/Expand.svelte";
   import Chip from "../primitives/Chip.svelte";
   import ListItem from "../primitives/ListItem.svelte";
+  import IconText from "../primitives/IconText.svelte";
 
   let {
     enabled = false,
@@ -159,13 +160,13 @@
   const status = $derived(
     summaryStale
       ? {
-          icon: "i-material-symbols-info-outline-rounded",
+          icon: "i-material-symbols-info-rounded",
           tone: "text-accent-yellow-700",
           title: "Pending summarization",
           detail: "Won't surface by relevance until summarization finishes.",
         }
       : {
-          icon: "i-material-symbols-check-circle-outline-rounded",
+          icon: "i-material-symbols-check-circle-rounded",
           tone: "text-default-500",
           title: "Summarized",
           detail: summary.trim() || "Can surface when it's relevant to your message.",
@@ -190,10 +191,7 @@
   </FormField>
 
   <div class="flex flex-col gap-0.5 text-xs">
-    <div class="flex items-center gap-1.5">
-      <i class="{status.icon} {status.tone} text-xs shrink-0"></i>
-      <span class="text-default-700">{status.title}</span>
-    </div>
+    <IconText icon={status.icon} color={status.tone}>{status.title}</IconText>
     <span class="text-default-500">{status.detail}</span>
   </div>
 

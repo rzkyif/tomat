@@ -725,9 +725,11 @@ try {
   # aborts the core install.
 
   if ($IdxExtension -ne -1) {
-    # Keep these filenames in sync with builtin-seed.ts (PLANTED_TARBALL / MANIFEST).
-    $tkDest = Join-Path $ExtensionsDir ".tomat-builtin.tgz"
-    $tkManifestDest = Join-Path $ExtensionsDir ".tomat-builtin.json"
+    # Keep these filenames in sync with the planted{Tarball,Manifest}() helpers in
+    # seeding.ts (`.<extension-id>.{tgz,json}`). Only the built-in is planted; the
+    # dev-only samples extension never is.
+    $tkDest = Join-Path $ExtensionsDir ".tomat-extension-builtin.tgz"
+    $tkManifestDest = Join-Path $ExtensionsDir ".tomat-extension-builtin.json"
     if ((Test-Path $tkDest) -and (Test-Path $tkManifestDest)) {
       Ui-ActionSkip $IdxExtension "(already present)"
     } else {

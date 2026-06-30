@@ -15,7 +15,7 @@ import { commitUpdate, handleUpdateMarkerOnBoot } from "./update/rollback.ts";
 import { extensionsRegistry } from "./extensions/registry.ts";
 import { mcpRegistry } from "./mcp/registry.ts";
 import { mcpManager } from "./mcp/manager.ts";
-import { seedBuiltinExtensionIfNeeded } from "./extensions/builtin-seed.ts";
+import { seedExtensionsIfNeeded } from "./extensions/seeding.ts";
 import { BROADCAST_SINK } from "./http/routes/extensions.ts";
 import { initSidecarBoot } from "./services/sidecar-boot.ts";
 import { coreStatus } from "./services/core-status.ts";
@@ -113,12 +113,13 @@ async function main(): Promise<void> {
       log.error(`extension verifyAllOnBoot failed: ${errMessage(err)}`);
     });
 
-  // Seed the built-in extension on a fresh install (background, non-blocking).
-  // This only brings it to status 'downloaded'; installing its tools is an
-  // explicit user choice from the Tools prompt (requestBuiltinInstall). Respects
-  // a prior user delete via the seed marker; retries next boot if offline.
-  void seedBuiltinExtensionIfNeeded(BROADCAST_SINK).catch((err) => {
-    log.warn(`builtin extension seed failed (will retry next boot): ${errMessage(err)}`);
+  // Seed the extensions tomat ships on a fresh install (background, non-blocking):
+  // the built-in, plus the dev-only samples in dev. This only brings them to status
+  // 'downloaded'; installing the built-in's tools is an explicit user choice from
+  // the Tools prompt (requestBuiltinInstall). Respects a prior user delete via the
+  // per-extension seed marker; retries next boot if offline.
+  void seedExtensionsIfNeeded(BROADCAST_SINK).catch((err) => {
+    log.warn(`extension seed failed (will retry next boot): ${errMessage(err)}`);
   });
 
   // Surface an unreadable secrets vault (sealed secrets.enc but no master key)

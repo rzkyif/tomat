@@ -19,11 +19,14 @@ const { prev, next } = manualNeighbors(entries, entry.id);
 // Clickable card mirroring CoreBarView's surface-inset row: a single
 // background-only feedback (hover +1 shade, press +2) via transition-interactive,
 // matching the article header's section/title type scale.
+// min-w-0 lets each card shrink below its title's intrinsic width: truncation
+// only engages when EVERY flex ancestor (the card and the inner text column)
+// can shrink, otherwise a long title forces the card wider than the page.
 const cardBase =
-  "flex flex-1 items-center gap-2 rounded-large bg-surface-inset px-4 py-3 transition-interactive hov:bg-surface-inset-strong act:bg-default-400 hov:cursor-pointer";
-const sectionLabel = "text-xs font-semibold uppercase tracking-wide text-default-500";
-const titleLabel = "truncate text-default-800";
-const chevron = "shrink-0 text-2xl text-default-500";
+  "flex min-w-0 flex-1 items-center gap-2 rounded-large bg-surface-inset px-3 py-3 md:px-4 transition-interactive hov:bg-surface-inset-strong act:bg-default-400 hov:cursor-pointer";
+const sectionLabel = "truncate text-xs font-semibold uppercase tracking-wide text-default-500";
+const titleLabel = "truncate text-sm md:text-base text-default-800";
+const chevron = "shrink-0 text-xl md:text-2xl text-default-500";
 ---
 
 <ManualLayout title={entry.data.title} entries={entries} currentId={entry.id}>
@@ -45,7 +48,7 @@ const chevron = "shrink-0 text-2xl text-default-500";
 
   {
     (prev || next) && (
-      <nav class="mt-10 md:mb-[20dvh] flex items-stretch gap-3" aria-label="More articles">
+      <nav class="mt-10 md:mb-[20dvh] flex items-stretch gap-2 md:gap-3" aria-label="More articles">
         {prev ? (
           <a href={prev.href} rel="prev" class={cardBase}>
             <i class={`i-material-symbols-chevron-left-rounded ${chevron}`} />

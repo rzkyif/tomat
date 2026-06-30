@@ -127,7 +127,7 @@
   </FormField>
 
   {#if status === "error" && statusError}
-    <ErrorDetailView detail={statusError} />
+    <ErrorDetailView message="Couldn't connect to this server" detail={statusError} />
   {/if}
 
   <FormField label="Name">

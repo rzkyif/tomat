@@ -17,7 +17,7 @@
 
 import { basename, dirname, isAbsolute, join, normalize, relative } from "@std/path";
 import type { BinaryKind, StorageCategory, StorageCategoryId, StorageNode } from "@tomat/shared";
-import { requiredBinaryKinds, requiredModelRefs } from "@tomat/shared";
+import { BUILTIN_EXTENSION_ID, requiredBinaryKinds, requiredModelRefs } from "@tomat/shared";
 import { extensionDir, paths, sessionDir } from "../paths.ts";
 import { AppError } from "../shared/errors.ts";
 import { getLogger } from "../shared/log.ts";
@@ -366,8 +366,10 @@ const CATEGORIES: CategoryDescriptor[] = [
       for (const tk of extensionsRegistry().list()) {
         const dir = extensionDir(tk.id);
         const lock =
-          tk.source === "builtin"
-            ? "Built-in extension"
+          tk.source === "seeded"
+            ? tk.id === BUILTIN_EXTENSION_ID
+              ? "Built-in extension"
+              : "Seeded extension"
             : ctx.enabledExtensionIds.has(tk.id)
               ? "Has enabled tools"
               : undefined;

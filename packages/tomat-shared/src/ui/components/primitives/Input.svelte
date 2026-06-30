@@ -65,9 +65,10 @@
   } = $props();
 
   const isNumber = $derived(type === "number");
-  const stateClass = $derived(
-    error ? "bg-accent-red-300 border-accent-red-400" : "bg-surface-inset",
-  );
+  // Errored fields keep the neutral inset fill and contents; the invalid state
+  // reads as a red inset outline instead (the `tomat-error-ring` helper draws
+  // the resting red outline and keeps the keyboard-focus ring red too).
+  const stateClass = $derived(error ? "bg-surface-inset tomat-error-ring" : "bg-surface-inset");
   const fontClass = $derived(`${mono ? "font-mono" : ""} ${uppercase ? "uppercase" : ""}`);
 
   function adjust(direction: 1 | -1) {

@@ -56,7 +56,7 @@ export const memoryDetailSamples = {
     editable: true,
     summaryStale: true,
     draftTitle: "",
-    titleError: "Give this memory a title.",
+    titleError: "Give this memory a title",
     contentLoaded: true,
     draftContent: "Always write the brand lowercase as tomat.",
   },

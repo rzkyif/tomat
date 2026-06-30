@@ -13,10 +13,18 @@ body {
    not shift sideways when navigating between a tall (scrolling) page and a short
    one. Applies on every page for a consistent content width. Also disable
    overscroll globally so manual articles (and every other page) never rubber-band
-   or trigger scroll chaining at their edges. */
+   or trigger scroll chaining at their edges.
+
+   `overflow-x: clip` is the page-wide safety net: if any descendant overflows
+   horizontally (a long unbreakable code line, a wide table, a tall prev/next
+   title), it is clipped at the viewport edge instead of widening the page and
+   pushing fixed chrome (the navbar) off-axis. `clip` (not `hidden`) keeps the
+   document a non-scroll-container, so it does not coerce overflow-y to `auto`
+   and the sticky outline sidebar + window-scroll fades keep working. */
 html {
   scrollbar-gutter: stable;
   overscroll-behavior: none;
+  overflow-x: clip;
 }
 
 /* Allow the native `<details>` open/close to animate its height by letting the
@@ -136,20 +144,18 @@ html:not([data-js]) [data-js-enhanced] {
 
 /* Scale-to-fit for inline manual demos (the showcase mechanism, applied to a
    static demo). A demo with a `designWidth` renders its View at that fixed width;
-   wireDemoScale (ManualLayout) measures the column and CSS-scales the whole unit
-   down to fit, then sizes the box to the scaled footprint so the page flows
-   correctly. Before the script runs, the cap keeps a wide demo from overflowing
+   wireDemoScale (ManualLayout) measures the column and `zoom`s the whole unit
+   down to fit. Before the script runs, the cap keeps a wide demo from overflowing
    the column (it reflows for one frame, never spills off-screen); the script then
-   removes the cap and applies the transform. No `overflow: hidden`, so a
-   Highlight overlay that sits just outside its content is never clipped. */
+   removes the cap and applies the zoom. zoom (not a transform) so the demo's
+   layout box shrinks for real, leaving no transformed subtree to bloat the page's
+   view-transition snapshot. No `overflow: hidden`, so a Highlight overlay that
+   sits just outside its content is never clipped. */
 .demo-scale {
   width: 100%;
 }
 .demo-scale-box {
   margin-inline: auto;
-}
-.demo-scale-inner {
-  transform-origin: top left;
 }
 .demo-scale:not([data-scaled]) .demo-scale-inner {
   max-width: 100%;

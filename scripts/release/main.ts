@@ -8,7 +8,7 @@
 //
 // Flags:
 //   --channel=stable|latest   target channel (the deno tasks set this)
-//   --triples=host|all|csv    triples to build for core/client (default host)
+//   --triples=all|host|<csv>  targets to release (default all); host = release:native
 //   --yes / -y                skip the confirmation prompt (CI)
 //   --force                   ignore the cursor; treat every item as changed
 //   --dry-run                 build locally, skip every R2 upload + cursor write
@@ -30,6 +30,10 @@ import {
   writeSigningKeys,
 } from "./lib.ts";
 import { encodeBase64 } from "@std/encoding/base64";
+import { ALL_KNOWN_TRIPLES, RELEASE_TARGET_TRIPLES } from "./all-targets.ts";
+import type { BuildEnvironment } from "./drivers/mod.ts";
+import { podmanLinuxDriver } from "./drivers/podman.ts";
+import { windowsUtmDriver } from "./drivers/windows.ts";
 import { coreItem } from "./core.ts";
 import { extensionItem } from "./extension.ts";
 import { catalogItem } from "./catalog.ts";
@@ -64,10 +68,15 @@ for (const item of ITEMS) {
 
 interface Flags {
   channel: ReleaseChannel;
-  triples: Triple[];
+  /** Triples the user asked to release for (already validated). */
+  requestedTriples: Triple[];
+  /** True when releasing for more than just the host triple (the `release`
+   *  task; `release:native` stays host-only). Drives the multi-env build path. */
+  crossPlatform: boolean;
   yes: boolean;
   force: boolean;
   dryRun: boolean;
+  githubRelease: boolean;
 }
 
 function parseFlags(): Flags {
@@ -75,45 +84,72 @@ function parseFlags(): Flags {
     Deno.args.filter((a) => a !== "--"),
     {
       string: ["channel", "triples"],
-      boolean: ["yes", "force", "dry-run", "help"],
+      boolean: ["yes", "force", "dry-run", "help", "github-release"],
       alias: { y: "yes" },
-      default: { yes: false, force: false, "dry-run": false, help: false },
+      default: {
+        yes: false,
+        force: false,
+        "dry-run": false,
+        help: false,
+        "github-release": false,
+      },
     },
   );
   if (args.help) {
-    console.log(`Usage: deno task release[:stable] [flags]
+    console.log(`Usage: deno task release[:native][:stable] [flags]
 
 Flags:
-  --triples=host             host triple only; cross-compilation is unsupported
+  --triples=all|host|<csv>   all targets (default), host only, or a triple list
   --yes, -y                  skip the confirmation prompt
   --force                    ignore the cursor; treat every item as changed
   --dry-run                  build locally; skip R2 uploads + cursor write
+  --github-release           also mirror to the rolling per-channel GitHub Release
   --help`);
     Deno.exit(0);
   }
-  // The release builds ONLY the host triple. Cross-compilation is not supported
-  // (notably tomat-core-speech statically links a native ONNX runtime that cannot
-  // be cross-compiled from a single host); the dedicated per-OS release CI builds
-  // each platform on its own native runner via scripts/build-core.ts.
-  const triples: Triple[] = [Deno.build.target as Triple];
-  if (args.triples && args.triples !== "host") {
-    fail(
-      `--triples="${args.triples}" is not supported: the release builds the host ` +
-        `triple only (${Deno.build.target}). Use the per-OS release CI for all platforms.`,
-    );
+  // `host` (release:native) builds only this machine's triple. `all` (the
+  // default `release` task) and an explicit csv build across targets: the host
+  // builds what it can natively and on-demand environments build the rest.
+  const spec = (args.triples ?? "all").trim();
+  let requestedTriples: Triple[];
+  if (spec === "host") {
+    requestedTriples = [Deno.build.target as Triple];
+  } else if (spec === "all") {
+    requestedTriples = RELEASE_TARGET_TRIPLES;
+  } else {
+    requestedTriples = spec.split(",").map((t) => t.trim()) as Triple[];
+    for (const t of requestedTriples) {
+      if (!ALL_KNOWN_TRIPLES.includes(t)) {
+        fail(`unknown --triples entry "${t}". Valid: ${ALL_KNOWN_TRIPLES.join(", ")}, host, all`);
+      }
+    }
   }
+  const crossPlatform = !(
+    requestedTriples.length === 1 && requestedTriples[0] === (Deno.build.target as Triple)
+  );
   return {
     channel: parseChannelFlag(args.channel),
-    triples,
+    requestedTriples,
+    crossPlatform,
     yes: args.yes,
     force: args.force,
     dryRun: args["dry-run"],
+    githubRelease: args["github-release"],
   };
 }
 
 async function main(): Promise<void> {
   const flags = parseFlags();
-  console.log(colors.bold(`\ntomat release: ${flags.channel} channel\n`));
+  const mode = flags.crossPlatform ? "all targets" : "host only";
+  console.log(colors.bold(`\ntomat release: ${flags.channel} channel (${mode})\n`));
+
+  // Cross-platform runs pass on-demand build environments; the core item routes
+  // each triple to the host (its own OS) or a driver (started for the build, then
+  // stopped), and reports what it couldn't build. The host-only path
+  // (release:native) passes no environments and builds just the host triple.
+  const environments: BuildEnvironment[] | undefined = flags.crossPlatform
+    ? [podmanLinuxDriver, windowsUtmDriver]
+    : undefined;
 
   step("Loading deploy environment");
   const env = await loadOrSeedEnv();
@@ -138,7 +174,9 @@ async function main(): Promise<void> {
     yes: flags.yes,
     force: flags.force,
     dryRun: flags.dryRun,
-    triples: flags.triples,
+    triples: flags.requestedTriples,
+    environments,
+    githubRelease: flags.githubRelease,
   });
 
   if (published > 0 && !flags.dryRun) {

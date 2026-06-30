@@ -40,7 +40,7 @@ export const objectManagerSamples = {
   error: {
     items: [],
     searchPlaceholder: "Search extensions",
-    error: "Could not reach the Core.",
+    error: "Could not reach the Core",
   },
   menuBusy: {
     items,

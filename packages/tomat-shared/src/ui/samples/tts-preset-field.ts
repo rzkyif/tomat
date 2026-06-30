@@ -93,7 +93,7 @@ export const ttsPresetFieldSamples = {
     },
   },
   error: {
-    error: "Could not load the voice catalog.",
+    error: "Could not load the voice catalog",
     presets: [],
   },
   noCustom: {

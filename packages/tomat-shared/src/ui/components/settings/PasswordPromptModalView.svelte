@@ -6,7 +6,7 @@
   import Button from "../primitives/Button.svelte";
   import Input from "../primitives/Input.svelte";
   import FormField from "../primitives/FormField.svelte";
-  import Alert from "../primitives/Alert.svelte";
+  import ErrorDetailView from "../chat/messages/ErrorDetailView.svelte";
 
   let {
     open = true,
@@ -59,7 +59,7 @@
     />
   </FormField>
   {#if error}
-    <Alert variant="error">{error}</Alert>
+    <ErrorDetailView message={error} />
   {/if}
   <div class="flex items-center justify-end gap-2">
     <Button variant="secondary" disabled={submitting} onclick={onCancel ?? noop}>Cancel</Button>

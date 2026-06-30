@@ -517,7 +517,7 @@
           Use at least {minAdminPasswordLength} characters.
         </span>
       {:else if installPasswordConfirm && installPassword !== installPasswordConfirm}
-        <span class="text-xs text-accent-red-600">Passwords do not match.</span>
+        <span class="text-xs text-accent-red-700">Passwords do not match.</span>
       {:else}
         <span class="text-xs text-default-500">
           Remember this. You'll need it to pair new devices.

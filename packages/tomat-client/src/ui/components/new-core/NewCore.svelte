@@ -27,7 +27,7 @@
   let alignment = $derived(settingsState.getAlignment());
 
   // The manual page covering how to install and run a Core elsewhere.
-  const CORE_SETUP_DOCS_URL = "https://au.tomat.ing/manual/settings/installing-a-core";
+  const CORE_SETUP_DOCS_URL = "https://au.tomat.ing/manual/maintenance/cores";
 
   // The Android back button steps the wizard back when a previous step exists,
   // mirroring the header arrow, before the global chain (mode / root) sees it.

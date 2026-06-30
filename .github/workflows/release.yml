@@ -1,0 +1,210 @@
+name: Release
+
+# Branch-driven channel release. Fast-forward main -> latest publishes the latest
+# channel; fast-forward latest -> stable publishes stable. The channel is the
+# branch name. Each native runner builds + build-time-signs its own triple
+# (ci-build), then one coordinator composes + Ed25519-signs + uploads the unified
+# manifests once to R2 and mirrors the run to the rolling per-channel GitHub
+# Release (ci-publish). Both halves share the R2 release-state cursor with the
+# local `deno task release`, so the two pipelines never double-publish.
+#
+# Version bumps live on `main` (these branches stay clean fast-forwards); CI never
+# writes the repo. A changed-but-unbumped item fails the publish job loudly.
+#
+# Required repo secrets: TOMAT_SIGNING_PRIVATE_KEY_B64, TOMAT_SIGNING_PUBLIC_KEY_B64,
+# TAURI_UPDATER_PUBLIC_KEY, TAURI_UPDATER_PRIVATE_KEY, TAURI_UPDATER_PRIVATE_KEY_PASSWORD,
+# TOMAT_ANDROID_KEYSTORE_B64, TOMAT_ANDROID_KEYSTORE_PASSWORD, TOMAT_ANDROID_KEY_ALIAS,
+# TOMAT_ANDROID_KEY_PASSWORD, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN,
+# TOMAT_R2_BUCKET, TOMAT_STORAGE_DOMAIN.
+
+on:
+  push:
+    branches: [latest, stable]
+
+# The GitHub Release mirror needs to create/edit releases + move the rolling tag.
+permissions:
+  contents: write
+
+# Serialize per channel; never cancel a half-done publish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # One native runner per desktop triple. The Linux runner additionally builds the
+  # Android APK(s). Each stages its artifacts + descriptors for the publish job.
+  build:
+    name: "Build (${{ matrix.id }})"
+    strategy:
+      # All-or-nothing: a release should not publish a partial platform set. A
+      # transient runner failure is recovered by re-pushing (the run is idempotent).
+      fail-fast: true
+      matrix:
+        include:
+          - { id: macos-x64, os: macos-13 }
+          - { id: macos-arm64, os: macos-14 }
+          - { id: windows-x64, os: windows-latest }
+          - { id: windows-arm64, os: windows-11-arm }
+          - { id: linux-x64, os: ubuntu-latest, android: true }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Channel from branch
+        id: ch
+        shell: bash
+        run: echo "channel=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.8.x
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+          # Android ABIs only on the Linux runner; the desktop runners build their
+          # host triple natively (no cross targets needed).
+          targets: ${{ matrix.android && 'aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android' || '' }}
+
+      # JDK for the Gradle/Tauri Android build (Linux runner only).
+      - uses: actions/setup-java@v4
+        if: matrix.android
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Linux deps for Tauri / xcap / cpal
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libpipewire-0.3-dev \
+            libasound2-dev \
+            libgbm-dev \
+            libsecret-1-dev \
+            patchelf
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            packages/tomat-client/src/tauri
+            packages/tomat-core-keychain
+            packages/tomat-core-updater
+            packages/tomat-core-ptyhost
+            packages/tomat-core-hwinfo
+            packages/tomat-core-speech
+          shared-key: release-${{ matrix.id }}
+          cache-all-crates: true
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/deno
+            ~/.deno
+          key: deno-${{ runner.os }}-${{ hashFiles('deno.lock', '**/deno.json', '**/deno.jsonc') }}
+          restore-keys: |
+            deno-${{ runner.os }}-
+
+      - name: Build + stage (${{ matrix.id }})
+        shell: bash
+        env:
+          # Public key is baked into the core binary; the Tauri minisign key signs
+          # the desktop bundle; the Android keystore signs the APK. The Ed25519
+          # PRIVATE manifest key is deliberately NOT provided to build runners.
+          TOMAT_SIGNING_PUBLIC_KEY_B64: ${{ secrets.TOMAT_SIGNING_PUBLIC_KEY_B64 }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+          TAURI_UPDATER_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+          TAURI_UPDATER_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
+          TOMAT_ANDROID_KEYSTORE_B64: ${{ secrets.TOMAT_ANDROID_KEYSTORE_B64 }}
+          TOMAT_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.TOMAT_ANDROID_KEYSTORE_PASSWORD }}
+          TOMAT_ANDROID_KEY_ALIAS: ${{ secrets.TOMAT_ANDROID_KEY_ALIAS }}
+          TOMAT_ANDROID_KEY_PASSWORD: ${{ secrets.TOMAT_ANDROID_KEY_PASSWORD }}
+        run: |
+          # NDK for the Tauri Android build (Linux runner only). The runner sets
+          # ANDROID_NDK_LATEST_HOME in its shell env; surface it under the names
+          # Tauri/Gradle read.
+          if [ -n "${{ matrix.android }}" ]; then
+            export NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+            export ANDROID_NDK_HOME="$NDK_HOME"
+          fi
+          deno task release:ci-build \
+            --channel=${{ steps.ch.outputs.channel }} \
+            ${{ matrix.android && '--android' || '' }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-${{ matrix.id }}
+          path: stage
+          retention-days: 3
+          if-no-files-found: error
+
+  # The single coordinator: collect every runner's stage dir, reconstruct dist/,
+  # compose + sign + upload the unified manifests to R2, write the shared cursor,
+  # and mirror the run to the rolling per-channel GitHub Release.
+  publish:
+    name: "Publish + GitHub Release"
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Channel from branch
+        id: ch
+        run: echo "channel=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.8.x
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/deno
+            ~/.deno
+          key: deno-${{ runner.os }}-${{ hashFiles('deno.lock', '**/deno.json', '**/deno.jsonc') }}
+          restore-keys: |
+            deno-${{ runner.os }}-
+
+      # All build artifacts, each under staging/stage-<id>/.
+      - uses: actions/download-artifact@v4
+        with:
+          path: staging
+          pattern: stage-*
+
+      # The publish half reads R2 + signing creds from .env (loadOrSeedEnv). Only
+      # single-line secrets land here; the multi-line Tauri key is build-only.
+      # Secrets pass through env (masked in logs), not the script body.
+      - name: Write .env from secrets
+        env:
+          TOMAT_SIGNING_PRIVATE_KEY_B64: ${{ secrets.TOMAT_SIGNING_PRIVATE_KEY_B64 }}
+          TOMAT_SIGNING_PUBLIC_KEY_B64: ${{ secrets.TOMAT_SIGNING_PUBLIC_KEY_B64 }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TOMAT_R2_BUCKET: ${{ secrets.TOMAT_R2_BUCKET }}
+          TOMAT_STORAGE_DOMAIN: ${{ secrets.TOMAT_STORAGE_DOMAIN }}
+        run: |
+          {
+            echo "TOMAT_SIGNING_PRIVATE_KEY_B64=$TOMAT_SIGNING_PRIVATE_KEY_B64"
+            echo "TOMAT_SIGNING_PUBLIC_KEY_B64=$TOMAT_SIGNING_PUBLIC_KEY_B64"
+            echo "CLOUDFLARE_ACCOUNT_ID=$CLOUDFLARE_ACCOUNT_ID"
+            echo "CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN"
+            echo "TOMAT_R2_BUCKET=$TOMAT_R2_BUCKET"
+            echo "TOMAT_STORAGE_DOMAIN=$TOMAT_STORAGE_DOMAIN"
+          } > .env
+
+      - name: Publish to R2 + GitHub Release
+        env:
+          # gh (the GitHub Release mirror) + the stable-channel upstream resolver.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          deno task release:ci-publish \
+            --channel=${{ steps.ch.outputs.channel }} \
+            --yes \
+            --staging-root=staging

@@ -226,9 +226,10 @@ crate's clippy config rejects `unwrap` in non-test code.
 
 `.github/workflows/ci.yml` runs the always-on suite:
 
-- The `deno` job runs `deno task test` on Linux (every package's Deno + vitest +
-  cargo tests).
-- The `rs` matrix runs `cargo test` for the Rust crates (tauri shell,
-  core-keychain, core-updater) on macOS and Windows.
+- The `deno` job runs the TypeScript pipeline on Linux: type-check, format
+  check, JS/Svelte lint, and the Deno + vitest tests (`deno task test:js`).
+- The `rs` matrix runs the Rust pipeline (clippy + `cargo test`) for the crates
+  (tauri shell, core-keychain, core-updater, core-ptyhost) on Linux, macOS, and
+  Windows; core-hwinfo and core-speech are Linux-only checks.
 - Neither E2E lane (headless integration, tauri-driver smoke) runs in CI; both
   are opt-in and local-only.

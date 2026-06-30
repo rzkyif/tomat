@@ -112,15 +112,23 @@ const { title, entries, currentId } = Astro.props;
     const inner = wrap.querySelector<HTMLElement>(".demo-scale-inner");
     if (!box || !inner) return;
     // Mark scaled first, which drops the pre-script max-width cap so `inner`
-    // measures at its full design width.
+    // measures at its full design width. Reset any prior zoom so the natural
+    // height is read at 1:1 (zoom, unlike a transform, reflows and so feeds back
+    // into offsetHeight).
     wrap.dataset.scaled = "1";
+    inner.style.zoom = "";
     const naturalH = inner.offsetHeight;
     // Fit the design box into the column, then (if set) cap the rendered height
     // so a tall design stays a compact inline demo at its true proportions.
     let scale = Math.min(1, wrap.clientWidth / w);
     const maxH = parseFloat(wrap.dataset.demoMaxh ?? "");
     if (maxH && naturalH * scale > maxH) scale = maxH / naturalH;
-    inner.style.transform = scale < 1 ? `scale(${scale})` : "";
+    // Fit via `zoom`, not `transform: scale()`. zoom actually shrinks the demo's
+    // LAYOUT box, so the fitted subtree carries no transform. A transformed
+    // subtree inside the page makes the browser's view-transition snapshot
+    // oversized and aborts the manual page slide on mobile (where the demo is
+    // scaled down); zoom keeps the snapshot the same size as what is painted.
+    inner.style.zoom = scale < 1 ? `${scale}` : "";
     box.style.width = `${w * scale}px`;
     box.style.height = `${naturalH * scale}px`;
   }
@@ -256,6 +264,11 @@ const { title, entries, currentId } = Astro.props;
   }
   wire();
   document.addEventListener("astro:page-load", wire);
+  // Fit the incoming page's demos during after-swap, which runs before the new
+  // page's view-transition snapshot is captured (page-load fires only after the
+  // transition). Otherwise a demo arrives at its un-fitted design width, whose
+  // overflow bloats the snapshot and aborts the manual page slide on mobile.
+  document.addEventListener("astro:after-swap", wireDemoScale);
   // The demo ResizeObserver already re-scales on column/content changes; keep the
   // highlight overlays pinned to their targets across those same reflows.
   globalThis.addEventListener("resize", wireDemoHighlights);

@@ -18,7 +18,7 @@
     <UserMessageView text="How do I install tomat?" />
     <AgentMessageView kind="content" bgClass="bubble-agent">
       {#snippet body()}
-        <span class="whitespace-pre-wrap break-words"
+        <span class="break-words"
           >Run the one-line installer from the landing page, then launch the app. Want the per-OS
           steps?</span
         >

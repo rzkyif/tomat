@@ -76,3 +76,45 @@ bucket (R2 -> tomat-releases -> Settings -> Custom Domains; enables public read)
 and `au.tomat.ing` to the Worker (set on first `deploy` via `wrangler.toml`).
 Seed `.env` at the repo root from `.env.example` (release-only: manifest signing
 plus Cloudflare/R2 credentials; the signing keypair is generated on first run).
+
+## GitHub Actions release (branch-driven)
+
+Besides the local `deno task release`, a second pipeline releases each channel by
+a git transfer (`.github/workflows/release.yml`):
+
+- fast-forward `main` -> `latest` publishes the **latest** channel;
+- fast-forward `latest` -> `stable` publishes the **stable** channel.
+
+The channel is the branch name. The workflow fans out one native build runner per
+desktop triple (`macos-13` x64, `macos-14` arm64, `windows-latest` x64,
+`windows-11-arm` arm64, `ubuntu-latest` x64 + Android), each running
+`deno task release:ci-build` to build and build-time-sign its own triple (Tauri
+minisign for the desktop bundle, the Java keystore for the APK) and upload a
+staging artifact. A single coordinator then runs `deno task release:ci-publish`:
+it reconstructs `dist/`, composes + Ed25519-signs + uploads the unified manifests
+**once** to R2, and mirrors the run to a rolling per-channel **GitHub Release**
+(tags `latest` / `stable`, assets clobbered each run).
+
+This is the same compose/sign/upload code and the **same R2 release-state cursor**
+as the local pipeline, so a CI run and a local run can never double-publish; the
+CI build runners are just an alternative environment provider to the local
+Podman/UTM drivers, producing the same bundle/descriptor contract
+(`scripts/release/artifacts.ts`). The Ed25519 trust-root **private** key is given
+only to the publish job, never to a build runner (which gets only the public key,
+baked into the core binary, plus the Tauri/Android build-signing keys).
+
+**Version bumps live on `main`.** The channel branches stay clean fast-forwards
+and CI never writes the repo: a changed item that wasn't bumped past the published
+version fails the publish job loudly (`--noBump` records the as-built source hash,
+so re-pushing the same commit is a no-op). Bump versions as part of the work on
+`main` before transferring (see the version-bump table in
+[DEVELOPMENT.md](../../DEVELOPMENT.md#channels)).
+
+**Required repo secrets** (same names as `.env.example`): `TOMAT_SIGNING_PRIVATE_KEY_B64`,
+`TOMAT_SIGNING_PUBLIC_KEY_B64`, `TAURI_UPDATER_PUBLIC_KEY`, `TAURI_UPDATER_PRIVATE_KEY`,
+`TAURI_UPDATER_PRIVATE_KEY_PASSWORD`, `TOMAT_ANDROID_KEYSTORE_B64`,
+`TOMAT_ANDROID_KEYSTORE_PASSWORD`, `TOMAT_ANDROID_KEY_ALIAS`, `TOMAT_ANDROID_KEY_PASSWORD`,
+`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `TOMAT_R2_BUCKET`, `TOMAT_STORAGE_DOMAIN`.
+Build runners receive only the Tauri + Android subset (plus the signing public
+key); the publish job receives all. The landing page still ships on its own track
+(`deno task release:website`), not from these workflows.

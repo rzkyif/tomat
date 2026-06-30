@@ -7,6 +7,7 @@
   import Input from "../../primitives/Input.svelte";
   import Textarea from "../../primitives/Textarea.svelte";
   import Toggle from "../../primitives/Toggle.svelte";
+  import IconText from "../../primitives/IconText.svelte";
   import ScheduleEditorView from "../ScheduleEditorView.svelte";
 
   type OptionValue = string | number;
@@ -64,12 +65,9 @@
 </script>
 
 <div class="flex flex-col gap-2 min-w-0 w-120 max-w-[calc(100vw-135px)] text-sm">
-  <div class="flex items-center gap-2 text-default-800 font-medium text-xs">
-    <i
-      class="flex i-material-symbols-calendar-clock-outline-rounded text-accent-yellow-500 text-sm shrink-0"
-    ></i>
-    <span class="break-words">Review Scheduled Prompt</span>
-  </div>
+  <IconText icon="i-material-symbols-calendar-clock-rounded" color="text-default-800">
+    Review Scheduled Prompt
+  </IconText>
   <Input
     value={title}
     oninput={(v) => (title = v)}

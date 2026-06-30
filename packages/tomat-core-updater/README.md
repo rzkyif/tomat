@@ -29,10 +29,9 @@ stderr.
 ## Run, build, test
 
 This crate exposes the standardized verbs as cargo wrappers (its `deno.json`):
-`deno task check:core-updater`, `lint:core-updater`, `test:core-updater`,
-`build:core-updater`, or `cd` in and run `deno task <verb>`. It is also compiled
-as part of `deno task build:core` and folded into the repo-wide
-`deno task check` / `lint` / `test`.
+`deno task lint:core-updater`, `test:core-updater`, `build:core-updater`, or
+`cd` in and run `deno task <verb>`. It is also compiled as part of
+`deno task build:core` and folded into the repo-wide `deno task lint` / `test`.
 
 Invoked by core's self-updater; see
 [`../tomat-core/src/update/README.md`](../tomat-core/src/update/README.md).

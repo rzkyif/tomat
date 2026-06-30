@@ -77,6 +77,26 @@ body {
   outline: none;
 }
 
+/* Mark an errored control. It carries a red inset outline at rest and keeps the
+   keyboard-focus ring red too (instead of reverting to the neutral grey ring)
+   while the field is invalid, with the same inset geometry as --focus-ring so it
+   is never clipped. The red matches the `text-accent-red-700` of the error
+   message shown with the field, so the outline and its label read as one color.
+   `:not(:disabled)` lifts the resting rule above the `outline-none` utility the
+   same way the focus-ring rule does, so the red outline wins regardless of
+   stylesheet order; and because both this rule and the focus-ring rule draw
+   `var(--focus-ring-color)`, focusing the field stays red whichever wins. */
+.tomat-error-ring {
+  --focus-ring-color: var(--accent-red-700);
+}
+.dark .tomat-error-ring {
+  --focus-ring-color: var(--accent-red-d-700);
+}
+.tomat-error-ring:not(:disabled) {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
+}
+
 /* Both font stacks default to the platform-native system stack and can be
    overridden at runtime by the appearance.defaultFont / appearance.monoFont
    settings, which set these variables on `documentElement`. */

@@ -3,7 +3,7 @@
   import Expand from "./Expand.svelte";
   import HelpText from "./HelpText.svelte";
   import IconButton from "./IconButton.svelte";
-  import Alert from "./Alert.svelte";
+  import IconText from "./IconText.svelte";
 
   // A settings field row: a label (with optional info + reset buttons and a
   // toggleable description) above or beside its control, plus an error alert.
@@ -153,12 +153,16 @@
     <div class={horizontal ? `${controlWidth} shrink-0 flex flex-col gap-1` : ""}>
       {@render children()}
       {#if horizontal && hasError && error}
-        <Alert variant="error" surface="transparent" size="sm">{error}</Alert>
+        <IconText icon="i-material-symbols-error-rounded" color="text-accent-red-700"
+          >{error}</IconText
+        >
       {/if}
     </div>
   </div>
 
   {#if !horizontal && hasError && error}
-    <Alert variant="error" surface="transparent" size="sm">{error}</Alert>
+    <IconText icon="i-material-symbols-error-rounded" color="text-accent-red-700"
+      >{error}</IconText
+    >
   {/if}
 </div>

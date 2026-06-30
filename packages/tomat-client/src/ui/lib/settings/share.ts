@@ -152,7 +152,7 @@ export function parseImport(text: string): ParsedImport {
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    return { values: {}, unknownKeys: [], error: "Not valid JSON." };
+    return { values: {}, unknownKeys: [], error: "Not valid JSON" };
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return {

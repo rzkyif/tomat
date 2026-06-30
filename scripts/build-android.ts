@@ -16,13 +16,62 @@
 // is not involved here, so there is no updater-endpoint override.
 
 import { parseArgs } from "@std/cli/parse-args";
+import { fromFileUrl, join } from "@std/path";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fromFileUrl(new URL("..", import.meta.url));
 
 const args = parseArgs(Deno.args, {
   string: ["channel"],
   default: { channel: "stable" },
 });
+
+// The Android build (Gradle + cargo-ndk) needs ANDROID_HOME, an NDK path, and a
+// JDK. Honor whatever the environment already sets; otherwise fall back to the
+// standard macOS locations (Android Studio + its bundled JBR), so a local
+// `deno task build:client:android` works out of the box on a stock mac setup
+// without the user having to export anything. On other hosts, set these in env.
+function resolveAndroidEnv(): Record<string, string> {
+  const home = Deno.env.get("HOME") ?? "";
+  const out: Record<string, string> = {};
+
+  const androidHome =
+    Deno.env.get("ANDROID_HOME") ??
+    Deno.env.get("ANDROID_SDK_ROOT") ??
+    join(home, "Library/Android/sdk");
+  out.ANDROID_HOME = androidHome;
+  out.ANDROID_SDK_ROOT = androidHome;
+
+  let ndk = Deno.env.get("NDK_HOME") ?? Deno.env.get("ANDROID_NDK_HOME") ?? "";
+  if (!ndk) {
+    try {
+      const ndkRoot = join(androidHome, "ndk");
+      const versions = [...Deno.readDirSync(ndkRoot)]
+        .filter((e) => e.isDirectory)
+        .map((e) => e.name)
+        .sort();
+      if (versions.length > 0) ndk = join(ndkRoot, versions[versions.length - 1]);
+    } catch {
+      // no NDK dir; gradle will surface a clearer error than we can here
+    }
+  }
+  if (ndk) {
+    out.NDK_HOME = ndk;
+    out.ANDROID_NDK_HOME = ndk;
+  }
+
+  let javaHome = Deno.env.get("JAVA_HOME") ?? "";
+  if (!javaHome) {
+    const jbr = "/Applications/Android Studio.app/Contents/jbr/Contents/Home";
+    try {
+      if (Deno.statSync(jbr).isDirectory) javaHome = jbr;
+    } catch {
+      // no Android Studio JBR; rely on a system JDK on PATH
+    }
+  }
+  if (javaHome) out.JAVA_HOME = javaHome;
+
+  return out;
+}
 
 const channel = args.channel;
 if (!["stable", "dev", "latest"].includes(channel)) {
@@ -49,8 +98,8 @@ if (Object.keys(override).length > 0) {
 
 const cmd = new Deno.Command("deno", {
   args: tauriArgs,
-  cwd: `${ROOT}packages/tomat-client`,
-  env: { ...Deno.env.toObject(), TOMAT_CHANNEL: channel },
+  cwd: join(ROOT, "packages/tomat-client"),
+  env: { ...Deno.env.toObject(), ...resolveAndroidEnv(), TOMAT_CHANNEL: channel },
   stdout: "inherit",
   stderr: "inherit",
 });

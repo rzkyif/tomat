@@ -9,7 +9,7 @@
   import OptionCard from "../primitives/OptionCard.svelte";
   import Select from "../primitives/Select.svelte";
   import HelpText from "../primitives/HelpText.svelte";
-  import Alert from "../primitives/Alert.svelte";
+  import ErrorDetailView from "../chat/messages/ErrorDetailView.svelte";
 
   // One badge chip inside a card (icon + pre-formatted text).
   interface Badge {
@@ -68,7 +68,7 @@
 
 <div class="flex flex-col gap-2">
   {#if error}
-    <Alert variant="error" size="sm">{error}</Alert>
+    <ErrorDetailView message={error} />
   {/if}
 
   {#each presets as p (p.id)}

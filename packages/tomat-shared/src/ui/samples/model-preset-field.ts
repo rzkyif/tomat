@@ -130,7 +130,7 @@ export const modelPresetFieldSamples = {
     },
   },
   error: {
-    error: "Could not reach the Core.",
+    error: "Could not reach the Core",
     checkLabel: "Check for Newer Models",
     checkIcon: "i-material-symbols-refresh-rounded",
     buckets: [],

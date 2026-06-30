@@ -984,10 +984,11 @@ fi
 if [ "$IDX_EXTENSION" != "-1" ]; then
   # Plant the tarball AND its signed manifest so core installs the built-in fully
   # offline on first boot (it re-verifies the manifest signature + tarball sha256,
-  # then extracts - no boot-time fetch). Keep these filenames in sync with
-  # builtin-seed.ts (PLANTED_TARBALL / PLANTED_MANIFEST).
-  TK_DEST="$EXTENSIONS_DIR/.tomat-builtin.tgz"
-  TK_MANIFEST_DEST="$EXTENSIONS_DIR/.tomat-builtin.json"
+  # then extracts - no boot-time fetch). Keep these filenames in sync with the
+  # planted{Tarball,Manifest}() helpers in seeding.ts (`.<extension-id>.{tgz,json}`).
+  # Only the built-in is planted; the dev-only samples extension never is.
+  TK_DEST="$EXTENSIONS_DIR/.tomat-extension-builtin.tgz"
+  TK_MANIFEST_DEST="$EXTENSIONS_DIR/.tomat-extension-builtin.json"
   if [ -f "$TK_DEST" ] && [ -f "$TK_MANIFEST_DEST" ]; then
     ui_action_skip "$IDX_EXTENSION" "(already present)"
   else

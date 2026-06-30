@@ -175,7 +175,7 @@
       onClose();
     } catch (e) {
       log.warn("import failed:", e);
-      importError = "Failed to apply settings.";
+      importError = "Failed to apply settings";
     } finally {
       importing = false;
     }

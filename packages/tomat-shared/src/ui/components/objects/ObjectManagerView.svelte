@@ -2,6 +2,7 @@
   import type { Snippet } from "svelte";
   import SearchInput from "../primitives/SearchInput.svelte";
   import IconButton from "../primitives/IconButton.svelte";
+  import IconText from "../primitives/IconText.svelte";
 
   // Generic, presentational shell for the object-management settings UI:
   // search bar + optional filter/sort + optional triple-dot, a batched
@@ -113,7 +114,11 @@
         : ''}"
     >
       {#if error}
-        <div class="px-3 py-2 text-sm text-accent-red-600">{error}</div>
+        <div class="px-3 py-2">
+          <IconText icon="i-material-symbols-error-rounded" color="text-accent-red-700">
+            {error}
+          </IconText>
+        </div>
       {/if}
       {#if emptyVisible}
         {@render empty()}

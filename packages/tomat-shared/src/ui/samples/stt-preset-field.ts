@@ -93,7 +93,7 @@ export const sttPresetFieldSamples = {
     },
   },
   error: {
-    error: "Could not load the transcription catalog.",
+    error: "Could not load the transcription catalog",
     presets: [],
   },
   noCustom: {
