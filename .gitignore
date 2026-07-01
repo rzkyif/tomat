@@ -28,6 +28,16 @@ packages/tomat-client/src/tauri/gen/schemas
 .env.*
 !.env.example
 
+# Signing material (defense-in-depth; real secrets live in gitignored .env)
+*.jks
+*.keystore
+keystore.properties
+*.p12
+*.pfx
+*.p8
+*.pem
+*.key
+
 # Vite temp files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
