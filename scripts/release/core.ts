@@ -343,19 +343,16 @@ export async function buildHelpers(triples: Triple[], suffix: string): Promise<H
   return out;
 }
 
-// GNU tar (the Windows CI runner's git-bundled `/usr/bin/tar`) parses an `-f`
-// argument containing a colon as a remote `host:file`, so a drive-letter archive
-// path like `C:\...\x.tar.gz` makes it try to connect to host `C`. `--force-local`
-// keeps the archive path local. Added only on Windows: macOS bsdtar rejects the
-// flag, and its temp paths never carry a drive-letter colon.
-const TAR_LOCAL = Deno.build.os === "windows" ? ["--force-local"] : [];
-
 /** Download + unpack espeak-ng-data once per release run; returns the path to
  *  the extracted `espeak-ng-data/` dir. bzip2 isn't available in Deno, so unpack
- *  via the system `tar` (present on every release host). */
+ *  via the system `tar` (present on every release host). tar runs with `cwd` set
+ *  and relative archive names only: the Windows runner's git-bundled GNU tar
+ *  mishandles drive-letter absolute paths (a colon reads as a remote `host:file`,
+ *  and backslashes break `-C`), so no absolute path is ever handed to it. */
 async function ensureEspeakData(): Promise<string> {
   const tmp = await Deno.makeTempDir({ prefix: "tomat-espeak-" });
-  const archive = join(tmp, "espeak-ng-data.tar.bz2");
+  const archiveName = "espeak-ng-data.tar.bz2";
+  const archive = join(tmp, archiveName);
   info(`fetching espeak-ng-data`);
   const res = await fetch(ESPEAK_DATA_URL);
   if (!res.ok || !res.body) {
@@ -375,7 +372,8 @@ async function ensureEspeakData(): Promise<string> {
   // Defense for the release host: reject any archive entry that would escape the
   // extraction dir (absolute path or `..` traversal) before extracting.
   const list = await new Deno.Command("tar", {
-    args: [...TAR_LOCAL, "-tjf", archive],
+    args: ["-tjf", archiveName],
+    cwd: tmp,
     stdout: "piped",
     stderr: "inherit",
   }).output();
@@ -388,7 +386,8 @@ async function ensureEspeakData(): Promise<string> {
     }
   }
   const { code } = await new Deno.Command("tar", {
-    args: [...TAR_LOCAL, "-xjf", archive, "-C", tmp],
+    args: ["-xjf", archiveName],
+    cwd: tmp,
     stdout: "inherit",
     stderr: "inherit",
   }).output();
@@ -450,12 +449,16 @@ async function buildSpeech(triples: Triple[], suffix: string): Promise<SpeechArt
     const outDir = join(DIST_DIR, triple);
     await ensureDir(outDir);
     const outPath = join(outDir, filename);
+    // Pack from within `staging` with relative names so tar never receives a
+    // drive-letter path (see ensureEspeakData), then copy the archive to dist.
     const { code: tarCode } = await new Deno.Command("tar", {
-      args: [...TAR_LOCAL, "-czf", outPath, "-C", staging, exeIn, "espeak-ng-data"],
+      args: ["-czf", filename, exeIn, "espeak-ng-data"],
+      cwd: staging,
       stdout: "inherit",
       stderr: "inherit",
     }).output();
     if (tarCode !== 0) fail(`tar -czf ${filename} exited ${tarCode}`);
+    await Deno.copyFile(join(staging, filename), outPath);
     await Deno.remove(staging, { recursive: true }).catch(() => {});
 
     const { sha256, size } = await sha256File(outPath);
