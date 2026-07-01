@@ -4,10 +4,14 @@
 //   - TOMAT_CHANNEL is set in the build env so `option_env!("TOMAT_CHANNEL")`
 //     in channel.rs bakes the channel into the shipped APK (its runtime default
 //     -> the channel's app-data dir, tomat-client-<channel> secret store).
-//   - For non-stable channels we pass a `tauri android build --config <json>`
-//     override so the app gets a distinct productName + bundle identifier
-//     (the android applicationId), letting stable and latest install side by
-//     side on one device.
+//   - For non-stable channels we pass a `--config` override for a distinct
+//     productName (the on-device app label). The distinct applicationId that lets
+//     stable + latest install side by side is applied by gradle via an
+//     applicationIdSuffix keyed off TOMAT_CHANNEL (see gen/android/app/
+//     build.gradle.kts), NOT by overriding the Tauri `identifier`: the identifier
+//     drives the MainActivity's java package path, which is fixed at
+//     `tauri android init` time, so overriding it makes Tauri look for a package
+//     dir that does not exist.
 //
 // Distribution is self-hosted: the resulting APK is signed by gradle's
 // signingConfigs (see gen/android/app/build.gradle.kts, fed by
@@ -32,13 +36,13 @@ if (!["stable", "dev", "latest"].includes(channel)) {
   Deno.exit(1);
 }
 
-// Non-stable channels get a distinct app identity so they install alongside
-// stable instead of overwriting it. Tauri deep-merges this over the base
-// tauri.conf.json + tauri.android.conf.json.
+// Non-stable channels get a distinct on-device label so they read as separate
+// apps; the distinct applicationId (for side-by-side install) is added by gradle's
+// applicationIdSuffix. We deliberately do NOT override `identifier` here (see the
+// header note). Tauri deep-merges this over tauri.conf.json + tauri.android.conf.json.
 const override: Record<string, unknown> = {};
 if (channel !== "stable") {
   override.productName = `tomat-${channel}`;
-  override.identifier = `au.tomat.ing.${channel}`;
 }
 
 // Invoke the Tauri CLI directly (not via `deno task ... --`) so `--config`

@@ -1068,48 +1068,69 @@ export async function runReleasePlan(
   // Each item's apply() appends the versioned keys it uploads to its own list so
   // the cursor below can record them and prune older versions. Items also append
   // the local files they want mirrored to the GitHub Release.
+  //
+  // Items are ISOLATED: one item's apply() throwing does not abort the rest. The
+  // failure is collected, the remaining items still run, and the cursor + mirror +
+  // bump below act only on the items that SUCCEEDED - so a re-run retries just the
+  // failed items (change detection skips the already-published ones, including the
+  // heavy driver builds). A run with any failure exits non-zero at the very end,
+  // after the successes are safely recorded.
   const recordedKeys = new Map<string, string[]>();
   const releaseAssets: Array<{ path: string; name: string }> = [];
+  const succeeded: PlanEntry[] = [];
+  const failed: Array<{ item: ReleaseItem; error: Error }> = [];
   for (const p of changed) {
     step(`Releasing: ${p.item.label}`);
     const keys: string[] = [];
-    recordedKeys.set(p.item.id, keys);
-    await p.item.apply(env, channel, {
-      triples: opts.triples,
-      environments: opts.environments,
-      prebuilt: opts.prebuilt,
-      dryRun: opts.dryRun,
-      recordVersionedKey: (k) => keys.push(k),
-      recordReleaseAsset: (path, name) => releaseAssets.push({ path, name }),
-    });
+    try {
+      await p.item.apply(env, channel, {
+        triples: opts.triples,
+        environments: opts.environments,
+        prebuilt: opts.prebuilt,
+        dryRun: opts.dryRun,
+        recordVersionedKey: (k) => keys.push(k),
+        recordReleaseAsset: (path, name) => releaseAssets.push({ path, name }),
+      });
+      recordedKeys.set(p.item.id, keys);
+      succeeded.push(p);
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      info(colors.red(`✗ ${p.item.label} failed: ${e.message}`));
+      failed.push({ item: p.item, error: e });
+    }
   }
+
+  const failSummary = () =>
+    `${failed.length} item(s) failed: ${failed.map((f) => f.item.label).join(", ")}`;
 
   if (opts.dryRun) {
-    ok(`dry-run complete; ${changed.length} item(s) built locally, nothing published`);
-    return changed.length;
+    ok(`dry-run complete; ${succeeded.length} item(s) built locally, nothing published`);
+    if (failed.length > 0) fail(`${failSummary()} (dry-run build).`);
+    return succeeded.length;
   }
 
-  // Mirror to the rolling per-channel GitHub Release BEFORE writing the cursor,
-  // so a mirror failure fails the whole run and a re-push retries everything
-  // (R2 puts are idempotent). Doing it after the cursor write would let a
-  // mirror failure leave the cursor claiming success, so the re-push would skip.
-  if (opts.githubRelease) {
+  // Mirror only the SUCCEEDED items to the rolling per-channel GitHub Release
+  // BEFORE writing the cursor, so a mirror failure fails the whole run and a
+  // re-push retries (R2 puts are idempotent). Doing it after the cursor write
+  // would let a mirror failure leave the cursor claiming success, so the re-push
+  // would skip.
+  if (opts.githubRelease && succeeded.length > 0) {
     await publishGithubRelease(env, channel, {
-      items: changed.map((p) => ({ label: p.item.label, version: p.localVersion })),
+      items: succeeded.map((p) => ({ label: p.item.label, version: p.localVersion })),
       assets: releaseAssets,
     });
   }
 
-  // Auto-bump: each item whose source changed has just published at its current
-  // version, so advance its file to the next patch (uncommitted) ready for the
-  // next cycle. Dedupe by versionFile so a shared file (client + android share
+  // Auto-bump: each succeeded item whose source changed has just published at its
+  // current version, so advance its file to the next patch (uncommitted) ready for
+  // the next cycle. Dedupe by versionFile so a shared file (client + android share
   // tauri.conf.json) bumps once. A platform-fill change (sourceChanged === false)
   // republishes the same version and is not bumped. Skipped under noBump (CI):
   // the repo is never written, versions are bumped on `main` before the transfer.
   const bumpedFiles = new Set<string>();
   if (!opts.noBump) {
     step("Bumping versions for the next release");
-    for (const p of changed) {
+    for (const p of succeeded) {
       if (!p.sourceChanged || bumpedFiles.has(p.item.versionFile)) continue;
       bumpedFiles.add(p.item.versionFile);
       const next = await p.item.bumpVersion();
@@ -1119,7 +1140,7 @@ export async function runReleasePlan(
 
   step("Updating release-state cursor");
   const pruneTargets: string[] = [];
-  for (const p of changed) {
+  for (const p of succeeded) {
     const prev =
       p.item.scope === "shared" ? cursor.shared[p.item.id] : cursor.channels[channel]?.[p.item.id];
     // Record the version just published (not the bumped one) so the gate's
@@ -1152,11 +1173,19 @@ export async function runReleasePlan(
   // Write the cursor before pruning so a crash mid-prune leaves harmless orphans
   // rather than a cursor claiming a just-deleted version is retained.
   await writeReleaseCursor(env, cursor);
-  ok(`cursor updated`);
+  ok(`cursor updated (${succeeded.length} item(s))`);
 
   if (pruneTargets.length > 0) {
     step(`Pruning ${pruneTargets.length} evicted artifact(s) from R2`);
     for (const key of pruneTargets) await r2Delete(env, key);
   }
-  return changed.length;
+
+  // Successes are now published + recorded; surface the failures loudly and exit
+  // non-zero so callers (and the branch-align step) treat the run as incomplete.
+  if (failed.length > 0) {
+    fail(
+      `${failSummary()}. ${succeeded.length} published + recorded; fix and re-run to retry the rest.`,
+    );
+  }
+  return succeeded.length;
 }

@@ -31,6 +31,16 @@ android {
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "au.tomat.ing"
+        // Per-channel install identity: stable keeps the bare applicationId; dev /
+        // latest get a suffix so they install alongside stable on one device. The
+        // java namespace stays au.tomat.ing (the MainActivity package path is fixed
+        // at `tauri android init`), so only the applicationId varies - which is why
+        // build-android.ts sets this via TOMAT_CHANNEL rather than overriding the
+        // Tauri identifier.
+        val tomatChannel = System.getenv("TOMAT_CHANNEL") ?: "stable"
+        if (tomatChannel != "stable") {
+            applicationIdSuffix = ".$tomatChannel"
+        }
         minSdk = 24
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()

@@ -681,8 +681,14 @@ async function composeBinaryManifest(
  *  artifacts (binary, helpers, worker .ts) ship gzip-compressed; the manifest
  *  sha256 stays over the DECOMPRESSED file, so consumers gunzip then verify the
  *  same hash. Mirrors extension.ts's `CompressionStream("gzip")` packing. */
-async function gzipFile(srcPath: string): Promise<{ path: string; size: number }> {
-  const gzPath = `${srcPath}.gz`;
+async function gzipFile(
+  srcPath: string,
+  outPath?: string,
+): Promise<{ path: string; size: number }> {
+  // Default alongside the source (dist artifacts, already gitignored); callers
+  // whose source lives in the repo tree (e.g. the worker .ts) pass an explicit
+  // dist path so the .gz never lands in tracked source.
+  const gzPath = outPath ?? `${srcPath}.gz`;
   const out = await Deno.open(gzPath, {
     create: true,
     write: true,
@@ -939,8 +945,12 @@ export async function composeAndUploadCore(
   ok(`uploaded ${speech.length} speech binaries`);
 
   step(`Uploading workers to R2 bucket "${env.r2Bucket}"`);
+  // Worker sources live in the repo tree, so gzip them into dist/ (gitignored)
+  // rather than next to the .ts, which would leave an untracked artifact.
+  const workersOut = join(DIST_DIR, "workers");
+  await ensureDir(workersOut);
   for (const w of workers) {
-    const gz = await gzipFile(w.path);
+    const gz = await gzipFile(w.path, join(workersOut, `${w.name}.gz`));
     const key = `${prefix}${version}/workers/${w.name}.gz`;
     info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(w.size)})`);
     await r2Put(env, key, gz.path, "application/gzip");
