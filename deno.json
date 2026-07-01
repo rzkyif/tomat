@@ -106,6 +106,7 @@
     "release:ci-build": "deno run -A scripts/release/ci-build.ts",
     "release:ci-publish": "deno run -A scripts/release/ci-publish.ts",
     "release:ci-preflight": "deno run -A scripts/release/ci-preflight.ts",
+    "release:ci-bump": "deno run -A scripts/release/ci-bump.ts",
     "release:website": "deno run -A scripts/release/website.ts --channel=latest",
     "remote-release": "deno run -A scripts/release/remote.ts --channel=latest",
     "remote-release:stable": "deno run -A scripts/release/remote.ts --channel=stable",

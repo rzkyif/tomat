@@ -23,6 +23,7 @@ import {
   loadOrSeedEnv,
   PACKAGES,
   parseChannelFlag,
+  type PublishedItem,
   type ReleaseChannel,
   type ReleaseItem,
   runReleasePlan,
@@ -34,7 +35,12 @@ import { ALL_KNOWN_TRIPLES, RELEASE_TARGET_TRIPLES } from "./all-targets.ts";
 import type { BuildEnvironment } from "./drivers/mod.ts";
 import { podmanLinuxDriver } from "./drivers/podman.ts";
 import { windowsUtmDriver } from "./drivers/windows.ts";
-import { assertReleaseGitState, pushChannelBranch } from "./git-align.ts";
+import {
+  assertReleaseGitState,
+  commitVersionBump,
+  pushChannelBranch,
+  pushMain,
+} from "./git-align.ts";
 import { coreItem } from "./core.ts";
 import { extensionItem } from "./extension.ts";
 import { catalogItem } from "./catalog.ts";
@@ -195,6 +201,11 @@ async function main(): Promise<void> {
     return true;
   });
 
+  // The version files runReleasePlan bumps for a latest-channel release; committed
+  // and pushed below so origin/latest carries the post-bump commit (keeping the
+  // cursor's post-bump hash and the CI preflight consistent).
+  const publishedItems: PublishedItem[] = [];
+
   const published = await runReleasePlan(env, items, flags.channel, {
     yes: flags.yes,
     force: flags.force,
@@ -202,13 +213,21 @@ async function main(): Promise<void> {
     triples: flags.requestedTriples,
     environments,
     githubRelease: flags.githubRelease,
-    // A branch-aligned release must NOT auto-bump: the pushed commit is the
-    // committed (pre-bump) state, and CI's preflight recomputes source hashes
-    // from that commit. Recording the as-built hash (noBump) keeps a re-push (and
-    // the CI preflight) a no-op. Versions are bumped + committed on main before
-    // releasing; the version-bump gate enforces that.
-    noBump: flags.alignBranches,
+    // A stable release is a fast-forward promotion of already-bumped versions
+    // from latest, so it must NOT bump (noBump). A latest release DOES bump: the
+    // bump is committed + pushed to main AND latest below, so the pushed commit
+    // matches the cursor's post-bump hash and the CI preflight stays a no-op. A
+    // host-only release:native keeps its uncommitted bump (no branch align).
+    noBump: flags.alignBranches && flags.channel === "stable",
+    publishedOut: publishedItems,
   });
+
+  // Commit the post-release bump before moving any branch, so origin/main and
+  // origin/latest both land on the bump commit. Latest channel only: stable
+  // promotions and host-only partial releases do not advance main.
+  if (flags.alignBranches && flags.channel === "latest" && !flags.dryRun && published > 0) {
+    await commitVersionBump(publishedItems.filter((p) => p.sourceChanged));
+  }
 
   if (published > 0 && !flags.dryRun) {
     console.log(
@@ -218,11 +237,16 @@ async function main(): Promise<void> {
     );
   }
 
-  // Align the channel branch to what was just published. Only after a real,
-  // non-dry release that published something: an abort or nothing-to-do returns
-  // 0 and leaves the branches untouched. CI's preflight sees the cursor already
-  // current and skips the build matrix, so this push does not re-run the release.
+  // Align the branches to what was just published. Only after a real, non-dry
+  // release that published something: an abort or nothing-to-do returns 0 and
+  // leaves the branches untouched. CI's preflight sees the cursor already current
+  // and skips the build matrix, so these pushes do not re-run the release.
+  //
+  // For a latest release HEAD is the post-release bump commit: push it to main
+  // first (so the bump persists) and then fast-forward latest onto it. A stable
+  // release did not touch main; only its channel branch moves.
   if (flags.alignBranches && !flags.dryRun && published > 0) {
+    if (flags.channel === "latest") await pushMain();
     await pushChannelBranch(flags.channel);
   }
 }

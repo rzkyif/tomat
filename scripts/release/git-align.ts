@@ -15,7 +15,7 @@
 //
 // Both no-op when the target is already aligned.
 
-import { fail, info, ok, type ReleaseChannel, step } from "./lib.ts";
+import { fail, info, ok, type PublishedItem, type ReleaseChannel, rel, step } from "./lib.ts";
 
 // ---------------------------------------------------------------------------
 // local helpers (deno task release)
@@ -31,7 +31,7 @@ async function git(args: string[]): Promise<{ code: number; stdout: string; stde
   };
 }
 
-async function revParse(ref: string): Promise<string> {
+export async function revParse(ref: string): Promise<string> {
   const out = await git(["rev-parse", ref]);
   if (out.code !== 0) fail(`git rev-parse ${ref} failed: ${out.stderr}`);
   return out.stdout;
@@ -83,6 +83,58 @@ export async function assertReleaseGitState(channel: ReleaseChannel): Promise<vo
     );
   }
   ok(`git state clean and aligned with ${sourceRef}`);
+}
+
+/** Commit the just-bumped version files as `bump: <labels>` on the current
+ *  HEAD. The bumped items name both the files to stage (deduped, since client +
+ *  android share tauri.conf.json) and the labels for the message. Stages only
+ *  those exact files (never `-a`), so an unrelated dirty file cannot ride along;
+ *  the clean-tree precondition (assertReleaseGitState) plus the non-force pushes
+ *  that follow guard against a colliding concurrent change. Returns the new HEAD
+ *  sha, or null when nothing was bumped. */
+export async function commitVersionBump(bumped: PublishedItem[]): Promise<string | null> {
+  if (bumped.length === 0) return null;
+  const files = [...new Set(bumped.map((b) => b.versionFile))];
+  const labels = [...new Set(bumped.map((b) => b.label))];
+
+  step(`Committing version bump: ${labels.join(", ")}`);
+  const add = await git(["add", "--", ...files]);
+  if (add.code !== 0) fail(`git add of bumped version files failed: ${add.stderr}`);
+
+  // Stage nothing unexpected: the staged set must equal exactly the bumped files.
+  const staged = await git(["diff", "--cached", "--name-only"]);
+  if (staged.code !== 0) fail(`git diff --cached failed: ${staged.stderr}`);
+  const stagedSet = new Set(staged.stdout.split("\n").filter(Boolean));
+  const wantSet = new Set(files.map((f) => rel(f)));
+  const unexpected = [...stagedSet].filter((f) => !wantSet.has(f));
+  if (unexpected.length > 0) {
+    fail(`unexpected staged changes alongside the version bump: ${unexpected.join(", ")}`);
+  }
+
+  const commit = await git(["commit", "-m", `bump: ${labels.join(", ")}`]);
+  if (commit.code !== 0) fail(`git commit of the version bump failed: ${commit.stderr}`);
+  const head = await revParse("HEAD");
+  ok(`committed bump ${head.slice(0, 12)} (${files.length} file(s))`);
+  return head;
+}
+
+/** Fast-forward origin/main to HEAD and push it. No-op when origin/main already
+ *  points at HEAD. Non-force, so a diverged main (a concurrent push during the
+ *  release) is refused rather than clobbered. Used after a latest-channel
+ *  release commits the post-release version bump. */
+export async function pushMain(): Promise<void> {
+  const head = await revParse("HEAD");
+  const remote = await git(["rev-parse", "origin/main"]);
+  if (remote.code === 0 && remote.stdout === head) {
+    info(`origin/main already at HEAD (${head.slice(0, 12)}); nothing to push`);
+    return;
+  }
+  step(`Fast-forwarding origin/main -> ${head.slice(0, 12)}`);
+  const push = await git(["push", "origin", "HEAD:refs/heads/main"]);
+  if (push.code !== 0) {
+    fail(`git push to main failed (non-fast-forward or rejected):\n${push.stderr}`);
+  }
+  ok(`pushed HEAD to origin/main`);
 }
 
 /** Fast-forward the local channel branch to HEAD and push it. No-op when

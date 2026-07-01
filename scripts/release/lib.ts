@@ -943,13 +943,32 @@ export interface RunReleaseOpts {
   /** Pre-built artifacts from CI build runners (the publish half of the CI
    *  build/publish split). Passed to each item's apply as opts.prebuilt. */
   prebuilt?: PrebuiltStaging;
-  /** Skip the post-release version auto-bump. CI never writes the repo: versions
-   *  are bumped on `main` before the channel transfer, so the cursor records the
-   *  as-built source hash (not a post-bump one), keeping re-pushes idempotent. */
+  /** Skip the post-release version auto-bump so the cursor records the as-built
+   *  source hash (not a post-bump one), keeping a re-push of the same commit
+   *  idempotent. Set for the CI publish half (the bump is a separate committed
+   *  step, see ci-bump.ts) and for a local stable promotion (a fast-forward of
+   *  already-bumped versions from latest, so there is nothing to bump). */
   noBump?: boolean;
   /** Mirror this run's artifacts + manifests to the rolling per-channel GitHub
    *  Release after the R2 upload. Off for a plain local release. */
   githubRelease?: boolean;
+  /** Optional sink: runReleasePlan appends one entry per successfully published
+   *  item so a branch-aligned caller can commit the version bumps it made
+   *  (main.ts) without changing the return type. */
+  publishedOut?: PublishedItem[];
+}
+
+/** One successfully published item, reported through RunReleaseOpts.publishedOut
+ *  so a caller can commit the bumps runReleasePlan applied. */
+export interface PublishedItem {
+  id: string;
+  label: string;
+  versionFile: string;
+  /** The source hash changed, so this item's version file was bumped (when
+   *  noBump is off). A platform-fill republish (false) was not bumped. */
+  sourceChanged: boolean;
+  /** The version just published (the pre-bump value). */
+  version: string;
 }
 
 interface PlanEntry {
@@ -1191,6 +1210,13 @@ export async function runReleasePlan(
     } else {
       (cursor.channels[channel] ??= {})[p.item.id] = state;
     }
+    opts.publishedOut?.push({
+      id: p.item.id,
+      label: p.item.label,
+      versionFile: p.item.versionFile,
+      sourceChanged: p.sourceChanged,
+      version: p.localVersion,
+    });
   }
   // Write the cursor before pruning so a crash mid-prune leaves harmless orphans
   // rather than a cursor claiming a just-deleted version is retained.
