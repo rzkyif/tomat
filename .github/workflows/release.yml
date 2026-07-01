@@ -81,7 +81,7 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { id: macos-x64, os: macos-13 }
+          - { id: macos-x64, os: macos-15-intel }
           # The macOS arm64 runner additionally builds + uploads the iOS .ipa
           # (App Store Connect), the way the Linux runner additionally builds the
           # Android APK: additive on an existing runner so the host core + desktop
