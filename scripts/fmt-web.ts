@@ -9,7 +9,7 @@
 // Options live in /.prettierrc.json (read below via resolveConfig and discovered
 // by the extensions), aligned to oxfmt's defaults so the repo shares one style.
 import { exists } from "@std/fs";
-import * as prettier from "npm:prettier@3.8.1";
+import * as prettier from "npm:prettier@3.9.1";
 import * as sveltePlugin from "npm:prettier-plugin-svelte@3.5.2";
 import * as astroPlugin from "npm:prettier-plugin-astro@0.14.1";
 

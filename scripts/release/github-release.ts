@@ -76,12 +76,12 @@ async function manifestAssets(
 
 function releaseBody(channel: ReleaseChannel, items: GithubReleaseInput["items"]): string {
   const lines = [
-    `Automated **${channel}** channel release, mirrored from the R2 distribution`,
-    `(\`get.au.tomat.ing\`). Published items:`,
+    `Automated **${channel}** channel release, mirrored from the R2 distribution (\`get.au.tomat.ing\`).\n`,
+    `Published items:`,
     "",
     ...items.map((i) => `- ${i.label} v${i.version}`),
     "",
-    `Install instructions live at https://au.tomat.ing.`,
+    `Follow the installation instructions at https://au.tomat.ing/install/`,
   ];
   return lines.join("\n");
 }
@@ -169,26 +169,31 @@ export async function publishGithubRelease(
     return;
   }
 
-  // `path#name` sets each asset's display name; --clobber replaces same-named
-  // assets so the rolling release is overwritten in place rather than erroring.
+  // GitHub keys a release asset by its FILENAME, and `path#label` only sets a
+  // display label - the stored name stays the file's basename. Several artifacts
+  // share a basename across triples (tomat-core-latest.gz, tomat-latest.app.tar.gz,
+  // ...), so uploading them directly makes gh clobber same-named files in parallel
+  // and 404. Stage each under its already-unique flat name (a.name) so every
+  // uploaded filename is distinct.
   info(`attaching ${assets.length} asset(s) to ${tag}`);
-  const uploadArgs = [
-    "release",
-    "upload",
-    tag,
-    ...repoArgs,
-    ...assets.map((a) => `${a.path}#${a.name}`),
-    "--clobber",
-  ];
-  // A just-created/edited release can 404 on uploads.github.com for a few seconds
-  // until it replicates from api.github.com (the create -> upload race). --clobber
-  // makes the upload idempotent, so retry with backoff before giving up.
+  const uploadDir = await Deno.makeTempDir({ prefix: "tomat-ghrel-" });
+  const uploadFiles: string[] = [];
+  for (const a of assets) {
+    const staged = join(uploadDir, a.name);
+    await Deno.copyFile(a.path, staged);
+    uploadFiles.push(staged);
+  }
+  // --clobber replaces same-named assets so the rolling release is overwritten in
+  // place. A just-created/edited release can still 404 on uploads.github.com for a
+  // few seconds until it replicates from api.github.com; retry with backoff.
+  const uploadArgs = ["release", "upload", tag, ...repoArgs, ...uploadFiles, "--clobber"];
   let upload = await gh(uploadArgs);
   for (let attempt = 1; upload.code !== 0 && attempt <= 5; attempt++) {
     info(colors.yellow(`upload failed (attempt ${attempt}/5); retrying in ${attempt * 3}s`));
     await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
     upload = await gh(uploadArgs);
   }
+  await Deno.remove(uploadDir, { recursive: true }).catch(() => {});
   if (upload.code !== 0) fail(`gh release upload ${tag} failed: ${upload.stderr.trim()}`);
   ok(`attached ${assets.length} asset(s) to ${tag} (${rel(DIST_DIR)} mirror)`);
 }

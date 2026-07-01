@@ -35,6 +35,7 @@ import { ALL_KNOWN_TRIPLES, RELEASE_TARGET_TRIPLES } from "./all-targets.ts";
 import type { BuildEnvironment } from "./drivers/mod.ts";
 import { podmanLinuxDriver } from "./drivers/podman.ts";
 import { windowsUtmDriver } from "./drivers/windows.ts";
+import { loadDriverEnv } from "./drivers/config.ts";
 import {
   assertReleaseGitState,
   commitVersionBump,
@@ -173,6 +174,10 @@ async function main(): Promise<void> {
   const environments: BuildEnvironment[] | undefined = flags.crossPlatform
     ? [podmanLinuxDriver, windowsUtmDriver]
     : undefined;
+  // Promote the drivers' device-specific config from .env into the process env
+  // before any driver runs (its cfg() reads them). Only the cross-platform path
+  // uses drivers; the host-only run skips it.
+  if (environments) await loadDriverEnv();
 
   step("Loading deploy environment");
   const env = await loadOrSeedEnv();

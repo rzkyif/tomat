@@ -313,7 +313,7 @@ mod unix {
         let reader = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
-                match nix::unistd::read(pty.master.as_raw_fd(), &mut buf) {
+                match nix::unistd::read(pty.master.as_fd(), &mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
                         let out = cancel_echo(&reader_echo, &buf[..n]);

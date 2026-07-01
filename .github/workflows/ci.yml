@@ -23,10 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: 2.8.x
+          deno-version: 2.9.x
 
       # Fail fast if the committed deno.lock no longer matches what the manifests
       # resolve to: the signed core binary is built from this graph, so a drifted
@@ -36,22 +36,22 @@ jobs:
 
       # Toolchain for `cargo fmt --check` (no compile) and the small ptyhost build
       # below; the heavy Rust compile lives in the `rs` matrix.
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.96.0
+          toolchain: 1.96.1
           components: rustfmt
 
       # All Rust crates are members of the single workspace rooted at the repo
       # root, so every build lands in the shared ./target. rust-cache must point at
       # that root (not a member subdir, which has no target/ and so caches nothing
       # but the registry).
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: . -> target
           cache-all-crates: true
 
       # Cache Deno's module + npm cache between runs.
-      - uses: actions/cache@v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             ~/.cache/deno
@@ -113,10 +113,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.96.0
+          toolchain: 1.96.1
           components: clippy
       # Tauri / xcap / cpal need the webkit + PipeWire/ALSA system libs on Linux;
       # macOS and Windows use the system webview and need nothing extra.
@@ -137,7 +137,7 @@ jobs:
       # shared ./target, so cache that one dir. Pointing at member subdirs caches
       # only the registry (their target/ dirs do not exist), leaving the whole
       # dependency graph to recompile every run.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: . -> target
           shared-key: rs-${{ matrix.os }}
@@ -173,12 +173,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.96.0
+          toolchain: 1.96.1
           targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: . -> target
           key: android
@@ -207,12 +207,12 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.96.0
+          toolchain: 1.96.1
           targets: aarch64-apple-ios
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: . -> target
           key: ios

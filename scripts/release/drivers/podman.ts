@@ -8,19 +8,20 @@
 // linuxdeploy bundles that .so closure into the AppImage. See the Containerfile for
 // the toolchain + sysroot setup and the magic-patched AppImage tooling.
 //
-// ============================ FILL THIS IN ============================
-// Set these to match your machine, then flip the driver on by registering it in
-// all-targets.ts. Until PODMAN_MACHINE is set, available() returns false and the
-// driver is skipped.
-const CONFIG = {
-  // `podman machine list` -> the NAME column.
-  machine: "podman-machine-default",
-  // Image tag built from drivers/linux/Containerfile (see its header for the
-  // `podman build` command). Must contain deno + the Rust linux targets + the
-  // Tauri Linux deps + sherpa build deps.
-  image: "tomat-linux-build:latest",
-};
-// =====================================================================
+// Device-specific config comes from .env (TOMAT_PODMAN_* / TOMAT_LINUX_BUILD_*,
+// promoted into the process env by loadDriverEnv; see .env.example). Read lazily
+// so .env is loaded first. Until TOMAT_PODMAN_MACHINE is set, available() returns
+// false and the driver is skipped.
+function cfg() {
+  return {
+    // `podman machine list` -> the NAME column.
+    machine: Deno.env.get("TOMAT_PODMAN_MACHINE") ?? "",
+    // Image tag built from drivers/linux/Containerfile (see its header for the
+    // `podman build` command). Must contain deno + the Rust linux targets + the
+    // Tauri Linux deps + sherpa build deps.
+    image: Deno.env.get("TOMAT_LINUX_BUILD_IMAGE") ?? "tomat-linux-build:latest",
+  };
+}
 
 import { join } from "@std/path";
 import { ensureDir } from "@std/fs/ensure-dir";
@@ -70,14 +71,14 @@ export const podmanLinuxDriver: BuildEnvironment = {
   triples: LINUX_TRIPLES,
 
   async available(): Promise<boolean> {
-    return CONFIG.machine !== "REPLACE_ME" && (await hasPodman());
+    return cfg().machine !== "" && (await hasPodman());
   },
 
   async detectState(): Promise<EnvState> {
     const { code, stdout } = await podman([
       "machine",
       "inspect",
-      CONFIG.machine,
+      cfg().machine,
       "--format",
       "{{.State}}",
     ]);
@@ -86,18 +87,19 @@ export const podmanLinuxDriver: BuildEnvironment = {
   },
 
   async ensureUp(): Promise<void> {
-    const { code } = await podman(["machine", "start", CONFIG.machine]);
-    if (code !== 0) throw new Error(`podman machine start ${CONFIG.machine} failed`);
+    const machine = cfg().machine;
+    const { code } = await podman(["machine", "start", machine]);
+    if (code !== 0) throw new Error(`podman machine start ${machine} failed`);
   },
 
   async teardown(): Promise<void> {
-    await podman(["machine", "stop", CONFIG.machine]);
+    await podman(["machine", "stop", cfg().machine]);
   },
 
   teardownSync(): void {
     try {
       new Deno.Command("podman", {
-        args: ["machine", "stop", CONFIG.machine],
+        args: ["machine", "stop", cfg().machine],
         stdout: "null",
         stderr: "null",
       }).outputSync();
@@ -130,7 +132,7 @@ export const podmanLinuxDriver: BuildEnvironment = {
         "CARGO_TARGET_DIR=/tmp/target",
         "-w",
         "/work",
-        CONFIG.image,
+        cfg().image,
         "deno",
         "run",
         "-A",
@@ -227,7 +229,7 @@ export const podmanLinuxDriver: BuildEnvironment = {
         `TAURI_UPDATER_PRIVATE_KEY_PASSWORD=${req.secrets.tauriPassword}`,
         "-w",
         "/work",
-        CONFIG.image,
+        cfg().image,
         "deno",
         "run",
         "-A",

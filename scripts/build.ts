@@ -56,6 +56,7 @@ import { buildCoreUnified, coreItem, coreOutputs } from "./release/core.ts";
 import type { BuildEnvironment } from "./release/drivers/mod.ts";
 import { podmanLinuxDriver } from "./release/drivers/podman.ts";
 import { windowsUtmDriver } from "./release/drivers/windows.ts";
+import { loadDriverEnv } from "./release/drivers/config.ts";
 import { clientItem } from "./release/client.ts";
 import { catalogItem } from "./release/catalog.ts";
 import { androidItem, buildAndroidBundle } from "./release/android.ts";
@@ -296,6 +297,9 @@ async function main(): Promise<void> {
   const environments: BuildEnvironment[] | undefined = flags.crossPlatform
     ? [podmanLinuxDriver, windowsUtmDriver]
     : undefined;
+  // Promote the drivers' device-specific config from .env into the process env
+  // before any driver runs (its cfg() reads them). Host-only builds skip it.
+  if (environments) await loadDriverEnv();
 
   // Android is built only when a keystore is configured AND its toolchain is
   // present; loadAndroidEnv notes the reason and returns null to skip otherwise,

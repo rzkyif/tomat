@@ -7,8 +7,9 @@
 // host.
 //
 // SCAFFOLD STATUS: the drivers exist but are not yet wired into the live
-// resolution in all-targets.ts, because they need machine-specific config (see
-// the CONFIG block at the top of podman.ts / windows.ts). Once those are filled,
+// resolution in all-targets.ts, because they need machine-specific config (the
+// TOMAT_WIN_* / TOMAT_PODMAN_* / TOMAT_LINUX_BUILD_* keys in .env, read via
+// cfg() in podman.ts / windows.ts; see .env.example). Once those are filled,
 // activation is: register the drivers here and have all-targets.ts route each
 // non-host triple to its driver via withEnvironment().
 
@@ -53,7 +54,7 @@ export interface BuildEnvironment {
   /** Triples this environment is responsible for building. */
   triples: Triple[];
   /** Usable on this machine right now: the tool is installed AND configured.
-   *  Returns false while the CONFIG placeholders are unset, so an un-configured
+   *  Returns false while the .env driver config is unset, so an un-configured
    *  driver is skipped (never silently builds nothing). */
   available(): Promise<boolean>;
   /** Current power state, so withEnvironment only starts/stops what it started. */

@@ -31,8 +31,8 @@ struct HwInfo {
     unified_memory: bool,
 }
 
-fn physical_cores(sys: &System) -> u32 {
-    sys.physical_core_count()
+fn physical_cores() -> u32 {
+    System::physical_core_count()
         .or_else(|| std::thread::available_parallelism().ok().map(|n| n.get()))
         .unwrap_or(4) as u32
 }
@@ -148,7 +148,7 @@ fn main() {
     let info = HwInfo {
         total_ram_bytes,
         available_ram_bytes,
-        cpu_cores_physical: physical_cores(&sys),
+        cpu_cores_physical: physical_cores(),
         gpu,
         unified_memory,
     };
