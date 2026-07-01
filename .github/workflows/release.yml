@@ -172,6 +172,29 @@ jobs:
           grep -v 'npm:workerd@' deno.json > deno.json.tmp
           mv deno.json.tmp deno.json
 
+      # sherpa-onnx-sys's prebuilt download map omits win-arm64, so stage the
+      # upstream win-arm64 static lib and point SHERPA_ONNX_LIB_DIR at it (the CI
+      # counterpart to windows-provision.ps1's guest setup). The version pin must
+      # match sherpa-onnx in packages/tomat-core-speech/Cargo.toml.
+      - name: Stage sherpa-onnx win-arm64 lib (win-arm64)
+        if: matrix.id == 'windows-arm64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $SherpaVersion = "1.13.2"
+          $Name = "sherpa-onnx-v$SherpaVersion-win-arm64-static-MT-Release-lib"
+          $Url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$SherpaVersion/$Name.tar.bz2"
+          $Root = Join-Path $env:RUNNER_TEMP "sherpa-onnx-libs"
+          New-Item -ItemType Directory -Force -Path $Root | Out-Null
+          $archive = Join-Path $Root "$Name.tar.bz2"
+          Write-Host "downloading $Url"
+          Invoke-WebRequest -Uri $Url -OutFile $archive
+          & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $Root
+          $lib = Get-ChildItem -Recurse -Path $Root -Filter "sherpa-onnx-core.lib" | Select-Object -First 1
+          if (-not $lib) { throw "sherpa-onnx-core.lib not found under $Root" }
+          "SHERPA_ONNX_LIB_DIR=$($lib.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "SHERPA_ONNX_LIB_DIR = $($lib.DirectoryName)"
+
       - name: Build + stage (${{ matrix.id }})
         shell: bash
         env:
