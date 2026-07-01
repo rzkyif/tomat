@@ -138,15 +138,13 @@ jobs:
             libsecret-1-dev \
             patchelf
 
+      # Single workspace rooted at the repo root: all six crates build into the
+      # shared ./target, so cache that one dir. Pointing at member subdirs caches
+      # only the registry (their target/ dirs do not exist), leaving the whole
+      # dependency graph to recompile every run.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            packages/tomat-client/src/tauri
-            packages/tomat-core-keychain
-            packages/tomat-core-updater
-            packages/tomat-core-ptyhost
-            packages/tomat-core-hwinfo
-            packages/tomat-core-speech
+          workspaces: . -> target
           shared-key: release-${{ matrix.id }}
           cache-all-crates: true
 
