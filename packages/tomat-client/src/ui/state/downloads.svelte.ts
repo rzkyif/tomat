@@ -7,6 +7,7 @@
  */
 
 import type { DownloadEntry, RequiredFile, ServerToClientFrame } from "@tomat/shared";
+import { errMessage } from "@tomat/shared";
 import { cores } from "$lib/core";
 import { platform } from "$lib/platform";
 import { getLogger } from "$lib/util/log";
@@ -174,6 +175,7 @@ class DownloadsState {
         // Mark everything currently missing as approved up front, so the button
         // flips to download-manager mode immediately (the app stays gated on
         // `hasPending` until the files actually land).
+        const prevApproved = this.approvedSources;
         this.approvedSources = new Set([
           ...this.approvedSources,
           ...this.missing.map((m) => m.source),
@@ -181,7 +183,15 @@ class DownloadsState {
         try {
           await cores().api().requirements.download();
         } catch (e) {
+          // The request failed, so nothing was enqueued. Roll back the
+          // optimistic approval: otherwise `needsApproval` reads false and the
+          // download button drops out of "Pending Downloads" while the chat
+          // stays gated on `hasPending`, leaving a split, stuck UI. Surface the
+          // failure too, so it isn't silently swallowed and the user knows to
+          // retry.
+          this.approvedSources = prevApproved;
           reqLog.warn("download failed:", e);
+          confirmState.alert({ title: "Download failed", message: errMessage(e) });
         }
       },
       onCancel: () => hooks?.onCancel?.(),

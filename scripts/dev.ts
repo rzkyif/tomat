@@ -111,16 +111,22 @@ const CORE_RESET_PRESERVE = new Set(["bin", "deno-cache"]);
 //                   so that flow is front-and-center (dev:reset:install).
 const RESET = Deno.args.includes("--reset");
 const FRESH_INSTALL = Deno.args.includes("--fresh-install");
-// --android runs the mobile client (`tauri android dev`) against this dev core
-// instead of the desktop client. The android WebView runs on an emulator/device,
-// so the core must be reachable off-loopback (TOMAT_CORE_HOST=0.0.0.0 below) and
-// the onboarding prefill is passed through Vite env (android has no launch argv).
+// --android / --ios run the mobile client (`tauri android|ios dev`) against this
+// dev core instead of the desktop client. The mobile WebView runs on an
+// emulator/simulator/device, so the core must be reachable off-loopback
+// (TOMAT_CORE_HOST=0.0.0.0 below) and the onboarding prefill is passed through
+// Vite env (mobile has no launch argv).
 const ANDROID = Deno.args.includes("--android");
+const IOS = Deno.args.includes("--ios");
+// The parts that are identical for either mobile target: bind the core to every
+// interface and route the prefill through Vite env rather than argv.
+const MOBILE = ANDROID || IOS;
 // --client-only spawns just the client (no dev core, no helper/sidecar setup),
 // the orchestrated equivalent of running the bare client task. It exists so the
-// android client-only loop still gets this script's clean teardown (the detached
-// Gradle build sweep below) instead of leaking on Ctrl+C. A core is assumed to
-// be running separately; onboarding derives its address from the dev host.
+// mobile client-only loop still gets this script's clean teardown (the detached
+// Gradle/Xcode build sweep below) instead of leaking on Ctrl+C. A core is
+// assumed to be running separately; onboarding derives its address from the dev
+// host.
 const CLIENT_ONLY = Deno.args.includes("--client-only");
 
 // All child labels ("core", "client", "dev") are left-aligned to this width so
@@ -585,9 +591,19 @@ const ANDROID_TARGET_TRIPLES = [
   "x86_64-linux-android",
 ];
 
-async function sweepAndroidBuild(): Promise<void> {
+// The iOS analogue: `tauri ios dev` drives xcodebuild, which runs the cargo/rustc/
+// clang cross-compile for the apple-ios triples in its own process group, outside
+// this orchestrator's descendant tree. Match those by triple and reap them on
+// Ctrl+C. The Simulator app and CoreSimulator services are persistent by design
+// (like adb + the Gradle daemon) and are intentionally left running.
+const IOS_TARGET_TRIPLES = ["aarch64-apple-ios", "aarch64-apple-ios-sim", "x86_64-apple-ios"];
+
+// SIGKILL every process whose command line still references one of these NDK/SDK
+// target triples: the detached mobile cross-compile jobs a descendant-tree walk
+// (pgrep -P) can't reach. Shared by the android + ios shutdown sweeps.
+async function sweepBuildTriples(triples: string[]): Promise<void> {
   if (Deno.build.os === "windows") return;
-  for (const triple of ANDROID_TARGET_TRIPLES) {
+  for (const triple of triples) {
     let pids: number[] = [];
     try {
       const out = await new Deno.Command("pgrep", {
@@ -652,9 +668,9 @@ async function shutdown(): Promise<void> {
 }
 
 // Final cleanup after the tree is killed: free the Vite port in case its server
-// outlived the tree (orphaned past pgrep -P reach), and on android reap the
-// detached Gradle-daemon cross-compile. Best-effort, then exit unconditionally
-// so a hung sweep can never wedge the shutdown.
+// outlived the tree (orphaned past pgrep -P reach), and on mobile reap the
+// detached Gradle-daemon / xcodebuild cross-compile. Best-effort, then exit
+// unconditionally so a hung sweep can never wedge the shutdown.
 async function finishShutdown(): Promise<void> {
   try {
     await reclaimVitePort();
@@ -663,7 +679,14 @@ async function finishShutdown(): Promise<void> {
   }
   if (ANDROID) {
     try {
-      await sweepAndroidBuild();
+      await sweepBuildTriples(ANDROID_TARGET_TRIPLES);
+    } catch {
+      // best-effort
+    }
+  }
+  if (IOS) {
+    try {
+      await sweepBuildTriples(IOS_TARGET_TRIPLES);
     } catch {
       // best-effort
     }
@@ -834,11 +857,11 @@ if (!CLIENT_ONLY) {
       // point at ~/.tomat/dev/core/workers (an empty dir in dev).
       {
         ...CHANNEL_ENV,
-        // For mobile dev the emulator/device reaches the host core over the
-        // network, so bind every interface (loopback-only would be unreachable).
-        // The self-signed cert is still pinned at pairing, so this only widens
-        // reachability, not trust.
-        ...(ANDROID ? { TOMAT_CORE_HOST: "0.0.0.0" } : {}),
+        // For mobile dev the emulator/simulator/device reaches the host core
+        // over the network, so bind every interface (loopback-only would be
+        // unreachable). The self-signed cert is still pinned at pairing, so this
+        // only widens reachability, not trust.
+        ...(MOBILE ? { TOMAT_CORE_HOST: "0.0.0.0" } : {}),
         TOMAT_WORKERS_DIR: `${ROOT}packages/tomat-core/src/workers`,
         // Core runs under `deno run --watch`. On a file change the watcher sends
         // SIGTERM and waits for the program to wind down so it can re-run the
@@ -868,20 +891,22 @@ const pairingCode = CLIENT_ONLY ? null : await mintPairingCode(adminToken);
 if (RESET) await resetClientSettings();
 
 // The onboarding prefill reaches the client differently per platform. Desktop
-// forwards it as launch argv (read by the read_launch_prefill command); android
+// forwards it as launch argv (read by the read_launch_prefill command); mobile
 // has no argv path, so it is passed through Vite env vars that mobile.ts's
-// launchPrefill reads at runtime. Both connect to this same dev core.
+// launchPrefill reads at runtime. All connect to this same dev core.
 const clientPrefillEnv: Record<string, string> = {};
 const clientCmd = ["deno", "run", "-A", "npm:@tauri-apps/cli@^2"];
-if (ANDROID) {
-  clientCmd.push("android", "dev");
+if (MOBILE) {
+  clientCmd.push(ANDROID ? "android" : "ios", "dev");
   // --client-only has no dev core here to point at, so it skips the address
   // prefill and lets mobile.ts derive it from the dev-server host at runtime.
   if (!CLIENT_ONLY) {
-    // The device reaches the host core over the network, not loopback: a physical
-    // device uses TAURI_DEV_HOST (also the HMR host); the emulator uses its
-    // host-loopback alias 10.0.2.2. Port = the dev channel core port (see CORE_URL).
-    const devHost = Deno.env.get("TAURI_DEV_HOST") ?? "10.0.2.2";
+    // The mobile target reaches the host core over the network, not loopback: a
+    // physical device uses TAURI_DEV_HOST (also the HMR host). Without it, the
+    // Android emulator uses its host-loopback alias 10.0.2.2, while the iOS
+    // Simulator shares the host network so plain 127.0.0.1 reaches it. Port = the
+    // dev channel core port (see CORE_URL).
+    const devHost = Deno.env.get("TAURI_DEV_HOST") ?? (ANDROID ? "10.0.2.2" : "127.0.0.1");
     clientPrefillEnv.VITE_DEV_CORE_URL = `https://${devHost}:7820`;
     if (pairingCode) clientPrefillEnv.VITE_DEV_PAIRING_CODE = pairingCode;
   }

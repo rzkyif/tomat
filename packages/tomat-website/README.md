@@ -135,12 +135,20 @@ so re-pushing the same commit is a no-op). Bump versions as part of the work on
 `TAURI_UPDATER_PRIVATE_KEY_PASSWORD`, `TOMAT_ANDROID_KEYSTORE_B64`,
 `TOMAT_ANDROID_KEYSTORE_PASSWORD`, `TOMAT_ANDROID_KEY_ALIAS`, `TOMAT_ANDROID_KEY_PASSWORD`,
 `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `TOMAT_R2_BUCKET`, `TOMAT_STORAGE_DOMAIN`.
-Optionally, the macOS Developer ID signing/notarization vars (`APPLE_SIGNING_IDENTITY`,
-`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`,
-`APPLE_TEAM_ID`, or the `APPLE_API_*` key trio) - these belong on the **macOS build
-runner only** (build-time signing, like the Tauri/Android keys), never the publish
-job; when unset the macOS bundle stays ad-hoc-signed. See
+Optionally, the Apple signing vars, which cover **both** the macOS Developer ID
+bundle and the iOS App Store build (`APPLE_SIGNING_IDENTITY`, `APPLE_CERTIFICATE`,
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, and
+the `APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_PATH` App Store Connect
+trio) - these belong on the **macOS build runner only** (build-time signing, like
+the Tauri/Android keys), never the publish job. When unset the macOS bundle stays
+ad-hoc-signed and the iOS `.ipa` build/upload is skipped (the App Store item is
+inert). iOS is additionally gated behind an `IOS_ENABLED` repo **variable**: its
+CI jobs (the `ios` cross-compile check and the `.ipa` build on the release
+runner) stay skipped until that variable is `true`, so iOS consumes no runner
+minutes and cannot block PRs before the account is ready. iOS is distributed
+through the App Store, not R2, so its runner builds + uploads the `.ipa` to App
+Store Connect itself rather than staging for the publish coordinator. See
 [macos-signing.md](../../scripts/release/macos-signing.md).
-Build runners receive only the Tauri + Android (+ macOS Apple, on the mac runner)
+Build runners receive only the Tauri + Android (+ Apple, on the mac runners)
 subset (plus the signing public key); the publish job receives all. The landing
 page still ships on its own track (`deno task release:website`), not from these workflows.

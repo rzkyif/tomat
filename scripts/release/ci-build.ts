@@ -38,6 +38,8 @@ import { join } from "@std/path";
 import { buildCoreArtifacts } from "./core.ts";
 import { buildClientBundle } from "./client.ts";
 import { buildAndroidBundle } from "./android.ts";
+import { buildAndUploadIos } from "./ios.ts";
+import { appleReleaseConfigured } from "./apple-toolchain.ts";
 import {
   bundleCoreArtifacts,
   stageDistFile,
@@ -51,8 +53,8 @@ async function main(): Promise<void> {
     Deno.args.filter((a) => a !== "--"),
     {
       string: ["channel", "stage-dir"],
-      boolean: ["android"],
-      default: { android: false },
+      boolean: ["android", "ios"],
+      default: { android: false, ios: false },
     },
   );
   const channel = parseChannelFlag(args.channel);
@@ -100,6 +102,24 @@ async function main(): Promise<void> {
     await writeAndroidDescriptor(stageDir, descriptor);
     for (const apk of descriptor.apks) await stageDistFile(stageDir, apk.relPath);
     ok(`staged ${descriptor.apks.length} APK(s)`);
+  }
+
+  // --- iOS (macOS runner only, with --ios) ---
+  // iOS ships through the App Store, so the signing mac builds AND uploads the
+  // .ipa here rather than staging it for the Linux publish coordinator. Inert
+  // until the Apple account + secrets exist: without them this no-ops so the
+  // runner stays green (mirrors the macOS APPLE_* signing being plumbed-but-off).
+  if (args.ios) {
+    if (!appleReleaseConfigured(env)) {
+      info(
+        colors.yellow(
+          "--ios given but Apple signing / App Store Connect is not configured; skipping iOS.",
+        ),
+      );
+    } else {
+      await buildAndUploadIos(env, channel, { triples: [], dryRun: false });
+      ok("built + uploaded the iOS .ipa to App Store Connect");
+    }
   }
 
   console.log(

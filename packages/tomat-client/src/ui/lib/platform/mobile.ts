@@ -1,6 +1,8 @@
-// Android (Tauri-mobile) implementation of the Platform interface. Like
-// tauri.ts it runs inside a Tauri webview and may import `@tauri-apps/*`
-// (the no-tauri-import rule only restricts code outside lib/platform/).
+// Mobile (Tauri-mobile) implementation of the Platform interface, shared by
+// Android and iOS. Like tauri.ts it runs inside a Tauri webview and may import
+// `@tauri-apps/*` (the no-tauri-import rule only restricts code outside
+// lib/platform/). The handful of spots that differ between the two mobile OSes
+// (self-update, the back affordance, the font picker) branch on osPlatform().
 //
 // Reuse vs. not-supported: the namespaces that call cross-platform Rust
 // commands (net, client files, storage, keychain, process, logging,
@@ -26,6 +28,7 @@ import {
 } from "@tauri-apps/plugin-fs";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { platform as osPlatform } from "@tauri-apps/plugin-os";
 import { sha256Hex, timingSafeEqualHex, verifyEd25519Detached } from "@tomat/shared";
 import { presentActionSheet } from "$lib/menu/action-sheet-host.svelte";
 import { type Platform, setPlatform, type UpdateHandle } from "./index";
@@ -187,6 +190,50 @@ async function inertSubscription(): Promise<() => void> {
   return () => {};
 }
 
+/** iOS has no hardware back key, so a left-edge swipe drives the same
+ *  back-handler stack the in-app back buttons use. Fires `cb` once per gesture
+ *  that starts within the left screen edge and travels decisively rightward;
+ *  a mostly-vertical drag (a scroll that happened to start near the edge) is
+ *  ignored so it is not swallowed. */
+function subscribeEdgeSwipeBack(cb: () => void): () => void {
+  const EDGE_PX = 24; // start zone measured from the left screen edge
+  const THRESHOLD_PX = 64; // horizontal travel that commits the gesture
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+  const onStart = (e: TouchEvent): void => {
+    const t = e.touches[0];
+    if (!t || t.clientX > EDGE_PX) return;
+    tracking = true;
+    startX = t.clientX;
+    startY = t.clientY;
+  };
+  const onMove = (e: TouchEvent): void => {
+    if (!tracking) return;
+    const t = e.touches[0];
+    if (!t) return;
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    if (dx > THRESHOLD_PX && Math.abs(dx) > Math.abs(dy)) {
+      tracking = false;
+      cb();
+    }
+  };
+  const onEnd = (): void => {
+    tracking = false;
+  };
+  document.addEventListener("touchstart", onStart, { passive: true });
+  document.addEventListener("touchmove", onMove, { passive: true });
+  document.addEventListener("touchend", onEnd, { passive: true });
+  document.addEventListener("touchcancel", onEnd, { passive: true });
+  return () => {
+    document.removeEventListener("touchstart", onStart);
+    document.removeEventListener("touchmove", onMove);
+    document.removeEventListener("touchend", onEnd);
+    document.removeEventListener("touchcancel", onEnd);
+  };
+}
+
 const impl: Platform = {
   // Pinned HTTP + WebSocket to a paired core; shared with the desktop impl
   // since both call the same Rust commands (see lib/platform/shared.ts). LAN
@@ -219,25 +266,31 @@ const impl: Platform = {
     subscribeMonitorChanged: inertSubscription,
   },
   backButton: {
-    // Tauri's app plugin emits a `back-button` event for every Android system
-    // back press (TauriActivity ships handleBackNavigation=false, so the JS
-    // layer owns back). The back-handler registry decides what each press does.
+    // Android's app plugin emits a `back-button` event for every system back
+    // press (TauriActivity ships handleBackNavigation=false, so the JS layer owns
+    // back). iOS has no hardware back, so a left-edge swipe feeds the same
+    // handler registry, which decides what each back does.
     async subscribe(cb) {
+      if (osPlatform() === "ios") return subscribeEdgeSwipeBack(cb);
       const listener = await onBackButtonPress(() => cb());
       return () => void listener.unregister();
     },
-    // Leave the app on the final root double-back. app.hide() is the only
-    // exit/background path that needs no extra plugin or capability (the process
-    // plugin has no Android support); if it proves to no-op on the target OS,
-    // swap this for a moveTaskToBack hook in MainActivity. Best-effort: never
-    // throw out of a back-button handler.
+    // Android leaves the app on the final root double-back via app.hide() (the
+    // only background path that needs no extra plugin; the process plugin has no
+    // Android support). iOS apps must not programmatically exit or move
+    // themselves to the background (App Store rejects it), so leaving is a no-op
+    // there. Best-effort: never throw out of a back-button handler.
     async exit() {
+      if (osPlatform() === "ios") return;
       try {
         await tauriHide();
       } catch {
         // No-op: a failed background must not crash the back handler.
       }
     },
+    // Only Android leaves the app on a root back; on iOS the OS home gesture owns
+    // that, so a root edge-swipe is inert rather than arming a dead exit hint.
+    canExit: () => osPlatform() === "android",
   },
   autostart: {
     isEnabled: () => Promise.resolve(false),
@@ -262,12 +315,16 @@ const impl: Platform = {
     restoreSystemVolume: () => Promise.resolve(),
   },
   fonts: {
-    // Android has no font-enumeration API exposed here, so offer a curated list
-    // of families that resolve on Android (the system default plus widely
-    // bundled faces) instead of an empty picker. "default" maps to the system
-    // stack via the appearance settings.
+    // Mobile has no font-enumeration API exposed here, so offer a curated list
+    // of families that resolve on the OS (the system default plus widely bundled
+    // faces) instead of an empty picker. "default" maps to the system stack via
+    // the appearance settings.
     list: () =>
-      Promise.resolve(["Roboto", "Noto Sans", "Noto Serif", "Droid Sans Mono", "monospace"]),
+      Promise.resolve(
+        osPlatform() === "ios"
+          ? ["Helvetica Neue", "Avenir Next", "Georgia", "Menlo", "monospace"]
+          : ["Roboto", "Noto Sans", "Noto Serif", "Droid Sans Mono", "monospace"],
+      ),
   },
   process: {
     selfMetrics: () => invoke("get_self_metrics"),
@@ -351,10 +408,13 @@ const impl: Platform = {
   revealPath: () => Promise.resolve(),
   updater: {
     getVersion: () => tauriGetVersion(),
-    // Self-hosted: compares the app version against the R2-hosted android.json
-    // and hands a newer APK to Android's package installer (see above).
-    check: () => checkAndroidUpdate(),
-    // No process relaunch on Android: the package installer restarts the app.
+    // Android self-hosts updates: it compares the app version against the
+    // R2-hosted android.json and hands a newer APK to the package installer (see
+    // above). iOS has no OTA self-install path, so updates come from the App
+    // Store and there is nothing to check here.
+    check: () => (osPlatform() === "ios" ? Promise.resolve(null) : checkAndroidUpdate()),
+    // No in-process relaunch on mobile: Android's package installer restarts the
+    // app, and iOS is relaunched from the home screen.
     relaunch: () => notSupported("Relaunch"),
   },
   fs: {

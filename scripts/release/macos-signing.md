@@ -80,28 +80,47 @@ builds the `apple-darwin` triples.
      grants persist (a stable identity is the reason to sign beyond `.dmg`
      shipping; ad-hoc identities can re-prompt after each update).
 
-## Future iOS (deferred - captured here to avoid re-derivation)
+## iOS (plumbed, inert until the Apple account + `APPLE_*` exist)
 
-An iOS Client is net-new and gated on the same Apple membership plus a Mac +
-Xcode. Key facts already established, so the iOS agent does not have to
-rediscover them:
+The iOS Client is wired end to end and gated on the same Apple membership plus a
+Mac + Xcode, exactly like the macOS signing above: the dev loop works today, and
+the build + release paths self-skip until the `APPLE_*` env is filled.
 
+- **What works now:** `deno task dev:ios` boots the dev Core and launches the app
+  on the iOS Simulator (mirrors `dev:android`, clean Ctrl+C teardown included).
+  `deno task --cwd packages/tomat-client init:ios` generates `gen/apple` (commit
+  it as source, like `gen/android`). `deno task check:ios` compiles the shell for
+  `aarch64-apple-ios`; the CI `ios` job runs the same check.
+- **What is inert until the account exists:** `build:client:ios` falls back to an
+  unsigned Simulator build without signing; `scripts/release/ios.ts` (`iosItem`,
+  registered in `main.ts`) is dropped by `appleReleaseConfigured(env)` when the
+  signing + App Store Connect env is absent. So iOS does not interfere with other
+  development, the CI iOS jobs (the `ios` cross-compile check in `ci.yml` and the
+  `.ipa` build on the release runner) are gated behind an **`IOS_ENABLED` repo
+  variable** and stay skipped, consuming no macOS runner minutes. To activate
+  iOS: set the `IOS_ENABLED` repo variable to `true` and fill `APPLE_TEAM_ID` + a
+  certificate (`APPLE_SIGNING_IDENTITY` or the base64 `APPLE_CERTIFICATE`) + the
+  `APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_PATH` trio; the same paths
+  then build/sign/upload the `.ipa` to App Store Connect. The remaining
+  account-side steps are creating the App Store Connect app record and submitting
+  for App Review.
 - **Architecture constraint:** iOS cannot run a local Core (no persistent
-  background service). The iOS Client pairs to a Core on another device only.
-  This is already reflected in the mobile platform impl
-  ([mobile.ts](../../packages/tomat-client/src/ui/lib/platform/mobile.ts)), where
-  the local-core surface returns false/null and features are remote-only.
-- **Keychain is already iOS-ready:** the Apple native keyring store is cfg-gated
-  for `macos` + `ios`
+  background service); the iOS Client pairs to a Core on another device only. The
+  mobile platform impl
+  ([mobile.ts](../../packages/tomat-client/src/ui/lib/platform/mobile.ts)) already
+  returns false/null across the local-core surface, and `updater.check` returns
+  null on iOS (the App Store owns updates; there is no OTA self-host).
+- **Keychain is iOS-ready:** the Apple native keyring store is cfg-gated for
+  `macos` + `ios`
   ([keychain.rs:82](../../packages/tomat-client/src/tauri/src/commands/keychain.rs#L82),
   and the same in the `tomat-core-keychain` helper).
-- **No Xcode project exists:** there is no `gen/apple` (only `gen/android`).
-  `tauri ios init` generates it. iOS shares the `run_mobile()` entry point and the
-  Android-centric mobile stubs, so the iOS-specific gaps are: hardware back-button
-  handling (Android hard-key at mobile.ts is not applicable; iOS needs an edge
-  swipe/gesture), the hardcoded font list, and iOS `Info.plist` usage strings +
-  distribution entitlements (all Xcode/cert-dependent).
+- **`gen/apple` customizations** (hand-applied after `init:ios`, like the Android
+  manifest edits): `Info.plist` usage strings (`NSMicrophoneUsageDescription`,
+  `NSLocalNetworkUsageDescription`) + an App Transport Security
+  `NSAllowsLocalNetworking` exception for the LAN/dev Core, and a channel xcconfig
+  that suffixes the bundle id off `TOMAT_CHANNEL` (the iOS analogue of gradle's
+  `applicationIdSuffix`).
 - **Distribution:** App Store only (the DMA alternative-marketplace path still
-  needs the $99 membership and is EU-only). A future `iosItem` release item would
-  mirror `androidItem` but upload to App Store Connect instead of self-hosting on
-  R2, and requires App Review.
+  needs the membership and is EU-only). `iosItem` mirrors `androidItem` but
+  uploads to App Store Connect instead of self-hosting on R2, and requires App
+  Review.

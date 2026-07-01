@@ -1,5 +1,6 @@
 import { presetIcons, presetTypography, presetWind4, type UserConfig } from "unocss";
 import extractorSvelte from "@unocss/extractor-svelte";
+import { lookupCollection } from "@iconify/json";
 import { CSS_EASING, INTERACTIVE_MS } from "./animations.ts";
 
 // The shared slice of the UnoCSS config that both the client (Vite) and the
@@ -14,7 +15,16 @@ import { CSS_EASING, INTERACTIVE_MS } from "./animations.ts";
 // extracted components.
 export function tomatUnoBase(): UserConfig {
   return {
-    presets: [presetWind4({ dark: "class" }), presetIcons(), presetTypography()],
+    presets: [
+      presetWind4({ dark: "class" }),
+      presetIcons({
+        collections: {
+          "material-symbols": () => lookupCollection("material-symbols"),
+          "line-md": () => lookupCollection("line-md"),
+        },
+      }),
+      presetTypography(),
+    ],
     // Route font-sans through the runtime-overridable --font-default variable
     // (written by appearance.defaultFont in the client; static default on the
     // website via base.css). font-mono is deliberately NOT overridden here:

@@ -51,6 +51,7 @@ const impl: Platform = {
   backButton: {
     subscribe: async () => () => {},
     exit: () => Promise.resolve(),
+    canExit: () => true,
   },
   autostart: {
     isEnabled: async () => false,

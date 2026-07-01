@@ -250,6 +250,79 @@ bump the patch version for any re-publish meant to update existing installs.
 the stock Tauri scaffolding; re-apply the customizations if it overwrites them
 (diff against the committed tree).
 
+### iOS (Tauri-mobile) client
+
+The same client builds for iOS from the same Tauri project (the shared
+`run_mobile()` entry and the mobile platform impl in
+`lib/platform/mobile.ts`, which branches its handful of OS-specific spots on
+`osPlatform()`). The iOS app is remote-only, exactly like Android. Distribution
+is **App Store only**: iOS cannot sideload a signed `.ipa`, so there is no
+self-hosted manifest and no OTA self-update (`updater.check` returns null on iOS;
+updates come from the store). Everything below the dev loop is **inert until an
+Apple Developer account + the `APPLE_*` env exist**, mirroring how the macOS
+Developer ID signing is plumbed-but-off (see
+[macos-signing.md](scripts/release/macos-signing.md)).
+
+**One-time host toolchain** (macOS only; Apple tooling cannot cross-build):
+
+- Xcode + the iOS SDK and Simulator runtimes (from the App Store or
+  developer.apple.com), then `xcode-select --install` for the command-line tools.
+- Rust cross-compile targets:
+  `rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios`
+  (Simulator dev on Apple Silicon needs only `aarch64-apple-ios-sim`).
+- An iOS Simulator (bundled with Xcode) or a provisioned physical device.
+
+**Tasks** (root `<verb>:<pkg>` form; the client package also exposes the bare
+`init:ios` / `dev:ios` / `build:ios` / `check:ios`):
+
+```bash
+deno task --cwd packages/tomat-client init:ios   # one-time: generate gen/apple
+deno task dev:ios                                 # dev core + iOS Simulator (HMR)
+deno task dev:client:ios                          # iOS client only, no core
+deno task build:client:ios                        # latest-channel build
+deno task build:client:ios:stable                 # stable-channel build
+```
+
+`dev:ios` is the mobile analogue of `dev:android`: it boots the dev core and the
+iOS client together, binds the core to `0.0.0.0`, mints a pairing code, and
+prefills onboarding through Vite env (`VITE_DEV_CORE_URL` /
+`VITE_DEV_PAIRING_CODE`). The core URL host is `127.0.0.1` (the Simulator shares
+the host network) by default, or `TAURI_DEV_HOST` when set (a physical device on
+the LAN). `dev:client:ios` runs only the client through the same orchestrator
+(`scripts/dev.ts --ios --client-only`) so it shares the clean Ctrl+C teardown:
+both reap the detached `xcodebuild` cross-compile (matched by the apple-ios
+target triples), leaving the Simulator and CoreSimulator services running.
+Non-stable channels get a distinct bundle id (`au.tomat.ing.<channel>`) so they
+install alongside stable, applied by a channel xcconfig in `gen/apple` keyed off
+`TOMAT_CHANNEL` (the iOS analogue of Android's gradle `applicationIdSuffix`; the
+Tauri `identifier` is not overridden, for the same reason as Android).
+
+**Signing + release.** A signed `.ipa` needs an Apple Developer account: a Team
+ID plus a signing certificate (`APPLE_TEAM_ID`, `APPLE_SIGNING_IDENTITY` or the
+base64 `APPLE_CERTIFICATE` on CI) and the App Store Connect API key trio
+(`APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_PATH`) to upload to
+TestFlight / the App Store. Without them, `build:client:ios` falls back to an
+unsigned Simulator build and `scripts/release/main.ts` drops the iOS item (like
+it drops android without a keystore).
+
+**iOS stays dormant until you flip one switch**, so it never interferes with
+other development before the account is ready. Today `deno task build` and
+`deno task release` do nothing for iOS (build has no iOS item; release drops it),
+and the CI iOS jobs (the `ios` cross-compile check in `ci.yml` and the `.ipa`
+build on the release runner) are gated behind an **`IOS_ENABLED` repo variable**
+and stay skipped, consuming no macOS runner minutes. Only `dev:ios` is active. To
+turn iOS on once the account lands: add the `APPLE_*` secrets and set the
+`IOS_ENABLED` repo variable to `true`; the same paths then build/sign/upload with
+no code change. The App Store Connect app record + App Review submission are the
+remaining account-side steps (see
+[macos-signing.md](scripts/release/macos-signing.md)).
+
+**`gen/apple` hygiene.** Same as `gen/android`: treat the generated Xcode project
+as source (commit it, `.gitignore` build output + signing material), with
+hand-applied customizations (the `Info.plist` usage strings and App Transport
+Security exception, the channel xcconfig). Re-running `init:ios` re-syncs the
+stock scaffolding; re-apply the customizations if it overwrites them.
+
 ## Packages and release items
 
 The repo separates two axes that used to be tangled in the root task list:

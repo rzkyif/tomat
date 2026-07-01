@@ -455,6 +455,14 @@ INSTALLED_BIN="$BIN_DIR/tomat-core$CHANNEL_SUFFIX"
 # register distinct OS services. Stable keeps the bare names.
 SERVICE_LABEL_ID="au.tomat.core$CHANNEL_SUFFIX"
 SYSTEMD_UNIT="tomat-core$CHANNEL_SUFFIX"
+# Human-readable label for surfaces a user actually reads (systemd Description,
+# service-manager listings). The unit/label ids above stay dashed; this is the
+# friendly form: "tomat Core", "tomat Core (latest)", "tomat Core (dev)".
+if [ "$TOMAT_CHANNEL" = "stable" ]; then
+  CORE_DISPLAY_NAME="tomat Core"
+else
+  CORE_DISPLAY_NAME="tomat Core ($TOMAT_CHANNEL)"
+fi
 
 # Resolve sha-256 command up front so all rows use the same one.
 SHA_CMD="sha256sum"
@@ -597,8 +605,14 @@ fi
 # terminal (e.g. the client-driven install), we skip the prompt and the
 # client sets the password through the API afterward. Skipped too when a
 # password is already on disk (re-install).
+#
+# The guard opens /dev/tty read-write rather than testing `[ -r /dev/tty ]`:
+# the device node can pass the permission test yet fail to open when there is
+# no controlling terminal (detached process, CI, the client-driven install),
+# in which case the prompts would error and, under `set -e`, abort the whole
+# install. Probing the actual open is what reliably detects an interactive tty.
 ADMIN_PW=""
-if [ ! -s "$ADMIN_PASSWORD_FILE" ] && [ -r /dev/tty ]; then
+if [ ! -s "$ADMIN_PASSWORD_FILE" ] && { : <>/dev/tty; } 2>/dev/null; then
   printf '\n%s\n' "Set an admin password for tomat-core." > /dev/tty
   printf '%s\n\n' "You'll need it to pair new devices remotely, so remember it." > /dev/tty
   while :; do
@@ -1223,7 +1237,7 @@ elif [ "$uname_os" = "Linux" ] && [ "$SERVICE_HAS_SYSTEMD" = "1" ]; then
 
   cat >"$UNIT" <<UNIT
 [Unit]
-Description=$SYSTEMD_UNIT
+Description=$CORE_DISPLAY_NAME
 Wants=network-online.target
 After=network-online.target
 

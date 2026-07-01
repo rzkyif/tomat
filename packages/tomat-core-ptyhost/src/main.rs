@@ -35,13 +35,17 @@
 //! echo would silence permission prompts. The master reader cancels the echo of
 //! everything written via `write` so the core never sees its own frames.
 
-use std::io::{BufRead, Write};
-use std::sync::{Arc, Mutex};
+use std::io::Write;
+use std::sync::Mutex;
 
+#[cfg(any(unix, test))]
 use base64::engine::general_purpose::STANDARD as B64;
+#[cfg(any(unix, test))]
 use base64::Engine;
+#[cfg(any(unix, test))]
 use serde::Deserialize;
 
+#[cfg(any(unix, test))]
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum ControlFrame {
@@ -82,6 +86,7 @@ fn emit_event(json: String) {
     drop(guard);
 }
 
+#[cfg(unix)]
 fn emit_pty(data: &[u8]) {
     emit_event(format!(
         "{{\"kind\":\"pty\",\"dataB64\":\"{}\"}}",
@@ -89,6 +94,7 @@ fn emit_pty(data: &[u8]) {
     ));
 }
 
+#[cfg(unix)]
 fn emit_exit(code: i32) {
     emit_event(format!("{{\"kind\":\"exit\",\"code\":{code}}}"));
 }
@@ -169,8 +175,10 @@ fn main() {
 #[cfg(unix)]
 mod unix {
     use super::*;
+    use std::io::BufRead;
     use std::os::fd::{AsFd, AsRawFd};
     use std::os::unix::process::CommandExt;
+    use std::sync::Arc;
 
     use nix::pty::openpty;
     use nix::sys::signal::{kill, Signal};

@@ -25,6 +25,15 @@ export function isAndroidPlatform(): boolean {
   return osPlatform() === "android";
 }
 
+/** True on iOS specifically. Android injects the safe-area / keyboard insets and
+ *  owns a hardware back; iOS has neither, so the shell reads its safe area from
+ *  CSS `env()` and derives the keyboard inset from the visual viewport (see
+ *  +layout.svelte), and the back-handler stack is driven by an edge-swipe gesture
+ *  wired in mobile.ts. */
+export function isIosPlatform(): boolean {
+  return osPlatform() === "ios";
+}
+
 /** Install the Platform singleton appropriate for the current OS. */
 export function installPlatform(): void {
   if (isMobilePlatform()) installMobilePlatform();

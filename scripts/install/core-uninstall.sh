@@ -553,6 +553,11 @@ else
     ui_die "Failed to remove $HOME_DIR" \
       "$RM_ERR" \
       "a process may still be holding the directory open; re-run after closing tomat"
+  # Best-effort: drop the now-empty channel dir (~/.tomat/<channel>) left behind
+  # once both core and client data are gone. rmdir only succeeds when empty, so a
+  # client still installed on this channel keeps it (the shared models dir lives
+  # under ~/.tomat, not the channel dir, so it is never affected).
+  rmdir "$(dirname "$HOME_DIR")" 2>/dev/null || true
   ui_action_done "$IDX_REMOVE" "(removed)"
 fi
 

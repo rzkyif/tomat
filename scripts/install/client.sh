@@ -424,9 +424,13 @@ else
   esac
 fi
 MANIFEST_URL="$STORAGE/$MANIFEST_DIR/client.json"
-# Channel-namespaced install targets (match build-client.ts productName).
-APP_DEST="/Applications/tomat$CHANNEL_SUFFIX.app"        # macOS
-APPIMAGE_NAME="tomat-client$CHANNEL_SUFFIX"              # linux
+# Channel-namespaced install targets. The macOS bundle installs under the
+# friendly DISPLAY_NAME (e.g. "tomat latest.app") for a readable /Applications
+# entry; the install step copies the extracted app to this path regardless of
+# its internal productName basename ("tomat-<channel>.app"), so the dash never
+# reaches what the user sees. Linux keeps the dash form for the AppImage.
+APP_DEST="/Applications/$DISPLAY_NAME.app"              # macOS (e.g. "tomat latest.app")
+APPIMAGE_NAME="tomat-client$CHANNEL_SUFFIX"             # linux
 
 # --- prerequisites (pre-UI; if these fail we can't even draw the UI) ------
 
@@ -790,6 +794,16 @@ if [ "$uname_os" = "Darwin" ]; then
     # untracked.
     rm -rf "$EXTRACT_DIR" 2>/dev/null || true
     rm -f "$TARBALL" 2>/dev/null || true
+
+    # Give the bundle the friendly display name. The built bundle's CFBundleName
+    # is the productName basename ("tomat-<channel>"), which is what Finder's
+    # "Open With" / app picker shows; overriding CFBundleDisplayName here makes
+    # every user-facing surface read DISPLAY_NAME (e.g. "tomat latest") instead
+    # of the dashed form, matching the "tomat latest.app" filename.
+    PLIST_INFO="$APP_DEST/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $DISPLAY_NAME" "$PLIST_INFO" 2>/dev/null \
+      || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $DISPLAY_NAME" "$PLIST_INFO" 2>/dev/null \
+      || true
 
     # Pretty file size for the detail.
     APP_BYTES="$(du -sk "$APP_DEST" 2>/dev/null | awk '{print $1 * 1024}')"

@@ -15,6 +15,12 @@ import { ttsState } from "./tts.svelte";
 
 const log = getLogger("vad");
 
+// Minimum gap between enable() retries after a failed init, so a repeating
+// trigger (a held push-to-talk key, a component remount) can't call enable()
+// several times a second - each retry would re-run getUserMedia and log the
+// same failure (e.g. a missing mic permission), flooding the log.
+const INIT_RETRY_COOLDOWN_MS = 3000;
+
 class VadManager {
   enabled = $state(false);
   listening = $state(false);
@@ -32,6 +38,9 @@ class VadManager {
   // The Rust side is the single source of truth (via saved_volume); this
   // flag just lets us avoid the IPC round-trip when no change was made.
   private volumeRestorePending = false;
+  // Timestamp of the last failed enable(); gates the retry cooldown above. 0
+  // means "no recent failure". Cleared on a successful enable().
+  private initFailedAt = 0;
 
   /** Wire up the window-visibility listener and register the speech handler.
    *  Safe to call multiple times - re-attaching replaces the previous hook. */
@@ -151,6 +160,11 @@ class VadManager {
   }
 
   private async enable(): Promise<void> {
+    // Throttle re-attempts after a recent failure so a repeating caller can't
+    // hammer getUserMedia and flood the log (see INIT_RETRY_COOLDOWN_MS).
+    if (this.initFailedAt && Date.now() - this.initFailedAt < INIT_RETRY_COOLDOWN_MS) {
+      return;
+    }
     const token = ++this.enableToken;
     this.loading = true;
     // Turning on voice input means the user wants to speak, not listen -
@@ -188,6 +202,7 @@ class VadManager {
       this.instance = instance;
       this.instance.start();
       this.enabled = true;
+      this.initFailedAt = 0;
       playBeep("on");
       if (settingsState.currentSettings["stt.activation"] === "sticky") {
         await settingsState.updateSetting("stt.vadPersistedState", true);
@@ -206,6 +221,7 @@ class VadManager {
       }
     } catch (err) {
       log.error("Failed to initialize:", err);
+      this.initFailedAt = Date.now();
       this.enabled = false;
     } finally {
       this.loading = false;

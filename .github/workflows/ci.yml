@@ -22,7 +22,7 @@ jobs:
   deno:
     name: "TypeScript checks (linux)"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: denoland/setup-deno@v2
@@ -67,12 +67,33 @@ jobs:
       # tripwire for deno version bumps.
       - run: cargo build -p tomat-core-ptyhost
 
-      # In-source TS tests via `deno task test:js` (deno + vitest one-shot). The
-      # cargo test suite runs in the `rs` matrix. E2E (WebdriverIO + tauri-driver
-      # under tests/e2e/) is intentionally not run in CI. See tests/e2e/README.md.
-      - run: deno task test:js
+      # In-source TS tests, split one step per package so a hang localizes to a
+      # single step in the log: the aggregate `deno task test:js` fans out through
+      # scripts/pkg.ts, which buffers each package's output until it completes and
+      # so hides which package stalled. Each step carries its own short timeout so
+      # a hang fails fast on the offending package instead of burning the whole
+      # job budget. The cargo test suite runs in the `rs` matrix; E2E (WebdriverIO
+      # + tauri-driver under tests/e2e/) is not run in CI (see tests/e2e/README.md).
+      - name: "test:js (shared)"
+        run: deno task --cwd packages/tomat-shared test:js
+        timeout-minutes: 3
+      # TOMAT_REQUIRE_PTYHOST makes the prompt-live-probe (the deno-bump drift
+      # tripwire) fail rather than skip; it lives in core and uses the binary built
+      # above.
+      - name: "test:js (core)"
+        run: deno task --cwd packages/tomat-core test:js
+        timeout-minutes: 3
         env:
           TOMAT_REQUIRE_PTYHOST: "1"
+      - name: "test:js (client)"
+        run: deno task --cwd packages/tomat-client test:js
+        timeout-minutes: 3
+      - name: "test:js (extension-builtin)"
+        run: deno task --cwd packages/tomat-extension-builtin test:js
+        timeout-minutes: 3
+      - name: "test:js (extension-samples)"
+        run: deno task --cwd packages/tomat-extension-samples test:js
+        timeout-minutes: 3
 
   # Rust pipeline: clippy (the single Rust compile-check - `--all-targets` is a
   # superset of cargo check, so check is never run separately) plus the cargo test
@@ -172,3 +193,31 @@ jobs:
           cargo check --locked \
             --manifest-path packages/tomat-client/src/tauri/Cargo.toml \
             --target aarch64-linux-android
+
+  # iOS cross-compile check. Same rationale as the android job: the shell's mobile
+  # cfg (#[cfg(mobile)] / target_os = "ios") is only exercised on an Apple target,
+  # so compile it for the device ABI here. Needs a macOS runner (xcodebuild is
+  # preinstalled); no signing, since this is a compile-only check. Dormant until
+  # the IOS_ENABLED repo variable is set (with the Apple account), so it consumes
+  # no macOS runner minutes and cannot block PRs before iOS work is active.
+  ios:
+    name: "iOS cross-compile check"
+    if: ${{ vars.IOS_ENABLED == 'true' }}
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/tomat-client/src/tauri
+          key: ios
+          cache-all-crates: true
+      - name: iOS cargo check (aarch64-apple-ios)
+        run: |
+          cargo check --locked \
+            --manifest-path packages/tomat-client/src/tauri/Cargo.toml \
+            --target aarch64-apple-ios

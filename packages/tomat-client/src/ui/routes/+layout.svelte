@@ -5,7 +5,12 @@
   import "../app.css";
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
-  import { installPlatform, isAndroidPlatform, isMobilePlatform } from "$lib/platform/select";
+  import {
+    installPlatform,
+    isAndroidPlatform,
+    isIosPlatform,
+    isMobilePlatform,
+  } from "$lib/platform/select";
   import { connectionState } from "$stores/connection.svelte";
   import { coreStatusState } from "$stores/core-status.svelte";
   import { makeUiContext, setUiContext } from "@tomat/shared/ui/context";
@@ -66,10 +71,37 @@
     // Backend core status (core.status frames) feeds the CoreBar alongside the
     // transport state above; same persistent-subscription rationale.
     coreStatusState.attach();
-    // The mobile soft-keyboard / safe-area insets are injected natively as CSS
-    // variables (see the Android MainActivity); the shell consumes them directly,
-    // so there is nothing to wire up here.
+    // Android injects the soft-keyboard / safe-area insets natively as CSS
+    // variables (see the Android MainActivity). iOS has no such native layer, so
+    // the shell reads the safe area from CSS env() (the .platform-ios class in
+    // app.css) and derives --keyboard-inset from the visual viewport here.
+    if (isIosPlatform()) return installIosInsets();
   });
+
+  // Set --keyboard-inset from the visual viewport on iOS: the layout viewport
+  // stays full-size (interactive-widget=overlays-content, see app.html) while the
+  // visual viewport shrinks by the keyboard's height, so the difference is the
+  // inset the composer lifts by. The safe-area insets come from CSS env() and
+  // need no JS. Returns a teardown for onMount.
+  function installIosInsets(): () => void {
+    const root = document.documentElement;
+    root.classList.add("platform-ios");
+    const vv = globalThis.visualViewport;
+    if (!vv) return () => root.classList.remove("platform-ios");
+    const update = (): void => {
+      const inset = Math.max(0, globalThis.innerHeight - vv.height - vv.offsetTop);
+      root.style.setProperty("--keyboard-inset", `${inset}px`);
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    update();
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      root.style.removeProperty("--keyboard-inset");
+      root.classList.remove("platform-ios");
+    };
+  }
 </script>
 
 <slot />

@@ -216,9 +216,10 @@
   <section class="flex flex-col">
     <!-- Group header: sticky at the very top (z above section headers at top-7). -->
     <div class="sticky top-0 z-20">
-      <!-- The pl-5 column applies only without an inline back button (Android):
-           an iOS back button is wider than the gutter, so that shell keeps the
-           leading-button layout (a future iOS pass owns its own alignment). -->
+      <!-- The pl-5 column aligns the group label with the fields' gutter only
+           when there is no inline back button (Android, where the system back
+           replaces it). When a back button is present (iOS and desktop mobile
+           nav) it takes the leading slot and owns the alignment instead. -->
       <SectionHeader label={group.name} level="group" class={stacked && !onBack ? "pl-5" : ""}>
         {#snippet leading()}
           {#if onBack}

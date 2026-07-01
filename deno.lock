@@ -7592,6 +7592,7 @@
       "packages/tomat-shared": {
         "dependencies": [
           "jsr:@std/assert@1",
+          "npm:@iconify/json@^2.2.483",
           "npm:@noble/curves@^2.2.0",
           "npm:@noble/hashes@^2.2.0",
           "npm:@unocss/extractor-svelte@^66.7.0",

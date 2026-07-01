@@ -409,10 +409,18 @@ case "$TOMAT_CHANNEL" in
 esac
 if [ "$TOMAT_CHANNEL" = "stable" ]; then
   CHANNEL_SUFFIX=""
+  DISPLAY_NAME="tomat"
 else
   CHANNEL_SUFFIX="-$TOMAT_CHANNEL"
+  case "$TOMAT_CHANNEL" in
+    latest) DISPLAY_NAME="tomat latest" ;;
+    dev) DISPLAY_NAME="tomat dev" ;;
+  esac
 fi
-APP_DEST="/Applications/tomat$CHANNEL_SUFFIX.app"
+# The macOS bundle installs under the friendly DISPLAY_NAME (e.g.
+# "tomat latest.app"); CHANNEL_SUFFIX (dash form) still names the keychain
+# service + the Linux AppImage, which are not the user-facing app icon.
+APP_DEST="/Applications/$DISPLAY_NAME.app"
 APPIMAGE_NAME="tomat-client$CHANNEL_SUFFIX"
 
 uname_os="$(uname -s 2>/dev/null || echo unknown)"
@@ -453,10 +461,10 @@ fi
 # --- action 1: remove the app --------------------------------------------
 
 if [ "$uname_os" = "Darwin" ]; then
-  # Case-insensitive lookup of this channel's bundle (tomat.app /
-  # tomat-latest.app, matching the Tauri productName). Older installs may have
-  # used a capitalized form, which -iname still matches.
-  FOUND_APP="$(find /Applications -maxdepth 1 -iname "tomat$CHANNEL_SUFFIX.app" -print -quit 2>/dev/null || true)"
+  # Case-insensitive lookup of this channel's bundle by its friendly install
+  # name (tomat.app / "tomat latest.app"), matching client.sh's APP_DEST.
+  # -iname also matches an older capitalized form.
+  FOUND_APP="$(find /Applications -maxdepth 1 -iname "$DISPLAY_NAME.app" -print -quit 2>/dev/null || true)"
 
   if [ -z "$FOUND_APP" ]; then
     ui_action_skip "$IDX_REMOVE_APP" "(not installed)"
@@ -544,6 +552,11 @@ if [ "$IDX_PURGE" != "-1" ]; then
         "" \
         "quit tomat and re-run"
     fi
+    # Best-effort: drop the now-empty channel dir (~/.tomat/<channel>) once both
+    # client and core data are gone. rmdir only succeeds when empty, so a core
+    # still installed on this channel keeps it (the shared models dir lives under
+    # ~/.tomat, not the channel dir, so it is never affected).
+    rmdir "$HOME/.tomat/$TOMAT_CHANNEL" 2>/dev/null || true
     ui_action_done "$IDX_PURGE" "(removed)"
   fi
 fi

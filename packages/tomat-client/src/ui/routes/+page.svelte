@@ -296,10 +296,11 @@
         unlistenMonitor = unlisten;
       });
 
-    // Android hardware / gesture back: feed every press to the back-handler
-    // registry (state/back.svelte.ts), which resolves the priority chain
-    // (overlay -> wizard -> non-chat mode -> chat-root double-back-to-exit).
-    // Inert on desktop (the stream never fires).
+    // Mobile back: feed every press to the back-handler registry
+    // (state/back.svelte.ts), which resolves the priority chain (overlay ->
+    // wizard -> non-chat mode -> chat-root double-back-to-exit). The source is
+    // the Android hardware/gesture back or an iOS left-edge swipe; inert on
+    // desktop (the stream never fires).
     platform()
       .backButton.subscribe(() => backState.back())
       .then((unlisten) => {

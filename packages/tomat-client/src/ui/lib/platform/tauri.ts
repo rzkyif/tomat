@@ -103,6 +103,7 @@ const impl: Platform = {
     // registry's back() is only reached via this stream, so exit is unreachable.
     subscribe: async () => () => {},
     exit: () => Promise.resolve(),
+    canExit: () => false,
   },
   autostart: {
     isEnabled: () => autostartIsEnabled(),

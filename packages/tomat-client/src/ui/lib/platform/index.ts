@@ -206,11 +206,17 @@ export interface Platform {
   // does. `exit` leaves the app, the final step of the chat-root
   // double-back-to-exit chain.
   backButton: {
-    /** Fire `cb` on every Android system back press. Returns a detach. Inert
-     *  (never fires) on desktop. */
+    /** Fire `cb` on every mobile back gesture (Android's hardware/system back or
+     *  an iOS left-edge swipe). Returns a detach. Inert (never fires) on desktop. */
     subscribe(cb: () => void): Promise<() => void>;
-    /** Leave the app (background / quit). No-op on desktop. */
+    /** Leave the app (background / quit). No-op on desktop and iOS (Apple forbids
+     *  a programmatic exit); Android backgrounds the task. */
     exit(): Promise<void>;
+    /** Whether a back gesture at the app root should leave the app. True on
+     *  Android; false on desktop (the stream never fires) and iOS (the OS home
+     *  gesture owns leaving, so a root back is inert instead of a dead double-tap
+     *  exit hint). */
+    canExit(): boolean;
   };
   // OS login entry ("start tomat when I log in").
   autostart: {

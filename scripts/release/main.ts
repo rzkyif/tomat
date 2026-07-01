@@ -40,6 +40,8 @@ import { extensionItem } from "./extension.ts";
 import { catalogItem } from "./catalog.ts";
 import { clientItem } from "./client.ts";
 import { androidItem } from "./android.ts";
+import { iosItem } from "./ios.ts";
+import { appleReleaseConfigured } from "./apple-toolchain.ts";
 import { scriptsItem } from "./install-scripts.ts";
 import { schemasItem } from "./schemas.ts";
 
@@ -52,6 +54,7 @@ const ITEMS: ReleaseItem[] = [
   catalogItem,
   clientItem,
   androidItem,
+  iosItem,
   scriptsItem,
   schemasItem,
 ];
@@ -179,6 +182,14 @@ async function main(): Promise<void> {
     }
     if (it.id === "android" && !env.androidKeystoreB64) {
       info(colors.yellow(`Android keystore not set in .env; skipping the android APK this run.`));
+      return false;
+    }
+    if (it.id === "ios" && !appleReleaseConfigured(env)) {
+      info(
+        colors.yellow(
+          `Apple signing / App Store Connect not configured in .env; skipping the iOS client this run.`,
+        ),
+      );
       return false;
     }
     return true;

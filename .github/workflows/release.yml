@@ -79,7 +79,13 @@ jobs:
       matrix:
         include:
           - { id: macos-x64, os: macos-13 }
-          - { id: macos-arm64, os: macos-14 }
+          # The macOS arm64 runner additionally builds + uploads the iOS .ipa
+          # (App Store Connect), the way the Linux runner additionally builds the
+          # Android APK: additive on an existing runner so the host core + desktop
+          # client are not built twice. iOS ships through the App Store, so it
+          # uploads itself rather than staging for the publish coordinator. Inert
+          # until the Apple account + APPLE_* secrets exist.
+          - { id: macos-arm64, os: macos-14, ios: true }
           - { id: windows-x64, os: windows-latest }
           - { id: windows-arm64, os: windows-11-arm }
           - { id: linux-x64, os: ubuntu-latest, android: true }
@@ -100,9 +106,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.96.0
-          # Android ABIs only on the Linux runner; the desktop runners build their
-          # host triple natively (no cross targets needed).
-          targets: ${{ matrix.android && 'aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android' || '' }}
+          # Android ABIs only on the Linux runner and iOS ABIs only on the macOS
+          # arm64 runner; the desktop runners build their host triple natively (no
+          # cross targets needed). iOS stays dormant until the IOS_ENABLED repo
+          # variable is set (alongside the Apple account + secrets), so nothing
+          # iOS runs in CI before then.
+          targets: ${{ matrix.android && 'aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android' || (matrix.ios && vars.IOS_ENABLED == 'true') && 'aarch64-apple-ios,aarch64-apple-ios-sim' || '' }}
 
       # JDK for the Gradle/Tauri Android build (Linux runner only).
       - uses: actions/setup-java@v4
@@ -161,6 +170,15 @@ jobs:
           TOMAT_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.TOMAT_ANDROID_KEYSTORE_PASSWORD }}
           TOMAT_ANDROID_KEY_ALIAS: ${{ secrets.TOMAT_ANDROID_KEY_ALIAS }}
           TOMAT_ANDROID_KEY_PASSWORD: ${{ secrets.TOMAT_ANDROID_KEY_PASSWORD }}
+          # Apple signing + App Store Connect (macOS client signing and the iOS
+          # .ipa build/upload). Empty until the account exists, so both stay inert.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
         run: |
           # NDK for the Tauri Android build (Linux runner only). The runner sets
           # ANDROID_NDK_LATEST_HOME in its shell env; surface it under the names
@@ -171,7 +189,8 @@ jobs:
           fi
           deno task release:ci-build \
             --channel=${{ steps.ch.outputs.channel }} \
-            ${{ matrix.android && '--android' || '' }}
+            ${{ matrix.android && '--android' || '' }} \
+            ${{ (matrix.ios && vars.IOS_ENABLED == 'true') && '--ios' || '' }}
 
       - uses: actions/upload-artifact@v4
         with:
