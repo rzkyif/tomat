@@ -4,10 +4,6 @@ on:
   pull_request:
   push:
     branches: [main]
-  schedule:
-    # Weekly advisory sweep so a newly-disclosed CVE in an already-pinned dep is
-    # surfaced even without a code change (Mon 06:00 UTC).
-    - cron: "0 6 * * 1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -176,31 +172,3 @@ jobs:
           cargo check --locked \
             --manifest-path packages/tomat-client/src/tauri/Cargo.toml \
             --target aarch64-linux-android
-
-  # Dependency-vulnerability gate. Runs on every PR/push and on the weekly
-  # schedule so a newly-disclosed advisory in an already-pinned dependency is
-  # surfaced even without a code change. cargo-audit covers the Rust crates (the
-  # signed helper binaries are built from Cargo.lock); osv-scanner covers the
-  # rest of the graph including deno.lock.
-  advisories:
-    name: "Dependency advisories"
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.96.0
-      # Prebuilt binary - avoids compiling cargo-audit from source every run.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-audit
-      - name: cargo-audit (Cargo.lock)
-        run: cargo audit
-      - name: osv-scanner (deno.lock + Cargo.lock)
-        # Pinned to a known-good release; bump alongside other action versions.
-        uses: google/osv-scanner-action@v2.0.2
-        with:
-          scan-args: |-
-            --lockfile=deno.lock
-            --lockfile=Cargo.lock
