@@ -137,13 +137,15 @@ async function buildClient(
   if (triple) args.push(`--target=${triple}`);
   if (bundles?.length) args.push(`--bundles=${bundles.join(",")}`);
   // CI passes every APPLE_* secret through the build step, so the ones that do
-  // not exist arrive as empty strings in the inherited env. Tauri treats a
-  // present-but-empty APPLE_CERTIFICATE as "sign me" and fails the import, so
-  // drop the blanks here; appleSigningEnv then re-adds only the ones actually set
-  // (keeping the inert-by-default ad-hoc signing when no Apple creds exist).
-  const childEnv = Deno.env.toObject();
-  for (const key of Object.keys(childEnv)) {
-    if (key.startsWith("APPLE_") && childEnv[key] === "") delete childEnv[key];
+  // not exist arrive as empty strings. Tauri treats a present-but-empty
+  // APPLE_CERTIFICATE as "sign me" and fails `security import`. Deno.Command
+  // inherits the parent env (clearEnv defaults false), so dropping the key from
+  // the env object below is not enough - the blank still leaks in from this
+  // process. Delete the blanks from the process env itself so no descendant
+  // (build-client.ts, then Tauri) inherits them; appleSigningEnv re-adds only the
+  // ones actually set, keeping the inert-by-default ad-hoc signing.
+  for (const [key, value] of Object.entries(Deno.env.toObject())) {
+    if (key.startsWith("APPLE_") && value === "") Deno.env.delete(key);
   }
   const cmd = new Deno.Command("deno", {
     args,
@@ -151,7 +153,7 @@ async function buildClient(
     stdout: "inherit",
     stderr: "inherit",
     env: {
-      ...childEnv,
+      ...Deno.env.toObject(),
       TAURI_SIGNING_PRIVATE_KEY: env.tauriUpdaterPrivateKey,
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: env.tauriUpdaterPassword,
       ...appleSigningEnv(env, triple ?? detectHostTriple()),
