@@ -51,13 +51,19 @@ const bundles = (args.bundles ?? "").trim();
 // the install skips it (a harmless "ignored build script" warning) and proceeds.
 // Host (macOS/Linux) builds are untouched; the guest's deno.json is re-synced
 // every run, so this never persists.
+// Strip line-based, not via JSON.parse: deno.json is JSONC and the CI pre-strip
+// (release.yml drops workerd before the first deno command) can leave a trailing
+// comma that a strict JSON.parse rejects. deno itself tolerates it, so filtering
+// the workerd line and writing the text back verbatim is enough (and idempotent
+// when the pre-strip already removed it).
 if (Deno.build.os === "windows") {
   const confPath = join(ROOT, "deno.json");
-  const conf = JSON.parse(await Deno.readTextFile(confPath)) as { allowScripts?: string[] };
-  if (Array.isArray(conf.allowScripts)) {
-    conf.allowScripts = conf.allowScripts.filter((s) => !s.includes("workerd"));
-    await Deno.writeTextFile(confPath, JSON.stringify(conf, null, 2) + "\n");
-  }
+  const conf = await Deno.readTextFile(confPath);
+  const stripped = conf
+    .split("\n")
+    .filter((l) => !l.includes("npm:workerd@"))
+    .join("\n");
+  if (stripped !== conf) await Deno.writeTextFile(confPath, stripped);
 }
 
 // Non-stable channels get a distinct app identity so they install alongside
