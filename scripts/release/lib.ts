@@ -9,7 +9,6 @@ import { encodeBase64 } from "@std/encoding/base64";
 import { encodeHex } from "@std/encoding/hex";
 import { copy } from "@std/fs/copy";
 import { ensureDir } from "@std/fs/ensure-dir";
-import { walk } from "@std/fs/walk";
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import { load as loadDotenv } from "@std/dotenv";
 import * as ed from "@noble/ed25519";
@@ -639,8 +638,30 @@ export interface HashInput {
   exclude?: (relPath: string) => boolean;
 }
 
-/** Stable sha256 over the sorted (repo-relative-path, file-sha256) pairs of
- *  every file reachable from `inputs`. Missing paths are skipped. */
+/** Tracked files under a repo directory, absolute paths. Uses `git ls-files` so
+ *  the hash sees only committed source, never build artifacts (gen/android,
+ *  .svelte-kit, dist, staged assets, ...). A filesystem walk would fold those in,
+ *  and since they exist after a local build but not in a fresh CI checkout, the
+ *  two would compute different hashes and change detection would never converge.
+ *  Content is read from the working tree, so a modified tracked file still counts;
+ *  only untracked/ignored files are dropped. */
+async function trackedFilesUnder(absDir: string): Promise<string[]> {
+  const out = await new Deno.Command("git", {
+    args: ["ls-files", "-z", "--", rel(absDir)],
+    cwd: REPO_ROOT,
+    stdout: "piped",
+    stderr: "null",
+  }).output();
+  if (!out.success) return [];
+  return new TextDecoder()
+    .decode(out.stdout)
+    .split("\0")
+    .filter(Boolean)
+    .map((p) => join(REPO_ROOT, p));
+}
+
+/** Stable sha256 over the sorted (repo-relative-path, file-sha256) pairs of the
+ *  tracked source reachable from `inputs`. Missing paths are skipped. */
 export async function hashPaths(inputs: HashInput[]): Promise<string> {
   const entries: { path: string; sha: string }[] = [];
   for (const input of inputs) {
@@ -651,10 +672,11 @@ export async function hashPaths(inputs: HashInput[]): Promise<string> {
       if (input.exclude?.(r)) continue;
       entries.push({ path: r, sha: (await sha256File(input.path)).sha256 });
     } else if (stat.isDirectory) {
-      for await (const e of walk(input.path, { includeDirs: false })) {
-        const r = rel(e.path);
+      for (const abs of await trackedFilesUnder(input.path)) {
+        if (!(await exists(abs))) continue; // tracked-but-deleted in the working tree
+        const r = rel(abs);
         if (input.exclude?.(r)) continue;
-        entries.push({ path: r, sha: (await sha256File(e.path)).sha256 });
+        entries.push({ path: r, sha: (await sha256File(abs)).sha256 });
       }
     }
   }
