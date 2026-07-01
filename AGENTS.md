@@ -105,6 +105,10 @@ through `npm:` specifiers from `deno task`.
   rule. Identifiers in code follow `camelCase`/`PascalCase` regardless of
   filename. Never rename a setting `id` string because a file was renamed: those
   strings are persisted on disk and on the wire.
+- **Commit messages** are a single lowercase line, `type: summary`, with NO
+  scope: write `fix: force-local tar on windows`, never `fix(release): ...`. The
+  types in use are `feat`, `fix`, and `bump`. No body, no scope parentheses, no
+  trailers.
 - **No em dashes.** `deno task lint` rejects the em dash (U+2014) across the
   whole repo (code, comments, strings, Markdown, and every other tracked file).
   When flagged, reword so the sentence reads naturally rather than swapping in
