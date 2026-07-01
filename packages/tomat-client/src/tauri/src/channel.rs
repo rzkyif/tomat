@@ -9,9 +9,11 @@
 //   latest   → ~/.tomat/latest/{core,client}      keychain "tomat-client-latest"
 //
 // Resolution order: the runtime TOMAT_CHANNEL env var (set by
-// `deno task dev`) wins, then a value baked in at build time via
-// `option_env!` (how a shipped latest bundle pins its channel), else
-// "stable". Unknown values fall back to "stable" rather than crash the UI.
+// `deno task dev` on desktop) wins, then the value baked in at build time via
+// `option_env!` (build.rs bakes it from the `channel` file each orchestrator
+// writes, which is how a shipped bundle - desktop OR mobile - pins its
+// channel), else "stable". Unknown values fall back to "stable" rather than
+// crash the UI.
 //
 // Models are deliberately NOT channel-scoped on the core side; they live at
 // the shared ~/.tomat/models. The client never touches the models dir, so

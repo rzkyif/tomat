@@ -772,10 +772,15 @@ async function provisionSpeechSidecar(): Promise<void> {
   try {
     let staged = false;
     try {
-      await Deno.lstat(dest);
+      // Deno.stat follows the symlink, so a dangling link (its target removed by
+      // a `cargo clean` or an interleaved mobile cross-build) reads as NOT staged
+      // and forces a rebuild - lstat would see the dead link and wrongly skip it,
+      // leaving the dev core with a missing binary the speech manifest can't
+      // resolve (STT/TTS then show a stuck "tomat-core-speech" pending download).
+      await Deno.stat(dest);
       staged = true;
     } catch {
-      /* not staged yet */
+      /* not staged (or a dangling symlink) */
     }
     if (!staged) {
       const out = await new Deno.Command("cargo", {
@@ -790,6 +795,9 @@ async function provisionSpeechSidecar(): Promise<void> {
       }
       await ensureDir(binDir);
       const built = join(ROOT, "target", "debug", `tomat-core-speech${exe}`);
+      // Clear a stale (possibly dangling) link first: symlink/copy fail if dest
+      // already exists, which it does when we're re-staging over a dead link.
+      await Deno.remove(dest).catch(() => {});
       if (Deno.build.os === "windows") await Deno.copyFile(built, dest);
       else await Deno.symlink(built, dest);
       devLog("built + linked tomat-core-speech sidecar into the dev bin dir");
@@ -882,6 +890,13 @@ if (!CLIENT_ONLY) {
 await reclaimVitePort();
 await clearStaleViteCache();
 
+// Bake the dev channel for channel.rs (via the Tauri crate's build.rs). Desktop
+// picks up TOMAT_CHANNEL at runtime, but a mobile build runs cargo inside
+// Xcode's script phase / the Gradle daemon, neither of which forwards the env to
+// the compile - so the on-disk `channel` file is the deterministic source. Write
+// it before the client (and its cargo build) spawns.
+await Deno.writeTextFile(join(ROOT, "packages/tomat-client/src/tauri/channel"), "dev");
+
 // Mint the pairing code before spawning the client so it can be forwarded as a
 // launch argument. The core boots in parallel during the health poll inside.
 // Skipped under --client-only (no core here to mint against).
@@ -889,6 +904,51 @@ const pairingCode = CLIENT_ONLY ? null : await mintPairingCode(adminToken);
 
 // --reset: clear the client's paired-cores state so it boots into onboarding.
 if (RESET) await resetClientSettings();
+
+// Resolve a concrete iOS simulator NAME for `tauri ios dev` so it never drops
+// into its interactive device picker, which spins forever under this script's
+// piped (non-TTY) stdin ("...you need to pick a device"). Tauri's [DEVICE]
+// positional matches by device name (not UDID). Prefers TAURI_IOS_DEVICE, then
+// any already-booted simulator (the developer's current choice), then boots the
+// first available iPhone and surfaces Simulator.app. Returns null only when
+// simctl finds nothing. (Android needs no equivalent: `tauri android dev`
+// auto-targets the running emulator.)
+async function resolveIosSimulator(): Promise<string | null> {
+  const override = Deno.env.get("TAURI_IOS_DEVICE");
+  if (override) return override;
+
+  type Sim = { udid: string; name: string; state: string };
+  const simctlDevices = async (filter: string): Promise<Sim[]> => {
+    try {
+      const out = await new Deno.Command("xcrun", {
+        args: ["simctl", "list", "devices", filter, "-j"],
+        stdout: "piped",
+        stderr: "null",
+      }).output();
+      const byRuntime = JSON.parse(new TextDecoder().decode(out.stdout)).devices ?? {};
+      return Object.values(byRuntime).flat() as Sim[];
+    } catch {
+      return []; // simctl unavailable (not a mac / no Xcode)
+    }
+  };
+
+  const booted = (await simctlDevices("booted")).find((d) => d.state === "Booted");
+  if (booted) return booted.name;
+
+  const iphone = (await simctlDevices("available")).find((d) => d.name.includes("iPhone"));
+  if (!iphone) return null;
+  await new Deno.Command("xcrun", {
+    args: ["simctl", "boot", iphone.udid],
+    stdout: "null",
+    stderr: "null",
+  })
+    .output()
+    .catch(() => {});
+  await new Deno.Command("open", { args: ["-a", "Simulator"], stdout: "null", stderr: "null" })
+    .output()
+    .catch(() => {});
+  return iphone.name;
+}
 
 // The onboarding prefill reaches the client differently per platform. Desktop
 // forwards it as launch argv (read by the read_launch_prefill command); mobile
@@ -898,6 +958,13 @@ const clientPrefillEnv: Record<string, string> = {};
 const clientCmd = ["deno", "run", "-A", "npm:@tauri-apps/cli@^2"];
 if (MOBILE) {
   clientCmd.push(ANDROID ? "android" : "ios", "dev");
+  // Pass a concrete simulator so `tauri ios dev` stays non-interactive (see
+  // resolveIosSimulator); without it the device picker spins under piped stdin.
+  if (IOS) {
+    const device = await resolveIosSimulator();
+    if (device) clientCmd.push(device);
+    else devLog("no iOS simulator found; boot one in Xcode or set TAURI_IOS_DEVICE");
+  }
   // --client-only has no dev core here to point at, so it skips the address
   // prefill and lets mobile.ts derive it from the dev-server host at runtime.
   if (!CLIENT_ONLY) {

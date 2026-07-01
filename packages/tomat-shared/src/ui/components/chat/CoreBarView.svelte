@@ -71,7 +71,6 @@
 
 <script lang="ts">
   import Bubble from "../primitives/Bubble.svelte";
-  import ButtonGroup from "../primitives/ButtonGroup.svelte";
   import Expand from "../primitives/Expand.svelte";
   import ErrorDetailView from "./messages/ErrorDetailView.svelte";
   import FlushSelect from "../primitives/FlushSelect.svelte";
@@ -117,7 +116,6 @@
     expanded = false,
     onToggleExpand = undefined,
     onSwitch,
-    onManageCores = undefined,
     onSettings = undefined,
     baseColorOverride = null,
   }: {
@@ -137,7 +135,6 @@
     /** Toggle the detail card; only wired when there is detail to show. */
     onToggleExpand?: () => void;
     onSwitch?: (id: string) => void;
-    onManageCores?: () => void;
     /** Mobile only: opens Settings from the top app bar (the gear is dropped
      *  from the composer there). Omitted on desktop. */
     onSettings?: () => void;
@@ -202,28 +199,41 @@
     extraClass="flex flex-col gap-2"
   >
     {#if mobile}
-      <!-- Mobile top app bar: status + switcher packed to the left, the Settings
-           gear pinned to the right edge (ml-auto). -->
-      <div class="flex items-center gap-2 w-full">
-        {@render headerRegions()}
-        {#if onSettings}
-          <IconButton
-            icon="i-material-symbols-settings-outline-rounded"
-            title="Settings"
-            size="lg"
-            variant="subtle"
-            surface="circle"
-            class="ml-auto shrink-0"
-            onclick={() => onSettings?.()}
-          />
-        {/if}
+      <!-- Mobile top app bar, three screen-anchored regions: the core picker (an
+           icon-button dropdown) at the left edge, the status pill centered across
+           the FULL bar width (equal 1fr side columns, so it stays screen-centered
+           regardless of the side controls' widths), and Settings at the right
+           edge. -->
+      <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 w-full">
+        <div class="flex items-center justify-self-start">
+          {@render corePicker()}
+        </div>
+        <div class="flex items-center justify-self-center min-w-0">
+          {@render statusPill()}
+        </div>
+        <div class="flex items-center justify-self-end">
+          {#if onSettings}
+            <IconButton
+              icon="i-material-symbols-settings-outline-rounded"
+              title="Settings"
+              size="lg"
+              variant="subtle"
+              surface="circle"
+              class="shrink-0"
+              onclick={() => onSettings?.()}
+            />
+          {/if}
+        </div>
       </div>
     {:else}
       <!-- Header row. Collapsed it packs left; expanded the status pill stays left
-           and the switcher + manage button move to the right edge (justify-between
-           over the card's width below). -->
+           and the switcher moves to the right edge (justify-between over the card's
+           width below). -->
       <div class="flex items-center gap-2" class:w-full={open} class:justify-between={open}>
-        {@render headerRegions()}
+        {@render statusPill()}
+        <div class="flex items-center gap-2 min-w-0">
+          {@render corePicker()}
+        </div>
       </div>
     {/if}
 
@@ -252,14 +262,12 @@
   </Bubble>
 </div>
 
-<!-- The status pill + core switcher, shared by the desktop row and the mobile
-     centered app-bar layout. Defined at the top level (not inside <Bubble>) so it
-     is a local snippet, not a snippet prop passed to Bubble. -->
-{#snippet headerRegions()}
-  <!-- Connected-core status. An inset pill (like the SessionBar gauge) so the
-       bar's regions read as solid controls rather than floating text. The tone
-       colors the icon and label by status, at the SessionBar text lightness (the
-       -700 shade). When there is detail it becomes a toggle. -->
+<!-- Connected-core status pill. An inset pill (like the SessionBar gauge) so the
+     bar's regions read as solid controls rather than floating text. The tone
+     colors the icon and label by status, at the SessionBar text lightness (the
+     -700 shade). When there is detail it becomes a toggle. Defined at the top
+     level (not inside <Bubble>) so it is a local snippet, not a snippet prop. -->
+{#snippet statusPill()}
   {#if hasDetail}
     <button
       type="button"
@@ -281,12 +289,27 @@
       {@render pillInner()}
     </span>
   {/if}
+{/snippet}
 
-  <div class="flex items-center gap-2 min-w-0">
-    <!-- Quick core switcher, housed in an inset pill matching the SessionBar
-         title field. The FlushSelect carries the pill styling itself so its
-         transparent <select> overlay covers the whole pill, at the SessionBar
-         text lightness rather than the dim flush tone. -->
+<!-- Quick core switcher. On desktop it is a labelled inset pill (shows the
+     connected core's name, matching the SessionBar title field). On mobile it is
+     an icon-button dropdown at the left edge of the app bar (an icon that opens
+     the same native picker on tap), matching the Settings gear opposite it. -->
+{#snippet corePicker()}
+  {#if mobile}
+    <FlushSelect
+      value={currentCoreId}
+      {options}
+      onchange={(v) => onSwitch?.(v)}
+      ariaLabel="Connected core"
+      title="Switch core"
+      icon="i-material-symbols-hub-outline"
+      iconOnly
+      rounded="rounded-large"
+      textClass="text-default-700"
+      class="p-2 text-xl bg-surface-inset hov:bg-surface-inset-strong"
+    />
+  {:else}
     <FlushSelect
       value={currentCoreId}
       {options}
@@ -297,14 +320,5 @@
       textClass="text-default-700 hov:text-default-900"
       class="h-8 px-3 bg-surface-inset"
     />
-
-    <ButtonGroup size="sm" class="shrink-0">
-      <IconButton
-        icon="i-material-symbols-hub-outline"
-        title="Manage cores"
-        size="sm"
-        onclick={() => onManageCores?.()}
-      />
-    </ButtonGroup>
-  </div>
+  {/if}
 {/snippet}

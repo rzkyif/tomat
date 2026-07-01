@@ -8,10 +8,7 @@
 
   // Which wizard step is showing.
   export type NewCoreWizardStep =
-    | "chooseDestination"
-    | "localConfirm"
-    | "remoteAddress"
-    | "remotePair";
+    "chooseDestination" | "localConfirm" | "remoteAddress" | "remotePair";
 
   // The in-flight pairing/install operation, or null when idle. Drives the
   // primary buttons' spinner + label and disables controls.

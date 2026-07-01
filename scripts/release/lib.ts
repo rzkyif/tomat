@@ -1184,15 +1184,17 @@ export async function runReleasePlan(
   for (const p of succeeded) {
     const prev =
       p.item.scope === "shared" ? cursor.shared[p.item.id] : cursor.channels[channel]?.[p.item.id];
-    // Record the version just published (not the bumped one) so the gate's
-    // local > recorded check passes next time. For the source hash: with a
-    // post-release bump (local), re-hash AFTER the bump so the version-file edit
-    // does not read as a source change on rerun. Under noBump (CI) nothing was
-    // edited, so the as-built hash already on hand is the one to record -
-    // re-pushing the same commit then reads as unchanged (idempotent).
+    // Record what was ACTUALLY released: the published version and its as-built
+    // (pre-bump) source hash. The post-release bump advances the version FILE on
+    // `main` only; the channel branch stays at this released commit, so recording
+    // the pre-bump hash keeps the cursor equal to what the branch points at and a
+    // re-push of the same commit reads as unchanged. Promoting the bump commit to
+    // the channel later then legitimately publishes it (a version bump alone is a
+    // valid release); a source change WITHOUT a bump is still rejected by the
+    // version-bump gate above.
     const state: ItemState = {
       version: p.localVersion,
-      sourceHash: opts.noBump ? p.localHash : await p.item.sourceHash(channel),
+      sourceHash: p.localHash,
     };
     const keys = recordedKeys.get(p.item.id) ?? [];
     if (keys.length > 0) {

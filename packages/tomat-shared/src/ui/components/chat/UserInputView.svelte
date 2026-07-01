@@ -301,7 +301,18 @@
         autoFocus={askUserPrompt.autoFocus}
       />
     {:else}
-      <div class="grid w-fit min-w-0 max-w-[calc(100vw-135px)] overflow-clip">
+      <!-- Width cap: on mobile the composer bubble is already full-width and the
+           action buttons live on their OWN row below, so the textarea/placeholder
+           should fill to the bubble's content edge (max-w-full) - the viewport
+           formula over-reserved ~135px on the right, wrapping a status
+           placeholder ("Pending download, open settings!") a word early with
+           clear space beside it. Desktop keeps the viewport cap so a
+           content-width bubble can't grow the composer past the window. -->
+      <div
+        class="grid w-fit min-w-0 {mobile
+          ? 'max-w-full'
+          : 'max-w-[calc(100vw-135px)]'} overflow-clip"
+      >
         <!-- Hidden span: mirrors the typed text so the grid auto-sizes width and
              height, and doubles as the autocomplete caret-measurement layer. -->
         <span

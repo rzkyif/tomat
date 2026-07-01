@@ -20,30 +20,29 @@
     reportHeight: (h: number) => void;
   } = $props();
 
-  const PROMPT =
-    "Draft my standup from these notes: shipped the import flow yesterday, on the export bug today, no blockers.";
+  const PROMPT = "Make me a grocery list for this week's dinners.";
   const ANSWER =
-    "Here's your standup:\n\nYesterday: shipped the import flow.\nToday: on the export bug.\nBlockers: none.\n\nHeads up: posting now lands mid-evening for the US Pacific team, so you might wait until your afternoon.";
+    "Here's your list:\n\nProduce: spinach, bell peppers, cherry tomatoes.\nPantry: chickpeas, brown rice, olive oil.\nDairy: feta, plain yogurt.\n\nKept it vegetarian and peanut-free, grouped by aisle like you like.";
 
   const DECODE_TOKENS_PER_SEC = 25;
   const ANSWER_SECONDS = ANSWER.length / 4 / DECODE_TOKENS_PER_SEC;
 
   // Two recalled memories: one knowledge fact and one skill, each with its
   // relevance score, exactly as the "Found N relevant memories" bubble lists them.
-  // The draft applies both (the skill's format, the fact's timezone aside) with
-  // no tool call, so the demo shows recall without needing an external action.
+  // The list applies both (the skill's format, the fact's dietary constraint)
+  // with no tool call, so the demo shows recall without needing an external action.
   const MEMORIES = [
     {
       memoryId: "s1",
-      title: "Skill: write a standup update",
+      title: "Skill: how you like lists",
       score: 0.89,
-      summary: "Yesterday / today / blockers, one short line each.",
+      summary: "Group by aisle, keep it short.",
     },
     {
       memoryId: "k1",
-      title: "Team timezone",
+      title: "Your diet",
       score: 0.82,
-      summary: "The team is mostly US Pacific; you're in CET.",
+      summary: "Vegetarian, and no peanuts.",
     },
   ];
 

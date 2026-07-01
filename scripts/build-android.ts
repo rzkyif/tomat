@@ -1,9 +1,11 @@
 // Builds the Tauri client as an Android APK for the requested channel.
 //
 // Channel handling mirrors build-client.ts:
-//   - TOMAT_CHANNEL is set in the build env so `option_env!("TOMAT_CHANNEL")`
-//     in channel.rs bakes the channel into the shipped APK (its runtime default
-//     -> the channel's app-data dir, tomat-client-<channel> secret store).
+//   - The channel is written to the Tauri crate's `channel` file, which build.rs
+//     bakes into the shipped APK via `option_env!("TOMAT_CHANNEL")` in channel.rs
+//     (its runtime default -> the channel's app-data dir, tomat-client-<channel>
+//     secret store). A file rather than the build env because a persistent Gradle
+//     daemon pins whatever channel it first started with.
 //   - For non-stable channels we pass a `--config` override for a distinct
 //     productName (the on-device app label). The distinct applicationId that lets
 //     stable + latest install side by side is applied by gradle via an
@@ -35,6 +37,12 @@ if (!["stable", "dev", "latest"].includes(channel)) {
   console.error(`invalid --channel: ${channel} (expected stable, dev, or latest)`);
   Deno.exit(1);
 }
+
+// Bake the channel for channel.rs (via build.rs). A persistent Gradle daemon
+// pins whatever TOMAT_CHANNEL it first started with, so the ambient env can't be
+// trusted to reach the cargo compile; the on-disk file is the deterministic
+// source (see build.rs).
+await Deno.writeTextFile(join(ROOT, "packages/tomat-client/src/tauri/channel"), channel);
 
 // Non-stable channels get a distinct on-device label so they read as separate
 // apps; the distinct applicationId (for side-by-side install) is added by gradle's

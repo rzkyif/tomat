@@ -27,6 +27,7 @@
     ariaLabel,
     title,
     icon,
+    iconOnly = false,
     disabled = false,
     rounded = "rounded-medium",
     textClass,
@@ -38,6 +39,11 @@
     ariaLabel: string;
     title?: string;
     icon?: string;
+    /** Render as an icon-only control (no selected-value label), so the dropdown
+     *  reads as an icon button that opens the native picker on tap. The `icon` is
+     *  centered and the invisible <select> overlays the whole square; size + fill
+     *  come from `class` (e.g. an IconButton-matching "p-2 text-xl bg-..."). */
+    iconOnly?: boolean;
     disabled?: boolean;
     /** Corner radius utility; override to match a surrounding pill. */
     rounded?: string;
@@ -60,17 +66,31 @@
   const current = $derived(options.find((o) => o.value === value));
 </script>
 
-<div
-  class="tomat-focus-wrap {rounded} relative flex items-center gap-1 min-w-0 text-sm transition-colors {disabled
-    ? 'text-default-400 opacity-50'
-    : resolvedText} {extraClass}"
-  {title}
->
-  {#if icon}
-    <i class="flex shrink-0 text-base {icon}"></i>
-  {/if}
-  <span class="truncate tracking-wide">
-    {current?.display ?? current?.label ?? value}
-  </span>
-  <Select variant="invisible" {value} {options} {onchange} {ariaLabel} {disabled} />
-</div>
+{#if iconOnly}
+  <div
+    class="tomat-focus-wrap {rounded} relative flex items-center justify-center shrink-0 transition-colors {disabled
+      ? 'text-default-400 opacity-50'
+      : resolvedText} {extraClass}"
+    {title}
+  >
+    {#if icon}
+      <i class="flex shrink-0 {icon}"></i>
+    {/if}
+    <Select variant="invisible" {value} {options} {onchange} {ariaLabel} {disabled} />
+  </div>
+{:else}
+  <div
+    class="tomat-focus-wrap {rounded} relative flex items-center gap-1 min-w-0 text-sm transition-colors {disabled
+      ? 'text-default-400 opacity-50'
+      : resolvedText} {extraClass}"
+    {title}
+  >
+    {#if icon}
+      <i class="flex shrink-0 text-base {icon}"></i>
+    {/if}
+    <span class="truncate tracking-wide">
+      {current?.display ?? current?.label ?? value}
+    </span>
+    <Select variant="invisible" {value} {options} {onchange} {ariaLabel} {disabled} />
+  </div>
+{/if}

@@ -47,8 +47,8 @@
   const PHONE_H = 720;
 
   // A prompt sent from the phone triggers a tool on the user's desktop.
-  const PROMPT = "Lock my PC.";
-  const ANSWER = "Locked your desktop. It's secured now.";
+  const PROMPT = "Lock my PC, I'm heading out.";
+  const ANSWER = "Locked your desktop. All secure. See you later.";
   const DECODE_TOKENS_PER_SEC = 25;
   const ANSWER_SECONDS = ANSWER.length / 4 / DECODE_TOKENS_PER_SEC;
   const RESULT = { locked: true };

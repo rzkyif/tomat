@@ -27,26 +27,25 @@
   // answers, then a complex one tomat auto-routes to the stronger secondary
   // model (the `bubble-agent-secondary` answer bubble is the visual tell, the
   // same class the client sets from `modelUsed === "secondary"`).
-  const Q1 = "What's 15% of 240?";
-  const A1 = "36. (15% = 0.15, and 0.15 x 240 = 36.)";
-  const Q2 = "Design an offline-first sync strategy for my notes app and weigh the tradeoffs.";
+  const Q1 = "How far is Kyoto from Tokyo?";
+  const A1 = "About 450 km, roughly 2 hours 15 minutes on the shinkansen.";
+  const Q2 = "Plan a cozy 3-day weekend in Kyoto on a small budget and weigh the tradeoffs.";
   const REASONING2 =
     "This needs multi-step planning and tradeoff analysis, not a one-line fact, so route it to the stronger model.";
   // Markdown, so the stronger model's reply renders with structure (headings,
   // lists, emphasis), both signalling the heavier answer and showcasing the
   // same markdown rendering the client uses.
-  const A2 = `## Recommended approach
+  const A2 = `## A relaxed plan
 
-Use a **local-first store** where every record carries a version:
+Base yourself near **Gion** so most days stay walkable:
 
-- **Plain fields** (title, tags): last-writer-wins merge. Simple, but can drop a concurrent edit.
-- **Note body**: a CRDT, so two offline edits *both* survive the merge.
-
-Sync runs on a background queue with exponential backoff, reconciling on reconnect.
+- **Day 1**: temples in the east, then street food along Pontocho for dinner.
+- **Day 2**: the Arashiyama bamboo grove early, a slow afternoon by the river.
+- **Day 3**: Fushimi Inari at *sunrise* before the crowds, souvenirs on the way out.
 
 ### The tradeoff
 
-LWW is cheap and easy to reason about; CRDTs preserve every edit but cost more in size and complexity. Use each where it earns its keep.`;
+A central stay costs more per night but saves on transit and time; a cheaper room out of town means longer commutes. Spend where your days actually happen.`;
 
   const DECODE_TOKENS_PER_SEC = 25;
   const A1_SECONDS = A1.length / 4 / DECODE_TOKENS_PER_SEC;

@@ -22,12 +22,12 @@
     reportHeight: (h: number) => void;
   } = $props();
 
-  // A tool from a connected GitHub MCP server, matched and called just like a
+  // A tool from a connected calendar MCP server, matched and called just like a
   // built-in tool. The relevant-tools bubble lists what matched; the tool call
   // runs and completes, then the agent replies.
-  const PROMPT = "Open a GitHub issue for the export bug.";
+  const PROMPT = "Add 'dentist' to my calendar next Tuesday at 3.";
   const ANSWER =
-    'Opened issue #482, "Export drops the last row," in acme/app and assigned it to you.';
+    "Added 'Dentist' to your calendar for Tuesday at 3:00 PM and set a 30-minute reminder.";
 
   const DECODE_TOKENS_PER_SEC = 25;
   const ANSWER_SECONDS = ANSWER.length / 4 / DECODE_TOKENS_PER_SEC;
@@ -47,7 +47,7 @@
   let cursorRef: HTMLElement | undefined = $state();
   let columnEl: HTMLElement | undefined = $state();
 
-  const RESULT = { number: 482, url: "github.com/acme/app/issues/482" };
+  const RESULT = { title: "Dentist", start: "Tuesday 3:00 PM", reminder: "30 min" };
 
   // The relevant-tools and tool-call bubbles are small bubbles, so the client
   // renders them in one horizontal message stack (both collapsed). The agent
@@ -173,23 +173,23 @@
                     {neighborRight}
                     phase1={[
                       {
-                        toolId: "github.create_issue",
-                        name: "create_issue",
-                        description: "Open a new issue on a repository.",
+                        toolId: "calendar.create_event",
+                        name: "create_event",
+                        description: "Add an event to your calendar.",
                         score: 0.88,
                       },
                       {
-                        toolId: "github.list_issues",
-                        name: "list_issues",
-                        description: "List issues on a repository.",
+                        toolId: "calendar.list_events",
+                        name: "list_events",
+                        description: "List upcoming events.",
                         score: 0.52,
                       },
                     ]}
                     phase2={[
                       {
-                        toolId: "github.create_issue",
-                        name: "create_issue",
-                        description: "Open a new issue on a repository.",
+                        toolId: "calendar.create_event",
+                        name: "create_event",
+                        description: "Add an event to your calendar.",
                       },
                     ]}
                   />
@@ -197,9 +197,9 @@
                   <ToolCallView
                     {neighborLeft}
                     {neighborRight}
-                    toolName="create_issue"
+                    toolName="create_event"
                     status={toolStatus}
-                    description={toolStatus === "running" ? "Creating issue" : undefined}
+                    description={toolStatus === "running" ? "Adding event" : undefined}
                     progress={toolStatus === "running" ? 0.5 : undefined}
                     result={toolResult}
                   />

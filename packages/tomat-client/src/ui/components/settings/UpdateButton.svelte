@@ -18,9 +18,14 @@
     type UpdateButtonPhase,
   } from "@tomat/shared/ui/components/settings/UpdateButtonView.svelte";
   import { useBlink } from "$composables/use-blink.svelte";
+  import { useUiContext } from "@tomat/shared/ui/context";
   import { getLogger } from "$lib/util/log";
 
   const log = getLogger("update");
+  // Touch has no hover, so the idle button can't reveal "Check for Updates" on
+  // hover the way desktop does; show the actionable label outright instead of the
+  // version string (which the desktop hover swaps in).
+  const mobile = useUiContext().platform === "mobile";
 
   let { collapsed, disabled = false } = $props<{
     collapsed: boolean;
@@ -49,13 +54,13 @@
       case "checking":
         return "Checking…";
       case "available":
-        return hovering ? "Install Updates" : "Updates Available";
+        return hovering || mobile ? "Install Updates" : "Updates Available";
       case "updating":
         return "Updating…";
       case "clientRestartPending":
         return "Restart to Update";
       default:
-        return hovering ? "Check for Updates" : `tomat Client v${clientVersion}`;
+        return hovering || mobile ? "Check for Updates" : `tomat Client v${clientVersion}`;
     }
   });
 

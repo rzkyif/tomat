@@ -50,8 +50,14 @@ regex = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 file-rotate = "0.8"
 
-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+# macOS uses the "legacy keychain" store (available to unsigned/ad-hoc builds);
+# iOS has only the "protected data" store, and the crate hard-requires the
+# `protected` feature there (the `keychain` module is macOS-only).
+[target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["protected"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-native-keyring-store = "1"

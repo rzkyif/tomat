@@ -79,9 +79,16 @@ impl KeychainStore for RealKeychain {
 /// (see `run()`); the dev channel uses the file-backed store instead, so a
 /// failure here is non-fatal and only logged.
 pub fn init_default_store() -> AppResult<()> {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[cfg(target_os = "macos")]
     {
         let store = apple_native_keyring_store::keychain::Store::new()?;
+        keyring_core::set_default_store(store);
+    }
+    #[cfg(target_os = "ios")]
+    {
+        // iOS exposes only the "protected data" keychain (see Cargo.toml); the
+        // legacy `keychain` module is macOS-only.
+        let store = apple_native_keyring_store::protected::Store::new()?;
         keyring_core::set_default_store(store);
     }
     #[cfg(target_os = "windows")]

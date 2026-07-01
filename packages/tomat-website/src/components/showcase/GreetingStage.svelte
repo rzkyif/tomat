@@ -22,10 +22,9 @@
   // A greeting fires on its own when the app opens: the automated prompt that ran
   // appears (collapsed, like any core-authored message), then the agent's reply
   // streams in. No user typing.
-  const GREETING =
-    "Good morning! Greet me for the day with a short, upbeat message and one tip to stay focused.";
+  const GREETING = "Good morning! Hype me up for the day and give me one small goal to start with.";
   const ANSWER =
-    "Good morning! A fresh day is yours to shape. One tip: pick the single most important task and finish it before email or chat can pull you away. You've got this.";
+    "Morning! Today is a clean slate. Your one small goal: pick the single thing that would make today feel like a win, and start there. You've got this.";
 
   const DECODE_TOKENS_PER_SEC = 25;
   const ANSWER_SECONDS = ANSWER.length / 4 / DECODE_TOKENS_PER_SEC;

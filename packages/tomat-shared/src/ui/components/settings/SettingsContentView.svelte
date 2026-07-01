@@ -1,12 +1,13 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { SETTINGS_SCHEMA, evalCondition, searchFields } from "../../../domain/settings/engine.ts";
-  import { destinationLabel, groupDestinationChips } from "../../../domain/settings/types.ts";
+  import { groupDestinationChips } from "../../../domain/settings/types.ts";
   import type {
     SettingField,
     SettingGroup,
     SettingSection,
   } from "../../../domain/settings/types.ts";
+  import DestinationChip from "../objects/DestinationChip.svelte";
   import HelpText from "../primitives/HelpText.svelte";
   import IconButton from "../primitives/IconButton.svelte";
   import SectionHeader from "../primitives/SectionHeader.svelte";
@@ -68,6 +69,14 @@
   const group = $derived<SettingGroup | undefined>(
     groupId ? SETTINGS_SCHEMA.find((g) => g.id === groupId) : undefined,
   );
+
+  // Destination chips: a single-destination group shows one chip on its header.
+  // A multi-destination (hybrid) group shows NO header chip; instead each labeled
+  // section carries its own Client/Core chip (every section in a hybrid group
+  // sets its own `destination`), so the split is legible per section rather than
+  // as an ambiguous pair on the group header.
+  const groupChips = $derived(group ? groupDestinationChips(group) : []);
+  const isMultiDest = $derived(groupChips.length > 1);
 
   // On mobile, every label (the group header, the section headers, and the
   // fields) sits on ONE left text column, with a collapsible section's chevron
@@ -214,38 +223,32 @@
   </div>
 {:else if group}
   <section class="flex flex-col">
-    <!-- Group header: sticky at the very top (z above section headers at top-7). -->
+    <!-- Group header: sticky at the very top (z above section headers at top-7).
+         The label sits on the SAME pl-5 column as the body on mobile so the two
+         line up. The back affordance (iOS, where there is no system back) is
+         absolutely positioned in the gutter to the LEFT of that column - it hangs
+         into the shell's p-3 padding rather than pushing the label right, so the
+         group content stays aligned under the header label with or without it. -->
     <div class="sticky top-0 z-20">
-      <!-- The pl-5 column aligns the group label with the fields' gutter only
-           when there is no inline back button (Android, where the system back
-           replaces it). When a back button is present (iOS and desktop mobile
-           nav) it takes the leading slot and owns the alignment instead. -->
-      <SectionHeader label={group.name} level="group" class={stacked && !onBack ? "pl-5" : ""}>
-        {#snippet leading()}
-          {#if onBack}
-            <!-- -ml-1 pulls the icon's optical edge flush with the group label;
-                 the back affordance lives IN the sticky group header so mobile
-                 nested nav has a single header, not a separate back row. -->
-            <IconButton
-              icon="i-material-symbols-arrow-back-rounded"
-              title="Back to settings"
-              size="sm"
-              variant="subtle"
-              class="-ml-1 w-7 shrink-0"
-              onclick={onBack}
-            />
-          {/if}
-        {/snippet}
+      {#if onBack}
+        <IconButton
+          icon="i-material-symbols-arrow-back-rounded"
+          title="Back to settings"
+          size="sm"
+          variant="subtle"
+          class="absolute left-0 top-1/2 -translate-y-1/2 -ml-2 w-7 shrink-0 z-10"
+          onclick={onBack}
+        />
+      {/if}
+      <SectionHeader label={group.name} level="group" class={stacked ? "pl-5" : ""}>
         {#snippet badge()}
-          <span class="inline-flex items-center gap-1">
-            {#each groupDestinationChips(group) as dest (dest)}
-              <span
-                class="text-[10px] font-medium uppercase tracking-wider px-1.5 inline-flex items-center h-4 leading-none rounded-medium bg-surface-inset text-default-700"
-              >
-                {destinationLabel(dest)}
-              </span>
-            {/each}
-          </span>
+          {#if !isMultiDest}
+            <span class="inline-flex items-center gap-1 shrink-0">
+              {#each groupChips as dest (dest)}
+                <DestinationChip {dest} />
+              {/each}
+            </span>
+          {/if}
         {/snippet}
         {#snippet actions()}
           {#if hasCollapsibleSections}
@@ -289,7 +292,9 @@
       inert={locked}
     >
       {#if omField}
-        <div class="flex-1 min-h-0 pt-1">
+        <!-- The object-management shell shares the same left column as every other
+             label on mobile, so its header/rows line up under the group header. -->
+        <div class="flex-1 min-h-0 pt-1 {bodyIndent}">
           {@render renderField(omField)}
         </div>
       {:else}
@@ -308,7 +313,13 @@
                       collapsible
                       expanded={isExpanded}
                       onToggle={() => toggle(keyOf(i))}
-                    />
+                    >
+                      {#snippet badge()}
+                        {#if isMultiDest && section.destination}
+                          <DestinationChip dest={section.destination} />
+                        {/if}
+                      {/snippet}
+                    </SectionHeader>
                   </div>
                 {/if}
                 {#if isExpanded}

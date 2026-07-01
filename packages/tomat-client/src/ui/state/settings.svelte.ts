@@ -58,9 +58,10 @@ type SettingChangeListener = (
 const SECRET_KEY_SET = new Set<string>(SECRET_KEYS);
 
 // Schema defaults, captured once: every value is a scalar, so sharing one
-// frozen copy for lookups is safe. The merged $state record gets its own
-// mutable copy in the constructor.
-const DEFAULTS: Readonly<Record<string, unknown>> = getDefaultSettings();
+// copy for lookups is safe. The merged $state record gets its own copy in the
+// constructor. A platform default overlay (setPlatformDefaults) may raise one
+// key at boot, so this is not frozen.
+const DEFAULTS: Record<string, unknown> = getDefaultSettings();
 
 function destinationFor(key: string): SettingDestination {
   return settingKeyDestination(key) ?? "client-on-client";
@@ -325,6 +326,21 @@ class SettingsState {
   }
 
   // --- loads ----------------------------------------------------------------
+
+  /** Raise platform-specific defaults before the first settings load. Mobile
+   *  reads at a larger base text size (18px vs the desktop 16): a real default,
+   *  not a post-load override, so the sparse layer treats 18 as the mobile
+   *  baseline and a user who picks 16 has it persisted like any non-default.
+   *  Idempotent; called once from the layout boot with the resolved form factor,
+   *  before loadClientSettings merges the stored file over these defaults. */
+  setPlatformDefaults(mobile: boolean): void {
+    if (mobile) DEFAULTS["appearance.textSize"] = 18;
+    // Reflect into the live merged view unless the user already overrode it, so
+    // the first paint (before loadClientSettings rebuilds the merge) is correct.
+    if (!("appearance.textSize" in this.clientSparse)) {
+      this.currentSettings["appearance.textSize"] = DEFAULTS["appearance.textSize"];
+    }
+  }
 
   /** Local-only load: defaults + the client settings file. Fast, no network.
    *  This is all the boot path needs before it can position, theme, and show

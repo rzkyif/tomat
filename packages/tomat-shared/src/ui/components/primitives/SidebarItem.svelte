@@ -48,6 +48,16 @@
   const padRight = $derived(label ? (collapsed ? "pr-0" : "pr-2.5") : "pr-1.5");
 
   const ui = useUiContext();
+  const mobile = $derived(ui.platform === "mobile");
+
+  // Mobile renders each row as a tappable card (taller, padded, rounded-large,
+  // resting on an inset fill) like a native iOS/Android settings row; desktop
+  // keeps the compact flush sidebar row that only fills in on hover.
+  const layoutClass = $derived(
+    mobile
+      ? "min-h-12 px-3 gap-3 rounded-large text-lg"
+      : `h-8 pl-1.5 ${padRight} gap-1.5 rounded-medium`,
+  );
 
   // The unselected resting tone brightens on hover; a coarse pointer (touch)
   // can't hover, so rest it at the brighter shade instead of leaving it dim.
@@ -55,18 +65,27 @@
     ui.pointer === "coarse" ? "text-default-700" : "text-default-500 hov:text-default-700",
   );
 
-  // Each row's hover/selected background is the resting cue; the press splash is
-  // the shared `use:ripple` action rather than a deeper inset shade.
-  const stateClass = $derived(
+  // Text tone by state (selected / ping / resting).
+  const textTone = $derived(
     selected
-      ? "bg-surface-inset text-default-900"
+      ? "text-default-900"
       : pingTone === "accent"
         ? ping
-          ? "text-accent-yellow-700 hov:bg-surface-inset"
-          : "text-accent-yellow-500 hov:bg-surface-inset"
+          ? "text-accent-yellow-700"
+          : "text-accent-yellow-500"
         : ping
-          ? "text-default-700 hov:bg-surface-inset"
-          : `${restingText} hov:bg-surface-inset`,
+          ? "text-default-700"
+          : restingText,
+  );
+
+  // Background: selected always fills; mobile rows always rest on a card (a shade
+  // deeper on hover/press), desktop materializes the fill only on hover.
+  const bgClass = $derived(
+    selected
+      ? "bg-surface-inset"
+      : mobile
+        ? "bg-surface-inset hov:bg-surface-inset-strong"
+        : "hov:bg-surface-inset",
   );
 
   const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
@@ -77,7 +96,7 @@
      200ms because it animates the sidebar collapse, not button feedback, and so
      cannot share the single-property `transition-interactive` shortcut. -->
 <button
-  class="hov:cursor-pointer flex items-center h-8 pl-1.5 {padRight} gap-1.5 rounded-medium [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {stateClass} {extraClass}"
+  class="hov:cursor-pointer flex items-center {layoutClass} [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {textTone} {bgClass} {extraClass}"
   {title}
   aria-label={ariaLabel ?? label}
   aria-pressed={ariaPressed}
@@ -86,7 +105,7 @@
   use:ripple={{ disabled, durationMs: rippleDuration }}
 >
   <span class="relative flex shrink-0">
-    <i class="flex text-xl shrink-0 {icon}"></i>
+    <i class="flex {mobile ? 'text-2xl' : 'text-xl'} shrink-0 {icon}"></i>
     {#if badge}
       {@render badge()}
     {/if}

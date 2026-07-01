@@ -11,7 +11,6 @@
     collapsible = false,
     expanded = true,
     onToggle,
-    leading,
     badge,
     actions,
     level = "section",
@@ -21,10 +20,6 @@
     collapsible?: boolean;
     expanded?: boolean;
     onToggle?: () => void;
-    /** Leading control before the label (e.g. the mobile back button on the
-     *  group header). Only rendered on the non-collapsible (group) header, where
-     *  it is valid markup (the collapsible header is itself a <button>). */
-    leading?: Snippet;
     badge?: Snippet;
     /** Right-aligned controls (expand-all / collapse-all), only on the
      *  non-collapsible (group) header (nesting buttons in the collapsible
@@ -46,30 +41,29 @@
 <div class="relative {extraClass}">
   {#if collapsible}
     <button
-      class="flex items-center gap-1 h-7 bg-surface text-base {textColor} {hoverColor} font-medium uppercase tracking-wide cursor-pointer w-full"
+      class="flex items-center gap-1 h-7 min-w-0 w-full bg-surface text-base {textColor} {hoverColor} font-medium uppercase tracking-wide cursor-pointer"
       onclick={onToggle}
     >
       <!-- -ml-0.5 pulls the chevron's optical left edge flush with the group
            header text above (matches Expandable's chevron nudge). -->
-      <i class="inline-block transition-transform duration-200 -ml-0.5 {chevronIcon}"></i>
-      <span>{label}</span>
+      <i class="inline-block shrink-0 transition-transform duration-200 -ml-0.5 {chevronIcon}"></i>
+      <!-- A long header stays on one line and truncates with an ellipsis instead
+           of wrapping (min-w-0 lets it shrink below its content width). -->
+      <span class="truncate">{label}</span>
       {#if badge}
-        {@render badge()}
+        <span class="shrink-0 flex items-center">{@render badge()}</span>
       {/if}
     </button>
   {:else}
     <div
-      class="flex items-center gap-2 h-7 bg-surface text-base {textColor} font-medium uppercase tracking-wide"
+      class="flex items-center gap-2 h-7 min-w-0 bg-surface text-base {textColor} font-medium uppercase tracking-wide"
     >
-      {#if leading}
-        {@render leading()}
-      {/if}
-      <span>{label}</span>
+      <span class="truncate">{label}</span>
       {#if badge}
-        {@render badge()}
+        <span class="shrink-0 flex items-center">{@render badge()}</span>
       {/if}
       {#if actions}
-        <div class="ml-auto flex items-center gap-1">
+        <div class="ml-auto shrink-0 flex items-center gap-1">
           {@render actions()}
         </div>
       {/if}

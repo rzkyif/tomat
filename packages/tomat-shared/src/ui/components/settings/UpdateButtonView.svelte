@@ -5,11 +5,7 @@
   // one of these phases plus a resolved label, so this View stays pure and the
   // gallery renders every visible state identically to the app.
   export type UpdateButtonPhase =
-    | "idle"
-    | "checking"
-    | "available"
-    | "updating"
-    | "clientRestartPending";
+    "idle" | "checking" | "available" | "updating" | "clientRestartPending";
 </script>
 
 <script lang="ts">
@@ -50,6 +46,19 @@
 
   const ui = useUiContext();
   const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
+  const mobile = $derived(ui.platform === "mobile");
+
+  // Mobile renders the row as a tappable card matching SidebarItem (taller,
+  // padded, rounded-large, resting on an inset fill); desktop keeps the compact
+  // flush row that fills in on hover.
+  const layoutClass = $derived(
+    mobile
+      ? "min-h-12 px-3 gap-3 rounded-large"
+      : `h-8 pl-1.5 ${collapsed ? "pr-0" : "pr-2.5"} gap-1.5 rounded-medium`,
+  );
+  const bgClass = $derived(
+    mobile ? "bg-surface-inset hov:bg-surface-inset-strong" : "hov:bg-surface-inset",
+  );
 
   // State-driven icon. Idle / available render the tomat SVG mask; the transient
   // states use unocss icon classes for the loading / restart glyphs.
@@ -77,9 +86,7 @@
 
 <button
   type="button"
-  class="hov:cursor-pointer flex items-center h-8 pl-1.5 {collapsed
-    ? 'pr-0'
-    : 'pr-2.5'} gap-1.5 rounded-medium [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {tone} hov:bg-surface-inset"
+  class="hov:cursor-pointer flex items-center {layoutClass} [transition:color_120ms,background-color_120ms,padding_200ms] disabled:opacity-50 disabled:pointer-events-none {tone} {bgClass}"
   title={collapsed ? label : undefined}
   aria-label={label}
   {disabled}
@@ -92,10 +99,10 @@
 >
   <span class="relative flex shrink-0">
     {#if iconClass}
-      <i class="flex text-xl shrink-0 {iconClass}"></i>
+      <i class="flex {mobile ? 'text-2xl' : 'text-xl'} shrink-0 {iconClass}"></i>
     {:else}
       <span
-        class="w-5 h-5 bg-current shrink-0"
+        class="{mobile ? 'w-6 h-6' : 'w-5 h-5'} bg-current shrink-0"
         style="mask:url(/tomat.svg) center/contain no-repeat;-webkit-mask:url(/tomat.svg) center/contain no-repeat;"
         aria-hidden="true"
       ></span>

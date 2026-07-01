@@ -207,8 +207,8 @@ async function main(): Promise<void> {
   });
 
   // The version files runReleasePlan bumps for a latest-channel release; committed
-  // and pushed below so origin/latest carries the post-bump commit (keeping the
-  // cursor's post-bump hash and the CI preflight consistent).
+  // and pushed to `main` below. `origin/latest` is left at the released (pre-bump)
+  // commit, matching the cursor's pre-bump hash.
   const publishedItems: PublishedItem[] = [];
 
   const published = await runReleasePlan(env, items, flags.channel, {
@@ -220,19 +220,12 @@ async function main(): Promise<void> {
     githubRelease: flags.githubRelease,
     // A stable release is a fast-forward promotion of already-bumped versions
     // from latest, so it must NOT bump (noBump). A latest release DOES bump: the
-    // bump is committed + pushed to main AND latest below, so the pushed commit
-    // matches the cursor's post-bump hash and the CI preflight stays a no-op. A
+    // bump is committed + pushed to `main` below, while `latest` stays at the
+    // released (pre-bump) commit that matches the cursor's pre-bump hash. A
     // host-only release:native keeps its uncommitted bump (no branch align).
     noBump: flags.alignBranches && flags.channel === "stable",
     publishedOut: publishedItems,
   });
-
-  // Commit the post-release bump before moving any branch, so origin/main and
-  // origin/latest both land on the bump commit. Latest channel only: stable
-  // promotions and host-only partial releases do not advance main.
-  if (flags.alignBranches && flags.channel === "latest" && !flags.dryRun && published > 0) {
-    await commitVersionBump(publishedItems.filter((p) => p.sourceChanged));
-  }
 
   if (published > 0 && !flags.dryRun) {
     console.log(
@@ -242,17 +235,23 @@ async function main(): Promise<void> {
     );
   }
 
-  // Align the branches to what was just published. Only after a real, non-dry
-  // release that published something: an abort or nothing-to-do returns 0 and
-  // leaves the branches untouched. CI's preflight sees the cursor already current
-  // and skips the build matrix, so these pushes do not re-run the release.
+  // Align branches to what was just published. Only after a real, non-dry release
+  // that published something: an abort or nothing-to-do returns 0 and leaves the
+  // branches untouched.
   //
-  // For a latest release HEAD is the post-release bump commit: push it to main
-  // first (so the bump persists) and then fast-forward latest onto it. A stable
-  // release did not touch main; only its channel branch moves.
+  // The channel branch points at the RELEASED commit (un-bumped); the post-release
+  // bump lands on `main` only. So fast-forward the channel branch to the released
+  // HEAD FIRST - the bump is still uncommitted in the working tree at this point -
+  // then, for latest, commit the bump and push it to `main`. Pushing the released
+  // (un-bumped) commit to the channel matches the cursor, so it does not re-run the
+  // release; the bump on `main` publishes on the next promotion. A stable release
+  // is a promotion that did not bump and does not touch `main`.
   if (flags.alignBranches && !flags.dryRun && published > 0) {
-    if (flags.channel === "latest") await pushMain();
     await pushChannelBranch(flags.channel);
+    if (flags.channel === "latest") {
+      await commitVersionBump(publishedItems.filter((p) => p.sourceChanged));
+      await pushMain();
+    }
   }
 }
 

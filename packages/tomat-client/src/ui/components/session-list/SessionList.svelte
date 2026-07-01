@@ -69,15 +69,13 @@
   }
 
   let rows = $derived(
-    sessionsState.list.map(
-      (entry): SessionRowView => ({
-        id: entry.id,
-        title: sessionTitle(entry),
-        summary: entry.summary.length > 0 ? summaryText(entry.summary) : "",
-        active: entry.id === sessionsState.id,
-        confirmingDelete: confirmingDelete === entry.id,
-      }),
-    ),
+    sessionsState.list.map((entry): SessionRowView => ({
+      id: entry.id,
+      title: sessionTitle(entry),
+      summary: entry.summary.length > 0 ? summaryText(entry.summary) : "",
+      active: entry.id === sessionsState.id,
+      confirmingDelete: confirmingDelete === entry.id,
+    })),
   );
 </script>
 

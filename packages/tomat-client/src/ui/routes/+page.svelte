@@ -642,9 +642,12 @@
          in the script). -->
       <!-- The frame fills the whole edge-to-edge window (h-screen, stable: the
          keyboard is handled by padding, not by resizing the viewport) and is the
-         single safe-area boundary for every in-flow screen. pt clears the status
-         bar (plus a little breathing room); pb clears whichever is taller, the
-         gesture/home bar or the soft keyboard, so the chat composer (and any
+         single safe-area boundary for every in-flow screen. pt clears EXACTLY the
+         status-bar/notch inset (no extra), so each screen's own padding is the gap
+         above its first element: the top distance reads as status-bar height +
+         that screen's padding, matching the left/right padding instead of adding a
+         second, device-independent strip on top. pb clears whichever is taller,
+         the gesture/home bar or the soft keyboard, so the chat composer (and any
          focused field in settings or the pairing wizard) rides above the keyboard
          instead of being covered. The inset values are injected natively as CSS
          variables (see MainActivity) because Android WebView reports env(safe-
@@ -656,7 +659,7 @@
          the element the carousel pages IN (runSlide translates mobileFrameEl). -->
       <div
         bind:this={choreo.mobileFrameEl}
-        class="flex flex-col h-screen w-screen pt-[calc(var(--safe-area-inset-top,0px)+0.5rem)] pb-[max(var(--safe-area-inset-bottom,0px),var(--keyboard-inset,0px))] text-default-800 bg-surface"
+        class="flex flex-col h-screen w-screen pt-[var(--safe-area-inset-top,0px)] pb-[max(var(--safe-area-inset-bottom,0px),var(--keyboard-inset,0px))] text-default-800 bg-surface"
       >
         {@render mobileScreen(viewState.mode)}
       </div>

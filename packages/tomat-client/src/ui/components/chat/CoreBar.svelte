@@ -82,10 +82,6 @@
     onSwitch={(id) => {
       if (id !== currentCoreId) void cores().select(id);
     }}
-    onManageCores={() => {
-      viewState.pendingSettingsGroup = "cores";
-      viewState.navigate("settings");
-    }}
     onSettings={() => viewState.navigate("settings")}
     baseColorOverride={themeOverrideHex}
   />

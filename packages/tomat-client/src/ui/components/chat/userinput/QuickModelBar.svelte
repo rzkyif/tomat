@@ -40,8 +40,7 @@
   const presetField = findField("llm.preset") as ModelPresetField | undefined;
   const bucketOptions = (presetField?.presetConfig.options ?? []) as PresetOption[];
   const customOption = (presetField?.presetConfig.secondaryOptions ?? [])[0] as
-    | PresetOption
-    | undefined;
+    PresetOption | undefined;
 
   const provider = $derived(
     settingsState.currentSettings["llm.provider"] === "external" ? "external" : "local",

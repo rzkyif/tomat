@@ -87,6 +87,15 @@
     }
   }
 
+  // Dismiss on a backdrop press. preventDefault() stops the tap's synthesized
+  // click: closing on pointerdown removes this overlay before the click fires, so
+  // without it the click falls through to whatever the backdrop was covering
+  // (e.g. a message or button behind a bottom sheet) instead of only closing.
+  function onBackdropPointerDown(e: PointerEvent): void {
+    e.preventDefault();
+    onclose();
+  }
+
   // Slide the sheet up on open and down on close; instant (no css) off touch so
   // desktop dialogs keep their existing appear/disappear behavior.
   function sheetSlide(_node: Element, { enabled }: { enabled: boolean }) {
@@ -172,7 +181,7 @@
     class="{positioningClass} inset-0 flex {alignClass} z-50 rounded-large {sheet
       ? 'pb-[var(--keyboard-inset,0px)]'
       : ''}"
-    onpointerdown={dismissOnBackdrop ? onclose : undefined}
+    onpointerdown={dismissOnBackdrop ? onBackdropPointerDown : undefined}
   >
     <!-- Blur+dim lives on its OWN layer behind the dialog, never as the dialog's
          parent. WebKit folds a backdrop-filter element's compositing-layer

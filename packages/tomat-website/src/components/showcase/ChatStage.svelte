@@ -40,12 +40,10 @@
     reportHeight: (h: number) => void;
   } = $props();
 
-  const PROMPT =
-    "Draft a friendly reply to my landlord asking to move Friday's inspection to the morning.";
-  const REASONING =
-    "A short, polite reschedule note: thank them, propose a morning time, and keep the tone warm.";
+  const PROMPT = "Help me write a fun invite for game night at my place this Friday.";
+  const REASONING = "Keep it short and upbeat: the plan, the time, and what to bring.";
   const ANSWER =
-    "Here's a draft you can send:\nHi Sam, thanks for the heads-up about Friday's inspection. Could we move it to the morning, around 9am? That works much better for me. Thanks so much!";
+    "Here's an invite you can send:\nGame night at mine this Friday, 7pm! Bring a snack and your competitive spirit. Board games, pizza, and zero mercy. Let me know if you're in.";
 
   // Stream the answer at a ~2B model's realistic decode rate on consumer
   // hardware: a 2B Q4 model runs ~35-55 tok/s on Apple Silicon and ~15-25 tok/s

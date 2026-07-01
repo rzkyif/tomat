@@ -1,29 +1,36 @@
 #!/usr/bin/env -S deno run -A
 // CI post-publish version bump: the committed counterpart to the local release's
 // auto-bump. It runs as the final job of the Release workflow, AFTER ci-publish
-// has published the latest channel, and does what a local `deno task release`
-// does after publishing: bump the just-published items' version files, commit
-// them to `main`, record the post-bump source hash in the shared R2 cursor, and
-// fast-forward `latest` onto the bump commit.
+// has published the latest channel. It bumps the just-published items' version
+// files and commits them to `main` ONLY. It does NOT touch `latest` and does NOT
+// write the cursor: `latest` stays at the released commit (the codebase as
+// actually shipped, un-bumped), and the shared R2 cursor keeps the pre-bump
+// (as-released) source hash that ci-publish already recorded.
 //
 // Latest channel only: a stable release is a fast-forward promotion of
 // already-bumped versions, so there is nothing to bump (the workflow only runs
 // this job on the latest branch; this script also no-ops on any other channel).
 //
-// Which items to bump: after ci-publish's noBump write, a just-published item's
-// recorded cursor version equals its local version (the version file has not
-// been advanced yet). Every other item was bumped after its last release, so its
-// local version is strictly greater. So "recorded.version === local version"
-// selects exactly the items this release published and left un-bumped.
+// Which items to bump: after ci-publish's write, a just-published item's recorded
+// cursor version equals its local version (the version file has not advanced yet).
+// Every other item was bumped after its last release, so its local version is
+// strictly greater. So "recorded.version === local version" selects exactly the
+// items this release published and left un-bumped.
 //
-// Idempotency: the bump commit's post-bump hash is written to the cursor BEFORE
-// `latest` moves onto it, so the resulting latest push is a preflight no-op
-// (nothing changed, this bump job skipped). If `main` advanced since the built
-// commit (a concurrent push), the bump is skipped and left to the next release.
+// No re-release loop, no guard: the bump lands on `main`, but a Release only fires
+// on a push to `latest`/`stable`, and this job's push is via GITHUB_TOKEN, which
+// GitHub does not let trigger another workflow. The next release happens when
+// `main` is promoted to `latest`; the bumped version then legitimately publishes
+// (a version bump alone is a valid release, while a source change without a bump
+// is still rejected by the version-bump gate). Because the cursor keeps the
+// pre-bump hash, a commit pushed to `main` mid-release stays unpublished and ships
+// on the next promotion instead of being masked - so no `head === built` guard is
+// needed. A non-fast-forward pushMain (a genuine concurrent push during the job)
+// still fails loudly.
 //
 // Flags:
 //   --channel=stable|latest    target channel (the workflow sets it from branch)
-//   --dry-run                  bump + commit locally; no cursor write or push
+//   --dry-run                  bump + commit locally; no push
 
 import { parseArgs } from "@std/cli/parse-args";
 import {
@@ -39,9 +46,8 @@ import {
   type ReleaseChannel,
   type ReleaseItem,
   step,
-  writeReleaseCursor,
 } from "./lib.ts";
-import { commitVersionBump, pushChannelBranch, pushMain, revParse } from "./git-align.ts";
+import { commitVersionBump, pushMain } from "./git-align.ts";
 import { coreItem } from "./core.ts";
 import { extensionItem } from "./extension.ts";
 import { catalogItem } from "./catalog.ts";
@@ -84,24 +90,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Only bump on top of the exact commit that was built + published. If `main`
-  // moved since (a concurrent push), fast-forwarding `latest` onto a bump built
-  // from the newer tree would skip those commits past CI; leave it to the next
-  // release instead.
-  const built = Deno.env.get("GITHUB_SHA");
-  if (built) {
-    const head = await revParse("HEAD");
-    if (head !== built) {
-      info(
-        colors.yellow(
-          `main (${head.slice(0, 12)}) has advanced past the built commit ` +
-            `(${built.slice(0, 12)}); skipping the auto-bump. The next release will bump.`,
-        ),
-      );
-      return;
-    }
-  }
-
   step("Loading deploy environment");
   const env = await loadOrSeedEnv();
 
@@ -122,8 +110,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Preview only: report what would bump without touching the tree, cursor, or
-  // branches (bumpPatch mirrors bumpVersion's patch increment).
+  // Preview only: report what would bump without touching the tree or `main`
+  // (bumpPatch mirrors bumpVersion's patch increment).
   if (dryRun) {
     step("dry-run: version bump preview (no writes)");
     const seen = new Set<string>();
@@ -132,7 +120,7 @@ async function main(): Promise<void> {
       seen.add(item.versionFile);
       info(`would bump ${item.label} ${recordedVersion} -> ${bumpPatch(recordedVersion)}`);
     }
-    info(colors.yellow("dry-run: skipping bump, commit, cursor write, and branch pushes"));
+    info(colors.yellow("dry-run: skipping the bump commit and the main push"));
     return;
   }
 
@@ -158,22 +146,10 @@ async function main(): Promise<void> {
 
   await commitVersionBump(bumped);
 
-  // Record the post-bump source hash so the latest push below is a preflight
-  // no-op. The recorded version stays at what was published (the gate's
-  // local > recorded check passes next cycle).
-  step("Recording post-bump source hash in the cursor");
-  for (const { item } of selected) {
-    const state = recordedFor(cursor, item, channel);
-    if (state) state.sourceHash = await item.sourceHash(channel);
-  }
-
-  await writeReleaseCursor(env, cursor);
-  ok(`cursor updated (${selected.length} item(s))`);
-
-  // Persist the bump on main, then fast-forward latest onto it. Cursor is written
-  // first, so the latest push (which re-triggers the workflow) sees no changes.
+  // Persist the bump on `main` only. `latest` is left at the released commit and
+  // the cursor keeps ci-publish's pre-bump hash, so the bump becomes the next
+  // thing a `main -> latest` promotion publishes (see the header note).
   await pushMain();
-  await pushChannelBranch(channel);
 }
 
 if (import.meta.main) {

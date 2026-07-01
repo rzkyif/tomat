@@ -85,7 +85,12 @@
 </script>
 
 <div style:display="contents" style:--default-base={baseColorOverride}>
-  <Bubble selectedAlignment={ui.getAlignment()} size="small" extraClass="flex items-center gap-2">
+  <Bubble
+    selectedAlignment={ui.getAlignment()}
+    fullWidth={mobile}
+    size="small"
+    extraClass="flex items-center gap-2"
+  >
     {#if tokenUsage}
       <div
         data-region="context-gauge"
@@ -109,6 +114,7 @@
            regenerate) so it reads as a chat that is never saved. -->
       <div
         class="flex items-center gap-1.5 min-w-0 h-8 px-3 overflow-hidden bg-surface-inset rounded-large text-sm text-default-700"
+        class:flex-1={mobile}
       >
         <i class="flex i-material-symbols-timer-outline-rounded shrink-0"></i>
         <span class="truncate">Temporary Session</span>
@@ -117,11 +123,14 @@
       <!-- Title (grid overlap technique for auto-sizing). The container is the
            only `min-w-0` flex item, so it absorbs the squeeze when the bubble
            hits its max width; the invisible span sizes it and the input shows an
-           ellipsis when blurred. -->
+           ellipsis when blurred. On mobile the bar is full-width, so the title
+           grows to fill the row (flex-1) and its input spans the space (w-full),
+           letting long titles use the whole width instead of hugging content. -->
       <div
         class="tomat-focus-wrap flex items-center min-w-0 h-8 overflow-hidden bg-surface-inset rounded-large text-sm"
+        class:flex-1={mobile}
       >
-        <div class="grid items-center min-w-0 overflow-hidden">
+        <div class="grid items-center min-w-0 overflow-hidden" class:w-full={mobile}>
           <span
             class="invisible row-start-1 col-start-1 whitespace-pre pl-3 pr-1 py-1"
             aria-hidden="true">{titleText || defaultTitle}</span
@@ -151,7 +160,10 @@
       </div>
     {/if}
 
-    <ButtonGroup size="sm" class="shrink-0">
+    <!-- ml-auto keeps the controls pinned to the right edge of the full-width
+         mobile bar even when there is no title to push them there (a new/unsaved
+         session). -->
+    <ButtonGroup size="sm" class={mobile ? "shrink-0 ml-auto" : "shrink-0"}>
       <IconButton
         icon="i-material-symbols-format-list-bulleted-rounded"
         title="Session List"

@@ -4,9 +4,9 @@
   import { useUiContext } from "../../context.ts";
 
   const ui = useUiContext();
-  // The mobile group list is a full-screen menu, so the rows sit tighter than
-  // the desktop sidebar's gap-2.
-  const listGap = ui.platform === "mobile" ? "gap-0.5" : "gap-2";
+  // The mobile group list renders each row as a tappable card (see SidebarItem),
+  // so the rows need real spacing between them; desktop keeps its compact gap.
+  const listGap = "gap-2";
 
   // THE single settings sidebar for both the client and the website
   // (single-source rule, AGENTS.md): the collapse toggle, the scrollable group

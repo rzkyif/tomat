@@ -16,9 +16,11 @@ name: Release
 #
 # A changed-but-unbumped item fails the publish job loudly. After a successful
 # latest-channel publish, a final `bump` job advances the just-published items'
-# version files, commits them to `main`, and fast-forwards `latest` onto that
-# commit (mirroring the local release's post-publish bump). Stable is a promotion
-# of already-bumped versions, so its bump job is a no-op.
+# version files and commits them to `main` ONLY (the committed counterpart to the
+# local release's post-publish bump). `latest` is left at the released commit and
+# the cursor keeps its pre-bump hash, so nothing re-releases; the bump publishes on
+# the next `main -> latest` promotion (a version bump alone is a valid release).
+# Stable is a promotion of already-bumped versions, so its bump job is a no-op.
 #
 # Required repo secrets: TOMAT_SIGNING_PRIVATE_KEY_B64, TOMAT_SIGNING_PUBLIC_KEY_B64,
 # TAURI_UPDATER_PUBLIC_KEY, TAURI_UPDATER_PRIVATE_KEY, TAURI_UPDATER_PRIVATE_KEY_PASSWORD,
@@ -305,12 +307,12 @@ jobs:
             --yes \
             --staging-root=staging
 
-  # Post-publish bump: advance the just-published items' version files, commit
-  # them to `main`, record the post-bump source hash in the shared R2 cursor, and
-  # fast-forward `latest` onto the bump commit (the committed counterpart to a
-  # local release's auto-bump). Latest channel only; the resulting `latest` push
-  # re-triggers this workflow but preflight then sees the cursor current and skips
-  # everything, so it terminates in one cheap extra run.
+  # Post-publish bump: advance the just-published items' version files and commit
+  # them to `main` ONLY (the committed counterpart to a local release's auto-bump).
+  # It does not touch `latest` or the cursor: `latest` stays at the released commit
+  # and the cursor keeps ci-publish's pre-bump hash, so nothing re-releases. The
+  # bump publishes on the next `main -> latest` promotion. Latest channel only.
+  # Pushes via GITHUB_TOKEN, which cannot trigger another workflow run.
   bump:
     name: "Bump versions on main"
     needs: [preflight, publish]
@@ -363,5 +365,5 @@ jobs:
           git config user.name "tomat-release[bot]"
           git config user.email "tomat-release[bot]@users.noreply.github.com"
 
-      - name: Bump versions, commit to main, fast-forward latest
+      - name: Bump versions, commit to main
         run: deno task release:ci-bump --channel=${{ github.ref_name }}

@@ -35,6 +35,11 @@
   // runtime), and the browser script init re-runs and sets the real values.
   const onMobile = browser && isMobilePlatform();
 
+  // Raise the mobile text-size default (18px vs desktop 16) before +page's
+  // onMount loads the stored settings over the defaults. Runs in the layout
+  // script, ahead of any child onMount, like installPlatform below.
+  settingsState.setPlatformDefaults(onMobile);
+
   setUiContext(
     makeUiContext({
       getSetting: (key) => settingsState.currentSettings[key] ?? settingDefaults[key],

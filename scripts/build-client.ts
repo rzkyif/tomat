@@ -1,9 +1,10 @@
 // Builds the Tauri client bundle for the requested channel.
 //
 // Channel handling:
-//   - TOMAT_CHANNEL is set in the build env so `option_env!("TOMAT_CHANNEL")`
-//     in channel.rs bakes the channel into the shipped bundle (its runtime
-//     default → ~/.tomat/<channel>/client, tomat-client-<channel> keychain).
+//   - The channel is written to the Tauri crate's `channel` file, which build.rs
+//     bakes into the shipped bundle via `option_env!("TOMAT_CHANNEL")` in
+//     channel.rs (its runtime default → ~/.tomat/<channel>/client,
+//     tomat-client-<channel> keychain).
 //   - For non-stable channels we pass a `tauri build --config <json>` override
 //     so the app gets a distinct productName + bundle identifier + updater
 //     endpoint, letting stable and latest coexist as separate installed apps.
@@ -31,6 +32,11 @@ if (!["stable", "dev", "latest"].includes(channel)) {
   console.error(`invalid --channel: ${channel} (expected stable, dev, or latest)`);
   Deno.exit(1);
 }
+
+// Bake the channel for channel.rs (via build.rs). Desktop builds inherit
+// TOMAT_CHANNEL at runtime, but a shipped bundle has no such env, so the on-disk
+// file is the deterministic source the compile reads (see build.rs).
+await Deno.writeTextFile(join(ROOT, "packages/tomat-client/src/tauri/channel"), channel);
 
 // Optional cross-arch target(s): the all-targets release builds the host's second
 // arch (e.g. x86_64-apple-darwin on an arm64 mac) and, in a build environment,

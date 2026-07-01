@@ -24,19 +24,19 @@
   // A guarded tool pauses for permission: the composer becomes the permission
   // review (a shield line + the exact command) with Deny / Allow, exactly as in
   // the app. Allowing resumes the tool, which completes and the agent replies.
-  const PROMPT = "Push my changes to origin.";
-  const ANSWER = "Pushed 3 commits to origin/main.";
+  const PROMPT = "Delete everything in my Downloads older than a month.";
+  const ANSWER = "Done. Removed 23 old files from Downloads.";
   const DECODE_TOKENS_PER_SEC = 25;
   const ANSWER_SECONDS = ANSWER.length / 4 / DECODE_TOKENS_PER_SEC;
 
   const ALLOW_TITLE = "Allow for this tool call";
-  const RESULT = { pushed: 3, branch: "origin/main" };
+  const RESULT = { removed: 23 };
   // The scripted permission the composer renders while paused (the same scripted
   // STATE the client feeds from its live permission store).
   const PERMISSION = {
     toolName: "shell",
     action: "run a program",
-    detail: "git push origin main",
+    detail: "find ~/Downloads -mtime +30 -delete",
     declared: true,
   };
 
