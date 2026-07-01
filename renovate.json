@@ -32,6 +32,18 @@
       "matchUpdateTypes": ["major"],
       "groupName": "dependencies (major)",
       "groupSlug": "major"
+    },
+    {
+      "description": "Keep the Android build toolchain in lockstep. The Kotlin Gradle plugin, AGP, and the androidx/material libraries are version-coupled: androidx artifacts embed Kotlin metadata the Kotlin compiler must be new enough to read (a lib compiled with Kotlin 2.1 fails to compile under the 1.9 compiler). The default major/minor split above routed the Kotlin MAJOR (1.9 -> 2.x) into its own PR while androidx bumped in the combined PR, leaving the compiler too old and breaking the Android release build. This rule (last, so it wins) regroups all of these into one PR regardless of update type, so a Kotlin major always lands with the androidx bumps that need it.",
+      "matchManagers": ["gradle"],
+      "matchPackageNames": [
+        "/^org\\.jetbrains\\.kotlin:/",
+        "/^com\\.android\\.tools\\.build:gradle$/",
+        "/^androidx\\./",
+        "/^com\\.google\\.android\\.material:/"
+      ],
+      "groupName": "android build toolchain",
+      "groupSlug": "android-toolchain"
     }
   ],
   "customManagers": [
