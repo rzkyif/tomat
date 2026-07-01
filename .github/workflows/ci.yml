@@ -163,37 +163,71 @@ jobs:
       - run: cargo test --locked --manifest-path packages/tomat-core-speech/Cargo.toml
         if: runner.os == 'Linux'
 
-  # Android cross-compile check. The Tauri shell ships an android build whose
-  # mobile cfg (#[cfg(mobile)] / target_os = "android") is never exercised by the
-  # host-target checks above, so compile it for the primary android ABI here.
-  # ubuntu-latest ships the Android SDK + NDK; we wire the NDK clang as the
-  # cross-compiler so the native bits (rustls/ring) build.
+  # Android build check. The Tauri shell's mobile cfg (#[cfg(mobile)] /
+  # target_os = "android") is never exercised by the host-target checks above, and
+  # neither is the android gradle/Kotlin toolchain: a Rust-only `cargo check`
+  # misses a Kotlin metadata mismatch (e.g. an androidx lib compiled with Kotlin
+  # 2.1 under a 1.9 compiler), which only surfaces during the gradle Kotlin
+  # compile. So run a real `tauri android build` here: it compiles the Rust mobile
+  # cfg AND runs the gradle assemble, catching both classes of breakage on main
+  # (the wry-generated Kotlin is produced by the Rust build, so a gradle-only step
+  # is not possible). Scoped to one ABI + the debug variant to stay lean - the
+  # Kotlin compile is ABI- and variant-independent, so this still catches the
+  # mismatch. ubuntu-latest ships the Android SDK + NDK; debug signing needs no
+  # keystore secret. Guards the Renovate coupling in renovate.json.
   android:
-    name: "Android cross-compile check"
+    name: "Android build (gradle assemble)"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.x
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.96.1
           targets: aarch64-linux-android
+      # Parity with the release android runner: the same host libs are present
+      # where this build is known to work, so install them to avoid a spurious
+      # missing-lib failure masking the real (Kotlin) signal.
+      - name: Install Linux deps for Tauri / xcap / cpal
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libpipewire-0.3-dev \
+            libasound2-dev \
+            libgbm-dev \
+            patchelf
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: . -> target
           key: android
           cache-all-crates: true
-      - name: Android cargo check (aarch64-linux-android)
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cache/deno
+            ~/.deno
+          key: deno-${{ runner.os }}-${{ hashFiles('deno.lock', '**/deno.json', '**/deno.jsonc') }}
+          restore-keys: |
+            deno-${{ runner.os }}-
+      # Single ABI + debug: compiles the Rust android cfg, generates the wry Kotlin,
+      # and runs the gradle Kotlin compile (where a metadata mismatch fails).
+      - name: Android APK build (aarch64, debug)
+        working-directory: packages/tomat-client
         run: |
-          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
-          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          export CC_aarch64_linux_android="$TC/aarch64-linux-android24-clang"
-          export CXX_aarch64_linux_android="$TC/aarch64-linux-android24-clang++"
-          export AR_aarch64_linux_android="$TC/llvm-ar"
-          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TC/aarch64-linux-android24-clang"
-          cargo check --locked \
-            --manifest-path packages/tomat-client/src/tauri/Cargo.toml \
-            --target aarch64-linux-android
+          export NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          export ANDROID_NDK_HOME="$NDK_HOME"
+          deno run -A npm:@tauri-apps/cli@^2 android build --apk --debug --target aarch64
 
   # iOS cross-compile check. Same rationale as the android job: the shell's mobile
   # cfg (#[cfg(mobile)] / target_os = "ios") is only exercised on an Apple target,
