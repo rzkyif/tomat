@@ -455,14 +455,6 @@ INSTALLED_BIN="$BIN_DIR/tomat-core$CHANNEL_SUFFIX"
 # register distinct OS services. Stable keeps the bare names.
 SERVICE_LABEL_ID="au.tomat.core$CHANNEL_SUFFIX"
 SYSTEMD_UNIT="tomat-core$CHANNEL_SUFFIX"
-# Human-readable label for surfaces a user actually reads (systemd Description,
-# service-manager listings). The unit/label ids above stay dashed; this is the
-# friendly form: "tomat Core", "tomat Core (latest)", "tomat Core (dev)".
-if [ "$TOMAT_CHANNEL" = "stable" ]; then
-  CORE_DISPLAY_NAME="tomat Core"
-else
-  CORE_DISPLAY_NAME="tomat Core ($TOMAT_CHANNEL)"
-fi
 
 # Resolve sha-256 command up front so all rows use the same one.
 SHA_CMD="sha256sum"
@@ -1237,7 +1229,7 @@ elif [ "$uname_os" = "Linux" ] && [ "$SERVICE_HAS_SYSTEMD" = "1" ]; then
 
   cat >"$UNIT" <<UNIT
 [Unit]
-Description=$CORE_DISPLAY_NAME
+Description=$SYSTEMD_UNIT
 Wants=network-online.target
 After=network-online.target
 

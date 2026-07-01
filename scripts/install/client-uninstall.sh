@@ -413,12 +413,12 @@ if [ "$TOMAT_CHANNEL" = "stable" ]; then
 else
   CHANNEL_SUFFIX="-$TOMAT_CHANNEL"
   case "$TOMAT_CHANNEL" in
-    latest) DISPLAY_NAME="tomat latest" ;;
-    dev) DISPLAY_NAME="tomat dev" ;;
+    latest) DISPLAY_NAME="tomat (latest)" ;;
+    dev) DISPLAY_NAME="tomat (dev)" ;;
   esac
 fi
 # The macOS bundle installs under the friendly DISPLAY_NAME (e.g.
-# "tomat latest.app"); CHANNEL_SUFFIX (dash form) still names the keychain
+# "tomat (latest).app"); CHANNEL_SUFFIX (dash form) still names the keychain
 # service + the Linux AppImage, which are not the user-facing app icon.
 APP_DEST="/Applications/$DISPLAY_NAME.app"
 APPIMAGE_NAME="tomat-client$CHANNEL_SUFFIX"
@@ -462,7 +462,7 @@ fi
 
 if [ "$uname_os" = "Darwin" ]; then
   # Case-insensitive lookup of this channel's bundle by its friendly install
-  # name (tomat.app / "tomat latest.app"), matching client.sh's APP_DEST.
+  # name (tomat.app / "tomat (latest).app"), matching client.sh's APP_DEST.
   # -iname also matches an older capitalized form.
   FOUND_APP="$(find /Applications -maxdepth 1 -iname "$DISPLAY_NAME.app" -print -quit 2>/dev/null || true)"
 

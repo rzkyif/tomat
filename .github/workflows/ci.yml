@@ -1,7 +1,6 @@
 name: CI
 
 on:
-  pull_request:
   push:
     branches: [main]
 
@@ -143,8 +142,15 @@ jobs:
           cache-all-crates: true
       # --locked fails if any Cargo.lock would change, so a drifted lock can't
       # pass CI (the signed helper binaries are built from these locks).
+      # clippy and test share the SAME `--all-targets` scope so cargo resolves an
+      # identical feature graph for the (huge) Tauri dependency tree: clippy builds
+      # those deps with real rustc, and test reuses that exact compilation instead
+      # of rebuilding the whole tree under a different `--lib` fingerprint. Only the
+      # small workspace crate itself is re-touched (clippy check vs test codegen).
+      # The Tauri crate has no examples/benches/integration tests or doctests, so
+      # `--all-targets` runs the same unit tests `--lib` did, plus any in the bin.
       - run: cargo clippy --locked --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --locked --manifest-path packages/tomat-client/src/tauri/Cargo.toml --lib
+      - run: cargo test --locked --manifest-path packages/tomat-client/src/tauri/Cargo.toml --all-targets
       - run: cargo clippy --locked --manifest-path packages/tomat-core-keychain/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path packages/tomat-core-keychain/Cargo.toml
       - run: cargo clippy --locked --manifest-path packages/tomat-core-updater/Cargo.toml --all-targets -- -D warnings

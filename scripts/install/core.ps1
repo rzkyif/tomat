@@ -328,9 +328,6 @@ $Installed = Join-Path $BinDir "tomat-core$ChannelSuffix.exe"
 # Scheduled-task name + process name, suffixed per channel so channels coexist.
 $TaskName = "tomat-core$ChannelSuffix"
 $ProcName = "tomat-core$ChannelSuffix"
-# Human-readable label for the task description a user reads in Task Scheduler.
-# The task id above stays dashed; this is the friendly form.
-$CoreDisplayName = if ($Channel -eq "stable") { "tomat Core" } else { "tomat Core ($Channel)" }
 
 # Make sure the staging tree exists before any UI starts.
 foreach ($d in @($BinDir, $WorkersDir, $ExtensionsDir, $StagingDir, $LogsDir)) {
@@ -899,7 +896,7 @@ try {
       $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
       Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
       Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-        -Settings $settings -Principal $principal -Description $CoreDisplayName | Out-Null
+        -Settings $settings -Principal $principal -Description "tomat-core" | Out-Null
       Start-ScheduledTask -TaskName $TaskName
     } catch {
       Ui-Die "Could not register scheduled task" `

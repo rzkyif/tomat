@@ -276,7 +276,7 @@ if ($Channel -eq "stable") {
   $InstallDirName = "tomat"
 } else {
   $ManifestDir = "manifests/$Channel"
-  $DisplayName = if ($Channel -eq "latest") { "tomat latest" } else { "tomat dev" }
+  $DisplayName = if ($Channel -eq "latest") { "tomat (latest)" } else { "tomat (dev)" }
   $InstallDirName = "tomat-$Channel"
 }
 $ManifestUrl = "$Storage/$ManifestDir/client.json"

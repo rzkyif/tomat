@@ -283,9 +283,16 @@ mod unix {
                 }
             }
         };
-        // Drop our slave fd so the master read errors out (EIO) once the
-        // child's copies close, ending the reader thread.
+        // Release every slave fd we still hold so the master read errors out
+        // (EIO) once the child's copies close, ending the reader thread. Both our
+        // own `pty.slave` AND the two slave clones that `command` still owns via
+        // `Stdio::from` (spawn dup2s them into the child but does not consume the
+        // parent handles) must go: on Linux a master read only reports EIO when
+        // the LAST slave fd closes, so one lingering clone wedges the reader (and
+        // thus ptyhost's exit) forever after the child is gone. macOS masks this
+        // by delivering EOF on child exit regardless, so it only bites on Linux.
         drop(pty.slave);
+        drop(command);
 
         let master_writer = match pty.master.try_clone() {
             Ok(fd) => fd,
