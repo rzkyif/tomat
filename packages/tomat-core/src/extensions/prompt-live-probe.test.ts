@@ -9,11 +9,12 @@
 
 import { assertEquals } from "@std/assert";
 import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
+import { fromFileUrl } from "@std/path";
 import { PromptParser, type PromptParserEvent } from "./prompt-parser.ts";
 
 function findPtyhost(): string | null {
   if (Deno.build.os === "windows") return null;
-  const repoRoot = new URL("../../../..", import.meta.url).pathname;
+  const repoRoot = fromFileUrl(new URL("../../../../", import.meta.url));
   for (const candidate of [
     `${repoRoot}target/debug/tomat-core-ptyhost`,
     `${repoRoot}target/release/tomat-core-ptyhost`,

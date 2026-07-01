@@ -3,11 +3,11 @@
 // write an UNSIGNED catalog.json to dist/ for local inspection. No keys, no
 // upload. Use `deno task release` to sign + publish.
 
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 import { ensureDir } from "@std/fs/ensure-dir";
 import { buildCatalogPayload } from "../../packages/tomat-model-catalog/src/index.ts";
 
-const REPO_ROOT = new URL("../..", import.meta.url).pathname;
+const REPO_ROOT = fromFileUrl(new URL("../..", import.meta.url));
 const OUT = join(REPO_ROOT, "dist", "catalog.unsigned.json");
 
 const payload = buildCatalogPayload(new Date().toISOString());

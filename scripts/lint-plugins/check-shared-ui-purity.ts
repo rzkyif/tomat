@@ -12,9 +12,13 @@
 // Phase 0 ships this in warn mode; Phase 6 flips STRICT to fail the build.
 
 import { walk } from "@std/fs/walk";
+import { fromFileUrl } from "@std/path";
 
 const STRICT = true;
-const ROOT = new URL("../../packages/tomat-shared/src/ui/components/", import.meta.url).pathname;
+// Native OS path (fromFileUrl); URL .pathname breaks walk()/readdir on Windows.
+const ROOT = fromFileUrl(
+  new URL("../../packages/tomat-shared/src/ui/components/", import.meta.url),
+);
 const REL = "packages/tomat-shared/src/ui/components/";
 // Forbidden import sources for a shared presentational component.
 const FORBIDDEN =
@@ -34,7 +38,7 @@ async function scan(): Promise<Violation[]> {
     for (let i = 0; i < lines.length; i++) {
       if (FORBIDDEN.test(lines[i])) {
         violations.push({
-          file: REL + entry.path.slice(ROOT.length),
+          file: REL + entry.path.slice(ROOT.length).replaceAll("\\", "/"),
           lineNumber: i + 1,
           line: lines[i].trim(),
         });

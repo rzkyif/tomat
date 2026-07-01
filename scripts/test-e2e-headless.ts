@@ -15,9 +15,9 @@
 // llama-server symlinked under ~/.tomat/dev/core/bin, produced by `deno task
 // dev` at least once) and the Rust helper binaries built in target/debug.
 
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 
-const repoRoot = new URL("..", import.meta.url).pathname;
+const repoRoot = fromFileUrl(new URL("..", import.meta.url));
 const dir = join(repoRoot, "tests", "e2e", "headless");
 const vitestBin = join(dir, "node_modules", ".bin", "vitest");
 

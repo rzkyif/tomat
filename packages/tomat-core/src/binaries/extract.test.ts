@@ -7,13 +7,14 @@ import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { BlobWriter, TextReader, ZipWriter } from "@zip.js/zip.js";
 import { extractArchive } from "./manager.ts";
+import { binaryName } from "./versions.ts";
 
 Deno.test("extractArchive(.zip): places exe at root and libs under lib/<kind>/, ignores extras", async () => {
   const tmp = await Deno.makeTempDir();
   try {
     // Build a zip with the exe + a shared lib in nested dirs, plus a stray file.
     const zw = new ZipWriter(new BlobWriter("application/zip"));
-    await zw.add("bin/llama-server", new TextReader("EXE-BYTES"));
+    await zw.add(`bin/${binaryName("llama-server")}`, new TextReader("EXE-BYTES"));
     await zw.add("nested/lib/libllama.dylib", new TextReader("LIB-BYTES"));
     await zw.add("README.md", new TextReader("ignore me"));
     const blob = await zw.close();
@@ -23,7 +24,7 @@ Deno.test("extractArchive(.zip): places exe at root and libs under lib/<kind>/, 
     const target = join(tmp, "bin");
     await extractArchive(zipPath, target, "llama-server");
 
-    assertEquals(await Deno.readTextFile(join(target, "llama-server")), "EXE-BYTES");
+    assertEquals(await Deno.readTextFile(join(target, binaryName("llama-server"))), "EXE-BYTES");
     assertEquals(
       await Deno.readTextFile(join(target, "lib", "llama-server", "libllama.dylib")),
       "LIB-BYTES",
@@ -49,7 +50,7 @@ Deno.test("extractArchive: per-kind lib dirs keep two sidecars' same-named libs 
     ] as const;
     for (const [kind, body] of cases) {
       const zw = new ZipWriter(new BlobWriter("application/zip"));
-      await zw.add(kind, new TextReader("EXE"));
+      await zw.add(binaryName(kind), new TextReader("EXE"));
       await zw.add("ggml-cpu.dll", new TextReader(body));
       const blob = await zw.close();
       const zipPath = join(tmp, `${kind}.zip`);

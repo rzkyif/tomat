@@ -20,6 +20,8 @@
 // Wired into `deno task lint` alongside the oxlint pass, the .svelte
 // tauri-boundary pass, and the em-dash pass.
 
+import { fromFileUrl } from "@std/path";
+
 const BRAND = "T" + "omat";
 
 // Extensions oxlint already lints via the no-uppercase-tomat rule. Skipped here
@@ -27,7 +29,8 @@ const BRAND = "T" + "omat";
 // for these, this pass owns everything else (including .svelte, see above).
 const OXLINT_EXTS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
 
-const ROOT = new URL("../../", import.meta.url).pathname;
+// Native OS path (fromFileUrl); URL .pathname is an invalid "/C:/..." cwd on Windows.
+const ROOT = fromFileUrl(new URL("../../", import.meta.url));
 
 interface Violation {
   file: string;

@@ -3,9 +3,9 @@
 // services/llm-scheduler.ts tests to drive deterministic stream parsing
 // without touching the network.
 
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 
-const FIXTURES_DIR = new URL("../fixtures/openai/", import.meta.url).pathname;
+const FIXTURES_DIR = fromFileUrl(new URL("../fixtures/openai/", import.meta.url));
 
 /**
  * Returns a fetch that responds to any URL with the contents of the named

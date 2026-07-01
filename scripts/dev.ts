@@ -6,12 +6,12 @@
 // pairing code so connecting the client is a one-paste step.
 // Stops both children on SIGINT/SIGTERM or when either exits.
 
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 import { ensureDir } from "@std/fs/ensure-dir";
 import { SEEDED_EXTENSIONS } from "@tomat/shared";
 import { computeDevManifest } from "../packages/tomat-core/src/extensions/seeded-manifest.ts";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fromFileUrl(new URL("..", import.meta.url));
 
 // Dev runs on the "dev" install channel (~/.tomat/dev/{core,client}). Both
 // children inherit TOMAT_CHANNEL so core and the Tauri client agree on the

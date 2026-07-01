@@ -9,11 +9,14 @@
 // Options live in /.prettierrc.json (read below via resolveConfig and discovered
 // by the extensions), aligned to oxfmt's defaults so the repo shares one style.
 import { exists } from "@std/fs";
+import { fromFileUrl } from "@std/path";
 import * as prettier from "npm:prettier@3.9.1";
 import * as sveltePlugin from "npm:prettier-plugin-svelte@3.5.2";
 import * as astroPlugin from "npm:prettier-plugin-astro@0.14.1";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+// Repo root as an OS path. `new URL("..").pathname` yields "/C:/work/" on Windows
+// (an invalid cwd); fromFileUrl produces the correct native path on every OS.
+const ROOT = fromFileUrl(new URL("..", import.meta.url));
 const check = Deno.args.includes("--check");
 
 // Non-ignored files (tracked + untracked), mirroring oxfmt's .gitignore handling.

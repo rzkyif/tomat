@@ -11,11 +11,13 @@
 // Wired into `deno task lint` (strict: a gap fails the build).
 
 import { walk } from "@std/fs/walk";
+import { fromFileUrl } from "@std/path";
 import { GALLERY_PRIMITIVES } from "../../packages/tomat-website/src/components/gallery/registry.ts";
 import { PRIMITIVE_SAMPLES } from "../../packages/tomat-shared/src/ui/samples/primitives.ts";
 
 const STRICT_GALLERY = true;
-const ROOT = new URL("../../", import.meta.url).pathname;
+// Native OS path (fromFileUrl); URL .pathname breaks walk()/readdir on Windows.
+const ROOT = fromFileUrl(new URL("../../", import.meta.url));
 const PRIMITIVES_DIR = `${ROOT}packages/tomat-shared/src/ui/components/primitives/`;
 const PRIMITIVES_RENDERER = `${ROOT}packages/tomat-website/src/components/gallery/Primitives.svelte`;
 

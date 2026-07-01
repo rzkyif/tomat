@@ -23,6 +23,7 @@
 // `deno task lint`.
 
 import { walk } from "@std/fs/walk";
+import { fromFileUrl } from "@std/path";
 import {
   EMBEDDED_VIEWS,
   GALLERY_VIEWS,
@@ -30,7 +31,8 @@ import {
 import { SAMPLES } from "../../packages/tomat-shared/src/ui/samples/index.ts";
 
 const STRICT = true;
-const ROOT = new URL("../../", import.meta.url).pathname;
+// Native OS path (fromFileUrl); URL .pathname breaks walk()/readdir on Windows.
+const ROOT = fromFileUrl(new URL("../../", import.meta.url));
 const VIEWS_DIR = `${ROOT}packages/tomat-shared/src/ui/components/`;
 const GALLERY_DIR = `${ROOT}packages/tomat-website/src/components/gallery/`;
 const CLIENT_COMPONENTS = `${ROOT}packages/tomat-client/src/ui/components/`;

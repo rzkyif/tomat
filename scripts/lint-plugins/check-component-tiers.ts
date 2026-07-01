@@ -17,6 +17,7 @@
 // wraps-is-galleried) is gated behind STRICT_GALLERY.
 
 import { walk } from "@std/fs/walk";
+import { fromFileUrl } from "@std/path";
 import {
   EMBEDDED_VIEWS,
   GALLERY_VIEWS,
@@ -29,7 +30,8 @@ const STRICT_GALLERY = true;
 // job is catching regressions, not proving completeness (the `composes`
 // declarations, cross-checked against imports, do that).
 const RAW_LEAF_CAP = 4;
-const ROOT = new URL("../../", import.meta.url).pathname;
+// Native OS path (fromFileUrl); URL .pathname breaks walk()/readdir on Windows.
+const ROOT = fromFileUrl(new URL("../../", import.meta.url));
 const COMPONENTS = `${ROOT}packages/tomat-client/src/ui/components/`;
 const MANIFEST = `${COMPONENTS}.tiers.json`;
 const SHARED_COMPONENTS = `${ROOT}packages/tomat-shared/src/ui/components/`;
@@ -48,7 +50,9 @@ const manifest: { components: Record<string, Entry> } = JSON.parse(
 const onDisk = new Set<string>();
 for await (const e of walk(COMPONENTS, { exts: [".svelte"], includeDirs: false })) {
   if (e.path.endsWith(".test.svelte")) continue;
-  onDisk.add(e.path.slice(COMPONENTS.length));
+  // Normalize to forward slashes so keys match .tiers.json (walk yields native
+  // backslash paths on Windows).
+  onDisk.add(e.path.slice(COMPONENTS.length).replaceAll("\\", "/"));
 }
 
 // Shared `*View` basenames, found recursively (Views live in domain subfolders),

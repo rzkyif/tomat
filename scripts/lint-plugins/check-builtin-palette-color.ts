@@ -12,6 +12,8 @@
 // Wired into `deno task lint` alongside the oxlint pass and the other walkers.
 // This source keeps no literal palette-color token, or it flags its own pattern.
 
+import { fromFileUrl } from "@std/path";
+
 // KEEP IN SYNC with PALETTE_COLOR_RE in oxlint-plugin.ts.
 const PALETTE_COLOR_RE =
   /\b(?:text|bg|border|ring|from|to|via|fill|stroke|outline|divide|caret|decoration|shadow)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|[1-9]00|950)\b/g;
@@ -31,7 +33,8 @@ const OXLINT_EXTS = new Set([
   ".svelte",
 ]);
 
-const ROOT = new URL("../../", import.meta.url).pathname;
+// Native OS path (fromFileUrl); URL .pathname is an invalid "/C:/..." cwd on Windows.
+const ROOT = fromFileUrl(new URL("../../", import.meta.url));
 
 interface Violation {
   file: string;

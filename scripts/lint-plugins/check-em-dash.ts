@@ -9,6 +9,8 @@
 // Wired into `deno task lint` alongside the oxlint pass and the .svelte
 // tauri-boundary pass. Keep this file em-dash-free, or it flags its own source.
 
+import { fromFileUrl } from "@std/path";
+
 const EM_DASH = String.fromCharCode(0x2014);
 
 // Extensions oxlint already lints via the no-em-dash rule. Skipped here so a
@@ -26,7 +28,8 @@ const OXLINT_EXTS = new Set([
   ".svelte",
 ]);
 
-const ROOT = new URL("../../", import.meta.url).pathname;
+// Native OS path (fromFileUrl); URL .pathname is an invalid "/C:/..." cwd on Windows.
+const ROOT = fromFileUrl(new URL("../../", import.meta.url));
 
 interface Violation {
   file: string;

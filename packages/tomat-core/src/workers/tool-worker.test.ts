@@ -5,10 +5,10 @@
 // pool side and asserts the worker's frame sequence.
 
 import { assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 import type { PoolToWorkerFrame, WorkerToPoolFrame } from "../extensions/worker-protocol.ts";
 
-const WORKER_ENTRY = new URL("./tool-worker.ts", import.meta.url).pathname;
+const WORKER_ENTRY = fromFileUrl(new URL("./tool-worker.ts", import.meta.url));
 
 const EXTENSION_SOURCE = `
 export async function echo(args, ctx) {

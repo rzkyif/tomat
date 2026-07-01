@@ -159,11 +159,12 @@ path, matching the readiness contract every sidecar promises. To stand a
 sidecar-shaped subprocess up in a test:
 
 ```ts
+import { fromFileUrl } from "@std/path";
 import { freePort } from "../../tests/helpers/free-port.ts";
 import { sidecarManager } from "./manager.ts";
 
 const port = freePort();
-const STUB = new URL("../../tests/fixtures/sidecars/http-stub.ts", import.meta.url).pathname;
+const STUB = fromFileUrl(new URL("../../tests/fixtures/sidecars/http-stub.ts", import.meta.url));
 await sidecarManager().start("llama", {
   binary: Deno.execPath(),
   args: ["run", `--allow-net=127.0.0.1:${port}`, STUB, String(port)],

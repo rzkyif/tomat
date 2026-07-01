@@ -12,9 +12,9 @@
 // (tomat-core-latest), so build outputs in dist/ never need a per-channel clean.
 
 import { parseArgs } from "@std/cli/parse-args";
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fromFileUrl(new URL("..", import.meta.url));
 
 // Build outputs, relative to the repo root. Every entry is gitignored.
 const ARTIFACTS = [

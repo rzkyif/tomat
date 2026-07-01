@@ -8,8 +8,10 @@
 // Wired into `deno task lint` alongside the oxlint pass.
 
 import { walk } from "@std/fs/walk";
+import { fromFileUrl } from "@std/path";
 
-const ROOT = new URL("../../packages/tomat-client/src/ui/", import.meta.url).pathname;
+// Native OS path (fromFileUrl); URL .pathname breaks walk()/readdir on Windows.
+const ROOT = fromFileUrl(new URL("../../packages/tomat-client/src/ui/", import.meta.url));
 // The platform layer (tauri.ts desktop impl, mobile.ts android impl, plus their
 // shared helpers and the selection bootstrap) is the one place allowed to import
 // @tauri-apps/* directly; everything else routes through the Platform interface.
@@ -28,13 +30,16 @@ interface Violation {
 async function scan(): Promise<Violation[]> {
   const violations: Violation[] = [];
   for await (const entry of walk(ROOT, { exts: [".svelte"], includeDirs: false })) {
-    if (entry.path.includes(ALLOW)) continue;
+    // walk yields native backslash paths on Windows; normalize so the ALLOW
+    // check and the reported path use forward slashes on every OS.
+    const rel = entry.path.replaceAll("\\", "/");
+    if (rel.includes(ALLOW)) continue;
     const text = await Deno.readTextFile(entry.path);
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i++) {
       if (IMPORT_RE.test(lines[i])) {
         violations.push({
-          file: entry.path.slice(ROOT.length - "packages/tomat-client/src/ui/".length),
+          file: rel.slice(ROOT.length - "packages/tomat-client/src/ui/".length),
           lineNumber: i + 1,
           line: lines[i].trim(),
         });

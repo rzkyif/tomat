@@ -1,4 +1,5 @@
 import { assertEquals, assertThrows } from "@std/assert";
+import { join } from "@std/path";
 import {
   channelBinName,
   channelSuffix,
@@ -37,26 +38,26 @@ const HOME = "/fake/home";
 
 Deno.test("stable channel nests core/client under ~/.tomat/stable", () => {
   withEnv({ HOME, TOMAT_CHANNEL: undefined, TOMAT_CORE_HOME: undefined }, () => {
-    assertEquals(coreRoot(), "/fake/home/.tomat/stable/core");
-    assertEquals(clientRoot(), "/fake/home/.tomat/stable/client");
+    assertEquals(coreRoot(), join(HOME, ".tomat", "stable", "core"));
+    assertEquals(clientRoot(), join(HOME, ".tomat", "stable", "client"));
   });
 });
 
 Deno.test("dev and latest channels each get their own subtree", () => {
   withEnv({ HOME, TOMAT_CHANNEL: "dev", TOMAT_CORE_HOME: undefined }, () => {
-    assertEquals(coreRoot(), "/fake/home/.tomat/dev/core");
-    assertEquals(clientRoot(), "/fake/home/.tomat/dev/client");
+    assertEquals(coreRoot(), join(HOME, ".tomat", "dev", "core"));
+    assertEquals(clientRoot(), join(HOME, ".tomat", "dev", "client"));
   });
   withEnv({ HOME, TOMAT_CHANNEL: "latest", TOMAT_CORE_HOME: undefined }, () => {
-    assertEquals(coreRoot(), "/fake/home/.tomat/latest/core");
-    assertEquals(clientRoot(), "/fake/home/.tomat/latest/client");
+    assertEquals(coreRoot(), join(HOME, ".tomat", "latest", "core"));
+    assertEquals(clientRoot(), join(HOME, ".tomat", "latest", "client"));
   });
 });
 
 Deno.test("models dir is shared across channels at ~/.tomat/models", () => {
   for (const ch of [undefined, "dev", "latest"]) {
     withEnv({ HOME, TOMAT_CHANNEL: ch, TOMAT_CORE_HOME: undefined }, () => {
-      assertEquals(paths().modelsDir, "/fake/home/.tomat/models");
+      assertEquals(paths().modelsDir, join(HOME, ".tomat", "models"));
     });
   }
 });
@@ -64,7 +65,7 @@ Deno.test("models dir is shared across channels at ~/.tomat/models", () => {
 Deno.test("TOMAT_CORE_HOME override wins and keeps models inside it", () => {
   withEnv({ HOME, TOMAT_CHANNEL: "dev", TOMAT_CORE_HOME: "/tmp/iso" }, () => {
     assertEquals(coreRoot(), "/tmp/iso");
-    assertEquals(paths().modelsDir, "/tmp/iso/models");
+    assertEquals(paths().modelsDir, join("/tmp/iso", "models"));
   });
 });
 

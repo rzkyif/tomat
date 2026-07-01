@@ -19,8 +19,10 @@
 // thus the View's default), never to hand-configure the shell here.
 
 import { walk } from "@std/fs/walk";
+import { fromFileUrl } from "@std/path";
 
-const ROOT = new URL("../../packages/tomat-website/src/", import.meta.url).pathname;
+// Native OS path (fromFileUrl); URL .pathname breaks walk()/readdir on Windows.
+const ROOT = fromFileUrl(new URL("../../packages/tomat-website/src/", import.meta.url));
 const REL = "packages/tomat-website/src/";
 
 // Composition-deciding props: the client's live-override seams.
@@ -56,7 +58,10 @@ async function scan(): Promise<Violation[]> {
   const violations: Violation[] = [];
   for await (const entry of walk(ROOT, { exts: [".svelte"], includeDirs: false })) {
     const text = await Deno.readTextFile(entry.path);
-    const rel = entry.path.slice(entry.path.indexOf(REL));
+    // walk yields native backslash paths on Windows; normalize so indexOf(REL)
+    // (a forward-slash needle) finds the repo-relative tail on every OS.
+    const p = entry.path.replaceAll("\\", "/");
+    const rel = p.slice(p.indexOf(REL));
     let from = 0;
     for (;;) {
       const idx = text.indexOf("<UserInputView", from);

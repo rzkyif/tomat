@@ -3,6 +3,7 @@
 // drives the manager through its lifecycle.
 
 import { assertEquals } from "@std/assert";
+import { fromFileUrl } from "@std/path";
 import { __resetForTesting, sidecarManager } from "./manager.ts";
 import type { SidecarSnapshot } from "./types.ts";
 import { initLogger } from "../shared/log.ts";
@@ -13,7 +14,9 @@ import { freePort } from "../../tests/helpers/free-port.ts";
 Deno.env.set("TOMAT_CORE_HOME", await Deno.makeTempDir({ prefix: "tomat-sidecar-test-" }));
 await initLogger();
 
-const STUB_PATH = new URL("../../tests/fixtures/sidecars/http-stub.ts", import.meta.url).pathname;
+const STUB_PATH = fromFileUrl(
+  new URL("../../tests/fixtures/sidecars/http-stub.ts", import.meta.url),
+);
 
 function buildOpts(port: number) {
   return {

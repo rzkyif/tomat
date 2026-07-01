@@ -4,6 +4,7 @@
 // authors who want to test their own network-touching tools.
 
 import { assertEquals, assertRejects } from "@std/assert";
+import { join } from "@std/path";
 import { download } from "./download.ts";
 import type { ToolContext } from "./types.ts";
 
@@ -184,7 +185,7 @@ Deno.test("download: derives filename from URL path when no filename arg is give
         },
         ctx,
       );
-      assertEquals(result.path, `${dir}/MyFile.bin`);
+      assertEquals(result.path, join(dir, "MyFile.bin"));
     } finally {
       restore();
     }

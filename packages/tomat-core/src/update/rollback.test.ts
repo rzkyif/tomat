@@ -250,7 +250,7 @@ Deno.test("handleUpdateMarkerOnBoot: latest rolls back the channel-suffixed bina
   try {
     // The rollback anchor must follow the channel suffix, not the bare name.
     const currentBin = binPath(coreBinaryName("tomat-core"));
-    assertEquals(currentBin.endsWith("tomat-core-latest"), true);
+    assertEquals(currentBin.includes("tomat-core-latest"), true);
     const oldBin = currentBin + ".old";
     await Deno.writeTextFile(currentBin, "BROKEN_LATEST");
     await Deno.writeTextFile(oldBin, "WORKING_LATEST");

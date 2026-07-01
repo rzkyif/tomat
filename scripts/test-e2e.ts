@@ -12,9 +12,9 @@
 //
 // Once that's done, this script exec's `wdio run wdio.conf.ts`.
 
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 
-const repoRoot = new URL("..", import.meta.url).pathname;
+const repoRoot = fromFileUrl(new URL("..", import.meta.url));
 const e2eDir = join(repoRoot, "tests", "e2e", "tauri-driver");
 const wdioBin = join(e2eDir, "node_modules", ".bin", "wdio");
 

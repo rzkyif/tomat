@@ -18,10 +18,11 @@
 
 import { assert, assertEquals } from "@std/assert";
 import { encodeBase64 } from "@std/encoding/base64";
+import { fromFileUrl } from "@std/path";
 import * as ed from "@noble/ed25519";
 
-const CLIENT_SH = new URL("./client.sh", import.meta.url).pathname;
-const CORE_SH = new URL("./core.sh", import.meta.url).pathname;
+const CLIENT_SH = fromFileUrl(new URL("./client.sh", import.meta.url));
+const CORE_SH = fromFileUrl(new URL("./core.sh", import.meta.url));
 const enc = new TextEncoder();
 
 /** Resolve an OpenSSL 3.x binary the way the install scripts do; null if none. */

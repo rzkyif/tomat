@@ -20,14 +20,18 @@
 // (.svelte markup, .ts, .astro, .mdx, .html), so it is the sole authority.
 
 import { lookupCollection, lookupCollections } from "npm:@iconify/json@^2.2.483";
+import { fromFileUrl, relative } from "@std/path";
 
-const ROOT = new URL("../../", import.meta.url).pathname;
+// Native OS path (fromFileUrl); URL .pathname is an invalid "/C:/..." cwd on Windows.
+const ROOT = fromFileUrl(new URL("../../", import.meta.url));
 
 // This file's own comments document what a BAD icon class looks like (deliberate
 // typos, e.g. `...chevron-rihgt...`), so scanning it would flag its own teaching
 // examples. A lint script never renders an icon, so skip it: nothing real is
 // lost, and the negative examples can stay readable inline.
-const SELF = new URL(import.meta.url).pathname.slice(ROOT.length);
+// `relative` + forward-slash normalization so this matches the git-listed path
+// (native backslashes on Windows) compared against `file` in the scan below.
+const SELF = relative(ROOT, fromFileUrl(import.meta.url)).replaceAll("\\", "/");
 
 // File types whose source can contain an icon class. Matches the union of the
 // client and website UnoCSS `content` pipelines.

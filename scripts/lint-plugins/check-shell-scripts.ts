@@ -16,7 +16,10 @@
 // PowerShell (.ps1) is not covered here (shellcheck can't parse it); a
 // PSScriptAnalyzer pass is a possible future follow-up.
 
-const ROOT = new URL("../../", import.meta.url).pathname;
+import { fromFileUrl } from "@std/path";
+
+// Native OS path (fromFileUrl); URL .pathname is an invalid "/C:/..." cwd on Windows.
+const ROOT = fromFileUrl(new URL("../../", import.meta.url));
 const SEVERITY = "warning";
 
 async function trackedShellScripts(): Promise<string[]> {
