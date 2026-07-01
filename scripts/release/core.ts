@@ -343,6 +343,13 @@ export async function buildHelpers(triples: Triple[], suffix: string): Promise<H
   return out;
 }
 
+// GNU tar (the Windows CI runner's git-bundled `/usr/bin/tar`) parses an `-f`
+// argument containing a colon as a remote `host:file`, so a drive-letter archive
+// path like `C:\...\x.tar.gz` makes it try to connect to host `C`. `--force-local`
+// keeps the archive path local. Added only on Windows: macOS bsdtar rejects the
+// flag, and its temp paths never carry a drive-letter colon.
+const TAR_LOCAL = Deno.build.os === "windows" ? ["--force-local"] : [];
+
 /** Download + unpack espeak-ng-data once per release run; returns the path to
  *  the extracted `espeak-ng-data/` dir. bzip2 isn't available in Deno, so unpack
  *  via the system `tar` (present on every release host). */
@@ -368,7 +375,7 @@ async function ensureEspeakData(): Promise<string> {
   // Defense for the release host: reject any archive entry that would escape the
   // extraction dir (absolute path or `..` traversal) before extracting.
   const list = await new Deno.Command("tar", {
-    args: ["-tjf", archive],
+    args: [...TAR_LOCAL, "-tjf", archive],
     stdout: "piped",
     stderr: "inherit",
   }).output();
@@ -381,7 +388,7 @@ async function ensureEspeakData(): Promise<string> {
     }
   }
   const { code } = await new Deno.Command("tar", {
-    args: ["-xjf", archive, "-C", tmp],
+    args: [...TAR_LOCAL, "-xjf", archive, "-C", tmp],
     stdout: "inherit",
     stderr: "inherit",
   }).output();
@@ -444,7 +451,7 @@ async function buildSpeech(triples: Triple[], suffix: string): Promise<SpeechArt
     await ensureDir(outDir);
     const outPath = join(outDir, filename);
     const { code: tarCode } = await new Deno.Command("tar", {
-      args: ["-czf", outPath, "-C", staging, exeIn, "espeak-ng-data"],
+      args: [...TAR_LOCAL, "-czf", outPath, "-C", staging, exeIn, "espeak-ng-data"],
       stdout: "inherit",
       stderr: "inherit",
     }).output();
