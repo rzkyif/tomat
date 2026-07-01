@@ -172,14 +172,23 @@ export async function publishGithubRelease(
   // `path#name` sets each asset's display name; --clobber replaces same-named
   // assets so the rolling release is overwritten in place rather than erroring.
   info(`attaching ${assets.length} asset(s) to ${tag}`);
-  const upload = await gh([
+  const uploadArgs = [
     "release",
     "upload",
     tag,
     ...repoArgs,
     ...assets.map((a) => `${a.path}#${a.name}`),
     "--clobber",
-  ]);
+  ];
+  // A just-created/edited release can 404 on uploads.github.com for a few seconds
+  // until it replicates from api.github.com (the create -> upload race). --clobber
+  // makes the upload idempotent, so retry with backoff before giving up.
+  let upload = await gh(uploadArgs);
+  for (let attempt = 1; upload.code !== 0 && attempt <= 5; attempt++) {
+    info(colors.yellow(`upload failed (attempt ${attempt}/5); retrying in ${attempt * 3}s`));
+    await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
+    upload = await gh(uploadArgs);
+  }
   if (upload.code !== 0) fail(`gh release upload ${tag} failed: ${upload.stderr.trim()}`);
   ok(`attached ${assets.length} asset(s) to ${tag} (${rel(DIST_DIR)} mirror)`);
 }
