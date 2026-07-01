@@ -505,6 +505,60 @@ if [ -z "$OPENSSL_CMD" ]; then
   exit 1
 fi
 
+# Verify a raw Ed25519 signature over a payload file against the committed
+# signing public key. Pure: no UI, no globals beyond OPENSSL_CMD +
+# TOMAT_SIGNING_PUBKEY_B64; returns 0 when valid, non-zero otherwise, so callers
+# decide how to react (the install flow below maps failure to ui_die; the
+# self-test maps it to an exit code). Single source of the verify crypto, shared
+# by the real install path and TOMAT_SELFTEST so the test exercises the actual
+# logic rather than a copy.
+ed25519_verify_file() {
+  _ev_payload="$1"
+  _ev_sig_raw="$2"
+  _ev_pem="$(mktemp 2>/dev/null || mktemp -t tomat-verify-pem)"
+  printf -- '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA%s\n-----END PUBLIC KEY-----\n' \
+    "$TOMAT_SIGNING_PUBKEY_B64" >"$_ev_pem"
+  _ev_rc=0
+  "$OPENSSL_CMD" pkeyutl -verify -pubin -inkey "$_ev_pem" -rawin \
+    -in "$_ev_payload" -sigfile "$_ev_sig_raw" >/dev/null 2>&1 || _ev_rc=$?
+  rm -f "$_ev_pem"
+  return "$_ev_rc"
+}
+
+# --- offline self-test (exercised by scripts/install/verify.test.ts) ------
+# When TOMAT_SELFTEST is set, verify a LOCAL manifest with the exact
+# canonicalize(minus .signature) + embedded-signature + ed25519_verify_file the
+# install flow uses, then exit before any network/install. The core manifest
+# carries an EMBEDDED `signature` field (unlike the client's detached .sig), so
+# this mirrors that shape. TOMAT_SELFTEST_PUBKEY_B64 overrides the committed key
+# so the test can sign fixtures with an ephemeral keypair. Exits 0 when the
+# signature (and optional artifact sha256) verify, non-zero (fail-closed) otherwise.
+if [ -n "${TOMAT_SELFTEST:-}" ]; then
+  TOMAT_SIGNING_PUBKEY_B64="${TOMAT_SELFTEST_PUBKEY_B64:-$TOMAT_SIGNING_PUBKEY_B64}"
+  _st_json="$(cat "$TOMAT_SELFTEST_MANIFEST")"
+  _st_canon="$(mktemp 2>/dev/null || mktemp -t tomat-selftest-canon)"
+  _st_raw="$(mktemp 2>/dev/null || mktemp -t tomat-selftest-sig)"
+  printf '%s' "$_st_json" | jq -Sjc 'del(.signature)' >"$_st_canon" 2>/dev/null
+  printf '%s' "$_st_json" | jq -r '.signature // empty' | "$OPENSSL_CMD" base64 -d -A >"$_st_raw" 2>/dev/null || true
+  if ! ed25519_verify_file "$_st_canon" "$_st_raw"; then
+    rm -f "$_st_canon" "$_st_raw"
+    printf 'selftest: signature INVALID\n' >&2
+    exit 1
+  fi
+  rm -f "$_st_canon" "$_st_raw"
+  if [ -n "${TOMAT_SELFTEST_ARTIFACT:-}" ]; then
+    _st_sha="sha256sum"
+    command -v sha256sum >/dev/null 2>&1 || _st_sha="shasum -a 256"
+    _st_got="$($_st_sha "$TOMAT_SELFTEST_ARTIFACT" 2>/dev/null | awk '{print $1}')"
+    if [ "$_st_got" != "$TOMAT_SELFTEST_SHA" ]; then
+      printf 'selftest: sha256 MISMATCH\n' >&2
+      exit 1
+    fi
+  fi
+  printf 'selftest: OK\n'
+  exit 0
+fi
+
 mkdir -p "$BIN_DIR" "$WORKERS_DIR" "$EXTENSIONS_DIR" "$STAGING_DIR" "$LOGS_DIR"
 
 # --- helper: figure out the platform-specific service label for action 7 --
@@ -689,20 +743,17 @@ fi
 # covers canonicalize(manifest minus `signature`) (matching the core's own
 # verifier in packages/tomat-core/src/update/self-updater.ts), which `jq -Sjc`
 # reproduces byte-for-byte. Fail closed: a tampered or unsigned manifest aborts.
-SIG_PEM="$STAGING_DIR/tomat-pubkey-$$.pem"
 SIG_CANON="$STAGING_DIR/tomat-canon-$$.bin"
 SIG_RAW="$STAGING_DIR/tomat-sig-$$.bin"
-printf -- '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA%s\n-----END PUBLIC KEY-----\n' \
-  "$TOMAT_SIGNING_PUBKEY_B64" >"$SIG_PEM"
 printf '%s' "$MANIFEST_JSON" | jq -Sjc 'del(.signature)' >"$SIG_CANON" 2>/dev/null
 printf '%s' "$MANIFEST_JSON" | jq -r '.signature // empty' | "$OPENSSL_CMD" base64 -d -A >"$SIG_RAW" 2>/dev/null
-if ! "$OPENSSL_CMD" pkeyutl -verify -pubin -inkey "$SIG_PEM" -rawin -in "$SIG_CANON" -sigfile "$SIG_RAW" >/dev/null 2>&1; then
-  rm -f "$SIG_PEM" "$SIG_CANON" "$SIG_RAW"
+if ! ed25519_verify_file "$SIG_CANON" "$SIG_RAW"; then
+  rm -f "$SIG_CANON" "$SIG_RAW"
   ui_die "Manifest signature verification failed" \
     "" \
     "the manifest may have been tampered with in transit; aborting"
 fi
-rm -f "$SIG_PEM" "$SIG_CANON" "$SIG_RAW"
+rm -f "$SIG_CANON" "$SIG_RAW"
 
 URL="$(printf '%s' "$MANIFEST_JSON" | jq -r --arg t "$TRIPLE" '.binaries[] | select(.triple==$t) | .url' 2>/dev/null || true)"
 SHA256="$(printf '%s' "$MANIFEST_JSON" | jq -r --arg t "$TRIPLE" '.binaries[] | select(.triple==$t) | .sha256' 2>/dev/null || true)"

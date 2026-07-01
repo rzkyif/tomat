@@ -34,6 +34,7 @@ import { ALL_KNOWN_TRIPLES, RELEASE_TARGET_TRIPLES } from "./all-targets.ts";
 import type { BuildEnvironment } from "./drivers/mod.ts";
 import { podmanLinuxDriver } from "./drivers/podman.ts";
 import { windowsUtmDriver } from "./drivers/windows.ts";
+import { assertReleaseGitState, pushChannelBranch } from "./git-align.ts";
 import { coreItem } from "./core.ts";
 import { extensionItem } from "./extension.ts";
 import { catalogItem } from "./catalog.ts";
@@ -77,6 +78,10 @@ interface Flags {
   force: boolean;
   dryRun: boolean;
   githubRelease: boolean;
+  /** Fast-forward + push the channel branch after a successful release, guarded
+   *  by strict git preconditions. Set by the full `release` / `release:stable`
+   *  tasks; off for `release:native` (a host-only partial release). */
+  alignBranches: boolean;
 }
 
 function parseFlags(): Flags {
@@ -84,7 +89,7 @@ function parseFlags(): Flags {
     Deno.args.filter((a) => a !== "--"),
     {
       string: ["channel", "triples"],
-      boolean: ["yes", "force", "dry-run", "help", "github-release"],
+      boolean: ["yes", "force", "dry-run", "help", "github-release", "align-branches"],
       alias: { y: "yes" },
       default: {
         yes: false,
@@ -92,6 +97,7 @@ function parseFlags(): Flags {
         "dry-run": false,
         help: false,
         "github-release": false,
+        "align-branches": false,
       },
     },
   );
@@ -104,6 +110,7 @@ Flags:
   --force                    ignore the cursor; treat every item as changed
   --dry-run                  build locally; skip R2 uploads + cursor write
   --github-release           also mirror to the rolling per-channel GitHub Release
+  --align-branches           fast-forward + push the channel branch after release
   --help`);
     Deno.exit(0);
   }
@@ -135,6 +142,7 @@ Flags:
     force: args.force,
     dryRun: args["dry-run"],
     githubRelease: args["github-release"],
+    alignBranches: args["align-branches"],
   };
 }
 
@@ -142,6 +150,12 @@ async function main(): Promise<void> {
   const flags = parseFlags();
   const mode = flags.crossPlatform ? "all targets" : "host only";
   console.log(colors.bold(`\ntomat release: ${flags.channel} channel (${mode})\n`));
+
+  // Branch-aligned release: enforce the git preconditions up front, before any
+  // env load or build, so a dirty/misaligned tree fails fast on a pristine tree.
+  if (flags.alignBranches) {
+    await assertReleaseGitState(flags.channel);
+  }
 
   // Cross-platform runs pass on-demand build environments; the core item routes
   // each triple to the host (its own OS) or a driver (started for the build, then
@@ -177,6 +191,12 @@ async function main(): Promise<void> {
     triples: flags.requestedTriples,
     environments,
     githubRelease: flags.githubRelease,
+    // A branch-aligned release must NOT auto-bump: the pushed commit is the
+    // committed (pre-bump) state, and CI's preflight recomputes source hashes
+    // from that commit. Recording the as-built hash (noBump) keeps a re-push (and
+    // the CI preflight) a no-op. Versions are bumped + committed on main before
+    // releasing; the version-bump gate enforces that.
+    noBump: flags.alignBranches,
   });
 
   if (published > 0 && !flags.dryRun) {
@@ -185,6 +205,14 @@ async function main(): Promise<void> {
         colors.green(colors.bold(`✓ release complete (${flags.channel})`)) +
         `  ${published} item(s) published\n`,
     );
+  }
+
+  // Align the channel branch to what was just published. Only after a real,
+  // non-dry release that published something: an abort or nothing-to-do returns
+  // 0 and leaves the branches untouched. CI's preflight sees the cursor already
+  // current and skips the build matrix, so this push does not re-run the release.
+  if (flags.alignBranches && !flags.dryRun && published > 0) {
+    await pushChannelBranch(flags.channel);
   }
 }
 

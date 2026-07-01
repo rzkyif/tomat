@@ -152,6 +152,25 @@ export interface DeployEnv {
   androidKeystorePassword: string;
   androidKeyAlias: string;
   androidKeyPassword: string;
+  /** Apple Developer ID signing + notarization for the macOS client bundle. All
+   *  optional and empty by default: when unset, the macOS build keeps ad-hoc
+   *  signing (tauri.conf.json's signingIdentity "-") and skips notarization, so
+   *  the pipeline behaves exactly as before. When filled, buildClient injects
+   *  them into the Tauri build env (see client.ts). Tauri reads the identity from
+   *  APPLE_SIGNING_IDENTITY (or the base64 .p12 in APPLE_CERTIFICATE +
+   *  APPLE_CERTIFICATE_PASSWORD on CI) and notarizes with either the Apple ID
+   *  trio (appleId/applePassword/appleTeamId) or the App Store Connect API key
+   *  trio (appleApiKey/appleApiIssuer/appleApiKeyPath). macOS builds host-natively
+   *  (Tauri can't cross-sign), so these ride only on a macOS host/runner. */
+  appleSigningIdentity: string;
+  appleCertificateB64: string;
+  appleCertificatePassword: string;
+  appleId: string;
+  applePassword: string;
+  appleTeamId: string;
+  appleApiKey: string;
+  appleApiIssuer: string;
+  appleApiKeyPath: string;
 }
 
 export async function loadOrSeedEnv(): Promise<DeployEnv> {
@@ -219,6 +238,15 @@ export async function loadOrSeedEnv(): Promise<DeployEnv> {
     androidKeystorePassword: get("TOMAT_ANDROID_KEYSTORE_PASSWORD"),
     androidKeyAlias: get("TOMAT_ANDROID_KEY_ALIAS") || "upload",
     androidKeyPassword: get("TOMAT_ANDROID_KEY_PASSWORD") || get("TOMAT_ANDROID_KEYSTORE_PASSWORD"),
+    appleSigningIdentity: get("APPLE_SIGNING_IDENTITY"),
+    appleCertificateB64: get("APPLE_CERTIFICATE"),
+    appleCertificatePassword: get("APPLE_CERTIFICATE_PASSWORD"),
+    appleId: get("APPLE_ID"),
+    applePassword: get("APPLE_PASSWORD"),
+    appleTeamId: get("APPLE_TEAM_ID"),
+    appleApiKey: get("APPLE_API_KEY"),
+    appleApiIssuer: get("APPLE_API_ISSUER"),
+    appleApiKeyPath: get("APPLE_API_KEY_PATH"),
   };
 }
 
@@ -250,6 +278,15 @@ export function envFromProcess(): DeployEnv {
     androidKeystorePassword: get("TOMAT_ANDROID_KEYSTORE_PASSWORD"),
     androidKeyAlias: get("TOMAT_ANDROID_KEY_ALIAS") || "upload",
     androidKeyPassword: get("TOMAT_ANDROID_KEY_PASSWORD") || get("TOMAT_ANDROID_KEYSTORE_PASSWORD"),
+    appleSigningIdentity: get("APPLE_SIGNING_IDENTITY"),
+    appleCertificateB64: get("APPLE_CERTIFICATE"),
+    appleCertificatePassword: get("APPLE_CERTIFICATE_PASSWORD"),
+    appleId: get("APPLE_ID"),
+    applePassword: get("APPLE_PASSWORD"),
+    appleTeamId: get("APPLE_TEAM_ID"),
+    appleApiKey: get("APPLE_API_KEY"),
+    appleApiIssuer: get("APPLE_API_ISSUER"),
+    appleApiKeyPath: get("APPLE_API_KEY_PATH"),
   };
 }
 
@@ -946,6 +983,23 @@ async function planItem(
     localHash,
     desc,
   };
+}
+
+/** True when any item differs from what the channel has published (the same
+ *  change detection runReleasePlan uses, without building or prompting). Used by
+ *  the CI preflight gate to skip the build/publish jobs when a branch push has
+ *  nothing to do (e.g. a local release already published this commit). */
+export async function hasReleaseChanges(
+  env: DeployEnv,
+  items: ReleaseItem[],
+  channel: ReleaseChannel,
+): Promise<boolean> {
+  const cursor = await readReleaseCursor(env);
+  for (const item of items) {
+    const plan = await planItem(env, item, channel, cursor, false);
+    if (plan.changed) return true;
+  }
+  return false;
 }
 
 /** Read the cursor, plan each item, enforce the version-bump gate, confirm, and

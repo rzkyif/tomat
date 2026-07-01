@@ -161,8 +161,6 @@
   </div>
 
   {#if !horizontal && hasError && error}
-    <IconText icon="i-material-symbols-error-rounded" color="text-accent-red-700"
-      >{error}</IconText
-    >
+    <IconText icon="i-material-symbols-error-rounded" color="text-accent-red-700">{error}</IconText>
   {/if}
 </div>

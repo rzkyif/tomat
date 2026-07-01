@@ -25,6 +25,12 @@
   //   raw control sits on the flipped card chrome and reads as the opposite theme.
   //   Chat-message Views (already bubbles), modal Views (their own surface), and
   //   the shells render without it.
+  // hug: a `surface` modifier for a raw, natural-width component (a permission
+  //   request, a button row, a badge) whose content is narrower than the card.
+  //   By default the surface bubble fills the card (so a stretch component like a
+  //   settings field row or ObjectManager spans it); `hug` instead lets the
+  //   bubble shrink to its content (`w-fit`, centered), so it wraps the component
+  //   like its name says rather than floating it in a too-wide bubble.
   // backdrop: the component renders its OWN overlay (a Modal/Popover/ActionSheet
   //   open over a dimmed backdrop), so the frame becomes a clipped, transformed
   //   containing block that pins those fixed/absolute layers to the card. The
@@ -35,12 +41,14 @@
   let {
     label,
     surface = false,
+    hug = false,
     backdrop = false,
     wide = false,
     children,
   }: {
     label: string;
     surface?: boolean;
+    hug?: boolean;
     backdrop?: boolean;
     wide?: boolean;
     children: Snippet;
@@ -108,11 +116,14 @@
       <div class="tomat-scroll relative z-10 w-full max-w-full min-w-0 overflow-x-auto p-6">
         <div class="demo-unflip flex w-fit min-w-full items-center justify-center">
           {#if surface}
-            <!-- `fullWidth` makes the bubble track the inner row: it fills the card
-                 for short/fill content (so a stretch component like ObjectManager
-                 spans the card) yet grows with the row when wide content (a long
-                 button bar) pushes the row past the card, so the bubble wraps it. -->
-            <Bubble selectedAlignment="center" fullWidth extraClass="flex justify-center">
+            <!-- Default: `fullWidth` makes the bubble track the inner row: it fills
+                 the card for stretch content (a settings field row, ObjectManager)
+                 yet grows with the row when wide content (a long button bar) pushes
+                 it past the card, so the bubble wraps it. `hug` drops `fullWidth` so
+                 the bubble shrinks to its content (`w-fit`, centered by the row's
+                 `justify-center`) for a raw, natural-width component narrower than
+                 the card, which would otherwise float in a too-wide bubble. -->
+            <Bubble selectedAlignment="center" fullWidth={!hug} extraClass="flex justify-center">
               {@render children()}
             </Bubble>
           {:else}

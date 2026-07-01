@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launch splash, dark theme: dark surface behind a white logo. Matches the
+         app's dark bg-surface (default-d-50, oklch L .205) so the splash blends
+         into the first paint. -->
+    <color name="splash_background">#FF171717</color>
+    <color name="splash_logo">#FFFAFAFA</color>
+</resources>

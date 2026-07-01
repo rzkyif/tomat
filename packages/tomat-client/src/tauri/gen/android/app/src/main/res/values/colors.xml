@@ -7,4 +7,9 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- Launch splash, light theme: light surface behind a dark logo. Matches the
+         app's bg-surface (default-50) so the splash blends into the first paint.
+         The dark variant lives in values-night/colors.xml. -->
+    <color name="splash_background">#FFFAFAFA</color>
+    <color name="splash_logo">#FF171717</color>
 </resources>

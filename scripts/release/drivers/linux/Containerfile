@@ -16,11 +16,20 @@
 # mount for the vite frontend).
 #
 # Scope: core + helpers + speech (cross-compiled, dbus via amd64 multiarch), AND
-# the Tauri Linux desktop client `.deb` (the GUI app cross-links against an amd64
+# the Tauri Linux desktop client AppImage (the GUI app cross-links against an amd64
 # SYSROOT built in the first stage below - the multiarch `-dev` route is a dead-end
 # because libwebkit2gtk-4.1-dev:amd64 pulls gobject-introspection/python3/build-
 # essential :amd64 that don't resolve, so instead we install webkit NATIVELY in an
 # amd64 image and copy its tree as a sysroot the cross toolchain links against).
+#
+# AppImage under emulation: linuxdeploy + appimagetool are x86_64 AppImages whose
+# self-mounting runtime stub ENOEXECs under this qemu - NOT because emulation is
+# broken (ordinary x86_64 binaries + mksquashfs run fine) but because AppImage
+# stamps a magic (0x414902) at ELF offset 8 that breaks qemu's binfmt match.
+# Zeroing those 3 bytes makes them exec; Tauri runs them with APPIMAGE_EXTRACT_AND_
+# RUN=1 (no FUSE). We pre-seed both, magic-patched, into the Tauri tools cache
+# below so Tauri's bundler runs them unmodified (it skips re-downloading a tool
+# already present). xdg-utils/squashfs-tools/patchelf are the bundler's host deps.
 
 # --- stage 1: amd64 sysroot with the Tauri GUI libs -------------------------
 # Native amd64 (runs under qemu - apt/dpkg work; only rustc/LLVM crash, and none
@@ -52,21 +61,22 @@ ENV DEBIAN_FRONTEND=noninteractive
 # pkg-config, so the x64 core build needs the TARGET's dbus dev lib: enable amd64
 # as a foreign dpkg arch and install libdbus-1-dev:amd64 (its .pc + .so land under
 # the x86_64-linux-gnu multiarch dir, where the cross pkg-config env below finds
-# them). dpkg-dev/fakeroot let the Tauri bundler assemble the `.deb`.
+# them).
 # libayatana-appindicator3-dev (native arm64) satisfies the Tauri bundler's
 # tray-library detection, which does a NATIVE `pkg-config ayatana-appindicator3-0.1`
 # lookup (get_appindicator_library_path) - it needs the .pc, not just the runtime
-# .so. For a `.deb` this only sets the package's Depends name (no arch-specific
-# copy), so the native arm64 lib is correct. Without it the bundler aborts with
-# "Can't detect any appindicator library".
+# .so. Without it the bundler aborts with "Can't detect any appindicator library".
+# xdg-utils provides /usr/bin/xdg-open (Tauri copies it into the AppImage);
+# squashfs-tools/patchelf/file/desktop-file-utils/zsync are linuxdeploy +
+# appimagetool's host-side dependencies for assembling the AppImage.
 RUN dpkg --add-architecture amd64 \
   && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl unzip xz-utils git \
     build-essential cmake clang pkg-config libssl-dev \
     gcc-x86-64-linux-gnu g++-x86-64-linux-gnu \
     libdbus-1-dev:amd64 \
-    dpkg-dev fakeroot \
     libayatana-appindicator3-dev \
+    xdg-utils squashfs-tools patchelf file desktop-file-utils zsync \
   && rm -rf /var/lib/apt/lists/*
 
 # Cross pkg-config for the x64 CORE build: allow cross queries (pkg-config
@@ -101,5 +111,59 @@ ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc \
 # Deno (arm64-native; cross-compiles the core to x64 via --target).
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/opt/deno sh
 ENV PATH=/opt/deno/bin:$PATH
+
+# Pre-seed the AppImage bundler tools, magic-patched so they exec under qemu (see
+# the header). They land in the Tauri tools cache (dirs::cache_dir()/tauri, which
+# honors XDG_CACHE_HOME); the client build sets XDG_CACHE_HOME=/opt/tauri-cache
+# (drivers/podman.ts), so Tauri finds them present and runs them instead of
+# re-downloading the un-patched (ENOEXEC) originals. The dest names must match
+# what Tauri's skip-if-exists check looks for EXACTLY: linuxdeploy keeps its arch
+# suffix, but the appimage plugin is saved WITHOUT one. The `dd` zeroes the 3-byte
+# AppImage magic at ELF offset 8.
+RUN mkdir -p /opt/tauri-cache/tauri \
+  && curl -fsSL -o /opt/tauri-cache/tauri/linuxdeploy-x86_64.AppImage \
+       https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage \
+  && curl -fsSL -o /opt/tauri-cache/tauri/linuxdeploy-plugin-appimage.AppImage \
+       https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage \
+  && chmod +x /opt/tauri-cache/tauri/linuxdeploy-x86_64.AppImage \
+              /opt/tauri-cache/tauri/linuxdeploy-plugin-appimage.AppImage \
+  && printf '\0\0\0' | dd of=/opt/tauri-cache/tauri/linuxdeploy-x86_64.AppImage bs=1 seek=8 count=3 conv=notrunc status=none \
+  && printf '\0\0\0' | dd of=/opt/tauri-cache/tauri/linuxdeploy-plugin-appimage.AppImage bs=1 seek=8 count=3 conv=notrunc status=none \
+  # linuxdeploy-plugin-gtk.sh, patched so its GTK-module symlink step uses `ln -sf`
+  # (the upstream `ln -s` aborts on a pre-existing module symlink under this cross
+  # setup). Same cache dir + skip-if-exists, so Tauri runs this instead of fetching
+  # the unpatched one.
+  && curl -fsSL -o /opt/tauri-cache/tauri/linuxdeploy-plugin-gtk.sh \
+       https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh \
+  && sed -i 's/ln $verbose -s /ln $verbose -sf /g' /opt/tauri-cache/tauri/linuxdeploy-plugin-gtk.sh \
+  && chmod +x /opt/tauri-cache/tauri/linuxdeploy-plugin-gtk.sh
+
+# The AppImage bundle step (Tauri's "custom files" copy + linuxdeploy-plugin-gtk)
+# reads x86_64 GUI runtime from `/usr/lib/$(uname -m)-linux-gnu/...` with no path
+# override, so on this arm64 host it would grab the container's arm64 libs (or fail
+# when an x86_64-only file like libayatana-appindicator3.so.1 / the webkit2gtk-4.1
+# helper binaries are absent). Two image-side fixes give it the x86_64 view:
+#   (1) a `uname` shim reporting x86_64 when TOMAT_FAKE_X86=1 (the client build sets
+#       it - drivers/podman.ts - so core builds still see the real host arch);
+#   (2) every sysroot x86_64 lib symlinked into the standard multiarch path, WITHOUT
+#       clobbering what's already there (the core build's amd64-multiarch dbus .pc +
+#       .so stay), so appindicator/webkit-helpers/gtk/gdk-pixbuf all resolve there.
+# The plugin's pkg-config lookups are pointed at the sysroot via PKG_CONFIG_PATH in
+# the same per-run env.
+RUN printf '#!/bin/sh\nif [ "$TOMAT_FAKE_X86" = "1" ]; then case "$1" in -m|-i|-p) echo x86_64; exit 0;; esac; fi\nexec /bin/uname "$@"\n' \
+      > /usr/local/bin/uname \
+  && chmod +x /usr/local/bin/uname \
+  && for f in /opt/amd64-sysroot/usr/lib/x86_64-linux-gnu/*; do \
+       t="/usr/lib/x86_64-linux-gnu/$(basename "$f")"; \
+       [ -e "$t" ] || ln -s "$f" "$t"; \
+     done \
+  # linuxdeploy-plugin-gtk does `cp -r` of these two dirs into an AppDir that
+  # already contains same-named dirs, which fails on a symlinked source ("cannot
+  # overwrite directory with non-directory"); they must be REAL dirs (the rest can
+  # stay symlinks - Tauri's custom-files copy of single .so / the webkit helper dir
+  # follows symlinks fine).
+  && rm -f /usr/lib/x86_64-linux-gnu/gtk-3.0 /usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0 \
+  && cp -a /opt/amd64-sysroot/usr/lib/x86_64-linux-gnu/gtk-3.0 /usr/lib/x86_64-linux-gnu/gtk-3.0 \
+  && cp -a /opt/amd64-sysroot/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0 /usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0
 
 WORKDIR /work

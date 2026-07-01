@@ -460,6 +460,55 @@ if [ -z "$OPENSSL_CMD" ]; then
   exit 1
 fi
 
+# Verify a raw Ed25519 signature over a payload file against the committed
+# signing public key. Pure: no UI, no globals beyond OPENSSL_CMD +
+# TOMAT_SIGNING_PUBKEY_B64; returns 0 when valid, non-zero otherwise, so callers
+# decide how to react (the install flow below maps failure to ui_die; the
+# self-test maps it to an exit code). Single source of the verify crypto, shared
+# by the real install path and TOMAT_SELFTEST so the test exercises the actual
+# logic rather than a copy.
+ed25519_verify_file() {
+  _ev_payload="$1"
+  _ev_sig_raw="$2"
+  _ev_pem="$(mktemp 2>/dev/null || mktemp -t tomat-verify-pem)"
+  printf -- '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA%s\n-----END PUBLIC KEY-----\n' \
+    "$TOMAT_SIGNING_PUBKEY_B64" >"$_ev_pem"
+  _ev_rc=0
+  "$OPENSSL_CMD" pkeyutl -verify -pubin -inkey "$_ev_pem" -rawin \
+    -in "$_ev_payload" -sigfile "$_ev_sig_raw" >/dev/null 2>&1 || _ev_rc=$?
+  rm -f "$_ev_pem"
+  return "$_ev_rc"
+}
+
+# --- offline self-test (exercised by scripts/install/verify.test.ts) ------
+# When TOMAT_SELFTEST is set, verify a LOCAL manifest + detached base64 signature
+# with the exact ed25519_verify_file + sha256 comparison the install flow uses,
+# then exit before any network/UI/install. TOMAT_SELFTEST_PUBKEY_B64 overrides
+# the committed key so the test can sign fixtures with an ephemeral keypair.
+# Exits 0 when everything verifies, non-zero (fail-closed) on any mismatch.
+if [ -n "${TOMAT_SELFTEST:-}" ]; then
+  TOMAT_SIGNING_PUBKEY_B64="${TOMAT_SELFTEST_PUBKEY_B64:-$TOMAT_SIGNING_PUBKEY_B64}"
+  _st_sig_raw="$(mktemp 2>/dev/null || mktemp -t tomat-selftest-sig)"
+  "$OPENSSL_CMD" base64 -d -A <"$TOMAT_SELFTEST_SIG_B64" >"$_st_sig_raw" 2>/dev/null || true
+  if ! ed25519_verify_file "$TOMAT_SELFTEST_MANIFEST" "$_st_sig_raw"; then
+    rm -f "$_st_sig_raw"
+    printf 'selftest: signature INVALID\n' >&2
+    exit 1
+  fi
+  rm -f "$_st_sig_raw"
+  if [ -n "${TOMAT_SELFTEST_ARTIFACT:-}" ]; then
+    _st_sha="sha256sum"
+    command -v sha256sum >/dev/null 2>&1 || _st_sha="shasum -a 256"
+    _st_got="$($_st_sha "$TOMAT_SELFTEST_ARTIFACT" 2>/dev/null | awk '{print $1}')"
+    if [ "$_st_got" != "$TOMAT_SELFTEST_SHA" ]; then
+      printf 'selftest: sha256 MISMATCH\n' >&2
+      exit 1
+    fi
+  fi
+  printf 'selftest: OK\n'
+  exit 0
+fi
+
 # --- helper: pick action 3 / 4 labels based on host ----------------------
 
 uname_os="$(uname -s 2>/dev/null || echo unknown)"
@@ -579,18 +628,15 @@ if ! curl -fsSL -o "$SIG_B64_TMP" "$SIG_URL" 2>/dev/null || [ ! -s "$SIG_B64_TMP
     "$SIG_URL" \
     "the storage origin may be misconfigured"
 fi
-SIG_PEM="$STAGING_DIR/tomat-pubkey-$$.pem"
 SIG_RAW="$STAGING_DIR/tomat-sig-$$.bin"
-printf -- '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA%s\n-----END PUBLIC KEY-----\n' \
-  "$TOMAT_SIGNING_PUBKEY_B64" >"$SIG_PEM"
 "$OPENSSL_CMD" base64 -d -A <"$SIG_B64_TMP" >"$SIG_RAW" 2>/dev/null
-if ! "$OPENSSL_CMD" pkeyutl -verify -pubin -inkey "$SIG_PEM" -rawin -in "$MANIFEST_TMP" -sigfile "$SIG_RAW" >/dev/null 2>&1; then
-  rm -f "$SIG_PEM" "$SIG_RAW" "$SIG_B64_TMP"
+if ! ed25519_verify_file "$MANIFEST_TMP" "$SIG_RAW"; then
+  rm -f "$SIG_RAW" "$SIG_B64_TMP"
   ui_die "Manifest signature verification failed" \
     "" \
     "the manifest may have been tampered with in transit; aborting"
 fi
-rm -f "$SIG_PEM" "$SIG_RAW" "$SIG_B64_TMP"
+rm -f "$SIG_RAW" "$SIG_B64_TMP"
 
 MANIFEST_JSON="$(cat "$MANIFEST_TMP")"
 rm -f "$MANIFEST_TMP"
@@ -822,6 +868,10 @@ else
         "check ownership of ~/.local"
     fi
     if ! chmod +x "$APPIMAGE" 2>/dev/null; then
+      # SC2088: the tilde is intentional display text in a user-facing hint
+      # (shown literally as ~/.local/bin, like the messages above), not a path
+      # passed to a command, so no $HOME expansion is wanted.
+      # shellcheck disable=SC2088
       ui_die "Failed to make AppImage executable" \
         "" \
         "~/.local/bin may be on a noexec mount"

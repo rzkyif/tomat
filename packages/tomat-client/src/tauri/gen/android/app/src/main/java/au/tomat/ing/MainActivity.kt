@@ -3,11 +3,17 @@ package au.tomat.ing
 import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
+    // Show the launch splash (Theme.tomat.Starting) and swap to Theme.tomat.
+    // Must run before super.onCreate(); the compat library backports the
+    // Android 12 splash to our minSdk so all devices get the same theme-aware
+    // dark/light surface + logo instead of the plain white window background.
+    installSplashScreen()
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
   }

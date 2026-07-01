@@ -240,6 +240,12 @@ export const androidItem: ReleaseItem = {
     );
   },
 
+  // The keystore-signed APKs buildAndroidBundle() copies under dist/android/.
+  // The unified build hash-checks this so a wiped/swapped output rebuilds.
+  buildOutputs(_channel: ReleaseChannel): Promise<string[]> {
+    return Promise.resolve([join(DIST_DIR, "android")]);
+  },
+
   // Changed when android.json doesn't yet carry this version (a fresh bump that
   // has not been published from any machine).
   async extraChanged(env: DeployEnv, channel: ReleaseChannel): Promise<boolean> {

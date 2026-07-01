@@ -1,7 +1,8 @@
 // Runs the repo's custom lint walkers concurrently: the checks oxlint cannot
 // express (tauri-import bans in .svelte, the em-dash and lowercase-brand bans,
 // shared-UI purity, the view / primitive / component-tier coverage walkers, the
-// website composer check, and icon-class validation). Each walker is an
+// website composer check, icon-class validation, and shellcheck over the shell
+// install scripts). Each walker is an
 // independent read-only `git ls-files` scan, so they run in parallel; output is
 // buffered and flushed as one labeled block per walker. Wired into the root
 // `lint:js` task after oxlint. Exits non-zero if any walker fails.
@@ -27,6 +28,7 @@ const walkers = [
   "check-component-tiers.ts",
   "check-website-composer.ts",
   "check-icon-classes.ts",
+  "check-shell-scripts.ts",
 ];
 
 const results = await Promise.all(

@@ -1,11 +1,12 @@
 // Linux build environment: a Podman container, started on demand.
 //
 // Builds core + helpers + speech (buildCore) and the Tauri Linux desktop client
-// `.deb` (buildClient) for x86_64-unknown-linux-gnu by CROSS-COMPILING from the
+// AppImage (buildClient) for x86_64-unknown-linux-gnu by CROSS-COMPILING from the
 // NATIVE arm64 container (qemu-emulated rustc SIGSEGVs, so no amd64 emulation):
 // rustc runs arm64 + emits x64; the GNU cross toolchain compiles/links the C deps;
-// the client links the GUI libs against an amd64 sysroot baked into the image.
-// See the Containerfile for the toolchain + sysroot setup.
+// the client links the GUI libs against an amd64 sysroot baked into the image, and
+// linuxdeploy bundles that .so closure into the AppImage. See the Containerfile for
+// the toolchain + sysroot setup and the magic-patched AppImage tooling.
 //
 // ============================ FILL THIS IN ============================
 // Set these to match your machine, then flip the driver on by registering it in
@@ -152,7 +153,7 @@ export const podmanLinuxDriver: BuildEnvironment = {
     await ensureDir(DIST_DIR);
     const descriptors: ClientDescriptor[] = [];
     for (const triple of req.triples) {
-      step(`podman build client (.deb) for ${triple}`);
+      step(`podman build client (AppImage) for ${triple}`);
       const stageRel = `bundles/${this.id}-client-${triple}`;
       const { code } = await podman([
         "run",
@@ -160,8 +161,8 @@ export const podmanLinuxDriver: BuildEnvironment = {
         // Unlike the core build, the Tauri/vite frontend build writes into the
         // repo tree (build/, .svelte-kit/, node_modules/), so the client build
         // needs a WRITABLE repo mount. cargo + the Tauri bundler write to
-        // /tmp/target (findClientBundle honors CARGO_TARGET_DIR); the .deb lands
-        // on the host via the writable mount under dist/.
+        // /tmp/target (findClientBundle honors CARGO_TARGET_DIR); the AppImage
+        // lands on the host via the writable mount under dist/.
         "-v",
         `${REPO_ROOT}:/work:rw`,
         "-e",
@@ -175,18 +176,55 @@ export const podmanLinuxDriver: BuildEnvironment = {
         "PKG_CONFIG_SYSROOT_DIR_x86_64_unknown_linux_gnu=/opt/amd64-sysroot",
         "-e",
         "PKG_CONFIG_PATH_x86_64_unknown_linux_gnu=/opt/amd64-sysroot/usr/lib/x86_64-linux-gnu/pkgconfig:/opt/amd64-sysroot/usr/share/pkgconfig",
+        // Plain PKG_CONFIG_PATH (no triple suffix) for linuxdeploy-plugin-gtk's own
+        // pkg-config calls (librsvg-2.0 etc.); the Rust build uses the suffixed one
+        // above, so this only steers the AppImage GTK-resource bundling.
+        "-e",
+        "PKG_CONFIG_PATH=/opt/amd64-sysroot/usr/lib/x86_64-linux-gnu/pkgconfig:/opt/amd64-sysroot/usr/share/pkgconfig",
         "-e",
         "CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc --sysroot=/opt/amd64-sysroot",
         "-e",
         "CXX_x86_64_unknown_linux_gnu=x86_64-linux-gnu-g++ --sysroot=/opt/amd64-sysroot",
         "-e",
         "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=--sysroot=/opt/amd64-sysroot",
-        // Public keys only: the .deb has no Tauri updater .sig, so no private key
-        // ever enters the container (its first-install is sha256 + Ed25519-gated).
+        // linuxdeploy resolves the GUI .so closure to bundle INTO the AppImage by
+        // DT_NEEDED + LD_LIBRARY_PATH; point it at the amd64 sysroot so it copies
+        // the x86_64 webkit/gtk/... libs (not the host's arm64 ones).
+        "-e",
+        "LD_LIBRARY_PATH=/opt/amd64-sysroot/usr/lib/x86_64-linux-gnu:/opt/amd64-sysroot/lib/x86_64-linux-gnu:/opt/amd64-sysroot/usr/lib",
+        // Tauri's AppImage bundler downloads linuxdeploy/appimagetool to
+        // dirs::cache_dir()/tauri and runs them; the image bakes magic-patched
+        // copies there (so they exec under qemu - see the Containerfile), found via
+        // this XDG_CACHE_HOME override.
+        "-e",
+        "XDG_CACHE_HOME=/opt/tauri-cache",
+        // Skip linuxdeploy's strip pass: its bundled x86_64 `strip`, run under
+        // qemu, fails to recognize the (valid) x86_64 .so it just bundled ("Unable
+        // to recognise the format"). Stripping only trims size, so disabling it
+        // yields the same working AppImage. linuxdeploy reads NO_STRIP from the env
+        // Tauri inherits.
+        "-e",
+        "NO_STRIP=1",
+        // Make the image's `uname` shim report x86_64 so linuxdeploy-plugin-gtk
+        // bundles the x86_64 GTK runtime (surfaced at the standard multiarch path in
+        // the image), not the container's arm64 one. Scoped to the client build, so
+        // the core build still sees the real host arch. See the Containerfile.
+        "-e",
+        "TOMAT_FAKE_X86=1",
+        // The Linux AppImage carries a Tauri updater .sig like every other desktop
+        // installer, so the minisign private key transits here (the Ed25519
+        // manifest key + R2 creds never leave the host). Empty password -> "".
+        // envFromProcess (build-release-bundle.ts -> lib.ts) reads the TAURI_UPDATER_*
+        // names from the container env; buildClient re-derives TAURI_SIGNING_PRIVATE_KEY
+        // from them for the bundler. Matches the Windows driver + .env.
         "-e",
         `TOMAT_SIGNING_PUBLIC_KEY_B64=${req.secrets.signingPublicKeyB64}`,
         "-e",
         `TAURI_UPDATER_PUBLIC_KEY=${req.secrets.tauriPublicKey}`,
+        "-e",
+        `TAURI_UPDATER_PRIVATE_KEY=${req.secrets.tauriPrivateKey}`,
+        "-e",
+        `TAURI_UPDATER_PRIVATE_KEY_PASSWORD=${req.secrets.tauriPassword}`,
         "-w",
         "/work",
         CONFIG.image,
@@ -197,7 +235,7 @@ export const podmanLinuxDriver: BuildEnvironment = {
         "--kind=client",
         `--channel=${req.channel}`,
         `--target=${triple}`,
-        "--bundles=deb",
+        "--bundles=appimage",
         `--bundle-dir=/work/dist/${stageRel}`,
       ]);
       if (code !== 0) throw new Error(`podman client build for ${triple} exited ${code}`);

@@ -173,7 +173,12 @@ through `npm:` specifiers from `deno task`.
   install (Android enforces it at install time). The keystore is supplied at
   release time via base64 in the gitignored `.env`
   (`TOMAT_ANDROID_KEYSTORE_B64`); the decoded `*.jks` + `keystore.properties` are
-  gitignored and never committed.
+  gitignored and never committed. A fourth, OPTIONAL identity applies to macOS: an
+  Apple Developer ID Application certificate (via the `APPLE_*` vars in `.env`)
+  signs + notarizes the macOS client bundle at build time. It is inert when
+  unset - the build falls back to ad-hoc signing (`signingIdentity` "-") and the
+  install script strips the Gatekeeper quarantine xattr, which is the current
+  state. See [scripts/release/macos-signing.md](scripts/release/macos-signing.md).
 - **Distribution split.** Two Cloudflare-hosted hostnames, aligned with content
   type: `au.tomat.ing` (Astro Worker, landing page only) and `get.au.tomat.ing`
   (R2 public bucket, every release artifact: installers, schemas, manifests,
@@ -207,6 +212,8 @@ For anything beyond the above, the canonical docs are:
   [tests/e2e/headless/README.md](tests/e2e/headless/README.md).
 - Release + deploy, channels, Cloudflare + R2 setup:
   [packages/tomat-website/README.md](packages/tomat-website/README.md)
+- macOS Developer ID signing + notarization (cert-ready checklist, entitlements,
+  `.dmg`, future iOS notes): [scripts/release/macos-signing.md](scripts/release/macos-signing.md)
 - Extension author API:
   [packages/tomat-extension-builtin/README.md](packages/tomat-extension-builtin/README.md)
 - User-facing copy (the single source for any string a user can read: settings,

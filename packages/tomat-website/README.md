@@ -85,6 +85,26 @@ a git transfer (`.github/workflows/release.yml`):
 - fast-forward `main` -> `latest` publishes the **latest** channel;
 - fast-forward `latest` -> `stable` publishes the **stable** channel.
 
+Drive it from the repo root without touching your working tree:
+
+```sh
+deno task remote-release          # remote latest <- main   -> CI publishes latest
+deno task remote-release:stable   # remote latest <- stable -> CI publishes stable
+```
+
+`remote-release` is purely remote: it fast-forwards the target branch onto its
+source via the GitHub refs API (`gh`), refuses a non-fast-forward, and no-ops
+when the target is already aligned (so it never triggers a redundant run). It
+replaces the manual `git push origin main:latest`.
+
+**The channel branches are shared with the local pipeline.** A `preflight` job
+diffs the release items against the shared R2 cursor and gates the build +
+publish jobs. So `deno task release` (which publishes to R2 locally first, then
+fast-forwards and pushes the channel branch) lands a branch push that preflight
+sees as "nothing changed" -> the build matrix is skipped. `remote-release` moves
+the branch with nothing published yet -> preflight sees changes -> CI builds and
+publishes. The two never double-publish, and neither wastes a matrix build.
+
 The channel is the branch name. The workflow fans out one native build runner per
 desktop triple (`macos-13` x64, `macos-14` arm64, `windows-latest` x64,
 `windows-11-arm` arm64, `ubuntu-latest` x64 + Android), each running
@@ -115,6 +135,12 @@ so re-pushing the same commit is a no-op). Bump versions as part of the work on
 `TAURI_UPDATER_PRIVATE_KEY_PASSWORD`, `TOMAT_ANDROID_KEYSTORE_B64`,
 `TOMAT_ANDROID_KEYSTORE_PASSWORD`, `TOMAT_ANDROID_KEY_ALIAS`, `TOMAT_ANDROID_KEY_PASSWORD`,
 `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `TOMAT_R2_BUCKET`, `TOMAT_STORAGE_DOMAIN`.
-Build runners receive only the Tauri + Android subset (plus the signing public
-key); the publish job receives all. The landing page still ships on its own track
-(`deno task release:website`), not from these workflows.
+Optionally, the macOS Developer ID signing/notarization vars (`APPLE_SIGNING_IDENTITY`,
+`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`,
+`APPLE_TEAM_ID`, or the `APPLE_API_*` key trio) - these belong on the **macOS build
+runner only** (build-time signing, like the Tauri/Android keys), never the publish
+job; when unset the macOS bundle stays ad-hoc-signed. See
+[macos-signing.md](../../scripts/release/macos-signing.md).
+Build runners receive only the Tauri + Android (+ macOS Apple, on the mac runner)
+subset (plus the signing public key); the publish job receives all. The landing
+page still ships on its own track (`deno task release:website`), not from these workflows.

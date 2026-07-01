@@ -56,8 +56,7 @@ const MANIFEST_CACHE_CONTROL = "public, max-age=300";
 interface ClientBundle {
   triple: Triple;
   bundlePath: string;
-  /** Absent for an artifact with no Tauri updater `.sig` (the Linux `.deb`). */
-  sigPath?: string;
+  sigPath: string;
   filename: string;
   size: number;
 }
@@ -132,7 +131,8 @@ async function buildClient(
   // Drive build-client.ts directly with the channel so it bakes TOMAT_CHANNEL
   // + applies the per-channel app-identity config override. `triple` cross-builds
   // the host's other arch; `bundles` narrows the bundle targets (the cross-built
-  // Linux client emits only `.deb`).
+  // Linux client emits only the AppImage, skipping the .deb/.rpm Tauri would
+  // otherwise also build).
   const args = ["run", "-A", "scripts/build-client.ts", `--channel=${channel}`];
   if (triple) args.push(`--target=${triple}`);
   if (bundles?.length) args.push(`--bundles=${bundles.join(",")}`);
@@ -145,48 +145,65 @@ async function buildClient(
       ...Deno.env.toObject(),
       TAURI_SIGNING_PRIVATE_KEY: env.tauriUpdaterPrivateKey,
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: env.tauriUpdaterPassword,
+      ...appleSigningEnv(env, triple ?? detectHostTriple()),
     },
   });
   const { code } = await cmd.output();
   if (code !== 0) fail(`build-client.ts (${channel}) exited ${code}`);
 }
 
-/** Locate the built installer (+ its Tauri `.sig` when present) for `triple`
- *  under `bundleRoot` - `target/release/bundle` for a host-native build, or
- *  `target/<triple>/release/bundle` for a cross-targeted one. `debOnly` looks for
- *  the cross-built Linux `.deb` (Tauri emits no updater `.sig` for it). */
-async function findClientBundle(
-  triple: Triple,
-  bundleRoot: string,
-  debOnly = false,
-): Promise<ClientBundle> {
-  const candidates: { dir: string; ext: string; sig: boolean }[] = [];
+/** The Apple Developer ID signing + notarization env vars Tauri reads, but only
+ *  for a macOS target and only for the fields that are actually set. When the
+ *  .env has no Apple credentials (the default), this returns {} and the macOS
+ *  build keeps ad-hoc signing (signingIdentity "-") with no notarization - i.e.
+ *  the current behavior. Empty values are dropped so Tauri never sees a blank
+ *  APPLE_CERTIFICATE it would try (and fail) to import. Exported for the
+ *  inert-by-default regression test (client.test.ts). */
+export function appleSigningEnv(env: DeployEnv, triple: Triple): Record<string, string> {
+  if (!triple.endsWith("apple-darwin")) return {};
+  const candidates: Record<string, string> = {
+    APPLE_SIGNING_IDENTITY: env.appleSigningIdentity,
+    APPLE_CERTIFICATE: env.appleCertificateB64,
+    APPLE_CERTIFICATE_PASSWORD: env.appleCertificatePassword,
+    APPLE_ID: env.appleId,
+    APPLE_PASSWORD: env.applePassword,
+    APPLE_TEAM_ID: env.appleTeamId,
+    APPLE_API_KEY: env.appleApiKey,
+    APPLE_API_ISSUER: env.appleApiIssuer,
+    APPLE_API_KEY_PATH: env.appleApiKeyPath,
+  };
+  return Object.fromEntries(Object.entries(candidates).filter(([, v]) => v !== ""));
+}
+
+/** Locate the built installer + its Tauri `.sig` for `triple` under `bundleRoot`
+ *  - `target/release/bundle` for a host-native build, or
+ *  `target/<triple>/release/bundle` for a cross-targeted one. The Linux client is
+ *  a self-contained AppImage (the GUI deps are bundled into it); like every other
+ *  platform it carries the Tauri updater `.sig`. */
+async function findClientBundle(triple: Triple, bundleRoot: string): Promise<ClientBundle> {
+  const candidates: { dir: string; ext: string }[] = [];
   if (triple.endsWith("apple-darwin")) {
-    candidates.push({ dir: join(bundleRoot, "macos"), ext: ".app.tar.gz", sig: true });
+    candidates.push({ dir: join(bundleRoot, "macos"), ext: ".app.tar.gz" });
   } else if (triple.endsWith("pc-windows-msvc")) {
-    candidates.push({ dir: join(bundleRoot, "msi"), ext: ".msi", sig: true });
-    candidates.push({ dir: join(bundleRoot, "nsis"), ext: ".exe", sig: true });
+    candidates.push({ dir: join(bundleRoot, "msi"), ext: ".msi" });
+    candidates.push({ dir: join(bundleRoot, "nsis"), ext: ".exe" });
   } else if (triple.endsWith("unknown-linux-gnu")) {
-    if (debOnly) {
-      candidates.push({ dir: join(bundleRoot, "deb"), ext: ".deb", sig: false });
-    } else {
-      candidates.push({ dir: join(bundleRoot, "appimage"), ext: ".AppImage", sig: true });
-    }
+    candidates.push({ dir: join(bundleRoot, "appimage"), ext: ".AppImage" });
   }
   for (const c of candidates) {
     if (!(await exists(c.dir))) continue;
     for await (const entry of Deno.readDir(c.dir)) {
       if (!entry.isFile) continue;
       if (!entry.name.endsWith(c.ext)) continue;
-      const sigPath = c.sig ? join(c.dir, `${entry.name}.sig`) : undefined;
-      if (sigPath && !(await exists(sigPath))) continue;
+      const sigPath = join(c.dir, `${entry.name}.sig`);
+      if (!(await exists(sigPath))) continue;
       const bundlePath = join(c.dir, entry.name);
       const stat = await Deno.stat(bundlePath);
       return { triple, bundlePath, sigPath, filename: entry.name, size: stat.size };
     }
   }
   fail(
-    `no Tauri bundle${debOnly ? " (.deb)" : " + .sig"} found for ${triple} under ` +
+    `no Tauri bundle + .sig found for ${triple} under ` +
       `${rel(bundleRoot)} (checked ${candidates.map((c) => `${rel(c.dir)}/*${c.ext}`).join(", ")})`,
   );
 }
@@ -245,7 +262,6 @@ export async function buildClientBundle(
   const version = await readClientVersion();
   const triple = opts.triple ?? detectHostTriple();
   const tauriKey = tauriPlatformKey(triple);
-  const debOnly = opts.bundles?.length === 1 && opts.bundles[0] === "deb";
   // A host-native build (no --target) emits under target/release/bundle; a
   // cross-targeted one under <CARGO_TARGET_DIR|target>/<triple>/release/bundle
   // (the Podman client build points CARGO_TARGET_DIR at /tmp so it doesn't write
@@ -258,26 +274,21 @@ export async function buildClientBundle(
   const restore = await injectTauriPubkey(env.tauriUpdaterPublicKey);
   try {
     await buildClient(env, channel, opts.triple, opts.bundles);
-    const bundle = await findClientBundle(triple, bundleRoot, debOnly);
-    ok(
-      `${triple}/${bundle.filename}  ${humanBytes(bundle.size)}` +
-        (bundle.sigPath ? `  → ${rel(bundle.sigPath)}` : `  (no .sig)`),
-    );
+    const bundle = await findClientBundle(triple, bundleRoot);
+    ok(`${triple}/${bundle.filename}  ${humanBytes(bundle.size)}  → ${rel(bundle.sigPath)}`);
 
-    // Copy the bundle (+ its Tauri .sig when present) under dist/<triple>/ so they
-    // ride along with the core artifacts; the publish host re-anchors + verifies.
+    // Copy the bundle + its Tauri .sig under dist/<triple>/ so they ride along
+    // with the core artifacts; the publish host re-anchors + verifies.
     const relPath = `${triple}/${bundle.filename}`;
-    const sigRelPath = bundle.sigPath ? `${triple}/${bundle.filename}.sig` : "";
+    const sigRelPath = `${triple}/${bundle.filename}.sig`;
     await ensureDir(join(DIST_DIR, triple));
     await Deno.copyFile(bundle.bundlePath, join(DIST_DIR, relPath));
-    if (bundle.sigPath) await Deno.copyFile(bundle.sigPath, join(DIST_DIR, sigRelPath));
+    await Deno.copyFile(bundle.sigPath, join(DIST_DIR, sigRelPath));
 
     // sha256 over the exact bytes the installer downloads (mirrors core.json):
     // the Tauri minisign signature protects in-app updates, this protects the
-    // FIRST install (client.sh verifies it before installing). The Linux .deb has
-    // no Tauri updater .sig (signature ""), so its first-install relies on the
-    // sha256 + the Ed25519 client.json.sig alone.
-    const signature = bundle.sigPath ? (await Deno.readTextFile(bundle.sigPath)).trim() : "";
+    // FIRST install (client.sh verifies it before installing).
+    const signature = (await Deno.readTextFile(bundle.sigPath)).trim();
     const { sha256 } = await sha256File(bundle.bundlePath);
     return {
       version,
@@ -412,9 +423,9 @@ export async function buildClientUnified(
     descriptors.push(await buildClientBundle(env, channel, { triple }));
   }
   // Drivers: each environment builds its triples' installers and ships the
-  // bundles + descriptors back into the host's dist/. The Tauri minisign key
-  // transits to envs that produce a signed installer (Windows); the Linux .deb
-  // needs none, so its driver ignores it.
+  // bundles + descriptors back into the host's dist/. Every desktop installer
+  // (Windows MSI/NSIS, Linux AppImage) carries the Tauri updater `.sig`, so the
+  // minisign key transits to each build environment.
   for (const { env: drv, triples: envTriples } of routing.byEnv) {
     if (!drv.buildClient) {
       info(

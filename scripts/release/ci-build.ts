@@ -19,7 +19,6 @@
 //   --android                  also build + stage the Android APK(s) (Linux only)
 
 import { parseArgs } from "@std/cli/parse-args";
-import { decodeBase64 } from "@std/encoding/base64";
 import { ensureDir } from "@std/fs/ensure-dir";
 import {
   channelBinSuffix,

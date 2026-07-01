@@ -92,6 +92,11 @@ install; a build failure surfaces in the dev log and core declines to start.
     libsecret-1-dev patchelf
   ```
 
+- **shellcheck** for linting the shell install scripts (`brew install shellcheck`
+  / `apt install shellcheck`). `deno task lint` runs it over `scripts/**/*.sh`;
+  when it is absent the check skips with a warning locally, but CI installs it so
+  the check is enforced.
+
 ### First-time setup
 
 ```bash
@@ -135,15 +140,20 @@ screen sets its own password.
 ### Building
 
 ```bash
-deno task build         # build everything that changed (core/client/catalog/website) for the latest channel
+deno task build         # build everything that changed (core/client/catalog/android) for the latest channel
 deno task build:stable  # ... for the stable channel
+deno task build:native  # same, but only for the current host triple
 ```
 
 `deno task build` compiles each artifact whose source changed since the last
 build and skips the rest (tracked by a `dist/.build-state.json` cursor). Run
-`deno task clean` or pass `--force` to rebuild from scratch. The granular
-`build:core` / `build:client` tasks force-build a single component. Releasing
-the built artifacts is covered in
+`deno task clean` or pass `--force` to rebuild from scratch. It mirrors the
+umbrella `deno task release` item set: core + helpers, the desktop client, the
+model catalog, and the android client (built only when an Android keystore is
+configured in `.env`; otherwise it is skipped with a note). The landing page is
+NOT part of `build`; it builds on its own via `deno task build:website` and ships
+on its own `release:website` track. The granular `build:core` / `build:client`
+tasks force-build a single component. Releasing the built artifacts is covered in
 [packages/tomat-website/README.md](packages/tomat-website/README.md).
 
 ### Working on one package
@@ -298,11 +308,21 @@ are offset so two cores can bind at once:
 
 Building and releasing (to the latest or stable channel) is covered in
 [packages/tomat-website/README.md](packages/tomat-website/README.md), the
-release + deploy doc. Two release pipelines share one R2 idempotency cursor: the
-local `deno task release`, and a branch-driven GitHub Actions pipeline where
-fast-forwarding `main` -> `latest` -> `stable` publishes each channel (build +
-release automated, also mirrored to GitHub Releases). Bump versions on `main`
-before transferring; the channel branches stay clean fast-forwards.
+release + deploy doc. Two release pipelines share one R2 idempotency cursor:
+
+- **Local** `deno task release` (latest) / `release:stable` builds + publishes
+  every changed item for all targets, then fast-forwards and pushes the channel
+  branch. It is gated on a clean, in-sync git state sitting exactly on the
+  channel's source branch (`latest` <- `main`, `stable` <- `latest`), and a CI
+  preflight sees the cursor already current, so its branch push does not re-run
+  the build matrix.
+- **Remote** `deno task remote-release` (latest) / `remote-release:stable`
+  fast-forwards the channel branch on the remote (server-side, ignoring the local
+  tree) so the branch-driven GitHub Actions pipeline does the build + publish.
+
+Either way the channel is the branch name and the branches stay clean
+fast-forwards: `main` -> `latest` -> `stable`. Bump versions on `main` (committed)
+before transferring; the version-bump gate rejects a changed-but-unbumped item.
 
 ## External dependencies
 

@@ -18,7 +18,7 @@
 //   --target=<triple>         triple to build; repeatable, or comma-separated.
 //                             `client` builds exactly one triple per invocation.
 //   --bundles=<csv>           client only: narrow the Tauri bundle targets (the
-//                             cross-built Linux client passes `deb`).
+//                             cross-built Linux client passes `appimage`).
 //   --bundle-dir=<dir>        dir to write the descriptor into (default dist/)
 
 import { parseArgs } from "@std/cli/parse-args";

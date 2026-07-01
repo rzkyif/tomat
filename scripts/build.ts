@@ -12,8 +12,11 @@
 // dist/, which clears the cursor and forces a full rebuild; --force does the
 // same without cleaning.
 //
-// Builds (core + helpers, client, catalog, website). The extension tarball and
-// the install scripts / schemas have no compile step, so they're release-only.
+// Builds (core + helpers, client, catalog, android). Mirrors the umbrella
+// `deno task release` item set: android is included (gated on the keystore being
+// present), and the landing page is NOT (it builds via `deno task build:website`
+// and ships on its own `release:website` track). The extension tarball and the
+// install scripts / schemas have no compile step, so they're release-only.
 //
 // `deno task build` builds all targets (the host builds every arch it can
 // natively; the rest are reported skipped pending their environment driver);
@@ -27,16 +30,20 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 import { ensureDir } from "@std/fs/ensure-dir";
+import { load as loadDotenv } from "@std/dotenv";
 import { join } from "@std/path";
 import type { Triple } from "../packages/tomat-shared/src/domain/model.ts";
 import {
   channelBinSuffix,
   colors,
+  type DeployEnv,
   DIST_DIR,
+  ENV_PATH,
   exists,
   fail,
   hashPaths,
   info,
+  loadOrSeedEnv,
   ok,
   parseChannelFlag,
   type ReleaseChannel,
@@ -51,7 +58,8 @@ import { podmanLinuxDriver } from "./release/drivers/podman.ts";
 import { windowsUtmDriver } from "./release/drivers/windows.ts";
 import { clientItem } from "./release/client.ts";
 import { catalogItem } from "./release/catalog.ts";
-import { websiteItem } from "./release/website.ts";
+import { androidItem, buildAndroidBundle } from "./release/android.ts";
+import { androidToolchainReady } from "./release/android-toolchain.ts";
 
 const BUILD_STATE = join(DIST_DIR, ".build-state.json");
 
@@ -145,6 +153,7 @@ function buildables(
   channel: ReleaseChannel,
   coreTriples: Triple[],
   environments: BuildEnvironment[] | undefined,
+  androidEnv: DeployEnv | null,
 ): Buildable[] {
   return [
     {
@@ -188,14 +197,46 @@ function buildables(
       outputHash: () => outputHash(catalogItem, channel),
       cmd: ["run", "-A", "scripts/catalog/build.ts"],
     },
-    {
-      key: "website",
-      label: "landing page",
-      sourceHash: () => websiteItem.sourceHash(channel),
-      outputHash: () => outputHash(websiteItem, channel),
-      cmd: ["run", "-A", "scripts/website/build.ts"],
-    },
+    // Android is host-independent (one APK set for every ABI), so it builds the
+    // same in `build` and `build:native`. Only present when a keystore is
+    // configured; buildAndroidBundle keystore-signs into dist/android/, the same
+    // path the release apply uses, so the output hash is stable across both.
+    ...(androidEnv
+      ? [
+          {
+            key: `android:${channel}`,
+            label: "android client",
+            sourceHash: () => androidItem.sourceHash(channel),
+            outputHash: () => outputHash(androidItem, channel),
+            run: () => buildAndroidBundle(androidEnv, channel).then(() => {}),
+          },
+        ]
+      : []),
   ];
+}
+
+/** Whether a release keystore is configured in .env, checked without seeding
+ *  keys so a plain desktop build stays side-effect-free. */
+async function androidKeystoreConfigured(): Promise<boolean> {
+  if (!(await exists(ENV_PATH))) return false;
+  const raw = await loadDotenv({ envPath: ENV_PATH, export: false });
+  return !!raw["TOMAT_ANDROID_KEYSTORE_B64"];
+}
+
+/** The DeployEnv for the android item, or null (with a note) to skip it. Android
+ *  builds only when BOTH the release keystore is configured AND the SDK/NDK/JDK
+ *  toolchain is present, so a machine set up for desktop-only builds is never
+ *  forced through a doomed gradle run. */
+async function loadAndroidEnv(): Promise<DeployEnv | null> {
+  if (!(await androidKeystoreConfigured())) {
+    info(colors.yellow("Android keystore not set in .env; skipping the android client."));
+    return null;
+  }
+  if (!androidToolchainReady()) {
+    info(colors.yellow("Android SDK/NDK/JDK not found; skipping the android client."));
+    return null;
+  }
+  return await loadOrSeedEnv();
 }
 
 async function readState(): Promise<BuildState> {
@@ -256,8 +297,13 @@ async function main(): Promise<void> {
     ? [podmanLinuxDriver, windowsUtmDriver]
     : undefined;
 
+  // Android is built only when a keystore is configured AND its toolchain is
+  // present; loadAndroidEnv notes the reason and returns null to skip otherwise,
+  // so a machine without android setup still builds the desktop items.
+  const androidEnv = await loadAndroidEnv();
+
   const state = await readState();
-  const items = buildables(flags.channel, coreTriples, environments);
+  const items = buildables(flags.channel, coreTriples, environments, androidEnv);
   let built = 0;
   for (const item of items) {
     const source = await item.sourceHash();

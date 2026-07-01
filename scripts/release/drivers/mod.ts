@@ -32,10 +32,10 @@ export interface ClientBuildRequest {
   triples: Triple[];
   channel: ReleaseChannel;
   /** Build-time values the in-environment build (build-release-bundle.ts
-   *  --kind=client -> envFromProcess) needs. A driver injects the subset its
-   *  artifact requires: an environment that signs its installer (Windows MSI/NSIS)
-   *  injects the Tauri PRIVATE key; the Linux `.deb` is unsigned and injects only
-   *  the PUBLIC keys (so the trust surface in that environment stays minimal). */
+   *  --kind=client -> envFromProcess) needs. Every desktop installer (Windows
+   *  MSI/NSIS, Linux AppImage) carries a Tauri updater `.sig`, so each signing
+   *  environment is injected the Tauri PRIVATE key; the Ed25519 manifest key + R2
+   *  creds never leave the host (signing/upload of the manifests stays there). */
   secrets: {
     /** Ed25519 PUBLIC key (base64); envFromProcess requires it. Never the private key. */
     signingPublicKeyB64: string;

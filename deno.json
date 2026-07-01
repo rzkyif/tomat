@@ -95,13 +95,16 @@
     "build:client:android:stable": "deno run -A scripts/build-android.ts --channel=stable",
     "build:catalog": "deno run -A scripts/catalog/build.ts",
     "build:website": "deno run -A scripts/website/build.ts",
-    "release": "deno run -A scripts/release/main.ts --channel=latest --triples=all",
-    "release:stable": "deno run -A scripts/release/main.ts --channel=stable --triples=all",
+    "release": "deno run -A scripts/release/main.ts --channel=latest --triples=all --align-branches",
+    "release:stable": "deno run -A scripts/release/main.ts --channel=stable --triples=all --align-branches",
     "release:native": "deno run -A scripts/release/main.ts --channel=latest --triples=host",
     "release:native:stable": "deno run -A scripts/release/main.ts --channel=stable --triples=host",
     "release:ci-build": "deno run -A scripts/release/ci-build.ts",
     "release:ci-publish": "deno run -A scripts/release/ci-publish.ts",
+    "release:ci-preflight": "deno run -A scripts/release/ci-preflight.ts",
     "release:website": "deno run -A scripts/release/website.ts --channel=latest",
+    "remote-release": "deno run -A scripts/release/remote.ts --channel=latest",
+    "remote-release:stable": "deno run -A scripts/release/remote.ts --channel=stable",
     "clean": "deno run -A scripts/clean.ts"
   },
   "exclude": [

@@ -326,7 +326,7 @@
       {/each}
 
       {#each entries(SAMPLES.AttachmentListView) as [name, p] (name)}
-        <GalleryCard label={`AttachmentListView · ${name}`} surface>
+        <GalleryCard label={`AttachmentListView · ${name}`} surface hug>
           <AttachmentListView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
@@ -338,7 +338,7 @@
       {/each}
 
       {#each entries(SAMPLES.PermissionRequestView) as [name, p] (name)}
-        <GalleryCard label={`PermissionRequestView · ${name}`} surface>
+        <GalleryCard label={`PermissionRequestView · ${name}`} surface hug>
           <PermissionRequestView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
@@ -355,7 +355,7 @@
       {/each}
 
       {#each entries(SAMPLES.PromptButtonsView) as [name, p] (name)}
-        <GalleryCard label={`PromptButtonsView · ${name}`} surface>
+        <GalleryCard label={`PromptButtonsView · ${name}`} surface hug>
           <PromptButtonsView {...p as ComponentProps} />
         </GalleryCard>
       {/each}
@@ -543,7 +543,7 @@
       {/each}
 
       {#each entries(SAMPLES.UpdateButtonView) as [name, p] (name)}
-        <GalleryCard label={`UpdateButtonView · ${name}`} surface>
+        <GalleryCard label={`UpdateButtonView · ${name}`} surface hug>
           <div class="w-full">
             <UpdateButtonView {...p as ComponentProps} />
           </div>
@@ -623,7 +623,7 @@
       {/each}
 
       {#each entries(SAMPLES.ObjectBadgeView) as [name, p] (name)}
-        <GalleryCard label={`ObjectBadgeView · ${name}`} surface>
+        <GalleryCard label={`ObjectBadgeView · ${name}`} surface hug>
           <ObjectBadgeView {...p as ComponentProps} />
         </GalleryCard>
       {/each}

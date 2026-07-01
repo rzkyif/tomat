@@ -8,6 +8,12 @@ name: Release
 # Release (ci-publish). Both halves share the R2 release-state cursor with the
 # local `deno task release`, so the two pipelines never double-publish.
 #
+# A cheap `preflight` job diffs the release items against that shared cursor and
+# gates the build + publish jobs. `deno task remote-release` moves the branch with
+# nothing published yet, so preflight sees changes and CI does the full build;
+# `deno task release` publishes locally FIRST and then pushes the branch, so
+# preflight sees the cursor already current and the expensive matrix is skipped.
+#
 # Version bumps live on `main` (these branches stay clean fast-forwards); CI never
 # writes the repo. A changed-but-unbumped item fails the publish job loudly.
 #
@@ -31,10 +37,41 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Cheap gate: does this channel actually have anything to publish? Diffs each
+  # release item against the shared R2 cursor (public read, no secrets but the
+  # non-secret Ed25519 public key). When false, the build + publish jobs below are
+  # skipped, so a local-release branch push does not re-run the whole matrix.
+  preflight:
+    name: "Preflight (changes?)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.plan.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Channel from branch
+        id: ch
+        shell: bash
+        run: echo "channel=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.8.x
+
+      - name: Plan against the R2 cursor
+        id: plan
+        env:
+          TOMAT_SIGNING_PUBLIC_KEY_B64: ${{ secrets.TOMAT_SIGNING_PUBLIC_KEY_B64 }}
+          TOMAT_STORAGE_DOMAIN: ${{ secrets.TOMAT_STORAGE_DOMAIN }}
+        run: deno task release:ci-preflight --channel=${{ steps.ch.outputs.channel }}
+
   # One native runner per desktop triple. The Linux runner additionally builds the
   # Android APK(s). Each stages its artifacts + descriptors for the publish job.
   build:
     name: "Build (${{ matrix.id }})"
+    needs: preflight
+    if: needs.preflight.outputs.changed == 'true'
     strategy:
       # All-or-nothing: a release should not publish a partial platform set. A
       # transient runner failure is recovered by re-pushing (the run is idempotent).
@@ -148,7 +185,8 @@ jobs:
   # and mirror the run to the rolling per-channel GitHub Release.
   publish:
     name: "Publish + GitHub Release"
-    needs: build
+    needs: [preflight, build]
+    if: needs.preflight.outputs.changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
