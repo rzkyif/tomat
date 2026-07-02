@@ -80,10 +80,13 @@ interface Active {
   startId: number;
   proc: Deno.ChildProcess;
   pid: number;
-  abort: AbortController; // aborted on supersede/stop
+  abort: AbortController; // aborted on supersede/stop/unexpected exit
   recentLogs: string[];
   // Set true once the stdout readiness marker is seen; runReadiness polls it.
   markerSeen: boolean;
+  // Set true by watchExit the moment the process is gone, so terminateActive
+  // skips the kill (on Windows, killing an exited pid fails with EPERM noise).
+  exited: boolean;
 }
 
 // Crash-after-ready flap guard. `RestartPolicy.maxAttempts` only bounds
@@ -103,6 +106,17 @@ class Sidecar {
   private pendingStop = false;
   // Timestamps of recent unexpected-exit restarts (rolling FLAP_WINDOW_MS).
   private restartTimes: number[] = [];
+  // Bumped on every EXPLICIT lifecycle call (start/stop, incl. restart, and
+  // the flap-guard give-up). The internal crash-restart loop captures it and
+  // exits when it changes, so a stale loop can never re-spawn with old options
+  // over a newer explicit decision.
+  private explicitGeneration = 0;
+  // The single in-flight crash-restart loop (null when none). watchExit spawns
+  // at most one; further crashes while it runs only feed the flap window and
+  // are sequenced by the loop's own attempt cycle. Without this, every crash
+  // spawned another concurrent loop and they piled up, spawning overlapping
+  // processes.
+  private restartLoop: Promise<void> | null = null;
 
   constructor(
     kind: SidecarKind,
@@ -122,6 +136,13 @@ class Sidecar {
   }
 
   async start(options: StartOptions): Promise<void> {
+    // Explicit start: invalidate any in-flight crash-restart loop (its options
+    // are stale relative to this call).
+    this.explicitGeneration += 1;
+    await this.startInternal(options);
+  }
+
+  private async startInternal(options: StartOptions): Promise<void> {
     // 1. Supersede any in-flight start. Null out this.active BEFORE awaiting
     //    terminate so the old watchExit's isCurrent check returns false the
     //    moment the old proc dies (otherwise we briefly emit a spurious Error
@@ -201,6 +222,7 @@ class Sidecar {
       abort,
       recentLogs: [],
       markerSeen: false,
+      exited: false,
     };
     this.active = active;
 
@@ -239,6 +261,8 @@ class Sidecar {
 
   async stop(): Promise<void> {
     this.pendingStop = true;
+    // Explicit disable also invalidates any in-flight crash-restart loop.
+    this.explicitGeneration += 1;
     // Explicit disable is a clean slate: a later re-enable gets a fresh flap
     // budget rather than inheriting crash history from before the stop.
     this.restartTimes = [];
@@ -258,8 +282,8 @@ class Sidecar {
     // An external restart is a deliberate re-application (settings change, manual
     // retry from the UI, the wedged-slot watchdog), so clear the crash flap-guard
     // window: its job is to bound the INTERNAL auto-restart loop, not an explicit
-    // re-apply. The internal loop calls start() directly, so it is unaffected and
-    // still accumulates crashes toward the cap.
+    // re-apply. The internal loop calls startInternal() directly, so it is
+    // unaffected and still accumulates crashes toward the cap.
     this.restartTimes = [];
     await this.start(options);
   }
@@ -347,13 +371,18 @@ class Sidecar {
 
   private async watchExit(active: Active, options: StartOptions): Promise<void> {
     const status = await active.proc.status;
+    active.exited = true;
     // If this active was superseded or stopped intentionally, ignore.
     if (!this.isCurrent(active.startId)) return;
     if (this.pendingStop) {
       this.pendingStop = false;
       return;
     }
-    // Unexpected exit.
+    // Unexpected exit. Abort the readiness probe first: startInternal may still
+    // be polling health for this pid, and without the abort it would block its
+    // caller for the full startup window (minutes for a large model) against a
+    // process that is already gone.
+    active.abort.abort();
     const msg =
       active.recentLogs.length > 0
         ? active.recentLogs.join("\n")
@@ -369,7 +398,8 @@ class Sidecar {
 
     // Flap guard: a sidecar that keeps crashing shortly after becoming Running
     // must not restart indefinitely. Count this restart in the rolling window
-    // and give up (terminal Error, no restart) if it exceeds the cap.
+    // and give up (terminal Error, no restart) if it exceeds the cap. The
+    // generation bump makes an in-flight restart loop exit too.
     const now = Date.now();
     this.restartTimes = this.restartTimes.filter((t) => now - t < FLAP_WINDOW_MS);
     this.restartTimes.push(now);
@@ -378,6 +408,7 @@ class Sidecar {
         `${this.kind}: flapping (${this.restartTimes.length} crashes in ` +
           `${FLAP_WINDOW_MS / 1000}s); giving up until re-enabled`,
       );
+      this.explicitGeneration += 1;
       this.emit({
         kind: this.kind,
         status: "Error",
@@ -387,16 +418,30 @@ class Sidecar {
       });
       return;
     }
-    await this.restartWithBackoff(options, policy);
+    // One loop drives recovery: if it is already running, this crash was one of
+    // its attempts (counted above) and its status check sequences the next one.
+    if (this.restartLoop) return;
+    const gen = this.explicitGeneration;
+    this.restartLoop = this.restartWithBackoff(options, policy, gen).finally(() => {
+      this.restartLoop = null;
+    });
+    await this.restartLoop;
   }
 
-  private async restartWithBackoff(options: StartOptions, policy: RestartPolicy): Promise<void> {
+  private async restartWithBackoff(
+    options: StartOptions,
+    policy: RestartPolicy,
+    gen: number,
+  ): Promise<void> {
     let delay = policy.initialDelayMs;
     for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
       log.info(`${this.kind}: restart attempt ${attempt}/${policy.maxAttempts} in ${delay}ms`);
       await sleep(delay);
-      if (this.pendingStop) return;
-      await this.start(options);
+      // A newer explicit start/stop/restart owns the sidecar now (or the flap
+      // guard gave up): this loop's options are stale, so it must bow out.
+      if (this.pendingStop || gen !== this.explicitGeneration) return;
+      await this.startInternal(options);
+      if (gen !== this.explicitGeneration) return;
       if (this.current.status === "Running") return;
       delay = Math.min(delay * 2, policy.maxDelayMs);
     }
@@ -406,7 +451,9 @@ class Sidecar {
   private async terminateActive(active: Active): Promise<void> {
     active.abort.abort();
     try {
-      if (Deno.build.os === "windows") {
+      if (active.exited) {
+        // Nothing to kill; fall through to the status drain below.
+      } else if (Deno.build.os === "windows") {
         // No SIGTERM on Windows; SIGKILL is the only option via Deno.
         active.proc.kill("SIGKILL");
       } else {

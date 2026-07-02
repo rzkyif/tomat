@@ -32,6 +32,14 @@ CI.
 | `deno task test:e2e:headless` | Headless integration E2E (real app in Chromium <-> real core over TLS, deps mocked). Manual only, primary lane. See [tests/e2e/headless/README.md](e2e/headless/README.md). |
 | `deno task test:e2e`          | tauri-driver smoke (real Tauri shell via WebdriverIO). Manual only, thin native lane. See [tests/e2e/tauri-driver/README.md](e2e/tauri-driver/README.md).                   |
 
+The aggregate `test`/`test:js` tasks print one `ok` line per package; on
+failure they print the last 20 output lines plus a rerun command, and the
+complete runner output is always in `.gate-logs/<verb>-<pkg>.log` (gitignored).
+The runners use dot reporters (`deno test --reporter=dot`, `vitest --reporter=dot`,
+`cargo test -q`), so per-test noise stays out of the console while failure
+detail is still printed in full. See "Gate output" in
+[DEVELOPMENT.md](../DEVELOPMENT.md).
+
 ## Layout
 
 ```

@@ -94,6 +94,11 @@ async function main(): Promise<void> {
   // Resume any persisted-Pending downloads from the previous run.
   downloadManager().resumePending();
 
+  // Feed download activity into the aggregate status so the corebar shows
+  // Downloading (not Idle) while required files are still being fetched.
+  downloadManager().subscribe((snap) => coreStatus().noteDownloads(snap));
+  coreStatus().noteDownloads(downloadManager().snapshot());
+
   // Verify extension content hashes in the background. Don't gate boot on it:
   // large extensions can take seconds to walk. A drifted extension is flipped to
   // status='drift' and has its tools disabled, so the chat-exposure gate blocks

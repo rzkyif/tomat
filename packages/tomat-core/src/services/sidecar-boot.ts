@@ -6,7 +6,11 @@
 // `sidecarManager()` is a generic supervisor; the kind-specific gates
 // (provider, enabled toggle, model file existence) live here.
 
-import { buildLlamaStartOptionsScaled, llamaStartArgsFromSettings } from "../sidecars/llama.ts";
+import {
+  buildLlamaStartOptionsScaled,
+  llamaMissingPrereq,
+  llamaStartArgsFromSettings,
+} from "../sidecars/llama.ts";
 import {
   buildLlamaEmbedStartOptions,
   llamaEmbedStartArgsFromSettings,
@@ -125,6 +129,13 @@ export async function initSidecarBoot(): Promise<void> {
   // sidecar. Without this hook the user has to manually toggle settings
   // (or restart core) after the download completes to actually pick up
   // the new file.
+  // Seed with the persisted rows first: download rows survive restarts, so on
+  // the first broadcast after boot a Completed row from an earlier run would
+  // otherwise read as a fresh completion and spuriously restart the sidecars
+  // (a multi-GB model reload) the moment anything touches the download queue.
+  for (const entry of downloadManager().snapshot()) {
+    lastSeenStatus.set(entry.id, entry.status);
+  }
   downloadManager().subscribe((snap) => {
     const justCompleted = new Set<string>();
     for (const entry of snap) {
@@ -184,33 +195,12 @@ export async function applyLlama(settings: Record<string, unknown>): Promise<voi
     await sidecarManager().stop("llama");
     return;
   }
-  if (!(await fileExists(args.modelPath))) {
+  const missing = await llamaMissingPrereq(args);
+  if (missing) {
     log.warn(
-      `llama-server model not on disk: ${args.modelPath}; sidecar stays ` +
-        `Disabled until the user downloads it (requirements flow). The ` +
-        `download-completion hook re-applies once the file lands`,
-    );
-    await sidecarManager().stop("llama");
-    return;
-  }
-  // A configured-but-missing mmproj would be passed to llama-server as
-  // `--mmproj <missing>`, which makes the whole sidecar fail to boot (not just
-  // vision). The requirements flow lists mmproj for download; until it lands,
-  // stay Disabled rather than spawn a doomed process. The download-completion
-  // hook re-applies once the file arrives.
-  if (args.mmprojPath && !(await fileExists(args.mmprojPath))) {
-    log.warn(
-      `llama-server mmproj not on disk: ${args.mmprojPath}; sidecar stays ` +
-        `Disabled until the user downloads it (requirements flow)`,
-    );
-    await sidecarManager().stop("llama");
-    return;
-  }
-  if (!(await fileExists(binPath(binaryName("llama-server"))))) {
-    log.warn(
-      `llama-server binary not installed; sidecar stays Disabled until it ` +
-        `is downloaded (the client re-prompts the pending download on the ` +
-        `next settings change)`,
+      `llama-server ${missing}; sidecar stays Disabled until the user ` +
+        `downloads it (requirements flow). The download-completion / ` +
+        `binary-install hooks re-apply once the file lands`,
     );
     await sidecarManager().stop("llama");
     return;

@@ -33,7 +33,8 @@ The client is connected to one core at a time. The CoreBar
 ([`components/chat/CoreBar.svelte`](../../components/chat/CoreBar.svelte)) shows
 which core that is, its merged status, and a quick switcher; full management
 (pair / unpair / rename) stays in Settings. The displayed status merges the
-backend `CoreStatus` (Starting Up / Idle / Busy / Updating / Error, carried on
+backend `CoreStatus` (Starting Up / Downloading / Idle / Busy / Updating /
+Error, carried on
 `core.status` frames and surfaced by the `coreStatusState` store) with the
 client transport states (Connecting / Reconnecting / Disconnected / Re-pair
 needed, from `connectionState`); transport wins whenever the socket is not

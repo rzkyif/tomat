@@ -1,14 +1,15 @@
-// Aggregate core lifecycle status (Starting Up / Idle / Busy / Updating /
-// Error). A single read-only aggregator that the WS hub subscribes to and
-// rebroadcasts as a `core.status` frame, and that the health route reads to
-// seed a freshly-connecting client.
+// Aggregate core lifecycle status (Starting Up / Downloading / Idle / Busy /
+// Updating / Error). A single read-only aggregator that the WS hub subscribes
+// to and rebroadcasts as a `core.status` frame, and that the health route reads
+// to seed a freshly-connecting client.
 //
 // Inputs arrive two ways:
 //   - PULLED on each recompute: sidecar readiness (sidecarManager.getStatuses).
 //   - PUSHED by the owning subsystem: chat active-turn count (services/chat.ts),
 //     LLM queue (services/llm-scheduler.ts), speech queue
-//     (services/speech-scheduler.ts), boot completion (main.ts), and update
-//     staging (subscribeUpdate, wired in the constructor path here).
+//     (services/speech-scheduler.ts), boot completion + download activity
+//     (main.ts), and update staging (subscribeUpdate, wired in the constructor
+//     path here).
 //
 // Push (not pull) for the dynamic signals keeps this module free of imports
 // back into chat / the schedulers, so there is no import cycle: those modules
@@ -19,6 +20,7 @@
 import type {
   CoreQueues,
   CoreStatusSnapshot,
+  DownloadEntry,
   SidecarSnapshot,
   SubsystemStatus,
 } from "@tomat/shared";
@@ -76,6 +78,11 @@ export class CoreStatusService {
   // Local speech (STT/TTS) queue.
   private speechQueued = 0;
   private speechActive = 0;
+  // Active (Pending/Downloading) downloads, pushed by main.ts's downloadManager
+  // subscription. While files are still being fetched the sidecars that need
+  // them sit at Disabled, so without this the bar would read Idle mid-fetch.
+  private downloadsActive = 0;
+  private downloadsProgress: number | undefined = undefined;
 
   private listeners = new Set<Listener>();
   private last: CoreStatusSnapshot = { status: "starting_up", subsystems: [] };
@@ -136,6 +143,22 @@ export class CoreStatusService {
     if (this.speechActive === active && this.speechQueued === queued) return;
     this.speechActive = active;
     this.speechQueued = queued;
+    this.recompute();
+  }
+
+  /** Fold a download-manager snapshot into the aggregate. Progress is rounded
+   *  to whole percent so per-chunk byte updates don't spam status frames. */
+  noteDownloads(entries: DownloadEntry[]): void {
+    const active = entries.filter((e) => e.status === "Pending" || e.status === "Downloading");
+    // Aggregate progress over the size-known active entries only: an unsized
+    // entry would add downloaded bytes with no total and push the ratio past 1.
+    const sized = active.filter((e) => typeof e.sizeBytes === "number" && e.sizeBytes > 0);
+    const total = sized.reduce((n, e) => n + (e.sizeBytes ?? 0), 0);
+    const done = sized.reduce((n, e) => n + Math.min(e.downloadedBytes, e.sizeBytes ?? 0), 0);
+    const progress = total > 0 ? Math.round((done / total) * 100) / 100 : undefined;
+    if (this.downloadsActive === active.length && this.downloadsProgress === progress) return;
+    this.downloadsActive = active.length;
+    this.downloadsProgress = progress;
     this.recompute();
   }
 
@@ -212,7 +235,19 @@ export class CoreStatusService {
       };
     }
 
-    // 5. Idle.
+    // 5. Downloading: required files (models / sidecar binaries) are still
+    //    being fetched. Below busy so live turn activity (e.g. an external
+    //    provider serving chat during a local-model download) still shows.
+    if (this.downloadsActive > 0) {
+      return {
+        status: "downloading",
+        detail: this.downloadsActive === 1 ? "1 file" : `${this.downloadsActive} files`,
+        progress: this.downloadsProgress,
+        subsystems,
+      };
+    }
+
+    // 6. Idle.
     return { status: "idle", subsystems };
   }
 }

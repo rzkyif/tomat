@@ -180,6 +180,13 @@ export class DownloadManager {
     });
   }
 
+  /** The queue-row id `enqueue(spec)` uses for this spec, without enqueuing.
+   *  Callers that hand ids back to clients must use this: cancel/retry/remove
+   *  match on it, so any other id silently no-ops. */
+  idFor(spec: EnqueueSpec): string {
+    return downloadId(spec.destination, this.resolveAbsPath(spec));
+  }
+
   remove(id: string): void {
     const row = this.store.getRow(id);
     if (!row) return;

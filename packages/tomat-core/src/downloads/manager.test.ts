@@ -72,6 +72,26 @@ Deno.test("DownloadManager.enqueue: file already on disk -> upserts Completed an
   }
 });
 
+Deno.test("DownloadManager.idFor: matches the row id enqueue creates, so cancel/remove accept it", async () => {
+  const env = await setupTestEnv();
+  try {
+    const mgr = new DownloadManager();
+    const spec = { source: "@u/r/main/y.bin", destination: "models" as const, groupId: "g" };
+    const absPath = join(paths().modelsDir, "u", "r", "y.bin");
+    assertEquals(mgr.idFor(spec), `models:${absPath}`);
+
+    await Deno.mkdir(dirname(absPath), { recursive: true });
+    await Deno.writeTextFile(absPath, "hello");
+    await mgr.enqueue(spec);
+    assertEquals(rowsForId(mgr.idFor(spec))?.status, "Completed");
+    // remove() matches on the same id.
+    mgr.remove(mgr.idFor(spec));
+    assertEquals(rowsForId(mgr.idFor(spec)), undefined);
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("DownloadManager.cancel: flips a Pending row to Cancelled without spawning network", async () => {
   const env = await setupTestEnv();
   try {

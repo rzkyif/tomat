@@ -421,6 +421,27 @@ concurrently (cap with `TOMAT_PKG_CONCURRENCY`). `fmt` and `lint` run
 oxfmt/oxlint once over the whole tree (they also cover root-level files) and add
 `cargo fmt`/`clippy` per Rust crate; `check` runs each package's own check.
 
+### Gate output
+
+The fan-out keeps the console concise. A passing package prints one line
+(`ok @tomat/core test (8.2s)`); a failing one prints the last 20 lines of its
+output (the child runners use quiet/dot reporters, so that tail is the failing
+test/file list), the path to the complete log, and a copy-pasteable rerun
+command:
+
+```
+!! @tomat/core test failed (exit 1, 12.4s)
+<last 20 output lines>
+full: .gate-logs/test-tomat-core.log
+rerun: deno task --cwd packages/tomat-core test
+```
+
+Nothing is hidden: every package run, pass or fail, writes its complete output
+to `.gate-logs/<verb>-<pkg>.log` (gitignored, overwritten per run), so anything
+a child printed on a passing run (warnings, leaked console noise) is preserved
+there. When the `CI` env var is set the failure block prints the full output
+instead of the excerpt, since the log file is unreadable in CI logs.
+
 `clippy` is the single Rust compile-check: `cargo clippy --all-targets` is a
 superset of `cargo check`, so the Rust crates carry no separate `check` task and
 `deno task check` is TS-only. A Rust compile error therefore surfaces in

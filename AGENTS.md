@@ -232,6 +232,15 @@ Tests are co-located with source as `*.test.ts`; scratch tests are
 `*.tmp.test.ts` (gitignored anywhere). After a change, run `deno task check`,
 `deno task fmt`, `deno task lint`, and `deno task test`.
 
+Gate output is intentionally concise: a passing gate is roughly a dozen lines
+(one `ok <package> <verb> (Ns)` line per package plus summaries), and each
+failing package adds a bounded block with the last 20 output lines (which name
+the failing test/file), a `rerun:` command, and a `full:` log path. Reading the
+last ~50 lines of a gate run is sufficient even on failure. The complete
+untruncated output of every package run is always written to
+`.gate-logs/<verb>-<pkg>.log` (gitignored); read that file only when the
+excerpt is not enough.
+
 ## General Rules
 
 ### 1. Think Before Coding

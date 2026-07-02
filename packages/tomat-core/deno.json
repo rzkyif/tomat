@@ -7,7 +7,7 @@
   "tasks": {
     "dev": "deno run --watch --allow-all src/main.ts",
     "check": "deno check src/main.ts",
-    "test:js": "deno test --allow-all --no-check --quiet",
+    "test:js": "deno test --allow-all --no-check --quiet --reporter=dot",
     "test": "deno task test:js"
   },
   "imports": {

@@ -18,6 +18,9 @@ export const CORE_STATUSES = [
   // Boot / init: the core is up enough to answer health, but a required local
   // sidecar is still loading, so it cannot serve chat / speech yet.
   "starting_up",
+  // A download (model file or sidecar binary) is active; the sidecars that
+  // need the missing files sit at Disabled until they land.
+  "downloading",
   // Ready, awaiting requests.
   "idle",
   // Serving a request (this client's or another's). New requests queue behind
@@ -57,7 +60,8 @@ export interface CoreStatusSnapshot {
   status: CoreStatus;
   /** Short human detail for a tooltip (e.g. "loading whisper", "3 queued"). */
   detail?: string;
-  /** Coarse 0..1 boot / load progress when known; drives a progress hint. */
+  /** Coarse 0..1 boot / load / download progress when known; drives a progress
+   *  hint. */
   progress?: number;
   /** Every sidecar the core has started, with its status (and error message
    *  when failed). Always present; drives the per-subsystem fold + the client

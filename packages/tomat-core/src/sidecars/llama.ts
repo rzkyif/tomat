@@ -8,7 +8,7 @@
 
 import { getDefaultSettings } from "@tomat/shared";
 import { binPath, llmPort, paths } from "../paths.ts";
-import { libDirFor, platformExe } from "../binaries/versions.ts";
+import { binaryName, libDirFor, platformExe } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
 import { boolSetting, numSetting, strSetting } from "../services/settings-access.ts";
 import type { StartOptions } from "./types.ts";
@@ -40,7 +40,14 @@ export function llamaStartArgsFromSettings(
   // defaults are stable-channel values.
   const modelSpec = strSetting(settings, "llm.modelPath", schemaDefault("llm.modelPath"));
   if (!modelSpec) return null;
-  const supportImages = boolSetting(settings, "llm.supportImages", true);
+  // Must fall back to the schema default (false): the requirements flow decides
+  // whether to download the mmproj from the same key, so a mismatched fallback
+  // here would pass --mmproj for a file that was never fetched.
+  const supportImages = boolSetting(
+    settings,
+    "llm.supportImages",
+    schemaDefaultBool("llm.supportImages"),
+  );
   const mmprojSpec = supportImages
     ? strSetting(settings, "llm.mmprojPath", schemaDefault("llm.mmprojPath"))
     : "";
@@ -56,6 +63,31 @@ export function llamaStartArgsFromSettings(
     gpuLayers: presentNumSetting(settings, "llm.gpuLayers"),
     flashAttn: boolSetting(settings, "llm.flashAttn", false),
   };
+}
+
+/** The first missing on-disk prerequisite for llama-server (model, mmproj,
+ *  or the binary itself), or null when everything is present. Every spawn path
+ *  (boot re-apply, idle reload, manual restart route) must check this: spawning
+ *  anyway either fails outright (no binary) or, for a configured-but-missing
+ *  mmproj, boots a process that exits on load and burns the flap-guard budget.
+ *  The mmproj check runs before the binary check (the gating regression test
+ *  relies on that order). */
+export async function llamaMissingPrereq(args: LlamaStartArgs): Promise<string | null> {
+  if (!(await fileExists(args.modelPath))) return `model not on disk: ${args.modelPath}`;
+  if (args.mmprojPath && !(await fileExists(args.mmprojPath))) {
+    return `mmproj not on disk: ${args.mmprojPath}`;
+  }
+  if (!(await fileExists(binPath(binaryName("llama-server"))))) return "binary not installed";
+  return null;
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    const st = await Deno.stat(path);
+    return st.isFile;
+  } catch {
+    return false;
+  }
 }
 
 /** Build a StartOptions from the parsed args. Caller passes this to
@@ -144,6 +176,10 @@ export async function buildLlamaStartOptionsScaled(args: LlamaStartArgs): Promis
 function schemaDefault(key: string): string {
   const v = getDefaultSettings()[key];
   return typeof v === "string" ? v : "";
+}
+
+function schemaDefaultBool(key: string): boolean {
+  return getDefaultSettings()[key] === true;
 }
 
 /** Like optionalNumSetting but keeps 0 (a meaningful value for gpuLayers). Returns

@@ -45,6 +45,8 @@ vite.config.ts.timestamp-*
 # Tooling local state
 .claude/
 .todo
+# Full per-package gate output written by scripts/pkg.ts on every run
+.gate-logs/
 
 # Reference only
 reference/

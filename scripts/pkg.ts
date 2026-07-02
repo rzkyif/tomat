@@ -9,8 +9,12 @@
 // in each package's `deno.json`; this script is only the fan-out.
 //
 // Packages run concurrently (bounded pool); each package's output is buffered
-// and flushed as one labeled block so concurrent runs stay readable. Cap the
-// pool with TOMAT_PKG_CONCURRENCY (defaults to the host's logical core count).
+// while it runs and always written in full to `.gate-logs/<verb>-<pkg>.log`
+// (gitignored, overwritten per run). The console stays concise: a passing
+// package prints one `ok` line; a failing one prints the last 20 output lines
+// plus the log path and a rerun command. When the CI env var is set the full
+// output is printed instead (the log file is unreadable in CI). Cap the pool
+// with TOMAT_PKG_CONCURRENCY (defaults to the host's logical core count).
 //
 // Usage: deno run -A scripts/pkg.ts <verb>
 
@@ -43,12 +47,13 @@ const members: string[] = rootCfg?.workspace ?? [];
 
 // Resolve the members that actually define the verb, preserving workspace order
 // so the failure summary is stable.
-const targets: { dir: string; label: string }[] = [];
-for (const rel of members) {
+const targets: { dir: string; rel: string; label: string }[] = [];
+for (const member of members) {
+  const rel = member.replace(/^\.\//, "");
   const dir = join(ROOT, rel);
   const cfg = await readConfig(dir);
   if (!cfg?.tasks?.[verb]) continue;
-  targets.push({ dir, label: cfg.name ?? rel });
+  targets.push({ dir, rel, label: cfg.name ?? rel });
 }
 
 const concurrency = Math.max(
@@ -56,34 +61,93 @@ const concurrency = Math.max(
   Number(Deno.env.get("TOMAT_PKG_CONCURRENCY")) || navigator.hardwareConcurrency || 4,
 );
 
-let failed = 0;
+// Color only when stdout is a real terminal and NO_COLOR is unset, so piping the
+// gate output to a file (or NO_COLOR=1) yields clean, escape-free text.
+const useColor = !Deno.env.get("NO_COLOR") && Deno.stdout.isTerminal();
+
+function color(code: string, s: string): string {
+  return useColor ? `\x1b[${code}m${s}\x1b[0m` : s;
+}
+
+// In CI the log file is unreadable, so failure blocks print the full output.
+const CI = Boolean(Deno.env.get("CI"));
+
+const EXCERPT_LINES = 20;
+const LOG_DIR = ".gate-logs";
+await Deno.mkdir(join(ROOT, LOG_DIR), { recursive: true });
+
+// Dot reporters (deno test, vitest) emit one marker per line when piped (deno:
+// "." pass, "," ignored, "!" fail); pack consecutive marker-only lines into
+// 80-column rows so logs and CI output stay readable.
+function packDotLines(out: string): string {
+  const packed: string[] = [];
+  let dots = "";
+  const flush = () => {
+    for (let i = 0; i < dots.length; i += 80) packed.push(dots.slice(i, i + 80));
+    dots = "";
+  };
+  for (const line of out.split("\n")) {
+    if (/^[.·,!]+$/.test(line)) {
+      dots += line;
+      continue;
+    }
+    flush();
+    packed.push(line);
+  }
+  flush();
+  return packed.join("\n");
+}
+
+const failedLabels: string[] = [];
 let next = 0;
 async function worker() {
   while (next < targets.length) {
     const target = targets[next++];
+    const started = performance.now();
     const { code, stdout, stderr } = await new Deno.Command("deno", {
       args: ["task", verb],
       cwd: target.dir,
+      // deno task colors its output even when piped; keep logs and excerpts
+      // escape-free.
+      env: { NO_COLOR: "1" },
       stdout: "piped",
       stderr: "piped",
     }).output();
+    const secs = ((performance.now() - started) / 1000).toFixed(1);
     const decoder = new TextDecoder();
-    const out = (decoder.decode(stdout) + decoder.decode(stderr)).trimEnd();
-    const lines = [`\n=== ${target.label} :: ${verb} ===`];
-    if (out) lines.push(out);
-    if (code !== 0) {
-      failed++;
-      lines.push(`!! ${target.label} :: ${verb} failed (exit ${code})`);
+    const out = packDotLines((decoder.decode(stdout) + decoder.decode(stderr)).trimEnd());
+    // Full output is always preserved, pass or fail, so a concise console never
+    // hides anything (e.g. warnings emitted on a passing run).
+    const logRel = `${LOG_DIR}/${verb.replaceAll(":", "-")}-${target.rel.split("/").pop()}.log`;
+    await Deno.writeTextFile(join(ROOT, logRel), out + "\n");
+    if (code === 0) {
+      console.log(`${color("32", "ok")} ${target.label} ${verb} ${color("2", `(${secs}s)`)}`);
+      continue;
     }
+    failedLabels.push(target.label);
+    const lines = [
+      `\n${color("31", "!!")} ${target.label} ${verb} failed (exit ${code}, ${secs}s)`,
+    ];
+    const outLines = out ? out.split("\n") : [];
+    if (CI || outLines.length <= EXCERPT_LINES) {
+      lines.push(...outLines);
+    } else {
+      lines.push(`... ${outLines.length - EXCERPT_LINES} earlier lines in ${logRel} ...`);
+      lines.push(...outLines.slice(-EXCERPT_LINES));
+    }
+    if (!CI) lines.push(color("2", `full: ${logRel}`));
+    lines.push(color("2", `rerun: deno task --cwd ${target.rel} ${verb}`));
     // console.log is synchronous, so buffered blocks never interleave.
-    console.log(lines.join("\n"));
+    console.log(lines.join("\n") + "\n");
   }
 }
 
 await Promise.all(Array.from({ length: Math.min(concurrency, targets.length) }, () => worker()));
 
-if (failed > 0) {
-  console.error(`\n${failed} of ${targets.length} package(s) failed \`${verb}\`.`);
+if (failedLabels.length > 0) {
+  console.error(
+    `${verb}: ${failedLabels.length} of ${targets.length} package(s) failed: ${failedLabels.join(", ")}`,
+  );
   Deno.exit(1);
 }
-console.log(`\n${verb}: ${targets.length} package(s) passed.`);
+console.log(`${verb}: ${targets.length} package(s) passed.`);

@@ -17,7 +17,7 @@ import { loadCoreSettingsResolved } from "./core-settings.ts";
 export type ModelKind = RequirementGroup;
 
 export interface EnsureResult {
-  enqueued: string[]; // job ids
+  enqueued: string[]; // download queue-row ids (accepted by cancel/retry/remove)
   alreadyHave: string[];
 }
 

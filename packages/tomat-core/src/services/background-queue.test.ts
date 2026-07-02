@@ -40,9 +40,11 @@ Deno.test("queue: dedupes by key and drains FIFO one at a time", async () => {
 
 Deno.test("queue: waits out busy streams plus the quiet period", async () => {
   let busy = true;
+  // Margins sized well above the ~16ms Windows timer granularity: the
+  // inside-the-quiet-period probe fires 70ms before the earliest drain.
   const q = new BackgroundQueue({
     isBusy: () => busy,
-    quietPeriodMs: 30,
+    quietPeriodMs: 100,
     busyPollMs: 5,
   });
   const ran: string[] = [];
@@ -56,9 +58,9 @@ Deno.test("queue: waits out busy streams plus the quiet period", async () => {
   await sleep(40);
   assertEquals(ran, []); // still busy
   busy = false;
-  await sleep(15);
+  await sleep(30);
   assertEquals(ran, []); // idle, but inside the quiet period
-  await sleep(60);
+  await sleep(250);
   assertEquals(ran, ["job"]);
   q.dispose();
 });

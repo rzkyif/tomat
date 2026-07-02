@@ -7,6 +7,7 @@
   // after a grace period), so there is no "disconnected" member here.
   export type DisplayCoreStatus =
     | "starting_up"
+    | "downloading"
     | "idle"
     | "busy"
     | "updating"
@@ -23,6 +24,12 @@
       tone: "text-default-700",
       label: "Starting up",
       spin: true,
+    },
+    downloading: {
+      icon: "i-material-symbols-downloading",
+      tone: "text-accent-blue-700",
+      label: "Downloading",
+      spin: false,
     },
     idle: {
       icon: "i-material-symbols-check-circle-rounded",
@@ -143,7 +150,7 @@
 
   const meta = $derived(STATUS_META[status]);
   const pct = $derived(
-    status === "starting_up" && typeof progress === "number"
+    (status === "starting_up" || status === "downloading") && typeof progress === "number"
       ? ` ${Math.round(progress * 100)}%`
       : "",
   );

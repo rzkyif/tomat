@@ -41,6 +41,13 @@ export const coreBarSamples = {
     cores: CORES,
     currentCoreId: "laptop",
   },
+  downloading: {
+    status: "downloading",
+    detail: "2 files",
+    progress: 0.35,
+    cores: CORES.slice(0, 1),
+    currentCoreId: "laptop",
+  },
   startingUp: {
     status: "starting_up",
     detail: "loading speech",

@@ -2,7 +2,7 @@
 // (tests/fixtures/sidecars/http-stub.ts) via the real Deno binary and
 // drives the manager through its lifecycle.
 
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { fromFileUrl } from "@std/path";
 import { __resetForTesting, sidecarManager } from "./manager.ts";
 import type { SidecarSnapshot } from "./types.ts";
@@ -107,6 +107,67 @@ Deno.test({
     await fetch(`http://127.0.0.1:${port}/exit`).catch(() => {});
     await waitForStatus(mgr, "Error", 8_000);
     assertEquals(mgr.status("llama").status, "Error");
+  },
+});
+
+Deno.test({
+  name: "SidecarManager: a crash during readiness aborts the probe instead of blocking start()",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    __resetForTesting();
+    const mgr = sidecarManager();
+    const port = freePort();
+    const t0 = Date.now();
+    // The process exits immediately, so the health endpoint never comes up.
+    // watchExit must abort the readiness poll; without that, start() blocks
+    // for the full startup window against a process that is already gone.
+    await mgr.start("llama", {
+      binary: Deno.execPath(),
+      args: ["eval", "Deno.exit(1)"],
+      readiness: { kind: "http" as const, url: `http://127.0.0.1:${port}/health` },
+      startupTimeoutMs: 20_000,
+      restartPolicy: "none" as const,
+    });
+    const elapsed = Date.now() - t0;
+    assertEquals(mgr.status("llama").status, "Error");
+    assert(elapsed < 10_000, `start() blocked ${elapsed}ms after the process exited`);
+  },
+});
+
+Deno.test({
+  name: "SidecarManager: an explicit start during crash-backoff supersedes the stale restart loop",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    __resetForTesting();
+    const mgr = sidecarManager();
+    const port = freePort();
+    const opts = {
+      ...buildOpts(port),
+      restartPolicy: { maxAttempts: 3, initialDelayMs: 800, maxDelayMs: 800 },
+    };
+    await mgr.start("llama", opts);
+    assertEquals(mgr.status("llama").status, "Running");
+
+    // Crash: watchExit emits Error and arms the 800ms backoff loop.
+    await fetch(`http://127.0.0.1:${port}/exit`).catch(() => {});
+    await waitForStatus(mgr, "Error", 8_000);
+
+    // Explicit start while the loop sleeps: it must win. The stale loop waking
+    // up used to call start() with its old options, superseding (killing) the
+    // freshly-started process and re-emitting Loading.
+    await mgr.start("llama", buildOpts(port));
+    assertEquals(mgr.status("llama").status, "Running");
+    const states: SidecarSnapshot["status"][] = [];
+    const unsub = mgr.subscribe((s) => {
+      if (s.kind === "llama") states.push(s.status);
+    });
+    await new Promise((r) => setTimeout(r, 1_600)); // past the loop's wake-up
+    unsub();
+    assertEquals(states, [], "stale restart loop fired after an explicit start");
+    assertEquals(mgr.status("llama").status, "Running");
+    await mgr.stop("llama");
   },
 });
 

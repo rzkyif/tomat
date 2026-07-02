@@ -3,9 +3,9 @@
   "exports": {},
   "tasks": {
     "build": "cargo build --release",
-    "lint": "cargo clippy --all-targets -- -D warnings",
+    "lint": "cargo clippy -q --all-targets -- -D warnings",
     "fmt": "cargo fmt",
     "fmt:check": "cargo fmt --check",
-    "test": "cargo test"
+    "test": "cargo test -q"
   }
 }

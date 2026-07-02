@@ -5,7 +5,7 @@
 // testable without spawning processes.
 
 import { assertEquals } from "@std/assert";
-import type { SidecarSnapshot } from "@tomat/shared";
+import type { DownloadEntry, DownloadStatus, SidecarSnapshot } from "@tomat/shared";
 import { CoreStatusService } from "./core-status.ts";
 import { __resetUpdateSubscribersForTesting, emitUpdate } from "../update/self-updater.ts";
 
@@ -146,6 +146,62 @@ Deno.test("core-status: a sidecar loading drives starting_up with progress", () 
   assertEquals(s.status, "starting_up");
   assertEquals(s.detail, "loading speech");
   assertEquals(s.progress, 0.4);
+});
+
+// A minimal download row; only status / sizeBytes / downloadedBytes matter to
+// the aggregate fold.
+function dl(
+  status: DownloadStatus,
+  sizeBytes: number | undefined,
+  downloadedBytes = 0,
+): DownloadEntry {
+  return {
+    id: `models:file-${status}-${sizeBytes}-${downloadedBytes}`,
+    source: "@test/repo/main/file.gguf",
+    destination: "models",
+    relPath: "test/repo/file.gguf",
+    absPath: "/models/test/repo/file.gguf",
+    filename: "file.gguf",
+    groupId: "llm",
+    sizeBytes,
+    downloadedBytes,
+    status,
+    addedAtMs: 0,
+  };
+}
+
+Deno.test("core-status: active downloads drive downloading with aggregate progress", () => {
+  const svc = fresh();
+  svc.noteBootDone();
+  svc.noteDownloads([dl("Downloading", 100, 50), dl("Pending", 100), dl("Completed", 100, 100)]);
+  const s = svc.snapshot();
+  assertEquals(s.status, "downloading");
+  assertEquals(s.detail, "2 files");
+  assertEquals(s.progress, 0.25);
+  // Every row finished -> back to idle.
+  svc.noteDownloads([dl("Completed", 100, 100)]);
+  assertEquals(svc.snapshot().status, "idle");
+});
+
+Deno.test("core-status: busy outranks downloading", () => {
+  const svc = fresh();
+  svc.noteBootDone();
+  svc.noteDownloads([dl("Downloading", 100, 10)]);
+  assertEquals(svc.snapshot().status, "downloading");
+  svc.noteActiveStreams(1);
+  assertEquals(svc.snapshot().status, "busy");
+  svc.noteActiveStreams(0);
+  assertEquals(svc.snapshot().status, "downloading");
+});
+
+Deno.test("core-status: an unsized active download reports no progress", () => {
+  const svc = fresh();
+  svc.noteBootDone();
+  svc.noteDownloads([dl("Downloading", undefined, 512)]);
+  const s = svc.snapshot();
+  assertEquals(s.status, "downloading");
+  assertEquals(s.detail, "1 file");
+  assertEquals(s.progress, undefined);
 });
 
 Deno.test("core-status: a message-only sidecar change re-emits", () => {

@@ -14,7 +14,11 @@
 // sidecar-boot, which itself imports this module.
 
 import { sidecarManager } from "../sidecars/manager.ts";
-import { buildLlamaStartOptions, llamaStartArgsFromSettings } from "../sidecars/llama.ts";
+import {
+  buildLlamaStartOptions,
+  llamaMissingPrereq,
+  llamaStartArgsFromSettings,
+} from "../sidecars/llama.ts";
 import { getLogger } from "../shared/log.ts";
 import { numSetting } from "./settings-access.ts";
 import { errMessage } from "@tomat/shared";
@@ -38,12 +42,19 @@ class LlmIdleManager {
   }
 
   /** Ensure the local model is loaded before a turn is sent. No-op for external
-   *  providers or when llama is already running/starting. */
+   *  providers, when llama is already running/starting, or when a required file
+   *  (model, mmproj, binary) is not on disk yet - spawning anyway would flip the
+   *  sidecar (and the corebar) to Error while a download is still in flight. */
   async ensureLoaded(settings: Record<string, unknown>): Promise<void> {
     const args = llamaStartArgsFromSettings(settings);
     if (!args) return; // external provider or no model configured
     const status = sidecarManager().status("llama").status;
     if (status === "Running" || status === "Loading") return;
+    const missing = await llamaMissingPrereq(args);
+    if (missing) {
+      log.info(`llama-server not reloaded: ${missing}`);
+      return;
+    }
     log.info("reloading llama-server after idle unload");
     try {
       await sidecarManager().start("llama", buildLlamaStartOptions(args));

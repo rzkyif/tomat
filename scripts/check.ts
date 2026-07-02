@@ -11,6 +11,7 @@ const ROOT = fromFileUrl(new URL("..", import.meta.url));
 const cmd = new Deno.Command("deno", {
   args: [
     "check",
+    "--quiet",
     "scripts/release/main.ts",
     "scripts/website/dev.ts",
     "scripts/website/build.ts",

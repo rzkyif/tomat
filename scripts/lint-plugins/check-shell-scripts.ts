@@ -87,4 +87,3 @@ if (code !== 0) {
   );
   Deno.exit(1);
 }
-console.log(`check-shell-scripts: ${files.length} script(s) clean (severity >= ${SEVERITY}).`);
