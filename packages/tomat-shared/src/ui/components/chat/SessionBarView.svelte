@@ -186,18 +186,16 @@
           onclick={() => onNext?.()}
         />
       {/if}
-      {#if !isNewSession}
-        {#if !mobile}
-          <IconButton
-            icon={confirmingDelete
-              ? "i-material-symbols-delete-forever-rounded"
-              : "i-material-symbols-delete-outline-rounded"}
-            title={confirmingDelete ? "Confirm Delete" : "Delete Session"}
-            size="sm"
-            onclick={() => onDelete?.()}
-            data-delete-btn
-          />
-        {/if}
+      {#if !isNewSession && !mobile}
+        <IconButton
+          icon={confirmingDelete
+            ? "i-material-symbols-delete-forever-rounded"
+            : "i-material-symbols-delete-outline-rounded"}
+          title={confirmingDelete ? "Confirm Delete" : "Delete Session"}
+          size="sm"
+          onclick={() => onDelete?.()}
+          data-delete-btn
+        />
         <IconButton
           icon="i-material-symbols-add-rounded"
           title="New Session"

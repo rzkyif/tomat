@@ -282,7 +282,7 @@
       title={detail ?? meta.label}
       aria-expanded={open}
       onclick={() => onToggleExpand?.()}
-      class="flex items-center gap-1.5 shrink-0 h-8 px-3 bg-surface-inset rounded-large transition-interactive hov:bg-surface-inset-strong hov:cursor-pointer {meta.tone}"
+      class="flex items-center gap-1.5 shrink-0 h-8 px-3 bg-surface-inset rounded-large select-none transition-interactive hov:bg-surface-inset-strong hov:cursor-pointer {meta.tone}"
       use:ripple={{ durationMs: rippleDuration }}
     >
       {@render pillInner()}
@@ -290,7 +290,7 @@
   {:else}
     <span
       data-region="core-status"
-      class="flex items-center gap-1.5 shrink-0 h-8 px-3 bg-surface-inset rounded-large {meta.tone}"
+      class="flex items-center gap-1.5 shrink-0 h-8 px-3 bg-surface-inset rounded-large select-none {meta.tone}"
       title={detail ?? meta.label}
     >
       {@render pillInner()}

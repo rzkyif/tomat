@@ -221,6 +221,7 @@
       ? 'w-full max-w-full'
       : 'w-fit max-w-[calc(100vw-5rem)]'} break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
     class:bubble-body-promote={ringCount > 0}
+    class:bubble-longpress={onlongpress}
     class:rounded-l-small={selectedAlignment === "left" || neighborLeft}
     class:border-l-8={selectedAlignment === "left" && active}
     class:border-l-0={selectedAlignment === "left" && !active}
@@ -324,6 +325,20 @@
      the same way, leaving the halo to blur only the desktop behind it. */
   .bubble-body-promote {
     transform: translateZ(0);
+  }
+
+  /* When a bubble carries a touch long-press handler (its mobile stand-in for
+     right-click, opening the action sheet), iOS otherwise fires its OWN
+     long-press gestures on top: the native callout menu (Copy / Select All) and
+     a text selection that flashes the bubble blue. Suppress both so the hold
+     resolves to our action sheet alone. Scoped to coarse pointers so desktop
+     text stays selectable; the mobile shell never selects bubble text anyway. */
+  @media (pointer: coarse) {
+    .bubble-longpress {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
   }
 
   .bubble-progress-invert {
