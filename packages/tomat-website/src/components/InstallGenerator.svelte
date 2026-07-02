@@ -45,9 +45,12 @@
   let bindAll = $state(false);
   let service = $state(true);
   // Uninstall options, folded into the command the same way the core install
-  // toggles are: client purge (wipe settings) and core keep-data.
-  let purge = $state(false);
-  let keepData = $state(false);
+  // toggles are. Both read as one axis ("keep my data"), so on always means keep
+  // and off always means delete, whichever part you are removing. The defaults
+  // mirror the scripts: removing the Client keeps its settings by default (on),
+  // removing the Core takes its data by default (off).
+  let keepClientData = $state(true);
+  let keepCoreData = $state(false);
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -65,8 +68,8 @@
   const command = $derived(
     mode === "uninstall"
       ? target === "client"
-        ? clientUninstallCommand(clientOs, channel, { purge })
-        : coreUninstallCommand(coreOs, channel, { keepData })
+        ? clientUninstallCommand(clientOs, channel, { purge: !keepClientData })
+        : coreUninstallCommand(coreOs, channel, { keepData: keepCoreData })
       : target === "client"
         ? clientCommand(clientOs, channel)
         : coreCommand(coreOs, channel, { bindAll, service }),
@@ -101,7 +104,11 @@
   const btnIdle = `${btnBase} bg-surface-inset text-default-700 hover:bg-surface-inset-strong`;
 </script>
 
-<div class="flex flex-col gap-6">
+<!-- not-prose: this island can mount inside the manual's `.prose` (the uninstall
+     page), whose presetTypography would otherwise restyle the command `<code>`
+     (backtick quotes, code padding) and the card `<p>` descriptions (margins).
+     It is a no-op on the /install page, which has no prose ancestor. -->
+<div class="not-prose flex flex-col gap-6">
   <!-- Step 1: client or core, with the "not sure" hint grouped under it. -->
   <div class="flex flex-col gap-2">
     <span class={labelCls}>{verb}</span>
@@ -133,7 +140,7 @@
           icon="i-mdi-server"
           title="Core"
           description={mode === "uninstall"
-            ? "The service that does the work. Removing it stops the Core and deletes its data from this computer."
+            ? "The service that does the work. Removing it stops the Core and takes its data with it, unless you choose to keep it."
             : "The service that does the work. Install it on its own when you want it on a separate, more powerful machine that Clients connect to."}
           onclick={() => (target = "core")}
         />
@@ -222,20 +229,20 @@
   {/if}
 
   <!-- Uninstall options, folded into the command live like the install ones.
-       Each changes what the removal touches: client purge wipes settings, core
-       keep-data spares the Core's data. -->
+       Both are one "keep my data" axis: on keeps, off deletes. The client keeps
+       its settings by default (on); the Core takes its data by default (off). -->
   {#if mode === "uninstall" && !isAndroid}
     <div class="flex flex-col gap-2">
       <span class={labelCls}>Options</span>
       <div class="flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
         {#if target === "client"}
           <label class="flex items-center justify-between gap-4">
-            <span class="text-sm text-default-700">Also delete settings and paired cores</span>
+            <span class="text-sm text-default-700">Keep settings and paired cores</span>
             <div class="w-24 shrink-0">
               <Toggle
-                checked={purge}
-                onchange={(v) => (purge = v)}
-                ariaLabel="Also delete settings and paired cores"
+                checked={keepClientData}
+                onchange={(v) => (keepClientData = v)}
+                ariaLabel="Keep settings and paired cores"
               />
             </div>
           </label>
@@ -244,8 +251,8 @@
             <span class="text-sm text-default-700">Keep sessions and memories</span>
             <div class="w-24 shrink-0">
               <Toggle
-                checked={keepData}
-                onchange={(v) => (keepData = v)}
+                checked={keepCoreData}
+                onchange={(v) => (keepCoreData = v)}
                 ariaLabel="Keep sessions and memories"
               />
             </div>

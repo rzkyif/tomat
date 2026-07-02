@@ -69,7 +69,13 @@ const codeBox =
   "ig-cmd block rounded-large bg-surface-inset px-4 py-3 font-mono text-sm text-default-800 overflow-x-auto whitespace-nowrap no-scrollbar";
 ---
 
-<div class="ig flex flex-col gap-6">
+{
+  /* not-prose: the baseline can render inside the manual's `.prose` (the uninstall
+  page), whose presetTypography would otherwise restyle the command `<code>`
+  (backtick quotes, code padding) and the flag-note paragraphs. No-op on
+  /install, which has no prose ancestor. */
+}
+<div class="ig not-prose flex flex-col gap-6">
   {/* Step 1: client or core, with the "not sure" hint grouped under it. */}
   <div class="flex flex-col gap-2">
     <span class={label}>{verb}</span>
@@ -112,7 +118,7 @@ const codeBox =
           <span class="ig-card-desc text-sm">
             {
               uninstall
-                ? "The service that does the work. Removing it stops the Core and deletes its data from this computer."
+                ? "The service that does the work. Removing it stops the Core and takes its data with it, unless you choose to keep it."
                 : "The service that does the work. Install it on its own when you want it on a separate, more powerful machine that Clients connect to."
             }
           </span>

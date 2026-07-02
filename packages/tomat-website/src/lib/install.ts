@@ -156,8 +156,8 @@ export function commandStepsTail(mode: "install" | "uninstall", target: Target):
     return [
       run,
       target === "core"
-        ? "It stops the Core and removes it; turn on the option below to keep its sessions and memories."
-        : "It removes the app; turn on the option below to also wipe your settings.",
+        ? "It stops the Core and removes it; use the option above to keep its sessions and memories."
+        : "It removes the app but keeps your settings; use the option above to wipe them too.",
     ];
   }
   if (target === "core") {
