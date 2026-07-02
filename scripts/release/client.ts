@@ -37,6 +37,7 @@ import {
   sha256File,
   signEd25519Bytes,
   step,
+  stripJsonVersion,
 } from "./lib.ts";
 
 // ---------------------------------------------------------------------------
@@ -485,27 +486,35 @@ export const clientItem: ReleaseItem = {
   bumpVersion: () => bumpVersionField(TAURI_CONF_PATH),
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
-    return hashPaths(
-      CLIENT_HASH_INPUTS.map((p) => ({
+    // tauri.conf.json carries the client version; drop it from the tree hash and
+    // fold it back in with the version blanked, so a lone bump does not re-trigger
+    // a client release while a real tauri.conf.json change still does.
+    const confRel = rel(TAURI_CONF_PATH);
+    return hashPaths([
+      ...CLIENT_HASH_INPUTS.map((p) => ({
         path: join(REPO_ROOT, p),
-        exclude: (r) => r.endsWith(".test.ts") || r.includes("/target/"),
+        exclude: (r: string) => r.endsWith(".test.ts") || r.includes("/target/") || r === confRel,
       })),
-    );
+      { path: TAURI_CONF_PATH, transform: stripJsonVersion },
+    ]);
   },
 
   buildOutputs(_channel: ReleaseChannel): Promise<string[]> {
     return clientBuildOutputs();
   },
 
-  // Beyond a source change, the host platform may simply not be published yet
-  // at the current version (another machine released a different platform).
-  // That makes the item "changed" but needs no version bump.
+  // Platform-fill only: the CURRENT version is already published but this host's
+  // platform is missing from it (another machine released a different platform),
+  // so republish to fill it - no version bump. A published version merely being
+  // BEHIND the local (bumped) version is NOT a change here: a lone version bump
+  // must not rebuild/republish; it ships with the next real source change, which
+  // trips the source hash above.
   async extraChanged(env: DeployEnv, channel: ReleaseChannel): Promise<boolean> {
     const version = await readClientVersion();
     const manifestDir = channelManifestDir(channel);
     const live = await fetchLiveJson<ClientManifest>(env, `${manifestDir}/client.json`);
     const hostKey = tauriPlatformKey(detectHostTriple());
-    return !(live && live.version === version && live.platforms[hostKey]);
+    return !!live && live.version === version && !live.platforms[hostKey];
   },
 
   async apply(env: DeployEnv, channel: ReleaseChannel, opts: ApplyOpts): Promise<void> {

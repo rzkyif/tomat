@@ -30,6 +30,7 @@ import {
   sha256File,
   signEd25519,
   step,
+  stripJsonVersion,
 } from "./lib.ts";
 
 const PKG_DIR = join(REPO_ROOT, "packages/tomat-extension-builtin");
@@ -102,11 +103,18 @@ export const extensionItem: ReleaseItem = {
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
     const pkgRel = relative(REPO_ROOT, PKG_DIR) + "/";
+    // deno.json carries the extension version; drop it from the tree hash and fold
+    // it back in with the version blanked, so a lone bump does not re-trigger an
+    // extension release while a real deno.json change still does.
     return hashPaths([
       {
         path: PKG_DIR,
-        exclude: (r) => isExcluded(r.startsWith(pkgRel) ? r.slice(pkgRel.length) : r),
+        exclude: (r) => {
+          const rp = r.startsWith(pkgRel) ? r.slice(pkgRel.length) : r;
+          return rp === "deno.json" || isExcluded(rp);
+        },
       },
+      { path: join(PKG_DIR, "deno.json"), transform: stripJsonVersion },
     ]);
   },
 

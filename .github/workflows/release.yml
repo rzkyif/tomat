@@ -17,10 +17,11 @@ name: Release
 # A changed-but-unbumped item fails the publish job loudly. After a successful
 # latest-channel publish, a final `bump` job advances the just-published items'
 # version files and commits them to `main` ONLY (the committed counterpart to the
-# local release's post-publish bump). `latest` is left at the released commit and
-# the cursor keeps its pre-bump hash, so nothing re-releases; the bump publishes on
-# the next `main -> latest` promotion (a version bump alone is a valid release).
-# Stable is a promotion of already-bumped versions, so its bump job is a no-op.
+# local release's post-publish bump). `latest` is left at the released commit. Source
+# hashes are version-blind, so this lone bump never re-triggers a release on its own:
+# it sits on `main` and ships bundled with the next real source change on a later
+# `main -> latest` promotion. Stable is a promotion of already-bumped versions, so
+# its bump job is a no-op.
 #
 # Required repo secrets: TOMAT_SIGNING_PRIVATE_KEY_B64, TOMAT_SIGNING_PUBLIC_KEY_B64,
 # TAURI_UPDATER_PUBLIC_KEY, TAURI_UPDATER_PRIVATE_KEY, TAURI_UPDATER_PRIVATE_KEY_PASSWORD,

@@ -369,6 +369,44 @@ function escapeRegExp(s: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// version normalization for source hashing
+//
+// A release item's version lives INSIDE its hashed source (CORE_VERSION in
+// config.ts, "version" in deno.json / tauri.conf.json / the schema). Left as-is,
+// the post-release bump of that file would change the item's source hash and
+// re-trigger a full rebuild + republish on the next promotion, with no real
+// source change. These normalizers blank the version to a fixed placeholder
+// before hashing so a version-only bump is invisible to change detection. The
+// version still ships (in the manifest) and still gates a release (the
+// version-bump gate reads version() directly); it just never TRIGGERS one. The
+// items that keep the version OUT of their hashed tree entirely - install
+// scripts (version.json excluded) and the catalog (version-free payload) - need
+// no normalizer.
+
+const VERSION_HASH_PLACEHOLDER = "0.0.0";
+
+/** Return `text` with the top-level JSON `"version"` value replaced by a fixed
+ *  placeholder. Anchored on the parsed top-level value exactly like
+ *  bumpVersionField, so a same-valued nested `"version"` is never touched.
+ *  Returns the text unchanged when there is no parseable top-level version. */
+export function stripJsonVersion(text: string): string {
+  let current: string | undefined;
+  try {
+    current = (JSON.parse(text) as { version?: string }).version;
+  } catch {
+    return text;
+  }
+  if (!current) return text;
+  const re = new RegExp(`("version"\\s*:\\s*")${escapeRegExp(current)}(")`);
+  return text.replace(re, `$1${VERSION_HASH_PLACEHOLDER}$2`);
+}
+
+/** The config.ts counterpart: blank the `CORE_VERSION = "x.y.z"` constant. */
+export function stripCoreVersion(text: string): string {
+  return text.replace(/(CORE_VERSION\s*=\s*")[^"]+(")/, `$1${VERSION_HASH_PLACEHOLDER}$2`);
+}
+
+// ---------------------------------------------------------------------------
 // canonical JSON for signing. Single-sourced in @tomat/shared (imported above)
 // so the signer here and the core verifiers (binaries/manifest.ts,
 // update/self-updater.ts) recompute byte-identical bytes and can't drift.
@@ -656,6 +694,18 @@ export interface HashInput {
   path: string;
   /** Skip files whose repo-relative path matches (e.g. tests, build output). */
   exclude?: (relPath: string) => boolean;
+  /** Optional content normalizer applied to each file's TEXT before it is
+   *  hashed. Used to blank a version field (see stripJsonVersion /
+   *  stripCoreVersion) so a version-only bump does not change the item's source
+   *  hash. Only put this on single-file inputs (the version file), never on a
+   *  directory input, since it forces a text read that would corrupt binary
+   *  assets under the tree. */
+  transform?: (text: string) => string;
+}
+
+async function hashOneFile(abs: string, transform?: (text: string) => string): Promise<string> {
+  if (transform) return await sha256String(transform(await Deno.readTextFile(abs)));
+  return (await sha256File(abs)).sha256;
 }
 
 /** Tracked files under a repo directory, absolute paths. Uses `git ls-files` so
@@ -690,13 +740,13 @@ export async function hashPaths(inputs: HashInput[]): Promise<string> {
     if (stat.isFile) {
       const r = rel(input.path);
       if (input.exclude?.(r)) continue;
-      entries.push({ path: r, sha: (await sha256File(input.path)).sha256 });
+      entries.push({ path: r, sha: await hashOneFile(input.path, input.transform) });
     } else if (stat.isDirectory) {
       for (const abs of await trackedFilesUnder(input.path)) {
         if (!(await exists(abs))) continue; // tracked-but-deleted in the working tree
         const r = rel(abs);
         if (input.exclude?.(r)) continue;
-        entries.push({ path: r, sha: (await sha256File(abs)).sha256 });
+        entries.push({ path: r, sha: await hashOneFile(abs, input.transform) });
       }
     }
   }
@@ -1204,14 +1254,13 @@ export async function runReleasePlan(
   for (const p of succeeded) {
     const prev =
       p.item.scope === "shared" ? cursor.shared[p.item.id] : cursor.channels[channel]?.[p.item.id];
-    // Record what was ACTUALLY released: the published version and its as-built
-    // (pre-bump) source hash. The post-release bump advances the version FILE on
-    // `main` only; the channel branch stays at this released commit, so recording
-    // the pre-bump hash keeps the cursor equal to what the branch points at and a
-    // re-push of the same commit reads as unchanged. Promoting the bump commit to
-    // the channel later then legitimately publishes it (a version bump alone is a
-    // valid release); a source change WITHOUT a bump is still rejected by the
-    // version-bump gate above.
+    // Record what was ACTUALLY released: the published version and its source
+    // hash. Source hashes are version-BLIND (each item strips its version field
+    // before hashing, see stripJsonVersion / stripCoreVersion), so the post-release
+    // bump does NOT change an item's hash: the pending bump sits on `main` and
+    // ships bundled with the next real source change (which does trip the hash),
+    // rather than re-triggering a rebuild + republish on its own. A source change
+    // WITHOUT a bump is still rejected by the version-bump gate above.
     const state: ItemState = {
       version: p.localVersion,
       sourceHash: p.localHash,

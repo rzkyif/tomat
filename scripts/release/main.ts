@@ -242,10 +242,10 @@ async function main(): Promise<void> {
   // The channel branch points at the RELEASED commit (un-bumped); the post-release
   // bump lands on `main` only. So fast-forward the channel branch to the released
   // HEAD FIRST - the bump is still uncommitted in the working tree at this point -
-  // then, for latest, commit the bump and push it to `main`. Pushing the released
-  // (un-bumped) commit to the channel matches the cursor, so it does not re-run the
-  // release; the bump on `main` publishes on the next promotion. A stable release
-  // is a promotion that did not bump and does not touch `main`.
+  // then, for latest, commit the bump and push it to `main`. Source hashes are
+  // version-blind, so the bump on `main` never re-runs the release on its own; it
+  // ships bundled with the next real source change on a later promotion. A stable
+  // release is a promotion that did not bump and does not touch `main`.
   if (flags.alignBranches && !flags.dryRun && published > 0) {
     await pushChannelBranch(flags.channel);
     if (flags.channel === "latest") {

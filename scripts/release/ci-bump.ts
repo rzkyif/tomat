@@ -4,8 +4,8 @@
 // has published the latest channel. It bumps the just-published items' version
 // files and commits them to `main` ONLY. It does NOT touch `latest` and does NOT
 // write the cursor: `latest` stays at the released commit (the codebase as
-// actually shipped, un-bumped), and the shared R2 cursor keeps the pre-bump
-// (as-released) source hash that ci-publish already recorded.
+// actually shipped, un-bumped), and the shared R2 cursor keeps the as-released
+// source hash that ci-publish already recorded.
 //
 // Latest channel only: a stable release is a fast-forward promotion of
 // already-bumped versions, so there is nothing to bump (the workflow only runs
@@ -15,17 +15,20 @@
 // cursor version equals its local version (the version file has not advanced yet).
 // Every other item was bumped after its last release, so its local version is
 // strictly greater. So "recorded.version === local version" selects exactly the
-// items this release published and left un-bumped.
+// items this release published and left un-bumped. Source hashes are version-BLIND
+// (each item strips its version before hashing) and client/android extraChanged is
+// fill-only, so ci-publish only ever publishes items whose source actually changed
+// (or a genuine same-version platform fill) - never a lone version bump. That makes
+// this selection equivalent to the local auto-bump's "sourceChanged only" filter:
+// bumping the just-published items is correct and cannot churn.
 //
-// No re-release loop, no guard: the bump lands on `main`, but a Release only fires
-// on a push to `latest`/`stable`, and this job's push is via GITHUB_TOKEN, which
-// GitHub does not let trigger another workflow. The next release happens when
-// `main` is promoted to `latest`; the bumped version then legitimately publishes
-// (a version bump alone is a valid release, while a source change without a bump
-// is still rejected by the version-bump gate). Because the cursor keeps the
-// pre-bump hash, a commit pushed to `main` mid-release stays unpublished and ships
-// on the next promotion instead of being masked - so no `head === built` guard is
-// needed. A non-fast-forward pushMain (a genuine concurrent push during the job)
+// No re-release loop: the bump lands on `main`, and a lone version bump no longer
+// re-triggers a release, because the version is stripped out of every source hash.
+// The pending bump sits on `main` until a REAL source change lands, then ships
+// bundled with it on the next `main -> latest` promotion (the higher version clears
+// the version-bump gate, which still rejects a source change WITHOUT a bump). This
+// job's push is via GITHUB_TOKEN, which GitHub does not let trigger another
+// workflow. A non-fast-forward pushMain (a genuine concurrent push during the job)
 // still fails loudly.
 //
 // Flags:

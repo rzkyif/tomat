@@ -46,6 +46,7 @@ import {
   sha256File,
   signEd25519,
   step,
+  stripCoreVersion,
 } from "./lib.ts";
 import { reportRouting, routeTriples } from "./all-targets.ts";
 import { type ArtifactBundle, mergeCoreBundles } from "./artifacts.ts";
@@ -774,12 +775,17 @@ export const coreItem: ReleaseItem = {
   bumpVersion: bumpCoreVersion,
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
-    return hashPaths(
-      CORE_HASH_INPUTS.map((p) => ({
+    // config.ts carries CORE_VERSION; drop it from the tree hash and fold it back
+    // in with the version blanked, so a lone version bump does not re-trigger a
+    // core release while a real config.ts change still does.
+    const configRel = rel(CONFIG_PATH);
+    return hashPaths([
+      ...CORE_HASH_INPUTS.map((p) => ({
         path: join(REPO_ROOT, p),
-        exclude: (r) => r.endsWith(".test.ts"),
+        exclude: (r: string) => r.endsWith(".test.ts") || r === configRel,
       })),
-    );
+      { path: CONFIG_PATH, transform: stripCoreVersion },
+    ]);
   },
 
   buildOutputs(channel: ReleaseChannel): Promise<string[]> {

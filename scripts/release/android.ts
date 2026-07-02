@@ -38,6 +38,7 @@ import {
   sha256File,
   signEd25519Bytes,
   step,
+  stripJsonVersion,
 } from "./lib.ts";
 
 // ---------------------------------------------------------------------------
@@ -231,13 +232,21 @@ export const androidItem: ReleaseItem = {
   bumpVersion: () => bumpVersionField(TAURI_CONF_PATH),
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
-    return hashPaths(
-      ANDROID_HASH_INPUTS.map((p) => ({
+    // tauri.conf.json carries the client/android version; drop it from the tree
+    // hash and fold it back in with the version blanked, so a lone bump does not
+    // re-trigger an android release while a real tauri.conf.json change still does.
+    const confRel = rel(TAURI_CONF_PATH);
+    return hashPaths([
+      ...ANDROID_HASH_INPUTS.map((p) => ({
         path: join(REPO_ROOT, p),
-        exclude: (r) =>
-          r.endsWith(".test.ts") || r.includes("/target/") || r.includes("/gen/android/"),
+        exclude: (r: string) =>
+          r.endsWith(".test.ts") ||
+          r.includes("/target/") ||
+          r.includes("/gen/android/") ||
+          r === confRel,
       })),
-    );
+      { path: TAURI_CONF_PATH, transform: stripJsonVersion },
+    ]);
   },
 
   // The keystore-signed APKs buildAndroidBundle() copies under dist/android/.
@@ -246,13 +255,16 @@ export const androidItem: ReleaseItem = {
     return Promise.resolve([join(DIST_DIR, "android")]);
   },
 
-  // Changed when android.json doesn't yet carry this version (a fresh bump that
-  // has not been published from any machine).
+  // Fill-only: the CURRENT version is published but carries no ABIs (a partial /
+  // broken publish at this version), so republish to repair it - no version bump.
+  // A published version merely being BEHIND the local (bumped) version is NOT a
+  // change: a lone version bump must not rebuild/republish; it ships with the next
+  // real source change, which trips the source hash above.
   async extraChanged(env: DeployEnv, channel: ReleaseChannel): Promise<boolean> {
     const version = await readAndroidVersion();
     const manifestDir = channelManifestDir(channel);
     const live = await fetchLiveJson<AndroidManifest>(env, `${manifestDir}/android.json`);
-    return !(live && live.version === version && Object.keys(live.abis ?? {}).length > 0);
+    return !!live && live.version === version && Object.keys(live.abis ?? {}).length === 0;
   },
 
   async apply(env: DeployEnv, channel: ReleaseChannel, opts: ApplyOpts): Promise<void> {

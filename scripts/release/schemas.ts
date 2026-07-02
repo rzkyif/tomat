@@ -18,6 +18,7 @@ import {
   type ReleaseItem,
   REPO_ROOT,
   step,
+  stripJsonVersion,
 } from "./lib.ts";
 
 const SCHEMAS: Array<{ src: string; r2Key: string }> = [
@@ -45,7 +46,12 @@ export const schemasItem: ReleaseItem = {
   bumpVersion: () => bumpVersionField(join(REPO_ROOT, VERSION_SRC)),
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
-    return hashPaths(SCHEMAS.map((s) => ({ path: join(REPO_ROOT, s.src) })));
+    // The schema file carries its own version; hash it with the version blanked so
+    // a lone bump does not re-trigger a schema release while a real schema change
+    // still does.
+    return hashPaths(
+      SCHEMAS.map((s) => ({ path: join(REPO_ROOT, s.src), transform: stripJsonVersion })),
+    );
   },
 
   // Schemas ship as-is (no compile step); the work is the byte-compare + upload.

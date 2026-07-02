@@ -34,6 +34,7 @@ import {
   REPO_ROOT,
   sha256File,
   step,
+  stripJsonVersion,
 } from "./lib.ts";
 
 // ---------------------------------------------------------------------------
@@ -169,13 +170,21 @@ export const iosItem: ReleaseItem = {
   bumpVersion: () => bumpVersionField(TAURI_CONF_PATH),
 
   sourceHash(_channel: ReleaseChannel): Promise<string> {
-    return hashPaths(
-      IOS_HASH_INPUTS.map((p) => ({
+    // tauri.conf.json carries the client/ios version; drop it from the tree hash
+    // and fold it back in with the version blanked, so a lone bump does not
+    // re-trigger an ios release while a real tauri.conf.json change still does.
+    const confRel = rel(TAURI_CONF_PATH);
+    return hashPaths([
+      ...IOS_HASH_INPUTS.map((p) => ({
         path: join(REPO_ROOT, p),
-        exclude: (r) =>
-          r.endsWith(".test.ts") || r.includes("/target/") || r.includes("/gen/apple/"),
+        exclude: (r: string) =>
+          r.endsWith(".test.ts") ||
+          r.includes("/target/") ||
+          r.includes("/gen/apple/") ||
+          r === confRel,
       })),
-    );
+      { path: TAURI_CONF_PATH, transform: stripJsonVersion },
+    ]);
   },
 
   buildOutputs(_channel: ReleaseChannel): Promise<string[]> {
