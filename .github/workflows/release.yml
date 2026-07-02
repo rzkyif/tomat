@@ -248,7 +248,9 @@ jobs:
     needs: [preflight, build]
     if: needs.preflight.outputs.changed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A healthy publish is ~5-7 min; cap well above that so a hung upload/verify
+    # surfaces in minutes rather than after the old 30-min ceiling.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 

@@ -507,19 +507,39 @@ export async function r2Put(
 
 async function verifyR2Upload(env: DeployEnv, key: string, file: string): Promise<void> {
   const url = `https://${env.storageDomain}/${key}?_v=${Date.now()}`;
-  let res: Response;
-  try {
-    res = await fetch(url);
-  } catch (err) {
-    fail(`r2 put ${key}: post-upload GET failed: ${err instanceof Error ? err.message : err}`);
+  // A freshly-uploaded object can be slow to serve from the edge, and the GET
+  // occasionally hangs indefinitely (no server response, no socket error), which
+  // silently burned ~20 min per stall in CI. Bound each attempt with a timeout
+  // and retry with backoff so a stuck fetch fails fast instead of blocking.
+  let remoteBytes: Uint8Array | undefined;
+  let lastErr = "";
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+      if (!res.ok || !res.body) {
+        lastErr = `GET returned ${res.status} ${res.statusText}`;
+      } else {
+        remoteBytes = new Uint8Array(await res.arrayBuffer());
+        break;
+      }
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : String(err);
+    }
+    if (attempt < 5) {
+      info(
+        colors.yellow(
+          `r2 verify ${key} failed (attempt ${attempt}/5: ${lastErr}); retrying in ${attempt * 3}s`,
+        ),
+      );
+      await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
+    }
   }
-  if (!res.ok || !res.body) {
+  if (!remoteBytes) {
     fail(
-      `r2 put ${key}: post-upload GET returned ${res.status} ${res.statusText}. ` +
-        `Wrangler likely crashed mid-upload despite exit 0. Re-run the task.`,
+      `r2 put ${key}: post-upload GET failed after 5 attempts (${lastErr}). ` +
+        `Wrangler may have crashed mid-upload despite exit 0. Re-run the task.`,
     );
   }
-  const remoteBytes = new Uint8Array(await res.arrayBuffer());
   const remoteHash = encodeHex(
     new Uint8Array(await crypto.subtle.digest("SHA-256", remoteBytes.buffer as ArrayBuffer)),
   );
