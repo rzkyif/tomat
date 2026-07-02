@@ -682,7 +682,7 @@ try {
             Invoke-WebRequest -Uri $h.url -OutFile $hGz -UseBasicParsing
           } catch {
             Ui-Die "Download interrupted" `
-              "fetching helper $hFilename: $($_.Exception.Message)" `
+              "fetching helper ${hFilename}: $($_.Exception.Message)" `
               "re-run; partial files were cleaned up"
           }
 
@@ -706,7 +706,7 @@ try {
             Move-Item -Force $hTmp $hPath
           } catch {
             Ui-Die "Permission denied writing to $BinDir\" `
-              "could not install $hFilename: $($_.Exception.Message)" `
+              "could not install ${hFilename}: $($_.Exception.Message)" `
               "check ownership of %USERPROFILE%\.tomat"
           }
         }
@@ -892,7 +892,7 @@ try {
       }
       $trigger = New-ScheduledTaskTrigger -AtLogOn
       $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd `
-          -RestartCount 5 -RestartInterval (New-TimeSpan -Seconds 30) -AllowStartIfOnBatteries
+          -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries
       $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
       Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
       Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `

@@ -386,6 +386,17 @@ try {
         $_.Exception.Message `
         "a process may still be holding the directory open; re-run after closing tomat"
     }
+    # Best-effort: drop the now-empty channel dir (~/.tomat/<channel>) left behind
+    # once both core and client data are gone. Only when empty, so a client still
+    # installed on this channel keeps it. The shared models dir lives under
+    # ~/.tomat, not the channel dir, so it is never affected. Mirrors
+    # core-uninstall.sh's `rmdir "$(dirname "$HOME_DIR")"`.
+    $channelDir = Split-Path -Parent $HomeDir
+    try {
+      if ((Test-Path $channelDir) -and -not (Get-ChildItem -Force $channelDir)) {
+        Remove-Item -Force $channelDir
+      }
+    } catch { }
     Ui-ActionDone $IdxData "(removed)"
   }
 

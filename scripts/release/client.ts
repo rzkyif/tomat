@@ -196,8 +196,12 @@ async function findClientBundle(triple: Triple, bundleRoot: string): Promise<Cli
   if (triple.endsWith("apple-darwin")) {
     candidates.push({ dir: join(bundleRoot, "macos"), ext: ".app.tar.gz" });
   } else if (triple.endsWith("pc-windows-msvc")) {
-    candidates.push({ dir: join(bundleRoot, "msi"), ext: ".msi" });
+    // Windows ships the per-user NSIS installer (installMode currentUser in
+    // tauri.conf.json); the MSI target was dropped so first install needs no
+    // admin. Prefer nsis; keep msi as a fallback only so a stale bundle dir from
+    // an older build is still locatable rather than silently shipped.
     candidates.push({ dir: join(bundleRoot, "nsis"), ext: ".exe" });
+    candidates.push({ dir: join(bundleRoot, "msi"), ext: ".msi" });
   } else if (triple.endsWith("unknown-linux-gnu")) {
     candidates.push({ dir: join(bundleRoot, "appimage"), ext: ".AppImage" });
   }

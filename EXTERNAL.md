@@ -138,6 +138,25 @@ Reading each row:
   because tool-permission prompts are parsed from this version's prompt wording
   ([prompt-parser.ts](packages/tomat-core/src/extensions/prompt-parser.ts)).
 
+### jq static build (install-time, only when the host has none)
+
+- **Used for:** the shell install scripts parse the signed manifest with `jq`
+  (and core reproduces the canonical signature payload with `jq -Sjc`). Default
+  Ubuntu/Debian ship no `jq`, so when it is missing the scripts fetch a pinned
+  static build instead of aborting.
+- **Code:** `ensure_jq` in
+  [core.sh](scripts/install/core.sh) and
+  [client.sh](scripts/install/client.sh) (identical block).
+- **Assumes:**
+  `github.com/jqlang/jq/releases/download/jq-1.7.1/jq-{linux,macos}-{amd64,arm64}`
+  stays reachable and matches the committed sha256 pins. Runs only on the real
+  install path (after the offline self-test), only when `jq` is absent.
+- **Fails as:** the installer aborts with "could not download jq" (asset moved)
+  or "downloaded jq failed sha256 verification" (asset republished at the same
+  URL). By design: no silent use of an unverified jq.
+- **Fix:** verify the new upstream asset, then bump `JQ_VERSION` + the four
+  `_jq_sha` pins in both scripts in the same commit.
+
 ### GitHub release JSON shape + rate-limiting
 
 - **Used for:** resolving every upstream sidecar (the two above).

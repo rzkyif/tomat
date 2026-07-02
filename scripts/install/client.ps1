@@ -1,25 +1,29 @@
 # tomat-client installer for Windows.
 #
 # Detects the host triple, fetches client.json from the storage origin,
-# picks the MSI for x86_64-pc-windows-msvc (or aarch64), downloads it to
-# %TEMP%, strips the Mark of the Web (MOTW) attribute so SmartScreen
-# doesn't show the "Windows protected your PC" warning, then hands off to
-# `msiexec /i` with a basic-UI progress dialog.
+# picks the per-user NSIS installer (.exe) for x86_64-pc-windows-msvc (or
+# aarch64), downloads it to %TEMP%, verifies its sha256 against the manifest,
+# strips the Mark of the Web (MOTW) attribute so SmartScreen doesn't show the
+# "Windows protected your PC" warning, then runs it silently. The NSIS bundle is
+# built currentUser (installMode in tauri.conf.json), so it installs under
+# %LOCALAPPDATA% with NO administrator prompt.
 #
 # Trust model (read before pinning a vendor signing key here):
 #   1. The installer is fetched over TLS from $env:TOMAT_STORAGE
 #      (get.au.tomat.ing by default). Connection-level integrity is HTTPS.
-#   2. The manifest at $env:TOMAT_STORAGE/manifests/client.json is also
-#      fetched over HTTPS. Its Ed25519 signature is intentionally NOT
-#      verified by this installer: PowerShell ships no minisign tool by
-#      default and pulling one in would inflate the install surface.
-#      Instead, the MSI itself is Authenticode-signed by the Tauri bundle
-#      pipeline; Windows enforces the signature at install time.
-#   3. Consequence: a compromised TLS chain on $env:TOMAT_STORAGE's
-#      certificate would let a MITM serve a malicious MSI on the first
-#      install, but only if it carries a valid Authenticode signature
-#      from a CA Windows trusts. Subsequent in-app updates verify the
-#      manifest signature inside the running client.
+#   2. The manifest at $env:TOMAT_STORAGE/manifests/client.json is fetched
+#      over HTTPS. Its Ed25519 signature is NOT verified here: PowerShell ships
+#      no minisign tool by default and pulling one in would inflate the install
+#      surface. The installer is also NOT Authenticode-signed (tomat has no
+#      Windows code-signing certificate yet); the currentUser NSIS package
+#      avoids the "unknown publisher" elevation prompt a per-machine install
+#      would trigger, since it needs no admin rights at all.
+#   3. As defense-in-depth the downloaded .exe's sha256 is compared against the
+#      manifest value (matching client.sh), so a corrupt or truncated download
+#      is rejected. This does NOT stop a MITM that rewrites both the manifest
+#      and the binary on the TLS origin; the in-app updater closes that gap by
+#      verifying the signed manifest inside the running client on every
+#      subsequent update.
 #
 # Usage (one-liner):
 #   powershell -ExecutionPolicy Bypass -Command "iwr -useb https://get.au.tomat.ing/install/client.ps1 | iex"
@@ -262,9 +266,9 @@ function Ui-Die($Reason, $Detail, $Hint) {
 $Storage = if ($env:TOMAT_STORAGE) { $env:TOMAT_STORAGE } else { "https://get.au.tomat.ing" }
 # Install channel via TOMAT_CHANNEL env. A latest client is a distinct app
 # (tomat-latest, identifier au.tomat.ing.latest) that coexists with stable and
-# updates from the latest manifest. The MSI itself controls the install dir +
-# product name (baked by build-client.ts); this script just picks the channel
-# manifest + display strings.
+# updates from the latest manifest. The NSIS installer itself controls the
+# install dir + product name (baked by build-client.ts); this script just picks
+# the channel manifest + display strings.
 $Channel = if ($env:TOMAT_CHANNEL) { $env:TOMAT_CHANNEL } else { "stable" }
 if ($Channel -notin @("stable", "dev", "latest")) {
   Write-Error "invalid TOMAT_CHANNEL: $Channel (expected stable, dev, or latest)"
@@ -287,9 +291,10 @@ try {
   Ui-Init "tomat-client installer"
 
   $IdxHost     = Ui-ActionAdd "Detecting host"
-  $IdxDownload = Ui-ActionAdd "Downloading MSI to %TEMP%"
+  $IdxDownload = Ui-ActionAdd "Downloading installer to %TEMP%"
+  $IdxVerify   = Ui-ActionAdd "Verifying download (sha256)"
   $IdxMotw     = Ui-ActionAdd "Clearing Mark of the Web"
-  $IdxInstall  = Ui-ActionAdd "Installing $DisplayName to C:\Program Files\$InstallDirName\ (a small msiexec progress dialog will appear)"
+  $IdxInstall  = Ui-ActionAdd "Installing $DisplayName (per-user, no admin prompt)"
 
   # --- action 1: detect host ----------------------------------------------
 
@@ -309,9 +314,9 @@ try {
 
   Ui-ActionDone $IdxHost "($Triple)"
 
-  # --- action 2: download MSI ---------------------------------------------
+  # --- action 2: download installer ---------------------------------------
 
-  Ui-ActionStart $IdxDownload "Downloading MSI to %TEMP%" "(fetching manifest)"
+  Ui-ActionStart $IdxDownload "Downloading installer to %TEMP%" "(fetching manifest)"
 
   $manifest = $null
   try {
@@ -362,7 +367,9 @@ try {
       "your platform may not be supported yet"
   }
 
-  $Tmp = Join-Path $env:TEMP ("tomat-client-" + [System.IO.Path]::GetRandomFileName() + ".msi")
+  # Stable, friendly filename (not a random temp name): this is what any
+  # SmartScreen / antivirus prompt shows the user, so it should read as tomat's.
+  $Tmp = Join-Path $env:TEMP "$InstallDirName-setup.exe"
   _Ui-TrackStaging $Tmp
 
   Ui-ActionUpdate $IdxDownload "(downloading v$($manifest.version))"
@@ -378,7 +385,25 @@ try {
   $sizeMb = [int]((Get-Item $Tmp).Length / 1MB)
   Ui-ActionDone $IdxDownload "($sizeMb MB)"
 
-  # --- action 3: clear Mark of the Web -----------------------------------
+  # --- action 3: verify sha256 -------------------------------------------
+
+  # Matches client.sh: reject a corrupt or truncated download before running it.
+  # (The manifest's Ed25519 signature is not checked here; see the trust model
+  # in the header.)
+  if (-not $entry.sha256) {
+    Ui-ActionSkip $IdxVerify "(no sha256 in manifest)"
+  } else {
+    Ui-ActionStart $IdxVerify "Verifying download (sha256)"
+    $actualSha = (Get-FileHash -Path $Tmp -Algorithm SHA256).Hash.ToLower()
+    if ($actualSha -ne $entry.sha256.ToLower()) {
+      Ui-Die "Downloaded installer failed sha256 verification" `
+        "expected $($entry.sha256), got $actualSha" `
+        "the download may be corrupt or tampered; re-run"
+    }
+    Ui-ActionDone $IdxVerify "(ok)"
+  }
+
+  # --- action 4: clear Mark of the Web -----------------------------------
 
   $motwPresent = $null -ne (Get-Item -Path $Tmp -Stream Zone.Identifier -ErrorAction SilentlyContinue)
 
@@ -399,78 +424,38 @@ try {
     }
   }
 
-  # --- action 4: install via msiexec -------------------------------------
+  # --- action 5: install via NSIS (silent, per-user) ---------------------
 
-  Ui-ActionStart $IdxInstall "Installing $DisplayName to C:\Program Files\$InstallDirName\ (a small msiexec progress dialog will appear)"
+  Ui-ActionStart $IdxInstall "Installing $DisplayName (per-user, no admin prompt)"
 
   $proc = $null
   try {
-    $proc = Start-Process -FilePath "msiexec.exe" `
-      -ArgumentList "/i", "`"$Tmp`"", "/qb", "/norestart" `
-      -Wait -PassThru
+    # /S = NSIS silent install. The bundle's currentUser installMode means no
+    # elevation is requested; the app lands under %LOCALAPPDATA% with a Start
+    # Menu shortcut. Start-Process -Wait blocks until the installer finishes.
+    $proc = Start-Process -FilePath $Tmp -ArgumentList "/S" -Wait -PassThru
   } catch {
-    Ui-Die "Could not launch msiexec" `
+    Ui-Die "Could not launch the installer" `
       $_.Exception.Message `
-      "check that msiexec.exe is on PATH"
+      "the download may be blocked by SmartScreen or antivirus; re-run"
   }
 
   $code = $proc.ExitCode
-  $restartRequired = $false
-
-  switch ($code) {
-    0 {
-      Ui-ActionDone $IdxInstall "(exit 0)"
-    }
-    1602 {
-      Ui-Die "Installation cancelled by user" `
-        "msiexec exit 1602" `
-        "re-run when ready"
-    }
-    1603 {
-      Ui-Die "msiexec reported a fatal error" `
-        "exit 1603" `
-        "check %WINDIR%\Logs\Bootstrap.log or re-run as Administrator"
-    }
-    1618 {
-      Ui-Die "Another MSI install in progress" `
-        "exit 1618" `
-        "wait for it to finish and re-run"
-    }
-    1638 {
-      Ui-ActionSkip $IdxInstall "(already installed)"
-    }
-    1641 {
-      Ui-ActionDone $IdxInstall "(installed; restart required)"
-      $restartRequired = $true
-    }
-    3010 {
-      Ui-ActionDone $IdxInstall "(installed; restart required)"
-      $restartRequired = $true
-    }
-    default {
-      Ui-Die "msiexec exit $code" `
-        "" `
-        "look up code at learn.microsoft.com/windows/win32/msi/error-codes"
-    }
+  if ($code -eq 0) {
+    Ui-ActionDone $IdxInstall "(installed)"
+  } else {
+    Ui-Die "Installer exited with code $code" `
+      "" `
+      "quit any running tomat and re-run; if it persists, report at github.com/rzkyif/tomat/issues"
   }
 
   # --- footer ------------------------------------------------------------
 
-  if ($restartRequired) {
-    Ui-Finish @(
-      "$DisplayName installed.",
-      "",
-      "Launch from the Start Menu (search for `"$DisplayName`").",
-      "",
-      "Restart Windows to finish the install."
-    )
-  } else {
-    Ui-Finish @(
-      "$DisplayName installed.",
-      "",
-      "Launch from the Start Menu (search for `"$DisplayName`")."
-    )
-  }
+  Ui-Finish @(
+    "$DisplayName installed.",
+    "",
+    "Launch from the Start Menu (search for `"$DisplayName`")."
+  )
 
   exit 0
 }

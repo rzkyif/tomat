@@ -1,9 +1,11 @@
 # tomat-client uninstaller for Windows.
 #
-# Finds the installed MSI via the Uninstall registry keys (HKLM 64-bit,
-# WOW6432Node, HKCU) using a case-insensitive name match, then hands off
-# to `msiexec /x` with a basic-UI progress dialog. Client settings under
-# %USERPROFILE%\.tomat\client\ are LEFT IN PLACE unless -Purge is passed.
+# Finds the installed client via the Uninstall registry keys (HKCU first for
+# the per-user NSIS install, then HKLM 64-bit / WOW6432Node for a legacy
+# per-machine MSI) using a case-insensitive name match, then runs its NSIS
+# uninstaller silently (msiexec /x kept as a fallback for an MSI install).
+# Client settings under %USERPROFILE%\.tomat\<channel>\client\ are LEFT IN
+# PLACE unless -Purge is passed.
 #
 # Usage (one-liner):
 #   powershell -ExecutionPolicy Bypass -Command "iwr -useb https://get.au.tomat.ing/install/client-uninstall.ps1 | iex"
@@ -271,10 +273,12 @@ if ($Channel -eq "stable") {
 } else {
   $ProductPattern = "^[Tt]omat-$Channel($| )"
 }
+# HKCU first: the per-user NSIS install registers there. HKLM entries remain for
+# a legacy per-machine MSI install.
 $UninstallKeys = @(
+  "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
   "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
-  "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
-  "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+  "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
 )
 
 # --- begin UI -------------------------------------------------------------
@@ -283,7 +287,7 @@ try {
   Ui-Init "tomat-client uninstaller"
 
   $IdxLocate = Ui-ActionAdd "Locating tomat in Windows uninstall registry"
-  $IdxRemove = Ui-ActionAdd "Uninstalling tomat via msiexec /x (a small msiexec progress dialog will appear)"
+  $IdxRemove = Ui-ActionAdd "Uninstalling tomat (silent)"
   $IdxPurge  = -1
   if ($Purge) {
     $IdxPurge = Ui-ActionAdd "Removing $ClientDir (per -Purge)"
@@ -310,56 +314,80 @@ try {
     Ui-ActionDone $IdxLocate "(found: $($product.DisplayName))"
   }
 
-  # --- action 2: msiexec /x ----------------------------------------------
+  # --- action 2: run the uninstaller -------------------------------------
 
   if (-not $product) {
     Ui-ActionSkip $IdxRemove "(skipped -- nothing installed)"
   } else {
-    Ui-ActionStart $IdxRemove "Uninstalling tomat via msiexec /x (a small msiexec progress dialog will appear)"
+    Ui-ActionStart $IdxRemove "Uninstalling $($product.DisplayName) (silent)"
 
-    $code = $product.PSChildName
+    # NSIS records QuietUninstallString ("<INSTDIR>\uninstall.exe" /S); a legacy
+    # MSI records an msiexec command. Prefer the quiet form, fall back to the
+    # plain UninstallString.
+    $uninstall = $product.QuietUninstallString
+    if (-not $uninstall) { $uninstall = $product.UninstallString }
+    $installLoc = $product.InstallLocation
 
-    $proc = $null
-    try {
-      $proc = Start-Process -FilePath "msiexec.exe" `
-        -ArgumentList "/x", $code, "/qb", "/norestart" `
-        -Wait -PassThru
-    } catch {
-      Ui-Die "Could not launch msiexec" `
-        $_.Exception.Message `
-        "check that msiexec.exe is on PATH"
-    }
+    if ($uninstall -match 'msiexec') {
+      # Legacy per-machine MSI: hand off to msiexec /x.
+      $proc = $null
+      try {
+        $proc = Start-Process -FilePath "msiexec.exe" `
+          -ArgumentList "/x", $product.PSChildName, "/qb", "/norestart" `
+          -Wait -PassThru
+      } catch {
+        Ui-Die "Could not launch msiexec" `
+          $_.Exception.Message `
+          "check that msiexec.exe is on PATH"
+      }
+      switch ($proc.ExitCode) {
+        0     { Ui-ActionDone $IdxRemove "(uninstalled)" }
+        1605  { Ui-ActionSkip $IdxRemove "(not installed)" }
+        1602  { Ui-Die "Uninstall cancelled by user" "exit 1602" "re-run when ready" }
+        1603  { Ui-Die "msiexec reported a fatal error" "exit 1603" "a file may be locked; quit any tomat process and re-run" }
+        1618  { Ui-Die "Another MSI op running" "exit 1618" "wait and re-run" }
+        default { Ui-Die "msiexec exit $($proc.ExitCode)" "" "look up code at learn.microsoft.com/windows/win32/msi/error-codes" }
+      }
+    } elseif ($uninstall) {
+      # NSIS uninstaller. Split the "<path>" [args] command and force silent.
+      if ($uninstall -match '^\s*"([^"]+)"\s*(.*)$') {
+        $exe = $matches[1]; $argStr = $matches[2].Trim()
+      } elseif ($uninstall -match '^\s*(\S+)\s*(.*)$') {
+        $exe = $matches[1]; $argStr = $matches[2].Trim()
+      } else {
+        $exe = $uninstall; $argStr = ""
+      }
+      $argList = @()
+      if ($argStr) { $argList = @($argStr -split '\s+') }
+      if ($argList -notcontains "/S") { $argList += "/S" }
 
-    $exit = $proc.ExitCode
-    switch ($exit) {
-      0 {
-        Ui-ActionDone $IdxRemove "(uninstalled)"
+      if (-not (Test-Path $exe)) {
+        Ui-ActionSkip $IdxRemove "(uninstaller missing; registry stale)"
+      } else {
+        try {
+          Start-Process -FilePath $exe -ArgumentList $argList -Wait -PassThru | Out-Null
+        } catch {
+          Ui-Die "Could not launch the uninstaller" `
+            $_.Exception.Message `
+            "quit any running tomat and re-run"
+        }
+        # A silent NSIS uninstall copies itself to %TEMP% and relaunches, so
+        # -Wait can return before the install dir is gone. Poll it (up to ~30s)
+        # to report completion accurately.
+        if ($installLoc -and (Test-Path $installLoc)) {
+          $deadline = (Get-Date).AddSeconds(30)
+          while ((Test-Path $installLoc) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+          }
+        }
+        if ($installLoc -and (Test-Path $installLoc)) {
+          Ui-ActionDone $IdxRemove "(uninstaller ran; some files may remain)"
+        } else {
+          Ui-ActionDone $IdxRemove "(uninstalled)"
+        }
       }
-      1605 {
-        # Registry said it was installed but msiexec disagrees -- weird
-        # state but treat as a skip rather than an error.
-        Ui-ActionSkip $IdxRemove "(not installed)"
-      }
-      1602 {
-        Ui-Die "Uninstall cancelled by user" `
-          "exit 1602" `
-          "re-run when ready"
-      }
-      1603 {
-        Ui-Die "msiexec reported a fatal error" `
-          "exit 1603" `
-          "a file may be locked; quit any tomat process and re-run"
-      }
-      1618 {
-        Ui-Die "Another MSI op running" `
-          "exit 1618" `
-          "wait and re-run"
-      }
-      default {
-        Ui-Die "msiexec exit $exit" `
-          "" `
-          "look up code at learn.microsoft.com/windows/win32/msi/error-codes"
-      }
+    } else {
+      Ui-ActionSkip $IdxRemove "(no uninstall command in registry)"
     }
   }
 
@@ -377,6 +405,17 @@ try {
           $_.Exception.Message `
           "quit tomat and re-run"
       }
+      # Best-effort: drop the now-empty channel dir (~/.tomat/<channel>) left
+      # behind once both client and core data are gone. Only when empty, so a
+      # core still installed on this channel keeps it; the shared models dir
+      # under ~/.tomat is never affected. Mirrors client-uninstall.sh's
+      # `rmdir "$HOME/.tomat/$TOMAT_CHANNEL"`.
+      $channelDir = Split-Path -Parent $ClientDir
+      try {
+        if ((Test-Path $channelDir) -and -not (Get-ChildItem -Force $channelDir)) {
+          Remove-Item -Force $channelDir
+        }
+      } catch { }
       Ui-ActionDone $IdxPurge "(removed)"
     }
   }

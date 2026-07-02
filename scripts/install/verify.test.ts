@@ -12,9 +12,11 @@
 // `signature` field over canonicalize(manifest minus .signature) (jq -Sjc), so
 // each is exercised in its own shape.
 //
-// Requires OpenSSL 3.x (for `pkeyutl -rawin`), jq, and a sha256 tool - the same
-// tools the scripts require. When OpenSSL 3.x is absent the suite is skipped
-// (the scripts would refuse to run there anyway); CI runners have it.
+// Requires OpenSSL 3.x (for `pkeyutl -rawin`), jq, and a sha256 tool. The scripts
+// hard-require OpenSSL + a sha256 tool and auto-provision jq when it is missing;
+// this test drives their canonical-JSON path directly, so jq must be present
+// here. When OpenSSL 3.x is absent the suite is skipped (the scripts would refuse
+// to run there anyway); CI runners have it.
 
 import { assert, assertEquals } from "@std/assert";
 import { encodeBase64 } from "@std/encoding/base64";

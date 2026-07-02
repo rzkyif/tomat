@@ -1,11 +1,11 @@
 // Windows build environment: a UTM VM driven headless over SSH.
 //
 // Builds core + helpers + speech (buildCore) and the Tauri Windows installer -
-// MSI/NSIS + the updater `.sig` (buildClient) - in the guest, started on demand
-// via utmctl and stopped afterwards. windows-provision.ps1 sets up the guest:
-// OpenSSH, the arm64-native deno, MSVC + both Rust windows targets, LLVM/clang
-// (sherpa's deps C-compile), and the win-arm64 sherpa lib. Tauri auto-downloads
-// WiX/NSIS on the first client build.
+// the per-user NSIS .exe + the updater `.sig` (buildClient) - in the guest,
+// started on demand via utmctl and stopped afterwards. windows-provision.ps1
+// sets up the guest: OpenSSH, the arm64-native deno, MSVC + both Rust windows
+// targets, LLVM/clang (sherpa's deps C-compile), and the win-arm64 sherpa lib.
+// Tauri auto-downloads NSIS on the first client build.
 //
 // One Windows-on-ARM guest builds BOTH windows triples:
 //   - aarch64-pc-windows-msvc: native. vcvars `arm64`; `deno compile` (no
@@ -276,7 +276,7 @@ export const windowsUtmDriver: BuildEnvironment = {
     await ensureDir(DIST_DIR);
     await syncSource();
     // Build-time secrets injected into the guest cmd env: the Tauri minisign key
-    // (so the MSI/NSIS carries the in-app-update `.sig`) + the public keys
+    // (so the NSIS installer carries the in-app-update `.sig`) + the public keys
     // envFromProcess/pubkey-reconciliation need. The Ed25519 trust-root PRIVATE
     // key never transits (manifest signing stays on the host). Base64 values hold
     // no cmd-special chars, so `set "VAR=value"` is safe. The new key has no
@@ -293,8 +293,8 @@ export const windowsUtmDriver: BuildEnvironment = {
       const guestBundleDir = `${repoFwd}/dist/${stageRel}`;
       const isX64 = triple.startsWith("x86_64");
       // arm64: native (vcvars arm64). x64: cross (arm64_amd64). Tauri builds the
-      // MSI + NSIS and emits the updater `.sig`; findClientBundle picks the signed
-      // installer. WiX/NSIS are auto-downloaded by the bundler on first build.
+      // per-user NSIS installer and emits the updater `.sig`; findClientBundle
+      // picks the signed installer. NSIS is auto-downloaded by the bundler on first build.
       const vcArch = isX64 ? "arm64_amd64" : "arm64";
       const code = await ssh(
         `cd /d ${cfg().guestRepo} & ` +

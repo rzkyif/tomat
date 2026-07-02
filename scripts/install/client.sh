@@ -434,13 +434,14 @@ APPIMAGE_NAME="tomat-client$CHANNEL_SUFFIX"             # linux
 
 # --- prerequisites (pre-UI; if these fail we can't even draw the UI) ------
 
-for cmd in curl jq; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    printf 'error: missing required command: %s\n' "$cmd" >&2
-    printf 'hint:  install %s and re-run the installer\n' "$cmd" >&2
-    exit 1
-  fi
-done
+# curl is the only hard prerequisite. jq is required too but is not on the hard
+# list: default Ubuntu/Debian ship no jq, so `ensure_jq` (below) auto-provisions
+# a pinned static build when it is missing rather than aborting.
+if ! command -v curl >/dev/null 2>&1; then
+  printf 'error: missing required command: curl\n' >&2
+  printf 'hint:  install curl and re-run the installer\n' >&2
+  exit 1
+fi
 
 # Committed Ed25519 signing public key (base64 raw key), kept in sync with
 # packages/tomat-core/data/signing-keys.json (a test guards the match). Used to
@@ -484,6 +485,62 @@ ed25519_verify_file() {
   return "$_ev_rc"
 }
 
+# Ensure `jq` is available, auto-provisioning a pinned static build when the host
+# has none. jq parses the manifest to pick this platform's bundle URL + sha256,
+# yet default Ubuntu/Debian do not ship it. Rather than abort those users, fetch
+# the official static jq for this platform, verify it against a committed sha256,
+# and prepend it to PATH so every `jq` call site below resolves it unchanged. The
+# download lives in a temp dir for this run only (no sudo, no PATH persistence).
+# Runs only on the real install path (after the offline self-test has exited), so
+# the self-test stays network-free and uses the host's own jq.
+JQ_VERSION="jq-1.7.1"
+JQ_BASE_URL="https://github.com/jqlang/jq/releases/download/$JQ_VERSION"
+ensure_jq() {
+  command -v jq >/dev/null 2>&1 && return 0
+  _jq_os="$(uname -s 2>/dev/null || echo unknown)"
+  _jq_arch="$(uname -m 2>/dev/null || echo unknown)"
+  case "$_jq_os/$_jq_arch" in
+    Linux/x86_64)
+      _jq_asset="jq-linux-amd64"
+      _jq_sha="5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5" ;;
+    Linux/aarch64 | Linux/arm64)
+      _jq_asset="jq-linux-arm64"
+      _jq_sha="4dd2d8a0661df0b22f1bb9a1f9830f06b6f3b8f7d91211a1ef5d7c4f06a8b4a5" ;;
+    Darwin/x86_64)
+      _jq_asset="jq-macos-amd64"
+      _jq_sha="4155822bbf5ea90f5c79cf254665975eb4274d426d0709770c21774de5407443" ;;
+    Darwin/arm64)
+      _jq_asset="jq-macos-arm64"
+      _jq_sha="0bbe619e663e0de2c550be2fe0d240d076799d6f8a652b70fa04aea8a8362e8a" ;;
+    *)
+      printf 'error: jq is required but not installed\n' >&2
+      printf 'hint:  install jq (e.g. "sudo apt install jq" or "brew install jq") and re-run\n' >&2
+      exit 1 ;;
+  esac
+  _jq_dir="$(mktemp -d 2>/dev/null || mktemp -d -t tomat-jq)"
+  _jq_bin="$_jq_dir/jq"
+  printf 'jq not found; fetching pinned static jq (%s)...\n' "$_jq_asset" >&2
+  if ! curl -fsSL "$JQ_BASE_URL/$_jq_asset" -o "$_jq_bin" 2>/dev/null; then
+    rm -rf "$_jq_dir"
+    printf 'error: could not download jq from %s\n' "$JQ_BASE_URL/$_jq_asset" >&2
+    printf 'hint:  install jq manually (e.g. "sudo apt install jq") and re-run\n' >&2
+    exit 1
+  fi
+  _jq_shacmd="sha256sum"
+  command -v sha256sum >/dev/null 2>&1 || _jq_shacmd="shasum -a 256"
+  _jq_got="$($_jq_shacmd "$_jq_bin" 2>/dev/null | awk '{print $1}')"
+  if [ "$_jq_got" != "$_jq_sha" ]; then
+    rm -rf "$_jq_dir"
+    printf 'error: downloaded jq failed sha256 verification\n' >&2
+    printf '       expected %s, got %s\n' "$_jq_sha" "${_jq_got:-<none>}" >&2
+    printf 'hint:  the download may be corrupt or tampered; re-run or install jq manually\n' >&2
+    exit 1
+  fi
+  chmod +x "$_jq_bin"
+  PATH="$_jq_dir:$PATH"
+  export PATH
+}
+
 # --- offline self-test (exercised by scripts/install/verify.test.ts) ------
 # When TOMAT_SELFTEST is set, verify a LOCAL manifest + detached base64 signature
 # with the exact ed25519_verify_file + sha256 comparison the install flow uses,
@@ -512,6 +569,10 @@ if [ -n "${TOMAT_SELFTEST:-}" ]; then
   printf 'selftest: OK\n'
   exit 0
 fi
+
+# jq is needed from the manifest step onward; provision a pinned static build now
+# if the host has none, so the rest of the install can assume `jq` on PATH.
+ensure_jq
 
 # --- helper: pick action 3 / 4 labels based on host ----------------------
 
