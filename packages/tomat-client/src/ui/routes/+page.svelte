@@ -710,8 +710,9 @@
          internal scroll, so it gets no outer padding/scroll wrapper. -->
     <Settings />
   {:else if mode === "newCore"}
-    <!-- Centered, scrollable wizard, flush on the page (no card). -->
-    <div class="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col p-3">
+    <!-- The wizard owns its own scroll + pinned footer; the frame just gives it
+         height (padding lives inside the view per the safe-area contract above). -->
+    <div class="flex-1 min-h-0 flex flex-col">
       <NewCore />
     </div>
   {:else}

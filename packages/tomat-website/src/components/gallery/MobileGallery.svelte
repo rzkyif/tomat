@@ -21,6 +21,7 @@
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
   import SettingsShellView from "@tomat/shared/ui/components/settings/SettingsShellView.svelte";
   import SettingsContentView from "@tomat/shared/ui/components/settings/SettingsContentView.svelte";
+  import NewCoreWizardView from "@tomat/shared/ui/components/new-core/NewCoreWizardView.svelte";
   import Modal from "@tomat/shared/ui/components/primitives/Modal.svelte";
   import ActionSheet from "@tomat/shared/ui/components/primitives/ActionSheet.svelte";
   import { SETTINGS_SCHEMA } from "@tomat/shared/domain/settings/engine";
@@ -41,6 +42,32 @@
   );
 
   const entries = <T,>(o: Record<string, T>) => Object.entries(o);
+
+  // The mobile pairing wizard, which mobile enters directly (no destination
+  // chooser). Reuse the shared desktop samples as a base and flip on the mobile
+  // branch, one card per header state: the first-run welcome hero, the pairing
+  // step (back row), and adding another Core (close button). Kept inline here
+  // rather than in the shared samples file so the desktop gallery, which auto-
+  // iterates SAMPLES.NewCoreWizardView, keeps rendering only its Bubble path.
+  const pairingMobile = {
+    welcome: {
+      ...SAMPLES.NewCoreWizardView.remoteAddress,
+      onMobile: true,
+      locked: true,
+      canStepBack: false,
+    },
+    pair: {
+      ...SAMPLES.NewCoreWizardView.remotePair,
+      onMobile: true,
+      locked: true,
+    },
+    addAnother: {
+      ...SAMPLES.NewCoreWizardView.remoteAddress,
+      onMobile: true,
+      locked: false,
+      canStepBack: false,
+    },
+  } satisfies Record<string, ComponentProps<typeof NewCoreWizardView>>;
 
   // A short simulated session for the mobile ChatShellView card (mirrors the
   // desktop card), so the phone frame shows the real chat, not stand-ins.
@@ -76,6 +103,19 @@
           input={chatInput}
           transcript={chatTranscript}
         />
+      </div>
+    </GalleryCard>
+  {/each}
+
+  {#each entries(pairingMobile) as [name, p] (name)}
+    <GalleryCard label={`NewCoreWizardView · ${name} · mobile`}>
+      <!-- Same phone frame as the chat shell: the wizard root is flex-1 min-h-0,
+           so it fills the frame and pins its own footer, exactly as it does inside
+           the mobile app frame. -->
+      <div
+        class="relative mx-auto flex w-[360px] h-[720px] overflow-hidden rounded-large border border-default-200 bg-surface"
+      >
+        <NewCoreWizardView {...p as ComponentProps<typeof NewCoreWizardView>} />
       </div>
     </GalleryCard>
   {/each}

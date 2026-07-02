@@ -21,7 +21,11 @@
   // chooser and the whole local-install branch are skipped (see
   // decideInitialView) and the wizard renders full-screen rather than in a
   // fixed-width bubble.
-  const onMobile = useUiContext().platform === "mobile";
+  const ui = useUiContext();
+  const onMobile = ui.platform === "mobile";
+  // On Android the OS owns back navigation, so the wizard drops its in-UI
+  // back/close (the system back handles both); iOS keeps them.
+  const hasSystemBack = ui.hasSystemBack;
   const wizard = new NewCoreWizard(onMobile);
 
   let alignment = $derived(settingsState.getAlignment());
@@ -62,6 +66,7 @@
 <NewCoreWizardView
   step={wizard.view}
   {onMobile}
+  {hasSystemBack}
   locked={viewState.locked}
   {alignment}
   busy={wizard.busy}

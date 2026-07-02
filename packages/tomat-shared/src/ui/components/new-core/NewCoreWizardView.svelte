@@ -36,6 +36,7 @@
   let {
     step,
     onMobile = false,
+    hasSystemBack = false,
     locked = false,
     alignment = "center",
     busy = null,
@@ -77,6 +78,7 @@
   }: {
     step: NewCoreWizardStep;
     onMobile?: boolean;
+    hasSystemBack?: boolean;
     locked?: boolean;
     alignment?: Alignment;
     busy?: NewCoreWizardBusy;
@@ -116,14 +118,19 @@
 </script>
 
 {#if onMobile}
-  <!-- Flush on the page (no card): a centered column that the parent panel
-       scrolls when it overflows. `m-auto` centers it vertically when short
-       without clipping the top when tall, unlike justify-center. The frame
-       shrinks by the keyboard height and owns the safe-area insets, so this
-       recenters in the smaller area above the keyboard without padding for the
-       gesture bar itself. -->
-  <div class="m-auto w-full flex flex-col gap-4">
-    {@render wizardBody()}
+  <!-- Full-screen mobile activity: a scrolling body (welcome header + the step's
+       fields) with the primary action pinned to a footer. The frame owns the
+       safe-area insets and shrinks by the keyboard height, so the footer rides
+       above the keyboard like the chat composer; this screen only adds its own
+       padding, never the insets. -->
+  <div class="flex-1 min-h-0 flex flex-col w-full">
+    <div class="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col gap-5 px-5 pt-4 pb-6">
+      {@render mobileHeader()}
+      {@render wizardBody()}
+    </div>
+    <div class="shrink-0 px-5 pt-2 pb-3 bg-surface">
+      {@render mobileFooterButton()}
+    </div>
   </div>
 {:else}
   <Bubble selectedAlignment={alignment} extraClass="flex flex-col gap-4 w-[22.5rem] max-w-full">
@@ -131,60 +138,150 @@
   </Bubble>
 {/if}
 
-{#snippet wizardBody()}
-  {#if step === "chooseDestination" && locked}
-    <!-- Onboarding welcome: centered logo + title, no exit (locked in until a
-         core is paired). -->
-    <div class="flex flex-col items-center gap-3 pt-2">
+{#snippet mobileHeader()}
+  {#if locked && !canStepBack}
+    <!-- First-run welcome: mobile enters the wizard here (the destination chooser
+         is desktop-only), so greet the user instead of opening on a bare form. The
+         intro is a normal left-aligned paragraph so it reads as one description
+         with the step lead below it, not a second, separately-styled block. -->
+    <div class="flex flex-col items-center gap-3 pt-4 pb-1">
       <span
-        class="w-14 h-14 bg-default-800 shrink-0"
+        class="w-16 h-16 bg-default-800 shrink-0"
         style="mask:url(/tomat.svg) center/contain no-repeat;-webkit-mask:url(/tomat.svg) center/contain no-repeat;"
         aria-hidden="true"
       ></span>
-      <h1 class="text-lg font-medium text-default-800">Welcome to tomat</h1>
+      <h1 class="text-2xl font-semibold text-default-800">Welcome to tomat</h1>
     </div>
+    <p class="text-sm text-default-600">
+      tomat runs on a Core: the service that powers your models, speech, and tools. Connect this
+      device to one to get started.
+    </p>
   {:else}
-    <!-- Header: an optional left back arrow (intra-wizard step-back, hidden when
+    <!-- Later step / additional-core: a left-aligned top bar (back or close) over
+         a screen title, matching the other mobile screens. On Android the OS owns
+         back navigation (hasSystemBack), so the in-UI back/close are dropped and
+         the system gesture / button handles both stepping back and closing; iOS
+         has no system back, so they show. -->
+    <div class="flex flex-col gap-2">
+      {#if canStepBack && !hasSystemBack}
+        <button
+          type="button"
+          class="flex items-center gap-2 h-11 -ml-1 self-start text-default-700 transition-interactive hov:text-default-900 hov:cursor-pointer"
+          disabled={busy !== null}
+          onclick={() => (onStepBack ?? noop)()}
+        >
+          <i class="i-material-symbols-arrow-back-rounded text-xl"></i>
+          <span class="font-medium">Back</span>
+        </button>
+      {:else if !locked && !hasSystemBack}
+        <div class="flex h-11 items-center justify-end -mr-2">
+          <IconButton
+            icon="i-material-symbols-close-rounded"
+            title="Close"
+            size="lg"
+            variant="subtle"
+            surface="circle"
+            disabled={busy !== null}
+            onclick={() => (onClose ?? noop)()}
+          />
+        </div>
+      {/if}
+      <h1 class="text-xl font-semibold text-default-800">
+        {#if step === "remotePair"}
+          Enter the Pairing Code
+        {:else}
+          Connect to a Core
+        {/if}
+      </h1>
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet mobileFooterButton()}
+  {#if step === "remotePair"}
+    <Button
+      variant="primary"
+      icon={busy === "claiming"
+        ? "i-line-md:loading-loop"
+        : "i-material-symbols-arrow-forward-rounded"}
+      class="w-full px-4 py-3 rounded-large"
+      disabled={busy !== null || !remoteCodeValid}
+      onclick={() => (onPairRemote ?? noop)()}
+    >
+      {busy === "claiming" ? "Pairing…" : "Pair"}
+    </Button>
+  {:else}
+    <Button
+      variant="primary"
+      icon={busy === "checking"
+        ? "i-line-md:loading-loop"
+        : "i-material-symbols-arrow-forward-rounded"}
+      class="w-full px-4 py-3 rounded-large"
+      disabled={busy !== null || !remoteUrl.trim()}
+      onclick={() => (onCheckConnection ?? noop)()}
+    >
+      {busy === "checking" ? "Checking…" : "Check Connection"}
+    </Button>
+  {/if}
+{/snippet}
+
+{#snippet wizardBody()}
+  <!-- Desktop header. Mobile renders its own welcome / top bar in mobileHeader. -->
+  {#if !onMobile}
+    {#if step === "chooseDestination" && locked}
+      <!-- Onboarding welcome: centered logo + title, no exit (locked in until a
+         core is paired). -->
+      <div class="flex flex-col items-center gap-3 pt-2">
+        <span
+          class="w-14 h-14 bg-default-800 shrink-0"
+          style="mask:url(/tomat.svg) center/contain no-repeat;-webkit-mask:url(/tomat.svg) center/contain no-repeat;"
+          aria-hidden="true"
+        ></span>
+        <h1 class="text-lg font-medium text-default-800">Welcome to tomat</h1>
+      </div>
+    {:else}
+      <!-- Header: an optional left back arrow (intra-wizard step-back, hidden when
          no previous step exists), a centered title, and an optional right close
          (explicit exit, shown whenever a core is already connected). A spacer
          balances whichever side control is absent so the title stays centered. -->
-    <div class="flex items-center gap-2">
-      {#if canStepBack}
-        <IconButton
-          icon="i-material-symbols-arrow-back-rounded"
-          title="Back"
-          size="lg"
-          variant="subtle"
-          surface="circle"
-          disabled={busy !== null}
-          onclick={() => (onStepBack ?? noop)()}
-        />
-      {:else}
-        <div class="w-9 shrink-0" aria-hidden="true"></div>
-      {/if}
-      <h1 class="text-lg font-medium text-default-800 flex-1 text-center">
-        {#if step === "chooseDestination"}
-          Add a Core
-        {:else if step === "localConfirm"}
-          Install a Core
+      <div class="flex items-center gap-2">
+        {#if canStepBack}
+          <IconButton
+            icon="i-material-symbols-arrow-back-rounded"
+            title="Back"
+            size="lg"
+            variant="subtle"
+            surface="circle"
+            disabled={busy !== null}
+            onclick={() => (onStepBack ?? noop)()}
+          />
         {:else}
-          Connect to a Remote Core
+          <div class="w-9 shrink-0" aria-hidden="true"></div>
         {/if}
-      </h1>
-      {#if !locked}
-        <IconButton
-          icon="i-material-symbols-close-rounded"
-          title="Close"
-          size="lg"
-          variant="subtle"
-          surface="circle"
-          disabled={busy !== null}
-          onclick={() => (onClose ?? noop)()}
-        />
-      {:else}
-        <div class="w-9 shrink-0" aria-hidden="true"></div>
-      {/if}
-    </div>
+        <h1 class="text-lg font-medium text-default-800 flex-1 text-center">
+          {#if step === "chooseDestination"}
+            Add a Core
+          {:else if step === "localConfirm"}
+            Install a Core
+          {:else}
+            Connect to a Remote Core
+          {/if}
+        </h1>
+        {#if !locked}
+          <IconButton
+            icon="i-material-symbols-close-rounded"
+            title="Close"
+            size="lg"
+            variant="subtle"
+            surface="circle"
+            disabled={busy !== null}
+            onclick={() => (onClose ?? noop)()}
+          />
+        {:else}
+          <div class="w-9 shrink-0" aria-hidden="true"></div>
+        {/if}
+      </div>
+    {/if}
   {/if}
 
   {#if step === "chooseDestination"}
@@ -289,12 +386,12 @@
   {:else if step === "remoteAddress"}
     <!-- Remote step 1: enter the address and verify the connection. -->
     <p class="text-sm text-default-600">
-      Enter the address of a Core already running on another machine, then check the connection
-      before pairing.
+      Enter the address where your Core is running, then check the connection. You can also press
+      the button on the address bar to find a Core on the same network.
     </p>
 
     <p class="text-sm text-default-500">
-      Need help setting up a remote Core?
+      New to this?
       <a
         href={coreSetupDocsUrl}
         class="text-default-800 hover:underline"
@@ -353,7 +450,9 @@
       <ErrorDetailView message={connectionError} />
     {/if}
 
-    {#if remoteUrl.trim()}
+    <!-- Desktop shows the CTA inline once an address is typed; mobile pins it to
+         the footer (see mobileFooterButton). -->
+    {#if !onMobile && remoteUrl.trim()}
       <Button
         variant="primary"
         icon={busy === "checking"
@@ -369,7 +468,8 @@
   {:else if step === "remotePair"}
     <!-- Remote step 2: name the core and enter its pairing code. -->
     <p class="text-sm text-default-600">
-      Give this Core a name and enter the 6-digit pairing code shown on the host machine.
+      Nearly there. Give this Core a name you'll recognize, then enter the 6-digit pairing code
+      shown on it.
     </p>
 
     <div class="flex flex-col gap-2">
@@ -396,7 +496,9 @@
       </FormField>
     </div>
 
-    {#if remoteCodeValid}
+    <!-- Desktop shows the CTA inline once the code is valid; mobile pins it to the
+         footer (see mobileFooterButton). -->
+    {#if !onMobile && remoteCodeValid}
       <Button
         variant="primary"
         icon={busy === "claiming"
