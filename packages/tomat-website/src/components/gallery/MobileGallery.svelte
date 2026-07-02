@@ -49,6 +49,17 @@
   // step (back row), and adding another Core (close button). Kept inline here
   // rather than in the shared samples file so the desktop gallery, which auto-
   // iterates SAMPLES.NewCoreWizardView, keeps rendering only its Bubble path.
+  // The corebar states that carry a detail card (a failure, queued work, or
+  // something loading): the only ones whose centered status pill becomes an
+  // expand toggle. Expandability is status-driven, not platform-gated, so the
+  // mobile top app bar toggles exactly like desktop; only its layout differs.
+  // Rendered pre-expanded (and with `onSettings`, so the app-bar gear shows) to
+  // give the mobile expanded layout a card to iterate against.
+  const coreBarExpandable = {
+    busyExpanded: SAMPLES.CoreBarView.busyExpanded,
+    errorExpanded: SAMPLES.CoreBarView.errorExpanded,
+  };
+
   const pairingMobile = {
     welcome: {
       ...SAMPLES.NewCoreWizardView.remoteAddress,
@@ -103,6 +114,17 @@
           input={chatInput}
           transcript={chatTranscript}
         />
+      </div>
+    </GalleryCard>
+  {/each}
+
+  {#each entries(coreBarExpandable) as [name, p] (name)}
+    <GalleryCard label={`CoreBarView · ${name} · mobile`}>
+      <!-- Phone-width so the bar's mobile branch paints as the full-width top app
+           bar it is; the pill sits centered and, expanded, the detail card opens
+           below it. No phone-height frame: the bar hugs its own content. -->
+      <div class="mx-auto w-[360px] max-w-full">
+        <CoreBarView {...p as ComponentProps<typeof CoreBarView>} onSettings={noop} />
       </div>
     </GalleryCard>
   {/each}
