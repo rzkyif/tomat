@@ -27,6 +27,7 @@ import { promptScheduler } from "./services/prompt-scheduler.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
 import { shutdownJobctl } from "./sidecars/jobctl.ts";
 import { loadCoreSettings } from "./services/core-settings.ts";
+import { setBehindProxy } from "./services/deployment.ts";
 import { sweepOrphanedSessionDirs } from "./services/sessions-store.ts";
 import { warnIfVaultUnreadable } from "./services/secrets.ts";
 import { tlsServeOptions } from "./services/tls.ts";
@@ -58,6 +59,31 @@ async function main(): Promise<void> {
     }
   }
 
+  // `server.behindProxy` marks that Core is fronted by a terminating HTTPS
+  // reverse proxy, so clients validate the proxy's real cert instead of pinning
+  // Core's self-signed one (see services/deployment.ts). Read raw, same as
+  // bindHost: never an API-writable setting, so a paired client can't weaken the
+  // pairing posture. The TOMAT_CORE_BEHIND_PROXY env var wins when set.
+  const behindProxyEnv = Deno.env.get("TOMAT_CORE_BEHIND_PROXY");
+  let behindProxy = behindProxyEnv === "1" || behindProxyEnv?.toLowerCase() === "true";
+  if (behindProxyEnv === undefined) {
+    try {
+      behindProxy = (await loadCoreSettings())["server.behindProxy"] === true;
+    } catch (err) {
+      log.warn(`could not read server.behindProxy; assuming false: ${errMessage(err)}`);
+    }
+  }
+  setBehindProxy(behindProxy);
+  if (behindProxy) {
+    // Operator confirmation the setting took effect: pairing folds no cert pin
+    // and clients trust the proxy's HTTPS certificate, so core must only be
+    // reachable through that proxy.
+    log.info(
+      "server.behindProxy is on: clients validate the reverse proxy's HTTPS " +
+        "certificate instead of pinning core's own",
+    );
+  }
+
   log.info(`tomat-core v${cfg.version} starting on ${bindHost}:${cfg.port}`);
   // The API is served over TLS (HTTPS/WSS) with a self-signed cert that clients
   // pin at pairing, so traffic is encrypted and core is authenticated even on a
@@ -65,7 +91,10 @@ async function main(): Promise<void> {
   if (bindHost !== "127.0.0.1" && bindHost !== "localhost" && bindHost !== "::1") {
     log.info(
       `core is bound to ${bindHost} (not loopback): the HTTPS/WSS API is ` +
-        `reachable from the network. Paired clients pin the TLS cert.`,
+        `reachable from the network. ` +
+        (behindProxy
+          ? `Clients trust the reverse proxy's HTTPS certificate.`
+          : `Paired clients pin the TLS cert.`),
     );
   }
   log.info(`root: ${paths().root}`);

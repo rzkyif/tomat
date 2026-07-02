@@ -101,12 +101,18 @@ export interface ShortcutBindings {
 // --- Networking ----------------------------------------------------------
 //
 // All traffic to a paired core goes through `platform().net`, which terminates
-// TLS with CERTIFICATE PINNING below the webview (a plain webview fetch can't
-// pin a self-signed cert). The desktop impl does it in Rust (reqwest +
-// tokio-tungstenite + a custom rustls verifier on the SPKI pin); a future mobile
-// impl reuses the same Rust. `pin` is base64(SHA-256(SPKI)); `capturePin` is the
-// pairing-time TOFU mode that records the presented cert's pin instead of
-// enforcing one.
+// TLS below the webview (a plain webview fetch can't pin a self-signed cert or
+// choose its verifier). The desktop impl does it in Rust (reqwest +
+// tokio-tungstenite + per-request rustls verifiers); mobile reuses the same
+// Rust. Every request states a `TlsMode`; `pin` is base64(SHA-256(SPKI)).
+
+/** TLS trust posture for one request, resolved below the webview in Rust.
+ *  `pin` enforces the stored SPKI pin (a self-signed core the Client secures
+ *  itself); `webpki` does standard public-CA validation (a core behind an HTTPS
+ *  proxy); `capture` accepts any cert and reports its pin, for the unpaired
+ *  pairing/discovery probe only. There is no accept-any default: every request
+ *  states its mode. */
+export type TlsMode = "pin" | "webpki" | "capture";
 
 export interface NetRequest {
   url: string;
@@ -114,17 +120,18 @@ export interface NetRequest {
   headers?: Record<string, string>;
   /** Request body. Binary (multipart, audio) is passed as bytes. */
   body?: string | Uint8Array;
-  /** Expected SPKI pin to enforce (base64 SHA-256). Omit with capturePin. */
+  /** Trust mode for this request (required). */
+  mode: TlsMode;
+  /** Expected SPKI pin to enforce (base64 SHA-256). Required when `mode` is
+   *  `pin`, ignored otherwise. */
   pin?: string;
-  /** Pairing TOFU: accept the presented cert and return its pin (no enforce). */
-  capturePin?: boolean;
 }
 
 export interface NetResponse {
   status: number;
   headers: Record<string, string>;
   body: Uint8Array;
-  /** The pin the server presented, when `capturePin` was set. */
+  /** The pin the server presented, when `mode` was `capture`. */
   capturedPin?: string;
 }
 
@@ -157,7 +164,10 @@ export interface Platform {
   // below the webview. See the NetRequest/NetSocket docs above.
   net: {
     fetch(req: NetRequest): Promise<NetResponse>;
-    connectWebSocket(url: string, opts?: { pin?: string }): Promise<NetSocket>;
+    connectWebSocket(
+      url: string,
+      opts: { mode: "pin" | "webpki"; pin?: string },
+    ): Promise<NetSocket>;
     /** Sweep the local network for reachable cores (the pairing "ping"
      *  button). Probes each host on this machine's /24(s) plus loopback at the
      *  known core ports against the unauthenticated /api/v1/health, deduped by

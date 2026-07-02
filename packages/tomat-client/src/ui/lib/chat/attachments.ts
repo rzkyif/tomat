@@ -63,7 +63,7 @@ export async function readSessionAttachment(path: string): Promise<string> {
   const res = await platform().net.fetch({
     url: path,
     headers: { Authorization: `Bearer ${client.endpoint.token}` },
-    pin: client.endpoint.tlsPin,
+    ...client.netTrust(),
   });
   if (res.status < 200 || res.status >= 300) {
     throw new Error(`fetch ${path}: ${res.status}`);

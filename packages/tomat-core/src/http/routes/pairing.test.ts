@@ -9,6 +9,7 @@ import { buildApp } from "../server.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
 import { pakeViaApp } from "../../../tests/helpers/pairing.ts";
 import { tlsCertFingerprint } from "../../services/tls.ts";
+import { setBehindProxy } from "../../services/deployment.ts";
 import { paths } from "../../paths.ts";
 
 const ADMIN_TOKEN = "test-admin-token";
@@ -227,6 +228,59 @@ Deno.test("pake: a MITM-substituted cert pin is rejected at finish (401)", async
     const body = await finish.json();
     assertEquals(body.error.code, "invalid_pairing_code");
   } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("pake: behindProxy folds empty, so an empty-fold (webpki) client pairs", async () => {
+  const env = await setupTestEnv();
+  setBehindProxy(true);
+  try {
+    await seedAdminToken();
+    const app = buildApp();
+    const code = await mintCode(app);
+
+    // A webpki-mode client validates the proxy cert and folds nothing; the route
+    // folds "" too when server.behindProxy is on, so the confirmations match.
+    const finish = await pakeViaApp(app, code, "proxied-laptop", "");
+    assertEquals(finish.status, 200);
+    assertEquals(typeof (await finish.json()).token, "string");
+  } finally {
+    setBehindProxy(false);
+    await env.teardown();
+  }
+});
+
+Deno.test("pake: behindProxy rejects a client that folds the real cert pin (401)", async () => {
+  const env = await setupTestEnv();
+  setBehindProxy(true);
+  try {
+    await seedAdminToken();
+    const app = buildApp();
+    const code = await mintCode(app);
+
+    // A pin-mode client folds the observed cert; the behindProxy route folds "",
+    // so the two diverge and pairing fails closed.
+    const finish = await pakeViaApp(app, code, "wrong-mode", await tlsCertFingerprint());
+    assertEquals(finish.status, 401);
+  } finally {
+    setBehindProxy(false);
+    await env.teardown();
+  }
+});
+
+Deno.test("GET /api/v1/health: reports behindProxy", async () => {
+  const env = await setupTestEnv();
+  try {
+    setBehindProxy(true);
+    const app = buildApp();
+    const on = await (await app.fetch(new Request("http://x/api/v1/health"))).json();
+    assertEquals(on.behindProxy, true);
+    setBehindProxy(false);
+    const off = await (await app.fetch(new Request("http://x/api/v1/health"))).json();
+    assertEquals(off.behindProxy, false);
+  } finally {
+    setBehindProxy(false);
     await env.teardown();
   }
 });

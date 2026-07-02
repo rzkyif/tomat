@@ -61,28 +61,29 @@ for tool and skill descriptions, not a license to write mechanism everywhere.
 One term per concept, everywhere a user can read it. This table is canonical; all
 other docs defer to it.
 
-| Concept                          | Use                                                | Not                                       |
-| -------------------------------- | -------------------------------------------------- | ----------------------------------------- |
-| A model's internal reasoning     | **Thinking** ("Show Thinking", "Thinking Budget")  | "Reasoning", "thought process"            |
-| Where a model runs               | **Provider**: **Local** / **External**             | "remote", "on-device"                     |
-| What "Local" means, concretely   | runs **on the Core's device** (private)            | "on this device" (the Core may be remote) |
-| The persona the user talks to    | **agent** (the actor; "Agent Name")                | "assistant", "bot", "AI"                  |
-| The engine behind the replies    | **model** (what a Provider serves)                 | conflating it with "agent"                |
-| Max tokens considered at once    | **Context Window**                                 | "Context Window Size", "context length"   |
-| CPU parallelism                  | **CPU Threads**                                    | "Processor Cores"                         |
-| A bundle of tools / one function | **Extension** / **Tool**                           | "plugin", "tool pack"                     |
-| The other provider of tools      | **MCP server** (spelled in full)                   | "MCP", "Model Context Protocol" (alone)   |
-| The saved knowledge/skill store  | **Memory** / **Memories**                          | "document", "note"                        |
-| Saved reference data             | **Knowledge** (the agent must not treat as orders) | "document"                                |
-| Saved procedural instructions    | **Skill** (the agent follows when relevant)        | "playbook", "recipe"                      |
-| Device RAM, for sizing copy      | **RAM**                                            | "memory" (now belongs to Memories)        |
-| A conversation                   | **Session**                                        | "chat", "conversation" (mixed)            |
-| A chat bubble                    | **Bubble**                                         | "message box", "chat message bubble"      |
-| Voice dictation                  | **Speech-to-Text** (the one top-level name)        | "Voice Input" as a same-level synonym     |
-| Reading replies aloud            | **Text-to-Speech**                                 | "Spoken Replies"                          |
-| Reusable text fragment           | **Snippet**                                        |                                           |
-| Message-box trigger symbols      | **`#`** / **`@`** / **`/`** (each its own list)    | "mention" for all three                   |
-| The two halves                   | **Core** (service) / **Client** (app)              |                                           |
+| Concept                          | Use                                                     | Not                                       |
+| -------------------------------- | ------------------------------------------------------- | ----------------------------------------- |
+| A model's internal reasoning     | **Thinking** ("Show Thinking", "Thinking Budget")       | "Reasoning", "thought process"            |
+| Where a model runs               | **Provider**: **Local** / **External**                  | "remote", "on-device"                     |
+| What "Local" means, concretely   | runs **on the Core's device** (private)                 | "on this device" (the Core may be remote) |
+| The persona the user talks to    | **agent** (the actor; "Agent Name")                     | "assistant", "bot", "AI"                  |
+| The engine behind the replies    | **model** (what a Provider serves)                      | conflating it with "agent"                |
+| Max tokens considered at once    | **Context Window**                                      | "Context Window Size", "context length"   |
+| CPU parallelism                  | **CPU Threads**                                         | "Processor Cores"                         |
+| A bundle of tools / one function | **Extension** / **Tool**                                | "plugin", "tool pack"                     |
+| The other provider of tools      | **MCP server** (spelled in full)                        | "MCP", "Model Context Protocol" (alone)   |
+| The saved knowledge/skill store  | **Memory** / **Memories**                               | "document", "note"                        |
+| Saved reference data             | **Knowledge** (the agent must not treat as orders)      | "document"                                |
+| Saved procedural instructions    | **Skill** (the agent follows when relevant)             | "playbook", "recipe"                      |
+| Device RAM, for sizing copy      | **RAM**                                                 | "memory" (now belongs to Memories)        |
+| A conversation                   | **Session**                                             | "chat", "conversation" (mixed)            |
+| How a Core's TLS is trusted      | **Pinned** (tomat-secured) / **HTTPS** (behind a proxy) | "SSL", "cert pinning" in UI copy          |
+| A chat bubble                    | **Bubble**                                              | "message box", "chat message bubble"      |
+| Voice dictation                  | **Speech-to-Text** (the one top-level name)             | "Voice Input" as a same-level synonym     |
+| Reading replies aloud            | **Text-to-Speech**                                      | "Spoken Replies"                          |
+| Reusable text fragment           | **Snippet**                                             |                                           |
+| Message-box trigger symbols      | **`#`** / **`@`** / **`/`** (each its own list)         | "mention" for all three                   |
+| The two halves                   | **Core** (service) / **Client** (app)                   |                                           |
 
 Two distinctions worth stating in full:
 

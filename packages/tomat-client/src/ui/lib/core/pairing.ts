@@ -22,14 +22,17 @@ import type {
 } from "@tomat/shared";
 import { confirmTag, cpaceInitiatorStart, randomSid, verifyConfirm } from "@tomat/shared";
 import { type NetResponse, platform } from "../platform/index.ts";
-import type { CoreClient } from "./client";
+import type { CoreClient, TrustMode } from "./client";
 
 export interface PairResult {
   token: string;
   clientId: string;
   coreVersion: string;
-  /** The cert pin captured at pairing; store it and pin all later connections. */
-  tlsPin: string;
+  /** How to trust this Core's TLS on later connections. `pin` stores + enforces
+   *  the captured cert pin; `webpki` validates the proxy's real cert (no pin). */
+  trustMode: TrustMode;
+  /** The cert pin captured at pairing; present (and enforced) only in pin mode. */
+  tlsPin?: string;
 }
 
 export class PairingApi {
@@ -45,7 +48,7 @@ export class PairingApi {
         "X-Admin-Token": adminToken,
       },
       body: JSON.stringify(req),
-      pin: this.client.endpoint.tlsPin,
+      ...this.client.netTrust(),
     });
     if (!ok(res)) throw new Error(`mint pairing code: HTTP ${res.status}`);
     return JSON.parse(text(res)) as PairingCodeResponse;
@@ -84,17 +87,22 @@ export class PairingApi {
 // --- unpaired flow (no pin yet) -------------------------------------------
 
 /** Probe an unpaired core's health over a TOFU TLS connection. Returns the
- *  reported version and the captured cert pin (for optional display). */
-export async function probeCore(baseUrl: string): Promise<{ version: string; pin: string }> {
+ *  reported version and its `behindProxy` hint (whether it is served over HTTPS
+ *  by a terminating reverse proxy). The hint selects the pairing trust mode; it
+ *  is unauthenticated, but the PAKE cert fold makes a forged value fail closed
+ *  (see `pairWithCode`), so it is a convenience, not a trust decision. */
+export async function probeCore(
+  baseUrl: string,
+): Promise<{ version: string; behindProxy: boolean }> {
   const res = await platform().net.fetch({
     url: `${baseUrl}/api/v1/health`,
-    capturePin: true,
+    mode: "capture",
   });
   if (!ok(res)) throw new Error(`Core responded ${res.status}`);
-  const body = JSON.parse(text(res)) as { version?: unknown };
+  const body = JSON.parse(text(res)) as { version?: unknown; behindProxy?: unknown };
   return {
     version: typeof body.version === "string" ? body.version : "unknown",
-    pin: res.capturedPin ?? "",
+    behindProxy: body.behindProxy === true,
   };
 }
 
@@ -115,7 +123,7 @@ export async function setAdminPasswordWithToken(
       "X-Admin-Token": adminToken,
     },
     body: JSON.stringify({ password }),
-    capturePin: true,
+    mode: "capture",
   });
   if (!ok(res)) throw apiError(res, "set admin password");
 }
@@ -134,35 +142,50 @@ export async function mintCodeWithAdminToken(
       "X-Admin-Token": adminToken,
     },
     body: JSON.stringify(req),
-    capturePin: true,
+    mode: "capture",
   });
   if (!ok(res)) throw new Error(`mint pairing code: HTTP ${res.status}`);
   return JSON.parse(text(res)) as PairingCodeResponse;
 }
 
-/** Run the full PAKE pairing against a core: TOFU-capture its cert, prove the
- *  code, channel-bind the pin, and verify core's confirmation (MITM-safe). */
+/** Run the full PAKE pairing against a core, proving the 6-digit code and
+ *  binding the TLS channel. `behindProxy` (from the health probe) picks the
+ *  trust mode: false (default) TOFU-captures the self-signed cert and folds its
+ *  pin into the CPace channel id + confirmation; true validates the proxy's real
+ *  cert via WebPKI and folds nothing (the Core folds empty too). Either way the
+ *  fold is the security boundary: if the two sides folded different values,
+ *  core's confirmation fails and we refuse to pair, so a forged `behindProxy`
+ *  hint or a MITM cert both fail closed. */
 export async function pairWithCode(
   baseUrl: string,
   clientName: string,
   code: string,
+  behindProxy: boolean,
 ): Promise<PairResult> {
-  // Step 0: capture the server's cert pin over a TOFU TLS connection (health is
-  // unauthenticated). We do NOT trust it yet. It is folded into the CPace
-  // channel identifier below AND the confirmation, and is only accepted once
-  // core proves it knew the code AND presents this same cert.
-  const probe = await platform().net.fetch({
-    url: `${baseUrl}/api/v1/health`,
-    capturePin: true,
-  });
-  const pin = probe.capturedPin;
-  if (!pin) throw new Error("could not read the Core's TLS certificate");
+  const trustMode: TrustMode = behindProxy ? "webpki" : "pin";
+
+  // Pin mode: TOFU-capture the server's cert pin (health is unauthenticated) and
+  // fold it. WebPKI mode: the Client validates the proxy's real cert instead, so
+  // there is no Core cert to observe; both sides fold empty.
+  let pin: string | undefined;
+  if (!behindProxy) {
+    const probe = await platform().net.fetch({
+      url: `${baseUrl}/api/v1/health`,
+      mode: "capture",
+    });
+    pin = probe.capturedPin;
+    if (!pin) throw new Error("could not read the Core's TLS certificate");
+  }
+  // The value folded into the CPace channel id + confirmation MAC. Empty in
+  // webpki mode, matching the empty fold the Core uses when server.behindProxy.
+  const foldPin = pin ?? "";
+  const trust = pin ? { mode: trustMode, pin } : { mode: trustMode };
 
   const sid = randomSid();
-  const ci = new TextEncoder().encode(pin);
+  const ci = new TextEncoder().encode(foldPin);
   const init = cpaceInitiatorStart(code, sid, ci);
 
-  // Step 1: start, now enforcing the pin we observed.
+  // Step 1: start, enforcing the trust mode we chose (pin or webpki).
   const startRes = await platform().net.fetch({
     url: `${baseUrl}/api/v1/pairing/pake/start`,
     method: "POST",
@@ -172,15 +195,15 @@ export async function pairWithCode(
       sid: toBase64(sid),
       msgA: toBase64(init.msgA),
     }),
-    pin,
+    ...trust,
   });
   if (!ok(startRes)) throw apiError(startRes, "pairing start failed");
   const start = JSON.parse(text(startRes)) as PakeStartResponse;
   const msgB = fromBase64(start.msgB);
   const isk = init.finish(msgB);
 
-  // Step 2: finish. Our confirmation also binds the pin we observed.
-  const confirmC = confirmTag(isk, "C", init.msgA, msgB, pin);
+  // Step 2: finish. Our confirmation binds the same fold value.
+  const confirmC = confirmTag(isk, "C", init.msgA, msgB, foldPin);
   const finishRes = await platform().net.fetch({
     url: `${baseUrl}/api/v1/pairing/pake/finish`,
     method: "POST",
@@ -189,18 +212,22 @@ export async function pairWithCode(
       pakeId: start.pakeId,
       confirmC: toBase64(confirmC),
     }),
-    pin,
+    ...trust,
   });
   if (!ok(finishRes)) throw apiError(finishRes, "pairing failed");
   const fin = JSON.parse(text(finishRes)) as PakeFinishResponse;
 
-  // Authenticate core: its confirmation must verify against the pin we saw. A
-  // MITM that terminated TLS with its own cert can't produce a matching tag.
-  const serverOk = verifyConfirm(fromBase64(fin.confirmS), isk, "S", init.msgA, msgB, pin);
+  // Authenticate core: its confirmation must verify against the fold we used. A
+  // MITM cert (pin mode) or a Core whose behindProxy setting disagrees with our
+  // detected mode both make this fail.
+  const serverOk = verifyConfirm(fromBase64(fin.confirmS), isk, "S", init.msgA, msgB, foldPin);
   if (!serverOk) {
     throw new Error(
-      "Core authentication failed: the TLS certificate could not be verified " +
-        "(possible man-in-the-middle). Not paired.",
+      behindProxy
+        ? "Core authentication failed: this Core is not configured to be served " +
+            "over HTTPS (or a certificate could not be verified). Not paired."
+        : "Core authentication failed: the TLS certificate could not be verified " +
+            "(possible man-in-the-middle). Not paired.",
     );
   }
 
@@ -208,6 +235,7 @@ export async function pairWithCode(
     token: fin.token,
     clientId: fin.clientId,
     coreVersion: fin.coreVersion,
+    trustMode,
     tlsPin: pin,
   };
 }

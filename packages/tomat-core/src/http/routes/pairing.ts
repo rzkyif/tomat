@@ -10,6 +10,7 @@ import {
 import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
 import { authService } from "../../services/auth.ts";
 import { dropClientSettingsCache } from "../../services/core-settings.ts";
+import { isBehindProxy } from "../../services/deployment.ts";
 import { tlsCertFingerprint } from "../../services/tls.ts";
 import { parseBody, readJson } from "../body.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
@@ -50,7 +51,7 @@ export function pairingRoutes(): Hono {
       decodeBase64(body.msgA),
       body.clientName,
       peerIp(c),
-      await tlsCertFingerprint(),
+      await pairingServerPin(),
     );
     return c.json({ pakeId: result.pakeId, msgB: encodeBase64(result.msgB) });
   });
@@ -63,7 +64,7 @@ export function pairingRoutes(): Hono {
     const result = await authService().pakeFinish(
       body.pakeId,
       decodeBase64(body.confirmC),
-      await tlsCertFingerprint(),
+      await pairingServerPin(),
     );
     return c.json({
       token: result.token,
@@ -133,6 +134,19 @@ export function pairingRoutes(): Hono {
   return r;
 }
 
+// The value folded into the pairing PAKE (channel id + key confirmation),
+// binding the TLS channel to the handshake. Normally Core's own self-signed cert
+// fingerprint, so a MITM that re-terminates TLS is detected. When Core is served
+// behind a terminating HTTPS proxy (`server.behindProxy`), the Client validates
+// the proxy's real cert via WebPKI and cannot observe Core's cert, so there is no
+// shared value to bind: both sides fold empty. This is the security boundary for
+// the trust mode - a self-signed Core ALWAYS folds its real fingerprint, so a
+// client that folded empty (or a MITM cert) fails the confirmation. Empty on both
+// sides is only reachable when the operator actually set `server.behindProxy`.
+function pairingServerPin(): Promise<string> {
+  return isBehindProxy() ? Promise.resolve("") : tlsCertFingerprint();
+}
+
 // The bearer token from the Authorization header, or null. authService()
 // .authenticate turns null into a 401, so callers can pass it straight through.
 function bearerToken(c: Context): string | null {
@@ -143,8 +157,9 @@ function bearerToken(c: Context): string | null {
 // The REAL socket peer address, threaded from Deno.serve into the Hono env (see
 // main.ts). We deliberately do NOT trust X-Forwarded-For / X-Real-IP, which are
 // client-settable: an attacker would rotate them to hand every guess a fresh,
-// empty rate-limit bucket. There is no reverse-proxy deployment mode today; add
-// a trusted-proxy setting before honoring those headers.
+// empty rate-limit bucket. Under `server.behindProxy` every request arrives from
+// the proxy's address, so the per-IP limiter collapses to one shared bucket -
+// stricter, and safe. Honoring XFF there would need a trusted-proxy setting.
 function peerIp(c: Context): string {
   const peer = (c.env as { remoteAddr?: { hostname?: string } } | undefined)?.remoteAddr;
   return peer?.hostname ?? "local";

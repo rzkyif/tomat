@@ -38,6 +38,10 @@ sysinfo = "0.39"
 # terminate TLS with a custom rustls verifier on the cert SPKI pin.
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
 rustls = "0.23"
+# Public-CA root set for the `webpki` trust mode (a Core served over HTTPS behind
+# a terminating reverse proxy). Restricting to public roots also means an
+# OS-installed interception root is NOT auto-trusted for pairing.
+webpki-roots = "1"
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 x509-parser = "0.18"

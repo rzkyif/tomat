@@ -21,7 +21,7 @@ test("pairing with a wrong code is rejected by the real PAKE", async () => {
   const { code } = await mintCodeWithAdminToken(app.baseUrl, app.adminToken);
   const wrong = code === "000000" ? "111111" : "000000";
 
-  await expect(pairWithCode(app.baseUrl, "wrong-code-client", wrong)).rejects.toThrow();
+  await expect(pairWithCode(app.baseUrl, "wrong-code-client", wrong, false)).rejects.toThrow();
 }, 60_000);
 
 test("a provider error mid-stream surfaces an error, and chat recovers", async () => {

@@ -22,7 +22,7 @@ test("a client cannot read another client's session on the same core", async () 
 
   // Pair a SECOND, independent client to the same core (its own bearer token).
   const { code } = await mintCodeWithAdminToken(app.baseUrl, app.adminToken);
-  const clientB = await pairWithCode(app.baseUrl, "client-b", code);
+  const clientB = await pairWithCode(app.baseUrl, "client-b", code, false);
   const authB = { authorization: `Bearer ${clientB.token}` };
 
   // B is a valid client: its own session list is empty (it owns nothing yet).

@@ -189,6 +189,13 @@ Deno.test("channel identifier (cert pin) is bound into the key", () => {
   const a2 = cpaceInitiatorStart(code, sid, pinA);
   const b2 = cpaceResponder(code, sid, a2.msgA, pinB);
   assertNotEquals(toHex(a2.finish(b2.msgB)), toHex(b2.isk));
+
+  // Empty vs cert-bound (a webpki-mode client against a core that is NOT behind
+  // a proxy, or the reverse) → diverges the same way: the empty fold agrees only
+  // when BOTH sides deliberately fold nothing.
+  const a3 = cpaceInitiatorStart(code, sid);
+  const b3 = cpaceResponder(code, sid, a3.msgA, pinA);
+  assertNotEquals(toHex(a3.finish(b3.msgB)), toHex(b3.isk));
 });
 
 // --- test #3: invalid peer messages are rejected --------------------------
@@ -245,6 +252,13 @@ Deno.test("confirmTag / verifyConfirm round-trip and tamper detection", () => {
 
   // Pin differs.
   assert(!verifyConfirm(tagC, isk, "C", msgA, msgB, "cert-pin-xyz"));
+
+  // A cert-bound tag never verifies against the empty fold (and vice versa):
+  // the webpki empty fold agrees only when both sides deliberately use it.
+  assert(!verifyConfirm(tagC, isk, "C", msgA, msgB, ""));
+  const tagEmpty = confirmTag(isk, "C", msgA, msgB, "");
+  assert(verifyConfirm(tagEmpty, isk, "C", msgA, msgB, ""));
+  assert(!verifyConfirm(tagEmpty, isk, "C", msgA, msgB, pin));
 
   // Tag byte flipped.
   const tagBad = tagC.slice();

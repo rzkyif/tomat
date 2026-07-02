@@ -6975,6 +6975,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
+ "webpki-roots 1.0.7",
  "windows-native-keyring-store",
  "x509-parser",
  "xcap",

@@ -42,6 +42,12 @@ export interface HealthResponse {
    *  (no need to read the on-disk admin token). Always true after a normal
    *  install, which sets one. */
   adminPasswordSet: boolean;
+  /** Whether Core is served over HTTPS by a terminating reverse proxy. When
+   *  true, the Client validates the proxy's real certificate (standard WebPKI)
+   *  instead of pinning Core's self-signed one, and pairing drops the cert
+   *  binding. An unauthenticated hint the pairing handshake verifies: a forged
+   *  value cannot complete pairing (see the cert fold in services/auth.ts). */
+  behindProxy: boolean;
 }
 
 // --- Sessions --------------------------------------------------------------

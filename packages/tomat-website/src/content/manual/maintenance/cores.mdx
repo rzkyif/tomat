@@ -42,6 +42,35 @@ first launch, it asks for this password in the app instead of the terminal.)
   that can route to it.
 </Aside>
 
+## Serving a Core over HTTPS
+
+By default the link between a Client and a Core is secured by tomat itself. The Core
+presents its own certificate, and the Client records ("pins") that exact certificate
+at pairing, so it recognizes the Core every time and refuses an impostor. This needs
+nothing from you and works anywhere, including a Core reachable only by its address on
+your network.
+
+Some setups instead put a Core behind a reverse proxy that already serves HTTPS with a
+certificate from a public authority, for example Cloudflare or Caddy on a public
+domain. There the Client never sees the Core's own certificate, only the proxy's, so
+the pinning above cannot apply. For that case the Core has a setting,
+`server.behindProxy`, that you turn on so the Client validates the proxy's public
+certificate the way a browser does instead of pinning. It is off by default and set on
+the Core's machine, in its `settings.json` alongside the network options above (or via
+the `TOMAT_CORE_BEHIND_PROXY` environment variable), never from the app, so a paired
+device can never change how the Core is trusted. The Client detects the mode by itself
+during pairing and marks each Core **Pinned** or **HTTPS** under **Cores** in Settings;
+there is nothing to set on the Client. Set it before you pair: the setting decides how
+each device trusts the Core at pairing, so a device paired the other way stops
+connecting until you pair it again.
+
+<Aside type="caution">
+  A reverse proxy that serves HTTPS can read the traffic that passes through it, including your
+  messages. Turn `server.behindProxy` on only for a proxy you run or trust. To keep the connection
+  secured end to end instead, reach the Core through a pass-through tunnel (such as Tailscale or
+  WireGuard) that carries its own connection unchanged: pinning keeps working and you set nothing.
+</Aside>
+
 ## Pairing
 
 A Client connects to a Core by **pairing**. The Core mints a short code; in the
@@ -99,7 +128,10 @@ and the Core each run a calculation from the code and trade the results; only if
 started from the same code do they agree, so a wrong code fails outright, and the code
 itself never crosses the network in a form anyone could replay. In the same step the
 Client records the Core's identity, so from then on it can tell it is reconnecting to
-the same Core and refuse a stand-in.
+the same Core and refuse a stand-in. That identity is normally the Core's own
+certificate; a Core served over HTTPS behind a proxy is instead trusted by the proxy's
+public certificate, chosen during this same exchange so a mismatch still fails
+(see [Serving a Core over HTTPS](#serving-a-core-over-https)).
 
 What you get out of a successful pairing is a long-lived key the Client stores in your
 operating system's keychain, the secure place the OS keeps passwords. Every later

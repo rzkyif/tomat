@@ -20,8 +20,8 @@ export interface E2ePlatformSeed {
   /** Pre-seeded keychain bearer tokens, keyed by core id. */
   keychain?: Record<string, string>;
   /** The core's real SPKI pin (base64(SHA-256(SPKI))), computed Node-side. The
-   *  pairing PAKE channel-binds this exact value, so capturePin must return it
-   *  (not a placeholder) or pairing confirmation fails. */
+   *  pairing PAKE channel-binds this exact value, so a capture-mode fetch must
+   *  report it (not a placeholder) or pairing confirmation fails. */
   tlsPin?: string;
 }
 
@@ -34,7 +34,8 @@ const unavailable = (what: string) => () =>
 const pinByOrigin = new Map<string, string>();
 
 /** Register the real SPKI pin for a core's origin (the pairing TOFU probe reads
- *  it via capturePin). Called for every core the test pairs, including extras. */
+ *  it via a capture-mode fetch). Called for every core the test pairs, including
+ *  extras. */
 export function registerCorePin(baseUrl: string, pin: string): void {
   pinByOrigin.set(new URL(baseUrl).origin, pin);
 }
@@ -54,7 +55,7 @@ function makeRealFetch(defaultPin: string) {
     // doesn't expose it, so the harness computed the real SPKI pin Node-side and
     // we hand it back here. The PAKE binds this, so it must be the true pin.
     // Resolve per-origin (multi-core) with the single-core seed as the fallback.
-    if (req.capturePin) {
+    if (req.mode === "capture") {
       out.capturedPin = pinByOrigin.get(new URL(req.url).origin) ?? defaultPin;
     }
     return out;

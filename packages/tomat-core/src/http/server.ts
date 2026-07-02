@@ -10,6 +10,7 @@ import type { HealthResponse } from "@tomat/shared";
 import { CORE_VERSION } from "../config.ts";
 import { coreStatus } from "../services/core-status.ts";
 import { authService } from "../services/auth.ts";
+import { isBehindProxy } from "../services/deployment.ts";
 import { corsMiddleware } from "./middleware/cors.ts";
 import { sendError } from "./middleware/errors.ts";
 import { adminRoutes } from "./routes/admin.ts";
@@ -72,6 +73,7 @@ export function buildApp(): Hono {
       uptimeMs: Math.floor(performance.now()),
       core: coreStatus().snapshot(),
       adminPasswordSet: authService().hasAdminPassword(),
+      behindProxy: isBehindProxy(),
     };
     return c.json(body);
   });

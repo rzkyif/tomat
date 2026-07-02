@@ -1,23 +1,31 @@
-//! Pinned network access to a paired core.
+//! Trust-scoped network access to a paired core.
 //!
-//! The webview can't pin a self-signed certificate (browser fetch/WebSocket
-//! expose no pinning API), so all core traffic is terminated here in Rust with
-//! a custom rustls verifier that checks the server cert's SubjectPublicKeyInfo
-//! against the base64 SHA-256 pin captured at pairing. HTTP uses reqwest; the
-//! WebSocket uses tokio-tungstenite. Both share `build_client_config`.
+//! The webview can't control certificate trust (browser fetch/WebSocket expose
+//! no pinning or verifier API), so all core traffic is terminated here in Rust
+//! with a per-request trust mode (`TlsTrust`). HTTP uses reqwest; the WebSocket
+//! uses tokio-tungstenite. Both share `build_client_config`.
 //!
-//! `capture_pin` (used only during the pairing TOFU handshake) accepts whatever
-//! cert is presented and reports its pin instead of enforcing one. The PAKE key
-//! confirmation then binds that pin, so a MITM is caught at the application
-//! layer even though TLS here didn't reject it.
+//! The three modes, one per paired-core trust posture:
+//!   - `Pin`: enforce the exact SubjectPublicKeyInfo SHA-256 pin captured at
+//!     pairing (the default; a self-signed core the Client secures itself).
+//!   - `WebPki`: standard public-CA validation (chain + hostname + expiry)
+//!     against the Mozilla root set, for a core served over HTTPS behind a
+//!     terminating reverse proxy. No pin.
+//!   - `Capture`: accept whatever cert is presented and report its pin, used
+//!     ONLY by the unpaired pairing/discovery probe. The PAKE key confirmation
+//!     then binds that pin, so a MITM is caught at the application layer.
+//!
+//! There is deliberately no "no verifier / accept-any" resting state: a paired
+//! connection is always `Pin` or `WebPki`, never `Capture`.
 
 use crate::error::{AppError, AppResult};
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::client::WebPkiServerVerifier;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
+use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -141,15 +149,65 @@ fn parse_pin(pin: Option<String>) -> AppResult<Option<[u8; 32]>> {
     }
 }
 
-fn build_client_config(
-    pin: Option<[u8; 32]>,
-    captured: Arc<Mutex<Option<[u8; 32]>>>,
-) -> AppResult<ClientConfig> {
-    let verifier = Arc::new(SpkiPinVerifier {
-        pin,
-        captured,
-        provider: PROVIDER.clone(),
-    });
+/// The trust posture for one connection. `Pin` and `WebPki` are the two
+/// paired-core modes; `Capture` (accept-any + report the SPKI) is reachable only
+/// from the unpaired probe/discovery paths. There is intentionally no variant
+/// that accepts any cert without reporting - a paired request that failed to
+/// carry a mode is an error, not a silent accept-any.
+enum TlsTrust {
+    Pin([u8; 32]),
+    WebPki,
+    Capture(Arc<Mutex<Option<[u8; 32]>>>),
+}
+
+/// Map the IPC `(mode, pin)` pair to a `TlsTrust`. `pin` mode requires a pin;
+/// an unknown mode is rejected. `captured` is the per-connection cell the
+/// capture verifier writes the presented SPKI into.
+fn trust_from(
+    mode: &str,
+    pin: Option<String>,
+    captured: &Arc<Mutex<Option<[u8; 32]>>>,
+) -> AppResult<TlsTrust> {
+    match mode {
+        "pin" => {
+            let hash =
+                parse_pin(pin)?.ok_or_else(|| AppError::validation("pin mode requires a pin"))?;
+            Ok(TlsTrust::Pin(hash))
+        }
+        "webpki" => Ok(TlsTrust::WebPki),
+        "capture" => Ok(TlsTrust::Capture(captured.clone())),
+        other => Err(AppError::validation(format!("unknown tls mode: {other}"))),
+    }
+}
+
+/// Standard public-CA verifier: full chain + hostname + expiry validation
+/// against the Mozilla root set. Restricting to public roots (not the OS store)
+/// keeps `webpki` mode to genuinely public HTTPS and avoids trusting an
+/// OS-installed interception root.
+fn webpki_verifier() -> AppResult<Arc<dyn ServerCertVerifier>> {
+    let mut roots = RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let verifier: Arc<dyn ServerCertVerifier> =
+        WebPkiServerVerifier::builder_with_provider(Arc::new(roots), PROVIDER.clone())
+            .build()
+            .map_err(|e| AppError::external(format!("webpki verifier: {e}")))?;
+    Ok(verifier)
+}
+
+fn build_client_config(trust: TlsTrust) -> AppResult<ClientConfig> {
+    let verifier: Arc<dyn ServerCertVerifier> = match trust {
+        TlsTrust::Pin(hash) => Arc::new(SpkiPinVerifier {
+            pin: Some(hash),
+            captured: Arc::new(Mutex::new(None)),
+            provider: PROVIDER.clone(),
+        }),
+        TlsTrust::Capture(captured) => Arc::new(SpkiPinVerifier {
+            pin: None,
+            captured,
+            provider: PROVIDER.clone(),
+        }),
+        TlsTrust::WebPki => webpki_verifier()?,
+    };
     Ok(ClientConfig::builder_with_provider(PROVIDER.clone())
         .with_safe_default_protocol_versions()
         .map_err(|e| AppError::external(format!("tls config: {e}")))?
@@ -169,7 +227,9 @@ pub struct NetFetchReply {
     captured_pin: Option<String>,
 }
 
-/// One pinned HTTP request. `body_b64`/the reply body are base64 to cross IPC.
+/// One HTTP request under a trust `mode` ("pin" | "webpki" | "capture").
+/// `body_b64`/the reply body are base64 to cross IPC. `captured_pin` is filled
+/// only in capture mode (the unpaired probe).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn net_fetch(
@@ -177,11 +237,13 @@ pub async fn net_fetch(
     method: String,
     headers: HashMap<String, String>,
     body_b64: Option<String>,
+    mode: String,
     pin: Option<String>,
-    capture_pin: bool,
 ) -> AppResult<NetFetchReply> {
     let captured = Arc::new(Mutex::new(None));
-    let tls = build_client_config(parse_pin(pin)?, captured.clone())?;
+    let trust = trust_from(&mode, pin, &captured)?;
+    let is_capture = matches!(trust, TlsTrust::Capture(_));
+    let tls = build_client_config(trust)?;
     let client = reqwest::Client::builder()
         .use_preconfigured_tls(tls)
         // Without explicit timeouts a stalled core (e.g. a wedged TLS handshake
@@ -229,7 +291,7 @@ pub async fn net_fetch(
         .await
         .map_err(|e| AppError::external(format!("read body: {e}")))?;
 
-    let captured_pin = if capture_pin {
+    let captured_pin = if is_capture {
         captured.lock().ok().and_then(|g| *g).map(|h| B64.encode(h))
     } else {
         None
@@ -371,7 +433,7 @@ async fn probe_core_health(ip: Ipv4Addr, port: u16) -> Option<DiscoveredCore> {
     let captured = Arc::new(Mutex::new(None));
     // A fresh client per probe: the capture cell is per-connection, so reusing
     // one client across hosts would race their pins onto the same cell.
-    let tls = build_client_config(None, captured.clone()).ok()?;
+    let tls = build_client_config(TlsTrust::Capture(captured.clone())).ok()?;
     let client = reqwest::Client::builder()
         .use_preconfigured_tls(tls)
         .connect_timeout(std::time::Duration::from_millis(DISCOVERY_TIMEOUT_MS))
@@ -443,9 +505,17 @@ pub async fn net_ws_open(
     app: AppHandle,
     ws_id: String,
     url: String,
+    mode: String,
     pin: Option<String>,
 ) -> AppResult<()> {
-    let tls = build_client_config(parse_pin(pin)?, Arc::new(Mutex::new(None)))?;
+    let captured = Arc::new(Mutex::new(None));
+    let trust = trust_from(&mode, pin, &captured)?;
+    // The WebSocket carries live traffic and the bearer token; it must never run
+    // in accept-any capture mode (that is only the unpaired probe).
+    if matches!(trust, TlsTrust::Capture(_)) {
+        return Err(AppError::validation("websocket cannot use capture mode"));
+    }
+    let tls = build_client_config(trust)?;
     let (tx, mut rx) = mpsc::unbounded_channel::<WsOut>();
     if let Ok(mut m) = WS_HANDLES.lock() {
         m.insert(ws_id.clone(), tx);
@@ -591,6 +661,41 @@ mod tests {
         wrong[0] ^= 0xff;
         let bad = make_verifier(Some(wrong), Arc::new(Mutex::new(None)));
         assert!(run_verify(&bad, &der).is_err());
+    }
+
+    #[test]
+    fn webpki_rejects_a_self_signed_cert() {
+        // A self-signed core cert chains to no public root, so webpki mode (used
+        // only behind a real HTTPS proxy) must reject it. This is the guard that
+        // a self-signed core can never be silently reached in webpki mode.
+        let der = self_signed();
+        let verifier = webpki_verifier().unwrap();
+        let name = ServerName::try_from("127.0.0.1").unwrap();
+        let res = verifier.verify_server_cert(&der, &[], &name, &[], UnixTime::now());
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn trust_from_maps_modes_and_requires_a_pin() {
+        let cell = Arc::new(Mutex::new(None));
+        // pin mode without a pin is an error (never a silent accept-any).
+        assert!(trust_from("pin", None, &cell).is_err());
+        let pin = B64.encode([9u8; 32]);
+        assert!(matches!(
+            trust_from("pin", Some(pin), &cell).unwrap(),
+            TlsTrust::Pin(_)
+        ));
+        assert!(matches!(
+            trust_from("webpki", None, &cell).unwrap(),
+            TlsTrust::WebPki
+        ));
+        assert!(matches!(
+            trust_from("capture", None, &cell).unwrap(),
+            TlsTrust::Capture(_)
+        ));
+        // An unknown/empty mode is rejected outright.
+        assert!(trust_from("bogus", None, &cell).is_err());
+        assert!(trust_from("", None, &cell).is_err());
     }
 
     #[test]

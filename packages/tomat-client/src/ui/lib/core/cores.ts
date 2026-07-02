@@ -1,5 +1,5 @@
 // Paired-cores registry. Backed by its own cores.json (the {id, name, baseUrl,
-// tlsPin, addedAtMs} entries plus the currentCoreId pointer) + OS keychain
+// trustMode, tlsPin, addedAtMs} entries plus the currentCoreId pointer) + OS keychain
 // (the bearer tokens). Owns the currently-selected core and rebuilds the
 // CoreClient + its per-domain APIs on switch. This module is the file's only
 // writer; settings live in their own settings.json (see lib/platform).
@@ -9,7 +9,7 @@ import { getLogger } from "$lib/util/log";
 import { Subscribers } from "../util/subscribers.ts";
 import { BinariesApi } from "./binaries";
 import { ChatApi } from "./chat";
-import { type ConnectionListener, CoreClient, type WsListener } from "./client";
+import { type ConnectionListener, CoreClient, type TrustMode, type WsListener } from "./client";
 import { GreetingsApi } from "./greetings";
 import { LlmApi } from "./llm";
 import { MemoriesApi } from "./memories";
@@ -33,8 +33,44 @@ export interface PairedCoreEntry {
   id: string; // ULID returned by pairing
   name: string; // user-visible label
   baseUrl: string; // e.g. https://127.0.0.1:7800
-  tlsPin: string; // pinned cert SPKI (base64 SHA-256), captured at pairing
+  trustMode: TrustMode; // "pin" (self-signed, default) | "webpki" (behind an HTTPS proxy)
+  tlsPin?: string; // pinned cert SPKI (base64 SHA-256), captured at pairing; present iff trustMode === "pin"
   addedAtMs: number;
+}
+
+/** Validate one raw cores.json entry. A `webpki` core carries no pin; every
+ *  other entry is `pin` mode and MUST carry a non-empty pin - a pin-mode entry
+ *  without a pin would drive an accept-any connection, so it is dropped (the
+ *  user re-pairs) rather than trusted. Returns null for anything malformed. */
+function coerceCoreEntry(raw: unknown): PairedCoreEntry | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (
+    typeof r.id !== "string" ||
+    typeof r.name !== "string" ||
+    typeof r.baseUrl !== "string" ||
+    typeof r.addedAtMs !== "number"
+  ) {
+    return null;
+  }
+  if (r.trustMode === "webpki") {
+    return {
+      id: r.id,
+      name: r.name,
+      baseUrl: r.baseUrl,
+      trustMode: "webpki",
+      addedAtMs: r.addedAtMs,
+    };
+  }
+  if (typeof r.tlsPin !== "string" || r.tlsPin.length === 0) return null;
+  return {
+    id: r.id,
+    name: r.name,
+    baseUrl: r.baseUrl,
+    trustMode: "pin",
+    tlsPin: r.tlsPin,
+    addedAtMs: r.addedAtMs,
+  };
 }
 
 const CURRENT_KEY = "currentCoreId";
@@ -145,6 +181,7 @@ class CoresRegistry {
     const client = new CoreClient({
       baseUrl: entry.baseUrl,
       token,
+      trustMode: entry.trustMode,
       tlsPin: entry.tlsPin,
     });
     this.current = { entry, client };
@@ -286,7 +323,13 @@ class CoresRegistry {
     currentCoreId?: string;
   }> {
     const raw = await platform().clientFiles.read("cores");
-    const cores = Array.isArray(raw.cores) ? (raw.cores as PairedCoreEntry[]) : [];
+    const rawCores = Array.isArray(raw.cores) ? raw.cores : [];
+    const cores: PairedCoreEntry[] = [];
+    for (const c of rawCores) {
+      const entry = coerceCoreEntry(c);
+      if (entry) cores.push(entry);
+      else log.warn("dropping a malformed core entry from cores.json (re-pair to restore it)");
+    }
     const currentCoreId =
       typeof raw[CURRENT_KEY] === "string" ? (raw[CURRENT_KEY] as string) : undefined;
     return { cores, currentCoreId };

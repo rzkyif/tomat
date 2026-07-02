@@ -13,7 +13,7 @@ import {
 } from "../platform/index";
 import type { ServerToClientFrame } from "@tomat/shared";
 
-const ENDPOINT = { baseUrl: "https://core", token: "T", tlsPin: "PIN" };
+const ENDPOINT = { baseUrl: "https://core", token: "T", trustMode: "pin", tlsPin: "PIN" } as const;
 
 function jsonRes(status: number, obj: unknown): NetResponse {
   return {

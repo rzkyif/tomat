@@ -10,6 +10,7 @@
   import ObjectDetailHeader from "@tomat/shared/ui/components/objects/ObjectDetailHeaderView.svelte";
   import ObjectDetailScroll from "@tomat/shared/ui/components/objects/ObjectDetailScrollView.svelte";
   import CoresFieldView from "@tomat/shared/ui/components/settings/CoresFieldView.svelte";
+  import type { Badge } from "@tomat/shared/ui/components/objects/object-types.ts";
 
   let query = $state("");
   let selectedItem = $state<PairedCoreEntry | null>(null);
@@ -45,6 +46,27 @@
 
   function isCurrent(id: string): boolean {
     return cores().currentEntry()?.id === id;
+  }
+
+  // Card / detail badges: the "Current" marker plus a read-only trust indicator
+  // so the user can see whether tomat secures this Core itself (Pinned) or trusts
+  // the HTTPS certificate of the reverse proxy in front of it.
+  function coreBadges(item: PairedCoreEntry): Badge[] {
+    const badges: Badge[] = [];
+    if (isCurrent(item.id)) badges.push({ label: "Current", accent: "green" });
+    badges.push(
+      item.trustMode === "webpki"
+        ? {
+            label: "HTTPS",
+            accent: "blue",
+            title: "Served over HTTPS by a reverse proxy; tomat trusts its certificate.",
+          }
+        : {
+            label: "Pinned",
+            title: "tomat secures this connection with a pinned certificate.",
+          },
+    );
+    return badges;
   }
 
   async function loadDevices() {
@@ -218,7 +240,7 @@
     <ObjectCard
       label={item.name}
       description={item.baseUrl}
-      badges={isCurrent(item.id) ? [{ label: "Current", accent: "green" }] : []}
+      badges={coreBadges(item)}
       menuRows={cardMenuRows(item)}
       onOpen={open}
     />
@@ -226,7 +248,7 @@
   {#snippet detail(item, close)}
     <ObjectDetailHeader
       title={draftName.trim() || item.name}
-      badges={isCurrent(item.id) ? [{ label: "Current", accent: "green" }] : []}
+      badges={coreBadges(item)}
       actions={detailActions(item, close)}
     />
     <ObjectDetailScroll>

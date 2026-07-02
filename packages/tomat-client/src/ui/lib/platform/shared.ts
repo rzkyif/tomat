@@ -56,8 +56,8 @@ export const net: Platform["net"] = {
       method: req.method ?? "GET",
       headers: req.headers ?? {},
       bodyB64,
+      mode: req.mode,
       pin: req.pin ?? null,
-      capturePin: req.capturePin ?? false,
     });
     return {
       status: res.status,
@@ -115,7 +115,7 @@ export const net: Platform["net"] = {
       for (const u of unlisteners) u();
     };
 
-    await invoke("net_ws_open", { wsId, url, pin: opts?.pin ?? null });
+    await invoke("net_ws_open", { wsId, url, mode: opts.mode, pin: opts.pin ?? null });
 
     return {
       send: (data) => {

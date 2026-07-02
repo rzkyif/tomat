@@ -14,10 +14,17 @@ import { Subscribers } from "../util/subscribers.ts";
 
 const log = getLogger("ws");
 
+/** How the Client establishes trust in a paired core's TLS. `pin` (the default)
+ *  enforces the SPKI pin captured at pairing (a self-signed core); `webpki` does
+ *  standard public-CA validation for a core served over HTTPS behind a
+ *  terminating reverse proxy. Chosen per core at pairing, then persisted. */
+export type TrustMode = "pin" | "webpki";
+
 export interface CoreEndpoint {
   baseUrl: string; // e.g. "https://127.0.0.1:7800"
   token: string; // bearer (from OS keychain)
-  tlsPin: string; // pinned cert SPKI (base64 SHA-256), from pairing
+  trustMode: TrustMode;
+  tlsPin?: string; // pinned cert SPKI (base64 SHA-256); required when trustMode === "pin"
 }
 
 export type WsListener = (frame: ServerToClientFrame) => void;
@@ -164,7 +171,7 @@ export class CoreClient {
         "Content-Type": contentType,
       },
       body,
-      pin: this.endpoint.tlsPin,
+      ...this.netTrust(),
     });
     return await this.parseResponse<T>(res);
   }
@@ -179,7 +186,7 @@ export class CoreClient {
         Authorization: `Bearer ${this.endpoint.token}`,
       },
       body: JSON.stringify(body),
-      pin: this.endpoint.tlsPin,
+      ...this.netTrust(),
     });
     if (!isOk(res)) this.throwApiError(res);
     return new Blob([res.body as BlobPart]);
@@ -190,7 +197,7 @@ export class CoreClient {
     const res = await platform().net.fetch({
       url: this.endpoint.baseUrl + path,
       headers: { Authorization: `Bearer ${this.endpoint.token}` },
-      pin: this.endpoint.tlsPin,
+      ...this.netTrust(),
     });
     if (!isOk(res)) this.throwApiError(res);
     return new Blob([res.body as BlobPart]);
@@ -231,6 +238,17 @@ export class CoreClient {
 
   // --- internals ---------------------------------------------------------
 
+  // The TLS trust arguments for a paired request. Pin mode enforces the stored
+  // SPKI pin; webpki mode does standard public-CA validation with no pin. Every
+  // net.fetch / connectWebSocket call spreads this, so the mode is never absent.
+  // Public so the few call sites that build a raw request outside this class
+  // (pairing's admin-token fetch, attachment fetch) stay in the same trust mode.
+  netTrust(): { mode: TrustMode; pin?: string } {
+    return this.endpoint.trustMode === "pin"
+      ? { mode: "pin", pin: this.endpoint.tlsPin }
+      : { mode: "webpki" };
+  }
+
   private async fetchJson<T>(
     method: string,
     path: string,
@@ -248,7 +266,7 @@ export class CoreClient {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      pin: this.endpoint.tlsPin,
+      ...this.netTrust(),
     });
     return this.parseResponse<T>(res);
   }
@@ -310,9 +328,7 @@ export class CoreClient {
   private async openSocket(wsUrl: string, gen: number): Promise<void> {
     let sock: NetSocket;
     try {
-      sock = await platform().net.connectWebSocket(wsUrl, {
-        pin: this.endpoint.tlsPin,
-      });
+      sock = await platform().net.connectWebSocket(wsUrl, this.netTrust());
     } catch (err) {
       // A newer attempt (watchdog/close) superseded this one while it was in
       // flight: drop it silently so we don't double-schedule a reconnect.

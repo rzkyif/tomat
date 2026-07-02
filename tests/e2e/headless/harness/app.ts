@@ -6,9 +6,8 @@
 import { commands } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { mintCodeWithAdminToken, pairWithCode } from "@client/lib/core/pairing.ts";
-import { cores } from "@client/lib/core/cores.ts";
+import { cores, type PairedCoreEntry } from "@client/lib/core/cores.ts";
 import { viewState } from "@client/state/index.ts";
-import type { PairedCoreEntry } from "@tomat/shared";
 import { installE2ePlatform, registerCorePin } from "./platform-e2e.ts";
 import E2eApp from "./E2eApp.svelte";
 import type { LlmScript, RecordedLlmRequest } from "./mock-services.ts";
@@ -29,11 +28,13 @@ async function pairCoreInto(
   name: string,
 ): Promise<{ clientId: string; token: string }> {
   const { code } = await mintCodeWithAdminToken(baseUrl, adminToken);
-  const res = await pairWithCode(baseUrl, CLIENT_NAME, code);
+  // E2E cores are self-signed on loopback, never behind an HTTPS proxy.
+  const res = await pairWithCode(baseUrl, CLIENT_NAME, code, false);
   const entry: PairedCoreEntry = {
     id: res.clientId,
     name,
     baseUrl,
+    trustMode: res.trustMode,
     tlsPin: res.tlsPin,
     addedAtMs: Date.now(),
   };

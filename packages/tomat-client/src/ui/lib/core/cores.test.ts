@@ -41,6 +41,7 @@ const entry = (id: string, name = "Local Core"): PairedCoreEntry => ({
   id,
   name,
   baseUrl: "https://127.0.0.1:7800",
+  trustMode: "pin",
   tlsPin: "pin",
   addedAtMs: 1,
 });

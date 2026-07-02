@@ -37,7 +37,7 @@ export type WizardView = "chooseDestination" | "localConfirm" | "remoteAddress" 
 
 type ConnectionStatus =
   | { kind: "idle" }
-  | { kind: "ok"; version: string; checkedUrl: string }
+  | { kind: "ok"; version: string; checkedUrl: string; behindProxy: boolean }
   | { kind: "error"; message: string };
 
 export function hostFromUrl(url: string): string {
@@ -191,13 +191,17 @@ export class NewCoreWizard {
     code: string,
     name: string,
     isLocal = false,
+    // Whether the Core is served over HTTPS behind a terminating proxy (from the
+    // health probe). A local/loopback core is always self-signed, so false.
+    behindProxy = false,
   ): Promise<void> {
     const firstEver = (await cores().list()).length === 0;
-    const res = await pairWithCode(baseUrl, CLIENT_NAME, code);
+    const res = await pairWithCode(baseUrl, CLIENT_NAME, code, behindProxy);
     const entry: PairedCoreEntry = {
       id: res.clientId,
       name,
       baseUrl,
+      trustMode: res.trustMode,
       tlsPin: res.tlsPin,
       addedAtMs: Date.now(),
     };
@@ -350,8 +354,8 @@ export class NewCoreWizard {
     }
     this.busy = "checking";
     try {
-      const { version } = await probeCore(url);
-      this.connectionStatus = { kind: "ok", version, checkedUrl: url };
+      const { version, behindProxy } = await probeCore(url);
+      this.connectionStatus = { kind: "ok", version, checkedUrl: url, behindProxy };
       // Connection confirmed: advance to the naming + pairing-code stage.
       this.view = "remotePair";
     } catch (e) {
@@ -407,9 +411,16 @@ export class NewCoreWizard {
       this.error = "Check the connection first";
       return;
     }
+    const { behindProxy } = this.connectionStatus;
     this.busy = "claiming";
     try {
-      await this.claimAndAdd(url, this.remoteCode, this.remoteName.trim() || hostFromUrl(url));
+      await this.claimAndAdd(
+        url,
+        this.remoteCode,
+        this.remoteName.trim() || hostFromUrl(url),
+        false,
+        behindProxy,
+      );
       this.remoteUrl = "";
       this.remoteName = "";
       this.remoteCode = "";
