@@ -474,21 +474,29 @@ async function buildRpm(
     join(buildroot, prefix.slice(1)),
   );
 
+  // The deno-compiled core embeds its whole payload as a ~0.5 GB `.note.sui` ELF
+  // note. rpm classifies every packaged file through libmagic, whose note-size cap
+  // rejects that note ("Note section size too big"), failing the build; no spec
+  // macro disables that classification. dpkg-deb has no such step, so only rpm
+  // needs this: ship the core binary gzip-compressed (libmagic sees gzip data, not
+  // the ELF) and decompress it in %post. The small helper ELFs classify fine, so
+  // they stay raw. -n keeps the archive reproducible (no name/mtime in the header).
+  await run(["gzip", "-n", join(buildroot, prefix.slice(1), "bin", binName)]);
+
   for (const d of ["SPECS", "RPMS", "BUILD", "BUILDROOT"]) await ensureDir(join(work, d));
   const spec = join(work, "SPECS", `${pkgName}.spec`);
   await Deno.writeTextFile(
     spec,
     // Disable rpm's default post-install processing: brp-strip runs `strip` over
-    // the payload, which truncates the deno-compiled core's appended eszip trailer
-    // and ships a binary that can no longer find its embedded code. debug_package
-    // nil suppresses the matching debuginfo subpackage. Both are required for a
-    // prebuilt-binary package.
+    // the payload (harmless on the raw helper ELFs, but pointless), and
+    // debug_package nil suppresses the debuginfo subpackage. The core binary is
+    // shipped gzipped (see above) so brp never touches it either way.
     `%global __os_install_post %{nil}\n%global debug_package %{nil}\n\n` +
       `Name: ${pkgName}\nVersion: ${version}\nRelease: 1\nSummary: tomat Core service\n` +
       `License: proprietary\nBuildArch: ${rpmArch(triple)}\n\n` +
       `%description\ntomat Core - the local-first AI client service.\n\n` +
       `%files\n${prefix}\n\n` +
-      `%post\n${linuxPostBody(channel, prefix, binName)}\n\n` +
+      `%post\n${linuxPostBody(channel, prefix, binName, { gunzipCore: true })}\n\n` +
       `%preun\n${linuxPreunBody(channel, prefix, binName)}\n`,
   );
   await run([
@@ -516,7 +524,16 @@ async function buildRpm(
 // the rpm scriptlets. They resolve the invoking user (packages install as root),
 // copy the payload into that user's ~/.tomat/<channel>/core, and run the
 // binary's own service subcommands as that user.
-function linuxPostBody(channel: ReleaseChannel, prefix: string, binName: string): string {
+function linuxPostBody(
+  channel: ReleaseChannel,
+  prefix: string,
+  binName: string,
+  opts: { gunzipCore?: boolean } = {},
+): string {
+  // rpm ships the core binary gzipped (its ELF note breaks rpm's file classifier -
+  // see buildRpm); decompress the copy in the user's home so install-service finds
+  // the runnable binary. deb ships it raw and skips this.
+  const gunzip = opts.gunzipCore ? `\n  gunzip -f "$DEST/bin/${binName}.gz"` : "";
   return `TARGET_USER="\${SUDO_USER:-$(logname 2>/dev/null || true)}"
 if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ]; then
   echo "no target user; skipping per-user service registration" >&2
@@ -524,7 +541,7 @@ else
   USER_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
   DEST="$USER_HOME/.tomat/${channel}/core"
   mkdir -p "$DEST/bin" "$DEST/workers"
-  cp -R "${prefix}/bin/." "$DEST/bin/"
+  cp -R "${prefix}/bin/." "$DEST/bin/"${gunzip}
   cp -R "${prefix}/workers/." "$DEST/workers/"
   chown -R "$TARGET_USER" "$USER_HOME/.tomat/${channel}"
   su - "$TARGET_USER" -c "TOMAT_CHANNEL=${channel} '$DEST/bin/${binName}' install-service" || true

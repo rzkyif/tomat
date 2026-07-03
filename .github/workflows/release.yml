@@ -249,8 +249,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $NsisVersion = "3.10"
-          $Url = "https://downloads.sourceforge.net/project/nsis/NSIS%203/$NsisVersion/nsis-$NsisVersion.zip"
+          # GitHub-hosted NSIS: SourceForge's redirect mirrors fail intermittently
+          # (this download flaked on x64 while succeeding on arm64). This is the same
+          # distribution Tauri fetches for its own bundler. Its real makensis.exe is
+          # in Bin/ with the support files (Stubs/Plugins/Contrib/Include) at the
+          # archive root, so pick the real exe (largest, over the tiny root shim) and
+          # point NSISDIR at the root so makensis resolves them regardless of cwd.
+          $Url = "https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip"
           $Root = Join-Path $env:RUNNER_TEMP "nsis"
           try {
             New-Item -ItemType Directory -Force -Path $Root | Out-Null
@@ -258,10 +263,13 @@ jobs:
             Write-Host "downloading $Url"
             Invoke-WebRequest -Uri $Url -OutFile $zip -MaximumRetryCount 5 -RetryIntervalSec 5
             Expand-Archive -LiteralPath $zip -DestinationPath $Root -Force
-            $makensis = Get-ChildItem -Recurse -Path $Root -Filter "makensis.exe" | Select-Object -First 1
+            $makensis = Get-ChildItem -Recurse -Path $Root -Filter "makensis.exe" |
+              Sort-Object Length -Descending | Select-Object -First 1
             if (-not $makensis) { throw "makensis.exe not found under $Root" }
+            $nsisDir = $makensis.Directory.Parent.FullName
             Add-Content -Path $env:GITHUB_PATH -Value $makensis.DirectoryName
-            Write-Host "makensis on PATH: $($makensis.DirectoryName)"
+            Add-Content -Path $env:GITHUB_ENV -Value "NSISDIR=$nsisDir"
+            Write-Host "makensis: $($makensis.FullName); NSISDIR=$nsisDir"
           } catch {
             Write-Host "::warning::NSIS staging failed ($($_.Exception.Message)); Core Windows installer will be skipped"
           }
