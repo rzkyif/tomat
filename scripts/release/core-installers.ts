@@ -98,13 +98,19 @@ async function run(argv: string[], cwd?: string): Promise<void> {
 }
 
 async function have(bin: string): Promise<boolean> {
+  // Presence, not success: Deno.Command throws NotFound when the binary is not on
+  // PATH but returns a (possibly non-zero) exit code when it exists. Some tools we
+  // probe reject `--version` (pkgbuild wants an argument, makensis uses /VERSION),
+  // so keying off exit code 0 would false-negative and silently skip the installer.
+  // stdin is closed so a tool that would otherwise read a script/stdin can't hang.
   try {
-    const { code } = await new Deno.Command(bin, {
+    await new Deno.Command(bin, {
       args: ["--version"],
+      stdin: "null",
       stdout: "null",
       stderr: "null",
     }).output();
-    return code === 0;
+    return true;
   } catch {
     return false;
   }
@@ -358,7 +364,7 @@ function windowsNsi(
   // uninstall-service.
   return `!include "MUI2.nsh"
 Name "tomat Core${suffix}"
-OutFile "${outFile.replace(/\\/g, "\\\\")}"
+OutFile "${outFile}"
 RequestExecutionLevel user
 InstallDir "$PROFILE\\.tomat\\${channel}\\core"
 !define UNINST_KEY "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\tomat-core${suffix}"
@@ -369,9 +375,9 @@ InstallDir "$PROFILE\\.tomat\\${channel}\\core"
 
 Section "Install"
   SetOutPath "$INSTDIR\\bin"
-  File /r "${join(payloadDir, "bin").replace(/\\/g, "\\\\")}\\*"
+  File /r "${join(payloadDir, "bin")}\\*"
   SetOutPath "$INSTDIR\\workers"
-  File /r "${join(payloadDir, "workers").replace(/\\/g, "\\\\")}\\*"
+  File /r "${join(payloadDir, "workers")}\\*"
   WriteUninstaller "$INSTDIR\\uninstall.exe"
   WriteRegStr HKCU "\${UNINST_KEY}" "DisplayName" "tomat Core${suffix}"
   WriteRegStr HKCU "\${UNINST_KEY}" "DisplayVersion" "${version}"
@@ -472,7 +478,13 @@ async function buildRpm(
   const spec = join(work, "SPECS", `${pkgName}.spec`);
   await Deno.writeTextFile(
     spec,
-    `Name: ${pkgName}\nVersion: ${version}\nRelease: 1\nSummary: tomat Core service\n` +
+    // Disable rpm's default post-install processing: brp-strip runs `strip` over
+    // the payload, which truncates the deno-compiled core's appended eszip trailer
+    // and ships a binary that can no longer find its embedded code. debug_package
+    // nil suppresses the matching debuginfo subpackage. Both are required for a
+    // prebuilt-binary package.
+    `%global __os_install_post %{nil}\n%global debug_package %{nil}\n\n` +
+      `Name: ${pkgName}\nVersion: ${version}\nRelease: 1\nSummary: tomat Core service\n` +
       `License: proprietary\nBuildArch: ${rpmArch(triple)}\n\n` +
       `%description\ntomat Core - the local-first AI client service.\n\n` +
       `%files\n${prefix}\n\n` +
