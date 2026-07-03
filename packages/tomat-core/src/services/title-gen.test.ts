@@ -6,7 +6,7 @@ import { assertEquals } from "@std/assert";
 import {
   __sanitizeForTesting as sanitize,
   __selectTitleContextForTesting as selectContext,
-} from "./title-gen.ts";
+} from "@tomat/core-engine/services/title-gen";
 
 // A template just large enough to exercise the placeholders; overhead is tiny
 // so the context window is effectively the message budget in these tests.

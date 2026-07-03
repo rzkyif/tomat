@@ -6,15 +6,16 @@
 // the package README for the boundary.
 
 export { init } from "./engine.ts";
-export type { EngineConnection, EngineInstance } from "./engine.ts";
-export { FrameBus } from "./frame-bus.ts";
+export type { EngineConnection, EngineInitOpts, EngineInstance } from "./engine.ts";
+export type { ClientResolver, EngineClient } from "./http/middleware/auth.ts";
+export { __resetFrameBusForTesting, FrameBus, frameBus } from "./frame-bus.ts";
 
 // Platform layer: the runtime handle plus the portable utilities moved services
 // import in place of core's Deno-coupled shared/*. The embedder calls attachHost
 // once at boot; core re-exports the utils from their old paths (thin shims) so
 // existing imports don't churn.
 export { attachHost, host } from "./platform/runtime.ts";
-export { getLogger } from "./platform/log.ts";
+export { getLogger, scrubSecrets } from "./platform/log.ts";
 export type { Logger } from "./platform/log.ts";
 export {
   enginePaths,
@@ -25,6 +26,7 @@ export {
 export type { EnginePaths } from "./platform/paths.ts";
 export { sha256HexSync, toHex } from "./platform/hash.ts";
 export { closeDb, db, openDb } from "./platform/db.ts";
+export { isWithin } from "./platform/fs-safety.ts";
 export {
   AppError,
   conflict,
@@ -57,7 +59,9 @@ export type {
   HostStmt,
   LocalEndpoints,
   LogLevel,
+  McpAdminHost,
   SqlBindValue,
+  StatusHost,
   WriteOpts,
 } from "./host.ts";
 export type {

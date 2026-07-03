@@ -3,7 +3,7 @@
 
 import type { Context, MiddlewareHandler } from "hono";
 import { type AuthedClient, authService } from "../../services/auth.ts";
-import { AppError } from "../../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 declare module "hono" {
   interface ContextVariableMap {

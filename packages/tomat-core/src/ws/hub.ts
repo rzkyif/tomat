@@ -14,6 +14,7 @@
 // during the upgrade handshake.
 
 import type { ServerToClientFrame } from "@tomat/shared";
+import { type EngineConnection, frameBus } from "@tomat/core-engine";
 import {
   chatInterruptWsSchema,
   chatStartWsSchema,
@@ -28,16 +29,19 @@ import {
   wsFrameEnvelopeSchema,
 } from "@tomat/shared";
 import { authService } from "../services/auth.ts";
-import { isOriginAllowed } from "../http/middleware/cors.ts";
-import { chatService } from "../services/chat.ts";
+import { isOriginAllowed } from "@tomat/core-engine/http/middleware/cors";
+import { chatService } from "@tomat/core-engine/services/chat";
 import { coreStatus } from "../services/core-status.ts";
 import { downloadManager } from "../downloads/manager.ts";
 import { subscribeUpdate } from "../update/self-updater.ts";
 import { notifyRequirementsChanged, onRequirementsChanged } from "../services/requirements.ts";
-import { subscribeClientSettings, subscribeCoreSettings } from "../services/core-settings.ts";
-import { subscribeSecretsChanged } from "../services/secrets.ts";
+import {
+  subscribeClientSettings,
+  subscribeCoreSettings,
+} from "@tomat/core-engine/services/core-settings";
+import { subscribeSecretsChanged } from "@tomat/core-engine/services/secrets";
 import { onBinaryInstalled } from "../binaries/manager.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("ws");
@@ -53,6 +57,10 @@ interface Connection {
   ws: WebSocket;
   clientId: string;
   alive: boolean;
+  // The engine FrameBus connection this socket is delivered through. Engine
+  // services broadcast via frameBus(); the subscribe() below pipes each frame to
+  // this socket. Closed when the socket goes away.
+  fb: EngineConnection;
   pingTimer?: ReturnType<typeof setTimeout>;
   pongTimer?: ReturnType<typeof setTimeout>;
 }
@@ -91,30 +99,16 @@ class WsHub {
     return upgrade.response;
   }
 
+  // Delivery is the engine FrameBus's job now: it fans a frame out to every
+  // registered connection's sink (each socket's ws.send, wired in
+  // registerConnection). Engine services broadcast through frameBus() directly;
+  // these delegating methods keep the hub's call shape for shell callers.
   broadcastToClient(clientId: string, frame: ServerToClientFrame): void {
-    const set = this.byClient.get(clientId);
-    if (!set) return;
-    const payload = JSON.stringify(frame);
-    for (const conn of set) {
-      try {
-        conn.ws.send(payload);
-      } catch {
-        /* socket closing */
-      }
-    }
+    frameBus().broadcastToClient(clientId, frame);
   }
 
   broadcastAll(frame: ServerToClientFrame): void {
-    const payload = JSON.stringify(frame);
-    for (const set of this.byClient.values()) {
-      for (const conn of set) {
-        try {
-          conn.ws.send(payload);
-        } catch {
-          /* */
-        }
-      }
-    }
+    frameBus().broadcastAll(frame);
   }
 
   // Force-close every live socket for a client. Called when a client is
@@ -125,6 +119,7 @@ class WsHub {
     const set = this.byClient.get(clientId);
     if (!set) return;
     for (const conn of set) {
+      conn.fb.close();
       if (conn.pingTimer !== undefined) clearTimeout(conn.pingTimer);
       if (conn.pongTimer !== undefined) clearTimeout(conn.pongTimer);
       try {
@@ -139,6 +134,7 @@ class WsHub {
   shutdown(): void {
     for (const set of this.byClient.values()) {
       for (const conn of set) {
+        conn.fb.close();
         // Clear heartbeat timers first so a scheduled tick can't fire on a
         // half-closed socket and trigger a noisy ws.send() failure.
         if (conn.pingTimer !== undefined) clearTimeout(conn.pingTimer);
@@ -156,7 +152,17 @@ class WsHub {
   // --- internals ---------------------------------------------------------
 
   private registerConnection(ws: WebSocket, clientId: string): void {
-    const conn: Connection = { ws, clientId, alive: true };
+    // Register a FrameBus connection and pipe every delivered frame to this
+    // socket. Engine services broadcast via frameBus(); this is the sink.
+    const fb = frameBus().registerConnection(clientId);
+    fb.subscribe((payload) => {
+      try {
+        ws.send(payload);
+      } catch {
+        /* socket closing */
+      }
+    });
+    const conn: Connection = { ws, clientId, alive: true, fb };
     let set = this.byClient.get(clientId);
     if (!set) {
       set = new Set();
@@ -314,6 +320,7 @@ class WsHub {
   }
 
   private removeConnection(conn: Connection): void {
+    conn.fb.close(); // detach this socket's sink from the FrameBus
     const set = this.byClient.get(conn.clientId);
     if (set) {
       set.delete(conn);

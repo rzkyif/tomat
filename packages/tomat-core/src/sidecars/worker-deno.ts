@@ -7,7 +7,7 @@
 
 import { binPath } from "../paths.ts";
 import { binaryName } from "../binaries/versions.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 export async function requireWorkerDeno(): Promise<string> {
   const p = binPath(binaryName("deno"));

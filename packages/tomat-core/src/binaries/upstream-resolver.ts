@@ -17,7 +17,7 @@
 
 import type { BinaryManifestEntry, Triple, UpstreamResolver } from "@tomat/shared";
 import { errMessage, isResolverEntry } from "@tomat/shared";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 interface GitHubReleaseAsset {
   name: string;

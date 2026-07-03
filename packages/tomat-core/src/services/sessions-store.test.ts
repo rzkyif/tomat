@@ -6,11 +6,11 @@
 import { assertEquals, assertNotEquals, assertRejects, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import type { Message } from "@tomat/shared";
-import { sessionsRepo, sweepOrphanedSessionDirs } from "./sessions-store.ts";
+import { sessionsRepo, sweepOrphanedSessionDirs } from "@tomat/core-engine/services/sessions-store";
 import { createTestClient, setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
-import { newMessageId } from "../shared/ids.ts";
-import { AppError } from "../shared/errors.ts";
+import { newMessageId } from "@tomat/core-engine";
+import { AppError } from "@tomat/core-engine";
 
 function userMessage(content = "hello"): Message {
   return {

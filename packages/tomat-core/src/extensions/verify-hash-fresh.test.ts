@@ -7,7 +7,7 @@ import { join } from "@std/path";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { extensionsRegistry } from "./registry.ts";
 import { hashExtension } from "./hash.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 async function makeExtensionDir(): Promise<string> {
   const dir = await Deno.makeTempDir({ prefix: "tomat-tk-verify-" });

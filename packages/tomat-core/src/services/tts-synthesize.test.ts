@@ -1,9 +1,9 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
-import { synthesizeSpeech } from "./tts-synthesize.ts";
-import { __resetForTesting as resetCoreSettings } from "./core-settings.ts";
-import { AppError } from "../shared/errors.ts";
+import { synthesizeSpeech } from "@tomat/core-engine/services/tts-synthesize";
+import { __resetForTesting as resetCoreSettings } from "@tomat/core-engine/services/core-settings";
+import { AppError } from "@tomat/core-engine";
 
 async function writeSettings(s: Record<string, unknown>): Promise<void> {
   await Deno.writeTextFile(paths().settingsFile, JSON.stringify(s));

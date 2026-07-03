@@ -16,7 +16,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpConnectionStatus, McpServer } from "@tomat/shared";
 import { errMessage } from "@tomat/shared";
 import { getLogger } from "../shared/log.ts";
-import { getSecret } from "../services/secrets.ts";
+import { getSecret } from "@tomat/core-engine/services/secrets";
 import { mcpAuthSecretName } from "./secret-key.ts";
 import { McpOAuthProvider } from "./oauth-provider.ts";
 import { requireWorkerDeno } from "../sidecars/worker-deno.ts";

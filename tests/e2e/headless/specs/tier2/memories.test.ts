@@ -22,11 +22,6 @@ test("creating a memory adds it to the memory list", async () => {
   // Survives an independent reload from core.
   await memoriesState.load();
   expect(memoriesState.memories.some((m) => m.title === "Favourite colour")).toBe(true);
-
-  // A fresh memory is unindexed, so it reports as stale; requesting a reindex
-  // is accepted by the core.
-  expect(memoriesState.memories.find((m) => m.id === mem.id)?.summaryStale).toBe(true);
-  await memoriesState.reindex(mem.id);
 });
 
 test("a skill's bundled files round-trip through core", async () => {

@@ -94,3 +94,19 @@ function deliver(sink: FrameSink, payload: string): void {
     // A sink mid-detach must never break delivery to the others.
   }
 }
+
+// The process-wide FrameBus. Engine services broadcast through it
+// (frameBus().broadcastToClient / broadcastAll); the Deno shell registers each
+// upgraded WebSocket as a connection and pipes delivered frames to the socket,
+// so the two share one registry.
+let _instance: FrameBus | null = null;
+export function frameBus(): FrameBus {
+  if (!_instance) _instance = new FrameBus();
+  return _instance;
+}
+
+// Test-only: drop every connection and the cached bus.
+export function __resetFrameBusForTesting(): void {
+  _instance?.closeAll();
+  _instance = null;
+}

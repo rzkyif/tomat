@@ -8,7 +8,7 @@ import { confirmTag, cpaceInitiatorStart, randomSid } from "@tomat/shared";
 import { type AuthService, authService } from "./auth.ts";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { mockClock } from "../../tests/helpers/time.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { paths } from "../paths.ts";
 
 // Core's "real" cert pin for these tests. A client that observed the same pin

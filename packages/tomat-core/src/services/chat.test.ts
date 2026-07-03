@@ -16,41 +16,10 @@
 
 import { assertEquals } from "@std/assert";
 import { pairClient } from "../../tests/helpers/pairing.ts";
-import { buildApp } from "../http/server.ts";
-import { patchCoreSettings } from "./core-settings.ts";
+import { startTestServer } from "../../tests/helpers/serve.ts";
+import { patchCoreSettings } from "@tomat/core-engine/services/core-settings";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import { wsHub } from "../ws/hub.ts";
 import { fakeOpenAIFetch } from "../../tests/helpers/fake-openai.ts";
-
-interface RunningServer {
-  port: number;
-  stop(): Promise<void>;
-}
-
-function startServer(): RunningServer {
-  const app = buildApp();
-  const hub = wsHub();
-  const abort = new AbortController();
-  const server = Deno.serve(
-    {
-      port: 0,
-      hostname: "127.0.0.1",
-      signal: abort.signal,
-    },
-    (req) => {
-      const url = new URL(req.url);
-      if (url.pathname === "/ws/v1") return hub.handleUpgrade(req);
-      return app.fetch(req);
-    },
-  );
-  return {
-    port: (server.addr as Deno.NetAddr).port,
-    async stop() {
-      abort.abort();
-      await server.finished.catch(() => {});
-    },
-  };
-}
 
 interface CollectedFrame {
   kind: string;
@@ -103,7 +72,7 @@ async function withChatHarness(
   }) => Promise<void>,
 ): Promise<void> {
   const env = await setupTestEnv();
-  const server = startServer();
+  const server = await startTestServer();
   const originalFetch = globalThis.fetch;
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url =

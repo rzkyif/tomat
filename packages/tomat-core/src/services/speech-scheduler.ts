@@ -13,7 +13,7 @@
 // Unlike the LLM scheduler this wraps a single request/response promise, not a
 // streamed async iterator, so the surface is `schedule(clientId, fn)`.
 
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { coreStatus } from "./core-status.ts";
 
 // The speech sidecar runs one engine; STT and TTS share its threads, so a

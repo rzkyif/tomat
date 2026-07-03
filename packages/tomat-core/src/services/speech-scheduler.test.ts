@@ -3,7 +3,7 @@
 
 import { assertEquals, assertRejects } from "@std/assert";
 import { SpeechScheduler } from "./speech-scheduler.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 // A controllable task: resolves only when its release fn is called, so the test
 // can hold a slot and inspect queue behavior deterministically.

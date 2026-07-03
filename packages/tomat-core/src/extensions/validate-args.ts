@@ -13,7 +13,7 @@ import { Ajv, type AnySchema, type ValidateFunction } from "ajv";
 // height).
 import safeRegexUntyped from "safe-regex";
 import type { Tool } from "@tomat/shared";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("extensions.validate");

@@ -6,7 +6,7 @@ import { assertEquals } from "@std/assert";
 import { DEFAULT_SAMPLING } from "@tomat/shared";
 import { attachHost } from "@tomat/core-engine";
 import { denoHost } from "../host/deno-host.ts";
-import { resolveContextSize, resolveEndpoint } from "./endpoint-resolver.ts";
+import { resolveContextSize, resolveEndpoint } from "@tomat/core-engine/services/endpoint-resolver";
 
 // Pure-transform tests: the only side effect is resolveExternalApiKey's vault
 // lookup, which must resolve to "no key". Point the engine host at an isolated

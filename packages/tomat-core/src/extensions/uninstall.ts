@@ -13,8 +13,8 @@
 
 import { join } from "@std/path";
 import { deleteExtensionData } from "../services/module-broker.ts";
-import { memoriesStore } from "../services/memories-store.ts";
-import { AppError } from "../shared/errors.ts";
+import { memoriesStore } from "@tomat/core-engine/services/memories-store";
+import { AppError } from "@tomat/core-engine";
 import { extensionsRegistry } from "./registry.ts";
 import { workerPool } from "./worker-pool.ts";
 

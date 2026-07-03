@@ -9,7 +9,7 @@
 import { Hono } from "hono";
 import type { SidecarKind, SidecarSnapshot, SidecarsStatusResponse } from "@tomat/shared";
 import { sidecarManager } from "../../sidecars/manager.ts";
-import { loadCoreSettings } from "../../services/core-settings.ts";
+import { loadCoreSettings } from "@tomat/core-engine/services/core-settings";
 import {
   buildLlamaStartOptionsScaled,
   llamaMissingPrereq,
@@ -17,7 +17,7 @@ import {
 } from "../../sidecars/llama.ts";
 import { buildSpeechStartOptions, speechDesiredState } from "../../sidecars/speech.ts";
 import { sampleProcessMetrics } from "../../sidecars/process-metrics.ts";
-import { AppError } from "../../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
 const SUPERVISED: ReadonlySet<SidecarKind> = new Set(["llama", "speech"]);

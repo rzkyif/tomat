@@ -17,7 +17,10 @@ test("an enabled greeting opens an automated session with the greeting reply on 
   app = await launchApp({
     scenario: "paired",
     llm: { kind: "text", text: "Hello and welcome!" },
-    settings: {
+    // greetings.* are client-local (destination: client-on-client): the client
+    // gates on them and only POSTs /greetings/run when one should fire, so they
+    // must be seeded into the client's local settings, not the core's.
+    clientSettings: {
       "greetings.enabled": true,
       "greetings.runOn": "every_start",
       "greetings.instruction": "Greet the user.",

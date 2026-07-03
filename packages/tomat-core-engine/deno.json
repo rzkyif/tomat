@@ -24,10 +24,20 @@
     "./services/chat-tool-selection": "./src/services/chat-tool-selection.ts",
     "./services/chat-tool-dispatch": "./src/services/chat-tool-dispatch.ts",
     "./services/stt-transcribe": "./src/services/stt-transcribe.ts",
-    "./services/tts-synthesize": "./src/services/tts-synthesize.ts"
+    "./services/tts-synthesize": "./src/services/tts-synthesize.ts",
+    "./services/memories-store": "./src/services/memories-store.ts",
+    "./services/memory-injection": "./src/services/memory-injection.ts",
+    "./services/chat-attachments": "./src/services/chat-attachments.ts",
+    "./services/llm-scheduler": "./src/services/llm-scheduler.ts",
+    "./services/chat-stream-muxer": "./src/services/chat-stream-muxer.ts",
+    "./services/title-gen": "./src/services/title-gen.ts",
+    "./services/chat": "./src/services/chat.ts",
+    "./http/body": "./src/http/body.ts",
+    "./http/middleware/cors": "./src/http/middleware/cors.ts",
+    "./http/middleware/errors": "./src/http/middleware/errors.ts"
   },
   "tasks": {
-    "check": "deno check src/index.ts src/services/*.ts",
+    "check": "deno check src/index.ts src/services/*.ts src/http/*.ts src/http/**/*.ts",
     "test:js": "deno test --allow-all --no-check --quiet --reporter=dot",
     "test": "deno task test:js"
   },
@@ -37,6 +47,9 @@
     "@std/path": "jsr:@std/path@^1.0.0",
     "@std/ulid": "jsr:@std/ulid@^1.0.0",
     "@noble/hashes": "npm:@noble/hashes@^2.2.0",
-    "openai": "npm:openai@^6.42.0"
+    "@std/encoding": "jsr:@std/encoding@^1.0.0",
+    "openai": "npm:openai@^6.42.0",
+    "hono": "npm:hono@^4.12.23",
+    "zod": "npm:zod@^4.4.3"
   }
 }

@@ -391,6 +391,21 @@ try {
     }
   }
 
+  # Best-effort: the NSIS uninstaller removes shortcuts by the baked productName
+  # ("tomat-latest.lnk"), but this channel's installer renamed them to the friendly
+  # DisplayName ("tomat (latest).lnk"), so the uninstaller leaves those orphaned.
+  # Remove them here. Stable's productName equals its DisplayName, so NSIS already
+  # handled it and this is a no-op.
+  if ($Channel -ne "stable") {
+    $DisplayName = if ($Channel -eq "latest") { "tomat (latest)" } else { "tomat (dev)" }
+    foreach ($dir in @([Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop"))) {
+      $lnk = Join-Path $dir "$DisplayName.lnk"
+      if (Test-Path -LiteralPath $lnk) {
+        try { Remove-Item -LiteralPath $lnk -Force } catch { }
+      }
+    }
+  }
+
   # --- action 3: purge client data dir -----------------------------------
 
   if ($Purge) {

@@ -12,7 +12,7 @@ import {
   isNoSpaceError,
   notFound,
   validation,
-} from "./errors.ts";
+} from "@tomat/core-engine";
 
 Deno.test("AppError: maps every ErrorCode to its documented HTTP status", () => {
   for (const [code, status] of Object.entries(ERROR_STATUS)) {

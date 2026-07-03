@@ -57,20 +57,22 @@
   <div class="columns-1 sm:columns-2 lg:columns-3 gap-4">
     {#each entries(P.Button) as [name, p] (name)}
       <GalleryCard label={`Button · ${name}`} surface>
-        <Button {...p as ComponentProps<typeof Button>} onclick={noop}>Button</Button>
+        <Button {...p as Omit<ComponentProps<typeof Button>, "children">} onclick={noop}
+          >Button</Button
+        >
       </GalleryCard>
     {/each}
 
     {#each entries(P.IconButton) as [name, p] (name)}
       <GalleryCard label={`IconButton · ${name}`} surface>
-        <IconButton {...p as ComponentProps<typeof IconButton>} onclick={noop} />
+        <IconButton {...p as Omit<ComponentProps<typeof IconButton>, "children">} onclick={noop} />
       </GalleryCard>
     {/each}
 
     {#each entries(P.IconText) as [name, p] (name)}
       <GalleryCard label={`IconText · ${name}`} surface>
         <div class="w-56">
-          <IconText {...p as ComponentProps<typeof IconText>}>
+          <IconText {...p as Omit<ComponentProps<typeof IconText>, "children">}>
             {#if name === "header"}
               <code
                 class="font-mono bg-accent-yellow-200 text-accent-yellow-700 rounded-small px-1.5 py-0.5"
@@ -89,7 +91,7 @@
 
     {#each entries(P.ButtonGroup) as [name, p] (name)}
       <GalleryCard label={`ButtonGroup · ${name}`} surface>
-        <ButtonGroup {...p as ComponentProps<typeof ButtonGroup>}>
+        <ButtonGroup {...p as Omit<ComponentProps<typeof ButtonGroup>, "children">}>
           <Button variant="ghost" onclick={noop}>One</Button>
           <Button variant="ghost" onclick={noop}>Two</Button>
         </ButtonGroup>
@@ -99,33 +101,43 @@
     {#each entries(P.Alert) as [name, p] (name)}
       <GalleryCard label={`Alert · ${name}`} surface>
         <div class="w-64">
-          <Alert {...p as ComponentProps<typeof Alert>}>Something needs your attention.</Alert>
+          <Alert {...p as Omit<ComponentProps<typeof Alert>, "children">}
+            >Something needs your attention.</Alert
+          >
         </div>
       </GalleryCard>
     {/each}
 
     {#each entries(P.Chip) as [name, p] (name)}
       <GalleryCard label={`Chip · ${name}`} surface>
-        <Chip {...p as ComponentProps<typeof Chip>} />
+        <Chip {...p as Omit<ComponentProps<typeof Chip>, "children">} />
       </GalleryCard>
     {/each}
 
     {#each entries(P.Checkbox) as [name, p] (name)}
       <GalleryCard label={`Checkbox · ${name}`} surface>
-        <Checkbox {...p as ComponentProps<typeof Checkbox>} ariaLabel="Sample" onchange={noop} />
+        <Checkbox
+          {...p as Omit<ComponentProps<typeof Checkbox>, "children">}
+          ariaLabel="Sample"
+          onchange={noop}
+        />
       </GalleryCard>
     {/each}
 
     {#each entries(P.Toggle) as [name, p] (name)}
       <GalleryCard label={`Toggle · ${name}`} surface>
-        <Toggle {...p as ComponentProps<typeof Toggle>} onchange={noop} onselect={noop} />
+        <Toggle
+          {...p as Omit<ComponentProps<typeof Toggle>, "children">}
+          onchange={noop}
+          onselect={noop}
+        />
       </GalleryCard>
     {/each}
 
     {#each entries(P.Input) as [name, p] (name)}
       <GalleryCard label={`Input · ${name}`} surface>
         <div class="w-56">
-          <Input {...p as ComponentProps<typeof Input>} oninput={noop} />
+          <Input {...p as Omit<ComponentProps<typeof Input>, "children">} oninput={noop} />
         </div>
       </GalleryCard>
     {/each}
@@ -133,7 +145,11 @@
     {#each entries(P.Textarea) as [name, p] (name)}
       <GalleryCard label={`Textarea · ${name}`} surface>
         <div class="w-64">
-          <Textarea {...p as ComponentProps<typeof Textarea>} oninput={noop} minHeight="min-h-20" />
+          <Textarea
+            {...p as Omit<ComponentProps<typeof Textarea>, "children">}
+            oninput={noop}
+            minHeight="min-h-20"
+          />
         </div>
       </GalleryCard>
     {/each}
@@ -141,21 +157,28 @@
     {#each entries(P.Select) as [name, p] (name)}
       <GalleryCard label={`Select · ${name}`} surface>
         <div class="w-56">
-          <Select {...p as ComponentProps<typeof Select>} onchange={noop} />
+          <Select {...p as Omit<ComponentProps<typeof Select>, "children">} onchange={noop} />
         </div>
       </GalleryCard>
     {/each}
 
     {#each entries(P.FlushSelect) as [name, p] (name)}
       <GalleryCard label={`FlushSelect · ${name}`} surface>
-        <FlushSelect {...p as ComponentProps<typeof FlushSelect>} onchange={noop} />
+        <FlushSelect
+          {...p as Omit<ComponentProps<typeof FlushSelect>, "children">}
+          onchange={noop}
+        />
       </GalleryCard>
     {/each}
 
     {#each entries(P.SearchInput) as [name, p] (name)}
       <GalleryCard label={`SearchInput · ${name}`} surface>
         <div class="w-56">
-          <SearchInput {...p as ComponentProps<typeof SearchInput>} oninput={noop} onclear={noop} />
+          <SearchInput
+            {...p as Omit<ComponentProps<typeof SearchInput>, "children">}
+            oninput={noop}
+            onclear={noop}
+          />
         </div>
       </GalleryCard>
     {/each}
@@ -163,7 +186,7 @@
     {#each entries(P.Slider) as [name, p] (name)}
       <GalleryCard label={`Slider · ${name}`} surface>
         <div class="w-64">
-          <Slider {...p as ComponentProps<typeof Slider>} oninput={noop} />
+          <Slider {...p as Omit<ComponentProps<typeof Slider>, "children">} oninput={noop} />
         </div>
       </GalleryCard>
     {/each}
@@ -171,7 +194,7 @@
     {#each entries(P.Tabs) as [name, p] (name)}
       <GalleryCard label={`Tabs · ${name}`} surface>
         <div class="w-64">
-          <Tabs {...p as ComponentProps<typeof Tabs>} onSelect={noop} />
+          <Tabs {...p as Omit<ComponentProps<typeof Tabs>, "children">} onSelect={noop} />
         </div>
       </GalleryCard>
     {/each}
@@ -179,14 +202,17 @@
     {#each entries(P.OptionCard) as [name, p] (name)}
       <GalleryCard label={`OptionCard · ${name}`} surface>
         <div class="w-56">
-          <OptionCard {...p as ComponentProps<typeof OptionCard>} onclick={noop} />
+          <OptionCard
+            {...p as Omit<ComponentProps<typeof OptionCard>, "children">}
+            onclick={noop}
+          />
         </div>
       </GalleryCard>
     {/each}
 
     {#each entries(P.Card) as [name, p] (name)}
       <GalleryCard label={`Card · ${name}`} surface>
-        <Card {...p as ComponentProps<typeof Card>}>
+        <Card {...p as Omit<ComponentProps<typeof Card>, "children">}>
           <div class="text-sm text-default-700">Card content</div>
         </Card>
       </GalleryCard>
@@ -195,14 +221,16 @@
     {#each entries(P.Bubble) as [name, p] (name)}
       <!-- A Bubble is its own surface; it sits straight on the grid, not in a panel. -->
       <GalleryCard label={`Bubble · ${name}`}>
-        <Bubble {...p as ComponentProps<typeof Bubble>}>A message bubble.</Bubble>
+        <Bubble {...p as Omit<ComponentProps<typeof Bubble>, "children">}>A message bubble.</Bubble>
       </GalleryCard>
     {/each}
 
     {#each entries(P.ListItem) as [name, p] (name)}
       <GalleryCard label={`ListItem · ${name}`} surface>
         <div class="w-56">
-          <ListItem {...p as ComponentProps<typeof ListItem>} onclick={noop}>List row</ListItem>
+          <ListItem {...p as Omit<ComponentProps<typeof ListItem>, "children">} onclick={noop}
+            >List row</ListItem
+          >
         </div>
       </GalleryCard>
     {/each}
@@ -210,7 +238,10 @@
     {#each entries(P.SidebarItem) as [name, p] (name)}
       <GalleryCard label={`SidebarItem · ${name}`} surface>
         <div class="w-48">
-          <SidebarItem {...p as ComponentProps<typeof SidebarItem>} onclick={noop} />
+          <SidebarItem
+            {...p as Omit<ComponentProps<typeof SidebarItem>, "children">}
+            onclick={noop}
+          />
         </div>
       </GalleryCard>
     {/each}
@@ -218,7 +249,10 @@
     {#each entries(P.SectionHeader) as [name, p] (name)}
       <GalleryCard label={`SectionHeader · ${name}`} surface>
         <div class="w-64">
-          <SectionHeader {...p as ComponentProps<typeof SectionHeader>} onToggle={noop} />
+          <SectionHeader
+            {...p as Omit<ComponentProps<typeof SectionHeader>, "children">}
+            onToggle={noop}
+          />
         </div>
       </GalleryCard>
     {/each}
@@ -226,7 +260,7 @@
     {#each entries(P.SubsectionHeader) as [name, p] (name)}
       <GalleryCard label={`SubsectionHeader · ${name}`} surface>
         <div class="w-64">
-          <SubsectionHeader {...p as ComponentProps<typeof SubsectionHeader>} />
+          <SubsectionHeader {...p as Omit<ComponentProps<typeof SubsectionHeader>, "children">} />
         </div>
       </GalleryCard>
     {/each}
@@ -234,7 +268,7 @@
     {#each entries(P.FormField) as [name, p] (name)}
       <GalleryCard label={`FormField · ${name}`} surface>
         <div class="w-64">
-          <FormField {...p as ComponentProps<typeof FormField>} onReset={noop}>
+          <FormField {...p as Omit<ComponentProps<typeof FormField>, "children">} onReset={noop}>
             <Input value="" placeholder="Value" oninput={noop} />
           </FormField>
         </div>
@@ -244,7 +278,7 @@
     {#each entries(P.HelpText) as [name, p] (name)}
       <GalleryCard label={`HelpText · ${name}`} surface>
         <div class="w-64">
-          <HelpText {...p as ComponentProps<typeof HelpText>} />
+          <HelpText {...p as Omit<ComponentProps<typeof HelpText>, "children">} />
         </div>
       </GalleryCard>
     {/each}
@@ -252,7 +286,7 @@
     {#each entries(P.Markdown) as [name, p] (name)}
       <GalleryCard label={`Markdown · ${name}`} surface>
         <div class="w-64">
-          <Markdown {...p as ComponentProps<typeof Markdown>} />
+          <Markdown {...p as Omit<ComponentProps<typeof Markdown>, "children">} />
         </div>
       </GalleryCard>
     {/each}
@@ -260,7 +294,7 @@
     {#each entries(P.Expandable) as [name, p] (name)}
       <GalleryCard label={`Expandable · ${name}`} surface>
         <div class="w-64">
-          <Expandable {...p as ComponentProps<typeof Expandable>}>
+          <Expandable {...p as Omit<ComponentProps<typeof Expandable>, "children">}>
             {#snippet title()}
               <span class="text-sm font-medium text-default-700">Details</span>
             {/snippet}
@@ -273,10 +307,10 @@
     {#each entries(P.Expand) as [name, p] (name)}
       <GalleryCard label={`Expand · ${name}`} surface>
         <div class="w-64 text-sm text-default-600">
-          <Expand {...p as ComponentProps<typeof Expand>}>
+          <Expand {...p as Omit<ComponentProps<typeof Expand>, "children">}>
             <p>Revealed content.</p>
           </Expand>
-          {#if !(p as ComponentProps<typeof Expand>).open}
+          {#if !(p as Omit<ComponentProps<typeof Expand>, "children">).open}
             <span class="text-default-400">(collapsed: nothing rendered)</span>
           {/if}
         </div>
@@ -287,7 +321,7 @@
       <GalleryCard label={`CollapsibleLabel · ${name}`} surface>
         <div class="flex items-center gap-1 text-sm text-default-700">
           <span class="i-material-symbols-folder-outline-rounded text-base"></span>
-          <CollapsibleLabel {...p as ComponentProps<typeof CollapsibleLabel>}
+          <CollapsibleLabel {...p as Omit<ComponentProps<typeof CollapsibleLabel>, "children">}
             >Label</CollapsibleLabel
           >
         </div>
@@ -298,7 +332,11 @@
     {#each entries(P.Modal) as [name, p] (name)}
       <GalleryCard label={`Modal · ${name}`} backdrop>
         <div class="relative h-72 w-full">
-          <Modal {...p as ComponentProps<typeof Modal>} onclose={noop} ariaLabel="Sample modal">
+          <Modal
+            {...p as Omit<ComponentProps<typeof Modal>, "children">}
+            onclose={noop}
+            ariaLabel="Sample modal"
+          >
             <h3 class="text-base font-medium text-default-800">Dialog title</h3>
             <p class="text-sm text-default-600">A centered dialog over a dimmed backdrop.</p>
           </Modal>
@@ -310,7 +348,7 @@
       <GalleryCard label={`ActionSheet · ${name}`} backdrop>
         <div class="relative h-80 w-full">
           <ActionSheet
-            {...p as ComponentProps<typeof ActionSheet>}
+            {...p as Omit<ComponentProps<typeof ActionSheet>, "children">}
             onclose={noop}
             items={[
               {
@@ -341,7 +379,7 @@
             Anchor
           </button>
           <Popover
-            {...p as ComponentProps<typeof Popover>}
+            {...p as Omit<ComponentProps<typeof Popover>, "children">}
             anchor={popoverAnchor}
             onclose={noop}
             ariaLabel="Sample popover"

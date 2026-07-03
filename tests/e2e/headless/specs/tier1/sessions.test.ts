@@ -1,6 +1,6 @@
 // Tier 1: session management. Create a session, send into it, start a new one
 // (transcript clears), and browse the session list.
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 import { launchApp, type AppHandle } from "../../harness/app.ts";
 import { sessionsState } from "@client/state/sessions.svelte";
@@ -31,10 +31,14 @@ test("lists prior sessions in the session list", async () => {
   const countAfterFirst = sessionsState.list.length;
   expect(countAfterFirst).toBeGreaterThanOrEqual(1);
 
-  // Explicitly start a second session (create() sets the active id) and send.
+  // Explicitly start a second session and send. create() only enters compose
+  // mode (the server session is minted lazily by the first user message), and
+  // that mint is an async round-trip kicked off by the send click, so wait for
+  // the new active id to settle before capturing it.
   await sessionsState.create();
-  const secondId = sessionsState.id;
   await app.chat.send("second session message");
+  await vi.waitFor(() => expect(sessionsState.id).toBeTruthy(), { timeout: 20_000 });
+  const secondId = sessionsState.id;
 
   await app.nav.openSessions();
   await sessionsState.loadList();

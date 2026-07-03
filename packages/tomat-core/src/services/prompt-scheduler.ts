@@ -15,13 +15,13 @@
 
 import type { ScheduledPrompt, ScheduledPromptDraft, ScheduleSpec, Session } from "@tomat/shared";
 import { errMessage } from "@tomat/shared";
-import { db } from "../db/connection.ts";
+import { db } from "@tomat/core-engine";
 import { sidecarManager } from "../sidecars/manager.ts";
-import { AppError } from "../shared/errors.ts";
-import { newScheduledPromptId } from "../shared/ids.ts";
+import { AppError } from "@tomat/core-engine";
+import { newScheduledPromptId } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { type AutomatedSessionInput, runAutomatedSession } from "./automated-session.ts";
-import { loadCoreSettings } from "./core-settings.ts";
+import { loadCoreSettings } from "@tomat/core-engine/services/core-settings";
 
 const log = getLogger("prompt-scheduler");
 

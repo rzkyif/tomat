@@ -5,14 +5,14 @@
 
 import { assertEquals, assertRejects } from "@std/assert";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import { patchCoreSettings } from "./core-settings.ts";
+import { patchCoreSettings } from "@tomat/core-engine/services/core-settings";
 import {
   activeEmbedModelId,
   embed,
   initEmbeddingService,
   isEmbeddingModelReady,
-} from "./embedding.ts";
-import { AppError } from "../shared/errors.ts";
+} from "@tomat/core-engine/services/embedding";
+import { AppError } from "@tomat/core-engine";
 
 // Configure external llm + a Relevance Model, with a plaintext API key (the
 // vault fallback resolveExternalApiKey honors for a non-loopback host).

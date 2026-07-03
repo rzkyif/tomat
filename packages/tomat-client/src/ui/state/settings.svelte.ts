@@ -59,8 +59,8 @@ const SECRET_KEY_SET = new Set<string>(SECRET_KEYS);
 
 // Schema defaults, captured once: every value is a scalar, so sharing one
 // copy for lookups is safe. The merged $state record gets its own copy in the
-// constructor. A platform default overlay (setPlatformDefaults) may raise one
-// key at boot, so this is not frozen.
+// constructor. A platform default overlay (setPlatformDefaults) may raise some
+// keys at boot, so this is not frozen.
 const DEFAULTS: Record<string, unknown> = getDefaultSettings();
 
 function destinationFor(key: string): SettingDestination {
@@ -327,18 +327,35 @@ class SettingsState {
 
   // --- loads ----------------------------------------------------------------
 
-  /** Raise platform-specific defaults before the first settings load. Mobile
-   *  reads at a larger base text size (18px vs the desktop 16): a real default,
-   *  not a post-load override, so the sparse layer treats 18 as the mobile
-   *  baseline and a user who picks 16 has it persisted like any non-default.
-   *  Idempotent; called once from the layout boot with the resolved form factor,
-   *  before loadClientSettings merges the stored file over these defaults. */
-  setPlatformDefaults(mobile: boolean): void {
+  /** Raise platform-specific defaults before the first settings load. Two cases:
+   *  - Mobile reads at a larger base text size (18px vs the desktop 16).
+   *  - Windows global-shortcut defaults must not lead with `super`: that maps to
+   *    the OS-reserved Win key, which `RegisterHotKey` accepts but Windows then
+   *    silently swallows, so the default hotkeys never fire. Use `super`-free
+   *    combos there instead (mac/Linux keep `super` = Cmd, which works).
+   *  These are REAL defaults, not post-load overrides: the sparse layer treats
+   *  them as the platform baseline, so a user who picks another value has it
+   *  persisted like any non-default. Idempotent; called once from the layout boot
+   *  with the resolved platform, before loadClientSettings merges the stored file
+   *  over these defaults. */
+  setPlatformDefaults(mobile: boolean, windows: boolean): void {
     if (mobile) DEFAULTS["appearance.textSize"] = 18;
+    if (windows) {
+      DEFAULTS["shortcuts.toggleWindow"] = "ctrl+alt+shift+z";
+      DEFAULTS["shortcuts.attachFile"] = "ctrl+alt+shift+a";
+      DEFAULTS["shortcuts.captureScreen"] = "ctrl+alt+shift+s";
+      DEFAULTS["shortcuts.captureRegion"] = "ctrl+alt+shift+x";
+    }
     // Reflect into the live merged view unless the user already overrode it, so
     // the first paint (before loadClientSettings rebuilds the merge) is correct.
-    if (!("appearance.textSize" in this.clientSparse)) {
-      this.currentSettings["appearance.textSize"] = DEFAULTS["appearance.textSize"];
+    for (const key of [
+      "appearance.textSize",
+      "shortcuts.toggleWindow",
+      "shortcuts.attachFile",
+      "shortcuts.captureScreen",
+      "shortcuts.captureRegion",
+    ]) {
+      if (!(key in this.clientSparse)) this.currentSettings[key] = DEFAULTS[key];
     }
   }
 

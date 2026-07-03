@@ -10,7 +10,7 @@ import type {
   TtsPresetView,
 } from "@tomat/shared";
 import { modelFilesObject, primaryFileSpec, TTS_PRIMARY_ROLE } from "@tomat/shared";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 /** Resolve the curated cards against the catalog (badges + voices for the
  *  client). Presets are validated at catalog build time, so a dangling reference

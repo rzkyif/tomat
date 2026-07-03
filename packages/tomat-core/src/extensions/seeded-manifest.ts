@@ -21,7 +21,7 @@ import { canonicalize, decodeBase64, errMessage } from "@tomat/shared";
 import type { BuiltinExtensionManifest, SeededExtension } from "@tomat/shared";
 import { builtinExtensionManifestUrl } from "../config.ts";
 import { channel, paths } from "../paths.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { compareSemver } from "../shared/semver.ts";
 import { hashExtension } from "./hash.ts";

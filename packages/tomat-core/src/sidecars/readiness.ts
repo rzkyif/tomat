@@ -10,7 +10,7 @@
 // until the deadline. Keeping the marker logic in manager.ts means we don't
 // have to tee streams just to expose them externally.
 
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 export const HEALTH_CHECK_ATTEMPTS = 30;
 export const HEALTH_CHECK_INTERVAL_MS = 1_000;

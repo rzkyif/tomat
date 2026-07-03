@@ -20,17 +20,17 @@
     highlightLabel?: string;
     highlightTarget?: string;
   } = $props();
-  const props = $derived(userInputSamples[scenario] as ComponentProps<typeof UserInputView>);
+  const viewProps: ComponentProps<typeof UserInputView> = $derived(userInputSamples[scenario]);
 </script>
 
 <DemoFrame {label} highlighted={!!highlightTarget} designWidth={620}>
   <div class="mx-auto w-full max-w-[620px]">
     {#if highlightTarget}
       <Highlight label={highlightLabel} target={highlightTarget}>
-        <UserInputView {...props} />
+        <UserInputView {...viewProps} />
       </Highlight>
     {:else}
-      <UserInputView {...props} />
+      <UserInputView {...viewProps} />
     {/if}
   </div>
 </DemoFrame>

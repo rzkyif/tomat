@@ -39,51 +39,52 @@
   const meta: { title: string; desc?: string; descHtml?: string }[] = [
     {
       title: "tomat is an open-source AI assistant",
-      desc: "Press the shortcut key and it will show up over other applications for quick access. It has been designed to feel integrated to your operating system.",
+      desc: "Press the shortcut key and it will show up as an overlay on top of other applications for quick access. Designed to feel like an integrated AI assistant.",
     },
     {
       title: "End-to-end speech capabilities",
-      desc: "Speech-to-Text lets you talk to the assistant, Text-to-Speech lets you hear the assistant.",
+      desc: "Speech-to-Text lets you talk to the assistant, Text-to-Speech lets the assistant speak to you.",
     },
     {
       title: "Local-first for privacy and security",
       descHtml:
-        'Powered by <a class="relative z-30 underline transition-interactive hov:text-default-900" href="https://github.com/ggml-org/llama.cpp" target="_blank" rel="noreferrer">llama.cpp</a> and <a class="relative z-30 underline transition-interactive hov:text-default-900" href="https://github.com/k2-fsa/sherpa-onnx" target="_blank" rel="noreferrer">sherpa-onnx</a> to provide a selection of state-of-the-art local language and audio models. Runs completely off the internet, while still allowing you to use external providers if you want.',
+        'Powered by <a class="relative z-30 underline transition-interactive hov:text-default-900" href="https://github.com/ggml-org/llama.cpp" target="_blank" rel="noreferrer">llama.cpp</a> and <a class="relative z-30 underline transition-interactive hov:text-default-900" href="https://github.com/k2-fsa/sherpa-onnx" target="_blank" rel="noreferrer">sherpa-onnx</a> to provide a wide selection of local language and speech models. Runs completely off the internet, while still allowing you to use external providers if you want.',
     },
     {
-      title: "Dual model complexity detection",
-      desc: "You can also choose to run a small model locally while redirecting more complex requests to an external provider.",
+      title: "Dual model routing",
+      desc: "Set it up to use a small model locally while redirecting more complex requests to a more powerful external model.",
     },
     {
-      title: "Complete themability",
-      desc: "Change the colors, the fonts, the shapes, and the effects, because why not?",
+      title: "Complete themeability",
+      desc: "Change the colors, fonts, shapes, effects, and more, because why not?",
     },
     {
       title: "Built-in downloader",
-      desc: "Everything you need to run the models are automatically listed along with the file sizes and downloaded upon approval.",
+      desc: "Everything you need to start is automatically listed along with the file sizes and downloaded upon approval.",
     },
     {
       title: "Knowledges and skills",
-      desc: "Configure the assistant with the knowledges and skills it needs, and it will automatically recall the most relevant ones on every prompt.",
+      desc: "Set up the assistant with extra information on things and how to do things, and it will automatically recall the most relevant ones on every prompt.",
     },
     {
       title: "Model Context Protocol support",
-      desc: "Plug-in popular MCP servers to quickly give your assistant access to external services.",
+      desc: "Plug in popular MCP servers to quickly give the assistant access to various external services.",
     },
     {
-      title: "Write your own tools",
-      desc: "If you need the agent to do something super specific, write your own simple tool in JavaScript or TypeScript by making use of our powerful Tools API.",
+      title: "Highly extensible via Extensions",
+      descHtml:
+        'For things super specific to your use case, write your own simple tool in JavaScript or TypeScript with our <a class="relative z-30 underline transition-interactive hov:text-default-900" href="/manual/tools/extensions">Extensions system</a>.',
     },
     {
       title: "Sandboxed tool execution",
-      descHtml: `Tools runs on the <a class="relative z-30 underline transition-interactive hov:text-default-900" href="https://deno.com/" target="_blank" rel="noreferrer">deno</a> runtime and are constrained by its sandboxing system, letting you worry less when using third-party tools.`,
+      descHtml: `Tools from extensions are run on the secure-by-default <a class="relative z-30 underline transition-interactive hov:text-default-900" href="https://deno.com/" target="_blank" rel="noreferrer">deno</a> runtime and makes full use of its granular permission system.`,
     },
     {
-      title: "Make it greet you",
-      desc: "Set it up to automatically greet you in a certain way when your PC starts or on every app open.",
+      title: "Automated greetings system",
+      desc: "Set it up to automatically greet you when your PC starts, or everytime the app is opened.",
     },
     {
-      title: "Run scheduled prompts",
+      title: "Scheduled prompting",
       desc: "Make the agent do regular or repetitive tasks automatically on a schedule.",
     },
     {

@@ -12,15 +12,15 @@
 // Caller passes an `EventSink` to receive install_log + install_done frames for
 // forwarding to the requesting client over WS.
 import { errMessage } from "@tomat/shared";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
-import { newJobId } from "../shared/ids.ts";
+import { newJobId } from "@tomat/core-engine";
 import { flattenNpmName, type InstallEventSink, type InstallSource } from "./installer-shared.ts";
 import { runDownload } from "./installer-download.ts";
 import { runInstallDeps } from "./installer-deps.ts";
 
 // Re-exported public surface (callers + tests import these from here).
-export { isWithin } from "../shared/fs-safety.ts";
+export { isWithin } from "@tomat/core-engine";
 export { flattenPermissions, registerLocalDownloaded } from "./installer-register.ts";
 export { extractableEntryType, verifyTarball } from "./installer-download.ts";
 export { flattenNpmName };

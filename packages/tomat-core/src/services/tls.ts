@@ -25,7 +25,7 @@ import * as x509 from "@peculiar/x509";
 import { encodeBase64 } from "@std/encoding/base64";
 import { getLogger } from "../shared/log.ts";
 import { toHex } from "../shared/hash.ts";
-import { getSecret, setSecret } from "./secrets.ts";
+import { getSecret, setSecret } from "@tomat/core-engine/services/secrets";
 
 x509.cryptoProvider.set(crypto);
 

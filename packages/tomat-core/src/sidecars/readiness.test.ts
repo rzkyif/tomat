@@ -4,7 +4,7 @@
 // loop. sleep() has an abort path that's easy to regress.
 
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { pollHttpHealth, sleep, validateHealthCheckUrl } from "./readiness.ts";
 
 Deno.test("validateHealthCheckUrl: accepts loopback http URLs", () => {

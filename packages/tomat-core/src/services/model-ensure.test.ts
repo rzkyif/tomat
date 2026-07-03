@@ -6,7 +6,7 @@ import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
-import { patchCoreSettings } from "./core-settings.ts";
+import { patchCoreSettings } from "@tomat/core-engine/services/core-settings";
 import { ensureKindModels, sourcesForKind } from "./model-ensure.ts";
 
 Deno.test("sourcesForKind('llm'): empty when llm.provider is external", async () => {

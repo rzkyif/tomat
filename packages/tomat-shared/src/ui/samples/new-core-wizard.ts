@@ -64,4 +64,19 @@ export const newCoreWizardSamples = {
     installPasswordValid: true,
     minAdminPasswordLength: 8,
   },
+  // Installing: the local install is running (spinner on the primary button,
+  // controls disabled), so the "Continue in the Background" escape hatch shows
+  // below it, letting the user drop the always-on-top setup window to the tray.
+  installing: {
+    step: "localConfirm",
+    canStepBack: true,
+    coreSetupDocsUrl: DOCS_URL,
+    busy: "installing",
+    installServiceChoice: true,
+    installNetworkChoice: false,
+    installPassword: "hunter2!",
+    installPasswordConfirm: "hunter2!",
+    installPasswordValid: true,
+    minAdminPasswordLength: 8,
+  },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof NewCoreWizardView>>>;

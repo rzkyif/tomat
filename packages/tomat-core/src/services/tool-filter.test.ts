@@ -6,8 +6,8 @@
 import { assertEquals } from "@std/assert";
 import { attachHost } from "@tomat/core-engine";
 import { denoHost } from "../host/deno-host.ts";
-import { ToolFilter } from "./tool-filter.ts";
-import type { LlmEndpointConfig } from "./llm-provider.ts";
+import { ToolFilter } from "@tomat/core-engine/services/tool-filter";
+import type { LlmEndpointConfig } from "@tomat/core-engine/services/llm-provider";
 import type { ToolDescriptor } from "@tomat/shared";
 
 // phase2 logs a warning on its fail-open paths, routed through the engine host

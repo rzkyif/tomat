@@ -19,7 +19,7 @@ import { join } from "@std/path";
 import type { CoreManifest, ErrorCode } from "@tomat/shared";
 import { CORE_VERSION, coreManifestUrl } from "../config.ts";
 import { paths } from "../paths.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { compareSemver } from "../shared/semver.ts";
 import { Sha256Stream } from "../shared/hash.ts";

@@ -5,7 +5,7 @@
 // owns persistence/broadcast; this module owns only the network + filesystem.
 
 import { dirname } from "@std/path";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { Sha256Stream } from "../shared/hash.ts";
 import { modelCatalogSha256 } from "../models/catalog.ts";

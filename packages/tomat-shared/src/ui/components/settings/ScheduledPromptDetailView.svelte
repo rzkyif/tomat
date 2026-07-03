@@ -104,7 +104,9 @@
       {/if}
     </div>
     <div class="flex items-center gap-2">
-      <Button size="sm" onclick={() => (onRunNow ?? noop)()}>Run Now</Button>
+      <div class="w-24 shrink-0">
+        <Button class="w-full h-8" onclick={() => (onRunNow ?? noop)()}>Run Now</Button>
+      </div>
       <div class="w-24 shrink-0">
         <Toggle
           checked={enabled}

@@ -32,7 +32,7 @@
   // the command builders, drops the install-only Core toggles for a flags note,
   // and relabels. Defaults to install so the /install page needs no prop.
   let { mode = "install" }: { mode?: "install" | "uninstall" } = $props();
-  const verb = mode === "install" ? "Install" : "Uninstall";
+  const verb = $derived(mode === "install" ? "Install" : "Uninstall");
 
   let target = $state<Target>("client");
   // Kept per target (as the baseline's two radio groups are): the client picker

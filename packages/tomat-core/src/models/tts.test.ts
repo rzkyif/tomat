@@ -8,7 +8,7 @@ import { SETTINGS_SCHEMA, type TtsPresetField } from "@tomat/shared";
 import { primaryFileSpec, TTS_PRIMARY_ROLE } from "@tomat/shared";
 import { buildCatalogPayload } from "../../../tomat-model-catalog/src/index.ts";
 import { buildTtsPresetViews, resolveTtsSelection, selectedTtsVoices } from "./tts.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 const catalog = buildCatalogPayload("2026-06-15T00:00:00Z");
 

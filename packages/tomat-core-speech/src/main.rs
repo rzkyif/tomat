@@ -1,3 +1,9 @@
+// Build as a Windows GUI-subsystem app in release so launching it never
+// allocates a console window. tomat-core spawns it with piped stdout/stderr, so
+// it keeps logging normally; it only ever wrote to the console when Windows gave
+// a console-subsystem child its own (visible) console. DO NOT REMOVE.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 // Resident HTTP speech sidecar for tomat-core.
 //
 // One self-contained binary (statically-linked sherpa-onnx) that serves

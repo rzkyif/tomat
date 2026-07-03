@@ -7,16 +7,15 @@
 
 import type {
   McpPrompt,
-  McpRemoteAuth,
   McpResource,
   McpServer,
-  McpStdioRuntime,
+  McpServerInput,
   McpTransportKind,
   Tool,
 } from "@tomat/shared";
-import { db } from "../db/connection.ts";
-import { AppError } from "../shared/errors.ts";
-import { newMcpServerId } from "../shared/ids.ts";
+import { db } from "@tomat/core-engine";
+import { AppError } from "@tomat/core-engine";
+import { newMcpServerId } from "@tomat/core-engine";
 import { mcpManager } from "./manager.ts";
 
 /** A server can only connect with a transport target: a `command` for stdio, a
@@ -29,24 +28,6 @@ function assertConnectable(kind: McpTransportKind, command?: string, url?: strin
   if (kind === "remote" && !url?.trim()) {
     throw new AppError("validation_error", "remote MCP server needs a url");
   }
-}
-
-export interface McpServerInput {
-  name: string;
-  kind: McpTransportKind;
-  command?: string;
-  args?: string[];
-  runtime?: McpStdioRuntime;
-  denoAllowAll?: boolean;
-  denoPermissions?: string[];
-  url?: string;
-  remoteAuth?: McpRemoteAuth;
-  enabled?: boolean;
-  // Whether a bearer token is stored for this server (the token itself goes to
-  // the secrets vault via the route, never through the registry/DB).
-  hasAuth?: boolean;
-  // Whether the OAuth authorization-code flow has completed (tokens in vault).
-  oauthAuthorized?: boolean;
 }
 
 interface Row {

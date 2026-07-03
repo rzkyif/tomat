@@ -268,6 +268,50 @@ html.dark .demo-unflip {
   --un-prose-td-borders: var(--default-d-200);
 }
 
+/* Inline code in the manual: render it as the client's inline-code pill (the
+   settings tool-detail style, `bg-surface-inset` fill + `text-default-800` +
+   `rounded-small` + `px-1.5 py-0.5` + `font-mono`) rather than
+   presetTypography's backtick-wrapped mono text, so `ctx.db` in the prose reads
+   like the same token does in the app. Scoped to `:not(pre) > code` so it never
+   touches the fenced code blocks (Shiki's `.astro-code`, a `pre > code`), which
+   keep their own dark syntax-highlighted surface. `bg-surface-inset` resolves to
+   `--default-200`, so it uses the same light/dark `--default-*` pair as the prose
+   colors above. */
+.manual-article .prose :not(pre) > code {
+  background-color: var(--default-200);
+  color: var(--default-800);
+  border-radius: var(--rounded-small);
+  padding: 0.125rem 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  font-weight: 400;
+  overflow-wrap: break-word;
+}
+/* presetTypography wraps inline code in literal backticks via pseudo-elements;
+   drop them now that the pill provides the affordance. */
+.manual-article .prose :not(pre) > code::before,
+.manual-article .prose :not(pre) > code::after {
+  content: none;
+}
+.dark .manual-article .prose :not(pre) > code {
+  background-color: var(--default-d-200);
+  color: var(--default-d-800);
+}
+
+/* An Aside card now sits at `bg-surface` lightness (a `-50` fill), so the pill
+   keeps its `bg-surface-inset` (`-200`) level from above and still reads as
+   recessed against the card, no lift needed. On the colored asides, retint the
+   pill to the card's accent by pointing `--default-base` at the accent base:
+   every `var(--default-*)` in the pill re-resolves to that hue, both background
+   and text, exactly the ladder-retint the client's accent bubbles use (see
+   Bubble.svelte). `note` (a neutral `info` card) keeps the gray ladder. */
+.manual-article .prose .manual-aside-tip :not(pre) > code {
+  --default-base: var(--accent-green-base);
+}
+.manual-article .prose .manual-aside-caution :not(pre) > code {
+  --default-base: var(--accent-yellow-base);
+}
+
 /* Smooth in-page anchor jumps, disabled for reduced motion. Deliberately NOT on
    the vertical scroll-snap container: mandatory snap re-aligns on scroll-end on
    its own, and a global smooth behavior only makes that settle look sluggish. */

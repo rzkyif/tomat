@@ -1,12 +1,25 @@
-// The engine's public entry. `init(host)` builds and wires the portable service
-// graph on a runtime-agnostic Host and returns an EngineInstance the embedder
-// drives: the Deno shell (`@tomat/core`) wraps handleHttp / connect in
-// Deno.serve + Deno.upgradeWebSocket; a future mobile client drives them in
-// process. This is the Phase-1 skeleton: it holds the host and a FrameBus and
-// stubs handleHttp; the DB, services, and routes move in over later phases.
+// The engine's public entry and the frozen in-process seam.
+//
+// The portable service graph (chat, sessions, settings, secrets, memories,
+// embeddings/relevance, LLM, tools, external STT/TTS, titles) is already fully
+// extracted into ./services/* and runs today: the Deno shell (`@tomat/core`)
+// serves it via Deno.serve + its Hono `buildApp`, and delivery flows through the
+// shared engine FrameBus (frameBus()). So on desktop the engine's logic is live;
+// what stays a designed-but-unwired seam is the *in-process transport* below.
+//
+// `handleHttp` / `connect` are the contract a future mobile client will drive to
+// run the engine inside its webview (no Deno.serve, no network). Wiring them means
+// building a Hono app from the engine's OWN reduced route set (external-provider,
+// remote-MCP-only) - NOT relocating the desktop shell's routes, most of which are
+// legitimately shell-coupled (sidecars, models, worker-exec, downloads, update).
+// That belongs to the mobile pass; here `handleHttp` is a deliberate 501 so the
+// interface is frozen now and needs no engine rework then. `connect` already works
+// against the real FrameBus (used by tests + the future transport).
 
 import type { Host } from "./host.ts";
-import { FrameBus } from "./frame-bus.ts";
+import { frameBus } from "./frame-bus.ts";
+import { buildEngineApp, ENGINE_ROUTE_PREFIXES } from "./http/app.ts";
+import type { ClientResolver } from "./http/middleware/auth.ts";
 
 // A single in-process client connection to the engine, mirroring the client's
 // NetSocket contract. Frames are the JSON-encoded @tomat/shared frame unions.
@@ -18,29 +31,48 @@ export interface EngineConnection {
   close(): void;
 }
 
+export interface EngineInitOpts {
+  // Resolves each HTTP request to its authenticated client. The engine does not
+  // own auth: the desktop shell injects a bearer -> authService resolver; a
+  // future in-process mobile transport injects one that returns its fixed local
+  // client. See http/middleware/auth.ts.
+  resolveClient: ClientResolver;
+}
+
 // The engine, once initialized.
 export interface EngineInstance {
-  // Handle one HTTP request against the whole /api/v1/* app-domain surface.
+  // Handle one HTTP request against the engine's app-domain slice of /api/v1/*
+  // (the routes ENGINE_ROUTE_PREFIXES covers). The shell forwards only matching
+  // requests here; the raw Request carries the bearer the injected resolver reads.
   handleHttp(req: Request): Promise<Response>;
-  // Register an already-authenticated client for WS-equivalent frame exchange.
-  // The embedder authenticates at its transport boundary and passes the id in.
+  // True when `pathname` belongs to the engine's app (so the shell knows to
+  // dispatch it here instead of into its own app).
+  isEngineRoute(pathname: string): boolean;
+  // Register an already-authenticated client for WS-equivalent frame exchange
+  // over the shared FrameBus (the same registry the Deno shell's WS hub uses).
   connect(clientId: string): EngineConnection;
   shutdown(): Promise<void>;
 }
 
-export function init(host: Host): Promise<EngineInstance> {
-  const frameBus = new FrameBus();
-  host.log("info", "engine", "engine init (skeleton; services land in later phases)");
+export function init(host: Host, opts: EngineInitOpts): Promise<EngineInstance> {
+  host.log("info", "engine", "engine init");
+  const app = buildEngineApp({ resolveClient: opts.resolveClient });
+  const bus = frameBus();
 
   const instance: EngineInstance = {
-    handleHttp(_req: Request): Promise<Response> {
-      return Promise.resolve(new Response("not implemented", { status: 501 }));
+    handleHttp(req: Request): Promise<Response> {
+      return Promise.resolve(app.fetch(req));
+    },
+    isEngineRoute(pathname: string): boolean {
+      return ENGINE_ROUTE_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
     },
     connect(clientId: string): EngineConnection {
-      return frameBus.registerConnection(clientId);
+      return bus.registerConnection(clientId);
     },
+    // The FrameBus is the process-wide singleton the shell's WS hub also drives,
+    // so tearing it down here would drop live shell sockets. Connection teardown
+    // is the shell's job (wsHub.shutdown); engine shutdown is a no-op today.
     shutdown(): Promise<void> {
-      frameBus.closeAll();
       return Promise.resolve();
     },
   };

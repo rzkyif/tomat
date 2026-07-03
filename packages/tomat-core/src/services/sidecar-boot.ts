@@ -23,10 +23,10 @@ import {
   type SpeechState,
 } from "../sidecars/speech.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
-import { llmScheduler } from "./llm-scheduler.ts";
+import { llmScheduler } from "@tomat/core-engine/services/llm-scheduler";
 import { llmIdle } from "./llm-idle.ts";
-import { loadCoreSettings, subscribeCoreSettings } from "./core-settings.ts";
-import { strSetting } from "./settings-access.ts";
+import { loadCoreSettings, subscribeCoreSettings } from "@tomat/core-engine/services/core-settings";
+import { strSetting } from "@tomat/core-engine/services/settings-access";
 import { downloadManager } from "../downloads/manager.ts";
 import { onBinaryInstalled } from "../binaries/manager.ts";
 import { runQueuedBuiltinInstall } from "../extensions/seeding.ts";

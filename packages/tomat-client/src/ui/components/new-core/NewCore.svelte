@@ -103,6 +103,7 @@
   onToggleService={() => (wizard.installServiceChoice = !wizard.installServiceChoice)}
   onToggleNetwork={() => (wizard.installNetworkChoice = !wizard.installNetworkChoice)}
   onPairLocal={() => wizard.pairLocal()}
+  onContinueInBackground={() => wizard.continueInBackground()}
   onPairRemote={() => wizard.pairRemote()}
   bind:remoteUrl={wizard.remoteUrl}
   bind:remoteName={wizard.remoteName}

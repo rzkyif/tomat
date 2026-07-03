@@ -19,7 +19,7 @@ import {
   startDownload,
   verifyTarball,
 } from "./installer.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { extensionsRegistry } from "./registry.ts";
 
 // --- Pure helper tests ------------------------------------------------------

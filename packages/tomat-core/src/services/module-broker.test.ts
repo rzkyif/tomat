@@ -9,7 +9,7 @@ import type { PermissionDecl } from "@tomat/shared";
 import { permissionKey } from "@tomat/shared";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { extensionsRegistry } from "../extensions/registry.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import {
   deleteExtensionData,
   handleModuleRequest,

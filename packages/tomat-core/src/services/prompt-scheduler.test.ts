@@ -8,8 +8,8 @@
 
 import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import type { ScheduleSpec } from "@tomat/shared";
-import { db } from "../db/connection.ts";
-import { AppError } from "../shared/errors.ts";
+import { db } from "@tomat/core-engine";
+import { AppError } from "@tomat/core-engine";
 import { createTestClient, setupTestEnv } from "../../tests/helpers/db.ts";
 import type { AutomatedSessionInput } from "./automated-session.ts";
 import { nextOccurrence, PromptScheduler } from "./prompt-scheduler.ts";

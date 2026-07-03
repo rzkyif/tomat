@@ -80,6 +80,11 @@ export class NewCoreWizard {
   installPassword = $state("");
   installPasswordConfirm = $state("");
   localAlreadyInstalled = $state(false);
+  // True once the user sent the always-on-top setup window to the background
+  // during a local install (see continueInBackground). pairLocal reads it in
+  // its finally to bring the window back once the install resolves, so the
+  // result (the unlocked UI, or an error) is never stranded off screen.
+  private hidWindowForInstall = false;
   // True when the chooser was skipped (a local core is already paired), so the
   // back arrow on the first step cancels the flow instead of revealing a chooser
   // the user was never meant to see.
@@ -312,6 +317,21 @@ export class NewCoreWizard {
     }
   }
 
+  // Send the always-on-top, immovable setup window to the background during the
+  // (potentially slow) local install so the user isn't trapped behind it. The
+  // tray icon and global shortcut re-show it on demand; pairLocal also re-shows
+  // it automatically once the install resolves. Only meaningful mid-install.
+  async continueInBackground(): Promise<void> {
+    if (this.busy !== "installing") return;
+    this.hidWindowForInstall = true;
+    try {
+      await platform().windowing.requestHide();
+    } catch (e) {
+      log.warn("hide for background install failed", e);
+      this.hidWindowForInstall = false;
+    }
+  }
+
   async pairLocal(): Promise<void> {
     this.error = "";
     this.busy = "installing";
@@ -332,6 +352,19 @@ export class NewCoreWizard {
     } catch (e) {
       this.error = await this.localPairErrorMessage(e);
       this.busy = null;
+    } finally {
+      // If the user backgrounded the window mid-install, bring it back now that
+      // the install has resolved (success unlocks the UI; failure shows the
+      // error). show() is idempotent, so this is a no-op if the tray already
+      // re-showed it. Best-effort: a failed re-show must not mask the result.
+      if (this.hidWindowForInstall) {
+        this.hidWindowForInstall = false;
+        try {
+          await platform().windowing.show();
+        } catch (e) {
+          log.warn("re-show after background install failed", e);
+        }
+      }
     }
   }
 

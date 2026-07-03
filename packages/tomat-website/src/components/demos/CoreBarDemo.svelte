@@ -21,17 +21,17 @@
     highlightLabel?: string;
     highlightTarget?: string;
   } = $props();
-  const props = $derived(coreBarSamples[scenario] as ComponentProps<typeof CoreBarView>);
+  const viewProps: ComponentProps<typeof CoreBarView> = $derived(coreBarSamples[scenario]);
 </script>
 
 <DemoFrame {label} highlighted={!!highlightTarget} designWidth={620}>
   <div class="mx-auto w-full max-w-[620px]">
     {#if highlightTarget}
       <Highlight label={highlightLabel} target={highlightTarget}>
-        <CoreBarView {...props} />
+        <CoreBarView {...viewProps} />
       </Highlight>
     {:else}
-      <CoreBarView {...props} />
+      <CoreBarView {...viewProps} />
     {/if}
   </div>
 </DemoFrame>

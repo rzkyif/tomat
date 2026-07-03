@@ -5,7 +5,7 @@
 // without us editing the shipped deno.json.
 import { join } from "@std/path";
 import { paths } from "../paths.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { requireWorkerDeno } from "../sidecars/worker-deno.ts";
 import { hashExtension } from "./hash.ts";

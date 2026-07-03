@@ -1,8 +1,8 @@
 // Resolves an extension's entry point (the file the worker imports) and the
 // default downloads directory used when building a worker's path templates.
 
-import { isWithin } from "../shared/fs-safety.ts";
-import { AppError } from "../shared/errors.ts";
+import { isWithin } from "@tomat/core-engine";
+import { AppError } from "@tomat/core-engine";
 
 export function resolveEntryPath(extensionFolder: string): string {
   const entry = resolveEntryCandidate(extensionFolder);

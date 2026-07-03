@@ -14,7 +14,7 @@ import {
   newRequestId,
   newSessionId,
   newStreamId,
-} from "./ids.ts";
+} from "@tomat/core-engine";
 
 // Crockford base32 ULID: 26 chars, [0-9A-HJKMNP-TV-Z].
 const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;

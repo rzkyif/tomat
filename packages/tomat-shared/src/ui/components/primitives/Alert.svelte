@@ -42,13 +42,17 @@
 
   const resolvedIcon = $derived(icon === false ? null : (icon ?? defaultIcon));
 
-  // Full strings so the UnoCSS extractor sees every variant.
+  // Full strings so the UnoCSS extractor sees every variant. The filled surface
+  // sits at `bg-surface` LIGHTNESS (a `-50` fill), accent-tinted, no border.
+  // Keeping the card at surface level leaves a full inset step below it, so
+  // on-card content (a code pill, a nested well) can paint at `bg-surface-inset`
+  // and still read as recessed against the notice.
   const filledClass = $derived(
     {
-      info: "bg-surface-inset text-default-700",
-      warning: "bg-accent-yellow-200 text-accent-yellow-700",
-      error: "bg-accent-red-200 text-accent-red-700",
-      success: "bg-accent-green-200 text-accent-green-700",
+      info: "bg-surface text-default-700",
+      warning: "bg-accent-yellow-50 text-accent-yellow-700",
+      error: "bg-accent-red-50 text-accent-red-700",
+      success: "bg-accent-green-50 text-accent-green-700",
     }[variant],
   );
 

@@ -7,14 +7,14 @@
 
 import { DEFAULT_MEMORY_SUMMARY_PROMPT, errMessage } from "@tomat/shared";
 import { backgroundQueue } from "./background-queue.ts";
-import { memoriesStore } from "./memories-store.ts";
-import { isEmbeddingModelReady } from "./embedding.ts";
+import { memoriesStore } from "@tomat/core-engine/services/memories-store";
+import { isEmbeddingModelReady } from "@tomat/core-engine/services/embedding";
 import { llmIdle } from "./llm-idle.ts";
-import { embedSourceHash, embedWithHash } from "./relevance.ts";
-import { loadCoreSettings } from "./core-settings.ts";
-import { resolveEndpoint } from "./endpoint-resolver.ts";
-import { singleShot } from "./single-shot.ts";
-import { thinkingBudget } from "./thinking-budget.ts";
+import { embedSourceHash, embedWithHash } from "@tomat/core-engine/services/relevance";
+import { loadCoreSettings } from "@tomat/core-engine/services/core-settings";
+import { resolveEndpoint } from "@tomat/core-engine/services/endpoint-resolver";
+import { singleShot } from "@tomat/core-engine/services/single-shot";
+import { thinkingBudget } from "@tomat/core-engine/services/thinking-budget";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("doc-indexer");
@@ -48,7 +48,7 @@ async function indexMemory(id: string): Promise<void> {
 
   // Summary: regenerate when it was derived from different content.
   if (state.summarySourceHash !== state.contentHash) {
-    const doc = store.get(id);
+    const doc = await store.get(id);
     const settings = await loadCoreSettings();
     try {
       // Background jobs run during the idle window, which is exactly when
@@ -89,7 +89,10 @@ async function indexMemory(id: string): Promise<void> {
     // the source hash so a steady not-ready state doesn't spin (the embed
     // text is still stale, so we only re-arm when there is real work).
     const pending = store.listIndexStates().find((s) => s.id === id);
-    if (pending && pending.embeddingSourceHash !== embedSourceHash(embedText(store.get(id)))) {
+    if (
+      pending &&
+      pending.embeddingSourceHash !== embedSourceHash(embedText(await store.get(id)))
+    ) {
       backgroundQueue().enqueueDeferred({
         key: `doc-index:${id}`,
         run: () => indexMemory(id),
@@ -97,7 +100,7 @@ async function indexMemory(id: string): Promise<void> {
     }
     return;
   }
-  const doc = store.get(id);
+  const doc = await store.get(id);
   const text = embedText(doc);
   const currentState = store.listIndexStates().find((s) => s.id === id);
   if (!currentState) return;

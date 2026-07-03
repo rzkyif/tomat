@@ -14,7 +14,7 @@ import { z } from "zod";
 import { DEFAULT_GREETING_INSTRUCTION, errMessage } from "@tomat/shared";
 import { runAutomatedSession } from "../../services/automated-session.ts";
 import { llmStillLoading } from "../../services/prompt-scheduler.ts";
-import { parseBody, readJson } from "../body.ts";
+import { parseBody, readJson } from "@tomat/core-engine/http/body";
 import { getLogger } from "../../shared/log.ts";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 

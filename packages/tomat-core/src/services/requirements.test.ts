@@ -7,7 +7,7 @@ import { assertEquals } from "@std/assert";
 import { dirname } from "@std/path";
 import { binarySource, EMBED_MODEL_FILE } from "@tomat/shared";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import { patchCoreSettings } from "./core-settings.ts";
+import { patchCoreSettings } from "@tomat/core-engine/services/core-settings";
 import { computeRequirements } from "./requirements.ts";
 import { resolveHfPath } from "../models/manager.ts";
 

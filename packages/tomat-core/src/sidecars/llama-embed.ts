@@ -10,7 +10,7 @@ import { EMBED_MODEL_FILE } from "@tomat/shared";
 import { binPath, embedPort, paths } from "../paths.ts";
 import { libDirFor, platformExe } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
-import { numSetting } from "../services/settings-access.ts";
+import { numSetting } from "@tomat/core-engine/services/settings-access";
 import type { StartOptions } from "./types.ts";
 
 // MiniLM's trained context length. llama-server caps n_batch to n_ubatch (512)

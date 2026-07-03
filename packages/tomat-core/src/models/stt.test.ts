@@ -8,7 +8,7 @@ import { type HardwareInfo, SETTINGS_SCHEMA, type SttPresetField } from "@tomat/
 import { primaryFileSpec, STT_PRIMARY_ROLE } from "@tomat/shared";
 import { buildCatalogPayload } from "../../../tomat-model-catalog/src/index.ts";
 import { buildSttPresetViews, resolveSttSelection, sttThreads } from "./stt.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 const catalog = buildCatalogPayload("2026-06-11T00:00:00Z");
 

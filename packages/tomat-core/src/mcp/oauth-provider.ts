@@ -12,7 +12,7 @@ import type {
   OAuthClientMetadata,
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { getSecret, setSecret } from "../services/secrets.ts";
+import { getSecret, setSecret } from "@tomat/core-engine/services/secrets";
 import { mcpOAuthSecretName } from "./secret-key.ts";
 
 interface OAuthBag {

@@ -2,7 +2,7 @@
 // the singleShot path is exercised at the provider level (llm-provider).
 
 import { assertEquals } from "@std/assert";
-import { buildApp } from "../server.ts";
+import { engine } from "../../host/engine.ts";
 import { pairClient } from "../../../tests/helpers/pairing.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
 
@@ -15,8 +15,8 @@ const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 Deno.test("POST /api/v1/llm/autocorrect: requires bearer (401)", async () => {
   const env = await setupTestEnv();
   try {
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/llm/autocorrect", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -33,8 +33,8 @@ Deno.test("POST /api/v1/llm/autocorrect: empty/missing text returns 400", async 
   const env = await setupTestEnv();
   try {
     const { token } = await pair();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/llm/autocorrect", {
         method: "POST",
         headers: { ...bearer(token), "content-type": "application/json" },
@@ -51,8 +51,8 @@ Deno.test("POST /api/v1/llm/merge: missing existing/next returns 400", async () 
   const env = await setupTestEnv();
   try {
     const { token } = await pair();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/llm/merge", {
         method: "POST",
         headers: { ...bearer(token), "content-type": "application/json" },

@@ -25,6 +25,14 @@ export function isAndroidPlatform(): boolean {
   return osPlatform() === "android";
 }
 
+/** True on Windows specifically. Drives platform-specific defaults where the
+ *  cross-platform value doesn't work: the global-shortcut defaults lead with
+ *  `super` (Cmd on mac, but the OS-reserved Win key on Windows, which silently
+ *  swallows the hotkey), so Windows needs `super`-free defaults instead. */
+export function isWindowsPlatform(): boolean {
+  return osPlatform() === "windows";
+}
+
 /** True on iOS specifically. Android injects the safe-area / keyboard insets and
  *  owns a hardware back; iOS has neither, so the shell reads its safe area from
  *  CSS `env()` and derives the keyboard inset from the visual viewport (see

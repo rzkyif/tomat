@@ -22,7 +22,7 @@ import { errMessage } from "@tomat/shared";
 import { binPath } from "../paths.ts";
 import { paths } from "../paths.ts";
 import { binaryName, coreBinaryName } from "../binaries/versions.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import {
   parseWorkerFrame,

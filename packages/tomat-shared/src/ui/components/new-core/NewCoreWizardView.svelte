@@ -68,6 +68,7 @@
     onToggleService,
     onToggleNetwork,
     onPairLocal,
+    onContinueInBackground,
     onPairRemote,
     // Controlled text fields.
     remoteUrl = $bindable(""),
@@ -106,6 +107,7 @@
     onToggleService?: () => void;
     onToggleNetwork?: () => void;
     onPairLocal?: () => void;
+    onContinueInBackground?: () => void;
     onPairRemote?: () => void;
     remoteUrl?: string;
     remoteName?: string;
@@ -641,6 +643,22 @@
         Install and Pair
       {/if}
     </Button>
+
+    {#if busy === "installing"}
+      <!-- The setup window is always-on-top and can't be moved, and installing a
+           Core can take a while on a slow connection. Let the user send it to the
+           background rather than wait behind it: the tray icon brings it back, and
+           it also returns on its own once the install finishes. Only shown once
+           the install is actually running (busy === "installing"). -->
+      <Button
+        variant="primary"
+        icon="i-material-symbols-keyboard-arrow-down-rounded"
+        class="px-4 py-2.5 rounded-large"
+        onclick={() => (onContinueInBackground ?? noop)()}
+      >
+        Continue in the Background
+      </Button>
+    {/if}
   {/if}
 
   {#if error}

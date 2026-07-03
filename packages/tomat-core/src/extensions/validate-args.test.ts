@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import type { Tool } from "@tomat/shared";
 import { __resetValidatorCacheForTesting, validateAndNormalizeToolArgs } from "./validate-args.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 function tool(parameters: Record<string, unknown>, id = "tk::t"): Tool {
   return {

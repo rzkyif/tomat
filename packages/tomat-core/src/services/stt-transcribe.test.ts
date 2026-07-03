@@ -1,7 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import { transcribeAudio } from "./stt-transcribe.ts";
-import { AppError } from "../shared/errors.ts";
+import { transcribeAudio } from "@tomat/core-engine/services/stt-transcribe";
+import { AppError } from "@tomat/core-engine";
 
 function wavFile(): File {
   // 44-byte WAV header + a little silence; the external mock ignores it.

@@ -20,17 +20,30 @@ oxlint rule (see [`.oxlintrc.json`](../../.oxlintrc.json) +
 runtime-specific is reached through the [`Host`](src/host.ts) the embedder injects
 at [`init(host)`](src/engine.ts):
 
-- `Host.fs` (async), `Host.openDb` (a synchronous SQLite subset), `Host.secureStore`
-  (the vault master key), `Host.config` (env/config), `Host.log`, `Host.capabilities`.
-- The embedder drives an [`EngineInstance`](src/engine.ts): `handleHttp(req)` for
-  the whole `/api/v1/*` app surface (a runtime-agnostic Hono `app.fetch`), and
-  `connect(clientId)` for WS-equivalent frame exchange over the
-  [`FrameBus`](src/frame-bus.ts). Frame payloads are the `@tomat/shared` frame
-  unions, so the wire contract matches the Client byte-for-byte.
+- Primitives: `Host.fs` (async), `Host.openDb` (a synchronous SQLite subset),
+  `Host.secureStore` (the vault master key), `Host.config` (env/config),
+  `Host.log`, `Host.capabilities`.
+- Capability-gated providers (optional; a host omits what it can't do): `localEndpoints`
+  (local llama/embed ports + local STT/TTS + speech-sidecar status + TTS voices),
+  `tools` (extension + MCP tool catalog and execution), `status` (idle/telemetry +
+  scheduled prompts + memory indexing), and `mcp` (remote-MCP server admin: registry
+  CRUD, connection reconcile, OAuth). A mobile host supplies a reduced set (e.g. no
+  `localEndpoints`), and the engine degrades where a provider is absent.
+- The embedder drives an [`EngineInstance`](src/engine.ts): `handleHttp(req)` serves
+  the engine's app-domain slice of `/api/v1/*` (a runtime-agnostic Hono `app.fetch`
+  over the routes in [`src/http/`](src/http/): sessions, settings, memories, llm,
+  stt, tts, mcp), `isEngineRoute(path)` tells the shell which paths to dispatch here,
+  and `connect(clientId)` gives WS-equivalent frame exchange over the shared
+  [`FrameBus`](src/frame-bus.ts). Auth is injected: the shell passes a bearer ->
+  client `resolveClient` at `init`, so the engine never imports its authService.
+  Frame payloads are the `@tomat/shared` frame unions, so the wire contract matches
+  the Client byte-for-byte.
 
 Transport, TLS, pairing/auth, and every subprocess/native subsystem (sidecars,
 binaries, self-update, the tool-worker sandbox, stdio MCP, helper binaries) stay
-in `@tomat/core`, not here.
+in `@tomat/core`, along with the OS-bound routes (health, pairing, admin, models,
+binaries, requirements, update, sidecars-status, storage, scheduled-prompts,
+greetings, extensions, tools) it serves from its own Hono app.
 
 ## Run / check / test
 

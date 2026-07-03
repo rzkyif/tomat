@@ -29,12 +29,12 @@ import {
 } from "../../extensions/npm-registry.ts";
 import { loadSeededManifest } from "../../extensions/seeded-manifest.ts";
 import { requestBuiltinInstall } from "../../extensions/seeding.ts";
-import { embed, isEmbeddingModelReady } from "../../services/embedding.ts";
-import { embedWithHash, toolEmbedText } from "../../services/relevance.ts";
-import { toolFilter } from "../../services/tool-filter.ts";
+import { embed, isEmbeddingModelReady } from "@tomat/core-engine/services/embedding";
+import { embedWithHash, toolEmbedText } from "@tomat/core-engine/services/relevance";
+import { toolFilter } from "@tomat/core-engine/services/tool-filter";
 import { sha256Hex } from "../../shared/hash.ts";
-import { AppError } from "../../shared/errors.ts";
-import { parseBody, readJson } from "../body.ts";
+import { AppError } from "@tomat/core-engine";
+import { parseBody, readJson } from "@tomat/core-engine/http/body";
 import { bearerMiddleware } from "../middleware/auth.ts";
 import { wsHub } from "../../ws/hub.ts";
 import { getLogger } from "../../shared/log.ts";

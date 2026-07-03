@@ -10,7 +10,7 @@ import {
   resetAllClientSettings,
   subscribeClientSettings,
   subscribeCoreSettings,
-} from "./core-settings.ts";
+} from "@tomat/core-engine/services/core-settings";
 import { createTestClient, setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
 

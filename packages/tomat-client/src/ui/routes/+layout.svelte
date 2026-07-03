@@ -10,6 +10,7 @@
     isAndroidPlatform,
     isIosPlatform,
     isMobilePlatform,
+    isWindowsPlatform,
   } from "$lib/platform/select";
   import { connectionState } from "$stores/connection.svelte";
   import { coreStatusState } from "$stores/core-status.svelte";
@@ -34,11 +35,13 @@
   // the running OS in the browser only; prerender stays desktop-shaped (no Tauri
   // runtime), and the browser script init re-runs and sets the real values.
   const onMobile = browser && isMobilePlatform();
+  const onWindows = browser && isWindowsPlatform();
 
-  // Raise the mobile text-size default (18px vs desktop 16) before +page's
-  // onMount loads the stored settings over the defaults. Runs in the layout
-  // script, ahead of any child onMount, like installPlatform below.
-  settingsState.setPlatformDefaults(onMobile);
+  // Raise platform-specific defaults (mobile text size; Windows `super`-free
+  // shortcut defaults) before +page's onMount loads the stored settings over the
+  // defaults. Runs in the layout script, ahead of any child onMount, like
+  // installPlatform below.
+  settingsState.setPlatformDefaults(onMobile, onWindows);
 
   setUiContext(
     makeUiContext({

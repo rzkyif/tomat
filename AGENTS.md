@@ -61,9 +61,14 @@ through `npm:` specifiers from `deno task`.
 - Domain types, the API contract, and the `tomat.json` schema live in
   `packages/tomat-shared/src/`. When changing the wire format, update this
   package first.
-- Core HTTP routes: `packages/tomat-core/src/http/routes/`. WS frames:
+- HTTP routes are split: the app-domain slice (sessions, settings, memories, llm,
+  stt, tts, mcp) lives in `packages/tomat-core-engine/src/http/` and is served via
+  `engine.handleHttp`; the OS-bound + transport routes (health, pairing, admin,
+  models, binaries, requirements, update, sidecars, storage, scheduled-prompts,
+  greetings, extensions, tools) stay in `packages/tomat-core/src/http/routes/`. The
+  Deno shell's `main.ts` dispatches each request to whichever owns it. WS frames:
   `packages/tomat-shared/src/api/ws.ts`. Settings keys consumed by core are
-  documented in the header of `packages/tomat-core/src/services/chat.ts`.
+  documented in the header of `packages/tomat-core-engine/src/services/chat.ts`.
 - Client API access: `packages/tomat-client/src/ui/lib/core/`. Platform-specific
   Tauri calls: `packages/tomat-client/src/ui/lib/platform/`.
 - Extension author API: the Zod schema in

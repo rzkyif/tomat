@@ -3,7 +3,7 @@
 // seam on LlmEndpointConfig. No real OpenAI calls.
 
 import { assertEquals } from "@std/assert";
-import { type LlmDelta, streamChatCompletion } from "./llm-provider.ts";
+import { type LlmDelta, streamChatCompletion } from "@tomat/core-engine/services/llm-provider";
 import { fakeOpenAIFetch } from "../../tests/helpers/fake-openai.ts";
 
 async function collect(iter: AsyncIterable<LlmDelta>): Promise<LlmDelta[]> {

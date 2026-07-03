@@ -8,7 +8,7 @@
 // change: CREATE TABLE IF NOT EXISTS alone never adds a column to an existing
 // table, so additive changes need real migration steps.
 
-import { db } from "./connection.ts";
+import { db } from "@tomat/core-engine";
 
 // schema.sql is loaded as a string at build time. Inlined via raw import to
 // avoid runtime path resolution after `deno compile`.

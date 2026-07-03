@@ -2,7 +2,7 @@
 // keyword and resolve a package@version → tarball URL + sha (for installer).
 
 import type { ExtensionSearchResult } from "@tomat/shared";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 const REGISTRY_BASE = "https://registry.npmjs.org";
 const SEARCH_KEYWORD = "tomat-extension";

@@ -6,7 +6,7 @@
 // is re-derivable from source hashes on boot, so dropped jobs are re-found.
 
 import { errMessage } from "@tomat/shared";
-import { chatService } from "./chat.ts";
+import { chatService } from "@tomat/core-engine/services/chat";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("bgqueue");

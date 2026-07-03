@@ -14,7 +14,7 @@
 import { paths } from "../paths.ts";
 import { binPath } from "../paths.ts";
 import { coreBinaryName } from "./versions.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 // Channel-independent base names. ptyhost is unix-only for now (Windows needs a
 // ConPTY backend; worker-handle.ts gates on the same platform check), so it is

@@ -3,7 +3,7 @@
 // promises.
 
 import { assertEquals } from "@std/assert";
-import { buildApp } from "../server.ts";
+import { engine } from "../../host/engine.ts";
 import { pairClient } from "../../../tests/helpers/pairing.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
 
@@ -20,8 +20,8 @@ Deno.test("GET /api/v1/settings: returns {} for a fresh core", async () => {
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/settings", { headers: bearer(token) }),
     );
     assertEquals(res.status, 200);
@@ -35,8 +35,8 @@ Deno.test("PATCH /api/v1/settings: persists keys and returns the merged object",
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/settings", {
         method: "PATCH",
         headers: { ...bearer(token), "content-type": "application/json" },
@@ -55,8 +55,8 @@ Deno.test("PATCH /api/v1/settings: rejects an unknown key with 400", async () =>
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/settings", {
         method: "PATCH",
         headers: { ...bearer(token), "content-type": "application/json" },
@@ -74,8 +74,8 @@ Deno.test("PATCH /api/v1/settings: rejects a client-destination key with 400", a
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/settings", {
         method: "PATCH",
         headers: { ...bearer(token), "content-type": "application/json" },
@@ -93,12 +93,12 @@ Deno.test("GET /api/v1/settings: drops non-schema keys from the response", async
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
-    const app = buildApp();
+    const app = await engine();
     // Simulate a stray key sitting in settings.json by writing through the
     // settings service directly (the route guard would reject it).
-    const { patchCoreSettings } = await import("../../services/core-settings.ts");
+    const { patchCoreSettings } = await import("@tomat/core-engine/services/core-settings");
     await patchCoreSettings({ "internal.junk": 1, "llm.host": "0.0.0.0" });
-    const res = await app.fetch(
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/settings", { headers: bearer(token) }),
     );
     assertEquals(res.status, 200);
@@ -114,9 +114,9 @@ Deno.test("PATCH /api/v1/settings: rejects a wrong-typed known key with 400", as
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
-    const app = buildApp();
+    const app = await engine();
     // llm.host is a string setting; a number is a type mismatch.
-    const res = await app.fetch(
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/settings", {
         method: "PATCH",
         headers: { ...bearer(token), "content-type": "application/json" },
@@ -134,8 +134,8 @@ Deno.test("PATCH /api/v1/settings: rejects a secret-typed key (must use the vaul
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/settings", {
         method: "PATCH",
         headers: { ...bearer(token), "content-type": "application/json" },
@@ -155,12 +155,12 @@ Deno.test("GET /api/v1/settings: never returns secret-typed values", async () =>
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
-    const app = buildApp();
+    const app = await engine();
     // Simulate a plaintext key sitting in settings.json by writing it through
     // the settings service directly (bypassing the route guard).
-    const { patchCoreSettings } = await import("../../services/core-settings.ts");
+    const { patchCoreSettings } = await import("@tomat/core-engine/services/core-settings");
     await patchCoreSettings({ "llm.external.apiKey": "sk-must-be-redacted" });
-    const res = await app.fetch(
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/settings", { headers: bearer(token) }),
     );
     assertEquals(res.status, 200);
@@ -176,8 +176,8 @@ Deno.test("PATCH /api/v1/settings: rejects non-object body with 400", async () =
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/settings", {
         method: "PATCH",
         headers: { ...bearer(token), "content-type": "application/json" },
@@ -196,8 +196,8 @@ Deno.test("PUT /api/v1/settings/secrets/:name: stores secret then GET returns na
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
-    const app = buildApp();
-    const put = await app.fetch(
+    const app = await engine();
+    const put = await app.handleHttp(
       new Request("http://x/api/v1/settings/secrets/openai-api-key", {
         method: "PUT",
         headers: { ...bearer(token), "content-type": "application/json" },
@@ -206,7 +206,7 @@ Deno.test("PUT /api/v1/settings/secrets/:name: stores secret then GET returns na
     );
     assertEquals(put.status, 204);
 
-    const list = await app.fetch(
+    const list = await app.handleHttp(
       new Request("http://x/api/v1/settings/secrets", {
         headers: bearer(token),
       }),
@@ -224,8 +224,8 @@ Deno.test("DELETE /api/v1/settings/secrets/:name: 404 when the name was never se
   const env = await setupTestEnv();
   try {
     const token = await pairOne();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/settings/secrets/absent", {
         method: "DELETE",
         headers: bearer(token),

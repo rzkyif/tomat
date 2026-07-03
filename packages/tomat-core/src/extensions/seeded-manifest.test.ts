@@ -13,7 +13,7 @@ import {
   readPlantedManifest,
   verifyBuiltinManifestSignature,
 } from "./seeded-manifest.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 async function sign(version: string, sk: Uint8Array): Promise<BuiltinExtensionManifest> {
   const unsigned = {

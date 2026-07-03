@@ -19,21 +19,21 @@ import { basename, dirname, isAbsolute, join, normalize, relative } from "@std/p
 import type { BinaryKind, StorageCategory, StorageCategoryId, StorageNode } from "@tomat/shared";
 import { BUILTIN_EXTENSION_ID, requiredBinaryKinds, requiredModelRefs } from "@tomat/shared";
 import { extensionDir, paths, sessionDir } from "../paths.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { resolveHfPath } from "../models/manager.ts";
 import { binariesManager } from "../binaries/manager.ts";
 import { sidecarManager } from "../sidecars/manager.ts";
 import { extensionsRegistry } from "../extensions/registry.ts";
 import { deleteExtension } from "../extensions/uninstall.ts";
-import { sessionsRepo } from "./sessions-store.ts";
-import { chatService } from "./chat.ts";
+import { sessionsRepo } from "@tomat/core-engine/services/sessions-store";
+import { chatService } from "@tomat/core-engine/services/chat";
 import {
   loadCoreSettingsResolved,
   resetAllClientSettings,
   resetCoreSettings,
-} from "./core-settings.ts";
-import { clearAllSecrets } from "./secrets.ts";
+} from "@tomat/core-engine/services/core-settings";
+import { clearAllSecrets } from "@tomat/core-engine/services/secrets";
 import { notifyRequirementsChanged } from "./requirements.ts";
 
 const log = getLogger("storage");

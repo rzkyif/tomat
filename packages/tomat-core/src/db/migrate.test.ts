@@ -4,7 +4,7 @@
 
 import { assertEquals, assertThrows } from "@std/assert";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import { db } from "./connection.ts";
+import { db } from "@tomat/core-engine";
 import { CURRENT_SCHEMA_VERSION, migrate } from "./migrate.ts";
 
 function tableNames(): string[] {

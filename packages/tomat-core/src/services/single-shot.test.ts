@@ -4,7 +4,7 @@
 // canned event-stream so we don't talk to a real LLM.
 
 import { assertEquals } from "@std/assert";
-import { singleShot } from "./single-shot.ts";
+import { singleShot } from "@tomat/core-engine/services/single-shot";
 
 // Build a minimal SSE stream the OpenAI SDK can parse into chat-completion
 // chunks. Each chunk's `delta.content` becomes a contentDelta in our

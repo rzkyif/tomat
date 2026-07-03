@@ -12,7 +12,7 @@
 import { requiredModelRefs } from "@tomat/shared";
 import type { RequirementGroup } from "@tomat/shared";
 import { modelsManager } from "../models/manager.ts";
-import { loadCoreSettingsResolved } from "./core-settings.ts";
+import { loadCoreSettingsResolved } from "@tomat/core-engine/services/core-settings";
 
 export type ModelKind = RequirementGroup;
 

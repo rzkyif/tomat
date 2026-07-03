@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import gsap from "gsap";
   import { getDefaultSettings, SETTINGS_SCHEMA } from "@tomat/shared/domain/settings/engine";
+  import type { DownloadStatus } from "@tomat/shared/domain/model";
   import SettingsShellView from "@tomat/shared/ui/components/settings/SettingsShellView.svelte";
   import SettingsContentView from "@tomat/shared/ui/components/settings/SettingsContentView.svelte";
   import DownloadsModalView from "@tomat/shared/ui/components/settings/DownloadsModalView.svelte";
@@ -49,7 +50,7 @@
   // downloads first, then the runtime.
   type Row = {
     key: string;
-    status: string;
+    status: DownloadStatus;
     icon: string;
     filename: string;
     title: string;

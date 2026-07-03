@@ -39,6 +39,12 @@
 
 $ErrorActionPreference = "Stop"
 
+# Windows PowerShell 5.1 (the `powershell.exe` this one-liner runs under) redraws
+# the Invoke-WebRequest progress bar on every socket read, throttling -OutFile
+# downloads to a fraction of the link speed. Suppressing progress restores full
+# throughput on the multi-tens-of-MB NSIS installer.
+$ProgressPreference = "SilentlyContinue"
+
 # ===== UI helpers begin =====
 # Self-contained UI helper block. Keep this region intact so future install
 # scripts can copy it verbatim. No external state, no shared library --
@@ -295,6 +301,13 @@ try {
   $IdxVerify   = Ui-ActionAdd "Verifying download (sha256)"
   $IdxMotw     = Ui-ActionAdd "Clearing Mark of the Web"
   $IdxInstall  = Ui-ActionAdd "Installing $DisplayName (per-user, no admin prompt)"
+  # NSIS names every shortcut after the baked productName ($InstallDirName), so a
+  # non-stable channel needs a rename pass to show the friendly $DisplayName.
+  # Stable's productName already equals its DisplayName, so it needs no pass.
+  $IdxShortcut = -1
+  if ($Channel -ne "stable") {
+    $IdxShortcut = Ui-ActionAdd "Renaming shortcuts to `"$DisplayName`""
+  }
 
   # --- action 1: detect host ----------------------------------------------
 
@@ -447,6 +460,31 @@ try {
     Ui-Die "Installer exited with code $code" `
       "" `
       "quit any running tomat and re-run; if it persists, report at github.com/rzkyif/tomat/issues"
+  }
+
+  # --- action 6: friendly-name the shortcuts -----------------------------
+
+  # NSIS names the per-user Start Menu and desktop .lnk files after the baked
+  # productName ($InstallDirName, e.g. "tomat-latest"), but users should see the
+  # channel's friendly $DisplayName ("tomat (latest)"). Rename them in place, the
+  # Windows parallel to the macOS installer renaming the .app. In-app updates run
+  # the NSIS installer with /UPDATE, which skips shortcut (re)creation, so the
+  # friendly names persist. Re-running this script recreates the productName-named
+  # .lnk and this pass renames it again (idempotent via -Force overwrite).
+  if ($Channel -ne "stable") {
+    Ui-ActionStart $IdxShortcut "Renaming shortcuts to `"$DisplayName`""
+    $ShortcutDirs = @(
+      [Environment]::GetFolderPath("Programs"),
+      [Environment]::GetFolderPath("Desktop")
+    )
+    foreach ($dir in $ShortcutDirs) {
+      $src = Join-Path $dir "$InstallDirName.lnk"
+      $dst = Join-Path $dir "$DisplayName.lnk"
+      if (Test-Path -LiteralPath $src) {
+        Move-Item -LiteralPath $src -Destination $dst -Force -ErrorAction SilentlyContinue
+      }
+    }
+    Ui-ActionDone $IdxShortcut "(done)"
   }
 
   # --- footer ------------------------------------------------------------

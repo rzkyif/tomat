@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import type { Tool } from "@tomat/shared";
 import type { PoolToWorkerFrame, WorkerToPoolFrame } from "./worker-protocol.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import {
   type CallEvent,
   type CallWorker,

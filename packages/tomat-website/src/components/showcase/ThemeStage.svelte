@@ -128,7 +128,7 @@
     // Shadow colour goes maximum pink/magenta. The flip re-asserts
     // `--bubble-shadow-color-*` on every element under `.demo-frame`, so an
     // inherited value is overridden; a marker class carries the override with
-    // `!important` to win per-element (see the <style> below).
+    // `!important` to win per-element (see the style block below).
     demo.move(tl, 'input[aria-label="Shadow Color value"]', { duration: 0.7 });
     demo.click(tl, 'input[aria-label="Shadow Color value"]', () => {
       setVal("appearance.bubbleShadowColor", NEW_SHADOW_COLOR);

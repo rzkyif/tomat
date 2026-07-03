@@ -2,7 +2,7 @@
 // synthesize requires the kokoro sidecar (out of scope here).
 
 import { assertEquals } from "@std/assert";
-import { buildApp } from "../server.ts";
+import { engine } from "../../host/engine.ts";
 import { pairClient } from "../../../tests/helpers/pairing.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
 
@@ -15,8 +15,8 @@ const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 Deno.test("GET /api/v1/tts/voices: requires bearer (401)", async () => {
   const env = await setupTestEnv();
   try {
-    const app = buildApp();
-    const res = await app.fetch(new Request("http://x/api/v1/tts/voices"));
+    const app = await engine();
+    const res = await app.handleHttp(new Request("http://x/api/v1/tts/voices"));
     assertEquals(res.status, 401);
   } finally {
     await env.teardown();
@@ -32,8 +32,8 @@ Deno.test("GET /api/v1/tts/voices: returns the selected model's catalog voices",
   Deno.env.set("TOMAT_CHANNEL", "dev");
   try {
     const { token } = await pair();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/tts/voices", { headers: bearer(token) }),
     );
     assertEquals(res.status, 200);
@@ -56,8 +56,8 @@ Deno.test("POST /api/v1/tts/synthesize: empty text returns 400", async () => {
   const env = await setupTestEnv();
   try {
     const { token } = await pair();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/tts/synthesize", {
         method: "POST",
         headers: { ...bearer(token), "content-type": "application/json" },
@@ -74,8 +74,8 @@ Deno.test("POST /api/v1/tts/synthesize: text over the length cap returns 400", a
   const env = await setupTestEnv();
   try {
     const { token } = await pair();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/tts/synthesize", {
         method: "POST",
         headers: { ...bearer(token), "content-type": "application/json" },
@@ -94,8 +94,8 @@ Deno.test("GET /api/v1/tts/status: returns the controller status object", async 
   const env = await setupTestEnv();
   try {
     const { token } = await pair();
-    const app = buildApp();
-    const res = await app.fetch(
+    const app = await engine();
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/tts/status", { headers: bearer(token) }),
     );
     assertEquals(res.status, 200);

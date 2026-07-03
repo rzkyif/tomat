@@ -13,8 +13,10 @@ afterEach(async () => {
 
 test("installs a local extension and lists it with its tool", async () => {
   app = await launchApp({ scenario: "paired" });
+  // waitReady() resolves once the app is connected; the mounted app already
+  // ran extensionsState.attach() on that connected edge, so the WS feed that
+  // awaitJob() relies on is live.
   await app.chat.waitReady();
-  await extensionsState.ensureConnected();
 
   const path = await commands.fixturePath("test-extension");
   const downloadJob = await extensionsState.download({ source: "local", slug: "test-echo", path });

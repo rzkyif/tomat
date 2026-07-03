@@ -15,9 +15,9 @@ import type {
   Tool,
   UndeclaredPolicy,
 } from "@tomat/shared";
-import { db } from "../db/connection.ts";
+import { db } from "@tomat/core-engine";
 import { paths } from "../paths.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { hostPlatforms } from "../shared/platform.ts";
 import { errMessage, permissionKey, toolPlatformSupported } from "@tomat/shared";
 import { hashExtension, statSignature } from "./hash.ts";

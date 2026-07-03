@@ -21,17 +21,17 @@
     highlightLabel?: string;
     highlightTarget?: string;
   } = $props();
-  const props = $derived(sessionBarSamples[scenario] as ComponentProps<typeof SessionBarView>);
+  const viewProps: ComponentProps<typeof SessionBarView> = $derived(sessionBarSamples[scenario]);
 </script>
 
 <DemoFrame {label} highlighted={!!highlightTarget} designWidth={620}>
   <div class="mx-auto w-full max-w-[620px]">
     {#if highlightTarget}
       <Highlight label={highlightLabel} target={highlightTarget}>
-        <SessionBarView {...props} />
+        <SessionBarView {...viewProps} />
       </Highlight>
     {:else}
-      <SessionBarView {...props} />
+      <SessionBarView {...viewProps} />
     {/if}
   </div>
 </DemoFrame>

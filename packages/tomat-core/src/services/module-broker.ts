@@ -13,18 +13,18 @@ import type { PermissionDecl, PermissionKind } from "@tomat/shared";
 import { errMessage, permissionKey } from "@tomat/shared";
 import type { ModuleName } from "../extensions/worker-protocol.ts";
 import { extensionsRegistry } from "../extensions/registry.ts";
-import { synthesizeSpeech } from "./tts-synthesize.ts";
-import { STT_MAX_AUDIO_BYTES, TTS_MAX_TEXT_CHARS } from "./media-limits.ts";
+import { synthesizeSpeech } from "@tomat/core-engine/services/tts-synthesize";
+import { STT_MAX_AUDIO_BYTES, TTS_MAX_TEXT_CHARS } from "@tomat/core-engine/services/media-limits";
 import { extensionDataDir } from "../paths.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
-import { loadCoreSettings } from "./core-settings.ts";
-import { memoriesStore } from "./memories-store.ts";
+import { loadCoreSettings } from "@tomat/core-engine/services/core-settings";
+import { memoriesStore } from "@tomat/core-engine/services/memories-store";
 import { scheduleMemoryIndexing } from "./memories-indexer.ts";
-import { resolveEndpoint } from "./endpoint-resolver.ts";
+import { resolveEndpoint } from "@tomat/core-engine/services/endpoint-resolver";
 import { llmIdle } from "./llm-idle.ts";
-import { singleShot } from "./single-shot.ts";
-import { transcribeAudio } from "./stt-transcribe.ts";
+import { singleShot } from "@tomat/core-engine/services/single-shot";
+import { transcribeAudio } from "@tomat/core-engine/services/stt-transcribe";
 
 const log = getLogger("modulebroker");
 
@@ -187,7 +187,7 @@ async function dispatchMemories(op: string, args: unknown): Promise<unknown> {
           updatedAtMs: m.updatedAtMs,
         }));
     case "get": {
-      const memory = store.getByTitle(argString(args, "title"));
+      const memory = await store.getByTitle(argString(args, "title"));
       if (!memory || !memory.enabled) {
         throw new AppError("not_found", `memory "${argString(args, "title")}" not found`);
       }
@@ -196,24 +196,24 @@ async function dispatchMemories(op: string, args: unknown): Promise<unknown> {
     case "getFile": {
       const title = argString(args, "title");
       const name = argString(args, "name");
-      const memory = store.getByTitle(title);
+      const memory = await store.getByTitle(title);
       if (!memory || !memory.enabled) {
         throw new AppError("not_found", `memory "${title}" not found`);
       }
       return {
         title: memory.title,
         name,
-        content: store.getFile(memory.id, name),
+        content: await store.getFile(memory.id, name),
       };
     }
     case "write": {
       const title = argString(args, "title");
       const content = argString(args, "content", { allowEmpty: true });
-      const existing = store.getByTitle(title);
+      const existing = await store.getByTitle(title);
       const before = existing?.content ?? "";
       const memory = existing
-        ? store.replaceContent(existing.id, content)
-        : store.create("knowledge", title, content);
+        ? await store.replaceContent(existing.id, content)
+        : await store.create("knowledge", title, content);
       scheduleMemoryIndexing(memory.id);
       return {
         title: memory.title,
@@ -224,11 +224,11 @@ async function dispatchMemories(op: string, args: unknown): Promise<unknown> {
     }
     case "edit": {
       const title = argString(args, "title");
-      const existing = store.getByTitle(title);
+      const existing = await store.getByTitle(title);
       if (!existing) {
         throw new AppError("not_found", `memory "${title}" not found`);
       }
-      const { memory, before, after } = store.editContent(
+      const { memory, before, after } = await store.editContent(
         existing.id,
         argString(args, "find"),
         argString(args, "replace", { allowEmpty: true }),

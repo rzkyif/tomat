@@ -178,44 +178,80 @@ fn install_service_flag(service: bool) -> &'static str {
 #[cfg(unix)]
 fn run_installer(url: &str, service: bool, bind_all: bool) -> AppResult<String> {
     let pipeline = format!("curl -fsSL '{}' | bash", url);
-    let out = Command::new("bash")
-        .arg("-c")
+    let mut cmd = Command::new("bash");
+    cmd.arg("-c")
         .arg(&pipeline)
         // Install into THIS client's channel so a latest client installs a latest
         // core (not stable). The installer bakes it into the service env.
         .env("TOMAT_CHANNEL", crate::channel::channel())
         .env("TOMAT_INSTALL_SERVICE", install_service_flag(service))
-        .env("TOMAT_INSTALL_BIND_ALL", install_service_flag(bind_all))
-        .output()?;
-    if !out.status.success() {
-        return Err(AppError::external(format!(
-            "installer exited with status {}: {}",
-            out.status,
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        .env("TOMAT_INSTALL_BIND_ALL", install_service_flag(bind_all));
+    run_installer_capturing(cmd)
 }
 
 #[cfg(windows)]
 fn run_installer(url: &str, service: bool, bind_all: bool) -> AppResult<String> {
+    use std::os::windows::process::CommandExt;
+    // A GUI-subsystem app spawning a console app (powershell.exe) makes Windows
+    // pop up a console window whose stdout we've redirected into the pipe below,
+    // so it renders empty (only IWR's progress bar draws to the host). Suppress
+    // it: the install runs silently and the client's own UI is the sole feedback,
+    // matching the windowless macOS/Linux path. 0x08000000 = CREATE_NO_WINDOW.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let ps = format!("iwr -useb '{}' | iex", url);
-    let out = Command::new("powershell")
-        .args(["-ExecutionPolicy", "Bypass", "-Command", &ps])
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-ExecutionPolicy", "Bypass", "-Command", &ps])
+        .creation_flags(CREATE_NO_WINDOW)
         // Install into THIS client's channel so a latest client installs a latest
         // core (not stable). The installer bakes it into the service env.
         .env("TOMAT_CHANNEL", crate::channel::channel())
         .env("TOMAT_INSTALL_SERVICE", install_service_flag(service))
-        .env("TOMAT_INSTALL_BIND_ALL", install_service_flag(bind_all))
-        .output()?;
-    if !out.status.success() {
+        .env("TOMAT_INSTALL_BIND_ALL", install_service_flag(bind_all));
+    run_installer_capturing(cmd)
+}
+
+/// Run the installer, capturing stdout/stderr to temp FILES and waiting for the
+/// direct child to exit, then parsing the captured output.
+///
+/// Why not `Command::output()` (pipes): on the "don't keep running in
+/// background" path the installer backgrounds the freshly-installed core, which
+/// inherits the parent's stdout handle (unix: the `exec 3>&1` dup in the
+/// installer UI; windows: `Start-Process` forcing `bInheritHandles`). With a
+/// PIPE, reading to EOF hangs forever because the detached core holds the write
+/// end open - the "stuck on installing" bug. It would ALSO hang on the failure
+/// path (a failure AFTER the core is backgrounded, e.g. the core not coming up
+/// before the pairing step). A FILE handle is harmless to inherit (it never
+/// blocks a reader), so we can just `status()` on the DIRECT child: it exits
+/// promptly once it has minted the code (or failed), regardless of the detached
+/// core. `NamedTempFile` is mode 0600 with an unpredictable name, so the
+/// briefly-on-disk pairing code isn't exposed to other users and there's no
+/// symlink pre-creation race; it also lossy-decodes, so odd installer bytes
+/// never abort the parse.
+fn run_installer_capturing(mut cmd: Command) -> AppResult<String> {
+    use std::io::Read;
+
+    let out = tempfile::NamedTempFile::new()?;
+    let err = tempfile::NamedTempFile::new()?;
+    let status = cmd.stdout(out.reopen()?).stderr(err.reopen()?).status()?;
+
+    let read_lossy = |path: &std::path::Path| -> String {
+        let mut buf = Vec::new();
+        if let Ok(mut f) = std::fs::File::open(path) {
+            let _ = f.read_to_end(&mut buf);
+        }
+        String::from_utf8_lossy(&buf).into_owned()
+    };
+
+    let stdout = read_lossy(out.path());
+    if !status.success() {
+        let stderr = read_lossy(err.path());
         return Err(AppError::external(format!(
             "installer exited with status {}: {}",
-            out.status,
-            String::from_utf8_lossy(&out.stderr).trim()
+            status,
+            stderr.trim()
         )));
     }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    Ok(stdout)
 }
 
 fn parse_pairing_code(output: &str) -> AppResult<String> {
@@ -357,7 +393,7 @@ pub fn local_sidecar_ports() -> std::collections::HashMap<String, u16> {
 /// admin endpoint already answers, this is a no-op and returns `false`.
 /// Returns `true` if a new process was started.
 #[tauri::command]
-pub async fn start_local_core() -> AppResult<bool> {
+pub async fn start_local_core(state: State<'_, AppState>) -> AppResult<bool> {
     // Dev: the core is started from source by `deno task dev`, not a binary we
     // can spawn here. Confirm it's reachable; never try to launch it.
     if is_dev() {
@@ -390,7 +426,11 @@ pub async fn start_local_core() -> AppResult<bool> {
         .ok_or_else(|| AppError::external("could not derive logs dir"))?;
     std::fs::create_dir_all(&logs_dir)?;
 
-    spawn_detached(&bin, &logs_dir)?;
+    let pid = spawn_detached(&bin, &logs_dir)?;
+    // Record that WE started this core so app-exit stops exactly it (service-less
+    // "on-demand" mode). We only reach here when the probe found nothing running,
+    // so a background-service core is never recorded and never stopped on exit.
+    state.0.spawned_core_pid.store(pid, Ordering::SeqCst);
 
     // Best-effort wait for the port to come up so the next pairing /
     // settings call doesn't race with the spawn.
@@ -421,8 +461,10 @@ async fn probe_local_core() -> bool {
     task.await.unwrap_or(false)
 }
 
+/// Spawn the core detached and return its PID so the caller can record which
+/// core THIS session started (and stop exactly it on app exit).
 #[cfg(unix)]
-fn spawn_detached(bin: &std::path::Path, logs_dir: &std::path::Path) -> AppResult<()> {
+fn spawn_detached(bin: &std::path::Path, logs_dir: &std::path::Path) -> AppResult<u32> {
     use std::fs::OpenOptions;
     use std::os::unix::process::CommandExt;
     let stdout = OpenOptions::new()
@@ -434,7 +476,7 @@ fn spawn_detached(bin: &std::path::Path, logs_dir: &std::path::Path) -> AppResul
         .append(true)
         .open(logs_dir.join("core.stderr.log"))?;
     // setsid so the child survives the client exiting.
-    unsafe {
+    let child = unsafe {
         Command::new(bin)
             .stdout(stdout)
             .stderr(stderr)
@@ -448,9 +490,9 @@ fn spawn_detached(bin: &std::path::Path, logs_dir: &std::path::Path) -> AppResul
                 }
                 Ok(())
             })
-            .spawn()?;
-    }
-    Ok(())
+            .spawn()?
+    };
+    Ok(child.id())
 }
 
 #[cfg(unix)]
@@ -462,12 +504,75 @@ fn libc_setsid() -> i32 {
     unsafe { setsid() }
 }
 
+/// Stop a core THIS session spawned (service-less mode). Called from the app's
+/// exit handler so quitting the client also stops a core it started. Best-effort
+/// and non-blocking: `pid == 0` (we never spawned one, e.g. a background service
+/// owns the core) is a no-op. Unix sends SIGTERM so the core runs its graceful
+/// shutdown (sidecar/MCP teardown). Windows hard-kills the tree; the in-core Job
+/// Object still reaps sidecars when the core dies, so nothing is orphaned.
+pub fn stop_spawned_core(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        // Guard against PID reuse: a mid-session core crash could free this PID
+        // for an unrelated process, and we must not signal that. Only proceed if
+        // the PID still looks like our core. "tomat-core" survives Linux's
+        // 15-char `comm` truncation and appears in macOS's full-path `comm`.
+        let looks_like_core = Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "comm="])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains("tomat-core"))
+            .unwrap_or(false);
+        if !looks_like_core {
+            return;
+        }
+        unsafe extern "C" {
+            fn kill(pid: i32, sig: i32) -> i32;
+        }
+        const SIGTERM: i32 = 15;
+        unsafe {
+            kill(pid as i32, SIGTERM);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // The IMAGENAME filter is the PID-reuse guard: taskkill matches nothing
+        // (a no-op) unless the PID is still a tomat-core process, so a recycled
+        // PID belonging to something else is never killed.
+        let image = crate::channel::core_binary_name();
+        let _ = Command::new("taskkill")
+            .args([
+                "/F",
+                "/T",
+                "/FI",
+                &format!("PID eq {pid}"),
+                "/FI",
+                &format!("IMAGENAME eq {image}"),
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+}
+
+/// Spawn the core detached and return its PID (see the unix variant).
 #[cfg(windows)]
-fn spawn_detached(bin: &std::path::Path, logs_dir: &std::path::Path) -> AppResult<()> {
+fn spawn_detached(bin: &std::path::Path, logs_dir: &std::path::Path) -> AppResult<u32> {
     use std::fs::OpenOptions;
     use std::os::windows::process::CommandExt;
-    const DETACHED_PROCESS: u32 = 0x00000008;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+    // CREATE_NO_WINDOW (not DETACHED_PROCESS): the core gets a console that is
+    // never shown, instead of no console at all. Console-subsystem sidecars the
+    // core later spawns (llama-server, tomat-core-speech) inherit this hidden
+    // console rather than allocating their own VISIBLE one, which is what popped
+    // terminal windows on Windows. The core still survives the client exiting
+    // (Windows doesn't reap children on parent exit). CREATE_NEW_PROCESS_GROUP
+    // keeps it out of our Ctrl+C group.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     let stdout = OpenOptions::new()
         .create(true)
         .append(true)
@@ -476,15 +581,15 @@ fn spawn_detached(bin: &std::path::Path, logs_dir: &std::path::Path) -> AppResul
         .create(true)
         .append(true)
         .open(logs_dir.join("core.stderr.log"))?;
-    Command::new(bin)
+    let child = Command::new(bin)
         .stdout(stdout)
         .stderr(stderr)
         // Pass this client's channel so the on-demand core matches it (the
         // compiled-in channel isn't visible to the spawned process otherwise).
         .env("TOMAT_CHANNEL", crate::channel::channel())
-        .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+        .creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP)
         .spawn()?;
-    Ok(())
+    Ok(child.id())
 }
 
 #[derive(serde::Serialize)]

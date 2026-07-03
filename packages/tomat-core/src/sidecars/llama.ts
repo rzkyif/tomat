@@ -10,7 +10,7 @@ import { getDefaultSettings } from "@tomat/shared";
 import { binPath, llmPort, paths } from "../paths.ts";
 import { binaryName, libDirFor, platformExe } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
-import { boolSetting, numSetting, strSetting } from "../services/settings-access.ts";
+import { boolSetting, numSetting, strSetting } from "@tomat/core-engine/services/settings-access";
 import type { StartOptions } from "./types.ts";
 
 export interface LlamaStartArgs {

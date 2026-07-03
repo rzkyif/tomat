@@ -20,7 +20,7 @@ import {
   llamaStartArgsFromSettings,
 } from "../sidecars/llama.ts";
 import { getLogger } from "../shared/log.ts";
-import { numSetting } from "./settings-access.ts";
+import { numSetting } from "@tomat/core-engine/services/settings-access";
 import { errMessage } from "@tomat/shared";
 
 const log = getLogger("llm-idle");

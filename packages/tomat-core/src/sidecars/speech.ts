@@ -33,8 +33,8 @@ import {
 import { binPath, paths, speechPort } from "../paths.ts";
 import { binaryName, libDirFor } from "../binaries/versions.ts";
 import { resolveHfPath } from "../models/manager.ts";
-import { numSetting, strSetting } from "../services/settings-access.ts";
-import { AppError } from "../shared/errors.ts";
+import { numSetting, strSetting } from "@tomat/core-engine/services/settings-access";
+import { AppError } from "@tomat/core-engine";
 import type { StartOptions } from "./types.ts";
 
 // Bound a single STT/TTS/configure call so a wedged inference (or a sidecar

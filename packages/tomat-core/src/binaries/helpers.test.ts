@@ -2,7 +2,7 @@ import { assertThrows } from "@std/assert";
 import { ensureHelperBinaries } from "./helpers.ts";
 import { coreBinaryName } from "./versions.ts";
 import { binPath, paths } from "../paths.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 // The helper names ensureHelperBinaries requires on this platform (ptyhost is
 // unix-only). Kept in sync with requiredHelpers() in helpers.ts.

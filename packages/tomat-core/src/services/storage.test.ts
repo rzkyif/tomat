@@ -3,10 +3,10 @@ import { dirname, join } from "@std/path";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
 import { buildStorageTree, clearStorageCategory, deleteStoragePaths } from "./storage.ts";
-import { patchCoreSettings } from "./core-settings.ts";
-import { setSecret } from "./secrets.ts";
+import { patchCoreSettings } from "@tomat/core-engine/services/core-settings";
+import { setSecret } from "@tomat/core-engine/services/secrets";
 import type { StorageCategory, StorageNode } from "@tomat/shared";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 async function writeModel(rel: string, bytes: string): Promise<string> {
   const abs = join(paths().modelsDir, rel);

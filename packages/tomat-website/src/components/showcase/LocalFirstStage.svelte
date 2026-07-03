@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import type { ComponentProps } from "svelte";
   import gsap from "gsap";
   import { getDefaultSettings, SETTINGS_SCHEMA } from "@tomat/shared/domain/settings/engine";
   import type { SettingField } from "@tomat/shared/domain/settings/types";
@@ -42,8 +43,15 @@
   });
 
   // The real adaptive preset picker (single-source component), fed from the
-  // sample and driven by its own callbacks so the Custom dropdowns work.
-  type PresetState = typeof modelPresetFieldSamples.recommended;
+  // sample and driven by its own callbacks so the Custom dropdowns work. Typed
+  // from the View's own props (not `typeof sample`, which would pin `selected`
+  // to its literal `false` and reject the demo toggling it), with buckets +
+  // custom required since the demo always supplies both.
+  type PresetProps = ComponentProps<typeof ModelPresetFieldView>;
+  type PresetState = PresetProps & {
+    buckets: NonNullable<PresetProps["buckets"]>;
+    custom: NonNullable<PresetProps["custom"]>;
+  };
   let preset = $state<PresetState>(structuredClone(modelPresetFieldSamples.recommended));
 
   let stageEl: HTMLElement | undefined = $state();

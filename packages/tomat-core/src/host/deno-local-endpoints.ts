@@ -11,6 +11,9 @@ import { embedPort, llmPort } from "../paths.ts";
 import { resolveHfPath } from "../models/manager.ts";
 import { speechSpeak, speechTranscribe } from "../sidecars/speech.ts";
 import { speechScheduler } from "../services/speech-scheduler.ts";
+import { sidecarManager } from "../sidecars/manager.ts";
+import { loadModelCatalog } from "../models/catalog.ts";
+import { selectedTtsVoices } from "../models/tts.ts";
 import { denoFs } from "./deno-fs.ts";
 
 export const denoLocalEndpoints: LocalEndpoints = {
@@ -34,5 +37,19 @@ export const denoLocalEndpoints: LocalEndpoints = {
     clientId: string,
   ): Promise<Uint8Array> {
     return speechScheduler().schedule(clientId, () => speechSpeak(text, voice, speed));
+  },
+  speechStatus(): { running: boolean; loading: boolean } {
+    const s = sidecarManager().status("speech").status;
+    return { running: s === "Running", loading: s === "Loading" };
+  },
+  async ttsVoices(
+    settings: Record<string, unknown>,
+  ): Promise<Array<{ id: string; label: string; lang?: string }>> {
+    const catalog = await loadModelCatalog();
+    return selectedTtsVoices(
+      catalog,
+      String(settings["tts.modelType"] ?? "kokoro"),
+      String(settings["tts.modelPath"] ?? ""),
+    );
   },
 };

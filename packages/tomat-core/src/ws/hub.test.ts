@@ -9,40 +9,9 @@
 
 import { assertEquals } from "@std/assert";
 import { pairClient } from "../../tests/helpers/pairing.ts";
-import { buildApp } from "../http/server.ts";
+import { startTestServer } from "../../tests/helpers/serve.ts";
 import { wsHub } from "./hub.ts";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-
-interface RunningServer {
-  port: number;
-  stop(): Promise<void>;
-}
-
-function startServer(): RunningServer {
-  const app = buildApp();
-  const hub = wsHub();
-  const abort = new AbortController();
-  const server = Deno.serve(
-    {
-      port: 0,
-      hostname: "127.0.0.1",
-      signal: abort.signal,
-    },
-    (req) => {
-      const url = new URL(req.url);
-      if (url.pathname === "/ws/v1") return hub.handleUpgrade(req);
-      return app.fetch(req);
-    },
-  );
-  const port = (server.addr as Deno.NetAddr).port;
-  return {
-    port,
-    async stop() {
-      abort.abort();
-      await server.finished.catch(() => {});
-    },
-  };
-}
 
 async function pair(): Promise<string> {
   const { token } = await pairClient("ws-test", "127.0.0.1");
@@ -93,7 +62,7 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     const env = await setupTestEnv();
-    const server = startServer();
+    const server = await startTestServer();
     try {
       const token = await pair();
       const ws = dial(server.port, token);
@@ -115,7 +84,7 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     const env = await setupTestEnv();
-    const server = startServer();
+    const server = await startTestServer();
     try {
       // Plain HTTP GET to /ws/v1 without an Upgrade header. The auth check
       // runs BEFORE the upgrade attempt, so we get the 401 directly.
@@ -135,7 +104,7 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     const env = await setupTestEnv();
-    const server = startServer();
+    const server = await startTestServer();
     try {
       const res = await fetch(`http://127.0.0.1:${server.port}/ws/v1?token=not-real`);
       assertEquals(res.status, 401);
@@ -152,7 +121,7 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     const env = await setupTestEnv();
-    const server = startServer();
+    const server = await startTestServer();
     try {
       // Mint two distinct paired clients and connect each.
       const tokenA = await pair();
@@ -187,7 +156,7 @@ Deno.test({
     // long-lived socket is actually cut off (the WS only authenticates once,
     // at upgrade). Pair, connect, then close by clientId and assert the close.
     const env = await setupTestEnv();
-    const server = startServer();
+    const server = await startTestServer();
     try {
       const { token, clientId } = await pairClient("ws-revoke-test", "127.0.0.1");
       const ws = dial(server.port, token);
@@ -213,7 +182,7 @@ Deno.test({
     // valid frame on the same socket must still be handled, proving the
     // connection isn't torn down by the bad frame.
     const env = await setupTestEnv();
-    const server = startServer();
+    const server = await startTestServer();
     try {
       const token = await pair();
       const ws = dial(server.port, token);
@@ -237,7 +206,7 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     const env = await setupTestEnv();
-    const server = startServer();
+    const server = await startTestServer();
     try {
       const token = await pair();
       const ws = dial(server.port, token);
@@ -291,7 +260,7 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     const env = await setupTestEnv();
-    const server = startServer();
+    const server = await startTestServer();
     try {
       const token = await pair();
       const ws = dial(server.port, token);
@@ -329,7 +298,7 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     const env = await setupTestEnv();
-    const server = startServer();
+    const server = await startTestServer();
     try {
       const token = await pair();
       const ws = dial(server.port, token);
@@ -370,7 +339,7 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     const env = await setupTestEnv();
-    const server = startServer();
+    const server = await startTestServer();
     try {
       const token = await pair();
       const ws = dial(server.port, token);
@@ -381,7 +350,7 @@ Deno.test({
       // carry only the benign key: the hub filter drops the secret even though
       // the store changed.
       const framePromise = waitForFrame(ws, "settings.updated");
-      const { patchCoreSettings } = await import("../services/core-settings.ts");
+      const { patchCoreSettings } = await import("@tomat/core-engine/services/core-settings");
       await patchCoreSettings({ "llm.external.apiKey": "sk-store-leak" });
       await patchCoreSettings({ "llm.host": "0.0.0.0" });
 

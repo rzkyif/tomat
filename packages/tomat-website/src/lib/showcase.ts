@@ -28,8 +28,13 @@ function prefersReduced(): boolean {
 }
 
 type EditableEl = HTMLInputElement | HTMLTextAreaElement;
+// The `<input>` types that render typed text and so can carry a text caret; a
+// range/checkbox/color/etc. input is an HTMLInputElement too but paints no text.
+const TEXT_INPUT_TYPES = new Set(["text", "search", "url", "email", "tel", "password", "number"]);
 function isEditable(el: HTMLElement): el is EditableEl {
-  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement) return TEXT_INPUT_TYPES.has(el.type);
+  return false;
 }
 
 // (x, y, height) of the caret at the end of the text, in the EDITABLE's own
@@ -192,8 +197,9 @@ function spawnBurst(stage: HTMLElement, x: number, y: number): void {
 }
 
 export class Demo {
-  // The text field the cursor last clicked into, so its faux caret blinks at the
-  // typed text's end and is dropped the moment the cursor clicks elsewhere.
+  // The text field the cursor last clicked into. It becomes the caret's home once
+  // typing starts, so the faux caret blinks at the typed text's end; it is dropped
+  // the moment the cursor clicks elsewhere.
   private caretTarget?: EditableEl;
   private caretEl?: HTMLElement;
 
@@ -272,8 +278,8 @@ export class Demo {
   }
 
   /** A click: a brief cursor press + a firework spark + a flash of `data-active`,
-   *  then `fn`. Clicking a text field also focuses it so its caret blinks while
-   *  typing; clicking anything else drops that caret. */
+   *  then `fn`. Clicking a text field records it as the caret's home (the caret
+   *  only appears once `type` runs); clicking anything else drops that caret. */
   click(tl: Timeline, sel: string, fn?: () => void, at?: Pos): void {
     tl.to(
       this.cursor,
@@ -297,10 +303,10 @@ export class Demo {
         const y = gsap.getProperty(this.cursor, "y") as number;
         spawnBurst(this.stage, x + 3, y + 2);
       }
-      // Caret: clicking into a text field shows its blinking caret; clicking
-      // anything else (e.g. Send) hides it.
-      if (el && isEditable(el)) this.showCaret(el);
-      else this.hideCaret();
+      // Caret: clicking into a text field marks it as the caret's home for the
+      // next `type`; clicking anything else (e.g. Send, a slider) drops the caret.
+      this.hideCaret();
+      if (el && isEditable(el)) this.caretTarget = el;
       fn?.();
     });
   }
@@ -310,10 +316,12 @@ export class Demo {
     this.hideCaret();
   }
 
-  /** Start (or move) the faux caret in `el` and pin it to the text's end. */
-  private showCaret(el: EditableEl): void {
+  /** Reveal the faux caret in the last-clicked text field and pin it to the
+   *  text's end. No-op unless the cursor clicked into a text field first. */
+  private showCaret(): void {
     if (prefersReduced()) return;
-    this.caretTarget = el;
+    const el = this.caretTarget;
+    if (!el) return;
     if (!this.caretEl) {
       const c = document.createElement("div");
       c.setAttribute("aria-hidden", "true");
@@ -378,6 +386,9 @@ export class Demo {
         duration: opts.duration ?? text.length * 0.055,
         ease: "none",
         snap: { n: 1 },
+        // Reveal the caret only now that typing is actually happening (and only
+        // if the cursor clicked into a text field first).
+        onStart: () => this.showCaret(),
         onUpdate: () => {
           set(text.slice(0, Math.round(o.n)));
           // Reposition after Svelte flushes the new value into the mirror (next

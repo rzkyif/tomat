@@ -53,6 +53,12 @@
 
 $ErrorActionPreference = "Stop"
 
+# Windows PowerShell 5.1 (the `powershell.exe` this one-liner runs under) redraws
+# the Invoke-WebRequest progress bar on every socket read, throttling -OutFile
+# downloads to a fraction of the link speed. Suppressing progress restores full
+# throughput on the multi-tens-of-MB core binary + workers.
+$ProgressPreference = "SilentlyContinue"
+
 # ===== UI helpers begin =====
 # Self-contained UI helper block. Keep this region intact so future install
 # scripts can copy it verbatim. No external state, no shared library --

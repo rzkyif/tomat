@@ -61,8 +61,13 @@ export interface LaunchOptions {
   scenario?: "paired" | "fresh";
   /** Initial mock LLM behaviour (default: echo). */
   llm?: LlmScript;
-  /** Extra core settings.json entries. */
+  /** Extra core settings.json entries (destination: core). */
   settings?: Record<string, unknown>;
+  /** Client-local settings seeded into the E2E platform's clientFiles before
+   *  mount, so `client-on-client` keys (greetings.*, appearance.*, shortcuts.*)
+   *  are in effect during the app's onMount boot - the point where, e.g., the
+   *  greeting gate reads them. Core-destination keys go in `settings`. */
+  clientSettings?: Record<string, unknown>;
   /** Model files present (default) or absent (downloader flow). */
   models?: "present" | "absent";
   /** Sidecar binaries present (default) or absent. */
@@ -129,7 +134,10 @@ export async function launchApp(opts: LaunchOptions = {}): Promise<AppHandle> {
   const { id: coreId, baseUrl, adminToken, tlsPin } = launched;
   const spawnedCoreIds = [coreId];
 
-  installE2ePlatform({ tlsPin });
+  installE2ePlatform({
+    tlsPin,
+    clientFiles: opts.clientSettings ? { settings: opts.clientSettings } : undefined,
+  });
   registerCorePin(baseUrl, tlsPin);
 
   let clientId: string | undefined;

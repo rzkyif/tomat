@@ -11,7 +11,7 @@ import {
   requiredBinaryKinds,
   requiredModelRefs,
 } from "@tomat/shared";
-import { loadCoreSettingsResolved } from "./core-settings.ts";
+import { loadCoreSettingsResolved } from "@tomat/core-engine/services/core-settings";
 import { modelsManager } from "../models/manager.ts";
 import { binariesManager } from "../binaries/manager.ts";
 import { hostTriple } from "../binaries/versions.ts";

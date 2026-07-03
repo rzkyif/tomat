@@ -5,8 +5,8 @@ import {
   clearStorageCategory,
   deleteStoragePaths,
 } from "../../services/storage.ts";
-import { AppError } from "../../shared/errors.ts";
-import { readJson } from "../body.ts";
+import { AppError } from "@tomat/core-engine";
+import { readJson } from "@tomat/core-engine/http/body";
 import { bearerMiddleware } from "../middleware/auth.ts";
 
 export function storageRoutes(): Hono {

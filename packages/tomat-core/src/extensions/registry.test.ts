@@ -8,7 +8,7 @@ import type { PermissionDecl } from "@tomat/shared";
 import { permissionKey } from "@tomat/shared";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { type ExtensionInsertInput, extensionsRegistry, type ToolInsertInput } from "./registry.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 function tk(overrides: Partial<ExtensionInsertInput> = {}): ExtensionInsertInput {
   return {

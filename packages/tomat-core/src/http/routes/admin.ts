@@ -8,7 +8,7 @@
 import { Hono } from "hono";
 import { adminPasswordSetRequestSchema } from "@tomat/shared";
 import { authService } from "../../services/auth.ts";
-import { parseBody, readJson } from "../body.ts";
+import { parseBody, readJson } from "@tomat/core-engine/http/body";
 import { adminTokenMiddleware } from "../middleware/auth.ts";
 
 export function adminRoutes(): Hono {

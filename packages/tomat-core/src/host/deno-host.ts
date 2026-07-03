@@ -13,6 +13,8 @@ import { denoFs } from "./deno-fs.ts";
 import { denoSecureStore } from "./deno-secure-store.ts";
 import { denoLocalEndpoints } from "./deno-local-endpoints.ts";
 import { denoToolHost } from "./deno-tool-host.ts";
+import { denoStatusHost } from "./deno-status-host.ts";
+import { denoMcpAdminHost } from "./deno-mcp-admin-host.ts";
 
 // A full Deno service: it can run local inference sidecars and spawn
 // subprocesses, and it reaches remote MCP servers.
@@ -37,6 +39,8 @@ const impl: Host = {
   secureStore: denoSecureStore,
   localEndpoints: denoLocalEndpoints,
   tools: denoToolHost,
+  status: denoStatusHost,
+  mcp: denoMcpAdminHost,
   log(level: LogLevel, scope: string, message: string): void {
     getLogger(scope)[level](message);
   },

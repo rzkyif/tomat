@@ -8,10 +8,10 @@
 import { assertEquals, assertNotEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { dirname, join } from "@std/path";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
-import { db } from "../db/connection.ts";
+import { db } from "@tomat/core-engine";
 import { paths } from "../paths.ts";
 import { DownloadManager } from "./manager.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 // An ArrayBuffer-backed view, which the WebCrypto + Response typings require.
 function bytesOf(s: string): Uint8Array<ArrayBuffer> {
@@ -164,6 +164,41 @@ Deno.test("DownloadManager.retry: refuses while Pending; refuses while Downloadi
     assertNotEquals(row?.status, "Error");
     mgr.cancel(id);
   } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("DownloadManager.resumePending: arms a worker for persisted Pending rows (no worker-less limbo)", async () => {
+  const env = await setupTestEnv();
+  const mgr = new DownloadManager();
+  try {
+    // A persisted Pending row, as normalizePersistedRows produces from an
+    // interrupted Downloading row across a restart. Its source isn't an `@...`
+    // spec so the spawned worker fails fast - which is exactly what proves a
+    // worker actually ran: before the fix, resumePending never armed the
+    // in-flight entry and spawn() no-opped on its guard, leaving the row Pending
+    // forever with no worker (the corebar-stuck-on-Downloading limbo).
+    const id = "models:/fake/resume-me";
+    db()
+      .prepare(`
+      INSERT INTO downloads
+        (id, source, destination, rel_path, abs_path, filename, group_id,
+         size_bytes, downloaded_bytes, status, error, added_at_ms)
+      VALUES (?, '/abs/only-source', 'models', '/abs/only-source', ?, 'src', 'g', NULL, 0, 'Pending', NULL, ?)
+    `)
+      .run(id, "/fake/resume-me", Date.now());
+
+    mgr.resumePending();
+
+    // Poll until the row leaves Pending: a worker ran it to a terminal state.
+    let status = rowsForId(id)?.status;
+    for (let i = 0; i < 200 && status === "Pending"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      status = rowsForId(id)?.status;
+    }
+    assertNotEquals(status, "Pending");
+  } finally {
+    mgr.shutdown();
     await env.teardown();
   }
 });

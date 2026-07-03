@@ -9,7 +9,7 @@
 // production caller should always pass an HF spec.
 
 import { join } from "@std/path";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { HF_BASE_URL } from "../config.ts";
 import type { DownloadPlan } from "@tomat/shared";
 

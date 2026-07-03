@@ -107,9 +107,12 @@ It returns the set of token stems it resolved alongside the block; the chat
 service hands that set to the memory token expander so a slug that names both an
 MCP resource and a memory expands once (MCP wins) instead of twice.
 
-## Routes ([`../http/routes/mcp.ts`](../http/routes/mcp.ts))
+## Routes (`@tomat/core-engine`'s [`http/routes/mcp.ts`](../../../tomat-core-engine/src/http/routes/mcp.ts))
 
-The HTTP routes are CRUD for servers, per-tool / per-prompt enable/disable, a
+The `/api/v1/mcp` routes live in the engine and reach this subsystem through the
+host's `McpAdminHost` (wired by [`../host/deno-mcp-admin-host.ts`](../host/deno-mcp-admin-host.ts));
+the engine serves them, the shell dispatches to it. They are CRUD for servers,
+per-tool / per-prompt enable/disable, a
 `reconnect` action, an `oauth/start` action, and the live `prompts` /
 `resources` listings the client's `/` and `@` autocomplete consume. Any change
 that affects which servers are enabled calls `resync()`, which has the manager

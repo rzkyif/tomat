@@ -3,14 +3,15 @@
 
 import { ensureDirs, paths } from "./paths.ts";
 import { ensureHelperBinaries } from "./binaries/helpers.ts";
-import { attachHost } from "@tomat/core-engine";
+import { attachHost, scrubSecrets } from "@tomat/core-engine";
 import { denoHost } from "./host/deno-host.ts";
 import { errMessage } from "@tomat/shared";
 import { loadBootConfig } from "./config.ts";
-import { getLogger, initLogger, isLoggerReady, scrubSecrets } from "./shared/log.ts";
-import { closeDb, openDb } from "./db/connection.ts";
+import { getLogger, initLogger, isLoggerReady } from "./shared/log.ts";
+import { closeDb, openDb } from "@tomat/core-engine";
 import { migrate } from "./db/migrate.ts";
 import { buildApp } from "./http/server.ts";
+import { engine } from "./host/engine.ts";
 import { wsHub } from "./ws/hub.ts";
 import { downloadManager } from "./downloads/manager.ts";
 import { commitUpdate, handleUpdateMarkerOnBoot } from "./update/rollback.ts";
@@ -23,16 +24,17 @@ import { initSidecarBoot } from "./services/sidecar-boot.ts";
 import { coreStatus } from "./services/core-status.ts";
 import { llmIdle } from "./services/llm-idle.ts";
 import { backgroundQueue } from "./services/background-queue.ts";
-import { memoriesStore, registerMemoryProvider } from "./services/memories-store.ts";
+import { memoriesStore, registerMemoryProvider } from "@tomat/core-engine/services/memories-store";
 import { scheduleMemoryIndexing } from "./services/memories-indexer.ts";
-import { initEmbeddingService } from "./services/embedding.ts";
+import { initEmbeddingService } from "@tomat/core-engine/services/embedding";
 import { promptScheduler } from "./services/prompt-scheduler.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
 import { shutdownJobctl } from "./sidecars/jobctl.ts";
-import { loadCoreSettings } from "./services/core-settings.ts";
+import { ensureHiddenConsole } from "./sidecars/console.ts";
+import { loadCoreSettings } from "@tomat/core-engine/services/core-settings";
 import { setBehindProxy } from "./services/deployment.ts";
-import { sweepOrphanedSessionDirs } from "./services/sessions-store.ts";
-import { warnIfVaultUnreadable } from "./services/secrets.ts";
+import { sweepOrphanedSessionDirs } from "@tomat/core-engine/services/sessions-store";
+import { warnIfVaultUnreadable } from "@tomat/core-engine/services/secrets";
 import { tlsServeOptions } from "./services/tls.ts";
 
 async function main(): Promise<void> {
@@ -44,6 +46,11 @@ async function main(): Promise<void> {
   await ensureDirs();
   await initLogger();
   const log = getLogger();
+
+  // Windows: give the core a hidden console before any sidecar spawns, so
+  // console-subsystem sidecars (llama-server, tomat-core-speech) inherit it
+  // instead of popping their own visible terminal window. No-op off Windows.
+  ensureHiddenConsole();
 
   // `server.bindHost` chooses the interface the HTTP listener binds to:
   // 127.0.0.1 (default, this machine only), a specific LAN IP, or 0.0.0.0
@@ -188,7 +195,7 @@ async function main(): Promise<void> {
   // Reconcile the memory store with the files on disk, then queue summary /
   // embedding refreshes for anything stale (idle-gated, background).
   try {
-    memoriesStore().rescan();
+    await memoriesStore().rescan();
     scheduleMemoryIndexing();
   } catch (err) {
     log.warn(`memory rescan failed: ${errMessage(err)}`);
@@ -221,6 +228,11 @@ async function main(): Promise<void> {
 
   const app = buildApp();
   const hub = wsHub();
+  // The engine serves its app-domain slice of /api/v1/* (sessions, settings,
+  // memories, ...); the shell dispatches matching requests into it and keeps its
+  // own transport + OS-bound routes in `app`. Auth runs inside the engine app via
+  // the resolver host/engine.ts injects.
+  const engineInst = await engine();
 
   // Self-signed cert + sealed key; clients pin the SPKI (see services/tls.ts).
   const tls = await tlsServeOptions(bindHost);
@@ -237,6 +249,12 @@ async function main(): Promise<void> {
           req.headers.get("upgrade")?.toLowerCase() === "websocket"
         ) {
           return await hub.handleUpgrade(req);
+        }
+        // Engine-owned routes: hand the raw request to the engine app (it reads
+        // the bearer via the injected resolver and renders the same error
+        // envelope on failure).
+        if (engineInst.isEngineRoute(url.pathname)) {
+          return await engineInst.handleHttp(req);
         }
         // Pass the real socket peer address into the Hono env so security-
         // sensitive routes (pairing rate limit) can key on it instead of a

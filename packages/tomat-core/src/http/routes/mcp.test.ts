@@ -4,25 +4,26 @@
 // connection is attempted.
 
 import { assertEquals } from "@std/assert";
-import { buildApp } from "../server.ts";
+import { engine } from "../../host/engine.ts";
+import type { EngineInstance } from "@tomat/core-engine";
 import { pairClient } from "../../../tests/helpers/pairing.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
-import { getSecret } from "../../services/secrets.ts";
+import { getSecret } from "@tomat/core-engine/services/secrets";
 import { mcpAuthSecretName } from "../../mcp/secret-key.ts";
 
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 const json = (token: string) => ({ ...bearer(token), "content-type": "application/json" });
 
-async function setup(): Promise<{ token: string; app: ReturnType<typeof buildApp> }> {
+async function setup(): Promise<{ token: string; app: EngineInstance }> {
   const { token } = await pairClient("mcp-test", "127.0.0.1");
-  return { token, app: buildApp() };
+  return { token, app: await engine() };
 }
 
 Deno.test("GET /api/v1/mcp: requires bearer (401)", async () => {
   const env = await setupTestEnv();
   try {
-    const app = buildApp();
-    const res = await app.fetch(new Request("http://x/api/v1/mcp"));
+    const app = await engine();
+    const res = await app.handleHttp(new Request("http://x/api/v1/mcp"));
     assertEquals(res.status, 401);
   } finally {
     await env.teardown();
@@ -33,7 +34,7 @@ Deno.test("POST /api/v1/mcp: rejects an unknown transport kind (400)", async () 
   const env = await setupTestEnv();
   try {
     const { token, app } = await setup();
-    const res = await app.fetch(
+    const res = await app.handleHttp(
       new Request("http://x/api/v1/mcp", {
         method: "POST",
         headers: json(token),
@@ -52,7 +53,7 @@ Deno.test("authToken is write-only: stored in the vault, never echoed, '' clears
     const { token, app } = await setup();
 
     // Create a disabled remote server with a bearer token.
-    const created = await app.fetch(
+    const created = await app.handleHttp(
       new Request("http://x/api/v1/mcp", {
         method: "POST",
         headers: json(token),
@@ -75,7 +76,7 @@ Deno.test("authToken is write-only: stored in the vault, never echoed, '' clears
     assertEquals(await getSecret(mcpAuthSecretName(server.id)), "sk-secret");
 
     // PATCH without authToken leaves it untouched.
-    await app.fetch(
+    await app.handleHttp(
       new Request(`http://x/api/v1/mcp/${server.id}`, {
         method: "PATCH",
         headers: json(token),
@@ -86,7 +87,7 @@ Deno.test("authToken is write-only: stored in the vault, never echoed, '' clears
     assertEquals((await (await get(app, token, server.id)).json()).hasAuth, true);
 
     // PATCH authToken "" clears it and flips hasAuth false.
-    await app.fetch(
+    await app.handleHttp(
       new Request(`http://x/api/v1/mcp/${server.id}`, {
         method: "PATCH",
         headers: json(token),
@@ -104,7 +105,7 @@ Deno.test("per-tool enable/disable toggles the row; bad action is 400", async ()
   const env = await setupTestEnv();
   try {
     const { token, app } = await setup();
-    const created = await app.fetch(
+    const created = await app.handleHttp(
       new Request("http://x/api/v1/mcp", {
         method: "POST",
         headers: json(token),
@@ -113,7 +114,7 @@ Deno.test("per-tool enable/disable toggles the row; bad action is 400", async ()
     );
     const { id } = await created.json();
 
-    const enabled = await app.fetch(
+    const enabled = await app.handleHttp(
       new Request(`http://x/api/v1/mcp/${id}/tools/search/enable`, {
         method: "POST",
         headers: bearer(token),
@@ -122,7 +123,7 @@ Deno.test("per-tool enable/disable toggles the row; bad action is 400", async ()
     assertEquals(enabled.status, 200);
     assertEquals((await enabled.json()).toolEnabled, ["search"]);
 
-    const bad = await app.fetch(
+    const bad = await app.handleHttp(
       new Request(`http://x/api/v1/mcp/${id}/tools/search/frobnicate`, {
         method: "POST",
         headers: bearer(token),
@@ -134,8 +135,6 @@ Deno.test("per-tool enable/disable toggles the row; bad action is 400", async ()
   }
 });
 
-function get(app: ReturnType<typeof buildApp>, token: string, id: string): Promise<Response> {
-  return Promise.resolve(
-    app.fetch(new Request(`http://x/api/v1/mcp/${id}`, { headers: bearer(token) })),
-  );
+function get(app: EngineInstance, token: string, id: string): Promise<Response> {
+  return app.handleHttp(new Request(`http://x/api/v1/mcp/${id}`, { headers: bearer(token) }));
 }

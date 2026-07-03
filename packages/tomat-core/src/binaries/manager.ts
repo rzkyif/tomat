@@ -26,9 +26,9 @@ import type {
 import { BINARY_KINDS, errMessage, isResolverEntry } from "@tomat/shared";
 import { downloadManager } from "../downloads/manager.ts";
 import { paths } from "../paths.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
-import { newJobId } from "../shared/ids.ts";
+import { newJobId } from "@tomat/core-engine";
 import { loadBinaryManifest } from "./manifest.ts";
 import { binaryName, hostTriple, libDirFor } from "./versions.ts";
 import { resolveBinaryEntry } from "./upstream-resolver.ts";

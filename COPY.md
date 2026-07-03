@@ -197,6 +197,17 @@ conceptual first, task-oriented, never breathless.
   (voice-activity detection, embeddings, the sandboxed worker, the pairing
   handshake) without explaining the basics under it, keep it scoped to that
   section, and never spill internals into the day-to-day copy outside it.
+- **The one reference exception (`tools/extensions.mdx`).** That page doubles as
+  the extension author reference, the single technical page for the whole
+  extension system, so it is the sanctioned exception to three of the rules
+  above: it may run well past the length target, use fenced `tomat.json` and
+  TypeScript code blocks and reference tables in place of the inline-demo rule,
+  and describe the tool author API directly (the `ctx` surface, permissions, the
+  manifest) rather than deferring mechanism to How It Works, because its second
+  audience is extension authors. It still obeys everything else: voice,
+  terminology, lowercase tomat, the em-dash ban, and a calm demo-driven
+  user-facing opening (what an extension is, installing, trust) before the
+  reference sections. No other manual page gets this latitude.
 
 ## Extensions and tools
 

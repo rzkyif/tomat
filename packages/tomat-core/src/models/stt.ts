@@ -14,7 +14,7 @@ import type {
   SttPresetView,
 } from "@tomat/shared";
 import { modelFilesObject, primaryFileSpec, STT_PRIMARY_ROLE } from "@tomat/shared";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 const MAX_THREADS = 8;
 

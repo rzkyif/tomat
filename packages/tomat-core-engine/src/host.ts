@@ -5,6 +5,13 @@
 // `Deno.*`, `@db/sqlite`, `@tauri-apps/*`, or `node:*` (enforced by the
 // `tomat/no-host-import` lint rule), so the same source runs in either runtime.
 
+import type {
+  McpPrompt,
+  McpResource,
+  McpServer,
+  McpServerInput,
+  ScheduledPromptDraft,
+} from "@tomat/shared";
 import type { ToolHost } from "./services/tool-host.ts";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -109,6 +116,76 @@ export interface LocalEndpoints {
     speed: number | undefined,
     clientId: string,
   ): Promise<Uint8Array>;
+  // The local speech sidecar's lifecycle, for the stt/tts `/status` polls. A host
+  // without local inference omits localEndpoints entirely, so those routes treat
+  // its absence as "not running".
+  speechStatus(): { running: boolean; loading: boolean };
+  // The voices of the currently-selected local TTS model (from the signed model
+  // catalog), for the client's voice dropdown.
+  ttsVoices(
+    settings: Record<string, unknown>,
+  ): Promise<Array<{ id: string; label: string; lang?: string }>>;
+}
+
+// Engine -> host notifications and lifecycle hooks the chat graph fires: status
+// telemetry (broadcast to clients), the local-model idle lifecycle (no-ops on a
+// host without local inference), and scheduled-prompt creation. A mobile host
+// supplies no-op status/idle and its own scheduler (or omits it).
+export interface StatusHost {
+  // Report the current active chat-stream count (status view).
+  noteActiveStreams(n: number): void;
+  // Report the local LLM queue depth (active + queued).
+  noteLlmQueue(active: number, queued: number): void;
+  // Reload the local model if idle-unloading stopped it; no-op for an external
+  // provider or a host without local inference.
+  ensureLocalModelLoaded(settings: Record<string, unknown>): Promise<void>;
+  // Cancel any pending idle-unload at the start of a turn.
+  noteLlmActivity(): void;
+  // Arm the idle-unload timer when the last active turn ends.
+  onTurnEnd(activeStreams: number): void;
+  // Persist a user-confirmed scheduled prompt.
+  createScheduledPrompt(clientId: string, draft: ScheduledPromptDraft): void;
+  // Queue background (re)indexing of a memory's summary + embedding, or of every
+  // memory when no id is given. The desktop host runs it on the idle-gated
+  // background queue; a host without one may index inline or defer.
+  scheduleMemoryIndexing(memoryId?: string): void;
+}
+
+// Remote-MCP server administration behind the /api/v1/mcp routes: the persisted
+// registry (CRUD + per-tool/prompt enablement), the live connection manager
+// (reconcile / disconnect), the OAuth authorization-code flow, and the vault key
+// names for a server's stored credentials. The desktop host wires its full MCP
+// subsystem (stdio + remote + OAuth); a mobile host wires a remote-HTTP-only
+// implementation but the same shape, so OAuth is supported by the contract even
+// where a given host defers it. The route orchestrates; these are the primitives.
+export interface McpAdminHost {
+  list(): McpServer[];
+  listPrompts(): McpPrompt[];
+  listResources(): McpResource[];
+  // Throws not_found if the id is unknown.
+  get(id: string): McpServer;
+  create(input: McpServerInput): McpServer;
+  update(id: string, patch: Partial<McpServerInput>): McpServer;
+  delete(id: string): void;
+  setToolEnabled(id: string, tool: string, enabled: boolean): McpServer;
+  setPromptEnabled(id: string, prompt: string, enabled: boolean): McpServer;
+  // Reconcile live connections to the current enabled set (connect newly-enabled,
+  // drop disabled). Called after any change that affects connectivity.
+  resync(): Promise<void>;
+  // Drop a server's live session (so a following resync reconnects with new config).
+  disconnect(id: string): Promise<void>;
+  // Begin the OAuth authorization-code flow; resolves with the URL to open, or
+  // null when stored tokens already work. `onComplete` fires later when the
+  // browser redirect lands (true = authorized).
+  startOAuth(
+    id: string,
+    url: string,
+    onComplete: (ok: boolean) => void,
+  ): Promise<{ authorizationUrl: string | null }>;
+  cancelOAuth(id: string): void;
+  // Vault key names for a server's stored bearer token / OAuth tokens.
+  authSecretName(id: string): string;
+  oauthSecretName(id: string): string;
 }
 
 // Everything the engine needs from its runtime. Injected once at init().
@@ -131,6 +208,11 @@ export interface Host {
   // Tool catalog + execution provider (extension registry + worker sandbox + MCP
   // client). A mobile host supplies a remote-MCP-only implementation.
   tools?: ToolHost;
+  // Status telemetry + local-model idle lifecycle + scheduled prompts.
+  status?: StatusHost;
+  // Remote-MCP server administration (registry + manager + OAuth). Present on any
+  // host that offers MCP (desktop and mobile both do).
+  mcp?: McpAdminHost;
   log(level: LogLevel, scope: string, message: string): void;
   // Current wall-clock ms; defaults to Date.now when omitted.
   now?(): number;

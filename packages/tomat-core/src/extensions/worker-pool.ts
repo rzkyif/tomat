@@ -6,10 +6,10 @@
 // Behaviorally rich part of the extension subsystem; ports the semantics of
 // src/bun/extensions/worker/pool.ts to Deno subprocesses.
 
-import { newCallId } from "../shared/ids.ts";
+import { newCallId } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { paths } from "../paths.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { emptyFlagSet, flagSetToArgs, type PathTemplates, unionFlags } from "./permissions.ts";
 import { extensionsRegistry } from "./registry.ts";
 import { WorkerHandle } from "./worker-handle.ts";

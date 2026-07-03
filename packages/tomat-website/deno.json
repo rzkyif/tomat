@@ -1,9 +1,10 @@
 {
   "name": "@tomat/website",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "exports": {},
   "tasks": {
     "dev": "ASTRO_DEV_BACKGROUND=1 deno run -A npm:astro@^7 dev",
+    "check": "deno run -A npm:astro@^7 sync && deno run -A npm:svelte-check@^4 --tsconfig ./tsconfig.json --output human",
     "build": "deno run -A npm:astro@^7 build",
     "preview": "deno run -A npm:wrangler@^4 dev",
     "deploy": "deno run -A npm:wrangler@^4 deploy"

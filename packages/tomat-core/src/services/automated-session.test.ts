@@ -7,8 +7,8 @@
 import { assertEquals } from "@std/assert";
 import type { ServerToClientFrame } from "@tomat/shared";
 import { createTestClient, setupTestEnv } from "../../tests/helpers/db.ts";
-import { chatService } from "./chat.ts";
-import { sessionsRepo } from "./sessions-store.ts";
+import { chatService } from "@tomat/core-engine/services/chat";
+import { sessionsRepo } from "@tomat/core-engine/services/sessions-store";
 import { wsHub } from "../ws/hub.ts";
 import { runAutomatedSession } from "./automated-session.ts";
 

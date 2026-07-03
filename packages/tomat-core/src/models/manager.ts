@@ -6,7 +6,7 @@ import type { DownloadEntry, ModelEntry, ProbeModelsResponse } from "@tomat/shar
 import { downloadManager } from "../downloads/manager.ts";
 import { probeSource } from "../downloads/sources.ts";
 import { paths } from "../paths.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 export type ModelGroup = "llm" | "stt" | "tts" | "embed";
 

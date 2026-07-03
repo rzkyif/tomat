@@ -11,7 +11,7 @@
 // or misspelled prop name still fails svelte-check, while a required callback /
 // snippet the renderer injects may be omitted.
 
-import type { ComponentProps } from "svelte";
+import type { Component, ComponentProps, SvelteComponent } from "svelte";
 import type ActionSheet from "../components/primitives/ActionSheet.svelte";
 import type Alert from "../components/primitives/Alert.svelte";
 import type Bubble from "../components/primitives/Bubble.svelte";
@@ -44,7 +44,10 @@ import type Tabs from "../components/primitives/Tabs.svelte";
 import type Textarea from "../components/primitives/Textarea.svelte";
 import type Toggle from "../components/primitives/Toggle.svelte";
 
-type Bundle<C> = Record<string, Partial<ComponentProps<C>>>;
+type Bundle<C extends Component<any, any> | SvelteComponent> = Record<
+  string,
+  Partial<ComponentProps<C>>
+>;
 
 const SELECT_OPTIONS = [
   { value: "fast", label: "Fast" },

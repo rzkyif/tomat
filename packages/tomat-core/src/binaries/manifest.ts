@@ -22,7 +22,7 @@ import { canonicalize, decodeBase64, errMessage } from "@tomat/shared";
 import { join } from "@std/path";
 import { binaryManifestUrl, CORE_VERSION } from "../config.ts";
 import { channel, paths } from "../paths.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { compareSemver } from "../shared/semver.ts";
 import signingKeys from "../../data/signing-keys.json" with { type: "json" };

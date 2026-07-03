@@ -24,9 +24,9 @@
 import { join } from "@std/path";
 import { errMessage } from "@tomat/shared";
 import type { DownloadEntry } from "@tomat/shared";
-import { AppError } from "../shared/errors.ts";
-import { isWithin } from "../shared/fs-safety.ts";
-import { newJobId } from "../shared/ids.ts";
+import { AppError } from "@tomat/core-engine";
+import { isWithin } from "@tomat/core-engine";
+import { newJobId } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { Semaphore } from "../shared/semaphore.ts";
 import { paths } from "../paths.ts";
@@ -89,6 +89,15 @@ export class DownloadManager {
   resumePending(): void {
     const rows = this.snapshot().filter((r) => r.status === "Pending");
     for (const row of rows) {
+      if (this.inFlight.has(row.id)) continue;
+      // Arm the in-flight entry BEFORE spawn, exactly like enqueue/retry do.
+      // spawn() no-ops when no in-flight entry exists (its guard), so a resumed
+      // row that skipped this would stay Pending forever with no worker: a
+      // permanent "queued but never downloads" limbo that ALSO keeps the corebar
+      // stuck on "Downloading" (its status counts non-terminal store rows). This
+      // is the invariant that removes any divergence: every non-terminal row has
+      // a live worker.
+      this.inFlight.set(row.id, { abort: new AbortController(), resolvers: [] });
       this.spawn(
         row.id,
         {
@@ -99,6 +108,17 @@ export class DownloadManager {
         },
         row.absPath,
       ).catch((err) => {
+        // spawn should mark the row terminal itself; if it threw before doing so,
+        // reconcile here so no worker-less non-terminal row can linger (which
+        // would strand the corebar on "Downloading" with nothing progressing).
+        // Covers both non-terminal states: a throw before OR after spawn flips
+        // the row to Downloading.
+        this.inFlight.delete(row.id);
+        const status = this.store.getRow(row.id)?.status;
+        if (status === "Pending" || status === "Downloading") {
+          this.store.setStatus(row.id, "Error", { error: errMessage(err) });
+          this.broadcast();
+        }
         log.warn(`resume ${row.id}: ${errMessage(err)}`);
       });
     }

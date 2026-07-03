@@ -15,8 +15,9 @@ afterEach(async () => {
 
 // Install + enable the hermetic echo tool in the running app's primary core.
 async function installEchoTool(a: AppHandle): Promise<void> {
+  // waitReady() resolves once connected; the mounted app already ran
+  // extensionsState.attach() on that edge, so the WS feed awaitJob() needs is live.
   await a.chat.waitReady();
-  await extensionsState.ensureConnected();
   const path = await commands.fixturePath("test-extension");
   await extensionsState.awaitJob(
     await extensionsState.download({ source: "local", slug: "test-echo", path }),

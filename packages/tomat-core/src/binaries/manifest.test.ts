@@ -12,7 +12,7 @@ import { encodeBase64 } from "@std/encoding/base64";
 import { canonicalize } from "@tomat/shared";
 import type { BinaryManifest } from "@tomat/shared";
 import { assertManifestShape, verifyBinariesSignature } from "./manifest.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 const SAMPLE_MANIFEST = {
   schemaVersion: 1,

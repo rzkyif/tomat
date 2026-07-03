@@ -3,7 +3,7 @@
 // helper).
 
 import { assertEquals, assertThrows } from "@std/assert";
-import { cosineNormalized, topKBySimilarity } from "./relevance.ts";
+import { cosineNormalized, topKBySimilarity } from "@tomat/core-engine/services/relevance";
 
 function vec(...xs: number[]): Float32Array {
   return new Float32Array(xs);

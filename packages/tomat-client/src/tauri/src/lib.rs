@@ -13,7 +13,7 @@ mod types;
 use crate::commands::*;
 use crate::logging::client_log;
 use crate::state::{AppState, AppStateInner};
-use std::sync::atomic::{AtomicBool, AtomicI64};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32};
 use std::sync::{Arc, Mutex};
 
 #[cfg(desktop)]
@@ -42,12 +42,19 @@ fn new_app_state() -> AppState {
         region_capture_target: Mutex::new("primary".to_string()),
         install_in_progress: AtomicBool::new(false),
         install_last_finished_ms: AtomicI64::new(0),
+        spawned_core_pid: AtomicU32::new(0),
     }))
 }
 
 /// Default global shortcut applied at startup before the frontend pushes the
-/// persisted value. Desktop only (no OS-level global hotkeys on mobile).
-#[cfg(desktop)]
+/// persisted value. Desktop only (no OS-level global hotkeys on mobile). Windows
+/// gets a `super`-free combo because `super` is the OS-reserved Win key there,
+/// which `RegisterHotKey` accepts but Windows silently swallows; kept in sync
+/// with the shared per-platform default in settings state (setPlatformDefaults),
+/// which the frontend re-asserts over this on load. Elsewhere `super` = Cmd.
+#[cfg(all(desktop, windows))]
+pub const DEFAULT_TOGGLE_SHORTCUT: &str = "ctrl+alt+shift+z";
+#[cfg(all(desktop, not(windows)))]
 pub const DEFAULT_TOGGLE_SHORTCUT: &str = "super+ctrl+shift+z";
 
 #[cfg(desktop)]
@@ -300,6 +307,12 @@ fn run_desktop() {
                             let _ = cpvc::set_system_volume(v);
                         }
                     }
+                    // Stop a local core THIS session spawned (service-less mode),
+                    // so quitting the client also stops the core it started. A
+                    // background-service core was never recorded here, so it is
+                    // left running. Only fires on true quit (tray Exit); the
+                    // window close button hides to tray and never reaches Exit.
+                    stop_spawned_core(state.0.spawned_core_pid.load(Ordering::SeqCst));
                 }
             }
         });

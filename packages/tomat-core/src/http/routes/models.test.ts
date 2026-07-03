@@ -10,7 +10,7 @@ import { EMBED_MODEL_FILE, settingKeyDestination } from "@tomat/shared";
 import { buildApp } from "../server.ts";
 import { pairClient } from "../../../tests/helpers/pairing.ts";
 import { setupTestEnv } from "../../../tests/helpers/db.ts";
-import { patchCoreSettings } from "../../services/core-settings.ts";
+import { patchCoreSettings } from "@tomat/core-engine/services/core-settings";
 import { onRequirementsChanged } from "../../services/requirements.ts";
 import { resolveHfPath } from "../../models/manager.ts";
 

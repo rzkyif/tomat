@@ -3,7 +3,7 @@
 // (concurrency, transfer, fanout, broadcast). Pure SQLite + the row<->entry
 // mapping; no network, no broadcast, no in-flight state.
 
-import { db } from "../db/connection.ts";
+import { db } from "@tomat/core-engine";
 import type { DownloadEntry, DownloadStatus } from "@tomat/shared";
 import { parseSource } from "./sources.ts";
 import type { EnqueueSpec } from "./manager.ts";

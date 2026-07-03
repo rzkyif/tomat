@@ -5,9 +5,9 @@
 // streams.
 
 import { assertEquals, assertThrows } from "@std/assert";
-import { LlmScheduler, llmScheduler } from "./llm-scheduler.ts";
+import { LlmScheduler, llmScheduler } from "@tomat/core-engine/services/llm-scheduler";
 import { fakeOpenAIFetch } from "../../tests/helpers/fake-openai.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 
 function makeReq() {
   return {

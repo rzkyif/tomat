@@ -21,8 +21,9 @@ import type { PoolToWorkerFrame, WorkerToPoolFrame } from "./worker-protocol.ts"
 import { askUserQuestionSchema, errMessage, scheduledPromptDraftSchema } from "@tomat/shared";
 import type { ScheduledPromptDraft, Tool } from "@tomat/shared";
 import { handleModuleRequest, type ModulePrompt } from "../services/module-broker.ts";
-import { getLogger, scrubSecrets } from "../shared/log.ts";
-import { AppError } from "../shared/errors.ts";
+import { scrubSecrets } from "@tomat/core-engine";
+import { getLogger } from "../shared/log.ts";
+import { AppError } from "@tomat/core-engine";
 import { boundDisplayContent } from "./worker-display-bounds.ts";
 import { CallTimeout } from "./worker-call-timeout.ts";
 

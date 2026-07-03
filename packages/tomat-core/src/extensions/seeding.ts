@@ -18,7 +18,7 @@ import { type InstallEventSink, startDownload, startInstallDeps } from "./instal
 import { readPlantedManifest } from "./seeded-manifest.ts";
 import { extensionsRegistry } from "./registry.ts";
 import { requireWorkerDeno } from "../sidecars/worker-deno.ts";
-import { memoriesStore } from "../services/memories-store.ts";
+import { memoriesStore } from "@tomat/core-engine/services/memories-store";
 
 // Install-script-planted artifact filenames for a seeded extension, read on first
 // boot for an offline install. Keep this naming in sync with

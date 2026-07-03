@@ -19,8 +19,8 @@ import {
   listSecretNames,
   setSecret,
   warnIfVaultUnreadable,
-} from "./secrets.ts";
-import { AppError } from "../shared/errors.ts";
+} from "@tomat/core-engine/services/secrets";
+import { AppError } from "@tomat/core-engine";
 
 Deno.test("setSecret + getSecret: round-trips a value", async () => {
   const env = await setupTestEnv();

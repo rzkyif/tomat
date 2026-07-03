@@ -4,9 +4,9 @@
 // one with deps stays 'downloaded' until the explicit Install step).
 import { dirname, join } from "@std/path";
 import { type ExtensionManifest, parseExtensionManifest } from "@tomat/shared";
-import { memoriesStore } from "../services/memories-store.ts";
+import { memoriesStore } from "@tomat/core-engine/services/memories-store";
 import { scheduleMemoryIndexing } from "../services/memories-indexer.ts";
-import { AppError } from "../shared/errors.ts";
+import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { sha256Hex } from "../shared/hash.ts";
 import { hashExtension } from "./hash.ts";
@@ -31,7 +31,7 @@ export async function finishRegister(
   manifestHash: string,
 ): Promise<void> {
   const deps = await hasDeclaredDeps(installPath);
-  registerDownloaded(extensionId, source, version, installPath, parsed, manifestHash, deps);
+  await registerDownloaded(extensionId, source, version, installPath, parsed, manifestHash, deps);
   if (!deps) {
     const contentHash = await hashExtension(installPath);
     extensionsRegistry().markInstalled(extensionId, contentHash);
@@ -69,7 +69,7 @@ export function parseManifestOrThrow(text: string): ExtensionManifest {
   return result.value;
 }
 
-function registerDownloaded(
+async function registerDownloaded(
   extensionId: string,
   source: InstallSource["source"],
   version: string,
@@ -77,7 +77,7 @@ function registerDownloaded(
   parsed: ExtensionManifest,
   manifestHash: string,
   hasDeps: boolean,
-): void {
+): Promise<void> {
   const registry = extensionsRegistry();
   registry.upsertExtension({
     id: extensionId,
@@ -110,7 +110,11 @@ function registerDownloaded(
   // Register any read-only memories the extension ships. The base dir is the
   // parent of the install dir so each row's `${extensionId}/${path}` filename
   // resolves back under the install dir (see registerExtensionMemories).
-  memoriesStore().registerExtensionMemories(extensionId, dirname(installPath), parsed.memories);
+  await memoriesStore().registerExtensionMemories(
+    extensionId,
+    dirname(installPath),
+    parsed.memories,
+  );
   // Index the just-registered memories so a knowledge memory's summary +
   // embedding land now, rather than waiting for the next boot (skill memories
   // already carry their frontmatter summary). Matches the manual rescan path.

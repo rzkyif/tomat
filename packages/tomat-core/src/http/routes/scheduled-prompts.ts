@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { scheduledPromptDraftSchema, scheduleSpecSchema } from "@tomat/shared";
 import { promptScheduler } from "../../services/prompt-scheduler.ts";
-import { parseBody, readJson } from "../body.ts";
+import { parseBody, readJson } from "@tomat/core-engine/http/body";
 import { bearerMiddleware, requireClient } from "../middleware/auth.ts";
 
 const patchBodySchema = z

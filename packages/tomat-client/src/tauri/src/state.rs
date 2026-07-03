@@ -3,7 +3,7 @@
 // remains: window visibility, current global shortcut, input shortcuts,
 // system-volume restore marker, region-capture target.
 
-use std::sync::atomic::{AtomicBool, AtomicI64};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32};
 use std::sync::{Arc, Mutex};
 
 pub struct AppStateInner {
@@ -36,6 +36,13 @@ pub struct AppStateInner {
     /// user spamming the "install" button doesn't re-run the installer
     /// back-to-back. Initialized to `0` (no install yet → no cooldown).
     pub install_last_finished_ms: AtomicI64,
+    /// PID of a local core THIS client session spawned via `start_local_core`
+    /// (the service-less "on-demand" mode). `0` means we never spawned one
+    /// (either a background service owns the core, or it was already up when we
+    /// probed). Only set on a real spawn, so a non-zero value means "we own this
+    /// core's liveness"; on app exit we stop exactly that PID, so quitting the
+    /// client also stops a core it started. Never stops a core we didn't launch.
+    pub spawned_core_pid: AtomicU32,
 }
 
 #[derive(Clone)]
@@ -56,6 +63,7 @@ mod tests {
             region_capture_target: Mutex::new("primary".to_string()),
             install_in_progress: AtomicBool::new(false),
             install_last_finished_ms: AtomicI64::new(0),
+            spawned_core_pid: AtomicU32::new(0),
         }
     }
 

@@ -12,11 +12,11 @@
 
 import type { Session, UserMessage } from "@tomat/shared";
 import { applyTitleDatetime, DEFAULT_TOOLS_HINT, errMessage } from "@tomat/shared";
-import { newMessageId, newStreamId } from "../shared/ids.ts";
+import { newMessageId, newStreamId } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { wsHub } from "../ws/hub.ts";
-import { chatService } from "./chat.ts";
-import { sessionsRepo } from "./sessions-store.ts";
+import { chatService } from "@tomat/core-engine/services/chat";
+import { sessionsRepo } from "@tomat/core-engine/services/sessions-store";
 
 const log = getLogger("automated-session");
 
