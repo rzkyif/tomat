@@ -81,7 +81,7 @@ async function runGreetingWhenReady(
       }
       await new Promise((resolve) => setTimeout(resolve, GREETING_READY_POLL_MS));
     }
-    runAutomatedSession({
+    await runAutomatedSession({
       ownerClientId,
       title,
       instruction,

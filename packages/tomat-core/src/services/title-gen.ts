@@ -74,7 +74,7 @@ async function generateTitle(
   try {
     let session;
     try {
-      session = sessionsRepo().getOrThrow(ownerClientId, sessionId);
+      session = await sessionsRepo().getOrThrow(ownerClientId, sessionId);
     } catch {
       return;
     }
@@ -92,7 +92,7 @@ async function generateTitle(
     broadcastGenerating(ownerClientId, sessionId, true);
     signalledStart = true;
 
-    const sessionMessages = sessionsRepo().listMessages(sessionId);
+    const sessionMessages = await sessionsRepo().listMessages(sessionId);
     const firstUser = sessionMessages.find((m) => m.role === "user");
     const firstAssistant = sessionMessages.find((m) => m.role === "assistant");
     if (!firstUser || !firstAssistant) return;
@@ -146,7 +146,7 @@ async function generateTitle(
     title = sanitize(title);
     if (!title) return;
 
-    sessionsRepo().patchTitle(ownerClientId, sessionId, title);
+    await sessionsRepo().patchTitle(ownerClientId, sessionId, title);
     wsHub().broadcastToClient(ownerClientId, {
       kind: "session.updated",
       sessionId,

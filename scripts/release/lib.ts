@@ -768,6 +768,7 @@ export type PackageKind = "deno" | "rust";
 
 export const PACKAGES: Record<string, { dir: string; kind: PackageKind }> = {
   shared: { dir: "packages/tomat-shared", kind: "deno" },
+  "core-engine": { dir: "packages/tomat-core-engine", kind: "deno" },
   core: { dir: "packages/tomat-core", kind: "deno" },
   client: { dir: "packages/tomat-client", kind: "deno" },
   website: { dir: "packages/tomat-website", kind: "deno" },

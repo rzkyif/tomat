@@ -32,9 +32,13 @@ flowchart TD
 - [`packages/tomat-shared/`](packages/tomat-shared/README.md): TypeScript
   types + Zod schemas (API contract, `tomat.json` schema, WS frame discriminated
   unions).
-- [`packages/tomat-core/`](packages/tomat-core/README.md): Deno service, single
-  SQLite DB, all sidecar supervision, npm-based extension installation,
-  in-process embeddings.
+- [`packages/tomat-core/`](packages/tomat-core/README.md): Deno service that
+  hosts the engine and owns the runtime/OS-bound layer: HTTPS/WSS transport, TLS +
+  pairing, sidecar supervision, npm-based extension installation, self-update.
+- [`packages/tomat-core-engine/`](packages/tomat-core-engine/README.md):
+  runtime-agnostic heart of core (sessions, chat/LLM streaming, settings,
+  memories + relevance, external STT/TTS, remote MCP) behind a `Host` abstraction,
+  so the same source runs in the Deno service and, later, the mobile webview.
 - [`packages/tomat-core-updater/`](packages/tomat-core-updater/README.md):
   standalone Rust binary that swaps in a staged core build during self-update,
   then restarts core.
@@ -328,11 +332,11 @@ stock scaffolding; re-apply the customizations if it overwrites them.
 The repo separates two axes that used to be tangled in the root task list:
 
 - A **package** is a unit of development: a workspace member with the
-  standardized verbs above. The 11 packages are the `workspace` array in the
-  root `deno.json` (6 Deno + 5 Rust crates), the single source of truth for the
+  standardized verbs above. The 12 packages are the `workspace` array in the
+  root `deno.json` (7 Deno + 5 Rust crates), the single source of truth for the
   fan-out (`scripts/pkg.ts`).
 - A **release item** is a unit of distribution and may compose several packages.
-  `core` bundles `tomat-core`, `tomat-shared`, and the native helper crates;
+  `core` bundles `tomat-core`, `tomat-core-engine`, `tomat-shared`, and the native helper crates;
   `client` and `website` each pull `tomat-shared`. Release items live in
   `scripts/release/*.ts`; each declares the `packages` it is built from, and the
   ones whose source hash is "each package's src + manifest" derive that hash

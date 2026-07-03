@@ -4,7 +4,16 @@
 
 import { assertEquals } from "@std/assert";
 import { DEFAULT_SAMPLING } from "@tomat/shared";
+import { attachHost } from "@tomat/core-engine";
+import { denoHost } from "../host/deno-host.ts";
 import { resolveContextSize, resolveEndpoint } from "./endpoint-resolver.ts";
+
+// Pure-transform tests: the only side effect is resolveExternalApiKey's vault
+// lookup, which must resolve to "no key". Point the engine host at an isolated
+// empty temp root so getSecret reads a non-existent vault (undefined) rather than
+// the developer's real one, without standing up the full test harness.
+Deno.env.set("TOMAT_CORE_HOME", Deno.makeTempDirSync({ prefix: "tomat-endpoint-test-" }));
+attachHost(denoHost());
 
 Deno.test("resolveEndpoint: defaults to local llama-server when provider is unset", async () => {
   const cfg = await resolveEndpoint({});

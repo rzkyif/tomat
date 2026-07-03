@@ -337,9 +337,9 @@ const CATEGORIES: CategoryDescriptor[] = [
     id: "sessions",
     label: "Sessions",
     deletable: true,
-    buildNodes(ctx) {
-      const out = sessionsRepo()
-        .listAll()
+    async buildNodes(ctx) {
+      const sessions = await sessionsRepo().listAll();
+      return sessions
         .sort((a, b) => b.updatedAtMs - a.updatedAtMs)
         .map((s) =>
           folderNode(
@@ -350,11 +350,9 @@ const CATEGORIES: CategoryDescriptor[] = [
             ctx.activeSessionIds.has(s.id) ? "Session is active" : undefined,
           ),
         );
-      return Promise.resolve(out);
     },
-    deleteNode: (node) => {
-      sessionsRepo().deleteById(basename(node.path));
-      return Promise.resolve();
+    deleteNode: async (node) => {
+      await sessionsRepo().deleteById(basename(node.path));
     },
   },
   {

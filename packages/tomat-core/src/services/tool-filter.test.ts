@@ -4,9 +4,16 @@
 // we drive responses with hand-rolled SSE payloads.
 
 import { assertEquals } from "@std/assert";
+import { attachHost } from "@tomat/core-engine";
+import { denoHost } from "../host/deno-host.ts";
 import { ToolFilter } from "./tool-filter.ts";
 import type { LlmEndpointConfig } from "./llm-provider.ts";
 import type { ToolDescriptor } from "@tomat/shared";
+
+// phase2 logs a warning on its fail-open paths, routed through the engine host
+// logger; attach the DenoHost so those lines resolve (this suite is a pure
+// phase2 parser test that never touches fs/db).
+attachHost(denoHost());
 
 function fixedSse(text: string): typeof fetch {
   return () => {

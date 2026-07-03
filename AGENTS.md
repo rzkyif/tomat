@@ -14,11 +14,18 @@ extension, and a distribution website. Tools come from two kinds of provider: an
 **extension** (a `tomat.json` bundle the core installs) and an **MCP server** (a
 Model Context Protocol process the core connects to). The packages:
 
-- **`@tomat/core`**: Deno service that owns every stateful and computational
-  concern: session/message storage, LLM streaming, sandboxed tool execution, MCP
-  server connections, TTS/STT supervision, model + binary downloads, extension
-  installation, embedding-based tool relevance, multi-client pairing auth, and
-  self-update.
+- **`@tomat/core`**: Deno service that hosts the engine and owns everything
+  runtime- or OS-bound: the HTTPS/WSS transport, TLS + multi-client pairing auth,
+  sandboxed tool execution, MCP server connections, TTS/STT supervision, model +
+  binary downloads, extension installation, and self-update. It supplies the
+  engine a `DenoHost` (Deno FS, `@db/sqlite`, the OS keychain) and serves it over
+  `Deno.serve`.
+- **`@tomat/core-engine`**: the runtime-agnostic heart of core, extracted so the
+  same TypeScript can run both in the Deno service and, in a future pass, inside
+  the mobile Client's webview. Owns the portable stateful logic (session/message
+  storage, LLM streaming, settings, memories + embedding-based relevance, external
+  STT/TTS, remote MCP) behind a `Host` abstraction; imports no `Deno.*`,
+  `@db/sqlite`, `@tauri-apps/*`, or `node:*` (enforced by `tomat/no-host-import`).
 - **`@tomat/core-updater`**: standalone Rust binary (`tomat-core-updater`) that
   swaps in a staged core build during self-update, then restarts core.
 - **`@tomat/core-keychain`**: standalone Rust binary (`tomat-core-keychain`)
@@ -199,7 +206,7 @@ For anything beyond the above, the canonical docs are:
 - Package vs release-item separation and the standardized per-package task
   vocabulary (`<verb>` / `<verb>:<pkg>`, fanned out by `scripts/pkg.ts`):
   [DEVELOPMENT.md](DEVELOPMENT.md). A package is a development unit (the root
-  `deno.json` `workspace` array is the source of truth, 6 Deno + 5 Rust crates);
+  `deno.json` `workspace` array is the source of truth, 7 Deno + 5 Rust crates);
   a release item is a distribution unit that may span packages
   (`scripts/release/*.ts`, each declaring its `packages`).
 - Per-package overview (layout, run/build/test, internals): the

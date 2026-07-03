@@ -21,6 +21,7 @@ Deno.test("runAutomatedSession: persists an automated message, broadcasts, and s
     const starts: Array<{ clientId: string; sessionId: string }> = [];
     chatService().start = (cid, frame) => {
       starts.push({ clientId: cid, sessionId: frame.sessionId });
+      return Promise.resolve();
     };
     // Capture session.created broadcasts.
     const broadcasts: Array<{ clientId: string; frame: ServerToClientFrame }> = [];
@@ -28,7 +29,7 @@ Deno.test("runAutomatedSession: persists an automated message, broadcasts, and s
       broadcasts.push({ clientId: cid, frame });
     };
 
-    const session = runAutomatedSession({
+    const session = await runAutomatedSession({
       ownerClientId: clientId,
       title: "Morning brief",
       instruction: "Summarize my day",
@@ -38,7 +39,7 @@ Deno.test("runAutomatedSession: persists an automated message, broadcasts, and s
     });
 
     // The session's automated opening message persists.
-    const messages = sessionsRepo().listMessages(session.id);
+    const messages = await sessionsRepo().listMessages(session.id);
     assertEquals(messages.length, 1);
     const opening = messages[0];
     if (opening.role !== "user") throw new Error("expected a user message");

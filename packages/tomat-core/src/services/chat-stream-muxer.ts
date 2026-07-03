@@ -127,7 +127,7 @@ export class StreamMuxer {
     // exit path. Pending deltas are flushed first so no chat.delta for the
     // id can trail its final snapshot.
     let reasoningFinalized = false;
-    const finalizeReasoning = (interrupted: boolean) => {
+    const finalizeReasoning = async (interrupted: boolean): Promise<void> => {
       if (!reasoningMsg || reasoningFinalized) return;
       reasoningFinalized = true;
       if (flushTimer !== undefined) clearTimeout(flushTimer);
@@ -137,13 +137,13 @@ export class StreamMuxer {
       reasoningMsg.reasoningDurationMs = Math.max(0, endMs - (reasoningStartedAtMs ?? endMs));
       reasoningMsg.pairedAssistantId = assistantMsg?.id;
       if (interrupted) reasoningMsg.interrupted = true;
-      writer.finalize(reasoningMsg);
+      await writer.finalize(reasoningMsg);
     };
     // Fills the streamed text into the skeletons. Called on every exit path
     // so a partial (interrupted / errored) message is returned for
     // finalization rather than dropped.
-    const settleMessages = (interrupted: boolean) => {
-      finalizeReasoning(interrupted);
+    const settleMessages = async (interrupted: boolean): Promise<void> => {
+      await finalizeReasoning(interrupted);
       if (assistantMsg) {
         assistantMsg.content = assistantContent;
         if (interrupted) assistantMsg.interrupted = true;
@@ -175,8 +175,8 @@ export class StreamMuxer {
         isLocal,
       })) {
         if (delta.finishReason) lastFinishReason = delta.finishReason;
-        this.handleDelta(delta, {
-          appendContent: (s) => {
+        await this.handleDelta(delta, {
+          appendContent: async (s) => {
             if (contentStartedAtMs === null) {
               contentStartedAtMs = Date.now();
               assistantMsg = {
@@ -188,7 +188,7 @@ export class StreamMuxer {
                 modelUsed: route,
               };
               writer.born(assistantMsg);
-              finalizeReasoning(false);
+              await finalizeReasoning(false);
             }
             assistantContent += s;
             // Keep the buffered live ref current so a mid-stream resubscribe
@@ -246,7 +246,7 @@ export class StreamMuxer {
       // `interrupted` so the caller finalizes them and live === reload.
       if (stream.abort.signal.aborted) {
         log.info(llmDoneLine("interrupted"));
-        settleMessages(true);
+        await settleMessages(true);
         return {
           assistant: assistantMsg ?? undefined,
           reasoning: reasoningMsg ?? undefined,
@@ -254,7 +254,7 @@ export class StreamMuxer {
           interrupted: true,
         };
       }
-      settleMessages(true);
+      await settleMessages(true);
       const classified =
         err instanceof AppError
           ? { code: err.code, message: err.message }
@@ -278,7 +278,7 @@ export class StreamMuxer {
     // swallows the AbortError and simply ends the iteration.
     if (stream.abort.signal.aborted) {
       log.info(llmDoneLine("interrupted"));
-      settleMessages(true);
+      await settleMessages(true);
       return {
         assistant: assistantMsg ?? undefined,
         reasoning: reasoningMsg ?? undefined,
@@ -342,7 +342,7 @@ export class StreamMuxer {
         status: "pending",
       }));
     }
-    settleMessages(false);
+    await settleMessages(false);
     // Truncation: the model hit the context window (finish_reason "length")
     // on a non-tool turn. The reply is cut off; when thinking consumed the
     // whole window there's no content at all, so synthesize an empty assistant
@@ -368,7 +368,7 @@ export class StreamMuxer {
         streamId: stream.streamId,
         tokenUsage: usage,
       });
-      sessionsRepo().setTokenUsage(stream.sessionId, usage);
+      await sessionsRepo().setTokenUsage(stream.sessionId, usage);
     }
 
     return {
@@ -379,10 +379,10 @@ export class StreamMuxer {
     };
   }
 
-  private handleDelta(
+  private async handleDelta(
     delta: LlmDelta,
     sink: {
-      appendContent: (s: string) => void;
+      appendContent: (s: string) => void | Promise<void>;
       appendReasoning: (s: string) => void;
       updateToolCall: (
         idx: number,
@@ -394,8 +394,8 @@ export class StreamMuxer {
       ) => void;
       captureUsage: (u: { prompt: number; completion: number; total: number }) => void;
     },
-  ): void {
-    if (delta.contentDelta) sink.appendContent(delta.contentDelta);
+  ): Promise<void> {
+    if (delta.contentDelta) await sink.appendContent(delta.contentDelta);
     if (delta.reasoningDelta) sink.appendReasoning(delta.reasoningDelta);
     if (delta.toolCalls) {
       for (const tc of delta.toolCalls) {

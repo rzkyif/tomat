@@ -11,7 +11,7 @@
 // and the client catches up from the session list on its next connect.
 
 import type { Session, UserMessage } from "@tomat/shared";
-import { applyTitleDatetime, DEFAULT_TOOLS_HINT } from "@tomat/shared";
+import { applyTitleDatetime, DEFAULT_TOOLS_HINT, errMessage } from "@tomat/shared";
 import { newMessageId, newStreamId } from "../shared/ids.ts";
 import { getLogger } from "../shared/log.ts";
 import { wsHub } from "../ws/hub.ts";
@@ -32,11 +32,11 @@ export interface AutomatedSessionInput {
   focus: "show" | "show_when_done";
 }
 
-export function runAutomatedSession(input: AutomatedSessionInput): Session {
+export async function runAutomatedSession(input: AutomatedSessionInput): Promise<Session> {
   // Stamp `{datetime}` in the title with the creation time, so a greeting (or
   // scheduled prompt) titled "Greeting {datetime}" reads "Greeting 2026-06-15
   // 14:30", matching the default-title form before LLM title generation.
-  const session = sessionsRepo().create({
+  const session = await sessionsRepo().create({
     ownerClientId: input.ownerClientId,
     title: applyTitleDatetime(input.title, Date.now()),
   });
@@ -48,7 +48,7 @@ export function runAutomatedSession(input: AutomatedSessionInput): Session {
     automated: true,
     createdAtMs: Date.now(),
   };
-  sessionsRepo().appendMessage(session.id, message);
+  await sessionsRepo().appendMessage(session.id, message);
   wsHub().broadcastToClient(input.ownerClientId, {
     kind: "session.created",
     session,
@@ -57,12 +57,15 @@ export function runAutomatedSession(input: AutomatedSessionInput): Session {
     focus: input.focus,
   });
   log.info(`automated session ${session.id} (${input.reason}): "${input.title}"`);
-  chatService().start(input.ownerClientId, {
-    kind: "chat.start",
-    streamId: newStreamId(),
-    sessionId: session.id,
-    route: "default",
-    toolsHint: DEFAULT_TOOLS_HINT,
-  });
+  // Fire-and-forget the turn: the session is already created and returned.
+  void chatService()
+    .start(input.ownerClientId, {
+      kind: "chat.start",
+      streamId: newStreamId(),
+      sessionId: session.id,
+      route: "default",
+      toolsHint: DEFAULT_TOOLS_HINT,
+    })
+    .catch((err) => log.warn(`automated session ${session.id} start failed: ${errMessage(err)}`));
   return session;
 }

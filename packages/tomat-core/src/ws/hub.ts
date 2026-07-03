@@ -228,7 +228,14 @@ class WsHub {
         log.warn(`bad chat.start: ${parsed.error.message}`);
         return;
       }
-      chatService().start(conn.clientId, parsed.data);
+      // Fire-and-forget: start() validates + registers the stream then runs the
+      // turn in the background. A rejection here is a rejected validation (e.g.
+      // unknown session); log it rather than leaving an unhandled rejection.
+      void chatService()
+        .start(conn.clientId, parsed.data)
+        .catch((err) => {
+          log.warn(`chat.start failed: ${errMessage(err)}`);
+        });
       return;
     }
     if (kind === "chat.interrupt") {

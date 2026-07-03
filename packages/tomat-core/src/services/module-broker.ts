@@ -5,7 +5,8 @@
 // access pauses the call on the SAME client prompt UI via the pool's
 // `permission_request` CallEvent (`promptUser`).
 
-import { Database } from "@db/sqlite";
+import type { HostDb } from "@tomat/core-engine";
+import { openDenoDb } from "../db/deno-sqlite.ts";
 import { encodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import type { PermissionDecl, PermissionKind } from "@tomat/shared";
@@ -261,11 +262,11 @@ function argString(args: unknown, key: string, opts: { allowEmpty?: boolean } = 
 // dispatch runs synchronously start to finish, so no handle is mid-use across
 // an eviction.
 const EXTENSION_DB_MAX_OPEN = 16;
-const extensionDbs = new Map<string, Database>();
+const extensionDbs = new Map<string, HostDb>();
 
 type DbBindValue = string | number | boolean | null;
 
-function extensionDb(extensionId: string): Database {
+function extensionDb(extensionId: string): HostDb {
   const existing = extensionDbs.get(extensionId);
   if (existing) {
     // Touch: move to the most-recently-used end of the Map.
@@ -284,7 +285,7 @@ function extensionDb(extensionId: string): Database {
   // round-trip values past 2^31 (e.g. Date.now() ms timestamps a extension
   // stores), plus the same per-connection pragmas so a extension's private db
   // behaves like the rest of core.
-  const db = new Database(join(dir, "data.sqlite"), { int64: true });
+  const db = openDenoDb(join(dir, "data.sqlite"));
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
   // Shorter than core's 5s: extension queries run synchronously on core's event

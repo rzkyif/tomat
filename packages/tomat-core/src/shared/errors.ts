@@ -1,59 +1,16 @@
-// AppError: thrown from anywhere in core, serialized to the wire format by
-// http/middleware/errors.ts.
+// Re-export shim: AppError and friends now live in @tomat/core-engine's platform
+// layer (runtime-agnostic), so the engine and core throw + catch the SAME class
+// (instanceof stays valid across the seam). Core keeps importing from this path
+// unchanged; this file just forwards. Removed once every core importer points at
+// the engine directly.
 
-import { ERROR_STATUS, type ErrorCode } from "@tomat/shared";
-
-export class AppError extends Error {
-  readonly code: ErrorCode;
-  readonly status: number;
-  readonly details?: Record<string, unknown>;
-
-  constructor(code: ErrorCode, message: string, details?: Record<string, unknown>) {
-    super(message);
-    this.name = "AppError";
-    this.code = code;
-    this.status = ERROR_STATUS[code];
-    this.details = details;
-  }
-}
-
-export function isAppError(value: unknown): value is AppError {
-  return value instanceof AppError;
-}
-
-// Helpers for the common error-throwing one-liners.
-export function notFound(message: string, details?: Record<string, unknown>): never {
-  throw new AppError("not_found", message, details);
-}
-
-export function validation(message: string, details?: Record<string, unknown>): never {
-  throw new AppError("validation_error", message, details);
-}
-
-export function conflict(message: string, details?: Record<string, unknown>): never {
-  throw new AppError("conflict", message, details);
-}
-
-export function forbidden(message: string, details?: Record<string, unknown>): never {
-  throw new AppError("forbidden", message, details);
-}
-
-export function internal(message: string, details?: Record<string, unknown>): never {
-  throw new AppError("internal_error", message, details);
-}
-
-// True for filesystem errors caused by a full disk. Deno surfaces these
-// as a generic OS error on most platforms; we match on the underlying
-// errno/code (`ENOSPC`) AND on the human-readable message because Deno's
-// error shape isn't fully typed across platforms. Used by the HTTP error
-// middleware to translate disk-full into a 507 instead of a 500.
-export function isNoSpaceError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const code =
-    (err as unknown as { code?: string }).code ?? (err as unknown as { errno?: string }).errno;
-  if (code === "ENOSPC" || code === "ERROR_DISK_FULL") return true;
-  const msg = err.message.toLowerCase();
-  return (
-    msg.includes("no space left") || msg.includes("disk full") || msg.includes("quota exceeded")
-  );
-}
+export {
+  AppError,
+  conflict,
+  forbidden,
+  internal,
+  isAppError,
+  isNoSpaceError,
+  notFound,
+  validation,
+} from "@tomat/core-engine";

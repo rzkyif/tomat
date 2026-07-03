@@ -407,6 +407,11 @@ export const llmGroup: SettingGroup = {
         description: "The model name to use, e.g. gpt-4o-mini.",
         placeholder: "gpt-4o-mini",
       },
+      embedModel: {
+        description:
+          "Optional model your External provider uses to surface relevant Memories and Tools, e.g. text-embedding-3-small. Reuses the Base URL and API Key above; leave blank to turn it off.",
+        placeholder: "text-embedding-3-small",
+      },
       contextSize: true,
     }),
   ],

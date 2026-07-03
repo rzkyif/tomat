@@ -128,7 +128,7 @@ export interface ScheduledPromptPatch {
   enabled?: boolean;
 }
 
-type FireFn = (input: AutomatedSessionInput) => Session;
+type FireFn = (input: AutomatedSessionInput) => Promise<Session>;
 
 // Bound the table per owner: schedules are user-curated, and an unbounded
 // list only arises from a runaway tool proposing them in a loop.
@@ -279,7 +279,7 @@ export class PromptScheduler {
         "the local model is still loading; try again in a moment",
       );
     }
-    const session = this.fire({
+    const session = await this.fire({
       ownerClientId,
       title: prompt.title,
       instruction: prompt.instruction,
@@ -363,7 +363,7 @@ export class PromptScheduler {
             )
             .run(now, next, prompt.id);
           try {
-            this.fire({
+            await this.fire({
               ownerClientId: prompt.ownerClientId,
               title: prompt.title,
               instruction: prompt.instruction,

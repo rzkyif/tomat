@@ -155,10 +155,15 @@ export interface CoreBuildArtifacts {
 // build
 
 // Packages in the core's module graph; only these are copied into the compile
-// workspace. `tomat-core` imports `@tomat/shared` and `@tomat/model-catalog`
-// via relative paths, so all three must be present for resolution to stay
-// inside the temp tree.
-const COMPILE_WORKSPACE_PACKAGES = ["tomat-shared", "tomat-core", "tomat-model-catalog"];
+// workspace. `tomat-core` imports `@tomat/shared`, `@tomat/core-engine`, and
+// `@tomat/model-catalog` via relative paths, so all must be present for
+// resolution to stay inside the temp tree.
+const COMPILE_WORKSPACE_PACKAGES = [
+  "tomat-shared",
+  "tomat-core-engine",
+  "tomat-core",
+  "tomat-model-catalog",
+];
 
 /** Isolated workspace for `deno compile`. `deno compile` embeds every npm dep
  *  recorded in the deno.lock plus every entry in the compiled package's import
@@ -737,6 +742,7 @@ async function writeManifestFile(
 // deps live in each deno.json / Cargo.toml, which ARE hashed.
 const CORE_PACKAGES = [
   "core",
+  "core-engine",
   "shared",
   "core-keychain",
   "core-updater",

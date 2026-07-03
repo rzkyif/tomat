@@ -1,50 +1,17 @@
-// ID generation wrappers. Wraps jsr:@std/ulid + crypto.randomUUID so call
-// sites express intent (session id vs. opaque uuid) and we have one place
-// to swap implementations later.
+// Re-export shim: ID generators now live in @tomat/core-engine's platform layer
+// (runtime-agnostic). Core keeps importing from this path unchanged; this file
+// forwards. Removed once every core importer points at the engine directly.
 
-import { ulid } from "@std/ulid";
-
-export function newSessionId(): string {
-  return ulid();
-}
-
-export function newMessageId(): string {
-  return ulid();
-}
-
-export function newAttachmentId(): string {
-  return ulid();
-}
-
-export function newClientId(): string {
-  return ulid();
-}
-
-export function newJobId(): string {
-  return ulid();
-}
-
-export function newStreamId(): string {
-  return ulid();
-}
-
-export function newCallId(): string {
-  return ulid();
-}
-
-export function newRequestId(): string {
-  // ask-user request id; short-lived per-call; uuid is fine.
-  return crypto.randomUUID();
-}
-
-export function newMemoryId(): string {
-  return ulid();
-}
-
-export function newScheduledPromptId(): string {
-  return ulid();
-}
-
-export function newMcpServerId(): string {
-  return ulid();
-}
+export {
+  newAttachmentId,
+  newCallId,
+  newClientId,
+  newJobId,
+  newMcpServerId,
+  newMemoryId,
+  newMessageId,
+  newRequestId,
+  newScheduledPromptId,
+  newSessionId,
+  newStreamId,
+} from "@tomat/core-engine";

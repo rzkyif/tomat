@@ -35,32 +35,32 @@ export function sessionsRoutes(): Hono {
   const r = new Hono();
   r.use("*", bearerMiddleware());
 
-  r.get("/", (c) => {
+  r.get("/", async (c) => {
     const me = requireClient(c);
-    return c.json(sessionsRepo().list(me.id));
+    return c.json(await sessionsRepo().list(me.id));
   });
 
   r.post("/", async (c) => {
     const me = requireClient(c);
     const body = (await readJson(c)) as { title?: string; temporary?: boolean };
-    const session = sessionsRepo().create({
+    const session = await sessionsRepo().create({
       ownerClientId: me.id,
       title: body.title,
       temporary: body.temporary === true,
     });
     // Creating any session means the client moved on from a prior temporary
     // one; reclaim stragglers it didn't (or couldn't) delete itself.
-    sessionsRepo().sweepClientTemporary(me.id, session.id);
+    await sessionsRepo().sweepClientTemporary(me.id, session.id);
     return c.json(session);
   });
 
-  r.get("/:id", (c) => {
+  r.get("/:id", async (c) => {
     const me = requireClient(c);
-    const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
+    const session = await sessionsRepo().getOrThrow(me.id, c.req.param("id"));
     // Navigating to a session orphans any other temporary one this client
     // owns (they are never listed, so there is no way back). Sweep them.
-    sessionsRepo().sweepClientTemporary(me.id, session.id);
-    const messages = sessionsRepo().listMessages(session.id);
+    await sessionsRepo().sweepClientTemporary(me.id, session.id);
+    const messages = await sessionsRepo().listMessages(session.id);
     return c.json({ ...session, messages });
   });
 
@@ -70,23 +70,23 @@ export function sessionsRoutes(): Hono {
     if (typeof body.title !== "string") {
       throw new AppError("validation_error", "title is required");
     }
-    sessionsRepo().patchTitle(me.id, c.req.param("id"), body.title);
+    await sessionsRepo().patchTitle(me.id, c.req.param("id"), body.title);
     return c.json({ id: c.req.param("id"), title: body.title });
   });
 
   // Regenerate the session title on demand. Generation streams in the
   // background; the client learns the start, the new title, and the end via
   // `session.updated` frames, so this just kicks it off and returns.
-  r.post("/:id/regenerate-title", (c) => {
+  r.post("/:id/regenerate-title", async (c) => {
     const me = requireClient(c);
-    const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
+    const session = await sessionsRepo().getOrThrow(me.id, c.req.param("id"));
     void regenerateTitle(session.id, me.id);
     return c.body(null, 204);
   });
 
   r.delete("/:id", async (c) => {
     const me = requireClient(c);
-    const { attachmentPaths } = sessionsRepo().delete(me.id, c.req.param("id"));
+    const { attachmentPaths } = await sessionsRepo().delete(me.id, c.req.param("id"));
     for (const p of attachmentPaths) {
       try {
         await Deno.remove(p);
@@ -101,18 +101,18 @@ export function sessionsRoutes(): Hono {
 
   r.post("/:id/messages", async (c) => {
     const me = requireClient(c);
-    const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
+    const session = await sessionsRepo().getOrThrow(me.id, c.req.param("id"));
     const body = parseBody(messageInputSchema, await readJson(c));
-    return c.json(sessionsRepo().appendMessage(session.id, body as Message));
+    return c.json(await sessionsRepo().appendMessage(session.id, body as Message));
   });
 
   r.patch("/:id/messages/:msgId", async (c) => {
     const me = requireClient(c);
-    const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
+    const session = await sessionsRepo().getOrThrow(me.id, c.req.param("id"));
     // Look up the row first so we can validate the patch against the
     // schema that matches its role; this is what blocks a UserMessage from
     // being patched with assistant-only fields like `streaming` / `toolCalls`.
-    const existing = sessionsRepo().getMessage(session.id, c.req.param("msgId"));
+    const existing = await sessionsRepo().getMessage(session.id, c.req.param("msgId"));
     const schema = messagePatchSchemaByRole[existing.role as MessageRoleForPatch];
     if (!schema) {
       throw new AppError(
@@ -127,7 +127,7 @@ export function sessionsRoutes(): Hono {
       throw new AppError("validation_error", parsed.error.message);
     }
     return c.json(
-      sessionsRepo().patchMessage(
+      await sessionsRepo().patchMessage(
         session.id,
         c.req.param("msgId"),
         parsed.data as Partial<Message>,
@@ -135,16 +135,16 @@ export function sessionsRoutes(): Hono {
     );
   });
 
-  r.delete("/:id/messages/:msgId", (c) => {
+  r.delete("/:id/messages/:msgId", async (c) => {
     const me = requireClient(c);
-    const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
-    sessionsRepo().deleteMessage(session.id, c.req.param("msgId"));
+    const session = await sessionsRepo().getOrThrow(me.id, c.req.param("id"));
+    await sessionsRepo().deleteMessage(session.id, c.req.param("msgId"));
     return c.body(null, 204);
   });
 
   r.post("/:id/attachments", async (c) => {
     const me = requireClient(c);
-    const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
+    const session = await sessionsRepo().getOrThrow(me.id, c.req.param("id"));
     const form = await c.req.formData();
     const file = form.get("file");
     const messageId = form.get("messageId");
@@ -158,7 +158,7 @@ export function sessionsRoutes(): Hono {
     const absPath = join(dir, `${id}_${filename}`);
     const bytes = new Uint8Array(await file.arrayBuffer());
     await Deno.writeFile(absPath, bytes);
-    const rec = sessionsRepo().recordAttachment(
+    const rec = await sessionsRepo().recordAttachment(
       session.id,
       messageId,
       filename,
@@ -171,8 +171,8 @@ export function sessionsRoutes(): Hono {
 
   r.get("/:id/attachments/:attId", async (c) => {
     const me = requireClient(c);
-    const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
-    const rec = sessionsRepo().getAttachment(session.id, c.req.param("attId"));
+    const session = await sessionsRepo().getOrThrow(me.id, c.req.param("id"));
+    const rec = await sessionsRepo().getAttachment(session.id, c.req.param("attId"));
     const file = await Deno.open(rec.absPath, { read: true });
     // Wrap the file's readable in a stream that explicitly closes the file
     // on cancel/error so a client abort doesn't leak the FD. Deno's runtime
@@ -221,7 +221,7 @@ export function sessionsRoutes(): Hono {
   //   data: {"error":"..."}                                  (terminal)
   r.post("/:id/chat", async (c) => {
     const me = requireClient(c);
-    const session = sessionsRepo().getOrThrow(me.id, c.req.param("id"));
+    const session = await sessionsRepo().getOrThrow(me.id, c.req.param("id"));
     const body = (await readJson(c)) as { content?: unknown };
     if (typeof body.content !== "string" || body.content.length === 0) {
       throw new AppError("validation_error", "body must be { content: string }");
@@ -242,9 +242,9 @@ export function sessionsRoutes(): Hono {
       content: body.content,
       createdAtMs: Date.now(),
     } as Message;
-    sessionsRepo().appendMessage(session.id, userMsg);
+    await sessionsRepo().appendMessage(session.id, userMsg);
 
-    const history = sessionsRepo().listMessages(session.id);
+    const history = await sessionsRepo().listMessages(session.id);
     const settings = await loadCoreSettings();
     const endpoint = await resolveEndpoint(settings, "default");
     const isLocal = strSetting(settings, "llm.provider", "local") === "local";
@@ -273,7 +273,7 @@ export function sessionsRoutes(): Hono {
           }
           // Persist the assistant turn.
           if (assistantText) {
-            sessionsRepo().appendMessage(session.id, {
+            await sessionsRepo().appendMessage(session.id, {
               id: newMessageId(),
               role: "assistant",
               content: assistantText,

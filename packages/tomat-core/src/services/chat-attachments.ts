@@ -155,7 +155,7 @@ async function readAttachmentAsDataUrl(
   if (cache?.has(cacheKey)) return cache.get(cacheKey) ?? null;
   let result: string | null = null;
   try {
-    const rec = sessionsRepo().getAttachment(sessionId, id);
+    const rec = await sessionsRepo().getAttachment(sessionId, id);
     const bytes = await Deno.readFile(rec.absPath);
     // encodeBase64 over the Uint8Array directly, instead of an O(n) per-byte
     // String.fromCharCode loop that builds a giant intermediate binary string
@@ -180,7 +180,7 @@ async function readAttachmentAsText(
   if (cache?.has(cacheKey)) return cache.get(cacheKey) ?? null;
   let result: string | null = null;
   try {
-    const rec = sessionsRepo().getAttachment(sessionId, id);
+    const rec = await sessionsRepo().getAttachment(sessionId, id);
     result = await Deno.readTextFile(rec.absPath);
   } catch (err) {
     log.warn(`document attachment load failed (${path}): ${errMessage(err)}`);

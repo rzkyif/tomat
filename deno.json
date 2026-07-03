@@ -1,6 +1,7 @@
 {
   "workspace": [
     "./packages/tomat-shared",
+    "./packages/tomat-core-engine",
     "./packages/tomat-core",
     "./packages/tomat-client",
     "./packages/tomat-website",
@@ -48,6 +49,7 @@
     "test:e2e:headless": "deno run -A scripts/test-e2e-headless.ts",
 
     "check:shared": "deno task --cwd packages/tomat-shared check",
+    "check:core-engine": "deno task --cwd packages/tomat-core-engine check",
     "check:core": "deno task --cwd packages/tomat-core check",
     "check:client": "deno task --cwd packages/tomat-client check",
     "check:extension": "deno task --cwd packages/tomat-extension-builtin check",
@@ -55,6 +57,7 @@
     "check:catalog": "deno task --cwd packages/tomat-model-catalog check",
 
     "test:shared": "deno task --cwd packages/tomat-shared test",
+    "test:core-engine": "deno task --cwd packages/tomat-core-engine test",
     "test:core": "deno task --cwd packages/tomat-core test",
     "test:client": "deno task --cwd packages/tomat-client test",
     "test:extension": "deno task --cwd packages/tomat-extension-builtin test",

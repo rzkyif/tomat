@@ -11,6 +11,8 @@
 //     await env.teardown();
 //   }
 
+import { attachHost } from "@tomat/core-engine";
+import { denoHost } from "../../src/host/deno-host.ts";
 import { closeDb, db, openDb } from "../../src/db/connection.ts";
 import { ensureDirs } from "../../src/paths.ts";
 import { migrate } from "../../src/db/migrate.ts";
@@ -90,6 +92,9 @@ export async function setupTestEnv(): Promise<TestEnv> {
     prior: Deno.env.get("TOMAT_CORE_HOME"),
   };
   Deno.env.set("TOMAT_CORE_HOME", coreHome);
+  // Install the engine runtime host so engine-hosted services resolve paths /
+  // db / fs through the same DenoHost the real boot uses.
+  attachHost(denoHost());
   await ensureDirs();
   openDb();
   migrate();

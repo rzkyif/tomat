@@ -16,6 +16,18 @@
   },
   "overrides": [
     {
+      "files": ["packages/tomat-core-engine/src/**/*.ts"],
+      "rules": {
+        "tomat/no-host-import": "error"
+      }
+    },
+    {
+      "files": ["packages/tomat-core-engine/**/*.test.ts"],
+      "rules": {
+        "tomat/no-host-import": "off"
+      }
+    },
+    {
       "files": ["packages/tomat-client/src/ui/**/*.{ts,tsx}"],
       "rules": {
         "tomat/no-tauri-import": "error"

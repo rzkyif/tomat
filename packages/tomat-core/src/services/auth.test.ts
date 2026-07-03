@@ -186,7 +186,7 @@ Deno.test("authenticate: rejects missing, unknown, and revoked tokens", async ()
     await assertRejects(() => auth.authenticate("not-a-real-token"), AppError, "not recognized");
     const { code } = auth.mintPairingCode();
     const { token, clientId } = await runPake(auth, { code, clientName: "c" });
-    auth.revokeClient(clientId);
+    await auth.revokeClient(clientId);
     await assertRejects(() => auth.authenticate(token), AppError, "not recognized");
   } finally {
     await env.teardown();

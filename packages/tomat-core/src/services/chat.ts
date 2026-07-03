@@ -102,8 +102,8 @@ export class ChatService {
   // Called by the WS handler when it sees a chat.start frame. Returns
   // synchronously; the streaming runs in the background and pushes frames
   // via wsHub.
-  start(clientId: string, frame: ChatStartFrame): void {
-    const session = sessionsRepo().getOrThrow(clientId, frame.sessionId);
+  async start(clientId: string, frame: ChatStartFrame): Promise<void> {
+    const session = await sessionsRepo().getOrThrow(clientId, frame.sessionId);
     if (this.hasActiveOn(clientId, session.id)) {
       this.send(clientId, {
         kind: "chat.error",
@@ -301,7 +301,7 @@ export class ChatService {
     // the complexity classifier when dual-model is enabled.
     let route: "default" | "secondary" = frame.route ?? "default";
     if (!frame.route && boolSetting(settings, "dualModel.enabled", false)) {
-      const last = lastUserText(sessionsRepo().listMessages(stream.sessionId));
+      const last = lastUserText(await sessionsRepo().listMessages(stream.sessionId));
       if (last) {
         try {
           route = await classifyComplexity(settings, last, stream.abort.signal);
@@ -347,9 +347,9 @@ export class ChatService {
     // turn's messages are deleted server-side and the new ones are inserted
     // into its slot. Otherwise the turn anchors on the newest user message
     // and inserts at the tail.
-    let history = sessionsRepo().listMessages(stream.sessionId);
+    let history = await sessionsRepo().listMessages(stream.sessionId);
     if (frame.anchorMessageId) {
-      const removed = sessionsRepo().deleteTurn(stream.sessionId, frame.anchorMessageId);
+      const removed = await sessionsRepo().deleteTurn(stream.sessionId, frame.anchorMessageId);
       for (const id of removed) {
         this.send(stream.clientId, {
           kind: "session.updated",
@@ -359,7 +359,7 @@ export class ChatService {
         });
       }
       if (removed.length > 0) {
-        history = sessionsRepo().listMessages(stream.sessionId);
+        history = await sessionsRepo().listMessages(stream.sessionId);
       }
     }
     const anchorId = frame.anchorMessageId ?? lastUserId(history);
@@ -386,7 +386,7 @@ export class ChatService {
     });
     const toolList = toolSelection.tools;
     const queryVector = toolSelection.queryVector;
-    if (toolSelection.filterMessage) writer.finalize(toolSelection.filterMessage);
+    if (toolSelection.filterMessage) await writer.finalize(toolSelection.filterMessage);
 
     // The tools hint is rendered client-side (the [toolsAvailable:...]
     // segment of the context template) but belongs in the prompt only on
@@ -429,13 +429,13 @@ export class ChatService {
           summary: m.summary,
           score: m.score,
         }));
-        writer.finalize(memoryFilterMsg);
+        await writer.finalize(memoryFilterMsg);
       } catch (err) {
         // Non-fatal: the turn just runs without memory context.
         log.warn(`stream ${stream.streamId}: memory relevance failed: ${errMessage(err)}`);
         memoryFilterMsg.status = "error";
         memoryFilterMsg.errorMessage = errMessage(err);
-        writer.finalize(memoryFilterMsg);
+        await writer.finalize(memoryFilterMsg);
       }
     }
 
@@ -503,7 +503,7 @@ export class ChatService {
           (assistant.toolCalls?.length ?? 0) > 0 ||
           assistant.truncated)
       ) {
-        writer.finalize(assistant);
+        await writer.finalize(assistant);
         history.push(assistant);
       }
       if (interrupted) {
@@ -564,7 +564,7 @@ export class ChatService {
             `(${pending.callId}) ${toolMsg.status} in ${Date.now() - startedAt}ms` +
             (toolMsg.error ? `: ${toolMsg.error}` : ""),
         );
-        writer.finalize(toolMsg);
+        await writer.finalize(toolMsg);
         history.push(toolMsg);
       }
     }

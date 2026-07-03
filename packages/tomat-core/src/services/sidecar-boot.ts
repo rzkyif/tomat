@@ -26,6 +26,7 @@ import { sidecarManager } from "../sidecars/manager.ts";
 import { llmScheduler } from "./llm-scheduler.ts";
 import { llmIdle } from "./llm-idle.ts";
 import { loadCoreSettings, subscribeCoreSettings } from "./core-settings.ts";
+import { strSetting } from "./settings-access.ts";
 import { downloadManager } from "../downloads/manager.ts";
 import { onBinaryInstalled } from "../binaries/manager.ts";
 import { runQueuedBuiltinInstall } from "../extensions/seeding.ts";
@@ -74,7 +75,10 @@ const SPEECH_KEYS = new Set([
 ]);
 
 // The embed sidecar only reads the shared CPU-thread knob; its model is fixed.
-const EMBED_KEYS = new Set(["llm.threads"]);
+// `llm.provider` + `llm.external.embedModel` gate whether embeddings run on the
+// local sidecar or an external provider, so a change to either re-applies (and
+// may stop) the embed sidecar.
+const EMBED_KEYS = new Set(["llm.threads", "llm.provider", "llm.external.embedModel"]);
 
 let initialized = false;
 
@@ -215,6 +219,13 @@ export async function applyLlama(settings: Record<string, unknown>): Promise<voi
 // disk gates (but no provider/mmproj gate) so it stays Disabled until the MiniLM
 // GGUF + binary land, then the download/binary hooks re-apply.
 export async function applyLlamaEmbed(settings: Record<string, unknown>): Promise<void> {
+  // When embeddings are served by an external provider (llm in external mode
+  // with a Relevance Model set), the local embed sidecar isn't needed.
+  const embedModel = strSetting(settings, "llm.external.embedModel", "").trim();
+  if (strSetting(settings, "llm.provider", "local") === "external" && embedModel) {
+    await sidecarManager().stop("llama-embed");
+    return;
+  }
   const args = llamaEmbedStartArgsFromSettings(settings);
   if (!(await fileExists(args.modelPath))) {
     log.warn(

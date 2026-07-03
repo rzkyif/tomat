@@ -96,7 +96,7 @@ export function pairingRoutes(): Hono {
         authService().verifyAdminPassword(body.password ?? null, peerIp(c), me.id);
       }
     }
-    const { existed, attachmentPaths } = authService().revokeClient(id);
+    const { existed, attachmentPaths } = await authService().revokeClient(id);
     if (!existed) {
       throw new AppError("not_found", `no paired client with id ${id}`);
     }

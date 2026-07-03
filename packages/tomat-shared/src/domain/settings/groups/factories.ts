@@ -18,6 +18,10 @@ export interface ExternalModelSectionOpts {
   /** Add a "Context Window" number field (the LLM-style providers track usage
    *  against it). */
   contextSize?: boolean;
+  /** Add an optional "Relevance Model" field: a second model this provider uses
+   *  to rank which Memories and Tools fit each message. Reuses this section's
+   *  Base URL + API Key; blank turns the ranking off. */
+  embedModel?: { description: string; placeholder: string };
   /** Add a "Voice" field (text-to-speech providers name a voice). */
   voice?: boolean;
   /** Add a "Language" field (speech-to-text providers take an optional default
@@ -59,6 +63,18 @@ export function externalModelSection(opts: ExternalModelSectionOpts): SettingSec
       descriptionTier: "ondemand",
     },
   ];
+  if (opts.embedModel) {
+    fields.push({
+      id: `${opts.idPrefix}.embedModel`,
+      name: "Relevance Model",
+      description: opts.embedModel.description,
+      type: "string",
+      defaultValue: "",
+      optional: true,
+      placeholder: opts.embedModel.placeholder,
+      descriptionTier: "ondemand",
+    });
+  }
   if (opts.contextSize) {
     fields.push({
       id: `${opts.idPrefix}.contextSize`,

@@ -3,6 +3,8 @@
 
 import { ensureDirs, paths } from "./paths.ts";
 import { ensureHelperBinaries } from "./binaries/helpers.ts";
+import { attachHost } from "@tomat/core-engine";
+import { denoHost } from "./host/deno-host.ts";
 import { errMessage } from "@tomat/shared";
 import { loadBootConfig } from "./config.ts";
 import { getLogger, initLogger, isLoggerReady, scrubSecrets } from "./shared/log.ts";
@@ -23,6 +25,7 @@ import { llmIdle } from "./services/llm-idle.ts";
 import { backgroundQueue } from "./services/background-queue.ts";
 import { memoriesStore, registerMemoryProvider } from "./services/memories-store.ts";
 import { scheduleMemoryIndexing } from "./services/memories-indexer.ts";
+import { initEmbeddingService } from "./services/embedding.ts";
 import { promptScheduler } from "./services/prompt-scheduler.ts";
 import { sidecarManager } from "./sidecars/manager.ts";
 import { shutdownJobctl } from "./sidecars/jobctl.ts";
@@ -33,6 +36,10 @@ import { warnIfVaultUnreadable } from "./services/secrets.ts";
 import { tlsServeOptions } from "./services/tls.ts";
 
 async function main(): Promise<void> {
+  // Install the engine's runtime host before any engine-hosted service runs.
+  // The DenoHost is stateless (paths read fresh per call), so this single
+  // attachment covers the whole process lifetime.
+  attachHost(denoHost());
   const cfg = loadBootConfig();
   await ensureDirs();
   await initLogger();
@@ -118,7 +125,7 @@ async function main(): Promise<void> {
   // attachments hit disk but whose RAM-only doc was lost on an unclean
   // shutdown. A persistent session always has a session.json, so this only
   // ever touches those orphans.
-  sweepOrphanedSessionDirs();
+  await sweepOrphanedSessionDirs();
 
   // Resume any persisted-Pending downloads from the previous run.
   downloadManager().resumePending();
@@ -172,6 +179,11 @@ async function main(): Promise<void> {
   } catch (err) {
     log.warn(`extension memory provider registration failed: ${errMessage(err)}`);
   }
+
+  // Resolve which embedding model is active (local sidecar vs an external
+  // Relevance Model) and track it across settings changes, so the relevance
+  // staleness hash re-embeds when the model changes.
+  await initEmbeddingService();
 
   // Reconcile the memory store with the files on disk, then queue summary /
   // embedding refreshes for anything stale (idle-gated, background).

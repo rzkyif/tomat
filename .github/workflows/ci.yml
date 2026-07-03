@@ -80,6 +80,9 @@ jobs:
       - name: "test:js (shared)"
         run: deno task --cwd packages/tomat-shared test:js
         timeout-minutes: 3
+      - name: "test:js (core-engine)"
+        run: deno task --cwd packages/tomat-core-engine test:js
+        timeout-minutes: 3
       # TOMAT_REQUIRE_PTYHOST makes the prompt-live-probe (the deno-bump drift
       # tripwire) fail rather than skip; it lives in core and uses the binary built
       # above.

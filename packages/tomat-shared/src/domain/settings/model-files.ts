@@ -62,17 +62,15 @@ export function modelFilesError(v: unknown): string | null {
   return null;
 }
 
-// Embedding model for extension tool-relevance RAG: an all-MiniLM-L6-v2 GGUF
-// served by the llama-embed sidecar (a second llama-server instance) over
-// /v1/embeddings, 384-dim and L2-normalized with `--pooling mean`. EMBED_REPO is
-// also folded into the stored-vector staleness hash (services/relevance.ts), so
-// changing it transparently forces a re-embed of every cached vector.
+// The local embedding model for tool-relevance + memory RAG: an all-MiniLM-L6-v2
+// GGUF served by the llama-embed sidecar over /v1/embeddings. EMBED_REPO is the
+// local model's identity; when embeddings run locally it is folded into the
+// stored-vector staleness hash (services/relevance.ts, via activeEmbedModelId)
+// so changing the model forces a re-embed of every cached vector. (In external
+// mode with a Relevance Model set, embeddings reuse that provider instead and
+// this file isn't downloaded.)
 export const EMBED_REPO = "@second-state/All-MiniLM-L6-v2-Embedding-GGUF/main";
 export const EMBED_MODEL_FILE = `${EMBED_REPO}/all-MiniLM-L6-v2-Q8_0.gguf`;
-// all-MiniLM-L6-v2 emits 384-dim vectors. embedding.ts rejects any other width
-// so a model swap can't silently store vectors incomparable with the existing
-// store (which assumes a fixed dimension).
-export const EMBED_DIM = 384;
 
 function isHfSpec(v: unknown): v is string {
   return typeof v === "string" && v.startsWith("@") && v.length > 1;
@@ -82,8 +80,8 @@ function isHfSpec(v: unknown): v is string {
  *  requirement group. The single source of truth consumed by both the core
  *  (`sourcesForKind` / requirements) and the client. llm local → modelPath
  *  (+ mmproj if image support); stt enabled+local → every file in its bundle;
- *  tts (when enabled) → every file in its bundle; embed → the MiniLM GGUF
- *  (always, for tool-relevance). The stt/tts bundles are read from the
+ *  tts (when enabled) → every file in its bundle; embed → the MiniLM GGUF unless
+ *  embeddings are served by an external Relevance Model. The stt/tts bundles are read from the
  *  `*.modelFiles` map that selection baked from the catalog, so any family's
  *  file set is covered without assuming filenames. */
 export function requiredModelRefs(s: Record<string, unknown>): RequiredModelRef[] {
@@ -111,6 +109,15 @@ export function requiredModelRefs(s: Record<string, unknown>): RequiredModelRef[
       out.push({ source: spec, group: "tts" });
     }
   }
-  out.push({ source: EMBED_MODEL_FILE, group: "embed" });
+  // The local MiniLM embedding model is only required when embeddings run
+  // locally. With llm in external mode and a Relevance Model (embedModel) set,
+  // embeddings reuse that external provider, so the local GGUF isn't needed.
+  const externalEmbed =
+    s["llm.provider"] === "external" &&
+    typeof s["llm.external.embedModel"] === "string" &&
+    (s["llm.external.embedModel"] as string).trim() !== "";
+  if (!externalEmbed) {
+    out.push({ source: EMBED_MODEL_FILE, group: "embed" });
+  }
   return out;
 }

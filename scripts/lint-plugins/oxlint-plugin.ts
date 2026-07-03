@@ -39,6 +39,10 @@ interface ImportDeclarationNode {
   source: { value: unknown };
 }
 
+interface MemberExpressionNode {
+  object?: { type?: string; name?: string };
+}
+
 interface ReportDescriptor {
   node?: unknown;
   loc?: { line: number; column: number };
@@ -88,6 +92,56 @@ const noTauriImport = {
         if (typeof src !== "string") return;
         if (src === "@tauri-apps" || src.startsWith("@tauri-apps/")) {
           context.report({ node, message: TAURI_MESSAGE });
+        }
+      },
+    };
+  },
+};
+
+const HOST_IMPORT_MESSAGE =
+  "@tomat/core-engine must stay runtime-agnostic. This module is host-specific " +
+  "(native SQLite, Tauri, or Node). Reach it through the injected Host " +
+  "(host.fs / host.openDb / host.secureStore / host.config) instead; the runtime " +
+  "wiring belongs in @tomat/core, not the engine.";
+const DENO_GLOBAL_MESSAGE =
+  "@tomat/core-engine must stay runtime-agnostic: the Deno global is not " +
+  "available in a webview. Reach files/env/time through the injected Host " +
+  "(host.fs / host.config / host.now) instead. (Test files are exempt.)";
+
+// A host-specific module the engine must never import directly. `@std/path`,
+// `@std/encoding`, `@std/ulid`, `@std/assert` are pure and stay allowed; only
+// `@std/fs` (the filesystem) is banned - it must go through host.fs.
+function isBannedHostImport(src: string): boolean {
+  const s = src.replace(/^jsr:/, "").replace(/^npm:/, "");
+  return (
+    s === "@db/sqlite" ||
+    s.startsWith("@db/sqlite/") ||
+    s === "@tauri-apps" ||
+    s.startsWith("@tauri-apps/") ||
+    s.startsWith("node:") ||
+    s === "@std/fs" ||
+    s.startsWith("@std/fs/")
+  );
+}
+
+// Keeps `@tomat/core-engine` importable in a non-Deno (webview) runtime: bans
+// host-coupled imports and raw `Deno.` global access. Enabled only for the
+// engine's non-test source via `overrides` in .oxlintrc.json. The
+// MemberExpression check catches `Deno.readTextFile(...)` etc.; if the plugin
+// host doesn't surface that node it simply no-ops and the import ban still holds.
+const noHostImport = {
+  create(context: RuleContext) {
+    return {
+      ImportDeclaration(node: ImportDeclarationNode) {
+        const src = node.source.value;
+        if (typeof src === "string" && isBannedHostImport(src)) {
+          context.report({ node, message: HOST_IMPORT_MESSAGE });
+        }
+      },
+      MemberExpression(node: MemberExpressionNode) {
+        const obj = node.object;
+        if (obj && obj.type === "Identifier" && obj.name === "Deno") {
+          context.report({ node, message: DENO_GLOBAL_MESSAGE });
         }
       },
     };
@@ -159,6 +213,7 @@ export default {
   meta: { name: "tomat" },
   rules: {
     "no-tauri-import": noTauriImport,
+    "no-host-import": noHostImport,
     "no-em-dash": noEmDash,
     "no-uppercase-tomat": noUppercaseBrand,
     "no-builtin-palette-color": noBuiltinPaletteColor,
