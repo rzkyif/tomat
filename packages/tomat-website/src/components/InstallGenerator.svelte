@@ -22,33 +22,14 @@
     coreCommand,
     coreUninstallCommand,
     detectOs,
+    installSteps,
     type NativeInstaller,
     nativeInstallers,
-    nativeInstallSteps,
     openTerminalStep,
     type Os,
     type Target,
     unsignedInstallerNote,
   } from "../lib/install.ts";
-
-  // Copy for the reframed uninstall command section: the double-click native
-  // removal path per OS, with the shown command called out as the scripted one.
-  // Kept in sync with the same strings in InstallGenerator.astro (the baseline
-  // renders them CSS-toggled per OS instead of reactively).
-  function nativeUninstallNote(t: Target, o: Os): string | null {
-    if (o === "windows") {
-      return "On Windows you can also uninstall from Settings > Apps (Add or remove programs). The command below is the headless path.";
-    }
-    if (o === "linux") {
-      return "On Linux you can also remove the package with sudo apt remove (Debian) or sudo dnf remove (Red Hat). The command below is the scripted path.";
-    }
-    if (o === "macos") {
-      return t === "client"
-        ? "On macOS you can also drag tomat to the Trash. The command below removes it and cleans up its settings."
-        : "The Core runs in the background with no app icon; the command below stops it and removes it.";
-    }
-    return null;
-  }
 
   // "install" (the /install page) or "uninstall" (the manual's removal page).
   // The two share the whole target -> OS -> command flow; uninstall just swaps
@@ -98,17 +79,24 @@
         : coreCommand(coreOs, channel, { bindAll, service }),
   );
 
-  const steps = $derived([openTerminalStep(os), ...commandStepsTail(mode, target)]);
-
-  // Native double-click installers for the current target + OS (the primary
-  // install CTA). Empty on Android, where the APK block handles it instead.
+  // Native double-click installers for the current target + OS (the alternative
+  // to the terminal command). Empty on Android, where the APK block handles it.
   const installers = $derived(nativeInstallers(target, os, channel));
   // Linux offers both .deb and .rpm, so its buttons need the format spelled out;
   // macOS/Windows are a single file, where the arch label alone is enough.
   const multiFormat = $derived(new Set(installers.map((i) => i.format)).size > 1);
-  const nativeSteps = $derived(nativeInstallSteps(target));
-  const unsignedNote = $derived(unsignedInstallerNote(os));
-  const uninstallNote = $derived(mode === "uninstall" ? nativeUninstallNote(target, os) : null);
+  // One "how to" for both entry points. Installing: the unified command-or-
+  // installer steps, with the Windows unknown-publisher warning folded in as a
+  // Windows-only step. Uninstalling: the terminal-only steps (open a terminal,
+  // run the command).
+  const howtoSteps = $derived.by(() => {
+    if (mode === "uninstall") {
+      return [openTerminalStep(os), ...commandStepsTail("uninstall", target)];
+    }
+    const base = installSteps(target);
+    const warn = unsignedInstallerNote(os);
+    return warn ? [base[0], warn, ...base.slice(1)] : base;
+  });
 
   function installerLabel(inst: NativeInstaller): string {
     return multiFormat ? `${inst.archLabel} · .${inst.format}` : inst.archLabel;
@@ -336,47 +324,10 @@
       </div>
     </div>
   {:else}
-    {#if mode === "install"}
-      <!-- Primary CTA: the conventional double-click native installers. One
-           button per arch x format, styled like the Android download anchor. -->
-      <div class="flex flex-col gap-2">
-        <span class={labelCls}>Download</span>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {#each installers as inst (inst.url)}
-            <a
-              href={inst.url}
-              class="inline-flex items-center justify-center gap-2 rounded-large bg-default-inverted-300 px-4 py-2.5 text-sm text-default-inverted-900 hover:cursor-pointer"
-            >
-              <i class="i-material-symbols-download-rounded text-base"></i>
-              {installerLabel(inst)}
-            </a>
-          {/each}
-        </div>
-        <ol class="m-0 mt-1 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
-          {#each nativeSteps as step (step)}
-            <li>{step}</li>
-          {/each}
-        </ol>
-        {#if unsignedNote}
-          <p class="text-xs text-default-500 m-0">{unsignedNote}</p>
-        {/if}
-      </div>
-
-      <!-- Secondary: the command-line / headless path, demoted below the
-           downloads for the server + SSH case. -->
-      <div class="flex flex-col gap-1 border-t border-surface pt-6">
-        <span class={labelCls}>Prefer the command line?</span>
-        <p class="text-sm text-default-600 m-0">
-          Advanced: install headlessly over SSH or on a server.
-        </p>
-      </div>
-    {/if}
-
+    <!-- 1. Install/Uninstall via terminal: the copy-on-click command card. This
+         is the original primary path, kept first. -->
     <div class="flex flex-col gap-2">
-      <span class={labelCls}>{verb} Command</span>
-      {#if uninstallNote}
-        <p class="text-xs text-default-500 m-0">{uninstallNote}</p>
-      {/if}
+      <span class={labelCls}>{verb} via terminal</span>
       <!-- The whole card copies on click, so the press feedback (ripple) and the
            hover are on the card itself; the icon is just an indicator. -->
       <div
@@ -409,10 +360,29 @@
       </div>
     </div>
 
+    {#if mode === "install"}
+      <!-- 2. Or download the installer: the conventional double-click packages,
+           one button per arch x format, styled like the OS / channel picker. -->
+      <div class="flex flex-col gap-2">
+        <span class={labelCls}>Or download the installer</span>
+        <div class="grid grid-cols-2 gap-2">
+          {#each installers as inst (inst.url)}
+            <a href={inst.url} class={`${btnIdle} hover:cursor-pointer`}>
+              <i class="i-material-symbols-download-rounded text-lg"></i>
+              {installerLabel(inst)}
+            </a>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <!-- 3. One "how to" covering both paths: run the command or open the
+         installer (installing), or run the command (uninstalling). The Windows
+         unknown-publisher warning is folded into the steps on Windows. -->
     <div class="flex flex-col gap-2">
       <span class={labelCls}>How to {verb}</span>
       <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
-        {#each steps as step (step)}
+        {#each howtoSteps as step (step)}
           <li>{step}</li>
         {/each}
         {#if mode === "install"}

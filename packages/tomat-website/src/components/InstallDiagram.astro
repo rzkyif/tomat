@@ -1,12 +1,12 @@
 ---
 // The topology illustration at the top of the install page. Each machine is a
-// device card (DiagramDevice: icon + name top-left, showcase bubble shadow) that
-// contains its Client / Core role chips (DiagramNode). Exactly three flows
+// device card (DiagramDevice: icon + name centred at its top) that contains its
+// Client / Core role chips (DiagramNode). Exactly three flows
 // connect the chips, forming the chain
 //   Laptop Client - Laptop Core - Phone Client - Gaming PC Core
 // i.e. the Laptop talks to its own Core, and the Phone reaches both the Laptop's
 // Core and the Gaming PC's Core. Every flow runs Client -> Core, so its dot is
-// blue on the way out (a request from the Client) and turns purple on the way
+// blue on the way out (a request from the Client) and turns yellow on the way
 // back (the reply from the Core); the dot starts and ends at a chip's centre, so
 // it is fully covered by the (opaque) chips at both ends. Each dot also carries
 // an expanding "ping" halo so the moving flow is easy to spot. A flow starts
@@ -36,12 +36,12 @@ import DiagramNode from "./DiagramNode.astro";
 const DUR = "2.6s";
 const KP = "0;1;1;0;0";
 const KT = "0;0.42;0.58;0.97;1";
-// Blue out (Client request), purple back (Core reply), via the accent bases.
-const FILL = "#3b82f6;#3b82f6;#a855f7;#a855f7;#3b82f6";
-// The ping halo tracks the same blue->purple trip as the dot, but in the lighter
+// Blue out (Client request), yellow back (Core reply), via the accent bases.
+const FILL = "#3b82f6;#3b82f6;#eab308;#eab308;#3b82f6";
+// The ping halo tracks the same blue->yellow trip as the dot, but in the lighter
 // subcard-BACKGROUND shade of each accent (the chips' `-400` fill, not their
 // stronger text), so the pulse reads as a soft echo of the chip it travels from.
-const PING_FILL = "#60a5fa;#60a5fa;#c084fc;#c084fc;#60a5fa";
+const PING_FILL = "#60a5fa;#60a5fa;#facc15;#facc15;#60a5fa";
 // Each flow's dot wears a "ping" halo: a translucent disc that expands from the
 // dot's radius and fades to nothing, re-emitting on its own short cycle so it
 // reads as a sonar pulse travelling with the dot. The cycle is shorter than the
@@ -234,20 +234,17 @@ const triFlows = [
 <style>
   /* Inverted-theme aliases: pick the opposite ladder to the site (dark tokens on
      a light site and vice versa), inherited by the device cards and chips. The
-     bubble-shadow colour is flipped to match the rendition, exactly as the home
-     showcase does, so a dark-rendered card gets a black shadow and a
-     light-rendered one a white shadow on either side of the flip. */
+     Client / Core chips share the cards' surface lightness (the `-300` step),
+     just tinted with their accent instead of the neutral. */
   .install-diagram {
     --dg-surface: var(--default-d-300);
     --dg-border: var(--default-d-300);
     --dg-text: var(--default-d-900);
     --dg-muted: var(--default-d-600);
-    --dg-client-bg: var(--accent-blue-d-400);
+    --dg-client-bg: var(--accent-blue-d-300);
     --dg-client-fg: var(--accent-blue-d-900);
-    --dg-core-bg: var(--accent-purple-d-400);
-    --dg-core-fg: var(--accent-purple-d-900);
-    --bubble-shadow-color-light: #000000ff;
-    --bubble-shadow-color-dark: #ffffffff;
+    --dg-core-bg: var(--accent-yellow-d-300);
+    --dg-core-fg: var(--accent-yellow-d-900);
     margin-block: 0;
   }
   :global(html.dark) .install-diagram {
@@ -255,10 +252,10 @@ const triFlows = [
     --dg-border: var(--default-300);
     --dg-text: var(--default-900);
     --dg-muted: var(--default-600);
-    --dg-client-bg: var(--accent-blue-400);
+    --dg-client-bg: var(--accent-blue-300);
     --dg-client-fg: var(--accent-blue-900);
-    --dg-core-bg: var(--accent-purple-400);
-    --dg-core-fg: var(--accent-purple-900);
+    --dg-core-bg: var(--accent-yellow-300);
+    --dg-core-fg: var(--accent-yellow-900);
   }
 
   .dg-stage {

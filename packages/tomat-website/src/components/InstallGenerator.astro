@@ -23,12 +23,10 @@ import {
   CORE_OS,
   coreCommand,
   coreUninstallCommand,
+  installSteps,
   type NativeInstaller,
   nativeInstallers,
-  nativeInstallSteps,
   openTerminalStep,
-  type Os,
-  type Target,
   unsignedInstallerNote,
 } from "../lib/install.ts";
 
@@ -87,28 +85,21 @@ function installerLabel(list: NativeInstaller[], inst: NativeInstaller): string 
   const multi = new Set(list.map((i) => i.format)).size > 1;
   return multi ? `${inst.archLabel} · .${inst.format}` : inst.archLabel;
 }
-// The reframed uninstall note per OS + target, matching the island's
-// nativeUninstallNote. Rendered CSS-toggled per OS below.
-function nativeUninstallNote(t: Target, o: Os): string | null {
-  if (o === "windows") {
-    return "On Windows you can also uninstall from Settings > Apps (Add or remove programs). The command below is the headless path.";
-  }
-  if (o === "linux") {
-    return "On Linux you can also remove the package with sudo apt remove (Debian) or sudo dnf remove (Red Hat). The command below is the scripted path.";
-  }
-  return t === "client"
-    ? "On macOS you can also drag tomat to the Trash. The command below removes it and cleans up its settings."
-    : "The Core runs in the background with no app icon; the command below stops it and removes it.";
-}
-const winNote = unsignedInstallerNote("windows");
+// Base "how to install" steps per target (used only in install mode; uninstall
+// uses the terminal steps). The Windows unknown-publisher warning is inserted as
+// its own CSS-toggled step right after step one below.
+const clientInstallSteps = installSteps("client");
+const coreInstallSteps = installSteps("core");
+const winStep = unsignedInstallerNote("windows");
 
 const label = "text-xs font-medium uppercase tracking-wide text-default-500";
-const dlBtn =
-  "inline-flex items-center justify-center gap-2 rounded-large bg-default-inverted-300 px-4 py-2.5 text-sm text-default-inverted-900 hover:cursor-pointer";
 const btnBase =
   "flex items-center justify-center gap-2 px-3 py-2 rounded-medium text-sm transition-colors";
 const osBtn = `ig-os-btn ${btnBase} bg-surface-inset text-default-700 hover:bg-surface-inset-strong cursor-pointer`;
 const btnActive = `${btnBase} bg-default-inverted-300 text-default-inverted-900`;
+// Download buttons reuse the OS-picker's idle look, minus the selected state (no
+// radio, no ig-os-btn), matching the request to style them like the pickers.
+const dlBtn = `${btnBase} bg-surface-inset text-default-700 hover:bg-surface-inset-strong cursor-pointer`;
 const codeBox =
   "ig-cmd block rounded-large bg-surface-inset px-4 py-3 font-mono text-sm text-default-800 overflow-x-auto whitespace-nowrap no-scrollbar";
 ---
@@ -223,73 +214,23 @@ const codeBox =
       </div>
     </div>
 
-    {
-      /* Primary CTA (install): native double-click installers, one grid of
-        buttons per OS, CSS-toggled by the OS radios. Hidden for Android, which
-        keeps its own APK block below. */
-    }
-    {
-      !uninstall && (
-        <div class="ig-dlsec-c flex flex-col gap-2">
-          <span class={label}>Download</span>
-          {DESKTOP_OS.map((o) => (
-            <div class={`ig-dl ig-dl-c-${o} grid grid-cols-1 sm:grid-cols-2 gap-2`}>
-              {clientInstallers[o].map((inst) => (
-                <a href={inst.url} class={dlBtn}>
-                  <i class="i-material-symbols-download-rounded text-base" />
-                  {installerLabel(clientInstallers[o], inst)}
-                </a>
-              ))}
-            </div>
-          ))}
-          <ol class="m-0 mt-1 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
-            {nativeInstallSteps("client").map((s) => (
-              <li>{s}</li>
-            ))}
-          </ol>
-          <p class="ig-dlnote ig-dlnote-c-windows text-xs text-default-500 m-0">{winNote}</p>
-        </div>
-      )
-    }
-
-    {
-      /* Secondary: the command-line / headless path, demoted below the
-        downloads. Hidden for Android (no shell command). */
-    }
-    {
-      !uninstall && (
-        <div class="ig-clisec-c flex flex-col gap-1 border-t border-surface pt-6">
-          <span class={label}>Prefer the command line?</span>
-          <p class="text-sm text-default-600 m-0">
-            Advanced: install headlessly over SSH or on a server.
-          </p>
-        </div>
-      )
-    }
-
-    <div class="flex flex-col gap-2">
-      <span class={label}>{verb} Command</span>
-      {
-        uninstall && (
-          <>
-            <p class="ig-unote ig-unote-c-macos text-xs text-default-500 m-0">
-              {nativeUninstallNote("client", "macos")}
-            </p>
-            <p class="ig-unote ig-unote-c-linux text-xs text-default-500 m-0">
-              {nativeUninstallNote("client", "linux")}
-            </p>
-            <p class="ig-unote ig-unote-c-windows text-xs text-default-500 m-0">
-              {nativeUninstallNote("client", "windows")}
-            </p>
-          </>
-        )
-      }
+    {/* 1. Install/Uninstall via terminal (non-android): the pre-rendered one-liner. */}
+    <div class="ig-termsec-c flex flex-col gap-2">
+      <span class={label}>{verb} via terminal</span>
       <code class={`${codeBox} ig-cmd-c-macos`}>{clientCmd.macos}</code>
       <code class={`${codeBox} ig-cmd-c-linux`}>{clientCmd.linux}</code>
       <code class={`${codeBox} ig-cmd-c-windows`}>{clientCmd.windows}</code>
-      {
-        uninstall ? (
-          <div class="ig-cmd ig-cmd-c-android flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
+    </div>
+
+    {
+      /* Android has no command: its own labeled download / removal block, shown
+      only when Android is the selected client OS. */
+    }
+    {
+      uninstall ? (
+        <div class="ig-cmd ig-cmd-c-android flex flex-col gap-2">
+          <span class={label}>Remove</span>
+          <div class="flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
             <p class="text-sm text-default-700 m-0">
               There is no script on Android. Remove tomat like any other app.
             </p>
@@ -299,8 +240,11 @@ const codeBox =
               <li>Confirm to remove the app and its data.</li>
             </ol>
           </div>
-        ) : (
-          <div class="ig-cmd ig-cmd-c-android flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
+        </div>
+      ) : (
+        <div class="ig-cmd ig-cmd-c-android flex flex-col gap-2">
+          <span class={label}>Download</span>
+          <div class="flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
             <p class="text-sm text-default-700 m-0">
               The Android app is a signed APK you install directly.
             </p>
@@ -308,7 +252,7 @@ const codeBox =
               href={apk}
               class="inline-flex items-center justify-center gap-2 rounded-large bg-default-inverted-300 px-4 py-2.5 text-sm text-default-inverted-900 hover:cursor-pointer"
             >
-              <i class="i-material-symbols-download-rounded text-base" />
+              <i class="i-material-symbols-download-rounded text-lg" />
               Download the Android APK
             </a>
             <ol class="m-0 flex flex-col gap-1 text-sm text-default-600 list-decimal pl-5">
@@ -317,10 +261,11 @@ const codeBox =
               <li>Confirm the install, then open tomat.</li>
             </ol>
           </div>
-        )
-      }
-    </div>
+        </div>
+      )
+    }
 
+    {/* Uninstall client flag note (--purge). */}
     {
       uninstall && (
         <div class="ig-purge-note flex flex-col gap-2">
@@ -343,25 +288,61 @@ const codeBox =
     }
 
     {
-      /* How to: the OS-specific opener is CSS-toggled per client OS; the rest is
-        fixed. Hidden for Android, which has its own steps in the command block. */
+      /* 2. Or download the installer (install only): one button per arch x format,
+      styled like the OS / channel pickers, CSS-toggled by the OS radios. */
+    }
+    {
+      !uninstall && (
+        <div class="ig-dlsec-c flex flex-col gap-2">
+          <span class={label}>Or download the installer</span>
+          {DESKTOP_OS.map((o) => (
+            <div class={`ig-dl ig-dl-c-${o} grid grid-cols-2 gap-2`}>
+              {clientInstallers[o].map((inst) => (
+                <a href={inst.url} class={dlBtn}>
+                  <i class="i-material-symbols-download-rounded text-lg" />
+                  {installerLabel(clientInstallers[o], inst)}
+                </a>
+              ))}
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    {
+      /* 3. One "how to" for both paths. Installing: the unified command-or-
+      installer steps, with the Windows warning as a CSS-toggled step. Uninstalling:
+      the terminal steps with the OS-specific opener toggled. Hidden for Android
+      (its steps live in the block above). */
     }
     <div class="ig-howto-c flex flex-col gap-2">
       <span class={label}>How to {verb}</span>
       <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
-        <li class="ig-step ig-step-c-macos">{openTerminalStep("macos")}</li>
-        <li class="ig-step ig-step-c-linux">{openTerminalStep("linux")}</li>
-        <li class="ig-step ig-step-c-windows">{openTerminalStep("windows")}</li>
-        {commandStepsTail(mode, "client").map((s) => <li>{s}</li>)}
         {
-          !uninstall && (
-            <li>
-              If you ever need to uninstall, follow{" "}
-              <a href="/manual/maintenance/uninstalling" class="underline hover:text-default-700">
-                the uninstallation guide
-              </a>
-              .
-            </li>
+          uninstall ? (
+            <>
+              <li class="ig-step ig-step-c-macos">{openTerminalStep("macos")}</li>
+              <li class="ig-step ig-step-c-linux">{openTerminalStep("linux")}</li>
+              <li class="ig-step ig-step-c-windows">{openTerminalStep("windows")}</li>
+              {commandStepsTail("uninstall", "client").map((s) => (
+                <li>{s}</li>
+              ))}
+            </>
+          ) : (
+            <>
+              <li>{clientInstallSteps[0]}</li>
+              <li class="ig-winstep ig-winstep-c-windows">{winStep}</li>
+              {clientInstallSteps.slice(1).map((s) => (
+                <li>{s}</li>
+              ))}
+              <li>
+                If you ever need to uninstall, follow{" "}
+                <a href="/manual/maintenance/uninstalling" class="underline hover:text-default-700">
+                  the uninstallation guide
+                </a>
+                .
+              </li>
+            </>
           )
         }
       </ol>
@@ -407,65 +388,18 @@ const codeBox =
       </div>
     </div>
 
-    {/* Primary CTA (install): native double-click installers per OS. */}
-    {
-      !uninstall && (
-        <div class="flex flex-col gap-2">
-          <span class={label}>Download</span>
-          {DESKTOP_OS.map((o) => (
-            <div class={`ig-dl ig-dl-o-${o} grid grid-cols-1 sm:grid-cols-2 gap-2`}>
-              {coreInstallers[o].map((inst) => (
-                <a href={inst.url} class={dlBtn}>
-                  <i class="i-material-symbols-download-rounded text-base" />
-                  {installerLabel(coreInstallers[o], inst)}
-                </a>
-              ))}
-            </div>
-          ))}
-          <ol class="m-0 mt-1 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
-            {nativeInstallSteps("core").map((s) => (
-              <li>{s}</li>
-            ))}
-          </ol>
-          <p class="ig-dlnote ig-dlnote-o-windows text-xs text-default-500 m-0">{winNote}</p>
-        </div>
-      )
-    }
-
-    {/* Secondary: the command-line / headless path, demoted below the downloads. */}
-    {
-      !uninstall && (
-        <div class="flex flex-col gap-1 border-t border-surface pt-6">
-          <span class={label}>Prefer the command line?</span>
-          <p class="text-sm text-default-600 m-0">
-            Advanced: install headlessly over SSH or on a server.
-          </p>
-        </div>
-      )
-    }
-
+    {/* 1. Install/Uninstall via terminal. */}
     <div class="flex flex-col gap-2">
-      <span class={label}>{verb} Command</span>
-      {
-        uninstall && (
-          <>
-            <p class="ig-unote ig-unote-o-macos text-xs text-default-500 m-0">
-              {nativeUninstallNote("core", "macos")}
-            </p>
-            <p class="ig-unote ig-unote-o-linux text-xs text-default-500 m-0">
-              {nativeUninstallNote("core", "linux")}
-            </p>
-            <p class="ig-unote ig-unote-o-windows text-xs text-default-500 m-0">
-              {nativeUninstallNote("core", "windows")}
-            </p>
-          </>
-        )
-      }
+      <span class={label}>{verb} via terminal</span>
       <code class={`${codeBox} ig-cmd-o-macos`}>{coreCmd.macos}</code>
       <code class={`${codeBox} ig-cmd-o-linux`}>{coreCmd.linux}</code>
       <code class={`${codeBox} ig-cmd-o-windows`}>{coreCmd.windows}</code>
     </div>
 
+    {
+      /* Options fold into the command above: install env vars, or the uninstall
+      keep-data flag. */
+    }
     <div class="flex flex-col gap-2">
       <span class={label}>Options</span>
       {
@@ -516,25 +450,60 @@ const codeBox =
     </div>
 
     {
-      /* How to: the OS-specific opener is CSS-toggled per core OS; the rest is
-        fixed. */
+      /* 2. Or download the installer (install only): buttons per OS, styled like
+      the pickers, CSS-toggled by the OS radios. */
+    }
+    {
+      !uninstall && (
+        <div class="flex flex-col gap-2">
+          <span class={label}>Or download the installer</span>
+          {DESKTOP_OS.map((o) => (
+            <div class={`ig-dl ig-dl-o-${o} grid grid-cols-2 gap-2`}>
+              {coreInstallers[o].map((inst) => (
+                <a href={inst.url} class={dlBtn}>
+                  <i class="i-material-symbols-download-rounded text-lg" />
+                  {installerLabel(coreInstallers[o], inst)}
+                </a>
+              ))}
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    {
+      /* 3. One "how to" for both paths. Installing: the unified command-or-
+      installer steps, with the Windows warning as a CSS-toggled step. Uninstalling:
+      the terminal steps with the OS-specific opener toggled. */
     }
     <div class="flex flex-col gap-2">
       <span class={label}>How to {verb}</span>
       <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
-        <li class="ig-step ig-step-o-macos">{openTerminalStep("macos")}</li>
-        <li class="ig-step ig-step-o-linux">{openTerminalStep("linux")}</li>
-        <li class="ig-step ig-step-o-windows">{openTerminalStep("windows")}</li>
-        {commandStepsTail(mode, "core").map((s) => <li>{s}</li>)}
         {
-          !uninstall && (
-            <li>
-              If you ever need to uninstall, follow{" "}
-              <a href="/manual/maintenance/uninstalling" class="underline hover:text-default-700">
-                the uninstallation guide
-              </a>
-              .
-            </li>
+          uninstall ? (
+            <>
+              <li class="ig-step ig-step-o-macos">{openTerminalStep("macos")}</li>
+              <li class="ig-step ig-step-o-linux">{openTerminalStep("linux")}</li>
+              <li class="ig-step ig-step-o-windows">{openTerminalStep("windows")}</li>
+              {commandStepsTail("uninstall", "core").map((s) => (
+                <li>{s}</li>
+              ))}
+            </>
+          ) : (
+            <>
+              <li>{coreInstallSteps[0]}</li>
+              <li class="ig-winstep ig-winstep-o-windows">{winStep}</li>
+              {coreInstallSteps.slice(1).map((s) => (
+                <li>{s}</li>
+              ))}
+              <li>
+                If you ever need to uninstall, follow{" "}
+                <a href="/manual/maintenance/uninstalling" class="underline hover:text-default-700">
+                  the uninstallation guide
+                </a>
+                .
+              </li>
+            </>
           )
         }
       </ol>
@@ -674,41 +643,15 @@ const codeBox =
     display: grid;
   }
 
-  /* The unsigned-installer note applies to Windows only; show it under the
-     Windows buttons of whichever target is selected. */
-  .ig-dlnote {
+  /* The Windows unknown-publisher warning is folded into the installer how-to as
+     a step, shown only when Windows is the selected OS. list-item so the ordered
+     list still numbers it; the hidden variants drop out of the count. */
+  .ig-winstep {
     display: none;
   }
-  .ig:has(#ig-osc-windows:checked) .ig-dlnote-c-windows,
-  .ig:has(#ig-oso-windows:checked) .ig-dlnote-o-windows {
-    display: block;
-  }
-
-  /* The reframed uninstall note: one per target x OS, toggled like the steps. */
-  .ig-unote {
-    display: none;
-  }
-  .ig:has(#ig-osc-macos:checked) .ig-unote-c-macos,
-  .ig:has(#ig-osc-linux:checked) .ig-unote-c-linux,
-  .ig:has(#ig-osc-windows:checked) .ig-unote-c-windows,
-  .ig:has(#ig-oso-macos:checked) .ig-unote-o-macos,
-  .ig:has(#ig-oso-linux:checked) .ig-unote-o-linux,
-  .ig:has(#ig-oso-windows:checked) .ig-unote-o-windows {
-    display: block;
-  }
-
-  /* Android has no native installer here (it is the APK block) and no shell
-     command, so hide both the download section and the command-line section
-     when Android is the selected client OS. */
-  .ig:has(#ig-osc-android:checked) .ig-dlsec-c,
-  .ig:has(#ig-osc-android:checked) .ig-clisec-c {
-    display: none;
-  }
-
-  /* The client --purge note is irrelevant to Android (removed via the OS, no
-     script), so hide it when Android is the selected client OS. */
-  .ig:has(#ig-osc-android:checked) .ig-purge-note {
-    display: none;
+  .ig:has(#ig-osc-windows:checked) .ig-winstep-c-windows,
+  .ig:has(#ig-oso-windows:checked) .ig-winstep-o-windows {
+    display: list-item;
   }
 
   /* How-to opener: the OS-specific first step, one per target x OS, toggled by
@@ -727,9 +670,14 @@ const codeBox =
     display: list-item;
   }
 
-  /* Android client installs from a downloaded APK, not a shell command, so its
-     steps live in the command block; hide the generic client how-to for it. */
-  .ig:has(#ig-osc-android:checked) .ig-howto-c {
+  /* Android (client only) installs from a downloaded APK, not a terminal command
+     or a desktop installer. It keeps its own labeled block above and hides the
+     terminal command, the installer download, the combined how-to, and the
+     client --purge note. */
+  .ig:has(#ig-osc-android:checked) .ig-termsec-c,
+  .ig:has(#ig-osc-android:checked) .ig-dlsec-c,
+  .ig:has(#ig-osc-android:checked) .ig-howto-c,
+  .ig:has(#ig-osc-android:checked) .ig-purge-note {
     display: none;
   }
 </style>

@@ -216,19 +216,21 @@ export function nativeInstallers(target: Target, os: Os, channel: Channel): Nati
   return out;
 }
 
-/** The "how to" steps for a native installer download, shared by both generator
- *  variants (like {@link commandStepsTail} for the command path). Generic across
- *  OS: the double-click flow is the same everywhere. */
-export function nativeInstallSteps(target: Target): string[] {
+/** The unified "how to install" steps, shared by both generator variants. Step
+ *  one covers either entry point (run the terminal command OR open the downloaded
+ *  installer); the rest is the common outcome, so one how-to serves both paths.
+ *  The Windows unknown-publisher warning is folded in by the caller as a
+ *  Windows-only step. */
+export function installSteps(target: Target): string[] {
   if (target === "core") {
     return [
-      "Open the downloaded installer and follow the prompts.",
-      "It installs Core and starts it in the background at login.",
+      "Run the command above, or open the downloaded installer, and follow the prompts.",
+      "It installs the Core and starts it in the background at login.",
       "Open a tomat Client on any device and pair it to this Core.",
     ];
   }
   return [
-    "Open the downloaded installer and follow the prompts.",
+    "Run the command above, or open the downloaded installer, and follow the prompts.",
     "Launch tomat when it finishes.",
     "Pick where its Core should run, on this computer or another you have.",
   ];
