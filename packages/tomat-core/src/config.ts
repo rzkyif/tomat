@@ -4,7 +4,7 @@
 
 import { channel, corePort } from "./paths.ts";
 
-export const CORE_VERSION = "0.1.5";
+export const CORE_VERSION = "0.1.6";
 
 // Two-host layout:
 //
