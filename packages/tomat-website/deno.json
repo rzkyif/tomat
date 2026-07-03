@@ -14,6 +14,7 @@
     "@astrojs/check": "npm:@astrojs/check@^0.9.9",
     "@astrojs/mdx": "npm:@astrojs/mdx@^7",
     "@astrojs/svelte": "npm:@astrojs/svelte@^9",
+    "astro-seo": "npm:astro-seo@^0.8.4",
     "svelte": "npm:svelte@^5.56.2",
     "unocss": "npm:unocss@^66.7.0",
     "@unocss/astro": "npm:@unocss/astro@^66.7.0",

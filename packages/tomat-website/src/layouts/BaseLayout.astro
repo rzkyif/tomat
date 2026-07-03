@@ -7,15 +7,35 @@ import "@tomat/shared/ui/styles/base.css";
 import "../styles/site.css";
 import { ClientRouter } from "astro:transitions";
 import { getCollection } from "astro:content";
+import { SEO } from "astro-seo";
 import { groupManual } from "../lib/manual";
 import { PAGES } from "../lib/site";
 import Navbar from "../components/Navbar.astro";
 
 interface Props {
+  /** The page's own name; the brand is appended by the title template below. */
   title?: string;
   description?: string;
+  /** Keep a page out of search results (internal QA surfaces like the gallery). */
+  noindex?: boolean;
 }
-const { title = "tomat", description = "tomat" } = Astro.props;
+// The brand is always lowercase, even leading a title (see AGENTS.md).
+const BRAND = "tomat";
+// The one-sentence pitch, taken verbatim from the root README's lead line. Used
+// as the default meta/OpenGraph description and the social-share summary.
+const SITE_DESCRIPTION = "Open source local-first modular AI assistant.";
+
+const { title, description = SITE_DESCRIPTION, noindex = false } = Astro.props;
+
+// "<page> · tomat", except the home page (or a bare brand title) which is just
+// "tomat" so it never reads "tomat · tomat".
+const fullTitle = !title || title === BRAND ? BRAND : `${title} · ${BRAND}`;
+
+// Absolute URLs for canonical + social cards. Astro.site is au.tomat.ing.
+const canonical = new URL(Astro.url.pathname, Astro.site).href;
+// The shared social-share card: dark bg-surface with the white tomat mark
+// centered, so it reads at any crop (public/og-image.png, 1200x630).
+const ogImage = new URL("/og-image.png", Astro.site).href;
 
 // The navbar's top-level pages, left-to-right, as the hrefs the inline
 // direction script compares to pick a slide direction (a later page = a larger
@@ -36,9 +56,26 @@ const manualOrder = groupManual(await getCollection("manual"))
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content={description} />
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <title>{title}</title>
+    <SEO
+      title={fullTitle}
+      description={description}
+      canonical={canonical}
+      noindex={noindex}
+      nofollow={noindex}
+      openGraph={{
+        basic: { title: fullTitle, type: "website", image: ogImage, url: canonical },
+        optional: { siteName: BRAND, description },
+        image: { alt: `${BRAND} logo`, width: 1200, height: 630, type: "image/png" },
+      }}
+      twitter={{
+        card: "summary_large_image",
+        title: fullTitle,
+        description,
+        image: ogImage,
+        imageAlt: `${BRAND} logo`,
+      }}
+    />
     {
       /* No-flash theme: set the .dark class before first paint from the saved
         preference, falling back to the OS setting. is:inline keeps it out of
