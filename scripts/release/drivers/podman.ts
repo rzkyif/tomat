@@ -237,7 +237,10 @@ export const podmanLinuxDriver: BuildEnvironment = {
         "--kind=client",
         `--channel=${req.channel}`,
         `--target=${triple}`,
-        "--bundles=appimage",
+        // AppImage is the Tauri updater artifact; deb + rpm are the conventional
+        // download installers the website links (harvested by client.ts). The
+        // container carries dpkg-dev + rpm so Tauri can bundle all three.
+        "--bundles=appimage,deb,rpm",
         `--bundle-dir=/work/dist/${stageRel}`,
       ]);
       if (code !== 0) throw new Error(`podman client build for ${triple} exited ${code}`);

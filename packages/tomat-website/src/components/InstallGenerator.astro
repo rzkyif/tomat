@@ -23,7 +23,13 @@ import {
   CORE_OS,
   coreCommand,
   coreUninstallCommand,
+  type NativeInstaller,
+  nativeInstallers,
+  nativeInstallSteps,
   openTerminalStep,
+  type Os,
+  type Target,
+  unsignedInstallerNote,
 } from "../lib/install.ts";
 
 interface Props {
@@ -60,7 +66,45 @@ const coreCmd = {
 };
 const apk = androidApkUrl(CH);
 
+// Native double-click installers (the primary install CTA), pre-rendered per
+// desktop OS + target so the baseline can CSS-toggle the matching buttons like
+// it does the commands. Android has none (it is the APK block above).
+const DESKTOP_OS = ["macos", "linux", "windows"] as const;
+type DesktopOs = (typeof DESKTOP_OS)[number];
+const clientInstallers: Record<DesktopOs, NativeInstaller[]> = {
+  macos: nativeInstallers("client", "macos", CH),
+  linux: nativeInstallers("client", "linux", CH),
+  windows: nativeInstallers("client", "windows", CH),
+};
+const coreInstallers: Record<DesktopOs, NativeInstaller[]> = {
+  macos: nativeInstallers("core", "macos", CH),
+  linux: nativeInstallers("core", "linux", CH),
+  windows: nativeInstallers("core", "windows", CH),
+};
+// Linux ships .deb + .rpm, so its buttons spell out the format; the single-file
+// OSes label by arch alone. Mirrors the island's installerLabel.
+function installerLabel(list: NativeInstaller[], inst: NativeInstaller): string {
+  const multi = new Set(list.map((i) => i.format)).size > 1;
+  return multi ? `${inst.archLabel} · .${inst.format}` : inst.archLabel;
+}
+// The reframed uninstall note per OS + target, matching the island's
+// nativeUninstallNote. Rendered CSS-toggled per OS below.
+function nativeUninstallNote(t: Target, o: Os): string | null {
+  if (o === "windows") {
+    return "On Windows you can also uninstall from Settings > Apps (Add or remove programs). The command below is the headless path.";
+  }
+  if (o === "linux") {
+    return "On Linux you can also remove the package with sudo apt remove (Debian) or sudo dnf remove (Red Hat). The command below is the scripted path.";
+  }
+  return t === "client"
+    ? "On macOS you can also drag tomat to the Trash. The command below removes it and cleans up its settings."
+    : "The Core runs in the background with no app icon; the command below stops it and removes it.";
+}
+const winNote = unsignedInstallerNote("windows");
+
 const label = "text-xs font-medium uppercase tracking-wide text-default-500";
+const dlBtn =
+  "inline-flex items-center justify-center gap-2 rounded-large bg-default-inverted-300 px-4 py-2.5 text-sm text-default-inverted-900 hover:cursor-pointer";
 const btnBase =
   "flex items-center justify-center gap-2 px-3 py-2 rounded-medium text-sm transition-colors";
 const osBtn = `ig-os-btn ${btnBase} bg-surface-inset text-default-700 hover:bg-surface-inset-strong cursor-pointer`;
@@ -179,8 +223,67 @@ const codeBox =
       </div>
     </div>
 
+    {
+      /* Primary CTA (install): native double-click installers, one grid of
+        buttons per OS, CSS-toggled by the OS radios. Hidden for Android, which
+        keeps its own APK block below. */
+    }
+    {
+      !uninstall && (
+        <div class="ig-dlsec-c flex flex-col gap-2">
+          <span class={label}>Download</span>
+          {DESKTOP_OS.map((o) => (
+            <div class={`ig-dl ig-dl-c-${o} grid grid-cols-1 sm:grid-cols-2 gap-2`}>
+              {clientInstallers[o].map((inst) => (
+                <a href={inst.url} class={dlBtn}>
+                  <i class="i-material-symbols-download-rounded text-base" />
+                  {installerLabel(clientInstallers[o], inst)}
+                </a>
+              ))}
+            </div>
+          ))}
+          <ol class="m-0 mt-1 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
+            {nativeInstallSteps("client").map((s) => (
+              <li>{s}</li>
+            ))}
+          </ol>
+          <p class="ig-dlnote ig-dlnote-c-windows text-xs text-default-500 m-0">{winNote}</p>
+        </div>
+      )
+    }
+
+    {
+      /* Secondary: the command-line / headless path, demoted below the
+        downloads. Hidden for Android (no shell command). */
+    }
+    {
+      !uninstall && (
+        <div class="ig-clisec-c flex flex-col gap-1 border-t border-surface pt-6">
+          <span class={label}>Prefer the command line?</span>
+          <p class="text-sm text-default-600 m-0">
+            Advanced: install headlessly over SSH or on a server.
+          </p>
+        </div>
+      )
+    }
+
     <div class="flex flex-col gap-2">
       <span class={label}>{verb} Command</span>
+      {
+        uninstall && (
+          <>
+            <p class="ig-unote ig-unote-c-macos text-xs text-default-500 m-0">
+              {nativeUninstallNote("client", "macos")}
+            </p>
+            <p class="ig-unote ig-unote-c-linux text-xs text-default-500 m-0">
+              {nativeUninstallNote("client", "linux")}
+            </p>
+            <p class="ig-unote ig-unote-c-windows text-xs text-default-500 m-0">
+              {nativeUninstallNote("client", "windows")}
+            </p>
+          </>
+        )
+      }
       <code class={`${codeBox} ig-cmd-c-macos`}>{clientCmd.macos}</code>
       <code class={`${codeBox} ig-cmd-c-linux`}>{clientCmd.linux}</code>
       <code class={`${codeBox} ig-cmd-c-windows`}>{clientCmd.windows}</code>
@@ -304,8 +407,60 @@ const codeBox =
       </div>
     </div>
 
+    {/* Primary CTA (install): native double-click installers per OS. */}
+    {
+      !uninstall && (
+        <div class="flex flex-col gap-2">
+          <span class={label}>Download</span>
+          {DESKTOP_OS.map((o) => (
+            <div class={`ig-dl ig-dl-o-${o} grid grid-cols-1 sm:grid-cols-2 gap-2`}>
+              {coreInstallers[o].map((inst) => (
+                <a href={inst.url} class={dlBtn}>
+                  <i class="i-material-symbols-download-rounded text-base" />
+                  {installerLabel(coreInstallers[o], inst)}
+                </a>
+              ))}
+            </div>
+          ))}
+          <ol class="m-0 mt-1 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
+            {nativeInstallSteps("core").map((s) => (
+              <li>{s}</li>
+            ))}
+          </ol>
+          <p class="ig-dlnote ig-dlnote-o-windows text-xs text-default-500 m-0">{winNote}</p>
+        </div>
+      )
+    }
+
+    {/* Secondary: the command-line / headless path, demoted below the downloads. */}
+    {
+      !uninstall && (
+        <div class="flex flex-col gap-1 border-t border-surface pt-6">
+          <span class={label}>Prefer the command line?</span>
+          <p class="text-sm text-default-600 m-0">
+            Advanced: install headlessly over SSH or on a server.
+          </p>
+        </div>
+      )
+    }
+
     <div class="flex flex-col gap-2">
       <span class={label}>{verb} Command</span>
+      {
+        uninstall && (
+          <>
+            <p class="ig-unote ig-unote-o-macos text-xs text-default-500 m-0">
+              {nativeUninstallNote("core", "macos")}
+            </p>
+            <p class="ig-unote ig-unote-o-linux text-xs text-default-500 m-0">
+              {nativeUninstallNote("core", "linux")}
+            </p>
+            <p class="ig-unote ig-unote-o-windows text-xs text-default-500 m-0">
+              {nativeUninstallNote("core", "windows")}
+            </p>
+          </>
+        )
+      }
       <code class={`${codeBox} ig-cmd-o-macos`}>{coreCmd.macos}</code>
       <code class={`${codeBox} ig-cmd-o-linux`}>{coreCmd.linux}</code>
       <code class={`${codeBox} ig-cmd-o-windows`}>{coreCmd.windows}</code>
@@ -502,6 +657,52 @@ const codeBox =
   }
   .ig:has(#ig-osc-android:checked) .ig-cmd-c-android {
     display: flex;
+  }
+
+  /* Native download buttons (install): one grid per target x OS, toggled by the
+     same OS radios as the commands. display: grid (not block) since each is a
+     button grid. */
+  .ig-dl {
+    display: none;
+  }
+  .ig:has(#ig-osc-macos:checked) .ig-dl-c-macos,
+  .ig:has(#ig-osc-linux:checked) .ig-dl-c-linux,
+  .ig:has(#ig-osc-windows:checked) .ig-dl-c-windows,
+  .ig:has(#ig-oso-macos:checked) .ig-dl-o-macos,
+  .ig:has(#ig-oso-linux:checked) .ig-dl-o-linux,
+  .ig:has(#ig-oso-windows:checked) .ig-dl-o-windows {
+    display: grid;
+  }
+
+  /* The unsigned-installer note applies to Windows only; show it under the
+     Windows buttons of whichever target is selected. */
+  .ig-dlnote {
+    display: none;
+  }
+  .ig:has(#ig-osc-windows:checked) .ig-dlnote-c-windows,
+  .ig:has(#ig-oso-windows:checked) .ig-dlnote-o-windows {
+    display: block;
+  }
+
+  /* The reframed uninstall note: one per target x OS, toggled like the steps. */
+  .ig-unote {
+    display: none;
+  }
+  .ig:has(#ig-osc-macos:checked) .ig-unote-c-macos,
+  .ig:has(#ig-osc-linux:checked) .ig-unote-c-linux,
+  .ig:has(#ig-osc-windows:checked) .ig-unote-c-windows,
+  .ig:has(#ig-oso-macos:checked) .ig-unote-o-macos,
+  .ig:has(#ig-oso-linux:checked) .ig-unote-o-linux,
+  .ig:has(#ig-oso-windows:checked) .ig-unote-o-windows {
+    display: block;
+  }
+
+  /* Android has no native installer here (it is the APK block) and no shell
+     command, so hide both the download section and the command-line section
+     when Android is the selected client OS. */
+  .ig:has(#ig-osc-android:checked) .ig-dlsec-c,
+  .ig:has(#ig-osc-android:checked) .ig-clisec-c {
+    display: none;
   }
 
   /* The client --purge note is irrelevant to Android (removed via the OS, no

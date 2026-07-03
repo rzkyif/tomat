@@ -331,6 +331,25 @@ export const llmGroup: SettingGroup = {
           descriptionTier: "ondemand",
         },
         {
+          id: "llm.binaryBackend",
+          name: "Acceleration",
+          visibleWhen: { field: "llm.provider", eq: "local" },
+          description:
+            "Which model-server build to download and run. Auto picks the best for your GPU; choose a specific backend to override, or CPU to stay off the GPU.",
+          type: "select",
+          defaultValue: "auto",
+          options: [
+            { value: "auto", label: "Auto" },
+            { value: "cpu", label: "CPU" },
+            { value: "vulkan", label: "Vulkan" },
+            { value: "cuda", label: "CUDA (NVIDIA)" },
+            { value: "rocm", label: "ROCm (AMD)" },
+            { value: "hip", label: "HIP (AMD)" },
+            { value: "metal", label: "Metal (Apple)" },
+          ],
+          descriptionTier: "ondemand",
+        },
+        {
           id: "llm.flashAttn",
           name: "Flash Attention",
           description: "Faster, lighter processing on supported hardware.",

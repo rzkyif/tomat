@@ -162,14 +162,19 @@ through `npm:` specifiers from `deno task`.
   (see `downloads/manager.ts` + the requirements/download routes + the client's
   `requestRequiredModal`). Boot and background code must not fetch, poll, check
   for updates, or download. The built-in extension is installed on first boot
-  OFFLINE from artifacts the install script already fetched + verified (the
-  install scripts plant `extensions/.tomat-extension-builtin.{tgz,json}`;
-  `seeding.ts` re-verifies and installs them with zero network) - never a
-  boot-time fetch.
-  The ONLY place network is expected without a user action is the install-script
-  phase itself (`scripts/install/*`), which runs before the app is considered
-  installed. New boot/background work routes through the user-gated download and
-  update flows; it never reaches out on its own.
+  OFFLINE from artifacts fetched + verified during install (the Core binary's
+  `bootstrap`/`install-service` subcommand plants
+  `extensions/.tomat-extension-builtin.{tgz,json}`, which every install front-end
+  - the thin scripts, the native installers, the in-app "set up a local Core"
+    flow - wraps; `seeding.ts` then re-verifies the Ed25519 signature + tarball
+    sha256 and installs them with zero network) - never a boot-time fetch. If the
+    plant is missing (an offline native-installer run), boot leaves the built-in for
+    the user to install from the extensions UI rather than fetching.
+    The ONLY place network is expected without a user action is the install phase
+    itself - the install scripts (`scripts/install/*`) and the `install-service`
+    subcommand they and the native installers delegate to - which runs before the
+    app is considered installed. New boot/background work routes through the
+    user-gated download and update flows; it never reaches out on its own.
 - **Channels and persistence.** All state lives under `~/.tomat/<channel>/`,
   where the channel (`stable` default, `dev`, `latest`) is selected by
   `TOMAT_CHANNEL` and resolved identically in core, client, and the install
@@ -191,10 +196,14 @@ through `npm:` specifiers from `deno task`.
   (`TOMAT_ANDROID_KEYSTORE_B64`); the decoded `*.jks` + `keystore.properties` are
   gitignored and never committed. A fourth, OPTIONAL identity applies to macOS: an
   Apple Developer ID Application certificate (via the `APPLE_*` vars in `.env`)
-  signs + notarizes the macOS client bundle at build time. It is inert when
-  unset - the build falls back to ad-hoc signing (`signingIdentity` "-") and the
-  install script strips the Gatekeeper quarantine xattr, which is the current
-  state. See [scripts/release/macos-signing.md](scripts/release/macos-signing.md).
+  signs + notarizes the macOS client bundle, the client `.dmg`, and the Core
+  `.pkg` at build time. It is inert when unset - the build falls back to ad-hoc
+  signing (`signingIdentity` "-") and the install script strips the Gatekeeper
+  quarantine xattr, which is the current state. A fifth, also-dormant identity is
+  Windows Authenticode (`WINDOWS_CERTIFICATE_THUMBPRINT` / `WINDOWS_SIGN_COMMAND`),
+  which would sign the client + Core NSIS installers; unset today, so Windows
+  installers ship unsigned and the install flow strips Mark-of-the-Web. See
+  [scripts/release/macos-signing.md](scripts/release/macos-signing.md).
 - **Distribution split.** Two Cloudflare-hosted hostnames, aligned with content
   type: `au.tomat.ing` (Astro Worker, landing page only) and `get.au.tomat.ing`
   (R2 public bucket, every release artifact: installers, schemas, manifests,

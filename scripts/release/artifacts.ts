@@ -15,7 +15,7 @@
 
 import { dirname, join } from "@std/path";
 import { ensureDir } from "@std/fs/ensure-dir";
-import type { Triple } from "../../packages/tomat-shared/src/domain/model.ts";
+import type { BinaryVariant, Triple } from "../../packages/tomat-shared/src/domain/model.ts";
 import type {
   BuildArtifact,
   CoreBuildArtifacts,
@@ -25,6 +25,7 @@ import type {
 } from "./core.ts";
 import { DIST_DIR, fail, sha256File } from "./lib.ts";
 import type { ReleaseChannel } from "./lib.ts";
+import type { CoreInstallerAsset } from "./core-installers.ts";
 
 export const BUNDLE_FILENAME = "bundle.json";
 
@@ -40,6 +41,7 @@ export interface ArtifactRecord {
   sha256: string;
   size: number;
   entryName?: string; // helpers only: the channel-suffixed manifest name
+  variant?: BinaryVariant; // speech only: the GPU build variant (cpu default)
 }
 
 // Everything one environment built for one set of triples. `workers` are
@@ -50,6 +52,11 @@ export interface ArtifactBundle {
   channel: ReleaseChannel;
   triples: Triple[];
   records: ArtifactRecord[];
+  // Conventional native Core installers (pkg/nsis/deb/rpm) this environment
+  // built, if any. Auxiliary download assets keyed to the core version; the
+  // publish coordinator uploads them + a signed core-installers.json. Kept
+  // separate from `records` (which feed core.json + self-update).
+  installers?: CoreInstallerAsset[];
 }
 
 /** dist-relative path for a `dist/<triple>/<filename>` artifact. */
@@ -96,6 +103,7 @@ export function bundleCoreArtifacts(
       relPath: distRel(s.triple, s.filename),
       sha256: s.sha256,
       size: s.size,
+      variant: s.variant,
     });
   }
   return { version, channel, triples, records };
@@ -167,6 +175,7 @@ export async function mergeCoreBundles(
       } else {
         speech.push({
           triple: rec.triple,
+          variant: rec.variant ?? "cpu",
           filename: rec.filename,
           path,
           sha256: rec.sha256,
@@ -189,9 +198,23 @@ export async function mergeCoreBundles(
 // plus the metadata the host's compose+sign+upload step needs. Mirrors the core
 // ArtifactBundle, one module so drivers and CI share the contract.
 
+/** A conventional-installer download the website links directly (macOS .dmg,
+ *  Windows NSIS .exe, Linux .deb/.rpm/.AppImage). Distinct from the Tauri updater
+ *  bundle above: the updater artifact drives in-app updates, these drive the
+ *  first double-click install. sha256 is over the file bytes. */
+export interface DownloadAsset {
+  format: "dmg" | "exe" | "deb" | "rpm" | "appimage";
+  filename: string;
+  relPath: string; // dist-relative, e.g. "aarch64-apple-darwin/tomat_0.1.5.dmg"
+  sha256: string;
+  size: number;
+}
+
 /** One desktop-client bundle built on its native platform. `signature` is the
  *  Tauri minisign signature over the bundle (for in-app updates); `sha256` is
- *  over the bundle bytes (for first-install verification, mirrors core.json). */
+ *  over the bundle bytes (for first-install verification, mirrors core.json).
+ *  `downloads` are the conventional native installers Tauri also emits (dmg /
+ *  deb / rpm / the NSIS exe), harvested for the website's direct-download CTA. */
 export interface ClientDescriptor {
   version: string;
   channel: ReleaseChannel;
@@ -204,6 +227,7 @@ export interface ClientDescriptor {
   sha256: string;
   size: number;
   signature: string;
+  downloads?: DownloadAsset[];
 }
 
 /** One keystore-signed APK for a single ABI. */

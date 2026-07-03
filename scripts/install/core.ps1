@@ -327,89 +327,35 @@ $ManifestUrl = "$Storage/$ManifestDir/core.json"
 $InstallService = if ($env:TOMAT_INSTALL_SERVICE) { $env:TOMAT_INSTALL_SERVICE } else { "1" }
 $InstallBindAll = if ($env:TOMAT_INSTALL_BIND_ALL) { $env:TOMAT_INSTALL_BIND_ALL } else { "0" }
 
-$AdminTokenFile = Join-Path $HomeDir ".admin-token"
-$AdminPasswordFile = Join-Path $HomeDir ".admin-password"
-$SettingsFile = Join-Path $HomeDir "settings.json"
+# The admin token, settings, Scheduled Task, and process names are all owned by
+# the core binary's install-service / mint-code subcommands now, so this script
+# no longer derives them (mirrors the cleanup already done in core.sh).
 $Installed = Join-Path $BinDir "tomat-core$ChannelSuffix.exe"
-# Scheduled-task name + process name, suffixed per channel so channels coexist.
-$TaskName = "tomat-core$ChannelSuffix"
-$ProcName = "tomat-core$ChannelSuffix"
 
 # Make sure the staging tree exists before any UI starts.
 foreach ($d in @($BinDir, $WorkersDir, $ExtensionsDir, $StagingDir, $LogsDir)) {
   [void](New-Item -ItemType Directory -Force -Path $d)
 }
 
-# --- pick the service label up front --------------------------------------
-
-if ($InstallService -eq "1") {
-  $ServiceLabel = "Registering Windows scheduled task '$TaskName'"
-} else {
-  $ServiceLabel = "Starting core in background (Start-Process)"
-}
-
-# --- admin password prompt (interactive installs only) --------------------
-
-# The admin password lets an already-paired client mint pairing codes and
-# revoke devices remotely without reading the admin token off this machine.
-# Ask up front (before the live UI), then set it on the running core below.
-# Skipped when input is redirected (the client-driven install, which sets the
-# password through the API afterward) or a password already exists (re-install).
-$AdminPw = ""
-$InputRedirected = $true
-try { $InputRedirected = [Console]::IsInputRedirected } catch { $InputRedirected = $true }
-if ((-not (Test-Path $AdminPasswordFile)) -and (-not $InputRedirected)) {
-  Write-Host ""
-  Write-Host "Set an admin password for tomat-core."
-  Write-Host "You'll need it to pair new devices remotely, so remember it."
-  Write-Host ""
-  while ($true) {
-    $pw1 = Read-Host -AsSecureString "Admin password (min 8 chars)"
-    $pw2 = Read-Host -AsSecureString "Confirm admin password"
-    $p1 = [System.Net.NetworkCredential]::new("", $pw1).Password
-    $p2 = [System.Net.NetworkCredential]::new("", $pw2).Password
-    if ($p1 -ne $p2) {
-      Write-Host "Passwords did not match. Try again."
-      continue
-    }
-    if ($p1.Length -lt 8) {
-      Write-Host "Password must be at least 8 characters. Try again."
-      continue
-    }
-    $AdminPw = $p1
-    break
-  }
-}
+# Service registration (Scheduled Task, or the background fallback) is chosen
+# and performed by the core binary's install-service subcommand, so this script
+# no longer builds a label or prompts for an admin password (the client sets it
+# over the API after pairing; headless installs can set it later).
 
 # --- begin UI -------------------------------------------------------------
 
 try {
   Ui-Init "tomat-core installer"
 
-  # Register every row up front so the cursor knows the total height. The
-  # settings.json row is conditional on TOMAT_INSTALL_BIND_ALL=1.
+  # Register every row up front so the cursor knows the total height. The seed
+  # binary is fetched + verified here; everything past it is delegated to the
+  # core binary's install subcommands.
   $IdxHost     = Ui-ActionAdd "Detecting host"
   $IdxManifest = Ui-ActionAdd "Fetching manifest from get.au.tomat.ing"
   $IdxBin      = Ui-ActionAdd "Installing core binary to $Installed"
-  $IdxWorkers  = Ui-ActionAdd "Installing workers to $WorkersDir\"
-  $IdxHelpers  = Ui-ActionAdd "Installing helpers to $BinDir\"
-  # Built-in extension is CDN-distributed for stable/latest; dev sources it from the
-  # codebase at runtime, so there's nothing to fetch here.
-  $IdxExtension  = -1
-  if ($Channel -ne "dev") {
-    $IdxExtension = Ui-ActionAdd "Planting built-in extension in $ExtensionsDir\"
-  }
-  $IdxToken    = Ui-ActionAdd "Writing admin token to $AdminTokenFile"
-  $IdxSettings = -1
-  if ($InstallBindAll -eq "1") {
-    $IdxSettings = Ui-ActionAdd "Seeding $SettingsFile"
-  }
-  $IdxService = Ui-ActionAdd $ServiceLabel
-  $IdxPassword = -1
-  if ($AdminPw -ne "") {
-    $IdxPassword = Ui-ActionAdd "Setting admin password"
-  }
-  $IdxPair    = Ui-ActionAdd "Minting pairing code at https://127.0.0.1:$CorePort"
+  $IdxDeps     = Ui-ActionAdd "Installing helpers + workers"
+  $IdxService  = Ui-ActionAdd "Registering background service"
+  $IdxPair     = Ui-ActionAdd "Minting pairing code at https://127.0.0.1:$CorePort"
 
   # --- action 1: detect host ----------------------------------------------
 
@@ -549,455 +495,43 @@ try {
     Ui-ActionDone $IdxBin "($sizeMb MB)"
   }
 
-  # --- action 4: install workers ------------------------------------------
+  # --- deps + service + pairing (delegated to the core binary) ------------
+  #
+  # Everything past the seed binary is the core binary's own responsibility now
+  # (packages/tomat-core/src/install): self-install fetches + verifies the
+  # workers + helpers, install-service writes the admin token / optional
+  # bind-all / built-in extension and registers the Scheduled Task, and
+  # mint-code prints the first pairing code as JSON. TOMAT_CHANNEL /
+  # TOMAT_INSTALL_SERVICE / TOMAT_INSTALL_BIND_ALL flow through the environment.
 
-  $workers = @()
-  if ($manifest.workers) {
-    $workers = @($manifest.workers)
+  Ui-ActionStart $IdxDeps "Installing helpers + workers"
+  $env:TOMAT_CHANNEL = $Channel
+  & $Installed self-install 1>&2
+  if ($LASTEXITCODE -ne 0) {
+    Ui-Die "Failed to install helpers and workers" "" "re-run; verification output is above"
   }
-  $workersCount = $workers.Count
+  Ui-ActionDone $IdxDeps
 
-  # Pre-check: are all workers already on disk and matching?
-  $workersAllOk = $true
-  if ($workersCount -gt 0) {
-    foreach ($w in $workers) {
-      $wPath = Join-Path $WorkersDir $w.name
-      if (-not (Test-Path $wPath)) { $workersAllOk = $false; break }
-      try {
-        $wGot = (Get-FileHash -Algorithm SHA256 -Path $wPath).Hash.ToLowerInvariant()
-      } catch { $workersAllOk = $false; break }
-      if ($wGot -ne $w.sha256.ToLowerInvariant()) { $workersAllOk = $false; break }
-    }
+  Ui-ActionStart $IdxService "Registering background service"
+  $env:TOMAT_INSTALL_SERVICE = $InstallService
+  $env:TOMAT_INSTALL_BIND_ALL = $InstallBindAll
+  & $Installed install-service 1>&2
+  if ($LASTEXITCODE -ne 0) {
+    Ui-Die "Failed to register the background service" "" "re-run with TOMAT_INSTALL_SERVICE=0 to launch core without a service"
   }
+  Ui-ActionDone $IdxService
 
-  if ($workersAllOk) {
-    Ui-ActionSkip $IdxWorkers "($workersCount/$workersCount already current)"
-  } else {
-    Ui-ActionStart $IdxWorkers "Installing workers to $WorkersDir\" "(0/$workersCount)"
-
-    $i = 0
-    foreach ($w in $workers) {
-      $wPath = Join-Path $WorkersDir $w.name
-
-      # Skip individual workers that are already correct on disk.
-      $wNeed = $true
-      if (Test-Path $wPath) {
-        try {
-          $wGot = (Get-FileHash -Algorithm SHA256 -Path $wPath).Hash.ToLowerInvariant()
-          if ($wGot -eq $w.sha256.ToLowerInvariant()) { $wNeed = $false }
-        } catch { }
-      }
-
-      $i = $i + 1
-      Ui-ActionUpdate $IdxWorkers "($i/$workersCount $($w.name))"
-
-      if ($wNeed) {
-        $wTmp = Join-Path $StagingDir "$($w.name)-$($manifest.version)-$([System.IO.Path]::GetRandomFileName())"
-        $wGz = "$wTmp.gz"
-        _Ui-TrackStaging $wTmp
-        _Ui-TrackStaging $wGz
-
-        try {
-          Invoke-WebRequest -Uri $w.url -OutFile $wGz -UseBasicParsing
-        } catch {
-          Ui-Die "Download interrupted" `
-            "fetching worker $($w.name): $($_.Exception.Message)" `
-            "re-run; partial files were cleaned up"
-        }
-
-        try {
-          Expand-GzipFile $wGz $wTmp
-        } catch {
-          Ui-Die "Could not decompress worker $($w.name)" `
-            "gzip decompress failed: $($_.Exception.Message)" `
-            "network corruption is the usual cause; re-run"
-        }
-        Remove-Item -Force $wGz -ErrorAction SilentlyContinue
-
-        $wGot = (Get-FileHash -Algorithm SHA256 -Path $wTmp).Hash.ToLowerInvariant()
-        if ($wGot -ne $w.sha256.ToLowerInvariant()) {
-          Ui-Die "sha256 mismatch on worker $($w.name)" `
-            "want $($w.sha256), got $wGot" `
-            "network corruption is the usual cause; re-run"
-        }
-
-        try {
-          Move-Item -Force $wTmp $wPath
-        } catch {
-          Ui-Die "Permission denied writing to $WorkersDir\" `
-            "could not install $($w.name): $($_.Exception.Message)" `
-            "check ownership of %USERPROFILE%\.tomat"
-        }
-      }
-    }
-
-    Ui-ActionDone $IdxWorkers "($workersCount/$workersCount)"
-  }
-
-  # --- action 5: install helpers ------------------------------------------
-
-  $helpers = @()
-  if ($manifest.helpers) {
-    $helpers = @($manifest.helpers | Where-Object { $_.triple -eq $Triple })
-  }
-  $helpersMatching = $helpers.Count
-
-  if ($helpersMatching -eq 0) {
-    Ui-ActionSkip $IdxHelpers "(no helper for this triple)"
-  } else {
-    # Pre-check: every matching helper already correct?
-    $helpersAllOk = $true
-    foreach ($h in $helpers) {
-      $hFilename = "$($h.name).exe"
-      $hPath = Join-Path $BinDir $hFilename
-      if (-not (Test-Path $hPath)) { $helpersAllOk = $false; break }
-      try {
-        $hGot = (Get-FileHash -Algorithm SHA256 -Path $hPath).Hash.ToLowerInvariant()
-      } catch { $helpersAllOk = $false; break }
-      if ($hGot -ne $h.sha256.ToLowerInvariant()) { $helpersAllOk = $false; break }
-    }
-
-    if ($helpersAllOk) {
-      Ui-ActionSkip $IdxHelpers "($helpersMatching/$helpersMatching already current)"
-    } else {
-      Ui-ActionStart $IdxHelpers "Installing helpers to $BinDir\" "(0/$helpersMatching)"
-
-      $j = 0
-      foreach ($h in $helpers) {
-        $hFilename = "$($h.name).exe"
-        $hPath = Join-Path $BinDir $hFilename
-
-        $hNeed = $true
-        if (Test-Path $hPath) {
-          try {
-            $hGot = (Get-FileHash -Algorithm SHA256 -Path $hPath).Hash.ToLowerInvariant()
-            if ($hGot -eq $h.sha256.ToLowerInvariant()) { $hNeed = $false }
-          } catch { }
-        }
-
-        $j = $j + 1
-        Ui-ActionUpdate $IdxHelpers "($j/$helpersMatching $hFilename)"
-
-        if ($hNeed) {
-          $hTmp = Join-Path $StagingDir "$hFilename-$($manifest.version)-$([System.IO.Path]::GetRandomFileName())"
-          $hGz = "$hTmp.gz"
-          _Ui-TrackStaging $hTmp
-          _Ui-TrackStaging $hGz
-
-          try {
-            Invoke-WebRequest -Uri $h.url -OutFile $hGz -UseBasicParsing
-          } catch {
-            Ui-Die "Download interrupted" `
-              "fetching helper ${hFilename}: $($_.Exception.Message)" `
-              "re-run; partial files were cleaned up"
-          }
-
-          try {
-            Expand-GzipFile $hGz $hTmp
-          } catch {
-            Ui-Die "Could not decompress helper $hFilename" `
-              "gzip decompress failed: $($_.Exception.Message)" `
-              "network corruption is the usual cause; re-run"
-          }
-          Remove-Item -Force $hGz -ErrorAction SilentlyContinue
-
-          $hGot = (Get-FileHash -Algorithm SHA256 -Path $hTmp).Hash.ToLowerInvariant()
-          if ($hGot -ne $h.sha256.ToLowerInvariant()) {
-            Ui-Die "sha256 mismatch on helper $hFilename" `
-              "want $($h.sha256), got $hGot" `
-              "network corruption is the usual cause; re-run"
-          }
-
-          try {
-            Move-Item -Force $hTmp $hPath
-          } catch {
-            Ui-Die "Permission denied writing to $BinDir\" `
-              "could not install ${hFilename}: $($_.Exception.Message)" `
-              "check ownership of %USERPROFILE%\.tomat"
-          }
-        }
-      }
-
-      Ui-ActionDone $IdxHelpers "($helpersMatching/$helpersMatching)"
-    }
-  }
-
-  # --- action 5b: built-in extension ---------------------------------------
-  # Plant the tarball AND its signed manifest so core installs the built-in fully
-  # offline on first boot (it re-verifies the manifest signature + tarball sha256,
-  # then extracts - no boot-time fetch; this script does not check the signature,
-  # core does). Planting is an OPTIONAL optimization: every failure here is non-fatal
-  # (we skip and core fetches + verifies + seeds the built-in itself), so it never
-  # aborts the core install.
-
-  if ($IdxExtension -ne -1) {
-    # Keep these filenames in sync with the planted{Tarball,Manifest}() helpers in
-    # seeding.ts (`.<extension-id>.{tgz,json}`). Only the built-in is planted; the
-    # dev-only samples extension never is.
-    $tkDest = Join-Path $ExtensionsDir ".tomat-extension-builtin.tgz"
-    $tkManifestDest = Join-Path $ExtensionsDir ".tomat-extension-builtin.json"
-    if ((Test-Path $tkDest) -and (Test-Path $tkManifestDest)) {
-      Ui-ActionSkip $IdxExtension "(already present)"
-    } else {
-      $tkManifest = $null
-      $tkManifestRaw = $null
-      try {
-        $tkResp = Invoke-WebRequest -Uri "$Storage/$ManifestDir/extension.json" -UseBasicParsing
-        $tkManifestRaw = $tkResp.Content
-        $tkManifest = $tkManifestRaw | ConvertFrom-Json
-      } catch {
-        $tkManifest = $null
-      }
-      if (-not $tkManifest -or -not $tkManifest.tarballUrl -or -not $tkManifest.sha256) {
-        Ui-ActionSkip $IdxExtension "(manifest unavailable; core will seed)"
-      } else {
-        Ui-ActionStart $IdxExtension "Planting built-in extension in $ExtensionsDir\" "(downloading)"
-        $tkTmp = Join-Path $StagingDir "builtin-extension-$([System.IO.Path]::GetRandomFileName()).tgz"
-        _Ui-TrackStaging $tkTmp
-        $tkPlanted = $false
-        try {
-          Invoke-WebRequest -Uri $tkManifest.tarballUrl -OutFile $tkTmp -UseBasicParsing
-          $tkGot = (Get-FileHash -Algorithm SHA256 -Path $tkTmp).Hash.ToLowerInvariant()
-          if ($tkGot -eq $tkManifest.sha256.ToLowerInvariant()) {
-            # Plant the verified tarball + its signed manifest; core re-verifies the
-            # signature + sha256 and extracts on boot. ASCII keeps the JSON BOM-free
-            # so Deno's JSON.parse accepts it.
-            Move-Item -Force $tkTmp $tkDest
-            Set-Content -Path $tkManifestDest -Value $tkManifestRaw -Encoding ascii -NoNewline
-            $tkPlanted = $true
-          }
-        } catch { }
-        if ($tkPlanted) {
-          Ui-ActionDone $IdxExtension "(planted)"
-        } else {
-          Remove-Item -Force $tkTmp -ErrorAction SilentlyContinue
-          Remove-Item -Force $tkDest, $tkManifestDest -ErrorAction SilentlyContinue
-          # Non-fatal: core fetches + verifies + seeds the built-in on first boot.
-          Ui-ActionSkip $IdxExtension "(could not plant; core will seed)"
-        }
-      }
-    }
-  }
-
-  # --- action 6: admin token ---------------------------------------------
-
-  $tokenPresent = $false
-  if (Test-Path $AdminTokenFile) {
-    if ((Get-Item $AdminTokenFile).Length -gt 0) {
-      $tokenPresent = $true
-    }
-  }
-
-  if ($tokenPresent) {
-    Ui-ActionSkip $IdxToken "(already present)"
-  } else {
-    Ui-ActionStart $IdxToken "Writing admin token to $AdminTokenFile"
-
-    try {
-      $bytes = New-Object byte[] 16
-      [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-      $hex = [BitConverter]::ToString($bytes).Replace("-", "").ToLowerInvariant()
-    } catch {
-      Ui-Die "No entropy source available" `
-        $_.Exception.Message `
-        "extremely rare; reboot and re-run"
-    }
-
-    try {
-      Set-Content -Path $AdminTokenFile -Value $hex -NoNewline -Encoding ascii
-    } catch {
-      Ui-Die "Permission denied writing $AdminTokenFile" `
-        $_.Exception.Message `
-        "check ownership of $HomeDir\"
-    }
-
-    try {
-      $acl = Get-Acl $AdminTokenFile
-      $acl.SetAccessRuleProtection($true, $false)
-      $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-        [System.Security.Principal.WindowsIdentity]::GetCurrent().Name,
-        "FullControl", "Allow")
-      $acl.SetAccessRule($rule)
-      Set-Acl -Path $AdminTokenFile -AclObject $acl
-    } catch {
-      Ui-Die "Failed to set ACL on .admin-token" `
-        $_.Exception.Message `
-        "the file was written but is world-readable; remove it and re-run"
-    }
-
-    Ui-ActionDone $IdxToken "(owner-only ACL)"
-  }
-
-  # --- action 6b: seed settings.json -------------------------------------
-
-  if ($IdxSettings -ne -1) {
-    if (Test-Path $SettingsFile) {
-      Ui-ActionSkip $IdxSettings "(already present)"
-    } else {
-      Ui-ActionStart $IdxSettings "Seeding $SettingsFile"
-      try {
-        Set-Content -Path $SettingsFile -Value '{"server.bindHost":"0.0.0.0"}' -Encoding ascii
-      } catch {
-        Ui-Die "Permission denied writing $SettingsFile" `
-          $_.Exception.Message `
-          "check ownership of $HomeDir\"
-      }
-      Ui-ActionDone $IdxSettings "(server.bindHost=0.0.0.0)"
-    }
-  }
-
-  # --- action 7: service registration ------------------------------------
-
-  # Snapshot whether the core was already running before we touch anything,
-  # so we can settle the row as [~] when nothing user-visible changed.
-  $ServiceAlreadyRunning = $null -ne (Get-Process -Name $ProcName -ErrorAction SilentlyContinue)
-
-  if ($InstallService -ne "1") {
-    # Background branch -- no scheduled task.
-    Ui-ActionStart $IdxService "Starting core in background (Start-Process)"
-    try {
-      $proc = Start-Process -FilePath $Installed -WindowStyle Hidden `
-        -RedirectStandardOutput (Join-Path $LogsDir "core.stdout.log") `
-        -RedirectStandardError (Join-Path $LogsDir "core.stderr.log") `
-        -PassThru
-      Ui-ActionDone $IdxService "(pid $($proc.Id))"
-    } catch {
-      Ui-Die "Could not launch core in background" `
-        $_.Exception.Message `
-        "re-run with TOMAT_INSTALL_SERVICE=1 to register a scheduled task instead"
-    }
-  } else {
-    # Scheduled task branch.
-    Ui-ActionStart $IdxService "Registering Windows scheduled task '$TaskName'"
-
-    # Check whether the existing task already points at the same binary. For
-    # non-stable channels the launch is wrapped in cmd.exe (to set TOMAT_CHANNEL),
-    # so the binary lives in the action's arguments, not its Execute field.
-    $TaskUnchanged = $false
-    try {
-      $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-      if ($existing -and $existing.Actions) {
-        $act = $existing.Actions[0]
-        if ($Channel -eq "stable") {
-          $TaskUnchanged = ($act.Execute -eq $Installed)
-        } else {
-          $TaskUnchanged = ($act.Execute -eq "cmd.exe" -and $act.Arguments -like "*$Installed*")
-        }
-      }
-    } catch { }
-
-    try {
-      # Bake the channel into the task so the daemon resolves the same
-      # ~/.tomat/<channel>. Scheduled tasks have no env field, so for
-      # non-stable channels wrap the launch in cmd.exe to set TOMAT_CHANNEL.
-      if ($Channel -eq "stable") {
-        $action = New-ScheduledTaskAction -Execute $Installed
-      } else {
-        $action = New-ScheduledTaskAction -Execute "cmd.exe" `
-          -Argument ("/c set TOMAT_CHANNEL={0}&& `"{1}`"" -f $Channel, $Installed)
-      }
-      $trigger = New-ScheduledTaskTrigger -AtLogOn
-      $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd `
-          -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries
-      $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-      Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-      Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-        -Settings $settings -Principal $principal -Description "tomat-core" | Out-Null
-      Start-ScheduledTask -TaskName $TaskName
-    } catch {
-      Ui-Die "Could not register scheduled task" `
-        $_.Exception.Message `
-        "Task Scheduler service may be disabled; re-run with TOMAT_INSTALL_SERVICE=0"
-    }
-
-    if ($TaskUnchanged -and $ServiceAlreadyRunning) {
-      Ui-ActionSkip $IdxService "(reloaded)"
-    } elseif ($TaskUnchanged) {
-      Ui-ActionDone $IdxService "(started)"
-    } else {
-      Ui-ActionDone $IdxService "(registered)"
-    }
-  }
-
-  # --- action 8: mint pairing code ---------------------------------------
+  # --- mint the first pairing code ---------------------------------------
 
   Ui-ActionStart $IdxPair "Minting pairing code at https://127.0.0.1:$CorePort" "(waiting for core)"
-
-  # Core serves HTTPS with a self-signed cert. This mint runs on the core host
-  # over loopback and is authenticated by the admin token, so skipping cert
-  # verification here is fine; the client pins the cert during pairing.
-  # -SkipCertificateCheck is PowerShell 6+; on Windows PowerShell 5.1 fall back
-  # to the process-wide validation callback.
-  $irmExtra = @{}
-  if ($PSVersionTable.PSVersion.Major -ge 6) {
-    $irmExtra['SkipCertificateCheck'] = $true
-  } else {
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-  }
-
-  # Poll the unauthenticated health endpoint until the freshly-started core binds
-  # its port. A cold start can take several seconds, so wait rather than failing
-  # the password-set and mint on a single early miss (the old fixed 2s sleep).
-  for ($i = 0; $i -lt 30; $i++) {
-    try {
-      Invoke-WebRequest -Uri "https://127.0.0.1:$CorePort/api/v1/health" `
-        -UseBasicParsing -TimeoutSec 5 @irmExtra | Out-Null
-      break
-    } catch {
-      Start-Sleep -Seconds 1
-    }
-  }
-
-  $admin = $null
+  $code = ""
   try {
-    $admin = Get-Content -Raw -Path $AdminTokenFile
+    $pairJson = & $Installed mint-code 2>$null
+    if ($pairJson) {
+      $code = ($pairJson | ConvertFrom-Json).code
+    }
   } catch { }
-
-  # --- action 8a: set admin password -------------------------------------
-
-  # Set the password the user chose at the top, now that core is up. Authorized
-  # by the on-disk admin token over loopback. ConvertTo-Json escapes arbitrary
-  # password characters safely.
-  if ($IdxPassword -ne -1 -and $admin) {
-    Ui-ActionStart $IdxPassword "Setting admin password"
-    $pwSet = $false
-    try {
-      $pwBody = @{ password = $AdminPw } | ConvertTo-Json -Compress
-      Invoke-RestMethod -Method Post `
-        -Uri "https://127.0.0.1:$CorePort/api/v1/admin/password" `
-        -Headers @{ "X-Admin-Token" = $admin; "Content-Type" = "application/json" } `
-        -Body $pwBody @irmExtra | Out-Null
-      $pwSet = $true
-    } catch { }
-    $AdminPw = ""
-    if ($pwSet) {
-      Ui-ActionDone $IdxPassword
-    } else {
-      Ui-ActionSkip $IdxPassword "(could not set; set it later in the client)"
-    }
-  }
-
-  # Retry a few times: the health probe above confirms the port is bound, but the
-  # pairing route can lag the bind by a moment on a cold start.
-  $code = $null
-  $pairFailed = $true
-  if ($admin) {
-    for ($i = 0; $i -lt 5 -and $pairFailed; $i++) {
-      try {
-        $resp = Invoke-RestMethod -Method Post `
-          -Uri "https://127.0.0.1:$CorePort/api/v1/pairing/codes" `
-          -Headers @{ "X-Admin-Token" = $admin; "Content-Type" = "application/json" } `
-          -Body "{}" @irmExtra
-        if ($resp.code) {
-          $code = $resp.code
-          $pairFailed = $false
-        }
-      } catch { }
-      if ($pairFailed) { Start-Sleep -Seconds 1 }
-    }
-  }
-
-  if (-not $pairFailed) {
+  if ($code) {
     Ui-ActionDone $IdxPair
   } else {
     Ui-ActionSkip $IdxPair "(could not mint; see manual instructions below)"
@@ -1005,7 +539,9 @@ try {
 
   # --- footer ------------------------------------------------------------
 
-  if (-not $pairFailed) {
+  # The "Pairing code:" line is parsed by the client's install trampoline
+  # (tomat-client .../commands/pairing.rs parse_pairing_code); keep the prefix.
+  if ($code) {
     Ui-Finish @(
       "Pairing code: $code",
       "",
@@ -1016,10 +552,7 @@ try {
   } else {
     Ui-Finish @(
       "tomat-core installed. Mint a pairing code with:",
-      "  `$admin = Get-Content -Raw '$AdminTokenFile'",
-      "  Invoke-RestMethod -Method Post -Uri https://127.0.0.1:$CorePort/api/v1/pairing/codes ``",
-      "    -SkipCertificateCheck ``",
-      "    -Headers @{ 'X-Admin-Token' = `$admin; 'Content-Type' = 'application/json' } -Body '{}'"
+      "  & '$Installed' mint-code"
     )
   }
 

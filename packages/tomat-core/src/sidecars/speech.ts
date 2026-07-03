@@ -30,8 +30,10 @@ import {
   sttUsesLocal,
   ttsUsesLocal,
 } from "@tomat/shared";
+import type { BinaryVariant } from "@tomat/shared";
 import { binPath, paths, speechPort } from "../paths.ts";
 import { binaryName, libDirFor } from "../binaries/versions.ts";
+import { installedVariant } from "../binaries/manager.ts";
 import { resolveHfPath } from "../models/manager.ts";
 import { numSetting, strSetting } from "@tomat/core-engine/services/settings-access";
 import { AppError } from "@tomat/core-engine";
@@ -60,6 +62,17 @@ export interface SpeechState {
   host: string;
   port: string;
   threads: number;
+  /** ONNX Runtime execution provider passed to the binary (--provider), derived
+   *  from the installed speech-binary variant. GPU providers only take effect on
+   *  a GPU-built binary; on the CPU build sherpa/onnxruntime ignore it. */
+  provider: string;
+}
+
+/** Map an installed speech-binary variant to the ONNX Runtime execution provider
+ *  string the binary understands. Only the `cuda` GPU build exists (NVIDIA);
+ *  every other variant (and none installed) runs on CPU. */
+function providerForVariant(variant: BinaryVariant | null): string {
+  return variant === "cuda" ? "cuda" : "cpu";
 }
 
 /** The bundled espeak-ng-data dir, extracted next to the binary at install. */
@@ -94,7 +107,9 @@ export async function speechDesiredState(settings: Record<string, unknown>): Pro
     if (family && roles) tts = { family, ...roles, data_dir: espeakDataDir() };
   }
 
-  return { stt, tts, host: "127.0.0.1", port: String(speechPort()), threads };
+  const provider = providerForVariant(await installedVariant("tomat-core-speech"));
+
+  return { stt, tts, host: "127.0.0.1", port: String(speechPort()), threads, provider };
 }
 
 /** Resolve a `*.modelFiles` map (role -> HF spec) to role -> on-disk path,
@@ -116,7 +131,10 @@ async function resolveRoles(modelFiles: unknown): Promise<Record<string, string>
 /** Build StartOptions whose `--stt-config`/`--tts-config <json>` flags load
  *  exactly the desired engines before the process binds, so HTTP readiness
  *  implies models loaded. The JSON is the same tagged config object POST
- *  /configure accepts. No libraryDir: the binary statically links sherpa-onnx. */
+ *  /configure accepts. The CPU build statically links sherpa-onnx (no
+ *  libraryDir); a GPU build (provider != cpu) links onnxruntime dynamically, so
+ *  its GPU runtime + provider libs -- extracted into bin/lib/tomat-core-speech --
+ *  must be on the library path. */
 export function buildSpeechStartOptions(state: SpeechState): StartOptions {
   const argv: string[] = [
     "--host",
@@ -125,12 +143,17 @@ export function buildSpeechStartOptions(state: SpeechState): StartOptions {
     state.port,
     "--threads",
     String(state.threads),
+    "--provider",
+    state.provider,
   ];
   if (state.stt) argv.push("--stt-config", JSON.stringify(state.stt));
   if (state.tts) argv.push("--tts-config", JSON.stringify(state.tts));
   return {
     binary: binPath(binaryName("tomat-core-speech")),
     args: argv,
+    ...(state.provider !== "cpu"
+      ? { libraryDir: libDirFor(paths().binDir, "tomat-core-speech") }
+      : {}),
     readiness: {
       kind: "http",
       url: `http://${state.host}:${state.port}/health`,

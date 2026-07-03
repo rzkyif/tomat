@@ -255,7 +255,10 @@ export async function applyLlamaEmbed(settings: Record<string, unknown>): Promis
 let speechProcKey: string | null = null;
 
 function speechProcKeyOf(state: SpeechState): string {
-  return `${state.host}:${state.port}:${state.threads}`;
+  // Include provider: it is fixed at process start (the ONNX EP is chosen when
+  // an engine is built), so a provider change (new GPU binary variant landed)
+  // must force a restart rather than a live /configure.
+  return `${state.host}:${state.port}:${state.threads}:${state.provider}`;
 }
 
 // The combined speech sidecar (Whisper STT + Kokoro TTS). Runs whenever at

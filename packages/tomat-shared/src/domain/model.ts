@@ -17,6 +17,24 @@ export const BINARY_KINDS = ["llama-server", "tomat-core-speech", "deno"] as con
 
 export type BinaryKind = (typeof BINARY_KINDS)[number];
 
+// GPU-backend build variants a binary may ship. `cpu` is the guaranteed
+// fallback present for every triple; the rest are hardware-specific builds
+// (llama.cpp: metal/vulkan/cuda/rocm/hip; sherpa-onnx: cuda/directml/coreml).
+// A device selects the best variant its hardware supports and the manifest
+// offers, always terminating at `cpu` (see domain/variant.ts).
+export const BINARY_VARIANTS = [
+  "cpu",
+  "metal",
+  "vulkan",
+  "cuda",
+  "rocm",
+  "hip",
+  "directml",
+  "coreml",
+] as const;
+
+export type BinaryVariant = (typeof BINARY_VARIANTS)[number];
+
 // HF-style spec: "@user/repo/branch/file". Branch may be "main".
 // The model storage path is derived by stripping the leading "@" and treating
 // the remainder as a relative path under ~/.tomat/core/models/.
@@ -66,20 +84,72 @@ export interface DownloadPlan {
 //    updates reach latest users without us re-releasing. The signed manifest
 //    commits to the repo + patterns (not the version); the download is
 //    verified against GitHub's published sha256 digest.
-export interface BinaryManifestPinnedEntry {
-  version: string;
-  platforms: Record<Triple, { url: string; sha256: string }>;
+// One downloadable artifact: a primary asset-name pattern plus optional
+// companion archives (e.g. the Windows CUDA `cudart` runtime) extracted into the
+// same lib dir. "{tag}" expands to the release tag_name in every pattern.
+export interface VariantAsset {
+  asset: string;
+  extra?: string[];
 }
 
-// `assets` maps a triple to the upstream asset name; "{tag}" expands to the
+// A triple maps to either a single bare asset pattern (single-variant, treated
+// as `cpu`) or a per-variant map. A variant map MUST include `cpu` (the
+// guaranteed fallback). Read through `assetVariants` so both shapes normalize.
+export type TripleAsset = string | Partial<Record<BinaryVariant, string | VariantAsset>>;
+
+// One resolved, pinned download: the primary URL + sha256 plus any companion
+// archives (extracted libs-only into bin/lib/<kind>).
+export interface PinnedTarget {
+  url: string;
+  sha256: string;
+  extras?: { url: string; sha256: string }[];
+}
+
+// A triple maps to either a single bare pinned target (single-variant, treated
+// as `cpu`) or a per-variant map. Read through `platformVariants`.
+export type VariantPlatform = PinnedTarget | Partial<Record<BinaryVariant, PinnedTarget>>;
+
+export interface BinaryManifestPinnedEntry {
+  version: string;
+  platforms: Record<Triple, VariantPlatform>;
+}
+
+// `assets` maps a triple to the upstream asset name(s); "{tag}" expands to the
 // release's tag_name (e.g. "llama-{tag}-bin-macos-arm64.tar.gz").
 export interface UpstreamResolver {
   repo: string;
-  assets: Partial<Record<Triple, string>>;
+  assets: Partial<Record<Triple, TripleAsset>>;
   /** When set, resolve this exact release tag instead of the latest. Pins a
    *  binary on EVERY channel (latest/dev resolve at runtime, stable pins from
    *  the same tag at release time), so bumping it is a deliberate edit. */
   pinnedTag?: string;
+}
+
+/** Normalize a triple's asset config into a per-variant map. A bare string is a
+ *  single `cpu` variant; a bare per-variant string value becomes `{ asset }`.
+ *  Everything downstream (selection, resolution, manifest generation) reads
+ *  through this, so single-variant kinds (deno, mac llama) need no special case. */
+export function assetVariants(
+  a: TripleAsset | undefined,
+): Partial<Record<BinaryVariant, VariantAsset>> {
+  if (a === undefined) return {};
+  if (typeof a === "string") return { cpu: { asset: a } };
+  const out: Partial<Record<BinaryVariant, VariantAsset>> = {};
+  for (const [v, val] of Object.entries(a)) {
+    if (val === undefined) continue;
+    out[v as BinaryVariant] = typeof val === "string" ? { asset: val } : val;
+  }
+  return out;
+}
+
+/** Normalize a pinned platform entry into a per-variant map. A bare
+ *  `PinnedTarget` (has `url`) is the `cpu` variant. Mirror of {@link assetVariants}
+ *  for the pinned (stable-channel) manifest shape. */
+export function platformVariants(
+  p: VariantPlatform | undefined,
+): Partial<Record<BinaryVariant, PinnedTarget>> {
+  if (!p) return {};
+  return "url" in p ? { cpu: p } : p;
 }
 
 export interface BinaryManifestResolverEntry {
@@ -101,12 +171,32 @@ export interface BinaryManifestResolverEntry {
 export const UPSTREAM_BINARIES: Partial<Record<BinaryKind, UpstreamResolver>> = {
   "llama-server": {
     repo: "ggml-org/llama.cpp",
+    // Per-variant asset maps: `cpu` is always present (the guaranteed fallback);
+    // GPU variants are the upstream GPU builds. macOS bakes Metal into the single
+    // default build, so mac stays a bare (cpu-keyed) string. See domain/variant.ts
+    // for how a device picks the best offered variant for its detected backend.
     assets: {
       "aarch64-apple-darwin": "llama-{tag}-bin-macos-arm64.tar.gz",
       "x86_64-apple-darwin": "llama-{tag}-bin-macos-x64.tar.gz",
-      "aarch64-unknown-linux-gnu": "llama-{tag}-bin-ubuntu-arm64.tar.gz",
-      "x86_64-unknown-linux-gnu": "llama-{tag}-bin-ubuntu-x64.tar.gz",
-      "x86_64-pc-windows-msvc": "llama-{tag}-bin-win-cpu-x64.zip",
+      "x86_64-unknown-linux-gnu": {
+        cpu: "llama-{tag}-bin-ubuntu-x64.tar.gz",
+        vulkan: "llama-{tag}-bin-ubuntu-vulkan-x64.tar.gz",
+        rocm: "llama-{tag}-bin-ubuntu-rocm-7.2-x64.tar.gz",
+      },
+      "aarch64-unknown-linux-gnu": {
+        cpu: "llama-{tag}-bin-ubuntu-arm64.tar.gz",
+        vulkan: "llama-{tag}-bin-ubuntu-vulkan-arm64.tar.gz",
+      },
+      "x86_64-pc-windows-msvc": {
+        cpu: "llama-{tag}-bin-win-cpu-x64.zip",
+        vulkan: "llama-{tag}-bin-win-vulkan-x64.zip",
+        // CUDA ships a separate cudart runtime archive extracted alongside.
+        cuda: {
+          asset: "llama-{tag}-bin-win-cuda-13.3-x64.zip",
+          extra: ["cudart-llama-bin-win-cuda-13.3-x64.zip"],
+        },
+        hip: "llama-{tag}-bin-win-hip-radeon-x64.zip",
+      },
       "aarch64-pc-windows-msvc": "llama-{tag}-bin-win-cpu-arm64.zip",
     },
   },
@@ -148,6 +238,20 @@ export interface BinaryStatus {
   version: string;
   installed: boolean;
   path?: string;
+  /** The GPU variant currently installed on disk (`cpu` for single-variant
+   *  kinds; undefined when not installed). */
+  variant?: BinaryVariant;
+  /** The desired variant captured at the last install (what that install AIMED
+   *  for). Equals `desiredVariant` in the normal case; differs from `variant`
+   *  only when the ideal wasn't resolvable upstream and the install degraded.
+   *  Present-ness is judged by `target === desiredVariant` (not
+   *  `variant === desiredVariant`), so an unavoidable fallback settles instead of
+   *  reading as perpetually-missing. Undefined when not installed. */
+  target?: BinaryVariant;
+  /** The variant this device should have, given detected hardware + the backend
+   *  override (the ideal). A concrete better variant becoming installable surfaces
+   *  through the update path, not the missing-requirement path. */
+  desiredVariant?: BinaryVariant;
 }
 
 // Resolved download metadata for a not-yet-installed binary, surfaced in the
@@ -262,7 +366,7 @@ const SELF_HOSTED_UNSUPPORTED: Partial<Record<BinaryKind, ReadonlySet<Triple>>> 
  *  unsupported triples. */
 export function binaryUnavailableOnTriple(kind: BinaryKind, triple: Triple): boolean {
   const resolver = UPSTREAM_BINARIES[kind];
-  if (resolver) return resolver.assets[triple] === undefined;
+  if (resolver) return Object.keys(assetVariants(resolver.assets[triple])).length === 0;
   return SELF_HOSTED_UNSUPPORTED[kind]?.has(triple) ?? false;
 }
 

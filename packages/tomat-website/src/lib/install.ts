@@ -126,6 +126,140 @@ export function coreUninstallCommand(os: Os, channel: Channel, opts: CoreUninsta
   return shCommand("core-uninstall.sh", "bash", vars, opts.keepData ? ["--keep-data"] : []);
 }
 
+// ---------------------------------------------------------------------------
+// Native installer downloads (the primary CTA)
+//
+// The conventional double-click installers - macOS `.dmg`/`.pkg`, Windows
+// `.exe`, Linux `.deb`/`.rpm` - published by scripts/release/{client,core-
+// installers}.ts. Each release also mirrors every installer to a version-less
+// `current/<triple>/<stable-name>` R2 key (exactly like {@link androidApkUrl}),
+// so this page links a stable URL without knowing the version. The stable names
+// here are kept in sync with coreInstallerStableName() / clientBundleAlias() on
+// the release side.
+
+export type Arch = "arm64" | "x64";
+export type InstallerFormat = "dmg" | "pkg" | "exe" | "deb" | "rpm";
+
+export interface NativeInstaller {
+  os: Os;
+  arch: Arch;
+  format: InstallerFormat;
+  /** The direct download URL (the version-less `current/` alias). */
+  url: string;
+  /** Human arch label for the button, e.g. "Apple Silicon" / "Intel". */
+  archLabel: string;
+}
+
+// [arch, target triple, human arch label] per desktop OS. Order is the one the
+// page offers the buttons in (the most common arch first).
+const OS_TRIPLES: Record<Exclude<Os, "android">, Array<[Arch, string, string]>> = {
+  macos: [
+    ["arm64", "aarch64-apple-darwin", "Apple Silicon"],
+    ["x64", "x86_64-apple-darwin", "Intel"],
+  ],
+  linux: [
+    ["x64", "x86_64-unknown-linux-gnu", "x86-64"],
+    ["arm64", "aarch64-unknown-linux-gnu", "ARM64"],
+  ],
+  windows: [
+    ["x64", "x86_64-pc-windows-msvc", "x86-64"],
+    ["arm64", "aarch64-pc-windows-msvc", "ARM64"],
+  ],
+};
+
+// Channel binary suffix, matching channelBinSuffix() on the release side: stable
+// is bare, other channels append `-<channel>`.
+function binSuffix(channel: Channel): string {
+  return channel === "stable" ? "" : `-${channel}`;
+}
+
+function currentUrl(channel: Channel, triple: string, filename: string): string {
+  const prefix = channel === "stable" ? "" : `${channel}/`;
+  return `${STORAGE_BASE}/${prefix}current/${triple}/${filename}`;
+}
+
+// The installer formats a given target offers per OS. macOS/Windows are a single
+// double-click file; Linux offers both the Debian and RPM package.
+function formatsFor(target: Target, os: Exclude<Os, "android">): InstallerFormat[] {
+  if (os === "macos") return target === "core" ? ["pkg"] : ["dmg"];
+  if (os === "windows") return ["exe"];
+  return ["deb", "rpm"];
+}
+
+// The version-less stable filename for one installer, matching the release-side
+// alias names (coreInstallerStableName / clientBundleAlias / the dmg/deb/rpm
+// aliases in client.ts).
+function stableName(target: Target, format: InstallerFormat, channel: Channel): string {
+  const base = target === "core" ? "tomat-core" : "tomat";
+  const suffix = binSuffix(channel);
+  if (format === "exe") return `${base}${suffix}-setup.exe`;
+  return `${base}${suffix}.${format}`;
+}
+
+/** Native double-click installers for a target on an OS, one entry per
+ *  arch x format. Android has no installer here (it is a sideloaded APK, see
+ *  {@link androidApkUrl}), so it returns []. */
+export function nativeInstallers(target: Target, os: Os, channel: Channel): NativeInstaller[] {
+  if (os === "android") return [];
+  const out: NativeInstaller[] = [];
+  for (const [arch, triple, archLabel] of OS_TRIPLES[os]) {
+    for (const format of formatsFor(target, os)) {
+      out.push({
+        os,
+        arch,
+        format,
+        archLabel,
+        url: currentUrl(channel, triple, stableName(target, format, channel)),
+      });
+    }
+  }
+  return out;
+}
+
+/** The "how to" steps for a native installer download, shared by both generator
+ *  variants (like {@link commandStepsTail} for the command path). Generic across
+ *  OS: the double-click flow is the same everywhere. */
+export function nativeInstallSteps(target: Target): string[] {
+  if (target === "core") {
+    return [
+      "Open the downloaded installer and follow the prompts.",
+      "It installs Core and starts it in the background at login.",
+      "Open a tomat Client on any device and pair it to this Core.",
+    ];
+  }
+  return [
+    "Open the downloaded installer and follow the prompts.",
+    "Launch tomat when it finishes.",
+    "Pick where its Core should run, on this computer or another you have.",
+  ];
+}
+
+/** A one-line note about the OS security prompt an UNSIGNED installer triggers,
+ *  or null when the platform's installer is signed. Windows installers ship
+ *  unsigned for now (SmartScreen warns); macOS + the rest are signed. */
+export function unsignedInstallerNote(os: Os): string | null {
+  if (os === "windows") {
+    return "Windows may warn that the publisher is unknown. Choose More info, then Run anyway.";
+  }
+  return null;
+}
+
+/** Short, user-facing label for an installer format, for the download button. */
+export function formatLabel(format: InstallerFormat): string {
+  switch (format) {
+    case "dmg":
+      return "Disk image (.dmg)";
+    case "pkg":
+      return "Installer (.pkg)";
+    case "exe":
+      return "Installer (.exe)";
+    case "deb":
+      return "Debian (.deb)";
+    case "rpm":
+      return "Red Hat (.rpm)";
+  }
+}
+
 /** The fixed "newest build" APK alias published per channel by
  *  scripts/release/android.ts, so the page can link a stable URL without
  *  knowing the version. The `current` segment is the moving alias; the channel

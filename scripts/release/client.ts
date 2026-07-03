@@ -8,13 +8,14 @@ import { ensureDir } from "@std/fs/ensure-dir";
 import { encodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import type { Triple } from "../../packages/tomat-shared/src/domain/model.ts";
-import { type ClientDescriptor, reanchorFile } from "./artifacts.ts";
+import { type ClientDescriptor, type DownloadAsset, reanchorFile } from "./artifacts.ts";
 import { reportRouting, routeTriples } from "./all-targets.ts";
 import { withEnvironment } from "./drivers/lifecycle.ts";
 import type { BuildEnvironment } from "./drivers/mod.ts";
 import {
   type ApplyOpts,
   bumpVersionField,
+  channelBinSuffix,
   channelManifestDir,
   channelStoragePrefix,
   colors,
@@ -67,6 +68,11 @@ interface ClientManifest {
   notes: string;
   pub_date: string;
   platforms: Record<string, { signature: string; url: string; sha256: string }>;
+  // Conventional-installer direct downloads per Tauri platform key (macOS .dmg,
+  // Linux .deb/.rpm; Windows's NSIS installer IS the `platforms` bundle, so it
+  // is not duplicated here). Consumed by the website's download CTA, NOT by the
+  // Tauri updater (which only reads `platforms`).
+  downloads?: Record<string, Array<DownloadAsset & { url: string }>>;
 }
 
 /** The client's published version is the one baked into the app bundle by Tauri
@@ -224,6 +230,74 @@ async function findClientBundle(triple: Triple, bundleRoot: string): Promise<Cli
   );
 }
 
+/** Collect the conventional native installers Tauri emits alongside the updater
+ *  bundle, for the website's direct-download CTA: macOS `.dmg`, Linux
+ *  `.deb`/`.rpm`. Windows is skipped - its NSIS `.exe` IS the updater bundle
+ *  (`findClientBundle`), so the website links that directly. Missing formats are
+ *  skipped without error (a dmg needs a signed+notarized macOS build to be worth
+ *  shipping; deb/rpm need the cross-build to not narrow `--bundles`). */
+async function collectExtraDownloads(
+  triple: Triple,
+  bundleRoot: string,
+): Promise<
+  Array<{ format: DownloadAsset["format"]; srcPath: string; filename: string; size: number }>
+> {
+  const specs: { dir: string; ext: string; format: DownloadAsset["format"] }[] = [];
+  if (triple.endsWith("apple-darwin")) {
+    specs.push({ dir: join(bundleRoot, "dmg"), ext: ".dmg", format: "dmg" });
+  } else if (triple.endsWith("unknown-linux-gnu")) {
+    specs.push({ dir: join(bundleRoot, "deb"), ext: ".deb", format: "deb" });
+    specs.push({ dir: join(bundleRoot, "rpm"), ext: ".rpm", format: "rpm" });
+  }
+  const out: Array<{
+    format: DownloadAsset["format"];
+    srcPath: string;
+    filename: string;
+    size: number;
+  }> = [];
+  for (const s of specs) {
+    if (!(await exists(s.dir))) continue;
+    for await (const entry of Deno.readDir(s.dir)) {
+      if (!entry.isFile || !entry.name.endsWith(s.ext)) continue;
+      const srcPath = join(s.dir, entry.name);
+      const size = (await Deno.stat(srcPath)).size;
+      out.push({ format: s.format, srcPath, filename: entry.name, size });
+    }
+  }
+  return out;
+}
+
+/** Dormant Windows Authenticode signing. When a cert is configured (env, via
+ *  DeployEnv), patch tauri.conf.json's bundle.windows so Tauri signs the NSIS
+ *  installer, restoring the file afterward (mirrors injectTauriPubkey). When the
+ *  cert env is empty - the default, no cert yet - this is a no-op and the
+ *  installer ships unsigned (the install flow keeps stripping Mark-of-the-Web).
+ *  Only applies to a windows target. Tauri reads Windows signing from config, not
+ *  env, which is why this is a config patch rather than an env injection like
+ *  appleSigningEnv. */
+export async function injectWindowsSigning(
+  env: DeployEnv,
+  triple: Triple,
+): Promise<() => Promise<void>> {
+  if (!triple.endsWith("pc-windows-msvc")) return async () => {};
+  if (!env.windowsCertificateThumbprint && !env.windowsSignCommand) return async () => {};
+  const original = await Deno.readTextFile(TAURI_CONF_PATH);
+  const conf = JSON.parse(original);
+  conf.bundle ??= {};
+  conf.bundle.windows ??= {};
+  if (env.windowsCertificateThumbprint) {
+    conf.bundle.windows.certificateThumbprint = env.windowsCertificateThumbprint;
+  }
+  if (env.windowsSignCommand) conf.bundle.windows.signCommand = env.windowsSignCommand;
+  conf.bundle.windows.timestampUrl = env.windowsTimestampUrl;
+  await Deno.writeTextFile(TAURI_CONF_PATH, JSON.stringify(conf, null, 2));
+  ok(`enabled Windows Authenticode signing in tauri.conf.json`);
+  return async () => {
+    await Deno.writeTextFile(TAURI_CONF_PATH, original);
+    info(`restored tauri.conf.json (removed Windows signing)`);
+  };
+}
+
 // The primary installable a plain `deno task build:client` emits for the host
 // platform (no updater .tar.gz/.sig, which a keyless build skips). The unified
 // build hashes these so a wiped or swapped bundle forces a rebuild. macOS
@@ -287,7 +361,8 @@ export async function buildClientBundle(
   info(`client triple: ${triple} (tauri key: ${tauriKey}), version ${version}`);
 
   step(`Building Tauri client bundle (${triple})`);
-  const restore = await injectTauriPubkey(env.tauriUpdaterPublicKey);
+  const restorePubkey = await injectTauriPubkey(env.tauriUpdaterPublicKey);
+  const restoreWinSigning = await injectWindowsSigning(env, triple);
   try {
     await buildClient(env, channel, opts.triple, opts.bundles);
     const bundle = await findClientBundle(triple, bundleRoot);
@@ -300,6 +375,24 @@ export async function buildClientBundle(
     await ensureDir(join(DIST_DIR, triple));
     await Deno.copyFile(bundle.bundlePath, join(DIST_DIR, relPath));
     await Deno.copyFile(bundle.sigPath, join(DIST_DIR, sigRelPath));
+
+    // Harvest the conventional native installers Tauri also built (dmg / deb /
+    // rpm), copy them under dist/<triple>/, and record them for the website's
+    // direct-download CTA. Absent formats are simply skipped.
+    const downloads: DownloadAsset[] = [];
+    for (const d of await collectExtraDownloads(triple, bundleRoot)) {
+      const dlRel = `${triple}/${d.filename}`;
+      await Deno.copyFile(d.srcPath, join(DIST_DIR, dlRel));
+      const { sha256 } = await sha256File(d.srcPath);
+      downloads.push({
+        format: d.format,
+        filename: d.filename,
+        relPath: dlRel,
+        sha256,
+        size: d.size,
+      });
+      ok(`  + download: ${d.filename}  ${humanBytes(d.size)}`);
+    }
 
     // sha256 over the exact bytes the installer downloads (mirrors core.json):
     // the Tauri minisign signature protects in-app updates, this protects the
@@ -317,14 +410,35 @@ export async function buildClientBundle(
       sha256,
       size: bundle.size,
       signature,
+      downloads: downloads.length ? downloads : undefined,
     };
   } finally {
-    await restore();
+    await restoreWinSigning();
+    await restorePubkey();
   }
 }
 
 // ---------------------------------------------------------------------------
 // publish half (runs ONCE on the host over every platform's descriptor)
+
+/** Version-less current/ alias for a platform's PRIMARY client bundle, when that
+ *  bundle is itself the user-facing installer: the Windows NSIS `.exe` and the
+ *  Linux AppImage. macOS's primary is the `.app.tar.gz` updater payload (its dmg
+ *  is aliased separately), so it returns undefined. Kept in sync with the
+ *  clientDownload builders in the website's lib/install.ts. */
+function clientBundleAlias(
+  triple: Triple,
+  storagePrefix: string,
+  suffix: string,
+): string | undefined {
+  if (triple.endsWith("pc-windows-msvc")) {
+    return `${storagePrefix}current/${triple}/tomat${suffix}-setup.exe`;
+  }
+  if (triple.endsWith("unknown-linux-gnu")) {
+    return `${storagePrefix}current/${triple}/tomat${suffix}.AppImage`;
+  }
+  return undefined;
+}
 
 /** Compose client.json from the union of platform descriptors, Ed25519-sign the
  *  detached client.json.sig, and upload the bundles + manifest to R2. Carry
@@ -346,7 +460,17 @@ export async function composeAndUploadClient(
   step("Composing client.json (Tauri updater manifest)");
   const platforms: ClientManifest["platforms"] =
     live?.version === version ? { ...live.platforms } : {};
-  const uploads: Array<{ key: string; path: string; descriptor: ClientDescriptor }> = [];
+  const suffix = channelBinSuffix(channel);
+  const uploads: Array<{
+    key: string;
+    path: string;
+    label: string;
+    size: number;
+    // Version-less current/ alias the website links against (mirrors android.ts).
+    aliasKey?: string;
+  }> = [];
+  const downloads: NonNullable<ClientManifest["downloads"]> =
+    live?.version === version && live.downloads ? { ...live.downloads } : {};
   for (const d of descriptors) {
     // Re-anchor + verify the bundle bytes against the descriptor's sha256.
     const bundlePath = await reanchorFile(d.relPath, d.sha256);
@@ -356,7 +480,35 @@ export async function composeAndUploadClient(
       url: `https://${env.storageDomain}/${key}`,
       sha256: d.sha256,
     };
-    uploads.push({ key, path: bundlePath, descriptor: d });
+    uploads.push({
+      key,
+      path: bundlePath,
+      label: `${d.triple}_${d.filename}`,
+      size: d.size,
+      // The Windows NSIS .exe and the Linux AppImage ARE the primary user-facing
+      // installers (Windows has no separate dmg/deb harvest), so alias them for
+      // the download page. macOS's primary bundle is the .app.tar.gz updater
+      // payload, not a user download - its dmg (below) is aliased instead.
+      aliasKey: clientBundleAlias(d.triple, storagePrefix, suffix),
+    });
+
+    // Conventional native installers (dmg/deb/rpm): re-anchor, upload, alias, and
+    // record a direct URL for the website. Keyed by the same tauri platform key.
+    if (d.downloads?.length) {
+      downloads[d.tauriKey] = [];
+      for (const dl of d.downloads) {
+        const dlPath = await reanchorFile(dl.relPath, dl.sha256);
+        const dlKey = `${storagePrefix}${version}/${d.triple}/${dl.filename}`;
+        downloads[d.tauriKey].push({ ...dl, url: `https://${env.storageDomain}/${dlKey}` });
+        uploads.push({
+          key: dlKey,
+          path: dlPath,
+          label: `${d.triple}_${dl.filename}`,
+          size: dl.size,
+          aliasKey: `${storagePrefix}current/${d.triple}/tomat${suffix}.${dl.format}`,
+        });
+      }
+    }
   }
 
   const manifest: ClientManifest = {
@@ -364,6 +516,7 @@ export async function composeAndUploadClient(
     notes: `tomat ${version}`,
     pub_date: new Date().toISOString(),
     platforms,
+    downloads: Object.keys(downloads).length ? downloads : undefined,
   };
   const clientJsonPath = await writeManifestFile(manifestDir, "client.json", manifest);
   ok(`client.json → ${rel(clientJsonPath)}`);
@@ -385,12 +538,16 @@ export async function composeAndUploadClient(
     return;
   }
 
-  step(`Uploading client bundle(s) to R2 bucket "${env.r2Bucket}"`);
+  step(`Uploading client bundle(s) + installers to R2 bucket "${env.r2Bucket}"`);
   for (const u of uploads) {
-    info(`uploading ${u.key}  (${humanBytes(u.descriptor.size)})`);
+    info(`uploading ${u.key}  (${humanBytes(u.size)})`);
     await r2Put(env, u.key, u.path, "application/octet-stream");
     opts.recordVersionedKey?.(u.key);
-    opts.recordReleaseAsset?.(u.path, `${u.descriptor.triple}_${u.descriptor.filename}`);
+    opts.recordReleaseAsset?.(u.path, u.label);
+    if (u.aliasKey) {
+      info(`uploading ${u.aliasKey}  (alias)`);
+      await r2Put(env, u.aliasKey, u.path, "application/octet-stream", "public, max-age=300");
+    }
   }
 
   step(`Uploading ${manifestDir}/client.json to R2`);

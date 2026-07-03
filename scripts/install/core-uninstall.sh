@@ -420,145 +420,53 @@ else
 fi
 HOME_DIR="${TOMAT_CORE_HOME:-$HOME/.tomat/$TOMAT_CHANNEL/core}"
 BIN_DIR="$HOME_DIR/bin"
-SERVICE_LABEL_ID="au.tomat.core$CHANNEL_SUFFIX"
-SYSTEMD_UNIT="tomat-core$CHANNEL_SUFFIX"
-CORE_BIN_NAME="tomat-core$CHANNEL_SUFFIX"
-# Core seals its secrets-vault master key in the OS keychain under this
-# service/account (mirrors secrets.ts); the helper that manages it is
-# channel-suffixed like every core binary (mirrors paths.ts coreBinaryName).
-KEYCHAIN_BIN="$BIN_DIR/tomat-core-keychain$CHANNEL_SUFFIX"
-KEYCHAIN_SERVICE="au.tomat.core$CHANNEL_SUFFIX"
-KEYCHAIN_ACCOUNT="master-key"
 
-uname_os="$(uname -s 2>/dev/null || echo unknown)"
-
-case "$uname_os" in
-  Darwin)
-    PLIST="$HOME/Library/LaunchAgents/$SERVICE_LABEL_ID.plist"
-    LABEL_SERVICE="Unloading launchd agent ~/Library/LaunchAgents/$SERVICE_LABEL_ID.plist"
-    ;;
-  Linux)
-    UNIT="$HOME/.config/systemd/user/$SYSTEMD_UNIT.service"
-    LABEL_SERVICE="Disabling systemd user unit ~/.config/systemd/user/$SYSTEMD_UNIT.service"
-    ;;
-  *)
-    printf 'error: unsupported OS: %s\n' "$uname_os" >&2
-    exit 1
-    ;;
-esac
-
-# --- begin UI -------------------------------------------------------------
+# The whole teardown - stop + remove the OS service, kill stragglers, clear the
+# keychain master key, remove ~/.tomat/<channel>/core (preserving the shared
+# ~/.tomat/models) - is done by the core binary's uninstall-service subcommand,
+# the single source of truth. This script is a thin wrapper with a best-effort
+# fallback for the rare case where the binary is already gone.
+INSTALLED_BIN="$BIN_DIR/tomat-core$CHANNEL_SUFFIX"
 
 ui_init "tomat-core uninstaller"
+IDX=$(ui_action_add "Removing tomat-core (service, keychain, data)")
+ui_action_start "$IDX" "Removing tomat-core (service, keychain, data)"
 
-IDX_SERVICE=$(ui_action_add "$LABEL_SERVICE")
-IDX_KILL=$(ui_action_add "Killing straggler tomat-core processes")
-IDX_KEYCHAIN=$(ui_action_add "Clearing keychain entry")
-IDX_REMOVE=$(ui_action_add "Removing $HOME_DIR")
-
-# --- action 1: unload service --------------------------------------------
-
-if [ "$uname_os" = "Darwin" ]; then
-  if [ ! -f "$PLIST" ]; then
-    ui_action_skip "$IDX_SERVICE" "(not installed)"
+if [ -x "$INSTALLED_BIN" ]; then
+  UNINSTALL_ARGS=""
+  [ "$KEEP_DATA" = "1" ] && UNINSTALL_ARGS="--keep-data"
+  # shellcheck disable=SC2086 # intentional word-splitting of the optional flag
+  if "$INSTALLED_BIN" uninstall-service $UNINSTALL_ARGS >&2; then
+    ui_action_done "$IDX"
   else
-    ui_action_start "$IDX_SERVICE" "$LABEL_SERVICE"
-    # `launchctl unload` often returns non-zero for benign reasons (the
-    # agent already exited, etc.); the meaningful step is removing the
-    # plist so launchd never auto-loads it again on next login.
-    launchctl unload "$PLIST" 2>/dev/null || true
-    if rm -f "$PLIST" 2>/dev/null; then
-      ui_action_done "$IDX_SERVICE" "(unloaded)"
-    else
-      # Both unload and rm effectively failed -- registration may persist.
-      ui_action_error "$IDX_SERVICE" "(could not remove plist)"
-    fi
+    ui_action_error "$IDX" "(uninstall-service reported an error; see output above)"
   fi
 else
-  # Linux
-  if [ ! -f "$UNIT" ]; then
-    ui_action_skip "$IDX_SERVICE" "(not installed)"
-  else
-    ui_action_start "$IDX_SERVICE" "$LABEL_SERVICE"
-    systemctl --user disable --now "$SYSTEMD_UNIT.service" 2>/dev/null || true
-    if rm -f "$UNIT" 2>/dev/null; then
-      systemctl --user daemon-reload 2>/dev/null || true
-      ui_action_done "$IDX_SERVICE" "(disabled)"
-    else
-      ui_action_error "$IDX_SERVICE" "(could not remove unit)"
-    fi
+  # Binary already gone (a partial install / prior removal): tear the service
+  # and data down directly so nothing lingers. The keychain master key can't be
+  # cleared without the helper, so it is left (noted in the footer).
+  case "$(uname -s 2>/dev/null || echo unknown)" in
+    Darwin)
+      _plist="$HOME/Library/LaunchAgents/au.tomat.core$CHANNEL_SUFFIX.plist"
+      if [ -f "$_plist" ]; then
+        launchctl unload "$_plist" 2>/dev/null || true
+        rm -f "$_plist"
+      fi
+      ;;
+    Linux)
+      _unit="$HOME/.config/systemd/user/tomat-core$CHANNEL_SUFFIX.service"
+      if [ -f "$_unit" ]; then
+        systemctl --user disable --now "tomat-core$CHANNEL_SUFFIX.service" 2>/dev/null || true
+        rm -f "$_unit"
+        systemctl --user daemon-reload 2>/dev/null || true
+      fi
+      ;;
+  esac
+  if [ "$KEEP_DATA" != "1" ] && [ -d "$HOME_DIR" ]; then
+    rm -rf "$HOME_DIR"
+    rmdir "$(dirname "$HOME_DIR")" 2>/dev/null || true
   fi
-fi
-
-# --- action 2: kill stragglers -------------------------------------------
-
-PIDS=""
-if command -v pgrep >/dev/null 2>&1; then
-  PIDS="$(pgrep -f "$HOME_DIR/bin/$CORE_BIN_NAME" 2>/dev/null || true)"
-fi
-
-if [ -z "$PIDS" ]; then
-  ui_action_skip "$IDX_KILL" "(none found)"
-else
-  ui_action_start "$IDX_KILL" "Killing straggler tomat-core processes"
-  # Try SIGTERM first; SIGKILL after a short grace.
-  KILLED_COUNT=0
-  for pid in $PIDS; do
-    if kill "$pid" 2>/dev/null; then
-      KILLED_COUNT=$((KILLED_COUNT + 1))
-    fi
-  done
-  sleep 1
-  for pid in $PIDS; do
-    kill -9 "$pid" 2>/dev/null || true
-  done
-  ui_action_done "$IDX_KILL" "(killed $KILLED_COUNT)"
-fi
-
-# --- action 3: clear the keychain master key -----------------------------
-# Done before the dir is removed (the helper lives in $BIN_DIR). Skipped under
-# --keep-data so the kept vault stays decryptable. Delete is idempotent, so
-# this is a no-op on dev (file fallback, no keychain entry) and on re-runs.
-
-if [ "$KEEP_DATA" = "1" ]; then
-  ui_action_skip "$IDX_KEYCHAIN" "(kept with data)"
-elif [ -x "$KEYCHAIN_BIN" ]; then
-  ui_action_start "$IDX_KEYCHAIN" "Clearing keychain entry"
-  # delete is idempotent (exit 0 even if absent), so a non-zero exit is a real
-  # failure (keychain locked / unavailable) worth reporting rather than masking.
-  if "$KEYCHAIN_BIN" delete "$KEYCHAIN_SERVICE" "$KEYCHAIN_ACCOUNT" >/dev/null 2>&1; then
-    ui_action_done "$IDX_KEYCHAIN" "(cleared)"
-  else
-    ui_action_skip "$IDX_KEYCHAIN" "(could not clear)"
-  fi
-elif [ "$uname_os" = "Darwin" ] && command -v security >/dev/null 2>&1; then
-  # Helper already gone (e.g. a partially-removed install): fall back to the
-  # native macOS keychain tool, which speaks the same generic-password store.
-  ui_action_start "$IDX_KEYCHAIN" "Clearing keychain entry"
-  security delete-generic-password -s "$KEYCHAIN_SERVICE" -a "$KEYCHAIN_ACCOUNT" >/dev/null 2>&1 || true
-  ui_action_done "$IDX_KEYCHAIN" "(cleared)"
-else
-  ui_action_skip "$IDX_KEYCHAIN" "(helper not present)"
-fi
-
-# --- action 4: remove the channel's core dir -----------------------------
-
-if [ "$KEEP_DATA" = "1" ]; then
-  ui_action_skip "$IDX_REMOVE" "(skipped per --keep-data)"
-elif [ ! -d "$HOME_DIR" ]; then
-  ui_action_skip "$IDX_REMOVE" "(directory not found)"
-else
-  ui_action_start "$IDX_REMOVE" "Removing $HOME_DIR"
-  RM_ERR="$(rm -rf "$HOME_DIR" 2>&1)" || \
-    ui_die "Failed to remove $HOME_DIR" \
-      "$RM_ERR" \
-      "a process may still be holding the directory open; re-run after closing tomat"
-  # Best-effort: drop the now-empty channel dir (~/.tomat/<channel>) left behind
-  # once both core and client data are gone. rmdir only succeeds when empty, so a
-  # client still installed on this channel keeps it (the shared models dir lives
-  # under ~/.tomat, not the channel dir, so it is never affected).
-  rmdir "$(dirname "$HOME_DIR")" 2>/dev/null || true
-  ui_action_done "$IDX_REMOVE" "(removed)"
+  ui_action_done "$IDX" "(binary missing; removed service + data directly)"
 fi
 
 # --- footer ---------------------------------------------------------------
@@ -576,5 +484,3 @@ else
     "" \
     "Models in ~/.tomat/models/ were left in place; remove manually if desired."
 fi
-
-exit 0

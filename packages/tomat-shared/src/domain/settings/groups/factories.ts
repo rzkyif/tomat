@@ -29,6 +29,32 @@ export interface ExternalModelSectionOpts {
   language?: boolean;
 }
 
+/** The GPU-acceleration override for the local speech binary. STT and TTS run in
+ *  ONE `tomat-core-speech` process, so both groups render this SAME field (same
+ *  `speech.binaryBackend` id -> one persisted value); each passes its own
+ *  `visibleWhen` so it shows under whichever engine is enabled. Auto picks the
+ *  best build for the detected GPU; a concrete backend forces it (falling back
+ *  to CPU when the platform doesn't offer it). Persisted to the core. */
+export function speechBackendField(visibleWhen: FieldCondition): SettingField {
+  return {
+    id: "speech.binaryBackend",
+    name: "Acceleration",
+    visibleWhen,
+    description:
+      "Which speech build to download and run for on-device voice. Auto picks the best for your GPU; choose CUDA to force the NVIDIA build, or CPU to stay off the GPU. Shared by Speech-to-Text and Text-to-Speech.",
+    type: "select",
+    defaultValue: "auto",
+    // CUDA is the only GPU speech build (NVIDIA on Linux/Windows); other GPUs run
+    // speech on CPU, so only these three options are offered.
+    options: [
+      { value: "auto", label: "Auto" },
+      { value: "cpu", label: "CPU" },
+      { value: "cuda", label: "CUDA (NVIDIA)" },
+    ],
+    descriptionTier: "ondemand",
+  };
+}
+
 /** The "External Provider" section every external-model group shares: an HTTPS
  *  base URL, a vault-stored API key, and a model name, plus optional context
  *  window / voice fields. Always persisted to the core. */

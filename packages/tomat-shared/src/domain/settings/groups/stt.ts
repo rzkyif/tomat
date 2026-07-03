@@ -6,7 +6,7 @@
 // badge per section.
 
 import type { SettingGroup } from "../types.ts";
-import { externalModelSection } from "./factories.ts";
+import { externalModelSection, speechBackendField } from "./factories.ts";
 
 export const sttGroup: SettingGroup = {
   id: "stt",
@@ -280,6 +280,7 @@ export const sttGroup: SettingGroup = {
           defaultValue: 4,
           descriptionTier: "ondemand",
         },
+        speechBackendField({ field: "stt.enabled", eq: true }),
       ],
     },
     externalModelSection({

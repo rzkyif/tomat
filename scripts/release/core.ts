@@ -5,16 +5,19 @@
 
 import { copy } from "@std/fs/copy";
 import { ensureDir } from "@std/fs/ensure-dir";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import type {
   BinaryKind,
   BinaryManifest,
   BinaryManifestEntry,
   BinaryManifestPinnedEntry,
+  BinaryVariant,
   CoreManifest,
+  PinnedTarget,
   Triple,
 } from "../../packages/tomat-shared/src/domain/model.ts";
 import {
+  assetVariants,
   BINARY_KINDS,
   binaryUnavailableOnTriple,
   UPSTREAM_BINARIES,
@@ -49,6 +52,7 @@ import {
   stripCoreVersion,
 } from "./lib.ts";
 import { reportRouting, routeTriples } from "./all-targets.ts";
+import { buildCoreInstallers, uploadCoreInstallers } from "./core-installers.ts";
 import { type ArtifactBundle, mergeCoreBundles } from "./artifacts.ts";
 import { withEnvironment } from "./drivers/lifecycle.ts";
 import type { BuildEnvironment } from "./drivers/mod.ts";
@@ -132,9 +136,13 @@ export interface HelperArtifact {
 
 export interface SpeechArtifact {
   triple: Triple;
-  // `<name><suffix>.tar.gz`. The sha256 is over this ARCHIVE (verified before
-  // extraction), unlike the single-file `.gz` artifacts whose sha is over the
-  // decompressed file.
+  // The GPU build variant this archive is. `cpu` is the statically-linked
+  // default (always built); GPU variants are built only when a prebuilt GPU
+  // sherpa-onnx lib dir is staged (see buildSpeech / SPEECH_GPU_VARIANTS).
+  variant: BinaryVariant;
+  // `<name>[-<variant>]<suffix>.tar.gz`. The sha256 is over this ARCHIVE
+  // (verified before extraction), unlike the single-file `.gz` artifacts whose
+  // sha is over the decompressed file.
   filename: string;
   path: string;
   sha256: string;
@@ -406,10 +414,46 @@ async function ensureEspeakData(): Promise<string> {
   return dataDir;
 }
 
+// The GPU speech variants buildable per triple. Only Linux CUDA is supported:
+//  - k2-fsa ships prebuilt CUDA archives for linux-x64 and win-x64, but NO
+//    DirectML or CoreML libs (those need an onnxruntime source build, avoided).
+//  - The win-x64 CUDA archive omits `onnxruntime.lib`, so the crate's shared
+//    link step (`dylib=onnxruntime`) can't link under MSVC; Linux `.so` linking
+//    has no separate import lib, so it links against the bundled libonnxruntime.
+// So NVIDIA on Linux gets a GPU speech binary; Windows NVIDIA (and every other
+// GPU, and Mac) runs speech on CPU (its LLM still gets a GPU llama.cpp build).
+// A variant is built ONLY when its prebuilt GPU lib dir is staged in the env var
+// below (the same SHERPA_ONNX_LIB_DIR mechanism the win-arm64 CPU build uses);
+// otherwise the release ships CPU-only for that triple. The staged archive
+// supplies the GPU onnxruntime + provider shared libs, packaged into the tarball
+// so they land in bin/lib/tomat-core-speech.
+const SPEECH_GPU_VARIANTS: Partial<Record<Triple, BinaryVariant[]>> = {
+  "x86_64-unknown-linux-gnu": ["cuda"],
+};
+
+/** Env var naming the staged prebuilt GPU sherpa-onnx lib dir for `variant`,
+ *  e.g. `SHERPA_ONNX_GPU_LIB_DIR_CUDA`. CI/driver provisioning downloads the
+ *  matching k2-fsa GPU archive (`...-linux-x64-gpu` / `...-win-x64-cuda`) and
+ *  points this at it (the dir holding the import/`.so` libs the crate links). */
+function speechGpuLibDirEnv(variant: BinaryVariant): string {
+  return `SHERPA_ONNX_GPU_LIB_DIR_${variant.toUpperCase()}`;
+}
+
+/** Recursively yield every file path under `root`. */
+async function* walkFiles(root: string): AsyncGenerator<string> {
+  for await (const e of Deno.readDir(root)) {
+    const p = join(root, e.name);
+    if (e.isDirectory) yield* walkFiles(p);
+    else if (e.isFile) yield p;
+  }
+}
+
 /** Build tomat-core-speech for each (host) triple and package it as a `.tar.gz`
- *  of {exe, espeak-ng-data/}. The exe inside the archive keeps the bare kind
- *  name the binaries manager's extractor looks for; the archive file carries the
- *  channel suffix. sha256 is over the archive (verified before extraction). */
+ *  of {exe, espeak-ng-data/, shared libs}. The exe inside the archive keeps the
+ *  bare kind name the binaries manager's extractor looks for; the archive file
+ *  carries the channel suffix (and, for GPU variants, the variant). Always
+ *  builds the CPU variant; adds a GPU variant when its prebuilt lib dir is
+ *  staged. sha256 is over the archive (verified before extraction). */
 async function buildSpeech(triples: Triple[], suffix: string): Promise<SpeechArtifact[]> {
   const out: SpeechArtifact[] = [];
   // Safety net: if a triple is ever marked speech-unavailable (binaries.json),
@@ -423,54 +467,106 @@ async function buildSpeech(triples: Triple[], suffix: string): Promise<SpeechArt
   if (speechTriples.length === 0) return out;
   const espeakData = await ensureEspeakData();
   for (const triple of speechTriples) {
-    const isWin = triple.includes("windows");
-    const exe = isWin ? ".exe" : "";
-    info(`cargo build ${SPEECH_CRATE.name} for ${triple}`);
-    const { code } = await new Deno.Command("cargo", {
-      args: [
-        "build",
-        "--release",
-        // Signed speech binary builds from the committed, CI-verified lock.
-        "--locked",
-        "--manifest-path",
-        join(REPO_ROOT, SPEECH_CRATE.crateDir, "Cargo.toml"),
-        "--target",
-        triple,
-      ],
-      stdout: "inherit",
-      stderr: "inherit",
-    }).output();
-    if (code !== 0) {
-      fail(`cargo build ${SPEECH_CRATE.name} for ${triple} exited ${code}`);
+    // CPU: statically-linked default build (no extra libs).
+    out.push(await buildSpeechVariant(triple, "cpu", null, suffix, espeakData));
+    // GPU: only when the prebuilt GPU lib dir is staged for this variant.
+    for (const variant of SPEECH_GPU_VARIANTS[triple] ?? []) {
+      const libDir = Deno.env.get(speechGpuLibDirEnv(variant));
+      if (!libDir) {
+        info(
+          colors.yellow(
+            `skipping ${variant} speech for ${triple} (${speechGpuLibDirEnv(variant)} unset)`,
+          ),
+        );
+        continue;
+      }
+      out.push(await buildSpeechVariant(triple, variant, libDir, suffix, espeakData));
     }
-
-    // Stage {exe, espeak-ng-data/} and pack a gzip tarball. The in-archive exe
-    // must be the bare `<kind>(.exe)` the extractor matches, with no suffix.
-    const exeIn = `${SPEECH_CRATE.name}${exe}`;
-    const staging = await Deno.makeTempDir({ prefix: "tomat-speech-" });
-    await Deno.copyFile(join(cargoTargetDir(), triple, "release", exeIn), join(staging, exeIn));
-    await copy(espeakData, join(staging, "espeak-ng-data"));
-
-    const filename = `${SPEECH_CRATE.name}${suffix}.tar.gz`;
-    const outDir = join(DIST_DIR, triple);
-    await ensureDir(outDir);
-    const outPath = join(outDir, filename);
-    // Pack from within `staging` with relative names so tar never receives a
-    // drive-letter path (see ensureEspeakData), then copy the archive to dist.
-    const { code: tarCode } = await new Deno.Command("tar", {
-      args: ["-czf", filename, exeIn, "espeak-ng-data"],
-      cwd: staging,
-      stdout: "inherit",
-      stderr: "inherit",
-    }).output();
-    if (tarCode !== 0) fail(`tar -czf ${filename} exited ${tarCode}`);
-    await Deno.copyFile(join(staging, filename), outPath);
-    await Deno.remove(staging, { recursive: true }).catch(() => {});
-
-    const { sha256, size } = await sha256File(outPath);
-    out.push({ triple, filename, path: outPath, sha256, size });
   }
   return out;
+}
+
+/** Build + package one speech variant. `gpuLibDir` null = CPU (static default);
+ *  set = GPU (build `--no-default-features --features shared` against the staged
+ *  prebuilt lib, and bundle that dir's shared libs into the archive). */
+async function buildSpeechVariant(
+  triple: Triple,
+  variant: BinaryVariant,
+  gpuLibDir: string | null,
+  suffix: string,
+  espeakData: string,
+): Promise<SpeechArtifact> {
+  const isWin = triple.includes("windows");
+  const exe = isWin ? ".exe" : "";
+  info(`cargo build ${SPEECH_CRATE.name} (${variant}) for ${triple}`);
+  const cargoArgs = [
+    "build",
+    "--release",
+    // Signed speech binary builds from the committed, CI-verified lock.
+    "--locked",
+    "--manifest-path",
+    join(REPO_ROOT, SPEECH_CRATE.crateDir, "Cargo.toml"),
+    "--target",
+    triple,
+  ];
+  // GPU builds link onnxruntime dynamically (the `shared` feature) against the
+  // staged prebuilt GPU lib; CPU keeps the default `static` feature.
+  if (gpuLibDir) cargoArgs.push("--no-default-features", "--features", "shared");
+  const env: Record<string, string> = {};
+  if (gpuLibDir) env.SHERPA_ONNX_LIB_DIR = gpuLibDir;
+  const { code } = await new Deno.Command("cargo", {
+    args: cargoArgs,
+    env,
+    stdout: "inherit",
+    stderr: "inherit",
+  }).output();
+  if (code !== 0) {
+    fail(`cargo build ${SPEECH_CRATE.name} (${variant}) for ${triple} exited ${code}`);
+  }
+
+  // Stage {exe, espeak-ng-data/, shared libs} and pack a gzip tarball. The
+  // in-archive exe must be the bare `<kind>(.exe)` the extractor matches.
+  const exeIn = `${SPEECH_CRATE.name}${exe}`;
+  const staging = await Deno.makeTempDir({ prefix: "tomat-speech-" });
+  await Deno.copyFile(join(cargoTargetDir(), triple, "release", exeIn), join(staging, exeIn));
+  await copy(espeakData, join(staging, "espeak-ng-data"));
+  const tarEntries = [exeIn, "espeak-ng-data"];
+  // GPU: copy the prebuilt GPU onnxruntime + provider shared libs into the
+  // archive so they land next to the binary at install (bin/lib/<kind>). The
+  // k2-fsa archives split runtime libs by OS -- Linux keeps the .so files in
+  // `lib/` (the linked dir), Windows keeps the .dll runtime in a sibling `bin/`
+  // while `lib/` holds only the import .lib. So collect from the whole archive
+  // root (the parent of the linked lib dir), deduping by basename.
+  if (gpuLibDir) {
+    const seen = new Set<string>();
+    for await (const p of walkFiles(dirname(gpuLibDir))) {
+      const base = p.split(/[\\/]/).pop() ?? p;
+      if (!/\.(so|dylib|dll)(\.\d+)*$/i.test(base) || seen.has(base)) continue;
+      seen.add(base);
+      await Deno.copyFile(p, join(staging, base));
+      tarEntries.push(base);
+    }
+  }
+
+  const variantTag = variant === "cpu" ? "" : `-${variant}`;
+  const filename = `${SPEECH_CRATE.name}${variantTag}${suffix}.tar.gz`;
+  const outDir = join(DIST_DIR, triple);
+  await ensureDir(outDir);
+  const outPath = join(outDir, filename);
+  // Pack from within `staging` with relative names so tar never receives a
+  // drive-letter path (see ensureEspeakData), then copy the archive to dist.
+  const { code: tarCode } = await new Deno.Command("tar", {
+    args: ["-czf", filename, ...tarEntries],
+    cwd: staging,
+    stdout: "inherit",
+    stderr: "inherit",
+  }).output();
+  if (tarCode !== 0) fail(`tar -czf ${filename} exited ${tarCode}`);
+  await Deno.copyFile(join(staging, filename), outPath);
+  await Deno.remove(staging, { recursive: true }).catch(() => {});
+
+  const { sha256, size } = await sha256File(outPath);
+  return { triple, variant, filename, path: outPath, sha256, size };
 }
 
 export async function hashWorkers(): Promise<WorkerArtifact[]> {
@@ -603,11 +699,23 @@ function composeSpeechEntry(
   storagePrefix: string,
 ): BinaryManifestPinnedEntry {
   const platforms = {} as BinaryManifestPinnedEntry["platforms"];
-  for (const a of artifacts) {
-    platforms[a.triple] = {
+  // Group per triple so a triple with GPU variants emits a per-variant map;
+  // a cpu-only triple collapses to the bare pinned shape (matching llama's
+  // single-variant triples and what platformVariants reads as `cpu`).
+  const byTriple = new Map<Triple, SpeechArtifact[]>();
+  for (const a of artifacts) byTriple.set(a.triple, [...(byTriple.get(a.triple) ?? []), a]);
+  for (const [triple, arts] of byTriple) {
+    const target = (a: SpeechArtifact): PinnedTarget => ({
       url: `https://${storageDomain}/${storagePrefix}${version}/${a.triple}/${a.filename}`,
       sha256: a.sha256,
-    };
+    });
+    if (arts.length === 1 && arts[0].variant === "cpu") {
+      platforms[triple] = target(arts[0]);
+      continue;
+    }
+    const variants: Partial<Record<BinaryVariant, PinnedTarget>> = {};
+    for (const a of arts) variants[a.variant] = target(a);
+    platforms[triple] = variants;
   }
   return { version, platforms };
 }
@@ -633,7 +741,7 @@ async function composeBinaryManifest(
       binaries[kind] = {
         resolver: {
           repo: resolver.repo,
-          assets: resolver.assets as Record<Triple, string>,
+          assets: resolver.assets,
           ...(resolver.pinnedTag ? { pinnedTag: resolver.pinnedTag } : {}),
         },
       };
@@ -641,24 +749,20 @@ async function composeBinaryManifest(
     }
 
     // Stable: pin URL + sha256 at release time, from the declared pinned tag
-    // when one exists (deno) or the current latest otherwise.
+    // when one exists (deno) or the current latest otherwise. Each triple
+    // resolves a per-variant map (cpu plus any GPU builds); `cpu` is required
+    // (the guaranteed fallback), GPU variants absent from this tag are skipped.
     info(`resolving ${resolver.pinnedTag ?? "latest"} ${kind} from ${resolver.repo}`);
     const release = await fetchRelease(resolver.repo, resolver.pinnedTag);
     const tag = release.tag_name;
     info(`  tag: ${tag}`);
 
-    const platforms = {} as BinaryManifestPinnedEntry["platforms"];
-    for (const [triple, pattern] of Object.entries(resolver.assets)) {
+    // Resolve one asset-name pattern to a pinned {url, sha256}, or null when the
+    // named asset is absent from this release.
+    const resolveOne = async (pattern: string): Promise<{ url: string; sha256: string } | null> => {
       const assetName = pattern.replace(/\{tag\}/g, tag);
       const asset = release.assets.find((a) => a.name === assetName);
-      if (!asset) {
-        info(
-          colors.yellow(
-            `  no asset named "${assetName}" in ${resolver.repo}@${tag}; skipping triple ${triple}`,
-          ),
-        );
-        continue;
-      }
+      if (!asset) return null;
       let sha256: string;
       if (asset.digest && asset.digest.startsWith("sha256:")) {
         sha256 = asset.digest.slice("sha256:".length);
@@ -666,10 +770,53 @@ async function composeBinaryManifest(
         info(`  hashing ${assetName}`);
         sha256 = await sha256OfUrl(asset.browser_download_url);
       }
-      platforms[triple as Triple] = {
-        url: asset.browser_download_url,
-        sha256,
-      };
+      return { url: asset.browser_download_url, sha256 };
+    };
+
+    const platforms = {} as BinaryManifestPinnedEntry["platforms"];
+    for (const [triple, tripleAsset] of Object.entries(resolver.assets)) {
+      const resolvedVariants: Partial<Record<BinaryVariant, PinnedTarget>> = {};
+      for (const [variant, va] of Object.entries(assetVariants(tripleAsset))) {
+        const primary = await resolveOne(va.asset);
+        if (!primary) {
+          info(
+            colors.yellow(
+              `  no asset "${va.asset.replace(/\{tag\}/g, tag)}" in ${resolver.repo}@${tag}; ` +
+                `skipping ${variant} for ${triple}`,
+            ),
+          );
+          continue;
+        }
+        // A GPU variant needs all its companion archives (e.g. cudart); if one
+        // is missing, drop the whole variant so we never pin a half-set.
+        const extras: { url: string; sha256: string }[] = [];
+        let extrasOk = true;
+        for (const extraPattern of va.extra ?? []) {
+          const e = await resolveOne(extraPattern);
+          if (!e) {
+            info(colors.yellow(`  missing extra "${extraPattern}" for ${variant}/${triple}; skip`));
+            extrasOk = false;
+            break;
+          }
+          extras.push(e);
+        }
+        if (!extrasOk) continue;
+        resolvedVariants[variant as BinaryVariant] = {
+          url: primary.url,
+          sha256: primary.sha256,
+          ...(extras.length ? { extras } : {}),
+        };
+      }
+      const keys = Object.keys(resolvedVariants);
+      if (!resolvedVariants.cpu) {
+        info(
+          colors.yellow(`  no cpu variant resolved for ${kind} triple ${triple}; skipping triple`),
+        );
+        continue;
+      }
+      // Collapse a cpu-only triple to the bare pinned shape (matches single-variant
+      // kinds and keeps the manifest tidy); otherwise emit the per-variant map.
+      platforms[triple as Triple] = keys.length === 1 ? resolvedVariants.cpu : resolvedVariants;
     }
     if (Object.keys(platforms).length === 0) {
       fail(`no platforms resolved for ${kind} (check asset name patterns)`);
@@ -812,6 +959,27 @@ export const coreItem: ReleaseItem = {
         ? await buildCoreUnified(opts.triples, suffix, channel, opts.environments)
         : await buildCoreArtifacts(opts.triples, suffix);
     await composeAndUploadCore(env, channel, version, built, opts);
+
+    // Native Core installers for a LOCAL release. In CI these are built per-runner
+    // (ci-build) and uploaded on the coordinator (ci-publish); the prebuilt path
+    // here is exactly that CI compose, so it already handled its installers and we
+    // skip. For a local `deno task release` we package the HOST OS's installer
+    // (the only platform whose pkgbuild/makensis/dpkg/rpmbuild tooling is present
+    // on this machine); buildCoreInstallers returns [] when that tooling is absent,
+    // so a plain checkout degrades cleanly. Cross-OS installers in all-targets mode
+    // would need each build environment to package its own OS (a follow-up).
+    if (!opts.prebuilt) {
+      const hostTriple = detectHostTriple();
+      const installers = await buildCoreInstallers(built, {
+        version,
+        channel,
+        triple: hostTriple,
+        env,
+      });
+      if (installers.length > 0) {
+        await uploadCoreInstallers(env, channel, version, installers, opts);
+      }
+    }
   },
 };
 

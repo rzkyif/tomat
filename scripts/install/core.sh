@@ -447,14 +447,9 @@ MANIFEST_URL="$STORAGE/$MANIFEST_DIR/core.json"
 INSTALL_SERVICE="${TOMAT_INSTALL_SERVICE:-1}"
 INSTALL_BIND_ALL="${TOMAT_INSTALL_BIND_ALL:-0}"
 
-ADMIN_TOKEN_FILE="$HOME_DIR/.admin-token"
-ADMIN_PASSWORD_FILE="$HOME_DIR/.admin-password"
-SETTINGS_FILE="$HOME_DIR/settings.json"
+# Where the seed binary lands. The admin token, settings, service names, and
+# extension planting are all owned by the core binary's install subcommands now.
 INSTALLED_BIN="$BIN_DIR/tomat-core$CHANNEL_SUFFIX"
-# launchd label / systemd unit, suffixed per channel so multiple channels
-# register distinct OS services. Stable keeps the bare names.
-SERVICE_LABEL_ID="au.tomat.core$CHANNEL_SUFFIX"
-SYSTEMD_UNIT="tomat-core$CHANNEL_SUFFIX"
 
 # Resolve sha-256 command up front so all rows use the same one.
 SHA_CMD="sha256sum"
@@ -624,101 +619,24 @@ mkdir -p "$BIN_DIR" "$WORKERS_DIR" "$EXTENSIONS_DIR" "$STAGING_DIR" "$LOGS_DIR"
 # if the host has none, so the rest of the install can assume `jq` on PATH.
 ensure_jq
 
-# --- helper: figure out the platform-specific service label for action 7 --
-
-uname_os="$(uname -s 2>/dev/null || echo unknown)"
-
-if [ "$INSTALL_SERVICE" = "1" ] && [ "$uname_os" = "Darwin" ]; then
-  SERVICE_LABEL="Installing launchd agent at ~/Library/LaunchAgents/$SERVICE_LABEL_ID.plist"
-elif [ "$INSTALL_SERVICE" = "1" ] && [ "$uname_os" = "Linux" ]; then
-  # We don't yet know whether systemd is available -- but we can probe now
-  # and pick the label honestly.
-  if systemctl --user --version >/dev/null 2>&1; then
-    SERVICE_HAS_SYSTEMD=1
-    SERVICE_LABEL="Installing systemd user unit at ~/.config/systemd/user/$SYSTEMD_UNIT.service"
-  else
-    SERVICE_HAS_SYSTEMD=0
-    SERVICE_LABEL="Starting core in background (systemd not available, used nohup)"
-  fi
-else
-  SERVICE_HAS_SYSTEMD=0
-  SERVICE_LABEL="Starting core in background (nohup)"
-fi
-# Default for non-Linux paths so the variable is always set.
-: "${SERVICE_HAS_SYSTEMD:=0}"
-
-# --- admin password prompt (interactive installs only) --------------------
-
-# The admin password lets an already-paired client mint pairing codes and
-# revoke devices remotely, without reading the admin token off this machine.
-# We ask for it up front (before the live progress UI starts) so the rest of
-# the install runs unattended, then set it on the core once it is running
-# (below, just before minting the first code). Two reads guard against typos.
-#
-# We read from /dev/tty, not stdin: this script is itself piped in via
-# `curl | bash`, so stdin is the script. When there is no controlling
-# terminal (e.g. the client-driven install), we skip the prompt and the
-# client sets the password through the API afterward. Skipped too when a
-# password is already on disk (re-install).
-#
-# The guard opens /dev/tty read-write rather than testing `[ -r /dev/tty ]`:
-# the device node can pass the permission test yet fail to open when there is
-# no controlling terminal (detached process, CI, the client-driven install),
-# in which case the prompts would error and, under `set -e`, abort the whole
-# install. Probing the actual open is what reliably detects an interactive tty.
-ADMIN_PW=""
-if [ ! -s "$ADMIN_PASSWORD_FILE" ] && { : <>/dev/tty; } 2>/dev/null; then
-  printf '\n%s\n' "Set an admin password for tomat-core." > /dev/tty
-  printf '%s\n\n' "You'll need it to pair new devices remotely, so remember it." > /dev/tty
-  while :; do
-    printf 'Admin password (min 8 chars): ' > /dev/tty
-    IFS= read -rs ADMIN_PW < /dev/tty
-    printf '\n' > /dev/tty
-    printf 'Confirm admin password: ' > /dev/tty
-    IFS= read -rs ADMIN_PW_CONFIRM < /dev/tty
-    printf '\n' > /dev/tty
-    if [ "$ADMIN_PW" != "$ADMIN_PW_CONFIRM" ]; then
-      printf '%s\n' "Passwords did not match. Try again." > /dev/tty
-      ADMIN_PW=""
-      continue
-    fi
-    if [ "${#ADMIN_PW}" -lt 8 ]; then
-      printf '%s\n' "Password must be at least 8 characters. Try again." > /dev/tty
-      ADMIN_PW=""
-      continue
-    fi
-    break
-  done
-  ADMIN_PW_CONFIRM=""
-fi
+# Service registration (launchd / systemd-user / Scheduled Task, or the nohup
+# fallback) is chosen and performed by the core binary's install-service
+# subcommand, so this script no longer probes for systemd or builds a label.
+# The admin password is likewise no longer prompted here: the client sets it
+# over the API after pairing, and headless installs can set it later.
 
 # --- begin UI -------------------------------------------------------------
 
 ui_init "tomat-core installer"
 
-# Register every row up front so the cursor knows the total height. The
-# settings.json row is conditional on TOMAT_INSTALL_BIND_ALL=1.
+# Register every row up front so the cursor knows the total height. The seed
+# binary is fetched + verified here; everything past it is delegated to the
+# core binary's install subcommands.
 IDX_HOST=$(ui_action_add "Detecting host")
 IDX_MANIFEST=$(ui_action_add "Fetching manifest from get.au.tomat.ing")
 IDX_BIN=$(ui_action_add "Installing core binary to $INSTALLED_BIN")
-IDX_WORKERS=$(ui_action_add "Installing workers to $WORKERS_DIR/")
-IDX_HELPERS=$(ui_action_add "Installing helpers to $BIN_DIR/")
-# Built-in extension is CDN-distributed for stable/latest; dev sources it from the
-# codebase at runtime, so there's nothing to fetch here.
-IDX_EXTENSION=-1
-if [ "$TOMAT_CHANNEL" != "dev" ]; then
-  IDX_EXTENSION=$(ui_action_add "Planting built-in extension in $EXTENSIONS_DIR/")
-fi
-IDX_TOKEN=$(ui_action_add "Writing admin token to $ADMIN_TOKEN_FILE")
-IDX_SETTINGS=-1
-if [ "$INSTALL_BIND_ALL" = "1" ]; then
-  IDX_SETTINGS=$(ui_action_add "Seeding $SETTINGS_FILE")
-fi
-IDX_SERVICE=$(ui_action_add "$SERVICE_LABEL")
-IDX_PASSWORD=-1
-if [ -n "$ADMIN_PW" ]; then
-  IDX_PASSWORD=$(ui_action_add "Setting admin password")
-fi
+IDX_DEPS=$(ui_action_add "Installing helpers + workers")
+IDX_SERVICE=$(ui_action_add "Registering background service")
 IDX_PAIR=$(ui_action_add "Minting pairing code at https://127.0.0.1:$CORE_PORT")
 
 # --- action 1: detect host -----------------------------------------------
@@ -898,532 +816,67 @@ else
   ui_action_done "$IDX_BIN" "(${BIN_MB} MB)"
 fi
 
-# --- action 4: install workers -------------------------------------------
+# --- deps + service + pairing (delegated to the core binary) --------------
+#
+# Everything past the seed binary is the core binary's own responsibility now
+# (packages/tomat-core/src/install), so this script stays thin and there is ONE
+# audited implementation of dependency fetch, service registration, secret
+# bootstrap, extension seeding, and pairing:
+#   self-install     fetch + verify the workers + helpers from the signed manifest
+#   install-service  write the admin token, optionally seed bind-all, plant the
+#                    built-in extension, then register + start the OS service
+#   mint-code        print the first pairing code as JSON
+# TOMAT_CHANNEL / TOMAT_INSTALL_SERVICE / TOMAT_INSTALL_BIND_ALL flow through
+# the environment set at the top of this script.
 
-WORKERS_COUNT="$(printf '%s' "$MANIFEST_JSON" | jq -r '.workers // [] | length')"
-# `jq length` is always a non-negative integer; guard against non-numeric jq
-# output (e.g. a malformed manifest) rather than the impossible negative case.
-case "$WORKERS_COUNT" in
-'' | *[!0-9]*) WORKERS_COUNT=0 ;;
-esac
-
-# Pre-check: are all workers already on disk and matching?
-WORKERS_ALL_OK=1
-if [ "$WORKERS_COUNT" -gt 0 ]; then
-  i=0
-  while [ "$i" -lt "$WORKERS_COUNT" ]; do
-    W_NAME="$(printf '%s' "$MANIFEST_JSON" | jq -r ".workers[$i].name")"
-    W_SHA="$(printf '%s' "$MANIFEST_JSON" | jq -r ".workers[$i].sha256")"
-    W_PATH="$WORKERS_DIR/$W_NAME"
-    if [ ! -f "$W_PATH" ]; then
-      WORKERS_ALL_OK=0
-      break
-    fi
-    W_GOT="$($SHA_CMD "$W_PATH" 2>/dev/null | awk '{print $1}')"
-    if [ "$W_GOT" != "$W_SHA" ]; then
-      WORKERS_ALL_OK=0
-      break
-    fi
-    i=$((i + 1))
-  done
-else
-  # No workers in manifest at all -- nothing to do.
-  WORKERS_ALL_OK=1
+ui_action_start "$IDX_DEPS" "Installing helpers + workers"
+if ! TOMAT_CHANNEL="$TOMAT_CHANNEL" "$INSTALLED_BIN" self-install >&2; then
+  ui_die "Failed to install helpers and workers" \
+    "" \
+    "re-run; verification output is above"
 fi
+ui_action_done "$IDX_DEPS"
 
-if [ "$WORKERS_ALL_OK" = "1" ]; then
-  ui_action_skip "$IDX_WORKERS" "(${WORKERS_COUNT}/${WORKERS_COUNT} already current)"
-else
-  ui_action_start "$IDX_WORKERS" "Installing workers to $WORKERS_DIR/" "(0/${WORKERS_COUNT})"
-
-  i=0
-  while [ "$i" -lt "$WORKERS_COUNT" ]; do
-    W_NAME="$(printf '%s' "$MANIFEST_JSON" | jq -r ".workers[$i].name")"
-    W_URL="$(printf '%s' "$MANIFEST_JSON" | jq -r ".workers[$i].url")"
-    W_SHA="$(printf '%s' "$MANIFEST_JSON" | jq -r ".workers[$i].sha256")"
-    W_PATH="$WORKERS_DIR/$W_NAME"
-    W_TMP="$STAGING_DIR/$W_NAME-$VERSION-$$"
-
-    # Skip individual workers that are already correct on disk.
-    W_NEED=1
-    if [ -f "$W_PATH" ]; then
-      W_GOT="$($SHA_CMD "$W_PATH" 2>/dev/null | awk '{print $1}')"
-      if [ "$W_GOT" = "$W_SHA" ]; then
-        W_NEED=0
-      fi
-    fi
-
-    ui_action_update "$IDX_WORKERS" "($((i + 1))/${WORKERS_COUNT} $W_NAME)"
-
-    if [ "$W_NEED" = "1" ]; then
-      _ui_track_staging "$W_TMP"
-      _ui_track_staging "$W_TMP.gz"
-      W_CURL_RC=0
-      curl -fsSL -o "$W_TMP.gz" "$W_URL" 2>/dev/null || W_CURL_RC=$?
-      if [ "$W_CURL_RC" -ne 0 ]; then
-        ui_die "Download interrupted" \
-          "curl exit $W_CURL_RC fetching worker $W_NAME" \
-          "re-run; partial files were cleaned up"
-      fi
-      if ! gzip -dc "$W_TMP.gz" > "$W_TMP" 2>/dev/null; then
-        ui_die "Could not decompress worker $W_NAME" \
-          "gzip -d failed on $W_TMP.gz" \
-          "network corruption is the usual cause; re-run"
-      fi
-      rm -f "$W_TMP.gz"
-      W_GOT="$($SHA_CMD "$W_TMP" | awk '{print $1}')"
-      if [ "$W_GOT" != "$W_SHA" ]; then
-        ui_die "sha256 mismatch on worker $W_NAME" \
-          "want $W_SHA, got $W_GOT" \
-          "network corruption is the usual cause; re-run"
-      fi
-      if ! mv -f "$W_TMP" "$W_PATH" 2>/dev/null; then
-        ui_die "Permission denied writing to $WORKERS_DIR/" \
-          "could not install $W_NAME" \
-          "check ownership of ~/.tomat"
-      fi
-    fi
-
-    i=$((i + 1))
-  done
-
-  ui_action_done "$IDX_WORKERS" "(${WORKERS_COUNT}/${WORKERS_COUNT})"
+ui_action_start "$IDX_SERVICE" "Registering background service"
+if ! TOMAT_CHANNEL="$TOMAT_CHANNEL" \
+     TOMAT_INSTALL_SERVICE="$INSTALL_SERVICE" \
+     TOMAT_INSTALL_BIND_ALL="$INSTALL_BIND_ALL" \
+     "$INSTALLED_BIN" install-service >&2; then
+  ui_die "Failed to register the background service" \
+    "" \
+    "re-run with TOMAT_INSTALL_SERVICE=0 to launch core without a service"
 fi
+ui_action_done "$IDX_SERVICE"
 
-# --- action 5: install helpers -------------------------------------------
-
-HELPERS_COUNT="$(printf '%s' "$MANIFEST_JSON" | jq -r '.helpers // [] | length')"
-# Guard against non-numeric jq output (malformed manifest), not the impossible
-# negative length.
-case "$HELPERS_COUNT" in
-'' | *[!0-9]*) HELPERS_COUNT=0 ;;
-esac
-
-# Count helpers matching our triple. Compute the indices of matching ones
-# (Bash 3.2 has no arrays we want to rely on, so we build a space-separated
-# list of indices).
-HELPER_INDICES=""
-HELPERS_MATCHING=0
-i=0
-while [ "$i" -lt "$HELPERS_COUNT" ]; do
-  H_TRIPLE="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$i].triple")"
-  if [ "$H_TRIPLE" = "$TRIPLE" ]; then
-    HELPER_INDICES="$HELPER_INDICES $i"
-    HELPERS_MATCHING=$((HELPERS_MATCHING + 1))
-  fi
-  i=$((i + 1))
-done
-
-if [ "$HELPERS_MATCHING" = "0" ]; then
-  ui_action_skip "$IDX_HELPERS" "(no helper for this triple)"
-else
-  # Pre-check: every matching helper already correct?
-  HELPERS_ALL_OK=1
-  for hi in $HELPER_INDICES; do
-    H_NAME="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$hi].name")"
-    H_SHA="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$hi].sha256")"
-    H_PATH="$BIN_DIR/$H_NAME"
-    if [ ! -f "$H_PATH" ]; then
-      HELPERS_ALL_OK=0
-      break
-    fi
-    H_GOT="$($SHA_CMD "$H_PATH" 2>/dev/null | awk '{print $1}')"
-    if [ "$H_GOT" != "$H_SHA" ]; then
-      HELPERS_ALL_OK=0
-      break
-    fi
-  done
-
-  if [ "$HELPERS_ALL_OK" = "1" ]; then
-    ui_action_skip "$IDX_HELPERS" "(${HELPERS_MATCHING}/${HELPERS_MATCHING} already current)"
-  else
-    ui_action_start "$IDX_HELPERS" "Installing helpers to $BIN_DIR/" "(0/${HELPERS_MATCHING})"
-
-    j=0
-    for hi in $HELPER_INDICES; do
-      H_NAME="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$hi].name")"
-      H_URL="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$hi].url")"
-      H_SHA="$(printf '%s' "$MANIFEST_JSON" | jq -r ".helpers[$hi].sha256")"
-      H_PATH="$BIN_DIR/$H_NAME"
-      H_TMP="$STAGING_DIR/$H_NAME-$VERSION-$$"
-
-      H_NEED=1
-      if [ -f "$H_PATH" ]; then
-        H_GOT="$($SHA_CMD "$H_PATH" 2>/dev/null | awk '{print $1}')"
-        if [ "$H_GOT" = "$H_SHA" ]; then
-          H_NEED=0
-        fi
-      fi
-
-      j=$((j + 1))
-      ui_action_update "$IDX_HELPERS" "(${j}/${HELPERS_MATCHING} $H_NAME)"
-
-      if [ "$H_NEED" = "1" ]; then
-        _ui_track_staging "$H_TMP"
-        _ui_track_staging "$H_TMP.gz"
-        H_CURL_RC=0
-        curl -fsSL -o "$H_TMP.gz" "$H_URL" 2>/dev/null || H_CURL_RC=$?
-        if [ "$H_CURL_RC" -ne 0 ]; then
-          ui_die "Download interrupted" \
-            "curl exit $H_CURL_RC fetching helper $H_NAME" \
-            "re-run; partial files were cleaned up"
-        fi
-        if ! gzip -dc "$H_TMP.gz" > "$H_TMP" 2>/dev/null; then
-          ui_die "Could not decompress helper $H_NAME" \
-            "gzip -d failed on $H_TMP.gz" \
-            "network corruption is the usual cause; re-run"
-        fi
-        rm -f "$H_TMP.gz"
-        H_GOT="$($SHA_CMD "$H_TMP" | awk '{print $1}')"
-        if [ "$H_GOT" != "$H_SHA" ]; then
-          ui_die "sha256 mismatch on helper $H_NAME" \
-            "want $H_SHA, got $H_GOT" \
-            "network corruption is the usual cause; re-run"
-        fi
-        if ! mv -f "$H_TMP" "$H_PATH" 2>/dev/null; then
-          ui_die "Permission denied writing to $BIN_DIR/" \
-            "could not install $H_NAME" \
-            "check ownership of ~/.tomat"
-        fi
-        chmod 0755 "$H_PATH"
-      fi
-    done
-
-    ui_action_done "$IDX_HELPERS" "(${HELPERS_MATCHING}/${HELPERS_MATCHING})"
-  fi
-fi
-
-# --- action 5b: built-in extension -----------------------------------------
-# Download the CDN-distributed built-in extension and PLANT its verified tarball so
-# core can install it on first boot without re-downloading the tarball. Core still
-# re-verifies the planted tarball against the signed manifest before extracting it.
-# Planting is an OPTIONAL optimization: EVERY failure here is non-fatal (we skip and
-# core fetches + verifies + seeds the built-in itself), so a bad/tampered extension
-# manifest or a flaky CDN never aborts the core install.
-
-if [ "$IDX_EXTENSION" != "-1" ]; then
-  # Plant the tarball AND its signed manifest so core installs the built-in fully
-  # offline on first boot (it re-verifies the manifest signature + tarball sha256,
-  # then extracts - no boot-time fetch). Keep these filenames in sync with the
-  # planted{Tarball,Manifest}() helpers in seeding.ts (`.<extension-id>.{tgz,json}`).
-  # Only the built-in is planted; the dev-only samples extension never is.
-  TK_DEST="$EXTENSIONS_DIR/.tomat-extension-builtin.tgz"
-  TK_MANIFEST_DEST="$EXTENSIONS_DIR/.tomat-extension-builtin.json"
-  if [ -f "$TK_DEST" ] && [ -f "$TK_MANIFEST_DEST" ]; then
-    ui_action_skip "$IDX_EXTENSION" "(already present)"
-  else
-    TK_MANIFEST="$(curl -fsSL "$STORAGE/$MANIFEST_DIR/extension.json" 2>/dev/null || true)"
-    if [ -z "$TK_MANIFEST" ]; then
-      ui_action_skip "$IDX_EXTENSION" "(manifest unavailable; core will seed)"
-    else
-      ui_action_start "$IDX_EXTENSION" "Planting built-in extension in $EXTENSIONS_DIR/" "(reading)"
-
-      # Read the tarball location + hash from extension.json. We do NOT verify the
-      # manifest signature here: core re-verifies the planted manifest's Ed25519
-      # signature AND the tarball's sha256 OFFLINE before installing on first boot
-      # (readPlantedManifest + the installer), so core is the single trust gate. A
-      # MITM that swaps both manifest and tarball is rejected there, never seeded.
-      # The sha256 check below is only a transport-corruption guard.
-      TK_URL="$(printf '%s' "$TK_MANIFEST" | jq -r '.tarballUrl // empty' 2>/dev/null || true)"
-      TK_SHA="$(printf '%s' "$TK_MANIFEST" | jq -r '.sha256 // empty' 2>/dev/null || true)"
-
-      if [ -z "$TK_URL" ] || [ -z "$TK_SHA" ]; then
-        ui_action_skip "$IDX_EXTENSION" "(manifest incomplete; core will seed)"
-      else
-        ui_action_update "$IDX_EXTENSION" "(downloading)"
-        TK_TMP="$STAGING_DIR/builtin-extension-$$.tgz"
-        _ui_track_staging "$TK_TMP"
-        if ! curl -fsSL -o "$TK_TMP" "$TK_URL" 2>/dev/null; then
-          rm -f "$TK_TMP"
-          ui_action_skip "$IDX_EXTENSION" "(download failed; core will seed)"
-        else
-          TK_GOT="$($SHA_CMD "$TK_TMP" 2>/dev/null | awk '{print $1}')"
-          if [ "$TK_GOT" != "$TK_SHA" ]; then
-            rm -f "$TK_TMP"
-            ui_action_skip "$IDX_EXTENSION" "(checksum mismatch; core will seed)"
-          elif ! mv -f "$TK_TMP" "$TK_DEST" 2>/dev/null; then
-            rm -f "$TK_TMP"
-            ui_action_skip "$IDX_EXTENSION" "(could not place; core will seed)"
-          elif ! printf '%s' "$TK_MANIFEST" > "$TK_MANIFEST_DEST" 2>/dev/null; then
-            # The signed manifest must sit beside the tarball, or core can't verify
-            # + install offline. Drop the tarball too so the next run re-plants both.
-            rm -f "$TK_DEST" "$TK_MANIFEST_DEST"
-            ui_action_skip "$IDX_EXTENSION" "(could not place; core will seed)"
-          else
-            # Planted as-is; on first boot core re-verifies the manifest signature +
-            # tarball sha256 and extracts it, with no network access.
-            ui_action_done "$IDX_EXTENSION" "(planted)"
-          fi
-        fi
-      fi
-    fi
-  fi
-fi
-
-# --- action 6: admin token -----------------------------------------------
-
-if [ -s "$ADMIN_TOKEN_FILE" ]; then
-  ui_action_skip "$IDX_TOKEN" "(already present)"
-else
-  ui_action_start "$IDX_TOKEN" "Writing admin token to $ADMIN_TOKEN_FILE"
-
-  if [ ! -r /dev/urandom ]; then
-    ui_die "No entropy source available" \
-      "/dev/urandom is missing or unreadable" \
-      "extremely rare; check /dev/urandom"
-  fi
-  if ! command -v xxd >/dev/null 2>&1; then
-    ui_die "Missing xxd command" \
-      "" \
-      "install vim-common or busybox"
-  fi
-
-  if ! head -c 16 /dev/urandom | xxd -p -c 256 > "$ADMIN_TOKEN_FILE" 2>/dev/null; then
-    ui_die "Permission denied writing $ADMIN_TOKEN_FILE" \
-      "" \
-      "check ownership of $HOME_DIR/"
-  fi
-  chmod 0600 "$ADMIN_TOKEN_FILE"
-
-  ui_action_done "$IDX_TOKEN" "(0600)"
-fi
-
-# --- action 6b: seed settings.json ---------------------------------------
-
-if [ "$IDX_SETTINGS" != "-1" ]; then
-  if [ -e "$SETTINGS_FILE" ]; then
-    ui_action_skip "$IDX_SETTINGS" "(already present)"
-  else
-    ui_action_start "$IDX_SETTINGS" "Seeding $SETTINGS_FILE"
-    if ! printf '%s\n' '{"server.bindHost":"0.0.0.0"}' > "$SETTINGS_FILE" 2>/dev/null; then
-      ui_die "Permission denied writing $SETTINGS_FILE" \
-        "" \
-        "check ownership of $HOME_DIR/"
-    fi
-    ui_action_done "$IDX_SETTINGS" "(server.bindHost=0.0.0.0)"
-  fi
-fi
-
-# --- action 7: service registration --------------------------------------
-
-# Snapshot whether the core is already running before we touch anything,
-# so we can settle the row as [~] only when nothing user-visible happened.
-SERVICE_ALREADY_RUNNING=0
-if command -v pgrep >/dev/null 2>&1; then
-  if pgrep -f "$INSTALLED_BIN" >/dev/null 2>&1; then
-    SERVICE_ALREADY_RUNNING=1
-  fi
-fi
-
-if [ "$INSTALL_SERVICE" != "1" ]; then
-  # Nohup branch.
-  ui_action_start "$IDX_SERVICE" "$SERVICE_LABEL"
-  TOMAT_CHANNEL="$TOMAT_CHANNEL" nohup "$INSTALLED_BIN" \
-    >>"$LOGS_DIR/core.stdout.log" \
-    2>>"$LOGS_DIR/core.stderr.log" &
-  NOHUP_PID=$!
-  disown "$NOHUP_PID" 2>/dev/null || true
-  ui_action_done "$IDX_SERVICE" "(pid $NOHUP_PID)"
-
-elif [ "$uname_os" = "Darwin" ]; then
-  # macOS launchd branch.
-  ui_action_start "$IDX_SERVICE" "$SERVICE_LABEL"
-
-  PLIST="$HOME/Library/LaunchAgents/$SERVICE_LABEL_ID.plist"
-  mkdir -p "$(dirname "$PLIST")"
-
-  # Determine whether the plist already pointed at the right binary AND the
-  # service was already running. If so, we treat the re-load as a no-op.
-  PLIST_UNCHANGED=0
-  if [ -f "$PLIST" ] && grep -q "<string>$INSTALLED_BIN</string>" "$PLIST" 2>/dev/null; then
-    if launchctl list "$SERVICE_LABEL_ID" >/dev/null 2>&1; then
-      PLIST_UNCHANGED=1
-    fi
-  fi
-
-  cat >"$PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>           <string>$SERVICE_LABEL_ID</string>
-  <key>ProgramArguments</key><array><string>$INSTALLED_BIN</string></array>
-  <key>EnvironmentVariables</key><dict><key>TOMAT_CHANNEL</key><string>$TOMAT_CHANNEL</string></dict>
-  <key>RunAtLoad</key>       <true/>
-  <key>KeepAlive</key>       <true/>
-  <key>StandardOutPath</key> <string>$LOGS_DIR/core.stdout.log</string>
-  <key>StandardErrorPath</key><string>$LOGS_DIR/core.stderr.log</string>
-</dict>
-</plist>
-PLIST
-
-  launchctl unload "$PLIST" 2>/dev/null || true
-  LOAD_RC=0
-  launchctl load "$PLIST" 2>/dev/null || LOAD_RC=$?
-  if [ "$LOAD_RC" -ne 0 ]; then
-    ui_die "launchctl load failed (exit $LOAD_RC)" \
-      "$PLIST" \
-      "inspect the plist; another user may own /Library/LaunchAgents"
-  fi
-
-  if [ "$PLIST_UNCHANGED" = "1" ] && [ "$SERVICE_ALREADY_RUNNING" = "1" ]; then
-    ui_action_skip "$IDX_SERVICE" "(reloaded)"
-  else
-    ui_action_done "$IDX_SERVICE" "(loaded)"
-  fi
-
-elif [ "$uname_os" = "Linux" ] && [ "$SERVICE_HAS_SYSTEMD" = "1" ]; then
-  # Linux systemd-user branch.
-  ui_action_start "$IDX_SERVICE" "$SERVICE_LABEL"
-
-  UNIT_DIR="$HOME/.config/systemd/user"
-  mkdir -p "$UNIT_DIR"
-  UNIT="$UNIT_DIR/$SYSTEMD_UNIT.service"
-
-  # Detect whether the existing unit file already points at the same binary
-  # AND the service is currently active. If so, we treat the reload as a
-  # no-op so the row settles [~] instead of [✓].
-  UNIT_UNCHANGED=0
-  if [ -f "$UNIT" ] && grep -q "^ExecStart=$INSTALLED_BIN\$" "$UNIT" 2>/dev/null; then
-    if systemctl --user is-active --quiet "$SYSTEMD_UNIT.service" 2>/dev/null; then
-      UNIT_UNCHANGED=1
-    fi
-  fi
-
-  cat >"$UNIT" <<UNIT
-[Unit]
-Description=$SYSTEMD_UNIT
-Wants=network-online.target
-After=network-online.target
-
-[Service]
-Environment=TOMAT_CHANNEL=$TOMAT_CHANNEL
-ExecStart=$INSTALLED_BIN
-Restart=on-failure
-RestartSec=5
-StandardOutput=append:$LOGS_DIR/core.stdout.log
-StandardError=append:$LOGS_DIR/core.stderr.log
-
-[Install]
-WantedBy=default.target
-UNIT
-
-  if ! systemctl --user daemon-reload 2>/dev/null; then
-    ui_die "systemctl --user daemon-reload failed" \
-      "" \
-      "re-run with TOMAT_INSTALL_SERVICE=0 to start core via nohup"
-  fi
-  if ! systemctl --user enable --now "$SYSTEMD_UNIT.service" 2>/dev/null; then
-    ui_die "systemctl --user enable failed" \
-      "" \
-      "re-run with TOMAT_INSTALL_SERVICE=0 to start core via nohup"
-  fi
-
-  if [ "$UNIT_UNCHANGED" = "1" ] && [ "$SERVICE_ALREADY_RUNNING" = "1" ]; then
-    ui_action_skip "$IDX_SERVICE" "(reloaded)"
-  else
-    ui_action_done "$IDX_SERVICE" "(enabled)"
-  fi
-
-else
-  # Linux fallback: no user systemd available. Plan calls this out
-  # explicitly as non-fatal; we just nohup the binary.
-  ui_action_start "$IDX_SERVICE" "$SERVICE_LABEL"
-  TOMAT_CHANNEL="$TOMAT_CHANNEL" nohup "$INSTALLED_BIN" \
-    >>"$LOGS_DIR/core.stdout.log" \
-    2>>"$LOGS_DIR/core.stderr.log" &
-  NOHUP_PID=$!
-  disown "$NOHUP_PID" 2>/dev/null || true
-  ui_action_done "$IDX_SERVICE" "(used nohup)"
-fi
-
-# --- action 8: mint pairing code -----------------------------------------
+# --- mint the first pairing code -----------------------------------------
 
 ui_action_start "$IDX_PAIR" "Minting pairing code at https://127.0.0.1:$CORE_PORT" "(waiting for core)"
-
-# Poll the unauthenticated health endpoint until the freshly-started core binds
-# its port. A cold start can take several seconds, so wait rather than failing
-# the password-set and mint on a single early miss (the old fixed `sleep 2`).
-i=0
-while [ "$i" -lt 30 ]; do
-  if curl -fsS -k -o /dev/null "https://127.0.0.1:$CORE_PORT/api/v1/health" 2>/dev/null; then
-    break
-  fi
-  i=$((i + 1))
-  sleep 1
-done
-
-ADMIN="$(cat "$ADMIN_TOKEN_FILE" 2>/dev/null || true)"
 CODE=""
-PAIR_FAILED=0
-
-# --- action 8a: set admin password ---------------------------------------
-
-# Set the password the user chose at the top, now that core is up. The body is
-# piped via stdin (-d @-), never an argv/header, so it can't leak through `ps`.
-# Authorized by the on-disk admin token over loopback (-k: self-signed cert).
-if [ "$IDX_PASSWORD" != "-1" ] && [ -n "$ADMIN" ]; then
-  ui_action_start "$IDX_PASSWORD" "Setting admin password"
-  PW_STATUS="$(
-    printf '%s' "$ADMIN_PW" | jq -Rs '{password: .}' 2>/dev/null | curl -fsS -k -o /dev/null \
-      -w '%{http_code}' -X POST \
-      -H "X-Admin-Token: $ADMIN" \
-      -H 'Content-Type: application/json' \
-      -d @- \
-      "https://127.0.0.1:$CORE_PORT/api/v1/admin/password" 2>/dev/null || true
-  )"
-  ADMIN_PW=""
-  if [ "$PW_STATUS" = "204" ]; then
-    ui_action_done "$IDX_PASSWORD"
-  else
-    ui_action_skip "$IDX_PASSWORD" "(could not set; set it later in the client)"
-  fi
+PAIR_JSON="$(TOMAT_CHANNEL="$TOMAT_CHANNEL" "$INSTALLED_BIN" mint-code 2>/dev/null || true)"
+if [ -n "$PAIR_JSON" ]; then
+  CODE="$(printf '%s' "$PAIR_JSON" | jq -r '.code // empty' 2>/dev/null || true)"
 fi
-
-# Core serves HTTPS with a self-signed cert. This mint runs on the core host
-# over loopback and is authenticated by the on-disk admin token, so -k (skip
-# cert verification) is fine here; the client pins the cert during pairing.
-# Retry a few times: the health probe above confirms the port is bound, but the
-# pairing route can lag the bind by a moment on a cold start.
-if [ -n "$ADMIN" ]; then
-  i=0
-  while [ "$i" -lt 5 ]; do
-    CODE_JSON="$(curl -fsS -k -X POST \
-      -H "X-Admin-Token: $ADMIN" \
-      -H 'Content-Type: application/json' \
-      -d '{}' \
-      "https://127.0.0.1:$CORE_PORT/api/v1/pairing/codes" 2>/dev/null || true)"
-    if [ -n "$CODE_JSON" ]; then
-      CODE="$(printf '%s' "$CODE_JSON" | jq -r '.code // empty' 2>/dev/null || true)"
-    fi
-    [ -n "$CODE" ] && break
-    i=$((i + 1))
-    sleep 1
-  done
-fi
-
 if [ -n "$CODE" ]; then
   ui_action_done "$IDX_PAIR"
 else
-  PAIR_FAILED=1
   ui_action_skip "$IDX_PAIR" "(could not mint; see manual instructions below)"
 fi
 
 # --- footer ---------------------------------------------------------------
 
-if [ "$PAIR_FAILED" = "0" ]; then
+# The "Pairing code:" line is parsed by the client's install trampoline
+# (tomat-client .../commands/pairing.rs parse_pairing_code); keep the prefix.
+if [ -n "$CODE" ]; then
   ui_finish \
     "Pairing code: $CODE" \
     "" \
-    "Open tomat-client → Pair → enter:" \
+    "Open tomat-client -> Pair -> enter:" \
     "  URL : https://127.0.0.1:$CORE_PORT   (or this host's LAN IP)" \
     "  Code: $CODE"
 else
   ui_finish \
     "tomat-core installed. Mint a pairing code with:" \
-    "  curl -k -X POST -H \"X-Admin-Token: \$(cat $ADMIN_TOKEN_FILE)\" \\" \
-    "       -H 'Content-Type: application/json' -d '{}' \\" \
-    "       https://127.0.0.1:$CORE_PORT/api/v1/pairing/codes"
+    "  \"$INSTALLED_BIN\" mint-code"
 fi
 
 exit 0

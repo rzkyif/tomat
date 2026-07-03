@@ -136,6 +136,14 @@ export interface CorePaths {
   // startup to detect post-update first boot vs. crash-loop after a failed
   // update (→ rollback). See update/rollback.ts.
   updateMarkerFile: string;
+  // The self-signed HTTPS cert (public PEM only, no key) core serves the API
+  // with, written to disk at boot so co-located tooling - the `mint-code`
+  // install subcommand run on this host - can trust the loopback API without
+  // disabling TLS verification. The client pins the SPKI at pairing instead; this
+  // file is just the CA-of-one that the mint-code fetch verifies against. Public
+  // material (it is served over TLS anyway), regenerated each boot. See
+  // services/tls.ts + install/pair.ts.
+  tlsCertFile: string;
   // Marker file path for a seeded extension id: exists once that extension has
   // been seeded at least once, so a user-deleted seeded extension is not
   // re-seeded on the next boot. Core-internal state, deliberately not a settings
@@ -183,6 +191,7 @@ export function paths(): CorePaths {
     logFile: join(logs, "core.log"),
     bootErrorFile: join(root, "last-error.txt"),
     updateMarkerFile: join(root, "update.pending.json"),
+    tlsCertFile: join(root, "tls-cert.pem"),
     seededMarkerFile: (id: string) => join(root, `${id}-seeded`),
   };
 }

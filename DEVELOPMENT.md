@@ -101,6 +101,15 @@ install; a build failure surfaces in the dev log and core declines to start.
   when it is absent the check skips with a warning locally, but CI installs it so
   the check is enforced.
 
+- **Native installer tooling** (only if a local `deno task release` should
+  package the conventional Core/Client installers for the host OS): `pkgbuild` +
+  `productsign`/`notarytool` ship with macOS; Linux needs `dpkg-dev` (for
+  `dpkg-deb`) and `rpm` (for `rpmbuild`); Windows needs `makensis` (NSIS). When a
+  tool is absent, `scripts/release/core-installers.ts` skips that installer and
+  the release still succeeds with the raw gzip'd binaries (which feed self-update
+  and the thin scripts). CI provisions these per runner; the Podman/UTM
+  cross-build drivers install them in their environments.
+
 ### First-time setup
 
 ```bash

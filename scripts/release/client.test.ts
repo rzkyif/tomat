@@ -7,7 +7,7 @@
 import { assertEquals } from "@std/assert";
 
 import type { Triple } from "../../packages/tomat-shared/src/domain/model.ts";
-import { appleSigningEnv } from "./client.ts";
+import { appleSigningEnv, injectWindowsSigning } from "./client.ts";
 import type { DeployEnv } from "./lib.ts";
 
 const DARWIN: Triple = "aarch64-apple-darwin";
@@ -39,6 +39,9 @@ function blankEnv(overrides: Partial<DeployEnv> = {}): DeployEnv {
     appleApiKey: "",
     appleApiIssuer: "",
     appleApiKeyPath: "",
+    windowsCertificateThumbprint: "",
+    windowsSignCommand: "",
+    windowsTimestampUrl: "",
     ...overrides,
   };
 }
@@ -65,4 +68,17 @@ Deno.test("appleSigningEnv: only non-empty fields are injected, no blanks", () =
 Deno.test("appleSigningEnv: never injected on a non-macOS target", () => {
   const env = blankEnv({ appleSigningIdentity: "Developer ID Application: Someone (TEAMID1234)" });
   assertEquals(appleSigningEnv(env, WINDOWS), {});
+});
+
+Deno.test("injectWindowsSigning: inert by default (no cert => no config patch)", async () => {
+  // Blank env: returns a no-op restore without touching tauri.conf.json, so the
+  // Windows installer ships unsigned (Mark-of-the-Web stripping stays in play).
+  const restore = await injectWindowsSigning(blankEnv(), WINDOWS);
+  await restore(); // must not throw
+});
+
+Deno.test("injectWindowsSigning: never patches on a non-Windows target", async () => {
+  const env = blankEnv({ windowsCertificateThumbprint: "AABBCCDD" });
+  const restore = await injectWindowsSigning(env, DARWIN);
+  await restore(); // no-op on darwin even with a cert set
 });

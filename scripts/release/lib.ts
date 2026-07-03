@@ -170,6 +170,16 @@ export interface DeployEnv {
   appleApiKey: string;
   appleApiIssuer: string;
   appleApiKeyPath: string;
+  /** Windows Authenticode code-signing, DORMANT by default (no cert yet). When
+   *  `windowsCertificateThumbprint` (or `windowsSignCommand`) is set, the client
+   *  NSIS installer + the Core NSIS installer are Authenticode-signed at build
+   *  time; when empty the installers ship unsigned and the install flow keeps
+   *  stripping Mark-of-the-Web. Mirrors the inert-by-default Apple signing, but
+   *  Tauri reads Windows signing from tauri.conf.json (not env), so it is applied
+   *  as a build-time config patch (see injectWindowsSigning in client.ts). */
+  windowsCertificateThumbprint: string;
+  windowsSignCommand: string;
+  windowsTimestampUrl: string;
 }
 
 export async function loadOrSeedEnv(): Promise<DeployEnv> {
@@ -246,6 +256,9 @@ export async function loadOrSeedEnv(): Promise<DeployEnv> {
     appleApiKey: get("APPLE_API_KEY"),
     appleApiIssuer: get("APPLE_API_ISSUER"),
     appleApiKeyPath: get("APPLE_API_KEY_PATH"),
+    windowsCertificateThumbprint: get("WINDOWS_CERTIFICATE_THUMBPRINT"),
+    windowsSignCommand: get("WINDOWS_SIGN_COMMAND"),
+    windowsTimestampUrl: get("WINDOWS_TIMESTAMP_URL") || "http://timestamp.digicert.com",
   };
 }
 
@@ -286,6 +299,9 @@ export function envFromProcess(): DeployEnv {
     appleApiKey: get("APPLE_API_KEY"),
     appleApiIssuer: get("APPLE_API_ISSUER"),
     appleApiKeyPath: get("APPLE_API_KEY_PATH"),
+    windowsCertificateThumbprint: get("WINDOWS_CERTIFICATE_THUMBPRINT"),
+    windowsSignCommand: get("WINDOWS_SIGN_COMMAND"),
+    windowsTimestampUrl: get("WINDOWS_TIMESTAMP_URL") || "http://timestamp.digicert.com",
   };
 }
 
@@ -1023,6 +1039,10 @@ export interface RunReleaseOpts {
   /** Mirror this run's artifacts + manifests to the rolling per-channel GitHub
    *  Release after the R2 upload. Off for a plain local release. */
   githubRelease?: boolean;
+  /** Extra GitHub-Release assets built outside the release plan (the native Core
+   *  installers ci-publish uploads before the plan). Merged into the mirror's
+   *  asset set alongside the item-recorded ones. */
+  extraGithubAssets?: Array<{ path: string; name: string }>;
   /** Optional sink: runReleasePlan appends one entry per successfully published
    *  item so a branch-aligned caller can commit the version bumps it made
    *  (main.ts) without changing the return type. */
@@ -1229,7 +1249,9 @@ export async function runReleasePlan(
   if (opts.githubRelease && succeeded.length > 0) {
     await publishGithubRelease(env, channel, {
       items: succeeded.map((p) => ({ label: p.item.label, version: p.localVersion })),
-      assets: releaseAssets,
+      // Item-recorded assets plus any built outside the plan (the native Core
+      // installers, uploaded by ci-publish before the plan runs).
+      assets: [...releaseAssets, ...(opts.extraGithubAssets ?? [])],
     });
   }
 

@@ -6,9 +6,12 @@
 //
 //  - `install_local_core`: shells out to the R2-hosted install script for
 //    the host platform, captures stdout, parses the printed pairing code,
-//    and returns it. The script writes the binary, sets up the launchd /
-//    systemd-user / scheduled-task service, mints the admin token, and hits
-//    /api/v1/pairing/codes itself. This command is just the trampoline.
+//    and returns it. The (now thin) script fetches + verifies the seed core
+//    binary, then delegates the rest to that binary's own install subcommands
+//    (`self-install`, `install-service`, `mint-code` - see
+//    packages/tomat-core/src/install), which set up the service, mint the
+//    admin token, plant the built-in extension, and print the pairing code.
+//    This command is just the trampoline and still parses `Pairing code:`.
 //
 //  - `start_local_core`: idempotently make sure a locally-installed core
 //    is running. Used at app boot for the "on-demand" install mode where

@@ -15,8 +15,8 @@
 // On the STABLE channel, manifest entries are pinned at release time and this
 // module isn't involved.
 
-import type { BinaryManifestEntry, Triple, UpstreamResolver } from "@tomat/shared";
-import { errMessage, isResolverEntry } from "@tomat/shared";
+import type { BinaryManifestEntry, BinaryVariant, Triple, UpstreamResolver } from "@tomat/shared";
+import { assetVariants, errMessage, isResolverEntry, platformVariants } from "@tomat/shared";
 import { AppError } from "@tomat/core-engine";
 
 interface GitHubReleaseAsset {
@@ -31,13 +31,19 @@ interface GitHubRelease {
   assets: GitHubReleaseAsset[];
 }
 
-/** Concrete download target resolved from an entry for one triple. */
+/** Concrete download target resolved from an entry for one triple + variant. */
 export interface ResolvedBinary {
   version: string;
+  /** The GPU-backend variant this download is (`cpu` for single-variant kinds). */
+  variant: BinaryVariant;
   url: string;
   sha256: string;
+  /** Companion archives (e.g. the Windows CUDA `cudart` runtime) extracted
+   *  libs-only into the same bin/lib/<kind> dir. */
+  extras?: { url: string; sha256: string }[];
   /** Download size in bytes when the source publishes it (GitHub asset size on
-   *  latest resolver entries). Pinned entries leave this unset. */
+   *  latest resolver entries), summed over the primary + extras. Pinned entries
+   *  leave this unset. */
   sizeBytes?: number;
 }
 
@@ -93,24 +99,19 @@ async function fetchRelease(
   return release;
 }
 
-/** Resolve an upstream resolver to the latest binary for `triple`. Returns
- *  null when upstream doesn't publish this triple at all (the resolver's
- *  `assets` map omits it), so it is marked unavailable rather than missing.
- *  Throws when the expected asset or its sha256 digest is missing. */
-export async function resolveUpstream(
-  resolver: UpstreamResolver,
-  triple: Triple,
-  signal?: AbortSignal,
-): Promise<ResolvedBinary | null> {
-  const pattern = resolver.assets[triple];
-  if (!pattern) return null;
-  const release = await fetchRelease(resolver.repo, resolver.pinnedTag, signal);
+/** Find a named asset in a release and return its verified download target.
+ *  Throws when the asset or its sha256 digest is missing. */
+function resolveAsset(
+  release: GitHubRelease,
+  repo: string,
+  pattern: string,
+): { url: string; sha256: string; sizeBytes?: number } {
   const assetName = pattern.replace(/\{tag\}/g, release.tag_name);
   const asset = release.assets.find((a) => a.name === assetName);
   if (!asset) {
     throw new AppError(
       "manifest_fetch_failed",
-      `upstream ${resolver.repo}@${release.tag_name} has no asset "${assetName}"`,
+      `upstream ${repo}@${release.tag_name} has no asset "${assetName}"`,
     );
   }
   if (!asset.digest || !asset.digest.startsWith("sha256:")) {
@@ -121,25 +122,64 @@ export async function resolveUpstream(
     );
   }
   return {
-    version: release.tag_name,
     url: asset.browser_download_url,
     sha256: asset.digest.slice("sha256:".length),
     sizeBytes: typeof asset.size === "number" ? asset.size : undefined,
   };
 }
 
+/** Resolve an upstream resolver to the latest binary for `triple` + `variant`.
+ *  Returns null when upstream doesn't publish this triple/variant (the
+ *  resolver's `assets` map omits it), so it is marked unavailable rather than
+ *  missing. Throws when the expected asset or its sha256 digest is missing. */
+export async function resolveUpstream(
+  resolver: UpstreamResolver,
+  triple: Triple,
+  variant: BinaryVariant,
+  signal?: AbortSignal,
+): Promise<ResolvedBinary | null> {
+  const va = assetVariants(resolver.assets[triple])[variant];
+  if (!va) return null;
+  const release = await fetchRelease(resolver.repo, resolver.pinnedTag, signal);
+  const primary = resolveAsset(release, resolver.repo, va.asset);
+  const extras = (va.extra ?? []).map((p) => {
+    const e = resolveAsset(release, resolver.repo, p);
+    return { url: e.url, sha256: e.sha256, sizeBytes: e.sizeBytes };
+  });
+  const sizeBytes = [primary, ...extras].reduce<number | undefined>(
+    (sum, a) => (sum === undefined || a.sizeBytes === undefined ? undefined : sum + a.sizeBytes),
+    0,
+  );
+  return {
+    version: release.tag_name,
+    variant,
+    url: primary.url,
+    sha256: primary.sha256,
+    ...(extras.length ? { extras: extras.map((e) => ({ url: e.url, sha256: e.sha256 })) } : {}),
+    sizeBytes,
+  };
+}
+
 /** Resolve a manifest entry (pinned or resolver) to a concrete download for
- *  `triple`. Pinned entries return their stored URL+hash; resolver entries hit
- *  GitHub for the latest release. Returns null when the triple isn't covered. */
+ *  `triple` + `variant`. Pinned entries return their stored URL+hash; resolver
+ *  entries hit GitHub for the latest release. Returns null when the
+ *  triple/variant isn't covered. */
 export async function resolveBinaryEntry(
   entry: BinaryManifestEntry,
   triple: Triple,
+  variant: BinaryVariant,
   signal?: AbortSignal,
 ): Promise<ResolvedBinary | null> {
   if (isResolverEntry(entry)) {
-    return await resolveUpstream(entry.resolver, triple, signal);
+    return await resolveUpstream(entry.resolver, triple, variant, signal);
   }
-  const platform = entry.platforms[triple];
-  if (!platform) return null;
-  return { version: entry.version, url: platform.url, sha256: platform.sha256 };
+  const target = platformVariants(entry.platforms[triple])[variant];
+  if (!target) return null;
+  return {
+    version: entry.version,
+    variant,
+    url: target.url,
+    sha256: target.sha256,
+    ...(target.extras ? { extras: target.extras } : {}),
+  };
 }

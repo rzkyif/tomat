@@ -36,6 +36,7 @@ import {
 } from "./lib.ts";
 import { join } from "@std/path";
 import { buildCoreArtifacts } from "./core.ts";
+import { buildCoreInstallers } from "./core-installers.ts";
 import { buildClientBundle } from "./client.ts";
 import { buildAndroidBundle } from "./android.ts";
 import { buildAndUploadIos } from "./ios.ts";
@@ -78,9 +79,22 @@ async function main(): Promise<void> {
   step(`Building core for ${hostTriple}`);
   const coreBuilt = await buildCoreArtifacts([hostTriple], suffix);
   const bundle = bundleCoreArtifacts(coreBuilt, version, channel, [hostTriple]);
+  // Build the conventional native Core installer(s) for this runner's OS (pkg /
+  // nsis / deb+rpm) and stage them alongside the raw artifacts. Degrades to []
+  // when the packaging tool isn't provisioned, so a plain build still succeeds.
+  const installers = await buildCoreInstallers(coreBuilt, {
+    version,
+    channel,
+    triple: hostTriple,
+    env,
+  });
+  if (installers.length) {
+    bundle.installers = installers;
+    for (const a of installers) await stageDistFile(stageDir, a.relPath);
+  }
   await writeBundle(stageDir, bundle);
   for (const rec of bundle.records) await stageDistFile(stageDir, rec.relPath);
-  ok(`staged ${bundle.records.length} core record(s)`);
+  ok(`staged ${bundle.records.length} core record(s), ${installers.length} installer(s)`);
 
   // --- desktop client (always, when Tauri keys are present) ---
   if (env.tauriUpdaterPublicKey && env.tauriUpdaterPrivateKey) {
@@ -88,6 +102,9 @@ async function main(): Promise<void> {
     await writeClientDescriptor(stageDir, descriptor);
     await stageDistFile(stageDir, descriptor.relPath);
     await stageDistFile(stageDir, descriptor.sigRelPath);
+    // Stage the conventional native installers (dmg/deb/rpm) alongside the
+    // updater bundle so the publish coordinator can upload them too.
+    for (const dl of descriptor.downloads ?? []) await stageDistFile(stageDir, dl.relPath);
     ok(`staged client bundle ${descriptor.filename}`);
   } else {
     info(colors.yellow("Tauri updater keys absent; skipping the client on this runner"));

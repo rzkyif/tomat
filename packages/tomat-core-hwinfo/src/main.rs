@@ -91,6 +91,51 @@ fn probe_rocm() -> Option<Gpu> {
     })
 }
 
+/// Vulkan: detect any Vulkan-capable discrete/integrated GPU the vendor probes
+/// missed (notably Intel Arc/iGPUs). Loads the system Vulkan loader at runtime;
+/// returns None cleanly when it is absent (no GPU / no driver) so we fall back
+/// to CPU. Picks the first non-CPU physical device and reports its largest
+/// DEVICE_LOCAL memory heap as VRAM.
+#[cfg(not(target_os = "macos"))]
+fn probe_vulkan() -> Option<Gpu> {
+    use ash::vk;
+    use std::ffi::CStr;
+
+    let entry = unsafe { ash::Entry::load() }.ok()?;
+    let app_info = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_0);
+    let create_info = vk::InstanceCreateInfo::default().application_info(&app_info);
+    let instance = unsafe { entry.create_instance(&create_info, None) }.ok()?;
+
+    let result = (|| {
+        let devices = unsafe { instance.enumerate_physical_devices() }.ok()?;
+        for pd in devices {
+            let props = unsafe { instance.get_physical_device_properties(pd) };
+            if props.device_type == vk::PhysicalDeviceType::CPU {
+                continue;
+            }
+            let mem = unsafe { instance.get_physical_device_memory_properties(pd) };
+            let vram = mem.memory_heaps[..mem.memory_heap_count as usize]
+                .iter()
+                .filter(|h| h.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
+                .map(|h| h.size)
+                .max()
+                .unwrap_or(0);
+            let name = unsafe { CStr::from_ptr(props.device_name.as_ptr()) }
+                .to_string_lossy()
+                .into_owned();
+            return Some(Gpu {
+                backend: "vulkan".into(),
+                name,
+                vram_bytes: vram,
+            });
+        }
+        None
+    })();
+
+    unsafe { instance.destroy_instance(None) };
+    result
+}
+
 // Apple Silicon: GPU shares system RAM (unified). Metal is always present.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn detect_gpu(total_ram_bytes: u64) -> (Gpu, bool) {
@@ -121,8 +166,11 @@ fn detect_gpu(_total_ram_bytes: u64) -> (Gpu, bool) {
 
 #[cfg(not(target_os = "macos"))]
 fn detect_gpu(_total_ram_bytes: u64) -> (Gpu, bool) {
+    // Vendor probes first (they carry accurate VRAM + drive cuda/rocm variant
+    // selection); Vulkan catches everything else with a GPU (e.g. Intel).
     probe_nvidia()
         .or_else(probe_rocm)
+        .or_else(probe_vulkan)
         .map(|g| (g, false))
         .unwrap_or_else(|| {
             (

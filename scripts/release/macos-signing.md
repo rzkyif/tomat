@@ -58,12 +58,14 @@ builds the `apple-darwin` triples.
    - Set `providerShortName` only if the Apple ID belongs to multiple teams (it
      disambiguates which team notarizes).
 
-4. **Ship a `.dmg`.** Add `"dmg"` to `bundle.targets` in
-   [tauri.conf.json](../../packages/tomat-client/src/tauri/tauri.conf.json) so a
-   signed, notarized disk image is produced for direct download (the current
-   targets omit it). Tauri staples the notarization ticket to the bundle after a
-   successful notarization; confirm `xcrun stapler validate` passes on the `.app`
-   inside the `.dmg`.
+4. **Ship a `.dmg`.** DONE: `"dmg"` is in `bundle.targets` in
+   [tauri.conf.json](../../packages/tomat-client/src/tauri/tauri.conf.json), and
+   `client.ts` harvests the `.dmg` into `client.json`'s `downloads` map for the
+   website's direct-download CTA. With signing on, Tauri staples the notarization
+   ticket to the bundle after a successful notarization; confirm `xcrun stapler
+validate` passes on the `.app` inside the `.dmg`. Until signing is on, the
+   `.dmg` still builds (unsigned) and the install flow strips the quarantine
+   xattr.
 
 5. **Wire CI secrets.** Add the `APPLE_*` vars as repo secrets that reach the
    **macOS build runner only** (mirroring how the Tauri/Android build-signing
@@ -79,6 +81,25 @@ builds the `apple-darwin` triples.
    - Grant microphone + screen-recording, trigger a self-update, and confirm the
      grants persist (a stable identity is the reason to sign beyond `.dmg`
      shipping; ad-hoc identities can re-prompt after each update).
+
+## Core `.pkg` (uses the same Apple identity)
+
+The standalone Core installer ([core-installers.ts](core-installers.ts))
+`pkgbuild`s a component pkg whose postinstall runs `tomat-core install-service`.
+When `APPLE_SIGNING_IDENTITY` is set it is `productsign`ed and, when the
+notarization creds exist, `notarytool submit --wait` + `stapler staple` runs.
+Inert (unsigned pkg) otherwise, exactly like the client `.dmg`.
+
+## Windows Authenticode (separate identity, still DORMANT)
+
+Independent of Apple. The client NSIS installer and the Core NSIS installer ship
+unsigned until a Windows code-signing cert exists (that is why the install flow
+strips Mark-of-the-Web). To turn it on, fill `WINDOWS_CERTIFICATE_THUMBPRINT` (a
+cert in the runner's store) or `WINDOWS_SIGN_COMMAND` (e.g. an Azure Trusted
+Signing invocation with `%1` for the file) in `.env` / repo secrets. `client.ts`
+`injectWindowsSigning` patches `tauri.conf.json` for the client bundle;
+`core-installers.ts` `signWindows` signs the Core installer. Both are inert when
+the env is empty.
 
 ## iOS (plumbed, inert until the Apple account + `APPLE_*` exist)
 

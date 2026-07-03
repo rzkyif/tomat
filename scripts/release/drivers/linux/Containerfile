@@ -68,15 +68,19 @@ ENV DEBIAN_FRONTEND=noninteractive
 # .so. Without it the bundler aborts with "Can't detect any appindicator library".
 # xdg-utils provides /usr/bin/xdg-open (Tauri copies it into the AppImage);
 # squashfs-tools/patchelf/file/desktop-file-utils/zsync are linuxdeploy +
-# appimagetool's host-side dependencies for assembling the AppImage.
+# appimagetool's host-side dependencies for assembling the AppImage. dpkg-dev
+# (dpkg-deb) + rpm (rpmbuild) build the conventional Linux installers for BOTH
+# the Tauri client (deb/rpm targets) and the Core native packages
+# (core-installers.ts).
 RUN dpkg --add-architecture amd64 \
   && apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl unzip xz-utils git \
+    ca-certificates curl unzip xz-utils bzip2 git \
     build-essential cmake clang pkg-config libssl-dev \
     gcc-x86-64-linux-gnu g++-x86-64-linux-gnu \
     libdbus-1-dev:amd64 \
     libayatana-appindicator3-dev \
     xdg-utils squashfs-tools patchelf file desktop-file-utils zsync \
+    dpkg-dev rpm \
   && rm -rf /var/lib/apt/lists/*
 
 # Cross pkg-config for the x64 CORE build: allow cross queries (pkg-config
@@ -165,5 +169,27 @@ RUN printf '#!/bin/sh\nif [ "$TOMAT_FAKE_X86" = "1" ]; then case "$1" in -m|-i|-
   && rm -f /usr/lib/x86_64-linux-gnu/gtk-3.0 /usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0 \
   && cp -a /opt/amd64-sysroot/usr/lib/x86_64-linux-gnu/gtk-3.0 /usr/lib/x86_64-linux-gnu/gtk-3.0 \
   && cp -a /opt/amd64-sysroot/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0 /usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0
+
+# Prebuilt CUDA sherpa-onnx libs so the LOCAL core build emits a `cuda` speech
+# variant for NVIDIA on Linux, matching the CI release (the "Stage sherpa-onnx
+# CUDA lib" step in .github/workflows/release.yml). buildSpeech in
+# scripts/release/core.ts keys the GPU variant on SHERPA_ONNX_GPU_LIB_DIR_CUDA;
+# setting it as image ENV (not per-run in podman.ts) means the core build picks
+# it up with no driver change, and the client build - which builds no speech -
+# simply ignores it. No CUDA toolkit is installed: the archive bundles the GPU
+# onnxruntime + provider .so files, which the cross toolchain links (x86_64 libs
+# for the x64 target) and which load CUDA at runtime on the user's machine. The
+# version MUST match sherpa-onnx in packages/tomat-core-speech/Cargo.toml (and
+# the CI + windows-provision staging). Baked into the image, so the ~200 MB
+# archive is fetched once at image-build time, not per release run.
+ARG SHERPA_CUDA_VERSION=1.13.3
+RUN name="sherpa-onnx-v${SHERPA_CUDA_VERSION}-cuda-12.x-cudnn-9.x-linux-x64-gpu" \
+  && curl -fsSL -o /tmp/sherpa-cuda.tar.bz2 \
+       "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_CUDA_VERSION}/${name}.tar.bz2" \
+  && mkdir -p /opt/sherpa-onnx-cuda \
+  && tar -xjf /tmp/sherpa-cuda.tar.bz2 -C /opt/sherpa-onnx-cuda --strip-components=1 \
+  && rm /tmp/sherpa-cuda.tar.bz2 \
+  && test -f /opt/sherpa-onnx-cuda/lib/libsherpa-onnx-c-api.so
+ENV SHERPA_ONNX_GPU_LIB_DIR_CUDA=/opt/sherpa-onnx-cuda/lib
 
 WORKDIR /work

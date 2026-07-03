@@ -8,7 +8,10 @@
 
 import type { SttFamily, TtsFamily } from "./catalog.ts";
 
-export type GpuBackend = "metal" | "cuda" | "rocm" | "cpu";
+// `vulkan` is a generic GPU backend (any Vulkan-capable device: Intel, and
+// NVIDIA/AMD where no vendor-specific build applies). It drives GPU-layer
+// offload like the vendor backends, and selects the `vulkan` binary variant.
+export type GpuBackend = "metal" | "cuda" | "rocm" | "vulkan" | "cpu";
 
 export interface GpuInfo {
   backend: GpuBackend;

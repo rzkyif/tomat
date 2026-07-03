@@ -145,6 +145,10 @@ export function modelsRoutes(): Hono {
       detectHardware(true),
       loadCoreSettings(),
     ]);
+    // Re-probing hardware can change the desired GPU binary variant (e.g. a GPU
+    // or driver appeared), so re-evaluate the required-files snapshot: a
+    // now-wrong-variant binary surfaces as a pending reinstall.
+    void notifyRequirementsChanged();
     return c.json(computeRecommendations(catalog, hw, appliedFromSettings(settings)));
   });
 

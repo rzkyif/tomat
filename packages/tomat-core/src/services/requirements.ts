@@ -55,9 +55,28 @@ export async function computeRequirements(): Promise<RequirementsSnapshot> {
   const list = await binariesManager()
     .list()
     .catch(() => []);
-  const installed = new Set(list.filter((b) => b.installed).map((b) => b.kind));
+  const statusByKind = new Map(list.map((b) => [b.kind, b]));
+  // "Present" means installed AND the last install already AIMED for the variant
+  // this device should have now (detected backend / override). We compare the
+  // stored `target` (what the install aimed for), not the installed `variant`:
+  // when the ideal (e.g. cuda) isn't resolvable upstream and the install degraded
+  // to cpu, target still records cuda, so `target === desiredVariant` keeps it
+  // present instead of looping the download popup on an unavoidable fallback. A
+  // genuinely new ideal (GPU appeared, override changed) makes target differ from
+  // desiredVariant, dropping it into `missing` for the reinstall. This is
+  // network-free (no resolvability probe here); a better variant merely becoming
+  // AVAILABLE upstream surfaces through the consented update path, not here. When
+  // the desired/target can't be determined (offline / no manifest entry / not yet
+  // tracked), a plain install counts as present so we never block on an
+  // unknowable upgrade.
+  const isPresent = (kind: (typeof binKinds)[number]): boolean => {
+    const s = statusByKind.get(kind);
+    if (!s || !s.installed) return false;
+    if (!s.desiredVariant || !s.target) return true;
+    return s.target === s.desiredVariant;
+  };
   const missingAvailable = binKinds.filter(
-    (k) => !installed.has(k) && !binaryUnavailableOnTriple(k, triple),
+    (k) => !isPresent(k) && !binaryUnavailableOnTriple(k, triple),
   );
   const binProbes =
     missingAvailable.length > 0
@@ -68,7 +87,7 @@ export async function computeRequirements(): Promise<RequirementsSnapshot> {
   const binProbeByKind = new Map(binProbes.map((p) => [p.kind, p]));
 
   for (const kind of binKinds) {
-    const present = installed.has(kind);
+    const present = isPresent(kind);
     const unavailable = !present && binaryUnavailableOnTriple(kind, triple);
     const probe = present ? undefined : binProbeByKind.get(kind);
     required.push({

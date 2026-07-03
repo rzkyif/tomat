@@ -9,6 +9,11 @@ publish = false
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+# Vulkan bindings that dynamically load the system Vulkan loader at runtime (via
+# libloading); no Vulkan SDK is needed at build time, so this compiles on
+# CI/driver hosts without any GPU. Used only to detect a Vulkan-capable GPU
+# (e.g. Intel) that the vendor probes (nvidia-smi/rocm-smi) miss.
+ash = { version = "0.38", default-features = false, features = ["loaded"] }
 
 [lints.clippy]
 unwrap_used = "warn"

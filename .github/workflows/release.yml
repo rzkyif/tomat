@@ -184,7 +184,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $SherpaVersion = "1.13.2"
+          $SherpaVersion = "1.13.3"
           $Name = "sherpa-onnx-v$SherpaVersion-win-arm64-static-MT-Release-lib"
           $Url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$SherpaVersion/$Name.tar.bz2"
           $Root = Join-Path $env:RUNNER_TEMP "sherpa-onnx-libs"
@@ -197,6 +197,49 @@ jobs:
           if (-not $lib) { throw "sherpa-onnx-core.lib not found under $Root" }
           "SHERPA_ONNX_LIB_DIR=$($lib.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "SHERPA_ONNX_LIB_DIR = $($lib.DirectoryName)"
+
+      # Stage the prebuilt CUDA sherpa-onnx lib so buildSpeech emits a `cuda`
+      # speech variant for NVIDIA on Linux. No CUDA toolkit is installed: the
+      # archive bundles the GPU onnxruntime + provider .so files, which link at
+      # build time and load CUDA at runtime on the user's machine. Linux only:
+      # the win-x64 CUDA archive omits onnxruntime.lib, so MSVC can't link the
+      # shared build (see SPEECH_GPU_VARIANTS in scripts/release/core.ts). If the
+      # lib isn't found this warns and skips, so the leg still ships CPU speech.
+      # Version must match sherpa-onnx in packages/tomat-core-speech/Cargo.toml.
+      - name: Stage sherpa-onnx CUDA lib (linux-x64)
+        if: matrix.id == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHERPA_VERSION=1.13.3
+          NAME="sherpa-onnx-v${SHERPA_VERSION}-cuda-12.x-cudnn-9.x-linux-x64-gpu"
+          URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_VERSION}/${NAME}.tar.bz2"
+          ROOT="${RUNNER_TEMP}/sherpa-onnx-cuda"
+          mkdir -p "$ROOT"
+          echo "downloading $URL"
+          curl -fsSL "$URL" -o "$ROOT/${NAME}.tar.bz2"
+          tar -xjf "$ROOT/${NAME}.tar.bz2" -C "$ROOT"
+          FOUND=$(find "$ROOT" -name libsherpa-onnx-c-api.so -print -quit || true)
+          if [ -z "$FOUND" ]; then
+            echo "::warning::libsherpa-onnx-c-api.so not found; shipping CPU speech only"
+          else
+            echo "SHERPA_ONNX_GPU_LIB_DIR_CUDA=$(dirname "$FOUND")" >> "$GITHUB_ENV"
+            echo "SHERPA_ONNX_GPU_LIB_DIR_CUDA = $(dirname "$FOUND")"
+          fi
+
+      # Native Core installer tooling (core-installers.ts): rpmbuild on Linux and
+      # makensis on Windows. macOS pkgbuild/productsign/notarytool ship with Xcode
+      # on the macOS runners. When a tool is missing the builder degrades to
+      # skipping that installer, so these keep the double-click packages in the
+      # release rather than being strictly required.
+      - name: Install Core installer tooling (linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Install Core installer tooling (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: winget install --id NSIS.NSIS -e --source winget --silent --accept-source-agreements --accept-package-agreements; exit 0
 
       - name: Build + stage (${{ matrix.id }})
         shell: bash
@@ -221,6 +264,13 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+          # Windows Authenticode code-signing, DORMANT until a cert exists. Empty
+          # secrets => the client + Core NSIS installers ship unsigned and the
+          # install flow keeps stripping Mark-of-the-Web (see injectWindowsSigning
+          # in client.ts + signWindows in core-installers.ts).
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          WINDOWS_SIGN_COMMAND: ${{ secrets.WINDOWS_SIGN_COMMAND }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
         run: |
           # NDK for the Tauri Android build (Linux runner only). The runner sets
           # ANDROID_NDK_LATEST_HOME in its shell env; surface it under the names

@@ -220,7 +220,10 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
 
 // --- internals ------------------------------------------------------------
 
-async function fetchCoreManifest(): Promise<CoreManifest> {
+// Exported so the fresh-install path (install/fetch-verify.ts) reuses the exact
+// same signed-manifest fetch + Ed25519 verify as self-update, keeping one
+// audited trust path instead of a parallel copy.
+export async function fetchCoreManifest(): Promise<CoreManifest> {
   let res: Response;
   try {
     res = await fetch(coreManifestUrl());
@@ -283,7 +286,14 @@ function assertCoreManifestShape(value: unknown): asserts value is CoreManifest 
   }
 }
 
-async function downloadAndVerify(url: string, outPath: string, sha256: string): Promise<void> {
+// Exported for reuse by the fresh-install path (install/fetch-verify.ts): the
+// gzip-decompress + streaming-sha256 + atomic-rename placement is identical for
+// a first install and an update.
+export async function downloadAndVerify(
+  url: string,
+  outPath: string,
+  sha256: string,
+): Promise<void> {
   const res = await fetch(url);
   if (!res.ok || !res.body) {
     throw new AppError("update_failed", `download HTTP ${res.status} for ${url}`);

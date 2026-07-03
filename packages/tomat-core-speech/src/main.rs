@@ -198,6 +198,11 @@ struct State {
     stt: Mutex<Slot<SttConfig, OfflineRecognizer>>,
     tts: Mutex<TtsSlot>,
     threads: i32,
+    // ONNX Runtime execution provider ("cpu", "cuda", "directml", "coreml").
+    // Fixed at process start from --provider; a GPU value only takes effect when
+    // this binary was built against a GPU-enabled sherpa-onnx/onnxruntime (the
+    // GPU build variant), otherwise onnxruntime falls back to CPU at load.
+    provider: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -236,7 +241,11 @@ fn flag(args: &[String], key: &str) -> Option<String> {
         .cloned()
 }
 
-fn build_recognizer(cfg: &SttConfig, threads: i32) -> Result<OfflineRecognizer, String> {
+fn build_recognizer(
+    cfg: &SttConfig,
+    threads: i32,
+    provider: &str,
+) -> Result<OfflineRecognizer, String> {
     let mut config = OfflineRecognizerConfig::default();
     // Each arm populates exactly one model-family sub-config and yields the
     // shared tokens path; sherpa picks the family from whichever sub-config is set.
@@ -324,12 +333,19 @@ fn build_recognizer(cfg: &SttConfig, threads: i32) -> Result<OfflineRecognizer, 
     };
     config.model_config.tokens = Some(tokens.clone());
     config.model_config.num_threads = threads.max(1);
+    config.model_config.provider = Some(provider.to_string());
     OfflineRecognizer::create(&config).ok_or_else(|| "failed to load stt model".to_string())
 }
 
-fn build_tts(cfg: &TtsConfig, threads: i32, lang: &str) -> Result<OfflineTts, String> {
+fn build_tts(
+    cfg: &TtsConfig,
+    threads: i32,
+    lang: &str,
+    provider: &str,
+) -> Result<OfflineTts, String> {
     let mut model = OfflineTtsModelConfig {
         num_threads: threads.max(1),
+        provider: Some(provider.to_string()),
         ..Default::default()
     };
     match cfg {
@@ -411,7 +427,7 @@ fn set_stt(state: &State, want: Option<SttConfig>) -> Result<(), String> {
     }
     match want {
         Some(p) => {
-            let engine = build_recognizer(&p, state.threads)?;
+            let engine = build_recognizer(&p, state.threads, &state.provider)?;
             slot.engine = Some(engine);
             slot.paths = Some(p);
             eprintln!("tomat-core-speech: STT loaded");
@@ -436,7 +452,7 @@ fn set_tts(state: &State, want: Option<TtsConfig>) -> Result<(), String> {
             // language reloads the engine (see the /speak handler). Build before
             // swapping so a failed load keeps the current engine.
             let lang = voices::DEFAULT_LANG;
-            let engine = build_tts(&p, state.threads, lang)?;
+            let engine = build_tts(&p, state.threads, lang, &state.provider)?;
             eprintln!(
                 "tomat-core-speech: TTS loaded (lang={}, sample_rate={}, speakers={})",
                 lang,
@@ -644,7 +660,7 @@ fn handle(mut request: tiny_http::Request, state: &State) {
                 let Some(paths) = slot.paths.clone() else {
                     return respond_text(request, 503, "tts not loaded");
                 };
-                match build_tts(&paths, state.threads, want_lang) {
+                match build_tts(&paths, state.threads, want_lang, &state.provider) {
                     Ok(engine) => {
                         eprintln!(
                             "tomat-core-speech: TTS reloaded ({} -> {want_lang})",
@@ -722,11 +738,13 @@ fn run() -> Result<(), String> {
                 .unwrap_or(4)
                 .min(4)
         });
+    let provider = flag(&args, "--provider").unwrap_or_else(|| "cpu".to_string());
 
     let state = Arc::new(State {
         stt: Mutex::new(Slot::empty()),
         tts: Mutex::new(TtsSlot::empty()),
         threads,
+        provider,
     });
 
     let initial = initial_config(&args);

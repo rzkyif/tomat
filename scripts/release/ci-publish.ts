@@ -48,6 +48,7 @@ import {
   readClientDescriptor,
 } from "./artifacts.ts";
 import { coreItem } from "./core.ts";
+import { uploadCoreInstallers } from "./core-installers.ts";
 import { extensionItem } from "./extension.ts";
 import { catalogItem } from "./catalog.ts";
 import { clientItem } from "./client.ts";
@@ -132,6 +133,27 @@ async function main(): Promise<void> {
   if (prebuilt.android) items.push(androidItem);
   items.push(scriptsItem, schemasItem);
 
+  // Publish the conventional native Core installers each runner built (pkg / nsis
+  // / deb+rpm) + a signed core-installers.json BEFORE the release plan, so the
+  // installers ride into the same GitHub-Release mirror as every other artifact:
+  // uploadCoreInstallers writes core-installers.json{,.sig} under dist/<manifestDir>
+  // (picked up by the mirror's manifest walk) and returns the installer binaries
+  // as GH assets, which we hand the plan via extraGithubAssets. The installers are
+  // auxiliary download assets keyed to the core version, so they ride outside the
+  // release-plan cursor. R2 puts are idempotent, so a plan failure after this just
+  // retries on re-push.
+  const installers = prebuilt.coreBundles.flatMap((b) => b.installers ?? []);
+  let extraGithubAssets: Array<{ path: string; name: string }> = [];
+  if (installers.length > 0) {
+    const coreVersion =
+      prebuilt.coreBundles.find((b) => b.installers?.length)?.version ??
+      prebuilt.coreBundles[0].version;
+    extraGithubAssets = await uploadCoreInstallers(env, channel, coreVersion, installers, {
+      triples: RELEASE_TARGET_TRIPLES,
+      dryRun: args["dry-run"],
+    });
+  }
+
   const published = await runReleasePlan(env, items, channel, {
     yes: args.yes,
     force: false,
@@ -140,6 +162,7 @@ async function main(): Promise<void> {
     prebuilt,
     noBump: true,
     githubRelease: args["github-release"] && !args["dry-run"],
+    extraGithubAssets,
   });
 
   if (published > 0 && !args["dry-run"]) {

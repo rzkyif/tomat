@@ -36,6 +36,7 @@ import { setBehindProxy } from "./services/deployment.ts";
 import { sweepOrphanedSessionDirs } from "@tomat/core-engine/services/sessions-store";
 import { warnIfVaultUnreadable } from "@tomat/core-engine/services/secrets";
 import { tlsServeOptions } from "./services/tls.ts";
+import { maybeRunInstallCommand } from "./install/cli.ts";
 
 async function main(): Promise<void> {
   // Install the engine's runtime host before any engine-hosted service runs.
@@ -237,6 +238,15 @@ async function main(): Promise<void> {
   // Self-signed cert + sealed key; clients pin the SPKI (see services/tls.ts).
   const tls = await tlsServeOptions(bindHost);
 
+  // Drop the public cert (no key) beside the core root so a co-located admin
+  // tool - the `mint-code` install subcommand - can trust the loopback API as a
+  // CA-of-one instead of disabling TLS verification. Best-effort: the client
+  // pins the SPKI at pairing regardless, so a write failure only degrades the
+  // in-process pairing-code mint, never the security posture.
+  void Deno.writeTextFile(paths().tlsCertFile, tls.cert).catch((err) => {
+    log.warn(`could not write ${paths().tlsCertFile}: ${errMessage(err)}`);
+  });
+
   let server: Deno.HttpServer<Deno.NetAddr>;
   try {
     server = Deno.serve(
@@ -388,6 +398,16 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
+  // Install/uninstall subcommands (install-service, uninstall-service,
+  // bootstrap, self-install, mint-code) run the core binary as a short-lived
+  // CLI instead of booting the server: every native installer front-end, the
+  // client's in-app "set up a local Core" flow, and the thin bootstrap scripts
+  // all wrap these, so the service-registration + secret + pairing logic lives
+  // in ONE audited place. A non-subcommand argv (the empty argv launchd/systemd
+  // use, or the updater's --restart-args) falls through to the server boot.
+  const subcommandCode = await maybeRunInstallCommand(Deno.args);
+  if (subcommandCode !== null) Deno.exit(subcommandCode);
+
   try {
     await main();
   } catch (err) {

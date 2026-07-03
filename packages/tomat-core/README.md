@@ -50,7 +50,10 @@ tokens are masked before they reach `core.log` or stderr.
 ## Installing a release build on another device
 
 To control a different machine, install `tomat-core` on it (the desktop client's
-pairing screen links here). The installer is a single command:
+pairing screen links here). The [Install page](https://au.tomat.ing/install) has a
+native installer for it (macOS `.pkg`, Windows `.exe`, Linux `.deb`/`.rpm`); the
+one-line command below is the headless equivalent for a server or SSH session, and
+the one the client's in-app "set up a local Core" flow drives:
 
 ```bash
 # macOS / Linux
@@ -71,15 +74,16 @@ curl -fsSL https://get.au.tomat.ing/install/core.sh | bash -s -- --latest
 powershell -ExecutionPolicy Bypass -Command "& { $env:TOMAT_CHANNEL='latest'; iwr -useb https://get.au.tomat.ing/install/core.ps1 | iex }"
 ```
 
-The installer downloads the signed core manifest, verifies the binary's SHA-256,
-installs an auto-start service (launchd / systemd-user / Task Scheduler), starts
-the daemon, prompts for an admin password (entered twice), and prints a 6-digit
-pairing code. Open the client, paste the core's URL (e.g.
-`http://192.168.1.50:7800`) and the pairing code. The client receives a
+Both paths run the same Core subcommands: `self-install` downloads the signed core
+manifest and verifies each binary's SHA-256, `install-service` registers an
+auto-start service (launchd / systemd-user / Task Scheduler) and starts the daemon,
+and `mint-code` prints a 6-digit pairing code. Open the client, paste the core's URL
+(e.g. `http://192.168.1.50:7800`) and the pairing code. The client receives a
 long-lived bearer token, stored in the OS keychain under the service
-`tomat-client`. The admin password lets an already-paired client mint more
-pairing codes (and remove other devices) remotely, without reading the admin
-token off the core's machine. A single client can pair with multiple cores and switch between
+`tomat-client`, and sets the admin password over the API after pairing (no terminal
+prompt). The admin password lets an already-paired client mint more pairing codes
+(and remove other devices) remotely, without reading the admin token off the core's
+machine. A single client can pair with multiple cores and switch between
 them via a dropdown in Settings. A single core can serve multiple clients
 simultaneously. Sessions are owned by the client that created them and are
 invisible to other paired clients.

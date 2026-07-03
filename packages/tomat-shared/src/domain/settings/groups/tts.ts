@@ -8,7 +8,7 @@
 // the Speech-to-Text structure.
 
 import type { RegexValidationRule, SettingGroup } from "../types.ts";
-import { externalModelSection } from "./factories.ts";
+import { externalModelSection, speechBackendField } from "./factories.ts";
 
 // Shared validator for the 0.25x-3x speed fields (synthesis + playback).
 const SPEED_RANGE_VALIDATION: RegexValidationRule[] = [
@@ -40,6 +40,9 @@ export const ttsGroup: SettingGroup = {
           defaultValue: false,
           descriptionTier: "ondemand",
         },
+        // Same key + control as the Speech-to-Text group: one speech binary
+        // serves both, so its acceleration is a single shared setting.
+        speechBackendField({ field: "tts.enabled", eq: true }),
       ],
     },
     {

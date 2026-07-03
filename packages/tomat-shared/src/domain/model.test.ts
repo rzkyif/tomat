@@ -5,7 +5,14 @@
 // the gates cannot drift on an absent flag or an absent provider.
 
 import { assertEquals } from "@std/assert";
-import { requiredBinaryKinds, sttUsesLocal, ttsUsesLocal } from "./model.ts";
+import {
+  assetVariants,
+  binaryUnavailableOnTriple,
+  platformVariants,
+  requiredBinaryKinds,
+  sttUsesLocal,
+  ttsUsesLocal,
+} from "./model.ts";
 
 Deno.test("sttUsesLocal: STT is disabled by default, so an empty (sparse) settings means not local", () => {
   assertEquals(sttUsesLocal({}), false);
@@ -51,4 +58,46 @@ Deno.test("requiredBinaryKinds: the speech binary is required when either engine
     }).includes("tomat-core-speech"),
     false,
   );
+});
+
+Deno.test("assetVariants: a bare string normalizes to the cpu variant", () => {
+  assertEquals(assetVariants("llama-{tag}-bin-macos-arm64.tar.gz"), {
+    cpu: { asset: "llama-{tag}-bin-macos-arm64.tar.gz" },
+  });
+  assertEquals(assetVariants(undefined), {});
+});
+
+Deno.test("assetVariants: a per-variant map keeps each variant, normalizing bare strings", () => {
+  assertEquals(
+    assetVariants({
+      cpu: "cpu.zip",
+      cuda: { asset: "cuda.zip", extra: ["cudart.zip"] },
+    }),
+    {
+      cpu: { asset: "cpu.zip" },
+      cuda: { asset: "cuda.zip", extra: ["cudart.zip"] },
+    },
+  );
+});
+
+Deno.test("platformVariants: a bare pinned target is the cpu variant", () => {
+  assertEquals(platformVariants({ url: "u", sha256: "s" }), { cpu: { url: "u", sha256: "s" } });
+  assertEquals(platformVariants({ cuda: { url: "u", sha256: "s" } }), {
+    cuda: { url: "u", sha256: "s" },
+  });
+  assertEquals(platformVariants(undefined), {});
+});
+
+Deno.test("binaryUnavailableOnTriple: llama-server is available on every shipped triple", () => {
+  // Every triple keeps a cpu variant, so none is unavailable.
+  for (const t of [
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+  ] as const) {
+    assertEquals(binaryUnavailableOnTriple("llama-server", t), false);
+  }
 });

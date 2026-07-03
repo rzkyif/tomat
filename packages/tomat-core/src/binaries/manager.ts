@@ -19,19 +19,122 @@ import { dirname, join } from "@std/path";
 import type {
   BinaryKind,
   BinaryManifest,
+  BinaryManifestEntry,
   BinaryProbeResult,
   BinaryStatus,
+  BinaryVariant,
+  GpuBackend,
   Triple,
 } from "@tomat/shared";
-import { BINARY_KINDS, errMessage, isResolverEntry } from "@tomat/shared";
+import {
+  assetVariants,
+  BINARY_KINDS,
+  errMessage,
+  isResolverEntry,
+  platformVariants,
+  selectVariant,
+  variantPreference,
+} from "@tomat/shared";
 import { downloadManager } from "../downloads/manager.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { newJobId } from "@tomat/core-engine";
+import { loadCoreSettingsResolved } from "@tomat/core-engine/services/core-settings";
+import { detectHardware } from "../models/hardware.ts";
 import { loadBinaryManifest } from "./manifest.ts";
 import { binaryName, hostTriple, libDirFor } from "./versions.ts";
-import { resolveBinaryEntry } from "./upstream-resolver.ts";
+import { resolveBinaryEntry, type ResolvedBinary } from "./upstream-resolver.ts";
+
+// Which resolved-settings key overrides the auto-detected GPU backend for each
+// kind. "auto" (or blank/absent) means "use detected hardware"; a concrete
+// variant forces that build (falling back to cpu if the platform doesn't offer
+// it). deno has no GPU variants, so it has no override. See the settings groups.
+const BACKEND_OVERRIDE_KEY: Partial<Record<BinaryKind, string>> = {
+  "llama-server": "llm.binaryBackend",
+  "tomat-core-speech": "speech.binaryBackend",
+};
+
+/** The set of variant keys this entry offers for `triple` (from either the
+ *  resolver asset map or the pinned platform map). `cpu` is always present for
+ *  a covered triple. */
+function offeredVariants(
+  entry: BinaryManifestEntry,
+  triple: Triple,
+): Partial<Record<BinaryVariant, unknown>> {
+  return isResolverEntry(entry)
+    ? assetVariants(entry.resolver.assets[triple])
+    : platformVariants(entry.platforms[triple]);
+}
+
+/** The variant this device should install for `kind`: the settings override
+ *  when set to a concrete offered variant, otherwise the best offered variant
+ *  for the detected backend. Always resolves to something `offered` contains
+ *  (falling back to `cpu`). */
+function desiredVariant(
+  entry: BinaryManifestEntry,
+  triple: Triple,
+  kind: BinaryKind,
+  backend: GpuBackend,
+  settings: Record<string, unknown>,
+): BinaryVariant {
+  const offered = offeredVariants(entry, triple);
+  const overrideKey = BACKEND_OVERRIDE_KEY[kind];
+  const override = overrideKey ? settings[overrideKey] : undefined;
+  if (typeof override === "string" && override !== "auto" && override !== "") {
+    return offered[override as BinaryVariant] !== undefined ? (override as BinaryVariant) : "cpu";
+  }
+  return selectVariant(offered, backend);
+}
+
+/** Resolve `entry` for `triple`, preferring `target` but DEGRADING to the
+ *  next-best offered variant (in the detected backend's preference order, always
+ *  ending at cpu) when the preferred one can't be resolved -- e.g. a renamed or
+ *  removed upstream GPU asset on the latest channel. So a device that wants cuda
+ *  but whose cuda asset vanished still gets a working vulkan/cpu build instead of
+ *  a failed install. On the stable channel `offered` is the pinned set (every
+ *  entry already resolvable), so the target resolves on the first try and this
+ *  never degrades. Returns the resolved best-installable variant, or null when
+ *  nothing (not even cpu) is offered for the triple; throws only when every
+ *  candidate errored (e.g. the network is down). Exported for testing. */
+export async function resolveWithFallback(
+  kind: BinaryKind,
+  entry: BinaryManifestEntry,
+  triple: Triple,
+  target: BinaryVariant,
+  backend: GpuBackend,
+): Promise<ResolvedBinary | null> {
+  const offered = offeredVariants(entry, triple);
+  // Candidate order: the target first, then the remaining preference order
+  // (offered only), always ending at cpu (the guaranteed fallback).
+  const candidates: BinaryVariant[] = [];
+  const add = (v: BinaryVariant) => {
+    if (offered[v] !== undefined && !candidates.includes(v)) candidates.push(v);
+  };
+  add(target);
+  for (const v of variantPreference(backend)) add(v);
+  add("cpu");
+  let lastErr: unknown;
+  for (const v of candidates) {
+    try {
+      const resolved = await resolveBinaryEntry(entry, triple, v);
+      if (resolved) {
+        if (v !== target) {
+          log.warn(`${kind}: ${target} variant unavailable upstream; falling back to ${v}`);
+        }
+        return resolved;
+      }
+    } catch (err) {
+      // A per-variant resolve failure (missing asset/digest, or a network error)
+      // is not fatal on its own: try the next candidate. Only if EVERY candidate
+      // fails do we surface the last error to the caller.
+      lastErr = err;
+      log.warn(`${kind}: resolving ${v} for ${triple} failed: ${errMessage(err)}`);
+    }
+  }
+  if (lastErr) throw lastErr;
+  return null;
+}
 
 const log = getLogger("binaries");
 
@@ -55,15 +158,48 @@ export function onBinaryInstalled(fn: BinaryInstalledListener): () => void {
   return () => binaryInstalledListeners.delete(fn);
 }
 
-/** Per-binary installed-version index. Updated on successful install /
- *  update so /api/v1/binaries/check can report what's actually on disk vs
- *  what the manifest currently publishes. */
-async function readInstalledVersions(): Promise<Record<string, string>> {
+interface InstalledRecord {
+  version: string;
+  /** The variant actually installed on disk. */
+  variant: BinaryVariant;
+  /** The desired variant we AIMED for at install time. Differs from `variant`
+   *  only when that ideal wasn't resolvable upstream and we degraded (latest
+   *  channel: a renamed/removed GPU asset). The present/stale check compares the
+   *  CURRENT desired against this, network-free, so a permanent, unavoidable
+   *  fallback SETTLES instead of looping the download popup; check() (consented
+   *  network) still upgrades if the ideal later becomes available. */
+  target: BinaryVariant;
+}
+
+/** Per-binary installed-version + variant index. Updated on successful install /
+ *  update so /api/v1/binaries/check can report what's actually on disk (version
+ *  AND GPU variant) vs what the manifest + detected hardware call for. A legacy
+ *  bare-string value (version only, pre-variant) normalizes to the `cpu`
+ *  variant. */
+async function readInstalled(): Promise<Record<string, InstalledRecord>> {
   try {
     const text = await Deno.readTextFile(join(paths().binDir, "versions.json"));
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === "object") {
-      return parsed as Record<string, string>;
+      const out: Record<string, InstalledRecord> = {};
+      for (const [kind, val] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof val === "string") {
+          // Legacy bare-string value (version only, pre-variant): cpu, and its
+          // own variant is the target it aimed for.
+          out[kind] = { version: val, variant: "cpu", target: "cpu" };
+        } else if (
+          val &&
+          typeof val === "object" &&
+          typeof (val as InstalledRecord).version === "string"
+        ) {
+          const rec = val as Partial<InstalledRecord> & { version: string };
+          const variant = rec.variant ?? "cpu";
+          // A record written before `target` existed aimed for exactly what it
+          // installed, so default target to that variant.
+          out[kind] = { version: rec.version, variant, target: rec.target ?? variant };
+        }
+      }
+      return out;
     }
   } catch (err) {
     if (!(err instanceof Deno.errors.NotFound)) {
@@ -73,9 +209,14 @@ async function readInstalledVersions(): Promise<Record<string, string>> {
   return {};
 }
 
-async function writeInstalledVersion(kind: BinaryKind, version: string): Promise<void> {
-  const versions = await readInstalledVersions();
-  versions[kind] = version;
+async function writeInstalledVersion(
+  kind: BinaryKind,
+  version: string,
+  variant: BinaryVariant,
+  target: BinaryVariant,
+): Promise<void> {
+  const versions = await readInstalled();
+  versions[kind] = { version, variant, target };
   await Deno.writeTextFile(
     join(paths().binDir, "versions.json"),
     JSON.stringify(versions, null, 2) + "\n",
@@ -90,12 +231,26 @@ export interface BinaryUpdateCheck {
   available: boolean;
 }
 
+/** The GPU variant currently installed on disk for `kind` (from versions.json),
+ *  or null when the binary isn't installed. Lets the speech sidecar pick the
+ *  ONNX execution provider that matches the binary it will actually launch. */
+export async function installedVariant(kind: BinaryKind): Promise<BinaryVariant | null> {
+  const versions = await readInstalled();
+  return versions[kind]?.variant ?? null;
+}
+
 export class BinariesManager {
   // List the install state of every known binary kind. Used by
   // GET /api/v1/binaries.
   async list(): Promise<BinaryStatus[]> {
     const manifest = await loadBinaryManifest().catch(() => null);
-    const versions = await readInstalledVersions();
+    const versions = await readInstalled();
+    const triple = hostTriple();
+    // Settings (override) + hardware (detected backend) drive the desired
+    // variant. Both are local (file read + in-process-cached probe), so a plain
+    // list still never hits the network.
+    const settings = await loadCoreSettingsResolved().catch(() => ({}) as Record<string, unknown>);
+    const backend = (await detectHardware().catch(() => null))?.gpu.backend ?? "cpu";
     const out: BinaryStatus[] = [];
     for (const kind of BINARY_KINDS) {
       const path = join(paths().binDir, binaryName(kind));
@@ -106,7 +261,7 @@ export class BinariesManager {
       // entries report their published version.
       const version = entry
         ? isResolverEntry(entry)
-          ? (versions[kind] ?? "latest")
+          ? (versions[kind]?.version ?? "latest")
           : entry.version
         : "unknown";
       out.push({
@@ -114,6 +269,9 @@ export class BinariesManager {
         version,
         installed,
         path: installed ? path : undefined,
+        variant: installed ? versions[kind]?.variant : undefined,
+        target: installed ? versions[kind]?.target : undefined,
+        desiredVariant: entry ? desiredVariant(entry, triple, kind, backend, settings) : undefined,
       });
     }
     return out;
@@ -123,38 +281,53 @@ export class BinariesManager {
   // version. Drives the UpdateButton's "updates available" affordance.
   async check(): Promise<BinaryUpdateCheck[]> {
     const manifest = await loadBinaryManifest({ force: true });
-    const versions = await readInstalledVersions();
+    const versions = await readInstalled();
     const triple = hostTriple();
+    const settings = await loadCoreSettingsResolved().catch(() => ({}) as Record<string, unknown>);
+    const backend = (await detectHardware().catch(() => null))?.gpu.backend ?? "cpu";
     const out: BinaryUpdateCheck[] = [];
     for (const kind of BINARY_KINDS) {
       const path = join(paths().binDir, binaryName(kind));
       const installed = await fileExists(path);
-      const installedVersion = versions[kind] ?? null;
-      // Resolve the latest available version for this host. For latest resolver
-      // entries this hits GitHub; a per-kind failure (missing asset/digest)
-      // degrades to "no update" rather than failing the whole check.
+      const installedRec = versions[kind] ?? null;
+      const installedVersion = installedRec?.version ?? null;
+      // Resolve the latest available version for this host + desired variant.
+      // For latest resolver entries this hits GitHub; a per-kind failure
+      // (missing asset/digest) degrades to "no update" rather than failing the
+      // whole check.
       let latestVersion = "unknown";
       let resolvable = false;
+      // The variant that WOULD actually install: the desired one, or its
+      // best-resolvable fallback. check() runs on the consented update path, so
+      // it can afford the network to learn what's genuinely installable (unlike
+      // the network-free present-check, which compares stored targets instead).
+      let effectiveVariant: BinaryVariant = "cpu";
       const entry = manifest.binaries[kind];
       if (entry) {
+        const wantTarget = desiredVariant(entry, triple, kind, backend, settings);
         try {
-          const resolved = await resolveBinaryEntry(entry, triple);
+          const resolved = await resolveWithFallback(kind, entry, triple, wantTarget, backend);
           if (resolved) {
             latestVersion = resolved.version;
+            effectiveVariant = resolved.variant;
             resolvable = true;
           }
         } catch (err) {
           log.warn(`check ${kind}: resolve failed: ${errMessage(err)}`);
         }
       }
-      // "available" means we should (re)install: the binary is missing, or the
-      // recorded install version disagrees with the latest. Guarded on
-      // `resolvable` so a triple with no upstream asset (e.g. whisper on
-      // mac/linux) never shows a phantom update. An installed-but-unknown
-      // version (pre-tracking) is treated as current.
-      const available =
-        resolvable &&
-        (!installed || (installedVersion !== null && installedVersion !== latestVersion));
+      // "available" means we should (re)install: the binary is missing, the
+      // recorded install version disagrees with the latest, OR the installed GPU
+      // variant differs from the best one now installable (e.g. a GPU appeared,
+      // the override changed, or a better upstream asset became available since a
+      // prior fallback). Comparing against the RESOLVED variant (not the ideal
+      // desired) means a still-unavailable GPU asset never shows a phantom update.
+      // Guarded on `resolvable` so a triple with no upstream asset never does
+      // either. An installed-but-unknown version (pre-tracking) is treated as
+      // current for the version check.
+      const versionStale = installedVersion !== null && installedVersion !== latestVersion;
+      const variantStale = installedRec !== null && installedRec.variant !== effectiveVariant;
+      const available = resolvable && (!installed || versionStale || variantStale);
       out.push({
         kind,
         installed,
@@ -173,6 +346,8 @@ export class BinariesManager {
   async probe(kinds: BinaryKind[]): Promise<BinaryProbeResult[]> {
     const manifest = await loadBinaryManifest().catch(() => null);
     const triple = hostTriple();
+    const settings = await loadCoreSettingsResolved().catch(() => ({}) as Record<string, unknown>);
+    const backend = (await detectHardware().catch(() => null))?.gpu.backend ?? "cpu";
     const out: BinaryProbeResult[] = [];
     for (const kind of kinds) {
       const entry = manifest?.binaries[kind];
@@ -181,7 +356,10 @@ export class BinariesManager {
         continue;
       }
       try {
-        const resolved = await resolveBinaryEntry(entry, triple);
+        const target = desiredVariant(entry, triple, kind, backend, settings);
+        // Size the variant that will actually install (target or its fallback),
+        // so the download-confirm popup shows the real size.
+        const resolved = await resolveWithFallback(kind, entry, triple, target, backend);
         if (!resolved) {
           out.push({ kind, version: "unknown" });
           continue;
@@ -207,8 +385,17 @@ export class BinariesManager {
     const targets = kinds ?? (await this.missingKinds());
     const jobIds: string[] = [];
     for (const kind of targets) {
-      const job = await this.kickoff(kind, manifest, triple);
-      jobIds.push(job);
+      // One kind failing to resolve (e.g. a renamed upstream GPU asset on the
+      // latest channel, so kickoff's pre-download resolve throws) must not block
+      // the others: log and continue so the remaining binaries still install.
+      // The failed kind stays missing and the requirements popup keeps offering
+      // it. update() (single kind) still surfaces the throw to its caller.
+      try {
+        const job = await this.kickoff(kind, manifest, triple);
+        jobIds.push(job);
+      } catch (err) {
+        log.error(`install ${kind}: ${errMessage(err)}`);
+      }
     }
     return { jobIds };
   }
@@ -241,12 +428,22 @@ export class BinariesManager {
     if (!entry) {
       throw new AppError("binary_not_found", `kind ${kind} not in manifest`);
     }
-    // Resolve to a concrete URL+hash+version. For pinned (stable) entries this
-    // is the stored data; for resolver (latest) entries it hits GitHub for the
+    const settings = await loadCoreSettingsResolved().catch(() => ({}) as Record<string, unknown>);
+    const backend = (await detectHardware().catch(() => null))?.gpu.backend ?? "cpu";
+    // The ideal variant this device wants; `resolveWithFallback` degrades to the
+    // best actually-installable one (target === resolved.variant in the normal
+    // case, differing only on a latest-channel asset miss). We record BOTH: the
+    // installed variant and the target aimed for.
+    const target = desiredVariant(entry, triple, kind, backend, settings);
+    // Resolve to a concrete URL+hash+version. For pinned (stable) entries this is
+    // the stored data; for resolver (latest) entries it hits GitHub for the
     // latest release and verifies via its published sha256 digest.
-    const resolved = await resolveBinaryEntry(entry, triple);
+    const resolved = await resolveWithFallback(kind, entry, triple, target, backend);
     if (!resolved) {
-      throw new AppError("binary_not_found", `kind ${kind} has no entry for triple ${triple}`);
+      throw new AppError(
+        "binary_not_found",
+        `kind ${kind} has no installable variant for triple ${triple}`,
+      );
     }
     const jobId = newJobId();
     const ext = resolved.url.toLowerCase().endsWith(".zip") ? "zip" : "tar.gz";
@@ -259,6 +456,7 @@ export class BinariesManager {
       // paths().stagingDir. Track the actual path so the failure-path cleanup
       // targets the real file instead of a non-existent stagingDir entry.
       let downloadedPath: string | undefined;
+      const extraPaths: string[] = [];
       try {
         downloadedPath = await downloadManager().enqueue({
           source: resolved.url,
@@ -269,11 +467,37 @@ export class BinariesManager {
           sha256: resolved.sha256,
         });
         log.info(`${kind}: downloaded to ${downloadedPath}`);
+        // Wipe the per-kind lib dir before extracting so a variant swap never
+        // leaves stale backend libs behind. This is required on Windows, where
+        // the sidecar's cwd is its lib dir and ggml_backend_load_all() scans it
+        // for compute-backend plugin DLLs; a leftover DLL from the old variant
+        // could crash or mis-select a backend.
+        await Deno.remove(libDirFor(paths().binDir, kind), { recursive: true }).catch(() => {});
         await extractArchive(downloadedPath, paths().binDir, kind);
+        // Companion archives (e.g. the Windows CUDA cudart runtime) carry only
+        // shared libs; extract them into the same bin/lib/<kind> dir.
+        for (let i = 0; i < (resolved.extras?.length ?? 0); i++) {
+          const extra = resolved.extras![i];
+          const extraExt = extra.url.toLowerCase().endsWith(".zip") ? "zip" : "tar.gz";
+          const p = await downloadManager().enqueue({
+            source: extra.url,
+            url: extra.url,
+            relPath: `staging/${kind}-extra${i}-${jobId}.${extraExt}`,
+            destination: "binaries",
+            groupId: `binary:${kind}`,
+            sha256: extra.sha256,
+          });
+          extraPaths.push(p);
+          await extractLibsOnly(p, paths().binDir, kind);
+        }
         await Deno.remove(downloadedPath);
         downloadedPath = undefined; // removed; nothing left to clean up
-        await writeInstalledVersion(kind, resolved.version);
-        log.info(`${kind}: installed v${resolved.version}`);
+        for (const p of extraPaths.splice(0)) await Deno.remove(p).catch(() => {});
+        await writeInstalledVersion(kind, resolved.version, resolved.variant, target);
+        log.info(
+          `${kind}: installed v${resolved.version} (${resolved.variant}` +
+            `${resolved.variant !== target ? `, wanted ${target}` : ""})`,
+        );
         for (const fn of binaryInstalledListeners) {
           try {
             fn(kind);
@@ -284,9 +508,9 @@ export class BinariesManager {
       } catch (err) {
         log.error(`${kind}: install failed: ${errMessage(err)}`);
       } finally {
-        if (downloadedPath) {
+        for (const p of [downloadedPath, ...extraPaths].filter((p): p is string => !!p)) {
           try {
-            await Deno.remove(downloadedPath);
+            await Deno.remove(p);
           } catch {
             /* fine */
           }
@@ -416,6 +640,52 @@ async function extractZip(archivePath: string, targetDir: string, kind: BinaryKi
   }
   if (!exeFound) {
     throw new AppError("extract_failed", `archive for ${kind} missing ${exeName}`);
+  }
+}
+
+// Extract ONLY the shared libraries from a companion archive into
+// bin/lib/<kind>/, ignoring everything else. Used for runtime-library archives
+// that carry no executable (e.g. the Windows CUDA `cudart` bundle:
+// cudart64_*.dll, cublas*.dll), so the exe-required check in extractArchive
+// would wrongly reject them. Dispatches on extension like extractArchive.
+export async function extractLibsOnly(
+  archivePath: string,
+  targetDir: string,
+  kind: BinaryKind,
+): Promise<void> {
+  const libDir = libDirFor(targetDir, kind);
+  await Deno.mkdir(libDir, { recursive: true });
+  if (archivePath.toLowerCase().endsWith(".zip")) {
+    const bytes = await Deno.readFile(archivePath);
+    const reader = new ZipReader(new Uint8ArrayReader(bytes));
+    try {
+      for (const entry of await reader.getEntries()) {
+        if (entry.directory || !entry.getData) continue;
+        const base = entry.filename.split("/").pop() ?? entry.filename;
+        if (!isSharedLib(base)) continue;
+        const data = await entry.getData(new Uint8ArrayWriter());
+        await writeBytesTo(data, join(libDir, base), 0o644);
+      }
+    } finally {
+      await reader.close();
+    }
+    return;
+  }
+  const file = await Deno.open(archivePath, { read: true });
+  const gunzip = new DecompressionStream("gzip");
+  const entries = file.readable.pipeThrough(gunzip).pipeThrough(new UntarStream());
+  for await (const entry of entries) {
+    const path = entry.path.replace(/^\.\//, "");
+    const base = path.split("/").pop() ?? path;
+    if (entry.header.typeflag !== "0" && entry.header.typeflag !== "") {
+      await entry.readable?.cancel();
+      continue;
+    }
+    if (isSharedLib(base)) {
+      await writeStreamTo(entry.readable, join(libDir, base), 0o644);
+    } else {
+      await entry.readable?.cancel();
+    }
   }
 }
 

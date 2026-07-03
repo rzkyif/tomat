@@ -22,7 +22,7 @@ $ErrorActionPreference = "Stop"
 # Pins. Deno: the build runtime (its denort is embedded into the core binary).
 $DenoVersion = "2.9.0"
 # Sherpa: must match packages/tomat-core-speech/Cargo.toml's sherpa-onnx version.
-$SherpaVersion = "1.13.2"
+$SherpaVersion = "1.13.3"
 $SherpaLibName = "sherpa-onnx-v$SherpaVersion-win-arm64-static-MT-Release-lib"
 $SherpaRoot = "C:\sherpa-onnx-libs"
 $DenoDir = "C:\deno"
@@ -63,6 +63,12 @@ Winget-Install "Microsoft.VisualStudio.2022.BuildTools" "--quiet --wait --norest
 Write-Host "==> CMake + Git"
 Winget-Install "Kitware.CMake"
 Winget-Install "Git.Git"
+
+Write-Host "==> NSIS (makensis, for the Core native installer)"
+# makensis compiles the hand-authored Core NSIS installer (core-installers.ts).
+# The Tauri client NSIS is built by Tauri's own bundled makensis; this is for the
+# standalone Core package.
+Winget-Install "NSIS.NSIS"
 
 Write-Host "==> rustup + toolchain 1.96.0 + both windows targets"
 Winget-Install "Rustlang.Rustup"

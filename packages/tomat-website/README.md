@@ -142,7 +142,11 @@ the `APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_PATH` App Store Connec
 trio) - these belong on the **macOS build runner only** (build-time signing, like
 the Tauri/Android keys), never the publish job. When unset the macOS bundle stays
 ad-hoc-signed and the iOS `.ipa` build/upload is skipped (the App Store item is
-inert). iOS is additionally gated behind an `IOS_ENABLED` repo **variable**: its
+inert). The Apple identity now also signs + notarizes the client `.dmg` and the
+Core `.pkg`. Optionally, the **dormant** Windows Authenticode vars
+(`WINDOWS_CERTIFICATE_THUMBPRINT` or `WINDOWS_SIGN_COMMAND`, with
+`WINDOWS_TIMESTAMP_URL`) sign the client + Core NSIS `.exe` installers on the
+**Windows build runner only**; unset today, so those installers ship unsigned. iOS is additionally gated behind an `IOS_ENABLED` repo **variable**: its
 CI jobs (the `ios` cross-compile check and the `.ipa` build on the release
 runner) stay skipped until that variable is `true`, so iOS consumes no runner
 minutes and cannot block PRs before the account is ready. iOS is distributed

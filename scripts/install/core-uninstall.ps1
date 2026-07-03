@@ -268,136 +268,65 @@ if ($Channel -notin @("stable", "dev", "latest")) {
 $HomeDir = if ($env:TOMAT_CORE_HOME) { $env:TOMAT_CORE_HOME } else { Join-Path $HOME ".tomat\$Channel\core" }
 # Channel-suffixed task + process names (stable stays bare).
 $ChannelSuffix = if ($Channel -eq "stable") { "" } else { "-$Channel" }
-$TaskName = "tomat-core$ChannelSuffix"
-$ProcName = "tomat-core$ChannelSuffix"
-# Core seals its secrets-vault master key in the OS keychain under this
-# service/account (mirrors secrets.ts); the helper that manages it is
-# channel-suffixed like every core binary (mirrors paths.ts coreBinaryName).
-$KeychainExe = Join-Path $HomeDir "bin\tomat-core-keychain$ChannelSuffix.exe"
-$KeychainService = "au.tomat.core$ChannelSuffix"
-$KeychainAccount = "master-key"
-
-# --- pick the data-removal label up front --------------------------------
-
-if ($KeepData) {
-  $DataLabel = "Removing $HomeDir (skipped per -KeepData)"
-} else {
-  $DataLabel = "Removing $HomeDir"
-}
+$Installed = Join-Path $HomeDir "bin\tomat-core$ChannelSuffix.exe"
 
 # --- begin UI -------------------------------------------------------------
 
+# The whole teardown - stop + unregister the Scheduled Task, kill stragglers,
+# clear the keychain master key, remove ~/.tomat/<channel>/core (preserving the
+# shared ~/.tomat/models) - is done by the core binary's uninstall-service
+# subcommand, the single source of truth. This is a thin wrapper with a
+# best-effort fallback for the rare case where the binary is already gone.
+
 try {
   Ui-Init "tomat-core uninstaller"
+  $Idx = Ui-ActionAdd "Removing tomat-core (service, keychain, data)"
+  Ui-ActionStart $Idx "Removing tomat-core (service, keychain, data)"
 
-  $IdxTask = Ui-ActionAdd "Unregistering Windows scheduled task '$TaskName'"
-  $IdxKill = Ui-ActionAdd "Killing straggler tomat-core processes"
-  $IdxKeychain = Ui-ActionAdd "Clearing keychain entry"
-  $IdxData = Ui-ActionAdd $DataLabel
-
-  # --- action 1: unregister scheduled task -------------------------------
-
-  $existingTask = $null
-  try {
-    $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-  } catch { }
-
-  if (-not $existingTask) {
-    Ui-ActionSkip $IdxTask "(task not found)"
-  } else {
-    Ui-ActionStart $IdxTask "Unregistering Windows scheduled task '$TaskName'"
-    try {
-      Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-      Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-    } catch { }
-
-    $stillThere = $null
-    try {
-      $stillThere = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    } catch { }
-
-    if ($stillThere) {
-      Ui-ActionError $IdxTask "(could not unregister)"
+  if (Test-Path $Installed) {
+    $env:TOMAT_CHANNEL = $Channel
+    if ($KeepData) {
+      & $Installed uninstall-service --keep-data 1>&2
     } else {
-      Ui-ActionDone $IdxTask "(unregistered)"
+      & $Installed uninstall-service 1>&2
     }
-  }
-
-  # --- action 2: kill straggler processes --------------------------------
-
-  $stragglers = @(Get-Process -Name $ProcName -ErrorAction SilentlyContinue)
-
-  if ($stragglers.Count -eq 0) {
-    Ui-ActionSkip $IdxKill "(none found)"
-  } else {
-    Ui-ActionStart $IdxKill "Killing straggler tomat-core processes" "($($stragglers.Count) found)"
-    $killed = 0
-    foreach ($p in $stragglers) {
+    if ($LASTEXITCODE -eq 0) {
+      Ui-ActionDone $Idx
+    } else {
+      Ui-ActionError $Idx "(uninstall-service reported an error; see output above)"
+    }
+    # uninstall-service (the running tomat-core.exe) cannot delete its own locked
+    # image on Windows, so it clears the keychain + data but leaves the binary +
+    # its dir behind. Now that the subcommand has exited the image is unlocked;
+    # sweep the leftover ~/.tomat/<channel>/core (and the channel dir if empty).
+    if ((-not $KeepData) -and (Test-Path $HomeDir)) {
       try {
-        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-        # Verify it actually died.
-        Start-Sleep -Milliseconds 100
-        $alive = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
-        if (-not $alive) {
-          $killed = $killed + 1
+        Remove-Item -Recurse -Force $HomeDir -ErrorAction Stop
+        $channelDir = Split-Path -Parent $HomeDir
+        if ((Test-Path $channelDir) -and -not (Get-ChildItem -Force $channelDir)) {
+          Remove-Item -Force $channelDir -ErrorAction SilentlyContinue
         }
       } catch { }
     }
-    Ui-ActionDone $IdxKill "(killed $killed)"
-  }
-
-  # --- action 3: clear the keychain master key ---------------------------
-  # Done before the dir is removed (the helper lives under bin\). Skipped under
-  # -KeepData so the kept vault stays decryptable. Delete is idempotent, so it
-  # is a no-op on dev (file fallback) and on re-runs.
-
-  if ($KeepData) {
-    Ui-ActionSkip $IdxKeychain "(kept with data)"
-  } elseif (Test-Path $KeychainExe) {
-    Ui-ActionStart $IdxKeychain "Clearing keychain entry"
-    # delete is idempotent (exit 0 even if absent), so a non-zero exit is a real
-    # failure (keychain locked / unavailable) worth reporting rather than masking.
-    $cleared = $false
+  } else {
+    # Binary already gone (partial install / prior removal): tear the Scheduled
+    # Task and data down directly. The keychain master key can't be cleared
+    # without the helper, so it is left behind.
+    $task = "tomat-core$ChannelSuffix"
     try {
-      & $KeychainExe delete $KeychainService $KeychainAccount 2>$null | Out-Null
-      if ($LASTEXITCODE -eq 0) { $cleared = $true }
+      Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+      Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
     } catch { }
-    if ($cleared) {
-      Ui-ActionDone $IdxKeychain "(cleared)"
-    } else {
-      Ui-ActionSkip $IdxKeychain "(could not clear)"
-    }
-  } else {
-    Ui-ActionSkip $IdxKeychain "(helper not present)"
-  }
-
-  # --- action 4: remove home dir -----------------------------------------
-
-  if ($KeepData) {
-    Ui-ActionSkip $IdxData "(kept per -KeepData)"
-  } elseif (-not (Test-Path $HomeDir)) {
-    Ui-ActionSkip $IdxData "(directory not found)"
-  } else {
-    Ui-ActionStart $IdxData "Removing $HomeDir"
-    try {
+    if ((-not $KeepData) -and (Test-Path $HomeDir)) {
       Remove-Item -Recurse -Force $HomeDir
-    } catch {
-      Ui-Die "Failed to remove $HomeDir" `
-        $_.Exception.Message `
-        "a process may still be holding the directory open; re-run after closing tomat"
+      $channelDir = Split-Path -Parent $HomeDir
+      try {
+        if ((Test-Path $channelDir) -and -not (Get-ChildItem -Force $channelDir)) {
+          Remove-Item -Force $channelDir
+        }
+      } catch { }
     }
-    # Best-effort: drop the now-empty channel dir (~/.tomat/<channel>) left behind
-    # once both core and client data are gone. Only when empty, so a client still
-    # installed on this channel keeps it. The shared models dir lives under
-    # ~/.tomat, not the channel dir, so it is never affected. Mirrors
-    # core-uninstall.sh's `rmdir "$(dirname "$HOME_DIR")"`.
-    $channelDir = Split-Path -Parent $HomeDir
-    try {
-      if ((Test-Path $channelDir) -and -not (Get-ChildItem -Force $channelDir)) {
-        Remove-Item -Force $channelDir
-      }
-    } catch { }
-    Ui-ActionDone $IdxData "(removed)"
+    Ui-ActionDone $Idx "(binary missing; removed service + data directly)"
   }
 
   # --- footer ------------------------------------------------------------
@@ -408,13 +337,13 @@ try {
       "",
       "$HomeDir kept per -KeepData.",
       "",
-      "Models in ~\.tomat\models\ were left in place; remove manually if desired."
+      "Models in ~/.tomat/models/ were left in place; remove manually if desired."
     )
   } else {
     Ui-Finish @(
       "tomat-core uninstalled.",
       "",
-      "Models in ~\.tomat\models\ were left in place; remove manually if desired."
+      "Models in ~/.tomat/models/ were left in place; remove manually if desired."
     )
   }
 
