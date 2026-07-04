@@ -440,6 +440,18 @@ function clientBundleAlias(
   return undefined;
 }
 
+/** A non-stable channel's productName carries the channel-suffixed DISPLAY name
+ *  ("tomat (latest)"), which Tauri bakes verbatim - spaces and parens included -
+ *  into the built bundle filename. That filename becomes the R2 object key AND
+ *  the `url` in client.json the updater fetches, so a raw space/paren would land
+ *  in the CDN URL and break the download. Strip the " (channel)" wrapper back to
+ *  a URL-safe "-channel" here (mirrors android.ts keying by a fixed clean name).
+ *  Stable's productName has no such wrapper, so this is a no-op there. Paired with
+ *  the productName format in scripts/build-client.ts. */
+function urlSafeBundleName(filename: string): string {
+  return filename.replace(/ \(([^)]+)\)/, "-$1");
+}
+
 /** Compose client.json from the union of platform descriptors, Ed25519-sign the
  *  detached client.json.sig, and upload the bundles + manifest to R2. Carry
  *  forward any platform from the live manifest at the same version that this run
@@ -474,7 +486,7 @@ export async function composeAndUploadClient(
   for (const d of descriptors) {
     // Re-anchor + verify the bundle bytes against the descriptor's sha256.
     const bundlePath = await reanchorFile(d.relPath, d.sha256);
-    const key = `${storagePrefix}${version}/${d.triple}/${d.filename}`;
+    const key = `${storagePrefix}${version}/${d.triple}/${urlSafeBundleName(d.filename)}`;
     platforms[d.tauriKey] = {
       signature: d.signature,
       url: `https://${env.storageDomain}/${key}`,
@@ -498,7 +510,7 @@ export async function composeAndUploadClient(
       downloads[d.tauriKey] = [];
       for (const dl of d.downloads) {
         const dlPath = await reanchorFile(dl.relPath, dl.sha256);
-        const dlKey = `${storagePrefix}${version}/${d.triple}/${dl.filename}`;
+        const dlKey = `${storagePrefix}${version}/${d.triple}/${urlSafeBundleName(dl.filename)}`;
         downloads[d.tauriKey].push({ ...dl, url: `https://${env.storageDomain}/${dlKey}` });
         uploads.push({
           key: dlKey,

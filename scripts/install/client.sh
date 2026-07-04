@@ -390,9 +390,9 @@ ui_die() {
 STORAGE="${TOMAT_STORAGE:-https://get.au.tomat.ing}"
 
 # Install channel: selectable via TOMAT_CHANNEL env or --channel <c> / --latest
-# (the arg wins). A latest client is a distinct app (tomat-latest.app, identifier
-# au.tomat.ing.latest) that coexists with stable and updates from the latest
-# manifest. Stable stays bare for back-compat.
+# (the arg wins). A latest client is a distinct app ("tomat (latest).app",
+# identifier au.tomat.ing.latest) that coexists with stable and updates from the
+# latest manifest. Stable stays bare for back-compat.
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --channel) TOMAT_CHANNEL="${2:-}"; shift 2 ;;
@@ -427,8 +427,8 @@ MANIFEST_URL="$STORAGE/$MANIFEST_DIR/client.json"
 # Channel-namespaced install targets. The macOS bundle installs under the
 # friendly DISPLAY_NAME (e.g. "tomat (latest).app") for a readable /Applications
 # entry; the install step copies the extracted app to this path regardless of
-# its internal productName basename ("tomat-<channel>.app"), so the dash never
-# reaches what the user sees. Linux keeps the dash form for the AppImage.
+# its internal productName basename, so the built name never leaks into the
+# install path. Linux uses the dashed form for the AppImage.
 APP_DEST="/Applications/$DISPLAY_NAME.app"              # macOS (e.g. "tomat (latest).app")
 APPIMAGE_NAME="tomat-client$CHANNEL_SUFFIX"             # linux
 
@@ -816,8 +816,9 @@ if [ "$uname_os" = "Darwin" ]; then
     # Locate the .app inside the tarball (its basename validates the archive),
     # then install it to the canonical channel path APP_DEST regardless of the
     # internal basename, so the pre-check, the Gatekeeper step, and the footer
-    # all agree on one location. productName is exactly tomat<suffix>, but copying
-    # to an explicit destination keeps that assumption from leaking.
+    # all agree on one location. The built bundle is named after productName
+    # (stable "tomat", non-stable "tomat (latest)" / "tomat (dev)"); copying to an
+    # explicit destination keeps that name from leaking into the install path.
     APP_SRC="$(find "$EXTRACT_DIR" -maxdepth 2 -name "*.app" -type d | head -n1)"
     if [ -z "$APP_SRC" ]; then
       ui_die "Client tarball is corrupted" \
@@ -856,11 +857,11 @@ if [ "$uname_os" = "Darwin" ]; then
     rm -rf "$EXTRACT_DIR" 2>/dev/null || true
     rm -f "$TARBALL" 2>/dev/null || true
 
-    # Give the bundle the friendly display name. The built bundle's CFBundleName
-    # is the productName basename ("tomat-<channel>"), which is what Finder's
-    # "Open With" / app picker shows; overriding CFBundleDisplayName here makes
-    # every user-facing surface read DISPLAY_NAME (e.g. "tomat (latest)") instead
-    # of the dashed form, matching the "tomat (latest).app" filename.
+    # Give the bundle the friendly display name. CFBundleName is the productName
+    # basename, which is what Finder's "Open With" / app picker shows; setting
+    # CFBundleDisplayName to DISPLAY_NAME (e.g. "tomat (latest)") makes every
+    # user-facing surface read the same friendly name as the "tomat (latest).app"
+    # filename.
     PLIST_INFO="$APP_DEST/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $DISPLAY_NAME" "$PLIST_INFO" 2>/dev/null \
       || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $DISPLAY_NAME" "$PLIST_INFO" 2>/dev/null \

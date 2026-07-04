@@ -270,9 +270,15 @@ async function startBackground(): Promise<void> {
 
 async function killStragglers(): Promise<void> {
   const binName = coreBinaryName("tomat-core");
+  // uninstall-service runs FROM the tomat-core<suffix> binary it is sweeping, so
+  // every match below includes THIS process. Excluding our own PID keeps
+  // killStragglers from terminating the uninstall mid-flight, before it clears
+  // the keychain master key and removes the core dir.
+  const self = Deno.pid;
   if (Deno.build.os === "windows") {
     await runPwsh(
       `Get-Process -Name '${binName.replace(/\.exe$/, "")}' -ErrorAction SilentlyContinue | ` +
+        `Where-Object { $_.Id -ne ${self} } | ` +
         `Stop-Process -Force -ErrorAction SilentlyContinue`,
       { ignoreError: true },
     );
@@ -284,7 +290,8 @@ async function killStragglers(): Promise<void> {
   const pids = found.stdout
     .split(/\s+/)
     .map((s) => s.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((pid) => pid !== String(self));
   for (const pid of pids) await run(["kill", pid], { ignoreError: true });
   // Brief grace, then SIGKILL any survivors.
   await new Promise((r) => setTimeout(r, 1000));

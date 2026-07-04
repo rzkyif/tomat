@@ -144,7 +144,7 @@ export async function mintCodeWithAdminToken(
     body: JSON.stringify(req),
     mode: "capture",
   });
-  if (!ok(res)) throw new Error(`mint pairing code: HTTP ${res.status}`);
+  if (!ok(res)) throw apiError(res, "mint pairing code");
   return JSON.parse(text(res)) as PairingCodeResponse;
 }
 

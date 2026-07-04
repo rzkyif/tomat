@@ -50,7 +50,7 @@ await Deno.writeTextFile(join(ROOT, "packages/tomat-client/src/tauri/channel"), 
 // header note). Tauri deep-merges this over tauri.conf.json + tauri.android.conf.json.
 const override: Record<string, unknown> = {};
 if (channel !== "stable") {
-  override.productName = `tomat-${channel}`;
+  override.productName = `tomat (${channel})`;
 }
 
 // Invoke the Tauri CLI directly (not via `deno task ... --`) so `--config`

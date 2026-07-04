@@ -342,11 +342,19 @@ export class NewCoreWizard {
       });
       // Set the admin password the user chose. The terminal installer prompts
       // for it; the client install runs the script non-interactively, so we set
-      // it here over loopback using the freshly-written admin token.
+      // it here over loopback using the freshly-written admin token. The install
+      // just minted that token, so a missing one means a corrupt install: fail
+      // loudly rather than pair a Core with no admin password (which would
+      // silently discard the password the user was required to enter and leave
+      // them unable to pair further devices). Mirrors pairLocalAlreadyInstalled.
       const adminToken = await platform().pairing.readAdminToken();
-      if (adminToken) {
-        await setAdminPasswordWithToken(this.localBaseUrl, adminToken, this.installPassword);
+      if (!adminToken) {
+        throw new Error(
+          "Local Core admin token not found after install. The install may be " +
+            "corrupt. Delete ~/.tomat/core/ and try again.",
+        );
       }
+      await setAdminPasswordWithToken(this.localBaseUrl, adminToken, this.installPassword);
       this.busy = "claiming";
       await this.claimAndAdd(this.localBaseUrl, code, "Local Core", true);
     } catch (e) {

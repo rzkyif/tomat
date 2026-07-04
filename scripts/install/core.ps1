@@ -506,7 +506,7 @@ try {
 
   Ui-ActionStart $IdxDeps "Installing helpers + workers"
   $env:TOMAT_CHANNEL = $Channel
-  & $Installed self-install 1>&2
+  & $Installed self-install | ForEach-Object { [Console]::Error.WriteLine($_) }
   if ($LASTEXITCODE -ne 0) {
     Ui-Die "Failed to install helpers and workers" "" "re-run; verification output is above"
   }
@@ -515,7 +515,7 @@ try {
   Ui-ActionStart $IdxService "Registering background service"
   $env:TOMAT_INSTALL_SERVICE = $InstallService
   $env:TOMAT_INSTALL_BIND_ALL = $InstallBindAll
-  & $Installed install-service 1>&2
+  & $Installed install-service | ForEach-Object { [Console]::Error.WriteLine($_) }
   if ($LASTEXITCODE -ne 0) {
     Ui-Die "Failed to register the background service" "" "re-run with TOMAT_INSTALL_SERVICE=0 to launch core without a service"
   }

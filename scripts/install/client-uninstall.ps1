@@ -259,19 +259,21 @@ function Ui-Die($Reason, $Detail, $Hint) {
 # --- configuration --------------------------------------------------------
 
 # Channel via TOMAT_CHANNEL env. Selects the channel's client state dir + the
-# uninstall-registry DisplayName to match (tomat vs tomat-latest).
+# uninstall-registry DisplayName to match (tomat vs "tomat (latest)").
 $Channel = if ($env:TOMAT_CHANNEL) { $env:TOMAT_CHANNEL } else { "stable" }
 if ($Channel -notin @("stable", "dev", "latest")) {
   Write-Error "invalid TOMAT_CHANNEL: $Channel (expected stable, dev, or latest)"
   exit 1
 }
 $ClientDir = Join-Path $HOME ".tomat\$Channel\client"
-# Match this channel's product only. Stable is bare "tomat" (followed by a
-# space or end, but NOT "tomat-latest"); non-stable matches "tomat-<channel>".
+# Match this channel's product only, keyed off the NSIS DisplayName (= Tauri
+# productName; see build-client.ts). Stable is bare "tomat" (end, or followed by
+# a version digit); non-stable is "tomat (<channel>)". The stable pattern stops
+# at end-or-space-digit so it never matches the parenthesized non-stable names.
 if ($Channel -eq "stable") {
-  $ProductPattern = "^[Tt]omat($| )"
+  $ProductPattern = "^[Tt]omat($| \d)"
 } else {
-  $ProductPattern = "^[Tt]omat-$Channel($| )"
+  $ProductPattern = "^[Tt]omat \($Channel\)"
 }
 # HKCU first: the per-user NSIS install registers there. HKLM entries remain for
 # a legacy per-machine MSI install.
@@ -298,8 +300,8 @@ try {
   Ui-ActionStart $IdxLocate "Locating tomat in Windows uninstall registry"
 
   # Case-insensitive match on DisplayName, scoped to this channel's product
-  # (tomat 0.1.0 / tomat-latest 0.1.0). $ProductPattern excludes other channels
-  # so uninstalling stable never removes the latest app and vice versa.
+  # (stable "tomat", latest "tomat (latest)"). $ProductPattern excludes other
+  # channels so uninstalling stable never removes the latest app and vice versa.
   $product = $null
   foreach ($key in $UninstallKeys) {
     $product = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue |
@@ -388,21 +390,6 @@ try {
       }
     } else {
       Ui-ActionSkip $IdxRemove "(no uninstall command in registry)"
-    }
-  }
-
-  # Best-effort: the NSIS uninstaller removes shortcuts by the baked productName
-  # ("tomat-latest.lnk"), but this channel's installer renamed them to the friendly
-  # DisplayName ("tomat (latest).lnk"), so the uninstaller leaves those orphaned.
-  # Remove them here. Stable's productName equals its DisplayName, so NSIS already
-  # handled it and this is a no-op.
-  if ($Channel -ne "stable") {
-    $DisplayName = if ($Channel -eq "latest") { "tomat (latest)" } else { "tomat (dev)" }
-    foreach ($dir in @([Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop"))) {
-      $lnk = Join-Path $dir "$DisplayName.lnk"
-      if (Test-Path -LiteralPath $lnk) {
-        try { Remove-Item -LiteralPath $lnk -Force } catch { }
-      }
     }
   }
 

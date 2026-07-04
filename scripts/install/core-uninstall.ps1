@@ -286,9 +286,9 @@ try {
   if (Test-Path $Installed) {
     $env:TOMAT_CHANNEL = $Channel
     if ($KeepData) {
-      & $Installed uninstall-service --keep-data 1>&2
+      & $Installed uninstall-service --keep-data | ForEach-Object { [Console]::Error.WriteLine($_) }
     } else {
-      & $Installed uninstall-service 1>&2
+      & $Installed uninstall-service | ForEach-Object { [Console]::Error.WriteLine($_) }
     }
     if ($LASTEXITCODE -eq 0) {
       Ui-ActionDone $Idx
