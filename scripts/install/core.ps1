@@ -519,9 +519,22 @@ try {
   # TOMAT_INSTALL_SERVICE / TOMAT_INSTALL_BIND_ALL / TOMAT_INSTALL_BEHIND_PROXY
   # flow through the environment.
 
+  # The subcommand calls below are BARE on purpose: no pipeline, no capture, no
+  # redirection (the PowerShell mirror of core.sh's plain `>&2`). The core's
+  # install subcommands print progress to stderr and keep stdout clean, so a
+  # pipe would relay nothing anyway; worse, ANY PowerShell read of the
+  # subcommand's stdout hangs the TOMAT_INSTALL_SERVICE=0 path forever. Every
+  # spawn hop on Windows passes bInheritHandles, so the detached core that
+  # install-service leaves running inherits the pipe's write end, and the
+  # read-to-EOF never completes even after the subcommand exits (the client
+  # then sits at "Starting the Core (67%)" until its 45-minute cap). A bare
+  # call hands the child this script's own stdout/stderr handles (console or
+  # file, neither of which blocks on an open inherited copy), and
+  # $LASTEXITCODE still reports the subcommand's exit.
+
   Ui-ActionStart $IdxDeps "Installing helpers and workers"
   $env:TOMAT_CHANNEL = $Channel
-  & $Installed self-install | ForEach-Object { [Console]::Error.WriteLine($_) }
+  & $Installed self-install
   if ($LASTEXITCODE -ne 0) {
     Ui-Die "Failed to install helpers and workers" "" "re-run; verification output is above"
   }
@@ -531,7 +544,7 @@ try {
   $env:TOMAT_INSTALL_SERVICE = $InstallService
   $env:TOMAT_INSTALL_BIND_ALL = $InstallBindAll
   $env:TOMAT_INSTALL_BEHIND_PROXY = $InstallBehindProxy
-  & $Installed install-service | ForEach-Object { [Console]::Error.WriteLine($_) }
+  & $Installed install-service
   if ($LASTEXITCODE -ne 0) {
     Ui-Die "Failed to start the Core" "" "re-run with TOMAT_INSTALL_SERVICE=0 to launch core without a service"
   }
@@ -540,6 +553,9 @@ try {
   # --- mint the first pairing code ---------------------------------------
 
   Ui-ActionStart $IdxPair "Getting a pairing code" "(waiting for core)"
+  # Capturing stdout here is safe despite the no-pipeline rule above: this pipe
+  # is created AFTER the detached core was launched (so the core holds no copy
+  # of its write end), and mint-code spawns nothing that outlives it.
   $code = ""
   try {
     $pairJson = & $Installed mint-code 2>$null

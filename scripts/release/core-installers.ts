@@ -458,8 +458,20 @@ Section "Install"
   WriteRegStr HKCU "\${UNINST_KEY}" "QuietUninstallString" '"$INSTDIR\\uninstall.exe" /S'
   ; Provision + start via the binary's own subcommand (bootstrap, service or
   ; background launch, and the authoritative Add/Remove Programs entry).
-  nsExec::Exec 'cmd.exe /c set TOMAT_CHANNEL=${channel}&& set TOMAT_INSTALL_SERVICE=$ServiceFlag&& set TOMAT_INSTALL_BIND_ALL=$BindAllFlag&& "$INSTDIR\\bin\\${binName}" install-service'
-  Pop $0
+  ; Background mode must NOT run under nsExec: nsExec reads the command's
+  ; output through a pipe, the detached core that install-service leaves
+  ; running inherits that pipe's write end (every spawn hop on Windows passes
+  ; bInheritHandles), and nsExec's read-to-EOF then blocks forever even after
+  ; install-service exits (the same hang scripts/install/core.ps1 documents).
+  ; ExecWait uses no pipe, at the cost of a briefly visible console. Service
+  ; mode keeps nsExec's hidden console: the Task Scheduler starts the core
+  ; out-of-tree, so no long-lived process ever holds the pipe.
+  \${If} $ServiceFlag == "0"
+    ExecWait 'cmd.exe /c set TOMAT_CHANNEL=${channel}&& set TOMAT_INSTALL_SERVICE=$ServiceFlag&& set TOMAT_INSTALL_BIND_ALL=$BindAllFlag&& "$INSTDIR\\bin\\${binName}" install-service' $0
+  \${Else}
+    nsExec::Exec 'cmd.exe /c set TOMAT_CHANNEL=${channel}&& set TOMAT_INSTALL_SERVICE=$ServiceFlag&& set TOMAT_INSTALL_BIND_ALL=$BindAllFlag&& "$INSTDIR\\bin\\${binName}" install-service'
+    Pop $0
+  \${EndIf}
   DetailPrint "install-service exited $0"
 SectionEnd
 
