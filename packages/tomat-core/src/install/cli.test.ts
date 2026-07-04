@@ -6,6 +6,7 @@
 
 import { assertEquals, assertMatch } from "@std/assert";
 import { maybeRunInstallCommand } from "./cli.ts";
+import { enableBehindProxy } from "./bootstrap.ts";
 import { paths } from "../paths.ts";
 
 async function withDevCoreHome(fn: (home: string) => Promise<void>): Promise<void> {
@@ -61,5 +62,59 @@ Deno.test("bootstrap --bind-all seeds settings.json", async () => {
     assertEquals(await maybeRunInstallCommand(["bootstrap", "--bind-all"]), 0);
     const settings = JSON.parse(await Deno.readTextFile(paths().settingsFile));
     assertEquals(settings["server.bindHost"], "0.0.0.0");
+    assertEquals(settings["server.behindProxy"], undefined);
+  });
+});
+
+Deno.test("bootstrap --behind-proxy seeds settings.json, composing with --bind-all", async () => {
+  await withDevCoreHome(async () => {
+    assertEquals(await maybeRunInstallCommand(["bootstrap", "--bind-all", "--behind-proxy"]), 0);
+    const settings = JSON.parse(await Deno.readTextFile(paths().settingsFile));
+    assertEquals(settings["server.bindHost"], "0.0.0.0");
+    assertEquals(settings["server.behindProxy"], true);
+  });
+});
+
+Deno.test("bootstrap leaves an existing settings.json untouched", async () => {
+  await withDevCoreHome(async () => {
+    await maybeRunInstallCommand(["bootstrap"]);
+    await Deno.writeTextFile(paths().settingsFile, `{"server.bindHost":"127.0.0.1"}\n`);
+    assertEquals(await maybeRunInstallCommand(["bootstrap", "--bind-all", "--behind-proxy"]), 0);
+    const settings = JSON.parse(await Deno.readTextFile(paths().settingsFile));
+    assertEquals(settings["server.bindHost"], "127.0.0.1");
+    assertEquals(settings["server.behindProxy"], undefined);
+  });
+});
+
+// The enable-behind-proxy verb also restarts the OS service, so it is exercised
+// end to end, not here; this covers just the additive settings merge the "flip"
+// step relies on (the verb's restart half is service.ts's restartService).
+Deno.test("enableBehindProxy merges into an existing settings.json, keeping other keys", async () => {
+  await withDevCoreHome(async () => {
+    await maybeRunInstallCommand(["bootstrap"]);
+    // Stand in for the settings the running core has already written post-boot.
+    await Deno.writeTextFile(
+      paths().settingsFile,
+      JSON.stringify({ "server.bindHost": "0.0.0.0", "llm.model": "x" }),
+    );
+    await enableBehindProxy();
+    const settings = JSON.parse(await Deno.readTextFile(paths().settingsFile));
+    assertEquals(settings["server.behindProxy"], true);
+    assertEquals(settings["server.bindHost"], "0.0.0.0");
+    assertEquals(settings["llm.model"], "x");
+  });
+});
+
+Deno.test("enableBehindProxy creates settings.json when absent and is idempotent", async () => {
+  await withDevCoreHome(async () => {
+    // bootstrap (no seed flags) creates the dir tree but no settings.json.
+    await maybeRunInstallCommand(["bootstrap"]);
+    await enableBehindProxy();
+    let settings = JSON.parse(await Deno.readTextFile(paths().settingsFile));
+    assertEquals(settings["server.behindProxy"], true);
+    // A second run is a no-op.
+    await enableBehindProxy();
+    settings = JSON.parse(await Deno.readTextFile(paths().settingsFile));
+    assertEquals(settings["server.behindProxy"], true);
   });
 });

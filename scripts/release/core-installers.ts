@@ -351,6 +351,12 @@ async function signWindows(file: string, env: DeployEnv): Promise<void> {
   ]);
 }
 
+/** The human display name for a channel's Core, matching the Client's
+ *  parenthesized convention ("tomat (latest)"): never the raw -latest suffix. */
+function coreDisplayName(channel: ReleaseChannel): string {
+  return channel === "stable" ? "tomat Core" : `tomat Core (${channel})`;
+}
+
 function windowsNsi(
   channel: ReleaseChannel,
   version: string,
@@ -359,19 +365,82 @@ function windowsNsi(
   outFile: string,
 ): string {
   const suffix = channel === "stable" ? "" : `-${channel}`;
-  // Per-user install (no admin): drop the payload into %USERPROFILE%\.tomat\<ch>\
-  // core and run the subcommands. A native uninstaller (Add/Remove Programs) runs
-  // uninstall-service.
+  const displayName = coreDisplayName(channel);
+  // Per-user install (no admin): an options page (background service /
+  // LAN pairing, mirroring the install script's TOMAT_INSTALL_* env vars and
+  // the client wizard's toggles), then drop the payload into
+  // %USERPROFILE%\.tomat\<ch>\core and run the binary's own install-service.
+  //
+  // Uninstall entry ownership: install-service itself registers the
+  // Add/Remove Programs entry (see tomat-core src/install/service.ts), the
+  // same one every install front-end gets, whose command re-runs
+  // uninstall-service and sweeps the install dir (including uninstall.exe).
+  // The registry writes below are only the FALLBACK for an install-service
+  // failure mid-install: they run first, install-service overwrites them on
+  // success, and either command fully removes the install.
+  //
+  // A silent install (/S) skips the custom page; .onInit sets the defaults
+  // (service on, loopback only).
   return `!include "MUI2.nsh"
-Name "tomat Core${suffix}"
+!include "nsDialogs.nsh"
+!include "LogicLib.nsh"
+Name "${displayName}"
 OutFile "${outFile}"
 RequestExecutionLevel user
 InstallDir "$PROFILE\\.tomat\\${channel}\\core"
 !define UNINST_KEY "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\tomat-core${suffix}"
 
+Var ServiceCheckbox
+Var BindAllCheckbox
+Var ServiceFlag
+Var BindAllFlag
+
+Page custom CoreOptionsPage CoreOptionsPageLeave
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_TITLE "${displayName} is installed"
+!define MUI_FINISHPAGE_TEXT "The Core now runs in the background on this computer.$\\r$\\n$\\r$\\nOpen a tomat Client to pair it: choose to set up a Core on this computer and the Client finds it on its own."
+!insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
+
+Function .onInit
+  StrCpy $ServiceFlag "1"
+  StrCpy $BindAllFlag "0"
+FunctionEnd
+
+Function CoreOptionsPage
+  !insertmacro MUI_HEADER_TEXT "Options" "Choose how the Core runs on this computer."
+  nsDialogs::Create 1018
+  Pop $0
+  \${If} $0 == error
+    Abort
+  \${EndIf}
+  \${NSD_CreateCheckbox} 0 10u 100% 12u "Keep the Core running in the background"
+  Pop $ServiceCheckbox
+  \${NSD_Check} $ServiceCheckbox
+  \${NSD_CreateLabel} 10u 24u -10u 20u "Starts the Core at login so it is always ready. When off, a tomat Client on this computer starts it on demand."
+  Pop $0
+  \${NSD_CreateCheckbox} 0 52u 100% 12u "Allow other devices on this network to pair"
+  Pop $BindAllCheckbox
+  \${NSD_CreateLabel} 10u 66u -10u 20u "When off, only this computer can reach the Core. Changeable later in the Core's settings.json."
+  Pop $0
+  nsDialogs::Show
+FunctionEnd
+
+Function CoreOptionsPageLeave
+  \${NSD_GetState} $ServiceCheckbox $0
+  \${If} $0 == \${BST_CHECKED}
+    StrCpy $ServiceFlag "1"
+  \${Else}
+    StrCpy $ServiceFlag "0"
+  \${EndIf}
+  \${NSD_GetState} $BindAllCheckbox $0
+  \${If} $0 == \${BST_CHECKED}
+    StrCpy $BindAllFlag "1"
+  \${Else}
+    StrCpy $BindAllFlag "0"
+  \${EndIf}
+FunctionEnd
 
 Section "Install"
   SetOutPath "$INSTDIR\\bin"
@@ -379,16 +448,21 @@ Section "Install"
   SetOutPath "$INSTDIR\\workers"
   File /r "${join(payloadDir, "workers")}\\*"
   WriteUninstaller "$INSTDIR\\uninstall.exe"
-  WriteRegStr HKCU "\${UNINST_KEY}" "DisplayName" "tomat Core${suffix}"
+  WriteRegStr HKCU "\${UNINST_KEY}" "DisplayName" "${displayName}"
   WriteRegStr HKCU "\${UNINST_KEY}" "DisplayVersion" "${version}"
+  WriteRegStr HKCU "\${UNINST_KEY}" "Publisher" "tomat"
   WriteRegStr HKCU "\${UNINST_KEY}" "UninstallString" '"$INSTDIR\\uninstall.exe"'
   WriteRegStr HKCU "\${UNINST_KEY}" "QuietUninstallString" '"$INSTDIR\\uninstall.exe" /S'
-  ; Register the background service via the binary's own subcommand.
-  nsExec::Exec 'cmd.exe /c set TOMAT_CHANNEL=${channel}&& "$INSTDIR\\bin\\${binName}" install-service'
+  ; Provision + start via the binary's own subcommand (bootstrap, service or
+  ; background launch, and the authoritative Add/Remove Programs entry).
+  nsExec::Exec 'cmd.exe /c set TOMAT_CHANNEL=${channel}&& set TOMAT_INSTALL_SERVICE=$ServiceFlag&& set TOMAT_INSTALL_BIND_ALL=$BindAllFlag&& "$INSTDIR\\bin\\${binName}" install-service'
+  Pop $0
+  DetailPrint "install-service exited $0"
 SectionEnd
 
 Section "Uninstall"
   nsExec::Exec 'cmd.exe /c set TOMAT_CHANNEL=${channel}&& "$INSTDIR\\bin\\${binName}" uninstall-service'
+  Pop $0
   DeleteRegKey HKCU "\${UNINST_KEY}"
   RMDir /r "$INSTDIR"
 SectionEnd

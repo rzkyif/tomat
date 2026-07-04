@@ -20,7 +20,7 @@ import {
   probeCore,
   setAdminPasswordWithToken,
 } from "$lib/core";
-import { type DiscoveredCore, platform } from "$lib/platform";
+import { type DiscoveredCore, type InstallProgress, platform } from "$lib/platform";
 import { getLogger } from "$lib/util/log";
 import { isTauri } from "$lib/util/env";
 import { modelRecommendState, viewState } from "$stores";
@@ -57,6 +57,11 @@ export class NewCoreWizard {
   localBaseUrl = $state("https://127.0.0.1:7800");
 
   busy = $state<null | "installing" | "claiming" | "checking">(null);
+  // Live phase of the running local install (label + done/total), streamed
+  // from the installer transcript by the Rust trampoline. Non-null only while
+  // busy === "installing" on the script path; the button renders it as
+  // "<label> (<pct>%)" instead of the bare "Installing…".
+  installProgress = $state<InstallProgress | null>(null);
   error = $state("");
   remoteUrl = $state("");
   remoteName = $state("");
@@ -73,8 +78,13 @@ export class NewCoreWizard {
 
   view = $state<WizardView>("chooseDestination");
   destination = $state<"local" | "remote">("local");
-  installServiceChoice = $state(true);
+  installServiceChoice = $state(false);
   installNetworkChoice = $state(false);
+  // Whether the new Core will be reached through a terminating HTTPS proxy. When
+  // on, the Core is switched into behind-proxy mode AFTER this Client pairs over
+  // loopback (a proxy-served Core folds no cert pin, so it can't be paired over
+  // loopback); see pairLocal's post-pair flip.
+  installBehindProxyChoice = $state(false);
   // Admin password set at install. Required (entered twice) so the user can
   // later pair new devices remotely without reading the admin token off disk.
   installPassword = $state("");
@@ -173,6 +183,13 @@ export class NewCoreWizard {
         this.localAlreadyInstalled = false;
       }
     }
+  }
+
+  // The streamed installer's phase count, read in a fresh scope because inline
+  // reads of `installProgress` after the install await are narrowed to the
+  // pre-await null (TS cannot see the subscription callback's writes).
+  private streamedInstallTotal(): number {
+    return this.installProgress?.total ?? 1;
   }
 
   // A local pair can fail because the core died on boot (e.g. its port is
@@ -289,8 +306,9 @@ export class NewCoreWizard {
       await this.pairLocalAlreadyInstalled();
       return;
     }
-    this.installServiceChoice = true;
+    this.installServiceChoice = false;
     this.installNetworkChoice = false;
+    this.installBehindProxyChoice = false;
     this.view = "localConfirm";
   }
 
@@ -335,14 +353,30 @@ export class NewCoreWizard {
   async pairLocal(): Promise<void> {
     this.error = "";
     this.busy = "installing";
+    this.installProgress = null;
+    // Follow the installer's phases so the button can narrate them. Best-effort:
+    // a failed subscription just leaves the bare "Installing…" label.
+    let unsubscribe: (() => void) | null = null;
     try {
+      unsubscribe = await platform()
+        .pairing.subscribeInstallProgress((p) => {
+          this.installProgress = p;
+        })
+        .catch((e) => {
+          log.warn("install progress subscription failed", e);
+          return null;
+        });
       const code = await platform().pairing.installLocalCore({
         service: this.installServiceChoice,
         bindAll: this.installNetworkChoice,
       });
-      // Set the admin password the user chose. The terminal installer prompts
-      // for it; the client install runs the script non-interactively, so we set
-      // it here over loopback using the freshly-written admin token. The install
+      // The script is done; the remaining pre-pair work (admin password over
+      // loopback) is one quick step, shown as the final phase at 100%.
+      const total = this.streamedInstallTotal();
+      this.installProgress = { label: "Securing your Core", done: total, total };
+      // Set the admin password the user chose. The install script never
+      // prompts for one (it must run non-interactively), so we set it here
+      // over loopback using the freshly-written admin token. The install
       // just minted that token, so a missing one means a corrupt install: fail
       // loudly rather than pair a Core with no admin password (which would
       // silently discard the password the user was required to enter and leave
@@ -357,10 +391,27 @@ export class NewCoreWizard {
       await setAdminPasswordWithToken(this.localBaseUrl, adminToken, this.installPassword);
       this.busy = "claiming";
       await this.claimAndAdd(this.localBaseUrl, code, "Local Core", true);
+      // "Install, pair, then flip": the pair above ran in pin mode over loopback
+      // (a proxy-served Core folds no cert pin, so loopback pairing must happen
+      // while the Core still pins). Only now switch the Core into behind-proxy
+      // mode and restart it, so later remote devices pair through the proxy. Our
+      // loopback pin survives the restart (same key, same cert on loopback).
+      // Best-effort: the Core is already paired and working, so a failed flip is
+      // logged, not surfaced (claimAndAdd has navigated away); the user can turn
+      // on server.behindProxy by hand (see the manual) if the flip did not land.
+      if (this.installBehindProxyChoice) {
+        try {
+          await platform().pairing.enableCoreBehindProxy(this.installServiceChoice);
+        } catch (e) {
+          log.warn("enable behind-proxy after pairing failed", e);
+        }
+      }
     } catch (e) {
       this.error = await this.localPairErrorMessage(e);
       this.busy = null;
     } finally {
+      unsubscribe?.();
+      this.installProgress = null;
       // If the user backgrounded the window mid-install, bring it back now that
       // the install has resolved (success unlocks the UI; failure shows the
       // error). show() is idempotent, so this is a no-op if the tray already

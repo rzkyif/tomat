@@ -46,6 +46,7 @@
   const channel: Channel = "latest";
   let bindAll = $state(false);
   let service = $state(true);
+  let behindProxy = $state(false);
   // Uninstall option, folded into the command like the core install toggles. It
   // reads as one axis ("keep my data"): on keeps, off deletes. Removing the
   // Client keeps its settings by default (on); removing the Core takes its data
@@ -70,7 +71,7 @@
         : coreUninstallCommand(os, channel, { keepData })
       : target === "client"
         ? clientCommand(os, channel)
-        : coreCommand(os, channel, { bindAll, service }),
+        : coreCommand(os, channel, { bindAll, service, behindProxy }),
   );
 
   // Native double-click installers for the current OS (the alternative to the
@@ -178,6 +179,16 @@
               checked={service}
               onchange={(v) => (service = v)}
               ariaLabel="Run in the background at login"
+            />
+          </div>
+        </label>
+        <label class="flex items-center justify-between gap-4">
+          <span class="text-sm text-default-700">Served through an HTTPS proxy</span>
+          <div class="w-24 shrink-0">
+            <Toggle
+              checked={behindProxy}
+              onchange={(v) => (behindProxy = v)}
+              ariaLabel="Served through an HTTPS proxy"
             />
           </div>
         </label>

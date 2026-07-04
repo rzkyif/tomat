@@ -143,6 +143,12 @@ const impl: Platform = {
       return null;
     },
     installLocalCore: unavailable("pairing.installLocalCore"),
+    subscribeInstallProgress() {
+      return Promise.resolve(() => {});
+    },
+    enableCoreBehindProxy() {
+      return Promise.resolve();
+    },
     isLocalCoreInstalled() {
       return Promise.resolve(false);
     },

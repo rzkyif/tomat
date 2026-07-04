@@ -14,6 +14,15 @@
   // primary buttons' spinner + label and disables controls.
   export type NewCoreWizardBusy = null | "installing" | "claiming" | "checking";
 
+  // The running local install's phase, streamed from the installer while
+  // busy === "installing". The install button shows "<label> (<pct>%)" so the
+  // user sees what is actually happening instead of a bare "Installing…".
+  export interface NewCoreInstallProgress {
+    label: string;
+    done: number;
+    total: number;
+  }
+
   // One LAN-discovered core row (pre-formatted host label + version).
   export interface NewCoreDiscoveredRow {
     pin: string;
@@ -54,8 +63,10 @@
     defaultRemoteName = "",
     remoteCodeValid = false,
     // Local-confirm step.
-    installServiceChoice = true,
+    installServiceChoice = false,
     installNetworkChoice = false,
+    installBehindProxyChoice = false,
+    installProgress = null,
     minAdminPasswordLength,
     installPasswordValid = false,
     onStepBack,
@@ -67,6 +78,7 @@
     onCheckConnection,
     onToggleService,
     onToggleNetwork,
+    onToggleBehindProxy,
     onPairLocal,
     onContinueInBackground,
     onPairRemote,
@@ -95,6 +107,8 @@
     remoteCodeValid?: boolean;
     installServiceChoice?: boolean;
     installNetworkChoice?: boolean;
+    installBehindProxyChoice?: boolean;
+    installProgress?: NewCoreInstallProgress | null;
     minAdminPasswordLength: number;
     installPasswordValid?: boolean;
     onStepBack?: () => void;
@@ -106,6 +120,7 @@
     onCheckConnection?: () => void;
     onToggleService?: () => void;
     onToggleNetwork?: () => void;
+    onToggleBehindProxy?: () => void;
     onPairLocal?: () => void;
     onContinueInBackground?: () => void;
     onPairRemote?: () => void;
@@ -117,6 +132,14 @@
   } = $props();
 
   const noop = (): void => {};
+
+  // "<label> (<pct>%)" for the install button while phases stream in, or null
+  // before the first phase lands (the button falls back to "Installing…").
+  const installProgressText = $derived.by(() => {
+    if (!installProgress || installProgress.total <= 0) return null;
+    const pct = Math.min(100, Math.round((installProgress.done / installProgress.total) * 100));
+    return `${installProgress.label} (${pct}%)`;
+  });
 </script>
 
 {#if onMobile}
@@ -590,6 +613,30 @@
       </div>
     </button>
 
+    <!-- Behind-proxy toggle. This device pairs directly over loopback either
+         way; the option switches the Core so OTHER devices reaching it through
+         an HTTPS proxy trust the proxy's certificate instead of the Core's. -->
+    <button
+      type="button"
+      class="flex items-start gap-3 bg-surface-inset rounded-large px-3 py-2.5 text-left hover:bg-surface-inset-strong hover:cursor-pointer transition-colors"
+      onclick={() => (onToggleBehindProxy ?? noop)()}
+      disabled={busy !== null}
+    >
+      <i
+        class="flex text-xl shrink-0 mt-0.5 {installBehindProxyChoice
+          ? 'i-material-symbols-check-box-rounded text-default-800'
+          : 'i-material-symbols-check-box-outline-blank text-default-500'}"
+      ></i>
+      <div class="flex flex-col gap-0.5 flex-1 min-w-0">
+        <span class="text-sm font-medium text-default-800"> Served through an HTTPS proxy </span>
+        <span class="text-xs text-default-500">
+          Turn this on only if other devices will reach this Core through a reverse proxy that
+          serves HTTPS, such as Caddy or Cloudflare. Those devices then trust the proxy's
+          certificate; this device stays paired directly. Leave it off for a normal local Core.
+        </span>
+      </div>
+    </button>
+
     <!-- Admin password. Required so the user can pair new devices remotely
          later (from a paired client) without reading the admin token off disk. -->
     <div class="flex flex-col gap-2">
@@ -636,7 +683,7 @@
       onclick={() => (onPairLocal ?? noop)()}
     >
       {#if busy === "installing"}
-        Installing…
+        {installProgressText ?? "Installing…"}
       {:else if busy === "claiming"}
         Pairing…
       {:else}

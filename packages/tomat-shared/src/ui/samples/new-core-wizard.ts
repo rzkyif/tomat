@@ -57,22 +57,25 @@ export const newCoreWizardSamples = {
     step: "localConfirm",
     canStepBack: true,
     coreSetupDocsUrl: DOCS_URL,
-    installServiceChoice: true,
+    installServiceChoice: false,
     installNetworkChoice: false,
+    installBehindProxyChoice: true,
     installPassword: "hunter2!",
     installPasswordConfirm: "hunter2!",
     installPasswordValid: true,
     minAdminPasswordLength: 8,
   },
   // Installing: the local install is running (spinner on the primary button,
-  // controls disabled), so the "Continue in the Background" escape hatch shows
+  // controls disabled), the button narrating the installer's current phase with
+  // a running percentage, so the "Continue in the Background" escape hatch shows
   // below it, letting the user drop the always-on-top setup window to the tray.
   installing: {
     step: "localConfirm",
     canStepBack: true,
     coreSetupDocsUrl: DOCS_URL,
     busy: "installing",
-    installServiceChoice: true,
+    installProgress: { label: "Downloading the Core", done: 2, total: 6 },
+    installServiceChoice: false,
     installNetworkChoice: false,
     installPassword: "hunter2!",
     installPasswordConfirm: "hunter2!",

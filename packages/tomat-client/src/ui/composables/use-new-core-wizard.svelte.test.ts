@@ -69,6 +69,10 @@ function makePlatform() {
       readAdminToken: vi.fn<() => Promise<string | null>>(async () => "admin-token"),
       readLocalCoreBootError: vi.fn<() => Promise<string | null>>(async () => null),
       installLocalCore: vi.fn(async () => "123456"),
+      subscribeInstallProgress: vi.fn<
+        (cb: (p: { label: string; done: number; total: number }) => void) => Promise<() => void>
+      >(async () => () => {}),
+      enableCoreBehindProxy: vi.fn<(service: boolean) => Promise<void>>(async () => {}),
       isLocalCoreInstalled: vi.fn(async () => false),
       startLocalCore: vi.fn(async () => true),
       localCoreBaseUrl: vi.fn(async () => LOCAL_URL),
@@ -242,7 +246,7 @@ describe("continueFromChoose", () => {
     w.localAlreadyInstalled = false;
     await w.continueFromChoose();
     expect(w.view).toBe("localConfirm");
-    expect(w.installServiceChoice).toBe(true);
+    expect(w.installServiceChoice).toBe(false);
     expect(w.installNetworkChoice).toBe(false);
     expect(plat.pairing.installLocalCore).not.toHaveBeenCalled();
   });
@@ -265,13 +269,13 @@ describe("continueFromChoose", () => {
 describe("pairLocal (install + pair)", () => {
   it("installs, sets the admin password, claims, and unlocks on the first core", async () => {
     const w = new NewCoreWizard(false);
-    w.installServiceChoice = true;
+    w.installServiceChoice = false;
     w.installNetworkChoice = false;
     w.installPassword = "hunter2-long";
     w.installPasswordConfirm = "hunter2-long";
     await w.pairLocal();
 
-    expect(plat.pairing.installLocalCore).toHaveBeenCalledWith({ service: true, bindAll: false });
+    expect(plat.pairing.installLocalCore).toHaveBeenCalledWith({ service: false, bindAll: false });
     expect(h.setAdminPasswordWithToken).toHaveBeenCalledWith(
       LOCAL_URL,
       "admin-token",
@@ -298,6 +302,47 @@ describe("pairLocal (install + pair)", () => {
     w.installPasswordConfirm = "hunter2-long";
     await w.pairLocal();
     expect(plat.pairing.installLocalCore).toHaveBeenCalledWith({ service: false, bindAll: true });
+  });
+
+  it("leaves the Core pinning when the behind-proxy option is off", async () => {
+    const w = new NewCoreWizard(false);
+    w.installBehindProxyChoice = false;
+    w.installPassword = "hunter2-long";
+    w.installPasswordConfirm = "hunter2-long";
+    await w.pairLocal();
+    // Paired over loopback in pin mode; no flip.
+    expect(h.pairWithCode).toHaveBeenCalledWith(LOCAL_URL, "tomat Client", "123456", false);
+    expect(plat.pairing.enableCoreBehindProxy).not.toHaveBeenCalled();
+  });
+
+  it("flips the Core into behind-proxy mode after pairing when the option is on", async () => {
+    const w = new NewCoreWizard(false);
+    w.installServiceChoice = true;
+    w.installBehindProxyChoice = true;
+    w.installPassword = "hunter2-long";
+    w.installPasswordConfirm = "hunter2-long";
+    await w.pairLocal();
+    // The pair still runs in pin mode over loopback; only afterward is the Core
+    // switched into behind-proxy mode, with the install's service choice.
+    expect(h.pairWithCode).toHaveBeenCalledWith(LOCAL_URL, "tomat Client", "123456", false);
+    expect(plat.pairing.enableCoreBehindProxy).toHaveBeenCalledWith(true);
+    const pairOrder = h.pairWithCode.mock.invocationCallOrder[0];
+    const flipOrder = plat.pairing.enableCoreBehindProxy.mock.invocationCallOrder[0];
+    expect(flipOrder).toBeGreaterThan(pairOrder);
+  });
+
+  it("keeps the completed pairing when the behind-proxy flip fails", async () => {
+    plat.pairing.enableCoreBehindProxy.mockRejectedValue(new Error("restart failed"));
+    const w = new NewCoreWizard(false);
+    w.installBehindProxyChoice = true;
+    w.installPassword = "hunter2-long";
+    w.installPasswordConfirm = "hunter2-long";
+    await w.pairLocal();
+    // Pairing succeeded and the UI advanced; the flip failure is swallowed.
+    expect(h.cores.addPaired).toHaveBeenCalled();
+    expect(h.viewState.navigate).toHaveBeenCalled();
+    expect(w.error).toBe("");
+    expect(w.busy).toBeNull();
   });
 
   it("routes an additional core back to the Cores settings manager", async () => {
@@ -327,6 +372,46 @@ describe("pairLocal (install + pair)", () => {
     expect(h.pairWithCode).not.toHaveBeenCalled(); // pairing aborted
     expect(h.cores.addPaired).not.toHaveBeenCalled();
     expect(w.error).toMatch(/admin token not found/i);
+    expect(w.busy).toBeNull();
+  });
+
+  it("streams installer phases into installProgress and clears them at the end", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let progressCb: ((p: { label: string; done: number; total: number }) => void) | null = null;
+    const unsubscribe = vi.fn(() => {});
+    plat.pairing.subscribeInstallProgress.mockImplementation(async (cb) => {
+      progressCb = cb;
+      return unsubscribe;
+    });
+    plat.pairing.installLocalCore.mockImplementation(async () => {
+      await gate;
+      return "123456";
+    });
+    const w = new NewCoreWizard(false);
+    w.installPassword = "hunter2-long";
+    w.installPasswordConfirm = "hunter2-long";
+
+    const done = w.pairLocal();
+    await vi.waitFor(() => expect(progressCb).not.toBeNull());
+    progressCb!({ label: "Downloading the Core", done: 2, total: 6 });
+    expect(w.installProgress).toEqual({ label: "Downloading the Core", done: 2, total: 6 });
+
+    release();
+    await done;
+    // Cleared once the flow resolves, and the subscription torn down.
+    expect(w.installProgress).toBeNull();
+    expect(unsubscribe).toHaveBeenCalled();
+  });
+
+  it("still installs when the progress subscription fails", async () => {
+    plat.pairing.subscribeInstallProgress.mockRejectedValue(new Error("no event bus"));
+    const w = new NewCoreWizard(false);
+    w.installPassword = "hunter2-long";
+    w.installPasswordConfirm = "hunter2-long";
+    await w.pairLocal();
+    expect(plat.pairing.installLocalCore).toHaveBeenCalled();
+    expect(w.error).toBe("");
     expect(w.busy).toBeNull();
   });
 

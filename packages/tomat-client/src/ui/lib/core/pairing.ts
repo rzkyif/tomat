@@ -108,8 +108,9 @@ export async function probeCore(
 
 /** Set the admin password on a freshly-installed local core, authorized by its
  *  on-disk admin token, over TOFU TLS. Used by the client's "install on this
- *  computer" flow (the terminal installer prompts instead). The password lets
- *  this and other paired devices mint codes / revoke remotely afterward. */
+ *  computer" flow (a terminal install sets none; the script only mints a
+ *  pairing code). The password lets this and other paired devices mint codes /
+ *  revoke remotely afterward. */
 export async function setAdminPasswordWithToken(
   baseUrl: string,
   adminToken: string,

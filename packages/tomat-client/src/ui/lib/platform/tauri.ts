@@ -205,6 +205,14 @@ const impl: Platform = {
         service: opts?.service ?? true,
         bindAll: opts?.bindAll ?? false,
       }),
+    async subscribeInstallProgress(cb) {
+      const unlisten = await listen<{ label: string; done: number; total: number }>(
+        "core-install-progress",
+        (e) => cb(e.payload),
+      );
+      return () => unlisten();
+    },
+    enableCoreBehindProxy: (service) => invoke("enable_core_behind_proxy", { service }),
     isLocalCoreInstalled: () => invoke("local_core_installed"),
     startLocalCore: () => invoke("start_local_core"),
     localCoreBaseUrl: () => invoke("local_core_base_url"),

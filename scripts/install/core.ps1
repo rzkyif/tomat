@@ -43,6 +43,13 @@
 #                               server.bindHost=0.0.0.0 so the freshly-installed
 #                               core listens on all interfaces and other LAN
 #                               devices can pair. "0" (default) keeps loopback.
+#   $env:TOMAT_INSTALL_BEHIND_PROXY
+#                               "1" seeds settings.json with
+#                               server.behindProxy=true for a core served
+#                               through an HTTPS reverse proxy: clients then
+#                               trust the proxy's real certificate when pairing
+#                               instead of pinning the core's own. Must be set
+#                               before the first pair. "0" (default) pins.
 #
 # UI:
 #   Each phase appears as one row. Pending rows show [ ], the active row
@@ -326,6 +333,7 @@ $LogsDir = Join-Path $HomeDir "logs"
 $ManifestUrl = "$Storage/$ManifestDir/core.json"
 $InstallService = if ($env:TOMAT_INSTALL_SERVICE) { $env:TOMAT_INSTALL_SERVICE } else { "1" }
 $InstallBindAll = if ($env:TOMAT_INSTALL_BIND_ALL) { $env:TOMAT_INSTALL_BIND_ALL } else { "0" }
+$InstallBehindProxy = if ($env:TOMAT_INSTALL_BEHIND_PROXY) { $env:TOMAT_INSTALL_BEHIND_PROXY } else { "0" }
 
 # The admin token, settings, Scheduled Task, and process names are all owned by
 # the core binary's install-service / mint-code subcommands now, so this script
@@ -345,21 +353,27 @@ foreach ($d in @($BinDir, $WorkersDir, $ExtensionsDir, $StagingDir, $LogsDir)) {
 # --- begin UI -------------------------------------------------------------
 
 try {
-  Ui-Init "tomat-core installer"
+  Ui-Init "tomat Core installer"
 
   # Register every row up front so the cursor knows the total height. The seed
   # binary is fetched + verified here; everything past it is delegated to the
   # core binary's install subcommands.
-  $IdxHost     = Ui-ActionAdd "Detecting host"
-  $IdxManifest = Ui-ActionAdd "Fetching manifest from get.au.tomat.ing"
-  $IdxBin      = Ui-ActionAdd "Installing core binary to $Installed"
-  $IdxDeps     = Ui-ActionAdd "Installing helpers + workers"
-  $IdxService  = Ui-ActionAdd "Registering background service"
-  $IdxPair     = Ui-ActionAdd "Minting pairing code at https://127.0.0.1:$CorePort"
+  #
+  # Row labels are user-facing copy in two places at once: this terminal AND
+  # the Client's install button, which tails the non-TTY transcript and shows
+  # the active row's label with a running percentage (tomat-client
+  # .../commands/pairing.rs). Keep them short, plain, and free of paths/URLs;
+  # put specifics in the suffix or the stderr progress lines instead.
+  $IdxHost     = Ui-ActionAdd "Checking this computer"
+  $IdxManifest = Ui-ActionAdd "Finding the newest Core"
+  $IdxBin      = Ui-ActionAdd "Downloading the Core"
+  $IdxDeps     = Ui-ActionAdd "Installing helpers and workers"
+  $IdxService  = Ui-ActionAdd "Starting the Core"
+  $IdxPair     = Ui-ActionAdd "Getting a pairing code"
 
   # --- action 1: detect host ----------------------------------------------
 
-  Ui-ActionStart $IdxHost "Detecting host"
+  Ui-ActionStart $IdxHost "Checking this computer"
 
   if (-not [Environment]::Is64BitOperatingSystem) {
     Ui-Die "Unsupported OS or architecture" `
@@ -373,7 +387,7 @@ try {
 
   # --- action 2: fetch manifest -------------------------------------------
 
-  Ui-ActionStart $IdxManifest "Fetching manifest from get.au.tomat.ing"
+  Ui-ActionStart $IdxManifest "Finding the newest Core"
 
   $manifest = $null
   try {
@@ -444,7 +458,7 @@ try {
   if ($ExistingOk) {
     Ui-ActionSkip $IdxBin "(already current)"
   } else {
-    Ui-ActionStart $IdxBin "Installing core binary to $Installed" "(downloading)"
+    Ui-ActionStart $IdxBin "Downloading the Core" "(downloading)"
 
     $BinTmp = Join-Path $StagingDir "tomat-core-$($manifest.version)-$([System.IO.Path]::GetRandomFileName()).exe"
     $BinGz = "$BinTmp.gz"
@@ -502,9 +516,10 @@ try {
   # workers + helpers, install-service writes the admin token / optional
   # bind-all / built-in extension and registers the Scheduled Task, and
   # mint-code prints the first pairing code as JSON. TOMAT_CHANNEL /
-  # TOMAT_INSTALL_SERVICE / TOMAT_INSTALL_BIND_ALL flow through the environment.
+  # TOMAT_INSTALL_SERVICE / TOMAT_INSTALL_BIND_ALL / TOMAT_INSTALL_BEHIND_PROXY
+  # flow through the environment.
 
-  Ui-ActionStart $IdxDeps "Installing helpers + workers"
+  Ui-ActionStart $IdxDeps "Installing helpers and workers"
   $env:TOMAT_CHANNEL = $Channel
   & $Installed self-install | ForEach-Object { [Console]::Error.WriteLine($_) }
   if ($LASTEXITCODE -ne 0) {
@@ -512,18 +527,19 @@ try {
   }
   Ui-ActionDone $IdxDeps
 
-  Ui-ActionStart $IdxService "Registering background service"
+  Ui-ActionStart $IdxService "Starting the Core"
   $env:TOMAT_INSTALL_SERVICE = $InstallService
   $env:TOMAT_INSTALL_BIND_ALL = $InstallBindAll
+  $env:TOMAT_INSTALL_BEHIND_PROXY = $InstallBehindProxy
   & $Installed install-service | ForEach-Object { [Console]::Error.WriteLine($_) }
   if ($LASTEXITCODE -ne 0) {
-    Ui-Die "Failed to register the background service" "" "re-run with TOMAT_INSTALL_SERVICE=0 to launch core without a service"
+    Ui-Die "Failed to start the Core" "" "re-run with TOMAT_INSTALL_SERVICE=0 to launch core without a service"
   }
   Ui-ActionDone $IdxService
 
   # --- mint the first pairing code ---------------------------------------
 
-  Ui-ActionStart $IdxPair "Minting pairing code at https://127.0.0.1:$CorePort" "(waiting for core)"
+  Ui-ActionStart $IdxPair "Getting a pairing code" "(waiting for core)"
   $code = ""
   try {
     $pairJson = & $Installed mint-code 2>$null
@@ -545,13 +561,14 @@ try {
     Ui-Finish @(
       "Pairing code: $code",
       "",
-      "Open tomat-client -> Pair -> enter:",
+      "Open a tomat Client, choose to pair with a Core on another computer,",
+      "and enter:",
       "  URL : https://127.0.0.1:$CorePort   (or this host's LAN IP)",
       "  Code: $code"
     )
   } else {
     Ui-Finish @(
-      "tomat-core installed. Mint a pairing code with:",
+      "The Core is installed. Get a pairing code with:",
       "  & '$Installed' mint-code"
     )
   }

@@ -310,13 +310,15 @@ try {
     }
   } else {
     # Binary already gone (partial install / prior removal): tear the Scheduled
-    # Task and data down directly. The keychain master key can't be cleared
-    # without the helper, so it is left behind.
+    # Task, the Add/Remove Programs entry, and data down directly. The keychain
+    # master key can't be cleared without the helper, so it is left behind.
     $task = "tomat-core$ChannelSuffix"
     try {
       Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
       Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
     } catch { }
+    Remove-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\tomat-core$ChannelSuffix" `
+      -Recurse -Force -ErrorAction SilentlyContinue
     if ((-not $KeepData) -and (Test-Path $HomeDir)) {
       Remove-Item -Recurse -Force $HomeDir
       $channelDir = Split-Path -Parent $HomeDir

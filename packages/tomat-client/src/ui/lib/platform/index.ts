@@ -156,6 +156,15 @@ export interface NetSocket {
   onError(cb: (reason?: string) => void): void;
 }
 
+/** One phase update of a running local-core install, parsed by the Rust
+ *  trampoline from the install script's transcript: the active phase's label
+ *  plus how many of the registered phases are done. */
+export interface InstallProgress {
+  label: string;
+  done: number;
+  total: number;
+}
+
 /** Severity levels for the client logger (lib/util/log.ts). */
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -314,6 +323,19 @@ export interface Platform {
      *  the settings schema (a paired client must not widen network exposure
      *  over the API); changing it later means editing that file by hand. */
     installLocalCore(opts?: { service?: boolean; bindAll?: boolean }): Promise<string>;
+    /** Subscribe to the running install's phase updates (label + done/total),
+     *  parsed from the installer's transcript. Fires only while
+     *  installLocalCore is in flight; returns an unsubscribe. */
+    subscribeInstallProgress(cb: (progress: InstallProgress) => void): Promise<() => void>;
+    /** Turn the just-installed local core into "served behind an HTTPS proxy"
+     *  mode and restart it. Called AFTER the loopback pair (a proxy-served core
+     *  folds no cert pin and so can't be paired over loopback), so this is a
+     *  separate step from installLocalCore rather than an install option. The
+     *  pin captured at pairing is unaffected, so this Client keeps connecting;
+     *  later remote devices reach the core through the proxy and validate its
+     *  certificate. `service` mirrors the install's background-service choice so
+     *  the restart uses the matching path. */
+    enableCoreBehindProxy(service: boolean): Promise<void>;
     /** Whether ~/.tomat/core/bin/tomat-core exists. Used at boot to decide
      *  whether we should attempt to spawn the local core for on-demand mode. */
     isLocalCoreInstalled(): Promise<boolean>;

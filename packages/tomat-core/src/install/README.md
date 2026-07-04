@@ -18,16 +18,20 @@ verification). Now verification runs once, here, in TypeScript.
 
 ## Subcommands (argv to the core binary)
 
-| Verb                | Does                                                                                                                                                                                                                                      |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `self-install`      | Fetch + verify + place the binary set from the signed `core.json`. Reuses `update/self-updater.ts`'s `fetchCoreManifest` (Ed25519) + `downloadAndVerify` (gzip + streaming sha256). Leaves the running core binary in place.              |
-| `bootstrap`         | Ensure the dir tree, mint the `.admin-token` (0600 / owner-only ACL), optionally seed `server.bindHost=0.0.0.0` (`--bind-all` / `TOMAT_INSTALL_BIND_ALL=1`), and plant the built-in extension for offline first-boot seeding. Idempotent. |
-| `install-service`   | `bootstrap`, then register + start the OS service.                                                                                                                                                                                        |
-| `mint-code`         | Wait for the daemon to bind, mint a pairing code with the admin token, print one JSON line `{ code, url, port }` on stdout.                                                                                                               |
-| `uninstall-service` | Stop + remove the service, kill stragglers, clear the keychain master key, remove `~/.tomat/<channel>/core` (unless `--keep-data`). Preserves the shared `~/.tomat/models`.                                                               |
+| Verb                  | Does                                                                                                                                                                                                                                                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `self-install`        | Fetch + verify + place the binary set from the signed `core.json`. Reuses `update/self-updater.ts`'s `fetchCoreManifest` (Ed25519) + `downloadAndVerify` (gzip + streaming sha256). Leaves the running core binary in place.                                                                                                   |
+| `bootstrap`           | Ensure the dir tree, mint the `.admin-token` (0600 / owner-only ACL), optionally seed `server.bindHost=0.0.0.0` (`--bind-all` / `TOMAT_INSTALL_BIND_ALL=1`) and/or `server.behindProxy=true` (`--behind-proxy` / `TOMAT_INSTALL_BEHIND_PROXY=1`), and plant the built-in extension for offline first-boot seeding. Idempotent. |
+| `install-service`     | `bootstrap`, then register + start the OS service.                                                                                                                                                                                                                                                                             |
+| `mint-code`           | Wait for the daemon to bind, mint a pairing code with the admin token, print one JSON line `{ code, url, port }` on stdout.                                                                                                                                                                                                    |
+| `uninstall-service`   | Stop + remove the service, kill stragglers, clear the keychain master key, remove `~/.tomat/<channel>/core` (unless `--keep-data`). Preserves the shared `~/.tomat/models`.                                                                                                                                                    |
+| `enable-behind-proxy` | Merge `server.behindProxy=true` into an existing `settings.json` and restart the daemon so it takes effect. The client's "install, pair, then flip" flow calls this AFTER the loopback pair (a proxy-served core folds no cert pin, so it cannot be paired over loopback). `TOMAT_INSTALL_SERVICE` selects the restart path.   |
 
 Env: `TOMAT_CHANNEL` (channel selection, via `paths.ts`), `TOMAT_INSTALL_SERVICE`
-(`0` = background launch, no service), `TOMAT_INSTALL_BIND_ALL`.
+(`0` = background launch, no service; also selects the `enable-behind-proxy`
+restart path), `TOMAT_INSTALL_BIND_ALL`, `TOMAT_INSTALL_BEHIND_PROXY` (`1` = seed
+`server.behindProxy=true` so pairing trusts an HTTPS proxy's certificate instead
+of pinning; set before first pair).
 
 ## Per-OS service registration
 
@@ -42,6 +46,11 @@ Mirrors what the scripts did, namespaced per channel (`channelSuffix()`), with
 - **Windows** - Task Scheduler `-AtLogOn` task `tomat-core<suffix>` (registered
   via PowerShell, matching `core.ps1`); non-stable channels wrap the launch in
   `cmd.exe` to set `TOMAT_CHANNEL` (scheduled tasks have no environment field).
+  Windows installs (service or background) also register a per-user
+  Add/Remove Programs entry (`HKCU\...\Uninstall\tomat-core<suffix>`, display
+  name "tomat Core (<channel>)") whose uninstall command runs
+  `uninstall-service` and then sweeps the core dir; `uninstall-service` removes
+  the entry.
 
 `TOMAT_INSTALL_SERVICE=0` skips the service and launches core in the background
 (the client then owns liveness).

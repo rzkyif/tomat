@@ -61,7 +61,7 @@ function cmdFor(os: DesktopOs): string {
   }
   return target === "client"
     ? clientCommand(os, CH)
-    : coreCommand(os, CH, { bindAll: false, service: true });
+    : coreCommand(os, CH, { bindAll: false, service: true, behindProxy: false });
 }
 const cmds: Record<DesktopOs, string> = {
   macos: cmdFor("macos"),
@@ -176,6 +176,11 @@ const codeBox =
             <li>
               <span class="font-mono text-default-900">TOMAT_INSTALL_SERVICE=0</span>
               skips the background service so you start the Core by hand.
+            </li>
+            <li>
+              <span class="font-mono text-default-900">TOMAT_INSTALL_BEHIND_PROXY=1</span>
+              marks the Core as served through an HTTPS proxy, so pairing trusts the proxy's
+              certificate. Set it before the first pair.
             </li>
           </ul>
           <p class="m-0">

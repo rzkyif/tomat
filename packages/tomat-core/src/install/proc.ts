@@ -12,17 +12,24 @@ export interface RunResult {
 
 /** Run a command to completion, capturing output. On a non-zero exit it prints
  *  the stderr as progress unless `ignoreError` is set (used for probes and
- *  best-effort teardown steps that are non-zero for benign reasons). */
+ *  best-effort teardown steps that are non-zero for benign reasons).
+ *
+ *  `capture: false` runs the child with null stdio instead of pipes. Required
+ *  when the child (or a grandchild) launches a process that outlives it: on
+ *  Windows a detached grandchild inherits the pipe write ends (.NET's
+ *  Start-Process passes bInheritHandles), so reading the pipes to EOF would
+ *  block for as long as that process lives - the "stuck on installing" hang. */
 export async function run(
   argv: string[],
-  opts: { env?: Record<string, string>; ignoreError?: boolean } = {},
+  opts: { env?: Record<string, string>; ignoreError?: boolean; capture?: boolean } = {},
 ): Promise<RunResult> {
+  const capture = opts.capture ?? true;
   const cmd = new Deno.Command(argv[0], {
     args: argv.slice(1),
     env: opts.env,
     stdin: "null",
-    stdout: "piped",
-    stderr: "piped",
+    stdout: capture ? "piped" : "null",
+    stderr: capture ? "piped" : "null",
   });
   let out: Deno.CommandOutput;
   try {
@@ -34,11 +41,12 @@ export async function run(
     return { code: 127, success: false, stdout: "", stderr: String(err) };
   }
   const dec = new TextDecoder();
+  // Deno.CommandOutput throws on reading a stream that wasn't piped.
   const res: RunResult = {
     code: out.code,
     success: out.success,
-    stdout: dec.decode(out.stdout),
-    stderr: dec.decode(out.stderr),
+    stdout: capture ? dec.decode(out.stdout) : "",
+    stderr: capture ? dec.decode(out.stderr) : "",
   };
   if (!res.success && !opts.ignoreError) {
     progress(`command failed (exit ${res.code}): ${argv.join(" ")}: ${res.stderr.trim()}`);
@@ -50,7 +58,7 @@ export async function run(
  *  result; callers decide whether a non-zero exit is fatal. */
 export async function runPwsh(
   script: string,
-  opts: { ignoreError?: boolean } = {},
+  opts: { ignoreError?: boolean; capture?: boolean } = {},
 ): Promise<RunResult> {
   return await run(
     [

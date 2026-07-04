@@ -54,9 +54,9 @@ pub use net::discover_lan_cores;
 pub use net::{net_fetch, net_ws_close, net_ws_open, net_ws_send};
 #[cfg(desktop)]
 pub use pairing::{
-    install_local_core, local_core_base_url, local_core_installed, local_sidecar_ports,
-    read_admin_token, read_launch_prefill, read_local_core_boot_error, start_local_core,
-    stop_spawned_core,
+    enable_core_behind_proxy, install_local_core, local_core_base_url, local_core_installed,
+    local_sidecar_ports, read_admin_token, read_launch_prefill, read_local_core_boot_error,
+    start_local_core, stop_spawned_core,
 };
 pub use process::get_self_metrics;
 #[cfg(desktop)]

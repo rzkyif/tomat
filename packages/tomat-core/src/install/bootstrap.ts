@@ -20,12 +20,16 @@ export interface BootstrapOptions {
   /** Seed settings.json with server.bindHost=0.0.0.0 so LAN devices can pair
    *  (TOMAT_INSTALL_BIND_ALL=1). */
   bindAll: boolean;
+  /** Seed settings.json with server.behindProxy=true so pairing trusts the
+   *  HTTPS proxy's real certificate instead of pinning the Core's own
+   *  (TOMAT_INSTALL_BEHIND_PROXY=1). Must be set before the first pair. */
+  behindProxy: boolean;
 }
 
 export async function bootstrap(opts: BootstrapOptions): Promise<void> {
   await ensureDirs();
   await ensureAdminToken();
-  if (opts.bindAll) await seedBindAll();
+  await seedServerSettings(opts);
   await plantBuiltinExtension();
 }
 
@@ -41,14 +45,53 @@ async function ensureAdminToken(): Promise<void> {
   progress("wrote admin token");
 }
 
-async function seedBindAll(): Promise<void> {
+// Seed the install-time server settings (bind-all, behind-proxy) into a fresh
+// settings.json. Both keys are deliberately not API-writable (a paired client
+// must not widen exposure or flip trust), so install time is the one moment
+// they can be set without hand-editing the file. An existing settings.json is
+// left untouched: a re-run must not clobber a configured core.
+async function seedServerSettings(opts: BootstrapOptions): Promise<void> {
+  const seed: Record<string, unknown> = {};
+  if (opts.bindAll) seed["server.bindHost"] = "0.0.0.0";
+  if (opts.behindProxy) seed["server.behindProxy"] = true;
+  if (Object.keys(seed).length === 0) return;
   const file = paths().settingsFile;
   if (await fileExists(file)) {
-    progress("settings.json already present; leaving bindHost as-is");
+    progress("settings.json already present; leaving server settings as-is");
     return;
   }
-  await Deno.writeTextFile(file, `{"server.bindHost":"0.0.0.0"}\n`);
-  progress("seeded settings.json (server.bindHost=0.0.0.0)");
+  await Deno.writeTextFile(file, JSON.stringify(seed) + "\n");
+  progress(`seeded settings.json (${Object.keys(seed).join(", ")})`);
+}
+
+/** Turn on server.behindProxy for an ALREADY-installed core by merging the key
+ *  into its settings.json (creating the file if absent, keeping every other
+ *  key). Unlike the fresh-install seed above, this is an additive
+ *  read-modify-write: the client's "install, pair, then flip" flow calls it
+ *  AFTER the local loopback pair, because a proxy-served core folds no cert pin
+ *  and so cannot be paired over loopback (see the enable-behind-proxy verb in
+ *  cli.ts, which restarts the core afterward so the setting takes effect). The
+ *  core preserves unknown keys on its own settings writes, so this survives.
+ *  Idempotent. */
+export async function enableBehindProxy(): Promise<void> {
+  const file = paths().settingsFile;
+  let settings: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(await Deno.readTextFile(file));
+    if (parsed && typeof parsed === "object") settings = parsed as Record<string, unknown>;
+  } catch {
+    // Absent or unparseable: start fresh. ensureDirs (run by bootstrap during
+    // install, before any pair) already created the parent directory.
+  }
+  if (settings["server.behindProxy"] === true) {
+    progress("server.behindProxy already on");
+    return;
+  }
+  settings["server.behindProxy"] = true;
+  // Match the core's own settings writer (JSON.stringify(value, null, 2)) so a
+  // later core write produces no spurious reformat diff.
+  await Deno.writeTextFile(file, JSON.stringify(settings, null, 2));
+  progress("turned on server.behindProxy");
 }
 
 // Plant `.tomat-extension-builtin.{tgz,json}` beside the extensions dir. The

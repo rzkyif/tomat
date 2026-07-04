@@ -24,6 +24,12 @@
 #                          server.bindHost=0.0.0.0 so the freshly-installed
 #                          core listens on all interfaces and other LAN devices
 #                          can pair. "0" (default) keeps the loopback bind.
+#   TOMAT_INSTALL_BEHIND_PROXY
+#                          "1" seeds settings.json with server.behindProxy=true
+#                          for a core served through an HTTPS reverse proxy:
+#                          clients then trust the proxy's real certificate when
+#                          pairing instead of pinning the core's own. Must be
+#                          set before the first pair. "0" (default) pins.
 #
 # UI:
 #   Each phase appears as one row. Pending rows show [ ], the active row
@@ -446,6 +452,7 @@ LOGS_DIR="$HOME_DIR/logs"
 MANIFEST_URL="$STORAGE/$MANIFEST_DIR/core.json"
 INSTALL_SERVICE="${TOMAT_INSTALL_SERVICE:-1}"
 INSTALL_BIND_ALL="${TOMAT_INSTALL_BIND_ALL:-0}"
+INSTALL_BEHIND_PROXY="${TOMAT_INSTALL_BEHIND_PROXY:-0}"
 
 # Where the seed binary lands. The admin token, settings, service names, and
 # extension planting are all owned by the core binary's install subcommands now.
@@ -627,21 +634,27 @@ ensure_jq
 
 # --- begin UI -------------------------------------------------------------
 
-ui_init "tomat-core installer"
+ui_init "tomat Core installer"
 
 # Register every row up front so the cursor knows the total height. The seed
 # binary is fetched + verified here; everything past it is delegated to the
 # core binary's install subcommands.
-IDX_HOST=$(ui_action_add "Detecting host")
-IDX_MANIFEST=$(ui_action_add "Fetching manifest from get.au.tomat.ing")
-IDX_BIN=$(ui_action_add "Installing core binary to $INSTALLED_BIN")
-IDX_DEPS=$(ui_action_add "Installing helpers + workers")
-IDX_SERVICE=$(ui_action_add "Registering background service")
-IDX_PAIR=$(ui_action_add "Minting pairing code at https://127.0.0.1:$CORE_PORT")
+#
+# Row labels are user-facing copy in two places at once: this terminal AND the
+# Client's install button, which tails the non-TTY transcript and shows the
+# active row's label with a running percentage (tomat-client
+# .../commands/pairing.rs). Keep them short, plain, and free of paths/URLs;
+# put specifics in the suffix or the stderr progress lines instead.
+IDX_HOST=$(ui_action_add "Checking this computer")
+IDX_MANIFEST=$(ui_action_add "Finding the newest Core")
+IDX_BIN=$(ui_action_add "Downloading the Core")
+IDX_DEPS=$(ui_action_add "Installing helpers and workers")
+IDX_SERVICE=$(ui_action_add "Starting the Core")
+IDX_PAIR=$(ui_action_add "Getting a pairing code")
 
 # --- action 1: detect host -----------------------------------------------
 
-ui_action_start "$IDX_HOST" "Detecting host"
+ui_action_start "$IDX_HOST" "Checking this computer"
 
 case "$(uname -s)" in
   Darwin) HOST_OS="apple-darwin" ;;
@@ -667,7 +680,7 @@ ui_action_done "$IDX_HOST" "($TRIPLE)"
 
 # --- action 2: fetch manifest --------------------------------------------
 
-ui_action_start "$IDX_MANIFEST" "Fetching manifest from get.au.tomat.ing"
+ui_action_start "$IDX_MANIFEST" "Finding the newest Core"
 
 MANIFEST_TMP="$STAGING_DIR/core-manifest-$$.json"
 _ui_track_staging "$MANIFEST_TMP"
@@ -766,7 +779,7 @@ fi
 if [ "$EXISTING_OK" = "1" ]; then
   ui_action_skip "$IDX_BIN" "(already current)"
 else
-  ui_action_start "$IDX_BIN" "Installing core binary to $INSTALLED_BIN" "(downloading)"
+  ui_action_start "$IDX_BIN" "Downloading the Core" "(downloading)"
 
   BIN_TMP="$STAGING_DIR/tomat-core-$VERSION-$$"
   _ui_track_staging "$BIN_TMP"
@@ -826,10 +839,11 @@ fi
 #   install-service  write the admin token, optionally seed bind-all, plant the
 #                    built-in extension, then register + start the OS service
 #   mint-code        print the first pairing code as JSON
-# TOMAT_CHANNEL / TOMAT_INSTALL_SERVICE / TOMAT_INSTALL_BIND_ALL flow through
-# the environment set at the top of this script.
+# TOMAT_CHANNEL / TOMAT_INSTALL_SERVICE / TOMAT_INSTALL_BIND_ALL /
+# TOMAT_INSTALL_BEHIND_PROXY flow through the environment set at the top of
+# this script.
 
-ui_action_start "$IDX_DEPS" "Installing helpers + workers"
+ui_action_start "$IDX_DEPS" "Installing helpers and workers"
 if ! TOMAT_CHANNEL="$TOMAT_CHANNEL" "$INSTALLED_BIN" self-install >&2; then
   ui_die "Failed to install helpers and workers" \
     "" \
@@ -837,12 +851,13 @@ if ! TOMAT_CHANNEL="$TOMAT_CHANNEL" "$INSTALLED_BIN" self-install >&2; then
 fi
 ui_action_done "$IDX_DEPS"
 
-ui_action_start "$IDX_SERVICE" "Registering background service"
+ui_action_start "$IDX_SERVICE" "Starting the Core"
 if ! TOMAT_CHANNEL="$TOMAT_CHANNEL" \
      TOMAT_INSTALL_SERVICE="$INSTALL_SERVICE" \
      TOMAT_INSTALL_BIND_ALL="$INSTALL_BIND_ALL" \
+     TOMAT_INSTALL_BEHIND_PROXY="$INSTALL_BEHIND_PROXY" \
      "$INSTALLED_BIN" install-service >&2; then
-  ui_die "Failed to register the background service" \
+  ui_die "Failed to start the Core" \
     "" \
     "re-run with TOMAT_INSTALL_SERVICE=0 to launch core without a service"
 fi
@@ -850,7 +865,7 @@ ui_action_done "$IDX_SERVICE"
 
 # --- mint the first pairing code -----------------------------------------
 
-ui_action_start "$IDX_PAIR" "Minting pairing code at https://127.0.0.1:$CORE_PORT" "(waiting for core)"
+ui_action_start "$IDX_PAIR" "Getting a pairing code" "(waiting for core)"
 CODE=""
 PAIR_JSON="$(TOMAT_CHANNEL="$TOMAT_CHANNEL" "$INSTALLED_BIN" mint-code 2>/dev/null || true)"
 if [ -n "$PAIR_JSON" ]; then
@@ -870,12 +885,13 @@ if [ -n "$CODE" ]; then
   ui_finish \
     "Pairing code: $CODE" \
     "" \
-    "Open tomat-client -> Pair -> enter:" \
+    "Open a tomat Client, choose to pair with a Core on another computer," \
+    "and enter:" \
     "  URL : https://127.0.0.1:$CORE_PORT   (or this host's LAN IP)" \
     "  Code: $CODE"
 else
   ui_finish \
-    "tomat-core installed. Mint a pairing code with:" \
+    "The Core is installed. Get a pairing code with:" \
     "  \"$INSTALLED_BIN\" mint-code"
 fi
 

@@ -23,8 +23,9 @@ Putting the Core on a more powerful computer lets the heavy model run there whil
 sit at a laptop. You install the Core on that machine directly rather than letting a
 Client set one up for you: pick the operating system of the machine that will run it,
 set the options that fit, and use the command it builds below. A Core meant for other
-machines to reach needs the command rather than the downloaded installer, because one
-of its options is what opens the Core to the network.
+machines to reach needs these options, because one of them is what opens the Core to
+the network; the downloaded installer asks for the same options on Windows but not on
+macOS or Linux, so the command is the safe choice everywhere.
 
 <div data-nojs-fallback>
   <InstallGeneratorStatic target="core" />
@@ -33,20 +34,23 @@ of its options is what opens the Core to the network.
   <InstallGenerator target="core" client:load />
 </div>
 
-Two of the options shape a remote Core in particular:
+The options shape a remote Core in particular:
 
 - **Allow access from other machines** is the one that matters here. By default a
   Core only listens to its own machine, so nothing else on the network can reach it.
   Turn it on to let a Client on another computer pair with it.
 - **Run in the background at login** installs the Core as a service so it starts on
   its own and is always there to connect to. Turn it off to start the Core by hand.
+- **Served through an HTTPS proxy** is only for a Core that will sit behind a reverse
+  proxy that terminates HTTPS. Read
+  [Serving a Core over HTTPS](#serving-a-core-over-https) before turning it on.
 
 Match the **channel** to the one you run on the Client (see
-[Updates and Channels](/manual/maintenance/updates-and-channels)). During the install
-you also set an **admin password**. Choose something you will remember: it is what
-lets you pair more devices later from a computer you have already paired, without
-going back to the Core's machine. (When the Client installs a Core for you on first
-launch, it asks for this password in the app instead of the terminal.)
+[Updates and Channels](/manual/maintenance/updates-and-channels)). When the install
+finishes it prints a one-time **pairing code**: enter it in a Client to pair the
+first device. When the Client installs a Core for you on first launch, it also asks
+you to set an **admin password**; choose something you will remember, because it is
+what lets you pair more devices later without going back to the Core's machine.
 
 <Aside type="caution">
   Allowing access from other machines opens the Core to your local network. Only do this on a
@@ -68,9 +72,10 @@ domain. There the Client never sees the Core's own certificate, only the proxy's
 the pinning above cannot apply. For that case the Core has a setting,
 `server.behindProxy`, that you turn on so the Client validates the proxy's public
 certificate the way a browser does instead of pinning. It is off by default and set on
-the Core's machine, in its `settings.json` alongside the network options above (or via
-the `TOMAT_CORE_BEHIND_PROXY` environment variable), never from the app, so a paired
-device can never change how the Core is trusted. The Client detects the mode by itself
+the Core's machine: at install time with the **Served through an HTTPS proxy** option
+above, or later in its `settings.json` alongside the network options (or via the
+`TOMAT_CORE_BEHIND_PROXY` environment variable). It is never set from the app, so a
+paired device can never change how the Core is trusted. The Client detects the mode by itself
 during pairing and marks each Core **Pinned** or **HTTPS** under **Cores** in Settings;
 there is nothing to set on the Client. Set it before you pair: the setting decides how
 each device trusts the Core at pairing, so a device paired the other way stops

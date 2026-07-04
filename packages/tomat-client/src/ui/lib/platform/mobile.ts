@@ -363,6 +363,8 @@ const impl: Platform = {
     readAdminToken: () => Promise.resolve(null),
     readLocalCoreBootError: () => Promise.resolve(null),
     installLocalCore: () => notSupported("Installing a local Core"),
+    subscribeInstallProgress: () => Promise.resolve(() => {}),
+    enableCoreBehindProxy: () => notSupported("Configuring a local Core"),
     isLocalCoreInstalled: () => Promise.resolve(false),
     startLocalCore: () => Promise.resolve(false),
     localCoreBaseUrl: () => Promise.resolve(""),

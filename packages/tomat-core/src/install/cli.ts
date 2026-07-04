@@ -14,15 +14,19 @@
 //   install-service    bootstrap, then register + start the OS service
 //   mint-code          print one JSON line: { code, url, port }
 //   uninstall-service  stop + remove the service, keychain key, and data
+//   enable-behind-proxy  turn on server.behindProxy on a paired core + restart
 //
 // Env honored: TOMAT_CHANNEL (channel selection, via paths.ts),
-// TOMAT_INSTALL_SERVICE (0 = background, no service), TOMAT_INSTALL_BIND_ALL
-// (1 = seed server.bindHost=0.0.0.0). Flags: --keep-data (uninstall),
-// --bind-all (bootstrap/install-service, same as TOMAT_INSTALL_BIND_ALL=1).
+// TOMAT_INSTALL_SERVICE (0 = background, no service; also selects the
+// enable-behind-proxy restart path), TOMAT_INSTALL_BIND_ALL (1 = seed
+// server.bindHost=0.0.0.0), TOMAT_INSTALL_BEHIND_PROXY (1 = seed
+// server.behindProxy=true for a core served through an HTTPS proxy). Flags:
+// --keep-data (uninstall), --bind-all / --behind-proxy (bootstrap /
+// install-service, same as the matching env var).
 
 import { errMessage } from "@tomat/shared";
-import { bootstrap } from "./bootstrap.ts";
-import { installService, uninstallService } from "./service.ts";
+import { bootstrap, enableBehindProxy } from "./bootstrap.ts";
+import { installService, restartService, uninstallService } from "./service.ts";
 import { mintCode } from "./pair.ts";
 import { selfInstall } from "./fetch-verify.ts";
 import { progress } from "./io.ts";
@@ -33,6 +37,7 @@ const VERBS = new Set([
   "install-service",
   "mint-code",
   "uninstall-service",
+  "enable-behind-proxy",
 ]);
 
 /** Run an install subcommand if argv names one. Returns the process exit code
@@ -44,6 +49,8 @@ export async function maybeRunInstallCommand(args: string[]): Promise<number | n
 
   const flags = new Set(args.slice(1).filter((a) => a.startsWith("--")));
   const bindAll = flags.has("--bind-all") || Deno.env.get("TOMAT_INSTALL_BIND_ALL") === "1";
+  const behindProxy =
+    flags.has("--behind-proxy") || Deno.env.get("TOMAT_INSTALL_BEHIND_PROXY") === "1";
   const keepData = flags.has("--keep-data");
 
   try {
@@ -52,12 +59,12 @@ export async function maybeRunInstallCommand(args: string[]): Promise<number | n
         await selfInstall();
         break;
       case "bootstrap":
-        await bootstrap({ bindAll });
+        await bootstrap({ bindAll, behindProxy });
         break;
       case "install-service":
         // Bootstrap (idempotent) then register the service, so a single call
         // from an installer post-install hook fully provisions the daemon.
-        await bootstrap({ bindAll });
+        await bootstrap({ bindAll, behindProxy });
         await installService();
         break;
       case "mint-code":
@@ -65,6 +72,16 @@ export async function maybeRunInstallCommand(args: string[]): Promise<number | n
         break;
       case "uninstall-service":
         await uninstallService({ keepData });
+        break;
+      case "enable-behind-proxy":
+        // Turn on server.behindProxy for an already-installed, already-paired
+        // core and restart it so the setting takes effect. The client's
+        // "install, pair, then flip" flow calls this AFTER the local loopback
+        // pair, because a proxy-served core folds no cert pin and so cannot be
+        // paired over loopback. The already-pinned loopback client survives the
+        // restart (same key, same cert served on loopback).
+        await enableBehindProxy();
+        await restartService();
         break;
     }
     return 0;

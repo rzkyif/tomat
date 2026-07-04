@@ -15,6 +15,7 @@
 import { dirname, join } from "@std/path";
 import { channel, channelKeychainSuffix, channelSuffix, coreRoot, paths } from "../paths.ts";
 import { binPath } from "../paths.ts";
+import { CORE_VERSION } from "../config.ts";
 import { coreBinaryName } from "../binaries/versions.ts";
 import { keychainDelete } from "../services/keychain.ts";
 import { progress } from "./io.ts";
@@ -41,20 +42,67 @@ export async function installService(): Promise<void> {
 
   if (!asService) {
     await startBackground();
+  } else {
+    switch (Deno.build.os) {
+      case "darwin":
+        await installLaunchd();
+        break;
+      case "linux":
+        await installSystemd();
+        break;
+      case "windows":
+        await installScheduledTask();
+        break;
+      default:
+        throw new Error(`unsupported OS for service install: ${Deno.build.os}`);
+    }
+  }
+  // Every Windows install front-end funnels through here, so this is the one
+  // place that lists the Core in Add/Remove Programs (Settings > Apps).
+  if (Deno.build.os === "windows") await registerWindowsUninstallEntry();
+}
+
+/** Restart the running daemon so an on-disk settings change (server.behindProxy)
+ *  takes effect. Mirrors installService's service-vs-background split: a service
+ *  install re-bounces the OS service; a background install stops the running
+ *  core and relaunches it. Called by the enable-behind-proxy verb (cli.ts) after
+ *  the local loopback pair, so TOMAT_INSTALL_SERVICE selects the same path the
+ *  install used. */
+export async function restartService(): Promise<void> {
+  const asService = (Deno.env.get("TOMAT_INSTALL_SERVICE") ?? "1") !== "0";
+  if (!asService) {
+    await killStragglers();
+    await startBackground();
     return;
   }
   switch (Deno.build.os) {
     case "darwin":
+      // launchctl unload + load bounces the KeepAlive agent cleanly (no manual
+      // kill, which would race the KeepAlive restart).
       await installLaunchd();
-      return;
+      break;
     case "linux":
-      await installSystemd();
-      return;
+      if (await haveSystemdUser()) {
+        const rc = await run(["systemctl", "--user", "restart", `${systemdUnitName()}.service`]);
+        if (!rc.success) throw new Error("systemctl --user restart failed");
+        progress(`restarted systemd user unit ${systemdUnitName()}`);
+      } else {
+        // No systemd: the install fell back to a background launch, so restart
+        // the same way.
+        await killStragglers();
+        await startBackground();
+      }
+      break;
     case "windows":
+      // Kill the running instance first, then Unregister+Register+Start (via
+      // installScheduledTask) a fresh one. Unregister drops the old task's
+      // failure-restart policy, so the kill can't be auto-relaunched into a
+      // second core.
+      await killStragglers();
       await installScheduledTask();
-      return;
+      break;
     default:
-      throw new Error(`unsupported OS for service install: ${Deno.build.os}`);
+      throw new Error(`unsupported OS for service restart: ${Deno.build.os}`);
   }
 }
 
@@ -70,6 +118,7 @@ export async function uninstallService(opts: { keepData: boolean }): Promise<voi
       break;
     case "windows":
       await removeScheduledTask();
+      await unregisterWindowsUninstallEntry();
       break;
     default:
       throw new Error(`unsupported OS for service uninstall: ${Deno.build.os}`);
@@ -238,6 +287,63 @@ async function removeScheduledTask(): Promise<void> {
   progress(`removed scheduled task ${task}`);
 }
 
+// --- Windows Add/Remove Programs entry --------------------------------------
+
+function windowsUninstallKey(): string {
+  return `HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\tomat-core${channelSuffix()}`;
+}
+
+/** The display name a person sees in Settings > Apps: parenthesized channel,
+ *  matching the Client's "tomat (latest)" convention. */
+function windowsDisplayName(): string {
+  const ch = channel();
+  return ch === "stable" ? "tomat Core" : `tomat Core (${ch})`;
+}
+
+/** List this install in Add/Remove Programs (per-user HKCU key, matching the
+ *  per-user install). The uninstall command re-runs this binary's own
+ *  uninstall-service, then sweeps the leftover core dir once the binary has
+ *  exited and unlocked its own exe (see removeCoreDir). Idempotent:
+ *  re-installs simply refresh the values. */
+async function registerWindowsUninstallEntry(): Promise<void> {
+  const bin = installedBinary();
+  const root = coreRoot();
+  // The env prefix is required: scheduled tasks and ARP launches carry no
+  // TOMAT_CHANNEL, and the binary resolves its channel from the environment.
+  const uninstallCmd =
+    `powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass ` +
+    `-Command "$env:TOMAT_CHANNEL='${psq(channel())}'; & '${psq(bin)}' uninstall-service; ` +
+    `Remove-Item -LiteralPath '${psq(root)}' -Recurse -Force -ErrorAction SilentlyContinue"`;
+  const key = windowsUninstallKey();
+  const rc = await runPwsh(
+    `$key = '${psq(key)}'\n` +
+      `New-Item -Path $key -Force | Out-Null\n` +
+      `Set-ItemProperty -Path $key -Name DisplayName -Value '${psq(windowsDisplayName())}'\n` +
+      `Set-ItemProperty -Path $key -Name DisplayVersion -Value '${psq(CORE_VERSION)}'\n` +
+      `Set-ItemProperty -Path $key -Name Publisher -Value 'tomat'\n` +
+      `Set-ItemProperty -Path $key -Name InstallLocation -Value '${psq(root)}'\n` +
+      `Set-ItemProperty -Path $key -Name DisplayIcon -Value '${psq(bin)}'\n` +
+      `Set-ItemProperty -Path $key -Name UninstallString -Value '${psq(uninstallCmd)}'\n` +
+      `Set-ItemProperty -Path $key -Name QuietUninstallString -Value '${psq(uninstallCmd)}'\n` +
+      `Set-ItemProperty -Path $key -Name NoModify -Value 1 -Type DWord\n` +
+      `Set-ItemProperty -Path $key -Name NoRepair -Value 1 -Type DWord\n`,
+  );
+  if (!rc.success) {
+    // Non-fatal: a missing Apps entry must not fail the install itself.
+    progress(`could not register the Add/Remove Programs entry (exit ${rc.code})`);
+    return;
+  }
+  progress(`registered "${windowsDisplayName()}" in Add/Remove Programs`);
+}
+
+async function unregisterWindowsUninstallEntry(): Promise<void> {
+  await runPwsh(
+    `Remove-Item -Path '${psq(windowsUninstallKey())}' -Recurse -Force -ErrorAction SilentlyContinue`,
+    { ignoreError: true },
+  );
+  progress("removed the Add/Remove Programs entry");
+}
+
 // --- TOMAT_INSTALL_SERVICE=0 background launch ----------------------------
 
 async function startBackground(): Promise<void> {
@@ -246,11 +352,20 @@ async function startBackground(): Promise<void> {
   const out = join(logs, "core.stdout.log");
   const err = join(logs, "core.stderr.log");
   if (Deno.build.os === "windows") {
-    await runPwsh(
-      `$env:TOMAT_CHANNEL='${channel()}'; ` +
-        `Start-Process -FilePath '${bin}' -WindowStyle Hidden ` +
-        `-RedirectStandardOutput '${out}' -RedirectStandardError '${err}'`,
+    // capture: false is load-bearing: Start-Process (.NET) passes
+    // bInheritHandles, so the detached core inherits every inheritable handle
+    // of this PowerShell, including piped stdio. With pipes, our read-to-EOF
+    // would block for as long as the core lives - the "stuck on installing"
+    // hang the client used to hit. Null stdio leaves nothing to hold open.
+    const rc = await runPwsh(
+      `$env:TOMAT_CHANNEL='${psq(channel())}'; ` +
+        `Start-Process -FilePath '${psq(bin)}' -WindowStyle Hidden ` +
+        `-RedirectStandardOutput '${psq(out)}' -RedirectStandardError '${psq(err)}'`,
+      { capture: false },
     );
+    if (!rc.success) {
+      throw new Error(`could not start the core in the background (exit ${rc.code})`);
+    }
   } else {
     // Detach via sh so the `&`-backgrounded core outlives this short-lived CLI,
     // exactly like the scripts' nohup branch.
@@ -374,4 +489,10 @@ async function fileExists(path: string): Promise<boolean> {
 // Single-quote a path for a POSIX shell (only the nohup branch needs this).
 function shQuote(s: string): string {
   return `'${s.replaceAll("'", "'\\''")}'`;
+}
+
+// Escape a value for interpolation INSIDE a single-quoted PowerShell literal
+// (doubling is PowerShell's single-quote escape). Callers write '${psq(v)}'.
+function psq(s: string): string {
+  return s.replaceAll("'", "''");
 }

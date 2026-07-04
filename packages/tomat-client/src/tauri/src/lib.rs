@@ -267,6 +267,7 @@ fn run_desktop() {
             read_admin_token,
             read_local_core_boot_error,
             install_local_core,
+            enable_core_behind_proxy,
             local_core_installed,
             local_core_base_url,
             local_sidecar_ports,

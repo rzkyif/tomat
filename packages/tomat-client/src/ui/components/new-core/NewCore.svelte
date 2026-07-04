@@ -88,6 +88,8 @@
   remoteCodeValid={/^\d{6}$/.test(wizard.remoteCode)}
   installServiceChoice={wizard.installServiceChoice}
   installNetworkChoice={wizard.installNetworkChoice}
+  installBehindProxyChoice={wizard.installBehindProxyChoice}
+  installProgress={wizard.installProgress}
   minAdminPasswordLength={MIN_ADMIN_PASSWORD_LENGTH}
   installPasswordValid={wizard.installPasswordValid}
   onStepBack={() => wizard.goBack()}
@@ -102,6 +104,7 @@
   onCheckConnection={() => wizard.checkConnection()}
   onToggleService={() => (wizard.installServiceChoice = !wizard.installServiceChoice)}
   onToggleNetwork={() => (wizard.installNetworkChoice = !wizard.installNetworkChoice)}
+  onToggleBehindProxy={() => (wizard.installBehindProxyChoice = !wizard.installBehindProxyChoice)}
   onPairLocal={() => wizard.pairLocal()}
   onContinueInBackground={() => wizard.continueInBackground()}
   onPairRemote={() => wizard.pairRemote()}

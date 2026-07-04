@@ -15,6 +15,10 @@ export interface CoreOptions {
   bindAll: boolean;
   /** Run as a background service at login (TOMAT_INSTALL_SERVICE). */
   service: boolean;
+  /** Served through an HTTPS reverse proxy (TOMAT_INSTALL_BEHIND_PROXY):
+   *  clients then trust the proxy's real certificate when pairing instead of
+   *  pinning the Core's own. Must be set before the first pair. */
+  behindProxy: boolean;
 }
 
 export interface ClientUninstallOptions {
@@ -49,12 +53,13 @@ export function osChoices(target: Target): OsChoice[] {
 
 // Stable is the installer's default (no env var); latest opts in via
 // TOMAT_CHANNEL. The order matches the installer: channel, then bind, then
-// service.
+// service, then proxy.
 function envVars(channel: Channel, core?: CoreOptions): Array<[string, string]> {
   const vars: Array<[string, string]> = [];
   if (channel !== "stable") vars.push(["TOMAT_CHANNEL", channel]);
   if (core?.bindAll) vars.push(["TOMAT_INSTALL_BIND_ALL", "1"]);
   if (core && !core.service) vars.push(["TOMAT_INSTALL_SERVICE", "0"]);
+  if (core?.behindProxy) vars.push(["TOMAT_INSTALL_BEHIND_PROXY", "1"]);
   return vars;
 }
 
@@ -262,8 +267,8 @@ export function installerHowto(os: Os, target: Target): HowtoStep[] {
 export function finishHowto(target: Target): string[] {
   if (target === "core") {
     return [
-      "Set an admin password when prompted; you'll need it to pair more devices.",
-      "When it finishes, the Core runs in the background at login. Open a tomat Client on any device and pair it to this Core.",
+      "When it finishes, it prints a pairing code and the Core runs in the background at login.",
+      "Open a tomat Client on any device and pair it to this Core with that code.",
     ];
   }
   return [];
