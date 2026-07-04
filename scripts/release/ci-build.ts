@@ -102,8 +102,8 @@ async function main(): Promise<void> {
     await writeClientDescriptor(stageDir, descriptor);
     await stageDistFile(stageDir, descriptor.relPath);
     await stageDistFile(stageDir, descriptor.sigRelPath);
-    // Stage the conventional native installers (dmg/deb/rpm) alongside the
-    // updater bundle so the publish coordinator can upload them too.
+    // Stage the conventional native installer (the macOS dmg) alongside the
+    // updater bundle so the publish coordinator can upload it too.
     for (const dl of descriptor.downloads ?? []) await stageDistFile(stageDir, dl.relPath);
     ok(`staged client bundle ${descriptor.filename}`);
   } else {

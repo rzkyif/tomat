@@ -4,17 +4,19 @@
 # the per-user NSIS install, then HKLM 64-bit / WOW6432Node for a legacy
 # per-machine MSI) using a case-insensitive name match, then runs its NSIS
 # uninstaller silently (msiexec /x kept as a fallback for an MSI install).
-# Client settings under %USERPROFILE%\.tomat\<channel>\client\ are LEFT IN
-# PLACE unless -Purge is passed.
+# The paired-core list under %USERPROFILE%\.tomat\<channel>\client\ is ALWAYS
+# removed so a re-install starts clean and does not try to reach a Core that is
+# gone. The rest of that dir (settings) is removed too by default; pass -KeepData
+# to preserve just the settings.
 #
 # Usage (one-liner):
 #   powershell -ExecutionPolicy Bypass -Command "iwr -useb https://get.au.tomat.ing/install/client-uninstall.ps1 | iex"
-#   powershell -ExecutionPolicy Bypass -Command "& { $env:TOMAT_PURGE='1'; iwr -useb https://get.au.tomat.ing/install/client-uninstall.ps1 | iex }"
+#   powershell -ExecutionPolicy Bypass -Command "& { $env:TOMAT_KEEP_DATA='1'; iwr -useb https://get.au.tomat.ing/install/client-uninstall.ps1 | iex }"
 #
 # Flags:
-#   -Purge             also remove %USERPROFILE%\.tomat\client\ (settings, paired-cores, etc.).
-#   $env:TOMAT_PURGE   "1" is the env equivalent of -Purge, for the piped one-liner above
-#                      (a switch param can't be passed through `iwr | iex`).
+#   -KeepData             keep the settings in %USERPROFILE%\.tomat\<channel>\client\ (the paired-core list is still removed).
+#   $env:TOMAT_KEEP_DATA  "1" is the env equivalent of -KeepData, for the piped one-liner above
+#                         (a switch param can't be passed through `iwr | iex`).
 #
 # UI:
 #   Each phase appears as one row. Pending rows show [ ], the active row
@@ -23,15 +25,15 @@
 #   Windows 11 (UTF-8 capable conhost / Terminal).
 
 param(
-  [switch]$Purge
+  [switch]$KeepData
 )
 
 $ErrorActionPreference = "Stop"
 
-# The one-liner install path (`iwr ... | iex`) cannot pass the -Purge switch, so
-# honor $env:TOMAT_PURGE=1 as the documented equivalent.
-if ($env:TOMAT_PURGE -in @("1", "true")) {
-  $Purge = $true
+# The one-liner install path (`iwr ... | iex`) cannot pass the -KeepData switch,
+# so honor $env:TOMAT_KEEP_DATA=1 as the documented equivalent.
+if ($env:TOMAT_KEEP_DATA -in @("1", "true")) {
+  $KeepData = $true
 }
 
 # ===== UI helpers begin =====
@@ -266,6 +268,10 @@ if ($Channel -notin @("stable", "dev", "latest")) {
   exit 1
 }
 $ClientDir = Join-Path $HOME ".tomat\$Channel\client"
+# The paired-core list (and, on the dev channel, its file-backed tokens) is always
+# removed so a re-install starts clean; -KeepData preserves only the settings.
+$CoresJson = Join-Path $ClientDir "cores.json"
+$KeychainJson = Join-Path $ClientDir "keychain.json"
 # Match this channel's product only, keyed off the NSIS DisplayName (= Tauri
 # productName; see build-client.ts). Stable is bare "tomat" (end, or followed by
 # a version digit); non-stable is "tomat (<channel>)". The stable pattern stops
@@ -282,6 +288,32 @@ $UninstallKeys = @(
   "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
   "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
 )
+# On signed stable/latest builds the Client stores each paired core's bearer token
+# in Windows Credential Manager (keyring-core windows-native-keyring-store) under
+# service "tomat-client<suffix>", account "core:<coreId>" (mirrors the client's
+# channel.rs + keychain.rs). The crate's Windows target name is "<account>.<service>",
+# i.e. "core:<id>.tomat-client<suffix>". Dev keeps its tokens in keychain.json
+# (removed with the data), so it needs no Credential Manager clearing.
+if ($Channel -eq "stable") { $KeychainService = "tomat-client" }
+else { $KeychainService = "tomat-client-$Channel" }
+
+# Delete one Windows Credential Manager generic credential by target name via
+# CredDeleteW (CRED_TYPE_GENERIC = 1). Matches keyring-core's delete_credential
+# exactly and avoids cmdkey's ambiguous parsing of the embedded ":" in "core:<id>".
+# Returns $true when the entry was deleted or was already absent (idempotent),
+# $false on a real error.
+Add-Type -Namespace Native -Name CredMan -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("advapi32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode, SetLastError=true)]
+public static extern bool CredDeleteW(string target, uint type, uint flags);
+'@ -ErrorAction SilentlyContinue
+
+function Remove-CredManTarget($Target) {
+  try {
+    if ([Native.CredMan]::CredDeleteW($Target, 1, 0)) { return $true }
+    # 1168 = ERROR_NOT_FOUND: the entry is already gone, so treat it as success.
+    return ([System.Runtime.InteropServices.Marshal]::GetLastWin32Error() -eq 1168)
+  } catch { return $false }
+}
 
 # --- begin UI -------------------------------------------------------------
 
@@ -290,9 +322,21 @@ try {
 
   $IdxLocate = Ui-ActionAdd "Locating tomat in Windows uninstall registry"
   $IdxRemove = Ui-ActionAdd "Uninstalling tomat (silent)"
-  $IdxPurge  = -1
-  if ($Purge) {
-    $IdxPurge = Ui-ActionAdd "Removing $ClientDir (per -Purge)"
+  # Paired-core tokens live in Windows Credential Manager on stable/latest; dev
+  # keeps them in keychain.json (removed with the data), so only add the step then.
+  if ($Channel -ne "dev") {
+    $IdxKeychain = Ui-ActionAdd "Clearing paired-core tokens"
+  } else {
+    $IdxKeychain = -1
+  }
+  $KeychainResidue = $false
+  # Paired cores are always removed; settings only when not kept.
+  if ($KeepData) {
+    $IdxCores = Ui-ActionAdd "Removing paired-core list (keeping settings)"
+    $IdxData = -1
+  } else {
+    $IdxCores = -1
+    $IdxData = Ui-ActionAdd "Removing $ClientDir"
   }
 
   # --- action 1: locate product in uninstall registry --------------------
@@ -393,13 +437,69 @@ try {
     }
   }
 
-  # --- action 3: purge client data dir -----------------------------------
+  # --- action 2b: clear paired-core tokens -------------------------------
+  # Read the core ids from cores.json BEFORE it is deleted below, and drop each
+  # core:<id>.tomat-client<suffix> credential from Windows Credential Manager.
+  # Mirrors the per-id `security`/`secret-tool` clearing in client-uninstall.sh.
 
-  if ($Purge) {
-    if (-not (Test-Path $ClientDir)) {
-      Ui-ActionSkip $IdxPurge "(no data found)"
+  if ($IdxKeychain -ne -1) {
+    if (-not (Test-Path $CoresJson)) {
+      Ui-ActionSkip $IdxKeychain "(no tokens)"
     } else {
-      Ui-ActionStart $IdxPurge "Removing $ClientDir (per -Purge)"
+      Ui-ActionStart $IdxKeychain "Clearing paired-core tokens"
+      $ids = @()
+      try {
+        $parsed = Get-Content -Raw $CoresJson | ConvertFrom-Json
+        $ids = @($parsed.cores | ForEach-Object { $_.id } | Where-Object { $_ })
+      } catch { $ids = @() }
+      $cleared = 0
+      foreach ($id in $ids) {
+        if (Remove-CredManTarget "core:$id.$KeychainService") { $cleared++ }
+        else { $KeychainResidue = $true }
+      }
+      if ($KeychainResidue) {
+        Ui-ActionSkip $IdxKeychain "(some tokens may remain)"
+      } elseif ($cleared -eq 0) {
+        Ui-ActionSkip $IdxKeychain "(no tokens)"
+      } else {
+        Ui-ActionDone $IdxKeychain "(cleared $cleared)"
+      }
+    }
+  }
+
+  # --- action 3: remove client data --------------------------------------
+  # -KeepData drops only the paired-core files (cores.json + the dev-channel
+  # keychain.json), leaving settings; otherwise the whole dir goes.
+
+  if ($KeepData) {
+    if (-not ((Test-Path $CoresJson) -or (Test-Path $KeychainJson))) {
+      Ui-ActionSkip $IdxCores "(no paired cores)"
+    } else {
+      Ui-ActionStart $IdxCores "Removing paired-core list (keeping settings)"
+      # Remove each existing file with a terminating error so a real failure (a
+      # locked cores.json while the Client is still running) surfaces instead of
+      # being swallowed and mis-reported as removed. Missing files are skipped by
+      # the Test-Path guard rather than by suppressing errors.
+      foreach ($f in @($CoresJson, $KeychainJson)) {
+        if (Test-Path $f) {
+          try {
+            Remove-Item -Force $f -ErrorAction Stop
+          } catch {
+            Ui-Die "Could not remove paired-core file $f" `
+              $_.Exception.Message `
+              "quit tomat and re-run"
+          }
+        }
+      }
+      Ui-ActionDone $IdxCores "(removed)"
+    }
+  }
+
+  if (-not $KeepData) {
+    if (-not (Test-Path $ClientDir)) {
+      Ui-ActionSkip $IdxData "(no data found)"
+    } else {
+      Ui-ActionStart $IdxData "Removing $ClientDir"
       try {
         Remove-Item -Recurse -Force $ClientDir
       } catch {
@@ -418,7 +518,7 @@ try {
           Remove-Item -Force $channelDir
         }
       } catch { }
-      Ui-ActionDone $IdxPurge "(removed)"
+      Ui-ActionDone $IdxData "(removed)"
     }
   }
 
@@ -430,25 +530,20 @@ try {
     $headline = "tomat-client uninstalled."
   }
 
-  if (-not $Purge -and (Test-Path $ClientDir)) {
-    Ui-Finish @(
-      $headline,
-      "",
-      "Settings in $ClientDir were left in place. Re-run with -Purge to remove."
-    )
-  } elseif ($Purge) {
-    # The Client ships no keychain CLI and keyring-core's Credential Manager
-    # entries can't be cleared reliably from here, so we surface the residue
-    # rather than leaving it unmentioned.
-    Ui-Finish @(
-      $headline,
-      "",
-      "A few paired-core tokens may remain in your Windows Credential Manager; remove them manually if desired."
-    )
+  # Build the finish notes. The paired-core list is always removed; on stable/latest
+  # its tokens are cleared from Windows Credential Manager in action 2b. A residue
+  # note is surfaced only when a delete actually failed, not by default.
+  $notes = @()
+  if ($KeepData) {
+    $notes += "Settings in $ClientDir were kept (per -KeepData); the paired-core list was removed."
+  }
+  if ($KeychainResidue) {
+    $notes += "Some paired-core tokens could not be removed from Windows Credential Manager; remove them manually if desired."
+  }
+  if ($notes.Count -gt 0) {
+    Ui-Finish (@($headline, "") + $notes)
   } else {
-    Ui-Finish @(
-      $headline
-    )
+    Ui-Finish @($headline)
   }
 
   exit 0

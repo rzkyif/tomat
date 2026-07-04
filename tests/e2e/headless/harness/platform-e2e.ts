@@ -199,6 +199,7 @@ export function buildE2ePlatform(seed: E2ePlatformSeed = {}): Platform {
     updater: {
       getVersion: async () => "0.0.0-e2e",
       check: async () => null,
+      canSelfInstall: async () => true,
       relaunch: unavailable("updater.relaunch"),
     },
     fs: {

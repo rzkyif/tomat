@@ -22,6 +22,10 @@
   import { getLogger } from "$lib/util/log";
 
   const log = getLogger("update");
+  // Where an install the updater can't replace in place (a non-AppImage Linux
+  // install: a distro/third-party repackage or a raw binary) sends the user to
+  // grab the new build, the way VS Code opens the download page on such installs.
+  const INSTALL_PAGE_URL = "https://au.tomat.ing/install";
   // Touch has no hover, so the idle button can't reveal "Check for Updates" on
   // hover the way desktop does; show the actionable label outright instead of the
   // version string (which the desktop hover swaps in).
@@ -40,12 +44,23 @@
   let coreLatest = $state<string>("");
   let binariesAvailable = $state<BinaryUpdateCheck[]>([]);
   let clientUpdate = $state<UpdateHandle | null>(null);
+  // False on a non-AppImage Linux install (the Tauri updater can only replace an
+  // AppImage): those get sent to the download page instead of a self-install.
+  let clientSelfInstall = $state(true);
 
   onMount(async () => {
     try {
       clientVersion = await platform().updater.getVersion();
     } catch {
       clientVersion = "unknown";
+    }
+    // Install-static (the packaging of this build never changes at runtime), so
+    // resolve it once here rather than on every check. Defaults to true, so a
+    // rare failure degrades to attempting the in-app install, not blocking it.
+    try {
+      clientSelfInstall = await platform().updater.canSelfInstall();
+    } catch (e) {
+      log.warn("canSelfInstall check failed:", e);
     }
   });
 
@@ -140,9 +155,15 @@
   }
 
   async function confirmInstall() {
+    // A client update this install can't apply in place (a non-AppImage Linux
+    // install) is a browser hand-off to the download page, not an in-app install.
+    const clientRedirect = !!clientUpdate && !clientSelfInstall;
     const lines: string[] = [];
     if (clientUpdate) {
-      lines.push(`tomat Client v${clientUpdate.version} (Client)`);
+      lines.push(
+        `tomat Client v${clientUpdate.version} (Client` +
+          (clientRedirect ? ", opens the download page)" : ")"),
+      );
     }
     if (coreAvailable) {
       lines.push(`tomat Core v${coreLatest} (Core, currently v${coreCurrent})`);
@@ -153,11 +174,17 @@
           (b.installedVersion ? ` (was v${b.installedVersion})` : ""),
       );
     }
+    const clientClause = !clientUpdate
+      ? `.`
+      : clientRedirect
+        ? `; the Client update opens the download page in your browser to get the ` +
+          `latest build.`
+        : `; the Client will need a restart at the end.`;
     confirmState.request({
       title: "Install updates",
       message:
-        `The following components will be updated. Core and sidecars will be ` +
-        `downloaded; the Client will need a restart at the end.\n\n` +
+        `The following components will be updated. Core and sidecars are ` +
+        `downloaded here${clientClause}\n\n` +
         lines.map((l) => `• ${l}`).join("\n"),
       confirmLabel: "Install",
       onConfirm: () => void runInstall(),
@@ -192,16 +219,27 @@
         }
       }
 
-      // Client artifact. tauri-plugin-updater downloads the bundle, verifies
-      // the signature, and stages it for the next launch. Restart is in the
-      // user's hands so they don't lose unsaved input.
+      // Client artifact. On a self-updating install (macOS, Windows, Linux
+      // AppImage) tauri-plugin-updater downloads the bundle, verifies the
+      // signature, and stages it for the next launch; restart is in the user's
+      // hands so they don't lose unsaved input. On a non-AppImage Linux install
+      // the updater can't replace the running app, so open the download page for
+      // the user to fetch the new build themselves.
       if (clientUpdate) {
-        try {
-          await clientUpdate.downloadAndInstall();
-          phase = "clientRestartPending";
-          return;
-        } catch (e) {
-          log.warn("client downloadAndInstall failed:", e);
+        if (clientSelfInstall) {
+          try {
+            await clientUpdate.downloadAndInstall();
+            phase = "clientRestartPending";
+            return;
+          } catch (e) {
+            log.warn("client downloadAndInstall failed:", e);
+          }
+        } else {
+          try {
+            await platform().openExternal(INSTALL_PAGE_URL);
+          } catch (e) {
+            log.warn("open download page failed:", e);
+          }
         }
       }
 

@@ -13,6 +13,7 @@ import { BUILTIN_EXTENSION_ID, errMessage } from "@tomat/shared";
 import { channel, ensureDirs, paths } from "../paths.ts";
 import { builtinExtensionManifestUrl } from "../config.ts";
 import { Sha256Stream, toHex } from "../shared/hash.ts";
+import { fetchWithTimeout, streamDownload } from "../shared/net.ts";
 import { progress } from "./io.ts";
 import { run } from "./proc.ts";
 
@@ -109,7 +110,7 @@ async function plantBuiltinExtension(): Promise<void> {
     return;
   }
   try {
-    const res = await fetch(builtinExtensionManifestUrl());
+    const res = await fetchWithTimeout(builtinExtensionManifestUrl());
     if (!res.ok) {
       progress(`built-in extension manifest unavailable (HTTP ${res.status}); core will seed`);
       return;
@@ -143,15 +144,20 @@ async function plantBuiltinExtension(): Promise<void> {
 // --- helpers --------------------------------------------------------------
 
 async function downloadToFile(url: string, outPath: string): Promise<string> {
-  const res = await fetch(url);
-  if (!res.ok || !res.body) throw new Error(`download HTTP ${res.status} for ${url}`);
   const file = await Deno.open(outPath, { create: true, write: true, truncate: true });
   const sha = new Sha256Stream();
   try {
-    for await (const chunk of res.body) {
-      await file.write(chunk);
-      sha.update(chunk);
-    }
+    // The built-in tarball is hashed as-is (not decompressed); the stall guard
+    // aborts a dead connection instead of hanging install-service at "Starting
+    // the Core".
+    await streamDownload(
+      url,
+      async (chunk) => {
+        await file.write(chunk);
+        sha.update(chunk);
+      },
+      { decompress: false },
+    );
   } finally {
     file.close();
   }

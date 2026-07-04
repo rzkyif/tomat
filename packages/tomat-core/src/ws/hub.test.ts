@@ -10,8 +10,25 @@
 import { assertEquals } from "@std/assert";
 import { pairClient } from "../../tests/helpers/pairing.ts";
 import { startTestServer } from "../../tests/helpers/serve.ts";
-import { wsHub } from "./hub.ts";
+import { isRequirementsRecomputeEdge, wsHub } from "./hub.ts";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
+
+// The download-queue edge that (must not) trigger a requirements recompute. The
+// binary exclusion is load-bearing: a binary's Completed is pre-extract, so
+// recomputing on it races a stale "still missing" snapshot against the real
+// post-extract onBinaryInstalled recompute.
+Deno.test("isRequirementsRecomputeEdge: binary rows never recompute; model terminals do", () => {
+  // Binary rows are excluded regardless of transition.
+  assertEquals(isRequirementsRecomputeEdge("binaries", "Downloading", "Completed"), false);
+  assertEquals(isRequirementsRecomputeEdge("binaries", "Downloading", "Error"), false);
+  // Model rows recompute on entering a terminal state (present, or failed).
+  assertEquals(isRequirementsRecomputeEdge("models", "Downloading", "Completed"), true);
+  assertEquals(isRequirementsRecomputeEdge("models", "Downloading", "Error"), true);
+  assertEquals(isRequirementsRecomputeEdge("models", undefined, "Completed"), true);
+  // Non-terminal transitions and terminal->terminal repeats don't recompute.
+  assertEquals(isRequirementsRecomputeEdge("models", "Pending", "Downloading"), false);
+  assertEquals(isRequirementsRecomputeEdge("models", "Completed", "Completed"), false);
+});
 
 async function pair(): Promise<string> {
   const { token } = await pairClient("ws-test", "127.0.0.1");

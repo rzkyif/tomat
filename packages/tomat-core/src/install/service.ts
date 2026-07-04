@@ -268,7 +268,12 @@ Unregister-ScheduledTask -TaskName '${task}' -Confirm:$false -ErrorAction Silent
 Register-ScheduledTask -TaskName '${task}' -Action $a -Trigger $t -Settings $s -Principal $p -Description 'tomat-core' | Out-Null
 Start-ScheduledTask -TaskName '${task}'
 `;
-  const rc = await runPwsh(script);
+  // capture: false (null stdio) as defense-in-depth: Start-ScheduledTask hands
+  // the launch to the Task Scheduler service, which does not inherit this
+  // PowerShell's handles the way Start-Process (startBackground) would, but we
+  // never read the output here (only rc.success), so keeping nothing piped
+  // removes any chance a read-to-EOF blocks on an inherited handle.
+  const rc = await runPwsh(script, { capture: false });
   if (!rc.success) {
     throw new Error(
       "Register-ScheduledTask failed; Task Scheduler may be disabled. Re-run with TOMAT_INSTALL_SERVICE=0",

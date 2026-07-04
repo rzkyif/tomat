@@ -4,9 +4,13 @@
 
 import { describe, expect, it } from "vitest";
 import { type Platform, setPlatform } from "$lib/platform";
-import { cores, type PairedCoreEntry } from "./cores";
+import { cores, isLoopbackUrl, type PairedCoreEntry, pruneUninstalledLocalCores } from "./cores";
 
-function makeMockPlatform(): {
+// Mutable knob for platform().pairing.isLocalCoreInstalled: `true`/`false`
+// return that, `"throw"` rejects (the best-effort error path).
+type LocalCoreInstalled = boolean | "throw";
+
+function makeMockPlatform(localCoreInstalled: LocalCoreInstalled = true): {
   platform: Platform;
   files: Record<string, Record<string, unknown>>;
   tokens: Record<string, string>;
@@ -33,6 +37,12 @@ function makeMockPlatform(): {
         delete tokens[coreId];
       },
     },
+    pairing: {
+      async isLocalCoreInstalled() {
+        if (localCoreInstalled === "throw") throw new Error("check failed");
+        return localCoreInstalled;
+      },
+    },
   } as unknown as Platform;
   return { platform, files, tokens };
 }
@@ -44,6 +54,37 @@ const entry = (id: string, name = "Local Core"): PairedCoreEntry => ({
   trustMode: "pin",
   tlsPin: "pin",
   addedAtMs: 1,
+});
+
+const remoteEntry = (id: string, name = "Remote Core"): PairedCoreEntry => ({
+  id,
+  name,
+  baseUrl: "https://192.168.1.5:7800",
+  trustMode: "pin",
+  tlsPin: "pin",
+  addedAtMs: 1,
+});
+
+describe("isLoopbackUrl", () => {
+  it("matches loopback hosts", () => {
+    expect(isLoopbackUrl("https://127.0.0.1:7800")).toBe(true);
+    expect(isLoopbackUrl("https://localhost:7800")).toBe(true);
+    expect(isLoopbackUrl("https://127.0.0.2:7800")).toBe(true);
+    expect(isLoopbackUrl("https://[::1]:7800")).toBe(true);
+  });
+
+  it("does NOT match remote hosts that merely contain a loopback substring", () => {
+    // The old substring check would misread these as local and delete them.
+    expect(isLoopbackUrl("https://localhost.example.com:7800")).toBe(false);
+    expect(isLoopbackUrl("https://127.0.0.1.evil.com:7800")).toBe(false);
+    expect(isLoopbackUrl("https://mylocalhost.net")).toBe(false);
+    expect(isLoopbackUrl("https://192.168.1.5:7800")).toBe(false);
+  });
+
+  it("treats an unparseable URL as remote (never pruned)", () => {
+    expect(isLoopbackUrl("not a url")).toBe(false);
+    expect(isLoopbackUrl("")).toBe(false);
+  });
 });
 
 describe("cores registry", () => {
@@ -88,6 +129,62 @@ describe("cores registry", () => {
     // Removing the last core leaves an empty registry with no current pointer.
     await cores().removePaired("core-a");
     expect(files.cores).toEqual({ cores: [] });
+  });
+
+  it("pruneUninstalledLocalCores drops local cores when no core is installed on disk", async () => {
+    const { platform, files, tokens } = makeMockPlatform(false);
+    setPlatform(platform);
+    await cores().addPaired(entry("local-a"), "token-a");
+
+    await pruneUninstalledLocalCores();
+    // The local core's record and token are gone: a reinstall over it starts clean.
+    expect(tokens["local-a"]).toBeUndefined();
+    expect(files.cores).toEqual({ cores: [] });
+  });
+
+  it("pruneUninstalledLocalCores keeps local cores when a core is installed on disk", async () => {
+    const { platform, files } = makeMockPlatform(true);
+    setPlatform(platform);
+    await cores().addPaired(entry("local-a"), "token-a");
+
+    await pruneUninstalledLocalCores();
+    expect(files.cores).toEqual({ cores: [entry("local-a")], currentCoreId: "local-a" });
+  });
+
+  it("pruneUninstalledLocalCores never touches remote cores", async () => {
+    // No local core on disk, but the paired core is remote (LAN host), so it must
+    // survive: only loopback cores depend on a local install.
+    const { platform, files } = makeMockPlatform(false);
+    setPlatform(platform);
+    await cores().addPaired(remoteEntry("remote-a"), "token-a");
+
+    await pruneUninstalledLocalCores();
+    expect(files.cores).toEqual({
+      cores: [remoteEntry("remote-a")],
+      currentCoreId: "remote-a",
+    });
+  });
+
+  it("pruneUninstalledLocalCores does not drop a remote core whose host contains 'localhost'", async () => {
+    // Regression guard for the substring-vs-host bug: a remote core at
+    // localhost.example.com is NOT local and must survive even with no local core.
+    const { platform, files } = makeMockPlatform(false);
+    setPlatform(platform);
+    const trap = { ...remoteEntry("remote-a"), baseUrl: "https://localhost.example.com:7800" };
+    await cores().addPaired(trap, "token-a");
+
+    await pruneUninstalledLocalCores();
+    expect(files.cores).toEqual({ cores: [trap], currentCoreId: "remote-a" });
+  });
+
+  it("pruneUninstalledLocalCores leaves cores paired when the install check throws", async () => {
+    // Best-effort: an errored on-disk check must not unpair a possibly-valid core.
+    const { platform, files } = makeMockPlatform("throw");
+    setPlatform(platform);
+    await cores().addPaired(entry("local-a"), "token-a");
+
+    await pruneUninstalledLocalCores();
+    expect(files.cores).toEqual({ cores: [entry("local-a")], currentCoreId: "local-a" });
   });
 
   it("rename updates the entry in place and keeps the current pointer", async () => {

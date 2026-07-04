@@ -265,7 +265,11 @@
   $effect(() => {
     const sig = downloadsState.missingSignature;
     if (connectionState.reconnecting) return;
-    if (!downloadsState.needsApproval) {
+    // Prompt when files await approval OR when an approved download failed (so a
+    // silent resolve/install failure becomes an actionable, retryable modal
+    // instead of a limbo the user can't act on).
+    const shouldPrompt = downloadsState.needsApproval || downloadsState.failed.length > 0;
+    if (!shouldPrompt) {
       dismissedSignature = null;
       shownSignature = null;
       return;

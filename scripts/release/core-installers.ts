@@ -621,13 +621,23 @@ else
   su - "$TARGET_USER" -c "TOMAT_CHANNEL=${channel} '$DEST/bin/${binName}' install-service" || true
 fi`;
 }
-function linuxPreunBody(channel: ReleaseChannel, _prefix: string, binName: string): string {
-  return `TARGET_USER="\${SUDO_USER:-$(logname 2>/dev/null || true)}"
-if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
-  USER_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
-  DEST="$USER_HOME/.tomat/${channel}/core"
-  su - "$TARGET_USER" -c "TOMAT_CHANNEL=${channel} '$DEST/bin/${binName}' uninstall-service" || true
-fi`;
+export function linuxPreunBody(channel: ReleaseChannel, _prefix: string, binName: string): string {
+  // Only tear down on a genuine removal, never on upgrade. dpkg runs prerm with
+  // "remove" on removal and "upgrade" on upgrade; rpm runs %preun with 0 on the
+  // final erase and 1 on upgrade. Running uninstall-service on upgrade would wipe
+  // ~/.tomat/<channel>/core (sessions, memories, keychain master key) on every
+  // version bump; on upgrade the new package's postinst re-runs the idempotent
+  // install-service instead, which preserves that data.
+  return `case "$1" in
+remove|0)
+  TARGET_USER="\${SUDO_USER:-$(logname 2>/dev/null || true)}"
+  if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
+    USER_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+    DEST="$USER_HOME/.tomat/${channel}/core"
+    su - "$TARGET_USER" -c "TOMAT_CHANNEL=${channel} '$DEST/bin/${binName}' uninstall-service" || true
+  fi
+  ;;
+esac`;
 }
 function linuxPostinst(channel: ReleaseChannel, prefix: string, binName: string): string {
   return `#!/bin/sh\nset -e\n${linuxPostBody(channel, prefix, binName)}\nexit 0\n`;

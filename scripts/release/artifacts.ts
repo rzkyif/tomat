@@ -198,12 +198,15 @@ export async function mergeCoreBundles(
 // plus the metadata the host's compose+sign+upload step needs. Mirrors the core
 // ArtifactBundle, one module so drivers and CI share the contract.
 
-/** A conventional-installer download the website links directly (macOS .dmg,
- *  Windows NSIS .exe, Linux .deb/.rpm/.AppImage). Distinct from the Tauri updater
- *  bundle above: the updater artifact drives in-app updates, these drive the
- *  first double-click install. sha256 is over the file bytes. */
+/** A conventional-installer download the website links directly. Today that is
+ *  only the macOS `.dmg`: the Windows NSIS `.exe` and the Linux `.AppImage` are
+ *  themselves the primary updater bundles (aliased directly), and the client
+ *  ships no Linux `.deb`/`.rpm` (the AppImage is the sole Linux client format).
+ *  Distinct from the Tauri updater bundle above: the updater artifact drives
+ *  in-app updates, this drives the first double-click install. sha256 is over
+ *  the file bytes. */
 export interface DownloadAsset {
-  format: "dmg" | "exe" | "deb" | "rpm" | "appimage";
+  format: "dmg";
   filename: string;
   relPath: string; // dist-relative, e.g. "aarch64-apple-darwin/tomat_0.1.5.dmg"
   sha256: string;
@@ -213,8 +216,8 @@ export interface DownloadAsset {
 /** One desktop-client bundle built on its native platform. `signature` is the
  *  Tauri minisign signature over the bundle (for in-app updates); `sha256` is
  *  over the bundle bytes (for first-install verification, mirrors core.json).
- *  `downloads` are the conventional native installers Tauri also emits (dmg /
- *  deb / rpm / the NSIS exe), harvested for the website's direct-download CTA. */
+ *  `downloads` is the conventional native installer Tauri also emits (the macOS
+ *  .dmg), harvested for the website's direct-download CTA. */
 export interface ClientDescriptor {
   version: string;
   channel: ReleaseChannel;

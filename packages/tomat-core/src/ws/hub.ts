@@ -40,11 +40,27 @@ import {
   subscribeCoreSettings,
 } from "@tomat/core-engine/services/core-settings";
 import { subscribeSecretsChanged } from "@tomat/core-engine/services/secrets";
-import { onBinaryInstalled } from "../binaries/manager.ts";
+import { onBinaryInstalled, onBinaryInstallFailed } from "../binaries/manager.ts";
 import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("ws");
+
+/** Whether a download row's status transition should trigger a requirements
+ *  recompute. MODEL rows recompute on entering a terminal state (Completed = now
+ *  present; Error = surface the failure). BINARY rows never recompute here: their
+ *  Completed is pre-extract, so binary readiness comes only from the install-
+ *  lifecycle listeners (onBinaryInstalled / onBinaryInstallFailed); recomputing on
+ *  a binary row would race a stale "still missing" snapshot in. Exported for test. */
+export function isRequirementsRecomputeEdge(
+  destination: string,
+  prevStatus: string | undefined,
+  nextStatus: string,
+): boolean {
+  if (destination === "binaries") return false;
+  const terminal = (s: string): boolean => s === "Completed" || s === "Error";
+  return !terminal(prevStatus ?? "") && terminal(nextStatus);
+}
 
 const HEARTBEAT_MS = 25_000;
 const PONG_TIMEOUT_MS = 10_000;
@@ -411,12 +427,29 @@ class WsHub {
         secretNames: names,
       });
     });
+    // Binary readiness is driven by the install lifecycle, NOT the download
+    // queue: a binary's archive download completing is not the same event as the
+    // binary being present (extraction runs after, and can fail). Recompute only
+    // on a real install success or failure.
     onBinaryInstalled(() => void notifyRequirementsChanged());
+    onBinaryInstallFailed(() => void notifyRequirementsChanged());
 
     // Track per-download status so a recompute fires only on edges that can
-    // change `missing`, not on every progress tick: a row reaching "Completed"
-    // (a file becoming present) or a tracked row disappearing (the user cleared
-    // a completed download, which can re-expose a now-missing file).
+    // change `missing`, not on every progress tick. For a MODEL row, "Completed"
+    // means the file is now present and "Error" means computeRequirements should
+    // surface its failure (see the model-download-error map there), so both are
+    // recompute edges.
+    //
+    // BINARY rows are deliberately excluded here (the `destination !== "binaries"`
+    // guard). A binary's Completed is PRE-EXTRACT: recomputing on it would
+    // broadcast a stale "still missing" snapshot that races the real, post-extract
+    // onBinaryInstalled recompute; binary present/failed state comes ONLY from the
+    // install-lifecycle listeners above (onBinaryInstalled / onBinaryInstallFailed).
+    // Do NOT drop this guard without moving binary readiness off the extract-after-
+    // download path, or the download<->present race returns. (Tested in hub.test.ts.)
+    //
+    // A tracked row disappearing (the user cleared a completed download) can
+    // re-expose a now-missing model file, so that still recomputes.
     const lastDownloadStatus = new Map<string, string>();
     downloadManager().subscribe((snap) => {
       this.broadcastAll({ kind: "downloads.snapshot", items: snap });
@@ -424,7 +457,7 @@ class WsHub {
       let changed = false;
       for (const e of snap) {
         const prev = lastDownloadStatus.get(e.id);
-        if (prev !== "Completed" && e.status === "Completed") changed = true;
+        if (isRequirementsRecomputeEdge(e.destination, prev, e.status)) changed = true;
         lastDownloadStatus.set(e.id, e.status);
       }
       const removed = [...lastDownloadStatus.keys()].filter((id) => !currentIds.has(id));

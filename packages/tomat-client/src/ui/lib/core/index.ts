@@ -4,7 +4,12 @@
 export { ApiError, CoreClient } from "./client";
 export type { CoreEndpoint, WsListener } from "./client";
 
-export { cores, ensureLocalCoreUpIfNeeded } from "./cores";
+export {
+  cores,
+  ensureLocalCoreUpIfNeeded,
+  isLoopbackUrl,
+  pruneUninstalledLocalCores,
+} from "./cores";
 export type { PairedCoreEntry } from "./cores";
 
 export { SessionsApi } from "./sessions";

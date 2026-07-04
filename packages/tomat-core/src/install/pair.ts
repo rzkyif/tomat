@@ -12,6 +12,11 @@ import { emitJson, progress } from "./io.ts";
 
 const HEALTH_POLL_ATTEMPTS = 30;
 const MINT_ATTEMPTS = 5;
+// Per-probe deadline. The core answers over loopback in milliseconds, so a
+// probe that hasn't returned in a few seconds is a stalled connection, not a
+// slow one; abort it so a single hung request can't wedge the (otherwise
+// bounded) retry loop forever.
+const PROBE_TIMEOUT_MS = 5000;
 
 export interface MintResult {
   code: string;
@@ -39,6 +44,7 @@ export async function mintCode(): Promise<MintResult> {
         headers: { "X-Admin-Token": admin, "Content-Type": "application/json" },
         body: "{}",
         client,
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       });
       if (res.ok) {
         const body = (await res.json()) as { code?: string };
@@ -93,7 +99,10 @@ async function waitForHealth(base: string): Promise<Deno.HttpClient> {
       }
     }
     try {
-      const res = await fetch(`${base}/api/v1/health`, { client });
+      const res = await fetch(`${base}/api/v1/health`, {
+        client,
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
       await res.body?.cancel();
       if (res.ok) return client;
     } catch {

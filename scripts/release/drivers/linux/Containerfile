@@ -69,9 +69,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 # xdg-utils provides /usr/bin/xdg-open (Tauri copies it into the AppImage);
 # squashfs-tools/patchelf/file/desktop-file-utils/zsync are linuxdeploy +
 # appimagetool's host-side dependencies for assembling the AppImage. dpkg-dev
-# (dpkg-deb) + rpm (rpmbuild) build the conventional Linux installers for BOTH
-# the Tauri client (deb/rpm targets) and the Core native packages
-# (core-installers.ts).
+# (dpkg-deb) + rpm (rpmbuild) build the Core native packages (core-installers.ts);
+# the Tauri client ships no deb/rpm (the AppImage is its sole Linux format), so
+# these serve Core alone.
 RUN dpkg --add-architecture amd64 \
   && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl unzip xz-utils bzip2 git \

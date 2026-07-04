@@ -27,8 +27,8 @@ import {
   coreCommand,
   coreUninstallCommand,
   finishHowto,
-  INSTALLER_OPEN_STEP,
-  installerSecurityStep,
+  formatTag,
+  installerHowto,
   type NativeInstaller,
   nativeInstallers,
   openTerminalStep,
@@ -56,7 +56,7 @@ type DesktopOs = (typeof DESKTOP)[number];
 function cmdFor(os: DesktopOs): string {
   if (uninstall) {
     return target === "client"
-      ? clientUninstallCommand(os, CH, { purge: false })
+      ? clientUninstallCommand(os, CH, { keepData: false })
       : coreUninstallCommand(os, CH, { keepData: false });
   }
   return target === "client"
@@ -79,19 +79,24 @@ const installers: Record<DesktopOs, NativeInstaller[]> = {
 };
 function installerLabel(list: NativeInstaller[], inst: NativeInstaller): string {
   const multi = new Set(list.map((i) => i.format)).size > 1;
-  return multi ? `${inst.archLabel} · .${inst.format}` : inst.archLabel;
+  return multi ? `${inst.archLabel} · ${formatTag(inst.format)}` : inst.archLabel;
 }
 
 const apk = androidApkUrl(CH);
 
 // Nested how-to (install): the install-script branch is an OS-specific opener
-// plus the run-command line; the installer-download branch is a fixed open step
-// plus the per-OS security step. The shared finishing steps are lifted to the
-// top level (step 2+). The security step exists only on macOS (Gatekeeper) and
-// Windows (SmartScreen); Linux has none.
+// plus the run-command line; the installer-download branch is the per-OS
+// installerHowto (macOS/Windows: open the package plus their security step; the
+// Linux Client: run the AppImage). Pre-rendered per
+// desktop OS and CSS-toggled by the selected radio, the same way the commands and
+// download buttons are. The shared finishing steps are lifted to the top level
+// (step 2+).
 const finishSteps = finishHowto(target);
-const secMac = installerSecurityStep("macos", target);
-const secWin = installerSecurityStep("windows", target);
+const installerSteps: Record<DesktopOs, ReturnType<typeof installerHowto>> = {
+  macos: installerHowto("macos", target),
+  linux: installerHowto("linux", target),
+  windows: installerHowto("windows", target),
+};
 // Uninstall how-to (terminal only): OS opener plus a fixed tail.
 const uninstallTail = uninstallStepsTail(target);
 
@@ -200,16 +205,19 @@ const codeBox =
       <div class="ig-optnote flex flex-col gap-2">
         <span class={label}>Options</span>
         <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
-          <p class="m-0">By default this keeps your settings. To wipe them too, add a flag:</p>
           <p class="m-0">
-            <span class="font-mono text-default-900">--purge</span>
-            also deletes your saved settings and paired cores.
+            This always removes your paired cores, so a re-install starts clean. It removes your
+            settings too by default; to keep those, add a flag:
+          </p>
+          <p class="m-0">
+            <span class="font-mono text-default-900">--keep-data</span>
+            keeps your saved settings (the paired cores are still removed).
           </p>
           <p class="m-0">
             On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
-            <span class="font-mono text-default-900">... | bash -s -- --purge</span>. On Windows
+            <span class="font-mono text-default-900">... | bash -s -- --keep-data</span>. On Windows
             prefix the line, e.g.
-            <span class="font-mono text-default-900">$env:TOMAT_PURGE="1"; irm ...</span>.
+            <span class="font-mono text-default-900">$env:TOMAT_KEEP_DATA="1"; irm ...</span>.
           </p>
         </div>
       </div>
@@ -347,20 +355,26 @@ const codeBox =
               </li>
               <li>
                 <span class="font-semibold text-default-800">Or download the installer:</span>
-                <ol class="mt-1 flex flex-col gap-1 list-decimal pl-5">
-                  <li>{INSTALLER_OPEN_STEP}</li>
-                  {secMac && (
-                    <li class="ig-sec ig-sec-macos">
-                      {secMac.text}
-                      <ul class="mt-1 flex flex-col gap-1 list-disc pl-5">
-                        {secMac.sub.map((s) => (
-                          <li>{s}</li>
-                        ))}
-                      </ul>
-                    </li>
-                  )}
-                  {secWin && <li class="ig-sec ig-sec-windows">{secWin.text}</li>}
-                </ol>
+                {DESKTOP.map((os) => (
+                  <ol class={`ig-ihow ig-ihow-${os} mt-1 flex flex-col gap-1 list-decimal pl-5`}>
+                    {installerSteps[os].map((step) =>
+                      typeof step === "string" ? (
+                        <li>{step}</li>
+                      ) : (
+                        <li>
+                          {step.text}
+                          {step.sub.length > 0 && (
+                            <ul class="mt-1 flex flex-col gap-1 list-disc pl-5">
+                              {step.sub.map((s) => (
+                                <li>{s}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </li>
+                      ),
+                    )}
+                  </ol>
+                ))}
               </li>
             </ol>
           </li>
@@ -413,8 +427,8 @@ const codeBox =
      data-os, scoped to each .ig root, so two instances stay independent. */
   .ig-cmd,
   .ig-dl,
+  .ig-ihow,
   .ig-open,
-  .ig-sec,
   .ig-android {
     display: none;
   }
@@ -428,13 +442,18 @@ const codeBox =
   .ig:has(.ig-radio[data-os="windows"]:checked) .ig-dl-windows {
     display: grid;
   }
-  /* Opener + security how-to steps: list-item so the ordered list still numbers
-     them; the hidden variants drop out of the count. */
+  /* The installer-download how-to list, one per OS: block so the whole list
+     shows; the hidden variants drop out. */
+  .ig:has(.ig-radio[data-os="macos"]:checked) .ig-ihow-macos,
+  .ig:has(.ig-radio[data-os="linux"]:checked) .ig-ihow-linux,
+  .ig:has(.ig-radio[data-os="windows"]:checked) .ig-ihow-windows {
+    display: block;
+  }
+  /* The install-script terminal opener: list-item so the ordered list still
+     numbers it; the hidden variants drop out of the count. */
   .ig:has(.ig-radio[data-os="macos"]:checked) .ig-open-macos,
   .ig:has(.ig-radio[data-os="linux"]:checked) .ig-open-linux,
-  .ig:has(.ig-radio[data-os="windows"]:checked) .ig-open-windows,
-  .ig:has(.ig-radio[data-os="macos"]:checked) .ig-sec-macos,
-  .ig:has(.ig-radio[data-os="windows"]:checked) .ig-sec-windows {
+  .ig:has(.ig-radio[data-os="windows"]:checked) .ig-open-windows {
     display: list-item;
   }
   /* Android (client only) has its own block and hides the desktop sections. */

@@ -254,6 +254,7 @@ const impl: Platform = {
       if (!update) return null;
       return wrapUpdate(update);
     },
+    canSelfInstall: () => invoke("can_self_install"),
     relaunch: () => tauriRelaunch(),
   },
   fs: {

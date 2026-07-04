@@ -179,6 +179,9 @@ const impl: Platform = {
     async check() {
       return null;
     },
+    async canSelfInstall() {
+      return true;
+    },
     relaunch: unavailable("updater.relaunch"),
   },
   fs: {

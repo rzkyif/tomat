@@ -16,6 +16,9 @@
   }
 
   function displaySubtitle(d: DownloadPlan): string {
+    // A failed prepare/install takes precedence: tell the user it can be retried
+    // rather than showing a version + no size (the old silent-limbo tell).
+    if (d.error) return "Couldn't be prepared - retry to download";
     if (isBinarySource(d.source)) {
       // Show the resolved release; fall back to "latest" when the probe
       // couldn't pin a concrete version.

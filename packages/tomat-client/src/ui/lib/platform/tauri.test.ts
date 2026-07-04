@@ -151,6 +151,11 @@ describe("Tauri platform: updater", () => {
     expect(await p.updater.check()).toBeNull();
     expect(tauriUpdaterCheck).toHaveBeenCalled();
   });
+  it("canSelfInstall invokes can_self_install", async () => {
+    invoke.mockResolvedValueOnce(false);
+    expect(await p.updater.canSelfInstall()).toBe(false);
+    expect(invoke).toHaveBeenCalledWith("can_self_install");
+  });
   it("relaunch delegates to plugin-process", async () => {
     await p.updater.relaunch();
     expect(tauriRelaunch).toHaveBeenCalled();

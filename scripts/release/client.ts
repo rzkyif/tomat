@@ -68,10 +68,10 @@ interface ClientManifest {
   notes: string;
   pub_date: string;
   platforms: Record<string, { signature: string; url: string; sha256: string }>;
-  // Conventional-installer direct downloads per Tauri platform key (macOS .dmg,
-  // Linux .deb/.rpm; Windows's NSIS installer IS the `platforms` bundle, so it
-  // is not duplicated here). Consumed by the website's download CTA, NOT by the
-  // Tauri updater (which only reads `platforms`).
+  // Conventional-installer direct downloads per Tauri platform key (macOS .dmg
+  // only; Windows's NSIS installer and the Linux AppImage ARE the `platforms`
+  // bundle, so they are not duplicated here). Consumed by the website's download
+  // CTA, NOT by the Tauri updater (which only reads `platforms`).
   downloads?: Record<string, Array<DownloadAsset & { url: string }>>;
 }
 
@@ -137,9 +137,9 @@ async function buildClient(
 ): Promise<void> {
   // Drive build-client.ts directly with the channel so it bakes TOMAT_CHANNEL
   // + applies the per-channel app-identity config override. `triple` cross-builds
-  // the host's other arch; `bundles` narrows the bundle targets (the cross-built
-  // Linux client emits only the AppImage, skipping the .deb/.rpm Tauri would
-  // otherwise also build).
+  // the host's other arch; `bundles` narrows the bundle targets (the Linux
+  // cross-build passes just "appimage" - the AppImage is the sole Linux client
+  // format).
   const args = ["run", "-A", "scripts/build-client.ts", `--channel=${channel}`];
   if (triple) args.push(`--target=${triple}`);
   if (bundles?.length) args.push(`--bundles=${bundles.join(",")}`);
@@ -230,12 +230,12 @@ async function findClientBundle(triple: Triple, bundleRoot: string): Promise<Cli
   );
 }
 
-/** Collect the conventional native installers Tauri emits alongside the updater
- *  bundle, for the website's direct-download CTA: macOS `.dmg`, Linux
- *  `.deb`/`.rpm`. Windows is skipped - its NSIS `.exe` IS the updater bundle
- *  (`findClientBundle`), so the website links that directly. Missing formats are
- *  skipped without error (a dmg needs a signed+notarized macOS build to be worth
- *  shipping; deb/rpm need the cross-build to not narrow `--bundles`). */
+/** Collect the conventional native installer Tauri emits alongside the updater
+ *  bundle, for the website's direct-download CTA: the macOS `.dmg`. Windows and
+ *  Linux are skipped - the NSIS `.exe` and the Linux `.AppImage` ARE the updater
+ *  bundle (`findClientBundle`), so the website links those directly; the Linux
+ *  client ships no `.deb`/`.rpm`. Missing formats are skipped without error (a
+ *  dmg needs a signed+notarized macOS build to be worth shipping). */
 async function collectExtraDownloads(
   triple: Triple,
   bundleRoot: string,
@@ -245,9 +245,6 @@ async function collectExtraDownloads(
   const specs: { dir: string; ext: string; format: DownloadAsset["format"] }[] = [];
   if (triple.endsWith("apple-darwin")) {
     specs.push({ dir: join(bundleRoot, "dmg"), ext: ".dmg", format: "dmg" });
-  } else if (triple.endsWith("unknown-linux-gnu")) {
-    specs.push({ dir: join(bundleRoot, "deb"), ext: ".deb", format: "deb" });
-    specs.push({ dir: join(bundleRoot, "rpm"), ext: ".rpm", format: "rpm" });
   }
   const out: Array<{
     format: DownloadAsset["format"];
@@ -376,9 +373,9 @@ export async function buildClientBundle(
     await Deno.copyFile(bundle.bundlePath, join(DIST_DIR, relPath));
     await Deno.copyFile(bundle.sigPath, join(DIST_DIR, sigRelPath));
 
-    // Harvest the conventional native installers Tauri also built (dmg / deb /
-    // rpm), copy them under dist/<triple>/, and record them for the website's
-    // direct-download CTA. Absent formats are simply skipped.
+    // Harvest the conventional native installer Tauri also built (the macOS
+    // dmg), copy it under dist/<triple>/, and record it for the website's
+    // direct-download CTA. Absent on a build with no dmg (simply skipped).
     const downloads: DownloadAsset[] = [];
     for (const d of await collectExtraDownloads(triple, bundleRoot)) {
       const dlRel = `${triple}/${d.filename}`;
@@ -498,13 +495,14 @@ export async function composeAndUploadClient(
       label: `${d.triple}_${d.filename}`,
       size: d.size,
       // The Windows NSIS .exe and the Linux AppImage ARE the primary user-facing
-      // installers (Windows has no separate dmg/deb harvest), so alias them for
-      // the download page. macOS's primary bundle is the .app.tar.gz updater
-      // payload, not a user download - its dmg (below) is aliased instead.
+      // installers (neither has a separate conventional-download harvest), so
+      // alias them for the download page. macOS's primary bundle is the
+      // .app.tar.gz updater payload, not a user download - its dmg (below) is
+      // aliased instead.
       aliasKey: clientBundleAlias(d.triple, storagePrefix, suffix),
     });
 
-    // Conventional native installers (dmg/deb/rpm): re-anchor, upload, alias, and
+    // Conventional native installer (the macOS dmg): re-anchor, upload, alias, and
     // record a direct URL for the website. Keyed by the same tauri platform key.
     if (d.downloads?.length) {
       downloads[d.tauriKey] = [];

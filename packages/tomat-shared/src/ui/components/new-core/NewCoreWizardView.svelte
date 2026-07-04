@@ -544,6 +544,16 @@
 
     <ul class="flex flex-col gap-2 text-sm text-default-700">
       <li class="flex gap-2">
+        <i
+          class="flex i-material-symbols-cloud-download-rounded text-base text-default-500 shrink-0 mt-0.5"
+        ></i>
+        <span>
+          tomat downloads the Core from
+          <code class="bg-surface-inset-strong px-1 rounded-small">get.au.tomat.ing</code>
+          and installs it on this computer.
+        </span>
+      </li>
+      <li class="flex gap-2">
         <i class="flex i-material-symbols-folder-rounded text-base text-default-500 shrink-0 mt-0.5"
         ></i>
         <span>

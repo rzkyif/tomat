@@ -73,6 +73,10 @@ export interface DownloadPlan {
   /** Resolved version for sidecar-binary plans (e.g. an upstream release tag).
    *  Unset for model files. */
   version?: string;
+  /** The last attempt to prepare this download failed; the confirm modal shows a
+   *  retry note instead of a size. Carried through from the requirements
+   *  snapshot's `RequiredFile.error`. */
+  error?: string;
 }
 
 // A binary manifest entry is one of two shapes:
@@ -297,6 +301,12 @@ export interface RequiredFile {
   /** A binary with no upstream asset on this platform. Kept in `required` for
    *  visibility but excluded from `missing` so it never blocks the app. */
   unavailable?: boolean;
+  /** The last attempt to prepare/download/install this file failed and it needs
+   *  a retry (e.g. an upstream binary that could not be resolved). Still counted
+   *  in `missing` (it blocks), but the UI shows the reason + a retry affordance
+   *  instead of a normal, sizeless "Download" line. Distinct from `unavailable`
+   *  (platform-impossible, non-blocking). */
+  error?: string;
   sizeHint?: number;
   version?: string;
 }

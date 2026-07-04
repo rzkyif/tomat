@@ -14,6 +14,7 @@ import {
 import { loadCoreSettingsResolved } from "@tomat/core-engine/services/core-settings";
 import { modelsManager } from "../models/manager.ts";
 import { binariesManager } from "../binaries/manager.ts";
+import { downloadManager } from "../downloads/manager.ts";
 import { hostTriple } from "../binaries/versions.ts";
 import { getLogger } from "../shared/log.ts";
 
@@ -36,6 +37,19 @@ export async function computeRequirements(): Promise<RequirementsSnapshot> {
   const modelProbes = await modelsManager().probe(modelRefs.map((r) => r.source));
   const probeBySource = new Map(modelProbes.map((p) => [p.source, p]));
 
+  // A model download that failed lives on as an Error row in the queue, keyed by
+  // the same source spec. Surface it as a retryable `error` so a stalled/failed
+  // model download isn't a silent, perpetually-"downloading" gate (the binary
+  // equivalent comes from the binaries manager below). Reading the live queue
+  // keeps this self-consistent: a retry flips the row off Error and the error
+  // clears on the next recompute, with nothing to reset by hand.
+  const modelDownloadError = new Map<string, string>();
+  for (const d of downloadManager().snapshot()) {
+    if (d.destination === "models" && d.status === "Error") {
+      modelDownloadError.set(d.source, d.error ?? "download failed");
+    }
+  }
+
   const required: RequiredFile[] = modelRefs.map((ref) => {
     const probe = probeBySource.get(ref.source);
     const present = probe?.alreadyHave ?? false;
@@ -44,6 +58,7 @@ export async function computeRequirements(): Promise<RequirementsSnapshot> {
       type: "model",
       group: ref.group,
       present,
+      error: present ? undefined : modelDownloadError.get(ref.source),
       sizeHint: present ? undefined : probe?.sizeHint,
     };
   });
@@ -90,12 +105,17 @@ export async function computeRequirements(): Promise<RequirementsSnapshot> {
     const present = isPresent(kind);
     const unavailable = !present && binaryUnavailableOnTriple(kind, triple);
     const probe = present ? undefined : binProbeByKind.get(kind);
+    // A recorded install failure (couldn't resolve upstream, download/extract
+    // errored) makes this a retryable error rather than a silent, sizeless,
+    // perpetually-missing entry. Only meaningful while still missing.
+    const error = !present && !unavailable ? binariesManager().failure(kind) : undefined;
     required.push({
       source: binarySource(kind),
       type: "binary",
       group: "binary",
       present,
       unavailable: unavailable || undefined,
+      error,
       sizeHint: probe?.sizeBytes,
       version: probe && probe.version !== "unknown" ? probe.version : undefined,
     });

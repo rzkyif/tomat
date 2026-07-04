@@ -70,6 +70,14 @@ class DownloadsState {
    *  modal); once approved it flips to download-manager mode even though the app
    *  is still gated (`hasPending`) until the files finish downloading. */
   needsApproval = $derived(this.missing.some((m) => !this.approvedSources.has(m.source)));
+  /** Missing files whose last prepare/download attempt failed (core couldn't
+   *  resolve/install them). Retryable: the button and popup offer another go. */
+  failed = $derived(this.missing.filter((m) => m.error));
+  /** Approved and genuinely in progress: pending, nothing awaiting approval, and
+   *  nothing failed. Every surface derives "download activity" from the
+   *  authoritative `missing` set this way, NOT from the transfer queue, so the
+   *  chat gate and the settings button can never disagree. */
+  installing = $derived(this.hasPending && !this.needsApproval && this.failed.length === 0);
   /** True until the first requirements snapshot arrives for the current core:
    *  callers show a loading state rather than assuming "ready". */
   loading = $derived(!this.requirementsLoaded);
@@ -82,13 +90,30 @@ class DownloadsState {
       .join("|"),
   );
 
+  /** Whether the last queue snapshot had any in-flight transfer, for detecting
+   *  the active -> idle settling edge that triggers a requirements self-heal. */
+  private queueActive = false;
+
   private subs = new Subscriptions();
 
   attach(): void {
     this.subs.attach(() => [
       cores().subscribeWs((frame: ServerToClientFrame) => {
         if (frame.kind === "downloads.snapshot") {
+          const wasActive = this.queueActive;
           this.items = frame.items;
+          this.queueActive = frame.items.some(
+            (i) => i.status === "Pending" || i.status === "Downloading",
+          );
+          // Self-heal: the queue just settled (was active, now idle) while the
+          // app is still gated. Re-pull the authoritative requirements snapshot
+          // so a missed/late requirements delta - or a binary install that
+          // failed to enqueue anything at all - can't leave `missing` stale and
+          // the UI stuck. Edge-triggered, so a persistently-failed binary
+          // refetches once and then stops (no idle queue -> no further edges).
+          if (wasActive && !this.queueActive && this.hasPending) {
+            void this.refetchRequirements();
+          }
         } else if (frame.kind === "requirements.snapshot") {
           this.applyRequirements(frame.required, frame.missing);
         }
@@ -160,6 +185,7 @@ class DownloadsState {
       alreadyHave: false,
       sizeHint: m.sizeHint,
       version: m.version,
+      error: m.error,
     }));
     confirmState.request({
       title: "Pending Downloads",
@@ -182,6 +208,10 @@ class DownloadsState {
         ]);
         try {
           await cores().api().requirements.download();
+          // Re-pull requirements: if a required binary couldn't be resolved,
+          // nothing was enqueued and no queue-settle edge will fire, so this is
+          // what surfaces the failure (retryable) instead of a silent limbo.
+          void this.refetchRequirements();
         } catch (e) {
           // The request failed, so nothing was enqueued. Roll back the
           // optimistic approval: otherwise `needsApproval` reads false and the

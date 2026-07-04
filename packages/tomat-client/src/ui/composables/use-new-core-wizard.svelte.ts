@@ -14,6 +14,7 @@
 import { errMessage, MIN_ADMIN_PASSWORD_LENGTH } from "@tomat/shared";
 import {
   cores,
+  isLoopbackUrl,
   mintCodeWithAdminToken,
   pairWithCode,
   type PairedCoreEntry,
@@ -47,8 +48,6 @@ export function hostFromUrl(url: string): string {
     return "Remote Core";
   }
 }
-
-const isLoopback = (u: string) => u.includes("127.0.0.1") || u.includes("localhost");
 
 export class NewCoreWizard {
   // Resolved from the platform on mount so a latest client targets the latest
@@ -142,7 +141,7 @@ export class NewCoreWizard {
   async decideInitialView(): Promise<void> {
     const list = await cores().list();
     const firstEver = list.length === 0;
-    const localCorePaired = list.some((c) => isLoopback(c.baseUrl));
+    const localCorePaired = list.some((c) => isLoopbackUrl(c.baseUrl));
 
     if (this.onMobile) {
       // Remote-only: there is no "this computer" option on mobile, so the

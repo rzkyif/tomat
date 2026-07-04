@@ -7,19 +7,27 @@ import {
   resolveUpstream,
 } from "./upstream-resolver.ts";
 
-// Swap globalThis.fetch for a canned GitHub /releases/latest response so the
-// digest-verification branches are exercised without touching the network.
-function withMockRelease(body: unknown, fn: () => Promise<unknown>): () => Promise<void> {
+// Swap globalThis.fetch for a canned GitHub response so the resolution branches
+// are exercised without touching the network. A latest (un-pinned) resolver
+// hits `/releases?per_page=N` (a newest-first ARRAY); pass a bare release object
+// and it is wrapped as a one-element list.
+function withMockReleases(body: unknown, fn: () => Promise<unknown>): () => Promise<void> {
+  const list = Array.isArray(body) ? body : [body];
   return async () => {
     const orig = globalThis.fetch;
     __resetResolverCacheForTesting();
-    globalThis.fetch = () =>
-      Promise.resolve(
-        new Response(JSON.stringify(body), {
+    globalThis.fetch = (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      // Pinned-tag lookups hit `/releases/tags/<tag>` (a single object); the
+      // latest path hits `/releases?per_page=N` (an array).
+      const payload = url.includes("/releases/tags/") ? list[0] : list;
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),
       );
+    };
     try {
       await fn();
     } finally {
@@ -114,7 +122,7 @@ Deno.test("resolveUpstream returns null (no GitHub call) when the triple has no 
 
 Deno.test(
   "resolveUpstream resolves the latest asset + verifies via GitHub's sha256 digest",
-  withMockRelease(
+  withMockReleases(
     {
       tag_name: "b9999",
       assets: [
@@ -150,7 +158,7 @@ Deno.test(
 
 Deno.test(
   "resolveUpstream resolves a GPU variant asset + its cudart extra",
-  withMockRelease(
+  withMockReleases(
     {
       tag_name: "b9999",
       assets: [
@@ -198,8 +206,10 @@ Deno.test(
 );
 
 Deno.test(
-  "resolveUpstream refuses an asset with no sha256 digest (unverifiable)",
-  withMockRelease(
+  "resolveUpstream refuses an asset with no sha256 digest (unverifiable), never installs it",
+  // Only release, digestless asset: we must NOT return it (unverifiable) and,
+  // with no older release to fall back to, reject.
+  withMockReleases(
     {
       tag_name: "b9999",
       assets: [
@@ -224,18 +234,63 @@ Deno.test(
             "cpu",
           ),
         Error,
-        "no sha256 digest",
+        "digest-verified",
       ),
   ),
 );
 
 Deno.test(
-  "resolveUpstream throws when the expected asset is absent from the release",
-  withMockRelease(
-    {
-      tag_name: "b9999",
-      assets: [{ name: "something-else.zip", browser_download_url: "x" }],
+  "resolveUpstream skips a digestless newest asset and falls back to an older digested one",
+  // GitHub can publish a release asset before its digest is computed; rather than
+  // fail, fall back to the last release that has a digest-verified copy.
+  withMockReleases(
+    [
+      {
+        tag_name: "b9999",
+        assets: [
+          {
+            name: "llama-b9999-bin-macos-arm64.tar.gz",
+            browser_download_url: "https://github.test/nodigest.tar.gz",
+            digest: null,
+            state: "uploaded",
+          },
+        ],
+      },
+      {
+        tag_name: "b9998",
+        assets: [
+          {
+            name: "llama-b9998-bin-macos-arm64.tar.gz",
+            browser_download_url: "https://github.test/mac-b9998.tar.gz",
+            digest: "sha256:mac",
+            size: 42,
+            state: "uploaded",
+          },
+        ],
+      },
+    ],
+    async () => {
+      const got = await resolveUpstream(
+        {
+          repo: "ggml-org/llama.cpp",
+          assets: { "aarch64-apple-darwin": "llama-{tag}-bin-macos-arm64.tar.gz" },
+        },
+        "aarch64-apple-darwin",
+        "cpu",
+      );
+      assertEquals(got?.version, "b9998");
+      assertEquals(got?.sha256, "mac");
     },
+  ),
+);
+
+Deno.test(
+  "resolveUpstream throws when the asset is absent from every recent release",
+  withMockReleases(
+    [
+      { tag_name: "b9999", assets: [{ name: "something-else.zip", browser_download_url: "x" }] },
+      { tag_name: "b9998", assets: [{ name: "another.zip", browser_download_url: "y" }] },
+    ],
     () =>
       assertRejects(
         () =>
@@ -250,7 +305,153 @@ Deno.test(
             "cpu",
           ),
         Error,
-        "has no asset",
+        "no fully-uploaded, digest-verified asset",
       ),
+  ),
+);
+
+Deno.test(
+  "resolveUpstream skips a just-published release still uploading its assets",
+  // The newest release (b9999) exists but its macos asset hasn't finished
+  // uploading (absent here); resolution must fall back to the last COMPLETE
+  // release (b9998) instead of failing. This is the exact llama.cpp
+  // publish-before-upload window that stranded llama-server with no size.
+  withMockReleases(
+    [
+      {
+        tag_name: "b9999",
+        assets: [
+          // A different triple's asset finished first; ours isn't here yet.
+          {
+            name: "llama-b9999-bin-win-cpu-x64.zip",
+            browser_download_url: "https://github.test/win.zip",
+            digest: "sha256:win",
+            size: 1,
+          },
+        ],
+      },
+      {
+        tag_name: "b9998",
+        assets: [
+          {
+            name: "llama-b9998-bin-macos-arm64.tar.gz",
+            browser_download_url: "https://github.test/mac-b9998.tar.gz",
+            digest: "sha256:mac",
+            size: 42,
+            state: "uploaded",
+          },
+        ],
+      },
+    ],
+    async () => {
+      const got = await resolveUpstream(
+        {
+          repo: "ggml-org/llama.cpp",
+          assets: { "aarch64-apple-darwin": "llama-{tag}-bin-macos-arm64.tar.gz" },
+        },
+        "aarch64-apple-darwin",
+        "cpu",
+      );
+      assertEquals(got, {
+        version: "b9998",
+        variant: "cpu",
+        url: "https://github.test/mac-b9998.tar.gz",
+        sha256: "mac",
+        sizeBytes: 42,
+      });
+    },
+  ),
+);
+
+Deno.test(
+  "resolveUpstream skips a prerelease and resolves the newest stable release",
+  // `/releases` (unlike `/releases/latest`) lists prereleases/drafts; an
+  // un-pinned resolver must track the latest STABLE release, not a prerelease.
+  withMockReleases(
+    [
+      {
+        tag_name: "b9999-rc",
+        prerelease: true,
+        assets: [
+          {
+            name: "llama-b9999-rc-bin-macos-arm64.tar.gz",
+            browser_download_url: "https://github.test/rc.tar.gz",
+            digest: "sha256:rc",
+            size: 9,
+            state: "uploaded",
+          },
+        ],
+      },
+      {
+        tag_name: "b9998",
+        assets: [
+          {
+            name: "llama-b9998-bin-macos-arm64.tar.gz",
+            browser_download_url: "https://github.test/mac-b9998.tar.gz",
+            digest: "sha256:mac",
+            size: 42,
+            state: "uploaded",
+          },
+        ],
+      },
+    ],
+    async () => {
+      const got = await resolveUpstream(
+        {
+          repo: "ggml-org/llama.cpp",
+          assets: { "aarch64-apple-darwin": "llama-{tag}-bin-macos-arm64.tar.gz" },
+        },
+        "aarch64-apple-darwin",
+        "cpu",
+      );
+      assertEquals(got?.version, "b9998");
+      assertEquals(got?.sha256, "mac");
+    },
+  ),
+);
+
+Deno.test(
+  "resolveUpstream skips an asset whose upload is still in progress (state != uploaded)",
+  // The newest release lists our asset but GitHub still marks it "starter"
+  // (bytes not fully stored); it must be treated as not-yet-available.
+  withMockReleases(
+    [
+      {
+        tag_name: "b9999",
+        assets: [
+          {
+            name: "llama-b9999-bin-macos-arm64.tar.gz",
+            browser_download_url: "https://github.test/partial.tar.gz",
+            digest: "sha256:partial",
+            size: 7,
+            state: "starter",
+          },
+        ],
+      },
+      {
+        tag_name: "b9998",
+        assets: [
+          {
+            name: "llama-b9998-bin-macos-arm64.tar.gz",
+            browser_download_url: "https://github.test/mac-b9998.tar.gz",
+            digest: "sha256:mac",
+            size: 42,
+            state: "uploaded",
+          },
+        ],
+      },
+    ],
+    async () => {
+      const got = await resolveUpstream(
+        {
+          repo: "ggml-org/llama.cpp",
+          assets: { "aarch64-apple-darwin": "llama-{tag}-bin-macos-arm64.tar.gz" },
+        },
+        "aarch64-apple-darwin",
+        "cpu",
+      );
+      assertEquals(got?.version, "b9998");
+      assertEquals(got?.sha256, "mac");
+    },
   ),
 );

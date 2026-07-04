@@ -445,9 +445,8 @@ if [ -x "$INSTALLED_BIN" ]; then
     ui_action_error "$IDX" "(uninstall-service reported an error; see output above)"
   fi
 else
-  # Binary already gone (a partial install / prior removal): tear the service
-  # and data down directly so nothing lingers. The keychain master key can't be
-  # cleared without the helper, so it is left (noted in the footer).
+  # Binary already gone (a partial install / prior removal): tear the service,
+  # keychain master key, and data down directly so nothing lingers.
   case "$(uname -s 2>/dev/null || echo unknown)" in
     Darwin)
       _plist="$HOME/Library/LaunchAgents/au.tomat.core$CHANNEL_SUFFIX.plist"
@@ -465,11 +464,34 @@ else
       fi
       ;;
   esac
+  # Clear the keychain master key before removing the dir. The tomat-core-keychain
+  # helper is a distinct file that usually survives when only the main binary is
+  # gone, and its `delete` verb is idempotent; if it too is missing, fall back to
+  # the OS store directly (best-effort). Skipped under --keep-data, which keeps
+  # both the key and the data (parity with uninstall-service --keep-data).
+  if [ "$KEEP_DATA" != "1" ]; then
+    _helper="$BIN_DIR/tomat-core-keychain$CHANNEL_SUFFIX"
+    _svc="au.tomat.core$CHANNEL_SUFFIX"
+    if [ -x "$_helper" ]; then
+      "$_helper" delete "$_svc" master-key >/dev/null 2>&1 || true
+    else
+      case "$(uname -s 2>/dev/null || echo unknown)" in
+        Darwin)
+          security delete-generic-password -s "$_svc" -a master-key >/dev/null 2>&1 || true
+          ;;
+        Linux)
+          if command -v secret-tool >/dev/null 2>&1; then
+            secret-tool clear service "$_svc" account master-key >/dev/null 2>&1 || true
+          fi
+          ;;
+      esac
+    fi
+  fi
   if [ "$KEEP_DATA" != "1" ] && [ -d "$HOME_DIR" ]; then
     rm -rf "$HOME_DIR"
     rmdir "$(dirname "$HOME_DIR")" 2>/dev/null || true
   fi
-  ui_action_done "$IDX" "(binary missing; removed service + data directly)"
+  ui_action_done "$IDX" "(binary missing; removed service + keychain + data directly)"
 fi
 
 # --- footer ---------------------------------------------------------------

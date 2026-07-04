@@ -1,10 +1,13 @@
 import { Hono } from "hono";
 import type { BinaryKind } from "@tomat/shared";
-import { binarySourceToKind } from "@tomat/shared";
+import { binarySourceToKind, errMessage } from "@tomat/shared";
 import { computeRequirements } from "../../services/requirements.ts";
 import { ensureKindModels, type ModelKind } from "../../services/model-ensure.ts";
 import { binariesManager } from "../../binaries/manager.ts";
 import { bearerMiddleware } from "../middleware/auth.ts";
+import { getLogger } from "../../shared/log.ts";
+
+const log = getLogger("requirements");
 
 export function requirementsRoutes(): Hono {
   const r = new Hono();
@@ -24,8 +27,16 @@ export function requirementsRoutes(): Hono {
     );
     const modelJobIds: string[] = [];
     for (const g of groups) {
-      const res = await ensureKindModels(g);
-      modelJobIds.push(...res.enqueued);
+      // One group failing to enqueue (e.g. a malformed source spec) must not
+      // abort the whole request and starve the OTHER groups + the binary
+      // installs below. Log and continue; the group stays missing and the popup
+      // keeps offering it.
+      try {
+        const res = await ensureKindModels(g);
+        modelJobIds.push(...res.enqueued);
+      } catch (err) {
+        log.error(`requirements download: ensure ${g} failed: ${errMessage(err)}`);
+      }
     }
 
     const binKinds: BinaryKind[] = snap.missing

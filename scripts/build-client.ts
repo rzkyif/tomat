@@ -45,9 +45,9 @@ const targets = (args.target as string[])
   .flatMap((t) => t.split(","))
   .map((t) => t.trim())
   .filter(Boolean);
-// Optional bundle-target override (e.g. "appimage" for the cross-built Linux
-// client, so Tauri emits only the AppImage and not the .deb/.rpm it would
-// otherwise also bundle).
+// Optional bundle-target override: a CSV of Tauri bundle targets, narrowing what
+// gets built instead of every target in tauri.conf.json. The Linux cross-build
+// passes just "appimage" - the AppImage is the sole Linux client format.
 const bundles = (args.bundles ?? "").trim();
 
 // Windows-only: the build host is the win-arm64 UTM guest, and `workerd` (the

@@ -270,6 +270,24 @@ $HomeDir = if ($env:TOMAT_CORE_HOME) { $env:TOMAT_CORE_HOME } else { Join-Path $
 $ChannelSuffix = if ($Channel -eq "stable") { "" } else { "-$Channel" }
 $Installed = Join-Path $HomeDir "bin\tomat-core$ChannelSuffix.exe"
 
+# Delete one Windows Credential Manager generic credential by target name via
+# CredDeleteW (CRED_TYPE_GENERIC = 1). Used only by the binary-missing fallback
+# below, when the keychain helper is gone too. keyring-core's Windows target name
+# is "<account>.<service>", so the master key is "master-key.au.tomat.core<suffix>".
+# Returns $true when the entry was deleted or was already absent (idempotent).
+Add-Type -Namespace Native -Name CredMan -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("advapi32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode, SetLastError=true)]
+public static extern bool CredDeleteW(string target, uint type, uint flags);
+'@ -ErrorAction SilentlyContinue
+
+function Remove-CredManTarget($Target) {
+  try {
+    if ([Native.CredMan]::CredDeleteW($Target, 1, 0)) { return $true }
+    # 1168 = ERROR_NOT_FOUND: the entry is already gone, so treat it as success.
+    return ([System.Runtime.InteropServices.Marshal]::GetLastWin32Error() -eq 1168)
+  } catch { return $false }
+}
+
 # --- begin UI -------------------------------------------------------------
 
 # The whole teardown - stop + unregister the Scheduled Task, kill stragglers,
@@ -310,8 +328,8 @@ try {
     }
   } else {
     # Binary already gone (partial install / prior removal): tear the Scheduled
-    # Task, the Add/Remove Programs entry, and data down directly. The keychain
-    # master key can't be cleared without the helper, so it is left behind.
+    # Task, the Add/Remove Programs entry, keychain master key, and data down
+    # directly.
     $task = "tomat-core$ChannelSuffix"
     try {
       Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
@@ -319,6 +337,19 @@ try {
     } catch { }
     Remove-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\tomat-core$ChannelSuffix" `
       -Recurse -Force -ErrorAction SilentlyContinue
+    # Clear the keychain master key before removing the dir. The tomat-core-keychain
+    # helper is a distinct file that usually survives when only the main binary is
+    # gone, and its `delete` verb is idempotent; if it too is missing, drop the
+    # Credential Manager entry directly. Skipped under -KeepData (keeps key + data).
+    if (-not $KeepData) {
+      $helper = Join-Path $HomeDir "bin\tomat-core-keychain$ChannelSuffix.exe"
+      $svc = "au.tomat.core$ChannelSuffix"
+      if (Test-Path $helper) {
+        & $helper delete $svc master-key 2>$null
+      } else {
+        [void](Remove-CredManTarget "master-key.$svc")
+      }
+    }
     if ((-not $KeepData) -and (Test-Path $HomeDir)) {
       Remove-Item -Recurse -Force $HomeDir
       $channelDir = Split-Path -Parent $HomeDir
@@ -328,7 +359,7 @@ try {
         }
       } catch { }
     }
-    Ui-ActionDone $Idx "(binary missing; removed service + data directly)"
+    Ui-ActionDone $Idx "(binary missing; removed service + keychain + data directly)"
   }
 
   # --- footer ------------------------------------------------------------

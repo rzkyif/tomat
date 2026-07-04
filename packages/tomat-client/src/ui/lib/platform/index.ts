@@ -380,6 +380,11 @@ export interface Platform {
     /** Check the configured update endpoint. Returns null when no update
      *  is available; otherwise an UpdateHandle the caller drives. */
     check(): Promise<UpdateHandle | null>;
+    /** Whether an available client update can be installed in place. False on a
+     *  non-AppImage Linux install (a distro/third-party repackage or raw binary),
+     *  where the Tauri updater can only replace an AppImage: callers open the
+     *  download page instead of running a self-update that would fail. */
+    canSelfInstall(): Promise<boolean>;
     /** Relaunch the desktop client process. */
     relaunch(): Promise<void>;
   };

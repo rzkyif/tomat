@@ -415,6 +415,10 @@ const impl: Platform = {
     // above). iOS has no OTA self-install path, so updates come from the App
     // Store and there is nothing to check here.
     check: () => (osPlatform() === "ios" ? Promise.resolve(null) : checkAndroidUpdate()),
+    // Android hands the newer APK to the OS package installer (a working
+    // self-install); iOS never surfaces an update (check returns null), so
+    // in-place install is always the right path on mobile.
+    canSelfInstall: () => Promise.resolve(true),
     // No in-process relaunch on mobile: Android's package installer restarts the
     // app, and iOS is relaunched from the home screen.
     relaunch: () => notSupported("Relaunch"),

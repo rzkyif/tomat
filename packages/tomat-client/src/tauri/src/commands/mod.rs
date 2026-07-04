@@ -187,6 +187,26 @@ pub fn client_channel() -> &'static str {
     crate::channel::channel()
 }
 
+/// Whether an in-app client update can be applied to this install in place.
+///
+/// The Tauri updater swaps the running bundle for macOS (.app) and Windows
+/// (NSIS), but on Linux it only replaces an AppImage (the file named by the
+/// `APPIMAGE` env var it was launched from). We ship the Linux client only as an
+/// AppImage, so this is normally true; it returns false for any OTHER Linux
+/// packaging (a distro/third-party repackage, or a raw binary), where an in-app
+/// update would fail - the UI sends those users to the download page instead.
+#[tauri::command]
+pub fn can_self_install() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var_os("APPIMAGE").is_some()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
+}
+
 // -------------------------------------------------------------------
 // File conversion (anytomd + pdf-extract). Desktop only: those crates are
 // not built for Android; mobile attachments route through the core instead.

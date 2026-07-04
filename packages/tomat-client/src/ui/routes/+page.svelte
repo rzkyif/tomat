@@ -27,7 +27,12 @@
   import { connectionState } from "$stores/connection.svelte";
   import { backState } from "$stores/back.svelte";
   import type { AppMode } from "$stores/view.svelte";
-  import { cores, ensureLocalCoreUpIfNeeded } from "$lib/core";
+  import {
+    cores,
+    ensureLocalCoreUpIfNeeded,
+    isLoopbackUrl,
+    pruneUninstalledLocalCores,
+  } from "$lib/core";
   import { platform } from "$lib/platform";
   import { useTheme } from "$composables/use-theme.svelte";
   import { WindowChoreography } from "$composables/use-window-choreography.svelte";
@@ -257,7 +262,18 @@
       await settingsState.loadClientSettings();
       // Decide the initial mode from LOCAL data only: whether a core is paired
       // is the client-settings `cores` list, with no select()/keychain/network.
-      const paired = (await cores().list()).length > 0;
+      // A paired local core whose core was uninstalled is dropped in the deferred
+      // phase (pruneUninstalledLocalCores); don't count it here, or the window
+      // would flash into chat before landing on onboarding. isLocalCoreInstalled
+      // is a fast on-disk check (no keychain/network), so it is allowed here; on
+      // an error assume installed rather than force onboarding.
+      const list = await cores().list();
+      let paired = list.length > 0;
+      if (paired && list.every((c) => isLoopbackUrl(c.baseUrl))) {
+        paired = await platform()
+          .pairing.isLocalCoreInstalled()
+          .catch(() => true);
+      }
       if (paired) {
         viewState.setImmediate("chat");
       } else {
@@ -389,6 +405,18 @@
     // the window is up regardless.
     void (async () => {
       log.info("deferred boot: connecting to core");
+      // Drop paired local cores whose core was uninstalled (the user removed both
+      // parts then reinstalled just the Client, or removed the Core on its own)
+      // before selecting, so restoreSelected never picks a core that is gone and
+      // hangs on "Connecting to core...". Keys off the on-disk core binary, so a
+      // running update never trips it. Falls through to onboarding or a remaining
+      // remote core via the restore + tokenless-cleanup below. Guarded like the
+      // steps below so a failure here can't abort the rest of the deferred boot.
+      try {
+        await pruneUninstalledLocalCores();
+      } catch (e) {
+        log.error("local-core prune failed:", e);
+      }
       try {
         await cores().restoreSelected();
       } catch (e) {

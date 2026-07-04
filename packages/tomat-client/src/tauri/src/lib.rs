@@ -258,6 +258,7 @@ fn run_desktop() {
             restore_system_volume,
             resolve_path,
             client_channel,
+            can_self_install,
             convert_file_to_markdown,
             get_self_metrics,
             was_autostarted,
@@ -363,6 +364,7 @@ fn run_mobile() {
             truncate_client_log,
             resolve_path,
             client_channel,
+            can_self_install,
             // Logging
             client_log,
         ])

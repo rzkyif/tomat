@@ -8,12 +8,14 @@
 #   - Linux: deletes ~/.local/bin/tomat-client.AppImage and its .desktop
 #            entry, then refreshes the desktop database when available.
 #
-# Client-side data (~/.tomat/client/) is LEFT IN PLACE so a future re-install
-# picks up the user's paired-core list and UI prefs. Use --purge to wipe.
+# The paired-core list and its keychain tokens are ALWAYS removed, so a
+# re-install starts clean and does not try to reach a Core that is gone. The
+# rest of the Client's data under ~/.tomat/<channel>/client/ (settings and
+# snippets) is removed too by default; pass --keep-data to preserve just that.
 #
 # Usage:
 #   curl -fsSL https://get.au.tomat.ing/install/client-uninstall.sh | bash
-#   curl -fsSL https://get.au.tomat.ing/install/client-uninstall.sh | bash -s -- --purge
+#   curl -fsSL https://get.au.tomat.ing/install/client-uninstall.sh | bash -s -- --keep-data
 #
 # UI:
 #   Each phase appears as one row. Pending rows show [ ], the active row
@@ -386,11 +388,11 @@ ui_die() {
 
 # --- configuration --------------------------------------------------------
 
-PURGE=0
+KEEP_DATA=0
 # Channel selectable via TOMAT_CHANNEL env or --channel <c> / --latest (arg wins).
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --purge) PURGE=1; shift ;;
+    --keep-data) KEEP_DATA=1; shift ;;
     --channel) TOMAT_CHANNEL="${2:-}"; shift 2 ;;
     --channel=*) TOMAT_CHANNEL="${1#*=}"; shift ;;
     --latest) TOMAT_CHANNEL="latest"; shift ;;
@@ -440,10 +442,14 @@ esac
 
 CLIENT_DATA_DIR="$HOME/.tomat/$TOMAT_CHANNEL/client"
 CORES_JSON="$CLIENT_DATA_DIR/cores.json"
+# The dev/android channels back paired-core tokens with this file inside the data
+# dir instead of the OS keychain; it is part of the paired-core state, so it goes
+# with cores.json even under --keep-data.
+KEYCHAIN_JSON="$CLIENT_DATA_DIR/keychain.json"
 # On signed desktop builds the Client stores each paired core's bearer token in
 # the OS keychain under this service / account "core:<coreId>" (mirrors the
-# client's channel.rs + keychain.rs). Cleared only under --purge, since the
-# non-purge path keeps the paired-core list for a later re-install.
+# client's channel.rs + keychain.rs). Always cleared, since the paired-core list
+# is always removed; --keep-data preserves only the settings.
 KEYCHAIN_SERVICE="tomat-client$CHANNEL_SUFFIX"
 
 # --- begin UI -------------------------------------------------------------
@@ -451,11 +457,14 @@ KEYCHAIN_SERVICE="tomat-client$CHANNEL_SUFFIX"
 ui_init "tomat-client uninstaller"
 
 IDX_REMOVE_APP=$(ui_action_add "$LABEL_REMOVE")
-IDX_KEYCHAIN=-1
-IDX_PURGE=-1
-if [ "$PURGE" = "1" ]; then
-  IDX_KEYCHAIN=$(ui_action_add "Clearing keychain tokens")
-  IDX_PURGE=$(ui_action_add "Removing $CLIENT_DATA_DIR (per --purge)")
+# Paired cores (tokens + list) are always removed; settings only when not kept.
+IDX_KEYCHAIN=$(ui_action_add "Clearing paired-core tokens")
+if [ "$KEEP_DATA" = "1" ]; then
+  IDX_CORES=$(ui_action_add "Removing paired-core list (keeping settings)")
+  IDX_DATA=-1
+else
+  IDX_CORES=-1
+  IDX_DATA=$(ui_action_add "Removing $CLIENT_DATA_DIR")
 fi
 
 # --- action 1: remove the app --------------------------------------------
@@ -504,20 +513,26 @@ else
   fi
 fi
 
-# --- action 2 (conditional): clear keychain tokens -----------------------
-# Runs before the data dir (which holds cores.json) is removed. macOS only:
-# the Client ships no keychain CLI and keyring-core's store format differs per
-# OS, so elsewhere we leave the tokens and say so rather than skip silently.
+# --- action 2: clear paired-core tokens ----------------------------------
+# Always runs (the paired-core list is always removed). Reads cores.json before
+# it is deleted below. Per platform + channel (mirrors the Client's keychain.rs):
+#   - macOS stable/latest: OS keychain, cleared per core id via the `security` CLI.
+#   - Linux stable/latest: the DBus Secret Service, whose items this Client tags
+#     with attribute service="$KEYCHAIN_SERVICE"; `secret-tool clear service ...`
+#     drops every one of ours in a single call.
+#   - dev/android: a keychain.json file inside the data dir, removed below.
+# Where we cannot reach the store (no tool, no running keychain), we leave the
+# tokens and note the residue rather than claiming success.
 
-if [ "$IDX_KEYCHAIN" != "-1" ]; then
-  if [ "$uname_os" != "Darwin" ]; then
-    ui_action_skip "$IDX_KEYCHAIN" "(tokens may remain in keychain)"
-  elif ! command -v security >/dev/null 2>&1; then
+KEYCHAIN_RESIDUE=0
+if [ "$uname_os" = "Darwin" ]; then
+  if ! command -v security >/dev/null 2>&1; then
     ui_action_skip "$IDX_KEYCHAIN" "(security tool not found)"
+    KEYCHAIN_RESIDUE=1
   elif [ ! -f "$CORES_JSON" ]; then
     ui_action_skip "$IDX_KEYCHAIN" "(no tokens)"
   else
-    ui_action_start "$IDX_KEYCHAIN" "Clearing keychain tokens"
+    ui_action_start "$IDX_KEYCHAIN" "Clearing paired-core tokens"
     if command -v jq >/dev/null 2>&1; then
       CORE_IDS="$(jq -r '.cores[]?.id // empty' "$CORES_JSON" 2>/dev/null || true)"
     else
@@ -538,15 +553,54 @@ if [ "$IDX_KEYCHAIN" != "-1" ]; then
       ui_action_done "$IDX_KEYCHAIN" "(cleared $CLEARED)"
     fi
   fi
+elif [ "$uname_os" = "Linux" ]; then
+  if [ ! -f "$CORES_JSON" ]; then
+    # No paired cores means none of our Secret Service tokens to clear (parity
+    # with the macOS branch, which keys off cores.json the same way).
+    ui_action_skip "$IDX_KEYCHAIN" "(no tokens)"
+  elif ! command -v secret-tool >/dev/null 2>&1; then
+    # dev-channel tokens live in keychain.json (removed below), so this only
+    # leaves stable/latest Secret Service tokens behind.
+    ui_action_skip "$IDX_KEYCHAIN" "(secret-tool not found; tokens may remain)"
+    KEYCHAIN_RESIDUE=1
+  else
+    ui_action_start "$IDX_KEYCHAIN" "Clearing paired-core tokens"
+    if secret-tool clear service "$KEYCHAIN_SERVICE" >/dev/null 2>&1; then
+      ui_action_done "$IDX_KEYCHAIN" "(cleared)"
+    else
+      # No running Secret Service (e.g. a headless / SSH session with no D-Bus).
+      ui_action_skip "$IDX_KEYCHAIN" "(no keychain running; tokens may remain)"
+      KEYCHAIN_RESIDUE=1
+    fi
+  fi
+else
+  ui_action_skip "$IDX_KEYCHAIN" "(tokens may remain in keychain)"
+  KEYCHAIN_RESIDUE=1
 fi
 
-# --- action 3 (conditional): purge client data ---------------------------
+# --- action 3: remove client data ----------------------------------------
+# --keep-data drops only the paired-core state (cores.json + the dev/android
+# keychain.json), leaving settings and snippets; otherwise the whole dir goes.
 
-if [ "$IDX_PURGE" != "-1" ]; then
-  if [ ! -d "$CLIENT_DATA_DIR" ]; then
-    ui_action_skip "$IDX_PURGE" "(no data found)"
+if [ "$IDX_CORES" != "-1" ]; then
+  if [ ! -f "$CORES_JSON" ] && [ ! -f "$KEYCHAIN_JSON" ]; then
+    ui_action_skip "$IDX_CORES" "(no paired cores)"
   else
-    ui_action_start "$IDX_PURGE" "Removing $CLIENT_DATA_DIR (per --purge)"
+    ui_action_start "$IDX_CORES" "Removing paired-core list (keeping settings)"
+    if ! rm -f "$CORES_JSON" "$KEYCHAIN_JSON" 2>/dev/null; then
+      ui_die "Permission denied removing paired-core files in $CLIENT_DATA_DIR" \
+        "" \
+        "quit tomat and re-run"
+    fi
+    ui_action_done "$IDX_CORES" "(removed)"
+  fi
+fi
+
+if [ "$IDX_DATA" != "-1" ]; then
+  if [ ! -d "$CLIENT_DATA_DIR" ]; then
+    ui_action_skip "$IDX_DATA" "(no data found)"
+  else
+    ui_action_start "$IDX_DATA" "Removing $CLIENT_DATA_DIR"
     if ! rm -rf "$CLIENT_DATA_DIR" 2>/dev/null; then
       ui_die "Permission denied removing $CLIENT_DATA_DIR" \
         "" \
@@ -557,26 +611,30 @@ if [ "$IDX_PURGE" != "-1" ]; then
     # still installed on this channel keeps it (the shared models dir lives under
     # ~/.tomat, not the channel dir, so it is never affected).
     rmdir "$HOME/.tomat/$TOMAT_CHANNEL" 2>/dev/null || true
-    ui_action_done "$IDX_PURGE" "(removed)"
+    ui_action_done "$IDX_DATA" "(removed)"
   fi
 fi
 
 # --- footer ---------------------------------------------------------------
 
-if [ "$PURGE" = "1" ]; then
-  if [ "$uname_os" != "Darwin" ]; then
-    ui_finish \
-      "tomat-client uninstalled." \
-      "" \
-      "A few paired-core tokens may remain in your OS keychain; remove them manually if desired."
+# The keychain-residue note only applies when action 2 could not reach the store
+# (no tool, or no running keychain). The paired-core list itself is always gone.
+KEYCHAIN_NOTE=""
+if [ "$KEYCHAIN_RESIDUE" = "1" ]; then
+  KEYCHAIN_NOTE="A few paired-core tokens may remain in your OS keychain; remove them manually if desired."
+fi
+
+if [ "$KEEP_DATA" = "1" ]; then
+  SETTINGS_NOTE="Settings in $CLIENT_DATA_DIR were kept (per --keep-data); the paired-core list was removed."
+  if [ -n "$KEYCHAIN_NOTE" ]; then
+    ui_finish "tomat-client uninstalled." "" "$SETTINGS_NOTE" "$KEYCHAIN_NOTE"
   else
-    ui_finish "tomat-client uninstalled."
+    ui_finish "tomat-client uninstalled." "" "$SETTINGS_NOTE"
   fi
+elif [ -n "$KEYCHAIN_NOTE" ]; then
+  ui_finish "tomat-client uninstalled." "" "$KEYCHAIN_NOTE"
 else
-  ui_finish \
-    "tomat-client uninstalled." \
-    "" \
-    "Settings in $CLIENT_DATA_DIR were left in place. Re-run with --purge to remove."
+  ui_finish "tomat-client uninstalled."
 fi
 
 exit 0

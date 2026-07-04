@@ -7,7 +7,7 @@
   // toggle them, and copies to the clipboard. It reuses the app's shared Toggle
   // primitive so the controls match the client, and the same lib/install helpers
   // as the baseline so the commands never drift between the two.
-  import { onMount, untrack } from "svelte";
+  import { onMount } from "svelte";
   import Toggle from "@tomat/shared/ui/components/primitives/Toggle.svelte";
   import { ripple } from "@tomat/shared/ui/actions/ripple.ts";
   import { RIPPLE_MS } from "@tomat/shared/ui/animations.ts";
@@ -22,6 +22,7 @@
     coreUninstallCommand,
     detectOs,
     finishHowto,
+    formatTag,
     installerHowto,
     type NativeInstaller,
     nativeInstallers,
@@ -48,10 +49,12 @@
   let service = $state(true);
   let behindProxy = $state(false);
   // Uninstall option, folded into the command like the core install toggles. It
-  // reads as one axis ("keep my data"): on keeps, off deletes. Removing the
-  // Client keeps its settings by default (on); removing the Core takes its data
-  // by default (off).
-  let keepData = $state(untrack(() => target === "client"));
+  // reads as one axis ("keep my data"): on keeps, off deletes. Both parts take
+  // their data by default (off), so a re-install starts clean; flip it on to keep
+  // the Client's settings or the Core's sessions and memories. The Client's paired
+  // cores are always removed regardless (that is what breaks a re-install), so the
+  // toggle governs settings only.
+  let keepData = $state(false);
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -67,7 +70,7 @@
   const command = $derived(
     mode === "uninstall"
       ? target === "client"
-        ? clientUninstallCommand(os, channel, { purge: !keepData })
+        ? clientUninstallCommand(os, channel, { keepData })
         : coreUninstallCommand(os, channel, { keepData })
       : target === "client"
         ? clientCommand(os, channel)
@@ -77,8 +80,9 @@
   // Native double-click installers for the current OS (the alternative to the
   // terminal command). Empty on Android, where the APK block handles it.
   const installers = $derived(nativeInstallers(target, os, channel));
-  // Linux offers both .deb and .rpm, so its buttons need the format spelled out;
-  // macOS/Windows are a single file, where the arch label alone is enough.
+  // The Linux Core offers two formats (.deb/.rpm), so its buttons need the format
+  // spelled out; the Client (a single AppImage) and macOS/Windows are one file,
+  // where the arch label alone is enough.
   const multiFormat = $derived(new Set(installers.map((i) => i.format)).size > 1);
   // The nested "how to": the two entry points are the (a, b) branches under step
   // one; their shared finishing steps are lifted to the top level (step 2+).
@@ -89,7 +93,7 @@
   const uninstallSteps = $derived([openTerminalStep(os), ...uninstallStepsTail(target)]);
 
   function installerLabel(inst: NativeInstaller): string {
-    return multiFormat ? `${inst.archLabel} · .${inst.format}` : inst.archLabel;
+    return multiFormat ? `${inst.archLabel} · ${formatTag(inst.format)}` : inst.archLabel;
   }
 
   async function copy() {
@@ -204,15 +208,13 @@
       <div class="flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
         <label class="flex items-center justify-between gap-4">
           <span class="text-sm text-default-700">
-            {target === "client" ? "Keep settings and paired cores" : "Keep sessions and memories"}
+            {target === "client" ? "Keep settings" : "Keep sessions and memories"}
           </span>
           <div class="w-24 shrink-0">
             <Toggle
               checked={keepData}
               onchange={(v) => (keepData = v)}
-              ariaLabel={target === "client"
-                ? "Keep settings and paired cores"
-                : "Keep sessions and memories"}
+              ariaLabel={target === "client" ? "Keep settings" : "Keep sessions and memories"}
             />
           </div>
         </label>

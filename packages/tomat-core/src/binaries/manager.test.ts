@@ -1,22 +1,34 @@
 import { assertEquals } from "@std/assert";
-import type { BinaryManifestEntry } from "@tomat/shared";
-import { resolveWithFallback } from "./manager.ts";
+import type { BinaryKind, BinaryManifestEntry } from "@tomat/shared";
+import {
+  __resetForTesting,
+  binariesManager,
+  onBinaryInstallFailed,
+  resolveWithFallback,
+} from "./manager.ts";
 import { __resetResolverCacheForTesting } from "./upstream-resolver.ts";
+import { setupTestEnv } from "../../tests/helpers/db.ts";
 
-// Swap globalThis.fetch for a canned GitHub /releases/latest response so the
-// resolver-entry cases run without touching the network (mirrors the helper in
-// upstream-resolver.test.ts).
+// Swap globalThis.fetch for a canned GitHub response so the resolver-entry cases
+// run without touching the network (mirrors the helper in
+// upstream-resolver.test.ts). A latest (un-pinned) resolver hits
+// `/releases?per_page=N` (a newest-first ARRAY); pass a bare release object and
+// it is wrapped as a one-element list.
 function withMockRelease(body: unknown, fn: () => Promise<unknown>): () => Promise<void> {
+  const list = Array.isArray(body) ? body : [body];
   return async () => {
     const orig = globalThis.fetch;
     __resetResolverCacheForTesting();
-    globalThis.fetch = () =>
-      Promise.resolve(
-        new Response(JSON.stringify(body), {
+    globalThis.fetch = (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const payload = url.includes("/releases/tags/") ? list[0] : list;
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),
       );
+    };
     try {
       await fn();
     } finally {
@@ -141,3 +153,30 @@ Deno.test(
     },
   ),
 );
+
+Deno.test("install: a resolve failure records a per-kind failure and notifies listeners", async () => {
+  // Drives the hub's requirements recompute: a binary that can't be resolved
+  // must fire onBinaryInstallFailed (and expose failure()) instead of silently
+  // dropping the kind. dev channel = in-code resolver manifest; the resolver's
+  // GitHub call is rejected to force the failure.
+  const prevChannel = Deno.env.get("TOMAT_CHANNEL");
+  Deno.env.set("TOMAT_CHANNEL", "dev");
+  const env = await setupTestEnv();
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.reject(new Error("offline test"));
+  __resetForTesting();
+  const failed: BinaryKind[] = [];
+  const off = onBinaryInstallFailed((k) => failed.push(k));
+  try {
+    await binariesManager().install(["llama-server"]);
+    assertEquals(failed.includes("llama-server"), true);
+    assertEquals(typeof binariesManager().failure("llama-server"), "string");
+  } finally {
+    off();
+    globalThis.fetch = origFetch;
+    __resetForTesting();
+    await env.teardown();
+    if (prevChannel === undefined) Deno.env.delete("TOMAT_CHANNEL");
+    else Deno.env.set("TOMAT_CHANNEL", prevChannel);
+  }
+});

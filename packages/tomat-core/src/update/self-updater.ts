@@ -23,6 +23,7 @@ import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 import { compareSemver } from "../shared/semver.ts";
 import { Sha256Stream } from "../shared/hash.ts";
+import { fetchWithTimeout, streamDownload } from "../shared/net.ts";
 import { binPath, channelBinName } from "../paths.ts";
 import { coreBinaryName, hostTriple, platformExe } from "../binaries/versions.ts";
 import signingKeys from "../../data/signing-keys.json" with { type: "json" };
@@ -226,7 +227,7 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
 export async function fetchCoreManifest(): Promise<CoreManifest> {
   let res: Response;
   try {
-    res = await fetch(coreManifestUrl());
+    res = await fetchWithTimeout(coreManifestUrl());
   } catch (err) {
     throw new AppError("manifest_fetch_failed", `core manifest fetch failed: ${errMessage(err)}`);
   }
@@ -294,14 +295,6 @@ export async function downloadAndVerify(
   outPath: string,
   sha256: string,
 ): Promise<void> {
-  const res = await fetch(url);
-  if (!res.ok || !res.body) {
-    throw new AppError("update_failed", `download HTTP ${res.status} for ${url}`);
-  }
-  // Core artifacts (binary, workers, helpers) ship gzip-compressed; the manifest
-  // sha256 is over the DECOMPRESSED file, so decompress the stream before
-  // writing + hashing.
-  const body = res.body.pipeThrough(new DecompressionStream("gzip"));
   const tmp = outPath + ".tmp";
   const file = await Deno.open(tmp, {
     create: true,
@@ -310,13 +303,19 @@ export async function downloadAndVerify(
   });
   // Hash incrementally while streaming to disk: the artifact (the ~100MB core
   // binary, model-sized helpers) is never held in memory, only one chunk at a
-  // time.
+  // time. Core artifacts ship gzip-compressed and the manifest sha256 is over the
+  // DECOMPRESSED file, so streamDownload decompresses before handing us chunks.
+  // The stall guard aborts a dead connection instead of hanging the installer.
   const sha = new Sha256Stream();
   try {
-    for await (const chunk of body) {
-      await file.write(chunk);
-      sha.update(chunk);
-    }
+    await streamDownload(
+      url,
+      async (chunk) => {
+        await file.write(chunk);
+        sha.update(chunk);
+      },
+      { decompress: true },
+    );
   } finally {
     file.close();
   }

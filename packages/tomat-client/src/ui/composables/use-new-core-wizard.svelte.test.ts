@@ -34,6 +34,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("$lib/core", () => ({
   cores: () => h.cores,
+  isLoopbackUrl: (u: string) => u.includes("127.0.0.1") || u.includes("localhost"),
   mintCodeWithAdminToken: h.mintCodeWithAdminToken,
   pairWithCode: h.pairWithCode,
   probeCore: h.probeCore,

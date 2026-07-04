@@ -158,6 +158,18 @@ export function onBinaryInstalled(fn: BinaryInstalledListener): () => void {
   return () => binaryInstalledListeners.delete(fn);
 }
 
+// Notified when a binary install ATTEMPT fails (couldn't resolve upstream, the
+// download errored, or extraction failed). The requirements layer recomputes on
+// this so a failed kind surfaces as a retryable `error` in the pending list
+// instead of a silent, sizeless, permanently-missing entry.
+type BinaryInstallFailedListener = (kind: BinaryKind) => void;
+const binaryInstallFailedListeners = new Set<BinaryInstallFailedListener>();
+
+export function onBinaryInstallFailed(fn: BinaryInstallFailedListener): () => void {
+  binaryInstallFailedListeners.add(fn);
+  return () => binaryInstallFailedListeners.delete(fn);
+}
+
 interface InstalledRecord {
   version: string;
   /** The variant actually installed on disk. */
@@ -240,6 +252,27 @@ export async function installedVariant(kind: BinaryKind): Promise<BinaryVariant 
 }
 
 export class BinariesManager {
+  // Last install-attempt error per kind, cleared when a fresh attempt starts or
+  // succeeds. Read by computeRequirements to mark a missing binary as retryable.
+  private readonly failures = new Map<BinaryKind, string>();
+
+  /** The reason the last install attempt for `kind` failed, or undefined when
+   *  the most recent attempt is pending or succeeded. */
+  failure(kind: BinaryKind): string | undefined {
+    return this.failures.get(kind);
+  }
+
+  private recordFailure(kind: BinaryKind, message: string): void {
+    this.failures.set(kind, message);
+    for (const fn of binaryInstallFailedListeners) {
+      try {
+        fn(kind);
+      } catch (err) {
+        log.warn(`binary-install-failed listener for ${kind}: ${errMessage(err)}`);
+      }
+    }
+  }
+
   // List the install state of every known binary kind. Used by
   // GET /api/v1/binaries.
   async list(): Promise<BinaryStatus[]> {
@@ -424,26 +457,42 @@ export class BinariesManager {
     manifest: BinaryManifest,
     triple: Triple,
   ): Promise<string> {
-    const entry = manifest.binaries[kind];
-    if (!entry) {
-      throw new AppError("binary_not_found", `kind ${kind} not in manifest`);
-    }
-    const settings = await loadCoreSettingsResolved().catch(() => ({}) as Record<string, unknown>);
-    const backend = (await detectHardware().catch(() => null))?.gpu.backend ?? "cpu";
-    // The ideal variant this device wants; `resolveWithFallback` degrades to the
-    // best actually-installable one (target === resolved.variant in the normal
-    // case, differing only on a latest-channel asset miss). We record BOTH: the
-    // installed variant and the target aimed for.
-    const target = desiredVariant(entry, triple, kind, backend, settings);
-    // Resolve to a concrete URL+hash+version. For pinned (stable) entries this is
-    // the stored data; for resolver (latest) entries it hits GitHub for the
-    // latest release and verifies via its published sha256 digest.
-    const resolved = await resolveWithFallback(kind, entry, triple, target, backend);
-    if (!resolved) {
-      throw new AppError(
-        "binary_not_found",
-        `kind ${kind} has no installable variant for triple ${triple}`,
+    // A fresh attempt clears any prior failure so this call doubles as retry.
+    this.failures.delete(kind);
+    let target: BinaryVariant;
+    let resolved: ResolvedBinary;
+    // The pre-download resolve can throw (missing manifest entry, no installable
+    // variant, upstream not resolvable). Record it as a failure BEFORE rethrowing
+    // so the requirements popup shows a retryable error rather than silently
+    // dropping the kind (which stranded llama-server with no size, no download).
+    try {
+      const entry = manifest.binaries[kind];
+      if (!entry) {
+        throw new AppError("binary_not_found", `kind ${kind} not in manifest`);
+      }
+      const settings = await loadCoreSettingsResolved().catch(
+        () => ({}) as Record<string, unknown>,
       );
+      const backend = (await detectHardware().catch(() => null))?.gpu.backend ?? "cpu";
+      // The ideal variant this device wants; `resolveWithFallback` degrades to the
+      // best actually-installable one (target === resolved.variant in the normal
+      // case, differing only on a latest-channel asset miss). We record BOTH: the
+      // installed variant and the target aimed for.
+      target = desiredVariant(entry, triple, kind, backend, settings);
+      // Resolve to a concrete URL+hash+version. For pinned (stable) entries this is
+      // the stored data; for resolver (latest) entries it hits GitHub for the
+      // latest release and verifies via its published sha256 digest.
+      const r = await resolveWithFallback(kind, entry, triple, target, backend);
+      if (!r) {
+        throw new AppError(
+          "binary_not_found",
+          `kind ${kind} has no installable variant for triple ${triple}`,
+        );
+      }
+      resolved = r;
+    } catch (err) {
+      this.recordFailure(kind, errMessage(err));
+      throw err;
     }
     const jobId = newJobId();
     const ext = resolved.url.toLowerCase().endsWith(".zip") ? "zip" : "tar.gz";
@@ -494,6 +543,7 @@ export class BinariesManager {
         downloadedPath = undefined; // removed; nothing left to clean up
         for (const p of extraPaths.splice(0)) await Deno.remove(p).catch(() => {});
         await writeInstalledVersion(kind, resolved.version, resolved.variant, target);
+        this.failures.delete(kind);
         log.info(
           `${kind}: installed v${resolved.version} (${resolved.variant}` +
             `${resolved.variant !== target ? `, wanted ${target}` : ""})`,
@@ -506,7 +556,10 @@ export class BinariesManager {
           }
         }
       } catch (err) {
+        // Download or extraction failed after a clean resolve. Record it so the
+        // kind surfaces as retryable instead of a silent perpetually-missing gate.
         log.error(`${kind}: install failed: ${errMessage(err)}`);
+        this.recordFailure(kind, errMessage(err));
       } finally {
         for (const p of [downloadedPath, ...extraPaths].filter((p): p is string => !!p)) {
           try {

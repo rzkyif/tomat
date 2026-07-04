@@ -22,8 +22,10 @@ export interface CoreOptions {
 }
 
 export interface ClientUninstallOptions {
-  /** Also wipe saved settings and paired cores (--purge / TOMAT_PURGE). */
-  purge: boolean;
+  /** Keep the Client's settings instead of removing them (--keep-data /
+   *  TOMAT_KEEP_DATA). The paired-core list is always removed regardless, so a
+   *  re-install starts clean and does not reach for a Core that is gone. */
+  keepData: boolean;
 }
 
 export interface CoreUninstallOptions {
@@ -66,7 +68,7 @@ function envVars(channel: Channel, core?: CoreOptions): Array<[string, string]> 
 // Env vars ride on the runner's side of the pipe (so the script sees them);
 // `flags` are positional args the script's own arg parser reads, passed through
 // the piped runner as `<runner> -s -- <flag...>` (the uninstall scripts take
-// --purge / --keep-data this way, since they read flags, not env vars).
+// --keep-data this way, since they read flags, not env vars).
 function shCommand(
   script: string,
   runner: "sh" | "bash",
@@ -99,11 +101,12 @@ export function coreCommand(os: Os, channel: Channel, opts: CoreOptions): string
   return shCommand("core.sh", "bash", vars);
 }
 
-/** The one-liner for removing the client, with its purge option folded in.
- *  Mirrors {@link clientCommand}: the channel rides as an env var, and Android
- *  has no script (it is removed like any app, see {@link androidApkUrl}), so it
- *  returns "". Purge passes through as the `--purge` flag on bash and the
- *  `TOMAT_PURGE` env var on Windows (a switch can't cross `irm | iex`). */
+/** The one-liner for removing the client, with its keep-data option folded in.
+ *  The paired-core list is always removed (so a re-install starts clean); keep-data
+ *  only preserves the settings, and passes through as the `--keep-data` flag on
+ *  bash and the `TOMAT_KEEP_DATA` env var on Windows (a switch can't cross
+ *  `irm | iex`). Android has no script (it is removed like any app, see
+ *  {@link androidApkUrl}), so it returns "". */
 export function clientUninstallCommand(
   os: Os,
   channel: Channel,
@@ -112,10 +115,10 @@ export function clientUninstallCommand(
   if (os === "android") return "";
   const vars = envVars(channel);
   if (os === "windows") {
-    if (opts.purge) vars.push(["TOMAT_PURGE", "1"]);
+    if (opts.keepData) vars.push(["TOMAT_KEEP_DATA", "1"]);
     return psCommand("client-uninstall.ps1", vars);
   }
-  return shCommand("client-uninstall.sh", "bash", vars, opts.purge ? ["--purge"] : []);
+  return shCommand("client-uninstall.sh", "bash", vars, opts.keepData ? ["--keep-data"] : []);
 }
 
 /** The one-liner for removing the core, with its keep-data option folded in.
@@ -135,15 +138,16 @@ export function coreUninstallCommand(os: Os, channel: Channel, opts: CoreUninsta
 // Native installer downloads (the primary CTA)
 //
 // The conventional double-click installers - macOS `.dmg`/`.pkg`, Windows
-// `.exe`, Linux `.deb`/`.rpm` - published by scripts/release/{client,core-
-// installers}.ts. Each release also mirrors every installer to a version-less
+// `.exe`, the Linux Client `.AppImage`, and the Linux Core `.deb`/`.rpm` -
+// published by scripts/release/{client,core-installers}.ts. Each release also
+// mirrors every installer to a version-less
 // `current/<triple>/<stable-name>` R2 key (exactly like {@link androidApkUrl}),
 // so this page links a stable URL without knowing the version. The stable names
 // here are kept in sync with coreInstallerStableName() / clientBundleAlias() on
 // the release side.
 
 export type Arch = "arm64" | "x64";
-export type InstallerFormat = "dmg" | "pkg" | "exe" | "deb" | "rpm";
+export type InstallerFormat = "dmg" | "pkg" | "exe" | "deb" | "rpm" | "appimage";
 
 export interface NativeInstaller {
   os: Os;
@@ -162,10 +166,10 @@ const OS_TRIPLES: Record<Exclude<Os, "android">, Array<[Arch, string, string]>> 
     ["arm64", "aarch64-apple-darwin", "Apple Silicon"],
     ["x64", "x86_64-apple-darwin", "Intel"],
   ],
-  linux: [
-    ["x64", "x86_64-unknown-linux-gnu", "x86-64"],
-    ["arm64", "aarch64-unknown-linux-gnu", "ARM64"],
-  ],
+  // Only x86-64 Linux is built (RELEASE_TARGET_TRIPLES omits linux-arm64 as niche
+  // for a desktop GUI); re-add the arm64 row here once that triple ships, or its
+  // buttons point at artifacts that do not exist.
+  linux: [["x64", "x86_64-unknown-linux-gnu", "x86-64"]],
   windows: [
     ["x64", "x86_64-pc-windows-msvc", "x86-64"],
     ["arm64", "aarch64-pc-windows-msvc", "ARM64"],
@@ -184,20 +188,25 @@ function currentUrl(channel: Channel, triple: string, filename: string): string 
 }
 
 // The installer formats a given target offers per OS. macOS/Windows are a single
-// double-click file; Linux offers both the Debian and RPM package.
+// double-click file. On Linux the Client ships a single AppImage (the primary,
+// self-updating build the install script installs); the Core has no GUI bundle,
+// so it ships the .deb/.rpm packages for the package manager.
 function formatsFor(target: Target, os: Exclude<Os, "android">): InstallerFormat[] {
   if (os === "macos") return target === "core" ? ["pkg"] : ["dmg"];
   if (os === "windows") return ["exe"];
-  return ["deb", "rpm"];
+  return target === "core" ? ["deb", "rpm"] : ["appimage"];
 }
 
 // The version-less stable filename for one installer, matching the release-side
-// alias names (coreInstallerStableName / clientBundleAlias / the dmg/deb/rpm
-// aliases in client.ts).
+// alias names (coreInstallerStableName / clientBundleAlias / the dmg alias in
+// client.ts).
 function stableName(target: Target, format: InstallerFormat, channel: Channel): string {
   const base = target === "core" ? "tomat-core" : "tomat";
   const suffix = binSuffix(channel);
   if (format === "exe") return `${base}${suffix}-setup.exe`;
+  // The AppImage alias keeps Tauri's capitalized ".AppImage" extension, so it
+  // can't ride the lowercase `${format}` path (that would 404 against the R2 key).
+  if (format === "appimage") return `${base}${suffix}.AppImage`;
   return `${base}${suffix}.${format}`;
 }
 
@@ -225,9 +234,10 @@ export function nativeInstallers(target: Target, os: Os, channel: Channel): Nati
  *  the uninstall steps. */
 export const RUN_COMMAND_STEP = "Paste the command above and press Enter.";
 
-/** The first step of the installer-download branch: open the package. Held
- *  separate so the no-JS baseline can render it once and CSS-toggle only the
- *  per-OS security step after it. */
+/** The opening step of the installer-download branch for a package installer
+ *  (macOS/Windows and the Linux Core): open the package. Composed into
+ *  {@link installerHowto}; the Linux Client is an AppImage instead, so it does
+ *  not use this. */
 export const INSTALLER_OPEN_STEP = "Open the downloaded installer and follow the prompts.";
 
 /** A how-to step. Usually a plain line; the OS security step carries a lead line
@@ -253,11 +263,30 @@ export function scriptHowto(os: Os): string[] {
  *  the downloaded package, then clear the first-run security prompt if the OS has
  *  one. Unlike the script, a downloaded installer is not quarantine-stripped for
  *  you, so the macOS Gatekeeper block and the Windows unknown-publisher warning
- *  are folded in per OS (see {@link installerSecurityStep}). The finishing steps
- *  are lifted to {@link finishHowto} (step 2). */
+ *  are folded in per OS (see {@link installerSecurityStep}). Linux is the
+ *  exception: the Client's primary download is the AppImage, which you make
+ *  executable and run rather than "install", so it gets its own steps (see
+ *  {@link linuxClientInstallerHowto}). The finishing steps are lifted to
+ *  {@link finishHowto} (step 2). */
 export function installerHowto(os: Os, target: Target): HowtoStep[] {
+  if (os === "linux" && target === "client") return linuxClientInstallerHowto();
   const security = installerSecurityStep(os, target);
   return security ? [INSTALLER_OPEN_STEP, security] : [INSTALLER_OPEN_STEP];
+}
+
+/** The Linux Client installer-download steps. The Client ships as a single
+ *  AppImage (the primary, self-updating build): a lead line plus sub-points for
+ *  making it executable and running it in place. */
+function linuxClientInstallerHowto(): HowtoStep[] {
+  return [
+    {
+      text: "The AppImage is one portable file that keeps itself up to date. To run it:",
+      sub: [
+        "Make it executable, either from your file manager's properties (allow running it as a program) or with chmod +x on the file.",
+        "Open it from your file manager or run it in a terminal. It runs in place, with no system install.",
+      ],
+    },
+  ];
 }
 
 /** The plain-text finishing steps once either install path completes (step 2),
@@ -319,7 +348,16 @@ export function formatLabel(format: InstallerFormat): string {
       return "Debian (.deb)";
     case "rpm":
       return "Red Hat (.rpm)";
+    case "appimage":
+      return "AppImage";
   }
+}
+
+/** The compact format tag a multi-format download button appends to its arch
+ *  label (the Linux Core offers the .deb/.rpm packages). AppImage shows as a
+ *  name, not a dotted extension; the packages keep their leading dot. */
+export function formatTag(format: InstallerFormat): string {
+  return format === "appimage" ? "AppImage" : `.${format}`;
 }
 
 /** The fixed "newest build" APK alias published per channel by
@@ -350,7 +388,7 @@ export function uninstallStepsTail(target: Target): string[] {
     RUN_COMMAND_STEP,
     target === "core"
       ? "It stops the Core and removes it; use the option above to keep its sessions and memories."
-      : "It removes the app but keeps your settings; use the option above to wipe them too.",
+      : "It removes the app, your paired cores, and your settings; use the option above to keep your settings.",
   ];
 }
 

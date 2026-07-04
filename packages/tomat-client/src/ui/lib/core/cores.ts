@@ -362,6 +362,24 @@ export function cores(): CoresRegistry {
   return _instance;
 }
 
+/** A paired core is "local" when it pairs over loopback (the client-managed
+ *  core on this device); remote cores use a LAN/WAN host. Matches the parsed
+ *  host EXACTLY (not a substring): a remote core whose name merely contains
+ *  "localhost"/"127.0.0.1" - e.g. "localhost.example.com" or "127.0.0.1.evil" -
+ *  must NOT read as local, since pruneUninstalledLocalCores would then delete it.
+ *  A URL that does not parse is treated as remote (never pruned). */
+export function isLoopbackUrl(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  // URL.hostname brackets IPv6 literals ("[::1]"); unwrap before comparing.
+  const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  return bare === "localhost" || bare === "::1" || /^127(?:\.\d{1,3}){3}$/.test(bare);
+}
+
 // On-demand mode: when the selected core points at loopback and the binary
 // is installed locally, spawn it ourselves if no service has it running.
 // Idempotent: start_local_core probes the port first and exits cleanly if
@@ -370,15 +388,44 @@ export function cores(): CoresRegistry {
 export async function ensureLocalCoreUpIfNeeded(): Promise<void> {
   const current = cores().currentEntry();
   if (!current) return;
-  if (!current.baseUrl.includes("127.0.0.1") && !current.baseUrl.includes("localhost")) {
-    return;
-  }
+  if (!isLoopbackUrl(current.baseUrl)) return;
   try {
     if (await platform().pairing.isLocalCoreInstalled()) {
       await platform().pairing.startLocalCore();
     }
   } catch (e) {
     log.error("ensureLocalCoreUpIfNeeded:", e);
+  }
+}
+
+/** Drop paired LOCAL cores whose core is no longer installed on this device.
+ *  When the local core was uninstalled - the user removed both parts and
+ *  reinstalled just the Client, or removed the Core on its own - its paired
+ *  record points at a core that is gone, and the app would otherwise keep
+ *  trying to reach it. Keys off the on-disk core binary (isLocalCoreInstalled),
+ *  NOT reachability, so a merely stopped local core is never dropped and an
+ *  update (which leaves the binary in place) never triggers it. Best-effort: if
+ *  the install check throws, the records are left paired rather than risk
+ *  unpairing a still-valid core. Run before restoreSelected so a gone local core
+ *  is never selected or connected to. */
+export async function pruneUninstalledLocalCores(): Promise<void> {
+  const locals = (await cores().list()).filter((c) => isLoopbackUrl(c.baseUrl));
+  if (locals.length === 0) return;
+  let installed: boolean;
+  try {
+    installed = await platform().pairing.isLocalCoreInstalled();
+  } catch (e) {
+    log.error("local-core install check failed; leaving local cores paired:", e);
+    return;
+  }
+  if (installed) return;
+  for (const c of locals) {
+    log.warn(`local core "${c.name}" is no longer installed on disk; unpairing`);
+    try {
+      await cores().removePaired(c.id);
+    } catch (e) {
+      log.error("auto-unpair of uninstalled local core failed:", e);
+    }
   }
 }
 

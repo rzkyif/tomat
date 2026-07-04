@@ -15,6 +15,7 @@ import type {
   CoreManifest,
   PinnedTarget,
   Triple,
+  UpstreamResolver,
 } from "../../packages/tomat-shared/src/domain/model.ts";
 import {
   assetVariants,
@@ -636,17 +637,19 @@ interface GitHubReleaseAsset {
   name: string;
   browser_download_url: string;
   digest?: string | null;
+  /** GitHub marks an asset "uploaded" only once fully stored; other states are
+   *  in-progress uploads we must not pin. */
+  state?: string;
 }
 
 interface GitHubRelease {
   tag_name: string;
   assets: GitHubReleaseAsset[];
+  draft?: boolean;
+  prerelease?: boolean;
 }
 
-async function fetchRelease(repo: string, pinnedTag?: string): Promise<GitHubRelease> {
-  const url = pinnedTag
-    ? `https://api.github.com/repos/${repo}/releases/tags/${pinnedTag}`
-    : `https://api.github.com/repos/${repo}/releases/latest`;
+async function githubJson(url: string): Promise<unknown> {
   const headers: Record<string, string> = {
     accept: "application/vnd.github+json",
     "user-agent": "tomat-release",
@@ -657,7 +660,47 @@ async function fetchRelease(repo: string, pinnedTag?: string): Promise<GitHubRel
   if (!res.ok) {
     fail(`GitHub API ${res.status} for ${url}: ${await res.text().catch(() => "")}`);
   }
-  return (await res.json()) as GitHubRelease;
+  return await res.json();
+}
+
+/** True when `assets` carries a fully-uploaded asset for every triple's primary
+ *  cpu build (the guaranteed fallback we require to pin a triple). Used to skip a
+ *  just-published release whose asset matrix is still uploading. */
+function releaseHasCpuAssets(release: GitHubRelease, assets: UpstreamResolver["assets"]): boolean {
+  for (const [, tripleAsset] of Object.entries(assets)) {
+    const cpu = assetVariants(tripleAsset).cpu;
+    if (!cpu) continue;
+    const name = cpu.asset.replace(/\{tag\}/g, release.tag_name);
+    const a = release.assets.find((x) => x.name === name);
+    if (!a || (a.state !== undefined && a.state !== "uploaded")) return false;
+  }
+  return true;
+}
+
+/** The release to pin for a resolver. A `pinnedTag` yields exactly that release;
+ *  otherwise the newest recent release whose per-triple cpu assets are fully
+ *  uploaded (upstream CI publishes the tag before its asset matrix finishes
+ *  uploading, so `/releases/latest` can point at an incomplete release). */
+async function selectRelease(
+  repo: string,
+  assets: UpstreamResolver["assets"],
+  pinnedTag?: string,
+): Promise<GitHubRelease> {
+  if (pinnedTag) {
+    return (await githubJson(
+      `https://api.github.com/repos/${repo}/releases/tags/${pinnedTag}`,
+    )) as GitHubRelease;
+  }
+  const list = (await githubJson(
+    `https://api.github.com/repos/${repo}/releases?per_page=10`,
+  )) as GitHubRelease[];
+  // Exclude drafts + prereleases (the list endpoint includes them, unlike
+  // `/releases/latest`), then take the newest with a complete cpu asset set.
+  const complete = list.find((r) => !r.draft && !r.prerelease && releaseHasCpuAssets(r, assets));
+  if (!complete) {
+    fail(`no recent ${repo} release has a complete cpu asset set (still uploading?)`);
+  }
+  return complete;
 }
 
 async function sha256OfUrl(url: string): Promise<string> {
@@ -753,7 +796,7 @@ async function composeBinaryManifest(
     // resolves a per-variant map (cpu plus any GPU builds); `cpu` is required
     // (the guaranteed fallback), GPU variants absent from this tag are skipped.
     info(`resolving ${resolver.pinnedTag ?? "latest"} ${kind} from ${resolver.repo}`);
-    const release = await fetchRelease(resolver.repo, resolver.pinnedTag);
+    const release = await selectRelease(resolver.repo, resolver.assets, resolver.pinnedTag);
     const tag = release.tag_name;
     info(`  tag: ${tag}`);
 
@@ -762,7 +805,8 @@ async function composeBinaryManifest(
     const resolveOne = async (pattern: string): Promise<{ url: string; sha256: string } | null> => {
       const assetName = pattern.replace(/\{tag\}/g, tag);
       const asset = release.assets.find((a) => a.name === assetName);
-      if (!asset) return null;
+      // Absent, or present but its upload hasn't finished: treat as unavailable.
+      if (!asset || (asset.state !== undefined && asset.state !== "uploaded")) return null;
       let sha256: string;
       if (asset.digest && asset.digest.startsWith("sha256:")) {
         sha256 = asset.digest.slice("sha256:".length);
