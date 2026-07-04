@@ -58,8 +58,10 @@ export async function installService(): Promise<void> {
     }
   }
   // Every Windows install front-end funnels through here, so this is the one
-  // place that lists the Core in Add/Remove Programs (Settings > Apps).
-  if (Deno.build.os === "windows") await registerWindowsUninstallEntry();
+  // place that lists the Core in Add/Remove Programs (Settings > Apps). Pass
+  // whether a Scheduled Task was registered: its removal needs admin, so the
+  // uninstall entry must self-elevate (see buildUninstallCommand).
+  if (Deno.build.os === "windows") await registerWindowsUninstallEntry(asService);
 }
 
 /** Restart the running daemon so an on-disk settings change (server.behindProxy)
@@ -305,20 +307,71 @@ function windowsDisplayName(): string {
   return ch === "stable" ? "tomat Core" : `tomat Core (${ch})`;
 }
 
+/** Base64(UTF-16LE) encode a command for PowerShell `-EncodedCommand`. Handing
+ *  the teardown across the Start-Process -Verb RunAs relaunch as one opaque
+ *  token sidesteps all nested-quoting. Exported for tests. */
+export function encodePwshCommand(cmd: string): string {
+  const bytes = new Uint8Array(cmd.length * 2);
+  for (let i = 0; i < cmd.length; i++) {
+    const code = cmd.charCodeAt(i);
+    bytes[i * 2] = code & 0xff;
+    bytes[i * 2 + 1] = (code >> 8) & 0xff;
+  }
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+/** Build the Add/Remove Programs UninstallString. The teardown re-runs this
+ *  binary's own uninstall-service (which removes the Scheduled Task, keychain
+ *  key, and this ARP entry), then sweeps the core dir once the binary has exited
+ *  and unlocked its own exe, and the channel dir if it is left empty.
+ *
+ *  A service install's task lives in the root Task Scheduler folder and needs
+ *  admin to unregister, but Settings > Apps runs this string UNELEVATED - so for
+ *  a service the command self-elevates (Start-Process -Verb RunAs, an expected
+ *  UAC prompt for a background service); otherwise the task removal silently
+ *  fails and a dead task pointing at a deleted binary lingers. A background
+ *  install has no task, so it runs the teardown directly with no prompt.
+ *  Exported for tests. */
+export function buildUninstallCommand(opts: {
+  asService: boolean;
+  bin: string;
+  root: string;
+  channelDir: string;
+  ch: string;
+}): string {
+  const { asService, bin, root, channelDir, ch } = opts;
+  // The env prefix is required: an ARP launch carries no TOMAT_CHANNEL, and the
+  // binary resolves its channel from the environment.
+  const teardown =
+    `$env:TOMAT_CHANNEL='${psq(ch)}'; ` +
+    `& '${psq(bin)}' uninstall-service; ` +
+    `Remove-Item -LiteralPath '${psq(root)}' -Recurse -Force -ErrorAction SilentlyContinue; ` +
+    `$cd='${psq(channelDir)}'; ` +
+    `if ((Test-Path -LiteralPath $cd) -and -not (Get-ChildItem -Force -LiteralPath $cd)) ` +
+    `{ Remove-Item -LiteralPath $cd -Force -ErrorAction SilentlyContinue }`;
+  const prefix = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass";
+  if (!asService) return `${prefix} -Command "${teardown}"`;
+  return (
+    `${prefix} -Command "Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList ` +
+    `'-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass',` +
+    `'-EncodedCommand','${encodePwshCommand(teardown)}'"`
+  );
+}
+
 /** List this install in Add/Remove Programs (per-user HKCU key, matching the
- *  per-user install). The uninstall command re-runs this binary's own
- *  uninstall-service, then sweeps the leftover core dir once the binary has
- *  exited and unlocked its own exe (see removeCoreDir). Idempotent:
- *  re-installs simply refresh the values. */
-async function registerWindowsUninstallEntry(): Promise<void> {
+ *  per-user install). Idempotent: re-installs simply refresh the values. */
+async function registerWindowsUninstallEntry(asService: boolean): Promise<void> {
   const bin = installedBinary();
   const root = coreRoot();
-  // The env prefix is required: scheduled tasks and ARP launches carry no
-  // TOMAT_CHANNEL, and the binary resolves its channel from the environment.
-  const uninstallCmd =
-    `powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass ` +
-    `-Command "$env:TOMAT_CHANNEL='${psq(channel())}'; & '${psq(bin)}' uninstall-service; ` +
-    `Remove-Item -LiteralPath '${psq(root)}' -Recurse -Force -ErrorAction SilentlyContinue"`;
+  const uninstallCmd = buildUninstallCommand({
+    asService,
+    bin,
+    root,
+    channelDir: dirname(root),
+    ch: channel(),
+  });
   const key = windowsUninstallKey();
   const rc = await runPwsh(
     `$key = '${psq(key)}'\n` +

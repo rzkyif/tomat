@@ -438,29 +438,34 @@ try {
   }
 
   # --- action 2b: clear paired-core tokens -------------------------------
-  # Read the core ids from cores.json BEFORE it is deleted below, and drop each
-  # core:<id>.tomat-client<suffix> credential from Windows Credential Manager.
-  # Mirrors the per-id `security`/`secret-tool` clearing in client-uninstall.sh.
+  # Drop EVERY core:<id>.tomat-client<suffix> credential for this channel from
+  # Windows Credential Manager, not only the ids still in cores.json: an abnormal
+  # unpair can orphan a token, and client-uninstall.sh clears them all in one
+  # `secret-tool clear service` too. Enumerate by matching the credential's
+  # TARGET value in `cmdkey /list` (robust to a localized "Target:" label), then
+  # CredDeleteW each (deleting an already-gone target is a no-op). The trailing
+  # lookahead keeps a stable-channel run ("tomat-client") from also matching a
+  # latest token ("tomat-client-latest").
 
   if ($IdxKeychain -ne -1) {
-    if (-not (Test-Path $CoresJson)) {
+    Ui-ActionStart $IdxKeychain "Clearing paired-core tokens"
+    $targets = @()
+    try {
+      $pattern = "core:[0-9A-Za-z]+\.$([regex]::Escape($KeychainService))(?=\s|`$)"
+      $targets = @((cmdkey /list 2>$null) |
+          Select-String -Pattern $pattern -AllMatches |
+          ForEach-Object { $_.Matches.Value } | Select-Object -Unique)
+    } catch { $targets = @() }
+    if ($targets.Count -eq 0) {
       Ui-ActionSkip $IdxKeychain "(no tokens)"
     } else {
-      Ui-ActionStart $IdxKeychain "Clearing paired-core tokens"
-      $ids = @()
-      try {
-        $parsed = Get-Content -Raw $CoresJson | ConvertFrom-Json
-        $ids = @($parsed.cores | ForEach-Object { $_.id } | Where-Object { $_ })
-      } catch { $ids = @() }
       $cleared = 0
-      foreach ($id in $ids) {
-        if (Remove-CredManTarget "core:$id.$KeychainService") { $cleared++ }
+      foreach ($t in $targets) {
+        if (Remove-CredManTarget $t) { $cleared++ }
         else { $KeychainResidue = $true }
       }
       if ($KeychainResidue) {
         Ui-ActionSkip $IdxKeychain "(some tokens may remain)"
-      } elseif ($cleared -eq 0) {
-        Ui-ActionSkip $IdxKeychain "(no tokens)"
       } else {
         Ui-ActionDone $IdxKeychain "(cleared $cleared)"
       }
