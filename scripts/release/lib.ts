@@ -12,6 +12,7 @@ import { ensureDir } from "@std/fs/ensure-dir";
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import { load as loadDotenv } from "@std/dotenv";
 import * as ed from "@noble/ed25519";
+import { AwsClient } from "aws4fetch";
 import { canonicalize } from "../../packages/tomat-shared/src/crypto/canonical.ts";
 import type { BuildEnvironment } from "./drivers/mod.ts";
 // Type-only: artifacts.ts imports values from this module, so a value import
@@ -127,11 +128,17 @@ export function decodeBase64(s: string): Uint8Array {
 export interface DeployEnv {
   signingPrivateKey: Uint8Array;
   signingPublicKey: Uint8Array;
-  /** Cloudflare token + account id wrangler authenticates with. Empty when the
-   *  user relies on a stored `wrangler login` OAuth session instead; the
-   *  release scripts only hand these to wrangler when set (see wranglerEnv). */
+  /** Cloudflare token + account id. The account id also forms the R2 S3 endpoint
+   *  host (`<account>.r2.cloudflarestorage.com`). The token authenticates the
+   *  landing-page Worker deploy via wrangler (see wranglerEnv); R2 object I/O uses
+   *  the S3 credentials below, not this token. Empty when the user relies on a
+   *  stored `wrangler login` OAuth session for the Worker deploy. */
   cloudflareApiToken: string;
   cloudflareAccountId: string;
+  /** R2 S3-API credentials (an "Object Read & Write" R2 API token) used for every
+   *  R2 object upload/copy/delete over the S3-compatible endpoint. */
+  r2AccessKeyId: string;
+  r2SecretAccessKey: string;
   websiteDomain: string;
   storageDomain: string;
   r2Bucket: string;
@@ -237,6 +244,8 @@ export async function loadOrSeedEnv(): Promise<DeployEnv> {
     signingPublicKey: decodeBase64(pubB64),
     cloudflareApiToken: get("CLOUDFLARE_API_TOKEN"),
     cloudflareAccountId: get("CLOUDFLARE_ACCOUNT_ID"),
+    r2AccessKeyId: get("TOMAT_R2_ACCESS_KEY_ID"),
+    r2SecretAccessKey: get("TOMAT_R2_SECRET_ACCESS_KEY"),
     websiteDomain: get("TOMAT_WEBSITE_DOMAIN") || "au.tomat.ing",
     storageDomain: get("TOMAT_STORAGE_DOMAIN") || "get.au.tomat.ing",
     r2Bucket: get("TOMAT_R2_BUCKET") || "tomat-releases",
@@ -280,6 +289,8 @@ export function envFromProcess(): DeployEnv {
     signingPublicKey: decodeBase64(pubB64),
     cloudflareApiToken: "",
     cloudflareAccountId: "",
+    r2AccessKeyId: "",
+    r2SecretAccessKey: "",
     websiteDomain: get("TOMAT_WEBSITE_DOMAIN") || "au.tomat.ing",
     storageDomain: get("TOMAT_STORAGE_DOMAIN") || "get.au.tomat.ing",
     r2Bucket: get("TOMAT_R2_BUCKET") || "tomat-releases",
@@ -516,7 +527,108 @@ export async function wranglerDeploy(env: DeployEnv): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// R2 uploads
+// R2 uploads (S3-compatible API)
+//
+// Object I/O goes straight to R2's S3 endpoint over signed `fetch`, not through
+// `wrangler r2 object`: a subprocess per object paid a ~1.5s deno+wrangler
+// cold-start each, and with 100+ objects per publish that dominated the job.
+// In-process requests have no cold-start and run concurrently (mapPool), aliases
+// become server-side copies instead of a second full upload, and the prune is a
+// fan-out of quick DELETEs. wrangler stays only for the Worker deploy.
+
+/** Bounded-concurrency map: runs `fn` over `items` with at most `concurrency`
+ *  requests in flight, preserving result order. Overlaps the many independent R2
+ *  round-trips instead of serializing them. */
+export async function mapPool<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = Array.from<R>({ length: items.length });
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  const n = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
+}
+
+/** Max R2 object requests in flight at once. Large artifacts (~150MB) are read
+ *  into memory to be signed, so this also bounds peak memory (cap * file size). */
+export const R2_CONCURRENCY = 4;
+
+function r2Client(env: DeployEnv): AwsClient {
+  if (!env.r2AccessKeyId || !env.r2SecretAccessKey) {
+    fail(
+      `R2 S3 credentials missing: set TOMAT_R2_ACCESS_KEY_ID + ` +
+        `TOMAT_R2_SECRET_ACCESS_KEY in .env (an "Object Read & Write" R2 API token).`,
+    );
+  }
+  return new AwsClient({
+    accessKeyId: env.r2AccessKeyId,
+    secretAccessKey: env.r2SecretAccessKey,
+    service: "s3",
+    region: "auto",
+  });
+}
+
+function r2ObjectUrl(env: DeployEnv, key: string): string {
+  if (!env.cloudflareAccountId) {
+    fail(`CLOUDFLARE_ACCOUNT_ID is required to form the R2 S3 endpoint.`);
+  }
+  // Release keys are all safe ASCII (versions, triples, filenames), so no
+  // per-segment percent-encoding is needed; path-style addressing puts the
+  // bucket first.
+  return `https://${env.cloudflareAccountId}.r2.cloudflarestorage.com/${env.r2Bucket}/${key}`;
+}
+
+/** Per-attempt ceiling for a single R2 object request. Generous enough for a
+ *  ~150MB upload on a slow runner uplink, low enough that a stalled connection
+ *  fails over to a retry instead of hanging until the job timeout. */
+const R2_REQUEST_TIMEOUT_MS = 120_000;
+
+/** Signed R2 request with bounded retry on transient failures (network error,
+ *  5xx, 429). Object writes are idempotent (same key + bytes), so a retry is
+ *  safe; the AWS SDK behind `wrangler` retried these internally, so this keeps a
+ *  single blip mid-upload from aborting the whole publish. A non-transient status
+ *  (4xx: auth, bad request) is returned as-is so the caller fails fast with the
+ *  response body. Exhausting all attempts aborts loudly. */
+async function r2SignedFetch(
+  env: DeployEnv,
+  url: string,
+  init: RequestInit,
+  label: string,
+): Promise<Response> {
+  const client = r2Client(env);
+  let lastErr = "";
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const res = await client.fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(R2_REQUEST_TIMEOUT_MS),
+      });
+      if (res.ok || (res.status < 500 && res.status !== 429)) return res;
+      lastErr = `${res.status} ${res.statusText}`;
+      await res.body?.cancel();
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : String(err);
+    }
+    if (attempt < 4) {
+      info(
+        colors.yellow(
+          `r2 ${label} failed (attempt ${attempt}/4: ${lastErr}); retrying in ${attempt * 2}s`,
+        ),
+      );
+      await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+    }
+  }
+  fail(`r2 ${label} failed after 4 attempts: ${lastErr}. Re-run the task.`);
+}
 
 export async function r2Put(
   env: DeployEnv,
@@ -525,40 +637,56 @@ export async function r2Put(
   contentType: string,
   cacheControl?: string,
 ): Promise<void> {
-  const args = [
-    "run",
-    "-A",
-    "npm:wrangler@^4",
-    "r2",
-    "object",
-    "put",
-    `${env.r2Bucket}/${key}`,
-    "--file",
-    file,
-    "--content-type",
-    contentType,
-    "--remote",
-  ];
-  if (cacheControl) args.push("--cache-control", cacheControl);
-  const cmd = new Deno.Command("deno", {
-    args,
-    cwd: WEBSITE_DIR,
-    env: wranglerEnv(env),
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const { code } = await cmd.output();
-  if (code !== 0) fail(`wrangler r2 put ${key} exited ${code}`);
-
-  // Verify the upload actually landed AND matches byte-for-byte. Wrangler has a
-  // bug where transient node TLS errors (`node:_tls_wrap: Uncaught TypeError:
-  // this._handle.start is not a function`) crash a PUT mid-stream but still exit
-  // 0, leaving the object missing or truncated. GET the public URL with a
-  // cachebusting query param and compare sha256 (a Content-Length check alone
-  // would pass a same-length corruption or count-preserving truncation).
+  const headers: Record<string, string> = { "content-type": contentType };
+  if (cacheControl) headers["cache-control"] = cacheControl;
+  const body = await Deno.readFile(file);
+  const res = await r2SignedFetch(
+    env,
+    r2ObjectUrl(env, key),
+    { method: "PUT", body, headers },
+    `put ${key}`,
+  );
+  const text = await res.text();
+  if (!res.ok) fail(`r2 put ${key} failed: ${res.status} ${res.statusText}\n${text}`);
   await verifyR2Upload(env, key, file);
 }
 
+/** Server-side copy of an already-uploaded object to a second key, replacing the
+ *  stored content-type + cache-control. Used for the version-less `current/`
+ *  aliases so the same (often ~150MB) bytes are not re-uploaded a second time. */
+export async function r2Copy(
+  env: DeployEnv,
+  srcKey: string,
+  destKey: string,
+  localFile: string,
+  contentType: string,
+  cacheControl?: string,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    "x-amz-copy-source": `/${env.r2Bucket}/${srcKey}`,
+    "x-amz-metadata-directive": "REPLACE",
+    "content-type": contentType,
+  };
+  if (cacheControl) headers["cache-control"] = cacheControl;
+  const res = await r2SignedFetch(
+    env,
+    r2ObjectUrl(env, destKey),
+    { method: "PUT", headers },
+    `copy ${srcKey} -> ${destKey}`,
+  );
+  const text = await res.text();
+  if (!res.ok) {
+    fail(`r2 copy ${srcKey} -> ${destKey} failed: ${res.status} ${res.statusText}\n${text}`);
+  }
+  // The alias must be byte-identical to its source; verify against the local file
+  // (this also catches S3's "200 OK with an error in the body" copy quirk).
+  await verifyR2Upload(env, destKey, localFile);
+}
+
+// Verify an upload actually landed AND matches byte-for-byte: GET the public URL
+// with a cachebusting query param and compare sha256 (a Content-Length check
+// alone would pass a same-length corruption or count-preserving truncation).
+// Guards against a truncated write or stale edge copy after a PUT/COPY.
 async function verifyR2Upload(env: DeployEnv, key: string, file: string): Promise<void> {
   const url = `https://${env.storageDomain}/${key}?_v=${Date.now()}`;
   // A freshly-uploaded object can be slow to serve from the edge, and the GET
@@ -591,7 +719,7 @@ async function verifyR2Upload(env: DeployEnv, key: string, file: string): Promis
   if (!remoteBytes) {
     fail(
       `r2 put ${key}: post-upload GET failed after 5 attempts (${lastErr}). ` +
-        `Wrangler may have crashed mid-upload despite exit 0. Re-run the task.`,
+        `The upload may not have propagated. Re-run the task.`,
     );
   }
   const remoteHash = encodeHex(
@@ -633,25 +761,18 @@ export async function r2PutInline(
  *  harmless, and failing an already-published release over a stale delete is
  *  worse. Returns whether the delete succeeded. */
 export async function r2Delete(env: DeployEnv, key: string): Promise<boolean> {
-  const cmd = new Deno.Command("deno", {
-    args: [
-      "run",
-      "-A",
-      "npm:wrangler@^4",
-      "r2",
-      "object",
-      "delete",
-      `${env.r2Bucket}/${key}`,
-      "--remote",
-    ],
-    cwd: WEBSITE_DIR,
-    env: wranglerEnv(env),
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const { code } = await cmd.output();
-  if (code !== 0) {
-    info(colors.yellow(`prune: r2 delete ${key} exited ${code}; skipping`));
+  let res: Response;
+  try {
+    res = await r2Client(env).fetch(r2ObjectUrl(env, key), { method: "DELETE" });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    info(colors.yellow(`prune: r2 delete ${key} errored (${msg}); skipping`));
+    return false;
+  }
+  await res.body?.cancel();
+  // S3 returns 204 on success and also when the key is already absent.
+  if (!res.ok && res.status !== 404) {
+    info(colors.yellow(`prune: r2 delete ${key} -> ${res.status}; skipping`));
     return false;
   }
   return true;
@@ -1319,7 +1440,7 @@ export async function runReleasePlan(
 
   if (pruneTargets.length > 0) {
     step(`Pruning ${pruneTargets.length} evicted artifact(s) from R2`);
-    for (const key of pruneTargets) await r2Delete(env, key);
+    await mapPool(pruneTargets, 10, (key) => r2Delete(env, key));
   }
 
   // Successes are now published + recorded; surface the failures loudly and exit

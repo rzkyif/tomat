@@ -20,6 +20,8 @@ function blankEnv(overrides: Partial<DeployEnv> = {}): DeployEnv {
     signingPublicKey: new Uint8Array(),
     cloudflareApiToken: "",
     cloudflareAccountId: "",
+    r2AccessKeyId: "",
+    r2SecretAccessKey: "",
     websiteDomain: "",
     storageDomain: "",
     r2Bucket: "",

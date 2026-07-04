@@ -24,7 +24,8 @@
     "@std/encoding": "jsr:@std/encoding@^1.0.0",
     "@std/dotenv": "jsr:@std/dotenv@^0.225",
     "@std/tar": "jsr:@std/tar@^0.1.0",
-    "@noble/ed25519": "jsr:@noble/ed25519@^3.0.0"
+    "@noble/ed25519": "jsr:@noble/ed25519@^3.0.0",
+    "aws4fetch": "npm:aws4fetch@^1.0.20"
   },
   "tasks": {
     "dev": "deno run -A --unsafely-ignore-certificate-errors=127.0.0.1 scripts/dev.ts",

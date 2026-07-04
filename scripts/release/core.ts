@@ -41,6 +41,8 @@ import {
   info,
   ok,
   packagesHashInputs,
+  mapPool,
+  R2_CONCURRENCY,
   r2Put,
   readCoreVersion,
   rel,
@@ -1146,36 +1148,36 @@ export async function composeAndUploadCore(
   // Single-file artifacts ship gzip-compressed (see gzipFile); the manifest
   // URLs end in `.gz` and consumers verify sha256 over the decompressed file.
   step(`Uploading binaries to R2 bucket "${env.r2Bucket}"`);
-  for (const a of artifacts) {
+  await mapPool(artifacts, R2_CONCURRENCY, async (a) => {
     const gz = await gzipFile(a.path);
     const key = `${prefix}${version}/${a.triple}/${a.filename}.gz`;
     info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(a.size)})`);
     await r2Put(env, key, gz.path, "application/gzip");
     opts.recordVersionedKey?.(key);
     opts.recordReleaseAsset?.(gz.path, `${a.triple}_${a.filename}.gz`);
-  }
+  });
   ok(`uploaded ${artifacts.length} binaries`);
 
   step(`Uploading helpers to R2 bucket "${env.r2Bucket}"`);
-  for (const h of helpers) {
+  await mapPool(helpers, R2_CONCURRENCY, async (h) => {
     const gz = await gzipFile(h.path);
     const key = `${prefix}${version}/${h.triple}/${h.filename}.gz`;
     info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(h.size)})`);
     await r2Put(env, key, gz.path, "application/gzip");
     opts.recordVersionedKey?.(key);
     opts.recordReleaseAsset?.(gz.path, `${h.triple}_${h.filename}.gz`);
-  }
+  });
   ok(`uploaded ${helpers.length} helpers`);
 
   step(`Uploading speech binary to R2 bucket "${env.r2Bucket}"`);
-  for (const s of speech) {
+  await mapPool(speech, R2_CONCURRENCY, async (s) => {
     // Already a .tar.gz (its own transport form); upload as-is, no extra gzip.
     const key = `${prefix}${version}/${s.triple}/${s.filename}`;
     info(`uploading ${key}  (${humanBytes(s.size)})`);
     await r2Put(env, key, s.path, "application/gzip");
     opts.recordVersionedKey?.(key);
     opts.recordReleaseAsset?.(s.path, `${s.triple}_${s.filename}`);
-  }
+  });
   ok(`uploaded ${speech.length} speech binaries`);
 
   step(`Uploading workers to R2 bucket "${env.r2Bucket}"`);
@@ -1183,13 +1185,13 @@ export async function composeAndUploadCore(
   // rather than next to the .ts, which would leave an untracked artifact.
   const workersOut = join(DIST_DIR, "workers");
   await ensureDir(workersOut);
-  for (const w of workers) {
+  await mapPool(workers, R2_CONCURRENCY, async (w) => {
     const gz = await gzipFile(w.path, join(workersOut, `${w.name}.gz`));
     const key = `${prefix}${version}/workers/${w.name}.gz`;
     info(`uploading ${key}  (${humanBytes(gz.size)}, raw ${humanBytes(w.size)})`);
     await r2Put(env, key, gz.path, "application/gzip");
     opts.recordVersionedKey?.(key);
-  }
+  });
   ok(`uploaded ${workers.length} workers`);
 
   step(`Uploading manifests to R2 bucket "${env.r2Bucket}"`);

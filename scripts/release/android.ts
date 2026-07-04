@@ -30,6 +30,9 @@ import {
   info,
   ok,
   packagesHashInputs,
+  mapPool,
+  R2_CONCURRENCY,
+  r2Copy,
   r2Put,
   rel,
   type ReleaseChannel,
@@ -367,24 +370,26 @@ export async function composeAndUploadAndroid(
   }
 
   step(`Uploading APK(s) to R2 bucket "${env.r2Bucket}"`);
-  for (const u of uploads) {
+  await mapPool(uploads, R2_CONCURRENCY, async (u) => {
     info(`uploading ${u.key}  (${humanBytes(u.size)})`);
     await r2Put(env, u.key, u.path, "application/vnd.android.package-archive");
     opts.recordVersionedKey?.(u.key);
     opts.recordReleaseAsset?.(u.path, `android-${u.abi}_tomat.apk`);
 
     // Mirror each APK to a version-less "current" alias so the install page can
-    // link a stable download URL without knowing the version. Short cache; the
-    // versioned copy above stays the source of truth the signed manifest names.
-    info(`uploading ${u.aliasKey}  (alias)`);
-    await r2Put(
+    // link a stable download URL without knowing the version, via a server-side
+    // copy (no re-upload). Short cache; the versioned copy above stays the source
+    // of truth the signed manifest names.
+    info(`copying ${u.aliasKey}  (alias)`);
+    await r2Copy(
       env,
+      u.key,
       u.aliasKey,
       u.path,
       "application/vnd.android.package-archive",
       MANIFEST_CACHE_CONTROL,
     );
-  }
+  });
 
   step(`Uploading ${manifestDir}/android.json to R2`);
   await r2Put(

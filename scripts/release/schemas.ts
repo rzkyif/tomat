@@ -12,6 +12,8 @@ import {
   hashPaths,
   info,
   ok,
+  mapPool,
+  R2_CONCURRENCY,
   r2Put,
   readVersionField,
   type ReleaseChannel,
@@ -57,23 +59,23 @@ export const schemasItem: ReleaseItem = {
   // Schemas ship as-is (no compile step); the work is the byte-compare + upload.
   async apply(env: DeployEnv, _channel: ReleaseChannel, opts: ApplyOpts): Promise<void> {
     step(`Syncing ${SCHEMAS.length} JSON schemas to R2`);
-    let uploaded = 0;
-    for (const { src, r2Key } of SCHEMAS) {
+    const results = await mapPool(SCHEMAS, R2_CONCURRENCY, async ({ src, r2Key }) => {
       const fullSrc = join(REPO_ROOT, src);
       const local = await Deno.readFile(fullSrc);
       const remote = await fetchR2Bytes(env, r2Key);
       if (remote && bytesEqual(local, remote)) {
         info(`unchanged: ${r2Key}`);
-        continue;
+        return false;
       }
       if (opts.dryRun) {
         info(`would upload ${r2Key}`);
-        continue;
+        return false;
       }
       await r2Put(env, r2Key, fullSrc, "application/json", SCHEMA_CACHE_CONTROL);
       ok(`uploaded ${r2Key}`);
-      uploaded++;
-    }
+      return true;
+    });
+    const uploaded = results.filter(Boolean).length;
     if (!opts.dryRun) ok(`uploaded ${uploaded}/${SCHEMAS.length} schemas`);
   },
 };

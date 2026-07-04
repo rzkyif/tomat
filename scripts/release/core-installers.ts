@@ -37,6 +37,9 @@ import {
   humanBytes,
   info,
   ok,
+  mapPool,
+  R2_CONCURRENCY,
+  r2Copy,
   r2Put,
   type ReleaseChannel,
   rel,
@@ -739,21 +742,21 @@ export async function uploadCoreInstallers(
     return [];
   }
   step(`Uploading Core installer(s) to R2 bucket "${env.r2Bucket}"`);
-  const ghAssets: Array<{ path: string; name: string }> = [];
-  for (const u of uploads) {
+  const ghAssets = await mapPool(uploads, R2_CONCURRENCY, async (u) => {
     info(`uploading ${u.key}  (${humanBytes(u.size)})`);
     await r2Put(env, u.key, u.path, "application/octet-stream");
     opts.recordVersionedKey?.(u.key);
-    // Mirror to the version-less current/ alias the website links against. Short
-    // cache (via the same header the manifests use); the versioned copy above is
-    // the source of truth the signed core-installers.json names.
-    info(`uploading ${u.aliasKey}  (alias)`);
-    await r2Put(env, u.aliasKey, u.path, "application/octet-stream", "public, max-age=300");
+    // Mirror to the version-less current/ alias the website links against via a
+    // server-side copy (no re-upload). Short cache (via the same header the
+    // manifests use); the versioned copy above is the source of truth the signed
+    // core-installers.json names.
+    info(`copying ${u.aliasKey}  (alias)`);
+    await r2Copy(env, u.key, u.aliasKey, u.path, "application/octet-stream", "public, max-age=300");
     // u.label is already the per-triple-unique flat name (`<triple>_<filename>`),
     // which is exactly what the GitHub-Release mirror needs to avoid basename
     // clobbering across triples.
-    ghAssets.push({ path: u.path, name: u.label });
-  }
+    return { path: u.path, name: u.label };
+  });
   await r2Put(
     env,
     `${manifestDir}/core-installers.json`,

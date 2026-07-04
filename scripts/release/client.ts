@@ -30,6 +30,9 @@ import {
   info,
   ok,
   packagesHashInputs,
+  mapPool,
+  R2_CONCURRENCY,
+  r2Copy,
   r2Put,
   rel,
   type ReleaseChannel,
@@ -549,16 +552,23 @@ export async function composeAndUploadClient(
   }
 
   step(`Uploading client bundle(s) + installers to R2 bucket "${env.r2Bucket}"`);
-  for (const u of uploads) {
+  await mapPool(uploads, R2_CONCURRENCY, async (u) => {
     info(`uploading ${u.key}  (${humanBytes(u.size)})`);
     await r2Put(env, u.key, u.path, "application/octet-stream");
     opts.recordVersionedKey?.(u.key);
     opts.recordReleaseAsset?.(u.path, u.label);
     if (u.aliasKey) {
-      info(`uploading ${u.aliasKey}  (alias)`);
-      await r2Put(env, u.aliasKey, u.path, "application/octet-stream", "public, max-age=300");
+      info(`copying ${u.aliasKey}  (alias)`);
+      await r2Copy(
+        env,
+        u.key,
+        u.aliasKey,
+        u.path,
+        "application/octet-stream",
+        "public, max-age=300",
+      );
     }
-  }
+  });
 
   step(`Uploading ${manifestDir}/client.json to R2`);
   await r2Put(

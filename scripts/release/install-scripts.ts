@@ -14,6 +14,8 @@ import {
   info,
   INSTALL_DIR,
   ok,
+  mapPool,
+  R2_CONCURRENCY,
   r2Put,
   readVersionField,
   type ReleaseChannel,
@@ -55,24 +57,28 @@ export const scriptsItem: ReleaseItem = {
   // Install scripts ship as-is (no compile step); the work is compare + upload.
   async apply(env: DeployEnv, _channel: ReleaseChannel, opts: ApplyOpts): Promise<void> {
     step(`Syncing ${INSTALL_SCRIPTS.length} install scripts to R2`);
-    let uploaded = 0;
-    for (const { name, contentType } of INSTALL_SCRIPTS) {
-      const src = join(INSTALL_DIR, name);
-      const r2Key = `install/${name}`;
-      const local = await Deno.readFile(src);
-      const remote = await fetchR2Bytes(env, r2Key);
-      if (remote && bytesEqual(local, remote)) {
-        info(`unchanged: ${r2Key}`);
-        continue;
-      }
-      if (opts.dryRun) {
-        info(`would upload ${r2Key}`);
-        continue;
-      }
-      await r2Put(env, r2Key, src, contentType, SCRIPT_CACHE_CONTROL);
-      ok(`uploaded ${r2Key}`);
-      uploaded++;
-    }
+    const results = await mapPool(
+      INSTALL_SCRIPTS,
+      R2_CONCURRENCY,
+      async ({ name, contentType }) => {
+        const src = join(INSTALL_DIR, name);
+        const r2Key = `install/${name}`;
+        const local = await Deno.readFile(src);
+        const remote = await fetchR2Bytes(env, r2Key);
+        if (remote && bytesEqual(local, remote)) {
+          info(`unchanged: ${r2Key}`);
+          return false;
+        }
+        if (opts.dryRun) {
+          info(`would upload ${r2Key}`);
+          return false;
+        }
+        await r2Put(env, r2Key, src, contentType, SCRIPT_CACHE_CONTROL);
+        ok(`uploaded ${r2Key}`);
+        return true;
+      },
+    );
+    const uploaded = results.filter(Boolean).length;
     if (!opts.dryRun) {
       ok(`uploaded ${uploaded}/${INSTALL_SCRIPTS.length} install scripts`);
     }
