@@ -222,7 +222,10 @@
     {/each}
   </div>
 {:else if group}
-  <section class="flex flex-col">
+  <!-- An object-management group fills the viewport (h-full min-h-0) so its
+       sticky header + tabs stay put and only its inner list scrolls; every other
+       group grows with its content and the panel viewport scrolls it. -->
+  <section class="flex flex-col {omField ? 'h-full min-h-0' : ''}">
     <!-- Group header: sticky at the very top (z above section headers at top-7).
          The label sits on the SAME pl-5 column as the body on mobile so the two
          line up. The back affordance (iOS, where there is no system back) is

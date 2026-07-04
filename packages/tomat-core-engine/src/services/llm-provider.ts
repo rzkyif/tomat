@@ -33,6 +33,15 @@ export interface LlmEndpointConfig {
   topK?: number;
   minP?: number;
   repeatPenalty?: number;
+  // DRY (Don't Repeat Yourself) sampler multiplier; > 0 discourages the model
+  // from repeating whole phrases, which curbs the semantic loops small
+  // reasoning models fall into. 0/undefined omits it. llama.cpp-only.
+  dryMultiplier?: number;
+  // OpenAI-style presence penalty; sent to both providers when non-zero.
+  presencePenalty?: number;
+  // llama.cpp sampler-chain order (canonical names). Empty/undefined = the
+  // server's default chain. llama.cpp-only.
+  samplers?: string[];
   reasoningBudget?: number;
   // External-only: the OpenAI-style `reasoning_effort` level. Local endpoints
   // use `reasoningBudget` instead.
@@ -119,7 +128,7 @@ export async function* streamChatCompletion(req: LlmRequest): AsyncIterable<LlmD
     const think = perCallBudget > 0;
     if (isLocal) {
       extra.chat_template_kwargs = { enable_thinking: think };
-      if (think) extra.reasoning_budget = perCallBudget;
+      if (think) setLocalThinkingBudget(extra, perCallBudget);
     } else if (think) {
       // OpenAI-compatible servers take no token budget; ask for thinking only.
       extra.reasoning_effort = "high";
@@ -131,11 +140,11 @@ export async function* streamChatCompletion(req: LlmRequest): AsyncIterable<LlmD
       // template is told `false`, so "off" must send the flag, not omit it.
       const think = req.endpoint.reasoning === "on";
       extra.chat_template_kwargs = { enable_thinking: think };
-      // The boot `--reasoning-budget` is gone; carry the per-turn budget here so
-      // a capped `<think>` still applies on the chat path (overrides the server
-      // default per request).
+      // Carry the per-turn budget here so a capped `<think>` applies on the chat
+      // path without a server restart. Sent per request (each client keeps its
+      // own budget), never pinned at boot.
       if (think && req.endpoint.reasoningBudget) {
-        extra.reasoning_budget = req.endpoint.reasoningBudget;
+        setLocalThinkingBudget(extra, req.endpoint.reasoningBudget);
       }
     } else if (req.endpoint.reasoning === "on") {
       // OpenAI-compatible servers take no token budget; ask for an effort level.
@@ -153,7 +162,16 @@ export async function* streamChatCompletion(req: LlmRequest): AsyncIterable<LlmD
     if (req.endpoint.repeatPenalty !== undefined) {
       extra.repeat_penalty = req.endpoint.repeatPenalty;
     }
+    // DRY curbs verbatim phrase loops the token-level repeat penalty misses; the
+    // base/length/window default on the server, so only the multiplier is sent.
+    if (req.endpoint.dryMultiplier) extra.dry_multiplier = req.endpoint.dryMultiplier;
+    // Sampler-chain order (catalog models set a loop-resistant one); omitted when
+    // unset so the server keeps its default chain.
+    if (req.endpoint.samplers?.length) extra.samplers = req.endpoint.samplers;
   }
+  // presence_penalty is OpenAI-standard, so it goes to both providers. Omitted
+  // when 0 (its no-op) to avoid tripping minimal external servers.
+  if (req.endpoint.presencePenalty) extra.presence_penalty = req.endpoint.presencePenalty;
 
   const stream = await client.chat.completions.create(
     {
@@ -208,4 +226,16 @@ function isLocalEndpoint(baseUrl: string): boolean {
   return (
     baseUrl.includes("127.0.0.1") || baseUrl.includes("localhost") || baseUrl.includes("0.0.0.0")
   );
+}
+
+// Encodes a per-request thinking-token cap for llama-server's OpenAI-compatible
+// endpoint. The budget arrives as `thinking_budget_tokens` (mapped internally to
+// the `reasoning_budget_tokens` sampler); `reasoning_control` must be true for
+// the server to create the on-demand budget sampler that forcibly ends the
+// `<think>` block at the cap. Both are per-request body fields, so no boot flag
+// and every client can run a different budget. (llama.cpp does NOT read a
+// top-level `reasoning_budget`, so that name is silently dropped.)
+function setLocalThinkingBudget(extra: Record<string, unknown>, budget: number): void {
+  extra.thinking_budget_tokens = budget;
+  extra.reasoning_control = true;
 }

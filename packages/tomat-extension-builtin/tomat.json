@@ -2,7 +2,7 @@
   "$schema": "https://get.au.tomat.ing/schemas/tomat-v1.json",
   "name": "tomat-extension-builtin",
   "displayName": "Built-In",
-  "description": "The everyday starter tools that come with tomat: search the web and read pages, do math, check the date and time, download and tidy files, open links, keep memories, and schedule prompts.",
+  "description": "The everyday starter tools that come with tomat: search the web and read pages, do math, check the date and time, download files, open links, keep memories, and schedule prompts.",
   "license": "MIT",
   "homepage": "https://au.tomat.ing",
   "tools": [
@@ -27,7 +27,12 @@
         "download https://example.com/file.zip",
         "save that file to my downloads",
         "grab the pdf from this link",
-        "fetch this archive for me"
+        "fetch this archive for me",
+        "download this file",
+        "save this link as a file",
+        "download that installer",
+        "get me the file at this url",
+        "put this download in my downloads folder"
       ],
       "function": "download",
       "permissions": {
@@ -86,7 +91,12 @@
         "open https://news.ycombinator.com",
         "take me to the github page",
         "visit example.com",
-        "go to the docs website"
+        "go to the docs website",
+        "open this link in my browser",
+        "pull up the wikipedia page for cats",
+        "launch this website",
+        "open that url",
+        "browse to this site"
       ],
       "function": "open",
       "alwaysAvailable": true,
@@ -125,7 +135,12 @@
         "open the calculator",
         "launch brave and spotify",
         "start the terminal",
-        "open my notes app"
+        "open my notes app",
+        "open spotify",
+        "launch the app",
+        "start up my code editor",
+        "fire up slack",
+        "can you open my browser"
       ],
       "function": "openApp",
       "alwaysAvailable": true,
@@ -171,7 +186,11 @@
         "open this pdf",
         "open the report in preview",
         "open that spreadsheet in excel",
-        "open my notes file in the editor"
+        "open my notes file in the editor",
+        "open the file at this path",
+        "open this document",
+        "open that image",
+        "open the file for me"
       ],
       "function": "openFile",
       "alwaysAvailable": true,
@@ -212,7 +231,11 @@
       "triggers": [
         "remember my current window layout",
         "save where my windows are",
-        "note the current screen arrangement"
+        "note the current screen arrangement",
+        "capture how my windows are positioned",
+        "record my current window setup",
+        "save my current workspace layout",
+        "remember how my screen is arranged right now"
       ],
       "function": "getWindowLayout",
       "platforms": ["darwin", "windows", "linux_x11"],
@@ -260,7 +283,10 @@
       "triggers": [
         "restore my window layout",
         "put my windows back where they were",
-        "arrange the windows like before"
+        "arrange the windows like before",
+        "move my windows back to the saved layout",
+        "set up my windows like last time",
+        "reposition the windows to my saved arrangement"
       ],
       "function": "setWindowLayout",
       "platforms": ["darwin", "windows", "linux_x11"],
@@ -292,7 +318,12 @@
         "what memories do I have",
         "list my saved notes",
         "which skills are available",
-        "do I have a memory about this"
+        "do I have a memory about this",
+        "show me all my memories",
+        "what have I asked you to remember",
+        "what do you know about me",
+        "what notes have I saved",
+        "list everything you remember"
       ],
       "function": "listMemories",
       "permissions": {
@@ -322,10 +353,17 @@
         "required": ["title", "content"]
       },
       "triggers": [
+        "remember that I like my hair yellow",
+        "remember that my sister's birthday is in june",
+        "remember my wifi password is hunter2",
+        "note that I prefer tea over coffee",
+        "keep a note that I parked on level 3",
         "write a memory about this",
         "save these notes as a memory",
         "create a new memory called shopping list",
-        "replace the contents of my notes memory"
+        "replace the contents of my notes memory",
+        "store this for later",
+        "make a note of this so you don't forget"
       ],
       "function": "writeMemory",
       "permissions": {
@@ -362,7 +400,12 @@
         "update the meeting time in my notes memory",
         "fix the typo in that memory",
         "change the deadline in my plan memory",
-        "add milk to my shopping list memory"
+        "add milk to my shopping list memory",
+        "update what you remember about my schedule",
+        "correct the address in my contacts memory",
+        "remove that line from my notes memory",
+        "change my remembered coffee order",
+        "actually, remember it's green not yellow"
       ],
       "function": "editMemory",
       "permissions": {
@@ -388,10 +431,15 @@
         "required": ["title"]
       },
       "triggers": [
+        "do you remember the thing I said to you last time",
+        "do you remember my wifi password",
+        "what did I tell you to remember about the project",
+        "recall what I told you earlier",
         "read my meeting notes memory",
         "what does my plan memory say",
         "look at the shopping list memory",
-        "check the notes I saved"
+        "check the notes I saved",
+        "what did I say about my preferences"
       ],
       "function": "readMemory",
       "permissions": {
@@ -423,7 +471,9 @@
       "triggers": [
         "read the template file from that skill",
         "open the skill's reference file",
-        "show me the bundled checklist"
+        "show me the bundled checklist",
+        "read the reference doc that skill mentioned",
+        "load the file that skill points to"
       ],
       "function": "readSkillFile",
       "permissions": {
@@ -496,7 +546,11 @@
         "remind me every monday at 9am to fill in the timesheet",
         "every morning give me a summary of my notes",
         "schedule a prompt for tomorrow at 8",
-        "check the news once every hour"
+        "check the news once every hour",
+        "remind me to take a break every 30 minutes",
+        "set up a daily standup summary",
+        "run this every week",
+        "schedule a reminder for friday afternoon"
       ],
       "function": "schedulePrompt",
       "permissions": {}
@@ -518,7 +572,9 @@
         "show me my meeting notes memory",
         "display the shopping list",
         "open my plan memory in the chat",
-        "let me see that memory"
+        "let me see that memory",
+        "pull up my notes memory",
+        "show me what's in my ideas memory"
       ],
       "function": "showMemory",
       "permissions": {
@@ -541,7 +597,11 @@
         "what time is it",
         "what's today's date",
         "what day is it tomorrow",
-        "current date and time"
+        "current date and time",
+        "what's the date today",
+        "what day of the week is it",
+        "what time is it right now",
+        "how many days until friday"
       ],
       "function": "getDatetime",
       "alwaysAvailable": true,
@@ -564,7 +624,11 @@
         "calculate 15% of 2400",
         "what is 2 to the power of 20",
         "how much is 144 divided by 12",
-        "evaluate this expression"
+        "evaluate this expression",
+        "what's the square root of 5041",
+        "what is 45 times 89",
+        "work out the tip on a 60 dollar bill",
+        "add these numbers up for me"
       ],
       "function": "calculator",
       "alwaysAvailable": true,
@@ -587,7 +651,11 @@
         "read this article for me",
         "summarize https://example.com/post",
         "what does this page say",
-        "open the link and tell me the gist"
+        "open the link and tell me the gist",
+        "read the contents of this url",
+        "summarize this webpage",
+        "what's on this page",
+        "get the text from this article"
       ],
       "function": "fetchWebpage",
       "permissions": {
@@ -622,7 +690,11 @@
         "search the web for deno 2 release notes",
         "look up the weather in amsterdam",
         "find recent news about this",
-        "search for how tall the eiffel tower is"
+        "search for how tall the eiffel tower is",
+        "google the best pizza in town",
+        "what's the latest on this topic",
+        "look this up online",
+        "find information about quantum computing"
       ],
       "function": "webSearch",
       "permissions": {
@@ -631,52 +703,6 @@
             "host": "html.duckduckgo.com",
             "ports": [443],
             "reason": "Query DuckDuckGo's HTML search endpoint"
-          }
-        ]
-      }
-    },
-    {
-      "name": "organize_downloads",
-      "description": "Tidy the user's Downloads folder. The user picks which loose files to sort and reviews the plan, then the accepted files move into category folders like Images, Documents, and Archives.",
-      "parameters": {
-        "type": "object",
-        "properties": {}
-      },
-      "triggers": [
-        "organize my downloads folder",
-        "clean up my downloads",
-        "sort the files in downloads",
-        "tidy up my downloaded files"
-      ],
-      "function": "organizeDownloads",
-      "permissions": {
-        "read": [
-          {
-            "path": "$downloads",
-            "reason": "List the files in the Downloads folder"
-          }
-        ],
-        "write": [
-          {
-            "path": "$downloads",
-            "reason": "Move files into category subfolders"
-          }
-        ],
-        "env": [
-          {
-            "key": "XDG_DOWNLOAD_DIR",
-            "reason": "Honor the user's preferred Downloads folder (Linux/XDG)",
-            "optional": true
-          },
-          {
-            "key": "HOME",
-            "reason": "Resolve ~/Downloads fallback",
-            "optional": true
-          },
-          {
-            "key": "USERPROFILE",
-            "reason": "Resolve %USERPROFILE%\\Downloads on Windows",
-            "optional": true
           }
         ]
       }

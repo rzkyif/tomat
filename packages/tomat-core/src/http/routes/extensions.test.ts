@@ -268,6 +268,37 @@ Deno.test("POST /:id/tools/:tool/enable: succeeds even with ungranted required p
   }
 });
 
+Deno.test("POST /:id/tools/:tool/always-available: overrides the flag; rejects a non-boolean", async () => {
+  const env = await setupTestEnv();
+  try {
+    const { token } = await pairOne();
+    const id = "tk-always";
+    const dir = await seedInstalledExtension(id);
+    try {
+      const app = buildApp();
+      const url = `/api/v1/extensions/${id}/tools/t/always-available`;
+      const post = (body: string): Request =>
+        new Request(`http://x${url}`, {
+          method: "POST",
+          headers: { ...bearer(token), "content-type": "application/json" },
+          body,
+        });
+      // Seeded tool declares alwaysAvailable: false; the override flips it on.
+      assertEquals(extensionsRegistry().listTools(id)[0].alwaysAvailable, false);
+      assertEquals((await app.fetch(post(`{"value":true}`))).status, 200);
+      assertEquals(extensionsRegistry().listTools(id)[0].alwaysAvailable, true);
+      assertEquals((await app.fetch(post(`{"value":false}`))).status, 200);
+      assertEquals(extensionsRegistry().listTools(id)[0].alwaysAvailable, false);
+      // A missing/non-boolean value is a validation error.
+      assertEquals((await app.fetch(post(`{}`))).status, 400);
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("POST /:id/confirm-reenable: re-pins hash + clears drift -> installed", async () => {
   const env = await setupTestEnv();
   try {

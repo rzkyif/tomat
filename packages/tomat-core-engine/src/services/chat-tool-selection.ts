@@ -5,10 +5,16 @@
 // finalize (so message ordering stays with the orchestrator).
 
 import type OpenAI from "openai";
-import type { Tool, ToolDescriptor, ToolFilterMessage } from "@tomat/shared";
+import type {
+  Tool,
+  ToolDescriptor,
+  ToolFilterEntryPersisted,
+  ToolFilterMessage,
+} from "@tomat/shared";
 import { errMessage, permissionKey } from "@tomat/shared";
 import { boolSetting, numSetting } from "./settings-access.ts";
 import { embed } from "./embedding.ts";
+import { cosineNormalized, toolEmbedText, toolNameMentioned } from "./relevance.ts";
 import { toolFilter } from "./tool-filter.ts";
 import { resolveEndpoint } from "./endpoint-resolver.ts";
 import { thinkingBudget } from "./thinking-budget.ts";
@@ -17,6 +23,13 @@ import { getLogger } from "../platform/log.ts";
 import { newMessageId } from "../platform/ids.ts";
 
 const log = getLogger("chat");
+
+// Cosine cutoff for folding a non-always-available MCP tool into a turn: with no
+// trigger phrases, an MCP tool is offered when the query names it OR its name +
+// description embedding is at least this similar to the query. A conservative
+// floor so an irrelevant server tool isn't force-included every turn; tune if
+// tools surface too eagerly or too rarely.
+const MCP_RELEVANCE_FLOOR = 0.25;
 
 // LLM-exposure gate: a tool reaches the model only when its extension is
 // 'installed' (not 'downloaded'/'drift'), the tool is enabled, AND no
@@ -116,6 +129,7 @@ export async function buildToolList(opts: {
     let phase1Entries: ToolDescriptor[] = [];
     let phase2Entries: ToolDescriptor[] | undefined;
     let alwaysEntries: ToolDescriptor[] = [];
+    let nameMatchedEntries: ToolDescriptor[] = [];
 
     if (!shouldFilter || !queryText) {
       const capped: Array<{ toolId: string }> = allEnabled.slice(0, maxTools).map((t) => ({
@@ -140,9 +154,11 @@ export async function buildToolList(opts: {
       const result = toolFilter().phase1(vector, {
         topK: maxTools,
         includeAlwaysAvailable: alwaysAvailableEnabled,
+        queryText,
       });
       phase1Entries = result.candidates;
       alwaysEntries = alwaysAvailableEnabled ? result.alwaysAvailable : [];
+      nameMatchedEntries = result.nameMatched;
       let candidates = result.candidates;
       if (secondPassEnabled && candidates.length > 0) {
         const phase2Endpoint = await resolveEndpoint(settings, route);
@@ -158,6 +174,14 @@ export async function buildToolList(opts: {
       }
       const final: Array<{ toolId: string }> = [];
       const seen = new Set<string>();
+      // Directly-named tools are force-included first, ahead of the cosine
+      // candidates and exempt from the maxTools cap (like always-available
+      // tools), so naming a tool by hand always exposes it to the model.
+      for (const n of nameMatchedEntries) {
+        if (seen.has(n.toolId)) continue;
+        final.push({ toolId: n.toolId });
+        seen.add(n.toolId);
+      }
       for (const c of candidates) {
         if (final.length >= maxTools) break;
         if (seen.has(c.toolId)) continue;
@@ -204,7 +228,11 @@ export async function buildToolList(opts: {
       name: a.name,
       description: a.description,
     }));
-    filterMsg.toolsSent = toolList.length;
+    filterMsg.nameMatched = nameMatchedEntries.map((n) => ({
+      toolId: n.toolId,
+      name: n.name,
+      description: n.description,
+    }));
   } catch (err) {
     // Embedding model not present, etc. This is non-fatal; we just skip tools.
     log.warn(`stream ${streamId}: tool filter failed, skipping tools: ${errMessage(err)}`);
@@ -212,8 +240,11 @@ export async function buildToolList(opts: {
     filterMsg.errorMessage = errMessage(err);
   }
 
-  // Enabled MCP tools aren't in the embedding relevance filter (they live on
-  // their servers); offer them like always-available tools. Two guards:
+  // Enabled MCP tools live on their servers, so they aren't in the embedding
+  // index. An MCP tool defaults to always-available (offered every turn); when
+  // its always-available is turned off it folds into relevance instead: with no
+  // trigger phrases, it's offered when the query names it or its name +
+  // description embedding clears MCP_RELEVANCE_FLOOR. Guards:
   //  - skip any whose name an extension tool already claims (a duplicate
   //    function name confuses the model, and dispatch resolves the name to
   //    the extension anyway, so the MCP entry would be dead weight), and
@@ -221,13 +252,33 @@ export async function buildToolList(opts: {
   //  - bound the count at `maxTools` so a server with many enabled tools
   //    can't blow the tool/context budget.
   const mcpMaxTools = numSetting(settings, "tools.maxTools", 30);
+  const mcpAlwaysAvailableEnabled = boolSetting(settings, "tools.alwaysAvailableEnabled", true);
   const offered = new Set(toolList.map((t) => (t.type === "function" ? t.function.name : "")));
-  let mcpAdded = 0;
+  const mcpEntries: ToolFilterEntryPersisted[] = [];
   for (const t of host().tools?.listMcpTools() ?? []) {
     if (!t.enabled || offered.has(t.name)) continue;
-    if (mcpAdded >= mcpMaxTools) break;
+    if (mcpEntries.length >= mcpMaxTools) break;
+    const isAlways = t.alwaysAvailable && mcpAlwaysAvailableEnabled;
+    // With no query vector (filtering off/skipped) everything is offered,
+    // matching the extension path; otherwise a non-always tool must be relevant.
+    let include = isAlways || queryVector === undefined;
+    if (!include && queryVector) {
+      if (toolNameMentioned(queryText ?? "", t.name)) {
+        include = true;
+      } else {
+        try {
+          const [vec] = await embed([toolEmbedText(t)]);
+          include = cosineNormalized(queryVector, vec) >= MCP_RELEVANCE_FLOOR;
+        } catch (err) {
+          // Embedding model unavailable: fall back to name-mention only (already
+          // checked above), so the tool is simply not offered this turn.
+          log.warn(`stream ${streamId}: MCP tool embed failed for ${t.name}: ${errMessage(err)}`);
+        }
+      }
+    }
+    if (!include) continue;
     offered.add(t.name);
-    mcpAdded++;
+    mcpEntries.push({ toolId: t.id, name: t.name, description: t.description });
     toolList.push({
       type: "function",
       function: {
@@ -237,6 +288,13 @@ export async function buildToolList(opts: {
       },
     });
   }
+
+  // MCP tools offered this turn, recorded for the bubble without forcing it
+  // visible. toolsSent is set here, after the append, so it counts them: an
+  // MCP-only turn would otherwise read as 0 tools sent and suppress the
+  // system-prompt tools hint even though the model got tools.
+  filterMsg.mcp = mcpEntries;
+  filterMsg.toolsSent = toolList.length;
 
   return { tools: toolList, queryVector, filterMessage: filterMsg };
 }

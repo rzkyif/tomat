@@ -108,13 +108,16 @@
       // Empty filter bubbles (no relevant tools / memories found) are hidden
       // unless the user opts to keep them. Errors always show. "No relevant
       // tools" is the filter result, not toolsSent: always-available tools
-      // would otherwise keep the bubble on every turn.
+      // would otherwise keep the bubble on every turn. A directly-named tool
+      // (nameMatched) is the exception: the user asked for it by name, so the
+      // bubble must show it even though it bypassed phase 1/2.
       const toolFilterBase =
         msg.phase2 !== undefined ? msg.phase2.length : (msg.phase1?.length ?? 0);
       const isHiddenEmptyToolFilter =
         msg.role === "tool_filter" &&
         msg.status !== "error" &&
         toolFilterBase === 0 &&
+        (msg.nameMatched?.length ?? 0) === 0 &&
         !settingsState.currentSettings["tools.showEmptySelection"];
       const isHiddenEmptyMemoryFilter =
         msg.role === "memory_filter" &&

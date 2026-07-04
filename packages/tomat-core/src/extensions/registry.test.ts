@@ -83,6 +83,30 @@ Deno.test("upsertExtension + status transitions: downloaded -> installed -> drif
   }
 });
 
+Deno.test("listAllTools: only aggregates tools of installed extensions", async () => {
+  const env = await setupTestEnv();
+  try {
+    const r = extensionsRegistry();
+    // Installed extension: its tool shows in the aggregate.
+    r.upsertExtension(tk({ id: "live" }));
+    r.markInstalled("live", "cafebabe");
+    r.replaceTools("live", [tool({ extensionId: "live", name: "live_tool" })]);
+    // Downloaded-but-not-installed: its tool must stay out.
+    r.upsertExtension(tk({ id: "pending", contentHash: "" }));
+    r.replaceTools("pending", [tool({ extensionId: "pending", name: "pending_tool" })]);
+    // Drifted: also out.
+    r.upsertExtension(tk({ id: "bad" }));
+    r.markInstalled("bad", "cafebabe");
+    r.replaceTools("bad", [tool({ extensionId: "bad", name: "bad_tool" })]);
+    r.markDrift("bad");
+
+    const names = r.listAllTools().map((t) => t.name);
+    assertEquals(names, ["live_tool"]);
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("getOrThrow: throws extension_not_found on missing id", async () => {
   const env = await setupTestEnv();
   try {
@@ -112,6 +136,37 @@ Deno.test("replaceTools: drops old tools, inserts new, preserves enabled on matc
     assertEquals(byName.get("keep")?.enabled, true);
     // New tool defaults to disabled (conservative re-install policy).
     assertEquals(byName.get("new")?.enabled, false);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("always_available: defaults to the manifest, overridable, preserved across re-download", async () => {
+  const env = await setupTestEnv();
+  try {
+    const r = extensionsRegistry();
+    r.upsertExtension(tk());
+    // Manifest default carries through: declared true stays on, declared false off.
+    r.replaceTools("example-extension", [
+      tool({ name: "declared_on", alwaysAvailable: true }),
+      tool({ name: "declared_off", alwaysAvailable: false }),
+    ]);
+    let byName = new Map(r.listTools("example-extension").map((t) => [t.name, t]));
+    assertEquals(byName.get("declared_on")?.alwaysAvailable, true);
+    assertEquals(byName.get("declared_off")?.alwaysAvailable, false);
+
+    // The user override wins over the declared default...
+    r.setToolAlwaysAvailable("example-extension", "declared_on", false);
+    r.setToolAlwaysAvailable("example-extension", "declared_off", true);
+    // ...and survives a re-download even though the manifest still declares the
+    // original values.
+    r.replaceTools("example-extension", [
+      tool({ name: "declared_on", alwaysAvailable: true }),
+      tool({ name: "declared_off", alwaysAvailable: false }),
+    ]);
+    byName = new Map(r.listTools("example-extension").map((t) => [t.name, t]));
+    assertEquals(byName.get("declared_on")?.alwaysAvailable, false);
+    assertEquals(byName.get("declared_off")?.alwaysAvailable, true);
   } finally {
     await env.teardown();
   }

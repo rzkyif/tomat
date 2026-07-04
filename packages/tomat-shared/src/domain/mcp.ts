@@ -51,6 +51,10 @@ export interface McpServer {
   // a server can't flood tool selection or the "/" autocomplete).
   toolEnabled: string[];
   promptEnabled: string[];
+  // Tool names the user turned "always available" OFF for. MCP tools default to
+  // always-available (usually offered to the model); a name here folds that tool
+  // into the relevance filter instead.
+  toolAlwaysAvailableOff: string[];
   // Live connection state + capability counts from the last successful connect.
   status: McpConnectionStatus;
   statusError?: string;

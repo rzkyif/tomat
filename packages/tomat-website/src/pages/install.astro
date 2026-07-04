@@ -1,42 +1,24 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
-import InstallDiagram from "../components/InstallDiagram.astro";
 import InstallGeneratorStatic from "../components/InstallGenerator.astro";
 import InstallGenerator from "../components/InstallGenerator.svelte";
 ---
 
-<BaseLayout title="Install" description="Install tomat: the Client, the Core, or both.">
-  <main class="mx-auto w-full max-w-2xl px-4 pt-6 pb-10 flex flex-col gap-10">
-    <header class="flex flex-col gap-3">
-      <h1 class="text-2xl font-semibold text-default-900">Install tomat</h1>
-      <p class="text-default-600 leading-relaxed">
-        tomat comes in two parts. The <strong class="text-default-800">Core</strong> is the service that
-        does the work: it runs models, executes tools, and keeps your sessions. The
-        <strong class="text-default-800">Client</strong> is the app you use to reach a Core.
-      </p>
-      <p class="text-default-600 leading-relaxed">
-        They connect over the network, so one Core can serve many Clients and one Client can reach
-        many Cores. Most setups run both on one machine, and the Client can install that Core for
-        you on first launch.
-      </p>
-    </header>
+<BaseLayout title="Install" description="Install the tomat Client for your operating system.">
+  <main class="mx-auto w-full max-w-2xl px-4 pt-6 pb-10 flex flex-col gap-6">
+    <h1 class="text-2xl font-semibold text-default-900">Install the Client</h1>
 
-    <InstallDiagram />
-
-    <section class="flex flex-col gap-5">
-      <h2 class="text-lg font-semibold text-default-900">Get Started</h2>
-      {
-        /* The generator works with no JS (the native baseline below); the island
-          mounts the enhanced version over it. The data-js gate (site.css) shows
-          exactly one, with no flash because data-js is set before first paint. */
-      }
-      <div data-nojs-fallback>
-        <InstallGeneratorStatic />
-      </div>
-      <div data-js-enhanced>
-        <InstallGenerator client:load />
-      </div>
-    </section>
+    {
+      /* The generator works with no JS (the native baseline below); the island
+        mounts the enhanced version over it. The data-js gate (site.css) shows
+        exactly one, with no flash because data-js is set before first paint. */
+    }
+    <div data-nojs-fallback>
+      <InstallGeneratorStatic target="client" />
+    </div>
+    <div data-js-enhanced>
+      <InstallGenerator target="client" client:load />
+    </div>
   </main>
 
   {

@@ -9,6 +9,7 @@
   import QuickSettings from "$components/quick-settings/QuickSettings.svelte";
   import SessionList from "$components/session-list/SessionList.svelte";
   import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
+  import { type BubbleMerge, mergeFlatCorners, NO_MERGE } from "@tomat/shared/ui/merge";
   import {
     downloadsState,
     memoriesState,
@@ -52,6 +53,23 @@
 
   const log = getLogger("boot");
   const ui = useUiContext();
+
+  // Settings view (desktop panelColumn): the CoreBar pins flush against the
+  // panel's bottom. The panel is always wider than the small CoreBar, so the
+  // CoreBar is the narrower "plug" (both top corners squared, pulled up to
+  // overlap) and the panel squares off its aligned bottom corner. Other panel
+  // modes (session list) leave the CoreBar floating.
+  const settingsCoreMerge = $derived.by<BubbleMerge>(() =>
+    viewState.mode === "settings"
+      ? {
+          flatCorners: mergeFlatCorners(settingsState.getAlignment(), "top", true),
+          overlapTop: true,
+        }
+      : NO_MERGE,
+  );
+  const settingsPanelFlat = $derived(
+    mergeFlatCorners(settingsState.getAlignment(), "bottom", false),
+  );
   // On mobile the app is a single opaque fullscreen activity: the transparent
   // bubble window, click-through, blur keepalive, cursor polling, and the
   // offscreen slide-in choreography are all desktop-only and gated off here.
@@ -100,6 +118,47 @@
       }
     }
   };
+
+  // Greetings. The greetings.* settings are client-local, so the client gates on
+  // them and asks the core to open a session only when one should run. A single
+  // POST helper is shared by the boot (launch) trigger below and the on-show
+  // trigger in the visibility listener.
+  let lastGreetingAtMs = 0; // Date.now() of the last greeting POST we sent
+
+  function greetingCooldownMs(): number {
+    const s = settingsState.currentSettings;
+    return (Number(s["greetings.showCooldown"] ?? 10) || 10) * 1000;
+  }
+
+  async function runGreeting(): Promise<{ ran: boolean; sessionId?: string }> {
+    const s = settingsState.currentSettings;
+    return await cores()
+      .api()
+      .greetings.run({
+        sessionTitle: (s["greetings.sessionTitle"] as string | undefined) ?? "",
+        instruction: (s["greetings.instruction"] as string | undefined) ?? "",
+        cooldownMs: greetingCooldownMs(),
+      });
+  }
+
+  // Fired on every window reveal (desktop only). Greets when "Every Show" is
+  // selected and the cooldown has elapsed, matching an app-open greeting. The
+  // core dedups on the same cooldown, so the client guard only avoids a
+  // redundant POST (e.g. the launch greeting's own show_when_done reveal).
+  async function maybeGreetOnShow(): Promise<void> {
+    const s = settingsState.currentSettings;
+    if (s["greetings.enabled"] !== true) return;
+    if (((s["greetings.runOn"] as string | undefined) ?? "autostart") !== "every_show") return;
+    if (cores().currentClient()?.connectionState !== "connected") return;
+    const now = Date.now();
+    if (now - lastGreetingAtMs < greetingCooldownMs()) return;
+    lastGreetingAtMs = now;
+    try {
+      await runGreeting();
+    } catch (e) {
+      log.warn("greeting on show failed:", e);
+    }
+  }
 
   let unlistenVisibility: (() => void) | null = null;
   let unlistenMonitor: (() => void) | null = null;
@@ -272,6 +331,9 @@
           // flicker.
           windowTransition.begin();
           setTimeout(() => windowTransition.end(), getDuration());
+          // Desktop only: greet on this reveal when "Every Show" is set. Mobile's
+          // visibility maps to app foreground/background, which should not greet.
+          if (!onMobile) void maybeGreetOnShow();
         } else {
           pauseClickThrough();
         }
@@ -406,17 +468,15 @@
             if (autostarted) await platform().windowing.show();
             return;
           }
+          // Stamp the debounce now so the greeting's own show_when_done reveal
+          // (which fires the visibility listener) doesn't re-trigger a greeting.
+          lastGreetingAtMs = Date.now();
           // The route answers immediately (the greeting itself starts in the
           // background once the model is loaded), so a slow response means
           // something is wrong; don't let an autostart window stay hidden
           // behind a hung request.
           const res = await Promise.race([
-            cores()
-              .api()
-              .greetings.run({
-                sessionTitle: (s["greetings.sessionTitle"] as string | undefined) ?? "",
-                instruction: (s["greetings.instruction"] as string | undefined) ?? "",
-              }),
+            runGreeting(),
             new Promise<never>((_resolve, reject) =>
               setTimeout(() => reject(new Error("greeting trigger timed out")), 10_000),
             ),
@@ -731,14 +791,15 @@
   {:else if viewState.mode === "sessionList"}
     <SessionList />
   {:else}
-    <Settings />
+    <Settings flatCorners={settingsPanelFlat} />
   {/if}
   <!-- CoreBar pins below the session-list / settings panel (which core
                you're on, its status, quick switch). Hidden in newCore (no core
-               yet) and quickSettings (transient overlay). -->
+               yet) and quickSettings (transient overlay). In settings it merges
+               flush onto the panel's bottom; in the session list it floats. -->
   {#if viewState.mode === "sessionList" || viewState.mode === "settings"}
     <div class="relative pointer-events-none">
-      <CoreBar />
+      <CoreBar merge={settingsCoreMerge} />
     </div>
   {/if}
 {/snippet}

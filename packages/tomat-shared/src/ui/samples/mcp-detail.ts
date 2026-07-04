@@ -2,13 +2,13 @@ import type { ComponentProps } from "svelte";
 import type { OmitSnippetProps } from "./types.ts";
 import type McpDetailView from "../components/settings/McpDetailView.svelte";
 
-// The MCP server detail editor: the enable toggle + status line, the name and
-// transport fields, the transport-specific fields (stdio command/args with the
-// optional bundled-deno runtime and its permissions, or a remote URL + bearer
-// token), and the live prompts list. Each sample drives one shape: a custom
-// stdio command, the bundled-deno runtime with manual permissions, a remote
-// HTTP server with a stored token, an error status, and a server exposing
-// prompts.
+// The MCP server detail editor: the connection status line + enable toggle, the
+// name and transport fields, and the transport-specific fields (stdio
+// command/args with the optional bundled-deno runtime and its permissions, or a
+// remote URL + bearer token). Each sample drives one shape: a custom stdio
+// command, the bundled-deno runtime with manual permissions, a remote HTTP
+// server with a stored token, and an error status. (A server's prompts are
+// managed in the snippets UI, not here.)
 export const mcpDetailSamples = {
   stdioCustom: {
     enabled: true,
@@ -80,22 +80,5 @@ export const mcpDetailSamples = {
     draftPermissions: "",
     draftUrl: "",
     draftAuthToken: "",
-  },
-  withPrompts: {
-    enabled: true,
-    status: "connected",
-    draftName: "Git",
-    draftKind: "stdio",
-    draftCommand: "uvx",
-    draftArgs: "mcp-server-git",
-    draftRuntime: "custom",
-    draftAllowAll: true,
-    draftPermissions: "",
-    draftUrl: "",
-    draftAuthToken: "",
-    prompts: [
-      { name: "commit", description: "Draft a commit message from staged changes.", enabled: true },
-      { name: "review", description: "Review the current diff for issues.", enabled: false },
-    ],
   },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof McpDetailView>>>;

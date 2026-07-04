@@ -47,7 +47,34 @@ export interface Sampling {
   minP: number;
   /** llama.cpp repetition penalty; 1.0 = disabled. */
   repeatPenalty: number;
+  /** DRY (Don't Repeat Yourself) multiplier; 0 = disabled. Penalizes repeating
+   *  whole phrases, catching the semantic loops the token-level repeat penalty
+   *  misses. Omitted by a model's catalog tuning falls back to DEFAULT_SAMPLING. */
+  dryMultiplier?: number;
+  /** OpenAI-style presence penalty; 0 = disabled. Nudges the model toward new
+   *  words instead of reusing ones it already produced. */
+  presencePenalty?: number;
+  /** llama.cpp sampler-chain order (canonical names, applied in this sequence).
+   *  Omitted = the server's default chain. Set only on catalog models known to
+   *  benefit; see LOOP_RESISTANT_SAMPLER_ORDER. */
+  samplers?: string[];
 }
+
+/** A sampler chain that runs the truncation samplers and temperature BEFORE the
+ *  repetition guards (DRY, penalties), rather than llama.cpp's default of
+ *  penalties-first. On some quantized reasoning models the default order lets
+ *  the penalties bias sampling into a loop; deferring them until after
+ *  temperature avoids that. Opt-in per catalog model, never a global default. */
+export const LOOP_RESISTANT_SAMPLER_ORDER: readonly string[] = [
+  "top_k",
+  "typ_p",
+  "top_p",
+  "min_p",
+  "xtc",
+  "temperature",
+  "dry",
+  "penalties",
+];
 
 /** Fallback sampling for a model with no catalog-specific values, and the
  *  default shown for the `llm.*` sampling fields. Conservative values that suit
@@ -58,6 +85,10 @@ export const DEFAULT_SAMPLING: Sampling = {
   topK: 20,
   minP: 0,
   repeatPenalty: 1.05,
+  // A moderate DRY multiplier on by default: small local models loop without it,
+  // and 0.8 is gentle enough to leave normal prose untouched. 0 turns it off.
+  dryMultiplier: 0.8,
+  presencePenalty: 0,
 };
 
 /** The concrete `llm.*` values a recommendation or a manual pick applies. Mirrors

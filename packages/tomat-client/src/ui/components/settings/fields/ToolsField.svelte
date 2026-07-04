@@ -98,7 +98,7 @@
       label={item.name}
       description={item.description || undefined}
       meta={item.providerName}
-      badges={item.enabled ? [{ label: "Enabled", accent: "green" }] : []}
+      badges={item.enabled ? [{ label: "Enabled", accent: "green" }] : [{ label: "Disabled" }]}
       menuRows={cardMenuRows(item)}
       onOpen={open}
     />
@@ -106,7 +106,7 @@
   {#snippet detail(item)}
     <ObjectDetailHeader title={item.name} subtitle={item.providerName} />
     <ObjectDetailScroll>
-      <ToolDetail tool={item} {horizontal} />
+      <ToolDetail tool={item} {horizontal} {reload} />
     </ObjectDetailScroll>
   {/snippet}
   {#snippet empty()}

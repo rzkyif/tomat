@@ -148,6 +148,8 @@ export type Message = {
   phase1?: ToolFilterPhase1Persisted[];
   phase2?: ToolFilterEntryPersisted[];
   alwaysAvailable?: ToolFilterEntryPersisted[];
+  nameMatched?: ToolFilterEntryPersisted[];
+  mcp?: ToolFilterEntryPersisted[];
   toolsSent?: number;
   errorMessage?: string;
   // role: "memory_filter" flat fields (MemoryFilterMessage on the wire).

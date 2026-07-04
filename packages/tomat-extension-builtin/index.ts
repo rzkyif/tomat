@@ -18,4 +18,3 @@ export { getDatetime } from "./src/datetime.ts";
 export { calculator } from "./src/calculator.ts";
 export { fetchWebpage } from "./src/webpage.ts";
 export { webSearch } from "./src/search.ts";
-export { organizeDownloads } from "./src/organize.ts";

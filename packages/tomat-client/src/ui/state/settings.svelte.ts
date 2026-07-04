@@ -33,6 +33,7 @@ import {
   type SettingDestination,
   destinationNeedsCore,
   getDefaultSettings,
+  initialThinkingBudgetAlignment,
   isClientGroup,
   isCoreGroup,
   SECRET_KEYS,
@@ -428,6 +429,18 @@ class SettingsState {
     this.coreLoaded = true;
     if (this.pendingCoreEdits.size > 0) {
       this.scheduleFlush().catch((e) => log.warn("queued core settings flush failed:", e));
+    }
+    // Align the thinking budget to the context window on first load. Only when
+    // the core has never stored one (still the context-blind schema default):
+    // a preset or a manual edit is a deliberate value we must not touch. Later
+    // context/preset changes realign through their own paths.
+    if (!("llm.reasoningBudget" in this.syncedCoreSparse)) {
+      const aligned = initialThinkingBudgetAlignment(this.currentSettings);
+      if (aligned !== null) {
+        this.updateSetting("llm.reasoningBudget", aligned).catch((e) =>
+          log.warn("initial thinking-budget alignment failed:", e),
+        );
+      }
     }
   }
 

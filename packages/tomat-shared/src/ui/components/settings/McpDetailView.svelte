@@ -18,16 +18,8 @@
   import Input from "../primitives/Input.svelte";
   import Select from "../primitives/Select.svelte";
   import Toggle from "../primitives/Toggle.svelte";
-  import SubsectionHeader from "../primitives/SubsectionHeader.svelte";
+  import IconText from "../primitives/IconText.svelte";
   import ErrorDetailView from "../chat/messages/ErrorDetailView.svelte";
-
-  // One prompt row the live server exposes, pre-filtered to this server by the
-  // client and toggled for "/" autocomplete.
-  interface PromptRow {
-    name: string;
-    description?: string;
-    enabled: boolean;
-  }
 
   // `horizontal` mirrors the settings-panel layout flag: controls sit to the
   // right of their label when there is room, and stack below when narrow.
@@ -47,7 +39,6 @@
     draftPermissions,
     draftUrl,
     draftAuthToken,
-    prompts = [],
     horizontal = false,
     onToggleEnabled = noop,
     onNameInput = noop,
@@ -62,7 +53,6 @@
     onAuthTokenInput = noop,
     onSignIn = noop,
     onFlush = noop,
-    onTogglePrompt = noop,
   }: {
     enabled?: boolean;
     status: McpConnectionStatus;
@@ -79,7 +69,6 @@
     draftPermissions: string;
     draftUrl: string;
     draftAuthToken: string;
-    prompts?: PromptRow[];
     horizontal?: boolean;
     onToggleEnabled?: (enabled: boolean) => void;
     onNameInput?: (v: string) => void;
@@ -94,10 +83,55 @@
     onAuthTokenInput?: (v: string) => void;
     onSignIn?: () => void;
     onFlush?: () => void;
-    onTogglePrompt?: (name: string, enabled: boolean) => void;
   } = $props();
 
   function noop(): void {}
+
+  // Connection status shown as a read-only two-line block above the toggle (the
+  // same shape memories use for summarization status). It reflects the live
+  // connection: "Off" until enabled, then "Connecting" while the handshake runs,
+  // then "Connected" or "Couldn't connect". The client feeds an optimistic
+  // "connecting" the moment the toggle is flipped so the line reacts instantly.
+  const connection = $derived.by(() => {
+    if (!enabled) {
+      return {
+        icon: "i-material-symbols-link-off-rounded",
+        tone: "text-default-500",
+        title: "Off",
+        detail: "Enable to connect and use its tools and prompts.",
+      };
+    }
+    switch (status) {
+      case "connected":
+        return {
+          icon: "i-material-symbols-check-circle-rounded",
+          tone: "text-accent-green-700",
+          title: "Connected",
+          detail: "Ready to use its tools and prompts.",
+        };
+      case "connecting":
+        return {
+          icon: "i-material-symbols-progress-activity",
+          tone: "text-accent-yellow-700",
+          title: "Connecting",
+          detail: "Starting the server and fetching its capabilities.",
+        };
+      case "error":
+        return {
+          icon: "i-material-symbols-error-rounded",
+          tone: "text-accent-red-700",
+          title: "Couldn't connect",
+          detail: "The server failed to start. See the details below.",
+        };
+      default:
+        return {
+          icon: "i-material-symbols-info-rounded",
+          tone: "text-accent-yellow-700",
+          title: "Disconnected",
+          detail: "Not connected right now.",
+        };
+    }
+  });
 
   const KIND_OPTIONS = [
     { value: "stdio", label: "Local (stdio)" },
@@ -117,12 +151,12 @@
 </script>
 
 <div class="flex flex-col gap-3">
-  <FormField
-    label="Connect"
-    description={`Status: ${status}`}
-    descriptionTier="always"
-    {horizontal}
-  >
+  <div class="flex flex-col gap-0.5 text-xs">
+    <IconText icon={connection.icon} color={connection.tone}>{connection.title}</IconText>
+    <span class="text-default-500">{connection.detail}</span>
+  </div>
+
+  <FormField label="Connect" {horizontal}>
     <Toggle checked={enabled} ariaLabel="Enable server" onchange={(v) => onToggleEnabled(v)} />
   </FormField>
 
@@ -283,28 +317,5 @@
         </Button>
       </FormField>
     {/if}
-  {/if}
-
-  {#if prompts.length > 0}
-    <div class="flex flex-col gap-1.5 pt-2 border-t border-surface">
-      <SubsectionHeader label="Prompts (trigger with /)" />
-      {#each prompts as p (p.name)}
-        <FormField label={`/${p.name}`} {horizontal}>
-          {#snippet labelContent()}
-            <div class="flex flex-col gap-0.5 min-w-0">
-              <code class="text-xs text-default-800 self-start">/{p.name}</code>
-              {#if p.description}
-                <span class="text-xs text-default-600 break-words">{p.description}</span>
-              {/if}
-            </div>
-          {/snippet}
-          <Toggle
-            checked={p.enabled}
-            ariaLabel={`Enable /${p.name}`}
-            onchange={(v) => onTogglePrompt(p.name, v)}
-          />
-        </FormField>
-      {/each}
-    </div>
   {/if}
 </div>

@@ -51,10 +51,11 @@ import { iosItem } from "./ios.ts";
 import { appleReleaseConfigured } from "./apple-toolchain.ts";
 import { scriptsItem } from "./install-scripts.ts";
 import { schemasItem } from "./schemas.ts";
+import { websiteItem } from "./website.ts";
 
 // Apply order: core first (everything else can depend on it being published).
-// The landing page ships on its own track via `deno task release:website`
-// (scripts/release/website.ts), so it is not part of this umbrella run.
+// The landing page is a platform-independent item (no per-triple artifact), so
+// it rides along at the tail like the catalog + install scripts.
 const ITEMS: ReleaseItem[] = [
   coreItem,
   extensionItem,
@@ -64,6 +65,7 @@ const ITEMS: ReleaseItem[] = [
   iosItem,
   scriptsItem,
   schemasItem,
+  websiteItem,
 ];
 
 // Drift guard: every package a release item claims to be built from must exist

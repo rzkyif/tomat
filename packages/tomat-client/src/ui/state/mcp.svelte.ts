@@ -33,6 +33,14 @@ class McpState {
   busy = $state<Record<string, boolean>>({});
 
   private subs = new Subscriptions();
+  // Monotonic token so overlapping refreshes are last-writer-wins by call order,
+  // not by response order. The `mcp.snapshot` frame is a payload-less "refetch"
+  // signal fired on every status change, and it is subscribed by both this store
+  // and the list's ObjectManager, so several refreshes race constantly. Without
+  // this guard a stale pre-connect response can land after a fresh post-connect
+  // one and flip the UI back to "disconnected"/"off" until a manual navigation
+  // forces an uncontended refetch.
+  private refreshSeq = 0;
 
   attach(): void {
     this.subs.attach(() => [
@@ -52,18 +60,31 @@ class McpState {
     if (frame.kind === "mcp.snapshot") void this.refresh();
   }
 
+  /** Subscribe a consumer (e.g. an ObjectManager list) to repaint on every
+   *  `mcp.snapshot` frame. Returns the unsubscribe. */
+  subscribeSnapshot(onChange: () => void): () => void {
+    return cores().subscribeWs((f) => {
+      if (f.kind === "mcp.snapshot") onChange();
+    });
+  }
+
   async refresh(): Promise<void> {
+    const seq = ++this.refreshSeq;
     try {
       const [servers, prompts, resources] = await Promise.all([
         cores().api().mcp.list(),
         cores().api().mcp.listPrompts(),
         cores().api().mcp.listResources(),
       ]);
+      // A newer refresh was started after this one; its result is more current,
+      // so drop this (possibly stale) response rather than clobber it.
+      if (seq !== this.refreshSeq) return;
       this.servers = servers;
       this.prompts = prompts;
       this.resources = resources;
       this.loadError = null;
     } catch (err) {
+      if (seq !== this.refreshSeq) return;
       log.warn("MCP refresh failed:", err);
       this.loadError = errMessage(err);
     }
@@ -115,9 +136,21 @@ class McpState {
     await this.refresh();
   }
 
+  async setToolAlwaysAvailable(id: string, tool: string, alwaysAvailable: boolean): Promise<void> {
+    await cores().api().mcp.setToolAlwaysAvailable(id, tool, alwaysAvailable);
+    await this.refresh();
+  }
+
   async setPromptEnabled(id: string, prompt: string, enabled: boolean): Promise<void> {
     await cores().api().mcp.setPromptEnabled(id, prompt, enabled);
     await this.refresh();
+  }
+
+  /** Resolve a prompt's content (with arguments) into one instruction string.
+   *  Used by the composer to fold a `/prompt` reference into the system prompt
+   *  when the message is sent. */
+  resolvePrompt(id: string, prompt: string, args: Record<string, string>): Promise<string> {
+    return cores().api().mcp.resolvePrompt(id, prompt, args);
   }
 }
 

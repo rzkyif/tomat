@@ -87,6 +87,7 @@
   import { ripple } from "../../actions/ripple.ts";
   import type { SidecarKind } from "../../../domain/model.ts";
   import type { CoreQueues, SubsystemStatus } from "../../../domain/core-status.ts";
+  import { type BubbleMerge, NO_MERGE } from "../../merge.ts";
 
   // The core bar: a small bubble showing which core the client is connected to,
   // its merged status, and a quick switcher. When the status carries extra
@@ -125,6 +126,8 @@
     onSwitch,
     onSettings = undefined,
     baseColorOverride = null,
+    merge = NO_MERGE,
+    onWidth = undefined,
   }: {
     status: DisplayCoreStatus;
     /** Short detail for the tooltip (e.g. "loading whisper", "3 queued"). */
@@ -146,6 +149,11 @@
      *  from the composer there). Omitted on desktop. */
     onSettings?: () => void;
     baseColorOverride?: string | null;
+    /** How this bar merges into the bubble above it (the SessionBar in chat, the
+     *  Settings panel in the settings view); defaults to floating alone. */
+    merge?: BubbleMerge;
+    /** Report the bar's rendered width so a merging neighbor can size the seam. */
+    onWidth?: (width: number) => void;
   } = $props();
 
   const meta = $derived(STATUS_META[status]);
@@ -204,6 +212,9 @@
     fullWidth={mobile}
     size="small"
     extraClass="flex flex-col gap-2"
+    flatCorners={merge.flatCorners}
+    overlapTop={merge.overlapTop}
+    {onWidth}
   >
     {#if mobile}
       <!-- Mobile top app bar, three screen-anchored regions: the core picker (an

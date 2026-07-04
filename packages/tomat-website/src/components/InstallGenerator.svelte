@@ -1,13 +1,13 @@
 <script lang="ts">
   // The enhanced install generator, mounted over the no-JS baseline
-  // (InstallGenerator.astro) when JS is available. Same nested target -> OS ->
-  // command flow, but live: it auto-detects the OS, folds the core options into
-  // the command as you toggle them, and copies to the clipboard. It reuses the
-  // app's shared OptionCard / Toggle / IconButton primitives so the controls
-  // match the client, and the same lib/install helpers as the baseline so the
-  // commands never drift between the two.
-  import { onMount } from "svelte";
-  import OptionCard from "@tomat/shared/ui/components/primitives/OptionCard.svelte";
+  // (InstallGenerator.astro) when JS is available. Each instance covers ONE
+  // target, the Client or the Core, given as a prop; the axes it exposes are the
+  // operating system, the channel, and (for the Core, or an uninstall) a couple
+  // of options. It auto-detects the OS, folds the options into the command as you
+  // toggle them, and copies to the clipboard. It reuses the app's shared Toggle
+  // primitive so the controls match the client, and the same lib/install helpers
+  // as the baseline so the commands never drift between the two.
+  import { onMount, untrack } from "svelte";
   import Toggle from "@tomat/shared/ui/components/primitives/Toggle.svelte";
   import { ripple } from "@tomat/shared/ui/actions/ripple.ts";
   import { RIPPLE_MS } from "@tomat/shared/ui/animations.ts";
@@ -17,94 +17,78 @@
     CLIENT_OS,
     clientCommand,
     clientUninstallCommand,
-    commandStepsTail,
     CORE_OS,
     coreCommand,
     coreUninstallCommand,
     detectOs,
-    installSteps,
+    finishHowto,
+    installerHowto,
     type NativeInstaller,
     nativeInstallers,
     openTerminalStep,
     type Os,
+    scriptHowto,
     type Target,
-    unsignedInstallerNote,
+    uninstallStepsTail,
   } from "../lib/install.ts";
 
-  // "install" (the /install page) or "uninstall" (the manual's removal page).
-  // The two share the whole target -> OS -> command flow; uninstall just swaps
-  // the command builders, drops the install-only Core toggles for a flags note,
-  // and relabels. Defaults to install so the /install page needs no prop.
-  let { mode = "install" }: { mode?: "install" | "uninstall" } = $props();
+  // `target` locks the instance to the Client or the Core (no picker). `mode` is
+  // "install" (the /install and cores pages) or "uninstall" (the removal page):
+  // the two share the OS -> command flow; uninstall swaps the command builders,
+  // drops the install-only options for a keep-data toggle, and has no installer
+  // download. Mode defaults to install so those pages need no prop.
+  let { target, mode = "install" }: { target: Target; mode?: "install" | "uninstall" } = $props();
   const verb = $derived(mode === "install" ? "Install" : "Uninstall");
 
-  let target = $state<Target>("client");
-  // Kept per target (as the baseline's two radio groups are): the client picker
-  // includes Android, the core picker does not.
-  let clientOs = $state<Os>("macos");
-  let coreOs = $state<Os>("macos");
+  let os = $state<Os>("macos");
   // Stable has not shipped yet, so the channel is locked to latest; the picker
   // shows stable as a disabled option for when it does.
   const channel: Channel = "latest";
   let bindAll = $state(false);
   let service = $state(true);
-  // Uninstall options, folded into the command the same way the core install
-  // toggles are. Both read as one axis ("keep my data"), so on always means keep
-  // and off always means delete, whichever part you are removing. The defaults
-  // mirror the scripts: removing the Client keeps its settings by default (on),
-  // removing the Core takes its data by default (off).
-  let keepClientData = $state(true);
-  let keepCoreData = $state(false);
+  // Uninstall option, folded into the command like the core install toggles. It
+  // reads as one axis ("keep my data"): on keeps, off deletes. Removing the
+  // Client keeps its settings by default (on); removing the Core takes its data
+  // by default (off).
+  let keepData = $state(untrack(() => target === "client"));
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   onMount(() => {
-    const os = detectOs(navigator.userAgent, navigator.platform);
-    clientOs = os;
-    // The core has no Android build; fall back to a desktop OS for its picker.
-    coreOs = os === "android" ? "linux" : os;
+    const detected = detectOs(navigator.userAgent, navigator.platform);
+    // The Core has no Android build; fall back to a desktop OS for its picker.
+    os = target === "core" && detected === "android" ? "linux" : detected;
   });
 
-  const os = $derived(target === "client" ? clientOs : coreOs);
   const osChoices = $derived(target === "client" ? CLIENT_OS : CORE_OS);
-  const isAndroid = $derived(target === "client" && clientOs === "android");
+  const isAndroid = $derived(target === "client" && os === "android");
 
   const command = $derived(
     mode === "uninstall"
       ? target === "client"
-        ? clientUninstallCommand(clientOs, channel, { purge: !keepClientData })
-        : coreUninstallCommand(coreOs, channel, { keepData: keepCoreData })
+        ? clientUninstallCommand(os, channel, { purge: !keepData })
+        : coreUninstallCommand(os, channel, { keepData })
       : target === "client"
-        ? clientCommand(clientOs, channel)
-        : coreCommand(coreOs, channel, { bindAll, service }),
+        ? clientCommand(os, channel)
+        : coreCommand(os, channel, { bindAll, service }),
   );
 
-  // Native double-click installers for the current target + OS (the alternative
-  // to the terminal command). Empty on Android, where the APK block handles it.
+  // Native double-click installers for the current OS (the alternative to the
+  // terminal command). Empty on Android, where the APK block handles it.
   const installers = $derived(nativeInstallers(target, os, channel));
   // Linux offers both .deb and .rpm, so its buttons need the format spelled out;
   // macOS/Windows are a single file, where the arch label alone is enough.
   const multiFormat = $derived(new Set(installers.map((i) => i.format)).size > 1);
-  // One "how to" for both entry points. Installing: the unified command-or-
-  // installer steps, with the Windows unknown-publisher warning folded in as a
-  // Windows-only step. Uninstalling: the terminal-only steps (open a terminal,
-  // run the command).
-  const howtoSteps = $derived.by(() => {
-    if (mode === "uninstall") {
-      return [openTerminalStep(os), ...commandStepsTail("uninstall", target)];
-    }
-    const base = installSteps(target);
-    const warn = unsignedInstallerNote(os);
-    return warn ? [base[0], warn, ...base.slice(1)] : base;
-  });
+  // The nested "how to": the two entry points are the (a, b) branches under step
+  // one; their shared finishing steps are lifted to the top level (step 2+).
+  // Uninstall has only the terminal path, so it renders a single flat list.
+  const scriptSteps = $derived(scriptHowto(os));
+  const installerSteps = $derived(installerHowto(os, target));
+  const finishSteps = $derived(finishHowto(target));
+  const uninstallSteps = $derived([openTerminalStep(os), ...uninstallStepsTail(target)]);
 
   function installerLabel(inst: NativeInstaller): string {
     return multiFormat ? `${inst.archLabel} · .${inst.format}` : inst.archLabel;
-  }
-
-  function selectOs(id: Os) {
-    if (target === "client") clientOs = id;
-    else coreOs = id;
   }
 
   async function copy() {
@@ -129,63 +113,11 @@
   const btnIdle = `${btnBase} bg-surface-inset text-default-700 hover:bg-surface-inset-strong`;
 </script>
 
-<!-- not-prose: this island can mount inside the manual's `.prose` (the uninstall
-     page), whose presetTypography would otherwise restyle the command `<code>`
-     (backtick quotes, code padding) and the card `<p>` descriptions (margins).
-     It is a no-op on the /install page, which has no prose ancestor. -->
+<!-- not-prose: this island mounts inside the manual's `.prose` (the cores and
+     uninstall pages), whose presetTypography would otherwise restyle the command
+     `<code>` (backtick quotes, code padding) and the list `<p>` margins. It is a
+     no-op on the /install page, which has no prose ancestor. -->
 <div class="not-prose flex flex-col gap-6">
-  <!-- Step 1: client or core, with the "not sure" hint grouped under it. -->
-  <div class="flex flex-col gap-2">
-    <span class={labelCls}>{verb}</span>
-    <div class="flex flex-col gap-3">
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <OptionCard
-          selected={target === "client"}
-          icon="i-mdi-monitor-dashboard"
-          title="Client"
-          description={mode === "uninstall"
-            ? "The app you look at. Removing it leaves your settings in place unless you choose to wipe them."
-            : "The app you look at. On first launch it can install a Core on this same computer for you, so one install gets you a full local setup."}
-          onclick={() => (target = "client")}
-        >
-          {#snippet trailing()}
-            {#if mode === "install"}
-              <span
-                class={`text-xs px-2 py-0.5 rounded-large ${
-                  target === "client"
-                    ? "bg-default-300 text-default-900"
-                    : "bg-default-inverted-300 text-default-inverted-900"
-                }`}>Recommended</span
-              >
-            {/if}
-          {/snippet}
-        </OptionCard>
-        <OptionCard
-          selected={target === "core"}
-          icon="i-mdi-server"
-          title="Core"
-          description={mode === "uninstall"
-            ? "The service that does the work. Removing it stops the Core and takes its data with it, unless you choose to keep it."
-            : "The service that does the work. Install it on its own when you want it on a separate, more powerful machine that Clients connect to."}
-          onclick={() => (target = "core")}
-        />
-      </div>
-      {#if mode === "install"}
-        <div
-          class="flex items-start gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-600"
-        >
-          <i
-            class="i-material-symbols-info-outline-rounded text-base shrink-0 mt-0.5 text-default-500"
-          ></i>
-          <span>
-            Not sure? Install the <strong class="text-default-800">Client</strong> and start there. It
-            walks you through everything, including setting up a Core on this same computer.
-          </span>
-        </div>
-      {/if}
-    </div>
-  </div>
-
   <!-- Operating system. -->
   <div class="flex flex-col gap-2">
     <span class={labelCls}>Operating System</span>
@@ -195,7 +127,7 @@
           type="button"
           class={`${os === o.id ? btnActive : btnIdle} hover:cursor-pointer`}
           aria-pressed={os === o.id}
-          onclick={() => selectOs(o.id)}
+          onclick={() => (os = o.id)}
         >
           <i class={`${o.icon} text-lg`}></i>
           {o.label}
@@ -253,36 +185,26 @@
     </div>
   {/if}
 
-  <!-- Uninstall options, folded into the command live like the install ones.
-       Both are one "keep my data" axis: on keeps, off deletes. The client keeps
-       its settings by default (on); the Core takes its data by default (off). -->
+  <!-- Uninstall option, folded into the command live like the install ones. One
+       "keep my data" axis: on keeps, off deletes. -->
   {#if mode === "uninstall" && !isAndroid}
     <div class="flex flex-col gap-2">
       <span class={labelCls}>Options</span>
       <div class="flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
-        {#if target === "client"}
-          <label class="flex items-center justify-between gap-4">
-            <span class="text-sm text-default-700">Keep settings and paired cores</span>
-            <div class="w-24 shrink-0">
-              <Toggle
-                checked={keepClientData}
-                onchange={(v) => (keepClientData = v)}
-                ariaLabel="Keep settings and paired cores"
-              />
-            </div>
-          </label>
-        {:else}
-          <label class="flex items-center justify-between gap-4">
-            <span class="text-sm text-default-700">Keep sessions and memories</span>
-            <div class="w-24 shrink-0">
-              <Toggle
-                checked={keepCoreData}
-                onchange={(v) => (keepCoreData = v)}
-                ariaLabel="Keep sessions and memories"
-              />
-            </div>
-          </label>
-        {/if}
+        <label class="flex items-center justify-between gap-4">
+          <span class="text-sm text-default-700">
+            {target === "client" ? "Keep settings and paired cores" : "Keep sessions and memories"}
+          </span>
+          <div class="w-24 shrink-0">
+            <Toggle
+              checked={keepData}
+              onchange={(v) => (keepData = v)}
+              ariaLabel={target === "client"
+                ? "Keep settings and paired cores"
+                : "Keep sessions and memories"}
+            />
+          </div>
+        </label>
       </div>
     </div>
   {/if}
@@ -324,8 +246,7 @@
       </div>
     </div>
   {:else}
-    <!-- 1. Install/Uninstall via terminal: the copy-on-click command card. This
-         is the original primary path, kept first. -->
+    <!-- Terminal command: the copy-on-click card. -->
     <div class="flex flex-col gap-2">
       <span class={labelCls}>{verb} via terminal</span>
       <!-- The whole card copies on click, so the press feedback (ripple) and the
@@ -361,8 +282,8 @@
     </div>
 
     {#if mode === "install"}
-      <!-- 2. Or download the installer: the conventional double-click packages,
-           one button per arch x format, styled like the OS / channel picker. -->
+      <!-- Or download the installer: the conventional double-click packages, one
+           button per arch x format, styled like the OS / channel picker. -->
       <div class="flex flex-col gap-2">
         <span class={labelCls}>Or download the installer</span>
         <div class="grid grid-cols-2 gap-2">
@@ -374,26 +295,82 @@
           {/each}
         </div>
       </div>
-    {/if}
 
-    <!-- 3. One "how to" covering both paths: run the command or open the
-         installer (installing), or run the command (uninstalling). The Windows
-         unknown-publisher warning is folded into the steps on Windows. -->
-    <div class="flex flex-col gap-2">
-      <span class={labelCls}>How to {verb}</span>
-      <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
-        {#each howtoSteps as step (step)}
-          <li>{step}</li>
-        {/each}
-        {#if mode === "install"}
+      <!-- How to Install: a nested outline. The two entry points are the (a, b)
+           branches under step one, each with its own numbered steps; the macOS
+           Gatekeeper and Windows warnings are folded into the installer branch
+           per OS by installerHowto. The uninstall pointer is the last step, not
+           a footer. -->
+      <div class="flex flex-col gap-2">
+        <span class={labelCls}>How to Install</span>
+        <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
+          <li>
+            Install with either path:
+            <!-- lower-alpha inline: the Uno list utilities are prose-gated, so
+                 they no-op inside this not-prose island; decimal/disc emit an
+                 ungated rule, but lower-alpha only comes from prose, so it needs
+                 an inline list-style-type to render the a./b. markers here. -->
+            <ol class="mt-1.5 flex flex-col gap-1.5 pl-5" style="list-style-type: lower-alpha">
+              <li>
+                <span class="font-semibold text-default-800">Using the install script:</span>
+                <ol class="mt-1 flex flex-col gap-1 list-decimal pl-5">
+                  {#each scriptSteps as step (step)}
+                    <li>{step}</li>
+                  {/each}
+                </ol>
+              </li>
+              <li>
+                <span class="font-semibold text-default-800">Or download the installer:</span>
+                <ol class="mt-1 flex flex-col gap-1 list-decimal pl-5">
+                  {#each installerSteps as step, i (i)}
+                    {#if typeof step === "string"}
+                      <li>{step}</li>
+                    {:else}
+                      <li>
+                        {step.text}
+                        {#if step.sub.length}
+                          <ul class="mt-1 flex flex-col gap-1 list-disc pl-5">
+                            {#each step.sub as s (s)}
+                              <li>{s}</li>
+                            {/each}
+                          </ul>
+                        {/if}
+                      </li>
+                    {/if}
+                  {/each}
+                </ol>
+              </li>
+            </ol>
+          </li>
+          {#if target === "client"}
+            <li>
+              When it finishes, launch tomat and pick where the Core should run: on the same
+              computer or <a href="/manual/maintenance/cores" class="underline hov:text-default-700"
+                >on a different one</a
+              >.
+            </li>
+          {/if}
+          {#each finishSteps as step (step)}
+            <li>{step}</li>
+          {/each}
           <li>
             If you ever need to uninstall, follow <a
               href="/manual/maintenance/uninstalling"
               class="underline hov:text-default-700">the uninstallation guide</a
             >.
           </li>
-        {/if}
-      </ol>
-    </div>
+        </ol>
+      </div>
+    {:else}
+      <!-- Uninstall: the terminal-only steps (open a terminal, run the command). -->
+      <div class="flex flex-col gap-2">
+        <span class={labelCls}>How to Uninstall</span>
+        <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
+          {#each uninstallSteps as step (step)}
+            <li>{step}</li>
+          {/each}
+        </ol>
+      </div>
+    {/if}
   {/if}
 </div>

@@ -6,8 +6,10 @@
 // (so a crash-looping client can't spawn a session per retry) and defers the
 // turn until the local model finishes loading (the connected edge that triggers
 // this POST is exactly when llama begins loading on boot, so an immediate turn
-// would race the load and error). The client navigates via the session.created
-// frame, not this response.
+// would race the load and error). The dedup window is the client-supplied
+// cooldown (greetings.showCooldown), floored server-side, so a rapid re-show or
+// crash loop still can't spam sessions. The client navigates via the
+// session.created frame, not this response.
 
 import { Hono } from "hono";
 import { z } from "zod";
@@ -22,8 +24,12 @@ const log = getLogger("greetings");
 
 // One greeting per client per window: a crash-looping client (or a buggy
 // caller) must not mint a session per retry. Suppressed runs answer ran:false
-// so an autostarted launch still reveals its window.
+// so an autostarted launch still reveals its window. The window is the client's
+// cooldown when supplied; this is the fallback when it isn't.
 const GREETING_MIN_INTERVAL_MS = 60_000;
+// Absolute floor for the dedup window, so a buggy/rogue client can't drive the
+// cooldown to zero and spam sessions.
+const GREETING_INTERVAL_FLOOR_MS = 1_000;
 // How long to wait for the local model before starting the turn anyway
 // (an error then surfaces in the session, which still reveals the window).
 const GREETING_READY_TIMEOUT_MS = 180_000;
@@ -35,6 +41,7 @@ const runBodySchema = z
   .object({
     sessionTitle: z.string().optional(),
     instruction: z.string().optional(),
+    cooldownMs: z.number().optional(),
   })
   .strict();
 
@@ -45,14 +52,18 @@ export function greetingsRoutes(): Hono {
   r.post("/run", async (c) => {
     const me = requireClient(c);
     const body = parseBody(runBodySchema, await readJson(c));
+    const interval = Math.max(
+      body.cooldownMs ?? GREETING_MIN_INTERVAL_MS,
+      GREETING_INTERVAL_FLOOR_MS,
+    );
     const last = lastGreetingAtByClient.get(me.id);
-    if (last !== undefined && Date.now() - last < GREETING_MIN_INTERVAL_MS) {
+    if (last !== undefined && Date.now() - last < interval) {
       return c.json({ ran: false, reason: "recent" });
     }
     lastGreetingAtByClient.set(me.id, Date.now());
     // Prune entries past the dedup window so the map can't grow unbounded across
-    // distinct client ids (each entry only matters for GREETING_MIN_INTERVAL_MS).
-    const cutoff = Date.now() - GREETING_MIN_INTERVAL_MS;
+    // distinct client ids (each entry only matters for `interval`).
+    const cutoff = Date.now() - interval;
     for (const [id, t] of lastGreetingAtByClient) {
       if (t < cutoff) lastGreetingAtByClient.delete(id);
     }

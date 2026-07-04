@@ -10,6 +10,7 @@
 // so a fitting MoE model will run comfortably.
 
 import type { ModelFamily } from "@tomat/shared";
+import { LOOP_RESISTANT_SAMPLER_ORDER } from "@tomat/shared";
 
 const spec = (repo: string, file: string) => `@unsloth/${repo}/main/${file}`;
 
@@ -19,14 +20,18 @@ const aa = (value: number) => [
 
 // Qwen's recommended thinking-mode sampling, at the precise/reasoning end
 // (temperature 0.6 rather than the higher "general" 1.0) for agentic
-// reliability. The 27B and 35B-A3B differ only in presence_penalty, which tomat
-// does not expose, so one set covers both. Users can adjust in Model Behavior.
+// reliability. The 27B and 35B-A3B differ only in presence_penalty; both are left
+// at the default here (loops are handled by the on-by-default DRY multiplier), so
+// one set covers both. Users can adjust presence penalty in Model Behavior.
 const SAMPLING = {
   temperature: 0.6,
   topP: 0.95,
   topK: 20,
   minP: 0,
   repeatPenalty: 1.0,
+  // Defer the repetition guards until after temperature; the default order loops
+  // on some quants of these reasoning models.
+  samplers: [...LOOP_RESISTANT_SAMPLER_ORDER],
 };
 
 export const qwen36: ModelFamily = {

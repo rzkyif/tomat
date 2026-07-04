@@ -128,7 +128,7 @@ export function thinkingSelection(
   settings: Record<string, unknown>,
   provider: LlmProvider,
 ): QuickSelection {
-  if (str(settings["llm.reasoning"], "on") === "off") return { value: "off" };
+  if (str(settings["llm.reasoning"], "off") === "off") return { value: "off" };
   if (provider === "external") {
     const effort = str(settings["llm.reasoningEffort"], "high");
     const known = EXTERNAL_THINKING_OPTIONS.some((o) => o.value === effort);
@@ -141,6 +141,22 @@ export function thinkingSelection(
     if (budget === localThinkingBudget(level, ctx)) return { value: level };
   }
   return { value: CUSTOM_VALUE, customLabel: `${budget} tokens` };
+}
+
+/** The `llm.reasoningBudget` a fresh local config should start at so the default
+ *  "Low" thinking budget tracks the ACTUAL context window rather than the static
+ *  4k the schema default is computed against. Called once at startup for a budget
+ *  that was never explicitly set (the caller checks the store); the running
+ *  Settings form and preset apply already realign on later context/preset
+ *  changes, this fills the missed initial case. Returns null when no change is
+ *  needed (external provider, thinking off, or already aligned). */
+export function initialThinkingBudgetAlignment(settings: Record<string, unknown>): number | null {
+  if (str(settings["llm.provider"], "local") === "external") return null;
+  if (str(settings["llm.reasoning"], "off") === "off") return null;
+  const ctx = num(settings["llm.contextSize"], DEFAULT_CONTEXT_SIZE);
+  const current = num(settings["llm.reasoningBudget"], 0);
+  const aligned = localThinkingBudget("low", ctx);
+  return aligned > 0 && aligned !== current ? aligned : null;
 }
 
 // --- Creativity (temperature) ---------------------------------------------

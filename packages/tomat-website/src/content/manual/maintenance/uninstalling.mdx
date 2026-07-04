@@ -40,19 +40,29 @@ Client's settings, use the terminal, where each part takes a flag for exactly th
 
 The one-line command that installed each part can also remove it, which is handy
 over SSH or on a machine with no desktop. It is also where you change what data is
-kept: removing the **Client** keeps your settings unless you add `--purge`, and
-removing the **Core** removes its data unless you add `--keep-data`. Pick the part
-and your operating system to get the exact command, then copy it into a terminal.
+kept. Pick your operating system for each part to get the exact command, then copy
+it into a terminal.
+
+Removing the **Client** keeps your settings unless you add `--purge`:
 
 <div data-nojs-fallback>
-  <InstallGeneratorStatic mode="uninstall" />
+  <InstallGeneratorStatic target="client" mode="uninstall" />
 </div>
 <div data-js-enhanced>
-  <InstallGenerator mode="uninstall" client:load />
+  <InstallGenerator target="client" mode="uninstall" client:load />
 </div>
 
-Removing the Core stops its background service before it deletes anything. If you
-installed both parts, you can run both commands, in either order.
+Removing the **Core** stops its background service, then removes its data unless you
+add `--keep-data`:
+
+<div data-nojs-fallback>
+  <InstallGeneratorStatic target="core" mode="uninstall" />
+</div>
+<div data-js-enhanced>
+  <InstallGenerator target="core" mode="uninstall" client:load />
+</div>
+
+If you installed both parts, you can run both commands, in either order.
 
 ## What tomat leaves behind
 

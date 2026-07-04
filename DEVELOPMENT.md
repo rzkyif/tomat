@@ -164,9 +164,10 @@ build and skips the rest (tracked by a `dist/.build-state.json` cursor). Run
 umbrella `deno task release` item set: core + helpers, the desktop client, the
 model catalog, and the android client (built only when an Android keystore is
 configured in `.env`; otherwise it is skipped with a note). The landing page is
-NOT part of `build`; it builds on its own via `deno task build:website` and ships
-on its own `release:website` track. The granular `build:core` / `build:client`
-tasks force-build a single component. Releasing the built artifacts is covered in
+NOT part of `build`; it builds on its own via `deno task build:website` and is
+released as part of the umbrella `deno task release` (its release item runs the
+Astro build itself). The granular `build:core` / `build:client` tasks force-build
+a single component. Releasing the built artifacts is covered in
 [packages/tomat-website/README.md](packages/tomat-website/README.md).
 
 ### Working on one package

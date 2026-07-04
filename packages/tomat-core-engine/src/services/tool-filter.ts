@@ -15,7 +15,12 @@ import { errMessage } from "@tomat/shared";
 import type { Tool, ToolDescriptor } from "@tomat/shared";
 import { host } from "../platform/runtime.ts";
 import { type LlmEndpointConfig, type LlmRequest, streamChatCompletion } from "./llm-provider.ts";
-import { cosineNormalized, embedSourceHash, toolEmbedText } from "./relevance.ts";
+import {
+  cosineNormalized,
+  embedSourceHash,
+  toolEmbedText,
+  toolNameMentioned,
+} from "./relevance.ts";
 import { getLogger } from "../platform/log.ts";
 
 const log = getLogger("toolFilter");
@@ -27,11 +32,19 @@ export interface Phase1Options {
   topK?: number;
   // If true, always-available tools are appended to the result (deduped).
   includeAlwaysAvailable?: boolean;
+  // The raw user query. When present, tools whose name it directly mentions
+  // are returned in `nameMatched` so the caller can force-include them.
+  queryText?: string;
 }
 
 export interface Phase1Result {
   candidates: ToolDescriptor[];
   alwaysAvailable: ToolDescriptor[];
+  // Tools the query names directly (see toolNameMentioned). Force-included by
+  // the caller ahead of the cosine candidates and the phase-2 filter, so a
+  // tool the user names by hand always reaches the model, even when it has no
+  // (fresh) embedding or would sort past topK.
+  nameMatched: ToolDescriptor[];
 }
 
 export class ToolFilter {
@@ -45,9 +58,21 @@ export class ToolFilter {
     const embeddings = host().tools?.loadToolEmbeddings() ?? new Map();
     const scored: Array<{ tool: Tool; score: number }> = [];
     const always: ToolDescriptor[] = [];
+    const nameMatched: ToolDescriptor[] = [];
     for (const tool of tools) {
+      // An always-available tool is offered every turn, so it bypasses the
+      // relevance pipeline entirely: no cosine scoring, no candidate slot, no
+      // phase-2 pass. The global "allow always-available tools" toggle rides in
+      // as includeAlwaysAvailable; when it's off, the tool falls through and is
+      // ranked like any other.
       if (tool.alwaysAvailable && options.includeAlwaysAvailable !== false) {
         always.push(toDescriptor(tool));
+        continue;
+      }
+      // Direct name mention is checked before the embedding gate: a named tool
+      // is force-included even when it has no (fresh) embedding yet.
+      if (options.queryText && toolNameMentioned(options.queryText, tool.name)) {
+        nameMatched.push(toDescriptor(tool));
       }
       const emb = embeddings.get(tool.id);
       if (!emb) continue;
@@ -60,14 +85,12 @@ export class ToolFilter {
       scored.push({ tool, score });
     }
     scored.sort((a, b) => b.score - a.score);
-    const dedupe = new Set(always.map((a) => a.toolId));
     const candidates: ToolDescriptor[] = [];
     for (const { tool, score } of scored) {
       if (candidates.length >= topK) break;
-      if (dedupe.has(tool.id)) continue;
       candidates.push({ ...toDescriptor(tool), similarity: score });
     }
-    return { candidates, alwaysAvailable: always };
+    return { candidates, alwaysAvailable: always, nameMatched };
   }
 
   // Phase-2 second-pass filter. Asks the LLM which of the phase-1

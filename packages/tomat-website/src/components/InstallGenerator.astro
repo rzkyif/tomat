@@ -1,15 +1,19 @@
 ---
-// The no-JavaScript baseline of the install generator. Native <input
-// type=radio> + CSS drive the nested target -> OS selection and reveal the
-// matching pre-rendered command; nothing here needs JS, so a reader with JS
-// off (or broken) still gets a working, selectable command to copy by hand.
-// InstallGenerator.svelte mounts the enhanced version over this (live channel /
-// core toggles, OS auto-detect, copy button); install.astro shows exactly one
-// via the data-js gate.
+// The no-JavaScript baseline of the install generator. Each instance covers ONE
+// target (the Client or the Core), given as a prop; native <input type=radio> +
+// CSS drive the OS selection and reveal the matching pre-rendered command, so a
+// reader with JS off (or broken) still gets a working, selectable command to
+// copy by hand. InstallGenerator.svelte mounts the enhanced version over this
+// (live OS auto-detect, option toggles, copy button); the host page shows
+// exactly one via the data-js gate.
 //
-// `mode` is "install" (the /install page) or "uninstall" (the manual's removal
+// `mode` is "install" (the /install and cores pages) or "uninstall" (the removal
 // page): same flow, with the uninstall one-liners, a flags note in place of the
-// install options, and a removal note in place of the Android download.
+// install options, and no installer download.
+//
+// Two instances can sit on one page (the uninstall page shows the Client and the
+// Core), so ids/names are namespaced by target and the CSS toggles by the
+// `data-os` attribute (scoped to each .ig root), never by a shared id.
 //
 // Channel is locked to `latest` here: stable has not shipped, so the baseline
 // only renders the latest-channel one-liners. The enhanced island shows the
@@ -19,216 +23,230 @@ import {
   CLIENT_OS,
   clientCommand,
   clientUninstallCommand,
-  commandStepsTail,
   CORE_OS,
   coreCommand,
   coreUninstallCommand,
-  installSteps,
+  finishHowto,
+  INSTALLER_OPEN_STEP,
+  installerSecurityStep,
   type NativeInstaller,
   nativeInstallers,
   openTerminalStep,
-  unsignedInstallerNote,
+  RUN_COMMAND_STEP,
+  type Target,
+  uninstallStepsTail,
 } from "../lib/install.ts";
 
 interface Props {
+  target: Target;
   mode?: "install" | "uninstall";
 }
-const { mode = "install" } = Astro.props;
+const { target, mode = "install" } = Astro.props;
 const verb = mode === "install" ? "Install" : "Uninstall";
 const uninstall = mode === "uninstall";
-
 const CH = "latest";
-// No-JS baseline: the command is pre-rendered without options (a static page
-// can't fold a toggle into it), so the flags note below carries the choices.
-const clientCmd = {
-  macos: uninstall
-    ? clientUninstallCommand("macos", CH, { purge: false })
-    : clientCommand("macos", CH),
-  linux: uninstall
-    ? clientUninstallCommand("linux", CH, { purge: false })
-    : clientCommand("linux", CH),
-  windows: uninstall
-    ? clientUninstallCommand("windows", CH, { purge: false })
-    : clientCommand("windows", CH),
-};
-const coreCmd = {
-  macos: uninstall
-    ? coreUninstallCommand("macos", CH, { keepData: false })
-    : coreCommand("macos", CH, { bindAll: false, service: true }),
-  linux: uninstall
-    ? coreUninstallCommand("linux", CH, { keepData: false })
-    : coreCommand("linux", CH, { bindAll: false, service: true }),
-  windows: uninstall
-    ? coreUninstallCommand("windows", CH, { keepData: false })
-    : coreCommand("windows", CH, { bindAll: false, service: true }),
-};
-const apk = androidApkUrl(CH);
 
-// Native double-click installers (the primary install CTA), pre-rendered per
-// desktop OS + target so the baseline can CSS-toggle the matching buttons like
-// it does the commands. Android has none (it is the APK block above).
-const DESKTOP_OS = ["macos", "linux", "windows"] as const;
-type DesktopOs = (typeof DESKTOP_OS)[number];
-const clientInstallers: Record<DesktopOs, NativeInstaller[]> = {
-  macos: nativeInstallers("client", "macos", CH),
-  linux: nativeInstallers("client", "linux", CH),
-  windows: nativeInstallers("client", "windows", CH),
+const osChoices = target === "client" ? CLIENT_OS : CORE_OS;
+const DESKTOP = ["macos", "linux", "windows"] as const;
+type DesktopOs = (typeof DESKTOP)[number];
+
+// The one-liner per desktop OS. Options are omitted from the pre-rendered command
+// (a static page can't fold a toggle into it); the options note below carries
+// them.
+function cmdFor(os: DesktopOs): string {
+  if (uninstall) {
+    return target === "client"
+      ? clientUninstallCommand(os, CH, { purge: false })
+      : coreUninstallCommand(os, CH, { keepData: false });
+  }
+  return target === "client"
+    ? clientCommand(os, CH)
+    : coreCommand(os, CH, { bindAll: false, service: true });
+}
+const cmds: Record<DesktopOs, string> = {
+  macos: cmdFor("macos"),
+  linux: cmdFor("linux"),
+  windows: cmdFor("windows"),
 };
-const coreInstallers: Record<DesktopOs, NativeInstaller[]> = {
-  macos: nativeInstallers("core", "macos", CH),
-  linux: nativeInstallers("core", "linux", CH),
-  windows: nativeInstallers("core", "windows", CH),
+
+// Native double-click installers (the alternative to the terminal command),
+// pre-rendered per desktop OS so the baseline can CSS-toggle the matching
+// buttons like it does the commands. Android has none (it is the APK block).
+const installers: Record<DesktopOs, NativeInstaller[]> = {
+  macos: nativeInstallers(target, "macos", CH),
+  linux: nativeInstallers(target, "linux", CH),
+  windows: nativeInstallers(target, "windows", CH),
 };
-// Linux ships .deb + .rpm, so its buttons spell out the format; the single-file
-// OSes label by arch alone. Mirrors the island's installerLabel.
 function installerLabel(list: NativeInstaller[], inst: NativeInstaller): string {
   const multi = new Set(list.map((i) => i.format)).size > 1;
   return multi ? `${inst.archLabel} · .${inst.format}` : inst.archLabel;
 }
-// Base "how to install" steps per target (used only in install mode; uninstall
-// uses the terminal steps). The Windows unknown-publisher warning is inserted as
-// its own CSS-toggled step right after step one below.
-const clientInstallSteps = installSteps("client");
-const coreInstallSteps = installSteps("core");
-const winStep = unsignedInstallerNote("windows");
+
+const apk = androidApkUrl(CH);
+
+// Nested how-to (install): the install-script branch is an OS-specific opener
+// plus the run-command line; the installer-download branch is a fixed open step
+// plus the per-OS security step. The shared finishing steps are lifted to the
+// top level (step 2+). The security step exists only on macOS (Gatekeeper) and
+// Windows (SmartScreen); Linux has none.
+const finishSteps = finishHowto(target);
+const secMac = installerSecurityStep("macos", target);
+const secWin = installerSecurityStep("windows", target);
+// Uninstall how-to (terminal only): OS opener plus a fixed tail.
+const uninstallTail = uninstallStepsTail(target);
+
+// Unique per-target ids/names so the Client and Core instances on the uninstall
+// page do not share a radio group; the CSS keys off data-os, not these ids.
+const osId = (os: string) => `ig-os-${target}-${os}`;
+const osName = `ig-os-${target}`;
 
 const label = "text-xs font-medium uppercase tracking-wide text-default-500";
 const btnBase =
   "flex items-center justify-center gap-2 px-3 py-2 rounded-medium text-sm transition-colors";
 const osBtn = `ig-os-btn ${btnBase} bg-surface-inset text-default-700 hover:bg-surface-inset-strong cursor-pointer`;
 const btnActive = `${btnBase} bg-default-inverted-300 text-default-inverted-900`;
-// Download buttons reuse the OS-picker's idle look, minus the selected state (no
-// radio, no ig-os-btn), matching the request to style them like the pickers.
+// Download buttons reuse the OS-picker's idle look, minus the selected state.
 const dlBtn = `${btnBase} bg-surface-inset text-default-700 hover:bg-surface-inset-strong cursor-pointer`;
 const codeBox =
-  "ig-cmd block rounded-large bg-surface-inset px-4 py-3 font-mono text-sm text-default-800 overflow-x-auto whitespace-nowrap no-scrollbar";
+  "ig-cmd rounded-large bg-surface-inset px-4 py-3 font-mono text-sm text-default-800 overflow-x-auto whitespace-nowrap no-scrollbar";
 ---
 
 {
-  /* not-prose: the baseline can render inside the manual's `.prose` (the uninstall
-  page), whose presetTypography would otherwise restyle the command `<code>`
-  (backtick quotes, code padding) and the flag-note paragraphs. No-op on
-  /install, which has no prose ancestor. */
+  /* not-prose: the baseline can render inside the manual's `.prose` (the cores +
+  uninstall pages), whose presetTypography would otherwise restyle the command
+  `<code>` and the note paragraphs. No-op on /install, which has no prose
+  ancestor. */
 }
 <div class="ig not-prose flex flex-col gap-6">
-  {/* Step 1: client or core, with the "not sure" hint grouped under it. */}
-  <div class="flex flex-col gap-2">
-    <span class={label}>{verb}</span>
-    <div class="flex flex-col gap-3">
-      <fieldset class="grid grid-cols-1 sm:grid-cols-2 gap-3 border-0 p-0 m-0">
-        <legend class="sr-only">What do you want to {verb.toLowerCase()}?</legend>
-
-        <input id="ig-tg-client" class="ig-radio sr-only" type="radio" name="ig-target" checked />
-        <label
-          for="ig-tg-client"
-          class="ig-card flex flex-col gap-1 p-3 rounded-large cursor-pointer"
-        >
-          <span class="flex items-center gap-2 min-h-6">
-            <i class="i-mdi-monitor-dashboard text-lg"></i>
-            <span class="text-base font-semibold">Client</span>
-            {
-              !uninstall && (
-                <span class="ig-badge ml-auto text-xs px-2 py-0.5 rounded-full">Recommended</span>
-              )
-            }
-          </span>
-          <span class="ig-card-desc text-sm">
-            {
-              uninstall
-                ? "The app you look at. Removing it leaves your settings in place unless you choose to wipe them."
-                : "The app you look at. On first launch it can install a Core on this same computer for you, so one install gets you a full local setup."
-            }
-          </span>
-        </label>
-
-        <input id="ig-tg-core" class="ig-radio sr-only" type="radio" name="ig-target" />
-        <label
-          for="ig-tg-core"
-          class="ig-card flex flex-col gap-1 p-3 rounded-large cursor-pointer"
-        >
-          <span class="flex items-center gap-2 min-h-6">
-            <i class="i-mdi-server text-lg"></i>
-            <span class="text-base font-semibold">Core</span>
-          </span>
-          <span class="ig-card-desc text-sm">
-            {
-              uninstall
-                ? "The service that does the work. Removing it stops the Core and takes its data with it, unless you choose to keep it."
-                : "The service that does the work. Install it on its own when you want it on a separate, more powerful machine that Clients connect to."
-            }
-          </span>
-        </label>
-      </fieldset>
-
+  {/* Operating system. */}
+  <fieldset class="flex flex-col gap-2 border-0 p-0 m-0">
+    <legend class={`${label} p-0`}>Operating System</legend>
+    <div class={`grid gap-2 ${target === "client" ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
       {
-        !uninstall && (
-          <div class="flex items-start gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-600">
-            <i class="i-material-symbols-info-outline-rounded text-base shrink-0 mt-0.5 text-default-500" />
-            <span>
-              Not sure? Install the <strong class="text-default-800">Client</strong> and start
-              there. It walks you through everything, including setting up a Core on this same
-              computer.
-            </span>
-          </div>
-        )
+        osChoices.map((o, i) => (
+          <>
+            <input
+              id={osId(o.id)}
+              name={osName}
+              class="ig-radio sr-only"
+              type="radio"
+              data-os={o.id}
+              checked={i === 0}
+            />
+            <label for={osId(o.id)} class={osBtn}>
+              <i class={`${o.icon} text-lg`} />
+              {o.label}
+            </label>
+          </>
+        ))
       }
+    </div>
+  </fieldset>
+
+  {/* Channel, locked to latest for now (stable not yet released). */}
+  <div class="flex flex-col gap-2">
+    <span class={label}>Channel</span>
+    <div class="grid grid-cols-2 gap-2">
+      <span class={`${btnBase} bg-surface-inset text-default-500 opacity-60 cursor-not-allowed`}>
+        <i class="i-material-symbols-shield-outline-rounded text-lg"></i>
+        Stable
+      </span>
+      <span class={btnActive}>
+        <i class="i-material-symbols-bolt-rounded text-lg"></i>
+        Latest
+      </span>
     </div>
   </div>
 
-  {/* Step 2 (client): OS + channel + command. */}
-  <div class="ig-when-client flex-col gap-6">
-    <fieldset class="flex flex-col gap-2 border-0 p-0 m-0">
-      <legend class={`${label} p-0`}>Operating System</legend>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {
-          CLIENT_OS.map((o, i) => (
-            <>
-              <input
-                id={`ig-osc-${o.id}`}
-                class="ig-radio sr-only"
-                type="radio"
-                name="ig-os-client"
-                checked={i === 0}
-              />
-              <label for={`ig-osc-${o.id}`} class={osBtn}>
-                <i class={`${o.icon} text-lg`} />
-                {o.label}
-              </label>
-            </>
-          ))
-        }
+  {
+    /* Options: env vars (install core) or a keep-data flag (uninstall). Hidden on
+  Android, which takes no flags. */
+  }
+  {
+    !uninstall && target === "core" && (
+      <div class="ig-optnote flex flex-col gap-2">
+        <span class={label}>Options</span>
+        <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
+          <p class="m-0">Add these before running to change how the Core installs:</p>
+          <ul class="m-0 flex flex-col gap-1 list-disc pl-5">
+            <li>
+              <span class="font-mono text-default-900">TOMAT_INSTALL_BIND_ALL=1</span>
+              lets Clients on other machines pair with this Core.
+            </li>
+            <li>
+              <span class="font-mono text-default-900">TOMAT_INSTALL_SERVICE=0</span>
+              skips the background service so you start the Core by hand.
+            </li>
+          </ul>
+          <p class="m-0">
+            On macOS and Linux put them on the <span class="font-mono">bash</span> side of the pipe,
+            e.g.{" "}
+            <span class="font-mono text-default-900">curl ... | TOMAT_INSTALL_BIND_ALL=1 bash</span>
+            . On Windows prefix the line, e.g.
+            <span class="font-mono text-default-900">$env:TOMAT_INSTALL_BIND_ALL="1"; irm ...</span>
+            .
+          </p>
+        </div>
       </div>
-    </fieldset>
-
-    <div class="flex flex-col gap-2">
-      <span class={label}>Channel</span>
-      <div class="grid grid-cols-2 gap-2">
-        <span class={`${btnBase} bg-surface-inset text-default-500 opacity-60 cursor-not-allowed`}>
-          <i class="i-material-symbols-shield-outline-rounded text-lg"></i>
-          Stable
-        </span>
-        <span class={btnActive}>
-          <i class="i-material-symbols-bolt-rounded text-lg"></i>
-          Latest
-        </span>
+    )
+  }
+  {
+    uninstall && target === "client" && (
+      <div class="ig-optnote flex flex-col gap-2">
+        <span class={label}>Options</span>
+        <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
+          <p class="m-0">By default this keeps your settings. To wipe them too, add a flag:</p>
+          <p class="m-0">
+            <span class="font-mono text-default-900">--purge</span>
+            also deletes your saved settings and paired cores.
+          </p>
+          <p class="m-0">
+            On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
+            <span class="font-mono text-default-900">... | bash -s -- --purge</span>. On Windows
+            prefix the line, e.g.
+            <span class="font-mono text-default-900">$env:TOMAT_PURGE="1"; irm ...</span>.
+          </p>
+        </div>
       </div>
-    </div>
+    )
+  }
+  {
+    uninstall && target === "core" && (
+      <div class="ig-optnote flex flex-col gap-2">
+        <span class={label}>Options</span>
+        <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
+          <p class="m-0">
+            By default this removes the Core and its data. To keep that data, add a flag:
+          </p>
+          <p class="m-0">
+            <span class="font-mono text-default-900">--keep-data</span>
+            keeps the Core's sessions and memories instead of removing them.
+          </p>
+          <p class="m-0">
+            On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
+            <span class="font-mono text-default-900">... | bash -s -- --keep-data</span>. On Windows
+            prefix the line, e.g.
+            <span class="font-mono text-default-900">$env:TOMAT_KEEP_DATA="1"; irm ...</span>.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
-    {/* 1. Install/Uninstall via terminal (non-android): the pre-rendered one-liner. */}
-    <div class="ig-termsec-c flex flex-col gap-2">
-      <span class={label}>{verb} via terminal</span>
-      <code class={`${codeBox} ig-cmd-c-macos`}>{clientCmd.macos}</code>
-      <code class={`${codeBox} ig-cmd-c-linux`}>{clientCmd.linux}</code>
-      <code class={`${codeBox} ig-cmd-c-windows`}>{clientCmd.windows}</code>
-    </div>
+  {/* Terminal command, one pre-rendered box per desktop OS. */}
+  <div class="ig-termsec flex flex-col gap-2">
+    <span class={label}>{verb} via terminal</span>
+    {DESKTOP.map((os) => <code class={`${codeBox} ig-cmd-${os}`}>{cmds[os]}</code>)}
+  </div>
 
-    {
-      /* Android has no command: its own labeled download / removal block, shown
-      only when Android is the selected client OS. */
-    }
-    {
-      uninstall ? (
-        <div class="ig-cmd ig-cmd-c-android flex flex-col gap-2">
+  {
+    /* Android (client only) installs from a downloaded APK, not a command. Its
+    own labeled block, shown only when Android is the selected OS. */
+  }
+  {
+    target === "client" &&
+      (uninstall ? (
+        <div class="ig-android flex flex-col gap-2">
           <span class={label}>Remove</span>
           <div class="flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
             <p class="text-sm text-default-700 m-0">
@@ -242,7 +260,7 @@ const codeBox =
           </div>
         </div>
       ) : (
-        <div class="ig-cmd ig-cmd-c-android flex flex-col gap-2">
+        <div class="ig-android flex flex-col gap-2">
           <span class={label}>Download</span>
           <div class="flex flex-col gap-3 rounded-large bg-surface-inset px-4 py-3">
             <p class="text-sm text-default-700 m-0">
@@ -262,327 +280,114 @@ const codeBox =
             </ol>
           </div>
         </div>
-      )
-    }
+      ))
+  }
 
-    {/* Uninstall client flag note (--purge). */}
-    {
-      uninstall && (
-        <div class="ig-purge-note flex flex-col gap-2">
-          <span class={label}>Options</span>
-          <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
-            <p class="m-0">By default this keeps your settings. To wipe them too, add a flag:</p>
-            <p class="m-0">
-              <span class="font-mono text-default-900">--purge</span>
-              also deletes your saved settings and paired cores.
-            </p>
-            <p class="m-0">
-              On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
-              <span class="font-mono text-default-900">... | bash -s -- --purge</span>. On Windows
-              prefix the line, e.g.
-              <span class="font-mono text-default-900">$env:TOMAT_PURGE="1"; irm ...</span>.
-            </p>
+  {
+    /* Or download the installer (install only): one button per arch x format,
+    CSS-toggled by the OS radios. */
+  }
+  {
+    !uninstall && (
+      <div class="ig-dlsec flex flex-col gap-2">
+        <span class={label}>Or download the installer</span>
+        {DESKTOP.map((os) => (
+          <div class={`ig-dl ig-dl-${os} grid grid-cols-2 gap-2`}>
+            {installers[os].map((inst) => (
+              <a href={inst.url} class={dlBtn}>
+                <i class="i-material-symbols-download-rounded text-lg" />
+                {installerLabel(installers[os], inst)}
+              </a>
+            ))}
           </div>
-        </div>
-      )
-    }
+        ))}
+      </div>
+    )
+  }
 
+  {
+    /* How to. Install: a nested outline (the two entry points are the a/b
+    branches under step one, each with its own numbered steps; the uninstall
+    pointer is the last step, not a footer). Uninstall: a single terminal list. */
+  }
+  <div class="ig-howto flex flex-col gap-2">
+    <span class={label}>How to {verb}</span>
     {
-      /* 2. Or download the installer (install only): one button per arch x format,
-      styled like the OS / channel pickers, CSS-toggled by the OS radios. */
-    }
-    {
-      !uninstall && (
-        <div class="ig-dlsec-c flex flex-col gap-2">
-          <span class={label}>Or download the installer</span>
-          {DESKTOP_OS.map((o) => (
-            <div class={`ig-dl ig-dl-c-${o} grid grid-cols-2 gap-2`}>
-              {clientInstallers[o].map((inst) => (
-                <a href={inst.url} class={dlBtn}>
-                  <i class="i-material-symbols-download-rounded text-lg" />
-                  {installerLabel(clientInstallers[o], inst)}
-                </a>
-              ))}
-            </div>
+      uninstall ? (
+        <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
+          {DESKTOP.map((os) => (
+            <li class={`ig-open ig-open-${os}`}>{openTerminalStep(os)}</li>
           ))}
-        </div>
-      )
-    }
-
-    {
-      /* 3. One "how to" for both paths. Installing: the unified command-or-
-      installer steps, with the Windows warning as a CSS-toggled step. Uninstalling:
-      the terminal steps with the OS-specific opener toggled. Hidden for Android
-      (its steps live in the block above). */
-    }
-    <div class="ig-howto-c flex flex-col gap-2">
-      <span class={label}>How to {verb}</span>
-      <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
-        {
-          uninstall ? (
-            <>
-              <li class="ig-step ig-step-c-macos">{openTerminalStep("macos")}</li>
-              <li class="ig-step ig-step-c-linux">{openTerminalStep("linux")}</li>
-              <li class="ig-step ig-step-c-windows">{openTerminalStep("windows")}</li>
-              {commandStepsTail("uninstall", "client").map((s) => (
-                <li>{s}</li>
-              ))}
-            </>
-          ) : (
-            <>
-              <li>{clientInstallSteps[0]}</li>
-              <li class="ig-winstep ig-winstep-c-windows">{winStep}</li>
-              {clientInstallSteps.slice(1).map((s) => (
-                <li>{s}</li>
-              ))}
+          {uninstallTail.map((s) => (
+            <li>{s}</li>
+          ))}
+        </ol>
+      ) : (
+        <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
+          <li>
+            Install with either path:
+            {/* lower-alpha inline: the Uno list utilities are prose-gated, so they
+            no-op inside this not-prose island; decimal/disc emit an ungated rule,
+            but lower-alpha only comes from prose, so it needs an inline
+            list-style-type to render the a./b. markers here. */}
+            <ol class="mt-1.5 flex flex-col gap-1.5 pl-5" style="list-style-type: lower-alpha">
               <li>
-                If you ever need to uninstall, follow{" "}
-                <a href="/manual/maintenance/uninstalling" class="underline hover:text-default-700">
-                  the uninstallation guide
-                </a>
-                .
-              </li>
-            </>
-          )
-        }
-      </ol>
-    </div>
-  </div>
-
-  {/* Step 2 (core): OS + channel + command + options. */}
-  <div class="ig-when-core flex-col gap-6">
-    <fieldset class="flex flex-col gap-2 border-0 p-0 m-0">
-      <legend class={`${label} p-0`}>Operating System</legend>
-      <div class="grid grid-cols-3 gap-2">
-        {
-          CORE_OS.map((o, i) => (
-            <>
-              <input
-                id={`ig-oso-${o.id}`}
-                class="ig-radio sr-only"
-                type="radio"
-                name="ig-os-core"
-                checked={i === 0}
-              />
-              <label for={`ig-oso-${o.id}`} class={osBtn}>
-                <i class={`${o.icon} text-lg`} />
-                {o.label}
-              </label>
-            </>
-          ))
-        }
-      </div>
-    </fieldset>
-
-    <div class="flex flex-col gap-2">
-      <span class={label}>Channel</span>
-      <div class="grid grid-cols-2 gap-2">
-        <span class={`${btnBase} bg-surface-inset text-default-500 opacity-60 cursor-not-allowed`}>
-          <i class="i-material-symbols-shield-outline-rounded text-lg"></i>
-          Stable
-        </span>
-        <span class={btnActive}>
-          <i class="i-material-symbols-bolt-rounded text-lg"></i>
-          Latest
-        </span>
-      </div>
-    </div>
-
-    {/* 1. Install/Uninstall via terminal. */}
-    <div class="flex flex-col gap-2">
-      <span class={label}>{verb} via terminal</span>
-      <code class={`${codeBox} ig-cmd-o-macos`}>{coreCmd.macos}</code>
-      <code class={`${codeBox} ig-cmd-o-linux`}>{coreCmd.linux}</code>
-      <code class={`${codeBox} ig-cmd-o-windows`}>{coreCmd.windows}</code>
-    </div>
-
-    {
-      /* Options fold into the command above: install env vars, or the uninstall
-      keep-data flag. */
-    }
-    <div class="flex flex-col gap-2">
-      <span class={label}>Options</span>
-      {
-        uninstall ? (
-          <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
-            <p class="m-0">
-              By default this removes the Core and its data. To keep that data, add a flag:
-            </p>
-            <p class="m-0">
-              <span class="font-mono text-default-900">--keep-data</span>
-              keeps the Core's sessions and memories instead of removing them.
-            </p>
-            <p class="m-0">
-              On macOS and Linux append it after <span class="font-mono">bash</span>, e.g.
-              <span class="font-mono text-default-900">... | bash -s -- --keep-data</span>. On
-              Windows prefix the line, e.g.
-              <span class="font-mono text-default-900">$env:TOMAT_KEEP_DATA="1"; irm ...</span>.
-            </p>
-          </div>
-        ) : (
-          <div class="flex flex-col gap-2 rounded-large bg-surface-inset px-4 py-3 text-sm text-default-700">
-            <p class="m-0">Add these before running to change how the Core installs:</p>
-            <ul class="m-0 flex flex-col gap-1 list-disc pl-5">
-              <li>
-                <span class="font-mono text-default-900">TOMAT_INSTALL_BIND_ALL=1</span>
-                lets Clients on other machines pair with this Core.
+                <span class="font-semibold text-default-800">Using the install script:</span>
+                <ol class="mt-1 flex flex-col gap-1 list-decimal pl-5">
+                  {DESKTOP.map((os) => (
+                    <li class={`ig-open ig-open-${os}`}>{openTerminalStep(os)}</li>
+                  ))}
+                  <li>{RUN_COMMAND_STEP}</li>
+                </ol>
               </li>
               <li>
-                <span class="font-mono text-default-900">TOMAT_INSTALL_SERVICE=0</span>
-                skips the background service so you start the Core by hand.
+                <span class="font-semibold text-default-800">Or download the installer:</span>
+                <ol class="mt-1 flex flex-col gap-1 list-decimal pl-5">
+                  <li>{INSTALLER_OPEN_STEP}</li>
+                  {secMac && (
+                    <li class="ig-sec ig-sec-macos">
+                      {secMac.text}
+                      <ul class="mt-1 flex flex-col gap-1 list-disc pl-5">
+                        {secMac.sub.map((s) => (
+                          <li>{s}</li>
+                        ))}
+                      </ul>
+                    </li>
+                  )}
+                  {secWin && <li class="ig-sec ig-sec-windows">{secWin.text}</li>}
+                </ol>
               </li>
-            </ul>
-            <p class="m-0">
-              On macOS and Linux put them on the <span class="font-mono">bash</span> side of the
-              pipe, e.g.{" "}
-              <span class="font-mono text-default-900">
-                curl ... | TOMAT_INSTALL_BIND_ALL=1 bash
-              </span>
-              . On Windows prefix the line, e.g.
-              <span class="font-mono text-default-900">
-                $env:TOMAT_INSTALL_BIND_ALL="1"; irm ...
-              </span>
+            </ol>
+          </li>
+          {target === "client" && (
+            <li>
+              When it finishes, launch tomat and pick where the Core should run: on the same
+              computer or{" "}
+              <a href="/manual/maintenance/cores" class="underline hover:text-default-700">
+                on a different one
+              </a>
               .
-            </p>
-          </div>
-        )
-      }
-    </div>
-
-    {
-      /* 2. Or download the installer (install only): buttons per OS, styled like
-      the pickers, CSS-toggled by the OS radios. */
-    }
-    {
-      !uninstall && (
-        <div class="flex flex-col gap-2">
-          <span class={label}>Or download the installer</span>
-          {DESKTOP_OS.map((o) => (
-            <div class={`ig-dl ig-dl-o-${o} grid grid-cols-2 gap-2`}>
-              {coreInstallers[o].map((inst) => (
-                <a href={inst.url} class={dlBtn}>
-                  <i class="i-material-symbols-download-rounded text-lg" />
-                  {installerLabel(coreInstallers[o], inst)}
-                </a>
-              ))}
-            </div>
+            </li>
+          )}
+          {finishSteps.map((s) => (
+            <li>{s}</li>
           ))}
-        </div>
+          <li>
+            If you ever need to uninstall, follow{" "}
+            <a href="/manual/maintenance/uninstalling" class="underline hover:text-default-700">
+              the uninstallation guide
+            </a>
+            .
+          </li>
+        </ol>
       )
     }
-
-    {
-      /* 3. One "how to" for both paths. Installing: the unified command-or-
-      installer steps, with the Windows warning as a CSS-toggled step. Uninstalling:
-      the terminal steps with the OS-specific opener toggled. */
-    }
-    <div class="flex flex-col gap-2">
-      <span class={label}>How to {verb}</span>
-      <ol class="m-0 flex flex-col gap-2 text-sm text-default-700 list-decimal pl-5">
-        {
-          uninstall ? (
-            <>
-              <li class="ig-step ig-step-o-macos">{openTerminalStep("macos")}</li>
-              <li class="ig-step ig-step-o-linux">{openTerminalStep("linux")}</li>
-              <li class="ig-step ig-step-o-windows">{openTerminalStep("windows")}</li>
-              {commandStepsTail("uninstall", "core").map((s) => (
-                <li>{s}</li>
-              ))}
-            </>
-          ) : (
-            <>
-              <li>{coreInstallSteps[0]}</li>
-              <li class="ig-winstep ig-winstep-o-windows">{winStep}</li>
-              {coreInstallSteps.slice(1).map((s) => (
-                <li>{s}</li>
-              ))}
-              <li>
-                If you ever need to uninstall, follow{" "}
-                <a href="/manual/maintenance/uninstalling" class="underline hover:text-default-700">
-                  the uninstallation guide
-                </a>
-                .
-              </li>
-            </>
-          )
-        }
-      </ol>
-    </div>
   </div>
 </div>
 
 <style>
-  /* Card + control selected/idle states, driven purely by the native radio
-     that immediately precedes each label (input:checked + label). Cross-cutting
-     visibility (which OS group / which command shows) keys off the radios via
-     :has() on the .ig root. */
-  .ig-card {
-    background: var(--default-100);
-    color: var(--default-800);
-    border: 1px solid var(--default-200);
-    transition:
-      background 150ms ease,
-      border-color 150ms ease;
-  }
-  :global(html.dark) .ig-card {
-    background: var(--default-d-100);
-    color: var(--default-d-800);
-    border-color: var(--default-d-200);
-  }
-  .ig-card:hover {
-    background: var(--default-200);
-  }
-  :global(html.dark) .ig-card:hover {
-    background: var(--default-d-200);
-  }
-  .ig-card-desc {
-    color: var(--default-500);
-  }
-  :global(html.dark) .ig-card-desc {
-    color: var(--default-d-500);
-  }
-
-  /* Recommended chip: neutral, opposite ladder to the card it sits on so it
-     stays legible. Idle card (light inset) -> inverted (dark) chip; selected
-     card (inverted/dark) -> default (light) chip. */
-  .ig-badge {
-    background: var(--default-d-300);
-    color: var(--default-d-900);
-  }
-  :global(html.dark) .ig-badge {
-    background: var(--default-300);
-    color: var(--default-900);
-  }
-  .ig-radio:checked + .ig-card .ig-badge {
-    background: var(--default-300);
-    color: var(--default-900);
-  }
-  :global(html.dark) .ig-radio:checked + .ig-card .ig-badge {
-    background: var(--default-d-300);
-    color: var(--default-d-900);
-  }
-
-  /* Selected target card: the inverted "primary" treatment, mirroring the
-     shared OptionCard's selected invert style (bg-default-inverted-300 =
-     the dark ladder in light mode and the light ladder in dark mode). */
-  .ig-radio:checked + .ig-card {
-    background: var(--default-d-300);
-    color: var(--default-d-900);
-    border-color: var(--default-d-300);
-  }
-  :global(html.dark) .ig-radio:checked + .ig-card {
-    background: var(--default-300);
-    color: var(--default-900);
-    border-color: var(--default-300);
-  }
-  .ig-radio:checked + .ig-card .ig-card-desc {
-    color: var(--default-d-600);
-  }
-  :global(html.dark) .ig-radio:checked + .ig-card .ig-card-desc {
-    color: var(--default-600);
-  }
-
-  /* Selected OS button: same inverted fill as the segmented controls' knob. */
+  /* Selected OS button: the inverted fill of the segmented controls' knob,
+     driven by the native radio that immediately precedes each label. */
   .ig-radio:checked + .ig-os-btn {
     background: var(--default-d-300);
     color: var(--default-d-900);
@@ -594,90 +399,47 @@ const codeBox =
 
   /* Keyboard focus lands on the visually-hidden radio; resurface the ring on
      its visible label. */
-  .ig-radio:focus-visible + .ig-card,
   .ig-radio:focus-visible + .ig-os-btn {
     outline: var(--focus-ring);
     outline-offset: var(--focus-ring-offset);
   }
 
-  /* Target -> which step-2 group shows. */
-  .ig-when-client,
-  .ig-when-core {
+  /* OS -> which command / download / step shows. Keyed off the checked radio's
+     data-os, scoped to each .ig root, so two instances stay independent. */
+  .ig-cmd,
+  .ig-dl,
+  .ig-open,
+  .ig-sec,
+  .ig-android {
     display: none;
   }
-  .ig:has(#ig-tg-client:checked) .ig-when-client {
-    display: flex;
-  }
-  .ig:has(#ig-tg-core:checked) .ig-when-core {
-    display: flex;
-  }
-
-  /* OS -> which command shows. One block per target x OS; the rest stay hidden. */
-  .ig-cmd {
-    display: none;
-  }
-  .ig:has(#ig-osc-macos:checked) .ig-cmd-c-macos,
-  .ig:has(#ig-osc-linux:checked) .ig-cmd-c-linux,
-  .ig:has(#ig-osc-windows:checked) .ig-cmd-c-windows,
-  .ig:has(#ig-oso-macos:checked) .ig-cmd-o-macos,
-  .ig:has(#ig-oso-linux:checked) .ig-cmd-o-linux,
-  .ig:has(#ig-oso-windows:checked) .ig-cmd-o-windows {
+  .ig:has(.ig-radio[data-os="macos"]:checked) .ig-cmd-macos,
+  .ig:has(.ig-radio[data-os="linux"]:checked) .ig-cmd-linux,
+  .ig:has(.ig-radio[data-os="windows"]:checked) .ig-cmd-windows {
     display: block;
   }
-  .ig:has(#ig-osc-android:checked) .ig-cmd-c-android {
-    display: flex;
-  }
-
-  /* Native download buttons (install): one grid per target x OS, toggled by the
-     same OS radios as the commands. display: grid (not block) since each is a
-     button grid. */
-  .ig-dl {
-    display: none;
-  }
-  .ig:has(#ig-osc-macos:checked) .ig-dl-c-macos,
-  .ig:has(#ig-osc-linux:checked) .ig-dl-c-linux,
-  .ig:has(#ig-osc-windows:checked) .ig-dl-c-windows,
-  .ig:has(#ig-oso-macos:checked) .ig-dl-o-macos,
-  .ig:has(#ig-oso-linux:checked) .ig-dl-o-linux,
-  .ig:has(#ig-oso-windows:checked) .ig-dl-o-windows {
+  .ig:has(.ig-radio[data-os="macos"]:checked) .ig-dl-macos,
+  .ig:has(.ig-radio[data-os="linux"]:checked) .ig-dl-linux,
+  .ig:has(.ig-radio[data-os="windows"]:checked) .ig-dl-windows {
     display: grid;
   }
-
-  /* The Windows unknown-publisher warning is folded into the installer how-to as
-     a step, shown only when Windows is the selected OS. list-item so the ordered
-     list still numbers it; the hidden variants drop out of the count. */
-  .ig-winstep {
-    display: none;
-  }
-  .ig:has(#ig-osc-windows:checked) .ig-winstep-c-windows,
-  .ig:has(#ig-oso-windows:checked) .ig-winstep-o-windows {
+  /* Opener + security how-to steps: list-item so the ordered list still numbers
+     them; the hidden variants drop out of the count. */
+  .ig:has(.ig-radio[data-os="macos"]:checked) .ig-open-macos,
+  .ig:has(.ig-radio[data-os="linux"]:checked) .ig-open-linux,
+  .ig:has(.ig-radio[data-os="windows"]:checked) .ig-open-windows,
+  .ig:has(.ig-radio[data-os="macos"]:checked) .ig-sec-macos,
+  .ig:has(.ig-radio[data-os="windows"]:checked) .ig-sec-windows {
     display: list-item;
   }
-
-  /* How-to opener: the OS-specific first step, one per target x OS, toggled by
-     the same radios. list-item (not block, as the command boxes use) so the
-     ordered-list number still renders; the hidden variants drop out of the
-     count. */
-  .ig-step {
-    display: none;
+  /* Android (client only) has its own block and hides the desktop sections. */
+  .ig:has(.ig-radio[data-os="android"]:checked) .ig-android {
+    display: flex;
   }
-  .ig:has(#ig-osc-macos:checked) .ig-step-c-macos,
-  .ig:has(#ig-osc-linux:checked) .ig-step-c-linux,
-  .ig:has(#ig-osc-windows:checked) .ig-step-c-windows,
-  .ig:has(#ig-oso-macos:checked) .ig-step-o-macos,
-  .ig:has(#ig-oso-linux:checked) .ig-step-o-linux,
-  .ig:has(#ig-oso-windows:checked) .ig-step-o-windows {
-    display: list-item;
-  }
-
-  /* Android (client only) installs from a downloaded APK, not a terminal command
-     or a desktop installer. It keeps its own labeled block above and hides the
-     terminal command, the installer download, the combined how-to, and the
-     client --purge note. */
-  .ig:has(#ig-osc-android:checked) .ig-termsec-c,
-  .ig:has(#ig-osc-android:checked) .ig-dlsec-c,
-  .ig:has(#ig-osc-android:checked) .ig-howto-c,
-  .ig:has(#ig-osc-android:checked) .ig-purge-note {
+  .ig:has(.ig-radio[data-os="android"]:checked) .ig-termsec,
+  .ig:has(.ig-radio[data-os="android"]:checked) .ig-dlsec,
+  .ig:has(.ig-radio[data-os="android"]:checked) .ig-howto,
+  .ig:has(.ig-radio[data-os="android"]:checked) .ig-optnote {
     display: none;
   }
 </style>

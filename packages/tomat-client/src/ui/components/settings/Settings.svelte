@@ -9,6 +9,7 @@
     SETTINGS_SCHEMA,
   } from "@tomat/shared";
   import { useUiContext } from "@tomat/shared/ui/context";
+  import type { BubbleCorner } from "@tomat/shared/ui/merge";
   import Select from "@tomat/shared/ui/components/primitives/Select.svelte";
   import type { SettingField } from "@tomat/shared";
   import type { Monitor } from "$lib/util/types";
@@ -44,6 +45,11 @@
   import BuiltinToolkitModal from "./BuiltinToolkitModal.svelte";
 
   const log = getLogger("settings");
+
+  // The settings view pins the CoreBar flush against the panel's bottom edge; the
+  // route passes the corners to square off so the panel merges with it. Empty
+  // (float) elsewhere and on mobile (no docked CoreBar there).
+  let { flatCorners = [] }: { flatCorners?: BubbleCorner[] } = $props();
 
   let shell = $state<SettingsShellView>();
   let monitors: Monitor[] = $state([]);
@@ -235,8 +241,13 @@
     }
     form.validateAllFields();
     // Desktop autofocuses search for keyboard-first use; mobile does not, so the
-    // soft keyboard does not pop open the moment Settings appears.
-    if (!onMobile) search.inputEl?.focus();
+    // soft keyboard does not pop open the moment Settings appears. `preventScroll`
+    // matters because this runs on mount: entering Settings from another panel
+    // focuses the field WHILE the panel layer is still translated off-screen
+    // mid-slide, and without it the WebView scrolls the layer to reveal the
+    // off-screen field, shifting the whole UI and then snapping back (the "slides
+    // to the wrong spot then teleports" glitch).
+    if (!onMobile) search.inputEl?.focus({ preventScroll: true });
   });
 
   // While the core is unreachable, settings can't be read/written: clear the
@@ -291,7 +302,7 @@
   {/snippet}
 
   {#snippet groupContent(gid: string)}
-    <div bind:this={layout.containerEl} class="relative">
+    <div bind:this={layout.containerEl} class="relative h-full">
       <SettingsContentView
         groupId={gid}
         values={settingsState.currentSettings}
@@ -352,6 +363,7 @@
   <div class="relative {onMobile ? 'w-full h-full' : 'w-fit'}">
     <SettingsShellView
       bind:this={shell}
+      {flatCorners}
       groups={shellGroups}
       bind:selectedGroupId
       {sidebarCollapsed}

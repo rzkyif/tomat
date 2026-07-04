@@ -1,6 +1,9 @@
 package au.tomat.ing
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -32,28 +35,55 @@ class MainActivity : TauriActivity() {
   // rides above whichever is taller; fixed sheets lift by --keyboard-inset.
   override fun onWebViewCreate(webView: WebView) {
     ViewCompat.setOnApplyWindowInsetsListener(webView) { _, insets ->
-      val density = webView.resources.displayMetrics.density
-      fun cssPx(px: Int): Int = (px / density).toInt()
-      val bars = insets.getInsets(
-        WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
-      )
-      val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-      val js = """
-        (function () {
-          var s = document.documentElement.style;
-          s.setProperty('--safe-area-inset-top', '${cssPx(bars.top)}px');
-          s.setProperty('--safe-area-inset-right', '${cssPx(bars.right)}px');
-          s.setProperty('--safe-area-inset-bottom', '${cssPx(bars.bottom)}px');
-          s.setProperty('--safe-area-inset-left', '${cssPx(bars.left)}px');
-          s.setProperty('--keyboard-inset', '${cssPx(keyboard)}px');
-        })();
-      """.trimIndent()
-      webView.evaluateJavascript(js, null)
+      publishInsets(webView, insets)
       // Return the insets unconsumed (the documented pattern); we supply the page
-      // its inset values via the CSS variables above rather than via env().
+      // its inset values via the CSS variables rather than via env().
       insets
     }
     // Kick a first inset pass now; keyboard show/hide re-fires the listener.
     webView.requestApplyInsets()
+
+    // The dispatch above lands while wry is still on its throwaway pre-load
+    // document, so the CSS variables get set on a document that is gone by the
+    // time our SPA's document is in place. The static status-bar inset never
+    // changes afterward, so the listener does not re-fire on its own, leaving the
+    // page with no top inset (the CoreBar then sits under the status bar).
+    // Re-publish onto the live document once the page has loaded. Keyboard and
+    // rotation still re-fire the listener, so this only needs to cover first load.
+    val handler = Handler(Looper.getMainLooper())
+    val deadline = SystemClock.uptimeMillis() + 10_000
+    handler.post(object : Runnable {
+      override fun run() {
+        val insets = ViewCompat.getRootWindowInsets(webView)
+        val loaded = webView.progress >= 100 && webView.url?.startsWith("http") == true
+        if (insets != null && loaded) {
+          publishInsets(webView, insets)
+          return
+        }
+        if (SystemClock.uptimeMillis() < deadline) handler.postDelayed(this, 150)
+      }
+    })
+  }
+
+  // Push the current window insets to the page as CSS variables the mobile shell
+  // consumes for all inset/keyboard layout (see the class comment).
+  private fun publishInsets(webView: WebView, insets: WindowInsetsCompat) {
+    val density = webView.resources.displayMetrics.density
+    fun cssPx(px: Int): Int = (px / density).toInt()
+    val bars = insets.getInsets(
+      WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+    )
+    val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+    val js = """
+      (function () {
+        var s = document.documentElement.style;
+        s.setProperty('--safe-area-inset-top', '${cssPx(bars.top)}px');
+        s.setProperty('--safe-area-inset-right', '${cssPx(bars.right)}px');
+        s.setProperty('--safe-area-inset-bottom', '${cssPx(bars.bottom)}px');
+        s.setProperty('--safe-area-inset-left', '${cssPx(bars.left)}px');
+        s.setProperty('--keyboard-inset', '${cssPx(keyboard)}px');
+      })();
+    """.trimIndent()
+    webView.evaluateJavascript(js, null)
   }
 }

@@ -30,18 +30,31 @@
     horizontal = false,
     enableBusy = false,
     enableAriaLabel,
+    showAlwaysAvailable = false,
+    alwaysAvailable = false,
+    alwaysAvailableBusy = false,
+    alwaysAvailableAriaLabel = "Always available",
     deniedRequired = 0,
     permissions = [],
     onToggleEnabled,
+    onToggleAlwaysAvailable,
     onGrantChange,
   }: {
     enabled: boolean;
     horizontal?: boolean;
     enableBusy?: boolean;
     enableAriaLabel: string;
+    // The always-available row is shown only when the global "allow
+    // always-available tools" setting is on; the client hides it otherwise
+    // (and for MCP tools, which are always offered regardless).
+    showAlwaysAvailable?: boolean;
+    alwaysAvailable?: boolean;
+    alwaysAvailableBusy?: boolean;
+    alwaysAvailableAriaLabel?: string;
     deniedRequired?: number;
     permissions?: PermissionRow[];
     onToggleEnabled?: (enabled: boolean) => void;
+    onToggleAlwaysAvailable?: (alwaysAvailable: boolean) => void;
     onGrantChange?: (key: string, nextState: GrantState) => void;
   } = $props();
 
@@ -73,6 +86,22 @@
       onchange={(v) => (onToggleEnabled ?? noop)(v)}
     />
   </FormField>
+
+  {#if showAlwaysAvailable}
+    <FormField
+      label="Always Available"
+      description="Offer this tool on every message instead of only when it looks relevant."
+      descriptionTier="ondemand"
+      {horizontal}
+    >
+      <Toggle
+        checked={alwaysAvailable}
+        disabled={alwaysAvailableBusy}
+        ariaLabel={alwaysAvailableAriaLabel}
+        onchange={(v) => (onToggleAlwaysAvailable ?? noop)(v)}
+      />
+    </FormField>
+  {/if}
 
   {#if permissions.length > 0}
     <div class="flex flex-col gap-1.5">

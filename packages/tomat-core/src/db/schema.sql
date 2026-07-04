@@ -146,6 +146,10 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   oauth_authorized    INTEGER NOT NULL DEFAULT 0,  -- remote 'oauth': the auth-code flow completed, tokens in vault
   tool_enabled_json   TEXT NOT NULL DEFAULT '[]',
   prompt_enabled_json TEXT NOT NULL DEFAULT '[]',
+  -- Tool names the user turned OFF "always available" for (MCP tools default to
+  -- always-available so they're usually offered; a name here folds that tool
+  -- into the relevance filter instead).
+  tool_always_available_off_json TEXT NOT NULL DEFAULT '[]',
   created_at_ms       INTEGER NOT NULL,
   updated_at_ms       INTEGER NOT NULL
 );

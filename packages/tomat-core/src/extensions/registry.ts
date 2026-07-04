@@ -320,12 +320,13 @@ export class ExtensionsRegistry {
     // re-inserted tool keeps the same id its grants reference.
     const existing = db()
       .prepare(`
-      SELECT id, name, enabled, required_permissions_json FROM tools WHERE extension_id = ?
+      SELECT id, name, enabled, always_available, required_permissions_json FROM tools WHERE extension_id = ?
     `)
       .all(extensionId) as Array<{
       id: string;
       name: string;
       enabled: number;
+      always_available: number;
       required_permissions_json: string;
     }>;
     const existingByName = new Map(existing.map((r) => [r.name, r]));
@@ -355,7 +356,11 @@ export class ExtensionsRegistry {
             JSON.stringify(t.parameters),
             JSON.stringify(t.triggers),
             t.fnExport,
-            t.alwaysAvailable ? 1 : 0,
+            // Both enabled and always_available are user-overridable, so a
+            // re-download preserves the prior choice by tool name; a brand-new
+            // tool falls back to its manifest default (enabled off; always as
+            // the manifest declares).
+            prior ? prior.always_available : t.alwaysAvailable ? 1 : 0,
             JSON.stringify(t.platforms),
             prior ? prior.enabled : 0,
             JSON.stringify(t.requiredPermissions),
@@ -407,6 +412,9 @@ export class ExtensionsRegistry {
   listAllTools(): Tool[] {
     const out: Tool[] = [];
     for (const ext of this.list()) {
+      // A downloaded-but-not-installed (or drifted) extension is not active, so its
+      // tools stay out of the aggregate list the way its chat exposure does.
+      if (ext.status !== "installed") continue;
       for (const tool of this.listTools(ext.id)) {
         out.push({ ...tool, providerName: ext.displayName });
       }
@@ -434,6 +442,16 @@ export class ExtensionsRegistry {
     db()
       .prepare(`UPDATE tools SET enabled = ? WHERE extension_id = ? AND name = ?`)
       .run(enabled ? 1 : 0, extensionId, name);
+  }
+
+  // The per-tool override for "offer this tool every turn without going through
+  // relevance selection". Defaults to the manifest's declared value at install
+  // and is preserved across re-downloads (see replaceTools); this is the write
+  // path for the user flipping it in the tool detail view.
+  setToolAlwaysAvailable(extensionId: string, name: string, alwaysAvailable: boolean): void {
+    db()
+      .prepare(`UPDATE tools SET always_available = ? WHERE extension_id = ? AND name = ?`)
+      .run(alwaysAvailable ? 1 : 0, extensionId, name);
   }
 
   // Bulk toggles backing the "Enable all / Disable all" extension-detail action.

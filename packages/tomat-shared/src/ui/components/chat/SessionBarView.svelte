@@ -3,6 +3,7 @@
   import ButtonGroup from "../primitives/ButtonGroup.svelte";
   import IconButton from "../primitives/IconButton.svelte";
   import { useUiContext } from "../../context.ts";
+  import { type BubbleMerge, NO_MERGE } from "../../merge.ts";
 
   // The session bar: a small bubble carrying the context-usage gauge, the
   // (editable) session title, and session navigation. All behaviour (title
@@ -38,6 +39,8 @@
     onDelete,
     onNew,
     baseColorOverride = null,
+    merge = NO_MERGE,
+    onWidth = undefined,
   }: {
     /** Context-window usage; null hides the gauge. */
     tokenUsage?: { used: number; max: number } | null;
@@ -65,6 +68,11 @@
     onNew?: () => void;
     /** Per-surface base-color override hex (appearance.sessionBarDefaultColor). */
     baseColorOverride?: string | null;
+    /** How this bar merges with the CoreBar (mobile: CoreBar sits above it and it
+     *  is the lower bubble; desktop: CoreBar sits below it); defaults to none. */
+    merge?: BubbleMerge;
+    /** Report the bar's rendered width so a merging neighbor can size the seam. */
+    onWidth?: (width: number) => void;
   } = $props();
 
   const contextRatio = $derived(
@@ -90,6 +98,9 @@
     fullWidth={mobile}
     size="small"
     extraClass="flex items-center gap-2"
+    flatCorners={merge.flatCorners}
+    overlapTop={merge.overlapTop}
+    {onWidth}
   >
     {#if tokenUsage}
       <div

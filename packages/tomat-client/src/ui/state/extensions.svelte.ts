@@ -318,6 +318,18 @@ class ExtensionsState {
     await this.loadAllTools();
   }
 
+  /** Override whether a tool is offered every turn (bypassing relevance
+   *  selection). Refresh so the tool detail reflects the new state at once. */
+  async setToolAlwaysAvailable(
+    extensionId: string,
+    toolName: string,
+    value: boolean,
+  ): Promise<void> {
+    await cores().api().extensions.setToolAlwaysAvailable(extensionId, toolName, value);
+    await this.refreshTools(extensionId);
+    await this.loadAllTools();
+  }
+
   /** Re-pin the current on-disk content + clear the drift warning. Refresh so
    *  the extension returns to 'installed' with its (now disabled) tools shown. */
   async confirmReenable(extensionId: string): Promise<void> {

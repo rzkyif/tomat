@@ -333,6 +333,10 @@ function applyToPatch(a: AppliedModelSettings, preset: string): Record<string, u
     "llm.topK": a.topK,
     "llm.minP": a.minP,
     "llm.repeatPenalty": a.repeatPenalty,
+    "llm.dryMultiplier": a.dryMultiplier,
+    "llm.presencePenalty": a.presencePenalty,
+    // Persisted as a `;`-joined chain (empty = the server's default order).
+    "llm.samplers": a.samplers?.join(";") ?? "",
   };
 }
 

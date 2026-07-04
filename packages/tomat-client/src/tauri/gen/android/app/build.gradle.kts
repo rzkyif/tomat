@@ -31,16 +31,6 @@ android {
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "au.tomat.ing"
-        // Per-channel install identity: stable keeps the bare applicationId; dev /
-        // latest get a suffix so they install alongside stable on one device. The
-        // java namespace stays au.tomat.ing (the MainActivity package path is fixed
-        // at `tauri android init`), so only the applicationId varies - which is why
-        // build-android.ts sets this via TOMAT_CHANNEL rather than overriding the
-        // Tauri identifier.
-        val tomatChannel = System.getenv("TOMAT_CHANNEL") ?: "stable"
-        if (tomatChannel != "stable") {
-            applicationIdSuffix = ".$tomatChannel"
-        }
         minSdk = 24
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
@@ -69,6 +59,21 @@ android {
             }
         }
         getByName("release") {
+            // Per-channel install identity, applied to release artifacts only:
+            // stable keeps the bare applicationId; dev / latest get a suffix so
+            // they install alongside stable on one device (build-android.ts sets
+            // TOMAT_CHANNEL). The debug variant that `tauri android dev` builds and
+            // launches stays bare au.tomat.ing so the CLI's `am start` target
+            // matches the installed package - a suffix there would install the app
+            // under au.tomat.ing.<channel> while the launch still targets
+            // au.tomat.ing, so the freshly installed build never comes up. The java
+            // namespace stays au.tomat.ing (the MainActivity package path is fixed
+            // at `tauri android init`), so only the applicationId varies - which is
+            // why the suffix is used rather than overriding the Tauri identifier.
+            val tomatChannel = System.getenv("TOMAT_CHANNEL") ?: "stable"
+            if (tomatChannel != "stable") {
+                applicationIdSuffix = ".$tomatChannel"
+            }
             isMinifyEnabled = true
             // Use the release keystore when the pipeline provided one; otherwise
             // fall back to debug signing so a keyless local build still installs.

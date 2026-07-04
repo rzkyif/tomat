@@ -9,6 +9,9 @@ import type { CoreClient } from "./client";
 export interface GreetingRunInput {
   sessionTitle: string;
   instruction: string;
+  /** Least time between greetings for this client, in ms. The core dedups on
+   *  this value (floored server-side), so a rapid re-show can't spam sessions. */
+  cooldownMs: number;
 }
 
 export class GreetingsApi {

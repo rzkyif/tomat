@@ -46,6 +46,7 @@ interface Row {
   oauth_authorized: number;
   tool_enabled_json: string;
   prompt_enabled_json: string;
+  tool_always_available_off_json: string;
   created_at_ms: number;
   updated_at_ms: number;
 }
@@ -165,11 +166,20 @@ class McpRegistry {
     return this.toggleInJson(id, "prompt_enabled_json", promptName, enabled);
   }
 
+  /** Set whether a tool is always-available (default true). Stored as an opt-out
+   *  set, so turning it OFF adds the name, turning it ON removes it. */
+  setToolAlwaysAvailable(id: string, toolName: string, alwaysAvailable: boolean): McpServer {
+    return this.toggleInJson(id, "tool_always_available_off_json", toolName, !alwaysAvailable);
+  }
+
   /** Every enabled tool from every connected server, in the shared Tool shape. */
   listAllTools(): Tool[] {
     const out: Tool[] = [];
     for (const server of this.list()) {
       const enabled = new Set(server.toolEnabled);
+      // MCP tools default to always-available (usually offered to the model);
+      // a name in the opt-out set folds that tool into the relevance filter.
+      const alwaysOff = new Set(server.toolAlwaysAvailableOff);
       for (const t of mcpManager().capabilities(server.id).tools) {
         out.push({
           id: `${server.id}::${t.name}`,
@@ -181,7 +191,7 @@ class McpRegistry {
           parameters: t.inputSchema ?? { type: "object" },
           triggers: [],
           fnExport: "",
-          alwaysAvailable: false,
+          alwaysAvailable: !alwaysOff.has(t.name),
           platforms: [],
           enabled: enabled.has(t.name),
           requiredPermissions: [],
@@ -232,7 +242,7 @@ class McpRegistry {
 
   private toggleInJson(
     id: string,
-    column: "tool_enabled_json" | "prompt_enabled_json",
+    column: "tool_enabled_json" | "prompt_enabled_json" | "tool_always_available_off_json",
     name: string,
     enabled: boolean,
   ): McpServer {
@@ -269,6 +279,10 @@ class McpRegistry {
       enabled: row.enabled !== 0,
       toolEnabled: JSON.parse(row.tool_enabled_json),
       promptEnabled: JSON.parse(row.prompt_enabled_json),
+      // Defensive `?? "[]"`: an existing dev DB created before this column was
+      // added has no value here (no migration under the no-active-users rule),
+      // so it reads as an empty opt-out set (every tool stays always-available).
+      toolAlwaysAvailableOff: JSON.parse(row.tool_always_available_off_json ?? "[]"),
       status: live.status,
       statusError: live.error,
       toolCount: caps.tools.length,

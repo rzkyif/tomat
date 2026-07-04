@@ -118,6 +118,9 @@ export const samplingSchema = z
     topK: z.number().int().nonnegative(),
     minP: z.number().min(0).max(1),
     repeatPenalty: z.number().positive(), // 1.0 = disabled
+    dryMultiplier: z.number().nonnegative().optional(), // 0 = disabled
+    presencePenalty: z.number().optional(), // 0 = disabled
+    samplers: z.array(z.string()).optional(), // llama.cpp sampler-chain order
   })
   .strict();
 export type CatalogSampling = z.infer<typeof samplingSchema>;

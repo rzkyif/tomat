@@ -45,10 +45,13 @@
     return Promise.resolve({ items: list, done: true });
   }
 
+  // Kind (always) + an Extension marker for non-user memories, then an explicit
+  // enabled/disabled state chip so every card carries its status at a glance
+  // (green Enabled / neutral Disabled), matching the tools and snippets lists.
   function cardBadges(d: MemoryMeta): Badge[] {
     const badges: Badge[] = [{ label: d.kind === "skill" ? "Skill" : "Knowledge" }];
     if (d.provider !== USER_MEMORY_PROVIDER) badges.push({ label: "Extension" });
-    if (!d.enabled) badges.push({ label: "Off", accent: "yellow" });
+    badges.push(d.enabled ? { label: "Enabled", accent: "green" } : { label: "Disabled" });
     return badges;
   }
 

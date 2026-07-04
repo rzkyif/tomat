@@ -9,12 +9,23 @@
   import { cores } from "$lib/core";
   import { hasAlpha } from "$lib/appearance/color";
   import { isExpanded, expansionState } from "$stores/expansion.svelte";
+  import { type BubbleMerge, NO_MERGE } from "@tomat/shared/ui/merge";
 
   // Quick core switcher + connected-core status. Merges the backend CoreStatus
   // (coreStatusState, via core.status frames) with the client transport state
   // (connectionState): transport wins whenever we're not connected, since a
   // transport state can never ride the wire. Full core management (pair / unpair
   // / rename) stays in Settings; the gear jumps there.
+
+  // Merge with the bubble above (the SessionBar in chat, the Settings panel in
+  // the settings view) is decided by the caller; floats alone by default.
+  let {
+    merge = NO_MERGE,
+    onWidth = undefined,
+  }: {
+    merge?: BubbleMerge;
+    onWidth?: (width: number) => void;
+  } = $props();
 
   const themeOverride = $derived(
     settingsState.currentSettings["appearance.sessionBarDefaultColor"] as string,
@@ -84,6 +95,8 @@
     }}
     onSettings={() => viewState.navigate("settings")}
     baseColorOverride={themeOverrideHex}
+    {merge}
+    {onWidth}
   />
 {/snippet}
 

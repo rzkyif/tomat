@@ -26,7 +26,67 @@ export const INTERACTIVE_MS = 120;
  *  action then renders no ripple). */
 export const RIPPLE_MS = 420;
 
-const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/**
+ * Play an explicit transform keyframe on `el` with the Web Animations API,
+ * resolving when it lands and leaving the END transform as the element's inline
+ * base (so a fill-less finish shows no revert-to-natural flash).
+ *
+ * Use this, NOT `el.style.transition = ...; el.style.transform = target`. A CSS
+ * transition interpolates from the element's CURRENT COMPUTED transform, so when
+ * a slide sequences out-then-in across timers the "in" leg intermittently starts
+ * from whatever mid value WKWebView was still painting - the "slide starts from
+ * the middle (~50%) instead of off-screen" glitch. WAAPI keyframes are explicit:
+ * the motion ALWAYS starts at `from`, whatever was last on screen, which removes
+ * that failure mode entirely. `element.animate` is already the app's imperative
+ * animation primitive (see `actions/ripple`).
+ *
+ * `durationMs <= 0` sets the end state instantly. A browser-cancelled animation
+ * (the node unmounts mid-slide) resolves rather than rejecting, matching the old
+ * timer-based callers that always ran to completion.
+ *
+ * `element.animate` + `Animation.finished` are the only WAAPI surface used here;
+ * both shipped together (Chromium 39, Safari 13.1 / iOS 13.4), so every target
+ * WebView we ship to supports them (Windows WebView2, Linux WebKitGTK 4.1,
+ * iOS >= 14, Android WebView >= Chromium 51, macOS Safari >= 13.1). The one gap
+ * is an un-updated macOS 10.13/10.14 (WKWebView follows the installed Safari): if
+ * `animate` is missing we set the end transform instantly instead of throwing, so
+ * navigation still works - it just lands with no motion on that ancient tail.
+ */
+export function animateTransform(
+  el: HTMLElement,
+  from: string,
+  to: string,
+  durationMs: number,
+  easing: string = CSS_EASING,
+): Promise<void> {
+  const base = to === "none" ? "" : to;
+  if (durationMs <= 0 || typeof el.animate !== "function") {
+    el.style.transform = base;
+    return Promise.resolve();
+  }
+  // `fill: "both"` makes the animation own the transform from the instant it is
+  // created: the element shows `from` immediately (no paint at its resting
+  // position first, which for a slide-IN would flash on screen before the motion
+  // starts) and holds `to` after finishing. We then write `to` to the inline base
+  // and cancel, so the resting transform sticks with no gap between the held
+  // frame and the inline value.
+  const anim = el.animate([{ transform: from }, { transform: to }], {
+    duration: durationMs,
+    easing,
+    fill: "both",
+  });
+  const settle = () => {
+    el.style.transform = base;
+    try {
+      anim.cancel();
+    } catch {
+      // Already cancelled (node unmounted mid-slide); nothing to finalize.
+    }
+  };
+  // Resolve on cancel too (never reject): the node may unmount mid-slide, and a
+  // pre-13.1 WebView could lack the `finished` promise despite having `animate`.
+  return anim.finished ? anim.finished.then(settle, settle) : Promise.resolve();
+}
 
 /** cubic-bezier(0.4, 0, 0.2, 1) sampled as a JS easing for rAF-driven motion. */
 function easeInOut(t: number): number {
@@ -187,20 +247,38 @@ export function runMessageEnter(
   else requestAnimationFrame(frame);
 }
 
+/** The nearest scrollable ancestor of `el` (the visible viewport the sliding
+ *  content lives in), or null if none. Lets the swap clip its exit ghost to what
+ *  is actually on screen and size the exit travel to the real content. */
+function nearestScroller(el: HTMLElement): HTMLElement | null {
+  for (let n = el.parentElement; n; n = n.parentElement) {
+    const o = getComputedStyle(n);
+    if (/(auto|scroll)/.test(`${o.overflowY} ${o.overflowX}`)) return n;
+  }
+  return null;
+}
+
 /**
  * The settings panel's content-layer slide-swap, shared so the client (settings
- * groups + tabs) and the website showcase produce byte-identical motion. Phase 1
- * slides the current content out by `outSign` along `axis`; `swap` then mutates
- * the content while it sits offscreen on the opposite side; phase 3 slides the
- * new content back to rest. `durationMs` is the per-phase length the caller has
- * already resolved (client: settings-aware `getDuration()`; website: `BASE_MS`).
- * With `durationMs <= 0` or no element, `swap` runs synchronously.
+ * groups + tabs) and the website showcase produce byte-identical motion. It is a
+ * TANDEM cross-slide: the outgoing content and the incoming content move together
+ * (same direction, same duration), like the mobile page transition, rather than
+ * out-then-wait-then-in.
  *
- *   axis "y" + outSign 1  => current leaves upward, new enters from below.
+ * The outgoing content is snapshotted into a fixed, clipped ghost overlay so it
+ * can slide away over the top while `swap` mutates the real layer underneath and
+ * the new content slides in. The ghost travels its FULL content size (not one
+ * viewport), so a group taller than the viewport clears entirely - including the
+ * tail that was scrolled out of view - instead of leaving a strip behind. The
+ * incoming content enters from the opposite edge, one viewport away.
+ *
+ *   axis "y" + outSign 1  => current leaves downward, new enters from above.
  *   axis "x" + outSign -1 => current leaves leftward, new enters from the right.
  *
- * `swap` may be async (e.g. the client awaits Svelte's `tick()` so the new DOM
- * exists before it is parked offscreen).
+ * `durationMs` is resolved by the caller (client: settings-aware `getDuration()`;
+ * website: `BASE_MS`); `<= 0`, no element, or no scroll host runs `swap` with no
+ * motion. `swap` may be async (the client awaits Svelte's `tick()` so the new DOM
+ * exists before the incoming leg starts).
  */
 export async function slideSwap(
   el: HTMLElement | undefined,
@@ -212,26 +290,58 @@ export async function slideSwap(
   },
 ): Promise<void> {
   const { axis, outSign, durationMs, swap } = opts;
-  if (!el || durationMs <= 0) {
+  const host = el?.parentElement;
+  const scroller = el ? nearestScroller(el) : null;
+  if (!el || durationMs <= 0 || !host || !scroller) {
     await swap();
+    if (el) el.style.transform = "";
     return;
   }
   const fn = axis === "y" ? "translateY" : "translateX";
-  const trans = `transform ${durationMs}ms ${CSS_EASING}`;
 
-  el.style.transition = trans;
-  el.style.transform = `${fn}(${100 * outSign}%)`;
-  await wait(durationMs);
+  // Snapshot the outgoing content as a fixed, clipped ghost that overlays exactly
+  // what is on screen now (so a scrolled tall group does not flash its hidden
+  // tail). It exits while the incoming content slides in underneath.
+  const sc = scroller.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  const clip = document.createElement("div");
+  clip.setAttribute("aria-hidden", "true");
+  clip.style.cssText =
+    `position:fixed;top:${sc.top}px;left:${sc.left}px;width:${sc.width}px;` +
+    `height:${sc.height}px;overflow:hidden;pointer-events:none;z-index:40;`;
+  const ghost = el.cloneNode(true) as HTMLElement;
+  // Drop any h-full / flex sizing so the ghost is exactly content-tall, then place
+  // it at the outgoing content's current on-screen offset (negative when scrolled).
+  ghost.style.cssText =
+    `position:absolute;margin:0;height:auto;width:${er.width}px;` +
+    `top:${er.top - sc.top}px;left:${er.left - sc.left}px;`;
+  clip.appendChild(ghost);
+  // Append to the document root, NOT inside the settings tree: the panel layer
+  // carries `will-change: transform`, which makes it the containing block for
+  // `position: fixed`, so a fixed overlay nested under it would be offset by the
+  // alignment margin (its horizontal position would be wrong). At the body root
+  // there is no transformed ancestor, so the viewport-space rects above position
+  // it correctly.
+  document.body.appendChild(clip);
+
+  // Travel = the greater of the content's own size and one viewport, so a group
+  // taller than the viewport clears whole (tail included) AND a short group still
+  // slides the full view rather than a stub. The incoming content enters from one
+  // viewport away, enough to reach rest whatever its height.
+  const viewPx = axis === "y" ? sc.height : sc.width;
+  const contentPx = axis === "y" ? ghost.scrollHeight : ghost.scrollWidth;
+  const outPx = Math.max(contentPx, viewPx);
+  const inPx = viewPx;
 
   await swap();
-  el.style.transition = "none";
-  el.style.transform = `${fn}(${100 * -outSign}%)`;
-  void el.offsetHeight;
 
-  el.style.transition = trans;
+  await Promise.all([
+    animateTransform(ghost, `${fn}(0px)`, `${fn}(${outSign * outPx}px)`, durationMs),
+    animateTransform(el, `${fn}(${-outSign * inPx}px)`, "none", durationMs),
+  ]);
+
+  clip.remove();
   el.style.transform = "";
-  await wait(durationMs);
-  el.style.transition = "";
 }
 
 // Sidebar labels share one expansion SPEED, not one duration: the transition

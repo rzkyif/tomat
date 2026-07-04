@@ -2,6 +2,7 @@
   import SessionBarView from "@tomat/shared/ui/components/chat/SessionBarView.svelte";
   import MessageEnter from "./MessageEnter.svelte";
   import { useUiContext } from "@tomat/shared/ui/context";
+  import { type BubbleMerge, NO_MERGE } from "@tomat/shared/ui/merge";
   import { messagesState, sessionsState, settingsState, viewState } from "../../state";
 
   // Mobile rides the panel carousel for screen entry, so the per-bar entry slide
@@ -12,7 +13,15 @@
   // The stacking z-index for this row, supplied by the chat column so a row
   // lower on screen paints over the ones above it. Owned here (not in a +page
   // wrapper) so a hidden bar leaves no empty flex item behind.
-  let { zIndex }: { zIndex: number } = $props();
+  let {
+    zIndex,
+    merge = NO_MERGE,
+    onWidth = undefined,
+  }: {
+    zIndex: number;
+    merge?: BubbleMerge;
+    onWidth?: (width: number) => void;
+  } = $props();
 
   // getContextSize lived in $lib/sidecar/llm and read from the LLM HTTP
   // /props endpoint. Context size is now reported by core; until the
@@ -135,6 +144,13 @@
   let showBar = $derived(
     !!messagesState.tokenUsage || showTitle || isTemporarySession || hasSessions,
   );
+
+  // When the bar hides it renders no Bubble, so its ResizeObserver stops
+  // reporting; tell the merge owner its width is gone so the CoreBar floats alone
+  // again.
+  $effect(() => {
+    if (!showBar) onWidth?.(0);
+  });
 </script>
 
 {#snippet bar()}
@@ -166,6 +182,8 @@
       sessionsState.create();
     }}
     baseColorOverride={themeOverrideHex}
+    {merge}
+    {onWidth}
   />
 {/snippet}
 

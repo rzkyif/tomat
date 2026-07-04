@@ -286,6 +286,10 @@ function appliedSettings(
     topK: sampling.topK,
     minP: sampling.minP,
     repeatPenalty: sampling.repeatPenalty,
+    dryMultiplier: sampling.dryMultiplier ?? DEFAULT_SAMPLING.dryMultiplier,
+    presencePenalty: sampling.presencePenalty ?? DEFAULT_SAMPLING.presencePenalty,
+    // Only catalog models carry a sampler order; others keep the server default.
+    samplers: sampling.samplers ?? DEFAULT_SAMPLING.samplers,
   };
 }
 

@@ -153,7 +153,7 @@
     rightSlot,
     // Temporary-session toggle: shown only while the chat is unstarted (the
     // host hides it once a chat begins, since the class is fixed at creation).
-    // `tempActive` drives the on (accent) styling.
+    // `tempActive` drives the on (inverted-fill) styling.
     showTempToggle = true,
     tempActive = false,
     tempTitle = "Temporary Session",
@@ -491,18 +491,20 @@
           <PromptButtonsView buttons={askUserPrompt.actions} />
         {:else}
           {#if showTempToggle}
-            <!-- Temporary-session toggle. On = accent icon + accent-tinted
-                 background (surface="none" so the tint isn't fighting the inset
-                 fill); off = the neutral filled look of the voice/send buttons. -->
+            <!-- Temporary-session toggle. On = the inverted "selected" fill
+                 shared by option cards and the OS picker (surface="none" so the
+                 fill isn't fighting the inset); off = the neutral filled look of
+                 the voice/send buttons. -->
             <IconButton
               data-region="temporary"
               icon="i-material-symbols-timer-outline-rounded"
               size="lg"
+              active={tempActive}
               surface={tempActive ? "none" : "filled"}
               title={tempActive ? "Disable Temporary Session" : "Enable Temporary Session"}
               ariaLabel={tempTitle}
-              class={tempActive ? "rounded-large bg-accent-blue-500/15" : "rounded-large"}
-              colorClass={tempActive ? "text-accent-blue-500 hov:text-accent-blue-400" : undefined}
+              class={tempActive ? "rounded-large bg-default-inverted-300" : "rounded-large"}
+              colorClass={tempActive ? "text-default-inverted-900" : undefined}
               onclick={() => onTempToggle?.()}
             />
           {/if}

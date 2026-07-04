@@ -1016,10 +1016,10 @@ export async function signEd25519Bytes(privateKey: Uint8Array, bytes: Uint8Array
 // ---------------------------------------------------------------------------
 // plan + apply orchestration
 //
-// Shared by the umbrella release (main.ts, all items) and the standalone
-// website release (website.ts, the website item only): read the cursor, diff
-// each item, gate changed-but-unbumped items, confirm, apply, and write the
-// cursor back. Callers pre-filter the item list and supply the channel + flags.
+// Shared by the umbrella local release (main.ts, all items) and the CI publish
+// half (ci-publish.ts, the items a runner staged): read the cursor, diff each
+// item, gate changed-but-unbumped items, confirm, apply, and write the cursor
+// back. Callers pre-filter the item list and supply the channel + flags.
 
 export interface RunReleaseOpts {
   yes: boolean;

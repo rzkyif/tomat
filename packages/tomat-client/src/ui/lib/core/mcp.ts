@@ -72,6 +72,26 @@ export class McpApi {
     );
   }
 
+  // Resolve a prompt's messages into one instruction string with the given
+  // arguments (a live server round-trip). Called at send time to fold a
+  // `/prompt` reference into the turn's system prompt.
+  async resolvePrompt(id: string, prompt: string, args: Record<string, string>): Promise<string> {
+    const res = await this.client.post<{ text: string }>(
+      `/api/v1/mcp/${encodeURIComponent(id)}/prompts/${encodeURIComponent(prompt)}/resolve`,
+      { arguments: args },
+    );
+    return res.text;
+  }
+
+  setToolAlwaysAvailable(id: string, tool: string, alwaysAvailable: boolean): Promise<McpServer> {
+    return this.client.post(
+      `/api/v1/mcp/${encodeURIComponent(id)}/tools/${encodeURIComponent(
+        tool,
+      )}/always-available/${alwaysAvailable ? "enable" : "disable"}`,
+      {},
+    );
+  }
+
   setPromptEnabled(id: string, prompt: string, enabled: boolean): Promise<McpServer> {
     return this.client.post(
       `/api/v1/mcp/${encodeURIComponent(id)}/prompts/${encodeURIComponent(

@@ -220,6 +220,25 @@ export function extensionsRoutes(): Hono {
     return c.json({ ok: true });
   });
 
+  // Per-tool override for "offer every turn, skip relevance selection". No
+  // worker refresh: this only affects tool selection, not sandbox grants.
+  r.post("/:id/tools/:tool/always-available", async (c) => {
+    const id = c.req.param("id");
+    const name = c.req.param("tool");
+    const body = (await readJson(c)) as { value?: unknown };
+    if (typeof body.value !== "boolean") {
+      throw new AppError("validation_error", "value must be a boolean");
+    }
+    const tool = extensionsRegistry()
+      .listTools(id)
+      .find((t) => t.name === name);
+    if (!tool) throw new AppError("tool_not_found", `${id}::${name}`);
+    extensionsRegistry().setToolAlwaysAvailable(id, name, body.value);
+    // Repaint the list so the tool detail reflects the change.
+    wsHub().broadcastAll({ kind: "extension.snapshot" });
+    return c.json({ ok: true });
+  });
+
   // Confirm-reenable: the user reviewed an out-of-band content change and trusts
   // the current on-disk content. Re-pin the hash, clear drift, return to
   // 'installed'. Tools were disabled when drift was flagged; the user re-enables.
@@ -450,6 +469,7 @@ async function rescanExtensions(): Promise<{ added: number; updated: number; rem
 
 function allEnabledTools(): Array<{
   id: string;
+  name: string;
   description: string;
   triggers: string[];
 }> {
@@ -458,12 +478,13 @@ function allEnabledTools(): Array<{
   const list = extensionsRegistry()
     .list()
     .filter((t) => t.status === "installed");
-  const out: Array<{ id: string; description: string; triggers: string[] }> = [];
+  const out: Array<{ id: string; name: string; description: string; triggers: string[] }> = [];
   for (const tk of list) {
     for (const t of extensionsRegistry().listTools(tk.id)) {
       if (t.enabled) {
         out.push({
           id: t.id,
+          name: t.name,
           description: t.description,
           triggers: t.triggers,
         });

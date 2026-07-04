@@ -17,6 +17,15 @@ export const relevantToolsSamples = {
         description: "",
       },
     ],
+    mcp: [{ toolId: "gh.search", name: "github_search", description: "" }],
+  },
+  named: {
+    defaultExpanded: true,
+    // The user named a tool directly ("use the write_memory tool"); nothing
+    // scored, so it rides in via the Named Tools section, not phase 1/2.
+    phase1: [],
+    phase2: [],
+    nameMatched: [{ toolId: "memory.write", name: "write_memory", description: "" }],
   },
   collapsed: {
     defaultExpanded: false,

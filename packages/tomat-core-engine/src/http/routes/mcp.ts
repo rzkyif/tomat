@@ -149,6 +149,37 @@ export function mcpRoutes(authed: MiddlewareHandler): Hono {
     return c.json(server);
   });
 
+  // Resolve a prompt's messages into one instruction string with the given
+  // arguments. The client calls this at send time to fold a `/prompt` reference
+  // into the turn's system prompt (a live server round-trip).
+  r.post("/:id/prompts/:prompt/resolve", async (c) => {
+    const args = parseBody(
+      z.object({ arguments: z.record(z.string(), z.string()).optional() }).strict(),
+      await readJson(c),
+    );
+    const text = await mcp().resolvePrompt(
+      c.req.param("id"),
+      c.req.param("prompt"),
+      args.arguments ?? {},
+    );
+    return c.json({ text });
+  });
+
+  r.post("/:id/tools/:tool/always-available/:action", (c) => {
+    const action = c.req.param("action");
+    const alwaysAvailable = action === "enable";
+    if (!alwaysAvailable && action !== "disable") {
+      throw new AppError("validation_error", "bad action");
+    }
+    const server = mcp().setToolAlwaysAvailable(
+      c.req.param("id"),
+      c.req.param("tool"),
+      alwaysAvailable,
+    );
+    frameBus().broadcastAll({ kind: "mcp.snapshot" });
+    return c.json(server);
+  });
+
   r.post("/:id/prompts/:prompt/:action", (c) => {
     const action = c.req.param("action");
     const enabled = action === "enable";

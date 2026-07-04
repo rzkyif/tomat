@@ -205,6 +205,8 @@ body {
   background-color: oklch(from var(--user-bubble-bg-light) var(--bubble-bg-l-light) c h / alpha);
   border-color: var(--user-bubble-border-light);
   color: var(--user-bubble-text-light);
+  /* Bubble-wide accent tint of nested `-default-` colors; see .bubble-agent. */
+  --default-base: var(--user-bubble-bg-light);
 }
 .dark .bubble-user {
   background-color: oklch(from var(--user-bubble-bg-dark) var(--bubble-bg-l-dark) c h / alpha);
@@ -216,6 +218,15 @@ body {
   background-color: oklch(from var(--agent-bubble-bg-light) var(--bubble-bg-l-light) c h / alpha);
   border-color: var(--agent-bubble-border-light);
   color: var(--agent-bubble-text-light);
+  /* Retint everything inside the bubble that uses a `-default-` color (the whole
+     markdown chrome: inline-code chips, tables, kbd, rules, headings) to the
+     bubble hue, the same bubble-wide mechanism the tool-call bubble uses via
+     `--default-base`. Fenced code blocks are the deliberate exception: they
+     paint on the neutral `--code-bg` editor surface, not the default ladder, so
+     they stay neutral. One declaration serves both themes: the `--default-*` /
+     `--default-d-*` ladders read only chroma/hue from the base and pin lightness
+     per step, and the light/dark bubble seeds share both. */
+  --default-base: var(--agent-bubble-bg-light);
 }
 .dark .bubble-agent {
   background-color: oklch(from var(--agent-bubble-bg-dark) var(--bubble-bg-l-dark) c h / alpha);
@@ -227,6 +238,8 @@ body {
   background-color: oklch(from var(--agent2-bubble-bg-light) var(--bubble-bg-l-light) c h / alpha);
   border-color: var(--agent2-bubble-border-light);
   color: var(--agent2-bubble-text-light);
+  /* Bubble-wide accent tint of nested `-default-` colors; see .bubble-agent. */
+  --default-base: var(--agent2-bubble-bg-light);
 }
 .dark .bubble-agent-secondary {
   background-color: oklch(from var(--agent2-bubble-bg-dark) var(--bubble-bg-l-dark) c h / alpha);
@@ -243,13 +256,24 @@ body {
    congruent with the body's flattened screen-edge side. 0 0 = no directional
    offset; blur = the distance; spread 0. */
 .bubble-shadow {
-  border-radius: var(--bubble-radius-left, var(--rounded-large))
-    var(--bubble-radius-right, var(--rounded-large))
-    var(--bubble-radius-right, var(--rounded-large)) var(--bubble-radius-left, var(--rounded-large));
+  border-radius: var(--bubble-radius-tl, var(--rounded-large))
+    var(--bubble-radius-tr, var(--rounded-large)) var(--bubble-radius-br, var(--rounded-large))
+    var(--bubble-radius-bl, var(--rounded-large));
   box-shadow: 0 0 var(--bubble-shadow-distance) 0 var(--bubble-shadow-color-light);
 }
 .dark .bubble-shadow {
   box-shadow: 0 0 var(--bubble-shadow-distance) 0 var(--bubble-shadow-color-dark);
+}
+/* Merged lower bubble: it sits in a higher stacking context than the bubble it
+   overlaps, so its shadow would paint over that bubble's surface. Clip the shadow
+   down to the neighbor's bottom edge (one overlap-padding below this body's top),
+   so nothing renders in the overlap strip; the side/bottom shadow below the seam
+   still bleeds out to the full blur distance. */
+.bubble-shadow.merge-clip-top {
+  clip-path: inset(
+    var(--bubble-merge-overlap, 0.5rem) calc(-1 * var(--bubble-shadow-distance))
+      calc(-1 * var(--bubble-shadow-distance)) calc(-1 * var(--bubble-shadow-distance))
+  );
 }
 
 /* Frosted halo: N concentric rounded layers behind the bubble body (Bubble.svelte
@@ -266,12 +290,12 @@ body {
   pointer-events: none;
   z-index: 0;
   inset: calc(-1 * var(--halo-grow));
-  /* Per-side radii follow the body's alignment/neighbor corner flattening
+  /* Per-corner radii follow the body's alignment/neighbor/merge corner flattening
      (same vars as .bubble-shadow), grown by this ring's outset. */
-  border-radius: calc(var(--bubble-radius-left, var(--rounded-large)) + var(--halo-grow))
-    calc(var(--bubble-radius-right, var(--rounded-large)) + var(--halo-grow))
-    calc(var(--bubble-radius-right, var(--rounded-large)) + var(--halo-grow))
-    calc(var(--bubble-radius-left, var(--rounded-large)) + var(--halo-grow));
+  border-radius: calc(var(--bubble-radius-tl, var(--rounded-large)) + var(--halo-grow))
+    calc(var(--bubble-radius-tr, var(--rounded-large)) + var(--halo-grow))
+    calc(var(--bubble-radius-br, var(--rounded-large)) + var(--halo-grow))
+    calc(var(--bubble-radius-bl, var(--rounded-large)) + var(--halo-grow));
   -webkit-backdrop-filter: blur(
     calc(var(--bubble-shadow-distance) * (var(--ring-index) + 1) / var(--ring-count) * 0.8)
   );
@@ -279,6 +303,14 @@ body {
     calc(var(--bubble-shadow-distance) * (var(--ring-index) + 1) / var(--ring-count) * 0.8)
   );
   opacity: calc((var(--ring-index) + 1) / var(--ring-count));
+}
+/* Merged lower bubble: clip each halo ring down to the neighbor's bottom edge, so
+   the frosted halo does not frost the bubble it merges into. Each ring extends
+   `--halo-grow` past this body's top, and the neighbor's edge is one
+   overlap-padding below that top, so clip `--halo-grow + overlap` off the ring's
+   top; the side/bottom extension is kept. */
+.bubble-halo.merge-clip-top {
+  clip-path: inset(calc(var(--halo-grow) + var(--bubble-merge-overlap, 0.5rem)) 0 0 0);
 }
 
 /* App-wide theme: the `*-default-*` and `*-accent-*-*` UnoCSS shortcuts
@@ -465,12 +497,10 @@ body {
 
 /* Code-block surface. Intentionally NON-inverting: syntax-highlighted code
    reads against a dark, editor-style background in both light and dark themes,
-   so these have no `.dark` override. `oklch(0.2 0 0)` is the OKLCH equivalent
-   of the previously hardcoded `#1e1e1e`; the inline variant keeps the prior
-   0.75 alpha used for inline code / tool-name pills. */
+   so this has no `.dark` override. `oklch(0.2 0 0)` is the OKLCH equivalent
+   of the previously hardcoded `#1e1e1e`. */
 :root {
   --code-bg: oklch(0.2 0 0);
-  --code-bg-inline: oklch(0.2 0 0 / 0.75);
 }
 
 /* Themed range-input styling. Removes native chrome and paints track + thumb
@@ -818,14 +848,18 @@ input[type="range"]::-moz-range-thumb {
   color: white;
 }
 .markdown code {
-  background-color: var(--code-bg-inline);
-  color: white;
+  background-color: var(--default-200);
+  color: var(--default-800);
   padding: 0.15em 0.4em;
   border-radius: 6px;
   margin-left: 0.25em;
   margin-right: 0.25em;
   font-size: 0.8em;
   font-family: var(--font-mono);
+}
+.dark .markdown code {
+  background-color: var(--default-d-200);
+  color: var(--default-d-800);
 }
 .markdown kbd {
   display: inline-block;

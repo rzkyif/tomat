@@ -73,7 +73,9 @@ export class SettingsSearch {
   clear(): void {
     this.query = "";
     void this.setMode(false);
-    this.inputEl?.focus();
+    // preventScroll: never let refocusing the field scroll an off-screen panel
+    // into view (see the mount autofocus in Settings.svelte).
+    this.inputEl?.focus({ preventScroll: true });
   }
 }
 

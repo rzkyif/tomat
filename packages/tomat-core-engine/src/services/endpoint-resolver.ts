@@ -9,8 +9,8 @@
 //   - llm.contextSize           : local context window
 //   - llm.reasoning             : "off" | "on"
 //   - llm.reasoningEffort       : "low" | "medium" | "high" (external only)
-//   - llm.temperature, llm.topP : sampling, sent to both providers
-//   - llm.topK, llm.minP, llm.repeatPenalty, llm.reasoningBudget : local only
+//   - llm.temperature, llm.topP, llm.presencePenalty : sampling, sent to both
+//   - llm.topK, llm.minP, llm.repeatPenalty, llm.dryMultiplier, llm.samplers, llm.reasoningBudget : local only
 //   - dualModel.external.baseUrl/apiKey/model        (route="secondary")
 //   - dualModel.external.contextSize
 //
@@ -45,14 +45,17 @@ export async function resolveEndpoint(
     };
   }
   const provider = strSetting(settings, "llm.provider", "local") as "local" | "external";
-  // Default mirrors the shared schema (settings.json is sparse): thinking is on
-  // unless the user turns it off. A legacy "auto" reads as "on" (the two are
+  // Default mirrors the shared schema (settings.json is sparse): thinking is off
+  // unless the user turns it on. A legacy "auto" reads as "on" (the two are
   // equivalent for thinking; "auto" was dropped from the toggle).
-  const reasoning = strSetting(settings, "llm.reasoning", "on") === "off" ? "off" : "on";
+  const reasoning = strSetting(settings, "llm.reasoning", "off") === "off" ? "off" : "on";
   // OpenAI-style samplers apply to both providers; read with the schema defaults
   // (sparse store) so a value is always sent.
   const temperature = numSetting(settings, "llm.temperature", DEFAULT_SAMPLING.temperature);
   const topP = numSetting(settings, "llm.topP", DEFAULT_SAMPLING.topP);
+  // presence_penalty is provider-agnostic (0 = off, its default); dry_multiplier
+  // is llama.cpp-only and read in the local branch below.
+  const presencePenalty = numSetting(settings, "llm.presencePenalty", 0) || undefined;
   if (provider === "external") {
     const baseUrl = strSetting(settings, "llm.external.baseUrl", "");
     const apiKey = await resolveExternalApiKey(settings, "llm.external.apiKey", baseUrl);
@@ -70,6 +73,7 @@ export async function resolveEndpoint(
       reasoningEffort,
       temperature,
       topP,
+      presencePenalty,
     };
   }
   const llmHost = strSetting(settings, "llm.host", "127.0.0.1");
@@ -90,8 +94,26 @@ export async function resolveEndpoint(
     topK: numSetting(settings, "llm.topK", DEFAULT_SAMPLING.topK),
     minP: numSetting(settings, "llm.minP", DEFAULT_SAMPLING.minP),
     repeatPenalty: numSetting(settings, "llm.repeatPenalty", DEFAULT_SAMPLING.repeatPenalty),
+    // DRY is on by default (small local models loop without it); 0 turns it off.
+    dryMultiplier:
+      numSetting(settings, "llm.dryMultiplier", DEFAULT_SAMPLING.dryMultiplier ?? 0) || undefined,
+    presencePenalty,
+    // Optional sampler-chain order, `;`-joined by presets from a catalog model.
+    // Empty = the server's default chain.
+    samplers: splitSamplers(strSetting(settings, "llm.samplers", "")),
     reasoningBudget: numSetting(settings, "llm.reasoningBudget", 0) || undefined,
   };
+}
+
+/** Parse the `;`-joined `llm.samplers` value into a sampler-name list, or
+ *  undefined when unset (so the request omits it and the server uses its
+ *  default chain). */
+function splitSamplers(value: string): string[] | undefined {
+  const names = value
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return names.length > 0 ? names : undefined;
 }
 
 /** Context window size for the active provider on the given route, in

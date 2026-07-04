@@ -250,6 +250,15 @@ export interface ToolFilterMessage extends MessageBase {
   // Tools whose extension declares `alwaysAvailable: true`; included
   // regardless of filtering when the bypass setting is on.
   alwaysAvailable?: ToolFilterEntryPersisted[];
+  // Tools the message named directly (e.g. "use the write_memory tool");
+  // force-included ahead of the relevance filter, so they're recorded here
+  // instead of in phase1/phase2 even though they bypassed both.
+  nameMatched?: ToolFilterEntryPersisted[];
+  // Enabled MCP tools offered this turn: the always-available ones (offered
+  // every turn), plus any whose always-available is off but that matched the
+  // turn by name or description. Recorded here so the bubble can list them
+  // without forcing itself on.
+  mcp?: ToolFilterEntryPersisted[];
   /** Number of tools actually exposed to the model this turn (post-filter,
    *  post-grant-gating). The phase arrays can't stand in for this: with
    *  filtering disabled they're empty while tools are still sent. The

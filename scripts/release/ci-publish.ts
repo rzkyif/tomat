@@ -55,6 +55,7 @@ import { clientItem } from "./client.ts";
 import { androidItem } from "./android.ts";
 import { scriptsItem } from "./install-scripts.ts";
 import { schemasItem } from "./schemas.ts";
+import { websiteItem } from "./website.ts";
 
 /** Copy every file under a runner's `dist/` into the host's DIST_DIR, preserving
  *  the dist-relative layout, so the descriptors' relPaths re-anchor + verify. */
@@ -76,8 +77,15 @@ async function mergeDist(stageDir: string): Promise<number> {
  *  reconstruct DIST_DIR, and collect the core bundles + client/android
  *  descriptors into the PrebuiltStaging the items consume. */
 async function collectPrebuilt(stagingRoot: string): Promise<PrebuiltStaging> {
-  if (!(await exists(stagingRoot))) fail(`staging root not found: ${stagingRoot}`);
   const staging: PrebuiltStaging = { coreBundles: [], clientDescriptors: [] };
+  // A website-only / platform-independent-only publish skips the build matrix,
+  // so no runner staged anything and the download leaves no staging root. That
+  // is expected: the publish plan just builds the changed coordinator-side items
+  // (catalog, install scripts, schemas, landing page) with an empty prebuilt set.
+  if (!(await exists(stagingRoot))) {
+    info(`no staging root (${stagingRoot}); publishing platform-independent items only`);
+    return staging;
+  }
   for await (const dir of Deno.readDir(stagingRoot)) {
     if (!dir.isDirectory) continue;
     const stageDir = join(stagingRoot, dir.name);
@@ -127,11 +135,13 @@ async function main(): Promise<void> {
   );
 
   // Core + the platform-independent items always run (the latter build directly
-  // on this host); client/android only when a runner actually staged them.
+  // on this host); client/android only when a runner actually staged them. Each
+  // is diffed against the cursor, so an unchanged item is a no-op - a website-only
+  // publish (no staged bundles) simply applies the landing page and nothing else.
   const items: ReleaseItem[] = [coreItem, extensionItem, catalogItem];
   if (prebuilt.clientDescriptors.length > 0) items.push(clientItem);
   if (prebuilt.android) items.push(androidItem);
-  items.push(scriptsItem, schemasItem);
+  items.push(scriptsItem, schemasItem, websiteItem);
 
   // Publish the conventional native Core installers each runner built (pkg / nsis
   // / deb+rpm) + a signed core-installers.json BEFORE the release plan, so the

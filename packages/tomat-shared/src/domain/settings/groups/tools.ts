@@ -75,7 +75,7 @@ export const toolsGroup: SettingGroup = {
           id: "tools.alwaysAvailableEnabled",
           name: "Allow Always-Available Tools",
           description:
-            "Let providers mark tools as always available, so they're offered every message without going through selection.",
+            "Let some tools be offered on every message, skipping relevance selection. Choose which in each tool's own settings; a tool starts on if its provider marks it always available.",
           type: "boolean",
           defaultValue: true,
           visibleWhen: { field: "tools.filteringEnabled", eq: true },

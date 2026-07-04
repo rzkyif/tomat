@@ -24,7 +24,11 @@ import { initSidecarBoot } from "./services/sidecar-boot.ts";
 import { coreStatus } from "./services/core-status.ts";
 import { llmIdle } from "./services/llm-idle.ts";
 import { backgroundQueue } from "./services/background-queue.ts";
-import { memoriesStore, registerMemoryProvider } from "@tomat/core-engine/services/memories-store";
+import {
+  memoriesStore,
+  registerMemoryProvider,
+  setMemoryProviderGate,
+} from "@tomat/core-engine/services/memories-store";
 import { scheduleMemoryIndexing } from "./services/memories-indexer.ts";
 import { initEmbeddingService } from "@tomat/core-engine/services/embedding";
 import { promptScheduler } from "./services/prompt-scheduler.ts";
@@ -187,6 +191,13 @@ async function main(): Promise<void> {
   } catch (err) {
     log.warn(`extension memory provider registration failed: ${errMessage(err)}`);
   }
+
+  // Hide an extension's memories from every listing surface unless it is installed
+  // (a downloaded-only or drifted extension is not active), mirroring how its tools
+  // are gated. Live query, so install/uninstall/drift take effect without extra
+  // bookkeeping. The base-dir mapping above stays for all extensions so a memory's
+  // content still resolves after a later install.
+  setMemoryProviderGate((provider) => extensionsRegistry().get(provider)?.status === "installed");
 
   // Resolve which embedding model is active (local sidecar vs an external
   // Relevance Model) and track it across settings changes, so the relevance

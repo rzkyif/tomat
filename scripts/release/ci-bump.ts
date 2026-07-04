@@ -58,6 +58,7 @@ import { clientItem } from "./client.ts";
 import { androidItem } from "./android.ts";
 import { scriptsItem } from "./install-scripts.ts";
 import { schemasItem } from "./schemas.ts";
+import { websiteItem } from "./website.ts";
 
 // The same set ci-preflight / ci-publish plan against (iOS ships through the App
 // Store, not the R2 cursor, so it is not here).
@@ -69,6 +70,7 @@ const ITEMS: ReleaseItem[] = [
   androidItem,
   scriptsItem,
   schemasItem,
+  websiteItem,
 ];
 
 function recordedFor(

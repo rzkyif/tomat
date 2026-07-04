@@ -99,6 +99,13 @@ export class ExtensionsApi {
     );
   }
 
+  setToolAlwaysAvailable(id: string, tool: string, value: boolean): Promise<{ ok: boolean }> {
+    return this.client.post(
+      `/api/v1/extensions/${encodeURIComponent(id)}/tools/${encodeURIComponent(tool)}/always-available`,
+      { value },
+    );
+  }
+
   setGrants(
     id: string,
     tool: string,

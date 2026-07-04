@@ -47,20 +47,20 @@ cd packages/tomat-website && deno task preview    # wrangler dev
 
 ## Release & deploy
 
-The site ships on its own track, separate from the repo-wide release. From the
-**repo root**:
+The site is a platform-independent item of the umbrella release, alongside the
+model catalog and install scripts: it carries no per-triple artifact, so it
+builds + deploys directly on the release host with no build-matrix runner. From
+the **repo root** `deno task release` (or a remote-triggered channel push) runs
+`astro build` then `wrangler deploy` for it, gated by the same source-hash cursor
+on R2 and version-bump check every other item uses, so an unchanged site is a
+no-op and no other artifact is built when only the site changed. The website's
+version lives in `packages/tomat-website/deno.json`; for the full version-bump
+table and channel details see [DEVELOPMENT.md](../../DEVELOPMENT.md#channels).
 
-```sh
-deno task release:website   # build Astro + wrangler deploy the landing page
-```
-
-It runs `astro build` then `wrangler deploy`, gated by the same source-hash
-cursor on R2 and version-bump check the umbrella `deno task release` uses, so an
-unchanged site is a no-op (pass `--force` to deploy anyway, `--dry-run` to build
-without deploying). The website's version lives in
-`packages/tomat-website/deno.json`; for the full version-bump table and channel
-details see [DEVELOPMENT.md](../../DEVELOPMENT.md#channels). `deno task release`
-publishes everything **except** the landing page.
+To ship a website-only change through CI: push it to `main`, then
+`deno task remote-release`. Preflight sees only the landing page changed
+(`native=false`), skips the entire build matrix, and the publish job deploys just
+the site.
 
 **One-time Cloudflare setup** (needs the `tomat.ing` zone on Cloudflare):
 
@@ -98,12 +98,17 @@ when the target is already aligned (so it never triggers a redundant run). It
 replaces the manual `git push origin main:latest`.
 
 **The channel branches are shared with the local pipeline.** A `preflight` job
-diffs the release items against the shared R2 cursor and gates the build +
-publish jobs. So `deno task release` (which publishes to R2 locally first, then
+diffs the release items against the shared R2 cursor and emits two gates:
+`changed` (any item differs -> run the publish job) and `native` (a matrix-built
+item - core, desktop client, android - differs -> run the expensive per-triple
+build matrix). So `deno task release` (which publishes to R2 locally first, then
 fast-forwards and pushes the channel branch) lands a branch push that preflight
-sees as "nothing changed" -> the build matrix is skipped. `remote-release` moves
-the branch with nothing published yet -> preflight sees changes -> CI builds and
-publishes. The two never double-publish, and neither wastes a matrix build.
+sees as "nothing changed" -> every job is skipped. `remote-release` moves the
+branch with nothing published yet -> preflight sees changes -> CI does the work.
+A push that touches only platform-independent items (extension, catalog, install
+scripts, schemas, the landing page) has `native=false`, so the whole build matrix
+is skipped and the publish job builds + deploys just those items on its own. The
+two pipelines never double-publish, and neither wastes a matrix build.
 
 The channel is the branch name. The workflow fans out one native build runner per
 desktop triple (`macos-13` x64, `macos-14` arm64, `windows-latest` x64,
@@ -155,4 +160,6 @@ Store Connect itself rather than staging for the publish coordinator. See
 [macos-signing.md](../../scripts/release/macos-signing.md).
 Build runners receive only the Tauri + Android (+ Apple, on the mac runners)
 subset (plus the signing public key); the publish job receives all. The landing
-page still ships on its own track (`deno task release:website`), not from these workflows.
+page is a platform-independent item built by the publish coordinator, so a
+website-only change publishes through these workflows with the whole build matrix
+skipped (preflight's `native` gate is false).

@@ -13,6 +13,7 @@
 // 31B is the next AA-scored size up.)
 
 import type { CatalogVariant, ModelFamily } from "@tomat/shared";
+import { LOOP_RESISTANT_SAMPLER_ORDER } from "@tomat/shared";
 
 const spec = (repo: string, file: string) => `@unsloth/${repo}/main/${file}`;
 
@@ -28,6 +29,9 @@ const SAMPLING = {
   topK: 64,
   minP: 0,
   repeatPenalty: 1.0,
+  // Defer the repetition guards until after temperature; the default order loops
+  // on some quants of these models.
+  samplers: [...LOOP_RESISTANT_SAMPLER_ORDER],
 };
 
 const E2B_MMPROJ = {

@@ -85,10 +85,16 @@ export interface UiContext {
  *  globally (the client writes it from appearance.bubbleShadowDistance; the
  *  website inherits the base default). */
 export function bubbleGap(ui: UiContext): string {
-  // Mobile bubbles have no shadow/halo (see Bubble.svelte), so they need no
-  // extra clearance: keep the tight default gap.
+  return `calc(${bubbleGapExpr(ui)})`;
+}
+
+/** The bare CSS expression behind `bubbleGap` (no `calc()` wrapper), so callers
+ *  can compose it into a larger `calc()` (e.g. a merged bubble's overlap margin,
+ *  which is `-(gap + padding)`). Mobile bubbles have no shadow/halo (see
+ *  Bubble.svelte), so they need no extra clearance: keep the tight default gap. */
+export function bubbleGapExpr(ui: UiContext): string {
   return ui.bubbleBlurEnabled && ui.platform !== "mobile"
-    ? "calc(0.5rem + 2 * var(--bubble-shadow-distance))"
+    ? "0.5rem + 2 * var(--bubble-shadow-distance)"
     : "0.5rem";
 }
 

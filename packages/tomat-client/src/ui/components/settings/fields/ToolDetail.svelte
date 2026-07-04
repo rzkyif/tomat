@@ -6,7 +6,13 @@
   // One tool's enable toggle and permission grants. Provider-agnostic: extension
   // tools carry sandbox permissions managed here; MCP tools run on their server
   // and only carry an enable toggle.
-  let { tool, horizontal = false }: { tool: Tool; horizontal?: boolean } = $props();
+  // `reload` refreshes the list behind the detail so a card's "Enabled" chip
+  // (and other badges) reflect a toggle made here, not just in the detail pane.
+  let {
+    tool,
+    horizontal = false,
+    reload,
+  }: { tool: Tool; horizontal?: boolean; reload?: () => void } = $props();
 
   let busyId = $state<string | null>(null);
 
@@ -23,10 +29,33 @@
     }
   }
 
+  // Always-available applies to both providers. MCP tools default to it (so
+  // they're usually offered); turning it off folds the tool into the relevance
+  // filter (matched by name + description). It's hidden when the global "allow
+  // always-available tools" setting is off (that setting then acts as the master
+  // switch, so the per-tool override is disabled).
+  const showAlwaysAvailable = $derived(
+    settingsState.currentSettings["tools.alwaysAvailableEnabled"] !== false,
+  );
+
+  // Extension tools store the flag on their DB row; MCP tools store it on the
+  // server row, then the flat tool list is refreshed to reflect the new value.
+  async function setAlwaysAvailable(alwaysAvailable: boolean): Promise<void> {
+    if (tool.providerKind === "mcp") {
+      await mcpState.setToolAlwaysAvailable(tool.extensionId, tool.name, alwaysAvailable);
+      await extensionsState.loadAllTools();
+    } else {
+      await extensionsState.setToolAlwaysAvailable(tool.extensionId, tool.name, alwaysAvailable);
+    }
+  }
+
   async function runToolAction(id: string, fn: () => Promise<void>) {
     busyId = id;
     try {
       await fn();
+      // The mutation already refreshed the flat tool list; re-render the list
+      // behind the detail so its card badges pick up the change.
+      reload?.();
     } catch (e) {
       confirmState.alert({ title: "Action failed", message: errMessage(e) });
     } finally {
@@ -172,9 +201,15 @@
   {horizontal}
   enableBusy={busyId === tool.name}
   enableAriaLabel={`Enable ${tool.name}`}
+  {showAlwaysAvailable}
+  alwaysAvailable={tool.alwaysAvailable}
+  alwaysAvailableBusy={busyId === `${tool.name}::always-available`}
+  alwaysAvailableAriaLabel={`Always offer ${tool.name}`}
   {deniedRequired}
   permissions={permissionRows}
   onToggleEnabled={(v) => runToolAction(tool.name, () => setEnabled(v))}
+  onToggleAlwaysAvailable={(v) =>
+    runToolAction(`${tool.name}::always-available`, () => setAlwaysAvailable(v))}
   onGrantChange={(key, nextState) => {
     const row = permissionRows.find((r) => r.key === key);
     if (row) handleGrantChange(row.decl, key, nextState);

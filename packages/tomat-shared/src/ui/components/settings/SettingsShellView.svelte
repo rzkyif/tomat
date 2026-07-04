@@ -5,6 +5,7 @@
   import SettingsSidebarView from "./SettingsSidebarView.svelte";
   import { slideSwap } from "../../animations.ts";
   import { useUiContext } from "../../context.ts";
+  import type { BubbleCorner } from "../../merge.ts";
 
   const noop = (): void => {};
 
@@ -37,6 +38,7 @@
     onReselectGroup,
     onToggleSidebar,
     sizeClass = "w-[760px] max-w-[calc(100vw-5rem)] h-80vh",
+    flatCorners = [],
     belowHeader,
     groupContent,
     searchContent,
@@ -66,6 +68,9 @@
     onToggleSidebar?: () => void;
     /** Sizing for the panel Bubble (default: the app's 760px x 80vh). */
     sizeClass?: string;
+    /** Corners to square off when the CoreBar merges flush onto the panel's
+     *  bottom (the settings view pins it there); defaults to none. Desktop only. */
+    flatCorners?: BubbleCorner[];
     /** Rendered between the header row and the sidebar/content split (e.g. the
      *  multi-core picker). */
     belowHeader?: Snippet;
@@ -212,6 +217,7 @@
   <Bubble
     selectedAlignment={ui.getAlignment()}
     extraClass="flex flex-col gap-3 overflow-hidden {sizeClass} relative"
+    {flatCorners}
   >
     {@render shellBody()}
   </Bubble>
@@ -301,16 +307,24 @@
 {#snippet contentArea()}
   <!-- Content -->
   <div class="relative flex-1 min-h-0 min-w-0">
+    <!-- overflow-y-scroll (not -auto): the 5px .tomat-scroll bar takes layout
+         space, so switching between a group tall enough to scroll and one that
+         is not would add/remove that 5px and reflow the whole panel (a visible
+         shift mid group-change). Always reserving the gutter keeps the width
+         constant; the track is transparent and the thumb only paints when
+         scrollable, so a short group shows nothing in the reserved strip. -->
     <div
-      class="tomat-scroll overflow-y-auto pr-2 h-full"
+      class="tomat-scroll overflow-y-scroll pr-2 h-full"
       bind:this={scrollEl}
       onscroll={updateFades}
       data-demo="content"
     >
-      <!-- min-h-full so the layer always spans the scroll viewport: the
-             group-change slide (translateY 100% of this layer) travels the
-             whole panel height regardless of how few fields the group has. -->
-      <div bind:this={layerEl} class="min-h-full">
+      <!-- h-full so the layer is exactly the scroll viewport: the group-change
+             slide (translateY 100% of this layer) travels one panel height, and
+             a group that fills the viewport (an object-management manager) can
+             establish a definite height chain down to its own inner scroller.
+             Taller groups overflow this layer (visible) and the viewport scrolls. -->
+      <div bind:this={layerEl} class="h-full">
         {#if searchMode}
           {@render searchContent?.()}
         {:else}

@@ -64,6 +64,21 @@ export function registerMemoryProvider(provider: string, baseDir: string): void 
   providerBaseDirs.set(provider, baseDir);
 }
 
+// Gate deciding whether an extension provider's memories are "active", i.e. its
+// extension is installed (not merely downloaded, and not drifted). The Deno host
+// wires this to the extension registry's status; hosts without extensions
+// (mobile) and tests leave it unset, so every provider passes. `USER_MEMORY_PROVIDER`
+// is always active. A downloaded-but-not-installed extension's memories stay in the
+// DB (so a later install restores them) but are hidden from every listing consumer.
+let providerActiveGate: ((provider: string) => boolean) | null = null;
+export function setMemoryProviderGate(gate: ((provider: string) => boolean) | null): void {
+  providerActiveGate = gate;
+}
+function providerActive(provider: string): boolean {
+  if (provider === USER_MEMORY_PROVIDER) return true;
+  return providerActiveGate ? providerActiveGate(provider) : true;
+}
+
 function baseDirFor(provider: string): string {
   if (provider === USER_MEMORY_PROVIDER) return enginePaths().memoriesDir;
   const dir = providerBaseDirs.get(provider);
@@ -74,7 +89,17 @@ function baseDirFor(provider: string): string {
 }
 
 export class MemoriesStore {
+  // Every memory whose provider is active: user memories plus those of installed
+  // extensions. Backs the Memories management UI, chat injection, and the client's
+  // @-autocomplete, so an extension that is downloaded but not installed contributes
+  // nothing. Internal reconciliation that must see hidden rows uses `allRows`.
   list(): MemoryMeta[] {
+    return this.allRows().filter((m) => providerActive(m.provider));
+  }
+
+  // Unfiltered: every row regardless of provider status. For reconciliation paths
+  // that address a specific (possibly not-yet-installed) extension's own rows.
+  private allRows(): MemoryMeta[] {
     const rows = db()
       .prepare(`${META_SELECT} ORDER BY title COLLATE NOCASE ASC`)
       .all() as MetaRow[];
@@ -438,7 +463,7 @@ export class MemoriesStore {
       }
       db().exec("BEGIN");
       try {
-        for (const row of this.list()) {
+        for (const row of this.allRows()) {
           if (row.provider !== extensionId) continue;
           if (!want.has(row.filename)) {
             db().prepare(`DELETE FROM memories WHERE id = ?`).run(row.id);
@@ -576,6 +601,7 @@ export function memoriesStore(): MemoriesStore {
 export function __resetForTesting(): void {
   _instance = null;
   providerBaseDirs.clear();
+  providerActiveGate = null;
 }
 
 // --- helpers ----------------------------------------------------------------

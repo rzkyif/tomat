@@ -13,6 +13,7 @@
 // Smallest floor (Qwen/Qwen3.5-2B).
 
 import type { CatalogQuant, ModelFamily } from "@tomat/shared";
+import { LOOP_RESISTANT_SAMPLER_ORDER } from "@tomat/shared";
 
 const PROVIDER = "unsloth";
 
@@ -56,6 +57,9 @@ const SAMPLING = {
   topK: 20,
   minP: 0,
   repeatPenalty: 1.0,
+  // Defer the repetition guards until after temperature; the default order loops
+  // on some quants of these reasoning models.
+  samplers: [...LOOP_RESISTANT_SAMPLER_ORDER],
 };
 
 export const qwen35: ModelFamily = {

@@ -105,10 +105,12 @@
   // is the shared `use:ripple` action, not a color shift. A surfaceless icon
   // button materializes the inset surface on hover (the text-darken in
   // `variantClass` is a complementary cue); a filled/circle button steps its
-  // existing fill one shade on hover.
+  // existing fill one shade on hover. An `active` surfaceless button already
+  // carries its own toggled-on fill (supplied via `class`), so it drops the
+  // hover inset rather than layering one on top.
   const surfaceClass = $derived(
     {
-      none: "hov:bg-surface-inset",
+      none: active ? "" : "hov:bg-surface-inset",
       filled: "bg-surface-inset hov:bg-surface-inset-strong",
       circle: "bg-surface-inset hov:bg-surface-inset-strong",
     }[surface],

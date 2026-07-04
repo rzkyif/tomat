@@ -35,8 +35,17 @@
   let draftAuthToken = $state("");
   let authTouched = $state(false);
 
-  // Prompts the live server exposes, toggled for "/" autocomplete.
-  const prompts = $derived(mcpState.prompts.filter((p) => p.serverId === server.id));
+  // Optimistic override for the enable toggle while an enable/disable call is in
+  // flight. The knob and status reflect the user's intent immediately (enabling
+  // shows "connecting" for the seconds the connect handshake takes) instead of
+  // waiting for the PATCH to return with the settled state. Cleared once the call
+  // resolves, at which point `server` already carries the real status.
+  let pending = $state<boolean | null>(null);
+
+  const effectiveEnabled = $derived(pending ?? server.enabled);
+  const effectiveStatus = $derived<McpServer["status"]>(
+    pending === true ? "connecting" : server.status,
+  );
 
   // The command actually run for a stdio server, shown in the enable
   // confirmation so consent reflects what launches.
@@ -72,11 +81,14 @@
   }, 600);
 
   async function applyEnabled(enabled: boolean) {
+    pending = enabled;
     try {
       await mcpState.update(server.id, { enabled });
       reload();
     } catch (e) {
       confirmState.alert({ title: "Action failed", message: errMessage(e) });
+    } finally {
+      pending = null;
     }
   }
 
@@ -108,8 +120,8 @@
 </script>
 
 <McpDetailView
-  enabled={server.enabled}
-  status={server.status}
+  enabled={effectiveEnabled}
+  status={effectiveStatus}
   statusError={server.statusError}
   remoteAuth={draftRemoteAuth}
   hasAuth={server.hasAuth}
@@ -123,11 +135,6 @@
   {draftPermissions}
   {draftUrl}
   {draftAuthToken}
-  prompts={prompts.map((p) => ({
-    name: p.name,
-    description: p.description,
-    enabled: p.enabled,
-  }))}
   {horizontal}
   onToggleEnabled={(v) => toggleEnabled(v)}
   onNameInput={(v) => {
@@ -179,5 +186,4 @@
     }
   }}
   onFlush={() => flushSave()}
-  onTogglePrompt={(name, v) => void mcpState.setPromptEnabled(server.id, name, v)}
 />

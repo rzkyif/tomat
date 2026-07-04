@@ -57,6 +57,7 @@
   import { InputShortcuts } from "$composables/use-input-shortcuts.svelte";
   import { PromptModes } from "$composables/use-prompt-modes.svelte";
   import { AskUser, type PendingAsk } from "$composables/use-askuser.svelte";
+  import { McpPromptArgs } from "$composables/use-mcp-prompt-args.svelte";
   import { vadManager } from "$stores/vad.svelte";
   import { shortcutHandler } from "$stores/shortcut.svelte";
   import { useBlink } from "$composables/use-blink.svelte";
@@ -76,6 +77,10 @@
   const themeOverrideHex = $derived(hasAlpha(themeOverride) ? themeOverride : null);
 
   let text = $state("");
+  // Arguments the user filled in for a `/prompt` MCP reference, keyed by prompt
+  // name. Populated when an argument-taking prompt is picked from the "/" menu
+  // (the inline form), read at send time to resolve the prompt, then cleared.
+  let mcpPromptArgs = $state<Record<string, Record<string, string>>>({});
   let monitors: Monitor[] = $state([]);
   let textareaElement: HTMLTextAreaElement | undefined = $state();
   let mirrorSpan: HTMLSpanElement | undefined = $state();
@@ -110,6 +115,9 @@
   // component keeps the $derived pending read (off the awaiting tool message's
   // ephemera) and the $effect that mirrors it in.
   const ask = new AskUser();
+  // The inline argument form for an argument-taking "/prompt" picked from the
+  // menu, rendered through the same AskUserFormView a tool's askUser uses.
+  const argMode = new McpPromptArgs();
 
   let autocompleteOptions = $derived.by<AutocompleteOption[]>(() => {
     if (!ac.open) return [];
@@ -366,6 +374,42 @@
     }),
   );
 
+  // Resolve every `/prompt` MCP reference in the sent text into an instruction
+  // block, fetched live from the server with any collected arguments. The blocks
+  // are folded into the turn's system prompt so they are both sent to the model
+  // and visible in the system-prompt bubble. Unknown/disabled `/tokens` are left
+  // alone (they stay as literal text in the user's message).
+  async function resolveMcpPromptBlock(
+    userText: string,
+    promptArgs: Record<string, Record<string, string>>,
+  ): Promise<string | null> {
+    const enabled = mcpState.prompts.filter((p) => p.enabled);
+    if (enabled.length === 0) return null;
+    const byName = new Map(enabled.map((p) => [p.name.toLowerCase(), p]));
+    const seen = new Set<string>();
+    const blocks: string[] = [];
+    for (const m of userText.matchAll(/(?:^|[^\w@#/])\/([A-Za-z0-9_-]+)/g)) {
+      const token = m[1].toLowerCase();
+      if (seen.has(token)) continue;
+      seen.add(token);
+      const p = byName.get(token);
+      if (!p) continue;
+      try {
+        const args = promptArgs[p.name] ?? {};
+        const resolved = await mcpState.resolvePrompt(p.serverId, p.name, args);
+        if (resolved.trim()) {
+          blocks.push(
+            `[Prompt /${p.name} from ${p.serverName} - follow these instructions]\n${resolved}`,
+          );
+        }
+      } catch (err) {
+        uiLog.warn(`MCP prompt /${p.name} failed to resolve:`, err);
+        showInputNotice(`Couldn't resolve /${p.name} from ${p.serverName}.`);
+      }
+    }
+    return blocks.length > 0 ? blocks.join("\n\n") : null;
+  }
+
   function applySnippetTrigger(option: { trigger: string }) {
     const ta = textareaElement;
     const result = ac.applyTrigger(text, option.trigger);
@@ -374,8 +418,33 @@
     const caret = result.caret;
     // Restore caret position after Svelte updates the DOM value.
     queueMicrotask(() => {
-      ta?.focus();
+      ta?.focus({ preventScroll: true });
       ta?.setSelectionRange(caret, caret);
+    });
+  }
+
+  // Autocomplete pick: insert the trigger, then - for an MCP prompt that takes
+  // arguments - open the inline argument form. The token is inserted first (so
+  // the autocomplete state is still fresh); submitting the form stashes the args
+  // and sends the turn straight away (see the begin callback below).
+  function onAutocompleteSelect(option: { id: string; trigger: string }) {
+    // Recover the source-carrying option BEFORE inserting the trigger: the
+    // autocomplete View types its option as `{ id, name, trigger }`, and
+    // `applySnippetTrigger` closes the dropdown, which empties `autocompleteOptions`
+    // (it early-returns `[]` when closed). Looking it up first is what lets an MCP
+    // prompt with arguments open the form.
+    const full = autocompleteOptions.find((o) => o.id === option.id);
+    applySnippetTrigger(option);
+    if (full?.source !== "mcp_prompt") return;
+    const prompt = mcpState.prompts.find((p) => `/${p.name}` === option.trigger);
+    if (!prompt || prompt.arguments.length === 0) return;
+    // Submitting the form sends the turn immediately rather than handing the
+    // composer back for more editing (which invites a half-filled, ambiguous
+    // state). The `/prompt` token is already in the text from applySnippetTrigger
+    // above, so resolveMcpPromptBlock picks it up with these stashed args.
+    argMode.begin(prompt, (p, args) => {
+      mcpPromptArgs = { ...mcpPromptArgs, [p.name]: args };
+      void handleSend();
     });
   }
 
@@ -400,16 +469,24 @@
   // keyboard without the user asking, covering half the screen. The user taps
   // the composer to focus instead. (User-initiated focus, e.g. tapping Edit,
   // goes through the exported focus() / direct calls and is unaffected.)
+  //
+  // `preventScroll` is load-bearing: this fires on mount, so when entering chat
+  // from another panel the composer is auto-focused WHILE the panel layer is
+  // still translated off-screen mid-slide. Without it the WebView scrolls the
+  // (overflow-hidden but still programmatically scrollable) layer to bring the
+  // off-screen textarea into view, shifting the whole UI by ~a viewport and then
+  // snapping back when the scroll resets - the "slides to the wrong spot then
+  // teleports" glitch.
   function focusTextarea() {
     if (onMobile) return;
     if (messagesState.messages.length == 0 && textareaElement) {
-      setTimeout(() => textareaElement?.focus(), 0);
+      setTimeout(() => textareaElement?.focus({ preventScroll: true }), 0);
     }
   }
 
   function focusInput() {
     if (onMobile) return;
-    if (textareaElement) setTimeout(() => textareaElement?.focus(), 0);
+    if (textareaElement) setTimeout(() => textareaElement?.focus({ preventScroll: true }), 0);
   }
 
   $effect(() => {
@@ -561,13 +638,11 @@
     // prepend/replace/append) is attached to the user message so sendMessages
     // can pick it up verbatim.
     const { userText, systemOverride } = applySnippets(trimmedText, snippetsState.snippets);
-    const effectiveSystemPrompt = applySystemPromptOverride(
+    const baseSystemPrompt = applySystemPromptOverride(
       buildSystemPromptBase(),
       systemOverride,
       buildContextBlock(),
     );
-    const systemPromptOverride =
-      systemOverride && effectiveSystemPrompt ? effectiveSystemPrompt : undefined;
 
     const snapshot: Attachment[] = composer.attachments.map((a) => ({
       type: a.type,
@@ -576,12 +651,28 @@
       mime: a.mime,
     }));
     const timestamp = Date.now();
+    const promptArgs = mcpPromptArgs;
 
     text = "";
     composer.clear();
+    mcpPromptArgs = {};
     ac.open = false;
 
     try {
+      // Resolve any `/prompt` MCP references into the system prompt (live
+      // round-trips) before the turn starts, so the injected instructions are
+      // both sent to the model and shown in the system-prompt bubble.
+      const mcpBlock = await resolveMcpPromptBlock(userText, promptArgs);
+      const effectiveSystemPrompt = mcpBlock
+        ? baseSystemPrompt
+          ? `${baseSystemPrompt}\n\n${mcpBlock}`
+          : mcpBlock
+        : baseSystemPrompt;
+      // Persist the override whenever a snippet OR an MCP prompt shaped this
+      // turn's prompt, so edit-and-resend replays the same context.
+      const systemPromptOverride =
+        (systemOverride || mcpBlock) && effectiveSystemPrompt ? effectiveSystemPrompt : undefined;
+
       await messagesState.addUserMessage({
         text: userText,
         attachments: snapshot,
@@ -596,7 +687,7 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (ac.handleKey(e, autocompleteOptions, applySnippetTrigger)) return;
+    if (ac.handleKey(e, autocompleteOptions, onAutocompleteSelect)) return;
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -610,7 +701,7 @@
       setText: (t) => {
         text = t;
       },
-      focus: () => textareaElement?.focus(),
+      focus: () => textareaElement?.focus({ preventScroll: true }),
       // Auto-send interrupts any in-flight work first, mirroring the
       // interrupt-and-send button.
       onAutoSend: async () => {
@@ -626,39 +717,56 @@
   function handleBubbleClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (target.closest("button, select, textarea, a, input")) return;
-    textareaElement?.focus();
+    textareaElement?.focus({ preventScroll: true });
   }
 
   // Voice button is idle/available when the speech sidecar is up (or disabled).
   let sttIdle = $derived(sttStatus === "Running" || sttStatus === "Disabled");
-  // Permission and askUser modes are driven through the shared composer's
-  // `permissionPrompt` / `askUserPrompt` state; only the (client-only) schedule-
-  // confirm form still rides the generic content/right slots. Precedence
-  // permission > askUser > schedule keeps one prompt in the composer at a time.
+  // Permission, askUser, and MCP-prompt-argument modes are driven through the
+  // shared composer's `permissionPrompt` / `askUserPrompt` state; only the
+  // (client-only) schedule-confirm form still rides the generic content/right
+  // slots. Precedence permission > tool askUser > MCP prompt args > schedule
+  // keeps one prompt in the composer at a time.
   let inAskMode = $derived(!permissionPrompt && !!pendingAsk);
-  let inScheduleMode = $derived(!permissionPrompt && !inAskMode && !!scheduleConfirm);
+  let inMcpArgMode = $derived(!permissionPrompt && !inAskMode && argMode.active);
+  let inScheduleMode = $derived(
+    !permissionPrompt && !inAskMode && !inMcpArgMode && !!scheduleConfirm,
+  );
 
   // The askUser bundle the View renders (form content + hoisted commit actions),
-  // mirroring how `permissionPrompt` is derived. Auto-submit for the no-explicit-
-  // submit kinds (single-select choice/files, diff, image) rides the effect below.
-  let askUserPrompt = $derived(
-    inAskMode && ask.pending
-      ? {
-          questions: ask.pending.questions,
-          drafts: ask.drafts,
-          togglePick: ask.togglePick,
-          setText: ask.setText,
-          onFreestyleFocus: ask.onFreestyleFocus,
-          onFreestyleBlur: ask.onFreestyleBlur,
-          setCell: ask.setCell,
-          addRow: ask.addRow,
-          removeRow: ask.removeRow,
-          canSubmit: ask.readyToSubmit,
-          onSubmit: ask.submit,
-          actions: ask.actions,
-        }
-      : null,
-  );
+  // mirroring how `permissionPrompt` is derived. A tool's askUser takes the slot
+  // when one is pending; otherwise the MCP prompt-argument form uses the same
+  // rendering so it looks identical. Auto-submit for the no-explicit-submit
+  // askUser kinds (single-select choice/files, diff, image) rides the effect below.
+  let askUserPrompt = $derived.by(() => {
+    if (inAskMode && ask.pending) {
+      return {
+        questions: ask.pending.questions,
+        drafts: ask.drafts,
+        togglePick: ask.togglePick,
+        setText: ask.setText,
+        onFreestyleFocus: ask.onFreestyleFocus,
+        onFreestyleBlur: ask.onFreestyleBlur,
+        setCell: ask.setCell,
+        addRow: ask.addRow,
+        removeRow: ask.removeRow,
+        canSubmit: ask.readyToSubmit,
+        onSubmit: ask.submit,
+        actions: ask.actions,
+      };
+    }
+    if (inMcpArgMode) {
+      return {
+        questions: argMode.questions,
+        drafts: argMode.drafts,
+        setText: argMode.setText,
+        canSubmit: argMode.canSubmit,
+        onSubmit: argMode.submit,
+        actions: argMode.actions,
+      };
+    }
+    return null;
+  });
   $effect(() => {
     if (!inAskMode || ask.requiresSubmit || !ask.readyToSubmit) return;
     ask.submit();
@@ -751,7 +859,7 @@
       onReject={() => {
         if (stt.original !== null) text = stt.original;
         stt.clearDiff();
-        textareaElement?.focus();
+        textareaElement?.focus({ preventScroll: true });
       }}
     />
   {/if}
@@ -809,7 +917,7 @@
       options={autocompleteOptions}
       selectedIndex={ac.index}
       anchor={ac.anchor}
-      onSelect={applySnippetTrigger}
+      onSelect={onAutocompleteSelect}
     />
   </div>
 {/if}

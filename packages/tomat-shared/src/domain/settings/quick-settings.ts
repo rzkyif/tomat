@@ -114,6 +114,7 @@ export const QUICK_SETTINGS_SECTIONS: QuickSettingsSectionDef[] = [
     enabledField: "greetings.enabled",
     fields: [
       { id: "greetings.runOn" },
+      { id: "greetings.showCooldown" },
       { id: "greetings.sessionTitle" },
       { id: "greetings.instruction" },
     ],

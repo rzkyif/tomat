@@ -12,11 +12,12 @@
 // dist/, which clears the cursor and forces a full rebuild; --force does the
 // same without cleaning.
 //
-// Builds (core + helpers, client, catalog, android). Mirrors the umbrella
+// Builds (core + helpers, client, catalog, android). A subset of the umbrella
 // `deno task release` item set: android is included (gated on the keystore being
-// present), and the landing page is NOT (it builds via `deno task build:website`
-// and ships on its own `release:website` track). The extension tarball and the
-// install scripts / schemas have no compile step, so they're release-only.
+// present), and the landing page is NOT - it has no local compile step here; its
+// release item builds Astro itself at release time (via `deno task build:website`
+// under the hood). The extension tarball and the install scripts / schemas
+// likewise have no compile step, so they're release-only.
 //
 // `deno task build` builds all targets (the host builds every arch it can
 // natively; the rest are reported skipped pending their environment driver);

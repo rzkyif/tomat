@@ -16,6 +16,8 @@ const BASELINE_SAMPLING = {
   topK: 20,
   minP: 0,
   repeatPenalty: 1.0,
+  dryMultiplier: DEFAULT_SAMPLING.dryMultiplier ?? 0,
+  presencePenalty: DEFAULT_SAMPLING.presencePenalty ?? 0,
 } as const;
 
 export const llmGroup: SettingGroup = {
@@ -122,6 +124,9 @@ export const llmGroup: SettingGroup = {
               "llm.topK",
               "llm.minP",
               "llm.repeatPenalty",
+              "llm.dryMultiplier",
+              "llm.presencePenalty",
+              "llm.samplers",
             ],
             // These are placeholders: the client fills each card's title, badges,
             // and description from GET /api/v1/models/recommend, and selecting a
@@ -179,7 +184,7 @@ export const llmGroup: SettingGroup = {
           description:
             "Whether the model should think before answering. The model may still skip it for simple prompts.",
           type: "select",
-          defaultValue: "on",
+          defaultValue: "off",
           options: [
             { value: "off", label: "Off" },
             { value: "on", label: "On" },
@@ -191,8 +196,9 @@ export const llmGroup: SettingGroup = {
           name: "Thinking Budget",
           description: "How many tokens the model may spend thinking.",
           type: "number",
-          // "Low" thinking for a fresh app (1/16 of the default context), so the
-          // quick model bar reads as "Low" rather than an open-ended "Unlimited".
+          // The budget to start from once thinking is turned on: "Low" (1/16 of
+          // the default context), so enabling thinking lands on a modest budget
+          // rather than an open-ended "Unlimited".
           defaultValue: localThinkingBudget("low", DEFAULT_CONTEXT_SIZE),
           visibleWhen: {
             allOf: [
@@ -269,6 +275,37 @@ export const llmGroup: SettingGroup = {
             "How strongly to discourage the model repeating itself. 1 is off; higher reduces repetition.",
           type: "float",
           defaultValue: BASELINE_SAMPLING.repeatPenalty,
+          visibleWhen: { field: "llm.provider", eq: "local" },
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.dryMultiplier",
+          name: "Loop Guard",
+          description:
+            "Discourages the model from repeating whole phrases, which helps it avoid getting stuck in thinking loops. Higher is stronger; 0 turns it off.",
+          type: "float",
+          defaultValue: BASELINE_SAMPLING.dryMultiplier,
+          visibleWhen: { field: "llm.provider", eq: "local" },
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.presencePenalty",
+          name: "Presence Penalty",
+          description:
+            "Nudges the model toward new words instead of ones it already used. Higher is more varied; 0 turns it off.",
+          type: "float",
+          defaultValue: BASELINE_SAMPLING.presencePenalty,
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "llm.samplers",
+          name: "Sampler Order",
+          description:
+            "The order the model server runs its samplers in, separated by semicolons. Leave blank to use the model's default order.",
+          type: "string",
+          defaultValue: "",
+          placeholder: "top_k;typ_p;top_p;min_p;xtc;temperature;dry;penalties",
+          optional: true,
           visibleWhen: { field: "llm.provider", eq: "local" },
           descriptionTier: "ondemand",
         },

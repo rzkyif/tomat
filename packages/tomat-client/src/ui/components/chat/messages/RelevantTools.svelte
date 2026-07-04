@@ -20,6 +20,8 @@
   phase1={msg.phase1}
   phase2={msg.phase2}
   alwaysAvailable={msg.alwaysAvailable}
+  nameMatched={msg.nameMatched}
+  mcp={msg.mcp}
   status={msg.status ?? "complete"}
   errorMessage={msg.errorMessage}
   {neighborLeft}

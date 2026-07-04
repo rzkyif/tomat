@@ -1,9 +1,10 @@
-// MCP token resolution: @resource -> fenced reference DATA, /prompt ->
-// instruction block, slug matching, dedup via the claimed set, required-argument
-// prompts skipped, `#` never treated as a reference, and the per-block cap.
+// MCP token resolution: @resource -> fenced reference DATA, slug matching, dedup
+// via the claimed set, `#` and `/` never treated as a resource, and the per-block
+// cap. `/prompt` tokens are resolved client-side at send (see resolvePrompt), so
+// this resolver deliberately leaves them alone.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { mcpResolveTokens } from "./tokens.ts";
+import { flattenPromptMessages, mcpResolveTokens } from "./tokens.ts";
 import { mcpRegistry } from "./registry.ts";
 import { mcpManager } from "./manager.ts";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
@@ -34,21 +35,27 @@ Deno.test("resolves @resource as fenced reference DATA", async () => {
   }
 });
 
-Deno.test("resolves /prompt as an instruction block, only when enabled", async () => {
+Deno.test("leaves a /prompt token unresolved (client resolves it at send)", async () => {
   const env = await setupTestEnv();
   try {
     const id = await connectFake({ prompts: [{ name: "commit", text: "Write a commit message" }] });
-    // Disabled by default: no match.
-    assertEquals((await mcpResolveTokens("run /commit")).block, null);
     mcpRegistry().setPromptEnabled(id, "commit", true);
-    const { block } = await mcpResolveTokens("run /commit");
-    assert(block);
-    assertStringIncludes(block, "follow these instructions");
-    assertStringIncludes(block, "Write a commit message");
+    // Even enabled, a `/prompt` is not expanded here.
+    assertEquals((await mcpResolveTokens("run /commit")).block, null);
   } finally {
     await clearFakeMcpServers();
     await env.teardown();
   }
+});
+
+Deno.test("flattenPromptMessages joins message text and caps the length", () => {
+  const flat = flattenPromptMessages([
+    { role: "user", content: { text: "line one" } },
+    { role: "user", content: [{ text: "a" }, { text: "b" }] },
+  ]);
+  assertEquals(flat, "line one\na\nb");
+  const big = flattenPromptMessages([{ role: "user", content: { text: "x".repeat(100_000) } }]);
+  assert(big.length <= 64_000);
 });
 
 Deno.test("dedups a repeated token and ignores '#'", async () => {
@@ -59,20 +66,6 @@ Deno.test("dedups a repeated token and ignores '#'", async () => {
     assert(block);
     // One block only despite two @readme mentions.
     assertEquals(block.split("BEGIN RESOURCE").length - 1, 1);
-  } finally {
-    await clearFakeMcpServers();
-    await env.teardown();
-  }
-});
-
-Deno.test("skips a prompt that needs a required argument", async () => {
-  const env = await setupTestEnv();
-  try {
-    const id = await connectFake({
-      prompts: [{ name: "review", requiredArg: true, text: "Review {{topic}}" }],
-    });
-    mcpRegistry().setPromptEnabled(id, "review", true);
-    assertEquals((await mcpResolveTokens("do /review")).block, null);
   } finally {
     await clearFakeMcpServers();
     await env.teardown();

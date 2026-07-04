@@ -8,6 +8,7 @@ import type { McpAdminHost } from "@tomat/core-engine";
 import type { McpServer, McpServerInput } from "@tomat/shared";
 import { mcpRegistry } from "../mcp/registry.ts";
 import { mcpManager } from "../mcp/manager.ts";
+import { flattenPromptMessages } from "../mcp/tokens.ts";
 import { cancel as cancelMcpOAuth, startMcpOAuth } from "../mcp/oauth-flow.ts";
 import { mcpAuthSecretName, mcpOAuthSecretName } from "../mcp/secret-key.ts";
 
@@ -24,6 +25,16 @@ export const denoMcpAdminHost: McpAdminHost = {
     mcpRegistry().setToolEnabled(id, tool, enabled),
   setPromptEnabled: (id: string, prompt: string, enabled: boolean): McpServer =>
     mcpRegistry().setPromptEnabled(id, prompt, enabled),
+  setToolAlwaysAvailable: (id: string, tool: string, alwaysAvailable: boolean): McpServer =>
+    mcpRegistry().setToolAlwaysAvailable(id, tool, alwaysAvailable),
+  resolvePrompt: async (
+    id: string,
+    prompt: string,
+    args: Record<string, string>,
+  ): Promise<string> => {
+    const got = await mcpManager().getPrompt(id, prompt, args);
+    return flattenPromptMessages(got.messages);
+  },
   // Reconcile connections to match the current enabled set.
   resync: (): Promise<void> => mcpManager().sync(mcpRegistry().list()),
   disconnect: (id: string): Promise<void> => mcpManager().disconnect(id),

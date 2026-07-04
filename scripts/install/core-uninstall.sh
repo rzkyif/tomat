@@ -435,8 +435,11 @@ ui_action_start "$IDX" "Removing tomat-core (service, keychain, data)"
 if [ -x "$INSTALLED_BIN" ]; then
   UNINSTALL_ARGS=""
   [ "$KEEP_DATA" = "1" ] && UNINSTALL_ARGS="--keep-data"
+  # TOMAT_CHANNEL must reach the binary: uninstall-service resolves the core
+  # root, service label, and keychain entry from it, defaulting to stable when
+  # unset. Without this the --latest / --dev teardown would tear down stable.
   # shellcheck disable=SC2086 # intentional word-splitting of the optional flag
-  if "$INSTALLED_BIN" uninstall-service $UNINSTALL_ARGS >&2; then
+  if TOMAT_CHANNEL="$TOMAT_CHANNEL" "$INSTALLED_BIN" uninstall-service $UNINSTALL_ARGS >&2; then
     ui_action_done "$IDX"
   else
     ui_action_error "$IDX" "(uninstall-service reported an error; see output above)"

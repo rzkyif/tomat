@@ -107,6 +107,9 @@ Deno.test("streamChatCompletion: local request carries thinking budget + llama s
         topK: 20,
         minP: 0.05,
         repeatPenalty: 1.1,
+        dryMultiplier: 0.8,
+        presencePenalty: 1.5,
+        samplers: ["top_k", "temperature", "dry", "penalties"],
         reasoningBudget: 256,
         fetch: cap.fetch,
       },
@@ -119,7 +122,14 @@ Deno.test("streamChatCompletion: local request carries thinking budget + llama s
   assertEquals(body.top_k, 20);
   assertEquals(body.min_p, 0.05);
   assertEquals(body.repeat_penalty, 1.1);
-  assertEquals(body.reasoning_budget, 256);
+  assertEquals(body.dry_multiplier, 0.8);
+  assertEquals(body.presence_penalty, 1.5);
+  assertEquals(body.samplers, ["top_k", "temperature", "dry", "penalties"]);
+  // llama-server reads the per-request thinking cap as `thinking_budget_tokens`
+  // and only enforces it when `reasoning_control` is true (a top-level `reasoning_budget`
+  // is silently dropped, so both must be present).
+  assertEquals(body.thinking_budget_tokens, 256);
+  assertEquals(body.reasoning_control, true);
   assertEquals(body.chat_template_kwargs, { enable_thinking: true });
 });
 
@@ -150,8 +160,11 @@ Deno.test("streamChatCompletion: external request uses reasoning_effort, drops l
   assertEquals(body.top_k, undefined);
   assertEquals(body.min_p, undefined);
   assertEquals(body.repeat_penalty, undefined);
+  assertEquals(body.dry_multiplier, undefined);
+  assertEquals(body.samplers, undefined);
   assertEquals(body.chat_template_kwargs, undefined);
-  assertEquals(body.reasoning_budget, undefined);
+  assertEquals(body.thinking_budget_tokens, undefined);
+  assertEquals(body.reasoning_control, undefined);
 });
 
 Deno.test("streamChatCompletion: external request forwards reasoningEffort level", async () => {
@@ -190,5 +203,6 @@ Deno.test("streamChatCompletion: thinking off sends enable_thinking false (local
   const body = cap.body();
   assertEquals(body.chat_template_kwargs, { enable_thinking: false });
   // No budget is sent when thinking is off.
-  assertEquals(body.reasoning_budget, undefined);
+  assertEquals(body.thinking_budget_tokens, undefined);
+  assertEquals(body.reasoning_control, undefined);
 });

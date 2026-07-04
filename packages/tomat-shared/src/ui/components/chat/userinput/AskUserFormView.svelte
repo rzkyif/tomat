@@ -135,12 +135,15 @@
 
   // Auto-focus the first nav element when the form appears so the user can
   // start typing or arrow-navigate without first reaching for the mouse.
+  // preventScroll: this fires on mount, so if the form appears while its panel is
+  // translated off-screen (mid navigation slide) a plain focus would scroll the
+  // layer to reveal it and shift the whole UI (see UserInput / Settings search).
   let focused = $state(false);
   $effect(() => {
     if (!autoFocus || focused || !container) return;
     const first = container.querySelector<HTMLElement>("[data-tc-nav]");
     if (!first) return;
-    first.focus();
+    first.focus({ preventScroll: true });
     focused = true;
   });
 </script>

@@ -207,6 +207,9 @@
       "tier": "C",
       "composes": ["ObjectDetailHeaderView", "ObjectDetailScrollView"]
     },
+    "settings/fields/McpPromptDetail.svelte": {
+      "tier": "C"
+    },
     "settings/fields/StorageField.svelte": {
       "tier": "C",
       "composes": ["StorageFieldView"]

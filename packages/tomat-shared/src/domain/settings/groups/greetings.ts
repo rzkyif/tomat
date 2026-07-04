@@ -23,17 +23,36 @@ export const greetingsGroup: SettingGroup = {
         {
           id: "greetings.runOn",
           name: "When to Greet",
-          description: "Greet on every start, or only when tomat opens itself at login.",
+          description:
+            "Greet only when tomat opens itself at login, on every launch, or every time the window is shown.",
           type: "select",
           defaultValue: "autostart",
           options: [
             { value: "autostart", label: "Automatic Start Only" },
             { value: "every_start", label: "Every Start" },
+            { value: "every_show", label: "Every Show" },
           ],
           // Login autostart has no mobile equivalent, so the choice is hidden
           // there; a mobile launch always greets (it reports as an automatic
-          // start), matching "every start".
+          // start), matching "every start". "Every Show" also greets each time
+          // the window is revealed from hidden, which mobile has no equivalent of.
           desktopOnly: true,
+          visibleWhen: { field: "greetings.enabled", eq: true },
+          descriptionTier: "ondemand",
+        },
+        {
+          id: "greetings.showCooldown",
+          name: "Greeting Cooldown",
+          description: "How long to wait before another greeting can run.",
+          type: "number",
+          defaultValue: 10,
+          suffix: "seconds",
+          regex: [
+            {
+              regex: "^([5-9]|[1-9][0-9]|[1-9][0-9]{2}|[12][0-9]{3}|3[0-5][0-9]{2}|3600)$",
+              errorMessage: "Must be 5-3600",
+            },
+          ],
           visibleWhen: { field: "greetings.enabled", eq: true },
           descriptionTier: "ondemand",
         },

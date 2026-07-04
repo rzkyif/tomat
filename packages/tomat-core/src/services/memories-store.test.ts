@@ -7,7 +7,7 @@ import { join } from "@std/path";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { paths } from "../paths.ts";
 import { AppError } from "@tomat/core-engine";
-import { memoriesStore } from "@tomat/core-engine/services/memories-store";
+import { memoriesStore, setMemoryProviderGate } from "@tomat/core-engine/services/memories-store";
 
 Deno.test("memories: create, get, list, title conflict", async () => {
   const env = await setupTestEnv();
@@ -110,6 +110,53 @@ Deno.test("memories: summaryStale flips false once the summary pins the content"
     // Editing the content makes the pinned summary stale again.
     await store.replaceContent(doc.id, "new body");
     assertEquals((await store.get(doc.id)).summaryStale, true);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("memories: an extension's memories are hidden unless the provider gate passes", async () => {
+  const env = await setupTestEnv();
+  try {
+    const store = memoriesStore();
+    // A user memory is always listed regardless of any gate.
+    await store.create("knowledge", "Mine", "body");
+    // Register a read-only memory shipped by extension "ext-a": base dir is the
+    // parent of the install dir, so `${id}/${path}` resolves under the install dir.
+    const baseDir = await Deno.makeTempDir();
+    await Deno.mkdir(join(baseDir, "ext-a"), { recursive: true });
+    Deno.writeTextFileSync(join(baseDir, "ext-a", "guide.md"), "# Guide");
+    await store.registerExtensionMemories("ext-a", baseDir, [
+      { kind: "knowledge", path: "guide.md" },
+    ]);
+
+    // No gate set: everything is visible (mobile / test default).
+    assertEquals(
+      store
+        .list()
+        .map((d) => d.title)
+        .sort(),
+      ["Guide", "Mine"],
+    );
+
+    // Gate says ext-a is NOT installed: its memory drops out, the row survives.
+    setMemoryProviderGate((provider) => provider !== "ext-a");
+    assertEquals(
+      store.list().map((d) => d.title),
+      ["Mine"],
+    );
+
+    // Gate says ext-a IS installed: it returns.
+    setMemoryProviderGate(() => true);
+    assertEquals(
+      store
+        .list()
+        .map((d) => d.title)
+        .sort(),
+      ["Guide", "Mine"],
+    );
+
+    await Deno.remove(baseDir, { recursive: true });
   } finally {
     await env.teardown();
   }

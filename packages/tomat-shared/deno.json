@@ -28,6 +28,7 @@
     "./ui/color": "./src/ui/color.ts",
     "./ui/context": "./src/ui/context.ts",
     "./ui/types": "./src/ui/types.ts",
+    "./ui/merge": "./src/ui/merge.ts",
     "./ui/animations": "./src/ui/animations.ts",
     "./ui/samples": "./src/ui/samples/index.ts",
     "./ui/styles/base.css": "./src/ui/styles/base.css"

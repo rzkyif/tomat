@@ -11,11 +11,15 @@
  * subscriptions, and keeps the two `$effect`s that trigger `runSlide` (on a
  * pending navigation) and `positionWindow` (on alignment/monitor/width change).
  *
- * The WKWebView transition + double-`rAF` ordering here is timing-sensitive and
- * only observable in the running app; it is moved verbatim from the route and
- * must stay byte-for-byte: set the transition, then the target style, with the
- * source value already on the element so the WebView fires the transition
- * reliably.
+ * Two motion mechanisms live here. The panel swap (`runSlide`, desktop) drives
+ * the layer transform through the shared `animateTransform` (Web Animations API,
+ * explicit keyframes) so the slide-in always starts from the off-screen edge and
+ * never from a stale mid-transform. The window-level reveal/hide
+ * (`applyWindowState`) and the mobile carousel still use the CSS-transition
+ * pattern - set the transition, then the target style, source value already on
+ * the element - which is timing-sensitive on WKWebView and only observable in the
+ * running app; the mobile carousel adds a double-`rAF` park so the WebView paints
+ * the start state before the transition turns on.
  */
 
 import { tick } from "svelte";
@@ -24,6 +28,7 @@ import { settingsState } from "$stores/settings.svelte";
 import { viewState, type AppMode } from "$stores/view.svelte";
 import { windowTransition } from "$stores/shortcut.svelte";
 import { getDuration } from "$lib/appearance/animations";
+import { animateTransform } from "@tomat/shared/ui/animations";
 import { getLogger } from "$lib/util/log";
 
 const windowLog = getLogger("window");
@@ -211,20 +216,20 @@ export class WindowChoreography {
     } else if (layer && dur > 0) {
       const offscreen = offscreenTransform(settingsState.getAlignment());
 
-      // Phase 1: slide the wrapper (and everything inside) offscreen.
-      layer.style.transition = `transform ${dur}ms ${TRANSITION_EASING}`;
-      layer.style.transform = offscreen;
-      await new Promise((r) => setTimeout(r, dur));
+      // Phase 1: slide the wrapper (and everything inside) to the aligned edge.
+      await animateTransform(layer, "none", offscreen, dur, TRANSITION_EASING);
 
       // Phase 2: commit the mode swap while offscreen, so the new mode
       // mounts already offscreen with no extra positioning.
       viewState.commit();
       await tick();
 
-      // Phase 3: slide the wrapper back to its natural position.
+      // Phase 3: slide the wrapper back in from the same edge to its natural
+      // position. WAAPI keyframes start the motion at `offscreen` explicitly, so
+      // the slide-in can't begin from a stale mid-transform (the "starts from the
+      // middle of the screen" glitch the timer + CSS-transition version had).
+      await animateTransform(layer, offscreen, "none", dur, TRANSITION_EASING);
       layer.style.transform = "";
-      await new Promise((r) => setTimeout(r, dur));
-      layer.style.transition = "";
     } else {
       viewState.commit();
     }

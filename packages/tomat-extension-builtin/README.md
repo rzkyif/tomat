@@ -17,25 +17,24 @@ for the `tomat-extension` keyword. An extension is a provider: it can ship
 tools, memories (knowledge and skills), or both. Each tool declares the OS-level
 permissions it needs, and the user grants them per tool (see Permissions below).
 
-| Tool                 | Function          | What it does                                                                        |
-| -------------------- | ----------------- | ----------------------------------------------------------------------------------- |
-| `web_search`         | webSearch         | Search DuckDuckGo and return the top results.                                       |
-| `fetch_webpage`      | fetchWebpage      | Fetch a URL and return its readable text content.                                   |
-| `calculator`         | calculator        | Evaluate a math expression (arithmetic, comparisons, functions like `sqrt`).        |
-| `get_datetime`       | getDatetime       | Report the current local date, time, weekday, and UTC offset.                       |
-| `download_url`       | download          | Download a file from an http(s) URL into the user's Downloads folder.               |
-| `organize_downloads` | organizeDownloads | Pick loose Downloads files, review a plan, move them into category folders.         |
-| `open_website`       | open              | Open a URL in the default browser (macOS `open`, Linux `xdg-open`, Win `rundll32`). |
-| `open_app`           | openApp           | Launch one or more apps by name (macOS `open -a`, Win `start`, Linux `gtk-launch`). |
-| `open_file`          | openFile          | Open a file, in a chosen app or the default one.                                    |
-| `get_window_layout`  | getWindowLayout   | Read open windows' positions and sizes (macOS/Windows/Linux X11; best-effort).      |
-| `set_window_layout`  | setWindowLayout   | Move and resize windows to a remembered layout (macOS/Windows/Linux X11).           |
-| `list_memories`      | listMemories      | List the user's memories by title, kind, and short summary.                         |
-| `read_memory`        | readMemory        | Read a memory's full content by title.                                              |
-| `show_memory`        | showMemory        | Render a memory as markdown in the chat (one-way display).                          |
-| `write_memory`       | writeMemory       | Create a memory, or replace an existing memory's content.                           |
-| `edit_memory`        | editMemory        | Replace one exact text occurrence in a memory.                                      |
-| `schedule_prompt`    | schedulePrompt    | Propose a scheduled prompt the user reviews and edits in chat before saving.        |
+| Tool                | Function        | What it does                                                                        |
+| ------------------- | --------------- | ----------------------------------------------------------------------------------- |
+| `web_search`        | webSearch       | Search DuckDuckGo and return the top results.                                       |
+| `fetch_webpage`     | fetchWebpage    | Fetch a URL and return its readable text content.                                   |
+| `calculator`        | calculator      | Evaluate a math expression (arithmetic, comparisons, functions like `sqrt`).        |
+| `get_datetime`      | getDatetime     | Report the current local date, time, weekday, and UTC offset.                       |
+| `download_url`      | download        | Download a file from an http(s) URL into the user's Downloads folder.               |
+| `open_website`      | open            | Open a URL in the default browser (macOS `open`, Linux `xdg-open`, Win `rundll32`). |
+| `open_app`          | openApp         | Launch one or more apps by name (macOS `open -a`, Win `start`, Linux `gtk-launch`). |
+| `open_file`         | openFile        | Open a file, in a chosen app or the default one.                                    |
+| `get_window_layout` | getWindowLayout | Read open windows' positions and sizes (macOS/Windows/Linux X11; best-effort).      |
+| `set_window_layout` | setWindowLayout | Move and resize windows to a remembered layout (macOS/Windows/Linux X11).           |
+| `list_memories`     | listMemories    | List the user's memories by title, kind, and short summary.                         |
+| `read_memory`       | readMemory      | Read a memory's full content by title.                                              |
+| `show_memory`       | showMemory      | Render a memory as markdown in the chat (one-way display).                          |
+| `write_memory`      | writeMemory     | Create a memory, or replace an existing memory's content.                           |
+| `edit_memory`       | editMemory      | Replace one exact text occurrence in a memory.                                      |
+| `schedule_prompt`   | schedulePrompt  | Propose a scheduled prompt the user reviews and edits in chat before saving.        |
 
 ## Layout
 
@@ -56,7 +55,6 @@ permissions it needs, and the user grants them per tool (see Permissions below).
     ├── web.ts         # shared size-capped fetch helper (not a tool)
     ├── webpage.ts     # fetch_webpage
     ├── search.ts      # web_search
-    ├── organize.ts    # organize_downloads
     └── types.ts       # local copy of the ToolContext shape the worker injects
 ```
 
@@ -69,12 +67,11 @@ per-tool grants on spawn and gives the worker subprocess exactly the matching
 `--allow-*` flags; module access (memories, ...) is brokered by the core rather
 than handed to the worker. Specifically:
 
-- `download_url` and `organize_downloads` need **read** and **write** on
-  `$downloads` (download reads it to pick a non-clobbering filename; organize
-  reads to list and writes to move), plus **env** for `XDG_DOWNLOAD_DIR` /
-  `HOME` / `USERPROFILE` (all optional; the tool resolves the folder from
-  whichever is granted). The web-facing tools refuse loopback and private-range
-  hosts and re-check every redirect hop.
+- `download_url` needs **read** and **write** on `$downloads` (read to pick a
+  non-clobbering filename, write to save the file), plus **env** for
+  `XDG_DOWNLOAD_DIR` / `HOME` / `USERPROFILE` (all optional; the tool resolves
+  the folder from whichever is granted). The web-facing tools refuse loopback
+  and private-range hosts and re-check every redirect hop.
 - `fetch_webpage` needs **net** to any http(s) host; `web_search` needs **net**
   to `html.duckduckgo.com` only.
 - `open_website` needs **run** access for `open`, `xdg-open`, and `rundll32`

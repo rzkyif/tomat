@@ -169,6 +169,13 @@ export interface McpAdminHost {
   delete(id: string): void;
   setToolEnabled(id: string, tool: string, enabled: boolean): McpServer;
   setPromptEnabled(id: string, prompt: string, enabled: boolean): McpServer;
+  // Set whether an MCP tool is always-available (default true). When off, the
+  // tool folds into the relevance filter instead of being offered every turn.
+  setToolAlwaysAvailable(id: string, tool: string, alwaysAvailable: boolean): McpServer;
+  // Fetch a prompt from a connected server and flatten its messages into one
+  // instruction string, applying the given arguments. Used to resolve a
+  // `/prompt` reference into the turn's system prompt when the message is sent.
+  resolvePrompt(id: string, prompt: string, args: Record<string, string>): Promise<string>;
   // Reconcile live connections to the current enabled set (connect newly-enabled,
   // drop disabled). Called after any change that affects connectivity.
   resync(): Promise<void>;

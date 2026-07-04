@@ -77,4 +77,12 @@ export const toolDetailSamples = {
     enableAriaLabel: "Enable search_web",
     permissions: [],
   },
+  alwaysAvailable: {
+    enabled: true,
+    enableAriaLabel: "Enable get_datetime",
+    showAlwaysAvailable: true,
+    alwaysAvailable: true,
+    alwaysAvailableAriaLabel: "Always offer get_datetime",
+    permissions: [],
+  },
 } satisfies Record<string, OmitSnippetProps<ComponentProps<typeof ToolDetailView>>>;

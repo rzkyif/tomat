@@ -20,8 +20,9 @@ on, the bar shows a microphone.
 />
 
 <Aside type="note">
-  Speech-to-Text can run locally, so your audio is transcribed on the Core and never sent to an
-  external service. That makes it safe to use for the same things you would type.
+  Speech-to-Text can run locally, so your audio is transcribed on the Core and never sent away, which
+  keeps it safe to use for the same things you would type. It can also use an External provider, which
+  sends your audio to an outside API to be transcribed instead.
 </Aside>
 
 ## Turning it on
@@ -44,6 +45,18 @@ The three ways to start are:
   hides the window instead. You set that shortcut under
   [Shortcuts](/manual/personalization/shortcuts).
 
+## Where it transcribes
+
+Under the same group you pick a **Provider** for the transcription itself. **Local**
+runs a speech-recognition model on the Core, so your audio never leaves the machine;
+**External** sends each clip to an OpenAI-compatible API and uses the text it returns.
+A Local provider offers a short list of curated models, from small low-RAM ones to a
+slower but more accurate option, and covers around a hundred languages between them;
+picking one may need a one-time download, which tomat always asks about first and
+never fetches in the background. An External provider takes a base URL, an API key,
+and a model name instead, and the audio is transcribed by whatever service you point
+it at.
+
 ## After you speak
 
 A raw transcription often has stray words and false starts. tomat can clean one up
@@ -64,11 +77,12 @@ dictation send a finished phrase on its own instead of streaming raw microphone
 noise, and it is why background sound does not usually trigger it.
 
 Each captured segment is packaged as a short audio clip and sent to the Core, where
-the speech service transcribes it with a local speech-recognition model and returns
-the text. For a Local setup that round trip never leaves your machine. The optional
-cleanup is a second, quick model pass over that raw text, fixing the false starts
-before the words reach the bar, and the send-after-dictation option submits the
-message once the cleanup is done.
+the speech service transcribes it and returns the text. With a Local provider it runs
+a speech-recognition model on the Core's device, so that round trip never leaves your
+machine; with an External provider the Core forwards the clip to the API you
+configured and hands back its transcript. The optional cleanup is a second, quick
+model pass over that raw text, fixing the false starts before the words reach the bar,
+and the send-after-dictation option submits the message once the cleanup is done.
 
 For the agent reading its answers back to you, see
 [Text-to-Speech](/manual/speech/text-to-speech).

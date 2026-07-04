@@ -14,6 +14,8 @@
     phase1,
     phase2,
     alwaysAvailable,
+    nameMatched,
+    mcp,
     status = "complete",
     errorMessage,
     defaultExpanded = false,
@@ -24,6 +26,8 @@
     phase1?: ToolFilterPhase1Persisted[];
     phase2?: ToolFilterEntryPersisted[];
     alwaysAvailable?: ToolFilterEntryPersisted[];
+    nameMatched?: ToolFilterEntryPersisted[];
+    mcp?: ToolFilterEntryPersisted[];
     status?: string;
     errorMessage?: string;
     defaultExpanded?: boolean;
@@ -32,34 +36,51 @@
   } = $props();
 
   type ScoredPhase = { kind: "embedding"; entries: ToolFilterPhase1Persisted[] };
-  type PlainPhase = { kind: "llm" | "always"; entries: ToolFilterEntryPersisted[] };
+  type PlainPhase = {
+    kind: "llm" | "always" | "named" | "mcp";
+    entries: ToolFilterEntryPersisted[];
+  };
   type Phase = ScoredPhase | PlainPhase;
 
   // Active sections in execution order; skipped methods drop out so the
-  // remaining "Phase N" labels renumber 1..N seamlessly.
+  // remaining "Phase N" labels renumber 1..N seamlessly. The extra sections
+  // (named, always, mcp) only appear when they carry tools; "mcp" lists the MCP
+  // tools offered this turn (always-available ones plus any matched by relevance).
   const phases = $derived.by<Phase[]>(() => {
     const out: Phase[] = [];
     if (phase1 !== undefined) out.push({ kind: "embedding", entries: phase1 });
     if (phase2 !== undefined) out.push({ kind: "llm", entries: phase2 });
+    if (nameMatched !== undefined && nameMatched.length > 0) {
+      out.push({ kind: "named", entries: nameMatched });
+    }
     if (alwaysAvailable !== undefined && alwaysAvailable.length > 0) {
       out.push({ kind: "always", entries: alwaysAvailable });
+    }
+    if (mcp !== undefined && mcp.length > 0) {
+      out.push({ kind: "mcp", entries: mcp });
     }
     return out;
   });
 
-  const bypassCount = $derived(alwaysAvailable?.length ?? 0);
+  const bypassCount = $derived(
+    (alwaysAvailable?.length ?? 0) + (nameMatched?.length ?? 0) + (mcp?.length ?? 0),
+  );
   const baseCount = $derived(phase2 !== undefined ? phase2.length : (phase1?.length ?? 0));
   const count = $derived(baseCount + bypassCount);
 
   const titleText = $derived.by(() => {
     if (status === "error") return "Failed to find relevant tools";
-    if (baseCount === 0) return "No relevant tools";
+    // A directly-named tool is a relevant match even when nothing scored, so it
+    // (unlike an always-available tool) lifts the "No relevant tools" title.
+    if (baseCount === 0 && (nameMatched?.length ?? 0) === 0) return "No relevant tools";
     return `Found ${count} relevant tool${count === 1 ? "" : "s"}`;
   });
 
   function phaseLabel(kind: Phase["kind"]): string {
     if (kind === "embedding") return "Embedding";
     if (kind === "llm") return "LLM Filter";
+    if (kind === "named") return "Named Tools";
+    if (kind === "mcp") return "MCP Tools";
     return "Always Available Tools";
   }
   function phaseEmptyText(kind: Phase["kind"]): string {

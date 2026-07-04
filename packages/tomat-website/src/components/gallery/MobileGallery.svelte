@@ -230,11 +230,16 @@
   />
 {/snippet}
 {#snippet chatSessionBar(_z: number)}
-  <!-- The session-management buttons (list + new) always show with the bar. -->
+  <!-- The session-management buttons (list + new) always show with the bar. On
+       mobile the SessionBar sits BELOW the CoreBar in the top app bar and is the
+       lower bubble, so it overlaps up (no gap, its top padding overlaps the
+       CoreBar's bottom padding). Corner rounding is invisible on the flat mobile
+       surface, so only the overlap shows. -->
   <SessionBarView
     {...SAMPLES.SessionBarView.default as ComponentProps<typeof SessionBarView>}
     onList={noop}
     onNew={noop}
+    merge={{ flatCorners: [], overlapTop: true }}
   />
 {/snippet}
 {#snippet chatInput()}

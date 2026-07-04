@@ -20,7 +20,8 @@ Deno.test("resolveEndpoint: defaults to local llama-server when provider is unse
   assertEquals(cfg.baseUrl, "http://127.0.0.1:7701/v1");
   assertEquals(cfg.apiKey, "sk-local");
   assertEquals(cfg.model, "default");
-  assertEquals(cfg.reasoning, "on");
+  // Thinking is off unless the user turns it on.
+  assertEquals(cfg.reasoning, "off");
   // Sampling is always populated from the schema defaults (sparse store).
   assertEquals(cfg.temperature, DEFAULT_SAMPLING.temperature);
   assertEquals(cfg.topP, DEFAULT_SAMPLING.topP);

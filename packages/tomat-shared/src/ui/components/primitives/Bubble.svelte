@@ -1,7 +1,8 @@
 <script lang="ts">
   import { type Snippet, untrack } from "svelte";
   import type { Alignment } from "../../types.ts";
-  import { useUiContext } from "../../context.ts";
+  import type { BubbleCorner } from "../../merge.ts";
+  import { bubbleGapExpr, useUiContext } from "../../context.ts";
   import { longpress } from "../../actions/longpress.ts";
 
   const ui = useUiContext();
@@ -25,6 +26,9 @@
     borderColorClass = "",
     neighborLeft = false,
     neighborRight = false,
+    flatCorners = [],
+    overlapTop = false,
+    onWidth = undefined,
     progress,
     progressFillBgClass = "bg-default-800",
     onclick,
@@ -64,6 +68,17 @@
     neighborLeft?: boolean;
     /** Visual-right side has another bubble in the same stack row. */
     neighborRight?: boolean;
+    /** Corners to square off (radius 0) when this bubble merges flush into a
+     *  stacked neighbor (CoreBar under the SessionBar / Settings panel). */
+    flatCorners?: BubbleCorner[];
+    /** This is the lower bubble of a merged pair: pull it up by one padding plus
+     *  the column gap so its top padding overlaps the neighbor's bottom padding
+     *  with no seam, and clip its top shadow/halo (which would otherwise cast onto
+     *  the bubble above). */
+    overlapTop?: boolean;
+    /** Report this bubble's rendered content width (via a ResizeObserver on the
+     *  body). Used to decide which of two merging bubbles is the narrower one. */
+    onWidth?: (width: number) => void;
     /** Progress visualisation rendered AS the bubble background. When set, the
      *  WHOLE bubble reads inverted (a solid `progressFillBgClass` fill under an
      *  `invert()`-ed copy of the content) and the progress bar is an
@@ -170,10 +185,46 @@
   // in CSS from the `--ring-index` / `--ring-count` custom props set below.
   let ringCount = $derived(mobile ? 0 : ui.bubbleBlurEnabled ? (ui.bubbleBlurRings ?? 3) : 0);
 
-  // Per-side corner radius, exported to CSS so the shadow layer and the halo
-  // rings track the body's alignment/neighbor corner flattening.
+  // Per-corner radius, exported to CSS so the body, the shadow layer, and the
+  // halo rings all track the same alignment / neighbor / merge corner flattening.
+  // A screen-edge-anchored (or stack-neighbor) side collapses to the small
+  // radius; a merged corner squares off entirely.
   let leftSmall = $derived(selectedAlignment === "left" || neighborLeft);
   let rightSmall = $derived(selectedAlignment === "right" || neighborRight);
+  let flat = $derived(new Set<BubbleCorner>(flatCorners));
+  function cornerRadius(corner: BubbleCorner, small: boolean): string {
+    if (flat.has(corner)) return "0px";
+    return small ? "var(--rounded-small)" : "var(--rounded-large)";
+  }
+  let radiusTL = $derived(cornerRadius("tl", leftSmall));
+  let radiusTR = $derived(cornerRadius("tr", rightSmall));
+  let radiusBR = $derived(cornerRadius("br", rightSmall));
+  let radiusBL = $derived(cornerRadius("bl", leftSmall));
+  let bodyRadius = $derived(`${radiusTL} ${radiusTR} ${radiusBR} ${radiusBL}`);
+
+  // Merge overlap: pull the lower bubble up by the column gap (removing it) plus
+  // one small-bubble padding (0.5rem, so its top padding overlaps the neighbor's
+  // bottom padding). The flex item is a BFC, so this negative margin overlaps the
+  // neighbor above instead of collapsing out. `--bubble-merge-overlap` also drives
+  // the shadow/halo top clip (base.css) so it tracks the same amount: the lower
+  // bubble sits in a higher stacking context than the neighbor, so its shadow/halo
+  // must be clipped to the neighbor's bottom edge or they paint over its surface.
+  let overlapAmount = "0.5rem";
+  let overlapMargin = $derived(
+    overlapTop ? `calc(-1 * (var(--bubble-merge-overlap) + ${bubbleGapExpr(ui)}))` : undefined,
+  );
+
+  // Report the body's rendered width so a merging neighbor can tell which bubble
+  // is narrower. Skipped when no consumer wants it.
+  let bodyEl = $state<HTMLElement>();
+  $effect(() => {
+    if (!onWidth || !bodyEl) return;
+    const el = bodyEl;
+    const ro = new ResizeObserver(() => onWidth?.(el.offsetWidth));
+    ro.observe(el);
+    onWidth(el.offsetWidth);
+    return () => ro.disconnect();
+  });
 </script>
 
 <!-- Positioning + halo-containment wrapper. The body below clips its own
@@ -193,39 +244,45 @@
   class:mr-auto={selectedAlignment === "left"}
   class:ml-auto={selectedAlignment === "right"}
   class:mx-auto={selectedAlignment === "center"}
-  style="--bubble-radius-left: var({leftSmall
-    ? '--rounded-small'
-    : '--rounded-large'}); --bubble-radius-right: var({rightSmall
-    ? '--rounded-small'
-    : '--rounded-large'})"
+  style:--bubble-radius-tl={radiusTL}
+  style:--bubble-radius-tr={radiusTR}
+  style:--bubble-radius-br={radiusBR}
+  style:--bubble-radius-bl={radiusBL}
+  style:--bubble-merge-overlap={overlapTop ? overlapAmount : undefined}
+  style:margin-top={overlapMargin}
 >
   {#if !mobile}
-    <div class="bubble-shadow absolute inset-0 z-0" aria-hidden="true"></div>
+    <div
+      class="bubble-shadow absolute inset-0 z-0"
+      class:merge-clip-top={overlapTop}
+      aria-hidden="true"
+    ></div>
   {/if}
   {#each Array(ringCount) as _, i (i)}
     <div
       class="bubble-halo"
+      class:merge-clip-top={overlapTop}
       style="--ring-index: {i}; --ring-count: {ringCount}"
       aria-hidden="true"
     ></div>
   {/each}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div
+    bind:this={bodyEl}
     {onclick}
     {oncontextmenu}
     {ondblclick}
     use:longpress={onlongpress}
     role={onclick ? "presentation" : undefined}
     style:--default-base={defaultBaseOverride}
-    class="bubble-body {bgClass} {minHClass} relative z-10 overflow-hidden rounded-large {fullWidth
+    style:border-radius={bodyRadius}
+    class="bubble-body {bgClass} {minHClass} relative z-10 overflow-hidden {fullWidth
       ? 'w-full max-w-full'
       : 'w-fit max-w-[calc(100vw-5rem)]'} break-words transition-all duration-100 border-solid pointer-events-auto {borderColorClass}"
     class:bubble-body-promote={ringCount > 0}
     class:bubble-longpress={onlongpress}
-    class:rounded-l-small={selectedAlignment === "left" || neighborLeft}
     class:border-l-8={selectedAlignment === "left" && active}
     class:border-l-0={selectedAlignment === "left" && !active}
-    class:rounded-r-small={selectedAlignment === "right" || neighborRight}
     class:border-r-8={selectedAlignment === "right" && active}
     class:border-r-0={selectedAlignment === "right" && !active}
     class:border-b-8={selectedAlignment === "center" && active}

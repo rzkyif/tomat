@@ -186,6 +186,8 @@ export const toolFilterMessageInputSchema = z
     phase1: z.array(toolFilterPhase1Schema).optional(),
     phase2: z.array(toolFilterEntrySchema).optional(),
     alwaysAvailable: z.array(toolFilterEntrySchema).optional(),
+    nameMatched: z.array(toolFilterEntrySchema).optional(),
+    mcp: z.array(toolFilterEntrySchema).optional(),
     toolsSent: z.number().int().min(0).optional(),
     errorMessage: z.string().optional(),
   })

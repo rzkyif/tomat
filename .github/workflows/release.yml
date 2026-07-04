@@ -9,10 +9,16 @@ name: Release
 # local `deno task release`, so the two pipelines never double-publish.
 #
 # A cheap `preflight` job diffs the release items against that shared cursor and
-# gates the build + publish jobs. `deno task remote-release` moves the branch with
-# nothing published yet, so preflight sees changes and CI does the full build;
-# `deno task release` publishes locally FIRST and then pushes the branch, so
-# preflight sees the cursor already current and the expensive matrix is skipped.
+# emits two gates: `changed` (any item differs -> run publish) and `native` (a
+# matrix-built item - core / desktop client / android - differs -> run the
+# expensive per-triple build matrix). The platform-independent items (extension,
+# catalog, install scripts, schemas, the landing page) build on the publish
+# coordinator, so a push touching only them - e.g. a website-only change - skips
+# the whole build matrix: changed=true, native=false, build skipped, publish runs
+# just the changed items. `deno task remote-release` moves the branch with nothing
+# published yet, so preflight sees changes and CI does the needed work; `deno task
+# release` publishes locally FIRST and then pushes the branch, so preflight sees
+# the cursor already current and every job is skipped.
 #
 # A changed-but-unbumped item fails the publish job loudly. After a successful
 # latest-channel publish, a final `bump` job advances the just-published items'
@@ -53,6 +59,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       changed: ${{ steps.plan.outputs.changed }}
+      native: ${{ steps.plan.outputs.native }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -77,7 +84,10 @@ jobs:
   build:
     name: "Build (${{ matrix.id }})"
     needs: preflight
-    if: needs.preflight.outputs.changed == 'true'
+    # Only the matrix-built items (core / desktop client / android) need a build
+    # runner. A push touching only platform-independent items (e.g. website-only)
+    # has native=false, so the whole matrix is skipped and publish runs alone.
+    if: needs.preflight.outputs.native == 'true'
     strategy:
       # All-or-nothing: a release should not publish a partial platform set. A
       # transient runner failure is recovered by re-pushing (the run is idempotent).
@@ -330,7 +340,12 @@ jobs:
   publish:
     name: "Publish + GitHub Release"
     needs: [preflight, build]
-    if: needs.preflight.outputs.changed == 'true'
+    # Run whenever anything changed. `build` is skipped for a platform-independent
+    # -only push (native=false); always() lets publish proceed past that skip, and
+    # the result guard still stops it if a build runner actually failed.
+    if: >-
+      always() && needs.preflight.outputs.changed == 'true' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     # A healthy publish is ~5-7 min; cap well above that so a hung upload/verify
     # surfaces in minutes rather than after the old 30-min ceiling.

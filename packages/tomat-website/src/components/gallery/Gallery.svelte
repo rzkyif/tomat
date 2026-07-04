@@ -18,6 +18,8 @@
   import AgentMessageView from "@tomat/shared/ui/components/chat/messages/AgentMessageView.svelte";
   import AttachmentListView from "@tomat/shared/ui/components/chat/AttachmentListView.svelte";
   import ChatShellView from "@tomat/shared/ui/components/chat/ChatShellView.svelte";
+  import { mergeFlatCorners } from "@tomat/shared/ui/merge";
+  import { bubbleGap, useUiContext } from "@tomat/shared/ui/context";
   import ConfirmModalView from "@tomat/shared/ui/components/settings/ConfirmModalView.svelte";
   import PasswordPromptModalView from "@tomat/shared/ui/components/settings/PasswordPromptModalView.svelte";
   import ColorPickerModalView from "@tomat/shared/ui/components/settings/ColorPickerModalView.svelte";
@@ -107,6 +109,8 @@
     },
   };
 
+  const galleryUi = useUiContext();
+
   // A short simulated session for the ChatShellView card, so the shell shows the
   // real chat the way the client paints it (mirrors the homepage ChatStage).
   const CHAT_PROMPT = "How do I install tomat on macOS?";
@@ -177,18 +181,31 @@
 
       {#each entries(SAMPLES.SettingsShellView) as [name, p] (name)}
         <GalleryCard label={`SettingsShellView · ${name}`} wide>
-          <SettingsShellView {...p} sizeClass="w-full h-[28rem]">
-            {#snippet groupContent(gid)}
-              <SettingsContentView
-                groupId={gid}
-                values={SAMPLE_VALUES}
-                expanded={expandedFor(gid)}
-              />
-            {/snippet}
-            {#snippet sidebarFooter(collapsed)}
-              <SettingsDemoFooter {collapsed} />
-            {/snippet}
-          </SettingsShellView>
+          <!-- The settings view pins the CoreBar flush against the panel's bottom:
+               the panel squares its bottom corners onto the merged CoreBar (the
+               narrower plug, top corners squared + pulled up to overlap). -->
+          <div class="flex flex-col" style:gap={bubbleGap(galleryUi)}>
+            <SettingsShellView
+              {...p}
+              sizeClass="w-full h-[28rem]"
+              flatCorners={mergeFlatCorners("center", "bottom", false)}
+            >
+              {#snippet groupContent(gid)}
+                <SettingsContentView
+                  groupId={gid}
+                  values={SAMPLE_VALUES}
+                  expanded={expandedFor(gid)}
+                />
+              {/snippet}
+              {#snippet sidebarFooter(collapsed)}
+                <SettingsDemoFooter {collapsed} />
+              {/snippet}
+            </SettingsShellView>
+            <CoreBarView
+              {...SAMPLES.CoreBarView.idle}
+              merge={{ flatCorners: mergeFlatCorners("center", "top", true), overlapTop: true }}
+            />
+          </div>
         </GalleryCard>
       {/each}
 
@@ -708,12 +725,23 @@
      feeds live state, so the card shows the actual chat (core bar, session bar,
      composer, and a prompt -> reasoning -> answer exchange), not stand-ins. -->
 {#snippet chatCoreBar()}
-  <CoreBarView {...SAMPLES.CoreBarView.idle} />
+  <!-- Desktop: the CoreBar is the lower, narrower bubble, so it merges UP into the
+       SessionBar (both top corners squared, pulled up to overlap the seam). -->
+  <CoreBarView
+    {...SAMPLES.CoreBarView.idle}
+    merge={{ flatCorners: mergeFlatCorners("center", "top", true), overlapTop: true }}
+  />
 {/snippet}
 {#snippet chatSessionBar(_z: number)}
   <!-- The session-management buttons (list + new) always show with the bar, so
-       the shell card matches the client instead of a bar with no controls. -->
-  <SessionBarView {...SAMPLES.SessionBarView.default} onList={chatNoop} onNew={chatNoop} />
+       the shell card matches the client instead of a bar with no controls. The
+       SessionBar is the wider bubble and keeps its rounding (center-aligned). -->
+  <SessionBarView
+    {...SAMPLES.SessionBarView.default}
+    onList={chatNoop}
+    onNew={chatNoop}
+    merge={{ flatCorners: mergeFlatCorners("center", "bottom", false), overlapTop: false }}
+  />
 {/snippet}
 {#snippet chatInput()}
   <UserInputView {...SAMPLES.UserInputView.empty} />

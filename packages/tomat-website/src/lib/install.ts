@@ -216,32 +216,87 @@ export function nativeInstallers(target: Target, os: Os, channel: Channel): Nati
   return out;
 }
 
-/** The unified "how to install" steps, shared by both generator variants. Step
- *  one covers either entry point (run the terminal command OR open the downloaded
- *  installer); the rest is the common outcome, so one how-to serves both paths.
- *  The Windows unknown-publisher warning is folded in by the caller as a
- *  Windows-only step. */
-export function installSteps(target: Target): string[] {
-  if (target === "core") {
-    return [
-      "Run the command above, or open the downloaded installer, and follow the prompts.",
-      "It installs the Core and starts it in the background at login.",
-      "Open a tomat Client on any device and pair it to this Core.",
-    ];
-  }
-  return [
-    "Run the command above, or open the downloaded installer, and follow the prompts.",
-    "Launch tomat when it finishes.",
-    "Pick where its Core should run, on this computer or another you have.",
-  ];
+/** The line that runs the piped command, shared by the install-script branch and
+ *  the uninstall steps. */
+export const RUN_COMMAND_STEP = "Paste the command above and press Enter.";
+
+/** The first step of the installer-download branch: open the package. Held
+ *  separate so the no-JS baseline can render it once and CSS-toggle only the
+ *  per-OS security step after it. */
+export const INSTALLER_OPEN_STEP = "Open the downloaded installer and follow the prompts.";
+
+/** A how-to step. Usually a plain line; the OS security step carries a lead line
+ *  plus its own sub-points (the macOS Gatekeeper clear-it walkthrough), so the
+ *  generators render it as a nested list rather than one long sentence. */
+export type HowtoStep = string | SecurityStep;
+
+export interface SecurityStep {
+  /** The lead line: what the OS does and why. */
+  text: string;
+  /** Sub-points to clear it, or [] for a one-line warning. */
+  sub: string[];
 }
 
-/** A one-line note about the OS security prompt an UNSIGNED installer triggers,
- *  or null when the platform's installer is signed. Windows installers ship
- *  unsigned for now (SmartScreen warns); macOS + the rest are signed. */
-export function unsignedInstallerNote(os: Os): string | null {
+/** The path-specific steps for the install-script branch (step 1.a): open the
+ *  right terminal, then run the piped command. The finishing steps are lifted to
+ *  {@link finishHowto} (step 2), shared with the installer branch. */
+export function scriptHowto(os: Os): string[] {
+  return [openTerminalStep(os), RUN_COMMAND_STEP];
+}
+
+/** The path-specific steps for the installer-download branch (step 1.b): open
+ *  the downloaded package, then clear the first-run security prompt if the OS has
+ *  one. Unlike the script, a downloaded installer is not quarantine-stripped for
+ *  you, so the macOS Gatekeeper block and the Windows unknown-publisher warning
+ *  are folded in per OS (see {@link installerSecurityStep}). The finishing steps
+ *  are lifted to {@link finishHowto} (step 2). */
+export function installerHowto(os: Os, target: Target): HowtoStep[] {
+  const security = installerSecurityStep(os, target);
+  return security ? [INSTALLER_OPEN_STEP, security] : [INSTALLER_OPEN_STEP];
+}
+
+/** The plain-text finishing steps once either install path completes (step 2),
+ *  lifted out of both branches so the shared outcome is stated once. Only the
+ *  Core has plain-text finishing steps; the Client's finish carries a link (to
+ *  Cores and Pairing), so the generators render it as bespoke markup instead. */
+export function finishHowto(target: Target): string[] {
+  if (target === "core") {
+    return [
+      "Set an admin password when prompted; you'll need it to pair more devices.",
+      "When it finishes, the Core runs in the background at login. Open a tomat Client on any device and pair it to this Core.",
+    ];
+  }
+  return [];
+}
+
+/** The first-run security prompt an unsigned installer triggers, per OS, or null
+ *  when there is none. macOS bundles are ad-hoc signed for now (an Apple
+ *  Developer ID is on the way), so Gatekeeper blocks them the first time and you
+ *  clear it once in System Settings (returned as a lead line plus sub-points);
+ *  Windows SmartScreen warns on the unsigned setup (a one-line note). Only the
+ *  installer-download path needs this: the install script strips the quarantine
+ *  flag for you. */
+export function installerSecurityStep(os: Os, target: Target): SecurityStep | null {
+  if (os === "macos") {
+    return {
+      text:
+        target === "core"
+          ? "macOS blocks the installer because tomat is not yet signed by an identified Apple developer. That signing is on the way, so this is temporary. To clear it:"
+          : "The first time you open tomat, macOS blocks it because it is not yet signed by an identified Apple developer. That signing is on the way, so this is temporary. To clear it:",
+      sub: [
+        "Open System Settings, then Privacy & Security.",
+        "Scroll to the Security section and choose Open Anyway next to the tomat message.",
+        target === "core"
+          ? "Enter your password to confirm, then run the installer again."
+          : "Enter your password to confirm, then open tomat again.",
+      ],
+    };
+  }
   if (os === "windows") {
-    return "Windows may warn that the publisher is unknown. Choose More info, then Run anyway.";
+    return {
+      text: "Windows may warn that the publisher is unknown. Choose More info, then Run anyway.",
+      sub: [],
+    };
   }
   return null;
 }
@@ -273,8 +328,8 @@ export function androidApkUrl(channel: Channel): string {
 
 /** The OS-specific first "how to" step: which terminal to open. Split out from
  *  the rest so the no-JS baseline can CSS-toggle it per OS while rendering the
- *  fixed tail (see {@link commandStepsTail}) statically, and the island can read
- *  it reactively. */
+ *  fixed tail (see {@link uninstallStepsTail}) statically, and the island can
+ *  read it reactively. */
 export function openTerminalStep(os: Os): string {
   return os === "windows"
     ? "Open PowerShell."
@@ -283,27 +338,15 @@ export function openTerminalStep(os: Os): string {
       : "Open your terminal.";
 }
 
-/** The "how to" steps after the OS-specific opener ({@link openTerminalStep}),
- *  fixed per mode + target. The install-only "uninstallation guide" pointer is
- *  appended by the caller, since it carries a link rather than plain text. */
-export function commandStepsTail(mode: "install" | "uninstall", target: Target): string[] {
-  const run = "Paste the command above and press Enter.";
-  if (mode === "uninstall") {
-    return [
-      run,
-      target === "core"
-        ? "It stops the Core and removes it; use the option above to keep its sessions and memories."
-        : "It removes the app but keeps your settings; use the option above to wipe them too.",
-    ];
-  }
-  if (target === "core") {
-    return [
-      run,
-      "Set an admin password when prompted; you'll need it to pair more devices.",
-      "When it finishes, note the pairing code it prints.",
-    ];
-  }
-  return [run, "When it finishes, launch tomat and pick where its Core should run."];
+/** The uninstall "how to" steps after the OS-specific opener
+ *  ({@link openTerminalStep}): run the command, then a note on what it removes. */
+export function uninstallStepsTail(target: Target): string[] {
+  return [
+    RUN_COMMAND_STEP,
+    target === "core"
+      ? "It stops the Core and removes it; use the option above to keep its sessions and memories."
+      : "It removes the app but keeps your settings; use the option above to wipe them too.",
+  ];
 }
 
 /** Map a navigator string to one of our OS ids, best-effort. */
