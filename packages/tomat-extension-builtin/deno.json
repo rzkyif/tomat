@@ -1,6 +1,6 @@
 {
   "name": "tomat-extension-builtin",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "tasks": {
     "check": "deno check index.ts",
     "test:js": "deno test --allow-all --no-check --quiet --reporter=dot",

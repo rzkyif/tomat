@@ -1,6 +1,6 @@
 {
   "name": "@tomat/website",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "exports": {},
   "tasks": {
     "dev": "ASTRO_DEV_BACKGROUND=1 deno run -A npm:astro@^7 dev",
