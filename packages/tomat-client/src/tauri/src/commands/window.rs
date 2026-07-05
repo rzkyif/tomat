@@ -424,6 +424,9 @@ pub fn set_input_shortcuts(
     // collides with it: the plugin keys handlers by a hash of the accelerator,
     // so registering the same combo would overwrite the toggle's handler in the
     // shared map and swallow its release events (turning taps into stuck holds).
+    // The reverse (setting the toggle to a combo an input shortcut already owns)
+    // is handled in `set_global_shortcut`: its `register` fails with
+    // ERROR_HOTKEY_ALREADY_REGISTERED and rolls back to the previous toggle.
     let toggle_accel = state.0.current_shortcut.lock().ok().and_then(|g| g.clone());
 
     let mut current = state

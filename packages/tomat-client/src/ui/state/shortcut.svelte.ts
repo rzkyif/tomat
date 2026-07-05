@@ -50,8 +50,9 @@ export const windowTransition = new WindowTransition();
 class ShortcutHandler {
   // Reactive: true while the push-to-talk shortcut is currently being held
   // (between press and either the hold verdict or a tap). Drives the mic
-  // button's hold-progress ring so the UI animates from 0 → 100% over the
-  // hold duration. Cosmetic, so a slightly congested webview clock is fine.
+  // button's hold-progress ring, AND is read by vadManager.afterSegment to keep
+  // dictating while held - so it is load-bearing, not cosmetic: every press must
+  // reset it (which is why a release always delivers a terminal event).
   pttHolding = $state(false);
   // The hold duration captured at press time (ms). Pinned for the duration
   // of the press so a settings change mid-hold can't desync the animation.
@@ -65,6 +66,12 @@ class ShortcutHandler {
   // so the matching tap / hold-end action is dropped too (otherwise a
   // half-press would still hide the window or toggle VAD off).
   private skipNextAction = false;
+  // Resolves once the current press has finished settling its state (visibility
+  // probe, show, ring flag). The tap/hold events arrive independently from Rust
+  // and can fire while onPressed is still awaiting, so each awaits this first -
+  // otherwise a fast tap could read a stale `wasVisibleOnPress` or leave the
+  // ring stuck on after onPressed re-sets it.
+  private pressSettled: Promise<void> = Promise.resolve();
 
   private unsubscribe: (() => void) | null = null;
 
@@ -90,9 +97,14 @@ class ShortcutHandler {
     this.pttHolding = false;
     this.pttHoldDuration = 0;
     this.skipNextAction = false;
+    this.pressSettled = Promise.resolve();
   }
 
-  private async onPressed() {
+  // Synchronous so the transition guard + skipNextAction flag are set the
+  // instant the press event fires, before any await can let a tap/hold event
+  // interleave. The actual work is deferred to settlePress, tracked so the
+  // follow-up handlers can await it.
+  private onPressed() {
     // Drop presses landing while the window is mid show / hide animation.
     // Rust flips its visibility AtomicBool only after JS finishes the
     // animation, so a pass-through press would emit the opposite-direction
@@ -102,12 +114,23 @@ class ShortcutHandler {
       return;
     }
     this.skipNextAction = false;
+    this.pressSettled = this.settlePress();
+  }
 
+  private async settlePress() {
     const mode = settingsState.currentSettings["stt.activation"];
     if (mode === "push-to-talk") {
       const duration = Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
-      const visible = await platform().windowing.isVisible();
+      let visible = false;
+      try {
+        visible = await platform().windowing.isVisible();
+      } catch (e) {
+        log.warn("isVisible failed:", e);
+      }
       this.wasVisibleOnPress = visible;
+      // Start the mic ring immediately; Rust decides tap vs hold from here.
+      this.pttHoldDuration = duration;
+      this.pttHolding = true;
 
       if (!visible) {
         try {
@@ -116,10 +139,6 @@ class ShortcutHandler {
           log.warn("show failed:", e);
         }
       }
-
-      // Start the mic ring immediately; Rust decides tap vs hold from here.
-      this.pttHoldDuration = duration;
-      this.pttHolding = true;
     } else {
       // Manual / Sticky: defer to Rust so the shortcut and the tray icon
       // share one source of truth for visibility (avoids drift between
@@ -136,6 +155,7 @@ class ShortcutHandler {
   // Released before the hold threshold: a short tap. Fires the moment Rust
   // sees the release, so taps stay snappy even when the webview is busy.
   private async onTap() {
+    await this.pressSettled;
     this.pttHolding = false;
     if (this.skipNextAction) {
       this.skipNextAction = false;
@@ -157,6 +177,7 @@ class ShortcutHandler {
 
   // Hold threshold reached while still held: start listening.
   private async onHoldStart() {
+    await this.pressSettled;
     this.pttHolding = false;
     if (this.skipNextAction) return;
     if (settingsState.currentSettings["stt.activation"] !== "push-to-talk") return;
@@ -165,14 +186,16 @@ class ShortcutHandler {
     }
   }
 
-  // Released after a hold: stop listening.
+  // Released after a hold (or a new press closing out an orphaned hold): stop
+  // listening. Not mode-gated - stopping an active dictation is always safe and
+  // must still happen if the mode changed mid-hold, so STT can't strand on.
   private async onHoldEnd() {
+    await this.pressSettled;
     this.pttHolding = false;
     if (this.skipNextAction) {
       this.skipNextAction = false;
       return;
     }
-    if (settingsState.currentSettings["stt.activation"] !== "push-to-talk") return;
     if (vadManager.enabled) {
       await vadManager.toggle();
     }

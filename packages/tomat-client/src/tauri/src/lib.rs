@@ -75,34 +75,44 @@ pub fn register_toggle_shortcut(
 
 /// Handle a physical press of the window toggle shortcut.
 ///
-/// Always emits `shortcut-pressed` (drives the mic ring, the manual/sticky
-/// window toggle, and the push-to-talk show-on-press). In push-to-talk mode it
-/// also arms an off-thread hold timer that emits `shortcut-hold-start` if the
-/// key is still held after `hold_ms`. See [`crate::state::PttState`] for why the
-/// tap-vs-hold timing lives in Rust rather than the webview.
+/// Emits `shortcut-pressed` (drives the mic ring, the manual/sticky window
+/// toggle, and the push-to-talk show-on-press). If a prior hold was never closed
+/// (its release was missed), emits `shortcut-hold-end` for it first. In
+/// push-to-talk mode it then arms an off-thread hold timer that emits
+/// `shortcut-hold-start` if the key is still held after `hold_ms`. See
+/// [`crate::state::PttState`] for why the tap-vs-hold timing lives in Rust.
 #[cfg(desktop)]
 fn on_toggle_pressed(app: &AppHandle) {
-    let _ = app.emit("shortcut-pressed", ());
-
     let Some(state) = app.try_state::<AppState>() else {
+        let _ = app.emit("shortcut-pressed", ());
         return;
     };
-    let (run_ptt, hold_ms, generation) = {
+    let start = {
         let Ok(mut ptt) = state.0.ptt.lock() else {
+            let _ = app.emit("shortcut-pressed", ());
             return;
         };
-        ptt.generation = ptt.generation.wrapping_add(1);
-        ptt.down = true;
-        ptt.hold_started = false;
-        (ptt.push_to_talk, ptt.hold_ms, ptt.generation)
+        ptt.begin_press()
     };
-    if !run_ptt {
+
+    // Close out an orphaned hold BEFORE announcing this press, so JS turns STT
+    // off (and resets the old ring) before the new press sets up its own.
+    if start.close_orphaned_hold {
+        let _ = app.emit("shortcut-hold-end", ());
+    }
+    let _ = app.emit("shortcut-pressed", ());
+    if !start.run_ptt {
         return;
     }
 
     // The hold timer runs on its own thread so its timing is immune to
     // webview-UI-thread congestion (which is the whole reason we don't classify
     // in JS). It fires once at `hold_ms` iff the same press is still held.
+    // Delivering `shortcut-hold-start` to JS still rides the webview pipe, but a
+    // hold coincides with a stationary cursor (the hand is on the keyboard), so
+    // that pipe is idle then - the congestion we fight is mouse-movement driven.
+    let generation = start.generation;
+    let hold_ms = start.hold_ms;
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(hold_ms));
@@ -113,12 +123,7 @@ fn on_toggle_pressed(app: &AppHandle) {
             let Ok(mut ptt) = state.0.ptt.lock() else {
                 return;
             };
-            if ptt.generation == generation && ptt.down && !ptt.hold_started {
-                ptt.hold_started = true;
-                true
-            } else {
-                false
-            }
+            ptt.try_start_hold(generation)
         };
         if fire {
             let _ = app.emit("shortcut-hold-start", ());
@@ -126,10 +131,11 @@ fn on_toggle_pressed(app: &AppHandle) {
     });
 }
 
-/// Handle a physical release of the window toggle shortcut. In push-to-talk
-/// mode, classify the just-ended press: a release before the hold timer fired
-/// is a `shortcut-tap`; a release after it is a `shortcut-hold-end`. Bumping the
-/// generation invalidates the hold timer so it can't fire post-classification.
+/// Handle a physical release of the window toggle shortcut. Classifies the
+/// just-ended press: a release before the hold timer fired is a `shortcut-tap`,
+/// after it a `shortcut-hold-end`. Always emits a terminal (JS ignores it in
+/// non-PTT mode but uses it to reset its ring); duplicate/late releases from the
+/// platform's multiple release-polling threads are dropped.
 #[cfg(desktop)]
 fn on_toggle_released(app: &AppHandle) {
     let Some(state) = app.try_state::<AppState>() else {
@@ -139,19 +145,13 @@ fn on_toggle_released(app: &AppHandle) {
         let Ok(mut ptt) = state.0.ptt.lock() else {
             return;
         };
-        ptt.down = false;
-        if !ptt.push_to_talk {
-            None
-        } else {
-            ptt.generation = ptt.generation.wrapping_add(1);
-            Some(ptt.hold_started)
-        }
+        ptt.end_press()
     };
     match outcome {
-        Some(true) => {
+        Some(crate::state::PressEnd::HoldEnd) => {
             let _ = app.emit("shortcut-hold-end", ());
         }
-        Some(false) => {
+        Some(crate::state::PressEnd::Tap) => {
             let _ = app.emit("shortcut-tap", ());
         }
         None => {}

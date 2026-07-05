@@ -6,6 +6,28 @@
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32};
 use std::sync::{Arc, Mutex};
 
+/// What a press should trigger, decided by [`PttState::begin_press`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PressStart {
+    /// A prior hold was never closed (its release was missed by the platform's
+    /// coarse release polling); this new press proves the key went up, so the
+    /// caller must emit `shortcut-hold-end` for it before starting this press.
+    pub close_orphaned_hold: bool,
+    /// Whether to arm the hold timer for this press (push-to-talk mode).
+    pub run_ptt: bool,
+    /// Hold threshold captured for this press.
+    pub hold_ms: u64,
+    /// This press's generation, so a fired timer can confirm it's still current.
+    pub generation: u64,
+}
+
+/// The terminal event a release should emit, from [`PttState::end_press`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PressEnd {
+    Tap,
+    HoldEnd,
+}
+
 /// Push-to-talk config + in-flight press state for the window toggle shortcut.
 ///
 /// The tap-vs-hold decision is made HERE in Rust, not in the webview, because
@@ -16,10 +38,15 @@ use std::sync::{Arc, Mutex};
 /// press/release promptly and off that thread, so it classifies correctly and
 /// emits a single semantic event (`shortcut-tap` / `shortcut-hold-start` /
 /// `shortcut-hold-end`) the UI just reacts to.
+///
+/// A release always emits a terminal event (even in non-PTT mode, where JS just
+/// resets its ring and ignores it) so the UI's hold flag can never strand true.
+/// Releases are idempotent on `down`, because on Windows each `WM_HOTKEY` spawns
+/// its own release-polling thread and several can report the final key-up.
 pub struct PttState {
     /// Whether the window shortcut is in push-to-talk mode (pushed from JS via
-    /// `set_ptt_config`). When false, a press is a plain window toggle and no
-    /// tap/hold classification runs.
+    /// `set_ptt_config`). When false, a press is a plain window toggle; the hold
+    /// timer isn't armed, but a release still emits a (JS-ignored) terminal.
     pub push_to_talk: bool,
     /// Hold threshold in ms: release before this is a tap, at/after it is a hold.
     pub hold_ms: u64,
@@ -36,12 +63,64 @@ pub struct PttState {
 impl Default for PttState {
     fn default() -> Self {
         Self {
-            push_to_talk: false,
+            // Mirror the app's default `stt.activation` ("push-to-talk") so a
+            // press landing in the tiny window before JS pushes `set_ptt_config`
+            // is still classified; JS re-asserts the real value on attach.
+            push_to_talk: true,
             hold_ms: 250,
             generation: 0,
             down: false,
             hold_started: false,
         }
+    }
+}
+
+impl PttState {
+    /// Register a press and return what it should trigger.
+    pub fn begin_press(&mut self) -> PressStart {
+        // A still-set `hold_started` means the previous press's release was
+        // never observed; this press proves the key went up, so flag it for a
+        // close-out. (Only PTT holds ever set `hold_started`.)
+        let close_orphaned_hold = self.hold_started;
+        self.generation = self.generation.wrapping_add(1);
+        self.down = true;
+        self.hold_started = false;
+        PressStart {
+            close_orphaned_hold,
+            run_ptt: self.push_to_talk,
+            hold_ms: self.hold_ms,
+            generation: self.generation,
+        }
+    }
+
+    /// Called when a press's hold timer elapses. Returns true if it actually
+    /// started the hold (still the current press, still held, not already
+    /// started), meaning the caller should emit `shortcut-hold-start`.
+    pub fn try_start_hold(&mut self, generation: u64) -> bool {
+        if self.generation == generation && self.down && !self.hold_started {
+            self.hold_started = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Register a release. Returns the terminal event to emit, or `None` for a
+    /// duplicate/late release of an already-classified press.
+    pub fn end_press(&mut self) -> Option<PressEnd> {
+        if !self.down {
+            return None;
+        }
+        self.down = false;
+        // Invalidate any pending hold timer for this press.
+        self.generation = self.generation.wrapping_add(1);
+        let was_hold = self.hold_started;
+        self.hold_started = false;
+        Some(if was_hold {
+            PressEnd::HoldEnd
+        } else {
+            PressEnd::Tap
+        })
     }
 }
 
@@ -116,6 +195,75 @@ mod tests {
         assert!(s.visible.load(Ordering::SeqCst));
         s.visible.store(false, Ordering::SeqCst);
         assert!(!s.visible.load(Ordering::SeqCst));
+    }
+
+    fn ptt(push_to_talk: bool) -> PttState {
+        PttState {
+            push_to_talk,
+            hold_ms: 250,
+            ..PttState::default()
+        }
+    }
+
+    #[test]
+    fn quick_tap_emits_tap_and_disarms_timer() {
+        let mut p = ptt(true);
+        let start = p.begin_press();
+        assert!(start.run_ptt);
+        assert!(!start.close_orphaned_hold);
+        // Release before the hold timer fires.
+        assert_eq!(p.end_press(), Some(PressEnd::Tap));
+        // The timer, firing late for that generation, must be a no-op.
+        assert!(!p.try_start_hold(start.generation));
+    }
+
+    #[test]
+    fn hold_then_release_emits_hold_end() {
+        let mut p = ptt(true);
+        let start = p.begin_press();
+        assert!(p.try_start_hold(start.generation));
+        assert_eq!(p.end_press(), Some(PressEnd::HoldEnd));
+    }
+
+    #[test]
+    fn duplicate_release_is_ignored() {
+        let mut p = ptt(true);
+        p.begin_press();
+        assert_eq!(p.end_press(), Some(PressEnd::Tap));
+        // A second release from another polling thread must not re-emit.
+        assert_eq!(p.end_press(), None);
+    }
+
+    #[test]
+    fn non_ptt_release_still_emits_terminal() {
+        // So JS always gets an event to reset its ring, even in manual/sticky.
+        let mut p = ptt(false);
+        let start = p.begin_press();
+        assert!(!start.run_ptt);
+        assert_eq!(p.end_press(), Some(PressEnd::Tap));
+    }
+
+    #[test]
+    fn new_press_closes_orphaned_hold() {
+        let mut p = ptt(true);
+        let first = p.begin_press();
+        assert!(p.try_start_hold(first.generation));
+        // First press's release was missed (no end_press). The next press must
+        // flag the orphaned hold for close-out.
+        let second = p.begin_press();
+        assert!(second.close_orphaned_hold);
+        // And the fresh press classifies cleanly on its own release.
+        assert_eq!(p.end_press(), Some(PressEnd::Tap));
+    }
+
+    #[test]
+    fn stale_timer_from_prior_press_does_not_start_hold() {
+        let mut p = ptt(true);
+        let first = p.begin_press();
+        assert_eq!(p.end_press(), Some(PressEnd::Tap));
+        let _second = p.begin_press();
+        // The first press's timer fires late: wrong generation, no hold.
+        assert!(!p.try_start_hold(first.generation));
     }
 
     #[test]
