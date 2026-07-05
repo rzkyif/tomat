@@ -1,15 +1,23 @@
-// Handle-level live E2E of the runtime permission prompt flow: a REAL
-// WorkerHandle spawns the REAL tomat-core-ptyhost + deno + tool-worker chain
-// and drives one tool call whose accesses trigger real Deno prompts. On unix
-// this exercises PTY mode (protocol on stdout, echo cancellation); on Windows
-// it exercises socket mode (ConPTY + loopback control socket), which is the
-// only automated cover for that composition since the ConPTY exists only
-// there. Asserts the full loop: boot, forwarded prompt frame, user answer,
-// resumed access, auto-denied undeclared access, exit propagation through
-// terminate().
+// Handle-level live E2E of the runtime permission prompt flow on WINDOWS: a
+// REAL WorkerHandle spawns the REAL tomat-core-ptyhost + deno + tool-worker
+// chain in socket mode (ConPTY + loopback control socket) and drives one tool
+// call whose accesses trigger real Deno prompts. This is the Windows
+// counterpart to the unix-only prompt-live-probe.test.ts: it is the only cover
+// that exercises the ConPTY + control-socket composition end to end, and the
+// ConPTY exists only on Windows. Asserts the full loop: boot, forwarded prompt
+// frame, user answer, resumed access, auto-denied undeclared access, exit
+// propagation through terminate().
 //
-// Skipped when the ptyhost binary is absent (no cargo build yet), same as
-// prompt-live-probe.test.ts. CI builds the debug binary before `deno task test`.
+// Windows-only. The unix PTY path (protocol on stdout, echo cancellation) is
+// covered by prompt-live-probe.test.ts, so this test deliberately does not run
+// there: driving the same flow through the heavier WorkerHandle harness adds no
+// coverage on unix and is sensitive to PTY answer/resume timing. The
+// platform-independent socket transport itself is unit-covered on every OS by
+// control-socket.test.ts.
+//
+// Skipped when the ptyhost binary is absent (no cargo build yet). Note that the
+// CI test:js lane runs on Linux only, so this test does not currently execute
+// in CI; it is the local Windows validator for the ConPTY prompt path.
 
 import { assert, assertEquals } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
@@ -61,8 +69,8 @@ async function plant(src: string, dest: string): Promise<void> {
 }
 
 Deno.test({
-  name: "worker-handle live: prompt forwards, user allow resumes, undeclared write auto-denies",
-  ignore: ptyhost === null,
+  name: "worker-handle live (windows conpty): prompt forwards, user allow resumes, undeclared write auto-denies",
+  ignore: ptyhost === null || Deno.build.os !== "windows",
   // The subprocess tree (ptyhost -> deno) and its pumps are torn down by
   // terminate(); sanitizers misread the piped readers that race it.
   sanitizeResources: false,
@@ -92,10 +100,10 @@ Deno.test({
       const entryPath = join(extensionFolder, "entry.ts");
       await Deno.writeTextFile(entryPath, ENTRY);
 
-      // Outside every allow-read'd path, so the read genuinely prompts. The
-      // realpath keeps the prompt's resource string equal to the declared and
-      // requested path even where tempdirs sit behind symlinks (macOS /var).
-      const grantedPath = await Deno.realPath(await Deno.makeTempFile({ suffix: ".txt" }));
+      // Outside every allow-read'd path, so the read genuinely prompts. Windows
+      // tempdirs are not symlinked, so makeTempFile's path equals the prompt's
+      // resource string as-is (no realPath normalization needed).
+      const grantedPath = await Deno.makeTempFile({ suffix: ".txt" });
       await Deno.writeTextFile(grantedPath, "twelve chars");
       const deniedPath = join(await Deno.makeTempDir(), "denied.txt");
 

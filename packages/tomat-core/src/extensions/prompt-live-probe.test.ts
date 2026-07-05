@@ -7,11 +7,12 @@
 // Skipped when the ptyhost binary is absent (e.g. no cargo build yet) or on
 // Windows: the probe FIXTURE below is unix-specific (it reads /etc/hosts and
 // dlopens libSystem, and expects PTY-shaped prompt output), so it validates the
-// unix PTY path only. The Windows ConPTY path has its own live cover in
-// worker-handle-live.test.ts (real prompts through the real ptyhost + ConPTY +
-// control socket, at the WorkerHandle level), plus the ConPTY-shaped parser
-// fixture in prompt-parser.test.ts. CI builds the debug binary before
-// `deno task test`.
+// unix PTY path only. The Windows ConPTY path has its own (local, Windows-only)
+// live cover in worker-handle-live.test.ts (real prompts through the real
+// ptyhost + ConPTY + control socket, at the WorkerHandle level), plus the
+// ConPTY-shaped parser fixture in prompt-parser.test.ts and the
+// platform-independent socket transport test in control-socket.test.ts. CI
+// builds the debug binary before `deno task test`.
 
 import { assertEquals } from "@std/assert";
 import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
