@@ -44,7 +44,7 @@ export const llmGroup: SettingGroup = {
           name: "Image Attachments",
           description: "Let yourself attach images to messages. The model must support vision.",
           type: "boolean",
-          defaultValue: false,
+          defaultValue: true,
           descriptionTier: "ondemand",
         },
         {

@@ -3,6 +3,7 @@
 
 import { ensureDirs, paths } from "./paths.ts";
 import { ensureHelperBinaries } from "./binaries/helpers.ts";
+import { binariesManager } from "./binaries/manager.ts";
 import { attachHost, scrubSecrets } from "@tomat/core-engine";
 import { denoHost } from "./host/deno-host.ts";
 import { errMessage } from "@tomat/shared";
@@ -139,8 +140,15 @@ async function main(): Promise<void> {
   // ever touches those orphans.
   await sweepOrphanedSessionDirs();
 
-  // Resume any persisted-Pending downloads from the previous run.
+  // Resume any persisted-Pending downloads from the previous run. Models resume
+  // in place; interrupted sidecar-binary downloads (most often torn down by the
+  // core self-update's mid-flight Deno.exit) are finished by BinariesManager,
+  // which re-runs the extract/install step resumePending can't. Best-effort:
+  // never gate boot on it.
   downloadManager().resumePending();
+  void binariesManager()
+    .reconcileInterruptedInstalls()
+    .catch((err) => log.warn(`binary reconcile failed: ${errMessage(err)}`));
 
   // Feed download activity into the aggregate status so the corebar shows
   // Downloading (not Idle) while required files are still being fetched.

@@ -443,6 +443,68 @@ export class BinariesManager {
     return { jobId };
   }
 
+  /** Finish binary installs interrupted by a process exit before their archive
+   *  was extracted. The usual cause is the in-app update flow: `runInstall`
+   *  kicks off sidecar downloads and then triggers the core self-update, whose
+   *  `Deno.exit(0)` (handoff to the updater) tears the process down mid-download.
+   *
+   *  The generic download manager can resume the byte transfer, but the
+   *  extract-into-binDir + `writeInstalledVersion` step lives only in kickoff's
+   *  in-process closure, which dies with the old process. A resumed transfer
+   *  would therefore land the archive in staging and never install it (and its
+   *  sha256 isn't re-verified on a generic resume either). So the download
+   *  manager deliberately skips `binaries` rows in `resumePending`, and here we
+   *  re-run the full kickoff for each affected kind instead: it re-resolves the
+   *  URL + sha256, re-downloads, verifies, extracts, and records the version
+   *  through the normal path.
+   *
+   *  Called once from main() on boot, right after `resumePending`. Only touches
+   *  interrupted `binaries` downloads (never models), reuses the cached manifest
+   *  (no forced network unless there is interrupted binary work), and is
+   *  best-effort: a per-kind failure is recorded as a retryable requirements
+   *  gate and never blocks boot. */
+  async reconcileInterruptedInstalls(): Promise<void> {
+    const stale = downloadManager()
+      .snapshot()
+      .filter((r) => r.destination === "binaries" && r.status === "Pending");
+    if (stale.length === 0) return;
+
+    const kinds = new Set<BinaryKind>();
+    for (const row of stale) {
+      // kickoff tags every row (main + companion extras) with `binary:<kind>`.
+      if (row.groupId.startsWith("binary:")) {
+        const kind = row.groupId.slice("binary:".length);
+        if ((BINARY_KINDS as readonly string[]).includes(kind)) {
+          kinds.add(kind as BinaryKind);
+        }
+      }
+      // Drop the orphaned row + partial: kickoff enqueues a fresh jobId, so the
+      // stale row would otherwise linger forever with no worker (stranding the
+      // corebar on "Downloading"). remove() no-ops on an in-flight row, but
+      // resumePending skipped binaries so none is in flight at this point.
+      downloadManager().remove(row.id);
+    }
+    if (kinds.size === 0) return;
+
+    // Cache-first: the manifest was fetched + cached during the original
+    // (consented) update, so re-initiating the interrupted download reuses it
+    // with no new network. Only reached when interrupted binary work exists.
+    const manifest = await loadBinaryManifest().catch(() => null);
+    if (!manifest) {
+      log.warn("reconcile: binary manifest unavailable; leaving interrupted installs for retry");
+      return;
+    }
+    const triple = hostTriple();
+    for (const kind of kinds) {
+      try {
+        await this.kickoff(kind, manifest, triple);
+        log.info(`reconcile: re-initiated interrupted install of ${kind}`);
+      } catch (err) {
+        log.warn(`reconcile: re-initiate ${kind} failed: ${errMessage(err)}`);
+      }
+    }
+  }
+
   private async missingKinds(): Promise<BinaryKind[]> {
     const out: BinaryKind[] = [];
     for (const kind of BINARY_KINDS) {

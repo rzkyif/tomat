@@ -1,9 +1,9 @@
 <script lang="ts">
-  // Bottom-left of the Settings sidebar. Shows the client version and drives
-  // the combined client + core + sidecar update flow.
+  // Bottom-left of the Settings sidebar. Drives the combined client + core +
+  // sidecar update flow.
   //
   // State machine:
-  //   idle                 : "tomat Client vX.X.X" / hover "Check for Updates"
+  //   idle                 : "Check for Updates"
   //   checking             : "Checking…"
   //   available            : "Updates Available!" / hover "Install Updates"
   //   updating             : "Updating…"
@@ -26,9 +26,8 @@
   // install: a distro/third-party repackage or a raw binary) sends the user to
   // grab the new build, the way VS Code opens the download page on such installs.
   const INSTALL_PAGE_URL = "https://au.tomat.ing/install";
-  // Touch has no hover, so the idle button can't reveal "Check for Updates" on
-  // hover the way desktop does; show the actionable label outright instead of the
-  // version string (which the desktop hover swaps in).
+  // Touch has no hover, so the "available" button can't reveal "Install Updates"
+  // on hover the way desktop does; show the actionable label outright instead.
   const mobile = useUiContext().platform === "mobile";
 
   let { collapsed, disabled = false } = $props<{
@@ -38,7 +37,6 @@
 
   let phase = $state<UpdateButtonPhase>("idle");
   let hovering = $state(false);
-  let clientVersion = $state<string>("…");
   let coreAvailable = $state(false);
   let coreCurrent = $state<string>("");
   let coreLatest = $state<string>("");
@@ -49,11 +47,6 @@
   let clientSelfInstall = $state(true);
 
   onMount(async () => {
-    try {
-      clientVersion = await platform().updater.getVersion();
-    } catch {
-      clientVersion = "unknown";
-    }
     // Install-static (the packaging of this build never changes at runtime), so
     // resolve it once here rather than on every check. Defaults to true, so a
     // rare failure degrades to attempting the in-app install, not blocking it.
@@ -75,7 +68,7 @@
       case "clientRestartPending":
         return "Restart to Update";
       default:
-        return hovering || mobile ? "Check for Updates" : `tomat Client v${clientVersion}`;
+        return "Check for Updates";
     }
   });
 
@@ -107,6 +100,9 @@
     phase = "checking";
     coreAvailable = false;
     binariesAvailable = [];
+    // Release a handle left over from a prior check (or a dismissed confirm) so
+    // the underlying Tauri Update object isn't leaked when we overwrite it.
+    void clientUpdate?.close().catch(() => {});
     clientUpdate = null;
 
     const tasks: Promise<void>[] = [];
@@ -228,11 +224,14 @@
       if (clientUpdate) {
         if (clientSelfInstall) {
           try {
+            // downloadAndInstall closes the handle implicitly on success.
             await clientUpdate.downloadAndInstall();
             phase = "clientRestartPending";
             return;
           } catch (e) {
             log.warn("client downloadAndInstall failed:", e);
+            void clientUpdate.close().catch(() => {});
+            clientUpdate = null;
           }
         } else {
           try {
@@ -240,6 +239,9 @@
           } catch (e) {
             log.warn("open download page failed:", e);
           }
+          // The browser hand-off won't install the staged handle; release it.
+          void clientUpdate.close().catch(() => {});
+          clientUpdate = null;
         }
       }
 

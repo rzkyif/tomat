@@ -1,7 +1,7 @@
 /**
  * The composer's attachment pipeline: the pending attachment list plus every
  * way one gets added (file picker, mobile image/doc pickers, clipboard paste,
- * screen / region capture) and the image-preview modal state.
+ * OS drag-and-drop, screen / region capture) and the image-preview modal state.
  *
  * Per the composable convention (see use-autocomplete), this class holds only
  * the `$state` and the imperative handlers; the consumer keeps the `$derived`
@@ -73,9 +73,12 @@ export class ComposerAttachments {
     this.previewImageUrl = null;
   }
 
-  async handlePaste(e: ClipboardEvent): Promise<void> {
-    const files = Array.from(e.clipboardData?.files || []);
-    if (files.length === 0) return;
+  /** Classify and ingest a batch of in-memory files (from a paste or an OS
+   *  drop), appending each supported one to the pending list. Unsupported
+   *  files are skipped. Returns whether any file was accepted. Images ingest
+   *  straight from their bytes; documents go through the binary converter. */
+  private async ingestFiles(files: File[]): Promise<boolean> {
+    if (files.length === 0) return false;
 
     const supportsImages = !!settingsState.currentSettings["llm.supportImages"];
     let handledAny = false;
@@ -94,11 +97,40 @@ export class ComposerAttachments {
           this.attachments = [...this.attachments, await ingestDocumentBlob(file, name)];
         }
       } catch (err) {
-        attachLog.error("Paste ingestion failed:", err);
+        attachLog.error("Attachment ingestion failed:", err);
       }
     }
 
-    if (handledAny) e.preventDefault();
+    return handledAny;
+  }
+
+  async handlePaste(e: ClipboardEvent): Promise<void> {
+    const files = filesFromDataTransfer(e.clipboardData);
+    if (files.length === 0) return;
+    // Read the files synchronously above (a DataTransfer is emptied once the
+    // event handler returns), then ingest.
+    if (await this.ingestFiles(files)) e.preventDefault();
+  }
+
+  // OS drag-and-drop. `dragDropEnabled` is false on the desktop window (see
+  // tauri.conf.json), so the webview delivers native HTML5 drop events carrying
+  // real File objects, which flow through the same classify + ingest path as
+  // paste; the dropped file just appears in the pending list (no overlay). The
+  // app-wide dragover guard in +layout.svelte cancels file dragover, which is
+  // what makes the window a valid drop target, so no dragover handler is needed
+  // here. The caller gates this on compose mode (a prompt mode doesn't accept
+  // attachments).
+  //
+  // Click-through coexistence: the overlay-window's poll (lib/window/window.ts)
+  // tracks the OS cursor independently of DOM events and disables click-through
+  // while the cursor is over the opaque composer, so a drop there still reaches
+  // the webview; over the transparent gaps it stays click-through as before.
+  // Mobile has no OS file drag, so this never fires there.
+  async handleDrop(e: DragEvent): Promise<void> {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    const files = e.dataTransfer ? Array.from(e.dataTransfer.files) : [];
+    if (await this.ingestFiles(files)) this.ctx.focus();
   }
 
   // Android: the picker returns a content URI (not an absolute path), so picked
@@ -165,12 +197,22 @@ export class ComposerAttachments {
         return;
       }
 
-      const filters = [
-        {
-          name: "Documents",
-          extensions: DOC_EXTENSIONS,
-        },
-      ];
+      const filters: Array<{ name: string; extensions: string[] }> = [];
+
+      // With images enabled there are two categories, so lead with a combined
+      // "All supported types" filter as the default selection. Without images
+      // the "Documents" filter already covers everything supported.
+      if (supportsImages) {
+        filters.push({
+          name: "All supported types",
+          extensions: [...DOC_EXTENSIONS, ...IMAGE_EXTENSIONS],
+        });
+      }
+
+      filters.push({
+        name: "Documents",
+        extensions: DOC_EXTENSIONS,
+      });
 
       if (supportsImages) {
         filters.push({
@@ -288,4 +330,27 @@ export class ComposerAttachments {
       this.capturing = false;
     }
   }
+}
+
+/** Whether a drag operation is carrying files (as opposed to dragged text or a
+ *  URL), so the drag handlers only engage for a real file drop. */
+function dragHasFiles(e: DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+}
+
+/** Pull the files out of a DataTransfer (a paste's clipboardData or a drop).
+ *  Prefers `.files`; when that is empty, some sources (notably macOS/Linux
+ *  webviews pasting a file copied in the file manager) expose the file only as
+ *  an item, so fall back to scanning `.items` for file entries. */
+function filesFromDataTransfer(dt: DataTransfer | null): File[] {
+  if (!dt) return [];
+  if (dt.files.length > 0) return Array.from(dt.files);
+  const out: File[] = [];
+  for (const item of Array.from(dt.items)) {
+    if (item.kind === "file") {
+      const f = item.getAsFile();
+      if (f) out.push(f);
+    }
+  }
+  return out;
 }

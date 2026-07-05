@@ -306,19 +306,6 @@ export type GetCoreSettingsResponse = Record<string, unknown>;
 export type PatchCoreSettingsRequest = Record<string, unknown>;
 export type PatchCoreSettingsResponse = Record<string, unknown>;
 
-// --- Update ----------------------------------------------------------------
-
-export interface UpdateCheckResponse {
-  currentVersion: string;
-  latestVersion: string;
-  available: boolean;
-  manifestUrl: string;
-}
-
-export interface UpdateApplyRequest {
-  version?: string;
-}
-
 // --- Sidecars --------------------------------------------------------------
 
 /** Live resource sample for a single process. */

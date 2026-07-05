@@ -3,15 +3,15 @@ import type { OmitSnippetProps } from "./types.ts";
 import type UpdateButtonView from "../components/settings/UpdateButtonView.svelte";
 
 // The Settings sidebar update button. The client owns the live update state
-// machine (client + core + sidecar checks, then the install/restart handoff) and
-// the version string, mapping all of it down to a phase + a resolved label.
-// These scripted stand-ins cover one rendition per visible phase, plus a
-// collapsed variant. Labels match exactly what the client resolves for each
-// phase (the idle/available labels swap on hover; these show the rest text).
+// machine (client + core + sidecar checks, then the install/restart handoff),
+// mapping all of it down to a phase + a resolved label. These scripted stand-ins
+// cover one rendition per visible phase, plus a collapsed variant. Labels match
+// exactly what the client resolves for each phase (the available label swaps to
+// "Install Updates" on hover; this shows the rest text).
 export const updateButtonSamples = {
   idle: {
     phase: "idle",
-    label: "tomat Client v1.4.2",
+    label: "Check for Updates",
     collapsed: false,
   },
   checking: {

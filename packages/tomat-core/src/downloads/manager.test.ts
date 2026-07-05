@@ -203,6 +203,49 @@ Deno.test("DownloadManager.resumePending: arms a worker for persisted Pending ro
   }
 });
 
+Deno.test("DownloadManager.resumePending: skips binaries rows (BinariesManager finishes those, incl. extraction)", async () => {
+  const env = await setupTestEnv();
+  const mgr = new DownloadManager();
+  try {
+    // A binaries-destination Pending row (as an interrupted sidecar update
+    // leaves behind). resumePending must NOT arm a worker for it: a generic
+    // resume only moves bytes, but a sidecar still needs the extract-into-binDir
+    // step that lives in BinariesManager, and its sha256 isn't re-verified here.
+    // So it stays Pending here; reconcileInterruptedInstalls owns finishing it.
+    const binId = "binaries:/fake/staging/llama-server-abc.tar.gz";
+    // A models row alongside it, to prove the skip is selective (models resume).
+    const modelId = "models:/fake/resume-model";
+    for (const [id, dest, abs] of [
+      [binId, "binaries", "/fake/staging/llama-server-abc.tar.gz"],
+      [modelId, "models", "/fake/resume-model"],
+    ] as const) {
+      db()
+        .prepare(`
+        INSERT INTO downloads
+          (id, source, destination, rel_path, abs_path, filename, group_id,
+           size_bytes, downloaded_bytes, status, error, added_at_ms)
+        VALUES (?, '/abs/only-source', ?, '/abs/only-source', ?, 'src', 'binary:llama-server', NULL, 0, 'Pending', NULL, ?)
+      `)
+        .run(id, dest, abs, Date.now());
+    }
+
+    mgr.resumePending();
+
+    // The models row leaves Pending (a worker ran it to a terminal state); the
+    // binaries row is untouched.
+    let modelStatus = rowsForId(modelId)?.status;
+    for (let i = 0; i < 200 && modelStatus === "Pending"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      modelStatus = rowsForId(modelId)?.status;
+    }
+    assertNotEquals(modelStatus, "Pending");
+    assertEquals(rowsForId(binId)?.status, "Pending");
+  } finally {
+    mgr.shutdown();
+    await env.teardown();
+  }
+});
+
 Deno.test("DownloadManager constructor: resets Downloading rows to Pending; drops vanished Completed", async () => {
   const env = await setupTestEnv();
   try {

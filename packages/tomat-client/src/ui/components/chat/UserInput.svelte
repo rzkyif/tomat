@@ -733,6 +733,13 @@
     !permissionPrompt && !inAskMode && !inMcpArgMode && !!scheduleConfirm,
   );
 
+  // Attachments (paste, OS drop, and the attach button) are only accepted while
+  // the composer is in normal compose mode. In a prompt mode (permission, tool
+  // askUser, MCP prompt args, schedule-confirm) the textarea and the attach
+  // controls are replaced, so a pasted or dropped file must be ignored too -
+  // this mirrors exactly when the attach button is shown.
+  let canAttach = $derived(!permissionPrompt && !inAskMode && !inMcpArgMode && !inScheduleMode);
+
   // The askUser bundle the View renders (form content + hoisted commit actions),
   // mirroring how `permissionPrompt` is derived. A tool's askUser takes the slot
   // when one is pending; otherwise the MCP prompt-argument form uses the same
@@ -794,7 +801,9 @@
   oncompositionstart={handleCompositionStart}
   oncompositionend={handleCompositionEnd}
   ontextareablur={() => (ac.open = false)}
-  onpaste={(e) => composer.handlePaste(e)}
+  onpaste={(e) => {
+    if (canAttach) composer.handlePaste(e);
+  }}
   topSlot={autocorrectAlert}
   contentOverride={inScheduleMode ? promptContent : undefined}
   belowContent={quickModelBar}
@@ -909,7 +918,12 @@
   {/if}
 {/snippet}
 
-<svelte:window onblur={() => composer.closeImagePreview()} />
+<svelte:window
+  onblur={() => composer.closeImagePreview()}
+  ondrop={(e) => {
+    if (canAttach) composer.handleDrop(e);
+  }}
+/>
 
 {#if ac.open}
   <div style:display="contents" style:--default-base={themeOverrideHex}>

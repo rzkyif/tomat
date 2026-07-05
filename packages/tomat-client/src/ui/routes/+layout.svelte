@@ -110,6 +110,18 @@
       root.classList.remove("platform-ios");
     };
   }
+
+  // With `dragDropEnabled: false` on the desktop window the webview handles file
+  // drops itself, so an unhandled drop would navigate the page to the dropped
+  // file. The composer catches drops in chat view; this app-wide guard blocks
+  // navigation everywhere else (Settings, onboarding, ...). Scoped to file drags
+  // so dragging text within an input is unaffected; inert on mobile (no file
+  // drag) and during SSR (window handlers don't run).
+  function blockFileDropNavigation(e: DragEvent): void {
+    if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) e.preventDefault();
+  }
 </script>
+
+<svelte:window ondragover={blockFileDropNavigation} ondrop={blockFileDropNavigation} />
 
 <slot />

@@ -8,6 +8,8 @@ import {
 } from "./manager.ts";
 import { __resetResolverCacheForTesting } from "./upstream-resolver.ts";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
+import { db } from "@tomat/core-engine";
+import { downloadManager } from "../downloads/manager.ts";
 
 // Swap globalThis.fetch for a canned GitHub response so the resolver-entry cases
 // run without touching the network (mirrors the helper in
@@ -178,5 +180,46 @@ Deno.test("install: a resolve failure records a per-kind failure and notifies li
     await env.teardown();
     if (prevChannel === undefined) Deno.env.delete("TOMAT_CHANNEL");
     else Deno.env.set("TOMAT_CHANNEL", prevChannel);
+  }
+});
+
+Deno.test("reconcileInterruptedInstalls: drops an orphaned binaries download row so it can't strand or land unextracted", async () => {
+  const env = await setupTestEnv();
+  const origFetch = globalThis.fetch;
+  // Offline: loadBinaryManifest can't resolve, so reconcile removes the stale
+  // row (its extraction context is gone with the old process) and leaves the
+  // kind for retry rather than re-kicking. The removal is the invariant that
+  // stops a resumed-but-never-installed archive AND the corebar limbo.
+  globalThis.fetch = () => Promise.reject(new Error("offline test"));
+  __resetForTesting();
+  try {
+    const id = "binaries:/fake/staging/llama-server-job1.tar.gz";
+    db()
+      .prepare(`
+        INSERT INTO downloads
+          (id, source, destination, rel_path, abs_path, filename, group_id,
+           size_bytes, downloaded_bytes, status, error, added_at_ms)
+        VALUES (?, 'https://cdn/llama.tar.gz', 'binaries', 'staging/llama-server-job1.tar.gz',
+                '/fake/staging/llama-server-job1.tar.gz', 'llama-server-job1.tar.gz',
+                'binary:llama-server', NULL, 0, 'Pending', NULL, ?)
+      `)
+      .run(id, Date.now());
+
+    await binariesManager().reconcileInterruptedInstalls();
+
+    // The orphaned row is gone, and no binaries download was re-armed (offline).
+    const snap = downloadManager().snapshot();
+    assertEquals(
+      snap.some((r) => r.id === id),
+      false,
+    );
+    assertEquals(
+      snap.some((r) => r.destination === "binaries"),
+      false,
+    );
+  } finally {
+    globalThis.fetch = origFetch;
+    __resetForTesting();
+    await env.teardown();
   }
 });

@@ -8,6 +8,8 @@
   import AskUserFormView, { type DraftAnswer } from "./userinput/AskUserFormView.svelte";
   import type { AskUserQuestion } from "../../../domain/session.ts";
   import { useUiContext } from "../../context.ts";
+  import { ripple } from "../../actions/ripple.ts";
+  import { RIPPLE_MS } from "../../animations.ts";
   import type { Alignment } from "../../types.ts";
 
   // The askUser form's controlled state + its hoisted commit actions, fed as one
@@ -61,6 +63,10 @@
   // modes (permission/schedule prompts, the autocorrect alert) still arrive as
   // props/snippets. Alignment comes from the UI context.
   const ui = useUiContext();
+  // The hand-rolled <select> wrappers (screen-capture, monitor picker) can't be
+  // IconButtons (a <select> can't live in a <button>), so they carry the shared
+  // press ripple by hand to match the IconButtons beside them.
+  const rippleDuration = $derived(ui.animationDurationMs(RIPPLE_MS));
   // Mobile: the composer spans the full screen width (so the send button is
   // never clipped) and drops the desktop window controls (screen capture, the
   // monitor picker, window alignment) that do nothing on a fullscreen app.
@@ -393,7 +399,8 @@
                  <select> can't live in a <button>, so this matches IconButton's
                  lg-tight sizing (p-1 text-xl) by hand. -->
             <div
-              class="tomat-focus-wrap relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hov:text-default-900 act:text-default-900 hov:bg-surface-inset act:bg-surface-inset-strong rounded transition-interactive"
+              class="tomat-focus-wrap relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hov:text-default-900 hov:bg-surface-inset rounded transition-interactive"
+              use:ripple={{ disabled: capturing, durationMs: rippleDuration }}
             >
               <i class="flex i-material-symbols-screenshot-monitor-outline-rounded"></i>
               <select
@@ -430,7 +437,8 @@
       {#if !mobile}
         <div class="flex items-center bg-surface-inset rounded-large p-1">
           <div
-            class="tomat-focus-wrap relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hov:text-default-900 act:text-default-900 hov:bg-surface-inset act:bg-surface-inset-strong rounded transition-interactive"
+            class="tomat-focus-wrap relative flex items-center justify-center shrink-0 p-1 text-xl text-default-700 hov:text-default-900 hov:bg-surface-inset rounded transition-interactive"
+            use:ripple={{ durationMs: rippleDuration }}
           >
             <i class="flex i-material-symbols-desktop-windows-outline-rounded"></i>
             <select

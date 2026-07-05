@@ -13,6 +13,7 @@
   import { RIPPLE_MS } from "@tomat/shared/ui/animations.ts";
   import {
     androidApkUrl,
+    type Arch,
     type Channel,
     CLIENT_OS,
     clientCommand,
@@ -20,6 +21,7 @@
     CORE_OS,
     coreCommand,
     coreUninstallCommand,
+    detectArch,
     detectOs,
     finishHowto,
     formatTag,
@@ -42,6 +44,15 @@
   const verb = $derived(mode === "install" ? "Install" : "Uninstall");
 
   let os = $state<Os>("macos");
+  // The genuinely detected OS (null when it can't be told, e.g. a future
+  // platform). Distinct from `os`, which follows the picker: the highlight keys
+  // off this so switching tabs doesn't paint another OS's list as "yours".
+  let detectedOs = $state<Os | null>(null);
+  // Best-effort CPU arch, resolved in onMount to highlight the installer that
+  // matches the visitor's machine (like the auto-selected OS). null until known,
+  // and stays null where it can't be told (macOS Safari/Firefox), so nothing is
+  // highlighted rather than guessing wrong.
+  let arch = $state<Arch | null>(null);
   // Stable has not shipped yet, so the channel is locked to latest; the picker
   // shows stable as a disabled option for when it does.
   const channel: Channel = "latest";
@@ -58,10 +69,32 @@
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // navigator.userAgentData is Chromium-only and not in the DOM lib typings; a
+  // minimal structural type keeps the access honest without an `any` cast.
+  interface UserAgentDataLike {
+    getHighEntropyValues(hints: string[]): Promise<{ architecture?: string }>;
+  }
+
   onMount(() => {
     const detected = detectOs(navigator.userAgent, navigator.platform);
-    // The Core has no Android build; fall back to a desktop OS for its picker.
-    os = target === "core" && detected === "android" ? "linux" : detected;
+    detectedOs = detected;
+    // Pick the initial tab: the detected OS, or macOS when unknown. The Core has
+    // no Android build, so its picker falls back to Linux there.
+    if (detected === null) os = "macos";
+    else if (target === "core" && detected === "android") os = "linux";
+    else os = detected;
+    // The high-entropy architecture is async and Chromium-only; other browsers
+    // (and the ones that reject the request) fall back to the UA string.
+    const ua = navigator.userAgent;
+    const uaData = (navigator as Navigator & { userAgentData?: UserAgentDataLike }).userAgentData;
+    if (uaData) {
+      uaData
+        .getHighEntropyValues(["architecture"])
+        .then((v) => (arch = detectArch(v.architecture, ua)))
+        .catch(() => (arch = detectArch(undefined, ua)));
+    } else {
+      arch = detectArch(undefined, ua);
+    }
   });
 
   const osChoices = $derived(target === "client" ? CLIENT_OS : CORE_OS);
@@ -84,6 +117,15 @@
   // spelled out; the Client (a single AppImage) and macOS/Windows are one file,
   // where the arch label alone is enough.
   const multiFormat = $derived(new Set(installers.map((i) => i.format)).size > 1);
+  // Only highlight the detected arch when the OS actually offers a choice of
+  // arches (macOS, Windows). A single-arch OS (Linux, or the Core's two same-arch
+  // package formats) has nothing to disambiguate, so lighting a button up there
+  // would just read as noise.
+  const archChoice = $derived(new Set(installers.map((i) => i.arch)).size > 1);
+  // Only recommend downloads on the visitor's own OS list: when the shown tab is
+  // the detected OS, or when the OS is unknown (then we fall back to arch alone,
+  // which is meaningful on every list).
+  const osMatches = $derived(detectedOs === null || detectedOs === os);
   // The nested "how to": the two entry points are the (a, b) branches under step
   // one; their shared finishing steps are lifted to the top level (step 2+).
   // Uninstall has only the terminal path, so it renders a single flat list.
@@ -287,7 +329,7 @@
           class={`text-lg shrink-0 ${
             copied
               ? "i-material-symbols-check-rounded text-default-900"
-              : "i-material-symbols-content-copy-outline-rounded text-default-600 group-hover:text-default-900"
+              : "i-material-symbols-content-copy-outline-rounded text-default-600 group-hover:text-[var(--default-900)] dark:group-hover:text-[var(--default-d-900)]"
           }`}
           aria-hidden="true"
         ></i>
@@ -301,7 +343,17 @@
         <span class={labelCls}>Or download the installer</span>
         <div class="grid grid-cols-2 gap-2">
           {#each installers as inst (inst.url)}
-            <a href={inst.url} class={`${btnIdle} hover:cursor-pointer`}>
+            <!-- Recommend a download only on the visitor's own OS list (or when
+                 the OS is unknown). Within it, a lone button (the single-arch
+                 Linux AppImage) is always the right arch; otherwise highlight the
+                 button matching the detected arch. -->
+            {@const recommended =
+              osMatches && (installers.length === 1 || (archChoice && arch === inst.arch))}
+            <a
+              href={inst.url}
+              class={`${recommended ? btnActive : btnIdle} hover:cursor-pointer`}
+              title={recommended ? "Recommended for your device" : undefined}
+            >
               <i class="i-material-symbols-download-rounded text-lg"></i>
               {installerLabel(inst)}
             </a>

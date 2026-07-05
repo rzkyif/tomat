@@ -122,7 +122,7 @@ export const sttGroup: SettingGroup = {
           name: "Clean Up Transcription",
           description: "Use the model to fix transcription mistakes after you dictate.",
           type: "boolean",
-          defaultValue: true,
+          defaultValue: false,
           descriptionTier: "ondemand",
         },
         {

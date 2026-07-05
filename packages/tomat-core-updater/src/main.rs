@@ -18,6 +18,8 @@
 //!   3  swap failed at the Windows "move current aside" stage
 //!   4  swap failed at the install-rename stage
 //!   5  spawn of the new core failed (swap reverted, or revert also failed)
+//!   6  could not create the `<current>.old` rollback anchor (Unix); nothing
+//!      was changed on disk, safe to re-run the update
 //!
 //! Logging: appends `{ISO8601_UTC} {LEVEL} {msg}\n` to a per-channel log file
 //! and mirrors WARN/ERROR to stderr. Path resolution order:

@@ -87,7 +87,17 @@ export class DownloadManager {
   // Resume any rows that were Pending when the process last exited. Called
   // from main after the manager is constructed and the rest of core is wired.
   resumePending(): void {
-    const rows = this.snapshot().filter((r) => r.status === "Pending");
+    // Skip `binaries` rows: a generic resume only re-runs the byte transfer, but
+    // a sidecar binary still needs the extract-into-binDir + version-record step
+    // that lives in BinariesManager.kickoff's in-process closure (gone once the
+    // process that started it exits), and its sha256 isn't re-verified here. So
+    // resuming one would land an unverified archive in staging and never install
+    // it. BinariesManager.reconcileInterruptedInstalls() owns finishing those on
+    // boot instead (re-resolve + re-download + verify + extract). Models resume
+    // normally: they stream straight to their final path with no extraction.
+    const rows = this.snapshot().filter(
+      (r) => r.status === "Pending" && r.destination !== "binaries",
+    );
     for (const row of rows) {
       if (this.inFlight.has(row.id)) continue;
       // Arm the in-flight entry BEFORE spawn, exactly like enqueue/retry do.

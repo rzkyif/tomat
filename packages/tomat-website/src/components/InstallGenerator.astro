@@ -304,6 +304,8 @@ const codeBox =
     !uninstall && (
       <div class="ig-dlsec flex flex-col gap-2">
         <span class={label}>Or download the installer</span>
+        {/* No "recommended" highlight here: it keys off the detected OS/arch,
+        which needs the island. The no-JS baseline shows every button neutral. */}
         {DESKTOP.map((os) => (
           <div class={`ig-dl ig-dl-${os} grid grid-cols-2 gap-2`}>
             {installers[os].map((inst) => (

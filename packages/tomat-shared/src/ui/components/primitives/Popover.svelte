@@ -110,7 +110,15 @@
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div bind:this={backdropEl} class="absolute inset-0 z-50" onpointerdown={onclose}>
+  <!-- pointer-events-auto re-enables clicks: this popover mounts under
+       pointer-events-none wrappers (the settings Bubble root and the panel-column
+       layer), so without it the backdrop and popup inherit none and every click
+       falls through to the settings items behind. Modal re-enables the same way. -->
+  <div
+    bind:this={backdropEl}
+    class="absolute inset-0 z-50 pointer-events-auto"
+    onpointerdown={onclose}
+  >
     <!-- Blur+dim lives on its OWN layer, never as the popup's parent. WebKit
          folds a backdrop-filter element's compositing-layer children (e.g. a
          scroll container) into the filtered region, which would blur the popup's

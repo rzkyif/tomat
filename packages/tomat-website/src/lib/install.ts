@@ -169,10 +169,10 @@ const OS_TRIPLES: Record<Exclude<Os, "android">, Array<[Arch, string, string]>> 
   // Only x86-64 Linux is built (RELEASE_TARGET_TRIPLES omits linux-arm64 as niche
   // for a desktop GUI); re-add the arm64 row here once that triple ships, or its
   // buttons point at artifacts that do not exist.
-  linux: [["x64", "x86_64-unknown-linux-gnu", "x86-64"]],
+  linux: [["x64", "x86_64-unknown-linux-gnu", "Intel or AMD (x64)"]],
   windows: [
-    ["x64", "x86_64-pc-windows-msvc", "x86-64"],
-    ["arm64", "aarch64-pc-windows-msvc", "ARM64"],
+    ["x64", "x86_64-pc-windows-msvc", "Intel or AMD (x64)"],
+    ["arm64", "aarch64-pc-windows-msvc", "ARM (ARM64)"],
   ],
 };
 
@@ -392,8 +392,34 @@ export function uninstallStepsTail(target: Target): string[] {
   ];
 }
 
-/** Map a navigator string to one of our OS ids, best-effort. */
-export function detectOs(ua: string, platform: string): Os {
+/** Best-effort map of a browser's CPU-architecture signal to one of our
+ *  {@link Arch} ids, or null when it can't be told. The reliable source is the
+ *  Chromium-only `navigator.userAgentData` high-entropy `architecture` value
+ *  (passed in as `architecture`); the UA string is a coarse fallback for other
+ *  browsers. macOS is deliberately unknowable from the UA (it always reads
+ *  "Intel" even on Apple Silicon), so a Mac with no userAgentData stays null and
+ *  the page highlights neither arch. We only ship 64-bit builds, so an "arm"
+ *  signal maps to arm64 and an "x86" signal to x64. */
+export function detectArch(architecture: string | undefined, ua: string): Arch | null {
+  const a = (architecture ?? "").toLowerCase();
+  if (a.includes("arm")) return "arm64";
+  if (a.includes("x86") || a === "amd64") return "x64";
+  const s = ua.toLowerCase();
+  if (s.includes("aarch64") || s.includes("arm64")) return "arm64";
+  // "win64"/"wow64"/"x86_64"/"x64" mark a 64-bit x86 browser; the bare macOS UA
+  // carries none of these (its "Intel" token is intentionally ignored), so it
+  // falls through to null.
+  if (s.includes("win64") || s.includes("wow64") || s.includes("x86_64") || s.includes("x64")) {
+    return "x64";
+  }
+  return null;
+}
+
+/** Map a navigator string to one of our OS ids, or null when none matches (an
+ *  unrecognized/future platform). The caller picks a default OS for the picker;
+ *  null is kept distinct so an unknown OS can fall back to arch-only highlighting
+ *  rather than masquerading as macOS. */
+export function detectOs(ua: string, platform: string): Os | null {
   const s = `${ua} ${platform}`.toLowerCase();
   if (s.includes("android")) return "android";
   if (s.includes("win")) return "windows";
@@ -402,5 +428,5 @@ export function detectOs(ua: string, platform: string): Os {
   if (s.includes("mac") || s.includes("iphone") || s.includes("ipad")) {
     return "macos";
   }
-  return "macos";
+  return null;
 }

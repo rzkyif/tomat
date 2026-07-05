@@ -27,13 +27,13 @@ Deno.test("llamaReadinessTimeoutMs: caps so a pathological size can't wait forev
   assertEquals(llamaReadinessTimeoutMs(100 * GiB), 600_000);
 });
 
-Deno.test("llamaStartArgsFromSettings: absent supportImages follows the schema default (no mmproj)", async () => {
+Deno.test("llamaStartArgsFromSettings: absent supportImages follows the schema default (mmproj)", async () => {
   const env = await setupTestEnv();
   try {
-    const off = llamaStartArgsFromSettings({});
+    const on = llamaStartArgsFromSettings({});
+    assert(on?.mmprojPath?.endsWith("mmproj-F16.gguf"), "the default resolves the mmproj path");
+    const off = llamaStartArgsFromSettings({ "llm.supportImages": false });
     assertEquals(off?.mmprojPath, undefined);
-    const on = llamaStartArgsFromSettings({ "llm.supportImages": true });
-    assert(on?.mmprojPath?.endsWith("mmproj-F16.gguf"), "enabling images resolves the mmproj path");
   } finally {
     await env.teardown();
   }

@@ -23,7 +23,8 @@ Waits 2 seconds for the parent core process to exit, atomically renames
 deletes it once the update is committed), then spawns the new core detached with
 `--restart-args` forwarded as its argv. Exit codes: 0 success, 2 bad arguments,
 3 Windows move-aside failed, 4 install rename failed, 5 spawn of the new core
-failed. Logs to a per-channel `logs/updater.log`, mirroring WARN/ERROR to
+failed, 6 rollback-anchor creation failed (Unix; nothing changed, safe to
+re-run). Logs to a per-channel `logs/updater.log`, mirroring WARN/ERROR to
 stderr.
 
 ## Run, build, test
