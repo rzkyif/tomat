@@ -3,15 +3,21 @@
 // Flow:
 //   1. Fetch the core update manifest from CORE_MANIFEST_URL.
 //   2. Verify Ed25519 signature against the embedded core public key.
-//   3. Pick the entry for the current triple, download to staging/, sha256-verify.
-//   4. Spawn tomat-core-updater with arguments pointing at staging path + the
-//      current bin path; updater waits 2s, renames atomic, restarts core.
-//   5. Exit (the updater takes over).
+//   3. Pick the entry for the current triple, download to staging/, sha256-verify
+//      (with the worker/helper artifacts), then commit the worker/helper renames.
+//   4. Swap in the new binary IN PLACE while core still runs (Unix renames over
+//      the running inode; Windows renames the running .exe aside, since a running
+//      .exe can be renamed just not overwritten), then restart THROUGH the OS
+//      supervisor so exactly one owner relaunches core: launchd's KeepAlive and a
+//      systemd `--user restart` bring it back on Unix; on Windows the
+//      tomat-core-updater helper starts the scheduled task (fast path) with a
+//      non-zero exit arming Task Scheduler's restart-on-failure as a backstop.
+//   5. Write the rollback marker, then exit.
 //
-// The updater preserves the previous binary as `<name>.old` on both platforms
-// (Unix via a hard link before the atomic rename; Windows by renaming the old
-// .exe aside) so core's boot-time rollback can restore it if the new binary
-// crash-loops; the anchor is deleted once the update is committed.
+// The previous binary is always preserved as `<name>.old` (Unix via a hard link
+// before the atomic rename; Windows because the running .exe is renamed there) so
+// boot-time rollback can restore it if the new binary crash-loops; the anchor is
+// deleted once the update commits at its healthy checkpoint.
 
 import { verifyAsync } from "@noble/ed25519";
 import { canonicalize, decodeBase64, errMessage } from "@tomat/shared";
@@ -28,6 +34,8 @@ import { binPath, channelBinName } from "../paths.ts";
 import { coreBinaryName, hostTriple, platformExe } from "../binaries/versions.ts";
 import signingKeys from "../../data/signing-keys.json" with { type: "json" };
 import { writeUpdateMarker } from "./rollback.ts";
+import { resolveSupervisor } from "../install/service.ts";
+import { runPwsh } from "../install/proc.ts";
 
 const log = getLogger("update");
 
@@ -166,57 +174,220 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
 
   const currentBin = binPath(coreBinaryName("tomat-core"));
   const updaterBin = binPath(coreBinaryName("tomat-core-updater"));
+  const supervisor = await resolveSupervisor();
+  const onWindows = Deno.build.os === "windows";
 
-  // Hand off and exit. The updater is a separate compiled binary; if it
-  // doesn't exist yet (early dev), we surface a clear error so the user
-  // knows the updater needs to be built/shipped alongside core. Checked BEFORE
-  // committing any rename, so a missing updater leaves the live dirs untouched.
-  try {
-    await Deno.stat(updaterBin);
-  } catch {
+  // The updater is the out-of-core relauncher. In background mode it is the ONLY
+  // thing that can relaunch core, so a missing one is fatal and we bail BEFORE
+  // committing any rename (a broken install leaves the live dirs untouched). On
+  // Windows it is only the fast path: Task Scheduler's restart-on-failure (armed
+  // by the non-zero exit below) is a backstop, so a missing updater just costs
+  // restart latency.
+  const updaterReady = await pathExists(updaterBin);
+  if (supervisor.kind === "background" && !updaterReady) {
     throw new AppError(
       "update_failed",
       `tomat-core-updater not installed at ${updaterBin}; ` +
         `rebuild + ship the updater binary or run the install script`,
     );
   }
+  if (onWindows && !updaterReady) {
+    log.warn(
+      `tomat-core-updater missing at ${updaterBin}; ` +
+        `relying on Task Scheduler restart-on-failure to relaunch core`,
+    );
+  }
 
-  // Everything is staged + verified: commit the workers/helpers now, as close to
-  // the binary handoff as possible to minimize the window where they could be
-  // skewed against the running (old) binary.
+  // Commit the workers/helpers now, as close to the binary swap as possible to
+  // minimize the window where they could be skewed against the running (old)
+  // binary. commitRename tolerates a running (locked) Windows target by moving
+  // it aside first.
   for (const r of pendingRenames) {
-    await Deno.rename(r.from, r.to);
+    await commitRename(r.from, r.to);
     log.info(`updated ${r.label}`);
   }
 
-  // Write the rollback marker BEFORE handing off to the updater. The new
-  // binary checks this on first boot; if it crashes before MARKER_TTL_MS,
-  // the next boot detects the unchanged marker and rolls back.
+  // Swap the binary in place and preserve the previous one as `<bin>.old` for
+  // boot rollback. This works while core is running on BOTH platforms: Unix
+  // renames over the running inode; Windows renames the running .exe aside (a
+  // running .exe can be renamed, just not overwritten) then renames the new one
+  // in. On the rare Windows failure (AV lock, cross-volume staging) fall back to
+  // letting the updater do the swap once core is down.
+  let swappedInCore = false;
+  try {
+    await swapBinaryInPlace(stagedPath, currentBin);
+    swappedInCore = true;
+  } catch (err) {
+    // Unix has no updater fallback for the swap, so a failure there is fatal.
+    if (!onWindows) throw err;
+    log.warn(`in-core binary swap failed (${errMessage(err)}); deferring to the updater`);
+  }
+
+  // Write the rollback marker BEFORE the restart. The new binary checks it on
+  // first boot and commits once it reaches a healthy checkpoint; a crash before
+  // that trips the boot-time rollback to `<bin>.old`.
   await writeUpdateMarker({
     version: manifest.version,
     previousVersion: CORE_VERSION,
   });
 
-  const cmd = new Deno.Command(updaterBin, {
-    args: [
-      "--staged",
-      stagedPath,
-      "--current",
-      currentBin,
-      "--restart-args",
-      JSON.stringify(Deno.args),
-    ],
+  // Restart THROUGH the supervisor so exactly one owner relaunches core and no
+  // two relaunchers race over the port. Each path has a fallback:
+  //   - launchd: `KeepAlive` relaunches the already-swapped binary the instant
+  //     we exit, so there is nothing to spawn (a competing updater-spawned core
+  //     is exactly the bug this replaces).
+  //   - systemd: a clean exit doesn't trip `Restart=on-failure`, so enqueue a
+  //     restart with the user manager. `--no-block` returns immediately and the
+  //     job is owned by the manager (outside this unit's cgroup), so it outlives
+  //     our exit.
+  //   - schtask (Windows): the updater starts the task (fast path) AND we exit
+  //     non-zero so Task Scheduler's own restart-on-failure relaunches the
+  //     already-swapped binary as a backstop if the updater was torn down with
+  //     core's job. The updater only performs the swap when the in-core one
+  //     couldn't.
+  //   - background: no supervisor, so the updater is the sole relauncher.
+  let exitCode = 0;
+  switch (supervisor.kind) {
+    case "launchd":
+      break;
+    case "systemd":
+      new Deno.Command("systemctl", {
+        args: ["--user", "restart", "--no-block", supervisor.unit],
+        stdin: "null",
+        stdout: "null",
+        stderr: "null",
+      }).spawn();
+      break;
+    case "schtask":
+      if (updaterReady) {
+        await spawnUpdater(updaterBin, currentBin, {
+          staged: swappedInCore ? undefined : stagedPath,
+          startTask: supervisor.task,
+        });
+      }
+      // Non-zero marks this run as failed so Task Scheduler's restart-on-failure
+      // (RestartCount/RestartInterval, set at install) relaunches core even if
+      // the updater never ran. Any concurrent double-launch is deduped by the
+      // task's default MultipleInstances=IgnoreNew policy.
+      exitCode = 75;
+      break;
+    case "background":
+      // Unix already swapped in place above; only Windows may hand the swap to
+      // the updater. Either way the updater is what respawns core.
+      await spawnUpdater(updaterBin, currentBin, {
+        staged: swappedInCore ? undefined : stagedPath,
+      });
+      break;
+  }
+
+  emitUpdate({ kind: "staged", version: manifest.version });
+  log.info(`update ${manifest.version} staged; restarting core via ${supervisor.kind}`);
+  // Give a spawned restarter a beat to detach.
+  await new Promise((r) => setTimeout(r, 200));
+  Deno.exit(exitCode);
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await Deno.stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Swap the staged binary over the running one and preserve the previous binary
+ *  as `<bin>.old` for boot rollback. Works while core is running on both
+ *  platforms:
+ *   - Unix: hard-link current -> `<bin>.old` (a copy is the fallback on
+ *     filesystems without hard links), then rename the staged binary over the
+ *     anchored path; the live process keeps its now-unlinked inode.
+ *   - Windows: a running .exe can't be overwritten but CAN be renamed, so move
+ *     current -> `<bin>.old` (that move IS the anchor) then rename the staged
+ *     binary into place; the live process keeps running from the renamed image.
+ *     If the second rename fails, restore the running binary so the supervisor
+ *     still finds one.
+ *  The anchor is mandatory: without it boot rollback could not recover. */
+async function swapBinaryInPlace(staged: string, current: string): Promise<void> {
+  const old = `${current}.old`;
+  await Deno.remove(old).catch(() => {});
+  if (Deno.build.os === "windows") {
+    await Deno.rename(current, old);
+    try {
+      await Deno.rename(staged, current);
+    } catch (err) {
+      // Put the running .exe back so the supervisor still has a binary to launch.
+      await Deno.rename(old, current).catch(() => {});
+      throw err;
+    }
+    return;
+  }
+  try {
+    await Deno.link(current, old);
+  } catch {
+    await Deno.copyFile(current, old).catch(() => {});
+  }
+  try {
+    await Deno.stat(old);
+  } catch {
+    throw new AppError(
+      "update_failed",
+      `could not create rollback anchor ${old}; refusing to install without a recoverable fallback`,
+    );
+  }
+  await Deno.rename(staged, current);
+  await Deno.chmod(current, 0o755);
+}
+
+/** Rename a staged artifact into its live path, tolerating a running (locked)
+ *  Windows target. A running .exe (e.g. a helper sidecar) can't be overwritten
+ *  but can be renamed, so move the live target aside first, then rename the new
+ *  one in. The aside copy is best-effort removed on the next update, so it stays
+ *  bounded to one per artifact. Unix renames over the target directly (replacing
+ *  a running inode is fine). */
+async function commitRename(from: string, to: string): Promise<void> {
+  try {
+    await Deno.rename(from, to);
+    return;
+  } catch (err) {
+    if (Deno.build.os !== "windows") throw err;
+    const aside = `${to}.old`;
+    await Deno.remove(aside).catch(() => {});
+    await Deno.rename(to, aside);
+    await Deno.rename(from, to);
+  }
+}
+
+/** Spawn the updater to finish the handoff from a process outside core: on
+ *  Windows it starts the Task Scheduler task (`startTask`) and, only if the
+ *  in-core swap failed, first installs the staged binary; in Unix background mode
+ *  the binary is already swapped, so it only respawns. On Windows it is launched
+ *  via `Start-Process` (the same detach path `startBackground` uses); if that
+ *  process is still torn down with core's job, the caller's non-zero exit arms
+ *  Task Scheduler's restart-on-failure as a backstop. */
+async function spawnUpdater(
+  updaterBin: string,
+  currentBin: string,
+  opts: { staged?: string; startTask?: string },
+): Promise<void> {
+  const args = ["--current", currentBin, "--restart-args", JSON.stringify(Deno.args)];
+  if (opts.staged) args.push("--staged", opts.staged);
+  if (opts.startTask) args.push("--supervisor", "schtask", "--service-label", opts.startTask);
+  if (Deno.build.os === "windows") {
+    const argList = args.map((a) => `'${a.replaceAll("'", "''")}'`).join(",");
+    await runPwsh(
+      `Start-Process -FilePath '${updaterBin.replaceAll("'", "''")}' ` +
+        `-WindowStyle Hidden -ArgumentList ${argList}`,
+      { capture: false, ignoreError: true },
+    );
+    return;
+  }
+  new Deno.Command(updaterBin, {
+    args,
     stdin: "null",
     stdout: "null",
     stderr: "null",
-  });
-  cmd.spawn();
-  emitUpdate({ kind: "staged", version: manifest.version });
-
-  log.info(`update staged at ${stagedPath}; exiting for updater takeover`);
-  // Give the updater a beat to detach.
-  await new Promise((r) => setTimeout(r, 200));
-  Deno.exit(0);
+  }).spawn();
 }
 
 // --- internals ------------------------------------------------------------

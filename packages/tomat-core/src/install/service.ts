@@ -33,6 +33,52 @@ function systemdUnitName(): string {
   return `tomat-core${channelSuffix()}`;
 }
 
+/** The process supervisor that owns this core install. The self-update flow
+ *  consults this so it can restart core THROUGH the supervisor (the single
+ *  owner) rather than racing it: on macOS launchd's `KeepAlive` relaunches core
+ *  on any exit, so a second relauncher (the old updater's detached spawn) fought
+ *  it over the port. Mirrors installService's os + TOMAT_INSTALL_SERVICE split,
+ *  including the Linux "no systemd -> background" fallback. */
+export type Supervisor =
+  | { kind: "launchd"; label: string }
+  | { kind: "systemd"; unit: string }
+  | { kind: "schtask"; task: string }
+  | { kind: "background" };
+
+/** Detect the supervisor by the definition installService actually wrote (the
+ *  launchd plist / systemd unit / scheduled task), NOT by TOMAT_INSTALL_SERVICE:
+ *  that flag is set at install time and is absent from a running core's
+ *  environment, so a background install would otherwise be misread as a service.
+ *  No matching definition -> background mode (the client owns liveness). */
+export async function resolveSupervisor(): Promise<Supervisor> {
+  switch (Deno.build.os) {
+    case "darwin":
+      return (await fileExists(plistPath()))
+        ? { kind: "launchd", label: serviceLabel() }
+        : { kind: "background" };
+    case "linux":
+      return (await fileExists(systemdUnitPath())) && (await haveSystemdUser())
+        ? { kind: "systemd", unit: `${systemdUnitName()}.service` }
+        : { kind: "background" };
+    case "windows":
+      return (await scheduledTaskExists(systemdUnitName()))
+        ? { kind: "schtask", task: systemdUnitName() }
+        : { kind: "background" };
+    default:
+      return { kind: "background" };
+  }
+}
+
+async function scheduledTaskExists(task: string): Promise<boolean> {
+  return (
+    await runPwsh(
+      `if (Get-ScheduledTask -TaskName '${psq(task)}' -ErrorAction SilentlyContinue) ` +
+        `{ exit 0 } else { exit 1 }`,
+      { ignoreError: true, capture: false },
+    )
+  ).success;
+}
+
 /** Register (and start) the OS service, or launch in the background when
  *  TOMAT_INSTALL_SERVICE=0. Assumes the core binary is already on disk (placed
  *  by the seed step / native installer / self-install). */
@@ -264,7 +310,12 @@ async function installScheduledTask(): Promise<void> {
   const script = `
 ${action}
 $t = New-ScheduledTaskTrigger -AtLogOn
-$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries
+# RestartCount/RestartInterval double as the self-update backstop: core exits
+# non-zero after staging an update, and this restart-on-failure relaunches the
+# already-swapped binary if the updater's fast-path start never lands.
+# MultipleInstances=IgnoreNew (the default, pinned explicitly) dedups that
+# backstop against the updater's own Start-ScheduledTask so only one core runs.
+$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries
 $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 Unregister-ScheduledTask -TaskName '${task}' -Confirm:$false -ErrorAction SilentlyContinue
 Register-ScheduledTask -TaskName '${task}' -Action $a -Trigger $t -Settings $s -Principal $p -Description 'tomat-core' | Out-Null
