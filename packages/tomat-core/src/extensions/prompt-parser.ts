@@ -174,6 +174,10 @@ export class PromptParser {
         // read, possibly reprinted after a flushed/garbled answer; swallow
         // it and the rest of the block chrome.
         if (line.includes("Allow?") || BLOCK_PREFIX_RE.test(line)) return;
+        // A console (ConPTY) echoes the typed answer while Deno reads it; the
+        // tool's thread is still blocked, so a bare y/n here can only be our
+        // own answer bouncing back, never tool output.
+        if (/^[yn]$/i.test(line.trim())) return;
         this.onEvent({ kind: "stderr_line", line });
         return;
       }

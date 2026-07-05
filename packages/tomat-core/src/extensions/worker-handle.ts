@@ -217,9 +217,18 @@ export class WorkerHandle {
     // before building the args so its port can be granted + passed to the worker.
     const socketMode = ptyMode && Deno.build.os === "windows";
     const listener = socketMode ? ControlListener.create() : undefined;
-    const socketFlags = listener
-      ? [`--allow-net=127.0.0.1:${listener.addr.slice(listener.addr.lastIndexOf(":") + 1)}`]
-      : [];
+    // Scoped grant for the control socket (socket mode only): the worker may
+    // connect to exactly the one loopback port core is listening on. Deno
+    // rejects a repeated --allow-net at parse time (unlike --allow-read), so
+    // the grant must merge into the tool's own net flag when one exists; a
+    // bare --allow-net (wildcard host grant) already covers it.
+    const flags = [...spec.flags];
+    if (listener) {
+      const port = listener.addr.slice(listener.addr.lastIndexOf(":") + 1);
+      const i = flags.findIndex((f) => f === "--allow-net" || f.startsWith("--allow-net="));
+      if (i === -1) flags.push(`--allow-net=127.0.0.1:${port}`);
+      else if (flags[i] !== "--allow-net") flags[i] += `,127.0.0.1:${port}`;
+    }
     const socketArgs = listener
       ? [`--control-addr=${listener.addr}`, `--control-token=${listener.token}`]
       : [];
@@ -234,10 +243,7 @@ export class WorkerHandle {
       // resolve npm deps from it (the folder is allow-read'd below).
       "--node-modules-dir=auto",
       ...(hasLock ? ["--frozen"] : []),
-      ...spec.flags,
-      // Scoped grant for the control socket (socket mode only): the worker may
-      // connect to exactly the one loopback port core is listening on.
-      ...socketFlags,
+      ...flags,
       `--allow-read=${spec.extensionFolder},${paths().denoCacheDir}`,
       `--deny-read=${deniedPaths}`,
       `--deny-write=${deniedPaths}`,

@@ -411,6 +411,34 @@ mod unix {
     }
 }
 
+// The DSR cursor-position query (ESC [ 6 n). portable-pty creates the
+// pseudoconsole with PSEUDOCONSOLE_INHERIT_CURSOR, which makes conhost emit
+// this query at session start and HOLD ALL CLIENT OUTPUT until the hosting
+// terminal answers with a cursor position report (ESC [ row ; col R). A real
+// terminal answers it automatically; here ptyhost is the terminal, so the
+// reader thread answers each query it sees. Without the reply the whole
+// session stalls before the child produces a single byte.
+#[cfg(any(windows, test))]
+const DSR_QUERY: &[u8] = b"\x1b[6n";
+
+/// Count DSR cursor-position queries in `tail ++ chunk` and return the new
+/// tail (the last `DSR_QUERY.len() - 1` bytes) to carry to the next chunk, so
+/// a query split across reads is still seen. `tail` is shorter than one query,
+/// so a counted match always ends in `chunk`: no double counting.
+#[cfg(any(windows, test))]
+fn scan_dsr_queries(tail: &[u8], chunk: &[u8]) -> (usize, Vec<u8>) {
+    let mut window = Vec::with_capacity(tail.len() + chunk.len());
+    window.extend_from_slice(tail);
+    window.extend_from_slice(chunk);
+    let count = window
+        .windows(DSR_QUERY.len())
+        .filter(|w| *w == DSR_QUERY)
+        .count();
+    let keep = window.len().min(DSR_QUERY.len() - 1);
+    let new_tail = window[window.len() - keep..].to_vec();
+    (count, new_tail)
+}
+
 #[cfg(windows)]
 mod windows {
     //! ConPTY backend. Unlike the unix path there is no termios and no echo
@@ -423,6 +451,8 @@ mod windows {
     //! portable-pty wraps CreatePseudoConsole + the STARTUPINFOEX spawn. It
     //! attaches all of the child's std handles to the console (the documented,
     //! reliable shape), which is fine here because the protocol is elsewhere.
+    //! ptyhost also plays the terminal's side of the ConPTY handshake: conhost's
+    //! cursor-position query is answered by the reader thread (see DSR_QUERY).
     use super::*;
     use std::io::{BufRead, Read};
     use std::sync::Arc;
@@ -494,13 +524,19 @@ mod windows {
             Ok(r) => r,
             Err(e) => emit_fatal(&format!("clone reader failed: {e}")),
         };
-        let mut writer = match pair.master.take_writer() {
-            Ok(w) => w,
+        // Shared between the control loop (prompt answers) and the reader
+        // thread (DSR replies, see below).
+        let writer = match pair.master.take_writer() {
+            Ok(w) => Arc::new(Mutex::new(w)),
             Err(e) => emit_fatal(&format!("take writer failed: {e}")),
         };
-        // Keep the master alive for the whole run; dropping it would tear down
-        // the pseudoconsole out from under the reader/writer.
-        let _master = pair.master;
+        // The master must stay alive while the child runs (dropping it tears
+        // down the pseudoconsole), and must be dropped as soon as the child
+        // exits: ConPTY never EOFs its output pipe on child exit by itself;
+        // the host has to close the pseudoconsole (ClosePseudoConsole, via
+        // Drop), which ends conhost and lets the reader thread drain the tail
+        // and hit EOF. The waiter owns it for exactly that lifecycle.
+        let master = pair.master;
 
         // A killer handle usable from the control loop while the waiter blocks
         // in child.wait().
@@ -516,12 +552,27 @@ mod windows {
 
         // ConPTY output -> core: chunked, base64-wrapped `pty` events. This is
         // Deno's prompt text plus the worker's stderr; no protocol rides it.
+        // The thread also answers conhost's cursor-position queries (DSR_QUERY):
+        // conhost blocks the whole session on the first one until it is
+        // answered, so the reply must happen here, not in core.
+        let dsr_writer = Arc::clone(&writer);
         let reader_thread = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
+            let mut tail: Vec<u8> = Vec::new();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
-                    Ok(n) => emit_pty(&buf[..n]),
+                    Ok(n) => {
+                        emit_pty(&buf[..n]);
+                        let (queries, new_tail) = scan_dsr_queries(&tail, &buf[..n]);
+                        tail = new_tail;
+                        for _ in 0..queries {
+                            if let Ok(mut w) = dsr_writer.lock() {
+                                let _ = w.write_all(b"\x1b[1;1R");
+                                let _ = w.flush();
+                            }
+                        }
+                    }
                     Err(_) => break,
                 }
             }
@@ -535,6 +586,7 @@ mod windows {
                 Ok(status) => status.exit_code() as i32,
                 Err(_) => 70,
             };
+            drop(master);
             let _ = reader_thread.join();
             emit_exit(code);
             std::process::exit(code);
@@ -551,8 +603,19 @@ mod windows {
             match serde_json::from_str::<ControlFrame>(&line) {
                 Ok(ControlFrame::Write { data_b64 }) | Ok(ControlFrame::Answer { data_b64 }) => {
                     if let Ok(bytes) = B64.decode(data_b64) {
-                        let _ = writer.write_all(&bytes);
-                        let _ = writer.flush();
+                        // A console line read completes on Enter (\r), never on
+                        // \n, so translate: core stays platform-agnostic and
+                        // keeps sending "y\n". Only prompt answers flow this
+                        // way on Windows (the protocol rides the control
+                        // socket), so a blanket swap is safe.
+                        let bytes: Vec<u8> = bytes
+                            .iter()
+                            .map(|&b| if b == b'\n' { b'\r' } else { b })
+                            .collect();
+                        if let Ok(mut w) = writer.lock() {
+                            let _ = w.write_all(&bytes);
+                            let _ = w.flush();
+                        }
                     }
                 }
                 Ok(ControlFrame::Kill) => kill_child(),
@@ -613,6 +676,30 @@ mod tests {
         }
         let k: ControlFrame = serde_json::from_str(r#"{"kind":"kill"}"#).unwrap();
         assert!(matches!(k, ControlFrame::Kill));
+    }
+
+    #[test]
+    fn dsr_scan_counts_queries_and_ignores_other_output() {
+        let (n, tail) = scan_dsr_queries(b"", b"hello \x1b[6n world \x1b[6n");
+        assert_eq!(n, 2);
+        assert_eq!(tail, b"[6n");
+        let (n, _) = scan_dsr_queries(b"", b"plain output, no query");
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn dsr_scan_matches_query_split_across_chunks_without_double_count() {
+        // Query split at every possible boundary: exactly one match total.
+        for cut in 1..DSR_QUERY.len() {
+            let (a, b) = DSR_QUERY.split_at(cut);
+            let (n1, tail) = scan_dsr_queries(b"", a);
+            assert_eq!(n1, 0);
+            let (n2, tail2) = scan_dsr_queries(&tail, b);
+            assert_eq!(n2, 1, "cut at {cut}");
+            // A third empty-ish chunk must not re-count the same query.
+            let (n3, _) = scan_dsr_queries(&tail2, b"more");
+            assert_eq!(n3, 0);
+        }
     }
 
     #[test]

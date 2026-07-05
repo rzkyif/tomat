@@ -109,8 +109,9 @@ The prompt wording is not a stable Deno API. The bundled deno is therefore
 pinned on every channel (`pinnedTag` in `UPSTREAM_BINARIES`), and
 [`prompt-live-probe.test.ts`](prompt-live-probe.test.ts) drives real prompts
 through the real ptyhost + parser as the drift tripwire for deno bumps (unix
-fixture; the ConPTY path is covered by the socket transport test and the
-ConPTY-shaped parser fixture). Without the helper (a from-source dev setup that
+fixture; the ConPTY path gets the same live cover at the WorkerHandle level in
+[`worker-handle-live.test.ts`](worker-handle-live.test.ts), plus the socket
+transport test and the ConPTY-shaped parser fixture). Without the helper (a from-source dev setup that
 has not built it), workers fall back to the legacy `--no-prompt` spawn and
 ask-state permissions surface to the tool as `NotCapable`.
 

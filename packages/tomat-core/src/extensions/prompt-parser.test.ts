@@ -157,9 +157,14 @@ Deno.test("parser: ConPTY-wrapped prompt still parses, resolves resource, and se
       apiName: "fetch()",
     },
   ]);
+  // The console echoes the typed answer while Deno reads it (observed live on
+  // Windows: a bare "y"/"n" line between the prompt and the confirmation).
+  // It is our own answer, not tool output, and must not leak as stderr.
+  parser.feed("y\r\n");
   // The granted confirmation, likewise repainted by the pseudoconsole.
   parser.feed(conptyWrap(grantedLine("net", "example.com:443")));
   assertEquals(events[1], { kind: "settled", granted: true });
+  assertEquals(events.length, 2);
 });
 
 Deno.test("parser: identical events under randomized chunking", () => {

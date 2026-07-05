@@ -36,7 +36,12 @@ Where the worker protocol flows differs by platform:
   cannot ride it. The worker instead connects back to core over a per-worker
   loopback socket (see core's `control-socket.ts`) and speaks the protocol
   there; the ConPTY carries only Deno's prompt. No echo cancellation is needed
-  because nothing byte-exact flows through the pseudoconsole.
+  because nothing byte-exact flows through the pseudoconsole. ptyhost also plays
+  the hosting terminal's side of the ConPTY session: it answers conhost's
+  cursor-position query (`ESC[6n`, which otherwise blocks the whole session),
+  translates `\n` in answers to `\r` (a console line read only completes on
+  Enter), and closes the pseudoconsole when the child exits (ConPTY never EOFs
+  its output pipe on its own).
 
 ## Run, build, test
 
