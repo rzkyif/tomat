@@ -16,13 +16,11 @@ import { binPath } from "../paths.ts";
 import { coreBinaryName } from "./versions.ts";
 import { AppError } from "@tomat/core-engine";
 
-// Channel-independent base names. ptyhost is unix-only for now (Windows needs a
-// ConPTY backend; worker-handle.ts gates on the same platform check), so it is
-// not required on Windows.
+// Channel-independent base names. ptyhost is required on every platform: unix
+// uses a PTY, Windows a ConPTY (see tomat-core-ptyhost), and both surface Deno's
+// permission prompts through the same protocol.
 function requiredHelpers(): string[] {
-  const helpers = ["tomat-core-keychain", "tomat-core-updater", "tomat-core-hwinfo"];
-  if (Deno.build.os !== "windows") helpers.push("tomat-core-ptyhost");
-  return helpers;
+  return ["tomat-core-keychain", "tomat-core-updater", "tomat-core-hwinfo", "tomat-core-ptyhost"];
 }
 
 /** Throw if any required helper binary is absent from the bin dir. Called early

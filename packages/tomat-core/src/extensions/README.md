@@ -79,12 +79,16 @@ Only `granted` permissions become `--allow-*` spawn flags. Everything else
 relies on Deno's interactive permission prompt at the moment of access: when the
 [`tomat-core-ptyhost`](../../../tomat-core-ptyhost/README.md) helper binary is
 present, [`worker-handle.ts`](worker-handle.ts) spawns the worker under it with
-stdin + stderr on a pseudo-terminal and WITHOUT `--no-prompt`, so an uncovered
-access pauses the op mid-call instead of throwing.
+stdin + stderr on a pseudo-terminal (a unix PTY, or a ConPTY on Windows) and
+WITHOUT `--no-prompt`, so an uncovered access pauses the op mid-call instead of
+throwing. On Windows the ConPTY reflows the child's stdout, so the worker
+protocol rides a per-worker loopback socket ([`control-socket.ts`](control-socket.ts))
+instead of stdout, leaving the pseudoconsole for the prompt; the rest of the
+flow (parser, matcher, WS frames) is identical to unix.
 
 [`prompt-parser.ts`](prompt-parser.ts) (pure state machine, fixture-tested)
 extracts the permission kind, resource, and API name from the prompt text on the
-PTY; [`prompt-matcher.ts`](prompt-matcher.ts) decides: declared permission with
+terminal; [`prompt-matcher.ts`](prompt-matcher.ts) decides: declared permission with
 state `ask` (or no row) forwards to the user in chat over the
 `tool.permission_request` / `tool.permission_response` WS frames (the pool
 pauses the call-timeout budget exactly like `askUser`); declared + `denied` and
@@ -104,10 +108,11 @@ returning to the warm pool.
 The prompt wording is not a stable Deno API. The bundled deno is therefore
 pinned on every channel (`pinnedTag` in `UPSTREAM_BINARIES`), and
 [`prompt-live-probe.test.ts`](prompt-live-probe.test.ts) drives real prompts
-through the real ptyhost + parser as the drift tripwire for deno bumps. Without
-the helper (Windows, or a from-source dev setup that has not built it), workers
-fall back to the legacy `--no-prompt` spawn and ask-state permissions surface to
-the tool as `NotCapable`.
+through the real ptyhost + parser as the drift tripwire for deno bumps (unix
+fixture; the ConPTY path is covered by the socket transport test and the
+ConPTY-shaped parser fixture). Without the helper (a from-source dev setup that
+has not built it), workers fall back to the legacy `--no-prompt` spawn and
+ask-state permissions surface to the tool as `NotCapable`.
 
 ## Built-in extension seeding
 

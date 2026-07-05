@@ -49,9 +49,10 @@ flowchart TD
   Rust helper that reports RAM, physical cores, and GPU/VRAM for the on-device
   model fit engine.
 - [`packages/tomat-core-ptyhost/`](packages/tomat-core-ptyhost/README.md):
-  native Rust helper that runs a tool worker under a pseudo-terminal so Deno's
-  runtime permission prompts can pause the tool and be answered from chat (unix
-  only for now; Windows falls back to `--no-prompt` workers).
+  native Rust helper that runs a tool worker under a pseudo-terminal (a unix PTY,
+  or a ConPTY on Windows) so Deno's runtime permission prompts can pause the tool
+  and be answered from chat. On Windows the worker protocol rides a loopback
+  socket since the ConPTY reflows stdout.
 
 These four helper binaries (updater, keychain, hwinfo, ptyhost) ship in the
 signed release manifest and are placed in the bin dir at install time. Core

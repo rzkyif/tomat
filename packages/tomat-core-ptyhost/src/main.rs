@@ -1,11 +1,19 @@
-//! tomat-core-ptyhost: PTY plumbing between tomat-core and a Deno tool
+//! tomat-core-ptyhost: terminal plumbing between tomat-core and a Deno tool
 //! worker. Deno only shows its interactive permission prompt when the
 //! worker's stdin AND stderr are terminals, so this helper allocates a
-//! pseudo-terminal, attaches the worker's stdin + stderr to the slave side,
-//! and bridges the master side to the core over a small NDJSON protocol.
-//! The worker's stdout is inherited, so the core<->worker NDJSON stream
-//! passes through this process untouched; ptyhost itself never writes to
-//! its own stdout.
+//! pseudo-terminal (a unix PTY in `mod unix`, a ConPTY in `mod windows`),
+//! attaches the worker's stdin + stderr to it, and bridges the master side to
+//! the core over a small NDJSON protocol. ptyhost never writes to its own
+//! stdout.
+//!
+//! The two backends differ only in how the worker protocol reaches core:
+//!   - unix: the worker's stdout is inherited, so the core<->worker NDJSON
+//!     stream passes through this process untouched (see the ECHO note below).
+//!   - windows: a ConPTY merges and reflows the child's stdout, so the protocol
+//!     cannot ride it. The worker connects back to core over a per-worker
+//!     loopback socket (core's control-socket.ts) and speaks the protocol
+//!     there; the ConPTY carries only the prompt. No echo cancellation is
+//!     needed since nothing byte-exact flows through the pseudoconsole.
 //!
 //! Control frames (core -> ptyhost, one JSON object per line on stdin):
 //!   {"kind":"spawn","cmd":"/path/to/deno","args":[...],"env":{...},"cwd":null}
@@ -38,14 +46,14 @@
 use std::io::Write;
 use std::sync::Mutex;
 
-#[cfg(any(unix, test))]
+#[cfg(any(unix, windows, test))]
 use base64::engine::general_purpose::STANDARD as B64;
-#[cfg(any(unix, test))]
+#[cfg(any(unix, windows, test))]
 use base64::Engine;
-#[cfg(any(unix, test))]
+#[cfg(any(unix, windows, test))]
 use serde::Deserialize;
 
-#[cfg(any(unix, test))]
+#[cfg(any(unix, windows, test))]
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum ControlFrame {
@@ -86,7 +94,7 @@ fn emit_event(json: String) {
     drop(guard);
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn emit_pty(data: &[u8]) {
     emit_event(format!(
         "{{\"kind\":\"pty\",\"dataB64\":\"{}\"}}",
@@ -94,7 +102,7 @@ fn emit_pty(data: &[u8]) {
     ));
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn emit_exit(code: i32) {
     emit_event(format!("{{\"kind\":\"exit\",\"code\":{code}}}"));
 }
@@ -165,10 +173,15 @@ fn main() {
     unix::run();
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn main() {
-    // Windows needs a ConPTY backend, which is not implemented yet. Exit with
-    // a distinctive code so the core's legacy-spawn fallback engages.
+    windows::run();
+}
+
+#[cfg(not(any(unix, windows)))]
+fn main() {
+    // No PTY backend for this platform; exit with a distinctive code so the
+    // core's legacy --no-prompt spawn engages.
     emit_fatal("ptyhost is not supported on this platform");
 }
 
@@ -393,6 +406,168 @@ mod unix {
         // stdin EOF or read error: the core is gone, take the child with us.
         // The waiter thread exits the process once the child is reaped.
         kill_live();
+        let _ = waiter.join();
+        std::process::exit(70);
+    }
+}
+
+#[cfg(windows)]
+mod windows {
+    //! ConPTY backend. Unlike the unix path there is no termios and no echo
+    //! cancellation to do: the worker protocol rides a loopback socket (see
+    //! core's control-socket.ts), so nothing byte-exact flows through the
+    //! pseudoconsole. The ConPTY exists only so Deno sees stdin + stderr as
+    //! console handles and shows its interactive permission prompt; we stream
+    //! that prompt text out as `pty` events and write the y/n answer back in.
+    //!
+    //! portable-pty wraps CreatePseudoConsole + the STARTUPINFOEX spawn. It
+    //! attaches all of the child's std handles to the console (the documented,
+    //! reliable shape), which is fine here because the protocol is elsewhere.
+    use super::*;
+    use std::io::{BufRead, Read};
+    use std::sync::Arc;
+
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+    // A wide console so Deno's permission-prompt lines are not wrapped by the
+    // pseudoconsole (ConPTY reflows output at the console width). Prompt lines
+    // and the longest resource strings (URLs, paths) stay well under this, so
+    // the prompt-parser sees each prompt line intact.
+    const CONSOLE_COLS: u16 = 8192;
+    const CONSOLE_ROWS: u16 = 50;
+
+    pub fn run() {
+        let stdin = std::io::stdin();
+        let mut lines = stdin.lock().lines();
+
+        // First frame must be spawn.
+        let first = match lines.next() {
+            Some(Ok(line)) => line,
+            _ => return, // EOF before spawn: nothing to do.
+        };
+        let spawn = match serde_json::from_str::<ControlFrame>(&first) {
+            Ok(f @ ControlFrame::Spawn { .. }) => f,
+            Ok(_) => emit_fatal("first control frame must be spawn"),
+            Err(e) => emit_fatal(&format!("bad control frame: {e}")),
+        };
+        let ControlFrame::Spawn {
+            cmd,
+            args,
+            env,
+            cwd,
+        } = spawn
+        else {
+            unreachable!()
+        };
+
+        let pty_system = native_pty_system();
+        let pair = match pty_system.openpty(PtySize {
+            rows: CONSOLE_ROWS,
+            cols: CONSOLE_COLS,
+            pixel_width: 0,
+            pixel_height: 0,
+        }) {
+            Ok(p) => p,
+            Err(e) => emit_fatal(&format!("openpty (conpty) failed: {e}")),
+        };
+
+        // The child's environment is exactly `env` (env_clear, then apply), the
+        // same contract as the unix path.
+        let mut builder = CommandBuilder::new(&cmd);
+        builder.args(&args);
+        builder.env_clear();
+        for (k, v) in &env {
+            builder.env(k, v);
+        }
+        if let Some(dir) = &cwd {
+            builder.cwd(dir);
+        }
+
+        let mut child = match pair.slave.spawn_command(builder) {
+            Ok(c) => c,
+            Err(e) => emit_fatal(&format!("spawn failed: {e}")),
+        };
+        // Drop the slave so the master read ends when the child's handles close.
+        drop(pair.slave);
+
+        let mut reader = match pair.master.try_clone_reader() {
+            Ok(r) => r,
+            Err(e) => emit_fatal(&format!("clone reader failed: {e}")),
+        };
+        let mut writer = match pair.master.take_writer() {
+            Ok(w) => w,
+            Err(e) => emit_fatal(&format!("take writer failed: {e}")),
+        };
+        // Keep the master alive for the whole run; dropping it would tear down
+        // the pseudoconsole out from under the reader/writer.
+        let _master = pair.master;
+
+        // A killer handle usable from the control loop while the waiter blocks
+        // in child.wait().
+        let killer = Arc::new(Mutex::new(child.clone_killer()));
+        let kill_child = {
+            let killer = Arc::clone(&killer);
+            move || {
+                if let Ok(mut k) = killer.lock() {
+                    let _ = k.kill();
+                }
+            }
+        };
+
+        // ConPTY output -> core: chunked, base64-wrapped `pty` events. This is
+        // Deno's prompt text plus the worker's stderr; no protocol rides it.
+        let reader_thread = std::thread::spawn(move || {
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => emit_pty(&buf[..n]),
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // Child exit -> drain the reader, report, and mirror the exit code.
+        // ptyhost must not outlive its child (core awaits this process's status
+        // as the worker's status).
+        let waiter = std::thread::spawn(move || {
+            let code = match child.wait() {
+                Ok(status) => status.exit_code() as i32,
+                Err(_) => 70,
+            };
+            let _ = reader_thread.join();
+            emit_exit(code);
+            std::process::exit(code);
+        });
+
+        // Control loop: forward writes/answers to the console input, honor kill,
+        // kill on EOF. `write` and `answer` are identical on Windows (no echo
+        // tracking): the console input carries only the prompt answer.
+        for line in lines {
+            let Ok(line) = line else { break };
+            if line.is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<ControlFrame>(&line) {
+                Ok(ControlFrame::Write { data_b64 }) | Ok(ControlFrame::Answer { data_b64 }) => {
+                    if let Ok(bytes) = B64.decode(data_b64) {
+                        let _ = writer.write_all(&bytes);
+                        let _ = writer.flush();
+                    }
+                }
+                Ok(ControlFrame::Kill) => kill_child(),
+                Ok(ControlFrame::Spawn { .. }) => {
+                    // One child per ptyhost; a second spawn is a core bug.
+                    kill_child();
+                    emit_fatal("duplicate spawn frame");
+                }
+                Err(_) => continue, // tolerate garbage; core logs its own errors
+            }
+        }
+
+        // stdin EOF or read error: core is gone, take the child with us. The
+        // waiter thread exits the process once the child is reaped.
+        kill_child();
         let _ = waiter.join();
         std::process::exit(70);
     }

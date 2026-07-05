@@ -122,6 +122,46 @@ Deno.test("parser: reprinted Allow after garbled answer is swallowed", () => {
   );
 });
 
+// A pseudoconsole (Windows ConPTY) reflects a screen buffer: it wraps output in
+// cursor-hide/show, per-line absolute cursor moves + erase-line, and CRLF line
+// endings. The parser strips all ANSI CSI and \r, so a prompt driven through a
+// ConPTY must still yield the same prompt/settled events as the raw PTY. This is
+// synthetic (real ConPTY output can only be captured on Windows), but it locks
+// in that the VT chrome ConPTY adds is inert to the parser.
+function conptyWrap(block: string): string {
+  const HIDE = "\x1b[?25l";
+  const SHOW = "\x1b[?25h";
+  // Rewrite each line as ConPTY would paint it: move the cursor to the row,
+  // erase the line, print the content, end with CRLF (except a no-newline tail,
+  // which ConPTY leaves without an ending, matching the Allow? line).
+  const lines = block.split("\n");
+  const hasTail = lines[lines.length - 1] !== "";
+  let out = HIDE;
+  lines.forEach((line, i) => {
+    if (line === "" && i === lines.length - 1) return;
+    const last = i === lines.length - 1 || (i === lines.length - 2 && !hasTail);
+    out += `\x1b[${i + 1};1H\x1b[K${line}`;
+    if (!(last && hasTail)) out += "\r\n";
+  });
+  return out + SHOW;
+}
+
+Deno.test("parser: ConPTY-wrapped prompt still parses, resolves resource, and settles", () => {
+  const { events, parser } = collect();
+  parser.feed(conptyWrap(promptBlock("net", "example.com:443", "fetch()")));
+  assertEquals(events, [
+    {
+      kind: "prompt",
+      permission: "net",
+      resource: "example.com:443",
+      apiName: "fetch()",
+    },
+  ]);
+  // The granted confirmation, likewise repainted by the pseudoconsole.
+  parser.feed(conptyWrap(grantedLine("net", "example.com:443")));
+  assertEquals(events[1], { kind: "settled", granted: true });
+});
+
 Deno.test("parser: identical events under randomized chunking", () => {
   const transcript =
     "boot noise\n" +

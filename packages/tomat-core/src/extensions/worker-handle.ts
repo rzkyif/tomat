@@ -1,20 +1,27 @@
 // One running tool-worker subprocess + NDJSON channel.
 //
-// Two spawn modes:
+// Three spawn modes:
 //
-//  - PTY mode (default when the tomat-core-ptyhost helper is present and the
-//    platform is unix): the worker runs under the helper with stdin + stderr
-//    on a pseudo-terminal, WITHOUT --no-prompt, so Deno pauses on permission
+//  - PTY mode (unix, helper present, prompt context set): the worker runs
+//    under the tomat-core-ptyhost helper with stdin + stderr on a
+//    pseudo-terminal, WITHOUT --no-prompt, so Deno pauses on permission
 //    prompts for anything outside the granted spawn flags. The handle parses
 //    prompt text off the PTY (prompt-parser.ts), consults the grant policy
 //    (prompt-matcher.ts), and either auto-answers or surfaces a synthesized
 //    `permission_prompt` frame for the pool to forward to the user. Worker
-//    stdout is inherited through the helper, so the protocol stream is
-//    identical in both modes.
+//    stdout is inherited through the helper, so the protocol stream flows on
+//    stdout exactly as in pipe mode.
 //
-//  - Pipe mode (helper missing, Windows, or no prompt context): today's
-//    direct spawn with --no-prompt; ask-state permissions surface to the
-//    tool as NotCapable.
+//  - Socket mode (windows, helper present, prompt context set): same as PTY
+//    mode, but under a ConPTY the child's stdout+stderr are both bound to the
+//    pseudoconsole (which merges and reflows them), so the byte-exact NDJSON
+//    protocol cannot ride stdout. Instead the worker connects back over a
+//    per-worker loopback control socket (control-socket.ts) and the protocol
+//    flows there, leaving the pseudoconsole free for the prompt. Prompt
+//    parsing and answering are identical to PTY mode.
+//
+//  - Pipe mode (helper missing, or no prompt context): direct spawn with
+//    --no-prompt; ask-state permissions surface to the tool as NotCapable.
 
 import { join } from "@std/path";
 import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
@@ -31,6 +38,7 @@ import {
 } from "./worker-protocol.ts";
 import { PromptParser, type PromptParserEvent } from "./prompt-parser.ts";
 import { decidePrompt, type PromptContext } from "./prompt-matcher.ts";
+import { type ControlChannel, ControlListener } from "./control-socket.ts";
 
 const log = getLogger("toolworker");
 
@@ -114,7 +122,6 @@ export function ptyhostPath(): string {
 }
 
 function ptyhostAvailableSync(): boolean {
-  if (Deno.build.os === "windows") return false;
   try {
     return Deno.statSync(ptyhostPath()).isFile;
   } catch {
@@ -134,6 +141,15 @@ export class WorkerHandle {
   readonly spawnedAt = Date.now();
   inFlightCalls = 0;
   lastActivityAt = Date.now();
+
+  // --- Socket mode state ---------------------------------------------------
+  // Set only in socket mode (windows ConPTY): the protocol rides this loopback
+  // channel instead of the worker's stdout. Sends before the worker connects
+  // are held in channelSendQueue and flushed once the channel authenticates.
+  private readonly socketMode: boolean;
+  private listener: ControlListener | undefined;
+  private channel: ControlChannel | undefined;
+  private channelSendQueue: string[] = [];
 
   // --- PTY mode state ------------------------------------------------------
   private readonly ptyMode: boolean;
@@ -196,6 +212,17 @@ export class WorkerHandle {
       p.memoriesDir,
     ].join(",");
     const ptyMode = spec.promptContext !== undefined && ptyhostAvailableSync();
+    // Under a ConPTY (windows) the child's stdout is bound to the pseudoconsole,
+    // so the protocol rides a loopback control socket instead. Bind the listener
+    // before building the args so its port can be granted + passed to the worker.
+    const socketMode = ptyMode && Deno.build.os === "windows";
+    const listener = socketMode ? ControlListener.create() : undefined;
+    const socketFlags = listener
+      ? [`--allow-net=127.0.0.1:${listener.addr.slice(listener.addr.lastIndexOf(":") + 1)}`]
+      : [];
+    const socketArgs = listener
+      ? [`--control-addr=${listener.addr}`, `--control-token=${listener.token}`]
+      : [];
     const args = [
       "run",
       // In PTY mode prompts are the whole point; in pipe mode they would
@@ -208,6 +235,9 @@ export class WorkerHandle {
       "--node-modules-dir=auto",
       ...(hasLock ? ["--frozen"] : []),
       ...spec.flags,
+      // Scoped grant for the control socket (socket mode only): the worker may
+      // connect to exactly the one loopback port core is listening on.
+      ...socketFlags,
       `--allow-read=${spec.extensionFolder},${paths().denoCacheDir}`,
       `--deny-read=${deniedPaths}`,
       `--deny-write=${deniedPaths}`,
@@ -215,6 +245,7 @@ export class WorkerHandle {
       entry,
       `--extension-id=${spec.extensionId}`,
       `--entry=${spec.entryPath}`,
+      ...socketArgs,
     ];
     // Build the worker env explicitly. clearEnv drops the inherited superset so
     // the --allow-env list is authoritative: only DENO_DIR, a non-secret
@@ -243,7 +274,7 @@ export class WorkerHandle {
         stdout: "piped",
         stderr: "piped",
       }).spawn();
-      const handle = new WorkerHandle(proc, spec.extensionId, true, spec.promptContext);
+      const handle = new WorkerHandle(proc, spec.extensionId, true, spec.promptContext, listener);
       handle.writeControl({ kind: "spawn", cmd: denoBin, args, env });
       return handle;
     }
@@ -268,13 +299,24 @@ export class WorkerHandle {
     extensionId: string,
     ptyMode: boolean,
     promptContext: PromptContext | undefined,
+    listener?: ControlListener,
   ) {
     this.proc = proc;
     this.writer = proc.stdin.getWriter();
     this.extensionId = extensionId;
     this.ptyMode = ptyMode;
     this.promptContext = promptContext;
-    void this.pumpStdout(proc.stdout);
+    this.socketMode = listener !== undefined;
+    this.listener = listener;
+    if (this.socketMode) {
+      // Protocol rides the control socket; the ptyhost's stdout carries nothing
+      // (the ConPTY child's stdout is on the pseudoconsole). Drain it so the
+      // pipe never fills, and accept the worker's control connection.
+      void this.drainStream(proc.stdout);
+      void this.acceptChannel();
+    } else {
+      void this.pumpStdout(proc.stdout);
+    }
     if (ptyMode) {
       this.promptParser = new PromptParser((e) => this.onPromptEvent(e));
       void this.pumpPtyhostEvents(proc.stderr);
@@ -319,6 +361,14 @@ export class WorkerHandle {
     // frame (e.g. a module result carrying a non-JSON value) must throw to
     // the caller, not die inside a swallowed write or an unawaited PTY path.
     const line = JSON.stringify(frame) + "\n";
+    if (this.socketMode) {
+      // Protocol rides the control socket, independent of the PTY, so the
+      // prompt-pending gating below does not apply. Hold frames only until the
+      // worker has connected and authenticated.
+      if (this.channel) this.channel.writeLine(line);
+      else this.channelSendQueue.push(line);
+      return;
+    }
     if (this.ptyMode) {
       // While a prompt is pending, Deno's clear_stdin would flush anything
       // written to the PTY before reading the answer; hold frames until the
@@ -351,7 +401,10 @@ export class WorkerHandle {
     this.promptPending = false;
     this.stopAnswerTimer();
     try {
-      if (this.ptyMode) {
+      if (this.socketMode) {
+        // Shutdown rides the control socket, not the PTY.
+        this.send({ kind: "shutdown" });
+      } else if (this.ptyMode) {
         this.writeWorkerFrame({ kind: "shutdown" });
       } else {
         this.send({ kind: "shutdown" });
@@ -359,6 +412,11 @@ export class WorkerHandle {
     } catch {
       /* ignore */
     }
+    // Release the control socket. The listener is one-shot (already closed after
+    // accept), but close it defensively in case the worker never connected;
+    // channel.close() flushes the queued shutdown before tearing down the conn.
+    this.listener?.close();
+    this.channel?.close();
     const dead = await Promise.race([
       this.proc.status.then(() => true),
       new Promise<boolean>((r) => setTimeout(() => r(false), drainTimeoutMs)),
@@ -533,6 +591,55 @@ export class WorkerHandle {
     if (this.answerTimer !== undefined) {
       clearTimeout(this.answerTimer);
       this.answerTimer = undefined;
+    }
+  }
+
+  // --- socket plumbing -----------------------------------------------------
+
+  /** Accept the worker's authenticated control connection, flush any queued
+   *  sends, then pump its frames. Runs once per socket-mode worker. */
+  private async acceptChannel(): Promise<void> {
+    if (!this.listener) return;
+    try {
+      const channel = await this.listener.accept();
+      this.channel = channel;
+      for (const line of this.channelSendQueue) channel.writeLine(line);
+      this.channelSendQueue = [];
+      void this.pumpChannel(channel);
+    } catch (err) {
+      log.warn(`[${this.extensionId}] control socket accept failed: ${errMessage(err)}`);
+      this.failBoot(new AppError("internal_error", "worker control socket failed"));
+      this.emit({ kind: "worker_exited", code: -1 });
+    }
+  }
+
+  /** Read worker frames off the control socket. Same structural screen as the
+   *  stdout pump: forge-able frame kinds are rejected by parseWorkerFrame. */
+  private async pumpChannel(channel: ControlChannel): Promise<void> {
+    for await (const line of channel.readLines()) {
+      if (!line.trim()) continue;
+      try {
+        const frame = parseWorkerFrame(JSON.parse(line));
+        if (!frame) {
+          log.warn(`[${this.extensionId}] dropping invalid frame: ${line.slice(0, 200)}`);
+          continue;
+        }
+        this.handle(frame);
+      } catch {
+        log.warn(`[${this.extensionId}] bad frame: ${line.slice(0, 200)}`);
+      }
+    }
+  }
+
+  /** Discard a stream we must keep drained but do not read (the ptyhost's own
+   *  stdout in socket mode). */
+  private async drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
+    try {
+      for await (const _chunk of stream) {
+        /* discard */
+      }
+    } catch {
+      /* stream closed */
     }
   }
 

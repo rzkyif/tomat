@@ -707,7 +707,8 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 // time; dev has no such download, so without this they are absent and core
 // fails its boot-time helper check (see ensureHelperBinaries in main.ts). The
 // crate name is also the on-disk base name; core looks them up channel-suffixed
-// ("-dev"). ptyhost is unix-only for now; the rest build + run everywhere.
+// ("-dev"). All four build + run on every platform (ptyhost uses a ConPTY on
+// Windows, a PTY on unix).
 const HELPER_CRATES = [
   "tomat-core-keychain",
   "tomat-core-updater",
@@ -717,9 +718,7 @@ const HELPER_CRATES = [
 
 async function provisionHelpers(): Promise<void> {
   const exe = Deno.build.os === "windows" ? ".exe" : "";
-  const crates = HELPER_CRATES.filter(
-    (c) => !(c === "tomat-core-ptyhost" && Deno.build.os === "windows"),
-  );
+  const crates = HELPER_CRATES;
   try {
     const out = await new Deno.Command("cargo", {
       args: ["build", ...crates.flatMap((c) => ["-p", c])],

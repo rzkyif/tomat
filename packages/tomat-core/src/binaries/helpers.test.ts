@@ -4,11 +4,14 @@ import { coreBinaryName } from "./versions.ts";
 import { binPath, paths } from "../paths.ts";
 import { AppError } from "@tomat/core-engine";
 
-// The helper names ensureHelperBinaries requires on this platform (ptyhost is
-// unix-only). Kept in sync with requiredHelpers() in helpers.ts.
-const REQUIRED = ["tomat-core-keychain", "tomat-core-updater", "tomat-core-hwinfo"].concat(
-  Deno.build.os === "windows" ? [] : ["tomat-core-ptyhost"],
-);
+// The helper names ensureHelperBinaries requires (every platform). Kept in sync
+// with requiredHelpers() in helpers.ts.
+const REQUIRED = [
+  "tomat-core-keychain",
+  "tomat-core-updater",
+  "tomat-core-hwinfo",
+  "tomat-core-ptyhost",
+];
 
 // paths.ts reads HOME / TOMAT_CORE_HOME / TOMAT_CHANNEL at call time. Point all
 // of them at a fresh tempdir so binPath() resolves inside it, and restore after

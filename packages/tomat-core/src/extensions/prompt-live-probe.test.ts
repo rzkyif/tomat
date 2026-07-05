@@ -5,7 +5,11 @@
 // every channel, so a bump is always a deliberate, CI-gated change).
 //
 // Skipped when the ptyhost binary is absent (e.g. no cargo build yet) or on
-// Windows. CI builds the debug binary before `deno task test`.
+// Windows: the probe FIXTURE below is unix-specific (it reads /etc/hosts and
+// dlopens libSystem, and expects PTY-shaped prompt output), so it validates the
+// unix PTY path only. A ConPTY-shaped equivalent needs a Windows runner and is
+// a follow-up; the parser's ConPTY handling is unit-covered in
+// prompt-parser.test.ts. CI builds the debug binary before `deno task test`.
 
 import { assertEquals } from "@std/assert";
 import { decodeBase64, encodeBase64 } from "@std/encoding/base64";
@@ -13,6 +17,7 @@ import { fromFileUrl } from "@std/path";
 import { PromptParser, type PromptParserEvent } from "./prompt-parser.ts";
 
 function findPtyhost(): string | null {
+  // Unix only: the probe fixture below is unix-specific (see the header).
   if (Deno.build.os === "windows") return null;
   const repoRoot = fromFileUrl(new URL("../../../../", import.meta.url));
   for (const candidate of [
