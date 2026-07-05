@@ -119,11 +119,15 @@ async function main(): Promise<void> {
   }
   log.info(`root: ${paths().root}`);
 
-  // Check the update marker BEFORE we open the DB / bind the port. If
-  // rollback fires, we exit cleanly and the supervisor relaunches the
-  // (now-restored) previous binary.
+  // Check the update marker BEFORE we open the DB / bind the port. If rollback
+  // fires, exit NON-ZERO so the supervisor relaunches the (now-restored) previous
+  // binary: launchd's KeepAlive relaunches on any exit, but systemd
+  // (Restart=on-failure) and Task Scheduler (restart-on-failure) only relaunch on
+  // a failure exit, so a clean exit(0) would leave the rolled-back binary stopped
+  // and core down. Background mode has no supervisor (the client owns liveness),
+  // so the code is moot there. 75 matches the update path's restart-request exit.
   const rolledBack = await handleUpdateMarkerOnBoot();
-  if (rolledBack) Deno.exit(0);
+  if (rolledBack) Deno.exit(75);
 
   // Fail loud if a native helper binary is missing rather than silently
   // degrading (file-backed secrets, guessed hardware, no permission prompts).

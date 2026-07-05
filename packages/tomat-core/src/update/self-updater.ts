@@ -155,9 +155,15 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
     }
   }
 
-  // Helpers are per-triple native binaries (keychain). Only the entries matching
-  // our triple apply. Swapped at the same time as the main binary to keep
-  // version invariants: the manifest is one atomic unit.
+  // Helpers are per-triple native binaries (keychain, updater, hwinfo, ptyhost).
+  // Only the entries matching our triple apply. They are committed here, just
+  // before the binary swap, to minimize skew. NOTE: this is NOT atomic with the
+  // binary swap, and boot rollback (rollback.ts) restores ONLY `<bin>.old`, not
+  // the helpers/workers. So a rollback leaves the NEW helpers next to the OLD
+  // core. That is tolerated because every helper/worker speaks a stable subprocess
+  // protocol (a new one works against an old core and vice versa); if that ever
+  // stops holding, this commit must move to the healthy checkpoint (commitUpdate)
+  // and grow its own rollback anchors.
   if (manifest.helpers && manifest.helpers.length > 0) {
     const exe = platformExe();
     for (const h of manifest.helpers) {
@@ -203,7 +209,7 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
   // binary. commitRename tolerates a running (locked) Windows target by moving
   // it aside first.
   for (const r of pendingRenames) {
-    await commitRename(r.from, r.to);
+    await commitRename(r.from, r.to, onWindows);
     log.info(`updated ${r.label}`);
   }
 
@@ -215,7 +221,7 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
   // letting the updater do the swap once core is down.
   let swappedInCore = false;
   try {
-    await swapBinaryInPlace(stagedPath, currentBin);
+    await swapBinaryInPlace(stagedPath, currentBin, onWindows);
     swappedInCore = true;
   } catch (err) {
     // Unix has no updater fallback for the swap, so a failure there is fatal.
@@ -237,9 +243,11 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
   //     we exit, so there is nothing to spawn (a competing updater-spawned core
   //     is exactly the bug this replaces).
   //   - systemd: a clean exit doesn't trip `Restart=on-failure`, so enqueue a
-  //     restart with the user manager. `--no-block` returns immediately and the
-  //     job is owned by the manager (outside this unit's cgroup), so it outlives
-  //     our exit.
+  //     restart with the user manager and AWAIT it: `--no-block` returns as soon
+  //     as the job is queued (owned by the manager, outside this unit's cgroup),
+  //     and awaiting guarantees it is queued before we exit and the cgroup is
+  //     torn down. If systemctl is unreachable/fails, fall back to exiting
+  //     non-zero so the unit's own `Restart=on-failure` relaunches core.
   //   - schtask (Windows): the updater starts the task (fast path) AND we exit
   //     non-zero so Task Scheduler's own restart-on-failure relaunches the
   //     already-swapped binary as a backstop if the updater was torn down with
@@ -250,14 +258,24 @@ async function applyUpdateInner(targetVersion?: string): Promise<void> {
   switch (supervisor.kind) {
     case "launchd":
       break;
-    case "systemd":
-      new Deno.Command("systemctl", {
+    case "systemd": {
+      const rc = await new Deno.Command("systemctl", {
         args: ["--user", "restart", "--no-block", supervisor.unit],
         stdin: "null",
         stdout: "null",
         stderr: "null",
-      }).spawn();
+      })
+        .output()
+        .catch(() => null);
+      if (!rc?.success) {
+        log.warn(
+          `systemctl restart of ${supervisor.unit} failed; ` +
+            `falling back to a non-zero exit so Restart=on-failure relaunches core`,
+        );
+        exitCode = 75;
+      }
       break;
+    }
     case "schtask":
       if (updaterReady) {
         await spawnUpdater(updaterBin, currentBin, {
@@ -307,11 +325,17 @@ async function pathExists(p: string): Promise<boolean> {
  *     binary into place; the live process keeps running from the renamed image.
  *     If the second rename fails, restore the running binary so the supervisor
  *     still finds one.
- *  The anchor is mandatory: without it boot rollback could not recover. */
-async function swapBinaryInPlace(staged: string, current: string): Promise<void> {
+ *  The anchor is mandatory: without it boot rollback could not recover.
+ *  `onWindows` is passed explicitly (not read from `Deno.build.os`) so tests can
+ *  exercise both branches on any host, mirroring the Rust updater's swap. */
+export async function swapBinaryInPlace(
+  staged: string,
+  current: string,
+  onWindows: boolean,
+): Promise<void> {
   const old = `${current}.old`;
   await Deno.remove(old).catch(() => {});
-  if (Deno.build.os === "windows") {
+  if (onWindows) {
     await Deno.rename(current, old);
     try {
       await Deno.rename(staged, current);
@@ -344,13 +368,14 @@ async function swapBinaryInPlace(staged: string, current: string): Promise<void>
  *  but can be renamed, so move the live target aside first, then rename the new
  *  one in. The aside copy is best-effort removed on the next update, so it stays
  *  bounded to one per artifact. Unix renames over the target directly (replacing
- *  a running inode is fine). */
-async function commitRename(from: string, to: string): Promise<void> {
+ *  a running inode is fine). `onWindows` is explicit for the same testability
+ *  reason as `swapBinaryInPlace`. */
+export async function commitRename(from: string, to: string, onWindows: boolean): Promise<void> {
   try {
     await Deno.rename(from, to);
     return;
   } catch (err) {
-    if (Deno.build.os !== "windows") throw err;
+    if (!onWindows) throw err;
     const aside = `${to}.old`;
     await Deno.remove(aside).catch(() => {});
     await Deno.rename(to, aside);

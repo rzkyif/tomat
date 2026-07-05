@@ -70,13 +70,13 @@ export async function resolveSupervisor(): Promise<Supervisor> {
 }
 
 async function scheduledTaskExists(task: string): Promise<boolean> {
-  return (
-    await runPwsh(
-      `if (Get-ScheduledTask -TaskName '${psq(task)}' -ErrorAction SilentlyContinue) ` +
-        `{ exit 0 } else { exit 1 }`,
-      { ignoreError: true, capture: false },
-    )
-  ).success;
+  // schtasks.exe ships on every Windows and exits 0 iff the task exists, so it
+  // needs neither the ScheduledTasks PowerShell module nor a PowerShell spawn
+  // (and it's the same tool the updater uses to `/Run` the task). Misdetecting a
+  // real task as absent would fall back to background mode, so prefer the most
+  // universally available probe.
+  return (await run(["schtasks", "/Query", "/TN", task], { ignoreError: true, capture: false }))
+    .success;
 }
 
 /** Register (and start) the OS service, or launch in the background when

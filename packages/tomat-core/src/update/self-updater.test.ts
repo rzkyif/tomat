@@ -6,14 +6,17 @@
 // divergence in key ordering, escaping, or array handling would
 // undetectably brick the auto-update channel for every shipped core.
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
+import { join } from "@std/path";
 import {
   __resetUpdateSubscribersForTesting,
   canonicalize,
+  commitRename,
   decodeBase64,
   emitUpdate,
   signedManifestPayload,
   subscribeUpdate,
+  swapBinaryInPlace,
   type UpdateEvent,
 } from "./self-updater.ts";
 
@@ -187,3 +190,136 @@ Deno.test("__resetUpdateSubscribersForTesting: clears the subscriber set", () =>
   emitUpdate({ kind: "staged", version: "1" });
   assertEquals(received, []);
 });
+
+// --- in-place binary swap ---------------------------------------------------
+//
+// The swap runs while core is still executing `current`, so it must always leave
+// a runnable binary at `current` and preserve the previous one at `<current>.old`
+// (the anchor boot-time rollback in rollback.ts restores). `onWindows` is passed
+// explicitly so both branches run on any host.
+
+async function tmpBinDir(): Promise<string> {
+  return await Deno.makeTempDir({ prefix: "tomat-swap-test-" });
+}
+
+Deno.test("swapBinaryInPlace (unix): installs staged and anchors the old binary", async () => {
+  const dir = await tmpBinDir();
+  try {
+    const current = join(dir, "tomat-core");
+    const staged = join(dir, "staging", "tomat-core-2");
+    await Deno.mkdir(join(dir, "staging"));
+    await Deno.writeTextFile(current, "v1");
+    await Deno.writeTextFile(staged, "v2");
+
+    await swapBinaryInPlace(staged, current, false);
+
+    assertEquals(await Deno.readTextFile(current), "v2");
+    // The previous binary survives as the rollback anchor.
+    assertEquals(await Deno.readTextFile(`${current}.old`), "v1");
+    // The staged copy was consumed by the rename.
+    assertEquals(await pathGone(staged), true);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("swapBinaryInPlace (unix): a stale anchor from a prior update is replaced", async () => {
+  const dir = await tmpBinDir();
+  try {
+    const current = join(dir, "tomat-core");
+    const staged = join(dir, "staged");
+    await Deno.writeTextFile(current, "v2");
+    await Deno.writeTextFile(staged, "v3");
+    await Deno.writeTextFile(`${current}.old`, "v1-stale");
+
+    await swapBinaryInPlace(staged, current, false);
+
+    assertEquals(await Deno.readTextFile(current), "v3");
+    assertEquals(await Deno.readTextFile(`${current}.old`), "v2");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("swapBinaryInPlace (windows): renames the running exe aside, then installs", async () => {
+  const dir = await tmpBinDir();
+  try {
+    const current = join(dir, "tomat-core.exe");
+    const staged = join(dir, "tomat-core-2.exe");
+    await Deno.writeTextFile(current, "v1");
+    await Deno.writeTextFile(staged, "v2");
+
+    await swapBinaryInPlace(staged, current, true);
+
+    assertEquals(await Deno.readTextFile(current), "v2");
+    assertEquals(await Deno.readTextFile(`${current}.old`), "v1");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("swapBinaryInPlace (windows): a failed install rename restores the running exe", async () => {
+  const dir = await tmpBinDir();
+  try {
+    const current = join(dir, "tomat-core.exe");
+    const missingStaged = join(dir, "does-not-exist.exe");
+    await Deno.writeTextFile(current, "v1");
+
+    // rename(staged -> current) fails because staged is absent; the swap must
+    // put the running binary back so the supervisor still finds one.
+    await assertRejects(() => swapBinaryInPlace(missingStaged, current, true));
+
+    assertEquals(await Deno.readTextFile(current), "v1");
+    assertEquals(await pathGone(`${current}.old`), true);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("commitRename: replaces the target with the staged artifact", async () => {
+  const dir = await tmpBinDir();
+  try {
+    const to = join(dir, "tomat-core-keychain");
+    const from = join(dir, "tomat-core-keychain.new");
+    await Deno.writeTextFile(to, "old");
+    await Deno.writeTextFile(from, "new");
+
+    await commitRename(from, to, false);
+
+    assertEquals(await Deno.readTextFile(to), "new");
+    assertEquals(await pathGone(from), true);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("commitRename (windows): a locked target is moved aside, not overwritten", async () => {
+  const dir = await tmpBinDir();
+  try {
+    // Simulate a target the direct rename can't replace by making it a
+    // non-empty directory: rename(file -> dir) fails, so the move-aside path
+    // (rename target -> target.old, then staged -> target) runs.
+    const to = join(dir, "ptyhost.exe");
+    await Deno.mkdir(to);
+    await Deno.writeTextFile(join(to, "keep"), "busy");
+    const from = join(dir, "ptyhost.new.exe");
+    await Deno.writeTextFile(from, "new");
+
+    await commitRename(from, to, true);
+
+    assertEquals(await Deno.readTextFile(to), "new");
+    // The previous target survives aside so a running helper keeps its image.
+    assertEquals(await Deno.readTextFile(join(`${to}.old`, "keep")), "busy");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+async function pathGone(p: string): Promise<boolean> {
+  try {
+    await Deno.stat(p);
+    return false;
+  } catch {
+    return true;
+  }
+}
