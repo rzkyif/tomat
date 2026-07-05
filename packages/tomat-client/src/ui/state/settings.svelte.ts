@@ -387,6 +387,7 @@ class SettingsState {
     this.applyToggleWindowShortcut(this.currentSettings["shortcuts.toggleWindow"]).catch((e) =>
       log.warn("Failed to register persisted shortcut:", e),
     );
+    this.applyPttConfig().catch((e) => log.warn("Failed to sync PTT config:", e));
   }
 
   /** Fetch the selected core's settings baseline (and configured-secret
@@ -460,6 +461,16 @@ class SettingsState {
     await platform().shortcuts.setBinding(accelerator);
   }
 
+  /** Push the window-shortcut activation mode + hold duration to Rust, which
+   *  owns the tap-vs-hold timing (see shortcut.svelte.ts). Call whenever
+   *  `stt.activation` or `stt.holdDuration` changes so Rust classifies the next
+   *  press correctly. */
+  async applyPttConfig(): Promise<void> {
+    const pushToTalk = this.currentSettings["stt.activation"] === "push-to-talk";
+    const holdMs = Number(this.currentSettings["stt.holdDuration"]) || 250;
+    await platform().shortcuts.setPttConfig(pushToTalk, holdMs);
+  }
+
   // --- edits ----------------------------------------------------------------
 
   async updateSetting(key: string, value: unknown): Promise<void> {
@@ -487,6 +498,12 @@ class SettingsState {
     }
 
     const transitions = this.applyChanges(updates, "user");
+
+    // Keep Rust's tap-vs-hold config in step with the activation mode + hold
+    // duration (applyChanges has already updated currentSettings).
+    if ("stt.activation" in updates || "stt.holdDuration" in updates) {
+      this.applyPttConfig().catch((e) => log.warn("Failed to sync PTT config:", e));
+    }
 
     for (const t of transitions) {
       // First observed prev per key inside the debounce window, so rapid

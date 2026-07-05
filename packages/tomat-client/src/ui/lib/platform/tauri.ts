@@ -153,15 +153,16 @@ const impl: Platform = {
     validate(accelerator) {
       return invoke("validate_shortcut", { accelerator });
     },
-    async subscribeEvents({ onPressed, onReleased }) {
-      const unPress: UnlistenFn = await listen("shortcut-pressed", () => onPressed());
-      let unRelease: UnlistenFn | null = null;
-      if (onReleased) {
-        unRelease = await listen("shortcut-released", () => onReleased());
-      }
+    setPttConfig(pushToTalk, holdMs) {
+      return invoke("set_ptt_config", { pushToTalk, holdMs });
+    },
+    async subscribeEvents({ onPressed, onTap, onHoldStart, onHoldEnd }) {
+      const unlisteners: UnlistenFn[] = [await listen("shortcut-pressed", () => onPressed())];
+      if (onTap) unlisteners.push(await listen("shortcut-tap", () => onTap()));
+      if (onHoldStart) unlisteners.push(await listen("shortcut-hold-start", () => onHoldStart()));
+      if (onHoldEnd) unlisteners.push(await listen("shortcut-hold-end", () => onHoldEnd()));
       return () => {
-        unPress();
-        if (unRelease) unRelease();
+        for (const un of unlisteners) un();
       };
     },
     setInputBindings(bindings) {

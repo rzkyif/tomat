@@ -401,11 +401,31 @@ pub fn validate_shortcut(app: AppHandle, accelerator: String) -> AppResult<()> {
 /// Empty accelerator strings inside `bindings` are skipped, allowing the user
 /// to clear an individual binding without unregistering the others.
 #[tauri::command]
+pub fn set_ptt_config(state: State<AppState>, push_to_talk: bool, hold_ms: u32) -> AppResult<()> {
+    let mut ptt = state
+        .0
+        .ptt
+        .lock()
+        .map_err(|e| AppError::external(format!("ptt mutex poisoned: {e}")))?;
+    ptt.push_to_talk = push_to_talk;
+    // Clamp to at least 1ms so the hold timer never sleeps zero and fires
+    // before a genuine tap's release can be observed.
+    ptt.hold_ms = u64::from(hold_ms.max(1));
+    Ok(())
+}
+
+#[tauri::command]
 pub fn set_input_shortcuts(
     app: AppHandle,
     state: State<AppState>,
     bindings: Vec<(String, String)>,
 ) -> AppResult<()> {
+    // Read the toggle accelerator first so we can skip any input binding that
+    // collides with it: the plugin keys handlers by a hash of the accelerator,
+    // so registering the same combo would overwrite the toggle's handler in the
+    // shared map and swallow its release events (turning taps into stuck holds).
+    let toggle_accel = state.0.current_shortcut.lock().ok().and_then(|g| g.clone());
+
     let mut current = state
         .0
         .input_shortcuts
@@ -425,6 +445,10 @@ pub fn set_input_shortcuts(
     // shouldn't take the whole input layer down.
     for (event_name, accel) in bindings.into_iter() {
         if accel.trim().is_empty() {
+            continue;
+        }
+        if toggle_accel.as_deref() == Some(accel.as_str()) {
+            log::warn!(target: "tomat::input-shortcut", "skipping '{event_name}' = '{accel}': collides with the window toggle shortcut");
             continue;
         }
         let handle = app.clone();

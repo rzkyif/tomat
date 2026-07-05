@@ -76,11 +76,20 @@ export interface ShortcutBindings {
   /** Probe whether an accelerator can be registered without actually keeping
    *  it. Used by the Settings UI to surface "already taken" before persist. */
   validate(accelerator: string): Promise<void>;
-  /** Subscribe to press/release events from the currently-bound shortcut.
-   *  Returns a cleanup function that detaches both listeners. */
+  /** Configure how Rust classifies a window-shortcut press. In push-to-talk
+   *  mode Rust owns the tap-vs-hold timing (a release before `holdMs` emits a
+   *  `tap`, at/after it a `holdStart`/`holdEnd` pair) so the decision doesn't
+   *  depend on the OS release event reaching the (possibly congested) webview
+   *  in time. Call on attach and whenever the mode or hold duration changes. */
+  setPttConfig(pushToTalk: boolean, holdMs: number): Promise<void>;
+  /** Subscribe to the window-shortcut events. `onPressed` fires on every press;
+   *  the rest fire only in push-to-talk mode per Rust's tap-vs-hold verdict.
+   *  Returns a cleanup function that detaches all listeners. */
   subscribeEvents(handlers: {
     onPressed: () => void;
-    onReleased?: () => void;
+    onTap?: () => void;
+    onHoldStart?: () => void;
+    onHoldEnd?: () => void;
   }): Promise<() => void>;
   /** Register window-scoped shortcuts that fire only while the input
    *  surface is focused. Pass `[]` to clear. The tuples are

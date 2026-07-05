@@ -64,7 +64,7 @@ pub use process::was_autostarted;
 #[cfg(desktop)]
 pub use window::{
     hide_main_window, position_window, request_hide_main_window, set_global_shortcut,
-    set_input_shortcuts, show_main_window, toggle_main_window, validate_shortcut,
+    set_input_shortcuts, set_ptt_config, show_main_window, toggle_main_window, validate_shortcut,
 };
 
 use crate::error::AppResult;

@@ -1,8 +1,16 @@
 /**
- * Listens for global-shortcut press / release events coming from the
- * Rust backend and turns them into the right app-level behavior: show
- * or hide the window, push-to-talk, sticky listen, etc., based on what
- * the user has configured.
+ * Listens for window-shortcut events coming from the Rust backend and turns
+ * them into the right app-level behavior: show or hide the window,
+ * push-to-talk, sticky listen, etc., based on what the user has configured.
+ *
+ * The tap-vs-hold decision itself is made in Rust (see `state::PttState` on the
+ * Rust side), not here: the OS release signal reaches this webview over the
+ * IPC pipe on the UI thread, which stalls exactly while the cursor is over the
+ * (interactive, non-clickthrough) window, so a JS-side hold timer would promote
+ * a quick tap to a hold and wrongly start STT. Rust classifies off that thread
+ * and emits one semantic event - `shortcut-tap`, `shortcut-hold-start`, or
+ * `shortcut-hold-end` - which we just react to. We still push the activation
+ * mode + hold duration to Rust via `setPttConfig`.
  */
 
 import { platform } from "$lib/platform";
@@ -41,9 +49,9 @@ export const windowTransition = new WindowTransition();
 
 class ShortcutHandler {
   // Reactive: true while the push-to-talk shortcut is currently being held
-  // (between press and either timer-fire or release). Drives the mic button's
-  // hold-progress ring so the UI animates from 0 → 100% in lockstep with the
-  // hold timer.
+  // (between press and either the hold verdict or a tap). Drives the mic
+  // button's hold-progress ring so the UI animates from 0 → 100% over the
+  // hold duration. Cosmetic, so a slightly congested webview clock is fine.
   pttHolding = $state(false);
   // The hold duration captured at press time (ms). Pinned for the duration
   // of the press so a settings change mid-hold can't desync the animation.
@@ -52,36 +60,36 @@ class ShortcutHandler {
   // Regular fields - no reactivity needed, just persistent across listener
   // fires. Using `this` rather than module-scope variables ensures we never
   // read from a stale closure capture.
-  private pressStart = 0;
   private wasVisibleOnPress = false;
-  private holdTimer: ReturnType<typeof setTimeout> | null = null;
-  // Set when onPressed bails because a window transition is in flight, so
-  // the matching onReleased is also dropped (otherwise PTT release would
-  // still fire `request_hide_main_window` or toggle VAD off the half-press).
-  private skipNextRelease = false;
+  // Set when onPressed drops its window action because a slide is in flight,
+  // so the matching tap / hold-end action is dropped too (otherwise a
+  // half-press would still hide the window or toggle VAD off).
+  private skipNextAction = false;
 
   private unsubscribe: (() => void) | null = null;
 
   async attach(): Promise<void> {
     if (this.unsubscribe) return;
+    // Make sure Rust has the current mode + hold duration before the first
+    // press (settings load usually beats this, but the push is idempotent).
+    await settingsState
+      .applyPttConfig()
+      .catch((e) => log.warn("initial PTT config sync failed:", e));
     this.unsubscribe = await platform().shortcuts.subscribeEvents({
       onPressed: () => this.onPressed(),
-      onReleased: () => this.onReleased(),
+      onTap: () => this.onTap(),
+      onHoldStart: () => this.onHoldStart(),
+      onHoldEnd: () => this.onHoldEnd(),
     });
   }
 
   detach() {
     this.unsubscribe?.();
     this.unsubscribe = null;
-    if (this.holdTimer) {
-      clearTimeout(this.holdTimer);
-      this.holdTimer = null;
-    }
-    this.pressStart = 0;
     this.wasVisibleOnPress = false;
     this.pttHolding = false;
     this.pttHoldDuration = 0;
-    this.skipNextRelease = false;
+    this.skipNextAction = false;
   }
 
   private async onPressed() {
@@ -90,15 +98,14 @@ class ShortcutHandler {
     // animation, so a pass-through press would emit the opposite-direction
     // event and reverse the slide mid-flight (visible flicker on spam).
     if (windowTransition.isTransitioning()) {
-      this.skipNextRelease = true;
+      this.skipNextAction = true;
       return;
     }
+    this.skipNextAction = false;
 
     const mode = settingsState.currentSettings["stt.activation"];
-    const duration = Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
-    this.pressStart = Date.now();
-
     if (mode === "push-to-talk") {
+      const duration = Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
       const visible = await platform().windowing.isVisible();
       this.wasVisibleOnPress = visible;
 
@@ -110,18 +117,9 @@ class ShortcutHandler {
         }
       }
 
-      if (this.holdTimer) clearTimeout(this.holdTimer);
-      // Flip the reactive flag synchronously on press so the UI ring starts
-      // animating immediately, not after the timer fires.
+      // Start the mic ring immediately; Rust decides tap vs hold from here.
       this.pttHoldDuration = duration;
       this.pttHolding = true;
-      this.holdTimer = setTimeout(async () => {
-        this.holdTimer = null;
-        this.pttHolding = false;
-        if (this.pressStart && !vadManager.enabled && !vadManager.loading) {
-          await vadManager.toggle();
-        }
-      }, duration);
     } else {
       // Manual / Sticky: defer to Rust so the shortcut and the tray icon
       // share one source of truth for visibility (avoids drift between
@@ -135,39 +133,47 @@ class ShortcutHandler {
     }
   }
 
-  private async onReleased() {
-    if (this.skipNextRelease) {
-      this.skipNextRelease = false;
+  // Released before the hold threshold: a short tap. Fires the moment Rust
+  // sees the release, so taps stay snappy even when the webview is busy.
+  private async onTap() {
+    this.pttHolding = false;
+    if (this.skipNextAction) {
+      this.skipNextAction = false;
       return;
     }
-
-    const mode = settingsState.currentSettings["stt.activation"];
-    const duration = Number(settingsState.currentSettings["stt.holdDuration"]) || 250;
-    const held = this.pressStart ? Date.now() - this.pressStart : 0;
-    const wasVisibleOnPress = this.wasVisibleOnPress;
-    this.pressStart = 0;
-
-    if (mode !== "push-to-talk") return;
-
-    if (this.holdTimer) {
-      clearTimeout(this.holdTimer);
-      this.holdTimer = null;
-    }
-    this.pttHolding = false;
-
-    if (held < duration) {
-      // Short tap: if visible on press, hide. If hidden on press, we already
-      // showed it on press - leave it visible.
-      if (wasVisibleOnPress) {
-        try {
-          // Route through the request path so the UI animates out before
-          // the native window actually hides.
-          await platform().windowing.requestHide();
-        } catch (e) {
-          log.warn("hide failed:", e);
-        }
+    if (settingsState.currentSettings["stt.activation"] !== "push-to-talk") return;
+    // If visible on press, hide. If hidden on press, we already showed it on
+    // press - leave it visible.
+    if (this.wasVisibleOnPress) {
+      try {
+        // Route through the request path so the UI animates out before
+        // the native window actually hides.
+        await platform().windowing.requestHide();
+      } catch (e) {
+        log.warn("hide failed:", e);
       }
-    } else if (vadManager.enabled) {
+    }
+  }
+
+  // Hold threshold reached while still held: start listening.
+  private async onHoldStart() {
+    this.pttHolding = false;
+    if (this.skipNextAction) return;
+    if (settingsState.currentSettings["stt.activation"] !== "push-to-talk") return;
+    if (!vadManager.enabled && !vadManager.loading) {
+      await vadManager.toggle();
+    }
+  }
+
+  // Released after a hold: stop listening.
+  private async onHoldEnd() {
+    this.pttHolding = false;
+    if (this.skipNextAction) {
+      this.skipNextAction = false;
+      return;
+    }
+    if (settingsState.currentSettings["stt.activation"] !== "push-to-talk") return;
+    if (vadManager.enabled) {
       await vadManager.toggle();
     }
   }

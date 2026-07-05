@@ -6,6 +6,45 @@
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32};
 use std::sync::{Arc, Mutex};
 
+/// Push-to-talk config + in-flight press state for the window toggle shortcut.
+///
+/// The tap-vs-hold decision is made HERE in Rust, not in the webview, because
+/// the OS "released" signal reaches JS over the WebView2 IPC pipe on the webview
+/// UI thread, which stalls exactly while the cursor is over the (interactive,
+/// non-clickthrough) window - so a quick tap's release could land after the JS
+/// hold timer had already fired and (wrongly) started STT. Rust learns of the
+/// press/release promptly and off that thread, so it classifies correctly and
+/// emits a single semantic event (`shortcut-tap` / `shortcut-hold-start` /
+/// `shortcut-hold-end`) the UI just reacts to.
+pub struct PttState {
+    /// Whether the window shortcut is in push-to-talk mode (pushed from JS via
+    /// `set_ptt_config`). When false, a press is a plain window toggle and no
+    /// tap/hold classification runs.
+    pub push_to_talk: bool,
+    /// Hold threshold in ms: release before this is a tap, at/after it is a hold.
+    pub hold_ms: u64,
+    /// Bumped on every press and every release so a stale hold timer spawned by
+    /// an earlier press can't fire against a newer (or already-classified) one.
+    pub generation: u64,
+    /// Whether the shortcut is currently physically held.
+    pub down: bool,
+    /// Whether the hold timer already fired for the current press (so the
+    /// release knows to emit `shortcut-hold-end` rather than `shortcut-tap`).
+    pub hold_started: bool,
+}
+
+impl Default for PttState {
+    fn default() -> Self {
+        Self {
+            push_to_talk: false,
+            hold_ms: 250,
+            generation: 0,
+            down: false,
+            hold_started: false,
+        }
+    }
+}
+
 pub struct AppStateInner {
     /// Tracked main-window visibility. Single source of truth shared across
     /// the tray icon, the global shortcut, the close-to-tray handler, and
@@ -21,6 +60,9 @@ pub struct AppStateInner {
     /// Currently registered input shortcuts (event name + accelerator).
     /// Cleared on UserInput unmount.
     pub input_shortcuts: Mutex<Vec<(String, String)>>,
+    /// Push-to-talk config + in-flight press state for the window toggle
+    /// shortcut. See [`PttState`].
+    pub ptt: Mutex<PttState>,
     /// The xcap monitor id the next region-capture invocation should crop
     /// against. Set by the JS helper before showing the overlay window;
     /// read by the overlay page on mount. Defaults to "primary".
@@ -60,6 +102,7 @@ mod tests {
             current_shortcut: Mutex::new(None),
             saved_volume: Mutex::new(None),
             input_shortcuts: Mutex::new(Vec::new()),
+            ptt: Mutex::new(PttState::default()),
             region_capture_target: Mutex::new("primary".to_string()),
             install_in_progress: AtomicBool::new(false),
             install_last_finished_ms: AtomicI64::new(0),

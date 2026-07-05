@@ -338,6 +338,7 @@ const impl: Platform = {
     // mobile UI offers on-screen buttons instead.
     setBinding: () => Promise.resolve(),
     validate: () => notSupported("Global shortcuts"),
+    setPttConfig: () => Promise.resolve(),
     subscribeEvents: inertSubscription,
     setInputBindings: () => Promise.resolve(),
     subscribeInputEvents: inertSubscription,

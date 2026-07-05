@@ -39,6 +39,7 @@ fn new_app_state() -> AppState {
         visible: AtomicBool::new(false),
         saved_volume: Mutex::new(None),
         input_shortcuts: Mutex::new(Vec::new()),
+        ptt: Mutex::new(crate::state::PttState::default()),
         region_capture_target: Mutex::new("primary".to_string()),
         install_in_progress: AtomicBool::new(false),
         install_last_finished_ms: AtomicI64::new(0),
@@ -66,14 +67,95 @@ pub fn register_toggle_shortcut(
     app.global_shortcut()
         .on_shortcut(accelerator, move |_app, _shortcut, event| {
             match event.state {
-                ShortcutState::Pressed => {
-                    let _ = handle.emit("shortcut-pressed", ());
-                }
-                ShortcutState::Released => {
-                    let _ = handle.emit("shortcut-released", ());
-                }
+                ShortcutState::Pressed => on_toggle_pressed(&handle),
+                ShortcutState::Released => on_toggle_released(&handle),
             }
         })
+}
+
+/// Handle a physical press of the window toggle shortcut.
+///
+/// Always emits `shortcut-pressed` (drives the mic ring, the manual/sticky
+/// window toggle, and the push-to-talk show-on-press). In push-to-talk mode it
+/// also arms an off-thread hold timer that emits `shortcut-hold-start` if the
+/// key is still held after `hold_ms`. See [`crate::state::PttState`] for why the
+/// tap-vs-hold timing lives in Rust rather than the webview.
+#[cfg(desktop)]
+fn on_toggle_pressed(app: &AppHandle) {
+    let _ = app.emit("shortcut-pressed", ());
+
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let (run_ptt, hold_ms, generation) = {
+        let Ok(mut ptt) = state.0.ptt.lock() else {
+            return;
+        };
+        ptt.generation = ptt.generation.wrapping_add(1);
+        ptt.down = true;
+        ptt.hold_started = false;
+        (ptt.push_to_talk, ptt.hold_ms, ptt.generation)
+    };
+    if !run_ptt {
+        return;
+    }
+
+    // The hold timer runs on its own thread so its timing is immune to
+    // webview-UI-thread congestion (which is the whole reason we don't classify
+    // in JS). It fires once at `hold_ms` iff the same press is still held.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(hold_ms));
+        let Some(state) = app.try_state::<AppState>() else {
+            return;
+        };
+        let fire = {
+            let Ok(mut ptt) = state.0.ptt.lock() else {
+                return;
+            };
+            if ptt.generation == generation && ptt.down && !ptt.hold_started {
+                ptt.hold_started = true;
+                true
+            } else {
+                false
+            }
+        };
+        if fire {
+            let _ = app.emit("shortcut-hold-start", ());
+        }
+    });
+}
+
+/// Handle a physical release of the window toggle shortcut. In push-to-talk
+/// mode, classify the just-ended press: a release before the hold timer fired
+/// is a `shortcut-tap`; a release after it is a `shortcut-hold-end`. Bumping the
+/// generation invalidates the hold timer so it can't fire post-classification.
+#[cfg(desktop)]
+fn on_toggle_released(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let outcome = {
+        let Ok(mut ptt) = state.0.ptt.lock() else {
+            return;
+        };
+        ptt.down = false;
+        if !ptt.push_to_talk {
+            None
+        } else {
+            ptt.generation = ptt.generation.wrapping_add(1);
+            Some(ptt.hold_started)
+        }
+    };
+    match outcome {
+        Some(true) => {
+            let _ = app.emit("shortcut-hold-end", ());
+        }
+        Some(false) => {
+            let _ = app.emit("shortcut-tap", ());
+        }
+        None => {}
+    }
 }
 
 #[cfg(desktop)]
@@ -242,6 +324,7 @@ fn run_desktop() {
             toggle_main_window,
             set_global_shortcut,
             set_input_shortcuts,
+            set_ptt_config,
             validate_shortcut,
             // Capture
             list_capture_monitors,

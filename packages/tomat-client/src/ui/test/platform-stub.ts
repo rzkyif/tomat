@@ -85,6 +85,7 @@ const impl: Platform = {
   shortcuts: {
     setBinding: NOOP,
     validate: async () => {},
+    setPttConfig: NOOP,
     subscribeEvents: async () => () => {},
     setInputBindings: NOOP,
     subscribeInputEvents: async () => () => {},
