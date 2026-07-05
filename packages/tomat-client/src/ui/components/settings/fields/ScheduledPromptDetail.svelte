@@ -21,7 +21,11 @@
   // clobber an in-progress edit, so these are intentionally not derived.
   let draftTitle = $state(untrack(() => item.title));
   let draftInstruction = $state(untrack(() => item.instruction));
-  let draftSchedule = $state<ScheduleSpec>(untrack(() => structuredClone(item.schedule)));
+  // `item` is a reactive store proxy when opened from the manager, so its
+  // schedule is deep Proxy state; structuredClone would throw DataCloneError on
+  // it. $state.snapshot returns a plain editable clone (the same call the chat
+  // schedule-confirm draft uses).
+  let draftSchedule = $state<ScheduleSpec>(untrack(() => $state.snapshot(item.schedule)));
   let draftRunMissed = $state(untrack(() => item.runMissed));
   let draftEnabled = $state(untrack(() => item.enabled));
 

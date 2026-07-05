@@ -3,6 +3,7 @@
   import type { ScheduledPrompt } from "@tomat/shared";
   import { confirmState, scheduledPromptsState } from "$stores";
   import { describeSchedule, nextRunText } from "$stores/scheduled-prompts.svelte";
+  import type { Badge } from "@tomat/shared/ui/components/objects/object-types";
   import type { ParsedQuery } from "$lib/objects/query";
   import { type MenuRow, showFilterSortMenu, showObjectActionMenu } from "$lib/objects/menu";
   import { getLogger } from "$lib/util/log";
@@ -34,7 +35,10 @@
     const text = q.text.toLowerCase();
     let list = scheduledPromptsState.prompts.filter(
       (p) =>
-        !text || p.title.toLowerCase().includes(text) || p.instruction.toLowerCase().includes(text),
+        (!text ||
+          p.title.toLowerCase().includes(text) ||
+          p.instruction.toLowerCase().includes(text)) &&
+        (q.filters.size === 0 || (q.filters.has("disabled") && !p.enabled)),
     );
     if (q.sort === "title") list = [...list].sort((a, b) => a.title.localeCompare(b.title));
     else if (q.sort === "next") {
@@ -44,6 +48,13 @@
       );
     }
     return Promise.resolve({ items: list, done: true });
+  }
+
+  // A single enabled/disabled state chip so every card carries its status at a
+  // glance (green Enabled / neutral Disabled), matching the tools and memories
+  // lists; the exact next-run time still rides in the card meta line.
+  function cardBadges(p: ScheduledPrompt): Badge[] {
+    return [p.enabled ? { label: "Enabled", accent: "green" } : { label: "Disabled" }];
   }
 
   function cardMenuRows(p: ScheduledPrompt): MenuRow[] {
@@ -97,7 +108,7 @@
   hasFilterSort
   onFilterSort={() =>
     showFilterSortMenu({
-      filters: [],
+      filters: [{ label: "Status", options: [{ token: "disabled", label: "Disabled" }] }],
       sorts: [
         { value: "title", label: "Title" },
         { value: "next", label: "Next run" },
@@ -120,6 +131,7 @@
       label={item.title}
       description={describeSchedule(item.schedule)}
       meta={nextRunText(item)}
+      badges={cardBadges(item)}
       menuRows={cardMenuRows(item)}
       onOpen={open}
     />
