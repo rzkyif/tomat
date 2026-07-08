@@ -16,6 +16,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpConnectionStatus, McpServer } from "@tomat/shared";
 import { errMessage } from "@tomat/shared";
 import { getLogger } from "../shared/log.ts";
+import { coreSecretDenyPaths } from "../shared/sandbox-deny.ts";
 import { getSecret } from "@tomat/core-engine/services/secrets";
 import { mcpAuthSecretName } from "./secret-key.ts";
 import { McpOAuthProvider } from "./oauth-provider.ts";
@@ -390,7 +391,16 @@ async function makeDenoStdioTransport(server: McpServer): Promise<StdioClientTra
   const target = server.command?.trim();
   if (!target) throw new Error("deno MCP server has no package or script to run");
   const denoBin = await requireWorkerDeno();
-  const perms = server.denoAllowAll ? ["--allow-all"] : server.denoPermissions;
+  // Even under the (default) allow-all toggle, backstop the grant with the same
+  // secret-file --deny list the extension tool workers use: Deno's --deny-* wins
+  // over --allow-*, so a user-added deno MCP server still can't read/write the
+  // core's secrets, admin token, sqlite db, memory store, or other extensions'
+  // data. A least-privilege (denoAllowAll=false) server runs on its manual list
+  // only, so the deny is redundant-but-harmless there.
+  const deny = coreSecretDenyPaths().join(",");
+  const perms = server.denoAllowAll
+    ? ["--allow-all", `--deny-read=${deny}`, `--deny-write=${deny}`]
+    : server.denoPermissions;
   return new StdioClientTransport({
     command: denoBin,
     args: ["run", ...perms, target, ...server.args],

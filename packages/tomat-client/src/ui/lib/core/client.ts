@@ -73,8 +73,6 @@ export class CoreClient {
   // Bumped on every connect attempt (and on watchdog/close) so a late-resolving
   // connectWebSocket() from a superseded attempt is discarded, not adopted.
   private wsConnectGen = 0;
-  private pongTimeoutId: number | null = null;
-  private pingTimeoutId: number | null = null;
   private connState: ConnectionState = "disconnected";
   private connListeners = new Subscribers<ConnectionListener>();
   // Last WS connect-failure reason (from the Tauri error event or an IPC
@@ -226,8 +224,6 @@ export class CoreClient {
       clearTimeout(this.wsReconnectTimer);
       this.wsReconnectTimer = null;
     }
-    if (this.pingTimeoutId !== null) clearTimeout(this.pingTimeoutId);
-    if (this.pongTimeoutId !== null) clearTimeout(this.pongTimeoutId);
     this.ws?.close();
     this.ws = null;
   }
@@ -313,13 +309,37 @@ export class CoreClient {
     if (this.ws || this.wsConnecting || this.wsReconnectTimer !== null) return;
     this.wsConnecting = true;
     const gen = ++this.wsConnectGen;
-    const wsUrl =
-      this.endpoint.baseUrl.replace(/^http/, "ws") +
-      `/ws/v1?token=${encodeURIComponent(this.endpoint.token)}`;
     log.debug(`connecting to ${this.endpoint.baseUrl} (attempt ${++this.connectAttempt})`);
     this.setConnState("connecting");
     this.armConnectWatchdog();
-    void this.openSocket(wsUrl, gen);
+    void this.mintTicketAndOpen(gen);
+  }
+
+  // Mint a short-lived WS ticket over authed HTTP (bearer in the Authorization
+  // header, kept out of the ws:// URL), then open the socket with only the
+  // ticket in the URL. The mint is the sole credential check now: a 401/403
+  // here is the dead-bearer signal (revoked client / core reset its DB) that
+  // never recovers, so it is terminal. Every other outcome is transient - an
+  // offline/5xx mint, or a stale/spent ticket that the upgrade later rejects -
+  // and the backoff loop re-mints a fresh ticket rather than parking.
+  private async mintTicketAndOpen(gen: number): Promise<void> {
+    let ticket: string;
+    try {
+      ticket = (await this.post<{ ticket: string }>("/api/v1/ws/ticket")).ticket;
+    } catch (err) {
+      if (gen !== this.wsConnectGen) return; // superseded while minting
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        this.enterUnauthorized(`HTTP ${err.status}`);
+        return;
+      }
+      this.lastWsError = err instanceof ApiError ? `HTTP ${err.status}` : String(err);
+      this.handleWsClosed();
+      return;
+    }
+    if (gen !== this.wsConnectGen || this.wsClosing) return;
+    const wsUrl =
+      this.endpoint.baseUrl.replace(/^http/, "ws") + `/ws/v1?ticket=${encodeURIComponent(ticket)}`;
+    await this.openSocket(wsUrl, gen);
   }
 
   // Open a pinned WebSocket through the platform net layer (Rust on desktop,
@@ -474,11 +494,27 @@ export class CoreClient {
       return;
     }
     if (frame.kind === "pong") {
-      if (this.pongTimeoutId !== null) clearTimeout(this.pongTimeoutId);
-      this.pongTimeoutId = null;
+      // The core is the only heartbeat initiator (server pings, we pong above)
+      // and never sends `pong`, so there is no client-side pong-deadline timer.
+      // Still drop a stray protocol pong here so it never reaches app listeners.
       return;
     }
     this.listeners.emit(frame);
+  }
+
+  // Park this client permanently: the core rejected our bearer at the ticket
+  // mint, which never starts working again, so no reconnect is scheduled. The UI
+  // surfaces "unauthorized" as a re-pair prompt; recovery builds a fresh
+  // CoreClient. A bad ticket at the upgrade layer does NOT reach here - that is
+  // transient and flows through handleWsClosed's normal backoff instead.
+  private enterUnauthorized(reason: string): void {
+    this.clearConnectWatchdog();
+    this.wsConnected = false;
+    this.wsConnecting = false;
+    this.ws = null;
+    this.disconnectedAtMs = null;
+    log.warn(`core rejected credentials (${reason}); halting reconnect, re-pair required`);
+    this.setConnState("unauthorized", reason);
   }
 
   private handleWsClosed(): void {
@@ -486,17 +522,6 @@ export class CoreClient {
     this.wsConnected = false;
     this.wsConnecting = false;
     this.ws = null;
-    // A handshake the core rejected for bad credentials (401/403) is terminal:
-    // the token won't start working again, so stop here instead of scheduling
-    // another doomed attempt. The UI surfaces "unauthorized" as a re-pair prompt.
-    if (isAuthRejection(this.lastWsError)) {
-      this.disconnectedAtMs = null;
-      log.warn(
-        `core rejected credentials (${this.lastWsError}); halting reconnect, re-pair required`,
-      );
-      this.setConnState("unauthorized", this.lastWsError ?? undefined);
-      return;
-    }
     // Log "disconnected" once per gap (the first close); the per-attempt
     // reconnect churn shows at debug below, so repeating it on every retry's
     // close would just be noise.
@@ -521,15 +546,6 @@ export class CoreClient {
 // True for a 2xx NetResponse.
 function isOk(res: NetResponse): boolean {
   return res.status >= 200 && res.status < 300;
-}
-
-// Whether a WS connect-failure reason is the core rejecting our credentials.
-// The desktop net layer reports the handshake status as "HTTP 401"/"HTTP 403"
-// (see commands/net.rs); a dead bearer token never recovers, so this gates the
-// terminal "unauthorized" state. The browser WS transport hides the handshake
-// status, so on web this never matches and the normal retry path is unchanged.
-function isAuthRejection(reason: string | null | undefined): boolean {
-  return !!reason && /\bHTTP (?:401|403)\b/.test(reason);
 }
 
 // Decode a NetResponse body (UTF-8 bytes) to text for JSON parsing.

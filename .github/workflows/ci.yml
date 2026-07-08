@@ -100,6 +100,17 @@ jobs:
       - name: "test:js (extension-samples)"
         run: deno task --cwd packages/tomat-extension-samples test:js
         timeout-minutes: 3
+      # Trust-root install-script verification (scripts/install/{core,client}.{sh,ps1}):
+      # not a package, so it is not covered by the per-package steps above. ubuntu-latest
+      # ships both OpenSSL 3.x and pwsh, so the POSIX and the pure-PowerShell Ed25519
+      # verify lanes both run here. TOMAT_REQUIRE_INSTALL_VERIFY makes the suite FAIL
+      # rather than skip if either interpreter is somehow absent, so a runner-image
+      # change can never silently drop this security-critical coverage.
+      - name: "test (install-script signature verification)"
+        run: deno test -A scripts/install/verify.test.ts
+        timeout-minutes: 3
+        env:
+          TOMAT_REQUIRE_INSTALL_VERIFY: "1"
 
   # Rust pipeline: clippy (the single Rust compile-check - `--all-targets` is a
   # superset of cargo check, so check is never run separately) plus the cargo test

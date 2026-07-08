@@ -117,6 +117,26 @@ Deno.test("unionFlags: read/write apply path templates", () => {
   assertEquals(flags.write.has("/home/u/Downloads/out"), true);
 });
 
+Deno.test("unionFlags: a write grant into the extension's own install dir ($extension) is dropped", () => {
+  // Self-write would open a TOCTOU vs the content-hash gate, so it must never
+  // reach the worker's --allow-write set.
+  const at: PermissionDecl = { kind: "write", path: "$extension", reason: "x" };
+  const under: PermissionDecl = { kind: "write", path: "$extension/sub/f", reason: "x" };
+  for (const decl of [at, under]) {
+    const flags = unionFlags([{ required: [decl], grants: [grantedFor(decl)] }], templates);
+    assertEquals(flags.write.size, 0);
+  }
+});
+
+Deno.test("unionFlags: a write grant whose path expands empty is dropped, not added as an empty entry", () => {
+  // A non-allowlisted $env expands to "", which must not become `--allow-write=`
+  // (a much broader grant than declared).
+  const decl: PermissionDecl = { kind: "write", path: "$env.TOMAT_NOT_ALLOWLISTED", reason: "x" };
+  const flags = unionFlags([{ required: [decl], grants: [grantedFor(decl)] }], templates);
+  assertEquals(flags.write.size, 0);
+  assertEquals(flags.write.has(""), false);
+});
+
 Deno.test("unionFlags: ffi flips the boolean, sys is a set", () => {
   const ffi: PermissionDecl = { kind: "ffi", reason: "x" };
   const sys: PermissionDecl = { kind: "sys", flag: "hostname", reason: "x" };

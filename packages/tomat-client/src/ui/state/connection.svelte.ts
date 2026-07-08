@@ -54,6 +54,14 @@ class ConnectionStateStore {
           this.unauthorized = true;
           if (r) this.reason = r;
         } else if (s === "disconnected" || s === "connecting") {
+          // The client never leaves "unauthorized" for the SAME core (it stops
+          // retrying), so a fresh connecting/disconnected here means we're now
+          // tracking a different/re-paired core: drop the stale re-pair prompt and
+          // its reason, or a healthy core would show "unauthorized" forever.
+          if (this.unauthorized) {
+            this.unauthorized = false;
+            this.reason = null;
+          }
           // Keep the last known reason through the connecting/disconnected churn.
           if (r) this.reason = r;
           if (this.disconnectedSinceMs === null) {

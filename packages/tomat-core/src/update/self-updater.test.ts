@@ -8,6 +8,9 @@
 
 import { assertEquals, assertRejects } from "@std/assert";
 import { join } from "@std/path";
+import { encodeBase64 } from "@std/encoding/base64";
+import * as ed from "@noble/ed25519";
+import type { CoreManifest } from "@tomat/shared";
 import {
   __resetUpdateSubscribersForTesting,
   canonicalize,
@@ -18,6 +21,7 @@ import {
   subscribeUpdate,
   swapBinaryInPlace,
   type UpdateEvent,
+  verifyCoreManifestSignature,
 } from "./self-updater.ts";
 
 Deno.test("canonicalize: object keys sorted lexicographically", () => {
@@ -67,6 +71,65 @@ Deno.test("signedManifestPayload: covers workers + helpers, excludes signature, 
     helpers: [{ ...manifest.helpers[0], sha256: "ff" }],
   };
   assertEquals(signedManifestPayload(manifest) === signedManifestPayload(tamperedHelper), false);
+});
+
+// The core.json self-update signature gate governs download-and-execute of the
+// Core binary + workers + helpers, so it gets the same accept/reject coverage as
+// its two siblings (verifyBinariesSignature, verifyBuiltinManifestSignature). A
+// throwaway keypair signs signedManifestPayload; a regression that inverted the
+// check or narrowed the signed payload would fail one of these.
+async function signedCoreManifest(sk: Uint8Array): Promise<CoreManifest> {
+  const body: Omit<CoreManifest, "signature"> = {
+    schemaVersion: 1,
+    version: "9.9.9",
+    binaries: [{ triple: "aarch64-apple-darwin", url: "https://x/core", sha256: "aa" }],
+    workers: [{ name: "tool-worker.ts", url: "https://x/w", sha256: "bb" }],
+    helpers: [
+      {
+        name: "tomat-core-keychain",
+        triple: "aarch64-apple-darwin",
+        url: "https://x/k",
+        sha256: "cc",
+      },
+    ],
+  };
+  const sig = await ed.signAsync(
+    new TextEncoder().encode(signedManifestPayload(body as unknown as Record<string, unknown>)),
+    sk,
+  );
+  return { ...body, signature: encodeBase64(sig) };
+}
+
+Deno.test("verifyCoreManifestSignature: a valid signature is accepted", async () => {
+  const sk = ed.utils.randomSecretKey();
+  const pk = await ed.getPublicKeyAsync(sk);
+  const manifest = await signedCoreManifest(sk);
+  assertEquals(await verifyCoreManifestSignature(manifest, pk), true);
+});
+
+Deno.test("verifyCoreManifestSignature: a tampered version is rejected", async () => {
+  const sk = ed.utils.randomSecretKey();
+  const pk = await ed.getPublicKeyAsync(sk);
+  const manifest = await signedCoreManifest(sk);
+  assertEquals(await verifyCoreManifestSignature({ ...manifest, version: "6.6.6" }, pk), false);
+});
+
+Deno.test("verifyCoreManifestSignature: a tampered (executed) worker URL is rejected", async () => {
+  const sk = ed.utils.randomSecretKey();
+  const pk = await ed.getPublicKeyAsync(sk);
+  const manifest = await signedCoreManifest(sk);
+  const tampered: CoreManifest = {
+    ...manifest,
+    workers: [{ ...manifest.workers[0], url: "https://evil/w" }],
+  };
+  assertEquals(await verifyCoreManifestSignature(tampered, pk), false);
+});
+
+Deno.test("verifyCoreManifestSignature: the wrong public key is rejected", async () => {
+  const sk = ed.utils.randomSecretKey();
+  const manifest = await signedCoreManifest(sk);
+  const otherPk = await ed.getPublicKeyAsync(ed.utils.randomSecretKey());
+  assertEquals(await verifyCoreManifestSignature(manifest, otherPk), false);
 });
 
 Deno.test("canonicalize: nested objects recursively sorted", () => {

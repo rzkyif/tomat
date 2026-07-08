@@ -1,6 +1,8 @@
 // chat-related Zod schemas. The chat WS frames are the contract between
-// the client and the chat orchestrator. Strict-mode + min-length checks
-// catch the common shapes silently breaking.
+// the client and the chat orchestrator. Required-field + min-length + type
+// checks catch the common shapes silently breaking; the frames are
+// `.passthrough()` so a newer client's extra field is ignored (forward-compat),
+// not rejected into a silent turn drop.
 
 import { assertEquals } from "@std/assert";
 import {
@@ -35,6 +37,21 @@ Deno.test("chatStartWsSchema: requires kind, streamId, sessionId", () => {
     }).success,
     false,
   );
+});
+
+Deno.test("chatStartWsSchema: ignores an unknown field (forward-compat, no silent drop)", () => {
+  // A newer client adds a field an older core doesn't know. It must parse OK on
+  // the known fields, not be rejected (which the hub turns into a silent drop).
+  const parsed = chatStartWsSchema.safeParse({
+    kind: "chat.start",
+    streamId: "s1",
+    sessionId: "S1",
+    someFutureField: { anything: true },
+  });
+  assertEquals(parsed.success, true);
+  // The unknown field is still carried through (passthrough), and known fields
+  // keep their validated values.
+  assertEquals(parsed.success && parsed.data.streamId, "s1");
 });
 
 Deno.test("chatInterruptWsSchema: requires non-empty streamId", () => {

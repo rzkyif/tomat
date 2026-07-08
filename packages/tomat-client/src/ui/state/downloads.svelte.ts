@@ -178,8 +178,30 @@ class DownloadsState {
   /** Build + fire the "Pending Downloads" confirm modal from the current
    *  `missing` set. `hooks` lets the Settings auto-popup layer its dismissal
    *  bookkeeping on top; the sidebar button calls it with no hooks to force a
-   *  re-show while pending. */
-  requestRequiredModal(hooks?: { onConfirm?: () => void; onCancel?: () => void }): void {
+   *  re-show while pending.
+   *
+   *  `probe` gates the outbound size HEADs to HuggingFace/GitHub. Only an
+   *  explicit user action may set it (the sidebar button click) - that is the
+   *  consent surface for the network request, per the no-non-consented-network
+   *  rule. The Settings auto-popup fires reactively on connect, NOT on a user
+   *  action, so it must leave `probe` false and render the local (unsized)
+   *  snapshot; the confirm modal shows "+" for unknown sizes. */
+  async requestRequiredModal(opts?: {
+    probe?: boolean;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+  }): Promise<void> {
+    const hooks = opts;
+    // Size probe only on the consented (explicit-click) path. On failure, fall
+    // back to the current (unsized) `missing` set so the modal still renders.
+    if (opts?.probe) {
+      try {
+        const snap = await cores().api().requirements.get({ probe: true });
+        this.applyRequirements(snap.required, snap.missing);
+      } catch (e) {
+        reqLog.warn("size probe for pending-downloads modal failed:", e);
+      }
+    }
     const plans = this.missing.map((m) => ({
       source: m.source,
       alreadyHave: false,

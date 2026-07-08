@@ -148,14 +148,20 @@ fn cancel_echo(pending: &Mutex<std::collections::VecDeque<u8>>, chunk: &[u8]) ->
     out
 }
 
-/// Write all of `bytes` to `fd`, retrying short writes and giving up on error.
+/// Write all of `bytes` to `fd`, retrying short writes and the spurious `EINTR`
+/// (a signal interrupting the syscall), giving up only on genuinely terminal
+/// errors (EPIPE, EBADF, ...). Matches std's `Write::write_all` semantics: a
+/// bare `Err(_) => break` would abandon the rest of the frame on an EINTR that a
+/// simple retry recovers from, corrupting the pty stream.
 #[cfg(unix)]
 fn write_all(fd: std::os::fd::BorrowedFd<'_>, bytes: &[u8]) {
     let mut off = 0;
     while off < bytes.len() {
         match nix::unistd::write(fd, &bytes[off..]) {
+            Ok(0) => break, // no progress and no error: treat the fd as closed
             Ok(n) => off += n,
-            Err(_) => break,
+            Err(nix::errno::Errno::EINTR) => continue, // interrupted; retry
+            Err(_) => break,                           // terminal error: give up on the frame
         }
     }
 }

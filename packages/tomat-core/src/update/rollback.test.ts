@@ -129,7 +129,7 @@ Deno.test("writeUpdateMarker: persists attempts=0", async () => {
   }
 });
 
-// --- performRollback (via attempts>=1 branch) -----------------------------
+// --- performRollback (via the attempts>=MAX_BOOT_ATTEMPTS branch) ----------
 
 import { binPath, paths as _paths } from "../paths.ts";
 import { coreBinaryName } from "../binaries/versions.ts";
@@ -145,10 +145,29 @@ async function writeMarkerWithAttempts(attempts: number): Promise<void> {
   );
 }
 
+Deno.test("handleUpdateMarkerOnBoot: a single interrupted boot is retried, not rolled back", async () => {
+  const env = await setupTestEnv();
+  try {
+    const currentBin = binPath(coreBinaryName("tomat-core"));
+    const oldBin = currentBin + ".old";
+    await Deno.writeTextFile(currentBin, "NEW_HEALTHY");
+    await Deno.writeTextFile(oldBin, "PREVIOUS");
+    // attempts=1 means one prior boot that didn't reach the checkpoint (e.g. an
+    // external restart during startup). It must NOT roll back yet: bump + retry.
+    await writeMarkerWithAttempts(1);
+    assertEquals(await handleUpdateMarkerOnBoot(), false);
+    assertEquals((await readRaw())?.attempts, 2);
+    // The new binary is untouched (not downgraded).
+    assertEquals(await Deno.readTextFile(currentBin), "NEW_HEALTHY");
+  } finally {
+    await env.teardown();
+  }
+});
+
 Deno.test("handleUpdateMarkerOnBoot: returns false when rollback anchor is missing", async () => {
   const env = await setupTestEnv();
   try {
-    await writeMarkerWithAttempts(1);
+    await writeMarkerWithAttempts(2);
     // No <bin>.old anchor written, so performRollback should log + bail.
     assertEquals(await handleUpdateMarkerOnBoot(), false);
     // Marker cleared so we don't loop on next boot.
@@ -165,7 +184,7 @@ Deno.test("handleUpdateMarkerOnBoot: rolls back current binary to <bin>.old cont
     const oldBin = currentBin + ".old";
     await Deno.writeTextFile(currentBin, "BROKEN_V999");
     await Deno.writeTextFile(oldBin, "WORKING_V998");
-    await writeMarkerWithAttempts(1);
+    await writeMarkerWithAttempts(2);
 
     assertEquals(await handleUpdateMarkerOnBoot(), true);
 
@@ -196,7 +215,7 @@ Deno.test("handleUpdateMarkerOnBoot: copy-first failure falls back to two-rename
     const oldBin = currentBin + ".old";
     await Deno.writeTextFile(currentBin, "BROKEN");
     await Deno.writeTextFile(oldBin, "WORKING");
-    await writeMarkerWithAttempts(1);
+    await writeMarkerWithAttempts(2);
 
     // Force the copy-first step to fail so the impl falls back to the
     // two-rename pattern (which consumes oldBin directly rather than via
@@ -233,7 +252,7 @@ Deno.test("handleUpdateMarkerOnBoot: a leftover <bin>.broken from a prior attemp
     await Deno.writeTextFile(currentBin, "NEW_BROKEN");
     await Deno.writeTextFile(oldBin, "WORKING");
     await Deno.writeTextFile(brokenBin, "PRIOR_BROKEN_LEFTOVER");
-    await writeMarkerWithAttempts(1);
+    await writeMarkerWithAttempts(2);
 
     assertEquals(await handleUpdateMarkerOnBoot(), true);
     assertEquals(await Deno.readTextFile(brokenBin), "NEW_BROKEN");
@@ -254,7 +273,7 @@ Deno.test("handleUpdateMarkerOnBoot: latest rolls back the channel-suffixed bina
     const oldBin = currentBin + ".old";
     await Deno.writeTextFile(currentBin, "BROKEN_LATEST");
     await Deno.writeTextFile(oldBin, "WORKING_LATEST");
-    await writeMarkerWithAttempts(1);
+    await writeMarkerWithAttempts(2);
 
     assertEquals(await handleUpdateMarkerOnBoot(), true);
     assertEquals(await Deno.readTextFile(currentBin), "WORKING_LATEST");

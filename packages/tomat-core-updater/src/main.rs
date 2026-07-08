@@ -206,7 +206,19 @@ pub fn perform_swap(staged: &Path, current: &Path, is_windows: bool) -> SwapResu
     let old = old_path(current);
     let _ = std::fs::remove_file(&old);
     if std::fs::hard_link(current, &old).is_err() {
-        let _ = std::fs::copy(current, &old);
+        // Copy fallback (filesystems without hard links). Unlike a hard link, a
+        // copy can fail partway (e.g. disk full) and leave a TRUNCATED file that
+        // still `exists()`, which would make revert_swap later restore a corrupt
+        // binary. Require the copy to complete AND byte-match the source; drop a
+        // partial anchor and bail before touching `current`.
+        let copied = std::fs::copy(current, &old).unwrap_or(0);
+        let src_len = std::fs::metadata(current)
+            .map(|m| m.len())
+            .unwrap_or(u64::MAX);
+        if copied != src_len {
+            let _ = std::fs::remove_file(&old);
+            return SwapResult::AnchorFailed;
+        }
     }
     if !old.exists() {
         return SwapResult::AnchorFailed;

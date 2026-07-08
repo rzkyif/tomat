@@ -31,6 +31,7 @@ import { paths } from "../paths.ts";
 import { binaryName, coreBinaryName } from "../binaries/versions.ts";
 import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
+import { coreSecretDenyPaths } from "../shared/sandbox-deny.ts";
 import {
   parseWorkerFrame,
   type PoolToWorkerFrame,
@@ -185,32 +186,11 @@ export class WorkerHandle {
     // holds no write grant for the folder).
     const hasLock = fileExistsSync(join(spec.extensionFolder, "deno.lock"));
     // Defense in depth: never let a tool worker read or write the core's secret
-    // material, even if it was granted a broad path like `$home` (which
-    // contains ~/.tomat). Deno's --deny-* flags take precedence over any
-    // --allow-*, so this holds regardless of the granted permission set. A
-    // blanket deny of `root` isn't usable because sessions live under it (and a
-    // tool may be granted $sessions), so the sensitive subtrees and files are
-    // enumerated explicitly, including the transient/legacy siblings.
-    const p = paths();
-    const deniedPaths = [
-      p.secretsEncFile,
-      p.secretsEncFile + ".tmp", // transient write target during re-encrypt
-      p.secretsPlainFile, // legacy plaintext path (declared but unused)
-      join(p.root, ".master-key"),
-      p.adminTokenFile,
-      p.adminPasswordFile,
-      p.dbFile,
-      p.dbFile + "-wal",
-      p.dbFile + "-shm",
-      p.dbFile + "-journal", // non-WAL fallback journal
-      // Every extension's private SQLite db and the memory store are reached
-      // ONLY through the core-side module broker (proxied over stdio), so a
-      // worker never needs fs access to them. Deny the whole subtrees so a tool
-      // granted a broad ancestor path (e.g. $home, which contains ~/.tomat)
-      // still can't read another extension's data or the memory store off disk.
-      join(p.root, "extension-data"),
-      p.memoriesDir,
-    ].join(",");
+    // material, even if it was granted a broad path like `$home` (which contains
+    // ~/.tomat). Deno's --deny-* flags take precedence over any --allow-*, so this
+    // holds regardless of the granted permission set. Single-sourced with the
+    // deno-runtime MCP spawn (mcp/manager.ts) via coreSecretDenyPaths.
+    const deniedPaths = coreSecretDenyPaths().join(",");
     const ptyMode = spec.promptContext !== undefined && ptyhostAvailableSync();
     // Under a ConPTY (windows) the child's stdout is bound to the pseudoconsole,
     // so the protocol rides a loopback control socket instead. Bind the listener

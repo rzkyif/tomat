@@ -7,14 +7,16 @@
 // shared engine FrameBus (frameBus()). So on desktop the engine's logic is live;
 // what stays a designed-but-unwired seam is the *in-process transport* below.
 //
-// `handleHttp` / `connect` are the contract a future mobile client will drive to
-// run the engine inside its webview (no Deno.serve, no network). Wiring them means
-// building a Hono app from the engine's OWN reduced route set (external-provider,
-// remote-MCP-only) - NOT relocating the desktop shell's routes, most of which are
-// legitimately shell-coupled (sidecars, models, worker-exec, downloads, update).
-// That belongs to the mobile pass; here `handleHttp` is a deliberate 501 so the
-// interface is frozen now and needs no engine rework then. `connect` already works
-// against the real FrameBus (used by tests + the future transport).
+// `handleHttp` / `connect` are the frozen in-process seam, and BOTH are already
+// live on desktop: `handleHttp` builds a Hono app from the engine's OWN reduced
+// route set and serves it (app.fetch) for the routes `isEngineRoute` claims,
+// which the Deno shell's `main.ts` dispatches straight to it; `connect` runs
+// against the real FrameBus (the same registry the WS hub uses, plus tests). That
+// route set is the engine's app-domain slice only - NOT the desktop shell's
+// shell-coupled routes (sidecars, models, worker-exec, downloads, update), which
+// legitimately stay in @tomat/core. What remains for the mobile pass is hosting
+// this same interface INSIDE the webview (no Deno.serve, no network) via a
+// transport that calls handleHttp/connect; the interface needs no engine rework.
 
 import type { Host } from "./host.ts";
 import { frameBus } from "./frame-bus.ts";

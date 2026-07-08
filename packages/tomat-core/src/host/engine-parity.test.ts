@@ -9,6 +9,7 @@
 import { assertEquals } from "@std/assert";
 import { pairClient } from "../../tests/helpers/pairing.ts";
 import { startTestServer } from "../../tests/helpers/serve.ts";
+import { dialWs } from "../../tests/helpers/ws.ts";
 import { engine } from "./engine.ts";
 import { patchCoreSettings } from "@tomat/core-engine/services/core-settings";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
@@ -74,7 +75,7 @@ Deno.test({
 
       // Real WebSocket for the same client, collecting frames until chat.done.
       const wsFrames: Frame[] = [];
-      ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws/v1?token=${token}`);
+      ws = await dialWs(server.port, token);
       await new Promise<void>((resolve, reject) => {
         ws!.addEventListener("open", () => resolve(), { once: true });
         ws!.addEventListener("error", reject, { once: true });

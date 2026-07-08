@@ -548,16 +548,30 @@ export class MemoriesStore {
     }));
   }
 
-  /** All memory embeddings, for relevance scoring at prompt time. */
-  loadAllEmbeddings(): Map<string, Float32Array> {
+  /** All memory embeddings paired with the source hash they were derived from,
+   *  for relevance scoring at prompt time. The hash lets the caller skip a
+   *  vector whose stored hash no longer matches the current model + text (a
+   *  stale index across an embed-model switch), the same freshness gate the
+   *  tool-relevance path uses. */
+  loadAllEmbeddings(): Map<string, { vector: Float32Array; sourceHash: string | null }> {
     const rows = db()
-      .prepare(`SELECT id, embedding, embedding_dim FROM memories WHERE embedding IS NOT NULL`)
-      .all() as Array<{ id: string; embedding: Uint8Array; embedding_dim: number }>;
-    const out = new Map<string, Float32Array>();
+      .prepare(
+        `SELECT id, embedding, embedding_dim, embedding_source_hash FROM memories WHERE embedding IS NOT NULL`,
+      )
+      .all() as Array<{
+      id: string;
+      embedding: Uint8Array;
+      embedding_dim: number;
+      embedding_source_hash: string | null;
+    }>;
+    const out = new Map<string, { vector: Float32Array; sourceHash: string | null }>();
     for (const row of rows) {
       const bytes = row.embedding;
       const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-      out.set(String(row.id), new Float32Array(copy, 0, Number(row.embedding_dim)));
+      out.set(String(row.id), {
+        vector: new Float32Array(copy, 0, Number(row.embedding_dim)),
+        sourceHash: row.embedding_source_hash == null ? null : String(row.embedding_source_hash),
+      });
     }
     return out;
   }

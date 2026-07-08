@@ -108,6 +108,7 @@ export function externalModelSection(opts: ExternalModelSectionOpts): SettingSec
       description: "The model's context window, in tokens. Used to track usage.",
       type: "number",
       defaultValue: 128000,
+      min: 1, // a context window is a positive token count
       descriptionTier: "ondemand",
     });
   }

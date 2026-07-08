@@ -30,6 +30,34 @@ const hasCoreLabel = (g: { destination: unknown }) =>
     (d) => destinationLabel(d) === "Core",
   );
 
+Deno.test("setting ids: a repeated id must map to the SAME field, never conflicting definitions", () => {
+  // Field ids are persisted on disk and on the wire, and validation / defaults /
+  // destination all key off the id. A duplicate id is allowed ONLY for the
+  // deliberate shared-field pattern (one persisted value rendered in two sections,
+  // e.g. `speech.binaryBackend` under both STT and TTS, since they share one
+  // tomat-core-speech process). Those occurrences must be identical apart from the
+  // UI-only `visibleWhen`, or the value would resolve inconsistently depending on
+  // which occurrence wins. A genuinely accidental collision (two different-typed or
+  // different-default fields sharing an id) fails here.
+  const byId = new Map<string, SettingField[]>();
+  for (const group of SETTINGS_SCHEMA) {
+    for (const section of group.sections) {
+      for (const field of section.fields) {
+        const list = byId.get(field.id) ?? [];
+        list.push(field);
+        byId.set(field.id, list);
+      }
+    }
+  }
+  // Normalize away the UI-only visibleWhen; everything else (type, defaultValue,
+  // options, validation) must match across occurrences of one id.
+  const norm = (f: SettingField) => JSON.stringify({ ...f, visibleWhen: undefined });
+  const conflicts = [...byId.entries()]
+    .filter(([, fields]) => fields.length > 1 && new Set(fields.map(norm)).size > 1)
+    .map(([id]) => id);
+  assertEquals(conflicts, [], `setting ids with conflicting definitions: ${conflicts.join(", ")}`);
+});
+
 Deno.test("group-id registry stays in sync with schema destinations (no drift)", () => {
   // CLIENT_GROUP_IDS / CORE_GROUP_IDS are hand-maintained for their literal
   // types; this is the derive-check that fails if a group's `destination` in the

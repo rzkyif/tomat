@@ -260,12 +260,14 @@ pub async fn net_fetch(
         .map_err(|e| AppError::validation(format!("bad method: {e}")))?;
     let mut header_map = reqwest::header::HeaderMap::new();
     for (k, v) in &headers {
-        if let (Ok(name), Ok(val)) = (
-            reqwest::header::HeaderName::from_bytes(k.as_bytes()),
-            reqwest::header::HeaderValue::from_str(v),
-        ) {
-            header_map.insert(name, val);
-        }
+        // Fail the call on an unparseable header rather than silently dropping it:
+        // a dropped header could omit an intended Authorization/content-type, so
+        // the caller must see the error instead of a request that quietly lacks it.
+        let name = reqwest::header::HeaderName::from_bytes(k.as_bytes())
+            .map_err(|e| AppError::validation(format!("bad header name {k:?}: {e}")))?;
+        let val = reqwest::header::HeaderValue::from_str(v)
+            .map_err(|e| AppError::validation(format!("bad header value for {k:?}: {e}")))?;
+        header_map.insert(name, val);
     }
     let mut req = client.request(method, &url).headers(header_map);
     if let Some(b64) = body_b64 {

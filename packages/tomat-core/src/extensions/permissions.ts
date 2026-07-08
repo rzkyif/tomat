@@ -6,6 +6,10 @@
 // tool sees a NotCapable at runtime and handles or fails gracefully).
 
 import type { Grant, PermissionDecl, PermissionKind } from "@tomat/shared";
+import { isWithin } from "@tomat/core-engine";
+import { getLogger } from "../shared/log.ts";
+
+const log = getLogger("permissions");
 
 export interface FlagSet {
   netAll: boolean; // bare --allow-net (any host/port); set by a wildcard host grant
@@ -136,12 +140,38 @@ function applyDecl(flags: FlagSet, decl: PermissionDecl, templates: PathTemplate
       }
       break;
     }
-    case "read":
-      flags.read.add(expandPath(decl.path, templates));
+    case "read": {
+      // An empty expansion (e.g. `$env.UNSET` or a non-allowlisted `$env.X`)
+      // must NOT be added: an empty entry in the set serializes to `--allow-read=`
+      // which Deno can read as a much broader grant than the author declared.
+      // Drop it (the tool sees NotCapable at runtime, like any absent optional
+      // permission) and warn so the author notices the unsatisfiable path.
+      const readPath = expandPath(decl.path, templates);
+      if (readPath) flags.read.add(readPath);
+      else log.warn(`dropping read permission with empty path expansion: "${decl.path}"`);
       break;
-    case "write":
-      flags.write.add(expandPath(decl.path, templates));
+    }
+    case "write": {
+      const writePath = expandPath(decl.path, templates);
+      if (!writePath) {
+        log.warn(`dropping write permission with empty path expansion: "${decl.path}"`);
+        break;
+      }
+      // Never grant write into the extension's OWN installed code dir
+      // ($extension / a path under it): that opens a TOCTOU where the tool could
+      // rewrite its entry file in the window between the content-hash verify and
+      // the worker's import (see chat-tool-dispatch verifyToolFresh). The
+      // content-hash gate assumes the install dir is immutable, so a self-write
+      // grant is dropped here rather than trusted.
+      if (isWithin(templates.extension, writePath)) {
+        log.warn(
+          `dropping self-write grant into the extension install dir ($extension): "${decl.path}"`,
+        );
+        break;
+      }
+      flags.write.add(writePath);
       break;
+    }
     case "run":
       flags.run.add(decl.binary);
       break;

@@ -120,15 +120,32 @@ export class SessionsRepo {
   }
 
   async list(ownerClientId: string): Promise<SessionListEntry[]> {
-    const docs = (await readAllDocs()).filter((d) => d.ownerClientId === ownerClientId);
-    docs.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
-    return docs.map((d) => ({
-      id: d.id,
-      title: d.title,
-      createdAtMs: d.createdAtMs,
-      updatedAtMs: d.updatedAtMs,
-      messageCount: d.messages.length,
-      summary: summarizeConversation(d.messages),
+    // Read the small per-session meta sidecar instead of parsing every full
+    // transcript. On a missing/corrupt meta (a pre-index session, or a failed
+    // meta write) fall back to the full doc and backfill so the next list() is
+    // fast. Same session set as before (persisted dirs on disk).
+    const metas: SessionMeta[] = [];
+    if (!(await host().fs.stat(enginePaths().sessionsDir))) return [];
+    for (const e of await host().fs.readDir(enginePaths().sessionsDir)) {
+      if (!e.isDir) continue;
+      let meta = await readMeta(e.name);
+      if (!meta) {
+        const doc = await readDoc(e.name);
+        if (!doc) continue;
+        meta = deriveMeta(doc);
+        await writeMeta(doc);
+      }
+      if (meta.ownerClientId !== ownerClientId) continue;
+      metas.push(meta);
+    }
+    metas.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+    return metas.map((m) => ({
+      id: m.id,
+      title: m.title,
+      createdAtMs: m.createdAtMs,
+      updatedAtMs: m.updatedAtMs,
+      messageCount: m.messageCount,
+      summary: m.summary,
     }));
   }
 
@@ -205,9 +222,13 @@ export class SessionsRepo {
 
   /** Insert a message directly after `afterId` in chronological order, so a
    *  regenerated mid-history turn lands in its slot instead of at the tail.
-   *  `afterId: null` (or an id that no longer exists) appends at the tail.
-   *  `ord` is renumbered to the array index across the whole doc on every
-   *  insert; nothing outside this store relies on specific ord values. */
+   *  `afterId: null` (or an id that no longer exists) appends at the tail. A
+   *  tail insert - appending, or inserting after the LAST message (the common
+   *  streaming-finalize path, whose anchor is the tail user message) - shifts
+   *  nothing, so it only assigns the new message a fresh `nextOrd` and skips the
+   *  O(n) renumber. A true mid-history splice shifts every following message, so
+   *  it renumbers the whole doc to keep ord == array index. Nothing outside this
+   *  store relies on specific ord values, only their relative order. */
   insertMessageAfter(
     sessionId: string,
     message: Message,
@@ -222,11 +243,20 @@ export class SessionsRepo {
         createdAtMs: message.createdAtMs || Date.now(),
       } as Message;
       const anchorIdx = afterId === null ? -1 : doc.messages.findIndex((m) => m.id === afterId);
-      if (anchorIdx === -1) doc.messages.push(stored);
-      else doc.messages.splice(anchorIdx + 1, 0, stored);
-      doc.messages.forEach((m, i) => {
-        m.ord = i;
-      });
+      if (anchorIdx === -1 || anchorIdx === doc.messages.length - 1) {
+        // Tail insert (append, an id no longer present, or after the current
+        // tail): existing messages keep their ords, so assign only the new one.
+        // `nextOrd` (max ord + 1) rather than array length, since deleteMessage
+        // can leave gaps and length-based ords would then collide.
+        stored.ord = nextOrd(doc.messages);
+        doc.messages.push(stored);
+      } else {
+        doc.messages.splice(anchorIdx + 1, 0, stored);
+        // A mid-history insert shifts every following message, so renumber all.
+        doc.messages.forEach((m, i) => {
+          m.ord = i;
+        });
+      }
       doc.updatedAtMs = Date.now();
       await writeDoc(doc);
       return { id, ord: stored.ord };
@@ -446,6 +476,82 @@ function sessionFile(id: string): string {
   return join(sessionDir(id), "session.json");
 }
 
+function metaFile(id: string): string {
+  return join(sessionDir(id), "meta.json");
+}
+
+// The small per-session sidecar list() reads instead of parsing the whole
+// transcript (which holds every message + attachment). A CACHE, never the source
+// of truth: on a missing/corrupt meta, list() falls back to the full doc and
+// backfills. Kept in sync by writeDoc (the single write primitive) and reaped
+// with the session dir on delete. Only the list-relevant fields; summary is cheap
+// (summarizeConversation early-breaks at the summary budget).
+interface SessionMeta {
+  id: string;
+  ownerClientId: string;
+  title: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  messageCount: number;
+  summary: SummaryPart[];
+}
+
+function deriveMeta(doc: SessionDoc): SessionMeta {
+  return {
+    id: doc.id,
+    ownerClientId: doc.ownerClientId,
+    title: doc.title,
+    createdAtMs: doc.createdAtMs,
+    updatedAtMs: doc.updatedAtMs,
+    messageCount: doc.messages.length,
+    summary: summarizeConversation(doc.messages),
+  };
+}
+
+async function readMeta(id: string): Promise<SessionMeta | null> {
+  const file = metaFile(id);
+  if (!(await host().fs.stat(file))) return null;
+  try {
+    const parsed = JSON.parse(await host().fs.readTextFile(file)) as SessionMeta;
+    // Reject a partial/old/truncated meta so list() falls back to the full doc
+    // for it. Every list-relevant field is checked, not just the ids: a meta
+    // with a valid id but a missing updatedAtMs/messageCount (a truncated write)
+    // would otherwise NaN-sort and send an undefined count over the wire.
+    if (
+      !parsed ||
+      typeof parsed.id !== "string" ||
+      typeof parsed.ownerClientId !== "string" ||
+      typeof parsed.title !== "string" ||
+      !Number.isFinite(parsed.createdAtMs) ||
+      !Number.isFinite(parsed.updatedAtMs) ||
+      !Number.isFinite(parsed.messageCount)
+    ) {
+      return null;
+    }
+    parsed.summary ??= [];
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function writeMeta(doc: SessionDoc): Promise<void> {
+  try {
+    await host().fs.writeTextFileAtomic(metaFile(doc.id), JSON.stringify(deriveMeta(doc)));
+  } catch (err) {
+    // The meta write failed, so any previous meta.json is now stale - and
+    // readMeta can't tell it drifted from the doc, so list() would serve the old
+    // title/count/summary. Delete it instead, so list() falls back to the full
+    // doc and re-derives + backfills. (A crash strictly between the session and
+    // meta writes leaves a stale meta until the next mutation rewrites it; that
+    // window self-heals and is not worth a cross-file journal to close.)
+    await host()
+      .fs.remove(metaFile(doc.id))
+      .catch(() => {});
+    log.warn(`could not write session meta for ${doc.id}: ${errMessage(err)}`);
+  }
+}
+
 function toSession(doc: SessionDoc): Session {
   return {
     id: doc.id,
@@ -502,6 +608,7 @@ async function writeDoc(doc: SessionDoc): Promise<void> {
   }
   await host().fs.mkdir(sessionDir(doc.id), { recursive: true });
   await host().fs.writeTextFileAtomic(sessionFile(doc.id), JSON.stringify(doc, null, 2));
+  await writeMeta(doc);
 }
 
 async function readAllDocs(): Promise<SessionDoc[]> {

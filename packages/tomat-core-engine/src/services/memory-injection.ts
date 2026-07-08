@@ -2,9 +2,10 @@
 // summary block (embedding-scored against the turn's query) and the per-message
 // `@token` memory expansions. Both read the memories store; a turn shares its
 // query embedding with relevantMemories so it embeds at most once.
+import type { MemoryMeta } from "@tomat/shared";
 import { memoriesStore } from "./memories-store.ts";
 import { embed, isEmbeddingModelReady } from "./embedding.ts";
-import { topKBySimilarity } from "./relevance.ts";
+import { embedSourceHash, memoryEmbedText, topKBySimilarity } from "./relevance.ts";
 
 // Cosine floor below which a memory is considered unrelated to the query.
 // Embeddings are L2-normalized MiniLM vectors, where unrelated text pairs
@@ -60,11 +61,35 @@ export async function relevantMemories(
     [queryVector] = await embed([queryText]);
   }
   if (!queryVector) return [];
+  const qv = queryVector;
+  // Skip any stored vector that is stale for the current embed model, before it
+  // reaches cosineNormalized. Two guards, mirroring the tool-relevance path:
+  //   1. Dimension: after a switch that changes the vector width (e.g. local
+  //      MiniLM dim 384 -> an external model dim 1536), a not-yet-reindexed
+  //      memory carries a stale-dimension vector, and cosineNormalized THROWS on
+  //      a length mismatch - which would drop ALL memory injection (even already-
+  //      reindexed ones) for the whole reindex window.
+  //   2. Source hash: a switch between two SAME-dimension models passes the
+  //      length check but scores meaninglessly. embedSourceHash folds in the
+  //      active model id, so a vector embedded under the old model has a hash
+  //      that no longer matches embedSourceHash(memoryEmbedText(...)); skip it.
+  //      We can reproduce that text only when the memory has a summary (what the
+  //      indexer embeds); a not-yet-summarized memory embedded from a content
+  //      head can't be reproduced here, so it falls back to the dimension guard
+  //      alone (never a false skip). A skipped memory reads as "not embedded"
+  //      until the background indexer backfills it.
   const scored = topKBySimilarity(
-    queryVector,
+    qv,
     [...embeddings]
-      .filter(([id]) => byId.has(id))
-      .map(([id, vector]) => ({
+      .filter(([id, { vector, sourceHash }]) => {
+        const meta = byId.get(id);
+        if (!meta || vector.length !== qv.length) return false;
+        if (meta.summary != null && sourceHash !== null) {
+          return sourceHash === embedSourceHash(memoryEmbedText(meta.title, meta.summary));
+        }
+        return true;
+      })
+      .map(([id, { vector }]) => ({
         item: id,
         vector,
       })),
@@ -137,6 +162,11 @@ export interface MemoryTokenBudget {
   // isn't injected twice.
   claimed: Set<string>;
   remainingChars: number;
+  // Per-request snapshot of enabled memories keyed by lowercased name stem, built
+  // once on first use and reused across the request's user messages so the whole
+  // store isn't re-listed + re-mapped per history message. Memories don't change
+  // mid-request, so caching for the request's lifetime is safe.
+  byStem?: Map<string, MemoryMeta>;
 }
 
 export function newMemoryTokenBudget(): MemoryTokenBudget {
@@ -162,9 +192,20 @@ export async function memoryTokenBlocks(
   } catch {
     return null;
   }
-  const docs = store.list().filter((d) => d.enabled);
-  if (docs.length === 0) return null;
-  const byStem = new Map(docs.map((d) => [d.filename.replace(/\.md$/, "").toLowerCase(), d]));
+  // Build the enabled-memory-by-stem index once per request and cache it on the
+  // shared budget, so a turn with many `@`-bearing history messages doesn't
+  // re-list + re-map the whole store for each one.
+  let byStem = budget.byStem;
+  if (!byStem) {
+    byStem = new Map(
+      store
+        .list()
+        .filter((d) => d.enabled)
+        .map((d) => [d.filename.replace(/\.md$/, "").toLowerCase(), d]),
+    );
+    budget.byStem = byStem;
+  }
+  if (byStem.size === 0) return null;
   const seen = new Set<string>();
   const blocks: string[] = [];
   // Bare `@slug` (group 2) or quoted `@"name with spaces"` (group 1). A bare

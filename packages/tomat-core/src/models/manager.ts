@@ -59,11 +59,11 @@ export class ModelsManager {
     await downloadManager().reconcileCompleted();
   }
 
-  async probe(sources: string[]): Promise<ProbeModelsResponse> {
+  async probe(sources: string[], opts: { network?: boolean } = {}): Promise<ProbeModelsResponse> {
     const root = paths().modelsDir;
     const out: ProbeModelsResponse = [];
     for (const source of sources) {
-      const r = await probeSource(source, root);
+      const r = await probeSource(source, root, { network: opts.network });
       out.push({
         source,
         alreadyHave: r.alreadyHave,

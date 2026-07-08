@@ -462,7 +462,7 @@ class TTSState {
         this.msPerWord = this.msPerWord === null ? observed : this.msPerWord * 0.4 + observed * 0.6;
 
         try {
-          await this.scheduleAudio(wav);
+          await this.scheduleAudio(wav, epochAtDispatch);
         } catch (e) {
           log.warn("decode/play failed:", e);
         }
@@ -474,7 +474,7 @@ class TTSState {
     })();
   }
 
-  private async scheduleAudio(wav: ArrayBuffer): Promise<void> {
+  private async scheduleAudio(wav: ArrayBuffer, epochAtDispatch: number): Promise<void> {
     const playbackRate = Math.max(
       0.25,
       Math.min(3, Number(settingsState.currentSettings["tts.playbackSpeed"]) || 1),
@@ -504,6 +504,16 @@ class TTSState {
     } catch (e) {
       URL.revokeObjectURL(url);
       throw e;
+    }
+
+    // The metadata wait above is a second async yield after dispatch()'s epoch
+    // recheck, and this entry is not yet in currentEntry/playbackQueue, so a
+    // reset() (stop / new message / navigate-away) landing during the wait can't
+    // reach it. Re-check the epoch here and drop the chunk, or it audibly starts
+    // playing after the user already stopped.
+    if (epochAtDispatch !== this.resetEpoch) {
+      URL.revokeObjectURL(url);
+      return;
     }
 
     const effectiveDurationMs =

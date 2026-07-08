@@ -21,9 +21,16 @@ import { getLogger } from "../shared/log.ts";
 const log = getLogger("requirements");
 
 /** Compute the full required-files list (models + binaries) and the missing
- *  subset for the current settings. Network HEADs happen only for missing
- *  models (present files short-circuit) and for missing-available binaries. */
-export async function computeRequirements(): Promise<RequirementsSnapshot> {
+ *  subset for the current settings. Presence ("present"/"missing") is a purely
+ *  local check. Size/version HEADs to HuggingFace/GitHub happen ONLY when
+ *  `probeSizes` is set, so the always-on snapshot (client connect, settings
+ *  broadcast) makes no outbound request per the no-non-consented-network rule;
+ *  the size hints are filled in later, only when the user opens the Pending
+ *  Downloads confirmation modal. */
+export async function computeRequirements(
+  opts: { probeSizes?: boolean } = {},
+): Promise<RequirementsSnapshot> {
+  const probeSizes = opts.probeSizes ?? false;
   const settings = await loadCoreSettingsResolved();
 
   // Models: dedupe by source (embed/tts base files are fixed; llm/stt could
@@ -34,7 +41,10 @@ export async function computeRequirements(): Promise<RequirementsSnapshot> {
     seen.add(r.source);
     return true;
   });
-  const modelProbes = await modelsManager().probe(modelRefs.map((r) => r.source));
+  const modelProbes = await modelsManager().probe(
+    modelRefs.map((r) => r.source),
+    { network: probeSizes },
+  );
   const probeBySource = new Map(modelProbes.map((p) => [p.source, p]));
 
   // A model download that failed lives on as an Error row in the queue, keyed by
@@ -94,7 +104,7 @@ export async function computeRequirements(): Promise<RequirementsSnapshot> {
     (k) => !isPresent(k) && !binaryUnavailableOnTriple(k, triple),
   );
   const binProbes =
-    missingAvailable.length > 0
+    probeSizes && missingAvailable.length > 0
       ? await binariesManager()
           .probe(missingAvailable)
           .catch(() => [])
@@ -144,10 +154,12 @@ let recomputeQueued = false;
  *  download-completion, and binary-installed triggers. Fire-and-forget safe:
  *  a failed recompute logs and skips the broadcast rather than throwing.
  *
- *  Concurrent calls coalesce: computeRequirements issues network HEAD probes, so
- *  a burst of triggers (e.g. a settings batch) would otherwise probe once per
- *  change. While a recompute runs, further calls flag a single trailing rerun
- *  and share the in-flight promise, bounding a burst to at most two recomputes. */
+ *  Concurrent calls coalesce: this path recomputes from local presence checks
+ *  only (no network - the size HEADs are deferred to the consented modal-open),
+ *  but a settings batch can still fire many triggers, and each recompute walks
+ *  the model/binary set and broadcasts. While a recompute runs, further calls
+ *  flag a single trailing rerun and share the in-flight promise, bounding a
+ *  burst to at most two recomputes. */
 export function notifyRequirementsChanged(): Promise<void> {
   if (recomputeInFlight) {
     recomputeQueued = true;

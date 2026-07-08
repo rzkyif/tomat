@@ -33,9 +33,17 @@
 //                         multilingual engine in place (see voices::voice_lang).
 
 use std::env;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
+
+// Request-body size caps. The server is loopback-only and core-internal (see the
+// bind below), so this is an OOM guard against a wedged/buggy local caller, not a
+// security boundary. Each read takes cap+1 bytes so an over-limit body is
+// detected and answered 413 rather than silently truncated.
+const MAX_CONFIGURE_BODY: u64 = 1 << 20; // 1 MiB: configure JSON (model paths)
+const MAX_SPEAK_BODY: u64 = 8 << 20; // 8 MiB: synthesis text (core chunks it)
+const MAX_TRANSCRIBE_BODY: u64 = 256 << 20; // 256 MiB: audio WAV input
 
 use sherpa_onnx::{
     GeneratedAudio, GenerationConfig, OfflineDolphinModelConfig, OfflineMoonshineModelConfig,
@@ -594,8 +602,16 @@ fn handle(mut request: tiny_http::Request, state: &State) {
         ("GET", "/health") => respond_text(request, 200, "ok"),
         ("POST", "/configure") => {
             let mut body = String::new();
-            if request.as_reader().read_to_string(&mut body).is_err() {
+            if request
+                .as_reader()
+                .take(MAX_CONFIGURE_BODY + 1)
+                .read_to_string(&mut body)
+                .is_err()
+            {
                 return respond_text(request, 400, "read error");
+            }
+            if body.len() as u64 > MAX_CONFIGURE_BODY {
+                return respond_text(request, 413, "configure body too large");
             }
             let req: ConfigureReq = match serde_json::from_str(&body) {
                 Ok(r) => r,
@@ -611,8 +627,16 @@ fn handle(mut request: tiny_http::Request, state: &State) {
         }
         ("POST", "/transcribe") => {
             let mut body = Vec::new();
-            if request.as_reader().read_to_end(&mut body).is_err() {
+            if request
+                .as_reader()
+                .take(MAX_TRANSCRIBE_BODY + 1)
+                .read_to_end(&mut body)
+                .is_err()
+            {
                 return respond_text(request, 400, "read error");
+            }
+            if body.len() as u64 > MAX_TRANSCRIBE_BODY {
+                return respond_text(request, 413, "transcribe body too large");
             }
             let slot = lock(&state.stt);
             let Some(rec) = slot.engine.as_ref() else {
@@ -637,8 +661,16 @@ fn handle(mut request: tiny_http::Request, state: &State) {
         }
         ("POST", "/speak") => {
             let mut body = String::new();
-            if request.as_reader().read_to_string(&mut body).is_err() {
+            if request
+                .as_reader()
+                .take(MAX_SPEAK_BODY + 1)
+                .read_to_string(&mut body)
+                .is_err()
+            {
                 return respond_text(request, 400, "read error");
+            }
+            if body.len() as u64 > MAX_SPEAK_BODY {
+                return respond_text(request, 413, "speak body too large");
             }
             let req: SpeakReq = match serde_json::from_str(&body) {
                 Ok(r) => r,
@@ -751,6 +783,11 @@ fn run() -> Result<(), String> {
     set_stt(&state, initial.stt)?;
     set_tts(&state, initial.tts)?;
 
+    // No per-request auth on the endpoints by design: core spawns this sidecar
+    // with a FIXED loopback host (see sidecars/speech.ts; --host defaults to
+    // 127.0.0.1) and never exposes it off-box, so it is reachable only by local
+    // processes of the same user. If a non-loopback bind is ever introduced, add a
+    // spawn-time shared-secret header check here before relying on that.
     let server = tiny_http::Server::http((host.as_str(), port))
         .map_err(|e| format!("bind {host}:{port}: {e}"))?;
     let server = Arc::new(server);

@@ -150,6 +150,42 @@ Deno.test("pake: rejects an expired pairing code", async () => {
   }
 });
 
+Deno.test("ws ticket: mint then consume returns the client id exactly once", async () => {
+  const env = await setupTestEnv();
+  try {
+    const auth = authService();
+    const ticket = auth.mintWsTicket("client-42");
+    assertEquals(auth.consumeWsTicket(ticket), "client-42");
+    // Single-use: a replay of the same ticket is rejected.
+    assertEquals(auth.consumeWsTicket(ticket), null);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("ws ticket: an unknown ticket is rejected", async () => {
+  const env = await setupTestEnv();
+  try {
+    assertEquals(authService().consumeWsTicket("never-minted"), null);
+  } finally {
+    await env.teardown();
+  }
+});
+
+Deno.test("ws ticket: an expired ticket is rejected (and consumed)", async () => {
+  const env = await setupTestEnv();
+  const clock = mockClock(1_700_000_000_000);
+  try {
+    const auth = authService();
+    const ticket = auth.mintWsTicket("client-7");
+    clock.advance(31_000); // past the 30-sec TTL
+    assertEquals(auth.consumeWsTicket(ticket), null);
+  } finally {
+    clock.restore();
+    await env.teardown();
+  }
+});
+
 Deno.test("pake: rate-limits the 21st start from the same IP", async () => {
   const env = await setupTestEnv();
   try {

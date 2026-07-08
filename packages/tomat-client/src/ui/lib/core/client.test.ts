@@ -123,13 +123,28 @@ describe("CoreClient HTTP", () => {
   });
 });
 
+// Serve the WS-ticket mint the client now calls before opening a socket; any
+// other request 404s (these tests only drive the WS path).
+function ticketFetch(status = 200): ReturnType<typeof vi.fn> {
+  return vi.fn((req: NetRequest): Promise<NetResponse> => {
+    if (req.url.endsWith("/api/v1/ws/ticket")) {
+      return Promise.resolve(
+        status === 200
+          ? jsonRes(200, { ticket: "TICKET" })
+          : jsonRes(status, { error: { code: "invalid_token", message: "nope" } }),
+      );
+    }
+    return Promise.resolve(jsonRes(404, { error: { code: "not_found", message: "unmocked" } }));
+  });
+}
+
 describe("CoreClient WebSocket dispatch", () => {
   let last: FakeNetSocket | null = null;
   beforeEach(() => {
     last = null;
     setPlatform({
       net: {
-        fetch: vi.fn(),
+        fetch: ticketFetch(),
         connectWebSocket: (_url: string) => {
           last = new FakeNetSocket();
           return Promise.resolve(last);
@@ -199,11 +214,13 @@ describe("CoreClient WebSocket dispatch", () => {
 
 describe("CoreClient reconnect", () => {
   let sockets: FakeNetSocket[] = [];
+  let netFetch: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     sockets = [];
+    netFetch = ticketFetch();
     setPlatform({
       net: {
-        fetch: vi.fn(),
+        fetch: netFetch,
         connectWebSocket: (_url: string) => {
           const s = new FakeNetSocket();
           sockets.push(s);
@@ -234,27 +251,56 @@ describe("CoreClient reconnect", () => {
     expect(sockets.length).toBe(2);
   });
 
-  // A 401/403 handshake rejection (core reset its DB, revoked this client, ...)
-  // is terminal: stop the reconnect loop and report "unauthorized" instead of
-  // hammering the core with a token that will never be accepted again.
-  it("halts the reconnect loop on an auth-rejection handshake error", async () => {
+  // Post-M4 the bearer is checked only at the ticket MINT. A 401 at the UPGRADE
+  // layer therefore means a stale/spent ticket, not a dead bearer, so it must be
+  // transient: re-mint a fresh ticket and reconnect, never park in "unauthorized".
+  // (Regression guard: the old code funnelled any "HTTP 401" reason - including
+  // this upgrade-layer one - into the terminal path.)
+  it("treats an upgrade-layer 401 as transient (re-mints and reconnects)", async () => {
     vi.useFakeTimers();
     const c = new CoreClient(ENDPOINT);
     const states: string[] = [];
     c.onConnectionState((s) => states.push(s));
     c.subscribe(() => {});
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0); // resolve the mint + connectWebSocket
     expect(sockets.length).toBe(1);
+    sockets[0].opened?.();
 
+    // The upgrade is rejected (ticket spent/expired); net.rs surfaces this as an
+    // "HTTP 401" onError reason. It must schedule a reconnect, not go terminal.
     sockets[0].errored?.("server rejected connection: HTTP 401");
-    // No reconnect is scheduled, however long we wait.
+    await vi.advanceTimersByTimeAsync(600);
+    expect(sockets.length).toBe(2);
+    expect(states).not.toContain("unauthorized");
+  });
+
+  // A 401/403 (core reset its DB, revoked this client, ...) is terminal: stop the
+  // reconnect loop and report "unauthorized" instead of hammering the core with a
+  // token that will never be accepted again. With the ticket flow the dead bearer
+  // is rejected at the ticket MINT (an authed HTTP call), so no socket ever opens.
+  it("halts the reconnect loop when the ticket mint is auth-rejected", async () => {
+    vi.useFakeTimers();
+    netFetch.mockImplementation(
+      (req: NetRequest): Promise<NetResponse> =>
+        Promise.resolve(
+          req.url.endsWith("/api/v1/ws/ticket")
+            ? jsonRes(401, { error: { code: "invalid_token", message: "nope" } })
+            : jsonRes(404, { error: { code: "not_found", message: "x" } }),
+        ),
+    );
+    const c = new CoreClient(ENDPOINT);
+    const states: string[] = [];
+    c.onConnectionState((s) => states.push(s));
+    c.subscribe(() => {});
+    // The mint 401 makes the connect terminal: no socket, no reconnect, ever.
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(sockets.length).toBe(1);
+    expect(sockets.length).toBe(0);
     expect(states.at(-1)).toBe("unauthorized");
 
     // A fresh subscriber must not revive the dead token either.
     c.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(sockets.length).toBe(1);
+    expect(sockets.length).toBe(0);
+    expect(states.at(-1)).toBe("unauthorized");
   });
 });

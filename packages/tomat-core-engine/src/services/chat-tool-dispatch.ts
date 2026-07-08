@@ -15,9 +15,6 @@ import { lastUserText } from "./chat-history.ts";
 import { host } from "../platform/runtime.ts";
 import type { ToolCallController, ToolHost } from "./tool-host.ts";
 import { newMessageId } from "../platform/ids.ts";
-import { getLogger } from "../platform/log.ts";
-
-const log = getLogger("chat.tooldispatch");
 
 // The host's tool provider (extension sandbox + MCP client). A chat turn only
 // reaches dispatch when tools are in play, so its absence is a wiring error.
@@ -88,23 +85,28 @@ export class ToolDispatcher {
     pending: ResolvedPendingCall,
     msg: ToolMessage,
     writer: TurnWriter,
-  ): Promise<void> {
+  ): Promise<DisplayMessage[]> {
+    // Display bubbles a tool pushes are born live here but returned UNFINALIZED so
+    // the caller can persist them AFTER the tool message, keeping the durable
+    // order (tool, then display) equal to the live order. Finalizing them eagerly
+    // here would persist them ahead of the still-running tool message.
+    const bornDisplays: DisplayMessage[] = [];
     if (pending.unknown) {
       msg.status = "failed";
       msg.error = `tool ${pending.toolName} not available`;
-      return;
+      return bornDisplays;
     }
     // MCP tools run on their server, not in the local sandbox: dispatch via the
     // MCP client and skip the worker-pool / permission machinery.
     if (toolHost().isMcpServer(pending.extensionId)) {
       await this.executeMcpToolCall(pending, msg, stream.abort.signal);
-      return;
+      return bornDisplays;
     }
     const tool = toolHost().getTool(`${pending.extensionId}::${pending.toolName}`);
     if (!tool) {
       msg.status = "failed";
       msg.error = "tool not found";
-      return;
+      return bornDisplays;
     }
     // Pre-flight before dispatch: (1) re-verify the extension's content hash so a
     // extension tampered since boot can't execute (this runs on EVERY call, so a
@@ -112,11 +114,11 @@ export class ToolDispatcher {
     // arguments against the tool's declared schema and fill defaults, so the
     // worker receives normalized args (not raw model output).
     //
-    // Residual TOCTOU: a tool granted write into its OWN installed code dir
-    // could alter that code in the window between this check and the worker's
-    // import. The content-hash gate therefore assumes a extension is not granted
-    // write to its own installedPath; never grant $extension write to an untrusted
-    // extension.
+    // The content-hash gate assumes the extension's install dir is immutable
+    // between this check and the worker's import. That invariant is now enforced:
+    // permissions.ts drops any write grant that resolves into the extension's own
+    // installedPath ($extension), so a tool can't self-modify its code to open a
+    // TOCTOU here.
     let normalizedArgs: string;
     try {
       await toolHost().verifyToolFresh(pending.extensionId);
@@ -130,7 +132,7 @@ export class ToolDispatcher {
       });
       msg.status = "failed";
       msg.error = errMsg;
-      return;
+      return bornDisplays;
     }
     const userMessage = lastUserText(await sessionsRepo().listMessages(stream.sessionId)) ?? "";
     const ctl = toolHost().startToolCall(
@@ -195,9 +197,12 @@ export class ToolDispatcher {
             message: event.message,
           });
         } else if (event.kind === "display") {
-          // One-way push: a display bubble is born and persisted in one
-          // step. It lands before the (still-running) tool message in the
-          // durable order, which matches the live order the client saw.
+          // One-way push: born now (live) so the client sees it immediately in
+          // order (after the running tool message), but NOT finalized here.
+          // Finalizing eagerly would persist it AHEAD of the still-running tool
+          // message, so its durable order (display-before-tool) would contradict
+          // the live order (tool-before-display). Collected instead and finalized
+          // by the caller after the tool message, restoring birth-order persist.
           const displayMsg: DisplayMessage = {
             id: newMessageId(),
             ord: -1,
@@ -207,12 +212,7 @@ export class ToolDispatcher {
             createdAtMs: Date.now(),
           };
           writer.born(displayMsg);
-          // One-way push from a sync worker-event callback: persist in the
-          // background (the born frame is already out; the per-session lock
-          // serializes the write). Log a failed persist rather than dropping it.
-          writer
-            .finalize(displayMsg)
-            .catch((err) => log.warn(`failed to persist display message: ${errMessage(err)}`));
+          bornDisplays.push(displayMsg);
         } else if (event.kind === "tool_cancelled") {
           this.send(stream.clientId, {
             kind: "tool.cancelled",
@@ -226,6 +226,13 @@ export class ToolDispatcher {
       ctl,
       stream,
     });
+    // Propagate a chat interrupt (stream abort) to the in-flight extension tool,
+    // so interrupting the turn cancels the tool too - matching the MCP path,
+    // which is handed stream.abort.signal directly, instead of relying on the
+    // client to send a separate tool.cancel frame.
+    const onStreamAbort = () => ctl.cancel();
+    if (stream.abort.signal.aborted) ctl.cancel();
+    else stream.abort.signal.addEventListener("abort", onStreamAbort, { once: true });
     try {
       const result = await ctl.done;
       this.send(stream.clientId, {
@@ -245,8 +252,10 @@ export class ToolDispatcher {
       msg.status = "failed";
       msg.error = errMsg;
     } finally {
+      stream.abort.signal.removeEventListener("abort", onStreamAbort);
       stream.outstandingPrompts.delete(pending.callId);
       this.inFlight.delete(pending.callId);
     }
+    return bornDisplays;
   }
 }

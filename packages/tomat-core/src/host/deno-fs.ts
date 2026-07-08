@@ -7,8 +7,20 @@
 import type { HostFs, WriteOpts } from "@tomat/core-engine";
 import { errMessage } from "@tomat/shared";
 
-function tmpPath(path: string): string {
-  return `${path}.tmp`;
+function tmpPath(path: string, opts?: WriteOpts): string {
+  // A restricted (secret) write uses a FIXED `${path}.tmp` so the sandbox deny
+  // list can NAME the transient target (a random suffix can't be enumerated, so
+  // a broadly-granted worker could read the re-encrypt temp). These writers
+  // (the secrets vault) serialize every mutation, so they never hit the
+  // shared-temp race the unique suffix below guards against.
+  if (opts?.restrictPermissions) return `${path}.tmp`;
+  // Every other atomic write gets a unique suffix so two concurrent writes to
+  // the SAME path never share one temp file. A fixed `${path}.tmp` lets
+  // interleaved writers race: one rename consumes the shared temp and the other
+  // rename throws ENOENT. A random suffix keeps each writer's temp distinct;
+  // last rename wins cleanly (still a lost update at the app layer, which
+  // serializes its writes, but never a spurious failure).
+  return `${path}.${crypto.randomUUID()}.tmp`;
 }
 
 async function tightenMode(path: string): Promise<void> {
@@ -21,12 +33,18 @@ async function tightenMode(path: string): Promise<void> {
 }
 
 async function writeBytesAtomic(path: string, bytes: Uint8Array, opts?: WriteOpts): Promise<void> {
-  const tmp = tmpPath(path);
+  const tmp = tmpPath(path, opts);
   const mode = opts?.restrictPermissions ? { mode: 0o600 } : undefined;
-  // mode at creation closes the world-readable window before the chmod fallback.
-  await Deno.writeFile(tmp, bytes, mode);
-  if (opts?.restrictPermissions) await tightenMode(tmp);
-  await Deno.rename(tmp, path);
+  try {
+    // mode at creation closes the world-readable window before the chmod fallback.
+    await Deno.writeFile(tmp, bytes, mode);
+    if (opts?.restrictPermissions) await tightenMode(tmp);
+    await Deno.rename(tmp, path);
+  } catch (err) {
+    // Best-effort cleanup so a failed write never leaks its uniquely-named temp.
+    await Deno.remove(tmp).catch(() => {});
+    throw err;
+  }
 }
 
 export const denoFs: HostFs = {

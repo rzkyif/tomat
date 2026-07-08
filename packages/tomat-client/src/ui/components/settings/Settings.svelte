@@ -276,7 +276,7 @@
     }
     if (sig === dismissedSignature || sig === shownSignature) return;
     shownSignature = sig;
-    downloadsState.requestRequiredModal({
+    void downloadsState.requestRequiredModal({
       onConfirm: () => (dismissedSignature = null),
       onCancel: () => (dismissedSignature = sig),
     });

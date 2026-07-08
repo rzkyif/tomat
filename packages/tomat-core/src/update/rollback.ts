@@ -12,11 +12,14 @@
 //     means an ordinary restart of a working binary can NEVER trip a rollback,
 //     because by the time it restarts the marker is already gone.
 //
-//   - Second boot with marker still present (attempts>=1): the previous boot
-//     never reached the healthy checkpoint, so the new binary could not run. We
-//     roll back by swapping `<bin>.old` back over `<bin>`. The current process
-//     exits; the OS supervisor (launchd / systemd-user / Scheduled Task)
-//     re-launches `<bin>`, which is now the previous working version.
+//   - Marker still present after MAX_BOOT_ATTEMPTS boots: every boot bumped the
+//     attempt count without reaching the healthy checkpoint, so the new binary
+//     could not run. We roll back by swapping `<bin>.old` back over `<bin>`. The
+//     current process exits; the OS supervisor (launchd / systemd-user /
+//     Scheduled Task) re-launches `<bin>`, now the previous working version.
+//     The threshold is >1 so a single boot INTERRUPTED before the checkpoint (an
+//     external restart / reboot during startup, not a crash) is retried rather
+//     than mistaken for a failed binary and silently downgraded.
 //
 //   - Marker present but version unrelated to current: confused state;
 //     log + delete marker, continue.
@@ -28,6 +31,11 @@ import { getLogger } from "../shared/log.ts";
 import { CORE_VERSION } from "../config.ts";
 
 const log = getLogger("update.rollback");
+
+// How many boots the new binary gets to reach its healthy checkpoint before we
+// roll back. >1 so a single boot interrupted by an external restart/reboot during
+// startup (not a crash) is retried instead of triggering a spurious downgrade.
+const MAX_BOOT_ATTEMPTS = 2;
 
 export interface UpdateMarker {
   // Version the updater intended to install (== CORE_VERSION of the new
@@ -111,17 +119,19 @@ export async function handleUpdateMarkerOnBoot(): Promise<boolean> {
     return false;
   }
 
-  if (marker.attempts >= 1) {
-    // We saw the marker on a previous boot but it never reached its healthy
-    // checkpoint to commit → the new binary could not run. Roll back.
+  if (marker.attempts >= MAX_BOOT_ATTEMPTS) {
+    // Every one of MAX_BOOT_ATTEMPTS boots saw the marker without reaching the
+    // healthy checkpoint to commit → the new binary genuinely could not run
+    // (not just one interrupted startup). Roll back.
     return await performRollback(marker);
   }
 
-  // First boot after update. Record the attempt and continue booting; the
-  // update commits once main.ts reaches its healthy checkpoint (commitUpdate).
+  // Boot after update, under the retry budget. Record the attempt and continue
+  // booting; the update commits once main.ts reaches its healthy checkpoint
+  // (commitUpdate), and an interrupted boot just retries on the next one.
   await bumpAttempts(marker);
   log.info(
-    `update marker: first boot of v${marker.version} ` +
+    `update marker: boot ${marker.attempts + 1}/${MAX_BOOT_ATTEMPTS} of v${marker.version} ` +
       `(was v${marker.previousVersion}); commits once it boots healthy`,
   );
   return false;

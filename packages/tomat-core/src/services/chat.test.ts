@@ -17,6 +17,7 @@
 import { assertEquals } from "@std/assert";
 import { pairClient } from "../../tests/helpers/pairing.ts";
 import { startTestServer } from "../../tests/helpers/serve.ts";
+import { dialWs } from "../../tests/helpers/ws.ts";
 import { patchCoreSettings } from "@tomat/core-engine/services/core-settings";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 import { fakeOpenAIFetch } from "../../tests/helpers/fake-openai.ts";
@@ -103,7 +104,7 @@ async function withChatHarness(
         },
       });
     const openWs = async () => {
-      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws/v1?token=${token}`);
+      const ws = await dialWs(server.port, token);
       sockets.push(ws);
       await new Promise<void>((resolve, reject) => {
         ws.addEventListener("open", () => resolve(), { once: true });
@@ -548,7 +549,7 @@ Deno.test({
       // It does not own the stream (and can't even see the session), so it must
       // receive nothing.
       const { token: otherToken } = await pairClient("chat-other", "127.0.0.1");
-      const ws2 = new WebSocket(`ws://127.0.0.1:${port}/ws/v1?token=${otherToken}`);
+      const ws2 = await dialWs(port, otherToken);
       await new Promise<void>((resolve, reject) => {
         ws2.addEventListener("open", () => resolve(), { once: true });
         ws2.addEventListener("error", reject, { once: true });

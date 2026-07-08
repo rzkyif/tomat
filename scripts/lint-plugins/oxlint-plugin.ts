@@ -39,8 +39,27 @@ interface ImportDeclarationNode {
   source: { value: unknown };
 }
 
+// Loose AST-node shape covering the fields the rules read (name for Identifier,
+// value for Literal, object/property/computed for MemberExpression, init for a
+// VariableDeclarator). Everything is optional so an unexpected node just no-ops.
+interface AstNode {
+  type?: string;
+  name?: string;
+  value?: unknown;
+  object?: AstNode;
+  property?: AstNode;
+  computed?: boolean;
+  init?: AstNode | null;
+}
+
 interface MemberExpressionNode {
-  object?: { type?: string; name?: string };
+  object?: AstNode;
+  property?: AstNode;
+  computed?: boolean;
+}
+
+interface VariableDeclaratorNode {
+  init?: AstNode | null;
 }
 
 interface ReportDescriptor {
@@ -124,11 +143,28 @@ function isBannedHostImport(src: string): boolean {
   );
 }
 
+// Is `node` the Deno global reached via globalThis: `globalThis.Deno` or
+// `globalThis["Deno"]`? (A bare `Deno.x` is handled separately by the object
+// check.)
+function isGlobalThisDeno(node: AstNode | null | undefined): boolean {
+  if (!node || node.type !== "MemberExpression") return false;
+  const o = node.object;
+  if (!o || o.type !== "Identifier" || o.name !== "globalThis") return false;
+  const p = node.property;
+  return node.computed
+    ? p?.type === "Literal" && p.value === "Deno"
+    : p?.type === "Identifier" && p.name === "Deno";
+}
+
 // Keeps `@tomat/core-engine` importable in a non-Deno (webview) runtime: bans
-// host-coupled imports and raw `Deno.` global access. Enabled only for the
-// engine's non-test source via `overrides` in .oxlintrc.json. The
-// MemberExpression check catches `Deno.readTextFile(...)` etc.; if the plugin
-// host doesn't surface that node it simply no-ops and the import ban still holds.
+// host-coupled imports and every way of reaching the raw `Deno` global. Enabled
+// only for the engine's non-test source via `overrides` in .oxlintrc.json.
+// Coverage: `Deno.x` (object check), `globalThis.Deno`/`globalThis["Deno"]`
+// (isGlobalThisDeno), and BINDING the global - `const d = Deno`,
+// `const { readTextFile } = Deno`, `const d = globalThis.Deno` - via the
+// VariableDeclarator check, so destructuring can't smuggle it past the member
+// check. If the plugin host doesn't surface a node it simply no-ops and the
+// import ban still holds.
 const noHostImport = {
   create(context: RuleContext) {
     return {
@@ -141,6 +177,19 @@ const noHostImport = {
       MemberExpression(node: MemberExpressionNode) {
         const obj = node.object;
         if (obj && obj.type === "Identifier" && obj.name === "Deno") {
+          context.report({ node, message: DENO_GLOBAL_MESSAGE });
+          return;
+        }
+        if (isGlobalThisDeno(node)) {
+          context.report({ node, message: DENO_GLOBAL_MESSAGE });
+        }
+      },
+      VariableDeclarator(node: VariableDeclaratorNode) {
+        const init = node.init;
+        if (!init) return;
+        // Binding the Deno global to a name (incl. destructuring) - which the
+        // member-access check above would not catch on its own.
+        if ((init.type === "Identifier" && init.name === "Deno") || isGlobalThisDeno(init)) {
           context.report({ node, message: DENO_GLOBAL_MESSAGE });
         }
       },

@@ -55,6 +55,16 @@ export function toolEmbedText(t: {
   return `${humanizeName(t.name)}\n${t.description}\n${(t.triggers ?? []).join("\n")}`;
 }
 
+/** The text embedded for a memory's relevance vector. Defined once (like
+ *  `toolEmbedText`) so the background indexer and the prompt-time freshness
+ *  check derive the same string, and therefore the same source hash. The
+ *  indexer passes the memory's summary, or a head slice of its content until a
+ *  summary exists; the prompt-time skip passes the summary it already has in
+ *  the memory meta. */
+export function memoryEmbedText(title: string, summaryOrContentHead: string): string {
+  return `${title}\n${summaryOrContentHead}`;
+}
+
 /** True when the user's message directly names a tool: the tool's name, spelled
  *  literally (`web_search`) or humanized (`web search`), appears as a run of
  *  whole words in the query. The match is contiguous and word-bounded, so

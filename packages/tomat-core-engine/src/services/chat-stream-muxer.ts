@@ -105,6 +105,11 @@ export class StreamMuxer {
           delta: pendingReasoning,
         });
         pendingReasoning = "";
+        // Advance the live ref to exactly what has now been EMITTED (born +
+        // deltas). Kept here, not on every append, so a mid-stream resubscribe's
+        // catch-up snapshot never overlaps the not-yet-flushed pending buffer and
+        // double-counts it. Between flushes the ref lags by one COALESCE_MS batch.
+        reasoningMsg.content = reasoning;
       }
       if (pendingContent && assistantMsg) {
         this.send(stream.clientId, {
@@ -114,6 +119,7 @@ export class StreamMuxer {
           delta: pendingContent,
         });
         pendingContent = "";
+        assistantMsg.content = assistantContent;
       }
     };
     const scheduleFlush = () => {
@@ -191,10 +197,10 @@ export class StreamMuxer {
               await finalizeReasoning(false);
             }
             assistantContent += s;
-            // Keep the buffered live ref current so a mid-stream resubscribe
-            // catches up to the text so far (the connected client still
-            // reconstructs from born + deltas; this only affects catch-up).
-            if (assistantMsg) assistantMsg.content = assistantContent;
+            // NB: the live ref's content is advanced in flushDeltas (to the last
+            // FLUSHED position), not here at the bleeding edge, so a mid-stream
+            // resubscribe's born snapshot + future deltas don't double-count the
+            // pending tail. settleMessages() sets the full content at finalize.
             pendingContent += s;
             scheduleFlush();
           },
@@ -216,7 +222,8 @@ export class StreamMuxer {
               writer.born(reasoningMsg);
             }
             reasoning += s;
-            if (reasoningMsg) reasoningMsg.content = reasoning;
+            // Live ref advanced in flushDeltas (last flushed position), not at the
+            // bleeding edge; finalizeReasoning() sets the full content at finalize.
             pendingReasoning += s;
             scheduleFlush();
           },

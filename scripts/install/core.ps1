@@ -10,21 +10,17 @@
 #   1. The installer is fetched over TLS from $env:TOMAT_STORAGE
 #      (get.au.tomat.ing by default). Connection-level integrity is HTTPS.
 #   2. The manifest at $env:TOMAT_STORAGE/manifests/core.json is also fetched
-#      over HTTPS. Its Ed25519 signature is intentionally NOT verified by
-#      this installer: PowerShell ships no minisign tool by default and
-#      pulling one in would inflate the install surface. Instead, the
-#      installer trusts the per-binary SHA-256 from the manifest and the
-#      running tomat-core binary's own signature check (in
-#      packages/tomat-core/src/update/self-updater.ts) to verify every
-#      subsequent self-update from the same channel.
-#   3. The bundled binary is hash-verified (Get-FileHash below) against
-#      the manifest's `sha256`, so a single corrupted download is caught
-#      even without manifest signature checking.
-#
-# Consequence: a compromised TLS chain on $env:TOMAT_STORAGE's certificate
-# would let a MITM serve a malicious manifest + matching binary on the very
-# first install. That risk window closes at first launch (manifest signature
-# verification is mandatory inside the running binary).
+#      over HTTPS and its Ed25519 signature is verified against the committed
+#      signing key BEFORE any URL or sha256 in it is trusted, exactly like the
+#      Unix installer (core.sh). PowerShell/.NET ships no Ed25519 primitive, so
+#      the verifier is implemented in-script over [bigint] (see the "signature
+#      verification" region below); it fails closed on a tampered/unsigned
+#      manifest. This closes the first-install MITM window: a compromised TLS
+#      chain that serves a malicious manifest + matching binary no longer
+#      installs, because the forged manifest cannot carry a valid signature
+#      under the committed key.
+#   3. The bundled binary is additionally hash-verified (Get-FileHash below)
+#      against the (now-authenticated) manifest `sha256` as defense in depth.
 #
 # Usage (one-liner):
 #   powershell -ExecutionPolicy Bypass -Command "iwr -useb https://get.au.tomat.ing/install/core.ps1 | iex"
@@ -302,6 +298,225 @@ function Expand-GzipFile($Src, $Dst) {
   } finally { $in.Dispose() }
 }
 
+# ===== signature verification begin =====
+# Self-contained Ed25519 (RFC 8032) verification in pure PowerShell so this
+# installer authenticates the release manifest against the SAME committed key the
+# Unix installers use (scripts/install/*.sh) BEFORE trusting any URL or sha256
+# from it. PowerShell/.NET ships no Ed25519 primitive, so the curve math is
+# implemented here over [bigint] (SHA-512 comes from the BCL). Keep this region
+# self-contained and identical across core.ps1 / client.ps1 so it can be copied
+# verbatim; the per-manifest wiring (embedded vs detached signature) lives in
+# each script's install flow, not here.
+#
+# Fail-closed guardrail: this crypto cannot lean on a battle-tested external
+# tool, so Invoke-VerifySelfCheck runs positive + negative Ed25519 and a
+# canonical-JSON known-answer test before any real verification. If a porting bug
+# makes ANY of them wrong the installer ABORTS. A bug can therefore only ever
+# refuse to install, never fail open.
+
+# Committed Ed25519 signing public key (base64 raw key), kept in sync with
+# packages/tomat-core/data/signing-keys.json (a test guards the match).
+$script:SigningPubkeyB64 = "KghrHOIqu76Hpl/xX8RHUuDA2n1NGCOj9gD1Jrn5H+M="
+
+$script:EdP = [bigint]::Pow(2, 255) - [bigint]19
+
+function _Ed-Mod($a, $m) {
+  $r = [bigint]::Remainder($a, $m)
+  if ($r -lt [bigint]::Zero) { $r = $r + $m }
+  return $r
+}
+function _Ed-Inv($x) {
+  return [bigint]::ModPow((_Ed-Mod $x $script:EdP), ($script:EdP - [bigint]2), $script:EdP)
+}
+$script:EdD = _Ed-Mod ([bigint](-121665) * (_Ed-Inv ([bigint]121666))) $script:EdP
+$script:EdI = [bigint]::ModPow([bigint]2, [bigint]::Divide(($script:EdP - [bigint]1), [bigint]4), $script:EdP)
+
+function _Ed-XRecover($y) {
+  $p = $script:EdP
+  $xx = _Ed-Mod ((($y * $y) - [bigint]1) * (_Ed-Inv (($script:EdD * $y * $y) + [bigint]1))) $p
+  $x = [bigint]::ModPow($xx, [bigint]::Divide(($p + [bigint]3), [bigint]8), $p)
+  if ((_Ed-Mod (($x * $x) - $xx) $p) -ne [bigint]::Zero) { $x = _Ed-Mod ($x * $script:EdI) $p }
+  if ((_Ed-Mod $x ([bigint]2)) -ne [bigint]::Zero) { $x = $p - $x }
+  return $x
+}
+$script:EdBy = _Ed-Mod ([bigint]4 * (_Ed-Inv ([bigint]5))) $script:EdP
+$script:EdBx = _Ed-XRecover $script:EdBy
+$script:EdB = @($script:EdBx, $script:EdBy)
+
+function _Ed-Edwards($P, $Q) {
+  # $pp, not $p: PowerShell variables are case-insensitive, so a local named $p
+  # would alias the point parameter $P and overwrite it with the modulus.
+  $pp = $script:EdP
+  $x1 = $P[0]; $y1 = $P[1]; $x2 = $Q[0]; $y2 = $Q[1]
+  $t = $script:EdD * $x1 * $x2 * $y1 * $y2
+  $x3 = (($x1 * $y2) + ($x2 * $y1)) * (_Ed-Inv ([bigint]1 + $t))
+  $y3 = (($y1 * $y2) + ($x1 * $x2)) * (_Ed-Inv ([bigint]1 - $t))
+  return ,@((_Ed-Mod $x3 $pp), (_Ed-Mod $y3 $pp))
+}
+function _Ed-ScalarMult($P, $e) {
+  $Q = @([bigint]::Zero, [bigint]::One)
+  if ($e -le [bigint]::Zero) { return ,$Q }
+  $bits = New-Object System.Collections.Generic.List[int]
+  $n = $e
+  while ($n -gt [bigint]::Zero) {
+    $bits.Add([int](_Ed-Mod $n ([bigint]2)))
+    $n = [bigint]::Divide($n, [bigint]2)
+  }
+  for ($i = $bits.Count - 1; $i -ge 0; $i--) {
+    $Q = _Ed-Edwards $Q $Q
+    if ($bits[$i] -eq 1) { $Q = _Ed-Edwards $Q $P }
+  }
+  return ,$Q
+}
+function _Ed-DecodeIntLE([byte[]]$bytes) {
+  # Unsigned little-endian -> bigint (append a 0x00 high byte to force positive).
+  $tmp = New-Object byte[] ($bytes.Length + 1)
+  [Array]::Copy($bytes, $tmp, $bytes.Length)
+  return [System.Numerics.BigInteger]::new($tmp)
+}
+function _Ed-IsOnCurve($P) {
+  # $pp, not $p: PowerShell is case-insensitive, so $p would alias the param $P.
+  $pp = $script:EdP
+  $x = $P[0]; $y = $P[1]
+  $v = _Ed-Mod (((-($x * $x)) + ($y * $y)) - [bigint]1 - ($script:EdD * $x * $x * $y * $y)) $pp
+  return ($v -eq [bigint]::Zero)
+}
+function _Ed-DecodePoint([byte[]]$bytes) {
+  $num = _Ed-DecodeIntLE $bytes
+  $two255 = [bigint]::Pow(2, 255)
+  $y = _Ed-Mod $num $two255
+  $signBit = _Ed-Mod ([bigint]::Divide($num, $two255)) ([bigint]2)
+  $x = _Ed-XRecover $y
+  if ((_Ed-Mod $x ([bigint]2)) -ne $signBit) { $x = $script:EdP - $x }
+  $P = @($x, $y)
+  if (-not (_Ed-IsOnCurve $P)) { throw "point off curve" }
+  return ,$P
+}
+function _Ed-Hint([byte[]]$bytes) {
+  $sha = [System.Security.Cryptography.SHA512]::Create()
+  try { $h = $sha.ComputeHash($bytes) } finally { $sha.Dispose() }
+  return _Ed-DecodeIntLE $h
+}
+function Test-Ed25519([byte[]]$msg, [byte[]]$sig, [byte[]]$pub) {
+  try {
+    if ($null -eq $sig -or $sig.Length -ne 64) { return $false }
+    if ($null -eq $pub -or $pub.Length -ne 32) { return $false }
+    $rBytes = New-Object byte[] 32; [Array]::Copy($sig, 0, $rBytes, 0, 32)
+    $sBytes = New-Object byte[] 32; [Array]::Copy($sig, 32, $sBytes, 0, 32)
+    $R = _Ed-DecodePoint $rBytes
+    $A = _Ed-DecodePoint $pub
+    $S = _Ed-DecodeIntLE $sBytes
+    $m = if ($null -eq $msg) { New-Object byte[] 0 } else { $msg }
+    $hIn = New-Object byte[] (64 + $m.Length)
+    [Array]::Copy($rBytes, 0, $hIn, 0, 32)
+    [Array]::Copy($pub, 0, $hIn, 32, 32)
+    if ($m.Length -gt 0) { [Array]::Copy($m, 0, $hIn, 64, $m.Length) }
+    $h = _Ed-Hint $hIn
+    $left = _Ed-ScalarMult $script:EdB $S
+    $right = _Ed-Edwards $R (_Ed-ScalarMult $A $h)
+    return (($left[0] -eq $right[0]) -and ($left[1] -eq $right[1]))
+  } catch {
+    return $false
+  }
+}
+
+function _Json-EscapeString([string]$s) {
+  # Match JSON.stringify string escaping (the basis of canonicalize): escape " and
+  # \, the C0 short forms, other <0x20 as \uXXXX; leave >=0x20 (incl. '/') as-is.
+  $sb = New-Object System.Text.StringBuilder
+  [void]$sb.Append([char]0x22)
+  foreach ($ch in $s.ToCharArray()) {
+    $code = [int][char]$ch
+    if ($ch -eq [char]0x22) { [void]$sb.Append('\"') }
+    elseif ($ch -eq [char]0x5C) { [void]$sb.Append('\\') }
+    elseif ($code -eq 8) { [void]$sb.Append('\b') }
+    elseif ($code -eq 12) { [void]$sb.Append('\f') }
+    elseif ($code -eq 10) { [void]$sb.Append('\n') }
+    elseif ($code -eq 13) { [void]$sb.Append('\r') }
+    elseif ($code -eq 9) { [void]$sb.Append('\t') }
+    elseif ($code -lt 0x20) { [void]$sb.Append('\u'); [void]$sb.Append($code.ToString('x4')) }
+    else { [void]$sb.Append($ch) }
+  }
+  [void]$sb.Append([char]0x22)
+  return $sb.ToString()
+}
+function ConvertTo-CanonicalJson($v) {
+  # Reproduce @tomat/shared canonicalize(): object keys sorted (ordinal, matching
+  # JS String.sort over ASCII keys), arrays in order, no insignificant whitespace.
+  if ($null -eq $v) { return 'null' }
+  if ($v -is [bool]) { if ($v) { return 'true' } else { return 'false' } }
+  if ($v -is [string]) { return (_Json-EscapeString $v) }
+  if ($v -is [int] -or $v -is [long] -or $v -is [double] -or $v -is [decimal] -or $v -is [single] -or $v -is [bigint]) {
+    return $v.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+  }
+  if ($v -is [System.Management.Automation.PSCustomObject]) {
+    $names = @($v.PSObject.Properties | ForEach-Object { $_.Name })
+    [Array]::Sort($names, [System.StringComparer]::Ordinal)
+    $parts = foreach ($n in $names) { (_Json-EscapeString $n) + ':' + (ConvertTo-CanonicalJson ($v.$n)) }
+    return '{' + ($parts -join ',') + '}'
+  }
+  if ($v -is [System.Collections.IEnumerable]) {
+    $parts = foreach ($e in $v) { ConvertTo-CanonicalJson $e }
+    return '[' + ($parts -join ',') + ']'
+  }
+  return (_Json-EscapeString ([string]$v))
+}
+
+function _Hex-ToBytes([string]$hex) {
+  $n = [int]($hex.Length / 2)
+  $b = New-Object byte[] $n
+  for ($i = 0; $i -lt $n; $i++) { $b[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16) }
+  return ,$b
+}
+# Positive + negative Ed25519 and a canonical-JSON known-answer test. Returns
+# $true only when the in-script crypto both accepts a valid signature and rejects
+# a tampered one AND reproduces canonicalize() byte-for-byte. Callers MUST abort
+# when this returns $false: a porting bug then fails the install closed instead of
+# trusting an unverified manifest. Vectors are generated by scripts/install/verify.test.ts.
+function Invoke-VerifySelfCheck {
+  try {
+    $pub = _Hex-ToBytes "755c4cb9256ca7cdc4acfdc6cfeeda849017e5b9f9514e99191bd67e0b0d4276"
+    $msg = [System.Text.Encoding]::ASCII.GetBytes("tomat-ed25519-known-answer-test")
+    $sig = _Hex-ToBytes "7b289d6ab9d3cb4cab6a03ba838f4265ffe50bf547feefbf5509308b8285a301e608bdb8480db3a468ce91d0442a4292bc31ef4f16925b1f41446cf9b0c17e0c"
+    if (-not (Test-Ed25519 $msg $sig $pub)) { return $false }
+    $bad = $sig.Clone(); $bad[0] = [byte]($bad[0] -bxor 1)
+    if (Test-Ed25519 $msg $bad $pub) { return $false }
+    $obj = ('{"b":[2,1],"a":"x/y","n":1,"s":"a\"b\\c"}' | ConvertFrom-Json)
+    if ((ConvertTo-CanonicalJson $obj) -ne '{"a":"x/y","b":[2,1],"n":1,"s":"a\"b\\c"}') { return $false }
+    return $true
+  } catch {
+    return $false
+  }
+}
+# ===== signature verification end =====
+
+# --- offline self-test (exercised by scripts/install/verify.test.ts) ------
+# Mirrors core.sh: when TOMAT_SELFTEST is set, verify a LOCAL manifest with the
+# exact canonicalize(minus .signature) + embedded-signature + Ed25519 path the
+# install flow uses, then exit before any network/install. The core manifest
+# carries an EMBEDDED `signature` field. TOMAT_SELFTEST_PUBKEY_B64 overrides the
+# committed key so the test can sign fixtures with an ephemeral keypair.
+if ($env:TOMAT_SELFTEST) {
+  if ($env:TOMAT_SELFTEST_PUBKEY_B64) { $script:SigningPubkeyB64 = $env:TOMAT_SELFTEST_PUBKEY_B64 }
+  if (-not (Invoke-VerifySelfCheck)) { [Console]::Error.WriteLine("selftest: self-check FAILED"); exit 1 }
+  $stObj = (Get-Content -Raw -Path $env:TOMAT_SELFTEST_MANIFEST) | ConvertFrom-Json
+  $ok = $false
+  try {
+    $canon = ConvertTo-CanonicalJson ($stObj | Select-Object -Property * -ExcludeProperty signature)
+    $payload = [System.Text.Encoding]::UTF8.GetBytes($canon)
+    $sig = [Convert]::FromBase64String([string]$stObj.signature)
+    $pub = [Convert]::FromBase64String($script:SigningPubkeyB64)
+    $ok = Test-Ed25519 $payload $sig $pub
+  } catch { $ok = $false }
+  if (-not $ok) { [Console]::Error.WriteLine("selftest: signature INVALID"); exit 1 }
+  if ($env:TOMAT_SELFTEST_ARTIFACT) {
+    $got = (Get-FileHash -Algorithm SHA256 -Path $env:TOMAT_SELFTEST_ARTIFACT).Hash.ToLower()
+    if ($got -ne ([string]$env:TOMAT_SELFTEST_SHA).ToLower()) { [Console]::Error.WriteLine("selftest: sha256 MISMATCH"); exit 1 }
+  }
+  Write-Output "selftest: OK"
+  exit 0
+}
+
 # --- configuration --------------------------------------------------------
 
 $Storage = if ($env:TOMAT_STORAGE) { $env:TOMAT_STORAGE } else { "https://get.au.tomat.ing" }
@@ -426,6 +641,33 @@ try {
         $_.Exception.Message `
         "check internet connectivity, then re-run"
     }
+  }
+
+  # Authenticate the manifest before trusting any URL/sha256 in it (matches
+  # core.sh). The embedded signature covers canonicalize(manifest minus
+  # .signature); a tampered or unsigned manifest fails closed here.
+  if (-not (Invoke-VerifySelfCheck)) {
+    Ui-Die "Signature self-check failed" `
+      "the installer's built-in verifier did not pass its known-answer test on this host" `
+      "report at github.com/rzkyif/tomat/issues"
+  }
+  if (-not $manifest.signature) {
+    Ui-Die "Manifest is not signed" `
+      "" `
+      "the manifest may have been tampered with in transit; aborting"
+  }
+  $sigOk = $false
+  try {
+    $canonBytes = [System.Text.Encoding]::UTF8.GetBytes(
+      (ConvertTo-CanonicalJson ($manifest | Select-Object -Property * -ExcludeProperty signature)))
+    $sigBytes = [Convert]::FromBase64String([string]$manifest.signature)
+    $pubBytes = [Convert]::FromBase64String($script:SigningPubkeyB64)
+    $sigOk = Test-Ed25519 $canonBytes $sigBytes $pubBytes
+  } catch { $sigOk = $false }
+  if (-not $sigOk) {
+    Ui-Die "Manifest signature verification failed" `
+      "" `
+      "the manifest may have been tampered with in transit; aborting"
   }
 
   if (-not $manifest.version) {

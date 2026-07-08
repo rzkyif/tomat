@@ -16,10 +16,14 @@ import { fromFileUrl } from "@std/path";
 
 const STRICT = true;
 // Native OS path (fromFileUrl); URL .pathname breaks walk()/readdir on Windows.
-const ROOT = fromFileUrl(
-  new URL("../../packages/tomat-shared/src/ui/components/", import.meta.url),
-);
-const REL = "packages/tomat-shared/src/ui/components/";
+// Scan the WHOLE shared UI subtree, not just components/: the `.ts` modules
+// there (context, tokens, the uno preset, sample bundles) are equally part of the
+// single-source layer and a client/tauri/api import in one of them would break
+// the website's rendering just the same. oxlint's tomat/no-tauri-import covers
+// `.ts` too, but only for @tauri-apps; this walker also bans the client aliases +
+// the api layer and is the sole check for `.svelte`.
+const ROOT = fromFileUrl(new URL("../../packages/tomat-shared/src/ui/", import.meta.url));
+const REL = "packages/tomat-shared/src/ui/";
 // Forbidden import sources for a shared presentational component.
 const FORBIDDEN =
   /(?:from\s+|import\s+)["'](?:@tomat\/client|\$lib|\$stores|\$composables|@tauri-apps\/|@tomat\/shared\/api)/;
@@ -32,7 +36,9 @@ interface Violation {
 
 async function scan(): Promise<Violation[]> {
   const violations: Violation[] = [];
-  for await (const entry of walk(ROOT, { exts: [".svelte"], includeDirs: false })) {
+  for await (const entry of walk(ROOT, { exts: [".svelte", ".ts"], includeDirs: false })) {
+    // Tests aren't part of the rendered single-source layer.
+    if (entry.path.endsWith(".test.ts")) continue;
     const text = await Deno.readTextFile(entry.path);
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i++) {

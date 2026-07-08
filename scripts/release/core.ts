@@ -210,9 +210,19 @@ async function setupCompileWorkspace(): Promise<string> {
       2,
     ),
   );
-  // Generate a lock scoped to just these packages' deps (resolved from the
-  // build cache) so the per-triple compiles embed only the core's graph rather
-  // than the whole-workspace dependency set.
+  // Seed the workspace with the committed, CI-verified root lock so `deno install`
+  // REUSES its exact versions + integrity hashes for every dep it already pins
+  // (which is all of the core's graph, since the root lock spans the whole
+  // workspace) instead of re-resolving each `^` range from the build cache. This
+  // is the supply-chain guarantee the signed Rust helpers already get via
+  // `--locked`: the compiled, Ed25519-signed Core embeds the dependency closure
+  // reviewed at this commit, not whatever newer in-range patch happens to be in
+  // the builder's cache. We do NOT pass `--frozen`: the root lock also pins the
+  // client/website-only deps, and the scoped 4-package workspace must PRUNE those,
+  // which `--frozen` would reject as drift. A plain `deno install` reuses the
+  // pinned entries and prunes the unused ones, keeping both the integrity pin and
+  // the scoped (~100 MB) graph.
+  await Deno.copyFile(join(REPO_ROOT, "deno.lock"), join(dir, "deno.lock"));
   const { code } = await new Deno.Command("deno", {
     args: ["install"],
     cwd: dir,

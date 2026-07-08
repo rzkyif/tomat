@@ -116,7 +116,6 @@ export class ChatService {
       sessionId: session.id,
       clientId,
       abort,
-      activeToolCalls: new Set(),
       liveMessages: new Map(),
       outstandingPrompts: new Map(),
     };
@@ -558,13 +557,17 @@ export class ChatService {
             `(${pending.callId}) starting`,
         );
         const startedAt = Date.now();
-        await this.dispatcher.execute(stream, pending, toolMsg, writer);
+        const displays = await this.dispatcher.execute(stream, pending, toolMsg, writer);
         log.info(
           `stream ${stream.streamId}: tool call ${pending.extensionId}/${pending.toolName} ` +
             `(${pending.callId}) ${toolMsg.status} in ${Date.now() - startedAt}ms` +
             (toolMsg.error ? `: ${toolMsg.error}` : ""),
         );
         await writer.finalize(toolMsg);
+        // Persist any display bubbles the call pushed, in birth order, AFTER the
+        // tool message so their durable order matches the live order the client
+        // saw (tool message first, then its displays).
+        for (const display of displays) await writer.finalize(display);
         history.push(toolMsg);
       }
     }

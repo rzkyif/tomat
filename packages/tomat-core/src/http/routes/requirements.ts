@@ -14,7 +14,13 @@ export function requirementsRoutes(): Hono {
   r.use("*", bearerMiddleware());
 
   // The full required-files list + the missing subset for the current config.
-  r.get("/", async (c) => c.json(await computeRequirements()));
+  // `?probe=1` additionally fills size/version hints via outbound HEADs; it is
+  // sent ONLY when the user opens the Pending Downloads confirm modal (an
+  // explicit action), never on the always-on connect/settings snapshot, per the
+  // no-non-consented-network rule.
+  r.get("/", async (c) =>
+    c.json(await computeRequirements({ probeSizes: c.req.query("probe") === "1" })),
+  );
 
   // Download everything missing: enqueue each missing model group (reusing the
   // probe+enqueue+dedup in ensureKindModels) and install the missing binaries.

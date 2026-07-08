@@ -296,6 +296,11 @@ export class DownloadManager {
     if (inFlight.abort.signal.aborted) {
       this.store.setStatus(id, "Cancelled");
       this.fanoutFailure(id, "cancelled");
+      // Drop the in-flight entry like every other spawn exit (line ~349). Without
+      // this a download cancelled WHILE QUEUED leaks its entry, and the `has(id)`
+      // guards then wedge that id forever: retry()/remove() no-op, and a fresh
+      // enqueue() joins the dead entry with a resolver that never settles.
+      this.inFlight.delete(id);
       this.broadcast();
       this.sem.release();
       return;

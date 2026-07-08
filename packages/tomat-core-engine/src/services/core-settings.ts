@@ -17,6 +17,20 @@ const log = getLogger("core-settings");
 
 let cached: Record<string, unknown> | null = null;
 
+// Serialize the shared-file read-modify-write. Without this, two concurrent
+// PATCHes each read the same base and the second write clobbers the first's
+// change on disk and in `cached` (a lost update). Mirrors withMemLock /
+// withSessionLock, which added exactly this guarantee for their stores.
+let settingsWriteChain: Promise<unknown> = Promise.resolve();
+function withSettingsLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = settingsWriteChain.then(fn, fn);
+  settingsWriteChain = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
 // Per-client overlay cache: client id -> its sparse "client-on-core" settings
 // (only the keys that client changed from the core-global defaults). Mirrors
 // `cached` but partitioned by client. Populated lazily from the
@@ -78,22 +92,27 @@ export async function loadCoreSettingsResolved(): Promise<Record<string, unknown
 export async function patchCoreSettings(
   partial: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const current = await loadCoreSettings();
-  const merged: Record<string, unknown> = { ...current };
-  const changed = new Set<string>();
-  for (const [k, v] of Object.entries(partial)) {
-    if (v === null || v === undefined) {
-      if (k in merged) {
-        delete merged[k];
+  // Load -> merge -> write -> cache is one critical section: a concurrent PATCH
+  // must not read the same base and clobber this write (lost update).
+  const { merged, changed } = await withSettingsLock(async () => {
+    const current = await loadCoreSettings();
+    const merged: Record<string, unknown> = { ...current };
+    const changed = new Set<string>();
+    for (const [k, v] of Object.entries(partial)) {
+      if (v === null || v === undefined) {
+        if (k in merged) {
+          delete merged[k];
+          changed.add(k);
+        }
+      } else if (!Object.is(merged[k], v)) {
+        merged[k] = v;
         changed.add(k);
       }
-    } else if (!Object.is(merged[k], v)) {
-      merged[k] = v;
-      changed.add(k);
     }
-  }
-  await writeAtomic(merged);
-  cached = merged;
+    await writeAtomic(merged);
+    cached = merged;
+    return { merged, changed };
+  });
   if (changed.size > 0) {
     for (const l of listeners) {
       try {
@@ -112,14 +131,19 @@ export async function patchCoreSettings(
  *  previously-set key marked changed. Used by the Storage view's "clear
  *  settings" (factory reset). Secrets are wiped separately by the caller. */
 export async function resetCoreSettings(): Promise<void> {
-  const previous = await loadCoreSettings();
-  const changed = new Set(Object.keys(previous));
-  await writeAtomic({});
-  cached = {};
+  const changed = await withSettingsLock(async () => {
+    const previous = await loadCoreSettings();
+    const keys = new Set(Object.keys(previous));
+    await writeAtomic({});
+    cached = {};
+    return keys;
+  });
   if (changed.size > 0) {
+    // Every value is now a default; listeners get the empty (reset) settings.
+    const reset: Record<string, unknown> = {};
     for (const l of listeners) {
       try {
-        await l(cached, changed);
+        await l(reset, changed);
       } catch (err) {
         log.error(`settings listener error: ${errMessage(err)}`);
       }
@@ -188,18 +212,33 @@ export async function patchClientSettings(
       "ON CONFLICT(client_id, key) DO UPDATE SET value_json = excluded.value_json",
   );
   const del = database.prepare("DELETE FROM client_settings WHERE client_id = ? AND key = ?");
-  for (const [k, v] of Object.entries(partial)) {
-    if (v === null || v === undefined) {
-      if (k in overlay) {
-        del.run(clientId, k);
-        delete overlay[k];
-        deleted.push(k);
+  // All-or-nothing: the per-key upserts/deletes run in one transaction so a
+  // failure partway can't leave the overlay half-applied on disk while the
+  // cache (updated only after COMMIT below) reflects a different state. The loop
+  // is fully synchronous (no await), so the single shared connection never
+  // interleaves this transaction with another.
+  database.exec("BEGIN");
+  try {
+    for (const [k, v] of Object.entries(partial)) {
+      if (v === null || v === undefined) {
+        if (k in overlay) {
+          del.run(clientId, k);
+          delete overlay[k];
+          deleted.push(k);
+        }
+      } else if (!Object.is(overlay[k], v)) {
+        upsert.run(clientId, k, JSON.stringify(v));
+        overlay[k] = v;
+        values[k] = v;
       }
-    } else if (!Object.is(overlay[k], v)) {
-      upsert.run(clientId, k, JSON.stringify(v));
-      overlay[k] = v;
-      values[k] = v;
     }
+    database.exec("COMMIT");
+  } catch (err) {
+    database.exec("ROLLBACK");
+    // Drop the cache so the next read reloads the rolled-back DB truth instead of
+    // the partially-mutated overlay we built above.
+    clientCache.delete(clientId);
+    throw err;
   }
   clientCache.set(clientId, overlay);
   if (Object.keys(values).length > 0 || deleted.length > 0) {

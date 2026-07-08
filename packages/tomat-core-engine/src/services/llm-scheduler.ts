@@ -104,7 +104,7 @@ export class LlmScheduler {
           `llama-server queue full (${this.queueLen()} waiting, ` + `${this.parallelSlots} slots)`,
         );
       }
-      await this.acquireLocal(opts.clientId);
+      await this.acquireLocal(opts.clientId, req.signal);
       // Combine the caller's abort signal (if any) with our watchdog
       // signal so an expired watchdog aborts the upstream cleanly.
       const watchdogController = new AbortController();
@@ -165,26 +165,58 @@ export class LlmScheduler {
 
   // --- local semaphore + round-robin ---------------------------------------
 
-  private acquireLocal(clientId: string): Promise<void> {
+  private acquireLocal(clientId: string, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(signal.reason);
     if (this.localActive < this.parallelSlots) {
       this.localActive++;
       this.notifyStatus();
       return Promise.resolve();
     }
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       let q = this.localQueueByClient.get(clientId);
       if (!q) {
         q = [];
         this.localQueueByClient.set(clientId, q);
         this.clientOrder.push(clientId);
       }
-      q.push(() => {
+      let onAbort: (() => void) | undefined;
+      const grant = (): void => {
+        if (signal && onAbort) signal.removeEventListener("abort", onAbort);
         this.localActive++;
         this.notifyStatus();
         resolve();
-      });
+      };
+      q.push(grant);
+      // If the turn is interrupted WHILE QUEUED, drop its grant so it never
+      // consumes a slot for an already-aborted turn (which would then start an
+      // upstream request that immediately aborts, having held up the queue).
+      if (signal) {
+        onAbort = () => {
+          this.removeQueuedGrant(clientId, grant);
+          this.notifyStatus();
+          reject(signal.reason);
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
       this.notifyStatus();
     });
+  }
+
+  // Remove a still-queued grant (an interrupted turn), pruning the client's queue
+  // and clientOrder entry when it empties, mirroring dispatch()'s bookkeeping.
+  private removeQueuedGrant(clientId: string, grant: () => void): void {
+    const q = this.localQueueByClient.get(clientId);
+    if (!q) return;
+    const idx = q.indexOf(grant);
+    if (idx !== -1) q.splice(idx, 1);
+    if (q.length === 0) {
+      this.localQueueByClient.delete(clientId);
+      const ci = this.clientOrder.indexOf(clientId);
+      if (ci !== -1) {
+        this.clientOrder.splice(ci, 1);
+        if (this.nextClientIdx > ci) this.nextClientIdx--;
+      }
+    }
   }
 
   private releaseLocal(): void {

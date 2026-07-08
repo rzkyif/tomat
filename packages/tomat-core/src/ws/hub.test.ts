@@ -10,6 +10,7 @@
 import { assertEquals } from "@std/assert";
 import { pairClient } from "../../tests/helpers/pairing.ts";
 import { startTestServer } from "../../tests/helpers/serve.ts";
+import { dialWs } from "../../tests/helpers/ws.ts";
 import { isRequirementsRecomputeEdge, wsHub } from "./hub.ts";
 import { setupTestEnv } from "../../tests/helpers/db.ts";
 
@@ -33,10 +34,6 @@ Deno.test("isRequirementsRecomputeEdge: binary rows never recompute; model termi
 async function pair(): Promise<string> {
   const { token } = await pairClient("ws-test", "127.0.0.1");
   return token;
-}
-
-function dial(port: number, token: string): WebSocket {
-  return new WebSocket(`ws://127.0.0.1:${port}/ws/v1?token=${token}`);
 }
 
 function once<T>(ws: WebSocket, ev: "open" | "close" | "error"): Promise<T> {
@@ -82,7 +79,7 @@ Deno.test({
     const server = await startTestServer();
     try {
       const token = await pair();
-      const ws = dial(server.port, token);
+      const ws = await dialWs(server.port, token);
       await once(ws, "open");
       ws.send(JSON.stringify({ kind: "ping" }));
       const reply = await nextMessage(ws);
@@ -96,7 +93,7 @@ Deno.test({
 });
 
 Deno.test({
-  name: "WS /ws/v1: upgrade without token returns 401",
+  name: "WS /ws/v1: upgrade without a ticket returns 401",
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
@@ -107,7 +104,7 @@ Deno.test({
       // runs BEFORE the upgrade attempt, so we get the 401 directly.
       const res = await fetch(`http://127.0.0.1:${server.port}/ws/v1`);
       assertEquals(res.status, 401);
-      assertEquals(await res.text(), "missing token");
+      assertEquals(await res.text(), "missing ticket");
     } finally {
       await server.stop();
       await env.teardown();
@@ -116,15 +113,99 @@ Deno.test({
 });
 
 Deno.test({
-  name: "WS /ws/v1: upgrade with invalid token returns 401",
+  name: "WS /ws/v1: upgrade with an invalid ticket returns 401",
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
     const env = await setupTestEnv();
     const server = await startTestServer();
     try {
-      const res = await fetch(`http://127.0.0.1:${server.port}/ws/v1?token=not-real`);
+      const res = await fetch(`http://127.0.0.1:${server.port}/ws/v1?ticket=not-real`);
       assertEquals(res.status, 401);
+    } finally {
+      await server.stop();
+      await env.teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "POST /api/v1/ws/ticket: requires a bearer (401 without one)",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const env = await setupTestEnv();
+    const server = await startTestServer();
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.port}/api/v1/ws/ticket`, {
+        method: "POST",
+      });
+      assertEquals(res.status, 401);
+      await res.body?.cancel();
+    } finally {
+      await server.stop();
+      await env.teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "POST /api/v1/ws/ticket: a bearer mints a ticket that then opens the upgrade",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    // End-to-end for the M4 flow: the bearer buys a ticket over authed HTTP
+    // (header, not URL), and that ticket - not the bearer - authorizes the WS
+    // upgrade. Proves the mint route and the upgrade agree on the ticket.
+    const env = await setupTestEnv();
+    const server = await startTestServer();
+    try {
+      const token = await pair();
+      const res = await fetch(`http://127.0.0.1:${server.port}/api/v1/ws/ticket`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      assertEquals(res.status, 200);
+      const { ticket } = (await res.json()) as { ticket: string };
+      assertEquals(typeof ticket, "string");
+
+      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws/v1?ticket=${ticket}`);
+      await once(ws, "open");
+      ws.send(JSON.stringify({ kind: "ping" }));
+      assertEquals(JSON.parse(await nextMessage(ws)), { kind: "pong" });
+      ws.close();
+    } finally {
+      await server.stop();
+      await env.teardown();
+    }
+  },
+});
+
+Deno.test({
+  name: "WS /ws/v1: a ticket is single-use (a second upgrade with it is rejected)",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    // The ticket must be consumed on first use, so a captured/replayed ticket
+    // can't open a second socket.
+    const env = await setupTestEnv();
+    const server = await startTestServer();
+    try {
+      const token = await pair();
+      const res = await fetch(`http://127.0.0.1:${server.port}/api/v1/ws/ticket`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const { ticket } = (await res.json()) as { ticket: string };
+
+      const ws1 = new WebSocket(`ws://127.0.0.1:${server.port}/ws/v1?ticket=${ticket}`);
+      await once(ws1, "open");
+
+      // Replaying the same ticket must fail the upgrade (auth runs before it).
+      const replay = await fetch(`http://127.0.0.1:${server.port}/ws/v1?ticket=${ticket}`);
+      assertEquals(replay.status, 401);
+      await replay.body?.cancel();
+      ws1.close();
     } finally {
       await server.stop();
       await env.teardown();
@@ -143,8 +224,8 @@ Deno.test({
       // Mint two distinct paired clients and connect each.
       const tokenA = await pair();
       const tokenB = await pair();
-      const wsA = dial(server.port, tokenA);
-      const wsB = dial(server.port, tokenB);
+      const wsA = await dialWs(server.port, tokenA);
+      const wsB = await dialWs(server.port, tokenB);
       await Promise.all([once(wsA, "open"), once(wsB, "open")]);
 
       // Fire a broadcast through the hub (synthetic; production triggers
@@ -176,7 +257,7 @@ Deno.test({
     const server = await startTestServer();
     try {
       const { token, clientId } = await pairClient("ws-revoke-test", "127.0.0.1");
-      const ws = dial(server.port, token);
+      const ws = await dialWs(server.port, token);
       await once(ws, "open");
       const closed = once<CloseEvent>(ws, "close");
       wsHub().closeClient(clientId);
@@ -202,7 +283,7 @@ Deno.test({
     const server = await startTestServer();
     try {
       const token = await pair();
-      const ws = dial(server.port, token);
+      const ws = await dialWs(server.port, token);
       await once(ws, "open");
       ws.send("not-json-at-all{");
       // Valid follow-up: ping, then expect a pong, proving the socket survived.
@@ -226,7 +307,7 @@ Deno.test({
     const server = await startTestServer();
     try {
       const token = await pair();
-      const ws = dial(server.port, token);
+      const ws = await dialWs(server.port, token);
       await once(ws, "open");
       ws.send(JSON.stringify({ streamId: "x", missing: "kind" }));
       ws.send(JSON.stringify({ kind: "ping" }));
@@ -280,7 +361,7 @@ Deno.test({
     const server = await startTestServer();
     try {
       const token = await pair();
-      const ws = dial(server.port, token);
+      const ws = await dialWs(server.port, token);
       await once(ws, "open");
 
       const valueFramePromise = waitForFrame(ws, "settings.updated");
@@ -318,7 +399,7 @@ Deno.test({
     const server = await startTestServer();
     try {
       const token = await pair();
-      const ws = dial(server.port, token);
+      const ws = await dialWs(server.port, token);
       await once(ws, "open");
 
       const framePromise = waitForFrame(ws, "settings.updated");
@@ -359,7 +440,7 @@ Deno.test({
     const server = await startTestServer();
     try {
       const token = await pair();
-      const ws = dial(server.port, token);
+      const ws = await dialWs(server.port, token);
       await once(ws, "open");
 
       // Write a secret-typed key through the service directly (the route guard

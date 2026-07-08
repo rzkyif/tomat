@@ -10,7 +10,11 @@ import { backgroundQueue } from "./background-queue.ts";
 import { memoriesStore } from "@tomat/core-engine/services/memories-store";
 import { isEmbeddingModelReady } from "@tomat/core-engine/services/embedding";
 import { llmIdle } from "./llm-idle.ts";
-import { embedSourceHash, embedWithHash } from "@tomat/core-engine/services/relevance";
+import {
+  embedSourceHash,
+  embedWithHash,
+  memoryEmbedText,
+} from "@tomat/core-engine/services/relevance";
 import { loadCoreSettings } from "@tomat/core-engine/services/core-settings";
 import { resolveEndpoint } from "@tomat/core-engine/services/endpoint-resolver";
 import { singleShot } from "@tomat/core-engine/services/single-shot";
@@ -110,7 +114,7 @@ async function indexMemory(id: string): Promise<void> {
 }
 
 function embedText(doc: { title: string; summary?: string; content: string }): string {
-  return `${doc.title}\n${doc.summary ?? doc.content.slice(0, EMBED_FALLBACK_HEAD_CHARS)}`;
+  return memoryEmbedText(doc.title, doc.summary ?? doc.content.slice(0, EMBED_FALLBACK_HEAD_CHARS));
 }
 
 function summaryPrompt(settings: Record<string, unknown>): string {

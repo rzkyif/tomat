@@ -25,6 +25,7 @@ import { storageRoutes } from "./routes/storage.ts";
 import { extensionsRoutes } from "./routes/extensions.ts";
 import { toolsRoutes } from "./routes/tools.ts";
 import { updateRoutes } from "./routes/update.ts";
+import { wsRoutes } from "./routes/ws.ts";
 
 // Upper bound on a single request body. Generous enough for legitimate
 // attachment uploads and STT audio, but it caps an unbounded body so a client
@@ -83,6 +84,7 @@ export function buildApp(): Hono {
   app.route("/api/v1/scheduled-prompts", scheduledPromptsRoutes());
   app.route("/api/v1/greetings", greetingsRoutes());
   app.route("/api/v1/update", updateRoutes());
+  app.route("/api/v1/ws", wsRoutes());
 
   return app;
 }

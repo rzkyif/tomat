@@ -38,7 +38,9 @@
   $effect(() => blink.run(needsAttention || isInstalling));
 
   function onClick() {
-    if (isPending || isFailed) downloadsState.requestRequiredModal();
+    // A click here is the explicit user action that consents to the size-probe
+    // HEADs, so pass probe:true (the auto-popup in Settings does not).
+    if (isPending || isFailed) void downloadsState.requestRequiredModal({ probe: true });
     else downloadsState.openModal();
   }
 </script>

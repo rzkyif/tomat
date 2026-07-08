@@ -8,7 +8,6 @@ export interface ActiveStream {
   sessionId: string;
   clientId: string;
   abort: AbortController;
-  activeToolCalls: Set<string>;
   // Born-but-not-yet-finalized messages of this turn, in birth order, each with
   // the afterId it was born at. Their `message` refs are the live objects the
   // run loop mutates, so their `content`/`status` reflect the stream so far.

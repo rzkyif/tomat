@@ -78,7 +78,11 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
   return {
     currentVersion: CORE_VERSION,
     latestVersion: manifest.version,
-    available: manifest.version !== CORE_VERSION,
+    // Only a STRICTLY NEWER version is an available update. A published downgrade
+    // (or equal version) reports available=false, consistent with applyUpdate,
+    // which hard-refuses a downgrade - so the UI never offers an "update" that the
+    // apply step would then reject.
+    available: compareSemver(manifest.version, CORE_VERSION) > 0,
     manifestUrl: coreManifestUrl(),
   };
 }
@@ -445,15 +449,29 @@ export async function fetchCoreManifest(): Promise<CoreManifest> {
   // with an undefined signature and throw unwrapped.
   assertCoreManifestShape(parsed);
   const pk = decodeBase64(signingKeys.publicKey);
-  const sig = decodeBase64(parsed.signature);
-  const body = new TextEncoder().encode(
-    signedManifestPayload(parsed as unknown as Record<string, unknown>),
-  );
-  const ok = await verifyAsync(sig, body, pk);
+  const ok = await verifyCoreManifestSignature(parsed, pk);
   if (!ok) {
     throw new AppError("signature_invalid", "core manifest signature invalid");
   }
   return parsed;
+}
+
+/** Verify a core-manifest signature: Ed25519 over signedManifestPayload (=
+ *  canonicalize(manifest minus `signature`)), so the signed version + binaries +
+ *  workers[] + helpers[] (all downloaded and EXECUTED) are authenticated as one
+ *  unit. Key-injectable + pure so it's unit-testable with a throwaway keypair;
+ *  the production path passes the embedded signing key. Exported for testing,
+ *  mirroring verifyBinariesSignature / verifyBuiltinManifestSignature so all
+ *  three trust-root verifiers share one shape and each has accept/reject tests. */
+export async function verifyCoreManifestSignature(
+  manifest: CoreManifest,
+  publicKey: Uint8Array,
+): Promise<boolean> {
+  const sig = decodeBase64(manifest.signature);
+  const body = new TextEncoder().encode(
+    signedManifestPayload(manifest as unknown as Record<string, unknown>),
+  );
+  return await verifyAsync(sig, body, publicKey);
 }
 
 /** Validate a fetched core manifest's shape before any field is read or the

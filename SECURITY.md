@@ -191,18 +191,33 @@ gitignored `.env`; only public keys are committed.
   or revoke another client (which cascade-deletes that client's data). This is
   by design under the trust model above; the destructive client actions in the
   UI are gated behind a confirmation to guard against honest mistakes.
-- **Install scripts trust TLS, not the signature.** The `curl | bash` /
-  `iwr | iex` installers verify each downloaded artifact's sha256 against the
-  manifest, but they do not verify the manifest's Ed25519 signature (verifying
-  Ed25519 in portable shell is brittle). Install-time provenance therefore rests
-  on TLS to the R2 origin. Once installed, the running core enforces the
-  signature on every subsequent update. The client bundle is minisign-verified
-  by the Tauri updater for in-app updates.
+- **Install-time provenance.** The `curl | bash` / `iwr | iex` installers verify
+  the manifest's Ed25519 signature against the committed signing key BEFORE
+  trusting any artifact URL or sha256: Unix via an OpenSSL 3.x raw-verify (the
+  script hard-requires it), Windows via a self-contained pure-PowerShell verifier
+  guarded by a fail-closed known-answer self-test. Each downloaded artifact's
+  sha256 is then checked against the now-authenticated manifest. Once installed,
+  the running core re-enforces the signature on every subsequent update. The
+  client bundle is minisign-verified by the Tauri updater for in-app updates.
 - **Latest channel sidecar provenance.** On the latest channel, sidecar binaries
   resolve to the latest upstream GitHub release at runtime and are verified
   against GitHub's published sha256 over TLS, which is outside our Ed25519
   signature. Trust for latest-channel sidecars shifts partly to GitHub and TLS.
   Stable pins URLs and hashes at release time.
+- **Network egress after install (consent-by-configuration).** Once installed,
+  Core and Client make no outbound request without an explicit user action:
+  update checks are button-gated and downloads happen behind a confirmation modal
+  (the requirements size-probe to HuggingFace/GitHub was moved behind that modal,
+  so it no longer fires on client connect or a settings change). Three paths
+  instead run from boot or in the background based on STANDING configuration
+  rather than a fresh per-action click, and their consent is the act of
+  configuring them: (1) an external LLM/STT/TTS/embedding provider you set is
+  contacted when you send a message, and background memory summarization +
+  embedding, greetings, and scheduled prompts send that content to it from idle;
+  (2) remote MCP servers you enable are auto-connected at boot with a background
+  reconnect loop; (3) the local llama/speech sidecars and the built-in extension
+  only ever talk to loopback. To keep Core fully local, leave the provider on the
+  local model and add no remote MCP servers.
 - **Extensions run third-party code.** A extension you install runs with the
   Deno permissions you grant it. Grant narrowly: a broad
   `read`/`write`/`run`/`ffi` grant is real capability (the vault is always

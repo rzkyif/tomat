@@ -1,4 +1,14 @@
-// Zod schemas for chat-related request bodies.
+// Zod schemas for chat-related request bodies (the client->server WS frames).
+//
+// These use `.passthrough()`, NOT `.strict()`: they still validate every known
+// field (required, min-length, types, kind literal), but IGNORE unknown fields
+// instead of rejecting the whole frame. This mirrors the server->client
+// forward-compat policy (serverToClientFrameSchema in validation/ws.ts also
+// passes unknown fields through) and is what makes version skew graceful - a
+// newer client that adds a field to chat.start is processed by an older core on
+// its known fields rather than being silently dropped (the hub logs + returns on
+// a parse failure, so a rejected frame just hangs the client). Required-field
+// checks still catch genuine malformed frames.
 
 import { z } from "zod";
 import { scheduledPromptDraftSchema } from "./scheduled-prompt.ts";
@@ -20,7 +30,7 @@ export const chatStartWsSchema = z
     // see the frame type in api/ws.ts.
     anchorMessageId: z.string().min(1).optional(),
   })
-  .strict();
+  .passthrough();
 
 export type ChatStartFrame = z.infer<typeof chatStartWsSchema>;
 
@@ -29,7 +39,7 @@ export const chatInterruptWsSchema = z
     kind: z.literal("chat.interrupt"),
     streamId: z.string().min(1),
   })
-  .strict();
+  .passthrough();
 
 export type ChatInterruptFrame = z.infer<typeof chatInterruptWsSchema>;
 
@@ -38,7 +48,7 @@ export const chatSubscribeWsSchema = z
     kind: z.literal("chat.subscribe"),
     sessionId: z.string().min(1),
   })
-  .strict();
+  .passthrough();
 
 export type ChatSubscribeFrame = z.infer<typeof chatSubscribeWsSchema>;
 
@@ -53,7 +63,7 @@ export const toolAskUserResponseSchema = z
       z.union([z.string(), z.array(z.string()), z.array(z.record(z.string(), z.string()))]),
     ),
   })
-  .strict();
+  .passthrough();
 
 export type ToolAskUserResponseFrame = z.infer<typeof toolAskUserResponseSchema>;
 
@@ -66,7 +76,7 @@ export const scheduleConfirmResponseSchema = z
     // The (possibly user-edited) draft; required when accepted.
     draft: scheduledPromptDraftSchema.optional(),
   })
-  .strict()
+  .passthrough()
   .superRefine((value, ctx) => {
     if (value.accepted && !value.draft) {
       ctx.addIssue({
@@ -86,7 +96,7 @@ export const toolPermissionResponseSchema = z
     requestId: z.string().min(1),
     allow: z.boolean(),
   })
-  .strict();
+  .passthrough();
 
 export type ToolPermissionResponseFrame = z.infer<typeof toolPermissionResponseSchema>;
 
@@ -95,7 +105,7 @@ export const toolCancelSchema = z
     kind: z.literal("tool.cancel"),
     callId: z.string().min(1),
   })
-  .strict();
+  .passthrough();
 
 export type ToolCancelFrame = z.infer<typeof toolCancelSchema>;
 
@@ -106,8 +116,9 @@ export type ToolCancelFrame = z.infer<typeof toolCancelSchema>;
 //
 // NOTE: the server->client direction IS validated per-variant by
 // `serverToClientFrameSchema` in `validation/ws.ts` (the client uses it in
-// core/client.ts); those variants use `.passthrough()` for forward-compat, and
-// a test in `validation/ws.test.ts` asserts the Zod union covers every TS
+// core/client.ts); those variants use `.passthrough()` for forward-compat (the
+// same policy the client->server variants above now follow), and a test in
+// `validation/ws.test.ts` asserts the Zod union covers every TS
 // `ServerToClientFrame` kind so the two can't drift.
 export const wsFrameEnvelopeSchema = z
   .object({

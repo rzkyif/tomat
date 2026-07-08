@@ -99,12 +99,17 @@
   // small bubbles (tool_filter, reasoning, system) via the existing
   // grouping pipeline instead of being a standalone element outside it.
   let displayedMessages = $derived.by<Message[]>(() => {
+    // Read the visibility flags ONCE per recompute rather than per message: this
+    // filter runs over the whole array on every streaming delta, and a reactive
+    // settings lookup per message multiplied that cost by the transcript length.
+    const showReasoning = settingsState.currentSettings["llm.showReasoning"];
+    const showSystemPrompt = settingsState.currentSettings["prompts.showSystemPrompt"];
+    const showEmptyToolSelection = settingsState.currentSettings["tools.showEmptySelection"];
+    const showEmptyMemorySelection = settingsState.currentSettings["memories.showEmptySelection"];
     const real = messagesState.messages.filter((msg) => {
       const isEmptyAssistant = msg.role === "assistant" && getTextContent(msg.content) === "";
-      const isHiddenReasoning =
-        msg.role === "reasoning" && !settingsState.currentSettings["llm.showReasoning"];
-      const isHiddenSystem =
-        msg.role === "system" && !settingsState.currentSettings["prompts.showSystemPrompt"];
+      const isHiddenReasoning = msg.role === "reasoning" && !showReasoning;
+      const isHiddenSystem = msg.role === "system" && !showSystemPrompt;
       // Empty filter bubbles (no relevant tools / memories found) are hidden
       // unless the user opts to keep them. Errors always show. "No relevant
       // tools" is the filter result, not toolsSent: always-available tools
@@ -118,12 +123,12 @@
         msg.status !== "error" &&
         toolFilterBase === 0 &&
         (msg.nameMatched?.length ?? 0) === 0 &&
-        !settingsState.currentSettings["tools.showEmptySelection"];
+        !showEmptyToolSelection;
       const isHiddenEmptyMemoryFilter =
         msg.role === "memory_filter" &&
         msg.status !== "error" &&
         (msg.relevant?.length ?? 0) === 0 &&
-        !settingsState.currentSettings["memories.showEmptySelection"];
+        !showEmptyMemorySelection;
       return (
         !isEmptyAssistant &&
         !isHiddenReasoning &&

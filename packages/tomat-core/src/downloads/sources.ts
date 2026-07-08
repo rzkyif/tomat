@@ -64,12 +64,22 @@ export interface ProbeResult {
 // HF resolve URLs 302-redirect to a CDN that often omits Content-Length on
 // HEAD. The 302 itself carries the size in `x-linked-size`, so probe without
 // following redirects first and fall back to a normal HEAD if needed.
-export async function probeSource(source: string, destinationRoot: string): Promise<ProbeResult> {
+export async function probeSource(
+  source: string,
+  destinationRoot: string,
+  opts: { network?: boolean } = {},
+): Promise<ProbeResult> {
+  // `network` gates the outbound size HEAD. Presence (`alreadyHave`) is always a
+  // local check; the HEAD to HuggingFace is only for the size hint of a MISSING
+  // file, so callers that must not touch the network (the always-on requirements
+  // snapshot, per the no-non-consented-network rule) pass network:false and get
+  // presence without a size estimate.
+  const network = opts.network ?? true;
   const parsed = parseSource(source);
   const absPath = join(destinationRoot, parsed.relPath);
   const alreadyHave = await pathExists(absPath);
 
-  if (!source.startsWith("@") || alreadyHave) {
+  if (!source.startsWith("@") || alreadyHave || !network) {
     return {
       source,
       url: parsed.url,

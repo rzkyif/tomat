@@ -112,6 +112,13 @@ interface NumberLikeFieldProps {
   placeholder?: string;
   regex?: RegexValidation;
   suffix?: string;
+  // Optional inclusive bounds. Unlike number_slider (min/max REQUIRED, rendered
+  // as a track), these are validation-only guards for a plain number/float input.
+  // Enforced by validateSettingsPatch so an out-of-range value can't reach the
+  // core (and a sidecar argv) - declare them for any numeric knob with a valid
+  // range instead of leaving it unbounded.
+  min?: number;
+  max?: number;
 }
 
 export type StringField = BaseField & TextLikeFieldProps & { type: "string" };

@@ -135,6 +135,7 @@ export const promptsGroup: SettingGroup = {
           description: "Tokens title generation may spend thinking. 0 turns thinking off.",
           type: "number",
           defaultValue: 128,
+          min: 0, // a token budget can't be negative
           placeholder: "0",
           descriptionTier: "ondemand",
         },
@@ -153,6 +154,7 @@ export const promptsGroup: SettingGroup = {
           description: "Tokens transcription cleanup may spend thinking. 0 turns thinking off.",
           type: "number",
           defaultValue: 0,
+          min: 0, // a token budget can't be negative
           placeholder: "0",
           descriptionTier: "ondemand",
         },
@@ -171,6 +173,7 @@ export const promptsGroup: SettingGroup = {
           description: "Tokens the memory summary may spend thinking. 0 turns thinking off.",
           type: "number",
           defaultValue: 256,
+          min: 0, // a token budget can't be negative
           placeholder: "0",
           descriptionTier: "ondemand",
         },

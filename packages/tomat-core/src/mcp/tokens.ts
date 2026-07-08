@@ -56,7 +56,22 @@ export async function mcpResolveTokens(text: string): Promise<McpTokenResult> {
     return { block: null, claimed };
   }
   const resources = mcpRegistry().listResources();
-  const byResource = new Map(resources.map((r) => [slug(r.name), r]));
+  // Index by slug, DETECTING cross-server collisions: two enabled servers each
+  // exposing a resource whose name slugs the same would otherwise let a plain
+  // `@slug` reference resolve to whichever was listed last, silently shadowing
+  // the other server's resource. An ambiguous slug is dropped (and logged when
+  // referenced) rather than auto-resolved to an arbitrary winner.
+  const byResource = new Map<string, (typeof resources)[number]>();
+  const ambiguous = new Set<string>();
+  for (const r of resources) {
+    const key = slug(r.name);
+    if (byResource.has(key) || ambiguous.has(key)) {
+      byResource.delete(key);
+      ambiguous.add(key);
+    } else {
+      byResource.set(key, r);
+    }
+  }
   if (byResource.size === 0) {
     return { block: null, claimed };
   }
@@ -68,6 +83,10 @@ export async function mcpResolveTokens(text: string): Promise<McpTokenResult> {
     if (seen.has(token)) continue;
     seen.add(token);
     try {
+      if (ambiguous.has(token)) {
+        log.warn(`MCP resource @${token} is ambiguous (multiple servers expose it); not resolving`);
+        continue;
+      }
       const r = byResource.get(token);
       if (!r) continue;
       claimed.add(token);

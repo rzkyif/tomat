@@ -10,8 +10,10 @@
 // hub.broadcastAll(frame).
 //
 // Heartbeat: server pings every 25 s and expects a pong within 10 s.
-// Token query param: /ws/v1?token=<bearer>. authService.authenticate runs
-// during the upgrade handshake.
+// Auth: /ws/v1?ticket=<t>, where <t> is a short-lived single-use ticket the
+// client mints over HTTP (POST /api/v1/ws/ticket, bearer in the Authorization
+// header). The long-lived bearer never travels in the ws:// URL, so it can't be
+// captured from a reverse-proxy access log; the ticket is consumed here.
 
 import type { ServerToClientFrame } from "@tomat/shared";
 import { type EngineConnection, frameBus } from "@tomat/core-engine";
@@ -41,7 +43,6 @@ import {
 } from "@tomat/core-engine/services/core-settings";
 import { subscribeSecretsChanged } from "@tomat/core-engine/services/secrets";
 import { onBinaryInstalled, onBinaryInstallFailed } from "../binaries/manager.ts";
-import { AppError } from "@tomat/core-engine";
 import { getLogger } from "../shared/log.ts";
 
 const log = getLogger("ws");
@@ -89,24 +90,23 @@ class WsHub {
   async handleUpgrade(req: Request): Promise<Response> {
     const url = new URL(req.url);
     // Mirror the HTTP CORS allowlist on the WS upgrade. The upgrade already
-    // requires a valid bearer in ?token=, but rejecting a cross-origin browser
-    // upgrade here is defense in depth (e.g. if a token ever leaked into a web
-    // context). Native clients (Tauri rust, curl) send no Origin and pass.
+    // requires a valid ticket in ?ticket=, but rejecting a cross-origin browser
+    // upgrade here is defense in depth. Native clients (Tauri rust, curl) send no
+    // Origin and pass.
     const origin = req.headers.get("origin");
     if (origin && !isOriginAllowed(origin)) {
       return new Response("forbidden origin", { status: 403 });
     }
-    const token = url.searchParams.get("token");
-    if (!token) {
-      return new Response("missing token", { status: 401 });
+    // Consume the single-use ticket the client minted over HTTP. The long-lived
+    // bearer is never in this URL, so a reverse-proxy access log can capture at
+    // most a spent, short-lived ticket.
+    const ticket = url.searchParams.get("ticket");
+    if (!ticket) {
+      return new Response("missing ticket", { status: 401 });
     }
-    let clientId: string;
-    try {
-      const me = await authService().authenticate(token);
-      clientId = me.id;
-    } catch (err) {
-      const msg = err instanceof AppError ? err.message : "auth failed";
-      return new Response(msg, { status: 401 });
+    const clientId = authService().consumeWsTicket(ticket);
+    if (!clientId) {
+      return new Response("invalid or expired ticket", { status: 401 });
     }
 
     const upgrade = Deno.upgradeWebSocket(req);

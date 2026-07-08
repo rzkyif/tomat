@@ -113,6 +113,19 @@ export function validateSettingsPatch(
         continue;
       }
     }
+    // A plain number/float with declared bounds must respect them too, so an
+    // out-of-range value (e.g. a negative token budget or context size) can't
+    // reach the core and flow into a sidecar argv.
+    if ((field.type === "number" || field.type === "float") && typeof value === "number") {
+      if (field.min !== undefined && value < field.min) {
+        errors.push(`"${key}" must be at least ${field.min}`);
+        continue;
+      }
+      if (field.max !== undefined && value > field.max) {
+        errors.push(`"${key}" must be at most ${field.max}`);
+        continue;
+      }
+    }
     if (
       (field.type === "string" ||
         field.type === "password" ||
