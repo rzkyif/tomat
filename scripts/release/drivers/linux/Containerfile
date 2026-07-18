@@ -39,7 +39,7 @@
 # The dev-lib set mirrors the proven Linux client deps in .github/workflows/ci.yml
 # (webkit/gtk/rsvg/soup/appindicator + pipewire/alsa/gbm for audio/VAD/capture),
 # so the local cross-build links the same libraries CI builds against natively.
-FROM --platform=linux/amd64 debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df AS amd64-sysroot
+FROM --platform=linux/amd64 debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818 AS amd64-sysroot
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev \
@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # --- stage 2: the arm64 build image -----------------------------------------
-FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
+FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
 
 ENV DEBIAN_FRONTEND=noninteractive
 
